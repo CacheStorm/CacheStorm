@@ -52,6 +52,7 @@ func New(cfg *config.Config) (*Server, error) {
 	command.RegisterStreamCommands(s.router)
 	command.RegisterGeoCommands(s.router)
 	command.RegisterScriptCommands(s.router)
+	command.RegisterDebugCommands(s.router)
 
 	return s, nil
 }

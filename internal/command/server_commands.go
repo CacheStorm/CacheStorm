@@ -2,6 +2,7 @@ package command
 
 import (
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -44,6 +45,9 @@ func RegisterKeyCommands(router *Router) {
 	router.Register(&CommandDef{Name: "KEYS", Handler: cmdKEYS})
 	router.Register(&CommandDef{Name: "RANDOMKEY", Handler: cmdRANDOMKEY})
 	router.Register(&CommandDef{Name: "UNLINK", Handler: cmdDEL})
+	router.Register(&CommandDef{Name: "TOUCH", Handler: cmdTOUCH})
+	router.Register(&CommandDef{Name: "DUMP", Handler: cmdDUMP})
+	router.Register(&CommandDef{Name: "RESTORE", Handler: cmdRESTORE})
 }
 
 func cmdPING(ctx *Context) error {
@@ -328,6 +332,165 @@ func matchPattern(s, pattern string) bool {
 	}
 
 	return pi == len(pattern)
+}
+
+func cmdTOUCH(ctx *Context) error {
+	if ctx.ArgCount() < 1 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	touched := int64(0)
+	for i := 0; i < ctx.ArgCount(); i++ {
+		key := ctx.ArgString(i)
+		if entry, exists := ctx.Store.Get(key); exists {
+			entry.Touch()
+			touched++
+		}
+	}
+
+	return ctx.WriteInteger(touched)
+}
+
+func cmdDUMP(ctx *Context) error {
+	if ctx.ArgCount() != 1 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	key := ctx.ArgString(0)
+	entry, exists := ctx.Store.Get(key)
+	if !exists {
+		return ctx.WriteNullBulkString()
+	}
+
+	var dump strings.Builder
+	dump.WriteString("CACHSTORM001")
+	dump.WriteByte(byte(entry.Value.Type()))
+	dump.WriteString(fmt.Sprintf("%d", entry.ExpiresAt))
+	dump.WriteString(":")
+
+	switch v := entry.Value.(type) {
+	case *store.StringValue:
+		dump.Write(v.Data)
+	case *store.HashValue:
+		for k, val := range v.Fields {
+			dump.WriteString(k)
+			dump.WriteByte('=')
+			dump.Write(val)
+			dump.WriteByte('&')
+		}
+	case *store.ListValue:
+		for _, el := range v.Elements {
+			dump.Write(el)
+			dump.WriteByte(',')
+		}
+	case *store.SetValue:
+		for k := range v.Members {
+			dump.WriteString(k)
+			dump.WriteByte(',')
+		}
+	case *store.SortedSetValue:
+		for _, se := range v.GetSortedRange(0, -1, true, false) {
+			dump.WriteString(fmt.Sprintf("%s:%f,", se.Member, se.Score))
+		}
+	}
+
+	return ctx.WriteBulkString(dump.String())
+}
+
+func cmdRESTORE(ctx *Context) error {
+	if ctx.ArgCount() < 3 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	key := ctx.ArgString(0)
+	ttl, err := strconv.ParseInt(ctx.ArgString(1), 10, 64)
+	if err != nil {
+		return ctx.WriteError(ErrNotInteger)
+	}
+
+	serialized := ctx.ArgString(2)
+
+	if len(serialized) < 13 || !strings.HasPrefix(serialized, "CACHSTORM001") {
+		return ctx.WriteError(errors.New("ERR DUMP payload version or checksum are wrong"))
+	}
+
+	replace := false
+	for i := 3; i < ctx.ArgCount(); i++ {
+		if strings.ToUpper(ctx.ArgString(i)) == "REPLACE" {
+			replace = true
+		}
+	}
+
+	if !replace {
+		if _, exists := ctx.Store.Get(key); exists {
+			return ctx.WriteError(errors.New("BUSYKEY Target key name already exists"))
+		}
+	}
+
+	data := serialized[12:]
+	typeByte := data[0]
+	data = data[1:]
+
+	colonIdx := strings.Index(data, ":")
+	if colonIdx == -1 {
+		return ctx.WriteError(errors.New("ERR invalid DUMP format"))
+	}
+
+	_ = data[:colonIdx]
+	data = data[colonIdx+1:]
+
+	var value store.Value
+	switch store.DataType(typeByte) {
+	case store.DataTypeString:
+		value = &store.StringValue{Data: []byte(data)}
+	case store.DataTypeHash:
+		hv := &store.HashValue{Fields: make(map[string][]byte)}
+		if len(data) > 0 {
+			pairs := strings.Split(data, "&")
+			for _, pair := range pairs {
+				if pair == "" {
+					continue
+				}
+				kv := strings.SplitN(pair, "=", 2)
+				if len(kv) == 2 {
+					hv.Fields[kv[0]] = []byte(kv[1])
+				}
+			}
+		}
+		value = hv
+	case store.DataTypeList:
+		lv := &store.ListValue{Elements: make([][]byte, 0)}
+		if len(data) > 0 {
+			items := strings.Split(data, ",")
+			for _, item := range items {
+				if item != "" {
+					lv.Elements = append(lv.Elements, []byte(item))
+				}
+			}
+		}
+		value = lv
+	case store.DataTypeSet:
+		sv := &store.SetValue{Members: make(map[string]struct{})}
+		if len(data) > 0 {
+			items := strings.Split(data, ",")
+			for _, item := range items {
+				if item != "" {
+					sv.Members[item] = struct{}{}
+				}
+			}
+		}
+		value = sv
+	default:
+		return ctx.WriteError(errors.New("ERR unsupported type for RESTORE"))
+	}
+
+	opts := store.SetOptions{}
+	if ttl > 0 {
+		opts.TTL = time.Duration(ttl) * time.Millisecond
+	}
+
+	ctx.Store.Set(key, value, opts)
+	return ctx.WriteOK()
 }
 
 func cmdAUTH(ctx *Context) error {
