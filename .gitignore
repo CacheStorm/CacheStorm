@@ -1,0 +1,46 @@
+# Binaries
+/bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Output of go coverage
+*.out
+coverage.txt
+coverage.html
+
+# Dependency directories
+vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+dist/
+
+# Data directories
+/data/
+*.aof
+*.rdb
+*.snapshot
+
+# Config (keep example)
+config/cachestorm.yaml
+!config/cachestorm.example.yaml
+
+# Logs
+*.log
+nul

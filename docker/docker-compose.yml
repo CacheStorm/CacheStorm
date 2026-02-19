@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  cachestorm-1:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "6380:6380"
+      - "9090:9090"
+    environment:
+      - CACHESTORM_CLUSTER_ENABLED=true
+      - CACHESTORM_CLUSTER_NODE_NAME=node-1
+      - CACHESTORM_CLUSTER_SEEDS=cachestorm-2:7946,cachestorm-3:7946
+    networks:
+      - cachestorm-net
+
+  cachestorm-2:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "6381:6380"
+    environment:
+      - CACHESTORM_CLUSTER_ENABLED=true
+      - CACHESTORM_CLUSTER_NODE_NAME=node-2
+      - CACHESTORM_CLUSTER_SEEDS=cachestorm-1:7946,cachestorm-3:7946
+    networks:
+      - cachestorm-net
+
+  cachestorm-3:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "6382:6380"
+    environment:
+      - CACHESTORM_CLUSTER_ENABLED=true
+      - CACHESTORM_CLUSTER_NODE_NAME=node-3
+      - CACHESTORM_CLUSTER_SEEDS=cachestorm-1:7946,cachestorm-2:7946
+    networks:
+      - cachestorm-net
+
+networks:
+  cachestorm-net:
+    driver: bridge
