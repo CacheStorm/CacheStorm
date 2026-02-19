@@ -43,6 +43,15 @@ func New(cfg *config.Config) (*Server, error) {
 	command.RegisterNamespaceCommands(s.router)
 	command.RegisterClusterCommands(s.router)
 	command.RegisterClientCommands(s.router)
+	command.RegisterConfigCommands(s.router)
+	command.RegisterTransactionCommands(s.router)
+	command.RegisterSortedSetCommands(s.router)
+	command.RegisterPubSubCommands(s.router)
+	command.RegisterBitmapCommands(s.router)
+	command.RegisterHyperLogLogCommands(s.router)
+	command.RegisterStreamCommands(s.router)
+	command.RegisterGeoCommands(s.router)
+	command.RegisterScriptCommands(s.router)
 
 	return s, nil
 }

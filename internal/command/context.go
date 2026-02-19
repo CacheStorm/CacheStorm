@@ -2,6 +2,7 @@ package command
 
 import (
 	"errors"
+	"sync/atomic"
 	"time"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
@@ -14,8 +15,11 @@ var (
 	ErrInvalidArg      = errors.New("ERR invalid argument")
 	ErrSyntaxError     = errors.New("ERR syntax error")
 	ErrNotInteger      = errors.New("ERR value is not an integer or out of range")
+	ErrNotFloat        = errors.New("ERR value is not a valid float")
 	ErrIndexOutOfRange = errors.New("ERR index out of range")
 )
+
+var subscriberID atomic.Int64
 
 type Context struct {
 	Command       string
@@ -26,14 +30,17 @@ type Context struct {
 	Authenticated bool
 	ClientID      int64
 	Namespace     string
+	Transaction   *Transaction
+	Subscriber    *store.Subscriber
 }
 
 func NewContext(cmd string, args [][]byte, s *store.Store, w *resp.Writer) *Context {
 	return &Context{
-		Command: cmd,
-		Args:    args,
-		Store:   s,
-		Writer:  w,
+		Command:     cmd,
+		Args:        args,
+		Store:       s,
+		Writer:      w,
+		Transaction: NewTransaction(),
 	}
 }
 
@@ -43,6 +50,20 @@ func (ctx *Context) IsAuthenticated() bool {
 
 func (ctx *Context) SetAuthenticated(auth bool) {
 	ctx.Authenticated = auth
+}
+
+func (ctx *Context) GetTransaction() *Transaction {
+	if ctx.Transaction == nil {
+		ctx.Transaction = NewTransaction()
+	}
+	return ctx.Transaction
+}
+
+func (ctx *Context) GetSubscriber() *store.Subscriber {
+	if ctx.Subscriber == nil {
+		ctx.Subscriber = store.NewSubscriber(subscriberID.Add(1))
+	}
+	return ctx.Subscriber
 }
 
 func (ctx *Context) Arg(n int) []byte {

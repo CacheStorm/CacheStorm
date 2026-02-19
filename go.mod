@@ -4,6 +4,7 @@ go 1.22
 
 require (
 	github.com/rs/zerolog v1.32.0
+	github.com/yuin/gopher-lua v1.1.1
 	gopkg.in/yaml.v3 v3.0.1
 )
 

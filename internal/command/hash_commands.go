@@ -2,6 +2,7 @@ package command
 
 import (
 	"strconv"
+	"strings"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
@@ -22,6 +23,7 @@ func RegisterHashCommands(router *Router) {
 	router.Register(&CommandDef{Name: "HINCRBYFLOAT", Handler: cmdHINCRBYFLOAT})
 	router.Register(&CommandDef{Name: "HSETNX", Handler: cmdHSETNX})
 	router.Register(&CommandDef{Name: "HSTRLEN", Handler: cmdHSTRLEN})
+	router.Register(&CommandDef{Name: "HSCAN", Handler: cmdHSCAN})
 }
 
 func getOrCreateHash(ctx *Context, key string) (*store.HashValue, error) {
@@ -396,4 +398,87 @@ func cmdHSTRLEN(ctx *Context) error {
 	}
 
 	return ctx.WriteInteger(int64(len(value)))
+}
+
+func cmdHSCAN(ctx *Context) error {
+	if ctx.ArgCount() < 2 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	key := ctx.ArgString(0)
+	cursor, err := strconv.Atoi(ctx.ArgString(1))
+	if err != nil {
+		return ctx.WriteError(ErrNotInteger)
+	}
+
+	count := 10
+	pattern := "*"
+
+	for i := 2; i < ctx.ArgCount(); i++ {
+		arg := strings.ToUpper(ctx.ArgString(i))
+		switch arg {
+		case "COUNT":
+			i++
+			if i >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			count, err = strconv.Atoi(ctx.ArgString(i))
+			if err != nil {
+				return ctx.WriteError(ErrNotInteger)
+			}
+		case "MATCH":
+			i++
+			if i >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			pattern = ctx.ArgString(i)
+		default:
+			return ctx.WriteError(ErrSyntaxError)
+		}
+	}
+
+	hash, err := getHash(ctx, key)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	if hash == nil {
+		return ctx.WriteArray([]*resp.Value{
+			resp.BulkString("0"),
+			resp.ArrayValue([]*resp.Value{}),
+		})
+	}
+
+	fields := make([]string, 0, len(hash.Fields))
+	for field := range hash.Fields {
+		if matchPattern(field, pattern) {
+			fields = append(fields, field)
+		}
+	}
+
+	start := cursor
+	if start >= len(fields) {
+		start = 0
+	}
+
+	end := start + count
+	if end > len(fields) {
+		end = len(fields)
+	}
+
+	nextCursor := 0
+	if end < len(fields) {
+		nextCursor = end
+	}
+
+	result := make([]*resp.Value, 0, (end-start)*2)
+	for i := start; i < end; i++ {
+		field := fields[i]
+		result = append(result, resp.BulkString(field))
+		result = append(result, resp.BulkBytes(hash.Fields[field]))
+	}
+
+	return ctx.WriteArray([]*resp.Value{
+		resp.BulkString(strconv.Itoa(nextCursor)),
+		resp.ArrayValue(result),
+	})
 }

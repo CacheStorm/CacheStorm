@@ -11,6 +11,9 @@ const (
 	DataTypeHash
 	DataTypeList
 	DataTypeSet
+	DataTypeSortedSet
+	DataTypeStream
+	DataTypeGeo
 )
 
 func (dt DataType) String() string {
@@ -23,6 +26,12 @@ func (dt DataType) String() string {
 		return "list"
 	case DataTypeSet:
 		return "set"
+	case DataTypeSortedSet:
+		return "zset"
+	case DataTypeStream:
+		return "stream"
+	case DataTypeGeo:
+		return "geo"
 	default:
 		return "unknown"
 	}

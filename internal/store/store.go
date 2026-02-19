@@ -30,12 +30,14 @@ type Store struct {
 	shards       [NumShards]*Shard
 	tagIndex     *TagIndex
 	namespaceMgr *NamespaceManager
+	pubsub       *PubSub
 	mu           sync.RWMutex
 }
 
 func NewStore() *Store {
 	s := &Store{
 		tagIndex: NewTagIndex(),
+		pubsub:   NewPubSub(),
 	}
 	for i := 0; i < NumShards; i++ {
 		s.shards[i] = NewShard()
@@ -47,6 +49,7 @@ func NewStoreWithNamespaces() *Store {
 	s := &Store{
 		tagIndex:     NewTagIndex(),
 		namespaceMgr: NewNamespaceManager(),
+		pubsub:       NewPubSub(),
 	}
 	for i := 0; i < NumShards; i++ {
 		s.shards[i] = NewShard()
@@ -250,4 +253,8 @@ func (s *Store) GetTagIndex() *TagIndex {
 
 func (s *Store) GetNamespaceManager() *NamespaceManager {
 	return s.namespaceMgr
+}
+
+func (s *Store) GetPubSub() *PubSub {
+	return s.pubsub
 }

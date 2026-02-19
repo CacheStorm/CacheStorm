@@ -3,6 +3,7 @@ package command
 import (
 	"math/rand"
 	"strconv"
+	"strings"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
@@ -23,6 +24,7 @@ func RegisterSetCommands(router *Router) {
 	router.Register(&CommandDef{Name: "SUNIONSTORE", Handler: cmdSUNIONSTORE})
 	router.Register(&CommandDef{Name: "SINTERSTORE", Handler: cmdSINTERSTORE})
 	router.Register(&CommandDef{Name: "SDIFFSTORE", Handler: cmdSDIFFSTORE})
+	router.Register(&CommandDef{Name: "SSCAN", Handler: cmdSSCAN})
 }
 
 func getOrCreateSet(ctx *Context, key string) (*store.SetValue, error) {
@@ -534,4 +536,85 @@ func cmdSDIFFSTORE(ctx *Context) error {
 	ctx.Store.Set(dstKey, dstSet, store.SetOptions{})
 
 	return ctx.WriteInteger(int64(len(result)))
+}
+
+func cmdSSCAN(ctx *Context) error {
+	if ctx.ArgCount() < 2 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	key := ctx.ArgString(0)
+	cursor, err := strconv.Atoi(ctx.ArgString(1))
+	if err != nil {
+		return ctx.WriteError(ErrNotInteger)
+	}
+
+	count := 10
+	pattern := "*"
+
+	for i := 2; i < ctx.ArgCount(); i++ {
+		arg := strings.ToUpper(ctx.ArgString(i))
+		switch arg {
+		case "COUNT":
+			i++
+			if i >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			count, err = strconv.Atoi(ctx.ArgString(i))
+			if err != nil {
+				return ctx.WriteError(ErrNotInteger)
+			}
+		case "MATCH":
+			i++
+			if i >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			pattern = ctx.ArgString(i)
+		default:
+			return ctx.WriteError(ErrSyntaxError)
+		}
+	}
+
+	set, err := getSet(ctx, key)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	if set == nil {
+		return ctx.WriteArray([]*resp.Value{
+			resp.BulkString("0"),
+			resp.ArrayValue([]*resp.Value{}),
+		})
+	}
+
+	members := make([]string, 0, len(set.Members))
+	for member := range set.Members {
+		if matchPattern(member, pattern) {
+			members = append(members, member)
+		}
+	}
+
+	start := cursor
+	if start >= len(members) {
+		start = 0
+	}
+
+	end := start + count
+	if end > len(members) {
+		end = len(members)
+	}
+
+	nextCursor := 0
+	if end < len(members) {
+		nextCursor = end
+	}
+
+	result := make([]*resp.Value, 0, end-start)
+	for i := start; i < end; i++ {
+		result = append(result, resp.BulkString(members[i]))
+	}
+
+	return ctx.WriteArray([]*resp.Value{
+		resp.BulkString(strconv.Itoa(nextCursor)),
+		resp.ArrayValue(result),
+	})
 }

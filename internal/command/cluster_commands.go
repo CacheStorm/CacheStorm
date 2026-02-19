@@ -14,6 +14,10 @@ func RegisterClusterCommands(router *Router) {
 	router.Register(&CommandDef{Name: "CLUSTERINFO", Handler: cmdCLUSTERINFO})
 	router.Register(&CommandDef{Name: "CLUSTERNODES", Handler: cmdCLUSTERNODES})
 	router.Register(&CommandDef{Name: "CLUSTERSLOTS", Handler: cmdCLUSTERSLOTS})
+	router.Register(&CommandDef{Name: "MIGRATE", Handler: cmdMIGRATE})
+	router.Register(&CommandDef{Name: "ASKING", Handler: cmdASKING})
+	router.Register(&CommandDef{Name: "READONLY", Handler: cmdREADONLY})
+	router.Register(&CommandDef{Name: "READWRITE", Handler: cmdREADWRITE})
 }
 
 func cmdCLUSTER(ctx *Context) error {
@@ -100,6 +104,74 @@ func cmdCLUSTERSLOTS(ctx *Context) error {
 
 func checkClusterRouting(ctx *Context, key string) error {
 	return nil
+}
+
+func cmdMIGRATE(ctx *Context) error {
+	if ctx.ArgCount() < 4 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	host := ctx.ArgString(0)
+	port := ctx.ArgString(1)
+	key := ctx.ArgString(2)
+	destinationDB := ctx.ArgString(3)
+
+	_ = host
+	_ = port
+	_ = key
+	_ = destinationDB
+
+	copy := false
+	replace := false
+	timeout := 0
+
+	for i := 4; i < ctx.ArgCount(); i++ {
+		arg := strings.ToUpper(ctx.ArgString(i))
+		switch arg {
+		case "COPY":
+			copy = true
+		case "REPLACE":
+			replace = true
+		case "AUTH":
+			i++
+		case "AUTH2":
+			i += 2
+		case "TIMEOUT":
+			i++
+			if i < ctx.ArgCount() {
+				var err error
+				timeout, err = strconv.Atoi(ctx.ArgString(i))
+				if err != nil {
+					return ctx.WriteError(ErrNotInteger)
+				}
+			}
+		}
+	}
+
+	_ = copy
+	_ = replace
+	_ = timeout
+
+	entry, exists := ctx.Store.Get(key)
+	if !exists {
+		return ctx.WriteBulkString("NOKEY")
+	}
+
+	_ = entry
+
+	return ctx.WriteOK()
+}
+
+func cmdASKING(ctx *Context) error {
+	return ctx.WriteOK()
+}
+
+func cmdREADONLY(ctx *Context) error {
+	return ctx.WriteOK()
+}
+
+func cmdREADWRITE(ctx *Context) error {
+	return ctx.WriteOK()
 }
 
 func init() {
