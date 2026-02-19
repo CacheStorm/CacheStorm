@@ -56,7 +56,7 @@ func (e *ScriptEngine) CreateState(keys []string, args []string) *lua.LState {
 			}
 		}
 
-		result := e.executeCommand(cmd, cmdArgs)
+		result := e.executeCommand(L, cmd, cmdArgs)
 		L.Push(result)
 		return 1
 	}))
@@ -80,7 +80,7 @@ func (e *ScriptEngine) CreateState(keys []string, args []string) *lua.LState {
 			}
 		}()
 
-		result := e.executeCommand(cmd, cmdArgs)
+		result := e.executeCommand(L, cmd, cmdArgs)
 		L.Push(result)
 		return 1
 	}))
@@ -127,7 +127,7 @@ func (e *ScriptEngine) CreateState(keys []string, args []string) *lua.LState {
 	return L
 }
 
-func (e *ScriptEngine) executeCommand(cmd string, args []string) lua.LValue {
+func (e *ScriptEngine) executeCommand(L *lua.LState, cmd string, args []string) lua.LValue {
 	switch cmd {
 	case "GET":
 		if len(args) < 1 {
@@ -244,8 +244,7 @@ func (e *ScriptEngine) executeCommand(cmd string, args []string) lua.LValue {
 			return lua.LNil
 		}
 		if hv, ok := entry.Value.(*store.HashValue); ok {
-			tbl := LPool.Get().(*lua.LTable)
-			defer LPool.Put(tbl)
+			tbl := L.NewTable()
 			for k, v := range hv.Fields {
 				tbl.Append(lua.LString(k))
 				tbl.Append(lua.LString(string(v)))

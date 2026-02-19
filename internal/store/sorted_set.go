@@ -156,3 +156,26 @@ func (v *SortedSetValue) RemoveRangeByScore(min, max float64) int {
 	}
 	return removed
 }
+
+func (v *SortedSetValue) Remove(member string) bool {
+	if _, exists := v.Members[member]; exists {
+		delete(v.Members, member)
+		return true
+	}
+	return false
+}
+
+func (v *SortedSetValue) GetScore(member string) (float64, bool) {
+	score, exists := v.Members[member]
+	return score, exists
+}
+
+func (v *SortedSetValue) Add(member string, score float64) bool {
+	_, exists := v.Members[member]
+	v.Members[member] = score
+	return !exists
+}
+
+func (v *SortedSetValue) Card() int {
+	return len(v.Members)
+}

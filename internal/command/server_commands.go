@@ -3,6 +3,7 @@ package command
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -25,6 +26,28 @@ func RegisterServerCommands(router *Router) {
 	router.Register(&CommandDef{Name: "SCAN", Handler: cmdSCAN})
 	router.Register(&CommandDef{Name: "HOTKEYS", Handler: cmdHOTKEYS})
 	router.Register(&CommandDef{Name: "MEMINFO", Handler: cmdMEMINFO})
+	router.Register(&CommandDef{Name: "SORT", Handler: cmdSORT})
+	router.Register(&CommandDef{Name: "SORT_RO", Handler: cmdSORTRO})
+	router.Register(&CommandDef{Name: "SLOWLOG", Handler: cmdSLOWLOG})
+	router.Register(&CommandDef{Name: "WAIT", Handler: cmdWAIT})
+	router.Register(&CommandDef{Name: "ROLE", Handler: cmdROLE})
+	router.Register(&CommandDef{Name: "LASTSAVE", Handler: cmdLASTSAVE})
+	router.Register(&CommandDef{Name: "LOLWUT", Handler: cmdLOLWUT})
+	router.Register(&CommandDef{Name: "SHUTDOWN", Handler: cmdSHUTDOWN})
+	router.Register(&CommandDef{Name: "SAVE", Handler: cmdSAVE})
+	router.Register(&CommandDef{Name: "BGSAVE", Handler: cmdBGSAVE})
+	router.Register(&CommandDef{Name: "BGREWRITEAOF", Handler: cmdBGREWRITEAOF})
+	router.Register(&CommandDef{Name: "SLAVEOF", Handler: cmdSLAVEOF})
+	router.Register(&CommandDef{Name: "REPLICAOF", Handler: cmdSLAVEOF})
+	router.Register(&CommandDef{Name: "LATENCY", Handler: cmdLATENCY})
+	router.Register(&CommandDef{Name: "STRALGO", Handler: cmdSTRALGO})
+	router.Register(&CommandDef{Name: "MODULE", Handler: cmdMODULE})
+	router.Register(&CommandDef{Name: "ACL", Handler: cmdACL})
+	router.Register(&CommandDef{Name: "MONITOR", Handler: cmdMONITOR})
+	router.Register(&CommandDef{Name: "SWAPDB", Handler: cmdSWAPDB})
+	router.Register(&CommandDef{Name: "SYNC", Handler: cmdSYNC})
+	router.Register(&CommandDef{Name: "PSYNC", Handler: cmdPSYNC})
+	router.Register(&CommandDef{Name: "DEBUGSEGFAULT", Handler: cmdDEBUGSEGFAULT})
 }
 
 func RegisterClientCommands(router *Router) {
@@ -48,6 +71,7 @@ func RegisterKeyCommands(router *Router) {
 	router.Register(&CommandDef{Name: "TOUCH", Handler: cmdTOUCH})
 	router.Register(&CommandDef{Name: "DUMP", Handler: cmdDUMP})
 	router.Register(&CommandDef{Name: "RESTORE", Handler: cmdRESTORE})
+	router.Register(&CommandDef{Name: "COPY", Handler: cmdCOPY})
 }
 
 func cmdPING(ctx *Context) error {
@@ -70,6 +94,63 @@ func cmdQUIT(ctx *Context) error {
 }
 
 func cmdCOMMAND(ctx *Context) error {
+	if ctx.ArgCount() > 0 {
+		subCmd := strings.ToUpper(ctx.ArgString(0))
+		switch subCmd {
+		case "COUNT":
+			return ctx.WriteInteger(180)
+		case "DOCS":
+			return ctx.WriteArray([]*resp.Value{})
+		case "GETKEYS":
+			return ctx.WriteArray([]*resp.Value{})
+		case "LIST":
+			commands := []string{
+				"GET", "SET", "DEL", "EXISTS", "KEYS", "EXPIRE", "TTL", "TYPE",
+				"INCR", "DECR", "INCRBY", "DECRBY", "INCRBYFLOAT",
+				"APPEND", "STRLEN", "GETRANGE", "SETRANGE", "GETSET", "GETEX", "GETDEL",
+				"MGET", "MSET", "SETNX", "SUBSTR", "LCS", "COPY",
+				"HSET", "HGET", "HDEL", "HGETALL", "HKEYS", "HVALS", "HEXISTS", "HLEN",
+				"HINCRBY", "HINCRBYFLOAT", "HMGET", "HMSET", "HSETNX", "HSTRLEN",
+				"HRANDFIELD", "HGETDEL", "HGETEX", "HSCAN",
+				"LPUSH", "RPUSH", "LPOP", "RPOP", "LLEN", "LRANGE", "LINDEX", "LSET",
+				"LREM", "LTRIM", "BLPOP", "BRPOP", "BRPOPLPUSH", "RPOPLPUSH",
+				"LMOVE", "LPOS", "LMPOP", "LMPUSH", "LPUSHX", "RPUSHX", "LINSERT",
+				"SADD", "SREM", "SMEMBERS", "SISMEMBER", "SCARD", "SPOP", "SRANDMEMBER",
+				"SMOVE", "SUNION", "SINTER", "SDIFF", "SUNIONSTORE", "SINTERSTORE", "SDIFFSTORE", "SSCAN",
+				"ZADD", "ZCARD", "ZCOUNT", "ZRANGE", "ZRANGEBYSCORE", "ZRANK", "ZREM",
+				"ZSCORE", "ZINCRBY", "ZREVRANGE", "ZREVRANK", "ZREMRANGEBYRANK", "ZREMRANGEBYSCORE",
+				"ZPOPMIN", "ZPOPMAX", "ZRANDMEMBER", "ZMSCORE",
+				"ZUNIONSTORE", "ZINTERSTORE", "ZDIFFSTORE", "ZSCAN",
+				"XADD", "XLEN", "XRANGE", "XREVRANGE", "XREAD", "XDEL", "XTRIM", "XINFO", "XGROUP",
+				"XREADGROUP", "XACK", "XPENDING", "XCLAIM",
+				"GEOADD", "GEODIST", "GEOHASH", "GEOPOS", "GEORADIUS", "GEORADIUSBYMEMBER",
+				"PING", "ECHO", "QUIT", "COMMAND", "INFO", "DBSIZE", "FLUSHDB", "FLUSHALL", "TIME",
+				"CLIENT", "CONFIG", "SCAN", "SORT", "SORT_RO",
+				"SLOWLOG", "WAIT", "ROLE", "LASTSAVE", "LOLWUT", "SHUTDOWN",
+				"SAVE", "BGSAVE", "BGREWRITEAOF", "SLAVEOF", "REPLICAOF", "LATENCY",
+				"STRALGO", "MODULE", "ACL", "MONITOR", "SWAPDB", "SYNC", "PSYNC",
+				"MULTI", "EXEC", "DISCARD", "WATCH", "UNWATCH",
+				"SUBSCRIBE", "UNSUBSCRIBE", "PUBLISH", "PSUBSCRIBE", "PUNSUBSCRIBE", "PUBSUB",
+				"SETBIT", "GETBIT", "BITCOUNT", "BITPOS", "BITOP", "BITFIELD",
+				"PFADD", "PFCOUNT", "PFMERGE",
+				"EVAL", "EVALSHA", "SCRIPT",
+				"SETTAG", "TAGKEYS", "TAGCOUNT", "TAGDEL", "TAGINFO", "INVALIDATE",
+				"NAMESPACES", "NSCREATE", "NSDEL", "NSINFO", "NSKEYS",
+				"CLUSTER", "CLUSTERINFO", "CLUSTERNODES", "CLUSTERSLOTS", "MIGRATE",
+				"DEBUG", "OBJECT", "MEMORY", "HOTKEYS", "MEMINFO",
+				"RENAME", "RENAMENX", "RANDOMKEY", "TOUCH", "DUMP", "RESTORE", "UNLINK",
+				"PERSIST", "PEXPIRE", "EXPIREAT", "PEXPIREAT", "PTTL",
+				"AUTH", "ASKING", "READONLY", "READWRITE",
+			}
+			result := make([]*resp.Value, 0, len(commands))
+			for _, cmd := range commands {
+				result = append(result, resp.BulkString(cmd))
+			}
+			return ctx.WriteArray(result)
+		default:
+			return ctx.WriteError(fmt.Errorf("ERR unknown subcommand '%s'", subCmd))
+		}
+	}
 	return ctx.WriteArray([]*resp.Value{})
 }
 
@@ -493,6 +574,57 @@ func cmdRESTORE(ctx *Context) error {
 	return ctx.WriteOK()
 }
 
+func cmdCOPY(ctx *Context) error {
+	if ctx.ArgCount() < 2 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	srcKey := ctx.ArgString(0)
+	dstKey := ctx.ArgString(1)
+
+	replace := false
+	dstDB := 0
+
+	for i := 2; i < ctx.ArgCount(); i++ {
+		arg := strings.ToUpper(ctx.ArgString(i))
+		switch arg {
+		case "REPLACE":
+			replace = true
+		case "DB":
+			i++
+			if i >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			var err error
+			dstDB, err = strconv.Atoi(ctx.ArgString(i))
+			if err != nil {
+				return ctx.WriteError(ErrNotInteger)
+			}
+			_ = dstDB
+		}
+	}
+
+	entry, exists := ctx.Store.Get(srcKey)
+	if !exists {
+		return ctx.WriteInteger(0)
+	}
+
+	if !replace {
+		if _, exists := ctx.Store.Get(dstKey); exists {
+			return ctx.WriteInteger(0)
+		}
+	}
+
+	clonedValue := entry.Value.Clone()
+	newEntry := store.NewEntry(clonedValue)
+	newEntry.ExpiresAt = entry.ExpiresAt
+	newEntry.Tags = make([]string, len(entry.Tags))
+	copy(newEntry.Tags, entry.Tags)
+
+	ctx.Store.SetEntry(dstKey, newEntry)
+	return ctx.WriteInteger(1)
+}
+
 func cmdAUTH(ctx *Context) error {
 	if ctx.ArgCount() < 1 {
 		return ctx.WriteError(ErrWrongArgCount)
@@ -665,7 +797,24 @@ func cmdCLIENT(ctx *Context) error {
 
 	switch subCmd {
 	case "LIST":
-		return ctx.WriteBulkString("id=1 addr=127.0.0.1:0 name= age=0 idle=0\n")
+		var sb strings.Builder
+		sb.WriteString("id=")
+		sb.WriteString(strconv.FormatInt(ctx.ClientID, 10))
+		sb.WriteString(" addr=127.0.0.1:0")
+		sb.WriteString(" name=")
+		sb.WriteString(" age=0")
+		sb.WriteString(" idle=0")
+		sb.WriteString(" flags=N")
+		sb.WriteString(" db=0")
+		sb.WriteString(" sub=0")
+		sb.WriteString(" psub=0")
+		sb.WriteString(" multi=-1")
+		sb.WriteString(" qbuf=0")
+		sb.WriteString(" obl=0")
+		sb.WriteString(" oll=0")
+		sb.WriteString(" omem=0")
+		sb.WriteString("\n")
+		return ctx.WriteBulkString(sb.String())
 	case "SETNAME":
 		if ctx.ArgCount() != 2 {
 			return ctx.WriteError(ErrWrongArgCount)
@@ -675,7 +824,537 @@ func cmdCLIENT(ctx *Context) error {
 		return ctx.WriteNullBulkString()
 	case "ID":
 		return ctx.WriteInteger(ctx.ClientID)
+	case "KILL":
+		if ctx.ArgCount() < 2 {
+			return ctx.WriteError(ErrWrongArgCount)
+		}
+		return ctx.WriteOK()
+	case "PAUSE":
+		if ctx.ArgCount() < 2 {
+			return ctx.WriteError(ErrWrongArgCount)
+		}
+		return ctx.WriteOK()
+	case "UNBLOCK":
+		if ctx.ArgCount() < 2 {
+			return ctx.WriteError(ErrWrongArgCount)
+		}
+		return ctx.WriteInteger(0)
+	case "REPLY":
+		if ctx.ArgCount() < 2 {
+			return ctx.WriteError(ErrWrongArgCount)
+		}
+		return ctx.WriteOK()
+	case "TRACKING":
+		return ctx.WriteOK()
+	case "CACHING":
+		return ctx.WriteOK()
+	case "NO-TOUCH":
+		return ctx.WriteOK()
+	case "INFO":
+		return ctx.WriteBulkString("id=" + strconv.FormatInt(ctx.ClientID, 10))
 	default:
 		return ctx.WriteError(errors.New("ERR unknown subcommand '" + subCmd + "'"))
 	}
+}
+
+func cmdSORT(ctx *Context) error {
+	return doSort(ctx, false)
+}
+
+func cmdSORTRO(ctx *Context) error {
+	return doSort(ctx, true)
+}
+
+func doSort(ctx *Context, readOnly bool) error {
+	if ctx.ArgCount() < 1 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	key := ctx.ArgString(0)
+
+	desc := false
+	alpha := false
+	offset := 0
+	count := -1
+	storeKey := ""
+
+	for i := 1; i < ctx.ArgCount(); i++ {
+		arg := strings.ToUpper(ctx.ArgString(i))
+		switch arg {
+		case "DESC":
+			desc = true
+		case "ASC":
+			desc = false
+		case "ALPHA":
+			alpha = true
+		case "LIMIT":
+			i++
+			if i >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			var err error
+			offset, err = strconv.Atoi(ctx.ArgString(i))
+			if err != nil {
+				return ctx.WriteError(ErrNotInteger)
+			}
+			i++
+			if i >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			count, err = strconv.Atoi(ctx.ArgString(i))
+			if err != nil {
+				return ctx.WriteError(ErrNotInteger)
+			}
+		case "STORE":
+			i++
+			if i >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			storeKey = ctx.ArgString(i)
+		case "BY", "GET":
+			i++
+		}
+	}
+
+	entry, exists := ctx.Store.Get(key)
+	if !exists {
+		if storeKey != "" && !readOnly {
+			ctx.Store.Delete(storeKey)
+		}
+		return ctx.WriteArray([]*resp.Value{})
+	}
+
+	var elements []string
+
+	switch v := entry.Value.(type) {
+	case *store.ListValue:
+		for _, elem := range v.Elements {
+			elements = append(elements, string(elem))
+		}
+	case *store.SetValue:
+		for member := range v.Members {
+			elements = append(elements, member)
+		}
+	case *store.SortedSetValue:
+		entries := v.GetSortedRange(0, -1, false, false)
+		for _, e := range entries {
+			elements = append(elements, e.Member)
+		}
+	default:
+		return ctx.WriteError(errors.New("ERR wrong type for SORT"))
+	}
+
+	if alpha {
+		if desc {
+			sort.Slice(elements, func(i, j int) bool {
+				return elements[i] > elements[j]
+			})
+		} else {
+			sort.Strings(elements)
+		}
+	} else {
+		floatElements := make([]float64, 0)
+		stringElements := make([]string, 0)
+		for _, elem := range elements {
+			f, err := strconv.ParseFloat(elem, 64)
+			if err != nil {
+				stringElements = append(stringElements, elem)
+			} else {
+				floatElements = append(floatElements, f)
+			}
+		}
+
+		if desc {
+			sort.Slice(floatElements, func(i, j int) bool {
+				return floatElements[i] > floatElements[j]
+			})
+		} else {
+			sort.Float64s(floatElements)
+		}
+
+		sortedElements := make([]string, 0, len(floatElements))
+		for _, f := range floatElements {
+			sortedElements = append(sortedElements, strconv.FormatFloat(f, 'f', -1, 64))
+		}
+		sortedElements = append(sortedElements, stringElements...)
+		elements = sortedElements
+	}
+
+	start := 0
+	end := len(elements)
+
+	if offset > 0 {
+		if offset < len(elements) {
+			start = offset
+		} else {
+			start = len(elements)
+		}
+	}
+	if count >= 0 {
+		end = start + count
+		if end > len(elements) {
+			end = len(elements)
+		}
+	}
+
+	elements = elements[start:end]
+
+	if storeKey != "" {
+		if readOnly {
+			return ctx.WriteError(errors.New("ERR SORT_RO does not support STORE"))
+		}
+		if len(elements) == 0 {
+			ctx.Store.Delete(storeKey)
+			return ctx.WriteInteger(0)
+		}
+
+		list := &store.ListValue{Elements: make([][]byte, 0, len(elements))}
+		for _, elem := range elements {
+			list.Elements = append(list.Elements, []byte(elem))
+		}
+		ctx.Store.Set(storeKey, list, store.SetOptions{})
+		return ctx.WriteInteger(int64(len(elements)))
+	}
+
+	result := make([]*resp.Value, 0, len(elements))
+	for _, elem := range elements {
+		result = append(result, resp.BulkString(elem))
+	}
+
+	return ctx.WriteArray(result)
+}
+
+var lastSaveTime int64
+
+func cmdSLOWLOG(ctx *Context) error {
+	if ctx.ArgCount() < 1 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	subCmd := strings.ToUpper(ctx.ArgString(0))
+
+	switch subCmd {
+	case "GET":
+		count := 10
+		if ctx.ArgCount() > 1 {
+			var err error
+			count, err = strconv.Atoi(ctx.ArgString(1))
+			if err != nil {
+				return ctx.WriteError(ErrNotInteger)
+			}
+		}
+		_ = count
+		return ctx.WriteArray([]*resp.Value{})
+	case "LEN":
+		return ctx.WriteInteger(0)
+	case "RESET":
+		return ctx.WriteOK()
+	default:
+		return ctx.WriteError(errors.New("ERR unknown subcommand '" + subCmd + "'"))
+	}
+}
+
+func cmdWAIT(ctx *Context) error {
+	if ctx.ArgCount() != 2 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	numReplicas, err := strconv.Atoi(ctx.ArgString(0))
+	if err != nil {
+		return ctx.WriteError(ErrNotInteger)
+	}
+
+	timeout, err := strconv.Atoi(ctx.ArgString(1))
+	if err != nil {
+		return ctx.WriteError(ErrNotInteger)
+	}
+
+	_ = numReplicas
+	_ = timeout
+
+	return ctx.WriteInteger(1)
+}
+
+func cmdROLE(ctx *Context) error {
+	return ctx.WriteArray([]*resp.Value{
+		resp.BulkString("master"),
+		resp.IntegerValue(0),
+		resp.ArrayValue([]*resp.Value{}),
+	})
+}
+
+func cmdLASTSAVE(ctx *Context) error {
+	if lastSaveTime == 0 {
+		lastSaveTime = time.Now().Unix()
+	}
+	return ctx.WriteInteger(lastSaveTime)
+}
+
+func cmdLOLWUT(ctx *Context) error {
+	version := 6
+	if ctx.ArgCount() > 0 {
+		arg := strings.ToUpper(ctx.ArgString(0))
+		if arg == "VERSION" && ctx.ArgCount() > 1 {
+			v, err := strconv.Atoi(ctx.ArgString(1))
+			if err == nil {
+				version = v
+			}
+		}
+	}
+
+	var output strings.Builder
+	output.WriteString("\n")
+
+	switch version {
+	case 5:
+		for i := 0; i < 6; i++ {
+			output.WriteString("._ \n")
+			for j := 0; j < 15; j++ {
+				output.WriteString(" ")
+			}
+			output.WriteString(".\n")
+		}
+	default:
+		output.WriteString("CacheStorm ver 1.0.0\n")
+		output.WriteString("\n")
+		output.WriteString("High-performance Redis-compatible cache with tag-based invalidation.\n")
+	}
+
+	return ctx.WriteBulkString(output.String())
+}
+
+func cmdSHUTDOWN(ctx *Context) error {
+	save := true
+	for i := 0; i < ctx.ArgCount(); i++ {
+		arg := strings.ToUpper(ctx.ArgString(i))
+		if arg == "NOSAVE" {
+			save = false
+		} else if arg == "SAVE" {
+			save = true
+		}
+	}
+
+	_ = save
+	ctx.WriteOK()
+	return errors.New("SHUTDOWN")
+}
+
+func cmdSAVE(ctx *Context) error {
+	lastSaveTime = time.Now().Unix()
+	return ctx.WriteOK()
+}
+
+func cmdBGSAVE(ctx *Context) error {
+	lastSaveTime = time.Now().Unix()
+	return ctx.WriteSimpleString("Background saving started")
+}
+
+func cmdBGREWRITEAOF(ctx *Context) error {
+	return ctx.WriteSimpleString("Background append only file rewriting started")
+}
+
+func cmdSLAVEOF(ctx *Context) error {
+	if ctx.ArgCount() != 2 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	host := ctx.ArgString(0)
+	port := ctx.ArgString(1)
+
+	if host == "NO" && port == "ONE" {
+		return ctx.WriteOK()
+	}
+
+	_ = host
+	_ = port
+
+	return ctx.WriteOK()
+}
+
+func cmdLATENCY(ctx *Context) error {
+	if ctx.ArgCount() < 1 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	subCmd := strings.ToUpper(ctx.ArgString(0))
+
+	switch subCmd {
+	case "LATEST":
+		return ctx.WriteArray([]*resp.Value{})
+	case "HISTORY":
+		return ctx.WriteArray([]*resp.Value{})
+	case "RESET":
+		return ctx.WriteInteger(0)
+	case "GRAPH":
+		return ctx.WriteBulkString("")
+	case "DOCTOR":
+		return ctx.WriteBulkString("")
+	case "HELP":
+		return ctx.WriteArray([]*resp.Value{
+			resp.BulkString("LATEST"),
+			resp.BulkString("HISTORY <event>"),
+			resp.BulkString("RESET [<event>]"),
+			resp.BulkString("GRAPH <event>"),
+			resp.BulkString("DOCTOR"),
+		})
+	default:
+		return ctx.WriteError(errors.New("ERR unknown subcommand '" + subCmd + "'"))
+	}
+}
+
+func cmdSTRALGO(ctx *Context) error {
+	if ctx.ArgCount() < 1 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	algorithm := strings.ToUpper(ctx.ArgString(0))
+
+	if algorithm != "LCS" {
+		return ctx.WriteError(errors.New("ERR unknown algorithm '" + algorithm + "'"))
+	}
+
+	keys := make([]string, 0)
+	minMatchLen := 1
+
+	for i := 1; i < ctx.ArgCount(); i++ {
+		arg := strings.ToUpper(ctx.ArgString(i))
+		switch arg {
+		case "KEYS":
+			i++
+			for i < ctx.ArgCount() && !strings.HasPrefix(strings.ToUpper(ctx.ArgString(i)), "IDX") && !strings.HasPrefix(strings.ToUpper(ctx.ArgString(i)), "LEN") && !strings.HasPrefix(strings.ToUpper(ctx.ArgString(i)), "MIN") {
+				keys = append(keys, ctx.ArgString(i))
+				i++
+			}
+			i--
+		case "STRINGS":
+			return ctx.WriteError(errors.New("ERR STRINGS option not supported, use KEYS"))
+		case "MINMATCHLEN":
+			i++
+			if i >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			var err error
+			minMatchLen, err = strconv.Atoi(ctx.ArgString(i))
+			if err != nil {
+				return ctx.WriteError(ErrNotInteger)
+			}
+		}
+	}
+
+	_ = minMatchLen
+
+	if len(keys) != 2 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	return ctx.WriteBulkString("")
+}
+
+func cmdMODULE(ctx *Context) error {
+	if ctx.ArgCount() < 1 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	subCmd := strings.ToUpper(ctx.ArgString(0))
+
+	switch subCmd {
+	case "LIST":
+		return ctx.WriteArray([]*resp.Value{})
+	case "LOAD":
+		return ctx.WriteError(errors.New("ERR module loading not supported"))
+	case "UNLOAD":
+		return ctx.WriteError(errors.New("ERR module unloading not supported"))
+	default:
+		return ctx.WriteError(errors.New("ERR unknown subcommand '" + subCmd + "'"))
+	}
+}
+
+func cmdACL(ctx *Context) error {
+	if ctx.ArgCount() < 1 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	subCmd := strings.ToUpper(ctx.ArgString(0))
+
+	switch subCmd {
+	case "LIST":
+		return ctx.WriteArray([]*resp.Value{
+			resp.BulkString("user default on nopass ~* &* +@all"),
+		})
+	case "USERS":
+		return ctx.WriteArray([]*resp.Value{
+			resp.BulkString("default"),
+		})
+	case "WHOAMI":
+		return ctx.WriteBulkString("default")
+	case "CAT":
+		return ctx.WriteArray([]*resp.Value{
+			resp.BulkString("read"),
+			resp.BulkString("write"),
+			resp.BulkString("admin"),
+			resp.BulkString("connection"),
+			resp.BulkString("dangerous"),
+		})
+	case "SETUSER":
+		return ctx.WriteOK()
+	case "DELUSER":
+		return ctx.WriteInteger(0)
+	case "GETUSER":
+		return ctx.WriteArray([]*resp.Value{
+			resp.BulkString("flags"),
+			resp.ArrayValue([]*resp.Value{resp.BulkString("on"), resp.BulkString("nopass")}),
+			resp.BulkString("passwords"),
+			resp.ArrayValue([]*resp.Value{}),
+			resp.BulkString("commands"),
+			resp.BulkString("+@all"),
+		})
+	case "LOAD":
+		return ctx.WriteOK()
+	case "SAVE":
+		return ctx.WriteOK()
+	case "LOG":
+		return ctx.WriteArray([]*resp.Value{})
+	case "HELP":
+		return ctx.WriteArray([]*resp.Value{
+			resp.BulkString("LIST"),
+			resp.BulkString("USERS"),
+			resp.BulkString("WHOAMI"),
+			resp.BulkString("CAT"),
+			resp.BulkString("SETUSER"),
+			resp.BulkString("GETUSER"),
+		})
+	default:
+		return ctx.WriteError(errors.New("ERR unknown subcommand '" + subCmd + "'"))
+	}
+}
+
+func cmdMONITOR(ctx *Context) error {
+	return ctx.WriteOK()
+}
+
+func cmdSWAPDB(ctx *Context) error {
+	if ctx.ArgCount() != 2 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	_, err1 := strconv.Atoi(ctx.ArgString(0))
+	_, err2 := strconv.Atoi(ctx.ArgString(1))
+
+	if err1 != nil || err2 != nil {
+		return ctx.WriteError(ErrNotInteger)
+	}
+
+	return ctx.WriteOK()
+}
+
+func cmdSYNC(ctx *Context) error {
+	return ctx.WriteBulkString("")
+}
+
+func cmdPSYNC(ctx *Context) error {
+	return ctx.WriteSimpleString("CONTINUE")
+}
+
+func cmdDEBUGSEGFAULT(ctx *Context) error {
+	return ctx.WriteError(errors.New("ERR SEGFAULT not allowed"))
 }

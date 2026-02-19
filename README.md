@@ -13,62 +13,84 @@ A high-performance, Redis-compatible in-memory cache server written in Go.
 - **Named Namespaces**: Instead of numbered databases
 - **Hot Key Detection**: Built-in hot key tracking
 - **Multi-node Clustering**: Gossip-based cluster with hash slot routing
+- **Lua Scripting**: Full EVAL/EVALSHA/SCRIPT support with gopher-lua
+- **All Redis Data Types**: String, Hash, List, Set, SortedSet, Stream, Geo, Bitmap, HyperLogLog
 
 ## Quick Start
 
 ```bash
 # Build
-make build
+go build -o cachestorm ./cmd/cachestorm
 
 # Run
-./bin/cachestorm
+./cachestorm
 
-# Or with Docker
-docker run -p 6380:6380 cachestorm/cachestorm:latest
+# Or with custom config
+./cachestorm -config config.yaml -port 6380
 ```
 
-## Commands
+## Commands (180+)
 
 ### String Commands
-`SET`, `GET`, `DEL`, `MSET`, `MGET`, `INCR`, `DECR`, `INCRBY`, `DECRBY`, `APPEND`, `STRLEN`, `GETRANGE`, `SETRANGE`, `SETNX`, `GETSET`, `GETDEL`
+`SET`, `GET`, `DEL`, `EXISTS`, `MSET`, `MGET`, `INCR`, `DECR`, `INCRBY`, `DECRBY`, `INCRBYFLOAT`, `APPEND`, `STRLEN`, `GETRANGE`, `SETRANGE`, `SETNX`, `GETSET`, `GETEX`, `GETDEL`, `SUBSTR`, `LCS`
 
 ### Hash Commands
-`HSET`, `HGET`, `HMSET`, `HMGET`, `HGETALL`, `HDEL`, `HEXISTS`, `HLEN`, `HKEYS`, `HVALS`, `HINCRBY`, `HINCRBYFLOAT`, `HSETNX`, `HSTRLEN`
+`HSET`, `HGET`, `HMSET`, `HMGET`, `HGETALL`, `HDEL`, `HEXISTS`, `HLEN`, `HKEYS`, `HVALS`, `HINCRBY`, `HINCRBYFLOAT`, `HSETNX`, `HSTRLEN`, `HRANDFIELD`, `HGETDEL`, `HGETEX`, `HSCAN`
 
 ### List Commands
-`LPUSH`, `RPUSH`, `LPUSHX`, `RPUSHX`, `LPOP`, `RPOP`, `LLEN`, `LRANGE`, `LINDEX`, `LSET`, `LREM`, `LTRIM`, `RPOPLPUSH`
+`LPUSH`, `RPUSH`, `LPUSHX`, `RPUSHX`, `LPOP`, `RPOP`, `LLEN`, `LRANGE`, `LINDEX`, `LSET`, `LREM`, `LTRIM`, `RPOPLPUSH`, `LINSERT`, `LMOVE`, `BLPOP`, `BRPOP`, `BRPOPLPUSH`, `LPOS`, `LMPOP`, `LMPUSH`
 
 ### Set Commands
-`SADD`, `SREM`, `SMEMBERS`, `SISMEMBER`, `SCARD`, `SPOP`, `SRANDMEMBER`, `SMOVE`, `SUNION`, `SINTER`, `SDIFF`, `SUNIONSTORE`, `SINTERSTORE`, `SDIFFSTORE`
+`SADD`, `SREM`, `SMEMBERS`, `SISMEMBER`, `SCARD`, `SPOP`, `SRANDMEMBER`, `SMOVE`, `SUNION`, `SINTER`, `SDIFF`, `SUNIONSTORE`, `SINTERSTORE`, `SDIFFSTORE`, `SSCAN`
+
+### Sorted Set Commands
+`ZADD`, `ZCARD`, `ZCOUNT`, `ZRANGE`, `ZRANGEBYSCORE`, `ZRANK`, `ZREM`, `ZSCORE`, `ZINCRBY`, `ZREVRANGE`, `ZREVRANK`, `ZREMRANGEBYRANK`, `ZREMRANGEBYSCORE`, `ZPOPMIN`, `ZPOPMAX`, `ZRANDMEMBER`, `ZMSCORE`, `ZUNIONSTORE`, `ZINTERSTORE`, `ZDIFFSTORE`, `ZSCAN`
+
+### Stream Commands
+`XADD`, `XLEN`, `XRANGE`, `XREVRANGE`, `XREAD`, `XDEL`, `XTRIM`, `XINFO`, `XGROUP`, `XREADGROUP`, `XACK`, `XPENDING`, `XCLAIM`
+
+### Geo Commands
+`GEOADD`, `GEODIST`, `GEOHASH`, `GEOPOS`, `GEORADIUS`, `GEORADIUSBYMEMBER`
+
+### Bitmap Commands
+`SETBIT`, `GETBIT`, `BITCOUNT`, `BITPOS`, `BITOP`, `BITFIELD`
+
+### HyperLogLog Commands
+`PFADD`, `PFCOUNT`, `PFMERGE`
 
 ### Key Commands
-`EXPIRE`, `PEXPIRE`, `EXPIREAT`, `PEXPIREAT`, `TTL`, `PTTL`, `PERSIST`, `TYPE`, `RENAME`, `RENAMENX`, `KEYS`, `SCAN`, `RANDOMKEY`, `UNLINK`
+`EXPIRE`, `PEXPIRE`, `EXPIREAT`, `PEXPIREAT`, `TTL`, `PTTL`, `PERSIST`, `TYPE`, `RENAME`, `RENAMENX`, `KEYS`, `SCAN`, `RANDOMKEY`, `UNLINK`, `TOUCH`, `DUMP`, `RESTORE`, `COPY`
+
+### Server Commands
+`PING`, `ECHO`, `QUIT`, `COMMAND`, `INFO`, `DBSIZE`, `FLUSHDB`, `FLUSHALL`, `TIME`, `AUTH`, `HOTKEYS`, `MEMINFO`, `SORT`, `SORT_RO`, `SLOWLOG`, `WAIT`, `ROLE`, `LASTSAVE`, `LOLWUT`, `SHUTDOWN`, `SAVE`, `BGSAVE`, `BGREWRITEAOF`, `SLAVEOF`, `REPLICAOF`, `LATENCY`, `STRALGO`, `MODULE`, `ACL`, `MONITOR`, `SWAPDB`, `SYNC`, `PSYNC`
+
+### Transaction Commands
+`MULTI`, `EXEC`, `DISCARD`, `WATCH`, `UNWATCH`
+
+### Pub/Sub Commands
+`SUBSCRIBE`, `UNSUBSCRIBE`, `PUBLISH`, `PSUBSCRIBE`, `PUNSUBSCRIBE`, `PUBSUB`
+
+### Scripting Commands
+`EVAL`, `EVALSHA`, `SCRIPT LOAD/EXISTS/FLUSH`
 
 ### Tag Commands (Killer Feature!)
 ```
 SETTAG key value tag1 tag2 ...   # Set key with tags
-TAGS key                          # Get tags for key
-ADDTAG key tag ...               # Add tags to existing key
-REMTAG key tag ...               # Remove tags from key
-INVALIDATE tag [CASCADE]         # Delete all keys with tag (and children if CASCADE)
-TAGKEYS tag                       # List all keys for a tag
+TAGKEYS tag                       # Get all keys for a tag
 TAGCOUNT tag                      # Count keys in a tag
-TAGLINK parent child             # Create tag hierarchy
-TAGUNLINK parent child           # Remove tag hierarchy link
-TAGCHILDREN tag                   # List child tags
+TAGDEL tag                        # Delete tag
+TAGINFO tag                       # Get tag info
+INVALIDATE tag                    # Delete all keys with tag
 ```
 
-### Server Commands
-`PING`, `ECHO`, `QUIT`, `COMMAND`, `INFO`, `DBSIZE`, `FLUSHDB`, `FLUSHALL`, `TIME`, `AUTH`, `HOTKEYS`, `MEMINFO`
-
 ### Namespace Commands
-`NAMESPACE`, `NAMESPACES`, `NAMESPACEDEL`, `NAMESPACEINFO`, `SELECT`
+`NAMESPACES`, `NSCREATE`, `NSDEL`, `NSINFO`, `NSKEYS`
 
 ### Cluster Commands
-`CLUSTER INFO`, `CLUSTER NODES`, `CLUSTER SLOTS`
+`CLUSTER INFO`, `CLUSTER NODES`, `CLUSTER SLOTS`, `MIGRATE`, `ASKING`, `READONLY`, `READWRITE`
 
-### Client Commands
-`CLIENT LIST`, `CLIENT SETNAME`, `CLIENT GETNAME`, `CLIENT ID`
+### Debug Commands
+`DEBUG`, `OBJECT`, `MEMORY`
 
 ## Tag-Based Invalidation Example
 
@@ -85,13 +107,23 @@ TAGKEYS users
 # Invalidate all user profiles at once
 INVALIDATE users
 # Returns: 2 (keys deleted)
+```
 
-# With hierarchy
-TAGLINK users admin
-SETTAG admin:1 "Admin" admin users
+## Lua Scripting Example
 
-INVALIDATE users CASCADE
-# Also invalidates admin:1
+```bash
+# Simple script
+EVAL "return redis.call('GET', KEYS[1])" 1 mykey
+
+# With arguments
+EVAL "return redis.call('SET', KEYS[1], ARGV[1])" 1 mykey myvalue
+
+# Cache script
+SCRIPT LOAD "return redis.call('INCR', KEYS[1])"
+# Returns: sha1 hash
+
+# Execute cached script
+EVALSHA <sha1> 1 counter
 ```
 
 ## Configuration
@@ -141,27 +173,27 @@ GET /memory      - Memory info
 GET /metrics     - Prometheus metrics
 ```
 
-## Docker
-
-```bash
-# Single node
-docker run -p 6380:6380 -p 9090:9090 cachestorm/cachestorm
-
-# 3-node cluster
-docker-compose -f docker/docker-compose.yml up
-```
-
 ## Performance
 
-Benchmark results (AMD Ryzen 7, Windows):
+Benchmark results (AMD Ryzen 7 PRO 6850H, Windows):
 
 ```
-GET:            97.80 ns/op (~10M ops/sec)
-GET Parallel:   14.17 ns/op (~70M ops/sec)
-SET:            735.8 ns/op (~1.4M ops/sec)
-SET Parallel:   73.77 ns/op (~13M ops/sec)
-TAGCOUNT:       23.65 ns/op
+GET:            72 ns/op (~14M ops/sec)
+GET Parallel:   14 ns/op (~70M ops/sec)
+SET:            750 ns/op (~1.3M ops/sec)
+SET Parallel:   65 ns/op (~15M ops/sec)
+TAGCOUNT:       19 ns/op
+Delete:         997 ns/op
 ```
+
+## Project Statistics
+
+| Metric | Value |
+|--------|-------|
+| Go files | 64 |
+| Lines of code | 11,255 |
+| Commands | 180+ |
+| Data types | 9 |
 
 ## Architecture
 
@@ -178,6 +210,7 @@ TAGCOUNT:       23.65 ns/op
 │              │                       │
 │  ┌───────────▼───────────────────┐  │
 │  │     Command Router            │  │
+│  │  219 handlers registered      │  │
 │  └───────────┬───────────────────┘  │
 │              │                       │
 │  ┌───────────▼───────────────────┐  │

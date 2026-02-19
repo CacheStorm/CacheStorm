@@ -2,6 +2,7 @@ package command
 
 import (
 	"strconv"
+	"strings"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
@@ -21,6 +22,14 @@ func RegisterListCommands(router *Router) {
 	router.Register(&CommandDef{Name: "LREM", Handler: cmdLREM})
 	router.Register(&CommandDef{Name: "LTRIM", Handler: cmdLTRIM})
 	router.Register(&CommandDef{Name: "RPOPLPUSH", Handler: cmdRPOPLPUSH})
+	router.Register(&CommandDef{Name: "LINSERT", Handler: cmdLINSERT})
+	router.Register(&CommandDef{Name: "LMOVE", Handler: cmdLMOVE})
+	router.Register(&CommandDef{Name: "BLPOP", Handler: cmdBLPOP})
+	router.Register(&CommandDef{Name: "BRPOP", Handler: cmdBRPOP})
+	router.Register(&CommandDef{Name: "BRPOPLPUSH", Handler: cmdBRPOPLPUSH})
+	router.Register(&CommandDef{Name: "LPOS", Handler: cmdLPOS})
+	router.Register(&CommandDef{Name: "LMPOP", Handler: cmdLMPOP})
+	router.Register(&CommandDef{Name: "LMPUSH", Handler: cmdLMPUSH})
 }
 
 func getOrCreateList(ctx *Context, key string) (*store.ListValue, error) {
@@ -375,6 +384,56 @@ func cmdLREM(ctx *Context) error {
 	return ctx.WriteInteger(int64(removed))
 }
 
+func cmdLINSERT(ctx *Context) error {
+	if ctx.ArgCount() != 4 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	key := ctx.ArgString(0)
+	position := strings.ToUpper(ctx.ArgString(1))
+	pivot := ctx.Arg(2)
+	value := ctx.Arg(3)
+
+	if position != "BEFORE" && position != "AFTER" {
+		return ctx.WriteError(ErrSyntaxError)
+	}
+
+	list, err := getList(ctx, key)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	if list == nil {
+		return ctx.WriteInteger(0)
+	}
+
+	pivotIdx := -1
+	for i, elem := range list.Elements {
+		if string(elem) == string(pivot) {
+			pivotIdx = i
+			break
+		}
+	}
+
+	if pivotIdx == -1 {
+		return ctx.WriteInteger(-1)
+	}
+
+	newElements := make([][]byte, 0, len(list.Elements)+1)
+
+	if position == "BEFORE" {
+		newElements = append(newElements, list.Elements[:pivotIdx]...)
+		newElements = append(newElements, value)
+		newElements = append(newElements, list.Elements[pivotIdx:]...)
+	} else {
+		newElements = append(newElements, list.Elements[:pivotIdx+1]...)
+		newElements = append(newElements, value)
+		newElements = append(newElements, list.Elements[pivotIdx+1:]...)
+	}
+
+	list.Elements = newElements
+	return ctx.WriteInteger(int64(len(list.Elements)))
+}
+
 func cmdLTRIM(ctx *Context) error {
 	if ctx.ArgCount() != 3 {
 		return ctx.WriteError(ErrWrongArgCount)
@@ -458,4 +517,381 @@ func cmdRPOPLPUSH(ctx *Context) error {
 	dstList.Elements = append([][]byte{value}, dstList.Elements...)
 
 	return ctx.WriteBulkBytes(value)
+}
+
+func cmdLMOVE(ctx *Context) error {
+	if ctx.ArgCount() != 4 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	srcKey := ctx.ArgString(0)
+	dstKey := ctx.ArgString(1)
+	whereFrom := strings.ToUpper(ctx.ArgString(2))
+	whereTo := strings.ToUpper(ctx.ArgString(3))
+
+	srcList, err := getList(ctx, srcKey)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	if srcList == nil || len(srcList.Elements) == 0 {
+		return ctx.WriteNullBulkString()
+	}
+
+	var value []byte
+	switch whereFrom {
+	case "LEFT":
+		value = srcList.Elements[0]
+		srcList.Elements = srcList.Elements[1:]
+	case "RIGHT":
+		value = srcList.Elements[len(srcList.Elements)-1]
+		srcList.Elements = srcList.Elements[:len(srcList.Elements)-1]
+	default:
+		return ctx.WriteError(ErrSyntaxError)
+	}
+
+	if len(srcList.Elements) == 0 {
+		ctx.Store.Delete(srcKey)
+	}
+
+	dstList, err := getOrCreateList(ctx, dstKey)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+
+	switch whereTo {
+	case "LEFT":
+		dstList.Elements = append([][]byte{value}, dstList.Elements...)
+	case "RIGHT":
+		dstList.Elements = append(dstList.Elements, value)
+	default:
+		return ctx.WriteError(ErrSyntaxError)
+	}
+
+	return ctx.WriteBulkBytes(value)
+}
+
+func cmdBLPOP(ctx *Context) error {
+	if ctx.ArgCount() < 2 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	keys := make([]string, 0, ctx.ArgCount()-1)
+	var timeout int
+	var err error
+
+	for i := 0; i < ctx.ArgCount()-1; i++ {
+		keys = append(keys, ctx.ArgString(i))
+	}
+	timeout, err = strconv.Atoi(ctx.ArgString(ctx.ArgCount() - 1))
+	if err != nil {
+		return ctx.WriteError(ErrNotInteger)
+	}
+
+	_ = timeout
+
+	for _, key := range keys {
+		list, err := getList(ctx, key)
+		if err != nil {
+			return ctx.WriteError(err)
+		}
+		if list != nil && len(list.Elements) > 0 {
+			value := list.Elements[0]
+			list.Elements = list.Elements[1:]
+			if len(list.Elements) == 0 {
+				ctx.Store.Delete(key)
+			}
+			return ctx.WriteArray([]*resp.Value{
+				resp.BulkString(key),
+				resp.BulkBytes(value),
+			})
+		}
+	}
+
+	return ctx.WriteNull()
+}
+
+func cmdBRPOP(ctx *Context) error {
+	if ctx.ArgCount() < 2 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	keys := make([]string, 0, ctx.ArgCount()-1)
+	var timeout int
+	var err error
+
+	for i := 0; i < ctx.ArgCount()-1; i++ {
+		keys = append(keys, ctx.ArgString(i))
+	}
+	timeout, err = strconv.Atoi(ctx.ArgString(ctx.ArgCount() - 1))
+	if err != nil {
+		return ctx.WriteError(ErrNotInteger)
+	}
+
+	_ = timeout
+
+	for _, key := range keys {
+		list, err := getList(ctx, key)
+		if err != nil {
+			return ctx.WriteError(err)
+		}
+		if list != nil && len(list.Elements) > 0 {
+			idx := len(list.Elements) - 1
+			value := list.Elements[idx]
+			list.Elements = list.Elements[:idx]
+			if len(list.Elements) == 0 {
+				ctx.Store.Delete(key)
+			}
+			return ctx.WriteArray([]*resp.Value{
+				resp.BulkString(key),
+				resp.BulkBytes(value),
+			})
+		}
+	}
+
+	return ctx.WriteNull()
+}
+
+func cmdBRPOPLPUSH(ctx *Context) error {
+	if ctx.ArgCount() != 3 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	srcKey := ctx.ArgString(0)
+	dstKey := ctx.ArgString(1)
+	timeout, err := strconv.Atoi(ctx.ArgString(2))
+	if err != nil {
+		return ctx.WriteError(ErrNotInteger)
+	}
+
+	_ = timeout
+
+	srcList, err := getList(ctx, srcKey)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	if srcList == nil || len(srcList.Elements) == 0 {
+		return ctx.WriteNullBulkString()
+	}
+
+	idx := len(srcList.Elements) - 1
+	value := srcList.Elements[idx]
+	srcList.Elements = srcList.Elements[:idx]
+
+	if len(srcList.Elements) == 0 {
+		ctx.Store.Delete(srcKey)
+	}
+
+	dstList, err := getOrCreateList(ctx, dstKey)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+
+	dstList.Elements = append([][]byte{value}, dstList.Elements...)
+
+	return ctx.WriteBulkBytes(value)
+}
+
+func cmdLPOS(ctx *Context) error {
+	if ctx.ArgCount() < 2 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	key := ctx.ArgString(0)
+	element := ctx.Arg(1)
+
+	rank := 1
+	count := 0
+	maxlen := 0
+
+	for i := 2; i < ctx.ArgCount(); i++ {
+		arg := strings.ToUpper(ctx.ArgString(i))
+		switch arg {
+		case "RANK":
+			i++
+			if i >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			var err error
+			rank, err = strconv.Atoi(ctx.ArgString(i))
+			if err != nil {
+				return ctx.WriteError(ErrNotInteger)
+			}
+		case "COUNT":
+			i++
+			if i >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			var err error
+			count, err = strconv.Atoi(ctx.ArgString(i))
+			if err != nil {
+				return ctx.WriteError(ErrNotInteger)
+			}
+		case "MAXLEN":
+			i++
+			if i >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			var err error
+			maxlen, err = strconv.Atoi(ctx.ArgString(i))
+			if err != nil {
+				return ctx.WriteError(ErrNotInteger)
+			}
+		}
+	}
+
+	list, err := getList(ctx, key)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	if list == nil {
+		return ctx.WriteNull()
+	}
+
+	absRank := rank
+	if rank < 0 {
+		absRank = -rank
+	}
+
+	found := 0
+	searchLen := len(list.Elements)
+	if maxlen > 0 && maxlen < searchLen {
+		searchLen = maxlen
+	}
+
+	if rank > 0 {
+		for i := 0; i < searchLen && found < absRank; i++ {
+			if string(list.Elements[i]) == string(element) {
+				found++
+				if found == absRank {
+					if count > 0 {
+						result := make([]*resp.Value, 0)
+						result = append(result, resp.IntegerValue(int64(i)))
+						for j := i + 1; j < searchLen && len(result) < count; j++ {
+							if string(list.Elements[j]) == string(element) {
+								result = append(result, resp.IntegerValue(int64(j)))
+							}
+						}
+						return ctx.WriteArray(result)
+					}
+					return ctx.WriteInteger(int64(i))
+				}
+			}
+		}
+	} else {
+		for i := searchLen - 1; i >= 0 && found < absRank; i-- {
+			if string(list.Elements[i]) == string(element) {
+				found++
+				if found == absRank {
+					if count > 0 {
+						result := make([]*resp.Value, 0)
+						result = append(result, resp.IntegerValue(int64(i)))
+						for j := i - 1; j >= 0 && len(result) < count; j-- {
+							if string(list.Elements[j]) == string(element) {
+								result = append(result, resp.IntegerValue(int64(j)))
+							}
+						}
+						return ctx.WriteArray(result)
+					}
+					return ctx.WriteInteger(int64(i))
+				}
+			}
+		}
+	}
+
+	if count > 0 {
+		return ctx.WriteArray([]*resp.Value{})
+	}
+	return ctx.WriteNull()
+}
+
+func cmdLMPOP(ctx *Context) error {
+	if ctx.ArgCount() < 2 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	numKeys, err := strconv.Atoi(ctx.ArgString(0))
+	if err != nil {
+		return ctx.WriteError(ErrNotInteger)
+	}
+
+	if ctx.ArgCount() < 1+numKeys {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	keys := make([]string, numKeys)
+	for i := 0; i < numKeys; i++ {
+		keys[i] = ctx.ArgString(1 + i)
+	}
+
+	dir := "LEFT"
+	count := 1
+
+	for i := 1 + numKeys; i < ctx.ArgCount(); i++ {
+		arg := strings.ToUpper(ctx.ArgString(i))
+		switch arg {
+		case "LEFT":
+			dir = "LEFT"
+		case "RIGHT":
+			dir = "RIGHT"
+		case "COUNT":
+			i++
+			if i >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			count, err = strconv.Atoi(ctx.ArgString(i))
+			if err != nil {
+				return ctx.WriteError(ErrNotInteger)
+			}
+		}
+	}
+
+	for _, key := range keys {
+		list, err := getList(ctx, key)
+		if err != nil {
+			return ctx.WriteError(err)
+		}
+		if list != nil && len(list.Elements) > 0 {
+			elements := make([]*resp.Value, 0, count)
+			for i := 0; i < count && len(list.Elements) > 0; i++ {
+				var value []byte
+				if dir == "LEFT" {
+					value = list.Elements[0]
+					list.Elements = list.Elements[1:]
+				} else {
+					value = list.Elements[len(list.Elements)-1]
+					list.Elements = list.Elements[:len(list.Elements)-1]
+				}
+				elements = append(elements, resp.BulkBytes(value))
+			}
+			if len(list.Elements) == 0 {
+				ctx.Store.Delete(key)
+			}
+			return ctx.WriteArray([]*resp.Value{
+				resp.BulkString(key),
+				resp.ArrayValue(elements),
+			})
+		}
+	}
+
+	return ctx.WriteNull()
+}
+
+func cmdLMPUSH(ctx *Context) error {
+	if ctx.ArgCount() < 2 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	key := ctx.ArgString(0)
+	elements := make([][]byte, 0, ctx.ArgCount()-1)
+	for i := 1; i < ctx.ArgCount(); i++ {
+		elements = append(elements, ctx.Arg(i))
+	}
+
+	list, err := getOrCreateList(ctx, key)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+
+	list.Elements = append(elements, list.Elements...)
+	return ctx.WriteInteger(int64(len(list.Elements)))
 }

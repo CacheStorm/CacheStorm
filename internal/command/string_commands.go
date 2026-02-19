@@ -2,6 +2,7 @@ package command
 
 import (
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
@@ -19,6 +20,7 @@ func RegisterStringCommands(router *Router) {
 	router.Register(&CommandDef{Name: "DECR", Handler: cmdDECR})
 	router.Register(&CommandDef{Name: "INCRBY", Handler: cmdINCRBY})
 	router.Register(&CommandDef{Name: "DECRBY", Handler: cmdDECRBY})
+	router.Register(&CommandDef{Name: "INCRBYFLOAT", Handler: cmdINCRBYFLOAT})
 	router.Register(&CommandDef{Name: "APPEND", Handler: cmdAPPEND})
 	router.Register(&CommandDef{Name: "STRLEN", Handler: cmdSTRLEN})
 	router.Register(&CommandDef{Name: "GETRANGE", Handler: cmdGETRANGE})
@@ -26,6 +28,9 @@ func RegisterStringCommands(router *Router) {
 	router.Register(&CommandDef{Name: "SETNX", Handler: cmdSETNX})
 	router.Register(&CommandDef{Name: "GETSET", Handler: cmdGETSET})
 	router.Register(&CommandDef{Name: "GETDEL", Handler: cmdGETDEL})
+	router.Register(&CommandDef{Name: "GETEX", Handler: cmdGETEX})
+	router.Register(&CommandDef{Name: "LCS", Handler: cmdLCS})
+	router.Register(&CommandDef{Name: "SUBSTR", Handler: cmdGETRANGE})
 }
 
 func cmdSET(ctx *Context) error {
@@ -452,4 +457,177 @@ func cmdGETDEL(ctx *Context) error {
 	ctx.Store.Delete(key)
 
 	return ctx.WriteBulkBytes(result)
+}
+
+func cmdGETEX(ctx *Context) error {
+	if ctx.ArgCount() < 1 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	key := ctx.ArgString(0)
+	entry, exists := ctx.Store.Get(key)
+	if !exists {
+		return ctx.WriteNullBulkString()
+	}
+
+	strVal, ok := entry.Value.(*store.StringValue)
+	if !ok {
+		return ctx.WriteError(store.ErrWrongType)
+	}
+
+	result := make([]byte, len(strVal.Data))
+	copy(result, strVal.Data)
+
+	if ctx.ArgCount() > 1 {
+		for i := 1; i < ctx.ArgCount(); i++ {
+			arg := strings.ToUpper(ctx.ArgString(i))
+			switch arg {
+			case "EX":
+				i++
+				if i >= ctx.ArgCount() {
+					return ctx.WriteError(ErrSyntaxError)
+				}
+				sec, err := strconv.ParseInt(ctx.ArgString(i), 10, 64)
+				if err != nil {
+					return ctx.WriteError(ErrNotInteger)
+				}
+				ctx.Store.SetTTL(key, time.Duration(sec)*time.Second)
+			case "PX":
+				i++
+				if i >= ctx.ArgCount() {
+					return ctx.WriteError(ErrSyntaxError)
+				}
+				ms, err := strconv.ParseInt(ctx.ArgString(i), 10, 64)
+				if err != nil {
+					return ctx.WriteError(ErrNotInteger)
+				}
+				ctx.Store.SetTTL(key, time.Duration(ms)*time.Millisecond)
+			case "EXAT":
+				i++
+				if i >= ctx.ArgCount() {
+					return ctx.WriteError(ErrSyntaxError)
+				}
+				ts, err := strconv.ParseInt(ctx.ArgString(i), 10, 64)
+				if err != nil {
+					return ctx.WriteError(ErrNotInteger)
+				}
+				ctx.Store.SetExpiresAt(key, time.Unix(ts, 0).UnixNano())
+			case "PXAT":
+				i++
+				if i >= ctx.ArgCount() {
+					return ctx.WriteError(ErrSyntaxError)
+				}
+				ts, err := strconv.ParseInt(ctx.ArgString(i), 10, 64)
+				if err != nil {
+					return ctx.WriteError(ErrNotInteger)
+				}
+				ctx.Store.SetExpiresAt(key, ts*int64(time.Millisecond))
+			case "PERSIST":
+				ctx.Store.Persist(key)
+			default:
+				return ctx.WriteError(ErrSyntaxError)
+			}
+		}
+	}
+
+	return ctx.WriteBulkBytes(result)
+}
+
+func cmdINCRBYFLOAT(ctx *Context) error {
+	if ctx.ArgCount() != 2 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	key := ctx.ArgString(0)
+	incr, err := strconv.ParseFloat(ctx.ArgString(1), 64)
+	if err != nil {
+		return ctx.WriteError(ErrInvalidArg)
+	}
+
+	entry, exists := ctx.Store.Get(key)
+	if !exists {
+		result := strconv.FormatFloat(incr, 'f', -1, 64)
+		ctx.Store.Set(key, &store.StringValue{Data: []byte(result)}, store.SetOptions{})
+		return ctx.WriteBulkString(result)
+	}
+
+	strVal, ok := entry.Value.(*store.StringValue)
+	if !ok {
+		return ctx.WriteError(store.ErrWrongType)
+	}
+
+	current, err := strconv.ParseFloat(string(strVal.Data), 64)
+	if err != nil {
+		return ctx.WriteError(ErrInvalidArg)
+	}
+
+	result := strconv.FormatFloat(current+incr, 'f', -1, 64)
+	ctx.Store.Set(key, &store.StringValue{Data: []byte(result)}, store.SetOptions{})
+	return ctx.WriteBulkString(result)
+}
+
+func cmdLCS(ctx *Context) error {
+	if ctx.ArgCount() < 2 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	key1 := ctx.ArgString(0)
+	key2 := ctx.ArgString(1)
+
+	entry1, exists1 := ctx.Store.Get(key1)
+	entry2, exists2 := ctx.Store.Get(key2)
+
+	if !exists1 || !exists2 {
+		return ctx.WriteBulkString("")
+	}
+
+	strVal1, ok1 := entry1.Value.(*store.StringValue)
+	strVal2, ok2 := entry2.Value.(*store.StringValue)
+
+	if !ok1 || !ok2 {
+		return ctx.WriteError(store.ErrWrongType)
+	}
+
+	s1 := string(strVal1.Data)
+	s2 := string(strVal2.Data)
+
+	if len(s1) == 0 || len(s2) == 0 {
+		return ctx.WriteBulkString("")
+	}
+
+	m := len(s1)
+	n := len(s2)
+
+	dp := make([][]int, m+1)
+	for i := range dp {
+		dp[i] = make([]int, n+1)
+	}
+
+	for i := 1; i <= m; i++ {
+		for j := 1; j <= n; j++ {
+			if s1[i-1] == s2[j-1] {
+				dp[i][j] = dp[i-1][j-1] + 1
+			} else if dp[i-1][j] > dp[i][j-1] {
+				dp[i][j] = dp[i-1][j]
+			} else {
+				dp[i][j] = dp[i][j-1]
+			}
+		}
+	}
+
+	result := make([]byte, 0, dp[m][n])
+	i, j := m, n
+	for i > 0 && j > 0 {
+		if s1[i-1] == s2[j-1] {
+			result = append([]byte{s1[i-1]}, result...)
+			i--
+			j--
+		} else if dp[i-1][j] > dp[i][j-1] {
+			i--
+		} else {
+			j--
+		}
+	}
+
+	return ctx.WriteBulkString(string(result))
 }

@@ -3,6 +3,7 @@ package command
 import (
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
@@ -24,6 +25,9 @@ func RegisterHashCommands(router *Router) {
 	router.Register(&CommandDef{Name: "HSETNX", Handler: cmdHSETNX})
 	router.Register(&CommandDef{Name: "HSTRLEN", Handler: cmdHSTRLEN})
 	router.Register(&CommandDef{Name: "HSCAN", Handler: cmdHSCAN})
+	router.Register(&CommandDef{Name: "HRANDFIELD", Handler: cmdHRANDFIELD})
+	router.Register(&CommandDef{Name: "HGETDEL", Handler: cmdHGETDEL})
+	router.Register(&CommandDef{Name: "HGETEX", Handler: cmdHGETEX})
 }
 
 func getOrCreateHash(ctx *Context, key string) (*store.HashValue, error) {
@@ -481,4 +485,212 @@ func cmdHSCAN(ctx *Context) error {
 		resp.BulkString(strconv.Itoa(nextCursor)),
 		resp.ArrayValue(result),
 	})
+}
+
+func cmdHRANDFIELD(ctx *Context) error {
+	if ctx.ArgCount() < 1 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	key := ctx.ArgString(0)
+	count := 1
+	withValues := false
+
+	for i := 1; i < ctx.ArgCount(); i++ {
+		arg := strings.ToUpper(ctx.ArgString(i))
+		switch arg {
+		case "WITHVALUES":
+			withValues = true
+		default:
+			var err error
+			count, err = strconv.Atoi(ctx.ArgString(i))
+			if err != nil {
+				return ctx.WriteError(ErrNotInteger)
+			}
+		}
+	}
+
+	hash, err := getHash(ctx, key)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	if hash == nil {
+		return ctx.WriteNullBulkString()
+	}
+
+	fields := make([]string, 0, len(hash.Fields))
+	for f := range hash.Fields {
+		fields = append(fields, f)
+	}
+
+	if count == 0 || len(fields) == 0 {
+		return ctx.WriteNullBulkString()
+	}
+
+	if count == 1 && !withValues {
+		return ctx.WriteBulkString(fields[0])
+	}
+
+	result := make([]*resp.Value, 0, count*2)
+	if count > 0 {
+		for i := 0; i < count && i < len(fields); i++ {
+			field := fields[i]
+			result = append(result, resp.BulkString(field))
+			if withValues {
+				result = append(result, resp.BulkBytes(hash.Fields[field]))
+			}
+		}
+	} else {
+		for i := 0; i < -count; i++ {
+			field := fields[i%len(fields)]
+			result = append(result, resp.BulkString(field))
+			if withValues {
+				result = append(result, resp.BulkBytes(hash.Fields[field]))
+			}
+		}
+	}
+
+	return ctx.WriteArray(result)
+}
+
+func cmdHGETDEL(ctx *Context) error {
+	if ctx.ArgCount() < 2 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	key := ctx.ArgString(0)
+	fields := make([]string, 0, ctx.ArgCount()-1)
+	for i := 1; i < ctx.ArgCount(); i++ {
+		fields = append(fields, ctx.ArgString(i))
+	}
+
+	hash, err := getHash(ctx, key)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	if hash == nil {
+		if len(fields) == 1 {
+			return ctx.WriteNullBulkString()
+		}
+		results := make([]*resp.Value, len(fields))
+		for i := range results {
+			results[i] = resp.NullValue()
+		}
+		return ctx.WriteArray(results)
+	}
+
+	if len(fields) == 1 {
+		value, exists := hash.Fields[fields[0]]
+		if !exists {
+			return ctx.WriteNullBulkString()
+		}
+		delete(hash.Fields, fields[0])
+		if len(hash.Fields) == 0 {
+			ctx.Store.Delete(key)
+		}
+		return ctx.WriteBulkBytes(value)
+	}
+
+	results := make([]*resp.Value, 0, len(fields))
+	for _, field := range fields {
+		if value, exists := hash.Fields[field]; exists {
+			results = append(results, resp.BulkBytes(value))
+			delete(hash.Fields, field)
+		} else {
+			results = append(results, resp.NullValue())
+		}
+	}
+	if len(hash.Fields) == 0 {
+		ctx.Store.Delete(key)
+	}
+	return ctx.WriteArray(results)
+}
+
+func cmdHGETEX(ctx *Context) error {
+	if ctx.ArgCount() < 2 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	key := ctx.ArgString(0)
+	fields := make([]string, 0)
+
+	for i := 1; i < ctx.ArgCount(); i++ {
+		arg := strings.ToUpper(ctx.ArgString(i))
+		switch arg {
+		case "EX", "PX", "EXAT", "PXAT", "PERSIST":
+			break
+		default:
+			if strings.HasPrefix(arg, "F") && i+1 < ctx.ArgCount() {
+				i++
+				fields = append(fields, ctx.ArgString(i))
+			} else if !strings.ContainsAny(arg, "0123456789") {
+				fields = append(fields, ctx.ArgString(i))
+			}
+		}
+	}
+
+	hash, err := getHash(ctx, key)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	if hash == nil {
+		if len(fields) == 1 {
+			return ctx.WriteNullBulkString()
+		}
+		results := make([]*resp.Value, len(fields))
+		for i := range results {
+			results[i] = resp.NullValue()
+		}
+		return ctx.WriteArray(results)
+	}
+
+	for i := 1; i < ctx.ArgCount(); i++ {
+		arg := strings.ToUpper(ctx.ArgString(i))
+		switch arg {
+		case "EX":
+			i++
+			if i >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			sec, err := strconv.ParseInt(ctx.ArgString(i), 10, 64)
+			if err != nil {
+				return ctx.WriteError(ErrNotInteger)
+			}
+			ctx.Store.SetTTL(key, time.Duration(sec)*time.Second)
+		case "PX":
+			i++
+			if i >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			ms, err := strconv.ParseInt(ctx.ArgString(i), 10, 64)
+			if err != nil {
+				return ctx.WriteError(ErrNotInteger)
+			}
+			ctx.Store.SetTTL(key, time.Duration(ms)*time.Millisecond)
+		case "PERSIST":
+			ctx.Store.Persist(key)
+		}
+	}
+
+	if len(fields) == 0 {
+		return ctx.WriteNullBulkString()
+	}
+
+	if len(fields) == 1 {
+		value, exists := hash.Fields[fields[0]]
+		if !exists {
+			return ctx.WriteNullBulkString()
+		}
+		return ctx.WriteBulkBytes(value)
+	}
+
+	results := make([]*resp.Value, 0, len(fields))
+	for _, field := range fields {
+		if value, exists := hash.Fields[field]; exists {
+			results = append(results, resp.BulkBytes(value))
+		} else {
+			results = append(results, resp.NullValue())
+		}
+	}
+	return ctx.WriteArray(results)
 }
