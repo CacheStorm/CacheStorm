@@ -6,14 +6,21 @@
   **High-Performance, Redis-Compatible In-Memory Cache**
   
   [![Go Version](https://img.shields.io/badge/Go-1.21%2B-00ADD8?style=flat&logo=go)](https://golang.org)
-  [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+  [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
   [![Redis Compatible](https://img.shields.io/badge/Redis-Compatible-DC382D?style=flat&logo=redis)](https://redis.io)
   [![Performance](https://img.shields.io/badge/Performance-77M%20ops%2Fsec-blue)](benchmarks/)
+  
+  [![CI](https://github.com/cachestorm/cachestorm/actions/workflows/ci.yml/badge.svg)](https://github.com/cachestorm/cachestorm/actions/workflows/ci.yml)
+  [![Release](https://github.com/cachestorm/cachestorm/actions/workflows/release.yml/badge.svg)](https://github.com/cachestorm/cachestorm/actions/workflows/release.yml)
+  [![Go Report Card](https://goreportcard.com/badge/github.com/cachestorm/cachestorm)](https://goreportcard.com/report/github.com/cachestorm/cachestorm)
+  [![Docker](https://img.shields.io/docker/v/cachestorm/cachestorm/latest?label=Docker)](https://hub.docker.com/r/cachestorm/cachestorm)
 </div>
 
 ---
 
 A high-performance, Redis-compatible in-memory cache server written in Go with **tag-based cache invalidation** as the killer feature.
+
+📚 **[Documentation](./docs/)** | 🚀 **[Getting Started](./docs/01-getting-started.md)** | 💬 **[Discussions](https://github.com/cachestorm/cachestorm/discussions)**
 
 ## Table of Contents
 
@@ -22,15 +29,15 @@ A high-performance, Redis-compatible in-memory cache server written in Go with *
 - [Installation](#installation)
 - [Configuration](#configuration)
 - [Admin UI](#admin-ui)
+- [HTTP API](#http-api)
 - [Commands](#commands)
 - [Data Types](#data-types)
 - [Lua Scripting](#lua-scripting)
 - [Tag-Based Invalidation](#tag-based-invalidation)
-- [HTTP API](#http-api)
 - [Performance](#performance)
 - [Docker](#docker)
 - [Architecture](#architecture)
-- [Testing](#testing)
+- [Contributing](#contributing)
 - [License](#license)
 
 ## Features
@@ -606,6 +613,7 @@ curl http://localhost:9090/metrics
 docker run -d \
   --name cachestorm \
   -p 6380:6380 \
+  -p 8080:8080 \
   -p 9090:9090 \
   cachestorm/cachestorm:latest
 ```
@@ -624,10 +632,21 @@ docker-compose -f docker/docker-compose.yml up -d --scale cachestorm=3
 docker run -d \
   --name cachestorm \
   -p 6380:6380 \
+  -p 8080:8080 \
   -p 9090:9090 \
   -v /path/to/config.yaml:/app/config.yaml \
   cachestorm/cachestorm:latest \
   -config /app/config.yaml
+```
+
+### With Password Protection
+```bash
+docker run -d \
+  --name cachestorm \
+  -p 6380:6380 \
+  -p 8080:8080 \
+  -e CACHESTORM_HTTP_PASSWORD="your-secret" \
+  cachestorm/cachestorm:latest
 ```
 
 ## Architecture
@@ -670,8 +689,12 @@ docker run -d \
 │  └────────────────────────────────────────────────────┘ │
 │                                                          │
 │  ┌────────────────────────────────────────────────────┐ │
-│  │              HTTP Server (:9090)                   │ │
-│  │   Admin API + Prometheus Metrics                  │ │
+│  │         HTTP Admin Server (:8080)                  │ │
+│  │   Admin UI + REST API (password protected)        │ │
+│  └────────────────────────────────────────────────────┘ │
+│                                                          │
+│  ┌────────────────────────────────────────────────────┐ │
+│  │           Prometheus Metrics (:9090)               │ │
 │  └────────────────────────────────────────────────────┘ │
 │                                                          │
 │  ┌────────────────────────────────────────────────────┐ │
@@ -735,8 +758,9 @@ redis-cli -p 6380 PING
 | Port | Service |
 |------|---------|
 | 6380 | TCP/RESP Server |
+| 8080 | HTTP Admin UI & API |
 | 7946 | Cluster Gossip |
-| 9090 | HTTP Admin API |
+| 9090 | Prometheus Metrics |
 
 ## Dependencies
 
@@ -780,11 +804,23 @@ redis-cli -p 6380 HOTKEYS
 
 ## Contributing
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing`)
-3. Commit changes (`git commit -m 'Add amazing feature'`)
-4. Push to branch (`git push origin feature/amazing`)
-5. Open a Pull Request
+We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for details.
+
+Quick start:
+```bash
+# Fork and clone
+git clone https://github.com/YOUR_USERNAME/cachestorm.git
+cd cachestorm
+
+# Install dependencies
+go mod download
+
+# Run tests
+go test ./...
+
+# Build
+go build -o cachestorm ./cmd/cachestorm
+```
 
 ## License
 
@@ -793,3 +829,9 @@ Apache 2.0 - See [LICENSE](LICENSE) for details.
 ## Credits
 
 CacheStorm is inspired by Redis and built from scratch in Go with a focus on tag-based cache invalidation.
+
+## Support
+
+- **Documentation**: [docs/](./docs/)
+- **Issues**: [GitHub Issues](https://github.com/cachestorm/cachestorm/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/cachestorm/cachestorm/discussions)
