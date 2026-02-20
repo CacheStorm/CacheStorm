@@ -97,15 +97,22 @@ func cmdXADD(ctx *Context) error {
 	key := ctx.ArgString(0)
 
 	maxLen := int64(0)
+	minID := ""
 	approximate := false
+	trimStrategy := ""
 	argIdx := 1
 
 	for argIdx < ctx.ArgCount() {
 		arg := strings.ToUpper(ctx.ArgString(argIdx))
-		if arg == "MAXLEN" {
+		switch arg {
+		case "MAXLEN":
+			trimStrategy = "MAXLEN"
 			argIdx++
 			if argIdx < ctx.ArgCount() && strings.ToUpper(ctx.ArgString(argIdx)) == "~" {
 				approximate = true
+				argIdx++
+			}
+			if argIdx < ctx.ArgCount() && strings.ToUpper(ctx.ArgString(argIdx)) == "=" {
 				argIdx++
 			}
 			if argIdx < ctx.ArgCount() {
@@ -116,7 +123,25 @@ func cmdXADD(ctx *Context) error {
 				}
 				argIdx++
 			}
-		} else {
+		case "MINID":
+			trimStrategy = "MINID"
+			argIdx++
+			if argIdx < ctx.ArgCount() && strings.ToUpper(ctx.ArgString(argIdx)) == "~" {
+				approximate = true
+				argIdx++
+			}
+			if argIdx < ctx.ArgCount() && strings.ToUpper(ctx.ArgString(argIdx)) == "=" {
+				argIdx++
+			}
+			if argIdx < ctx.ArgCount() {
+				minID = ctx.ArgString(argIdx)
+				argIdx++
+			}
+		case "NOMKSTREAM":
+			argIdx++
+		case "LIMIT":
+			argIdx += 2
+		default:
 			break
 		}
 	}
@@ -142,8 +167,6 @@ func cmdXADD(ctx *Context) error {
 		return ctx.WriteError(store.ErrWrongType)
 	}
 
-	_ = approximate
-
 	if id == "*" {
 		id = generateStreamID(stream.LastID)
 	}
@@ -153,7 +176,14 @@ func cmdXADD(ctx *Context) error {
 		return ctx.WriteError(err)
 	}
 
+	if trimStrategy == "MINID" && minID != "" {
+		stream.TrimByMinID(minID, approximate)
+	} else if trimStrategy == "MAXLEN" && maxLen > 0 {
+		stream.Trim(maxLen, approximate)
+	}
+
 	_ = entry
+	_ = approximate
 	return ctx.WriteBulkString(id)
 }
 

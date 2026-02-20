@@ -348,6 +348,26 @@ func (v *StreamValue) Trim(maxLen int64, _ bool) int64 {
 	return remove
 }
 
+func (v *StreamValue) TrimByMinID(minID string, _ bool) int64 {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	remaining := make([]*StreamEntry, 0)
+	removed := int64(0)
+
+	for _, entry := range v.Entries {
+		if entry.ID >= minID {
+			remaining = append(remaining, entry)
+		} else {
+			removed++
+		}
+	}
+
+	v.Entries = remaining
+	v.Length -= removed
+	return removed
+}
+
 func (v *StreamValue) CreateGroup(name, lastID string) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()

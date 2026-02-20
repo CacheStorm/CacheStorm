@@ -1,6 +1,7 @@
 package command
 
 import (
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -43,6 +44,7 @@ func RegisterSortedSetCommands(router *Router) {
 	router.Register(&CommandDef{Name: "ZMPOP", Handler: cmdZMPOP})
 	router.Register(&CommandDef{Name: "BZPOPMIN", Handler: cmdBZPOPMIN})
 	router.Register(&CommandDef{Name: "BZPOPMAX", Handler: cmdBZPOPMAX})
+	router.Register(&CommandDef{Name: "BZMPOP", Handler: cmdBZMPOP})
 	router.Register(&CommandDef{Name: "ZREVRANGEBYLEX", Handler: cmdZREVRANGEBYLEX})
 }
 
@@ -296,23 +298,45 @@ func cmdZRANGE(ctx *Context) error {
 	}
 
 	key := ctx.ArgString(0)
-	start, err := strconv.Atoi(ctx.ArgString(1))
-	if err != nil {
-		return ctx.WriteError(ErrNotInteger)
-	}
-	stop, err := strconv.Atoi(ctx.ArgString(2))
-	if err != nil {
-		return ctx.WriteError(ErrNotInteger)
-	}
+	startStr := ctx.ArgString(1)
+	stopStr := ctx.ArgString(2)
 
 	withScores := false
 	rev := false
+	byScore := false
+	byLex := false
+	offset := 0
+	count := -1
+
 	for i := 3; i < ctx.ArgCount(); i++ {
 		arg := strings.ToUpper(ctx.ArgString(i))
-		if arg == "WITHSCORES" {
+		switch arg {
+		case "WITHSCORES":
 			withScores = true
-		} else if arg == "REV" {
+		case "REV":
 			rev = true
+		case "BYSCORE":
+			byScore = true
+		case "BYLEX":
+			byLex = true
+		case "LIMIT":
+			i++
+			if i >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			var err error
+			offset, err = strconv.Atoi(ctx.ArgString(i))
+			if err != nil {
+				return ctx.WriteError(ErrNotInteger)
+			}
+			i++
+			if i >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			count, err = strconv.Atoi(ctx.ArgString(i))
+			if err != nil {
+				return ctx.WriteError(ErrNotInteger)
+			}
 		}
 	}
 
@@ -325,8 +349,49 @@ func cmdZRANGE(ctx *Context) error {
 	}
 
 	zset.RLock()
-	entries := zset.GetSortedRange(start, stop, withScores, rev)
-	zset.RUnlock()
+	defer zset.RUnlock()
+
+	var entries []store.SortedEntry
+
+	if byScore {
+		minScore, minExclusive, maxScore, maxExclusive := parseScoreRange(startStr, stopStr)
+		entries = zset.GetByScoreRange(minScore, minExclusive, maxScore, maxExclusive, rev)
+		if offset > 0 || count >= 0 {
+			start := offset
+			if start > len(entries) {
+				start = len(entries)
+			}
+			end := len(entries)
+			if count >= 0 && start+count < end {
+				end = start + count
+			}
+			entries = entries[start:end]
+		}
+	} else if byLex {
+		minLex, minExclusive, maxLex, maxExclusive := parseLexRange(startStr, stopStr)
+		entries = zset.GetByLexRange(minLex, minExclusive, maxLex, maxExclusive, rev)
+		if offset > 0 || count >= 0 {
+			start := offset
+			if start > len(entries) {
+				start = len(entries)
+			}
+			end := len(entries)
+			if count >= 0 && start+count < end {
+				end = start + count
+			}
+			entries = entries[start:end]
+		}
+	} else {
+		start, err := strconv.Atoi(startStr)
+		if err != nil {
+			return ctx.WriteError(ErrNotInteger)
+		}
+		stop, err := strconv.Atoi(stopStr)
+		if err != nil {
+			return ctx.WriteError(ErrNotInteger)
+		}
+		entries = zset.GetSortedRange(start, stop, false, rev)
+	}
 
 	results := make([]*resp.Value, 0, len(entries)*2)
 	for _, e := range entries {
@@ -337,6 +402,66 @@ func cmdZRANGE(ctx *Context) error {
 	}
 
 	return ctx.WriteArray(results)
+}
+
+func parseScoreRange(minStr, maxStr string) (min float64, minExclusive bool, max float64, maxExclusive bool) {
+	minExclusive = strings.HasPrefix(minStr, "(")
+	if minExclusive {
+		minStr = minStr[1:]
+	}
+	if minStr == "-inf" {
+		min = math.Inf(-1)
+	} else if minStr == "+inf" || minStr == "inf" {
+		min = math.Inf(1)
+	} else {
+		min, _ = strconv.ParseFloat(minStr, 64)
+	}
+
+	maxExclusive = strings.HasPrefix(maxStr, "(")
+	if maxExclusive {
+		maxStr = maxStr[1:]
+	}
+	if maxStr == "-inf" {
+		max = math.Inf(-1)
+	} else if maxStr == "+inf" || maxStr == "inf" {
+		max = math.Inf(1)
+	} else {
+		max, _ = strconv.ParseFloat(maxStr, 64)
+	}
+
+	return
+}
+
+func parseLexRange(minStr, maxStr string) (min string, minExclusive bool, max string, maxExclusive bool) {
+	if strings.HasPrefix(minStr, "[") {
+		min = minStr[1:]
+		minExclusive = false
+	} else if strings.HasPrefix(minStr, "(") {
+		min = minStr[1:]
+		minExclusive = true
+	} else if minStr == "-" {
+		min = ""
+		minExclusive = false
+	} else if minStr == "+" {
+		min = ""
+		minExclusive = true
+	}
+
+	if strings.HasPrefix(maxStr, "[") {
+		max = maxStr[1:]
+		maxExclusive = false
+	} else if strings.HasPrefix(maxStr, "(") {
+		max = maxStr[1:]
+		maxExclusive = true
+	} else if maxStr == "+" {
+		max = ""
+		maxExclusive = false
+	} else if maxStr == "-" {
+		max = ""
+		maxExclusive = true
+	}
+
+	return
 }
 
 func cmdZRANGEBYSCORE(ctx *Context) error {
@@ -1700,6 +1825,114 @@ func cmdBZPOPGeneric(ctx *Context, max bool) error {
 				})
 			}
 			zset.Unlock()
+		}
+
+		if timeout == 0 {
+			return ctx.WriteNull()
+		}
+
+		if time.Now().After(deadline) {
+			return ctx.WriteNull()
+		}
+
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func cmdBZMPOP(ctx *Context) error {
+	if ctx.ArgCount() < 3 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	timeout, err := strconv.ParseInt(ctx.ArgString(0), 10, 64)
+	if err != nil {
+		return ctx.WriteError(ErrNotInteger)
+	}
+
+	numKeys, err := strconv.Atoi(ctx.ArgString(1))
+	if err != nil {
+		return ctx.WriteError(ErrNotInteger)
+	}
+
+	if numKeys < 1 || 2+numKeys > ctx.ArgCount() {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	keys := make([]string, numKeys)
+	for i := 0; i < numKeys; i++ {
+		keys[i] = ctx.ArgString(2 + i)
+	}
+
+	dir := "MIN"
+	count := 1
+	argIdx := 2 + numKeys
+
+	for argIdx < ctx.ArgCount() {
+		arg := strings.ToUpper(ctx.ArgString(argIdx))
+		switch arg {
+		case "MIN", "MAX":
+			dir = arg
+			argIdx++
+		case "COUNT":
+			argIdx++
+			if argIdx >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			count, err = strconv.Atoi(ctx.ArgString(argIdx))
+			if err != nil {
+				return ctx.WriteError(ErrNotInteger)
+			}
+			argIdx++
+		default:
+			return ctx.WriteError(ErrSyntaxError)
+		}
+	}
+
+	deadline := time.Now().Add(time.Duration(timeout) * time.Second)
+	max := dir == "MAX"
+
+	for {
+		for _, key := range keys {
+			zset, err := getSortedSet(ctx, key)
+			if err != nil {
+				return ctx.WriteError(err)
+			}
+			if zset == nil || len(zset.Members) == 0 {
+				continue
+			}
+
+			zset.Lock()
+			if len(zset.Members) == 0 {
+				zset.Unlock()
+				continue
+			}
+
+			entries := zset.GetSortedRange(0, count-1, false, max)
+			if len(entries) == 0 {
+				zset.Unlock()
+				continue
+			}
+
+			popped := make([]*resp.Value, 0, len(entries))
+			for _, entry := range entries {
+				delete(zset.Members, entry.Member)
+				popped = append(popped, resp.ArrayValue([]*resp.Value{
+					resp.BulkString(entry.Member),
+					resp.BulkString(strconv.FormatFloat(entry.Score, 'f', -1, 64)),
+				}))
+			}
+
+			isEmpty := len(zset.Members) == 0
+			zset.Unlock()
+
+			if isEmpty {
+				ctx.Store.Delete(key)
+			}
+
+			return ctx.WriteArray([]*resp.Value{
+				resp.BulkString(key),
+				resp.ArrayValue(popped),
+			})
 		}
 
 		if timeout == 0 {

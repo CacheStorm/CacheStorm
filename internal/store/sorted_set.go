@@ -334,3 +334,73 @@ func (v *SortedSetValue) GetAllEntries() []SortedEntry {
 	sort.Sort(entries)
 	return entries
 }
+
+func (v *SortedSetValue) GetByScoreRange(minScore float64, minExclusive bool, maxScore float64, maxExclusive bool, reverse bool) []SortedEntry {
+	entries := make(sortedEntries, 0)
+	for member, score := range v.Members {
+		if minExclusive {
+			if score <= minScore {
+				continue
+			}
+		} else {
+			if score < minScore {
+				continue
+			}
+		}
+		if maxExclusive {
+			if score >= maxScore {
+				continue
+			}
+		} else {
+			if score > maxScore {
+				continue
+			}
+		}
+		entries = append(entries, SortedEntry{Member: member, Score: score})
+	}
+
+	if reverse {
+		sort.Sort(sort.Reverse(entries))
+	} else {
+		sort.Sort(entries)
+	}
+
+	return entries
+}
+
+func (v *SortedSetValue) GetByLexRange(minLex string, minExclusive bool, maxLex string, maxExclusive bool, reverse bool) []SortedEntry {
+	entries := make(sortedEntries, 0)
+	for member, score := range v.Members {
+		if minLex != "" {
+			if minExclusive {
+				if member <= minLex {
+					continue
+				}
+			} else {
+				if member < minLex {
+					continue
+				}
+			}
+		}
+		if maxLex != "" {
+			if maxExclusive {
+				if member >= maxLex {
+					continue
+				}
+			} else {
+				if member > maxLex {
+					continue
+				}
+			}
+		}
+		entries = append(entries, SortedEntry{Member: member, Score: score})
+	}
+
+	if reverse {
+		sort.Sort(sort.Reverse(entries))
+	} else {
+		sort.Sort(entries)
+	}
+
+	return entries
+}

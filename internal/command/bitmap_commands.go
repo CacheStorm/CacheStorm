@@ -403,8 +403,12 @@ func cmdBITFIELD(ctx *Context) error {
 				return ctx.WriteError(ErrNotInteger)
 			}
 
-			newVal := bitfieldIncr(bm, encoding, offset, increment, overflow)
-			results = append(results, resp.IntegerValue(newVal))
+			newVal, failed := bitfieldIncr(bm, encoding, offset, increment, overflow)
+			if failed {
+				results = append(results, resp.NullValue())
+			} else {
+				results = append(results, resp.IntegerValue(newVal))
+			}
 			i += 4
 
 		case "OVERFLOW":
@@ -412,6 +416,9 @@ func cmdBITFIELD(ctx *Context) error {
 				return ctx.WriteError(ErrSyntaxError)
 			}
 			overflow = strings.ToUpper(ctx.ArgString(i + 1))
+			if overflow != "WRAP" && overflow != "SAT" && overflow != "FAIL" {
+				return ctx.WriteError(ErrSyntaxError)
+			}
 			i += 2
 
 		default:
@@ -515,11 +522,11 @@ func bitfieldSet(bm *BitmapValue, encoding string, offset int64, value int64) in
 	return oldValue
 }
 
-func bitfieldIncr(bm *BitmapValue, encoding string, offset int64, increment int64, overflow string) int64 {
+func bitfieldIncr(bm *BitmapValue, encoding string, offset int64, increment int64, overflow string) (int64, bool) {
 	current := bitfieldGet(bm.Data, encoding, offset)
 	bits := parseEncoding(encoding)
 	if bits == 0 {
-		return 0
+		return 0, false
 	}
 
 	maxVal := int64(1<<bits - 1)
@@ -541,14 +548,23 @@ func bitfieldIncr(bm *BitmapValue, encoding string, offset int64, increment int6
 		}
 	case "FAIL":
 		if newValue > maxVal || newValue < minVal {
-			return current
+			return current, true
 		}
 	default:
-		newValue = newValue & ((1 << bits) - 1)
+		if strings.HasPrefix(encoding, "i") {
+			for newValue > maxVal {
+				newValue -= (1 << bits)
+			}
+			for newValue < minVal {
+				newValue += (1 << bits)
+			}
+		} else {
+			newValue = newValue & ((1 << bits) - 1)
+		}
 	}
 
 	bitfieldSet(bm, encoding, offset, newValue)
-	return newValue
+	return newValue, false
 }
 
 func parseEncoding(encoding string) int {
