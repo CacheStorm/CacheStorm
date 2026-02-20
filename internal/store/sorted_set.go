@@ -3,14 +3,23 @@ package store
 import (
 	"fmt"
 	"sort"
+	"sync"
 )
 
 type SortedSetValue struct {
 	Members map[string]float64
+	mu      sync.RWMutex
 }
+
+func (v *SortedSetValue) Lock()    { v.mu.Lock() }
+func (v *SortedSetValue) Unlock()  { v.mu.Unlock() }
+func (v *SortedSetValue) RLock()   { v.mu.RLock() }
+func (v *SortedSetValue) RUnlock() { v.mu.RUnlock() }
 
 func (v *SortedSetValue) Type() DataType { return DataTypeSortedSet }
 func (v *SortedSetValue) SizeOf() int64 {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
 	var size int64 = 48
 	for k := range v.Members {
 		size += int64(len(k)) + 16 + 80
@@ -18,6 +27,8 @@ func (v *SortedSetValue) SizeOf() int64 {
 	return size
 }
 func (v *SortedSetValue) String() string {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
 	result := ""
 	for member, score := range v.Members {
 		if result != "" {
@@ -28,6 +39,8 @@ func (v *SortedSetValue) String() string {
 	return result
 }
 func (v *SortedSetValue) Clone() Value {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
 	cloned := &SortedSetValue{Members: make(map[string]float64, len(v.Members))}
 	for k, score := range v.Members {
 		cloned.Members[k] = score

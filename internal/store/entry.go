@@ -1,6 +1,7 @@
 package store
 
 import (
+	"sync"
 	"time"
 )
 
@@ -59,10 +60,18 @@ func (v *StringValue) Clone() Value {
 
 type HashValue struct {
 	Fields map[string][]byte
+	mu     sync.RWMutex
 }
+
+func (v *HashValue) Lock()    { v.mu.Lock() }
+func (v *HashValue) Unlock()  { v.mu.Unlock() }
+func (v *HashValue) RLock()   { v.mu.RLock() }
+func (v *HashValue) RUnlock() { v.mu.RUnlock() }
 
 func (v *HashValue) Type() DataType { return DataTypeHash }
 func (v *HashValue) SizeOf() int64 {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
 	var size int64 = 48
 	for k, val := range v.Fields {
 		size += int64(len(k)) + int64(len(val)) + 80
@@ -70,6 +79,8 @@ func (v *HashValue) SizeOf() int64 {
 	return size
 }
 func (v *HashValue) String() string {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
 	result := ""
 	for k, val := range v.Fields {
 		if result != "" {
@@ -80,6 +91,8 @@ func (v *HashValue) String() string {
 	return result
 }
 func (v *HashValue) Clone() Value {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
 	cloned := &HashValue{Fields: make(map[string][]byte, len(v.Fields))}
 	for k, val := range v.Fields {
 		cv := make([]byte, len(val))
@@ -91,10 +104,18 @@ func (v *HashValue) Clone() Value {
 
 type ListValue struct {
 	Elements [][]byte
+	mu       sync.RWMutex
 }
+
+func (v *ListValue) Lock()    { v.mu.Lock() }
+func (v *ListValue) Unlock()  { v.mu.Unlock() }
+func (v *ListValue) RLock()   { v.mu.RLock() }
+func (v *ListValue) RUnlock() { v.mu.RUnlock() }
 
 func (v *ListValue) Type() DataType { return DataTypeList }
 func (v *ListValue) SizeOf() int64 {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
 	var size int64 = 24
 	for _, el := range v.Elements {
 		size += int64(len(el)) + 24
@@ -102,6 +123,8 @@ func (v *ListValue) SizeOf() int64 {
 	return size
 }
 func (v *ListValue) String() string {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
 	result := ""
 	for _, el := range v.Elements {
 		if result != "" {
@@ -112,6 +135,8 @@ func (v *ListValue) String() string {
 	return result
 }
 func (v *ListValue) Clone() Value {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
 	cloned := &ListValue{Elements: make([][]byte, len(v.Elements))}
 	for i, el := range v.Elements {
 		cel := make([]byte, len(el))
@@ -123,10 +148,18 @@ func (v *ListValue) Clone() Value {
 
 type SetValue struct {
 	Members map[string]struct{}
+	mu      sync.RWMutex
 }
+
+func (v *SetValue) Lock()    { v.mu.Lock() }
+func (v *SetValue) Unlock()  { v.mu.Unlock() }
+func (v *SetValue) RLock()   { v.mu.RLock() }
+func (v *SetValue) RUnlock() { v.mu.RUnlock() }
 
 func (v *SetValue) Type() DataType { return DataTypeSet }
 func (v *SetValue) SizeOf() int64 {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
 	var size int64 = 48
 	for k := range v.Members {
 		size += int64(len(k)) + 48
@@ -134,6 +167,8 @@ func (v *SetValue) SizeOf() int64 {
 	return size
 }
 func (v *SetValue) String() string {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
 	result := ""
 	for k := range v.Members {
 		if result != "" {
@@ -144,6 +179,8 @@ func (v *SetValue) String() string {
 	return result
 }
 func (v *SetValue) Clone() Value {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
 	cloned := &SetValue{Members: make(map[string]struct{}, len(v.Members))}
 	for k := range v.Members {
 		cloned.Members[k] = struct{}{}

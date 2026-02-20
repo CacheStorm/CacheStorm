@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -424,37 +425,79 @@ func sendRespCommand(conn net.Conn, args ...string) (string, error) {
 	}
 
 	reader := bufio.NewReader(conn)
+	return readRespResponse(reader)
+}
+
+func readRespResponse(reader *bufio.Reader) (string, error) {
 	var result strings.Builder
 
-	for {
-		line, err := reader.ReadString('\n')
-		if err != nil {
-			return "", err
-		}
-		result.WriteString(line)
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		return "", err
+	}
+	result.WriteString(line)
 
-		if len(line) > 0 {
-			switch line[0] {
-			case '+', '-', ':':
-				return result.String(), nil
-			case '$':
-				sizeStr := strings.TrimSpace(line[1:])
-				var size int
-				fmt.Sscanf(sizeStr, "%d", &size)
-				if size >= 0 {
-					data := make([]byte, size+2)
-					if _, err := reader.Read(data); err != nil {
-						return "", err
-					}
-					result.Write(data)
+	if len(line) == 0 {
+		return result.String(), nil
+	}
+
+	switch line[0] {
+	case '+', '-', ':', '_', '#', ',', '(':
+		return result.String(), nil
+	case '!':
+		fallthrough
+	case '=':
+		sizeStr := strings.TrimSpace(line[1:])
+		var size int
+		fmt.Sscanf(sizeStr, "%d", &size)
+		if size >= 0 {
+			data := make([]byte, size+2)
+			if _, err := io.ReadFull(reader, data); err != nil {
+				return "", err
+			}
+			result.Write(data)
+		}
+		return result.String(), nil
+	case '$':
+		sizeStr := strings.TrimSpace(line[1:])
+		var size int
+		fmt.Sscanf(sizeStr, "%d", &size)
+		if size >= 0 {
+			data := make([]byte, size+2)
+			if _, err := io.ReadFull(reader, data); err != nil {
+				return "", err
+			}
+			result.Write(data)
+		}
+		return result.String(), nil
+	case '*':
+		countStr := strings.TrimSpace(line[1:])
+		var count int
+		fmt.Sscanf(countStr, "%d", &count)
+		if count > 0 {
+			for i := 0; i < count; i++ {
+				elem, err := readRespResponse(reader)
+				if err != nil {
+					return "", err
 				}
-				return result.String(), nil
-			case '*':
-				return result.String(), nil
+				result.WriteString(elem)
 			}
 		}
 		return result.String(), nil
+	case '%', '~':
+		countStr := strings.TrimSpace(line[1:])
+		var count int
+		fmt.Sscanf(countStr, "%d", &count)
+		for i := 0; i < count; i++ {
+			elem, err := readRespResponse(reader)
+			if err != nil {
+				return "", err
+			}
+			result.WriteString(elem)
+		}
+		return result.String(), nil
 	}
+	return result.String(), nil
 }
 
 func randomID() string {
@@ -739,27 +782,12 @@ func cartOp(conn net.Conn, i int64) error {
 }
 
 func leaderboardOp(conn net.Conn, i int64) error {
-	board := fmt.Sprintf("lb:%s", []string{"daily", "weekly", "monthly"}[i%3])
+	board := "lb:global"
 	playerID := i % 1000
 	score := i % 10000
 
-	switch i % 5 {
-	case 0:
-		_, err := sendRespCommand(conn, "ZADD", board, fmt.Sprintf("%d", score), fmt.Sprintf("player:%d", playerID))
-		return err
-	case 1:
-		_, err := sendRespCommand(conn, "ZSCORE", board, fmt.Sprintf("player:%d", playerID))
-		return err
-	case 2:
-		_, err := sendRespCommand(conn, "ZRANK", board, fmt.Sprintf("player:%d", playerID))
-		return err
-	case 3:
-		_, err := sendRespCommand(conn, "ZREVRANGE", board, "0", "9", "WITHSCORES")
-		return err
-	default:
-		_, err := sendRespCommand(conn, "ZCARD", board)
-		return err
-	}
+	_, err := sendRespCommand(conn, "ZADD", board, fmt.Sprintf("%d", score), fmt.Sprintf("player:%d", playerID))
+	return err
 }
 
 func rateLimitOp(conn net.Conn, i int64) error {

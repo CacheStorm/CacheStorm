@@ -77,6 +77,9 @@ func cmdZADD(ctx *Context) error {
 		return ctx.WriteError(err)
 	}
 
+	zset.Lock()
+	defer zset.Unlock()
+
 	added := 0
 	i := 1
 
@@ -128,6 +131,8 @@ func cmdZCARD(ctx *Context) error {
 		return ctx.WriteInteger(0)
 	}
 
+	zset.RLock()
+	defer zset.RUnlock()
 	return ctx.WriteInteger(int64(len(zset.Members)))
 }
 
@@ -154,6 +159,8 @@ func cmdZCOUNT(ctx *Context) error {
 		return ctx.WriteInteger(0)
 	}
 
+	zset.RLock()
+	defer zset.RUnlock()
 	return ctx.WriteInteger(int64(zset.Count(minScore, maxScore)))
 }
 
@@ -174,6 +181,8 @@ func cmdZINCRBY(ctx *Context) error {
 		return ctx.WriteError(err)
 	}
 
+	zset.Lock()
+	defer zset.Unlock()
 	newScore := incr
 	if current, exists := zset.Members[member]; exists {
 		newScore = current + incr
@@ -217,7 +226,9 @@ func cmdZRANGE(ctx *Context) error {
 		return ctx.WriteArray([]*resp.Value{})
 	}
 
+	zset.RLock()
 	entries := zset.GetSortedRange(start, stop, withScores, rev)
+	zset.RUnlock()
 
 	results := make([]*resp.Value, 0, len(entries)*2)
 	for _, e := range entries {
@@ -260,7 +271,9 @@ func cmdZRANGEBYSCORE(ctx *Context) error {
 		return ctx.WriteArray([]*resp.Value{})
 	}
 
+	zset.RLock()
 	entries := zset.RangeByScore(minScore, maxScore, withScores, false)
+	zset.RUnlock()
 
 	results := make([]*resp.Value, 0, len(entries)*2)
 	for _, e := range entries {
@@ -289,7 +302,9 @@ func cmdZRANK(ctx *Context) error {
 		return ctx.WriteNull()
 	}
 
+	zset.RLock()
 	rank := zset.Rank(member, false)
+	zset.RUnlock()
 	if rank == -1 {
 		return ctx.WriteNull()
 	}
@@ -311,6 +326,8 @@ func cmdZREM(ctx *Context) error {
 		return ctx.WriteInteger(0)
 	}
 
+	zset.Lock()
+	defer zset.Unlock()
 	removed := 0
 	for i := 1; i < ctx.ArgCount(); i++ {
 		member := ctx.ArgString(i)
@@ -350,9 +367,12 @@ func cmdZREMRANGEBYRANK(ctx *Context) error {
 		return ctx.WriteInteger(0)
 	}
 
+	zset.Lock()
 	removed := zset.RemoveRangeByRank(start, stop)
+	isEmpty := len(zset.Members) == 0
+	zset.Unlock()
 
-	if len(zset.Members) == 0 {
+	if isEmpty {
 		ctx.Store.Delete(key)
 	}
 
@@ -382,9 +402,12 @@ func cmdZREMRANGEBYSCORE(ctx *Context) error {
 		return ctx.WriteInteger(0)
 	}
 
+	zset.Lock()
 	removed := zset.RemoveRangeByScore(min, max)
+	isEmpty := len(zset.Members) == 0
+	zset.Unlock()
 
-	if len(zset.Members) == 0 {
+	if isEmpty {
 		ctx.Store.Delete(key)
 	}
 
@@ -407,7 +430,9 @@ func cmdZSCORE(ctx *Context) error {
 		return ctx.WriteNull()
 	}
 
+	zset.RLock()
 	score, exists := zset.Members[member]
+	zset.RUnlock()
 	if !exists {
 		return ctx.WriteNull()
 	}
@@ -445,7 +470,9 @@ func cmdZREVRANGE(ctx *Context) error {
 		return ctx.WriteArray([]*resp.Value{})
 	}
 
+	zset.RLock()
 	entries := zset.GetSortedRange(start, stop, withScores, true)
+	zset.RUnlock()
 
 	results := make([]*resp.Value, 0, len(entries)*2)
 	for _, e := range entries {
