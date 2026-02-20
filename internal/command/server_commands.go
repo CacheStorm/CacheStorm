@@ -9,9 +9,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cachestorm/cachestorm/internal/acl"
 	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
 )
+
+var globalACL = acl.NewACL()
 
 func RegisterServerCommands(router *Router) {
 	router.Register(&CommandDef{Name: "PING", Handler: cmdPING})
@@ -1630,54 +1633,186 @@ func cmdACL(ctx *Context) error {
 
 	switch subCmd {
 	case "LIST":
-		return ctx.WriteArray([]*resp.Value{
-			resp.BulkString("user default on nopass ~* &* +@all"),
-		})
+		users := globalACL.ListUsers()
+		results := make([]*resp.Value, 0, len(users))
+		for _, name := range users {
+			if user, ok := globalACL.GetUser(name); ok {
+				results = append(results, resp.BulkString(user.ToACLString()))
+			}
+		}
+		return ctx.WriteArray(results)
 	case "USERS":
-		return ctx.WriteArray([]*resp.Value{
-			resp.BulkString("default"),
-		})
+		users := globalACL.ListUsers()
+		results := make([]*resp.Value, 0, len(users))
+		for _, name := range users {
+			results = append(results, resp.BulkString(name))
+		}
+		return ctx.WriteArray(results)
 	case "WHOAMI":
+		if ctx.Username != "" {
+			return ctx.WriteBulkString(ctx.Username)
+		}
 		return ctx.WriteBulkString("default")
 	case "CAT":
 		return ctx.WriteArray([]*resp.Value{
-			resp.BulkString("read"),
-			resp.BulkString("write"),
 			resp.BulkString("admin"),
+			resp.BulkString("bitmap"),
 			resp.BulkString("connection"),
 			resp.BulkString("dangerous"),
+			resp.BulkString("geo"),
+			resp.BulkString("hash"),
+			resp.BulkString("hyperloglog"),
+			resp.BulkString("list"),
+			resp.BulkString("pubsub"),
+			resp.BulkString("read"),
+			resp.BulkString("scripting"),
+			resp.BulkString("set"),
+			resp.BulkString("sortedset"),
+			resp.BulkString("stream"),
+			resp.BulkString("string"),
+			resp.BulkString("transaction"),
+			resp.BulkString("write"),
 		})
 	case "SETUSER":
+		if ctx.ArgCount() < 2 {
+			return ctx.WriteError(ErrWrongArgCount)
+		}
+		username := ctx.ArgString(1)
+		user, exists := globalACL.GetUser(username)
+		if !exists {
+			var err error
+			user, err = globalACL.CreateUser(username)
+			if err != nil {
+				return ctx.WriteError(err)
+			}
+		}
+		ruleParts := make([]string, 0, len(ctx.Args)-2)
+		for i := 2; i < len(ctx.Args); i++ {
+			ruleParts = append(ruleParts, string(ctx.Args[i]))
+		}
+		rule := strings.Join(ruleParts, " ")
+		if err := acl.ParseACLRule(rule, user); err != nil {
+			return ctx.WriteError(err)
+		}
+		if !user.Enabled {
+			user.Enable()
+		}
 		return ctx.WriteOK()
 	case "DELUSER":
-		return ctx.WriteInteger(0)
+		if ctx.ArgCount() < 2 {
+			return ctx.WriteError(ErrWrongArgCount)
+		}
+		deleted := int64(0)
+		for i := 1; i < ctx.ArgCount(); i++ {
+			username := ctx.ArgString(i)
+			if err := globalACL.DeleteUser(username); err == nil {
+				deleted++
+			}
+		}
+		return ctx.WriteInteger(deleted)
 	case "GETUSER":
+		if ctx.ArgCount() < 2 {
+			return ctx.WriteError(ErrWrongArgCount)
+		}
+		username := ctx.ArgString(1)
+		user, exists := globalACL.GetUser(username)
+		if !exists {
+			return ctx.WriteNull()
+		}
+
 		return ctx.WriteArray([]*resp.Value{
 			resp.BulkString("flags"),
-			resp.ArrayValue([]*resp.Value{resp.BulkString("on"), resp.BulkString("nopass")}),
+			resp.ArrayValue([]*resp.Value{
+				resp.BulkString(func() string {
+					if user.IsEnabled() {
+						return "on"
+					}
+					return "off"
+				}()),
+				resp.BulkString(func() string {
+					if user.IsNoPassword() {
+						return "nopass"
+					}
+					return ""
+				}()),
+			}),
 			resp.BulkString("passwords"),
 			resp.ArrayValue([]*resp.Value{}),
 			resp.BulkString("commands"),
 			resp.BulkString("+@all"),
+			resp.BulkString("keys"),
+			resp.ArrayValue([]*resp.Value{resp.BulkString("~*")}),
 		})
 	case "LOAD":
 		return ctx.WriteOK()
 	case "SAVE":
 		return ctx.WriteOK()
 	case "LOG":
+		count := 10
+		if ctx.ArgCount() > 1 {
+			var err error
+			count, err = strconv.Atoi(ctx.ArgString(1))
+			if err != nil {
+				return ctx.WriteError(ErrNotInteger)
+			}
+		}
+		_ = count
 		return ctx.WriteArray([]*resp.Value{})
+	case "DRYRUN":
+		if ctx.ArgCount() < 3 {
+			return ctx.WriteError(ErrWrongArgCount)
+		}
+		username := ctx.ArgString(1)
+		cmd := ctx.ArgString(2)
+		user, exists := globalACL.GetUser(username)
+		if !exists {
+			return ctx.WriteError(acl.ErrUserNotFound)
+		}
+		if user.CanExecuteCommand(cmd) {
+			return ctx.WriteOK()
+		}
+		return ctx.WriteError(acl.ErrPermissionDenied)
+	case "GENPASS":
+		bits := 256
+		if ctx.ArgCount() > 1 {
+			var err error
+			bits, err = strconv.Atoi(ctx.ArgString(1))
+			if err != nil {
+				return ctx.WriteError(ErrNotInteger)
+			}
+		}
+		return ctx.WriteBulkString(generatePassword(bits))
 	case "HELP":
 		return ctx.WriteArray([]*resp.Value{
 			resp.BulkString("LIST"),
 			resp.BulkString("USERS"),
 			resp.BulkString("WHOAMI"),
 			resp.BulkString("CAT"),
-			resp.BulkString("SETUSER"),
-			resp.BulkString("GETUSER"),
+			resp.BulkString("SETUSER <username> [rule ...]"),
+			resp.BulkString("GETUSER <username>"),
+			resp.BulkString("DELUSER <username> [username ...]"),
+			resp.BulkString("DRYRUN <username> <command>"),
+			resp.BulkString("GENPASS [bits]"),
+			resp.BulkString("LOAD"),
+			resp.BulkString("SAVE"),
 		})
 	default:
 		return ctx.WriteError(errors.New("ERR unknown subcommand '" + subCmd + "'"))
 	}
+}
+
+func generatePassword(bits int) string {
+	const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	length := bits / 6
+	if length < 1 {
+		length = 1
+	}
+	result := make([]byte, length)
+	for i := range result {
+		result[i] = chars[time.Now().UnixNano()%int64(len(chars))]
+		time.Sleep(time.Nanosecond)
+	}
+	return string(result)
 }
 
 func cmdMONITOR(ctx *Context) error {

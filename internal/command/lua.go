@@ -592,6 +592,285 @@ func (e *ScriptEngine) executeCommand(L *lua.LState, cmd string, args []string) 
 		e.store.Flush()
 		return lua.LString("OK")
 
+	case "ZRANGE":
+		if len(args) < 3 {
+			return lua.LNil
+		}
+		entry, exists := e.store.Get(args[0])
+		if !exists {
+			return L.NewTable()
+		}
+		if zset, ok := entry.Value.(*store.SortedSetValue); ok {
+			start, err1 := strconv.Atoi(args[1])
+			stop, err2 := strconv.Atoi(args[2])
+			if err1 != nil || err2 != nil {
+				return L.NewTable()
+			}
+			entries := zset.GetSortedRange(start, stop, false, false)
+			tbl := L.NewTable()
+			for _, e := range entries {
+				tbl.Append(lua.LString(e.Member))
+			}
+			return tbl
+		}
+		return L.NewTable()
+
+	case "HKEYS":
+		if len(args) < 1 {
+			return L.NewTable()
+		}
+		entry, exists := e.store.Get(args[0])
+		if !exists {
+			return L.NewTable()
+		}
+		if hv, ok := entry.Value.(*store.HashValue); ok {
+			tbl := L.NewTable()
+			for k := range hv.Fields {
+				tbl.Append(lua.LString(k))
+			}
+			return tbl
+		}
+		return L.NewTable()
+
+	case "HVALS":
+		if len(args) < 1 {
+			return L.NewTable()
+		}
+		entry, exists := e.store.Get(args[0])
+		if !exists {
+			return L.NewTable()
+		}
+		if hv, ok := entry.Value.(*store.HashValue); ok {
+			tbl := L.NewTable()
+			for _, v := range hv.Fields {
+				tbl.Append(lua.LString(string(v)))
+			}
+			return tbl
+		}
+		return L.NewTable()
+
+	case "SMEMBERS":
+		if len(args) < 1 {
+			return L.NewTable()
+		}
+		entry, exists := e.store.Get(args[0])
+		if !exists {
+			return L.NewTable()
+		}
+		if sv, ok := entry.Value.(*store.SetValue); ok {
+			tbl := L.NewTable()
+			for member := range sv.Members {
+				tbl.Append(lua.LString(member))
+			}
+			return tbl
+		}
+		return L.NewTable()
+
+	case "SREM":
+		if len(args) < 2 {
+			return lua.LNumber(0)
+		}
+		entry, exists := e.store.Get(args[0])
+		if !exists {
+			return lua.LNumber(0)
+		}
+		if sv, ok := entry.Value.(*store.SetValue); ok {
+			removed := 0
+			for i := 1; i < len(args); i++ {
+				if _, ok := sv.Members[args[i]]; ok {
+					delete(sv.Members, args[i])
+					removed++
+				}
+			}
+			return lua.LNumber(removed)
+		}
+		return lua.LNumber(0)
+
+	case "LINDEX":
+		if len(args) < 2 {
+			return lua.LNil
+		}
+		entry, exists := e.store.Get(args[0])
+		if !exists {
+			return lua.LNil
+		}
+		if lv, ok := entry.Value.(*store.ListValue); ok {
+			idx, err := strconv.Atoi(args[1])
+			if err != nil {
+				return lua.LNil
+			}
+			if idx < 0 {
+				idx = len(lv.Elements) + idx
+			}
+			if idx >= 0 && idx < len(lv.Elements) {
+				return lua.LString(string(lv.Elements[idx]))
+			}
+		}
+		return lua.LNil
+
+	case "APPEND":
+		if len(args) < 2 {
+			return lua.LNumber(0)
+		}
+		entry, exists := e.store.Get(args[0])
+		if !exists {
+			e.store.Set(args[0], &store.StringValue{Data: []byte(args[1])}, store.SetOptions{})
+			return lua.LNumber(len(args[1]))
+		}
+		if sv, ok := entry.Value.(*store.StringValue); ok {
+			newData := append(sv.Data, []byte(args[1])...)
+			e.store.Set(args[0], &store.StringValue{Data: newData}, store.SetOptions{})
+			return lua.LNumber(len(newData))
+		}
+		return lua.LNumber(0)
+
+	case "STRLEN":
+		if len(args) < 1 {
+			return lua.LNumber(0)
+		}
+		entry, exists := e.store.Get(args[0])
+		if !exists {
+			return lua.LNumber(0)
+		}
+		if sv, ok := entry.Value.(*store.StringValue); ok {
+			return lua.LNumber(len(sv.Data))
+		}
+		return lua.LNumber(0)
+
+	case "INCRBY":
+		if len(args) < 2 {
+			return lua.LNil
+		}
+		incr, err := strconv.ParseInt(args[1], 10, 64)
+		if err != nil {
+			return lua.LNil
+		}
+		entry, exists := e.store.Get(args[0])
+		if !exists {
+			e.store.Set(args[0], &store.StringValue{Data: []byte(args[1])}, store.SetOptions{})
+			return lua.LNumber(incr)
+		}
+		if sv, ok := entry.Value.(*store.StringValue); ok {
+			var val int64
+			fmt.Sscanf(string(sv.Data), "%d", &val)
+			val += incr
+			e.store.Set(args[0], &store.StringValue{Data: []byte(fmt.Sprintf("%d", val))}, store.SetOptions{})
+			return lua.LNumber(val)
+		}
+		return lua.LNil
+
+	case "DECRBY":
+		if len(args) < 2 {
+			return lua.LNil
+		}
+		decr, err := strconv.ParseInt(args[1], 10, 64)
+		if err != nil {
+			return lua.LNil
+		}
+		entry, exists := e.store.Get(args[0])
+		if !exists {
+			e.store.Set(args[0], &store.StringValue{Data: []byte(fmt.Sprintf("%d", -decr))}, store.SetOptions{})
+			return lua.LNumber(-decr)
+		}
+		if sv, ok := entry.Value.(*store.StringValue); ok {
+			var val int64
+			fmt.Sscanf(string(sv.Data), "%d", &val)
+			val -= decr
+			e.store.Set(args[0], &store.StringValue{Data: []byte(fmt.Sprintf("%d", val))}, store.SetOptions{})
+			return lua.LNumber(val)
+		}
+		return lua.LNil
+
+	case "RENAME":
+		if len(args) < 2 {
+			return lua.LString("ERR")
+		}
+		entry, exists := e.store.Get(args[0])
+		if !exists {
+			return lua.LString("ERR no such key")
+		}
+		e.store.Delete(args[0])
+		e.store.SetEntry(args[1], entry)
+		return lua.LString("OK")
+
+	case "PERSIST":
+		if len(args) < 1 {
+			return lua.LNumber(0)
+		}
+		if e.store.Persist(args[0]) {
+			return lua.LNumber(1)
+		}
+		return lua.LNumber(0)
+
+	case "GETSET":
+		if len(args) < 2 {
+			return lua.LNil
+		}
+		entry, exists := e.store.Get(args[0])
+		var oldVal []byte
+		if exists {
+			if sv, ok := entry.Value.(*store.StringValue); ok {
+				oldVal = sv.Data
+			}
+		}
+		e.store.Set(args[0], &store.StringValue{Data: []byte(args[1])}, store.SetOptions{})
+		if oldVal != nil {
+			return lua.LString(string(oldVal))
+		}
+		return lua.LNil
+
+	case "SETNX":
+		if len(args) < 2 {
+			return lua.LNumber(0)
+		}
+		if _, exists := e.store.Get(args[0]); !exists {
+			e.store.Set(args[0], &store.StringValue{Data: []byte(args[1])}, store.SetOptions{})
+			return lua.LNumber(1)
+		}
+		return lua.LNumber(0)
+
+	case "HMGET":
+		if len(args) < 2 {
+			return L.NewTable()
+		}
+		tbl := L.NewTable()
+		entry, exists := e.store.Get(args[0])
+		if !exists {
+			for i := 1; i < len(args); i++ {
+				tbl.Append(lua.LNil)
+			}
+			return tbl
+		}
+		if hv, ok := entry.Value.(*store.HashValue); ok {
+			for i := 1; i < len(args); i++ {
+				if val, ok := hv.Fields[args[i]]; ok {
+					tbl.Append(lua.LString(string(val)))
+				} else {
+					tbl.Append(lua.LNil)
+				}
+			}
+		}
+		return tbl
+
+	case "HMSET":
+		if len(args) < 3 || len(args)%2 == 0 {
+			return lua.LString("ERR")
+		}
+		entry, exists := e.store.Get(args[0])
+		var hv *store.HashValue
+		if !exists {
+			hv = &store.HashValue{Fields: make(map[string][]byte)}
+		} else {
+			hv = entry.Value.(*store.HashValue)
+		}
+		for i := 1; i+1 < len(args); i += 2 {
+			hv.Fields[args[i]] = []byte(args[i+1])
+		}
+		if !exists {
+			e.store.Set(args[0], hv, store.SetOptions{})
+		}
+		return lua.LString("OK")
+
 	default:
 		return lua.LNil
 	}

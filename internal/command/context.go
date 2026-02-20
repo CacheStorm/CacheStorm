@@ -32,6 +32,7 @@ type Context struct {
 	Namespace     string
 	Transaction   *Transaction
 	Subscriber    *store.Subscriber
+	Username      string
 }
 
 func NewContext(cmd string, args [][]byte, s *store.Store, w *resp.Writer) *Context {
