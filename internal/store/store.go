@@ -234,6 +234,31 @@ func (s *Store) Persist(key string) bool {
 	return true
 }
 
+func (s *Store) GetTTL(key string) time.Duration {
+	idx := s.shardIndex(key)
+	shard := s.shards[idx]
+
+	entry, exists := shard.Get(key)
+	if !exists {
+		return -2 * time.Second
+	}
+
+	if entry.IsExpired() {
+		return -2 * time.Second
+	}
+
+	if entry.ExpiresAt == 0 {
+		return -1 * time.Second
+	}
+
+	remaining := time.Duration(entry.ExpiresAt - time.Now().UnixNano())
+	if remaining < 0 {
+		return -2 * time.Second
+	}
+
+	return remaining
+}
+
 func (s *Store) KeyCount() int64 {
 	var count int64
 	for i := 0; i < NumShards; i++ {

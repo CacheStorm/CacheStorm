@@ -4,6 +4,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
@@ -40,6 +41,9 @@ func RegisterSortedSetCommands(router *Router) {
 	router.Register(&CommandDef{Name: "ZINTER", Handler: cmdZINTER})
 	router.Register(&CommandDef{Name: "ZDIFF", Handler: cmdZDIFF})
 	router.Register(&CommandDef{Name: "ZMPOP", Handler: cmdZMPOP})
+	router.Register(&CommandDef{Name: "BZPOPMIN", Handler: cmdBZPOPMIN})
+	router.Register(&CommandDef{Name: "BZPOPMAX", Handler: cmdBZPOPMAX})
+	router.Register(&CommandDef{Name: "ZREVRANGEBYLEX", Handler: cmdZREVRANGEBYLEX})
 }
 
 func getOrCreateSortedSet(ctx *Context, key string) (*store.SortedSetValue, error) {
@@ -1437,4 +1441,126 @@ func cmdZMPOP(ctx *Context) error {
 	}
 
 	return ctx.WriteNull()
+}
+
+func cmdBZPOPMIN(ctx *Context) error {
+	return cmdBZPOPGeneric(ctx, false)
+}
+
+func cmdBZPOPMAX(ctx *Context) error {
+	return cmdBZPOPGeneric(ctx, true)
+}
+
+func cmdBZPOPGeneric(ctx *Context, max bool) error {
+	if ctx.ArgCount() < 2 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	keys := make([]string, 0, ctx.ArgCount()-1)
+	var timeout int
+	var err error
+
+	for i := 0; i < ctx.ArgCount()-1; i++ {
+		keys = append(keys, ctx.ArgString(i))
+	}
+	timeout, err = strconv.Atoi(ctx.ArgString(ctx.ArgCount() - 1))
+	if err != nil {
+		return ctx.WriteError(ErrNotInteger)
+	}
+
+	deadline := time.Now().Add(time.Duration(timeout) * time.Second)
+
+	for {
+		for _, key := range keys {
+			zset, err := getSortedSet(ctx, key)
+			if err != nil {
+				return ctx.WriteError(err)
+			}
+			if zset == nil || len(zset.Members) == 0 {
+				continue
+			}
+
+			zset.Lock()
+			entries := zset.GetSortedRange(0, 0, false, max)
+			if len(entries) > 0 {
+				entry := entries[0]
+				delete(zset.Members, entry.Member)
+				isEmpty := len(zset.Members) == 0
+				zset.Unlock()
+
+				if isEmpty {
+					ctx.Store.Delete(key)
+				}
+
+				return ctx.WriteArray([]*resp.Value{
+					resp.BulkString(key),
+					resp.BulkString(entry.Member),
+					resp.BulkString(strconv.FormatFloat(entry.Score, 'f', -1, 64)),
+				})
+			}
+			zset.Unlock()
+		}
+
+		if timeout == 0 {
+			return ctx.WriteNull()
+		}
+
+		if time.Now().After(deadline) {
+			return ctx.WriteNull()
+		}
+
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func cmdZREVRANGEBYLEX(ctx *Context) error {
+	if ctx.ArgCount() < 3 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	key := ctx.ArgString(0)
+	max := ctx.ArgString(1)
+	min := ctx.ArgString(2)
+
+	offset := 0
+	count := -1
+
+	for i := 3; i < ctx.ArgCount(); i++ {
+		arg := strings.ToUpper(ctx.ArgString(i))
+		switch arg {
+		case "LIMIT":
+			if i+2 >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			var err error
+			offset, err = strconv.Atoi(ctx.ArgString(i + 1))
+			if err != nil {
+				return ctx.WriteError(ErrNotInteger)
+			}
+			count, err = strconv.Atoi(ctx.ArgString(i + 2))
+			if err != nil {
+				return ctx.WriteError(ErrNotInteger)
+			}
+			i += 2
+		}
+	}
+
+	zset, err := getSortedSet(ctx, key)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	if zset == nil {
+		return ctx.WriteArray([]*resp.Value{})
+	}
+
+	zset.RLock()
+	members := zset.RangeByLex(min, max, offset, count, true)
+	zset.RUnlock()
+
+	results := make([]*resp.Value, 0, len(members))
+	for i := len(members) - 1; i >= 0; i-- {
+		results = append(results, resp.BulkString(members[i]))
+	}
+
+	return ctx.WriteArray(results)
 }

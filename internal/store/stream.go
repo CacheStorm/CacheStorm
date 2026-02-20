@@ -429,3 +429,27 @@ func (v *StreamValue) GetEntryByID(id string) *StreamEntry {
 	}
 	return nil
 }
+
+func (v *StreamValue) SetLastID(lastID string) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.LastID = lastID
+}
+
+func (v *StreamValue) GetLastID() string {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	return v.LastID
+}
+
+func (v *StreamValue) GetGroups() map[string]*ConsumerGroup {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	return v.Groups
+}
+
+func (v *StreamValue) GetGroupCount() int {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	return len(v.Groups)
+}

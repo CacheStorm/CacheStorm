@@ -30,6 +30,7 @@ func RegisterStreamCommands(router *Router) {
 	router.Register(&CommandDef{Name: "XPENDING", Handler: cmdXPENDING})
 	router.Register(&CommandDef{Name: "XCLAIM", Handler: cmdXCLAIM})
 	router.Register(&CommandDef{Name: "XAUTOCLAIM", Handler: cmdXAUTOCLAIM})
+	router.Register(&CommandDef{Name: "XSETID", Handler: cmdXSETID})
 }
 
 func getOrCreateStream(ctx *Context, key string, maxLen int64) *store.StreamValue {
@@ -1125,4 +1126,49 @@ func cmdXAUTOCLAIM(ctx *Context) error {
 		resp.BulkString(nextCursor),
 		resp.ArrayValue(results),
 	})
+}
+
+func cmdXSETID(ctx *Context) error {
+	if ctx.ArgCount() < 2 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	key := ctx.ArgString(0)
+	lastID := ctx.ArgString(1)
+
+	stream := getStream(ctx, key)
+	if stream == nil {
+		return ctx.WriteError(store.ErrKeyNotFound)
+	}
+
+	entriesAdded := int64(0)
+	maxDeletedId := int64(0)
+	for i := 2; i < ctx.ArgCount(); i++ {
+		arg := strings.ToUpper(ctx.ArgString(i))
+		switch arg {
+		case "ENTRIESADDED":
+			if i+1 >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			var err error
+			entriesAdded, err = strconv.ParseInt(ctx.ArgString(i+1), 10, 64)
+			if err != nil {
+				return ctx.WriteError(ErrNotInteger)
+			}
+			i++
+		case "MAXDELETEDID":
+			if i+1 >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			i++
+		default:
+			return ctx.WriteError(ErrSyntaxError)
+		}
+	}
+
+	_ = entriesAdded
+	_ = maxDeletedId
+
+	stream.SetLastID(lastID)
+	return ctx.WriteOK()
 }

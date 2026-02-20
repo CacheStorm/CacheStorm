@@ -2,7 +2,9 @@ package command
 
 import (
 	"errors"
+	"fmt"
 	"sync"
+	"time"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
@@ -223,9 +225,148 @@ func executeQueuedCommand(ctx *Context, qc queuedCommand) *resp.Value {
 			return resp.IntegerValue(1)
 		}
 		return resp.ErrorValue("ERR wrong number of arguments")
+	case "DECR":
+		if len(qc.args) >= 1 {
+			key := string(qc.args[0])
+			if entry, exists := ctx.Store.Get(key); exists {
+				if sv, ok := entry.Value.(*store.StringValue); ok {
+					var newVal int64
+					for _, b := range sv.Data {
+						newVal = newVal*10 + int64(b-'0')
+					}
+					newVal--
+					ctx.Store.Set(key, &store.StringValue{Data: []byte(int64ToBytes(newVal))}, store.SetOptions{})
+					return resp.IntegerValue(newVal)
+				}
+			}
+			ctx.Store.Set(key, &store.StringValue{Data: []byte("-1")}, store.SetOptions{})
+			return resp.IntegerValue(-1)
+		}
+		return resp.ErrorValue("ERR wrong number of arguments")
+	case "EXPIRE":
+		if len(qc.args) >= 2 {
+			key := string(qc.args[0])
+			seconds, err := parseInt(qc.args[1])
+			if err != nil {
+				return resp.ErrorValue("ERR value is not an integer")
+			}
+			if _, exists := ctx.Store.Get(key); exists {
+				ctx.Store.SetTTL(key, time.Duration(seconds)*time.Second)
+				return resp.IntegerValue(1)
+			}
+			return resp.IntegerValue(0)
+		}
+		return resp.ErrorValue("ERR wrong number of arguments")
+	case "TTL":
+		if len(qc.args) >= 1 {
+			key := string(qc.args[0])
+			ttl := ctx.Store.GetTTL(key)
+			if ttl == -2*time.Second {
+				return resp.IntegerValue(-2)
+			}
+			if ttl == -1*time.Second {
+				return resp.IntegerValue(-1)
+			}
+			return resp.IntegerValue(int64(ttl / time.Second))
+		}
+		return resp.ErrorValue("ERR wrong number of arguments")
+	case "PERSIST":
+		if len(qc.args) >= 1 {
+			key := string(qc.args[0])
+			if _, exists := ctx.Store.Get(key); exists {
+				if ctx.Store.GetTTL(key) > 0 {
+					ctx.Store.Persist(key)
+					return resp.IntegerValue(1)
+				}
+				return resp.IntegerValue(0)
+			}
+			return resp.IntegerValue(0)
+		}
+		return resp.ErrorValue("ERR wrong number of arguments")
+	case "TYPE":
+		if len(qc.args) >= 1 {
+			key := string(qc.args[0])
+			if entry, exists := ctx.Store.Get(key); exists {
+				return resp.SimpleString(entry.Value.Type().String())
+			}
+			return resp.SimpleString("none")
+		}
+		return resp.ErrorValue("ERR wrong number of arguments")
+	case "EXISTS":
+		count := int64(0)
+		for _, arg := range qc.args {
+			if _, exists := ctx.Store.Get(string(arg)); exists {
+				count++
+			}
+		}
+		return resp.IntegerValue(count)
+	case "APPEND":
+		if len(qc.args) >= 2 {
+			key := string(qc.args[0])
+			value := qc.args[1]
+			if entry, exists := ctx.Store.Get(key); exists {
+				if sv, ok := entry.Value.(*store.StringValue); ok {
+					newData := append(sv.Data, value...)
+					ctx.Store.Set(key, &store.StringValue{Data: newData}, store.SetOptions{})
+					return resp.IntegerValue(int64(len(newData)))
+				}
+				return resp.ErrorValue("WRONGTYPE Operation against a key holding the wrong kind of value")
+			}
+			ctx.Store.Set(key, &store.StringValue{Data: value}, store.SetOptions{})
+			return resp.IntegerValue(int64(len(value)))
+		}
+		return resp.ErrorValue("ERR wrong number of arguments")
+	case "MSET":
+		if len(qc.args) >= 2 && len(qc.args)%2 == 0 {
+			for i := 0; i < len(qc.args); i += 2 {
+				key := string(qc.args[i])
+				value := qc.args[i+1]
+				ctx.Store.Set(key, &store.StringValue{Data: value}, store.SetOptions{})
+			}
+			return resp.SimpleString("OK")
+		}
+		return resp.ErrorValue("ERR wrong number of arguments")
+	case "MGET":
+		if len(qc.args) >= 1 {
+			results := make([]*resp.Value, len(qc.args))
+			for i, arg := range qc.args {
+				key := string(arg)
+				if entry, exists := ctx.Store.Get(key); exists {
+					if sv, ok := entry.Value.(*store.StringValue); ok {
+						results[i] = resp.BulkBytes(sv.Data)
+					} else {
+						results[i] = resp.NullValue()
+					}
+				} else {
+					results[i] = resp.NullValue()
+				}
+			}
+			return resp.ArrayValue(results)
+		}
+		return resp.ErrorValue("ERR wrong number of arguments")
 	default:
 		return resp.ErrorValue("ERR command not supported in transaction")
 	}
+}
+
+func parseInt(data []byte) (int64, error) {
+	var result int64
+	var negative bool
+	i := 0
+	if len(data) > 0 && data[0] == '-' {
+		negative = true
+		i = 1
+	}
+	for ; i < len(data); i++ {
+		if data[i] < '0' || data[i] > '9' {
+			return 0, fmt.Errorf("not an integer")
+		}
+		result = result*10 + int64(data[i]-'0')
+	}
+	if negative {
+		result = -result
+	}
+	return result, nil
 }
 
 func int64ToBytes(n int64) []byte {

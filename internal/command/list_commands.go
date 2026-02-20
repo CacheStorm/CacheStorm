@@ -25,6 +25,7 @@ func RegisterListCommands(router *Router) {
 	router.Register(&CommandDef{Name: "RPOPLPUSH", Handler: cmdRPOPLPUSH})
 	router.Register(&CommandDef{Name: "LINSERT", Handler: cmdLINSERT})
 	router.Register(&CommandDef{Name: "LMOVE", Handler: cmdLMOVE})
+	router.Register(&CommandDef{Name: "BLMOVE", Handler: cmdBLMOVE})
 	router.Register(&CommandDef{Name: "BLPOP", Handler: cmdBLPOP})
 	router.Register(&CommandDef{Name: "BRPOP", Handler: cmdBRPOP})
 	router.Register(&CommandDef{Name: "BRPOPLPUSH", Handler: cmdBRPOPLPUSH})
@@ -569,6 +570,86 @@ func cmdLMOVE(ctx *Context) error {
 	}
 
 	return ctx.WriteBulkBytes(value)
+}
+
+func cmdBLMOVE(ctx *Context) error {
+	if ctx.ArgCount() < 5 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	srcKey := ctx.ArgString(0)
+	dstKey := ctx.ArgString(1)
+	whereFrom := strings.ToUpper(ctx.ArgString(2))
+	whereTo := strings.ToUpper(ctx.ArgString(3))
+	timeout, err := strconv.Atoi(ctx.ArgString(4))
+	if err != nil {
+		return ctx.WriteError(ErrNotInteger)
+	}
+
+	if whereFrom != "LEFT" && whereFrom != "RIGHT" {
+		return ctx.WriteError(ErrSyntaxError)
+	}
+	if whereTo != "LEFT" && whereTo != "RIGHT" {
+		return ctx.WriteError(ErrSyntaxError)
+	}
+
+	deadline := time.Now().Add(time.Duration(timeout) * time.Second)
+
+	for {
+		srcList, err := getList(ctx, srcKey)
+		if err != nil {
+			return ctx.WriteError(err)
+		}
+
+		if srcList != nil && len(srcList.Elements) > 0 {
+			srcList.Lock()
+			if len(srcList.Elements) > 0 {
+				var value []byte
+				switch whereFrom {
+				case "LEFT":
+					value = srcList.Elements[0]
+					srcList.Elements = srcList.Elements[1:]
+				case "RIGHT":
+					value = srcList.Elements[len(srcList.Elements)-1]
+					srcList.Elements = srcList.Elements[:len(srcList.Elements)-1]
+				}
+
+				srcEmpty := len(srcList.Elements) == 0
+				srcList.Unlock()
+
+				if srcEmpty {
+					ctx.Store.Delete(srcKey)
+				}
+
+				dstList, err := getOrCreateList(ctx, dstKey)
+				if err != nil {
+					return ctx.WriteError(err)
+				}
+
+				dstList.Lock()
+				switch whereTo {
+				case "LEFT":
+					dstList.Elements = append([][]byte{value}, dstList.Elements...)
+				case "RIGHT":
+					dstList.Elements = append(dstList.Elements, value)
+				}
+				dstList.Unlock()
+
+				return ctx.WriteBulkBytes(value)
+			}
+			srcList.Unlock()
+		}
+
+		if timeout == 0 {
+			return ctx.WriteNull()
+		}
+
+		if time.Now().After(deadline) {
+			return ctx.WriteNull()
+		}
+
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func cmdBLPOP(ctx *Context) error {
