@@ -1,12 +1,18 @@
 package command
 
 import (
+	"errors"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
+)
+
+var (
+	ErrBusyGroup = errors.New("BUSYGROUP Consumer Group name already exists")
+	ErrNoGroup   = errors.New("NOGROUP No such key")
 )
 
 func RegisterStreamCommands(router *Router) {
@@ -23,6 +29,7 @@ func RegisterStreamCommands(router *Router) {
 	router.Register(&CommandDef{Name: "XACK", Handler: cmdXACK})
 	router.Register(&CommandDef{Name: "XPENDING", Handler: cmdXPENDING})
 	router.Register(&CommandDef{Name: "XCLAIM", Handler: cmdXCLAIM})
+	router.Register(&CommandDef{Name: "XAUTOCLAIM", Handler: cmdXAUTOCLAIM})
 }
 
 func getOrCreateStream(ctx *Context, key string, maxLen int64) *store.StreamValue {
@@ -420,22 +427,111 @@ func cmdXINFO(ctx *Context) error {
 			return ctx.WriteError(store.ErrKeyNotFound)
 		}
 
+		full := false
+		for i := 2; i < ctx.ArgCount(); i++ {
+			if strings.ToUpper(ctx.ArgString(i)) == "FULL" {
+				full = true
+			}
+		}
+
+		if full {
+			entries := stream.GetRange("-", "+", 0)
+			entryResults := make([]*resp.Value, 0, len(entries))
+			for _, e := range entries {
+				fieldValues := make([]*resp.Value, 0)
+				for k, v := range e.Fields {
+					fieldValues = append(fieldValues, resp.BulkString(k), resp.BulkBytes(v))
+				}
+				entryResults = append(entryResults, resp.ArrayValue([]*resp.Value{
+					resp.BulkString(e.ID),
+					resp.ArrayValue(fieldValues),
+				}))
+			}
+
+			groupResults := make([]*resp.Value, 0)
+			for name, group := range stream.Groups {
+				consumerResults := make([]*resp.Value, 0)
+				for cname, c := range group.Consumers {
+					consumerResults = append(consumerResults, resp.ArrayValue([]*resp.Value{
+						resp.BulkString("name"), resp.BulkString(cname),
+						resp.BulkString("seen-time"), resp.IntegerValue(c.SeenTime),
+						resp.BulkString("pel-count"), resp.IntegerValue(c.Pending),
+					}))
+				}
+				groupResults = append(groupResults, resp.ArrayValue([]*resp.Value{
+					resp.BulkString("name"), resp.BulkString(name),
+					resp.BulkString("last-delivered-id"), resp.BulkString(group.LastID),
+					resp.BulkString("pel-count"), resp.IntegerValue(int64(len(group.Pending))),
+					resp.BulkString("consumers"), resp.ArrayValue(consumerResults),
+				}))
+			}
+
+			return ctx.WriteArray([]*resp.Value{
+				resp.BulkString("length"), resp.IntegerValue(stream.Len()),
+				resp.BulkString("entries"), resp.ArrayValue(entryResults),
+				resp.BulkString("groups"), resp.ArrayValue(groupResults),
+			})
+		}
+
 		return ctx.WriteArray([]*resp.Value{
 			resp.BulkString("length"), resp.IntegerValue(stream.Len()),
 			resp.BulkString("radix-tree-keys"), resp.IntegerValue(stream.Len()),
 			resp.BulkString("radix-tree-nodes"), resp.IntegerValue(stream.Len() + 1),
 			resp.BulkString("last-generated-id"), resp.BulkString(stream.LastID),
+			resp.BulkString("groups"), resp.IntegerValue(int64(len(stream.Groups))),
 		})
 
 	case "GROUPS":
-		return ctx.WriteArray([]*resp.Value{})
+		if ctx.ArgCount() < 2 {
+			return ctx.WriteError(ErrWrongArgCount)
+		}
+		key := ctx.ArgString(1)
+		stream := getStream(ctx, key)
+		if stream == nil {
+			return ctx.WriteArray([]*resp.Value{})
+		}
+
+		results := make([]*resp.Value, 0)
+		for name, group := range stream.Groups {
+			results = append(results, resp.ArrayValue([]*resp.Value{
+				resp.BulkString("name"), resp.BulkString(name),
+				resp.BulkString("consumers"), resp.IntegerValue(int64(len(group.Consumers))),
+				resp.BulkString("pending"), resp.IntegerValue(int64(len(group.Pending))),
+				resp.BulkString("last-delivered-id"), resp.BulkString(group.LastID),
+			}))
+		}
+		return ctx.WriteArray(results)
 
 	case "CONSUMERS":
-		return ctx.WriteArray([]*resp.Value{})
+		if ctx.ArgCount() < 3 {
+			return ctx.WriteError(ErrWrongArgCount)
+		}
+		key := ctx.ArgString(1)
+		groupName := ctx.ArgString(2)
+
+		stream := getStream(ctx, key)
+		if stream == nil {
+			return ctx.WriteArray([]*resp.Value{})
+		}
+
+		group := stream.GetGroup(groupName)
+		if group == nil {
+			return ctx.WriteArray([]*resp.Value{})
+		}
+
+		results := make([]*resp.Value, 0)
+		for name, c := range group.Consumers {
+			results = append(results, resp.ArrayValue([]*resp.Value{
+				resp.BulkString("name"), resp.BulkString(name),
+				resp.BulkString("pending"), resp.IntegerValue(c.Pending),
+				resp.BulkString("idle"), resp.IntegerValue(time.Now().UnixMilli() - c.SeenTime),
+			}))
+		}
+		return ctx.WriteArray(results)
 
 	case "HELP":
 		return ctx.WriteArray([]*resp.Value{
-			resp.BulkString("XINFO STREAM <key>"),
+			resp.BulkString("XINFO STREAM <key> [FULL]"),
 			resp.BulkString("XINFO GROUPS <key>"),
 			resp.BulkString("XINFO CONSUMERS <key> <group>"),
 		})
@@ -454,30 +550,579 @@ func cmdXGROUP(ctx *Context) error {
 
 	switch subCmd {
 	case "CREATE":
+		if ctx.ArgCount() < 4 {
+			return ctx.WriteError(ErrWrongArgCount)
+		}
+
+		key := ctx.ArgString(1)
+		groupName := ctx.ArgString(2)
+		lastID := ctx.ArgString(3)
+
+		stream := getStream(ctx, key)
+		if stream == nil {
+			if ctx.ArgCount() > 4 && strings.ToUpper(ctx.ArgString(4)) == "MKSTREAM" {
+				stream = getOrCreateStream(ctx, key, 0)
+				if stream == nil {
+					return ctx.WriteError(store.ErrWrongType)
+				}
+			} else {
+				return ctx.WriteError(store.ErrKeyNotFound)
+			}
+		}
+
+		err := stream.CreateGroup(groupName, lastID)
+		if err != nil {
+			return ctx.WriteError(ErrBusyGroup)
+		}
+
 		return ctx.WriteOK()
+
 	case "DESTROY":
+		if ctx.ArgCount() < 3 {
+			return ctx.WriteError(ErrWrongArgCount)
+		}
+
+		key := ctx.ArgString(1)
+		groupName := ctx.ArgString(2)
+
+		stream := getStream(ctx, key)
+		if stream == nil {
+			return ctx.WriteInteger(0)
+		}
+
+		if stream.DestroyGroup(groupName) {
+			return ctx.WriteInteger(1)
+		}
 		return ctx.WriteInteger(0)
+
 	case "SETID":
+		if ctx.ArgCount() < 4 {
+			return ctx.WriteError(ErrWrongArgCount)
+		}
+
+		key := ctx.ArgString(1)
+		groupName := ctx.ArgString(2)
+		lastID := ctx.ArgString(3)
+
+		stream := getStream(ctx, key)
+		if stream == nil {
+			return ctx.WriteError(store.ErrKeyNotFound)
+		}
+
+		if !stream.SetGroupLastID(groupName, lastID) {
+			return ctx.WriteError(ErrNoGroup)
+		}
+
 		return ctx.WriteOK()
+
 	case "DELCONSUMER":
-		return ctx.WriteInteger(0)
+		if ctx.ArgCount() < 4 {
+			return ctx.WriteError(ErrWrongArgCount)
+		}
+
+		key := ctx.ArgString(1)
+		groupName := ctx.ArgString(2)
+		consumerName := ctx.ArgString(3)
+
+		stream := getStream(ctx, key)
+		if stream == nil {
+			return ctx.WriteInteger(0)
+		}
+
+		group := stream.GetGroup(groupName)
+		if group == nil {
+			return ctx.WriteError(ErrNoGroup)
+		}
+
+		var pending int64
+		if c, exists := group.Consumers[consumerName]; exists {
+			pending = c.Pending
+			delete(group.Consumers, consumerName)
+		}
+
+		return ctx.WriteInteger(pending)
+
 	default:
 		return ctx.WriteError(ErrUnknownCommand)
 	}
 }
 
 func cmdXREADGROUP(ctx *Context) error {
-	return ctx.WriteNull()
+	if ctx.ArgCount() < 6 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	var groupName, consumerName string
+	var count int64 = 1
+	var block int64 = 0
+	var streamsIdx int
+	var noack bool
+
+	i := 0
+	for i < ctx.ArgCount() {
+		arg := strings.ToUpper(ctx.ArgString(i))
+		switch arg {
+		case "GROUP":
+			if i+2 >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			groupName = ctx.ArgString(i + 1)
+			consumerName = ctx.ArgString(i + 2)
+			i += 3
+		case "COUNT":
+			if i+1 >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			var err error
+			count, err = strconv.ParseInt(ctx.ArgString(i+1), 10, 64)
+			if err != nil {
+				return ctx.WriteError(ErrNotInteger)
+			}
+			i += 2
+		case "BLOCK":
+			if i+1 >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			var err error
+			block, err = strconv.ParseInt(ctx.ArgString(i+1), 10, 64)
+			if err != nil {
+				return ctx.WriteError(ErrNotInteger)
+			}
+			i += 2
+		case "STREAMS":
+			streamsIdx = i + 1
+			i = ctx.ArgCount()
+		case "NOACK":
+			noack = true
+			i++
+		default:
+			i++
+		}
+	}
+
+	if groupName == "" || consumerName == "" || streamsIdx == 0 {
+		return ctx.WriteError(ErrSyntaxError)
+	}
+
+	remaining := ctx.ArgCount() - streamsIdx
+	if remaining < 2 || remaining%2 != 0 {
+		return ctx.WriteError(ErrSyntaxError)
+	}
+
+	numStreams := remaining / 2
+	keys := make([]string, numStreams)
+	ids := make([]string, numStreams)
+
+	for i := 0; i < numStreams; i++ {
+		keys[i] = ctx.ArgString(streamsIdx + i)
+		ids[i] = ctx.ArgString(streamsIdx + numStreams + i)
+	}
+
+	results := make([][]*resp.Value, numStreams)
+	totalEntries := int64(0)
+
+	for i, key := range keys {
+		stream := getStream(ctx, key)
+		if stream == nil {
+			continue
+		}
+
+		group := stream.GetGroup(groupName)
+		if group == nil {
+			return ctx.WriteError(ErrNoGroup)
+		}
+
+		consumer := group.GetOrCreateConsumer(consumerName)
+		consumer.SeenTime = time.Now().UnixMilli()
+
+		var startID string
+		if ids[i] == ">" {
+			startID = group.LastID
+			if startID == "0-0" {
+				startID = "-"
+			}
+		} else {
+			startID = ids[i]
+		}
+
+		entries := stream.GetRange(startID, "+", count)
+		for _, entry := range entries {
+			if ids[i] == ">" && entry.ID > group.LastID {
+				group.AddPending(entry.ID, consumerName)
+			}
+
+			entryResult := []*resp.Value{
+				resp.BulkString(entry.ID),
+			}
+			fieldValues := make([]*resp.Value, 0, len(entry.Fields)*2)
+			for k, v := range entry.Fields {
+				fieldValues = append(fieldValues, resp.BulkString(k), resp.BulkBytes(v))
+			}
+			entryResult = append(entryResult, resp.ArrayValue(fieldValues))
+			results[i] = append(results[i], entryResult...)
+			totalEntries++
+		}
+	}
+
+	if totalEntries == 0 && block > 0 {
+		deadline := time.Now().Add(time.Duration(block) * time.Second)
+		for time.Now().Before(deadline) {
+			for i, key := range keys {
+				stream := getStream(ctx, key)
+				if stream == nil {
+					continue
+				}
+
+				group := stream.GetGroup(groupName)
+				if group == nil {
+					continue
+				}
+
+				startID := group.LastID
+				if startID == "0-0" {
+					startID = "-"
+				}
+
+				entries := stream.GetRange(startID, "+", count)
+				for _, entry := range entries {
+					if entry.ID > group.LastID {
+						group.AddPending(entry.ID, consumerName)
+						entryResult := []*resp.Value{resp.BulkString(entry.ID)}
+						fieldValues := make([]*resp.Value, 0)
+						for k, v := range entry.Fields {
+							fieldValues = append(fieldValues, resp.BulkString(k), resp.BulkBytes(v))
+						}
+						entryResult = append(entryResult, resp.ArrayValue(fieldValues))
+						results[i] = append(results[i], entryResult...)
+						totalEntries++
+					}
+				}
+			}
+
+			if totalEntries > 0 {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	if totalEntries == 0 {
+		return ctx.WriteNull()
+	}
+
+	finalResults := make([]*resp.Value, numStreams)
+	for i := range keys {
+		if len(results[i]) > 0 {
+			finalResults[i] = resp.ArrayValue([]*resp.Value{
+				resp.BulkString(keys[i]),
+				resp.ArrayValue(results[i]),
+			})
+		}
+	}
+
+	_ = noack
+
+	return ctx.WriteArray(finalResults)
 }
 
 func cmdXACK(ctx *Context) error {
-	return ctx.WriteInteger(0)
+	if ctx.ArgCount() < 3 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	key := ctx.ArgString(0)
+	groupName := ctx.ArgString(1)
+	entryIDs := make([]string, 0, ctx.ArgCount()-2)
+	for i := 2; i < ctx.ArgCount(); i++ {
+		entryIDs = append(entryIDs, ctx.ArgString(i))
+	}
+
+	stream := getStream(ctx, key)
+	if stream == nil {
+		return ctx.WriteInteger(0)
+	}
+
+	group := stream.GetGroup(groupName)
+	if group == nil {
+		return ctx.WriteError(ErrNoGroup)
+	}
+
+	acked := int64(0)
+	for _, id := range entryIDs {
+		if group.Ack(id) {
+			acked++
+		}
+	}
+
+	return ctx.WriteInteger(acked)
 }
 
 func cmdXPENDING(ctx *Context) error {
-	return ctx.WriteArray([]*resp.Value{})
+	if ctx.ArgCount() < 2 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	key := ctx.ArgString(0)
+	groupName := ctx.ArgString(1)
+
+	stream := getStream(ctx, key)
+	if stream == nil {
+		return ctx.WriteArray([]*resp.Value{})
+	}
+
+	group := stream.GetGroup(groupName)
+	if group == nil {
+		return ctx.WriteError(ErrNoGroup)
+	}
+
+	start := "-"
+	end := "+"
+	var count int64 = 10
+	var consumer string
+
+	if ctx.ArgCount() > 2 {
+		var err error
+		start = ctx.ArgString(2)
+		if ctx.ArgCount() > 3 {
+			end = ctx.ArgString(3)
+		}
+		if ctx.ArgCount() > 4 {
+			count, err = strconv.ParseInt(ctx.ArgString(4), 10, 64)
+			if err != nil {
+				return ctx.WriteError(ErrNotInteger)
+			}
+		}
+		if ctx.ArgCount() > 5 {
+			consumer = ctx.ArgString(5)
+		}
+
+		pending := group.GetPending(start, end, count)
+		results := make([]*resp.Value, 0, len(pending))
+		for _, p := range pending {
+			if consumer == "" || p.Consumer == consumer {
+				results = append(results, resp.ArrayValue([]*resp.Value{
+					resp.BulkString(p.ID),
+					resp.BulkString(p.Consumer),
+					resp.IntegerValue(p.DeliveryTS),
+					resp.IntegerValue(p.Deliveries),
+				}))
+			}
+		}
+		return ctx.WriteArray(results)
+	}
+
+	pendingCount := group.GetPendingCount()
+	firstID, lastID := group.GetFirstLastID()
+	consumers := group.GetAllConsumers()
+
+	if pendingCount == 0 {
+		return ctx.WriteArray([]*resp.Value{
+			resp.IntegerValue(0),
+			resp.NullValue(),
+			resp.NullValue(),
+			resp.ArrayValue([]*resp.Value{}),
+		})
+	}
+
+	consumerResults := make([]*resp.Value, 0, len(consumers))
+	for _, c := range consumers {
+		cPending := group.GetConsumerPending(c)
+		consumerResults = append(consumerResults, resp.ArrayValue([]*resp.Value{
+			resp.BulkString(c),
+			resp.IntegerValue(cPending),
+		}))
+	}
+
+	return ctx.WriteArray([]*resp.Value{
+		resp.IntegerValue(pendingCount),
+		resp.BulkString(firstID),
+		resp.BulkString(lastID),
+		resp.ArrayValue(consumerResults),
+	})
 }
 
 func cmdXCLAIM(ctx *Context) error {
-	return ctx.WriteArray([]*resp.Value{})
+	if ctx.ArgCount() < 5 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	key := ctx.ArgString(0)
+	groupName := ctx.ArgString(1)
+	consumerName := ctx.ArgString(2)
+	minIdleTime, err := strconv.ParseInt(ctx.ArgString(3), 10, 64)
+	if err != nil {
+		return ctx.WriteError(ErrNotInteger)
+	}
+
+	var entryIDs []string
+	var retryCount int64
+	var force bool
+	var justid bool
+
+	i := 4
+	for i < ctx.ArgCount() {
+		arg := strings.ToUpper(ctx.ArgString(i))
+		switch arg {
+		case "IDLE", "TIME", "RETRYCOUNT":
+			if i+1 >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			if arg == "RETRYCOUNT" {
+				retryCount, _ = strconv.ParseInt(ctx.ArgString(i+1), 10, 64)
+			}
+			i += 2
+		case "FORCE":
+			force = true
+			i++
+		case "JUSTID":
+			justid = true
+			i++
+		default:
+			entryIDs = append(entryIDs, ctx.ArgString(i))
+			i++
+		}
+	}
+
+	if len(entryIDs) == 0 {
+		return ctx.WriteError(ErrSyntaxError)
+	}
+
+	stream := getStream(ctx, key)
+	if stream == nil {
+		return ctx.WriteArray([]*resp.Value{})
+	}
+
+	group := stream.GetGroup(groupName)
+	if group == nil {
+		return ctx.WriteError(ErrNoGroup)
+	}
+
+	_ = minIdleTime
+	_ = force
+	_ = retryCount
+
+	now := time.Now().UnixMilli()
+	claimed := group.Claim(entryIDs, consumerName)
+
+	results := make([]*resp.Value, 0, len(claimed))
+	for _, id := range claimed {
+		if justid {
+			results = append(results, resp.BulkString(id))
+		} else {
+			entry := stream.GetEntryByID(id)
+			if entry != nil {
+				entryResult := []*resp.Value{resp.BulkString(entry.ID)}
+				fieldValues := make([]*resp.Value, 0)
+				for k, v := range entry.Fields {
+					fieldValues = append(fieldValues, resp.BulkString(k), resp.BulkBytes(v))
+				}
+				entryResult = append(entryResult, resp.ArrayValue(fieldValues))
+				results = append(results, resp.ArrayValue(entryResult))
+			}
+		}
+	}
+
+	_ = now
+
+	return ctx.WriteArray(results)
+}
+
+func cmdXAUTOCLAIM(ctx *Context) error {
+	if ctx.ArgCount() < 5 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	key := ctx.ArgString(0)
+	groupName := ctx.ArgString(1)
+	consumerName := ctx.ArgString(2)
+	minIdleTime, err := strconv.ParseInt(ctx.ArgString(3), 10, 64)
+	if err != nil {
+		return ctx.WriteError(ErrNotInteger)
+	}
+	start := ctx.ArgString(4)
+
+	var count int64 = 100
+	var justid bool
+
+	i := 5
+	for i < ctx.ArgCount() {
+		arg := strings.ToUpper(ctx.ArgString(i))
+		switch arg {
+		case "COUNT":
+			if i+1 >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			count, err = strconv.ParseInt(ctx.ArgString(i+1), 10, 64)
+			if err != nil {
+				return ctx.WriteError(ErrNotInteger)
+			}
+			i += 2
+		case "JUSTID":
+			justid = true
+			i++
+		default:
+			i++
+		}
+	}
+
+	stream := getStream(ctx, key)
+	if stream == nil {
+		return ctx.WriteArray([]*resp.Value{
+			resp.BulkString("0-0"),
+			resp.ArrayValue([]*resp.Value{}),
+		})
+	}
+
+	group := stream.GetGroup(groupName)
+	if group == nil {
+		return ctx.WriteError(ErrNoGroup)
+	}
+
+	_ = minIdleTime
+
+	now := time.Now().UnixMilli()
+	pending := group.GetPending(start, "+", count)
+
+	var entryIDs []string
+	for _, p := range pending {
+		if now-p.DeliveryTS >= minIdleTime {
+			entryIDs = append(entryIDs, p.ID)
+		}
+	}
+
+	claimed := group.Claim(entryIDs, consumerName)
+
+	nextCursor := "0-0"
+	if len(pending) >= int(count) {
+		nextCursor = pending[count-1].ID
+	}
+
+	var results []*resp.Value
+	if justid {
+		results = make([]*resp.Value, 0, len(claimed))
+		for _, id := range claimed {
+			results = append(results, resp.BulkString(id))
+		}
+	} else {
+		results = make([]*resp.Value, 0, len(claimed))
+		for _, id := range claimed {
+			entry := stream.GetEntryByID(id)
+			if entry != nil {
+				entryResult := []*resp.Value{resp.BulkString(entry.ID)}
+				fieldValues := make([]*resp.Value, 0)
+				for k, v := range entry.Fields {
+					fieldValues = append(fieldValues, resp.BulkString(k), resp.BulkBytes(v))
+				}
+				entryResult = append(entryResult, resp.ArrayValue(fieldValues))
+				results = append(results, resp.ArrayValue(entryResult))
+			}
+		}
+	}
+
+	_ = now
+
+	return ctx.WriteArray([]*resp.Value{
+		resp.BulkString(nextCursor),
+		resp.ArrayValue(results),
+	})
 }
