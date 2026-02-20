@@ -14,15 +14,16 @@ import (
 )
 
 type Server struct {
-	cfg      *config.Config
-	listener net.Listener
-	router   *command.Router
-	store    *store.Store
-	conns    sync.Map
-	connID   atomic.Int64
-	stopping atomic.Bool
-	stopCh   chan struct{}
-	wg       sync.WaitGroup
+	cfg        *config.Config
+	listener   net.Listener
+	router     *command.Router
+	store      *store.Store
+	httpServer *HTTPServer
+	conns      sync.Map
+	connID     atomic.Int64
+	stopping   atomic.Bool
+	stopCh     chan struct{}
+	wg         sync.WaitGroup
 }
 
 func New(cfg *config.Config) (*Server, error) {
@@ -54,6 +55,15 @@ func New(cfg *config.Config) (*Server, error) {
 	command.RegisterScriptCommands(s.router)
 	command.RegisterDebugCommands(s.router)
 
+	if cfg.HTTP.Enabled {
+		httpCfg := &HTTPConfig{
+			Enabled:  cfg.HTTP.Enabled,
+			Port:     cfg.HTTP.Port,
+			Password: cfg.HTTP.Password,
+		}
+		s.httpServer = NewHTTPServer(s.store, s.router, httpCfg)
+	}
+
 	return s, nil
 }
 
@@ -70,6 +80,17 @@ func (s *Server) Start(ctx context.Context) error {
 		Msg("CacheStorm server started")
 
 	go s.acceptLoop()
+
+	if s.httpServer != nil {
+		go func() {
+			logger.Info().
+				Int("port", s.cfg.HTTP.Port).
+				Msg("HTTP admin server started")
+			if err := s.httpServer.Start(); err != nil {
+				logger.Error().Err(err).Msg("HTTP server error")
+			}
+		}()
+	}
 
 	return nil
 }
@@ -108,6 +129,12 @@ func (s *Server) acceptLoop() {
 func (s *Server) Stop(ctx context.Context) error {
 	s.stopping.Store(true)
 	close(s.stopCh)
+
+	if s.httpServer != nil {
+		if err := s.httpServer.Stop(); err != nil {
+			logger.Error().Err(err).Msg("HTTP server stop error")
+		}
+	}
 
 	if s.listener != nil {
 		s.listener.Close()

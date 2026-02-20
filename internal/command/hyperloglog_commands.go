@@ -21,6 +21,7 @@ type HyperLogLogValue struct {
 
 func (v *HyperLogLogValue) Type() store.DataType { return store.DataTypeString }
 func (v *HyperLogLogValue) SizeOf() int64        { return hllRegisters + 24 }
+func (v *HyperLogLogValue) String() string       { return "HyperLogLog" }
 func (v *HyperLogLogValue) Clone() store.Value {
 	cloned := &HyperLogLogValue{}
 	cloned.Registers = v.Registers

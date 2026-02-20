@@ -21,6 +21,7 @@ type BitmapValue struct {
 
 func (v *BitmapValue) Type() store.DataType { return store.DataTypeString }
 func (v *BitmapValue) SizeOf() int64        { return int64(len(v.Data)) + 24 }
+func (v *BitmapValue) String() string       { return string(v.Data) }
 func (v *BitmapValue) Clone() store.Value {
 	cloned := make([]byte, len(v.Data))
 	copy(cloned, v.Data)

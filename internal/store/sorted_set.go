@@ -1,6 +1,9 @@
 package store
 
-import "sort"
+import (
+	"fmt"
+	"sort"
+)
 
 type SortedSetValue struct {
 	Members map[string]float64
@@ -13,6 +16,16 @@ func (v *SortedSetValue) SizeOf() int64 {
 		size += int64(len(k)) + 16 + 80
 	}
 	return size
+}
+func (v *SortedSetValue) String() string {
+	result := ""
+	for member, score := range v.Members {
+		if result != "" {
+			result += ", "
+		}
+		result += fmt.Sprintf("%s: %.2f", member, score)
+	}
+	return result
 }
 func (v *SortedSetValue) Clone() Value {
 	cloned := &SortedSetValue{Members: make(map[string]float64, len(v.Members))}

@@ -223,6 +223,192 @@ func TestScriptEngine_RedisCall(t *testing.T) {
 			t.Errorf("Eval() = %v, want string", got)
 		}
 	})
+
+	t.Run("EXPIRE and TTL", func(t *testing.T) {
+		script := `
+			redis.call('SET', 'expirekey', 'value')
+			redis.call('EXPIRE', 'expirekey', 100)
+			return redis.call('TTL', 'expirekey')
+		`
+		got, err := engine.Eval(script, []string{}, []string{})
+		if err != nil {
+			t.Errorf("Eval() error = %v", err)
+			return
+		}
+		ttl, ok := got.(float64)
+		if !ok || ttl < 95 || ttl > 100 {
+			t.Errorf("Eval() = %v, want ~100", got)
+		}
+	})
+
+	t.Run("MSET and MGET", func(t *testing.T) {
+		script := `
+			redis.call('MSET', 'k1', 'v1', 'k2', 'v2')
+			return redis.call('MGET', 'k1', 'k2')
+		`
+		got, err := engine.Eval(script, []string{}, []string{})
+		if err != nil {
+			t.Errorf("Eval() error = %v", err)
+			return
+		}
+		slice, ok := got.([]interface{})
+		if !ok || len(slice) != 2 {
+			t.Errorf("Eval() = %v, want []interface{} with 2 elements", got)
+			return
+		}
+		if slice[0] != "v1" || slice[1] != "v2" {
+			t.Errorf("Eval() = %v, want [v1, v2]", got)
+		}
+	})
+
+	t.Run("HEXISTS and HDEL", func(t *testing.T) {
+		script := `
+			redis.call('HSET', 'myhash', 'field1', 'value1')
+			local exists = redis.call('HEXISTS', 'myhash', 'field1')
+			redis.call('HDEL', 'myhash', 'field1')
+			local after = redis.call('HEXISTS', 'myhash', 'field1')
+			return {exists, after}
+		`
+		got, err := engine.Eval(script, []string{}, []string{})
+		if err != nil {
+			t.Errorf("Eval() error = %v", err)
+			return
+		}
+		slice, ok := got.([]interface{})
+		if !ok || len(slice) != 2 {
+			t.Errorf("Eval() = %v, want []interface{} with 2 elements", got)
+			return
+		}
+		if slice[0] != float64(1) || slice[1] != float64(0) {
+			t.Errorf("Eval() = %v, want [1, 0]", got)
+		}
+	})
+
+	t.Run("HLEN", func(t *testing.T) {
+		script := `
+			redis.call('HSET', 'hashlen', 'f1', 'v1')
+			redis.call('HSET', 'hashlen', 'f2', 'v2')
+			return redis.call('HLEN', 'hashlen')
+		`
+		got, err := engine.Eval(script, []string{}, []string{})
+		if err != nil {
+			t.Errorf("Eval() error = %v", err)
+			return
+		}
+		if got != float64(2) {
+			t.Errorf("Eval() = %v, want 2", got)
+		}
+	})
+
+	t.Run("LLEN and LRANGE", func(t *testing.T) {
+		script := `
+			redis.call('RPUSH', 'mylist', 'a')
+			redis.call('RPUSH', 'mylist', 'b')
+			redis.call('RPUSH', 'mylist', 'c')
+			local len = redis.call('LLEN', 'mylist')
+			local range_result = redis.call('LRANGE', 'mylist', 0, -1)
+			return {len, range_result}
+		`
+		got, err := engine.Eval(script, []string{}, []string{})
+		if err != nil {
+			t.Errorf("Eval() error = %v", err)
+			return
+		}
+		slice, ok := got.([]interface{})
+		if !ok || len(slice) != 2 {
+			t.Errorf("Eval() = %v, want []interface{} with 2 elements", got)
+			return
+		}
+		lenVal, ok := slice[0].(float64)
+		if !ok || lenVal < 3 {
+			t.Errorf("LLEN = %v, want >= 3", slice[0])
+		}
+	})
+
+	t.Run("ZADD, ZSCORE, ZCARD", func(t *testing.T) {
+		script := `
+			redis.call('ZADD', 'myzset', 1.0, 'one')
+			redis.call('ZADD', 'myzset', 2.0, 'two')
+			local score = redis.call('ZSCORE', 'myzset', 'one')
+			local card = redis.call('ZCARD', 'myzset')
+			return {score, card}
+		`
+		got, err := engine.Eval(script, []string{}, []string{})
+		if err != nil {
+			t.Errorf("Eval() error = %v", err)
+			return
+		}
+		slice, ok := got.([]interface{})
+		if !ok || len(slice) != 2 {
+			t.Errorf("Eval() = %v, want []interface{} with 2 elements", got)
+			return
+		}
+		if slice[0] != float64(1.0) {
+			t.Errorf("ZSCORE = %v, want 1.0", slice[0])
+		}
+		if slice[1] != float64(2) {
+			t.Errorf("ZCARD = %v, want 2", slice[1])
+		}
+	})
+
+	t.Run("ZREM", func(t *testing.T) {
+		script := `
+			redis.call('ZADD', 'zremtest', 1.0, 'member1')
+			redis.call('ZADD', 'zremtest', 2.0, 'member2')
+			local removed = redis.call('ZREM', 'zremtest', 'member1')
+			local card = redis.call('ZCARD', 'zremtest')
+			return {removed, card}
+		`
+		got, err := engine.Eval(script, []string{}, []string{})
+		if err != nil {
+			t.Errorf("Eval() error = %v", err)
+			return
+		}
+		slice, ok := got.([]interface{})
+		if !ok || len(slice) != 2 {
+			t.Errorf("Eval() = %v, want []interface{} with 2 elements", got)
+			return
+		}
+		if slice[0] != float64(1) {
+			t.Errorf("ZREM = %v, want 1", slice[0])
+		}
+		if slice[1] != float64(1) {
+			t.Errorf("ZCARD after ZREM = %v, want 1", slice[1])
+		}
+	})
+
+	t.Run("DBSIZE", func(t *testing.T) {
+		script := `
+			redis.call('SET', 'key1', 'value1')
+			redis.call('SET', 'key2', 'value2')
+			return redis.call('DBSIZE')
+		`
+		got, err := engine.Eval(script, []string{}, []string{})
+		if err != nil {
+			t.Errorf("Eval() error = %v", err)
+			return
+		}
+		size, ok := got.(float64)
+		if !ok || size < 2 {
+			t.Errorf("Eval() = %v, want >= 2", got)
+		}
+	})
+
+	t.Run("FLUSHDB", func(t *testing.T) {
+		script := `
+			redis.call('SET', 'flushkey', 'value')
+			redis.call('FLUSHDB')
+			return redis.call('DBSIZE')
+		`
+		got, err := engine.Eval(script, []string{}, []string{})
+		if err != nil {
+			t.Errorf("Eval() error = %v", err)
+			return
+		}
+		if got != float64(0) {
+			t.Errorf("Eval() = %v, want 0", got)
+		}
+	})
 }
 
 func TestScriptEngine_ScriptSHA(t *testing.T) {

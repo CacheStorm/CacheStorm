@@ -10,6 +10,7 @@ import (
 
 type Config struct {
 	Server      ServerConfig               `yaml:"server"`
+	HTTP        HTTPConfig                 `yaml:"http"`
 	Memory      MemoryConfig               `yaml:"memory"`
 	Namespaces  map[string]NamespaceConfig `yaml:"namespaces"`
 	Cluster     ClusterConfig              `yaml:"cluster"`
@@ -27,6 +28,12 @@ type ServerConfig struct {
 	WriteTimeout    string `yaml:"write_timeout" default:"0"`
 	ReadBufferSize  int    `yaml:"read_buffer_size" default:"4096"`
 	WriteBufferSize int    `yaml:"write_buffer_size" default:"4096"`
+}
+
+type HTTPConfig struct {
+	Enabled  bool   `yaml:"enabled" default:"true"`
+	Port     int    `yaml:"port" default:"8080"`
+	Password string `yaml:"password"`
 }
 
 type MemoryConfig struct {

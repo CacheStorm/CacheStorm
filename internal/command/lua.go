@@ -4,7 +4,9 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
+	"strconv"
 	"sync"
+	"time"
 
 	"github.com/cachestorm/cachestorm/internal/store"
 	lua "github.com/yuin/gopher-lua"
@@ -368,6 +370,227 @@ func (e *ScriptEngine) executeCommand(L *lua.LState, cmd string, args []string) 
 			return lua.LString("none")
 		}
 		return lua.LString(entry.Value.Type().String())
+
+	case "EXPIRE":
+		if len(args) < 2 {
+			return lua.LNumber(0)
+		}
+		sec, err := strconv.ParseInt(args[1], 10, 64)
+		if err != nil {
+			return lua.LNumber(0)
+		}
+		if e.store.SetTTL(args[0], time.Duration(sec)*time.Second) {
+			return lua.LNumber(1)
+		}
+		return lua.LNumber(0)
+
+	case "TTL":
+		if len(args) < 1 {
+			return lua.LNumber(-2)
+		}
+		ttl := e.store.TTL(args[0])
+		if ttl < 0 {
+			return lua.LNumber(int64(ttl))
+		}
+		return lua.LNumber(int64(ttl.Seconds()))
+
+	case "MGET":
+		if len(args) < 1 {
+			return lua.LNil
+		}
+		tbl := L.NewTable()
+		for _, key := range args {
+			entry, exists := e.store.Get(key)
+			if !exists {
+				tbl.Append(lua.LNil)
+			} else if sv, ok := entry.Value.(*store.StringValue); ok {
+				tbl.Append(lua.LString(string(sv.Data)))
+			} else {
+				tbl.Append(lua.LNil)
+			}
+		}
+		return tbl
+
+	case "MSET":
+		if len(args) < 2 {
+			return lua.LString("OK")
+		}
+		for i := 0; i+1 < len(args); i += 2 {
+			e.store.Set(args[i], &store.StringValue{Data: []byte(args[i+1])}, store.SetOptions{})
+		}
+		return lua.LString("OK")
+
+	case "HEXISTS":
+		if len(args) < 2 {
+			return lua.LNumber(0)
+		}
+		entry, exists := e.store.Get(args[0])
+		if !exists {
+			return lua.LNumber(0)
+		}
+		if hv, ok := entry.Value.(*store.HashValue); ok {
+			if _, ok := hv.Fields[args[1]]; ok {
+				return lua.LNumber(1)
+			}
+		}
+		return lua.LNumber(0)
+
+	case "HDEL":
+		if len(args) < 2 {
+			return lua.LNumber(0)
+		}
+		entry, exists := e.store.Get(args[0])
+		if !exists {
+			return lua.LNumber(0)
+		}
+		if hv, ok := entry.Value.(*store.HashValue); ok {
+			deleted := 0
+			for i := 1; i < len(args); i++ {
+				if _, ok := hv.Fields[args[i]]; ok {
+					delete(hv.Fields, args[i])
+					deleted++
+				}
+			}
+			return lua.LNumber(deleted)
+		}
+		return lua.LNumber(0)
+
+	case "HLEN":
+		if len(args) < 1 {
+			return lua.LNumber(0)
+		}
+		entry, exists := e.store.Get(args[0])
+		if !exists {
+			return lua.LNumber(0)
+		}
+		if hv, ok := entry.Value.(*store.HashValue); ok {
+			return lua.LNumber(len(hv.Fields))
+		}
+		return lua.LNumber(0)
+
+	case "LLEN":
+		if len(args) < 1 {
+			return lua.LNumber(0)
+		}
+		entry, exists := e.store.Get(args[0])
+		if !exists {
+			return lua.LNumber(0)
+		}
+		if lv, ok := entry.Value.(*store.ListValue); ok {
+			return lua.LNumber(len(lv.Elements))
+		}
+		return lua.LNumber(0)
+
+	case "LRANGE":
+		if len(args) < 3 {
+			return lua.LNil
+		}
+		entry, exists := e.store.Get(args[0])
+		if !exists {
+			return lua.LNil
+		}
+		start, err1 := strconv.Atoi(args[1])
+		stop, err2 := strconv.Atoi(args[2])
+		if err1 != nil || err2 != nil {
+			return lua.LNil
+		}
+		if lv, ok := entry.Value.(*store.ListValue); ok {
+			length := len(lv.Elements)
+			if start < 0 {
+				start = length + start
+			}
+			if stop < 0 {
+				stop = length + stop
+			}
+			if start < 0 {
+				start = 0
+			}
+			if stop >= length {
+				stop = length - 1
+			}
+			tbl := L.NewTable()
+			if start <= stop {
+				for i := start; i <= stop; i++ {
+					tbl.Append(lua.LString(string(lv.Elements[i])))
+				}
+			}
+			return tbl
+		}
+		return lua.LNil
+
+	case "ZADD":
+		if len(args) < 3 {
+			return lua.LNumber(0)
+		}
+		score, err := strconv.ParseFloat(args[1], 64)
+		if err != nil {
+			return lua.LNumber(0)
+		}
+		entry, exists := e.store.Get(args[0])
+		var zset *store.SortedSetValue
+		if !exists {
+			zset = &store.SortedSetValue{Members: make(map[string]float64)}
+			e.store.Set(args[0], zset, store.SetOptions{})
+		} else {
+			zset = entry.Value.(*store.SortedSetValue)
+		}
+		if _, exists := zset.Members[args[2]]; !exists {
+			zset.Members[args[2]] = score
+			return lua.LNumber(1)
+		}
+		zset.Members[args[2]] = score
+		return lua.LNumber(0)
+
+	case "ZSCORE":
+		if len(args) < 2 {
+			return lua.LNil
+		}
+		entry, exists := e.store.Get(args[0])
+		if !exists {
+			return lua.LNil
+		}
+		if zset, ok := entry.Value.(*store.SortedSetValue); ok {
+			if score, ok := zset.Members[args[1]]; ok {
+				return lua.LNumber(score)
+			}
+		}
+		return lua.LNil
+
+	case "ZCARD":
+		if len(args) < 1 {
+			return lua.LNumber(0)
+		}
+		entry, exists := e.store.Get(args[0])
+		if !exists {
+			return lua.LNumber(0)
+		}
+		if zset, ok := entry.Value.(*store.SortedSetValue); ok {
+			return lua.LNumber(len(zset.Members))
+		}
+		return lua.LNumber(0)
+
+	case "ZREM":
+		if len(args) < 2 {
+			return lua.LNumber(0)
+		}
+		entry, exists := e.store.Get(args[0])
+		if !exists {
+			return lua.LNumber(0)
+		}
+		if zset, ok := entry.Value.(*store.SortedSetValue); ok {
+			if _, ok := zset.Members[args[1]]; ok {
+				delete(zset.Members, args[1])
+				return lua.LNumber(1)
+			}
+		}
+		return lua.LNumber(0)
+
+	case "DBSIZE":
+		return lua.LNumber(e.store.KeyCount())
+
+	case "FLUSHDB":
+		e.store.Flush()
+		return lua.LString("OK")
 
 	default:
 		return lua.LNil

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"math"
 )
 
@@ -22,6 +23,16 @@ func NewGeoValue() *GeoValue {
 func (v *GeoValue) Type() DataType { return DataTypeGeo }
 func (v *GeoValue) SizeOf() int64 {
 	return int64(len(v.Points))*24 + 48
+}
+func (v *GeoValue) String() string {
+	result := ""
+	for member, point := range v.Points {
+		if result != "" {
+			result += ", "
+		}
+		result += fmt.Sprintf("%s: (%.6f, %.6f)", member, point.Lon, point.Lat)
+	}
+	return result
 }
 func (v *GeoValue) Clone() Value {
 	cloned := NewGeoValue()

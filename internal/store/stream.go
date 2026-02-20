@@ -40,6 +40,26 @@ func (v *StreamValue) SizeOf() int64 {
 	}
 	return size
 }
+func (v *StreamValue) String() string {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+
+	result := ""
+	for _, entry := range v.Entries {
+		if result != "" {
+			result += "\n"
+		}
+		fields := ""
+		for k, val := range entry.Fields {
+			if fields != "" {
+				fields += ", "
+			}
+			fields += k + ": " + string(val)
+		}
+		result += entry.ID + " -> " + fields
+	}
+	return result
+}
 func (v *StreamValue) Clone() Value {
 	v.mu.RLock()
 	defer v.mu.RUnlock()

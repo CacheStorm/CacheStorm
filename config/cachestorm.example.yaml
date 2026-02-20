@@ -1,43 +1,137 @@
+# CacheStorm Configuration Example
+# Copy this file to config.yaml and customize
+
+# Server Configuration
 server:
+  # Bind address (0.0.0.0 for all interfaces)
   bind: "0.0.0.0"
+  
+  # TCP port for RESP server
   port: 6380
+  
+  # Maximum simultaneous connections
   max_connections: 10000
+  
+  # TCP keepalive in seconds
   tcp_keepalive: 300
+  
+  # Buffer sizes
   read_buffer_size: 4096
   write_buffer_size: 4096
+  
+  # Timeouts
+  read_timeout: "30s"
+  write_timeout: "30s"
+  idle_timeout: "300s"
 
+# Memory Management
 memory:
-  max_memory: "0"
+  # Maximum memory usage (0 = unlimited)
+  # Examples: "1gb", "512mb", "2gb"
+  max_memory: "2gb"
+  
+  # Eviction policy when memory limit is reached
+  # Options: allkeys-lru, allkeys-lfu, volatile-lru, volatile-lfu, volatile-ttl, noeviction
   eviction_policy: "allkeys-lru"
-  pressure_warning: 70
-  pressure_critical: 85
+  
+  # Memory pressure thresholds (percentage)
+  pressure_warning: 70    # Log warning
+  pressure_critical: 85   # Start aggressive eviction
+  
+  # Number of keys to sample during eviction
   eviction_sample_size: 5
 
+# Logging Configuration
+logging:
+  # Log level: debug, info, warn, error
+  level: "info"
+  
+  # Log format: console, json
+  format: "console"
+  
+  # Output: stdout, stderr, or file path
+  output: "stdout"
+
+# Namespace Configuration
 namespaces:
+  # Default namespace
   default:
+    # Default TTL for keys (0 = no expiry)
     default_ttl: "0"
+    
+  # Custom namespace example
+  # cache:
+  #   default_ttl: "1h"
+  
+  # Session namespace with auto-expiry
+  # sessions:
+  #   default_ttl: "30m"
 
+# Cluster Configuration
 cluster:
+  # Enable clustering
   enabled: false
+  
+  # Gossip port for cluster communication
+  gossip_port: 7946
+  
+  # Seed nodes for cluster discovery
+  # seeds:
+  #   - "node1:7946"
+  #   - "node2:7946"
+  
+  # Cluster node name (auto-generated if not set)
+  # node_name: "node1"
 
+# Persistence Configuration
 persistence:
+  # Enable persistence
   enabled: false
+  
+  # AOF (Append-Only File) settings
+  aof:
+    enabled: false
+    # fsync: always, everysec, no
+    fsync: "everysec"
+    filename: "appendonly.aof"
+  
+  # RDB (Snapshot) settings
+  rdb:
+    enabled: false
+    # Snapshot interval: save <seconds> <changes>
+    intervals:
+      - seconds: 900
+        changes: 1
+      - seconds: 300
+        changes: 10
+      - seconds: 60
+        changes: 10000
+    filename: "dump.rdb"
 
+# Plugin Configuration
 plugins:
+  # Statistics plugin
   stats:
     enabled: true
+    update_interval: "10s"
+  
+  # Prometheus metrics plugin
   metrics:
     enabled: true
     port: 9090
     path: "/metrics"
+  
+  # Authentication plugin
   auth:
     enabled: false
+    password: "your-secret-password"
+    # ACL configuration file
+    # acl_file: "acl.conf"
+  
+  # Slow query logging
   slowlog:
     enabled: true
+    # Threshold for slow queries
     threshold: "10ms"
-    max_entries: 1000
-
-logging:
-  level: "info"
-  format: "console"
-  output: "stdout"
+    # Maximum number of entries to keep
+    max_entries: 128

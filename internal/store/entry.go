@@ -41,6 +41,7 @@ type Value interface {
 	Type() DataType
 	SizeOf() int64
 	Clone() Value
+	String() string
 }
 
 type StringValue struct {
@@ -49,6 +50,7 @@ type StringValue struct {
 
 func (v *StringValue) Type() DataType { return DataTypeString }
 func (v *StringValue) SizeOf() int64  { return int64(len(v.Data)) + 24 }
+func (v *StringValue) String() string { return string(v.Data) }
 func (v *StringValue) Clone() Value {
 	cloned := make([]byte, len(v.Data))
 	copy(cloned, v.Data)
@@ -66,6 +68,16 @@ func (v *HashValue) SizeOf() int64 {
 		size += int64(len(k)) + int64(len(val)) + 80
 	}
 	return size
+}
+func (v *HashValue) String() string {
+	result := ""
+	for k, val := range v.Fields {
+		if result != "" {
+			result += ", "
+		}
+		result += k + ": " + string(val)
+	}
+	return result
 }
 func (v *HashValue) Clone() Value {
 	cloned := &HashValue{Fields: make(map[string][]byte, len(v.Fields))}
@@ -89,6 +101,16 @@ func (v *ListValue) SizeOf() int64 {
 	}
 	return size
 }
+func (v *ListValue) String() string {
+	result := ""
+	for _, el := range v.Elements {
+		if result != "" {
+			result += ", "
+		}
+		result += string(el)
+	}
+	return result
+}
 func (v *ListValue) Clone() Value {
 	cloned := &ListValue{Elements: make([][]byte, len(v.Elements))}
 	for i, el := range v.Elements {
@@ -110,6 +132,16 @@ func (v *SetValue) SizeOf() int64 {
 		size += int64(len(k)) + 48
 	}
 	return size
+}
+func (v *SetValue) String() string {
+	result := ""
+	for k := range v.Members {
+		if result != "" {
+			result += ", "
+		}
+		result += k
+	}
+	return result
 }
 func (v *SetValue) Clone() Value {
 	cloned := &SetValue{Members: make(map[string]struct{}, len(v.Members))}

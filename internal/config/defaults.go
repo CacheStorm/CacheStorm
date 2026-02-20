@@ -10,6 +10,11 @@ func Default() *Config {
 			ReadBufferSize:  4096,
 			WriteBufferSize: 4096,
 		},
+		HTTP: HTTPConfig{
+			Enabled:  true,
+			Port:     8080,
+			Password: "",
+		},
 		Memory: MemoryConfig{
 			MaxMemory:      "0",
 			EvictionPolicy: "allkeys-lru",
