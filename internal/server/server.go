@@ -58,6 +58,7 @@ func New(cfg *config.Config) (*Server, error) {
 	command.RegisterReplicationCommands(s.router)
 	command.RegisterFunctionCommands(s.router)
 	command.RegisterModuleCommands(s.router)
+	command.RegisterSentinelCommands(s.router)
 
 	command.InitReplicationManager(s.store)
 
