@@ -777,32 +777,50 @@ func cmdBRPOPLPUSH(ctx *Context) error {
 		return ctx.WriteError(ErrNotInteger)
 	}
 
-	_ = timeout
+	deadline := time.Now().Add(time.Duration(timeout) * time.Second)
 
-	srcList, err := getList(ctx, srcKey)
-	if err != nil {
-		return ctx.WriteError(err)
+	for {
+		srcList, err := getList(ctx, srcKey)
+		if err != nil {
+			return ctx.WriteError(err)
+		}
+
+		if srcList != nil && len(srcList.Elements) > 0 {
+			srcList.Lock()
+			if len(srcList.Elements) > 0 {
+				idx := len(srcList.Elements) - 1
+				value := srcList.Elements[idx]
+				srcList.Elements = srcList.Elements[:idx]
+				isEmpty := len(srcList.Elements) == 0
+				srcList.Unlock()
+
+				if isEmpty {
+					ctx.Store.Delete(srcKey)
+				}
+
+				dstList, err := getOrCreateList(ctx, dstKey)
+				if err != nil {
+					return ctx.WriteError(err)
+				}
+				dstList.Lock()
+				dstList.Elements = append([][]byte{value}, dstList.Elements...)
+				dstList.Unlock()
+
+				return ctx.WriteBulkBytes(value)
+			}
+			srcList.Unlock()
+		}
+
+		if timeout == 0 {
+			return ctx.WriteNull()
+		}
+
+		if time.Now().After(deadline) {
+			return ctx.WriteNull()
+		}
+
+		time.Sleep(10 * time.Millisecond)
 	}
-	if srcList == nil || len(srcList.Elements) == 0 {
-		return ctx.WriteNullBulkString()
-	}
-
-	idx := len(srcList.Elements) - 1
-	value := srcList.Elements[idx]
-	srcList.Elements = srcList.Elements[:idx]
-
-	if len(srcList.Elements) == 0 {
-		ctx.Store.Delete(srcKey)
-	}
-
-	dstList, err := getOrCreateList(ctx, dstKey)
-	if err != nil {
-		return ctx.WriteError(err)
-	}
-
-	dstList.Elements = append([][]byte{value}, dstList.Elements...)
-
-	return ctx.WriteBulkBytes(value)
 }
 
 func cmdLPOS(ctx *Context) error {
