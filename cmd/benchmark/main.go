@@ -237,30 +237,63 @@ func warmup(addr string) int64 {
 	defer conn.Close()
 
 	for i := 0; i < 1000; i++ {
-		sendCommand(conn, fmt.Sprintf("*3\r\n$3\r\nSET\r\n$6\r\nwarmup\r\n$1\r\n%d\r\n", i))
+		sendRespCommand(conn, "SET", fmt.Sprintf("warmup%d", i), fmt.Sprintf("%d", i))
 	}
 	return 1000
 }
 
-func setOp(conn net.Conn, i int64) error {
-	cmd := fmt.Sprintf("*3\r\n$3\r\nSET\r\n$6\r\nkey:%d\r\n$6\r\nvalue%d\r\n", i%10000, i%10000)
-	_, err := conn.Write([]byte(cmd))
-	if err != nil {
-		return err
+func sendRespCommand(conn net.Conn, args ...string) (string, error) {
+	cmd := fmt.Sprintf("*%d\r\n", len(args))
+	for _, arg := range args {
+		cmd += fmt.Sprintf("$%d\r\n%s\r\n", len(arg), arg)
 	}
+
+	if _, err := conn.Write([]byte(cmd)); err != nil {
+		return "", err
+	}
+
 	reader := bufio.NewReader(conn)
-	_, err = reader.ReadString('\n')
+	var result strings.Builder
+
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			return "", err
+		}
+		result.WriteString(line)
+
+		if len(line) > 0 && (line[0] == '+' || line[0] == '-' || line[0] == ':') {
+			break
+		}
+		if len(line) > 0 && line[0] == '$' {
+			sizeStr := strings.TrimSpace(line[1:])
+			var size int
+			fmt.Sscanf(sizeStr, "%d", &size)
+			if size > 0 {
+				data := make([]byte, size+2)
+				if _, err := reader.Read(data); err != nil {
+					return "", err
+				}
+				result.Write(data)
+			}
+			break
+		}
+		break
+	}
+
+	return result.String(), nil
+}
+
+func setOp(conn net.Conn, i int64) error {
+	key := fmt.Sprintf("key:%d", i%10000)
+	val := fmt.Sprintf("value%d", i%10000)
+	_, err := sendRespCommand(conn, "SET", key, val)
 	return err
 }
 
 func getOp(conn net.Conn, i int64) error {
-	cmd := fmt.Sprintf("*2\r\n$3\r\nGET\r\n$6\r\nkey:%d\r\n", i%10000)
-	_, err := conn.Write([]byte(cmd))
-	if err != nil {
-		return err
-	}
-	reader := bufio.NewReader(conn)
-	_, err = reader.ReadString('\n')
+	key := fmt.Sprintf("key:%d", i%10000)
+	_, err := sendRespCommand(conn, "GET", key)
 	return err
 }
 
@@ -384,25 +417,20 @@ func runMixedBenchmark(addr string, ops int64, workers int) BenchmarkResult {
 			defer wg.Done()
 			conn, err := net.Dial("tcp", addr)
 			if err != nil {
-				errors.Add(1)
+				errors.Add(opsPerWorker)
 				return
 			}
 			defer conn.Close()
 
 			for i := int64(0); i < opsPerWorker; i++ {
-				var cmd string
+				var err error
 				if i%2 == 0 {
-					cmd = fmt.Sprintf("*3\r\n$3\r\nSET\r\n$6\r\nmix%d\r\n$4\r\ndata\r\n", (workerID*opsPerWorker+i)%10000)
+					_, err = sendRespCommand(conn, "SET", fmt.Sprintf("mix%d", (workerID*opsPerWorker+i)%10000), "data")
 				} else {
-					cmd = fmt.Sprintf("*2\r\n$3\r\nGET\r\n$6\r\nmix%d\r\n", (workerID*opsPerWorker+i)%10000)
+					_, err = sendRespCommand(conn, "GET", fmt.Sprintf("mix%d", (workerID*opsPerWorker+i)%10000))
 				}
-				if _, err := conn.Write([]byte(cmd)); err != nil {
+				if err != nil {
 					errors.Add(1)
-				} else {
-					reader := bufio.NewReader(conn)
-					if _, err := reader.ReadString('\n'); err != nil {
-						errors.Add(1)
-					}
 				}
 				totalOps.Add(1)
 				progress.increment()
@@ -458,13 +486,18 @@ func runPipelineBenchmark(addr string, ops int64, pipelineSize int) BenchmarkRes
 
 	for b := int64(0); b < batches; b++ {
 		for i := 0; i < pipelineSize; i++ {
-			cmd := fmt.Sprintf("*3\r\n$3\r\nSET\r\n$6\r\npipe%d\r\n$4\r\ndata\r\n", (b*int64(pipelineSize)+int64(i))%10000)
+			key := fmt.Sprintf("pipe%d", (b*int64(pipelineSize)+int64(i))%10000)
+			cmd := fmt.Sprintf("*3\r\n$3\r\nSET\r\n$%d\r\n%s\r\n$4\r\ndata\r\n", len(key), key)
 			conn.Write([]byte(cmd))
 		}
 		reader := bufio.NewReader(conn)
 		for i := 0; i < pipelineSize; i++ {
-			if _, err := reader.ReadString('\n'); err != nil {
+			line, err := reader.ReadString('\n')
+			if err != nil || (len(line) > 0 && line[0] == '-') {
 				errors.Add(1)
+			}
+			if len(line) > 0 && line[0] == '$' {
+				reader.ReadString('\n')
 			}
 		}
 		totalOps.Add(int64(pipelineSize))
@@ -493,7 +526,6 @@ func runConcurrentBenchmark(addr string, ops int64, workers int) BenchmarkResult
 	var totalOps atomic.Int64
 	var errors atomic.Int64
 	var wg sync.WaitGroup
-	var latencies sync.Map
 
 	start := time.Now()
 	opsPerWorker := ops / int64(workers)
@@ -517,24 +549,16 @@ func runConcurrentBenchmark(addr string, ops int64, workers int) BenchmarkResult
 			defer wg.Done()
 			conn, err := net.Dial("tcp", addr)
 			if err != nil {
-				errors.Add(1)
+				errors.Add(opsPerWorker)
 				return
 			}
 			defer conn.Close()
 
 			for i := int64(0); i < opsPerWorker; i++ {
-				opStart := time.Now()
-				cmd := fmt.Sprintf("*3\r\n$3\r\nSET\r\n$6\r\nconc%d\r\n$4\r\ndata\r\n", (int64(workerID)*opsPerWorker+i)%10000)
-				if _, err := conn.Write([]byte(cmd)); err != nil {
+				key := fmt.Sprintf("conc%d", (int64(workerID)*opsPerWorker+i)%10000)
+				if _, err := sendRespCommand(conn, "SET", key, "data"); err != nil {
 					errors.Add(1)
-					continue
 				}
-				reader := bufio.NewReader(conn)
-				if _, err := reader.ReadString('\n'); err != nil {
-					errors.Add(1)
-					continue
-				}
-				latencies.Store(workerID, time.Since(opStart))
 				totalOps.Add(1)
 				progress.increment()
 			}
