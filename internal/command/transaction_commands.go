@@ -11,12 +11,14 @@ import (
 var (
 	ErrExecWithoutMulti    = errors.New("ERR EXEC without MULTI")
 	ErrDiscardWithoutMulti = errors.New("ERR DISCARD without MULTI")
+	ErrWatchInMulti        = errors.New("ERR WATCH inside MULTI is not allowed")
 )
 
 type Transaction struct {
-	mu     sync.Mutex
-	queued []queuedCommand
-	active bool
+	mu          sync.Mutex
+	queued      []queuedCommand
+	active      bool
+	watchedKeys map[string]int64
 }
 
 type queuedCommand struct {
@@ -26,8 +28,9 @@ type queuedCommand struct {
 
 func NewTransaction() *Transaction {
 	return &Transaction{
-		queued: make([]queuedCommand, 0),
-		active: false,
+		queued:      make([]queuedCommand, 0),
+		active:      false,
+		watchedKeys: make(map[string]int64),
 	}
 }
 
@@ -52,6 +55,12 @@ func (t *Transaction) Clear() {
 	t.active = false
 }
 
+func (t *Transaction) ClearWatch() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.watchedKeys = make(map[string]int64)
+}
+
 func (t *Transaction) IsActive() bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -65,6 +74,30 @@ func (t *Transaction) Start() {
 	t.queued = t.queued[:0]
 }
 
+func (t *Transaction) Watch(key string, version int64) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.watchedKeys[key] = version
+}
+
+func (t *Transaction) CheckWatchedVersions(getVersion func(key string) int64) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for key, version := range t.watchedKeys {
+		currentVersion := getVersion(key)
+		if currentVersion != version {
+			return false
+		}
+	}
+	return true
+}
+
+func (t *Transaction) HasWatchedKeys() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return len(t.watchedKeys) > 0
+}
+
 func RegisterTransactionCommands(router *Router) {
 	router.Register(&CommandDef{Name: "MULTI", Handler: cmdMULTI})
 	router.Register(&CommandDef{Name: "EXEC", Handler: cmdEXEC})
@@ -74,6 +107,9 @@ func RegisterTransactionCommands(router *Router) {
 }
 
 func cmdMULTI(ctx *Context) error {
+	if ctx.Transaction.HasWatchedKeys() {
+		ctx.Transaction.ClearWatch()
+	}
 	ctx.Transaction.Start()
 	return ctx.WriteOK()
 }
@@ -81,6 +117,14 @@ func cmdMULTI(ctx *Context) error {
 func cmdEXEC(ctx *Context) error {
 	if !ctx.Transaction.IsActive() {
 		return ctx.WriteError(ErrExecWithoutMulti)
+	}
+
+	if ctx.Transaction.HasWatchedKeys() {
+		if !ctx.Transaction.CheckWatchedVersions(ctx.Store.GetVersion) {
+			ctx.Transaction.Clear()
+			ctx.Transaction.ClearWatch()
+			return ctx.WriteNull()
+		}
 	}
 
 	queued := ctx.Transaction.GetQueued()
@@ -106,14 +150,26 @@ func cmdDISCARD(ctx *Context) error {
 	}
 
 	ctx.Transaction.Clear()
+	ctx.Transaction.ClearWatch()
 	return ctx.WriteOK()
 }
 
 func cmdWATCH(ctx *Context) error {
+	if ctx.Transaction.IsActive() {
+		return ctx.WriteError(ErrWatchInMulti)
+	}
+
+	for i := 0; i < ctx.ArgCount(); i++ {
+		key := ctx.ArgString(i)
+		version := ctx.Store.GetVersion(key)
+		ctx.Transaction.Watch(key, version)
+	}
+
 	return ctx.WriteOK()
 }
 
 func cmdUNWATCH(ctx *Context) error {
+	ctx.Transaction.ClearWatch()
 	return ctx.WriteOK()
 }
 

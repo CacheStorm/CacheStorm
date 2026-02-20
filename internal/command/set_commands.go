@@ -14,12 +14,14 @@ func RegisterSetCommands(router *Router) {
 	router.Register(&CommandDef{Name: "SREM", Handler: cmdSREM})
 	router.Register(&CommandDef{Name: "SMEMBERS", Handler: cmdSMEMBERS})
 	router.Register(&CommandDef{Name: "SISMEMBER", Handler: cmdSISMEMBER})
+	router.Register(&CommandDef{Name: "SMISMEMBER", Handler: cmdSMISMEMBER})
 	router.Register(&CommandDef{Name: "SCARD", Handler: cmdSCARD})
 	router.Register(&CommandDef{Name: "SPOP", Handler: cmdSPOP})
 	router.Register(&CommandDef{Name: "SRANDMEMBER", Handler: cmdSRANDMEMBER})
 	router.Register(&CommandDef{Name: "SMOVE", Handler: cmdSMOVE})
 	router.Register(&CommandDef{Name: "SUNION", Handler: cmdSUNION})
 	router.Register(&CommandDef{Name: "SINTER", Handler: cmdSINTER})
+	router.Register(&CommandDef{Name: "SINTERCARD", Handler: cmdSINTERCARD})
 	router.Register(&CommandDef{Name: "SDIFF", Handler: cmdSDIFF})
 	router.Register(&CommandDef{Name: "SUNIONSTORE", Handler: cmdSUNIONSTORE})
 	router.Register(&CommandDef{Name: "SINTERSTORE", Handler: cmdSINTERSTORE})
@@ -644,4 +646,95 @@ func cmdSSCAN(ctx *Context) error {
 		resp.BulkString(strconv.Itoa(nextCursor)),
 		resp.ArrayValue(result),
 	})
+}
+
+func cmdSINTERCARD(ctx *Context) error {
+	if ctx.ArgCount() < 1 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	numKeys := ctx.ArgCount()
+	limit := -1
+
+	if numKeys >= 3 && strings.ToUpper(ctx.ArgString(numKeys-2)) == "LIMIT" {
+		var err error
+		limit, err = strconv.Atoi(ctx.ArgString(numKeys - 1))
+		if err != nil {
+			return ctx.WriteError(ErrNotInteger)
+		}
+		numKeys -= 2
+	}
+
+	if numKeys < 1 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	firstSet, err := getSetOrEmpty(ctx, ctx.ArgString(0))
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+
+	firstSet.RLock()
+	result := make(map[string]struct{})
+	for member := range firstSet.Members {
+		result[member] = struct{}{}
+	}
+	firstSet.RUnlock()
+
+	for i := 1; i < numKeys; i++ {
+		set, err := getSet(ctx, ctx.ArgString(i))
+		if err != nil {
+			return ctx.WriteError(err)
+		}
+		if set == nil {
+			return ctx.WriteInteger(0)
+		}
+
+		set.RLock()
+		for member := range result {
+			if _, exists := set.Members[member]; !exists {
+				delete(result, member)
+			}
+		}
+		set.RUnlock()
+	}
+
+	count := len(result)
+	if limit > 0 && count > limit {
+		count = limit
+	}
+
+	return ctx.WriteInteger(int64(count))
+}
+
+func cmdSMISMEMBER(ctx *Context) error {
+	if ctx.ArgCount() < 2 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	key := ctx.ArgString(0)
+
+	set, err := getSet(ctx, key)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+
+	result := make([]*resp.Value, 0, ctx.ArgCount()-1)
+	for i := 1; i < ctx.ArgCount(); i++ {
+		member := ctx.ArgString(i)
+		if set == nil {
+			result = append(result, resp.IntegerValue(0))
+		} else {
+			set.RLock()
+			_, exists := set.Members[member]
+			set.RUnlock()
+			if exists {
+				result = append(result, resp.IntegerValue(1))
+			} else {
+				result = append(result, resp.IntegerValue(0))
+			}
+		}
+	}
+
+	return ctx.WriteArray(result)
 }

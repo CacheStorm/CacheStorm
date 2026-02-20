@@ -16,6 +16,8 @@ func RegisterGeoCommands(router *Router) {
 	router.Register(&CommandDef{Name: "GEOPOS", Handler: cmdGEOPOS})
 	router.Register(&CommandDef{Name: "GEORADIUS", Handler: cmdGEORADIUS})
 	router.Register(&CommandDef{Name: "GEORADIUSBYMEMBER", Handler: cmdGEORADIUSBYMEMBER})
+	router.Register(&CommandDef{Name: "GEOSEARCH", Handler: cmdGEOSEARCH})
+	router.Register(&CommandDef{Name: "GEOSEARCHSTORE", Handler: cmdGEOSEARCHSTORE})
 }
 
 func getOrCreateGeo(ctx *Context, key string) *store.GeoValue {
@@ -293,4 +295,213 @@ func cmdGEORADIUSBYMEMBER(ctx *Context) error {
 	}
 
 	return ctx.WriteArray(results)
+}
+
+func cmdGEOSEARCH(ctx *Context) error {
+	if ctx.ArgCount() < 4 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	key := ctx.ArgString(0)
+
+	var fromLon, fromLat, radius float64
+	var hasFromMember bool
+	var fromMember string
+	var unit string = "km"
+
+	i := 1
+	for i < ctx.ArgCount() {
+		arg := strings.ToUpper(ctx.ArgString(i))
+		switch arg {
+		case "FROMMEMBER":
+			if i+1 >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			fromMember = ctx.ArgString(i + 1)
+			hasFromMember = true
+			i += 2
+		case "FROMLONLAT":
+			if i+2 >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			var err1, err2 error
+			fromLon, err1 = strconv.ParseFloat(ctx.ArgString(i+1), 64)
+			fromLat, err2 = strconv.ParseFloat(ctx.ArgString(i+2), 64)
+			if err1 != nil || err2 != nil {
+				return ctx.WriteError(ErrNotFloat)
+			}
+			hasFromMember = false
+			i += 3
+		case "BYRADIUS":
+			if i+2 >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			var err error
+			radius, err = strconv.ParseFloat(ctx.ArgString(i+1), 64)
+			if err != nil {
+				return ctx.WriteError(ErrNotFloat)
+			}
+			unit = strings.ToLower(ctx.ArgString(i + 2))
+			i += 3
+		case "BYBOX":
+			if i+4 >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			var err error
+			radius, err = strconv.ParseFloat(ctx.ArgString(i+1), 64)
+			if err != nil {
+				return ctx.WriteError(ErrNotFloat)
+			}
+			unit = strings.ToLower(ctx.ArgString(i + 3))
+			i += 5
+		case "ASC", "DESC", "COUNT", "WITHCOORD", "WITHDIST", "WITHHASH":
+			i++
+		default:
+			i++
+		}
+	}
+
+	geo := getGeo(ctx, key)
+	if geo == nil {
+		return ctx.WriteArray([]*resp.Value{})
+	}
+
+	if hasFromMember {
+		centerPoint, exists := geo.Get(fromMember)
+		if !exists {
+			return ctx.WriteArray([]*resp.Value{})
+		}
+		fromLon = centerPoint.Lon
+		fromLat = centerPoint.Lat
+	}
+
+	switch unit {
+	case "mi":
+		radius = radius / 0.621371
+	case "ft":
+		radius = radius / 3280.84
+	case "m":
+		radius = radius / 1000
+	}
+
+	results := make([]*resp.Value, 0)
+	for member, point := range geo.Points {
+		dist := store.Haversine(fromLon, fromLat, point.Lon, point.Lat)
+		if dist <= radius {
+			results = append(results, resp.BulkString(member))
+		}
+	}
+
+	return ctx.WriteArray(results)
+}
+
+func cmdGEOSEARCHSTORE(ctx *Context) error {
+	if ctx.ArgCount() < 5 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	destKey := ctx.ArgString(0)
+	srcKey := ctx.ArgString(1)
+
+	var fromLon, fromLat, radius float64
+	var hasFromMember bool
+	var fromMember string
+	var unit string = "km"
+
+	i := 2
+	for i < ctx.ArgCount() {
+		arg := strings.ToUpper(ctx.ArgString(i))
+		switch arg {
+		case "FROMMEMBER":
+			if i+1 >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			fromMember = ctx.ArgString(i + 1)
+			hasFromMember = true
+			i += 2
+		case "FROMLONLAT":
+			if i+2 >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			var err1, err2 error
+			fromLon, err1 = strconv.ParseFloat(ctx.ArgString(i+1), 64)
+			fromLat, err2 = strconv.ParseFloat(ctx.ArgString(i+2), 64)
+			if err1 != nil || err2 != nil {
+				return ctx.WriteError(ErrNotFloat)
+			}
+			hasFromMember = false
+			i += 3
+		case "BYRADIUS":
+			if i+2 >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			var err error
+			radius, err = strconv.ParseFloat(ctx.ArgString(i+1), 64)
+			if err != nil {
+				return ctx.WriteError(ErrNotFloat)
+			}
+			unit = strings.ToLower(ctx.ArgString(i + 2))
+			i += 3
+		case "BYBOX":
+			if i+4 >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			var err error
+			radius, err = strconv.ParseFloat(ctx.ArgString(i+1), 64)
+			if err != nil {
+				return ctx.WriteError(ErrNotFloat)
+			}
+			unit = strings.ToLower(ctx.ArgString(i + 3))
+			i += 5
+		case "ASC", "DESC", "COUNT", "STOREDIST":
+			i++
+		default:
+			i++
+		}
+	}
+
+	geo := getGeo(ctx, srcKey)
+	if geo == nil {
+		ctx.Store.Delete(destKey)
+		return ctx.WriteInteger(0)
+	}
+
+	if hasFromMember {
+		centerPoint, exists := geo.Get(fromMember)
+		if !exists {
+			ctx.Store.Delete(destKey)
+			return ctx.WriteInteger(0)
+		}
+		fromLon = centerPoint.Lon
+		fromLat = centerPoint.Lat
+	}
+
+	switch unit {
+	case "mi":
+		radius = radius / 0.621371
+	case "ft":
+		radius = radius / 3280.84
+	case "m":
+		radius = radius / 1000
+	}
+
+	destGeo := getOrCreateGeo(ctx, destKey)
+	if destGeo == nil {
+		return ctx.WriteError(store.ErrWrongType)
+	}
+
+	count := 0
+	for member, point := range geo.Points {
+		dist := store.Haversine(fromLon, fromLat, point.Lon, point.Lat)
+		if dist <= radius {
+			destGeo.Add(member, point.Lon, point.Lat)
+			count++
+		}
+	}
+
+	if count == 0 {
+		ctx.Store.Delete(destKey)
+	}
+
+	return ctx.WriteInteger(int64(count))
 }

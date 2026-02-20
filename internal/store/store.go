@@ -32,12 +32,15 @@ type Store struct {
 	namespaceMgr *NamespaceManager
 	pubsub       *PubSub
 	mu           sync.RWMutex
+	versions     map[string]int64
+	versionMu    sync.RWMutex
 }
 
 func NewStore() *Store {
 	s := &Store{
 		tagIndex: NewTagIndex(),
 		pubsub:   NewPubSub(),
+		versions: make(map[string]int64),
 	}
 	for i := 0; i < NumShards; i++ {
 		s.shards[i] = NewShard()
@@ -50,11 +53,24 @@ func NewStoreWithNamespaces() *Store {
 		tagIndex:     NewTagIndex(),
 		namespaceMgr: NewNamespaceManager(),
 		pubsub:       NewPubSub(),
+		versions:     make(map[string]int64),
 	}
 	for i := 0; i < NumShards; i++ {
 		s.shards[i] = NewShard()
 	}
 	return s
+}
+
+func (s *Store) GetVersion(key string) int64 {
+	s.versionMu.RLock()
+	defer s.versionMu.RUnlock()
+	return s.versions[key]
+}
+
+func (s *Store) IncrementVersion(key string) {
+	s.versionMu.Lock()
+	defer s.versionMu.Unlock()
+	s.versions[key]++
 }
 
 func (s *Store) shardIndex(key string) uint32 {
@@ -118,6 +134,7 @@ func (s *Store) Set(key string, value Value, opts SetOptions) error {
 	}
 
 	shard.Set(key, entry)
+	s.IncrementVersion(key)
 	return nil
 }
 
@@ -125,6 +142,7 @@ func (s *Store) SetEntry(key string, entry *Entry) {
 	idx := s.shardIndex(key)
 	shard := s.shards[idx]
 	shard.Set(key, entry)
+	s.IncrementVersion(key)
 }
 
 func (s *Store) Delete(key string) bool {
@@ -138,6 +156,9 @@ func (s *Store) Delete(key string) bool {
 
 	s.tagIndex.RemoveKey(key, entry.Tags)
 	_, deleted := shard.Delete(key)
+	if deleted {
+		s.IncrementVersion(key)
+	}
 	return deleted
 }
 

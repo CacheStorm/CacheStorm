@@ -205,3 +205,132 @@ func (v *SortedSetValue) Add(member string, score float64) bool {
 func (v *SortedSetValue) Card() int {
 	return len(v.Members)
 }
+
+func (v *SortedSetValue) LexCount(min, max string) int {
+	count := 0
+	for member := range v.Members {
+		if lexCompare(member, min, max) {
+			count++
+		}
+	}
+	return count
+}
+
+func (v *SortedSetValue) RangeByLex(min, max string, offset, count int, reverse bool) []string {
+	entries := make(sortedEntries, 0, len(v.Members))
+	for member, score := range v.Members {
+		entries = append(entries, SortedEntry{Member: member, Score: score})
+	}
+	sort.Sort(entries)
+
+	var result []string
+	for _, e := range entries {
+		if lexCompare(e.Member, min, max) {
+			result = append(result, e.Member)
+		}
+	}
+
+	if reverse {
+		for i, j := 0, len(result)-1; i < j; i, j = i+1, j-1 {
+			result[i], result[j] = result[j], result[i]
+		}
+	}
+
+	if offset < 0 {
+		offset = 0
+	}
+	if offset >= len(result) {
+		return nil
+	}
+	if count <= 0 {
+		return result[offset:]
+	}
+	end := offset + count
+	if end > len(result) {
+		end = len(result)
+	}
+	return result[offset:end]
+}
+
+func (v *SortedSetValue) RemoveRangeByLex(min, max string) int {
+	removed := 0
+	for member := range v.Members {
+		if lexCompare(member, min, max) {
+			delete(v.Members, member)
+			removed++
+		}
+	}
+	return removed
+}
+
+func lexCompare(member, min, max string) bool {
+	minInclusive := true
+	maxInclusive := true
+	minVal := min
+	maxVal := max
+
+	if len(min) > 0 {
+		if min[0] == '[' {
+			minInclusive = true
+			minVal = min[1:]
+		} else if min[0] == '(' {
+			minInclusive = false
+			minVal = min[1:]
+		} else if min == "-" {
+			minVal = ""
+			minInclusive = true
+		} else if min == "+" {
+			return false
+		}
+	}
+
+	if len(max) > 0 {
+		if max[0] == '[' {
+			maxInclusive = true
+			maxVal = max[1:]
+		} else if max[0] == '(' {
+			maxInclusive = false
+			maxVal = max[1:]
+		} else if max == "+" {
+			maxVal = string([]byte{0xFF})
+			maxInclusive = true
+		} else if max == "-" {
+			return false
+		}
+	}
+
+	if minVal != "" {
+		if minInclusive {
+			if member < minVal {
+				return false
+			}
+		} else {
+			if member <= minVal {
+				return false
+			}
+		}
+	}
+
+	if maxVal != "" && maxVal != string([]byte{0xFF}) {
+		if maxInclusive {
+			if member > maxVal {
+				return false
+			}
+		} else {
+			if member >= maxVal {
+				return false
+			}
+		}
+	}
+
+	return true
+}
+
+func (v *SortedSetValue) GetAllEntries() []SortedEntry {
+	entries := make(sortedEntries, 0, len(v.Members))
+	for member, score := range v.Members {
+		entries = append(entries, SortedEntry{Member: member, Score: score})
+	}
+	sort.Sort(entries)
+	return entries
+}

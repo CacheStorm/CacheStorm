@@ -3,6 +3,7 @@ package command
 import (
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
@@ -587,27 +588,43 @@ func cmdBLPOP(ctx *Context) error {
 		return ctx.WriteError(ErrNotInteger)
 	}
 
-	_ = timeout
+	deadline := time.Now().Add(time.Duration(timeout) * time.Second)
 
-	for _, key := range keys {
-		list, err := getList(ctx, key)
-		if err != nil {
-			return ctx.WriteError(err)
-		}
-		if list != nil && len(list.Elements) > 0 {
-			value := list.Elements[0]
-			list.Elements = list.Elements[1:]
-			if len(list.Elements) == 0 {
-				ctx.Store.Delete(key)
+	for {
+		for _, key := range keys {
+			list, err := getList(ctx, key)
+			if err != nil {
+				return ctx.WriteError(err)
 			}
-			return ctx.WriteArray([]*resp.Value{
-				resp.BulkString(key),
-				resp.BulkBytes(value),
-			})
+			if list != nil && len(list.Elements) > 0 {
+				list.Lock()
+				if len(list.Elements) > 0 {
+					value := list.Elements[0]
+					list.Elements = list.Elements[1:]
+					isEmpty := len(list.Elements) == 0
+					list.Unlock()
+					if isEmpty {
+						ctx.Store.Delete(key)
+					}
+					return ctx.WriteArray([]*resp.Value{
+						resp.BulkString(key),
+						resp.BulkBytes(value),
+					})
+				}
+				list.Unlock()
+			}
 		}
-	}
 
-	return ctx.WriteNull()
+		if timeout == 0 {
+			return ctx.WriteNull()
+		}
+
+		if time.Now().After(deadline) {
+			return ctx.WriteNull()
+		}
+
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func cmdBRPOP(ctx *Context) error {
@@ -627,28 +644,44 @@ func cmdBRPOP(ctx *Context) error {
 		return ctx.WriteError(ErrNotInteger)
 	}
 
-	_ = timeout
+	deadline := time.Now().Add(time.Duration(timeout) * time.Second)
 
-	for _, key := range keys {
-		list, err := getList(ctx, key)
-		if err != nil {
-			return ctx.WriteError(err)
-		}
-		if list != nil && len(list.Elements) > 0 {
-			idx := len(list.Elements) - 1
-			value := list.Elements[idx]
-			list.Elements = list.Elements[:idx]
-			if len(list.Elements) == 0 {
-				ctx.Store.Delete(key)
+	for {
+		for _, key := range keys {
+			list, err := getList(ctx, key)
+			if err != nil {
+				return ctx.WriteError(err)
 			}
-			return ctx.WriteArray([]*resp.Value{
-				resp.BulkString(key),
-				resp.BulkBytes(value),
-			})
+			if list != nil && len(list.Elements) > 0 {
+				list.Lock()
+				if len(list.Elements) > 0 {
+					idx := len(list.Elements) - 1
+					value := list.Elements[idx]
+					list.Elements = list.Elements[:idx]
+					isEmpty := len(list.Elements) == 0
+					list.Unlock()
+					if isEmpty {
+						ctx.Store.Delete(key)
+					}
+					return ctx.WriteArray([]*resp.Value{
+						resp.BulkString(key),
+						resp.BulkBytes(value),
+					})
+				}
+				list.Unlock()
+			}
 		}
-	}
 
-	return ctx.WriteNull()
+		if timeout == 0 {
+			return ctx.WriteNull()
+		}
+
+		if time.Now().After(deadline) {
+			return ctx.WriteNull()
+		}
+
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func cmdBRPOPLPUSH(ctx *Context) error {

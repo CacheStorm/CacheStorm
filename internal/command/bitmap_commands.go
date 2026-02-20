@@ -1,8 +1,11 @@
 package command
 
 import (
+	"encoding/binary"
 	"strconv"
+	"strings"
 
+	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
 )
 
@@ -336,5 +339,231 @@ func cmdBITOP(ctx *Context) error {
 }
 
 func cmdBITFIELD(ctx *Context) error {
-	return ctx.WriteError(ErrUnknownCommand)
+	if ctx.ArgCount() < 1 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	key := ctx.ArgString(0)
+	bm := getOrCreateBitmap(ctx, key)
+	if bm == nil {
+		return ctx.WriteError(store.ErrWrongType)
+	}
+
+	results := make([]*resp.Value, 0)
+	overflow := "WRAP"
+
+	i := 1
+	for i < ctx.ArgCount() {
+		op := strings.ToUpper(ctx.ArgString(i))
+
+		switch op {
+		case "GET":
+			if i+2 >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			encoding := ctx.ArgString(i + 1)
+			offset, err := strconv.ParseInt(ctx.ArgString(i+2), 10, 64)
+			if err != nil {
+				return ctx.WriteError(ErrNotInteger)
+			}
+
+			val := bitfieldGet(bm.Data, encoding, offset)
+			results = append(results, resp.IntegerValue(val))
+			i += 3
+
+		case "SET":
+			if i+3 >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			encoding := ctx.ArgString(i + 1)
+			offset, err := strconv.ParseInt(ctx.ArgString(i+2), 10, 64)
+			if err != nil {
+				return ctx.WriteError(ErrNotInteger)
+			}
+			value, err := strconv.ParseInt(ctx.ArgString(i+3), 10, 64)
+			if err != nil {
+				return ctx.WriteError(ErrNotInteger)
+			}
+
+			oldVal := bitfieldSet(bm, encoding, offset, value)
+			results = append(results, resp.IntegerValue(oldVal))
+			i += 4
+
+		case "INCRBY":
+			if i+3 >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			encoding := ctx.ArgString(i + 1)
+			offset, err := strconv.ParseInt(ctx.ArgString(i+2), 10, 64)
+			if err != nil {
+				return ctx.WriteError(ErrNotInteger)
+			}
+			increment, err := strconv.ParseInt(ctx.ArgString(i+3), 10, 64)
+			if err != nil {
+				return ctx.WriteError(ErrNotInteger)
+			}
+
+			newVal := bitfieldIncr(bm, encoding, offset, increment, overflow)
+			results = append(results, resp.IntegerValue(newVal))
+			i += 4
+
+		case "OVERFLOW":
+			if i+1 >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			overflow = strings.ToUpper(ctx.ArgString(i + 1))
+			i += 2
+
+		default:
+			return ctx.WriteError(ErrSyntaxError)
+		}
+	}
+
+	return ctx.WriteArray(results)
 }
+
+func bitfieldGet(data []byte, encoding string, offset int64) int64 {
+	bits := parseEncoding(encoding)
+	if bits == 0 {
+		return 0
+	}
+
+	byteOffset := int(offset / 8)
+	bitOffset := int(offset % 8)
+
+	if byteOffset >= len(data) {
+		return 0
+	}
+
+	var result int64
+	remaining := bits
+	currentByte := byteOffset
+	currentBit := bitOffset
+
+	for remaining > 0 && currentByte < len(data) {
+		bitsToRead := 8 - currentBit
+		if bitsToRead > remaining {
+			bitsToRead = remaining
+		}
+
+		mask := byte((1 << bitsToRead) - 1)
+		bitsRead := (data[currentByte] >> (8 - currentBit - bitsToRead)) & mask
+		result = (result << bitsToRead) | int64(bitsRead)
+
+		remaining -= bitsToRead
+		currentBit += bitsToRead
+		if currentBit >= 8 {
+			currentBit = 0
+			currentByte++
+		}
+	}
+
+	if strings.HasPrefix(encoding, "i") && bits > 0 {
+		signBit := int64(1 << (bits - 1))
+		if result&signBit != 0 {
+			result |= ^((1 << bits) - 1)
+		}
+	}
+
+	return result
+}
+
+func bitfieldSet(bm *BitmapValue, encoding string, offset int64, value int64) int64 {
+	bits := parseEncoding(encoding)
+	if bits == 0 {
+		return 0
+	}
+
+	byteOffset := int(offset / 8)
+	bitOffset := int(offset % 8)
+
+	totalBytes := byteOffset + (bits+7)/8 + 1
+	if totalBytes > len(bm.Data) {
+		newData := make([]byte, totalBytes)
+		copy(newData, bm.Data)
+		bm.Data = newData
+	}
+
+	oldValue := bitfieldGet(bm.Data, encoding, offset)
+
+	mask := int64((1 << bits) - 1)
+	valueToSet := value & mask
+
+	remaining := bits
+	currentByte := byteOffset
+	currentBit := bitOffset
+
+	for remaining > 0 {
+		bitsToWrite := 8 - currentBit
+		if bitsToWrite > remaining {
+			bitsToWrite = remaining
+		}
+
+		shift := remaining - bitsToWrite
+		bitsValue := byte((valueToSet >> shift) & ((1 << bitsToWrite) - 1))
+		clearMask := ^byte(((1 << bitsToWrite) - 1) << (8 - currentBit - bitsToWrite))
+		bm.Data[currentByte] = (bm.Data[currentByte] & clearMask) | (bitsValue << (8 - currentBit - bitsToWrite))
+
+		remaining -= bitsToWrite
+		currentBit += bitsToWrite
+		if currentBit >= 8 {
+			currentBit = 0
+			currentByte++
+		}
+	}
+
+	return oldValue
+}
+
+func bitfieldIncr(bm *BitmapValue, encoding string, offset int64, increment int64, overflow string) int64 {
+	current := bitfieldGet(bm.Data, encoding, offset)
+	bits := parseEncoding(encoding)
+	if bits == 0 {
+		return 0
+	}
+
+	maxVal := int64(1<<bits - 1)
+	minVal := int64(0)
+
+	if strings.HasPrefix(encoding, "i") {
+		minVal = -(1 << (bits - 1))
+		maxVal = (1 << (bits - 1)) - 1
+	}
+
+	newValue := current + increment
+
+	switch overflow {
+	case "SAT":
+		if newValue > maxVal {
+			newValue = maxVal
+		} else if newValue < minVal {
+			newValue = minVal
+		}
+	case "FAIL":
+		if newValue > maxVal || newValue < minVal {
+			return current
+		}
+	default:
+		newValue = newValue & ((1 << bits) - 1)
+	}
+
+	bitfieldSet(bm, encoding, offset, newValue)
+	return newValue
+}
+
+func parseEncoding(encoding string) int {
+	switch strings.ToLower(encoding) {
+	case "i8", "u8":
+		return 8
+	case "i16", "u16":
+		return 16
+	case "i32", "u32":
+		return 32
+	case "i64", "u64":
+		return 64
+	default:
+		return 0
+	}
+}
+
+var _ = binary.BigEndian
