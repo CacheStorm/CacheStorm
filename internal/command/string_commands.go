@@ -26,6 +26,9 @@ func RegisterStringCommands(router *Router) {
 	router.Register(&CommandDef{Name: "GETRANGE", Handler: cmdGETRANGE})
 	router.Register(&CommandDef{Name: "SETRANGE", Handler: cmdSETRANGE})
 	router.Register(&CommandDef{Name: "SETNX", Handler: cmdSETNX})
+	router.Register(&CommandDef{Name: "SETEX", Handler: cmdSETEX})
+	router.Register(&CommandDef{Name: "PSETEX", Handler: cmdPSETEX})
+	router.Register(&CommandDef{Name: "MSETNX", Handler: cmdMSETNX})
 	router.Register(&CommandDef{Name: "GETSET", Handler: cmdGETSET})
 	router.Register(&CommandDef{Name: "GETDEL", Handler: cmdGETDEL})
 	router.Register(&CommandDef{Name: "GETEX", Handler: cmdGETEX})
@@ -43,6 +46,7 @@ func cmdSET(ctx *Context) error {
 
 	opts := store.SetOptions{}
 	args := ctx.Args[2:]
+	getOldValue := false
 
 	for i := 0; i < len(args); i++ {
 		arg := string(args[i])
@@ -94,6 +98,7 @@ func cmdSET(ctx *Context) error {
 		case "KEEPTTL":
 			opts.KeepTTL = true
 		case "GET":
+			getOldValue = true
 		default:
 			return ctx.WriteError(ErrSyntaxError)
 		}
@@ -101,6 +106,30 @@ func cmdSET(ctx *Context) error {
 
 	if opts.NX && opts.XX {
 		return ctx.WriteError(ErrSyntaxError)
+	}
+
+	if getOldValue {
+		entry, exists := ctx.Store.Get(key)
+		if exists {
+			strVal, ok := entry.Value.(*store.StringValue)
+			if !ok {
+				return ctx.WriteError(store.ErrWrongType)
+			}
+			oldValue := make([]byte, len(strVal.Data))
+			copy(oldValue, strVal.Data)
+
+			err := ctx.Store.Set(key, &store.StringValue{Data: value}, opts)
+			if err != nil {
+				return ctx.WriteError(err)
+			}
+			return ctx.WriteBulkBytes(oldValue)
+		}
+
+		err := ctx.Store.Set(key, &store.StringValue{Data: value}, opts)
+		if err != nil {
+			return ctx.WriteError(err)
+		}
+		return ctx.WriteNullBulkString()
 	}
 
 	err := ctx.Store.Set(key, &store.StringValue{Data: value}, opts)
@@ -411,6 +440,67 @@ func cmdSETNX(ctx *Context) error {
 	return ctx.WriteInteger(1)
 }
 
+func cmdSETEX(ctx *Context) error {
+	if ctx.ArgCount() != 3 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	key := ctx.ArgString(0)
+	sec, err := strconv.ParseInt(ctx.ArgString(1), 10, 64)
+	if err != nil {
+		return ctx.WriteError(ErrNotInteger)
+	}
+	if sec <= 0 {
+		return ctx.WriteError(ErrInvalidArg)
+	}
+	value := ctx.Arg(2)
+
+	ctx.Store.Set(key, &store.StringValue{Data: value}, store.SetOptions{TTL: time.Duration(sec) * time.Second})
+	return ctx.WriteOK()
+}
+
+func cmdPSETEX(ctx *Context) error {
+	if ctx.ArgCount() != 3 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	key := ctx.ArgString(0)
+	ms, err := strconv.ParseInt(ctx.ArgString(1), 10, 64)
+	if err != nil {
+		return ctx.WriteError(ErrNotInteger)
+	}
+	if ms <= 0 {
+		return ctx.WriteError(ErrInvalidArg)
+	}
+	value := ctx.Arg(2)
+
+	ctx.Store.Set(key, &store.StringValue{Data: value}, store.SetOptions{TTL: time.Duration(ms) * time.Millisecond})
+	return ctx.WriteOK()
+}
+
+func cmdMSETNX(ctx *Context) error {
+	if ctx.ArgCount() < 2 || ctx.ArgCount()%2 != 0 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	keys := make([]string, 0, ctx.ArgCount()/2)
+	for i := 0; i < ctx.ArgCount(); i += 2 {
+		key := ctx.ArgString(i)
+		if ctx.Store.Exists(key) {
+			return ctx.WriteInteger(0)
+		}
+		keys = append(keys, key)
+	}
+
+	for i := 0; i < ctx.ArgCount(); i += 2 {
+		key := ctx.ArgString(i)
+		value := ctx.Arg(i + 1)
+		ctx.Store.Set(key, &store.StringValue{Data: value}, store.SetOptions{})
+	}
+
+	return ctx.WriteInteger(1)
+}
+
 func cmdGETSET(ctx *Context) error {
 	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(ErrWrongArgCount)
@@ -574,10 +664,45 @@ func cmdLCS(ctx *Context) error {
 	key1 := ctx.ArgString(0)
 	key2 := ctx.ArgString(1)
 
+	idx := false
+	lenOnly := false
+	minMatchLen := 1
+	withMatchLen := false
+
+	for i := 2; i < ctx.ArgCount(); i++ {
+		arg := strings.ToUpper(ctx.ArgString(i))
+		switch arg {
+		case "IDX":
+			idx = true
+		case "LEN":
+			lenOnly = true
+		case "MINMATCHLEN":
+			i++
+			if i >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			var err error
+			minMatchLen, err = strconv.Atoi(ctx.ArgString(i))
+			if err != nil {
+				return ctx.WriteError(ErrNotInteger)
+			}
+			if minMatchLen < 1 {
+				minMatchLen = 1
+			}
+		case "WITHMATCHLEN":
+			withMatchLen = true
+		default:
+			return ctx.WriteError(ErrSyntaxError)
+		}
+	}
+
 	entry1, exists1 := ctx.Store.Get(key1)
 	entry2, exists2 := ctx.Store.Get(key2)
 
 	if !exists1 || !exists2 {
+		if lenOnly {
+			return ctx.WriteInteger(0)
+		}
 		return ctx.WriteBulkString("")
 	}
 
@@ -592,6 +717,9 @@ func cmdLCS(ctx *Context) error {
 	s2 := string(strVal2.Data)
 
 	if len(s1) == 0 || len(s2) == 0 {
+		if lenOnly {
+			return ctx.WriteInteger(0)
+		}
 		return ctx.WriteBulkString("")
 	}
 
@@ -615,13 +743,48 @@ func cmdLCS(ctx *Context) error {
 		}
 	}
 
-	result := make([]byte, 0, dp[m][n])
+	lcsLen := dp[m][n]
+
+	if lenOnly {
+		return ctx.WriteInteger(int64(lcsLen))
+	}
+
+	if !idx {
+		result := make([]byte, 0, lcsLen)
+		i, j := m, n
+		for i > 0 && j > 0 {
+			if s1[i-1] == s2[j-1] {
+				result = append([]byte{s1[i-1]}, result...)
+				i--
+				j--
+			} else if dp[i-1][j] > dp[i][j-1] {
+				i--
+			} else {
+				j--
+			}
+		}
+		return ctx.WriteBulkString(string(result))
+	}
+
+	type Match struct {
+		A1, A2 int
+		B1, B2 int
+		Len    int
+	}
+	matches := make([]Match, 0)
+
 	i, j := m, n
 	for i > 0 && j > 0 {
 		if s1[i-1] == s2[j-1] {
-			result = append([]byte{s1[i-1]}, result...)
-			i--
-			j--
+			endI, endJ := i, j
+			for i > 0 && j > 0 && s1[i-1] == s2[j-1] {
+				i--
+				j--
+			}
+			matchLen := endI - i
+			if matchLen >= minMatchLen {
+				matches = append([]Match{{A1: i, A2: endI - 1, B1: j, B2: endJ - 1, Len: matchLen}}, matches...)
+			}
 		} else if dp[i-1][j] > dp[i][j-1] {
 			i--
 		} else {
@@ -629,5 +792,28 @@ func cmdLCS(ctx *Context) error {
 		}
 	}
 
-	return ctx.WriteBulkString(string(result))
+	result := make([]*resp.Value, 0, len(matches)*2+2)
+	result = append(result, resp.BulkString("matches"))
+	matchArray := make([]*resp.Value, 0, len(matches))
+	for _, match := range matches {
+		matchEntry := []*resp.Value{
+			resp.ArrayValue([]*resp.Value{
+				resp.IntegerValue(int64(match.A1)),
+				resp.IntegerValue(int64(match.A2)),
+			}),
+			resp.ArrayValue([]*resp.Value{
+				resp.IntegerValue(int64(match.B1)),
+				resp.IntegerValue(int64(match.B2)),
+			}),
+		}
+		if withMatchLen {
+			matchEntry = append(matchEntry, resp.IntegerValue(int64(match.Len)))
+		}
+		matchArray = append(matchArray, resp.ArrayValue(matchEntry))
+	}
+	result = append(result, resp.ArrayValue(matchArray))
+	result = append(result, resp.BulkString("len"))
+	result = append(result, resp.IntegerValue(int64(lcsLen)))
+
+	return ctx.WriteArray(result)
 }

@@ -82,6 +82,61 @@ func cmdZADD(ctx *Context) error {
 	}
 
 	key := ctx.ArgString(0)
+
+	nx := false
+	xx := false
+	ch := false
+	incr := false
+	gt := false
+	lt := false
+	i := 1
+
+	for i < ctx.ArgCount() {
+		arg := strings.ToUpper(ctx.ArgString(i))
+		switch arg {
+		case "NX":
+			nx = true
+			i++
+		case "XX":
+			xx = true
+			i++
+		case "CH":
+			ch = true
+			i++
+		case "INCR":
+			incr = true
+			i++
+		case "GT":
+			gt = true
+			i++
+		case "LT":
+			lt = true
+			i++
+		default:
+			break
+		}
+		if arg == "NX" || arg == "XX" || arg == "CH" || arg == "INCR" || arg == "GT" || arg == "LT" {
+			continue
+		}
+		break
+	}
+
+	if nx && xx {
+		return ctx.WriteError(ErrSyntaxError)
+	}
+	if (gt && lt) || (incr && (gt || lt)) {
+		return ctx.WriteError(ErrSyntaxError)
+	}
+
+	scoreMemberCount := ctx.ArgCount() - i
+	if scoreMemberCount < 2 || scoreMemberCount%2 != 0 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	if incr && scoreMemberCount > 2 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
 	zset, err := getOrCreateSortedSet(ctx, key)
 	if err != nil {
 		return ctx.WriteError(err)
@@ -90,40 +145,73 @@ func cmdZADD(ctx *Context) error {
 	zset.Lock()
 	defer zset.Unlock()
 
+	if xx && len(zset.Members) == 0 {
+		if incr {
+			return ctx.WriteNullBulkString()
+		}
+		return ctx.WriteInteger(0)
+	}
+
 	added := 0
-	i := 1
+	changed := 0
 
 	for i < ctx.ArgCount() {
-		arg := strings.ToUpper(ctx.ArgString(i))
-
-		switch arg {
-		case "NX", "XX", "CH", "INCR":
-			i++
-			continue
-		case "GT", "LT":
-			i++
-			continue
-		}
-
-		if i+1 >= ctx.ArgCount() {
-			break
-		}
-
 		score, err := strconv.ParseFloat(ctx.ArgString(i), 64)
 		if err != nil {
 			return ctx.WriteError(ErrNotInteger)
 		}
-
 		member := ctx.ArgString(i + 1)
 
-		if _, exists := zset.Members[member]; !exists {
-			added++
+		currentScore, exists := zset.Members[member]
+
+		if nx && exists {
+			i += 2
+			continue
 		}
-		zset.Members[member] = score
+
+		if xx && !exists {
+			i += 2
+			continue
+		}
+
+		if incr {
+			if !exists {
+				if xx {
+					return ctx.WriteNullBulkString()
+				}
+				zset.Members[member] = score
+				return ctx.WriteBulkString(strconv.FormatFloat(score, 'f', -1, 64))
+			}
+			newScore := currentScore + score
+			zset.Members[member] = newScore
+			return ctx.WriteBulkString(strconv.FormatFloat(newScore, 'f', -1, 64))
+		}
+
+		shouldUpdate := false
+		if !exists {
+			shouldUpdate = true
+			added++
+		} else {
+			if gt && score > currentScore {
+				shouldUpdate = true
+			} else if lt && score < currentScore {
+				shouldUpdate = true
+			} else if !gt && !lt && score != currentScore {
+				shouldUpdate = true
+			}
+		}
+
+		if shouldUpdate {
+			zset.Members[member] = score
+			changed++
+		}
 
 		i += 2
 	}
 
+	if ch {
+		return ctx.WriteInteger(int64(changed))
+	}
 	return ctx.WriteInteger(int64(added))
 }
 
@@ -931,113 +1019,189 @@ func cmdZMSCORE(ctx *Context) error {
 }
 
 func cmdZUNIONSTORE(ctx *Context) error {
-	if ctx.ArgCount() < 3 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	destKey := ctx.ArgString(0)
-	numKeys, err := strconv.Atoi(ctx.ArgString(1))
-	if err != nil {
-		return ctx.WriteError(ErrNotInteger)
-	}
-
-	if ctx.ArgCount() < 2+numKeys {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	result := make(map[string]float64)
-	for i := 0; i < numKeys; i++ {
-		key := ctx.ArgString(2 + i)
-		zset, err := getSortedSet(ctx, key)
-		if err != nil {
-			return ctx.WriteError(err)
-		}
-		if zset == nil {
-			continue
-		}
-		for member, score := range zset.Members {
-			if existing, exists := result[member]; exists {
-				result[member] = existing + score
-			} else {
-				result[member] = score
-			}
-		}
-	}
-
-	if len(result) == 0 {
-		ctx.Store.Delete(destKey)
-		return ctx.WriteInteger(0)
-	}
-
-	destZset, err := getOrCreateSortedSet(ctx, destKey)
-	if err != nil {
-		return ctx.WriteError(err)
-	}
-
-	destZset.Members = result
-	return ctx.WriteInteger(int64(len(result)))
+	return zUnionInterStore(ctx, true, true)
 }
 
 func cmdZINTERSTORE(ctx *Context) error {
-	if ctx.ArgCount() < 3 {
+	return zUnionInterStore(ctx, false, true)
+}
+
+func zUnionInterStore(ctx *Context, isUnion bool, hasDestKey bool) error {
+	offset := 0
+	if hasDestKey {
+		offset = 1
+	}
+
+	if ctx.ArgCount() < 2+offset {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
-	destKey := ctx.ArgString(0)
-	numKeys, err := strconv.Atoi(ctx.ArgString(1))
+	var destKey string
+	if hasDestKey {
+		destKey = ctx.ArgString(0)
+	}
+
+	numKeys, err := strconv.Atoi(ctx.ArgString(offset))
 	if err != nil {
 		return ctx.WriteError(ErrNotInteger)
 	}
 
-	if ctx.ArgCount() < 2+numKeys {
+	if numKeys < 1 {
+		return ctx.WriteError(ErrSyntaxError)
+	}
+
+	if ctx.ArgCount() < 1+offset+numKeys {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
-	firstZset, err := getSortedSet(ctx, ctx.ArgString(2))
-	if err != nil {
-		return ctx.WriteError(err)
+	keys := make([]string, numKeys)
+	for i := 0; i < numKeys; i++ {
+		keys[i] = ctx.ArgString(1 + offset + i)
 	}
-	if firstZset == nil {
-		ctx.Store.Delete(destKey)
-		return ctx.WriteInteger(0)
+
+	weights := make([]float64, numKeys)
+	for i := range weights {
+		weights[i] = 1.0
+	}
+
+	aggregate := "SUM"
+
+	argIdx := 1 + offset + numKeys
+	for argIdx < ctx.ArgCount() {
+		arg := strings.ToUpper(ctx.ArgString(argIdx))
+		switch arg {
+		case "WEIGHTS":
+			argIdx++
+			if argIdx+numKeys > ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			for i := 0; i < numKeys; i++ {
+				w, err := strconv.ParseFloat(ctx.ArgString(argIdx), 64)
+				if err != nil {
+					return ctx.WriteError(ErrNotInteger)
+				}
+				weights[i] = w
+				argIdx++
+			}
+		case "AGGREGATE":
+			argIdx++
+			if argIdx >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			aggregate = strings.ToUpper(ctx.ArgString(argIdx))
+			if aggregate != "SUM" && aggregate != "MIN" && aggregate != "MAX" {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			argIdx++
+		default:
+			return ctx.WriteError(ErrSyntaxError)
+		}
 	}
 
 	result := make(map[string]float64)
-	for member, score := range firstZset.Members {
-		result[member] = score
-	}
 
-	for i := 1; i < numKeys; i++ {
-		key := ctx.ArgString(2 + i)
-		zset, err := getSortedSet(ctx, key)
+	if isUnion {
+		for i, key := range keys {
+			zset, err := getSortedSet(ctx, key)
+			if err != nil {
+				return ctx.WriteError(err)
+			}
+			if zset == nil {
+				continue
+			}
+			zset.RLock()
+			for member, score := range zset.Members {
+				weightedScore := score * weights[i]
+				if existing, exists := result[member]; exists {
+					switch aggregate {
+					case "SUM":
+						result[member] = existing + weightedScore
+					case "MIN":
+						if weightedScore < existing {
+							result[member] = weightedScore
+						}
+					case "MAX":
+						if weightedScore > existing {
+							result[member] = weightedScore
+						}
+					}
+				} else {
+					result[member] = weightedScore
+				}
+			}
+			zset.RUnlock()
+		}
+	} else {
+		firstZset, err := getSortedSet(ctx, keys[0])
 		if err != nil {
 			return ctx.WriteError(err)
 		}
-		if zset == nil {
+		if firstZset == nil {
+			if hasDestKey {
+				ctx.Store.Delete(destKey)
+			}
+			return ctx.WriteInteger(0)
+		}
+
+		firstZset.RLock()
+		for member, score := range firstZset.Members {
+			result[member] = score * weights[0]
+		}
+		firstZset.RUnlock()
+
+		for i := 1; i < numKeys; i++ {
+			zset, err := getSortedSet(ctx, keys[i])
+			if err != nil {
+				return ctx.WriteError(err)
+			}
+			if zset == nil {
+				if hasDestKey {
+					ctx.Store.Delete(destKey)
+				}
+				return ctx.WriteInteger(0)
+			}
+			zset.RLock()
+			for member := range result {
+				if score, exists := zset.Members[member]; exists {
+					weightedScore := score * weights[i]
+					switch aggregate {
+					case "SUM":
+						result[member] += weightedScore
+					case "MIN":
+						if weightedScore < result[member] {
+							result[member] = weightedScore
+						}
+					case "MAX":
+						if weightedScore > result[member] {
+							result[member] = weightedScore
+						}
+					}
+				} else {
+					delete(result, member)
+				}
+			}
+			zset.RUnlock()
+		}
+	}
+
+	if hasDestKey {
+		if len(result) == 0 {
 			ctx.Store.Delete(destKey)
 			return ctx.WriteInteger(0)
 		}
-		for member := range result {
-			if score, exists := zset.Members[member]; exists {
-				result[member] += score
-			} else {
-				delete(result, member)
-			}
+
+		destZset, err := getOrCreateSortedSet(ctx, destKey)
+		if err != nil {
+			return ctx.WriteError(err)
 		}
+
+		destZset.Lock()
+		destZset.Members = result
+		destZset.Unlock()
+		return ctx.WriteInteger(int64(len(result)))
 	}
 
-	if len(result) == 0 {
-		ctx.Store.Delete(destKey)
-		return ctx.WriteInteger(0)
-	}
-
-	destZset, err := getOrCreateSortedSet(ctx, destKey)
-	if err != nil {
-		return ctx.WriteError(err)
-	}
-
-	destZset.Members = result
-	return ctx.WriteInteger(int64(len(result)))
+	return nil
 }
 
 func cmdZDIFFSTORE(ctx *Context) error {
@@ -1225,69 +1389,14 @@ func cmdZDIFF(ctx *Context) error {
 }
 
 func cmdZUNION(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	numKeys, err := strconv.Atoi(ctx.ArgString(0))
-	if err != nil {
-		return ctx.WriteError(ErrNotInteger)
-	}
-
-	if ctx.ArgCount() < 1+numKeys {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	withScores := false
-	if ctx.ArgCount() > 1+numKeys && strings.ToUpper(ctx.ArgString(1+numKeys)) == "WITHSCORES" {
-		withScores = true
-	}
-
-	result := make(map[string]float64)
-	for i := 0; i < numKeys; i++ {
-		key := ctx.ArgString(1 + i)
-		zset, err := getSortedSet(ctx, key)
-		if err != nil {
-			return ctx.WriteError(err)
-		}
-		if zset == nil {
-			continue
-		}
-		zset.RLock()
-		for member, score := range zset.Members {
-			if existing, exists := result[member]; exists {
-				result[member] = existing + score
-			} else {
-				result[member] = score
-			}
-		}
-		zset.RUnlock()
-	}
-
-	if len(result) == 0 {
-		return ctx.WriteArray([]*resp.Value{})
-	}
-
-	entries := make([]store.SortedEntry, 0, len(result))
-	for member, score := range result {
-		entries = append(entries, store.SortedEntry{Member: member, Score: score})
-	}
-	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].Score < entries[j].Score || (entries[i].Score == entries[j].Score && entries[i].Member < entries[j].Member)
-	})
-
-	respEntries := make([]*resp.Value, 0, len(entries)*2)
-	for _, e := range entries {
-		respEntries = append(respEntries, resp.BulkString(e.Member))
-		if withScores {
-			respEntries = append(respEntries, resp.BulkString(strconv.FormatFloat(e.Score, 'f', -1, 64)))
-		}
-	}
-
-	return ctx.WriteArray(respEntries)
+	return zUnionInter(ctx, true)
 }
 
 func cmdZINTER(ctx *Context) error {
+	return zUnionInter(ctx, false)
+}
+
+func zUnionInter(ctx *Context, isUnion bool) error {
 	if ctx.ArgCount() < 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
@@ -1297,48 +1406,140 @@ func cmdZINTER(ctx *Context) error {
 		return ctx.WriteError(ErrNotInteger)
 	}
 
+	if numKeys < 1 {
+		return ctx.WriteError(ErrSyntaxError)
+	}
+
 	if ctx.ArgCount() < 1+numKeys {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
+	keys := make([]string, numKeys)
+	for i := 0; i < numKeys; i++ {
+		keys[i] = ctx.ArgString(1 + i)
+	}
+
+	weights := make([]float64, numKeys)
+	for i := range weights {
+		weights[i] = 1.0
+	}
+
+	aggregate := "SUM"
 	withScores := false
-	if ctx.ArgCount() > 1+numKeys && strings.ToUpper(ctx.ArgString(1+numKeys)) == "WITHSCORES" {
-		withScores = true
+
+	argIdx := 1 + numKeys
+	for argIdx < ctx.ArgCount() {
+		arg := strings.ToUpper(ctx.ArgString(argIdx))
+		switch arg {
+		case "WEIGHTS":
+			argIdx++
+			if argIdx+numKeys > ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			for i := 0; i < numKeys; i++ {
+				w, err := strconv.ParseFloat(ctx.ArgString(argIdx), 64)
+				if err != nil {
+					return ctx.WriteError(ErrNotInteger)
+				}
+				weights[i] = w
+				argIdx++
+			}
+		case "AGGREGATE":
+			argIdx++
+			if argIdx >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			aggregate = strings.ToUpper(ctx.ArgString(argIdx))
+			if aggregate != "SUM" && aggregate != "MIN" && aggregate != "MAX" {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			argIdx++
+		case "WITHSCORES":
+			withScores = true
+			argIdx++
+		default:
+			return ctx.WriteError(ErrSyntaxError)
+		}
 	}
 
-	firstZset, err := getSortedSet(ctx, ctx.ArgString(1))
-	if err != nil {
-		return ctx.WriteError(err)
-	}
-	if firstZset == nil {
-		return ctx.WriteArray([]*resp.Value{})
-	}
-
-	firstZset.RLock()
 	result := make(map[string]float64)
-	for member, score := range firstZset.Members {
-		result[member] = score
-	}
-	firstZset.RUnlock()
 
-	for i := 1; i < numKeys; i++ {
-		key := ctx.ArgString(1 + i)
-		zset, err := getSortedSet(ctx, key)
+	if isUnion {
+		for i, key := range keys {
+			zset, err := getSortedSet(ctx, key)
+			if err != nil {
+				return ctx.WriteError(err)
+			}
+			if zset == nil {
+				continue
+			}
+			zset.RLock()
+			for member, score := range zset.Members {
+				weightedScore := score * weights[i]
+				if existing, exists := result[member]; exists {
+					switch aggregate {
+					case "SUM":
+						result[member] = existing + weightedScore
+					case "MIN":
+						if weightedScore < existing {
+							result[member] = weightedScore
+						}
+					case "MAX":
+						if weightedScore > existing {
+							result[member] = weightedScore
+						}
+					}
+				} else {
+					result[member] = weightedScore
+				}
+			}
+			zset.RUnlock()
+		}
+	} else {
+		firstZset, err := getSortedSet(ctx, keys[0])
 		if err != nil {
 			return ctx.WriteError(err)
 		}
-		if zset == nil {
+		if firstZset == nil {
 			return ctx.WriteArray([]*resp.Value{})
 		}
-		zset.RLock()
-		for member := range result {
-			if score, exists := zset.Members[member]; exists {
-				result[member] += score
-			} else {
-				delete(result, member)
-			}
+
+		firstZset.RLock()
+		for member, score := range firstZset.Members {
+			result[member] = score * weights[0]
 		}
-		zset.RUnlock()
+		firstZset.RUnlock()
+
+		for i := 1; i < numKeys; i++ {
+			zset, err := getSortedSet(ctx, keys[i])
+			if err != nil {
+				return ctx.WriteError(err)
+			}
+			if zset == nil {
+				return ctx.WriteArray([]*resp.Value{})
+			}
+			zset.RLock()
+			for member := range result {
+				if score, exists := zset.Members[member]; exists {
+					weightedScore := score * weights[i]
+					switch aggregate {
+					case "SUM":
+						result[member] += weightedScore
+					case "MIN":
+						if weightedScore < result[member] {
+							result[member] = weightedScore
+						}
+					case "MAX":
+						if weightedScore > result[member] {
+							result[member] = weightedScore
+						}
+					}
+				} else {
+					delete(result, member)
+				}
+			}
+			zset.RUnlock()
+		}
 	}
 
 	if len(result) == 0 {

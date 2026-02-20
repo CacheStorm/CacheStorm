@@ -126,3 +126,33 @@ func EncodeGeohash(lon, lat float64) string {
 
 	return string(result)
 }
+
+func EncodeGeohashInt(lon, lat float64) uint64 {
+	var bits uint64
+	minLon, maxLon := -180.0, 180.0
+	minLat, maxLat := -90.0, 90.0
+
+	for i := 0; i < 52; i++ {
+		if i%2 == 0 {
+			mid := (minLon + maxLon) / 2
+			if lon >= mid {
+				bits = bits*2 + 1
+				minLon = mid
+			} else {
+				bits = bits * 2
+				maxLon = mid
+			}
+		} else {
+			mid := (minLat + maxLat) / 2
+			if lat >= mid {
+				bits = bits*2 + 1
+				minLat = mid
+			} else {
+				bits = bits * 2
+				maxLat = mid
+			}
+		}
+	}
+
+	return bits
+}

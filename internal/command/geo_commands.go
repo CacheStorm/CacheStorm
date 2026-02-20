@@ -136,8 +136,9 @@ func cmdGEODIST(ctx *Context) error {
 	}
 
 	switch unit {
+	case "m":
+		dist = dist * 1000
 	case "km":
-		dist = dist
 	case "mi":
 		dist = dist * 0.621371
 	case "ft":
@@ -227,30 +228,180 @@ func cmdGEORADIUS(ctx *Context) error {
 	}
 
 	unit := strings.ToLower(ctx.ArgString(4))
+	radiusKm := radius
 	switch unit {
 	case "km":
 	case "mi":
-		radius = radius / 0.621371
+		radiusKm = radius * 1.60934
 	case "ft":
-		radius = radius / 3280.84
-	default:
-		radius = radius / 1000
+		radiusKm = radius / 3280.84
+	case "m":
+		radiusKm = radius / 1000
+	}
+
+	withCoord := false
+	withDist := false
+	withHash := false
+	count := 0
+	sortOrder := ""
+	storeKey := ""
+	storeDistKey := ""
+
+	for i := 5; i < ctx.ArgCount(); i++ {
+		arg := strings.ToUpper(ctx.ArgString(i))
+		switch arg {
+		case "WITHCOORD":
+			withCoord = true
+		case "WITHDIST":
+			withDist = true
+		case "WITHHASH":
+			withHash = true
+		case "COUNT":
+			i++
+			if i >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			var err error
+			count, err = strconv.Atoi(ctx.ArgString(i))
+			if err != nil {
+				return ctx.WriteError(ErrNotInteger)
+			}
+		case "ASC":
+			sortOrder = "ASC"
+		case "DESC":
+			sortOrder = "DESC"
+		case "STORE":
+			i++
+			if i >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			storeKey = ctx.ArgString(i)
+		case "STOREDIST":
+			i++
+			if i >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			storeDistKey = ctx.ArgString(i)
+		}
 	}
 
 	geo := getGeo(ctx, key)
 	if geo == nil {
+		if storeKey != "" || storeDistKey != "" {
+			ctx.Store.Delete(storeKey)
+			ctx.Store.Delete(storeDistKey)
+			return ctx.WriteInteger(0)
+		}
 		return ctx.WriteArray([]*resp.Value{})
 	}
 
-	results := make([]*resp.Value, 0)
+	type result struct {
+		member string
+		dist   float64
+		point  store.GeoPoint
+		hash   uint64
+	}
+	results := make([]result, 0)
+
 	for member, point := range geo.Points {
 		dist := store.Haversine(lon, lat, point.Lon, point.Lat)
-		if dist <= radius {
-			results = append(results, resp.BulkString(member))
+		if dist <= radiusKm {
+			hash := store.EncodeGeohashInt(point.Lon, point.Lat)
+			results = append(results, result{member: member, dist: dist, point: point, hash: hash})
 		}
 	}
 
-	return ctx.WriteArray(results)
+	if sortOrder == "ASC" {
+		for i := 0; i < len(results)-1; i++ {
+			for j := i + 1; j < len(results); j++ {
+				if results[j].dist < results[i].dist {
+					results[i], results[j] = results[j], results[i]
+				}
+			}
+		}
+	} else if sortOrder == "DESC" {
+		for i := 0; i < len(results)-1; i++ {
+			for j := i + 1; j < len(results); j++ {
+				if results[j].dist > results[i].dist {
+					results[i], results[j] = results[j], results[i]
+				}
+			}
+		}
+	}
+
+	if count > 0 && count < len(results) {
+		results = results[:count]
+	}
+
+	if storeKey != "" {
+		if len(results) == 0 {
+			ctx.Store.Delete(storeKey)
+			return ctx.WriteInteger(0)
+		}
+		destGeo := store.NewGeoValue()
+		for _, r := range results {
+			destGeo.Add(r.member, r.point.Lon, r.point.Lat)
+		}
+		ctx.Store.Set(storeKey, destGeo, store.SetOptions{})
+		return ctx.WriteInteger(int64(len(results)))
+	}
+
+	if storeDistKey != "" {
+		if len(results) == 0 {
+			ctx.Store.Delete(storeDistKey)
+			return ctx.WriteInteger(0)
+		}
+		destZset := &store.SortedSetValue{Members: make(map[string]float64)}
+		for _, r := range results {
+			switch unit {
+			case "m":
+				destZset.Members[r.member] = r.dist * 1000
+			case "km":
+				destZset.Members[r.member] = r.dist
+			case "mi":
+				destZset.Members[r.member] = r.dist * 0.621371
+			case "ft":
+				destZset.Members[r.member] = r.dist * 3280.84
+			}
+		}
+		ctx.Store.Set(storeDistKey, destZset, store.SetOptions{})
+		return ctx.WriteInteger(int64(len(results)))
+	}
+
+	respResults := make([]*resp.Value, 0, len(results))
+	for _, r := range results {
+		if !withCoord && !withDist && !withHash {
+			respResults = append(respResults, resp.BulkString(r.member))
+		} else {
+			entry := []*resp.Value{resp.BulkString(r.member)}
+			if withDist {
+				var dist float64
+				switch unit {
+				case "m":
+					dist = r.dist * 1000
+				case "km":
+					dist = r.dist
+				case "mi":
+					dist = r.dist * 0.621371
+				case "ft":
+					dist = r.dist * 3280.84
+				}
+				entry = append(entry, resp.BulkString(strconv.FormatFloat(dist, 'f', -1, 64)))
+			}
+			if withHash {
+				entry = append(entry, resp.IntegerValue(int64(r.hash)))
+			}
+			if withCoord {
+				entry = append(entry, resp.ArrayValue([]*resp.Value{
+					resp.BulkString(strconv.FormatFloat(r.point.Lon, 'f', -1, 64)),
+					resp.BulkString(strconv.FormatFloat(r.point.Lat, 'f', -1, 64)),
+				}))
+			}
+			respResults = append(respResults, resp.ArrayValue(entry))
+		}
+	}
+
+	return ctx.WriteArray(respResults)
 }
 
 func cmdGEORADIUSBYMEMBER(ctx *Context) error {
@@ -266,18 +417,70 @@ func cmdGEORADIUSBYMEMBER(ctx *Context) error {
 	}
 
 	unit := strings.ToLower(ctx.ArgString(3))
+	radiusKm := radius
 	switch unit {
 	case "km":
 	case "mi":
-		radius = radius / 0.621371
+		radiusKm = radius * 1.60934
 	case "ft":
-		radius = radius / 3280.84
-	default:
-		radius = radius / 1000
+		radiusKm = radius / 3280.84
+	case "m":
+		radiusKm = radius / 1000
+	}
+
+	withCoord := false
+	withDist := false
+	withHash := false
+	count := 0
+	sortOrder := ""
+	storeKey := ""
+	storeDistKey := ""
+
+	for i := 4; i < ctx.ArgCount(); i++ {
+		arg := strings.ToUpper(ctx.ArgString(i))
+		switch arg {
+		case "WITHCOORD":
+			withCoord = true
+		case "WITHDIST":
+			withDist = true
+		case "WITHHASH":
+			withHash = true
+		case "COUNT":
+			i++
+			if i >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			var err error
+			count, err = strconv.Atoi(ctx.ArgString(i))
+			if err != nil {
+				return ctx.WriteError(ErrNotInteger)
+			}
+		case "ASC":
+			sortOrder = "ASC"
+		case "DESC":
+			sortOrder = "DESC"
+		case "STORE":
+			i++
+			if i >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			storeKey = ctx.ArgString(i)
+		case "STOREDIST":
+			i++
+			if i >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			storeDistKey = ctx.ArgString(i)
+		}
 	}
 
 	geo := getGeo(ctx, key)
 	if geo == nil {
+		if storeKey != "" || storeDistKey != "" {
+			ctx.Store.Delete(storeKey)
+			ctx.Store.Delete(storeDistKey)
+			return ctx.WriteInteger(0)
+		}
 		return ctx.WriteArray([]*resp.Value{})
 	}
 
@@ -286,15 +489,113 @@ func cmdGEORADIUSBYMEMBER(ctx *Context) error {
 		return ctx.WriteError(errors.New("ERR member not found"))
 	}
 
-	results := make([]*resp.Value, 0)
+	type result struct {
+		member string
+		dist   float64
+		point  store.GeoPoint
+		hash   uint64
+	}
+	results := make([]result, 0)
+
 	for m, point := range geo.Points {
 		dist := store.Haversine(centerPoint.Lon, centerPoint.Lat, point.Lon, point.Lat)
-		if dist <= radius {
-			results = append(results, resp.BulkString(m))
+		if dist <= radiusKm {
+			hash := store.EncodeGeohashInt(point.Lon, point.Lat)
+			results = append(results, result{member: m, dist: dist, point: point, hash: hash})
 		}
 	}
 
-	return ctx.WriteArray(results)
+	if sortOrder == "ASC" {
+		for i := 0; i < len(results)-1; i++ {
+			for j := i + 1; j < len(results); j++ {
+				if results[j].dist < results[i].dist {
+					results[i], results[j] = results[j], results[i]
+				}
+			}
+		}
+	} else if sortOrder == "DESC" {
+		for i := 0; i < len(results)-1; i++ {
+			for j := i + 1; j < len(results); j++ {
+				if results[j].dist > results[i].dist {
+					results[i], results[j] = results[j], results[i]
+				}
+			}
+		}
+	}
+
+	if count > 0 && count < len(results) {
+		results = results[:count]
+	}
+
+	if storeKey != "" {
+		if len(results) == 0 {
+			ctx.Store.Delete(storeKey)
+			return ctx.WriteInteger(0)
+		}
+		destGeo := store.NewGeoValue()
+		for _, r := range results {
+			destGeo.Add(r.member, r.point.Lon, r.point.Lat)
+		}
+		ctx.Store.Set(storeKey, destGeo, store.SetOptions{})
+		return ctx.WriteInteger(int64(len(results)))
+	}
+
+	if storeDistKey != "" {
+		if len(results) == 0 {
+			ctx.Store.Delete(storeDistKey)
+			return ctx.WriteInteger(0)
+		}
+		destZset := &store.SortedSetValue{Members: make(map[string]float64)}
+		for _, r := range results {
+			switch unit {
+			case "m":
+				destZset.Members[r.member] = r.dist * 1000
+			case "km":
+				destZset.Members[r.member] = r.dist
+			case "mi":
+				destZset.Members[r.member] = r.dist * 0.621371
+			case "ft":
+				destZset.Members[r.member] = r.dist * 3280.84
+			}
+		}
+		ctx.Store.Set(storeDistKey, destZset, store.SetOptions{})
+		return ctx.WriteInteger(int64(len(results)))
+	}
+
+	respResults := make([]*resp.Value, 0, len(results))
+	for _, r := range results {
+		if !withCoord && !withDist && !withHash {
+			respResults = append(respResults, resp.BulkString(r.member))
+		} else {
+			entry := []*resp.Value{resp.BulkString(r.member)}
+			if withDist {
+				var dist float64
+				switch unit {
+				case "m":
+					dist = r.dist * 1000
+				case "km":
+					dist = r.dist
+				case "mi":
+					dist = r.dist * 0.621371
+				case "ft":
+					dist = r.dist * 3280.84
+				}
+				entry = append(entry, resp.BulkString(strconv.FormatFloat(dist, 'f', -1, 64)))
+			}
+			if withHash {
+				entry = append(entry, resp.IntegerValue(int64(r.hash)))
+			}
+			if withCoord {
+				entry = append(entry, resp.ArrayValue([]*resp.Value{
+					resp.BulkString(strconv.FormatFloat(r.point.Lon, 'f', -1, 64)),
+					resp.BulkString(strconv.FormatFloat(r.point.Lat, 'f', -1, 64)),
+				}))
+			}
+			respResults = append(respResults, resp.ArrayValue(entry))
+		}
+	}
+
+	return ctx.WriteArray(respResults)
 }
 
 func cmdGEOSEARCH(ctx *Context) error {

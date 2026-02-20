@@ -230,15 +230,28 @@ func cmdXREVRANGE(ctx *Context) error {
 	end := ctx.ArgString(1)
 	start := ctx.ArgString(2)
 
-	_ = end
-	_ = start
+	count := int64(0)
+	for i := 3; i < ctx.ArgCount(); i++ {
+		arg := strings.ToUpper(ctx.ArgString(i))
+		if arg == "COUNT" {
+			i++
+			if i >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			var err error
+			count, err = strconv.ParseInt(ctx.ArgString(i), 10, 64)
+			if err != nil {
+				return ctx.WriteError(ErrNotInteger)
+			}
+		}
+	}
 
 	stream := getStream(ctx, key)
 	if stream == nil {
 		return ctx.WriteArray([]*resp.Value{})
 	}
 
-	entries := stream.GetRange("0-0", "+", 0)
+	entries := stream.GetRange(start, end, count)
 
 	results := make([]*resp.Value, 0, len(entries))
 	for i := len(entries) - 1; i >= 0; i-- {
