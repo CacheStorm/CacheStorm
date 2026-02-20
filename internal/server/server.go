@@ -54,6 +54,7 @@ func New(cfg *config.Config) (*Server, error) {
 	command.RegisterGeoCommands(s.router)
 	command.RegisterScriptCommands(s.router)
 	command.RegisterDebugCommands(s.router)
+	command.RegisterCacheCommands(s.router)
 
 	if cfg.HTTP.Enabled {
 		httpCfg := &HTTPConfig{
