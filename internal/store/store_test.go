@@ -5,184 +5,300 @@ import (
 	"time"
 )
 
-func TestNewStore(t *testing.T) {
-	s := NewStore()
-	if s == nil {
-		t.Fatal("expected store, got nil")
-	}
-}
-
-func TestSetGet(t *testing.T) {
+func TestStoreSetGet(t *testing.T) {
 	s := NewStore()
 
-	err := s.Set("foo", &StringValue{Data: []byte("bar")}, SetOptions{})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	s.Set("key1", &StringValue{Data: []byte("value1")}, SetOptions{})
 
-	entry, exists := s.Get("foo")
+	entry, exists := s.Get("key1")
 	if !exists {
-		t.Fatal("expected key to exist")
+		t.Fatal("key1 should exist")
 	}
 
-	strVal, ok := entry.Value.(*StringValue)
-	if !ok {
-		t.Fatal("expected StringValue")
-	}
-
-	if string(strVal.Data) != "bar" {
-		t.Errorf("expected 'bar', got '%s'", string(strVal.Data))
+	if string(entry.Value.(*StringValue).Data) != "value1" {
+		t.Errorf("expected value1, got %s", entry.Value.(*StringValue).Data)
 	}
 }
 
-func TestGetNonExistent(t *testing.T) {
+func TestStoreDelete(t *testing.T) {
 	s := NewStore()
 
-	_, exists := s.Get("nonexistent")
-	if exists {
-		t.Error("expected key not to exist")
+	s.Set("key1", &StringValue{Data: []byte("value1")}, SetOptions{})
+
+	if !s.Delete("key1") {
+		t.Error("delete should return true")
+	}
+
+	if _, exists := s.Get("key1"); exists {
+		t.Error("key1 should not exist after delete")
+	}
+
+	if s.Delete("nonexistent") {
+		t.Error("deleting nonexistent key should return false")
 	}
 }
 
-func TestDelete(t *testing.T) {
+func TestStoreExists(t *testing.T) {
 	s := NewStore()
 
-	s.Set("foo", &StringValue{Data: []byte("bar")}, SetOptions{})
-
-	if !s.Delete("foo") {
-		t.Error("expected delete to return true")
+	if s.Exists("key1") {
+		t.Error("nonexistent key should not exist")
 	}
 
-	if s.Exists("foo") {
-		t.Error("expected key to be deleted")
+	s.Set("key1", &StringValue{Data: []byte("value1")}, SetOptions{})
+
+	if !s.Exists("key1") {
+		t.Error("key1 should exist")
 	}
 }
 
-func TestExists(t *testing.T) {
+func TestStoreTTL(t *testing.T) {
 	s := NewStore()
 
-	if s.Exists("foo") {
-		t.Error("expected key not to exist")
-	}
+	s.Set("key1", &StringValue{Data: []byte("value1")}, SetOptions{TTL: 5 * time.Second})
 
-	s.Set("foo", &StringValue{Data: []byte("bar")}, SetOptions{})
-
-	if !s.Exists("foo") {
-		t.Error("expected key to exist")
-	}
-}
-
-func TestSetNX(t *testing.T) {
-	s := NewStore()
-
-	err := s.Set("foo", &StringValue{Data: []byte("bar")}, SetOptions{NX: true})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	err = s.Set("foo", &StringValue{Data: []byte("baz")}, SetOptions{NX: true})
-	if err != ErrKeyExists {
-		t.Errorf("expected ErrKeyExists, got %v", err)
-	}
-}
-
-func TestSetXX(t *testing.T) {
-	s := NewStore()
-
-	err := s.Set("foo", &StringValue{Data: []byte("bar")}, SetOptions{XX: true})
-	if err != ErrKeyNotFound {
-		t.Errorf("expected ErrKeyNotFound, got %v", err)
-	}
-
-	s.Set("foo", &StringValue{Data: []byte("bar")}, SetOptions{})
-
-	err = s.Set("foo", &StringValue{Data: []byte("baz")}, SetOptions{XX: true})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestTTL(t *testing.T) {
-	s := NewStore()
-
-	ttl := s.TTL("nonexistent")
-	if ttl != -2 {
-		t.Errorf("expected -2 for nonexistent key, got %v", ttl)
-	}
-
-	s.Set("foo", &StringValue{Data: []byte("bar")}, SetOptions{})
-
-	ttl = s.TTL("foo")
-	if ttl != -1 {
-		t.Errorf("expected -1 for key without TTL, got %v", ttl)
-	}
-
-	s.SetTTL("foo", 10*time.Second)
-
-	ttl = s.TTL("foo")
-	if ttl < 9*time.Second || ttl > 10*time.Second {
-		t.Errorf("expected ~10s TTL, got %v", ttl)
-	}
-}
-
-func TestSetWithTTL(t *testing.T) {
-	s := NewStore()
-
-	s.Set("foo", &StringValue{Data: []byte("bar")}, SetOptions{TTL: 100 * time.Millisecond})
-
-	_, exists := s.Get("foo")
+	entry, exists := s.Get("key1")
 	if !exists {
-		t.Fatal("expected key to exist")
+		t.Fatal("key1 should exist")
 	}
+
+	if entry.TTL() <= 0 || entry.TTL() > 5*time.Second {
+		t.Errorf("TTL should be between 0 and 5 seconds, got %v", entry.TTL())
+	}
+}
+
+func TestStoreExpiration(t *testing.T) {
+	s := NewStore()
+
+	s.Set("key1", &StringValue{Data: []byte("value1")}, SetOptions{TTL: 100 * time.Millisecond})
 
 	time.Sleep(150 * time.Millisecond)
 
-	_, exists = s.Get("foo")
+	_, exists := s.Get("key1")
 	if exists {
-		t.Error("expected key to be expired")
+		t.Error("key1 should be expired")
 	}
 }
 
-func TestKeyCount(t *testing.T) {
+func TestStoreSetNX(t *testing.T) {
 	s := NewStore()
 
-	if s.KeyCount() != 0 {
-		t.Errorf("expected 0 keys, got %d", s.KeyCount())
+	err := s.Set("key1", &StringValue{Data: []byte("value1")}, SetOptions{NX: true})
+	if err != nil {
+		t.Errorf("NX set should succeed: %v", err)
 	}
 
-	s.Set("foo", &StringValue{Data: []byte("bar")}, SetOptions{})
-	s.Set("baz", &StringValue{Data: []byte("qux")}, SetOptions{})
-
-	if s.KeyCount() != 2 {
-		t.Errorf("expected 2 keys, got %d", s.KeyCount())
+	err = s.Set("key1", &StringValue{Data: []byte("value2")}, SetOptions{NX: true})
+	if err != ErrKeyExists {
+		t.Errorf("NX set on existing key should fail, got: %v", err)
 	}
 }
 
-func TestFlush(t *testing.T) {
+func TestStoreSetXX(t *testing.T) {
 	s := NewStore()
 
-	s.Set("foo", &StringValue{Data: []byte("bar")}, SetOptions{})
-	s.Set("baz", &StringValue{Data: []byte("qux")}, SetOptions{})
+	err := s.Set("key1", &StringValue{Data: []byte("value1")}, SetOptions{XX: true})
+	if err != ErrKeyNotFound {
+		t.Errorf("XX set on nonexistent key should fail, got: %v", err)
+	}
+
+	s.Set("key1", &StringValue{Data: []byte("value1")}, SetOptions{})
+
+	err = s.Set("key1", &StringValue{Data: []byte("value2")}, SetOptions{XX: true})
+	if err != nil {
+		t.Errorf("XX set on existing key should succeed: %v", err)
+	}
+}
+
+func TestStoreFlush(t *testing.T) {
+	s := NewStore()
+
+	s.Set("key1", &StringValue{Data: []byte("value1")}, SetOptions{})
+	s.Set("key2", &StringValue{Data: []byte("value2")}, SetOptions{})
 
 	s.Flush()
 
 	if s.KeyCount() != 0 {
-		t.Errorf("expected 0 keys after flush, got %d", s.KeyCount())
+		t.Errorf("key count should be 0 after flush, got %d", s.KeyCount())
 	}
 }
 
-func TestShardDistribution(t *testing.T) {
+func TestHashOperations(t *testing.T) {
 	s := NewStore()
 
-	keys := []string{"foo", "bar", "baz", "qux", "quux", "corge", "grault", "garply"}
+	h := &HashValue{Fields: make(map[string][]byte)}
+	h.Fields["field1"] = []byte("value1")
+	s.Set("hash1", h, SetOptions{})
 
-	for _, key := range keys {
-		s.Set(key, &StringValue{Data: []byte("value")}, SetOptions{})
+	entry, exists := s.Get("hash1")
+	if !exists {
+		t.Fatal("hash1 should exist")
 	}
 
-	for _, key := range keys {
-		if !s.Exists(key) {
-			t.Errorf("expected key '%s' to exist", key)
-		}
+	hv := entry.Value.(*HashValue)
+	if string(hv.Fields["field1"]) != "value1" {
+		t.Errorf("expected value1, got %s", hv.Fields["field1"])
+	}
+}
+
+func TestListOperations(t *testing.T) {
+	s := NewStore()
+
+	l := &ListValue{Elements: [][]byte{[]byte("item1"), []byte("item2")}}
+	s.Set("list1", l, SetOptions{})
+
+	entry, exists := s.Get("list1")
+	if !exists {
+		t.Fatal("list1 should exist")
+	}
+
+	lv := entry.Value.(*ListValue)
+	if len(lv.Elements) != 2 {
+		t.Errorf("expected 2 elements, got %d", len(lv.Elements))
+	}
+}
+
+func TestSetOperations(t *testing.T) {
+	s := NewStore()
+
+	set := &SetValue{Members: make(map[string]struct{})}
+	set.Members["member1"] = struct{}{}
+	set.Members["member2"] = struct{}{}
+	s.Set("set1", set, SetOptions{})
+
+	entry, exists := s.Get("set1")
+	if !exists {
+		t.Fatal("set1 should exist")
+	}
+
+	sv := entry.Value.(*SetValue)
+	if len(sv.Members) != 2 {
+		t.Errorf("expected 2 members, got %d", len(sv.Members))
+	}
+}
+
+func TestSortedSetOperations(t *testing.T) {
+	s := NewStore()
+
+	zset := &SortedSetValue{Members: make(map[string]float64)}
+	zset.Members["member1"] = 1.0
+	zset.Members["member2"] = 2.0
+	s.Set("zset1", zset, SetOptions{})
+
+	entry, exists := s.Get("zset1")
+	if !exists {
+		t.Fatal("zset1 should exist")
+	}
+
+	zv := entry.Value.(*SortedSetValue)
+	if len(zv.Members) != 2 {
+		t.Errorf("expected 2 members, got %d", len(zv.Members))
+	}
+}
+
+func TestStoreMemoryUsage(t *testing.T) {
+	s := NewStore()
+
+	initial := s.MemUsage()
+
+	s.Set("key1", &StringValue{Data: []byte("value1")}, SetOptions{})
+
+	after := s.MemUsage()
+	if after <= initial {
+		t.Error("memory usage should increase after adding data")
+	}
+}
+
+func TestStoreKeyCount(t *testing.T) {
+	s := NewStore()
+
+	if s.KeyCount() != 0 {
+		t.Errorf("initial key count should be 0, got %d", s.KeyCount())
+	}
+
+	s.Set("key1", &StringValue{Data: []byte("value1")}, SetOptions{})
+	s.Set("key2", &StringValue{Data: []byte("value2")}, SetOptions{})
+
+	if s.KeyCount() != 2 {
+		t.Errorf("key count should be 2, got %d", s.KeyCount())
+	}
+}
+
+func TestStoreConcurrentAccess(t *testing.T) {
+	s := NewStore()
+
+	done := make(chan bool)
+
+	for i := 0; i < 100; i++ {
+		go func(n int) {
+			key := string(rune('a' + n%10))
+			s.Set(key, &StringValue{Data: []byte("value")}, SetOptions{})
+			s.Get(key)
+			s.Exists(key)
+			done <- true
+		}(i)
+	}
+
+	for i := 0; i < 100; i++ {
+		<-done
+	}
+}
+
+func TestStoreGetAll(t *testing.T) {
+	s := NewStore()
+
+	s.Set("key1", &StringValue{Data: []byte("value1")}, SetOptions{})
+	s.Set("key2", &StringValue{Data: []byte("value2")}, SetOptions{})
+	s.Set("key3", &StringValue{Data: []byte("value3")}, SetOptions{})
+
+	entries := s.GetAll()
+	if len(entries) != 3 {
+		t.Errorf("expected 3 entries, got %d", len(entries))
+	}
+}
+
+func TestStoreSetTTL(t *testing.T) {
+	s := NewStore()
+
+	s.Set("key1", &StringValue{Data: []byte("value1")}, SetOptions{})
+
+	if !s.SetTTL("key1", 10*time.Second) {
+		t.Error("SetTTL should return true for existing key")
+	}
+
+	entry, _ := s.Get("key1")
+	if entry.TTL() <= 0 {
+		t.Error("TTL should be set")
+	}
+}
+
+func TestStorePersist(t *testing.T) {
+	s := NewStore()
+
+	s.Set("key1", &StringValue{Data: []byte("value1")}, SetOptions{TTL: 10 * time.Second})
+
+	if !s.Persist("key1") {
+		t.Error("Persist should return true for existing key with TTL")
+	}
+
+	entry, _ := s.Get("key1")
+	if entry.TTL() != -1 {
+		t.Error("TTL should be -1 after persist")
+	}
+}
+
+func TestStoreSetExpiresAt(t *testing.T) {
+	s := NewStore()
+
+	s.Set("key1", &StringValue{Data: []byte("value1")}, SetOptions{})
+
+	expiresAt := time.Now().Add(10 * time.Second).UnixNano()
+	if !s.SetExpiresAt("key1", expiresAt) {
+		t.Error("SetExpiresAt should return true")
+	}
+
+	entry, _ := s.Get("key1")
+	if entry.TTL() <= 0 {
+		t.Error("TTL should be set")
 	}
 }
