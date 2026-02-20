@@ -1,6 +1,19 @@
-# CacheStorm
+<div align="center">
+  <img src="https://avatars.githubusercontent.com/u/262622049?s=400&u=a2e56c80726cb8a3ae6fc8f8622be5173b7b2848&v=4" alt="CacheStorm Logo" width="180" height="180">
+  
+  # CacheStorm
+  
+  **High-Performance, Redis-Compatible In-Memory Cache**
+  
+  [![Go Version](https://img.shields.io/badge/Go-1.21%2B-00ADD8?style=flat&logo=go)](https://golang.org)
+  [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+  [![Redis Compatible](https://img.shields.io/badge/Redis-Compatible-DC382D?style=flat&logo=redis)](https://redis.io)
+  [![Performance](https://img.shields.io/badge/Performance-77M%20ops%2Fsec-blue)](benchmarks/)
+</div>
 
-A high-performance, Redis-compatible in-memory cache server written in Go with tag-based cache invalidation as the killer feature.
+---
+
+A high-performance, Redis-compatible in-memory cache server written in Go with **tag-based cache invalidation** as the killer feature.
 
 ## Table of Contents
 
@@ -8,12 +21,13 @@ A high-performance, Redis-compatible in-memory cache server written in Go with t
 - [Quick Start](#quick-start)
 - [Installation](#installation)
 - [Configuration](#configuration)
+- [Admin UI](#admin-ui)
 - [Commands](#commands)
 - [Data Types](#data-types)
 - [Lua Scripting](#lua-scripting)
 - [Tag-Based Invalidation](#tag-based-invalidation)
+- [HTTP API](#http-api)
 - [Performance](#performance)
-- [API Reference](#api-reference)
 - [Docker](#docker)
 - [Architecture](#architecture)
 - [Testing](#testing)
