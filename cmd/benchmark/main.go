@@ -933,29 +933,40 @@ func runPipelineBenchmark(addr string, ops int64, pipelineSize int) BenchmarkRes
 	}
 	defer conn.Close()
 
+	buildCmd := func(args ...string) string {
+		cmd := fmt.Sprintf("*%d\r\n", len(args))
+		for _, arg := range args {
+			cmd += fmt.Sprintf("$%d\r\n%s\r\n", len(arg), arg)
+		}
+		return cmd
+	}
+
 	for b := int64(0); b < batches; b++ {
+		var cmdBuilder strings.Builder
 		for i := 0; i < pipelineSize; i++ {
 			idx := b*int64(pipelineSize) + int64(i)
 			switch i % 4 {
 			case 0:
-				sendRespCommand(conn, "SET", fmt.Sprintf("pipe:%d", idx%10000), fmt.Sprintf("val%d", idx))
+				cmdBuilder.WriteString(buildCmd("SET", fmt.Sprintf("pipe:%d", idx%10000), fmt.Sprintf("val%d", idx)))
 			case 1:
-				sendRespCommand(conn, "GET", fmt.Sprintf("pipe:%d", idx%10000))
+				cmdBuilder.WriteString(buildCmd("GET", fmt.Sprintf("pipe:%d", idx%10000)))
 			case 2:
-				sendRespCommand(conn, "INCR", fmt.Sprintf("counter:%d", idx%100))
+				cmdBuilder.WriteString(buildCmd("INCR", fmt.Sprintf("counter:%d", idx%100)))
 			case 3:
-				sendRespCommand(conn, "HSET", fmt.Sprintf("hash:%d", idx%1000), "field", fmt.Sprintf("%d", idx))
+				cmdBuilder.WriteString(buildCmd("HSET", fmt.Sprintf("hash:%d", idx%1000), "field", fmt.Sprintf("%d", idx)))
 			}
+		}
+
+		if _, err := conn.Write([]byte(cmdBuilder.String())); err != nil {
+			errors.Add(int64(pipelineSize))
+			continue
 		}
 
 		reader := bufio.NewReader(conn)
 		for i := 0; i < pipelineSize; i++ {
-			line, err := reader.ReadString('\n')
-			if err != nil || (len(line) > 0 && line[0] == '-') {
+			_, err := readRespResponse(reader)
+			if err != nil {
 				errors.Add(1)
-			}
-			if len(line) > 0 && (line[0] == '$' || line[0] == '*') {
-				reader.ReadString('\n')
 			}
 		}
 		totalOps.Add(int64(pipelineSize))
