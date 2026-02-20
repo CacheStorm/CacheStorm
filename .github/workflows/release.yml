@@ -10,18 +10,12 @@ env:
 
 permissions:
   contents: write
+  packages: write
 
 jobs:
-  build:
-    name: Build Release Binaries
+  test:
+    name: Test
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        goos: [linux, darwin, windows]
-        goarch: [amd64, arm64]
-        exclude:
-          - goos: windows
-            goarch: arm64
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -31,29 +25,52 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
 
-      - name: Get version
-        id: version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+      - name: Run tests
+        run: go test ./internal/... -race -v
 
-      - name: Build binary
+  build:
+    name: Build Binaries
+    runs-on: ubuntu-latest
+    needs: test
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Build
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: 0
         run: |
-          BINARY_NAME=cachestorm-${{ matrix.goos }}-${{ matrix.goarch }}
-          if [ "${{ matrix.goos }}" = "windows" ]; then
-            BINARY_NAME="${BINARY_NAME}.exe"
-          fi
-          go build -ldflags="-s -w -X main.version=${{ steps.version.outputs.VERSION }}" -o ${BINARY_NAME} ./cmd/cachestorm
-          tar -czvf ${BINARY_NAME}.tar.gz ${BINARY_NAME}
-          echo "BINARY_NAME=${BINARY_NAME}.tar.gz" >> $GITHUB_ENV
+          VERSION=${GITHUB_REF#refs/tags/}
+          BINARY=cachestorm-${{ matrix.goos }}-${{ matrix.goarch }}
+          [ "${{ matrix.goos }}" = "windows" ] && BINARY="${BINARY}.exe"
+          go build -ldflags="-s -w -X main.version=${VERSION}" -o ${BINARY} ./cmd/cachestorm
+          tar -czvf ${BINARY}.tar.gz ${BINARY}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: cachestorm-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: ${{ env.BINARY_NAME }}
+          name: ${{ matrix.goos }}-${{ matrix.goarch }}
+          path: cachestorm-*.tar.gz
 
   release:
     name: Create Release
@@ -63,65 +80,34 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Download all artifacts
+      - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-
-      - name: Get version
-        id: version
-        run: |
-          VERSION=${GITHUB_REF#refs/tags/}
-          echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
-          echo "VERSION_WITHOUT_V=${VERSION#v}" >> $GITHUB_OUTPUT
-
-      - name: Generate changelog
-        id: changelog
-        run: |
-          if [ -f CHANGELOG.md ]; then
-            sed -n "/^## \[${{ steps.version.outputs.VERSION_WITHOUT_V }}\]/,/^## \[/p" CHANGELOG.md | sed '$d' > release_notes.md || echo "## Release ${{ steps.version.outputs.VERSION }}" > release_notes.md
-          else
-            echo "## Release ${{ steps.version.outputs.VERSION }}" > release_notes.md
-          fi
-          echo "Release notes generated"
+          merge-multiple: true
 
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
-          name: CacheStorm ${{ steps.version.outputs.VERSION }}
-          body_path: release_notes.md
-          draft: false
-          prerelease: ${{ contains(steps.version.outputs.VERSION, '-') }}
-          files: |
-            artifacts/**/*
+          name: CacheStorm ${{ github.ref_name }}
           generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref, '-') }}
+          files: artifacts/*
 
   docker:
-    name: Build & Push Docker Image
+    name: Docker Build & Push
     runs-on: ubuntu-latest
-    needs: release
+    needs: test
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Get version
-        id: version
-        run: |
-          VERSION=${GITHUB_REF#refs/tags/}
-          echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
-          echo "VERSION_WITHOUT_V=${VERSION#v}" >> $GITHUB_OUTPUT
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
@@ -131,27 +117,11 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            cachestorm/cachestorm:latest
-            cachestorm/cachestorm:${{ steps.version.outputs.VERSION }}
             ghcr.io/cachestorm/cachestorm:latest
-            ghcr.io/cachestorm/cachestorm:${{ steps.version.outputs.VERSION }}
-
-  homebrew:
-    name: Update Homebrew Formula
-    runs-on: ubuntu-latest
-    needs: release
-    if: ${{ !contains(github.ref, '-') }}
-    steps:
-      - name: Get version
-        id: version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-
-      - name: Update Homebrew tap
-        run: |
-          echo "TODO: Trigger homebrew-cachestorm update for ${{ steps.version.outputs.VERSION }}"
+            ghcr.io/cachestorm/cachestorm:${{ github.ref_name }}
