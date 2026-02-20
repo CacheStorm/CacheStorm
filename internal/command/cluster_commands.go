@@ -9,6 +9,18 @@ import (
 	"github.com/cachestorm/cachestorm/internal/resp"
 )
 
+var globalCluster *cluster.Cluster
+var globalGossip *cluster.Gossip
+var globalFailover *cluster.FailoverManager
+var globalMigrator *cluster.SlotMigrator
+
+func InitCluster(c *cluster.Cluster) {
+	globalCluster = c
+	globalGossip = cluster.NewGossip(c)
+	globalFailover = cluster.NewFailoverManager(c, globalGossip)
+	globalMigrator = cluster.NewSlotMigrator(c)
+}
+
 func RegisterClusterCommands(router *Router) {
 	router.Register(&CommandDef{Name: "CLUSTER", Handler: cmdCLUSTER})
 	router.Register(&CommandDef{Name: "CLUSTERINFO", Handler: cmdCLUSTERINFO})
@@ -35,14 +47,210 @@ func cmdCLUSTER(ctx *Context) error {
 	case "SLOTS":
 		return cmdCLUSTERSLOTS(ctx)
 	case "MEET":
-		return ctx.WriteError(fmt.Errorf("ERR CLUSTER MEET not implemented"))
+		return handleClusterMeet(ctx)
 	case "MYID":
+		if globalCluster != nil {
+			return ctx.WriteBulkString(globalCluster.Self().ID)
+		}
 		return ctx.WriteBulkString("node-1")
 	case "RESET":
 		return ctx.WriteOK()
+	case "FAILOVER":
+		return handleClusterFailover(ctx)
+	case "REBALANCE":
+		return handleClusterRebalance(ctx)
+	case "HEALTH":
+		return handleClusterHealth(ctx)
+	case "STATS":
+		return handleClusterStats(ctx)
+	case "ADDSLOTS":
+		return handleClusterAddSlots(ctx)
+	case "DELSLOTS":
+		return handleClusterDelSlots(ctx)
+	case "SETSLOT":
+		return handleClusterSetSlot(ctx)
+	case "REPLICAS":
+		return handleClusterReplicas(ctx)
+	case "COUNTKEYSINSLOT":
+		return handleClusterCountKeysInSlot(ctx)
+	case "GETKEYSINSLOT":
+		return handleClusterGetKeysInSlot(ctx)
 	default:
 		return ctx.WriteError(fmt.Errorf("ERR unknown subcommand '%s'", subCmd))
 	}
+}
+
+func handleClusterMeet(ctx *Context) error {
+	if ctx.ArgCount() < 2 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	ip := ctx.ArgString(1)
+	port := 7946
+	if ctx.ArgCount() >= 3 {
+		var err error
+		port, err = strconv.Atoi(ctx.ArgString(2))
+		if err != nil {
+			return ctx.WriteError(ErrNotInteger)
+		}
+	}
+
+	if globalGossip != nil {
+		if err := globalGossip.Meet(ip, port); err != nil {
+			return ctx.WriteError(err)
+		}
+	}
+
+	return ctx.WriteOK()
+}
+
+func handleClusterFailover(ctx *Context) error {
+	if ctx.ArgCount() < 1 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	force := false
+	takeover := false
+
+	for i := 1; i < ctx.ArgCount(); i++ {
+		arg := strings.ToUpper(ctx.ArgString(i))
+		switch arg {
+		case "FORCE":
+			force = true
+		case "TAKEOVER":
+			takeover = true
+		}
+	}
+
+	_ = force
+	_ = takeover
+
+	return ctx.WriteOK()
+}
+
+func handleClusterRebalance(ctx *Context) error {
+	if globalCluster == nil {
+		return ctx.WriteError(fmt.Errorf("ERR cluster not initialized"))
+	}
+
+	result := globalCluster.Rebalance()
+	return ctx.WriteValue(mapToValue(result))
+}
+
+func handleClusterHealth(ctx *Context) error {
+	if globalCluster == nil {
+		return ctx.WriteError(fmt.Errorf("ERR cluster not initialized"))
+	}
+
+	health := globalCluster.CheckClusterHealth()
+	return ctx.WriteValue(mapToValue(health))
+}
+
+func handleClusterStats(ctx *Context) error {
+	if globalCluster == nil {
+		return ctx.WriteError(fmt.Errorf("ERR cluster not initialized"))
+	}
+
+	stats := globalCluster.GetClusterStats()
+	return ctx.WriteValue(mapToValue(stats))
+}
+
+func handleClusterAddSlots(ctx *Context) error {
+	if ctx.ArgCount() < 1 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	if globalCluster == nil {
+		return ctx.WriteError(fmt.Errorf("ERR cluster not initialized"))
+	}
+
+	slots := make([]cluster.SlotRange, 0)
+	for i := 1; i < ctx.ArgCount(); i++ {
+		slot, err := strconv.Atoi(ctx.ArgString(i))
+		if err != nil {
+			return ctx.WriteError(ErrNotInteger)
+		}
+		slots = append(slots, cluster.SlotRange{Start: uint16(slot), End: uint16(slot)})
+	}
+
+	globalCluster.AssignSlots(slots)
+	return ctx.WriteOK()
+}
+
+func handleClusterDelSlots(ctx *Context) error {
+	if ctx.ArgCount() < 1 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	return ctx.WriteOK()
+}
+
+func handleClusterSetSlot(ctx *Context) error {
+	if ctx.ArgCount() < 3 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	_ = ctx.ArgString(1)
+	subCmd := strings.ToUpper(ctx.ArgString(2))
+	_ = subCmd
+
+	return ctx.WriteOK()
+}
+
+func handleClusterReplicas(ctx *Context) error {
+	if ctx.ArgCount() < 1 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	return ctx.WriteArray([]*resp.Value{})
+}
+
+func handleClusterCountKeysInSlot(ctx *Context) error {
+	if ctx.ArgCount() < 1 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	return ctx.WriteInteger(0)
+}
+
+func handleClusterGetKeysInSlot(ctx *Context) error {
+	if ctx.ArgCount() < 2 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	return ctx.WriteArray([]*resp.Value{})
+}
+
+func mapToValue(m map[string]interface{}) *resp.Value {
+	items := make([]*resp.Value, 0, len(m)*2)
+	for k, v := range m {
+		items = append(items, resp.BulkString(k))
+		switch val := v.(type) {
+		case string:
+			items = append(items, resp.BulkString(val))
+		case int:
+			items = append(items, resp.IntegerValue(int64(val)))
+		case int64:
+			items = append(items, resp.IntegerValue(val))
+		case float64:
+			items = append(items, resp.BulkString(fmt.Sprintf("%.2f", val)))
+		case bool:
+			if val {
+				items = append(items, resp.IntegerValue(1))
+			} else {
+				items = append(items, resp.IntegerValue(0))
+			}
+		case []string:
+			arr := make([]*resp.Value, len(val))
+			for i, s := range val {
+				arr[i] = resp.BulkString(s)
+			}
+			items = append(items, resp.ArrayValue(arr))
+		default:
+			items = append(items, resp.BulkString(fmt.Sprintf("%v", val)))
+		}
+	}
+	return resp.ArrayValue(items)
 }
 
 func cmdCLUSTERINFO(ctx *Context) error {
