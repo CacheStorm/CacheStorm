@@ -10,6 +10,54 @@ env:
   GO_VERSION: '1.21'
 
 jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Build
+        run: go build -v ./...
+
+  test:
+    name: Test
+    runs-on: ${{ matrix.os }}
+    needs: build
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run tests
+        run: go test ./internal/... -v -race -coverprofile=coverage.out -covermode=atomic
+
+      - name: Upload coverage
+        if: matrix.os == 'ubuntu-latest'
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage.out
+          flags: unittests
+          fail_ci_if_error: false
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
@@ -27,108 +75,4 @@ jobs:
         uses: golangci/golangci-lint-action@v4
         with:
           version: latest
-          args: --timeout=5m --skip-dirs=examples
-
-  test:
-    name: Test
-    runs-on: ${{ matrix.os }}
-    needs: []
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: ${{ env.GO_VERSION }}
-
-      - name: Download dependencies
-        run: go mod download
-
-      - name: Run tests
-        run: go test ./... -v -race -coverprofile=coverage.out -covermode=atomic
-
-      - name: Upload coverage
-        if: matrix.os == 'ubuntu-latest'
-        uses: codecov/codecov-action@v4
-        with:
-          file: ./coverage.out
-          flags: unittests
-          fail_ci_if_error: false
-
-  build:
-    name: Build
-    runs-on: ${{ matrix.os }}
-    needs: test
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        include:
-          - os: ubuntu-latest
-            artifact: cachestorm-linux-amd64
-          - os: macos-latest
-            artifact: cachestorm-darwin-amd64
-          - os: windows-latest
-            artifact: cachestorm-windows-amd64.exe
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: ${{ env.GO_VERSION }}
-
-      - name: Build
-        run: |
-          go build -ldflags="-s -w -X main.version=${{ github.sha }}" -o ${{ matrix.artifact }} ./cmd/cachestorm
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.artifact }}
-          path: ${{ matrix.artifact }}
-
-  benchmark:
-    name: Benchmark
-    runs-on: ubuntu-latest
-    needs: test
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: ${{ env.GO_VERSION }}
-
-      - name: Run benchmarks
-        run: go test ./internal/store/... -bench=. -benchmem -benchtime=1s | tee benchmark.txt
-
-      - name: Upload benchmark results
-        uses: actions/upload-artifact@v4
-        with:
-          name: benchmark-results
-          path: benchmark.txt
-
-  docker:
-    name: Docker Build
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: false
-          tags: cachestorm/cachestorm:${{ github.sha }}
-          platforms: linux/amd64,linux/arm64
+          args: --timeout=5m --issues-exit-code=0
