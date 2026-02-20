@@ -115,6 +115,11 @@ server:
   read_timeout: "30s"
   write_timeout: "30s"
 
+http:
+  enabled: true
+  port: 8080
+  password: ""  # Optional: set to protect admin UI
+
 memory:
   max_memory: "2gb"
   eviction_policy: "allkeys-lru"  # allkeys-lru, allkeys-lfu, volatile-lru, volatile-lfu, volatile-ttl
@@ -148,6 +153,58 @@ cluster:
   enabled: false
   gossip_port: 7946
   seeds: []
+```
+
+## Admin UI
+
+CacheStorm includes a modern web-based admin interface for monitoring and management.
+
+### Features
+- **Dashboard**: Real-time metrics (keys, memory, tags, uptime)
+- **Keys Browser**: Search, view, add, and delete keys
+- **Tags Management**: View tags and invalidate cached data
+- **Namespaces**: Manage multiple namespaces
+- **Cluster View**: Monitor cluster nodes and join new nodes
+- **Console**: Execute Redis commands directly
+- **Slow Log**: View slow queries
+
+### Access
+```bash
+# Start server (HTTP admin on port 8080)
+./cachestorm
+
+# Open in browser
+http://localhost:8080
+```
+
+### Password Protection
+```yaml
+http:
+  enabled: true
+  port: 8080
+  password: "your-secret-password"
+```
+
+When a password is set, the admin UI will show a login screen.
+
+### Screenshots
+
+**Dashboard**
+```
+┌─────────────────────────────────────────────────────────────┐
+│  CacheStorm Admin                                           │
+├─────────────────────────────────────────────────────────────┤
+│  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐          │
+│  │ Keys    │ │ Memory  │ │ Tags    │ │ Uptime  │          │
+│  │ 12,345  │ │ 256 MB  │ │ 127     │ │ 2d 4h   │          │
+│  └─────────┘ └─────────┘ └─────────┘ └─────────┘          │
+│                                                             │
+│  Recent Activity              Top Tags                     │
+│  ─────────────────           ─────────                     │
+│  ● SET user:1                 user:*  ========  4521      │
+│  ● INCR counter               cache:* ======    3212      │
+│  ● TAGKEYS session            sess:*  ====      1892      │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ## Commands
