@@ -79,6 +79,8 @@ func cmdSADD(ctx *Context) error {
 		return ctx.WriteError(err)
 	}
 
+	set.Lock()
+	defer set.Unlock()
 	added := 0
 	for i := 1; i < ctx.ArgCount(); i++ {
 		member := ctx.ArgString(i)
@@ -105,6 +107,8 @@ func cmdSREM(ctx *Context) error {
 		return ctx.WriteInteger(0)
 	}
 
+	set.Lock()
+	defer set.Unlock()
 	removed := 0
 	for i := 1; i < ctx.ArgCount(); i++ {
 		member := ctx.ArgString(i)
@@ -135,6 +139,8 @@ func cmdSMEMBERS(ctx *Context) error {
 		return ctx.WriteArray([]*resp.Value{})
 	}
 
+	set.RLock()
+	defer set.RUnlock()
 	members := make([]*resp.Value, 0, len(set.Members))
 	for member := range set.Members {
 		members = append(members, resp.BulkString(member))
@@ -159,6 +165,8 @@ func cmdSISMEMBER(ctx *Context) error {
 		return ctx.WriteInteger(0)
 	}
 
+	set.RLock()
+	defer set.RUnlock()
 	if _, exists := set.Members[member]; exists {
 		return ctx.WriteInteger(1)
 	}
@@ -179,6 +187,8 @@ func cmdSCARD(ctx *Context) error {
 		return ctx.WriteInteger(0)
 	}
 
+	set.RLock()
+	defer set.RUnlock()
 	return ctx.WriteInteger(int64(len(set.Members)))
 }
 
@@ -208,6 +218,8 @@ func cmdSPOP(ctx *Context) error {
 		return ctx.WriteArray([]*resp.Value{})
 	}
 
+	set.Lock()
+	defer set.Unlock()
 	if count == 1 {
 		for member := range set.Members {
 			delete(set.Members, member)
@@ -270,10 +282,12 @@ func cmdSRANDMEMBER(ctx *Context) error {
 		return ctx.WriteNullBulkString()
 	}
 
+	set.RLock()
 	members := make([]string, 0, len(set.Members))
 	for member := range set.Members {
 		members = append(members, member)
 	}
+	set.RUnlock()
 
 	if !withCount {
 		idx := 0
@@ -312,12 +326,17 @@ func cmdSMOVE(ctx *Context) error {
 		return ctx.WriteInteger(0)
 	}
 
+	srcSet.Lock()
 	if _, exists := srcSet.Members[member]; !exists {
+		srcSet.Unlock()
 		return ctx.WriteInteger(0)
 	}
 
 	delete(srcSet.Members, member)
-	if len(srcSet.Members) == 0 {
+	srcEmpty := len(srcSet.Members) == 0
+	srcSet.Unlock()
+
+	if srcEmpty {
 		ctx.Store.Delete(srcKey)
 	}
 
@@ -326,7 +345,9 @@ func cmdSMOVE(ctx *Context) error {
 		return ctx.WriteError(err)
 	}
 
+	dstSet.Lock()
 	dstSet.Members[member] = struct{}{}
+	dstSet.Unlock()
 	return ctx.WriteInteger(1)
 }
 
@@ -341,9 +362,11 @@ func cmdSUNION(ctx *Context) error {
 		if err != nil {
 			return ctx.WriteError(err)
 		}
+		set.RLock()
 		for member := range set.Members {
 			result[member] = struct{}{}
 		}
+		set.RUnlock()
 	}
 
 	members := make([]*resp.Value, 0, len(result))
@@ -364,10 +387,12 @@ func cmdSINTER(ctx *Context) error {
 		return ctx.WriteError(err)
 	}
 
+	firstSet.RLock()
 	result := make(map[string]struct{})
 	for member := range firstSet.Members {
 		result[member] = struct{}{}
 	}
+	firstSet.RUnlock()
 
 	for i := 1; i < ctx.ArgCount(); i++ {
 		set, err := getSet(ctx, ctx.ArgString(i))
@@ -378,11 +403,13 @@ func cmdSINTER(ctx *Context) error {
 			return ctx.WriteArray([]*resp.Value{})
 		}
 
+		set.RLock()
 		for member := range result {
 			if _, exists := set.Members[member]; !exists {
 				delete(result, member)
 			}
 		}
+		set.RUnlock()
 	}
 
 	members := make([]*resp.Value, 0, len(result))
