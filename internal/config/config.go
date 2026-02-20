@@ -147,11 +147,17 @@ func (c *Config) applyEnvOverrides() {
 }
 
 func (c *ServerConfig) ReadTimeoutDuration() time.Duration {
-	d, _ := time.ParseDuration(c.ReadTimeout)
+	d, err := time.ParseDuration(c.ReadTimeout)
+	if err != nil {
+		return 0
+	}
 	return d
 }
 
 func (c *ServerConfig) WriteTimeoutDuration() time.Duration {
-	d, _ := time.ParseDuration(c.WriteTimeout)
+	d, err := time.ParseDuration(c.WriteTimeout)
+	if err != nil {
+		return 0
+	}
 	return d
 }

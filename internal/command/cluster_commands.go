@@ -102,7 +102,8 @@ func cmdCLUSTERSLOTS(ctx *Context) error {
 	return ctx.WriteArray(slots)
 }
 
-func checkClusterRouting(ctx *Context, key string) error {
+func checkClusterRouting(_ *Context, key string) error {
+	_ = key
 	return nil
 }
 

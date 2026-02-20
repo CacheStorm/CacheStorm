@@ -1,10 +1,13 @@
 # Binaries
 /bin/
+/cachestorm
+/cachestorm.exe
 *.exe
 *.exe~
 *.dll
 *.so
 *.dylib
+*.tar.gz
 
 # Test binary
 *.test

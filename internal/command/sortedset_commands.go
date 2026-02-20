@@ -137,11 +137,11 @@ func cmdZCOUNT(ctx *Context) error {
 	}
 
 	key := ctx.ArgString(0)
-	min, err := strconv.ParseFloat(ctx.ArgString(1), 64)
+	minScore, err := strconv.ParseFloat(ctx.ArgString(1), 64)
 	if err != nil {
 		return ctx.WriteError(ErrNotInteger)
 	}
-	max, err := strconv.ParseFloat(ctx.ArgString(2), 64)
+	maxScore, err := strconv.ParseFloat(ctx.ArgString(2), 64)
 	if err != nil {
 		return ctx.WriteError(ErrNotInteger)
 	}
@@ -154,7 +154,7 @@ func cmdZCOUNT(ctx *Context) error {
 		return ctx.WriteInteger(0)
 	}
 
-	return ctx.WriteInteger(int64(zset.Count(min, max)))
+	return ctx.WriteInteger(int64(zset.Count(minScore, maxScore)))
 }
 
 func cmdZINCRBY(ctx *Context) error {

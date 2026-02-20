@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-type CommandDef struct {
+type CommandDef struct { //nolint:revive // Command prefix is intentional for clarity
 	Name    string
 	Handler func(ctx *Context) error
 	Arity   int

@@ -162,7 +162,7 @@ func (v *StreamValue) Delete(ids ...string) int64 {
 	return deleted
 }
 
-func (v *StreamValue) Trim(maxLen int64, approximate bool) int64 {
+func (v *StreamValue) Trim(maxLen int64, _ bool) int64 {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 

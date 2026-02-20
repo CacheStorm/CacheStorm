@@ -98,6 +98,16 @@ issues:
         - errcheck
         - revive
 
+    - path: test_client\.go
+      linters:
+        - errcheck
+        - revive
+
+    # Ignore errcheck for examples and test files
+    - path: examples/
+      linters:
+        - errcheck
+
   max-issues-per-linter: 0
   max-same-issues: 0
   new: false

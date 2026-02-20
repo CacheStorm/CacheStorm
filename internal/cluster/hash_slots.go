@@ -38,7 +38,7 @@ var crc16Table = [256]uint16{
 }
 
 func CRC16(data []byte) uint16 {
-	var crc uint16 = 0
+	var crc uint16
 	for _, b := range data {
 		crc = (crc << 8) ^ crc16Table[(crc>>8)^uint16(b)]
 	}

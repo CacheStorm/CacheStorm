@@ -48,7 +48,7 @@ func (s sortedEntries) Less(i, j int) bool {
 }
 func (s sortedEntries) Swap(i, j int) { s[i], s[j] = s[j], s[i] }
 
-func (v *SortedSetValue) GetSortedRange(start, stop int, withScores bool, reverse bool) []SortedEntry {
+func (v *SortedSetValue) GetSortedRange(start, stop int, _ bool, reverse bool) []SortedEntry {
 	entries := make(sortedEntries, 0, len(v.Members))
 	for member, score := range v.Members {
 		entries = append(entries, SortedEntry{Member: member, Score: score})
@@ -100,20 +100,20 @@ func (v *SortedSetValue) Rank(member string, reverse bool) int {
 	return -1
 }
 
-func (v *SortedSetValue) Count(min, max float64) int {
+func (v *SortedSetValue) Count(minScore, maxScore float64) int {
 	count := 0
 	for _, score := range v.Members {
-		if score >= min && score <= max {
+		if score >= minScore && score <= maxScore {
 			count++
 		}
 	}
 	return count
 }
 
-func (v *SortedSetValue) RangeByScore(min, max float64, withScores bool, reverse bool) []SortedEntry {
+func (v *SortedSetValue) RangeByScore(minScore, maxScore float64, _ bool, reverse bool) []SortedEntry {
 	entries := make(sortedEntries, 0)
 	for member, score := range v.Members {
-		if score >= min && score <= max {
+		if score >= minScore && score <= maxScore {
 			entries = append(entries, SortedEntry{Member: member, Score: score})
 		}
 	}
@@ -159,10 +159,10 @@ func (v *SortedSetValue) RemoveRangeByRank(start, stop int) int {
 	return removed
 }
 
-func (v *SortedSetValue) RemoveRangeByScore(min, max float64) int {
+func (v *SortedSetValue) RemoveRangeByScore(minScore, maxScore float64) int {
 	removed := 0
 	for member, score := range v.Members {
-		if score >= min && score <= max {
+		if score >= minScore && score <= maxScore {
 			delete(v.Members, member)
 			removed++
 		}
