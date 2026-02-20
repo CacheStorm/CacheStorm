@@ -333,6 +333,11 @@ func cmdINFO(ctx *Context) error {
 	sb.WriteString("db0:keys=")
 	sb.WriteString(strconv.FormatInt(ctx.Store.KeyCount(), 10))
 	sb.WriteString(",expires=0\r\n")
+	sb.WriteString("\r\n")
+
+	if replMgr := GetReplicationManager(); replMgr != nil {
+		sb.WriteString(replMgr.GetInfo())
+	}
 
 	return ctx.WriteBulkString(sb.String())
 }
@@ -1405,14 +1410,6 @@ func cmdWAIT(ctx *Context) error {
 	return ctx.WriteInteger(1)
 }
 
-func cmdROLE(ctx *Context) error {
-	return ctx.WriteArray([]*resp.Value{
-		resp.BulkString("master"),
-		resp.IntegerValue(0),
-		resp.ArrayValue([]*resp.Value{}),
-	})
-}
-
 func cmdLASTSAVE(ctx *Context) error {
 	if lastSaveTime == 0 {
 		lastSaveTime = time.Now().Unix()
@@ -1832,14 +1829,6 @@ func cmdSWAPDB(ctx *Context) error {
 	}
 
 	return ctx.WriteOK()
-}
-
-func cmdSYNC(ctx *Context) error {
-	return ctx.WriteBulkString("")
-}
-
-func cmdPSYNC(ctx *Context) error {
-	return ctx.WriteSimpleString("CONTINUE")
 }
 
 func cmdDEBUGSEGFAULT(ctx *Context) error {

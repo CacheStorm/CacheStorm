@@ -56,7 +56,7 @@ func (c *Connection) Handle() {
 
 		c.lastCmd = cmd
 
-		ctx := command.NewContext(cmd, args, c.store, c.writer)
+		ctx := command.NewContextWithClient(cmd, args, c.store, c.writer, c.ID, c.conn.RemoteAddr().String())
 
 		if cmd == "QUIT" {
 			c.writer.WriteOK()

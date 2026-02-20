@@ -33,6 +33,7 @@ type Context struct {
 	Transaction   *Transaction
 	Subscriber    *store.Subscriber
 	Username      string
+	RemoteAddr    string
 }
 
 func NewContext(cmd string, args [][]byte, s *store.Store, w *resp.Writer) *Context {
@@ -42,6 +43,18 @@ func NewContext(cmd string, args [][]byte, s *store.Store, w *resp.Writer) *Cont
 		Store:       s,
 		Writer:      w,
 		Transaction: NewTransaction(),
+	}
+}
+
+func NewContextWithClient(cmd string, args [][]byte, s *store.Store, w *resp.Writer, clientID int64, remoteAddr string) *Context {
+	return &Context{
+		Command:     cmd,
+		Args:        args,
+		Store:       s,
+		Writer:      w,
+		Transaction: NewTransaction(),
+		ClientID:    clientID,
+		RemoteAddr:  remoteAddr,
 	}
 }
 

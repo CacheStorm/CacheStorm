@@ -55,6 +55,9 @@ func New(cfg *config.Config) (*Server, error) {
 	command.RegisterScriptCommands(s.router)
 	command.RegisterDebugCommands(s.router)
 	command.RegisterCacheCommands(s.router)
+	command.RegisterReplicationCommands(s.router)
+
+	command.InitReplicationManager(s.store)
 
 	if cfg.HTTP.Enabled {
 		httpCfg := &HTTPConfig{

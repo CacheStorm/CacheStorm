@@ -15,6 +15,7 @@ type Config struct {
 	Namespaces  map[string]NamespaceConfig `yaml:"namespaces"`
 	Cluster     ClusterConfig              `yaml:"cluster"`
 	Persistence PersistenceConfig          `yaml:"persistence"`
+	Replication ReplicationConfig          `yaml:"replication"`
 	Plugins     PluginsConfig              `yaml:"plugins"`
 	Logging     LoggingConfig              `yaml:"logging"`
 }
@@ -67,6 +68,17 @@ type PersistenceConfig struct {
 	SnapshotInterval string `yaml:"snapshot_interval" default:"5m"`
 	DataDir          string `yaml:"data_dir" default:"/var/lib/cachestorm"`
 	MaxAOFSize       string `yaml:"max_aof_size" default:"1gb"`
+}
+
+type ReplicationConfig struct {
+	Role                string `yaml:"role" default:"master"`
+	MasterHost          string `yaml:"master_host"`
+	MasterPort          int    `yaml:"master_port"`
+	MasterAuth          string `yaml:"master_auth"`
+	ReplicaAnnounceIP   string `yaml:"replica_announce_ip"`
+	ReplicaAnnouncePort int    `yaml:"replica_announce_port"`
+	ReadOnly            bool   `yaml:"read_only" default:"true"`
+	ReplTimeout         int    `yaml:"repl_timeout" default:"60"`
 }
 
 type PluginsConfig struct {

@@ -304,3 +304,16 @@ func (s *Store) GetNamespaceManager() *NamespaceManager {
 func (s *Store) GetPubSub() *PubSub {
 	return s.pubsub
 }
+
+func (s *Store) GetAll() map[string]*Entry {
+	result := make(map[string]*Entry)
+	for i := 0; i < NumShards; i++ {
+		shardData := s.shards[i].GetAll()
+		for k, v := range shardData {
+			if !v.IsExpired() {
+				result[k] = v
+			}
+		}
+	}
+	return result
+}

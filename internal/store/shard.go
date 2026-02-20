@@ -103,3 +103,13 @@ func (s *Shard) Flush() int64 {
 	s.memUsage = 0
 	return freed
 }
+
+func (s *Shard) GetAll() map[string]*Entry {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make(map[string]*Entry, len(s.data))
+	for k, v := range s.data {
+		result[k] = v
+	}
+	return result
+}
