@@ -149,7 +149,32 @@ func cmdMEMORY(ctx *Context) error {
 	case "MALLOC-STATS":
 		return ctx.WriteSimpleString("allocator: go runtime")
 	case "DOCTOR":
-		return ctx.WriteSimpleString("Sam said that everything is fine.")
+		var diagnosis strings.Builder
+		diagnosis.WriteString("CacheStorm Memory Doctor:\n\n")
+
+		memUsage := ctx.Store.MemUsage()
+		keyCount := ctx.Store.KeyCount()
+
+		diagnosis.WriteString(fmt.Sprintf("Total memory usage: %d bytes\n", memUsage))
+		diagnosis.WriteString(fmt.Sprintf("Total keys: %d\n", keyCount))
+
+		if keyCount > 0 {
+			avgSize := memUsage / keyCount
+			diagnosis.WriteString(fmt.Sprintf("Average key size: %d bytes\n", avgSize))
+
+			if avgSize > 10000 {
+				diagnosis.WriteString("\nWarning: Average key size is high.\n")
+				diagnosis.WriteString("Consider using smaller values or compression.\n")
+			}
+		}
+
+		if memUsage > 100*1024*1024 {
+			diagnosis.WriteString("\nWarning: Memory usage exceeds 100MB.\n")
+			diagnosis.WriteString("Consider setting maxmemory limit or using eviction policy.\n")
+		}
+
+		diagnosis.WriteString("\nNo critical issues detected.\n")
+		return ctx.WriteBulkString(diagnosis.String())
 	case "PURGE":
 		return ctx.WriteOK()
 	default:

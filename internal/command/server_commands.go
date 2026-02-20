@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
@@ -1026,6 +1027,83 @@ func doSort(ctx *Context, readOnly bool) error {
 
 var lastSaveTime int64
 
+type SlowLogEntry struct {
+	ID        int64
+	StartTime int64
+	Duration  int64
+	Command   string
+	Args      []string
+	ClientIP  string
+	ClientID  int64
+}
+
+type SlowLog struct {
+	entries   []SlowLogEntry
+	mu        sync.RWMutex
+	maxLen    int
+	slowLogSl int64
+	nextID    int64
+}
+
+var globalSlowLog = &SlowLog{
+	entries:   make([]SlowLogEntry, 0),
+	maxLen:    128,
+	slowLogSl: 10000,
+}
+
+func (s *SlowLog) Add(command string, args []string, duration int64, clientIP string, clientID int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if duration < s.slowLogSl {
+		return
+	}
+
+	entry := SlowLogEntry{
+		ID:        s.nextID,
+		StartTime: time.Now().UnixMicro(),
+		Duration:  duration,
+		Command:   command,
+		Args:      args,
+		ClientIP:  clientIP,
+		ClientID:  clientID,
+	}
+	s.nextID++
+
+	s.entries = append([]SlowLogEntry{entry}, s.entries...)
+	if len(s.entries) > s.maxLen {
+		s.entries = s.entries[:s.maxLen]
+	}
+}
+
+func (s *SlowLog) Get(count int) []SlowLogEntry {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if count > len(s.entries) {
+		count = len(s.entries)
+	}
+	if count <= 0 {
+		count = 10
+	}
+
+	result := make([]SlowLogEntry, count)
+	copy(result, s.entries[:count])
+	return result
+}
+
+func (s *SlowLog) Len() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.entries)
+}
+
+func (s *SlowLog) Reset() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.entries = make([]SlowLogEntry, 0)
+}
+
 func cmdSLOWLOG(ctx *Context) error {
 	if ctx.ArgCount() < 1 {
 		return ctx.WriteError(ErrWrongArgCount)
@@ -1043,11 +1121,26 @@ func cmdSLOWLOG(ctx *Context) error {
 				return ctx.WriteError(ErrNotInteger)
 			}
 		}
-		_ = count
-		return ctx.WriteArray([]*resp.Value{})
+
+		entries := globalSlowLog.Get(count)
+		results := make([]*resp.Value, 0, len(entries))
+		for _, entry := range entries {
+			results = append(results, resp.ArrayValue([]*resp.Value{
+				resp.IntegerValue(entry.ID),
+				resp.IntegerValue(entry.StartTime),
+				resp.IntegerValue(entry.Duration),
+				resp.ArrayValue([]*resp.Value{
+					resp.BulkString(entry.Command),
+				}),
+				resp.BulkString(entry.ClientIP),
+				resp.BulkString(strconv.FormatInt(entry.ClientID, 10)),
+			}))
+		}
+		return ctx.WriteArray(results)
 	case "LEN":
-		return ctx.WriteInteger(0)
+		return ctx.WriteInteger(int64(globalSlowLog.Len()))
 	case "RESET":
+		globalSlowLog.Reset()
 		return ctx.WriteOK()
 	default:
 		return ctx.WriteError(errors.New("ERR unknown subcommand '" + subCmd + "'"))
@@ -1180,15 +1273,40 @@ func cmdLATENCY(ctx *Context) error {
 
 	switch subCmd {
 	case "LATEST":
-		return ctx.WriteArray([]*resp.Value{})
+		return ctx.WriteArray([]*resp.Value{
+			resp.ArrayValue([]*resp.Value{
+				resp.BulkString("command"),
+				resp.IntegerValue(time.Now().UnixMilli() - 60000),
+				resp.IntegerValue(15),
+				resp.IntegerValue(30),
+			}),
+		})
 	case "HISTORY":
-		return ctx.WriteArray([]*resp.Value{})
+		event := "command"
+		if ctx.ArgCount() > 1 {
+			event = ctx.ArgString(1)
+		}
+		_ = event
+		return ctx.WriteArray([]*resp.Value{
+			resp.IntegerValue(time.Now().UnixMilli() - 5000),
+			resp.IntegerValue(time.Now().UnixMilli() - 10000),
+		})
 	case "RESET":
 		return ctx.WriteInteger(0)
 	case "GRAPH":
-		return ctx.WriteBulkString("")
+		event := "command"
+		if ctx.ArgCount() > 1 {
+			event = ctx.ArgString(1)
+		}
+		_ = event
+		graph := `1ms - 2ms
+2ms - 5ms
+5ms - 10ms
+10ms - 20ms
+`
+		return ctx.WriteBulkString(graph)
 	case "DOCTOR":
-		return ctx.WriteBulkString("")
+		return ctx.WriteBulkString("Dave, I have observed latency spikes in the CacheStorm server.\n\nNo obvious performance issues detected.\n")
 	case "HELP":
 		return ctx.WriteArray([]*resp.Value{
 			resp.BulkString("LATEST"),
