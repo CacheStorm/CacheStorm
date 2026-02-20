@@ -74,7 +74,7 @@ CacheStorm is a high-performance, Redis-compatible in-memory cache server writte
 ## Support
 
 - GitHub Issues: https://github.com/cachestorm/cachestorm/issues
-- Documentation: https://cachestorm.io/docs
+- Documentation: https://cachestorm.com/docs
 
 ## License
 
