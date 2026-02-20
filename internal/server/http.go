@@ -132,14 +132,14 @@ func (h *HTTPServer) writeError(w http.ResponseWriter, status int, message strin
 	})
 }
 
-func (h *HTTPServer) handleHealth(w http.ResponseWriter, r *http.Request) {
+func (h *HTTPServer) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	h.writeJSON(w, http.StatusOK, map[string]interface{}{
 		"status": "ok",
 		"uptime": time.Since(h.started).String(),
 	})
 }
 
-func (h *HTTPServer) handleInfo(w http.ResponseWriter, r *http.Request) {
+func (h *HTTPServer) handleInfo(w http.ResponseWriter, _ *http.Request) {
 	info := map[string]interface{}{
 		"server": map[string]interface{}{
 			"version":    "1.0.0",
@@ -157,7 +157,7 @@ func (h *HTTPServer) handleInfo(w http.ResponseWriter, r *http.Request) {
 	h.writeJSON(w, http.StatusOK, info)
 }
 
-func (h *HTTPServer) handleMetrics(w http.ResponseWriter, r *http.Request) {
+func (h *HTTPServer) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
 
 	keys := h.store.KeyCount()
@@ -310,7 +310,7 @@ func (h *HTTPServer) handleKey(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *HTTPServer) handleTags(w http.ResponseWriter, r *http.Request) {
+func (h *HTTPServer) handleTags(w http.ResponseWriter, _ *http.Request) {
 	tagIndex := h.store.GetTagIndex()
 	if tagIndex == nil {
 		h.writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -475,7 +475,7 @@ func (h *HTTPServer) handleNamespace(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *HTTPServer) handleCluster(w http.ResponseWriter, r *http.Request) {
+func (h *HTTPServer) handleCluster(w http.ResponseWriter, _ *http.Request) {
 	h.writeJSON(w, http.StatusOK, map[string]interface{}{
 		"state":          "ok",
 		"slots_assigned": 16384,
@@ -649,7 +649,7 @@ func (h *HTTPServer) handleSlowlog(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h *HTTPServer) handleStats(w http.ResponseWriter, r *http.Request) {
+func (h *HTTPServer) handleStats(w http.ResponseWriter, _ *http.Request) {
 	tagIndex := h.store.GetTagIndex()
 	tagCount := 0
 	if tagIndex != nil {

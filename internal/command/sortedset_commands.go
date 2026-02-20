@@ -236,11 +236,11 @@ func cmdZRANGEBYSCORE(ctx *Context) error {
 	}
 
 	key := ctx.ArgString(0)
-	min, err := strconv.ParseFloat(ctx.ArgString(1), 64)
+	minScore, err := strconv.ParseFloat(ctx.ArgString(1), 64)
 	if err != nil {
 		return ctx.WriteError(ErrNotInteger)
 	}
-	max, err := strconv.ParseFloat(ctx.ArgString(2), 64)
+	maxScore, err := strconv.ParseFloat(ctx.ArgString(2), 64)
 	if err != nil {
 		return ctx.WriteError(ErrNotInteger)
 	}
@@ -260,7 +260,7 @@ func cmdZRANGEBYSCORE(ctx *Context) error {
 		return ctx.WriteArray([]*resp.Value{})
 	}
 
-	entries := zset.RangeByScore(min, max, withScores, false)
+	entries := zset.RangeByScore(minScore, maxScore, withScores, false)
 
 	results := make([]*resp.Value, 0, len(entries)*2)
 	for _, e := range entries {

@@ -41,7 +41,9 @@ func (r *Reader) ReadValue() (*Value, error) {
 	case TypeArray:
 		return r.readArray()
 	case TypeNull:
-		r.readCRLF()
+		if err := r.readCRLF(); err != nil {
+			return nil, err
+		}
 		return NullValue(), nil
 	default:
 		return nil, ErrInvalidType
@@ -123,7 +125,9 @@ func (r *Reader) readBulkString() (*Value, error) {
 	}
 
 	if size == 0 {
-		r.readCRLF()
+		if err := r.readCRLF(); err != nil {
+			return nil, err
+		}
 		return BulkBytes([]byte{}), nil
 	}
 

@@ -67,7 +67,7 @@ func New(cfg *config.Config) (*Server, error) {
 	return s, nil
 }
 
-func (s *Server) Start(ctx context.Context) error {
+func (s *Server) Start(_ context.Context) error {
 	addr := net.JoinHostPort(s.cfg.Server.Bind, strconv.Itoa(s.cfg.Server.Port))
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -140,7 +140,7 @@ func (s *Server) Stop(ctx context.Context) error {
 		s.listener.Close()
 	}
 
-	s.conns.Range(func(key, value interface{}) bool {
+	s.conns.Range(func(_, value interface{}) bool {
 		if c, ok := value.(*Connection); ok {
 			c.Close()
 		}

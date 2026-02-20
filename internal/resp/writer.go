@@ -44,23 +44,41 @@ func (w *Writer) WriteValue(v *Value) error {
 }
 
 func (w *Writer) WriteSimpleString(s string) error {
-	w.wr.WriteByte(byte(TypeSimpleString))
-	w.wr.WriteString(s)
-	w.wr.WriteString("\r\n")
+	if err := w.wr.WriteByte(byte(TypeSimpleString)); err != nil {
+		return err
+	}
+	if _, err := w.wr.WriteString(s); err != nil {
+		return err
+	}
+	if _, err := w.wr.WriteString("\r\n"); err != nil {
+		return err
+	}
 	return w.wr.Flush()
 }
 
 func (w *Writer) WriteError(s string) error {
-	w.wr.WriteByte(byte(TypeError))
-	w.wr.WriteString(s)
-	w.wr.WriteString("\r\n")
+	if err := w.wr.WriteByte(byte(TypeError)); err != nil {
+		return err
+	}
+	if _, err := w.wr.WriteString(s); err != nil {
+		return err
+	}
+	if _, err := w.wr.WriteString("\r\n"); err != nil {
+		return err
+	}
 	return w.wr.Flush()
 }
 
 func (w *Writer) WriteInteger(n int64) error {
-	w.wr.WriteByte(byte(TypeInteger))
-	w.wr.WriteString(strconv.FormatInt(n, 10))
-	w.wr.WriteString("\r\n")
+	if err := w.wr.WriteByte(byte(TypeInteger)); err != nil {
+		return err
+	}
+	if _, err := w.wr.WriteString(strconv.FormatInt(n, 10)); err != nil {
+		return err
+	}
+	if _, err := w.wr.WriteString("\r\n"); err != nil {
+		return err
+	}
 	return w.wr.Flush()
 }
 
@@ -69,11 +87,21 @@ func (w *Writer) WriteBulkString(s string) error {
 }
 
 func (w *Writer) WriteBulkBytes(b []byte) error {
-	w.wr.WriteByte(byte(TypeBulkString))
-	w.wr.WriteString(strconv.Itoa(len(b)))
-	w.wr.WriteString("\r\n")
-	w.wr.Write(b)
-	w.wr.WriteString("\r\n")
+	if err := w.wr.WriteByte(byte(TypeBulkString)); err != nil {
+		return err
+	}
+	if _, err := w.wr.WriteString(strconv.Itoa(len(b))); err != nil {
+		return err
+	}
+	if _, err := w.wr.WriteString("\r\n"); err != nil {
+		return err
+	}
+	if _, err := w.wr.Write(b); err != nil {
+		return err
+	}
+	if _, err := w.wr.WriteString("\r\n"); err != nil {
+		return err
+	}
 	return w.wr.Flush()
 }
 
