@@ -1602,25 +1602,6 @@ func cmdSTRALGO(ctx *Context) error {
 	return ctx.WriteBulkString("")
 }
 
-func cmdMODULE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	subCmd := strings.ToUpper(ctx.ArgString(0))
-
-	switch subCmd {
-	case "LIST":
-		return ctx.WriteArray([]*resp.Value{})
-	case "LOAD":
-		return ctx.WriteError(errors.New("ERR module loading not supported"))
-	case "UNLOAD":
-		return ctx.WriteError(errors.New("ERR module unloading not supported"))
-	default:
-		return ctx.WriteError(errors.New("ERR unknown subcommand '" + subCmd + "'"))
-	}
-}
-
 func cmdACL(ctx *Context) error {
 	if ctx.ArgCount() < 1 {
 		return ctx.WriteError(ErrWrongArgCount)
