@@ -77,6 +77,7 @@ func New(cfg *config.Config) (*Server, error) {
 	command.RegisterDataStructuresCommands(s.router)
 	command.RegisterEncodingCommands(s.router)
 	command.RegisterActorCommands(s.router)
+	command.RegisterMVCCCommands(s.router)
 
 	command.InitReplicationManager(s.store)
 
