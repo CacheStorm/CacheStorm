@@ -110,7 +110,6 @@ func cmdSREM(ctx *Context) error {
 	}
 
 	set.Lock()
-	defer set.Unlock()
 	removed := 0
 	for i := 1; i < ctx.ArgCount(); i++ {
 		member := ctx.ArgString(i)
@@ -120,7 +119,10 @@ func cmdSREM(ctx *Context) error {
 		}
 	}
 
-	if len(set.Members) == 0 {
+	isEmpty := len(set.Members) == 0
+	set.Unlock()
+
+	if isEmpty {
 		ctx.Store.Delete(key)
 	}
 
@@ -221,15 +223,17 @@ func cmdSPOP(ctx *Context) error {
 	}
 
 	set.Lock()
-	defer set.Unlock()
 	if count == 1 {
 		for member := range set.Members {
 			delete(set.Members, member)
-			if len(set.Members) == 0 {
+			isEmpty := len(set.Members) == 0
+			set.Unlock()
+			if isEmpty {
 				ctx.Store.Delete(key)
 			}
 			return ctx.WriteBulkString(member)
 		}
+		set.Unlock()
 		return ctx.WriteNullBulkString()
 	}
 
@@ -238,6 +242,7 @@ func cmdSPOP(ctx *Context) error {
 		for member := range set.Members {
 			members = append(members, resp.BulkString(member))
 		}
+		set.Unlock()
 		ctx.Store.Delete(key)
 		return ctx.WriteArray(members)
 	}
@@ -252,6 +257,7 @@ func cmdSPOP(ctx *Context) error {
 		delete(set.Members, member)
 		i++
 	}
+	set.Unlock()
 
 	return ctx.WriteArray(members)
 }

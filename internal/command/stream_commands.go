@@ -102,6 +102,7 @@ func cmdXADD(ctx *Context) error {
 	trimStrategy := ""
 	argIdx := 1
 
+loop:
 	for argIdx < ctx.ArgCount() {
 		arg := strings.ToUpper(ctx.ArgString(argIdx))
 		switch arg {
@@ -142,7 +143,7 @@ func cmdXADD(ctx *Context) error {
 		case "LIMIT":
 			argIdx += 2
 		default:
-			break
+			break loop
 		}
 	}
 

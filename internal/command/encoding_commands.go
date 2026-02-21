@@ -2,12 +2,16 @@ package command
 
 import (
 	"fmt"
+	"math/rand"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
 )
+
+var encodingRandMu sync.Mutex
+var encodingRand = rand.New(rand.NewSource(time.Now().UnixNano()))
 
 func RegisterEncodingCommands(router *Router) {
 	router.Register(&CommandDef{Name: "MSGPACK.ENCODE", Handler: cmdMSGPACKENCODE})
@@ -527,8 +531,9 @@ func generateUUID() string {
 }
 
 func randomInt(n int) int {
-	seed := time.Now().UnixNano()
-	return int((seed*1103515245 + 12345) % int64(n))
+	encodingRandMu.Lock()
+	defer encodingRandMu.Unlock()
+	return encodingRand.Intn(n)
 }
 
 func cmdUUIDVALIDATE(ctx *Context) error {

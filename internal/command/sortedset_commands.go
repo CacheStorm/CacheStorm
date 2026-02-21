@@ -550,7 +550,6 @@ func cmdZREM(ctx *Context) error {
 	}
 
 	zset.Lock()
-	defer zset.Unlock()
 	removed := 0
 	for i := 1; i < ctx.ArgCount(); i++ {
 		member := ctx.ArgString(i)
@@ -560,7 +559,10 @@ func cmdZREM(ctx *Context) error {
 		}
 	}
 
-	if len(zset.Members) == 0 {
+	isEmpty := len(zset.Members) == 0
+	zset.Unlock()
+
+	if isEmpty {
 		ctx.Store.Delete(key)
 	}
 

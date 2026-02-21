@@ -209,7 +209,6 @@ func cmdHDEL(ctx *Context) error {
 	}
 
 	hash.Lock()
-	defer hash.Unlock()
 	deleted := 0
 	for i := 1; i < ctx.ArgCount(); i++ {
 		field := ctx.ArgString(i)
@@ -219,7 +218,10 @@ func cmdHDEL(ctx *Context) error {
 		}
 	}
 
-	if len(hash.Fields) == 0 {
+	isEmpty := len(hash.Fields) == 0
+	hash.Unlock()
+
+	if isEmpty {
 		ctx.Store.Delete(key)
 	}
 
@@ -618,14 +620,16 @@ func cmdHGETDEL(ctx *Context) error {
 	}
 
 	hash.Lock()
-	defer hash.Unlock()
 	if len(fields) == 1 {
 		value, exists := hash.Fields[fields[0]]
 		if !exists {
+			hash.Unlock()
 			return ctx.WriteNullBulkString()
 		}
 		delete(hash.Fields, fields[0])
-		if len(hash.Fields) == 0 {
+		isEmpty := len(hash.Fields) == 0
+		hash.Unlock()
+		if isEmpty {
 			ctx.Store.Delete(key)
 		}
 		return ctx.WriteBulkBytes(value)
@@ -640,7 +644,9 @@ func cmdHGETDEL(ctx *Context) error {
 			results = append(results, resp.NullValue())
 		}
 	}
-	if len(hash.Fields) == 0 {
+	isEmpty := len(hash.Fields) == 0
+	hash.Unlock()
+	if isEmpty {
 		ctx.Store.Delete(key)
 	}
 	return ctx.WriteArray(results)

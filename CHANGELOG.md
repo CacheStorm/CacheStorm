@@ -13,6 +13,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - WebSocket support
 - GraphQL subscriptions
 
+## [0.1.26] - 2026-02-22
+
+### Fixed - Critical Bug Fixes
+
+**Deadlock Fixes**
+- Fixed deadlock in `HDEL` command when deleting empty hash
+- Fixed deadlock in `HGETDEL` command when deleting empty hash
+- Fixed deadlock in `SREM` command when deleting empty set
+- Fixed deadlock in `SPOP` command when deleting empty set
+- Fixed deadlock in `ZREM` command when deleting empty sorted set
+
+**Test Improvements**
+- Fixed `TestTransactionCommands` name conflict in comprehensive_test.go
+- Fixed `s.Set()` calls to use proper `store.StringValue` type
+- Fixed infinite loop in `XADD` command argument parsing
+- Fixed `generateUUID()` random number generator producing negative indices
+
+**Coverage**
+- Command coverage: 13.9%
+- Store coverage: 12.3%
+- Cluster coverage: 23.3%
+- RESP coverage: 45.6%
+- Total registered commands: 1,578
+
 ## [0.1.25] - 2026-02-21
 
 ### Added - Redis Compatibility Improvements (8 new commands - Total: 1,606)
