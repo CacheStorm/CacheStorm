@@ -65,6 +65,7 @@ func New(cfg *config.Config) (*Server, error) {
 	command.RegisterProbabilisticCommands(s.router)
 	command.RegisterGraphCommands(s.router)
 	command.RegisterDigestCommands(s.router)
+	command.RegisterUtilityCommands(s.router)
 
 	command.InitReplicationManager(s.store)
 
