@@ -2,6 +2,130 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.22] - 2026-02-21
+
+### Added - Advanced Commands 2 (175 new commands - Total: 1393)
+
+**Filter Commands**
+- FILTER.CREATE, DELETE, APPLY, LIST
+
+**Transform Commands**
+- TRANSFORM.CREATE, DELETE, APPLY, LIST
+
+**Enrichment Commands**
+- ENRICH.CREATE, DELETE, APPLY, LIST
+
+**Validator Commands**
+- VALIDATE.CREATE, DELETE, CHECK, LIST
+
+**Job Extended Commands**
+- JOBX.CREATE, DELETE, RUN, STATUS, LIST
+
+**Stage Commands**
+- STAGE.CREATE, DELETE, NEXT, PREV, LIST
+
+**Context Commands**
+- CONTEXT.CREATE, DELETE, SET, GET, LIST
+
+**Rule Commands**
+- RULE.CREATE, DELETE, EVAL, LIST
+
+**Policy Commands**
+- POLICY.CREATE, DELETE, CHECK, LIST
+
+**Permit Commands**
+- PERMIT.GRANT, REVOKE, CHECK, LIST
+
+**Grant Commands**
+- GRANT.CREATE, DELETE, CHECK, LIST
+
+**Chain Extended Commands**
+- CHAINX.CREATE, DELETE, EXECUTE, LIST
+
+**Task Extended Commands**
+- TASKX.CREATE, DELETE, RUN, LIST
+
+**Timer Commands**
+- TIMER.CREATE, DELETE, STATUS, LIST
+
+**Counter Extended Commands**
+- COUNTERX2.CREATE, INCR, DECR, GET, LIST
+
+**Level Commands**
+- LEVEL.CREATE, DELETE, SET, GET, LIST
+
+**Record Commands**
+- RECORD.CREATE, ADD, GET, DELETE
+
+**Entity Commands**
+- ENTITY.CREATE, DELETE, GET, SET, LIST
+
+**Relation Commands**
+- RELATION.CREATE, DELETE, GET, LIST
+
+**Connection Extended Commands**
+- CONNECTIONX.CREATE, DELETE, STATUS, LIST
+
+**Pool Extended Commands**
+- POOLX.CREATE, DELETE, ACQUIRE, RELEASE, STATUS
+
+**Buffer Extended Commands**
+- BUFFERX.CREATE, WRITE, READ, DELETE
+
+**Stream Extended Commands**
+- STREAMX.CREATE, WRITE, READ, DELETE
+
+**Event Extended Commands**
+- EVENTX.CREATE, DELETE, EMIT, SUBSCRIBE, LIST
+
+**Hook Commands**
+- HOOK.CREATE, DELETE, TRIGGER, LIST
+
+**Middleware Commands**
+- MIDDLEWARE.CREATE, DELETE, EXECUTE, LIST
+
+**Interceptor Commands**
+- INTERCEPTOR.CREATE, DELETE, CHECK, LIST
+
+**Guard Commands**
+- GUARD.CREATE, DELETE, CHECK, LIST
+
+**Proxy Commands**
+- PROXY.CREATE, DELETE, ROUTE, LIST
+
+**Cache Extended Commands**
+- CACHEX.CREATE, DELETE, GET, SET, LIST
+
+**Store Extended Commands**
+- STOREX.CREATE, DELETE, PUT, GET, LIST
+
+**Index Commands**
+- INDEX.CREATE, DELETE, ADD, SEARCH, LIST
+
+**Query Commands**
+- QUERY.CREATE, DELETE, EXECUTE, LIST
+
+**View Commands**
+- VIEW.CREATE, DELETE, GET, LIST
+
+**Report Commands**
+- REPORT.CREATE, DELETE, GENERATE, LIST
+
+**Audit Extended Commands**
+- AUDITX.LOG, GET, SEARCH, LIST
+
+**Token Commands**
+- TOKEN.CREATE, DELETE, VALIDATE, REFRESH, LIST
+
+**Session Extended Commands**
+- SESSIONX.CREATE, DELETE, GET, SET, LIST
+
+**Profile Commands**
+- PROFILE.CREATE, DELETE, GET, SET, LIST
+
+**Role Extended Commands**
+- ROLEX.CREATE, DELETE, ASSIGN, CHECK, LIST
+
 ## [0.1.21] - 2026-02-21
 
 ### Added - Extra Commands (138 new commands - Total: 1218)
