@@ -1,0 +1,29 @@
+[Unit]
+Description=CacheStorm - High-Performance In-Memory Database
+Documentation=https://github.com/cachestorm/cachestorm
+After=network.target
+
+[Service]
+Type=simple
+User=cachestorm
+Group=cachestorm
+ExecStart=/usr/bin/cachestorm --config /etc/cachestorm/cachestorm.yaml
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65535
+TimeoutStartSec=30
+TimeoutStopSec=30
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/cachestorm /var/log/cachestorm
+
+# Resource limits
+LimitNPROC=4096
+LimitCORE=infinity
+
+[Install]
+WantedBy=multi-user.target
