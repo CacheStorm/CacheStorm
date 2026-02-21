@@ -635,3 +635,305 @@ func TestResilienceCommandsComprehensive(t *testing.T) {
 		})
 	}
 }
+
+func TestJSONCommandsComprehensive(t *testing.T) {
+	s := store.NewStore()
+	router := NewRouter()
+	RegisterJSONCommands(router)
+
+	tests := []struct {
+		name string
+		cmd  string
+		args [][]byte
+	}{
+		{"JSON.SET", "JSON.SET", [][]byte{[]byte("doc1"), []byte("$"), []byte(`{"name":"test","value":123}`)}},
+		{"JSON.GET", "JSON.GET", [][]byte{[]byte("doc1"), []byte("$")}},
+		{"JSON.TYPE", "JSON.TYPE", [][]byte{[]byte("doc1"), []byte("$")}},
+		{"JSON.STRLEN", "JSON.STRLEN", [][]byte{[]byte("doc1"), []byte("$.name")}},
+		{"JSON.OBJLEN", "JSON.OBJLEN", [][]byte{[]byte("doc1"), []byte("$")}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := newTestCtx(tt.cmd, tt.args, s)
+			handler, ok := router.Get(tt.cmd)
+			if !ok {
+				t.Fatalf("Command %s not found", tt.cmd)
+			}
+			if err := handler.Handler(ctx); err != nil {
+				t.Errorf("Command %s failed: %v", tt.cmd, err)
+			}
+		})
+	}
+}
+
+func TestEncodingCommandsComprehensive(t *testing.T) {
+	s := store.NewStore()
+	router := NewRouter()
+	RegisterEncodingCommands(router)
+
+	tests := []struct {
+		name string
+		cmd  string
+		args [][]byte
+	}{
+		{"URL.ENCODE", "URL.ENCODE", [][]byte{[]byte("hello world")}},
+		{"URL.DECODE", "URL.DECODE", [][]byte{[]byte("hello%20world")}},
+		{"UUID.GEN", "UUID.GEN", nil},
+		{"UUID.VALIDATE", "UUID.VALIDATE", [][]byte{[]byte("550e8400-e29b-41d4-a716-446655440000")}},
+		{"TIMESTAMP.NOW", "TIMESTAMP.NOW", nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := newTestCtx(tt.cmd, tt.args, s)
+			handler, ok := router.Get(tt.cmd)
+			if !ok {
+				t.Fatalf("Command %s not found", tt.cmd)
+			}
+			if err := handler.Handler(ctx); err != nil {
+				t.Errorf("Command %s failed: %v", tt.cmd, err)
+			}
+		})
+	}
+}
+
+func TestCacheCommandsComprehensive(t *testing.T) {
+	s := store.NewStore()
+	router := NewRouter()
+	RegisterCacheCommands(router)
+
+	tests := []struct {
+		name string
+		cmd  string
+		args [][]byte
+	}{
+		{"CACHE.STATS", "CACHE.STATS", nil},
+		{"CACHE.CLEAR", "CACHE.CLEAR", nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := newTestCtx(tt.cmd, tt.args, s)
+			handler, ok := router.Get(tt.cmd)
+			if !ok {
+				t.Fatalf("Command %s not found", tt.cmd)
+			}
+			if err := handler.Handler(ctx); err != nil {
+				t.Errorf("Command %s failed: %v", tt.cmd, err)
+			}
+		})
+	}
+}
+
+func TestTimeSeriesCommandsComprehensive(t *testing.T) {
+	s := store.NewStore()
+	router := NewRouter()
+	RegisterTSCommands(router)
+
+	tests := []struct {
+		name string
+		cmd  string
+		args [][]byte
+	}{
+		{"TS.CREATE", "TS.CREATE", [][]byte{[]byte("ts1")}},
+		{"TS.ADD", "TS.ADD", [][]byte{[]byte("ts1"), []byte("*"), []byte("100")}},
+		{"TS.GET", "TS.GET", [][]byte{[]byte("ts1")}},
+		{"TS.RANGE", "TS.RANGE", [][]byte{[]byte("ts1"), []byte("-"), []byte("+")}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := newTestCtx(tt.cmd, tt.args, s)
+			handler, ok := router.Get(tt.cmd)
+			if !ok {
+				t.Fatalf("Command %s not found", tt.cmd)
+			}
+			if err := handler.Handler(ctx); err != nil {
+				t.Errorf("Command %s failed: %v", tt.cmd, err)
+			}
+		})
+	}
+}
+
+func TestProbabilisticCommandsComprehensive(t *testing.T) {
+	s := store.NewStore()
+	router := NewRouter()
+	RegisterProbabilisticCommands(router)
+
+	tests := []struct {
+		name string
+		cmd  string
+		args [][]byte
+	}{
+		{"BF.ADD", "BF.ADD", [][]byte{[]byte("bf1"), []byte("item1")}},
+		{"BF.EXISTS", "BF.EXISTS", [][]byte{[]byte("bf1"), []byte("item1")}},
+		{"CF.ADD", "CF.ADD", [][]byte{[]byte("cf1"), []byte("item1")}},
+		{"CF.EXISTS", "CF.EXISTS", [][]byte{[]byte("cf1"), []byte("item1")}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := newTestCtx(tt.cmd, tt.args, s)
+			handler, ok := router.Get(tt.cmd)
+			if !ok {
+				t.Fatalf("Command %s not found", tt.cmd)
+			}
+			if err := handler.Handler(ctx); err != nil {
+				t.Errorf("Command %s failed: %v", tt.cmd, err)
+			}
+		})
+	}
+}
+
+func TestTagCommandsComprehensive(t *testing.T) {
+	s := store.NewStore()
+	router := NewRouter()
+	RegisterTagCommands(router)
+	RegisterStringCommands(router)
+
+	ctx := newTestCtx("SET", [][]byte{[]byte("taggedkey"), []byte("value")}, s)
+	if handler, ok := router.Get("SET"); ok {
+		handler.Handler(ctx)
+	}
+
+	tests := []struct {
+		name string
+		cmd  string
+		args [][]byte
+	}{
+		{"SETTAG", "SETTAG", [][]byte{[]byte("taggedkey"), []byte("tag1")}},
+		{"TAGS", "TAGS", [][]byte{[]byte("taggedkey")}},
+		{"TAGKEYS", "TAGKEYS", [][]byte{[]byte("tag1")}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := newTestCtx(tt.cmd, tt.args, s)
+			handler, ok := router.Get(tt.cmd)
+			if !ok {
+				t.Fatalf("Command %s not found", tt.cmd)
+			}
+			if err := handler.Handler(ctx); err != nil {
+				t.Errorf("Command %s failed: %v", tt.cmd, err)
+			}
+		})
+	}
+}
+
+func TestNamespaceCommandsComprehensive(t *testing.T) {
+	s := store.NewStoreWithNamespaces()
+	router := NewRouter()
+	RegisterNamespaceCommands(router)
+
+	tests := []struct {
+		name string
+		cmd  string
+		args [][]byte
+	}{
+		{"NAMESPACES", "NAMESPACES", nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := newTestCtx(tt.cmd, tt.args, s)
+			handler, ok := router.Get(tt.cmd)
+			if !ok {
+				t.Fatalf("Command %s not found", tt.cmd)
+			}
+			if err := handler.Handler(ctx); err != nil {
+				t.Errorf("Command %s failed: %v", tt.cmd, err)
+			}
+		})
+	}
+}
+
+func TestUtilityCommandsComprehensive(t *testing.T) {
+	s := store.NewStore()
+	router := NewRouter()
+	RegisterUtilityCommands(router)
+
+	tests := []struct {
+		name string
+		cmd  string
+		args [][]byte
+	}{
+		{"ID.CREATE", "ID.CREATE", [][]byte{[]byte("gen1")}},
+		{"ID.NEXT", "ID.NEXT", [][]byte{[]byte("gen1")}},
+		{"SNOWFLAKE.NEXT", "SNOWFLAKE.NEXT", nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := newTestCtx(tt.cmd, tt.args, s)
+			handler, ok := router.Get(tt.cmd)
+			if !ok {
+				t.Fatalf("Command %s not found", tt.cmd)
+			}
+			if err := handler.Handler(ctx); err != nil {
+				t.Errorf("Command %s failed: %v", tt.cmd, err)
+			}
+		})
+	}
+}
+
+func TestDigestCommandsComprehensive(t *testing.T) {
+	s := store.NewStore()
+	router := NewRouter()
+	RegisterDigestCommands(router)
+
+	tests := []struct {
+		name string
+		cmd  string
+		args [][]byte
+	}{
+		{"DIGEST.MD5", "DIGEST.MD5", [][]byte{[]byte("test")}},
+		{"DIGEST.SHA1", "DIGEST.SHA1", [][]byte{[]byte("test")}},
+		{"DIGEST.SHA256", "DIGEST.SHA256", [][]byte{[]byte("test")}},
+		{"DIGEST.SHA512", "DIGEST.SHA512", [][]byte{[]byte("test")}},
+		{"DIGEST.BASE64ENCODE", "DIGEST.BASE64ENCODE", [][]byte{[]byte("test")}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := newTestCtx(tt.cmd, tt.args, s)
+			handler, ok := router.Get(tt.cmd)
+			if !ok {
+				t.Fatalf("Command %s not found", tt.cmd)
+			}
+			if err := handler.Handler(ctx); err != nil {
+				t.Errorf("Command %s failed: %v", tt.cmd, err)
+			}
+		})
+	}
+}
+
+func TestMonitoringCommandsComprehensive(t *testing.T) {
+	s := store.NewStore()
+	router := NewRouter()
+	RegisterMonitoringCommands(router)
+
+	tests := []struct {
+		name string
+		cmd  string
+		args [][]byte
+	}{
+		{"METRICS.GET", "METRICS.GET", nil},
+		{"HEALTH.CHECK", "HEALTH.CHECK", nil},
+		{"HEALTH.LIVENESS", "HEALTH.LIVENESS", nil},
+		{"SLOWLOG.LEN", "SLOWLOG.LEN", nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := newTestCtx(tt.cmd, tt.args, s)
+			handler, ok := router.Get(tt.cmd)
+			if !ok {
+				t.Fatalf("Command %s not found", tt.cmd)
+			}
+			if err := handler.Handler(ctx); err != nil {
+				t.Errorf("Command %s failed: %v", tt.cmd, err)
+			}
+		})
+	}
+}
