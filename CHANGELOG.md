@@ -2,6 +2,85 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.20] - 2026-02-21
+
+### Added - More Commands (129 new commands - Total: 1080)
+
+**Sliding Window Commands**
+- SLIDING.CREATE, CHECK, RESET, DELETE, STATS
+
+**Bucket Commands**
+- BUCKETX.CREATE, TAKE, RETURN, REFILL, DELETE
+
+**Idempotency Commands**
+- IDEMPOTENCY.SET, GET, CHECK, DELETE, LIST
+
+**Feature Experiment Commands**
+- EXPERIMENT.CREATE, DELETE, ASSIGN, TRACK, RESULTS, LIST
+
+**Rollout Commands**
+- ROLLOUT.CREATE, DELETE, CHECK, PERCENTAGE, LIST
+
+**Schema Commands**
+- SCHEMA.REGISTER, VALIDATE, DELETE, LIST
+
+**Pipeline Commands**
+- PIPELINE.CREATE, ADDSTAGE, EXECUTE, STATUS, DELETE, LIST
+
+**Notification Commands**
+- NOTIFY.CREATE, SEND, LIST, DELETE, TEMPLATE
+
+**Alert Commands**
+- ALERT.CREATE, TRIGGER, ACKNOWLEDGE, RESOLVE, LIST, HISTORY
+
+**Counter Extended Commands**
+- COUNTERX.CREATE, INCR, DECR, GET, RESET, DELETE
+
+**Gauge Commands**
+- GAUGE.CREATE, SET, GET, INCR, DECR, DELETE
+
+**Tracing Commands**
+- TRACE.START, SPAN, END, GET, LIST
+
+**Log Extended Commands**
+- LOGX.WRITE, READ, SEARCH, CLEAR, STATS
+
+**API Key Commands**
+- APIKEY.CREATE, VALIDATE, REVOKE, LIST, USAGE
+
+**Quota Extended Commands**
+- QUOTAX.CREATE, CHECK, USAGE, RESET, DELETE
+
+**Meter Commands**
+- METER.CREATE, RECORD, GET, BILLING, DELETE
+
+**Tenant Commands**
+- TENANT.CREATE, DELETE, GET, LIST, CONFIG
+
+**Lease Commands**
+- LEASE.CREATE, RENEW, REVOKE, GET, LIST
+
+**Heap Commands**
+- HEAP.PUSH, POP, PEEK, SIZE, DELETE
+
+**Bloom Extended Commands**
+- BLOOMX.CREATE, ADD, CHECK, INFO, DELETE
+
+**Sketch Commands**
+- SKETCH.CREATE, UPDATE, QUERY, MERGE, DELETE
+
+**Ring Buffer Commands**
+- RINGBUFFER.CREATE, WRITE, READ, SIZE, DELETE
+
+**Window Commands**
+- WINDOW.CREATE, ADD, GET, AGGREGATE, DELETE
+
+**Frequency Commands**
+- FREQ.CREATE, ADD, COUNT, TOP, DELETE
+
+**Partition Commands**
+- PARTITION.CREATE, ADD, GET, LIST, DELETE
+
 ## [0.1.19] - 2026-02-21
 
 ### Added - Extended Commands (97 new commands - Total: 951)
