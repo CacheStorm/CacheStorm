@@ -2,6 +2,45 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.18] - 2026-02-21
+
+### Added - Integration Commands (71 new commands - Total: 854)
+
+**Circuit Breaker Commands**
+- CIRCUITBREAKER.CREATE, STATE, TRIP, RESET
+
+**Rate Limit Commands**
+- RATELIMIT.CREATE, CHECK, RESET, DELETE
+
+**Cache Lock Commands**
+- CACHE.LOCK, UNLOCK, LOCKED, REFRESH
+
+**Network Commands**
+- NET.WHOIS, DNS, PING, PORT
+
+**Array Commands**
+- ARRAY.PUSH, POP, SHIFT, UNSHIFT, SLICE, SPLICE
+- ARRAY.REVERSE, SORT, UNIQUE, FLATTEN, MERGE
+- ARRAY.INTERSECT, DIFF, INDEXOF, LASTINDEXOF, INCLUDES
+
+**Object Commands**
+- OBJECT.KEYS, VALUES, ENTRIES, FROMENTRIES
+- OBJECT.MERGE, PICK, OMIT, HAS, GET, SET, DELETE
+
+**Math Commands**
+- MATH.ADD, SUB, MUL, DIV, MOD, POW, SQRT, ABS
+- MATH.MIN, MAX, FLOOR, CEIL, ROUND, RANDOM
+- MATH.SUM, AVG, MEDIAN, STDDEV
+
+**Geo Extended Commands**
+- GEO.ENCODE, DECODE, DISTANCE, BOUNDINGBOX
+
+**CAPTCHA Commands**
+- CAPTCHA.GENERATE, VERIFY
+
+**Sequence Commands**
+- SEQUENCE.NEXT, CURRENT, RESET, SET
+
 ## [0.1.13] - 2026-02-21
 
 ### Added - Workflow, State Machine, Chained and Reactive
