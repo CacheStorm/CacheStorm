@@ -62,6 +62,8 @@ func New(cfg *config.Config) (*Server, error) {
 	command.RegisterJSONCommands(s.router)
 	command.RegisterTSCommands(s.router)
 	command.RegisterSearchCommands(s.router)
+	command.RegisterProbabilisticCommands(s.router)
+	command.RegisterGraphCommands(s.router)
 
 	command.InitReplicationManager(s.store)
 
