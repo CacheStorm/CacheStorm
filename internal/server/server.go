@@ -84,6 +84,7 @@ func New(cfg *config.Config) (*Server, error) {
 	command.RegisterExtraCommands(s.router)
 	command.RegisterAdvancedCommands2(s.router)
 	command.RegisterResilienceCommands(s.router)
+	command.RegisterMLCommands(s.router)
 
 	command.InitReplicationManager(s.store)
 

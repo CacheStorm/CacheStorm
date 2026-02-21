@@ -8,7 +8,7 @@
   [![Go Version](https://img.shields.io/badge/Go-1.22%2B-00ADD8?style=flat&logo=go)](https://golang.org)
   [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
   [![Redis Compatible](https://img.shields.io/badge/Redis-Compatible-DC382D?style=flat&logo=redis)](https://redis.io)
-  [![Commands](https://img.shields.io/badge/Commands-1458+-green)](./docs/commands.md)
+  [![Commands](https://img.shields.io/badge/Commands-1598+-green)](./docs/commands.md)
   
   [![CI](https://github.com/cachestorm/cachestorm/actions/workflows/ci.yml/badge.svg)](https://github.com/cachestorm/cachestorm/actions/workflows/ci.yml)
   [![Release](https://github.com/cachestorm/cachestorm/actions/workflows/release.yml/badge.svg)](https://github.com/cachestorm/cachestorm/actions/workflows/release.yml)
@@ -18,7 +18,7 @@
 
 ---
 
-A high-performance, Redis-compatible in-memory database written in Go with **1,458+ commands** across 50+ modules. CacheStorm extends Redis with modern distributed systems features, data processing capabilities, and application-level abstractions.
+A high-performance, Redis-compatible in-memory database written in Go with **1,598 commands** across 50+ modules. CacheStorm extends Redis with modern distributed systems features, data processing capabilities, and application-level abstractions.
 
 📚 **[Documentation](./docs/)** | 🚀 **[Getting Started](./docs/01-getting-started.md)** | 📖 **[Commands Reference](./docs/commands.md)** | 💬 **[Discussions](https://github.com/cachestorm/cachestorm/discussions)**
 

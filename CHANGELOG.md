@@ -12,7 +12,126 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GraphQL API
 - WebSocket support
 - GraphQL subscriptions
-- Machine learning commands
+
+## [0.1.24] - 2026-02-21
+
+### Added - Machine Learning Commands (80 new commands - Total: 1,598)
+
+**Model Commands**
+- `MODEL.CREATE` - Create ML model
+- `MODEL.TRAIN` - Train model
+- `MODEL.PREDICT` - Make predictions
+- `MODEL.DELETE` - Delete model
+- `MODEL.LIST` - List models
+- `MODEL.STATUS` - Get model status
+
+**Feature Commands**
+- `FEATURE.SET` - Set feature value
+- `FEATURE.GET` - Get feature value
+- `FEATURE.DEL` - Delete feature
+- `FEATURE.INCR` - Increment feature
+- `FEATURE.NORMALIZE` - Normalize features
+- `FEATURE.VECTOR` - Get feature vector
+
+**Embedding Commands**
+- `EMBEDDING.CREATE` - Create embedding
+- `EMBEDDING.GET` - Get embedding
+- `EMBEDDING.SEARCH` - Search embeddings
+- `EMBEDDING.SIMILAR` - Find similar embeddings
+- `EMBEDDING.DELETE` - Delete embedding
+
+**Tensor Commands**
+- `TENSOR.CREATE` - Create tensor
+- `TENSOR.GET` - Get tensor
+- `TENSOR.ADD` - Add tensors
+- `TENSOR.MATMUL` - Matrix multiplication
+- `TENSOR.RESHAPE` - Reshape tensor
+- `TENSOR.DELETE` - Delete tensor
+
+**Classifier Commands**
+- `CLASSIFIER.CREATE` - Create classifier
+- `CLASSIFIER.TRAIN` - Train classifier
+- `CLASSIFIER.PREDICT` - Predict class
+- `CLASSIFIER.DELETE` - Delete classifier
+
+**Regressor Commands**
+- `REGRESSOR.CREATE` - Create regressor
+- `REGRESSOR.TRAIN` - Train regressor
+- `REGRESSOR.PREDICT` - Predict value
+- `REGRESSOR.DELETE` - Delete regressor
+
+**Clustering Commands**
+- `CLUSTER.CREATE` - Create cluster model
+- `CLUSTER.FIT` - Fit clusters
+- `CLUSTER.PREDICT` - Predict cluster
+- `CLUSTER.CENTROIDS` - Get centroids
+- `CLUSTER.DELETE` - Delete cluster model
+
+**Anomaly Detection Commands**
+- `ANOMALY.CREATE` - Create anomaly detector
+- `ANOMALY.DETECT` - Detect anomalies
+- `ANOMALY.LEARN` - Learn normal behavior
+- `ANOMALY.DELETE` - Delete detector
+
+**Sentiment Analysis Commands**
+- `SENTIMENT.ANALYZE` - Analyze sentiment
+- `SENTIMENT.BATCH` - Batch sentiment analysis
+
+**NLP Commands**
+- `NLP.TOKENIZE` - Tokenize text
+- `NLP.ENTITIES` - Extract entities
+- `NLP.KEYWORDS` - Extract keywords
+- `NLP.SUMMARIZE` - Summarize text
+
+**Similarity Commands**
+- `SIMILARITY.COSINE` - Cosine similarity
+- `SIMILARITY.EUCLIDEAN` - Euclidean distance
+- `SIMILARITY.JACCARD` - Jaccard similarity
+- `SIMILARITY.DOTPRODUCT` - Dot product
+
+**Dataset Commands**
+- `DATASET.CREATE` - Create dataset
+- `DATASET.ADD` - Add data
+- `DATASET.GET` - Get dataset
+- `DATASET.SPLIT` - Split dataset
+- `DATASET.DELETE` - Delete dataset
+
+**ML Experiment Commands**
+- `MLXPERIMENT.CREATE` - Create experiment
+- `MLXPERIMENT.LOG` - Log metrics
+- `MLXPERIMENT.METRICS` - Get metrics
+- `MLXPERIMENT.COMPARE` - Compare experiments
+- `MLXPERIMENT.DELETE` - Delete experiment
+
+**ML Pipeline Commands**
+- `PIPELINEML.CREATE` - Create ML pipeline
+- `PIPELINEML.ADD` - Add step
+- `PIPELINEML.RUN` - Run pipeline
+- `PIPELINEML.DELETE` - Delete pipeline
+
+**Hyperparameter Commands**
+- `HYPERPARAM.SET` - Set hyperparameter
+- `HYPERPARAM.GET` - Get hyperparameter
+- `HYPERPARAM.SEARCH` - Search hyperparameters
+- `HYPERPARAM.DELETE` - Delete hyperparameters
+
+**Evaluator Commands**
+- `EVALUATOR.CREATE` - Create evaluator
+- `EVALUATOR.RUN` - Run evaluation
+- `EVALUATOR.METRICS` - Get metrics
+- `EVALUATOR.DELETE` - Delete evaluator
+
+**Recommendation Commands**
+- `RECOMMEND.CREATE` - Create recommender
+- `RECOMMEND.TRAIN` - Train recommender
+- `RECOMMEND.GET` - Get recommendations
+- `RECOMMEND.DELETE` - Delete recommender
+
+**Time Series Forecast Commands**
+- `TIMEFORECAST.CREATE` - Create forecaster
+- `TIMEFORECAST.TRAIN` - Train forecaster
+- `TIMEFORECAST.PREDICT` - Predict values
+- `TIMEFORECAST.DELETE` - Delete forecaster
 
 ## [0.1.23] - 2026-02-21
 
@@ -335,7 +454,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Commands | Description |
 |---------|------|----------|-------------|
-| 0.1.23 | 2026-02-21 | 1,458 | Resilience patterns |
+| 0.1.24 | 2026-02-21 | 1,598 | Machine learning commands |
+| 0.1.23 | 2026-02-21 | 1,518 | Resilience patterns |
 | 0.1.22 | 2026-02-21 | 1,393 | Advanced commands 2 |
 | 0.1.21 | 2026-02-21 | 1,218 | Extra commands |
 | 0.1.20 | 2026-02-21 | 1,080 | More commands |
@@ -345,7 +465,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/cachestorm/cachestorm/compare/v0.1.23...HEAD
+[Unreleased]: https://github.com/cachestorm/cachestorm/compare/v0.1.24...HEAD
+[0.1.24]: https://github.com/cachestorm/cachestorm/compare/v0.1.23...v0.1.24
 [0.1.23]: https://github.com/cachestorm/cachestorm/compare/v0.1.22...v0.1.23
 [0.1.22]: https://github.com/cachestorm/cachestorm/compare/v0.1.21...v0.1.22
 [0.1.21]: https://github.com/cachestorm/cachestorm/compare/v0.1.20...v0.1.21
