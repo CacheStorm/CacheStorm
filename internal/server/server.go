@@ -73,6 +73,7 @@ func New(cfg *config.Config) (*Server, error) {
 	command.RegisterEventCommands(s.router)
 	command.RegisterUtilityExtCommands(s.router)
 	command.RegisterTemplateCommands(s.router)
+	command.RegisterWorkflowCommands(s.router)
 
 	command.InitReplicationManager(s.store)
 
