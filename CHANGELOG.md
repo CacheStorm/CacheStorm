@@ -2,6 +2,101 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.21] - 2026-02-21
+
+### Added - Extra Commands (138 new commands - Total: 1218)
+
+**SWIM Protocol Commands**
+- SWIM.JOIN, LEAVE, MEMBERS, PING, SUSPECT
+
+**Gossip Protocol Commands**
+- GOSSIP.JOIN, LEAVE, BROADCAST, GET, MEMBERS
+
+**Anti-Entropy Commands**
+- ANTI_ENTROPY.SYNC, DIFF, MERGE, STATUS
+
+**Vector Clock Commands**
+- VECTOR_CLOCK.CREATE, INCREMENT, COMPARE, MERGE, GET
+
+**CRDT Commands**
+- CRDT.LWW.SET, GET, DELETE
+- CRDT.GCOUNTER.INCR, GET
+- CRDT.PNCounter.INCR, DECR, GET
+- CRDT.GSET.ADD, GET
+- CRDT.ORSET.ADD, REMOVE, GET
+
+**Merkle Tree Commands**
+- MERKLE.CREATE, ADD, VERIFY, PROOF, ROOT
+
+**Raft Consensus Commands**
+- RAFT.STATE, LEADER, TERM, VOTE, APPEND, COMMIT
+
+**Sharding Commands**
+- SHARD.MAP, MOVE, REBALANCE, LIST, STATUS
+
+**Compression Commands**
+- COMPRESSION.COMPRESS, DECOMPRESS, INFO
+
+**Deduplication Commands**
+- DEDUP.ADD, CHECK, EXPIRE, CLEAR
+
+**Batch Processing Commands**
+- BATCH.SUBMIT, STATUS, CANCEL, LIST
+
+**Deadline Commands**
+- DEADLINE.SET, CHECK, CANCEL, LIST
+
+**Sanitization Commands**
+- SANITIZE.STRING, HTML, JSON, SQL
+
+**Data Masking Commands**
+- MASK.CARD, EMAIL, PHONE, IP
+
+**API Gateway Commands**
+- GATEWAY.CREATE, DELETE, ROUTE, LIST, METRICS
+
+**Threshold Commands**
+- THRESHOLD.SET, CHECK, LIST, DELETE
+
+**Switch Commands**
+- SWITCH.STATE, TOGGLE, ON, OFF, LIST
+
+**Bookmark Commands**
+- BOOKMARK.SET, GET, DELETE, LIST
+
+**Replay Extended Commands**
+- REPLAYX.START, STOP, PAUSE, SPEED
+
+**Route Commands**
+- ROUTE.ADD, REMOVE, MATCH, LIST
+
+**Ghost Commands**
+- GHOST.CREATE, WRITE, READ, DELETE
+
+**Probe Commands**
+- PROBE.CREATE, DELETE, RUN, RESULTS, LIST
+
+**Canary Commands**
+- CANARY.CREATE, DELETE, CHECK, STATUS, LIST
+
+**Rage Test Commands**
+- RAGE.TEST, STOP, STATS, RESET
+
+**Grid Commands**
+- GRID.CREATE, SET, GET, DELETE, QUERY, CLEAR
+
+**Tape Commands**
+- TAPE.CREATE, WRITE, READ, SEEK, DELETE
+
+**Slice Commands**
+- SLICE.CREATE, APPEND, GET, DELETE
+
+**Rollup Extended Commands**
+- ROLLUPX.CREATE, ADD, GET, DELETE
+
+**Beacon Commands**
+- BEACON.START, STOP, LIST, CHECK
+
 ## [0.1.20] - 2026-02-21
 
 ### Added - More Commands (129 new commands - Total: 1080)

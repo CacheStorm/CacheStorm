@@ -81,6 +81,7 @@ func New(cfg *config.Config) (*Server, error) {
 	command.RegisterIntegrationCommands(s.router)
 	command.RegisterExtendedCommands(s.router)
 	command.RegisterMoreCommands(s.router)
+	command.RegisterExtraCommands(s.router)
 
 	command.InitReplicationManager(s.store)
 
