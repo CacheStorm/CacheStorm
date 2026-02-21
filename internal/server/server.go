@@ -67,6 +67,7 @@ func New(cfg *config.Config) (*Server, error) {
 	command.RegisterDigestCommands(s.router)
 	command.RegisterUtilityCommands(s.router)
 	command.RegisterMonitoringCommands(s.router)
+	command.RegisterCacheWarmingCommands(s.router)
 
 	command.InitReplicationManager(s.store)
 
