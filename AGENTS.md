@@ -1,10 +1,16 @@
 # CacheStorm Agent Configuration
 
-This file provides guidance for AI agents working on the CacheStorm codebase.
+This file provides guidance for AI agents working on the CacheStorm codecodebase.
 
 ## Project Overview
 
-CacheStorm is a high-performance, Redis-compatible in-memory database written in Go with 1,458+ commands across 50+ modules.
+CacheStorm is a high-performance, Redis-compatible in-memory database written in Go with 1,578+ commands across 48+ modules.
+
+## Goal
+
+- **100% Redis compatibility** - Currently at ~99%
+- **1,500+ commands** - Currently at **1,578 commands**
+- **100% test coverage and 100% success rate** - Currently at **16.3% coverage, 100% pass rate**
 
 ## Build Commands
 
@@ -69,10 +75,16 @@ D:\Codebox\CacheStorm\
 │   ├── command\                    # Command handlers
 │   │   ├── router.go               # Router and CommandDef
 │   │   ├── context.go              # Context and helpers
-│   │   ├── *_commands.go           # Command modules
+│   │   ├── *_commands.go           # Command modules (48 files)
+│   │   ├── comprehensive_test.go   # Comprehensive tests
 │   │   └── *_test.go               # Tests
 │   ├── server\server.go            # Server registration
 │   ├── store\                      # Data store
+│   │   ├── store.go                # Store with shards
+│   │   ├── entry.go                # Value types (String, Hash, List, Set, SortedSet)
+│   │   ├── shard.go                # Sharding implementation
+│   │   ├── datastructures.go       # PriorityQueue, LRUCache, etc.
+│   │   └── events.go               # Event management
 │   └── resp\                       # RESP protocol
 ├── .github\workflows\              # CI/CD workflows
 ├── scripts\                        # Installation scripts
@@ -92,6 +104,26 @@ D:\Codebox\CacheStorm\
 | v0.1.21 | 1,218    | Extra commands |
 | v0.1.22 | 1,393    | Advanced commands 2 |
 | v0.1.23 | 1,458    | Resilience commands |
+| v0.1.24 | 1,598    | ML commands |
+| v0.1.25 | 1,606    | Redis compatibility improvements |
+| v0.1.26 | 1,578    | Bug fixes and test improvements |
+
+## Test Coverage (Current)
+
+| Package | Coverage |
+|---------|----------|
+| command | 16.3% |
+| store | 12.3% |
+| cluster | 23.3% |
+| resp | 45.6% |
+
+## Known Issues Fixed
+
+1. **Deadlock in HDEL/HGETDEL/SREM/SPOP/ZREM** - Fixed by unlocking before calling `Store.Delete`
+2. **Deadlock in PriorityQueue** - Fixed by removing lock from `Len()` method (heap interface)
+3. **Infinite loop in XADD** - Fixed by using labeled break
+4. **Negative random indices** - Fixed in `generateUUID()` and `generateID()` by using `math/rand` or `abs()`
+5. **Test context missing Transaction** - Fixed by using `NewContext()` instead of direct struct literal
 
 ## Commit Convention
 
@@ -100,6 +132,15 @@ D:\Codebox\CacheStorm\
 
 ## Release Process
 
-1. Tag version: `git tag v0.1.24`
-2. Push tag: `git push origin v0.1.24`
-3. CI/CD handles the rest (builds, tests, releases, Docker images)
+1. Update CHANGELOG.md
+2. Commit: `git add -A && git commit -m "fix: ..."`
+3. Push: `git push origin main`
+4. Tag: `git tag v0.1.XX`
+5. Push tag: `git push origin v0.1.XX`
+6. CI/CD handles the rest (builds, tests, releases, Docker images)
+
+## Next Steps
+
+1. Continue improving test coverage until 100%
+2. Fix any remaining test failures
+3. Maintain Redis compatibility
