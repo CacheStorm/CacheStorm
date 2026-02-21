@@ -76,6 +76,7 @@ func New(cfg *config.Config) (*Server, error) {
 	command.RegisterWorkflowCommands(s.router)
 	command.RegisterDataStructuresCommands(s.router)
 	command.RegisterEncodingCommands(s.router)
+	command.RegisterActorCommands(s.router)
 
 	command.InitReplicationManager(s.store)
 
