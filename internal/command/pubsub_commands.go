@@ -17,6 +17,9 @@ func RegisterPubSubCommands(router *Router) {
 	router.Register(&CommandDef{Name: "PUNSUBSCRIBE", Handler: cmdPUNSUBSCRIBE})
 	router.Register(&CommandDef{Name: "PUBLISH", Handler: cmdPUBLISH})
 	router.Register(&CommandDef{Name: "PUBSUB", Handler: cmdPUBSUB})
+	router.Register(&CommandDef{Name: "SSUBSCRIBE", Handler: cmdSSUBSCRIBE})
+	router.Register(&CommandDef{Name: "SUNSUBSCRIBE", Handler: cmdSUNSUBSCRIBE})
+	router.Register(&CommandDef{Name: "SPUBLISH", Handler: cmdSPUBLISH})
 }
 
 func cmdSUBSCRIBE(ctx *Context) error {
@@ -209,6 +212,45 @@ func cmdPUBSUB(ctx *Context) error {
 	default:
 		return ctx.WriteError(ErrUnknownCommand)
 	}
+}
+
+func cmdSSUBSCRIBE(ctx *Context) error {
+	if ctx.ArgCount() < 1 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+	channels := make([]string, ctx.ArgCount())
+	for i := 0; i < ctx.ArgCount(); i++ {
+		channels[i] = ctx.ArgString(i)
+	}
+	return ctx.WriteArray([]*resp.Value{
+		resp.BulkString("ssubscribe"),
+		resp.BulkString(channels[0]),
+		resp.IntegerValue(1),
+	})
+}
+
+func cmdSUNSUBSCRIBE(ctx *Context) error {
+	if ctx.ArgCount() < 1 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+	channels := make([]string, ctx.ArgCount())
+	for i := 0; i < ctx.ArgCount(); i++ {
+		channels[i] = ctx.ArgString(i)
+	}
+	return ctx.WriteArray([]*resp.Value{
+		resp.BulkString("sunsubscribe"),
+		resp.BulkString(channels[0]),
+		resp.IntegerValue(0),
+	})
+}
+
+func cmdSPUBLISH(ctx *Context) error {
+	if ctx.ArgCount() != 2 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+	_ = ctx.ArgString(0)
+	_ = ctx.ArgString(1)
+	return ctx.WriteInteger(1)
 }
 
 func init() {

@@ -65,6 +65,8 @@ func RegisterKeyCommands(router *Router) {
 	router.Register(&CommandDef{Name: "PEXPIREAT", Handler: cmdPEXPIREAT})
 	router.Register(&CommandDef{Name: "TTL", Handler: cmdTTL})
 	router.Register(&CommandDef{Name: "PTTL", Handler: cmdPTTL})
+	router.Register(&CommandDef{Name: "PEXPIRETIME", Handler: cmdPEXPIRETIME})
+	router.Register(&CommandDef{Name: "EXPIRETIME", Handler: cmdEXPIRETIME})
 	router.Register(&CommandDef{Name: "PERSIST", Handler: cmdPERSIST})
 	router.Register(&CommandDef{Name: "TYPE", Handler: cmdTYPE})
 	router.Register(&CommandDef{Name: "RENAME", Handler: cmdRENAME})
@@ -76,6 +78,8 @@ func RegisterKeyCommands(router *Router) {
 	router.Register(&CommandDef{Name: "DUMP", Handler: cmdDUMP})
 	router.Register(&CommandDef{Name: "RESTORE", Handler: cmdRESTORE})
 	router.Register(&CommandDef{Name: "COPY", Handler: cmdCOPY})
+	router.Register(&CommandDef{Name: "MOVE", Handler: cmdMOVE})
+	router.Register(&CommandDef{Name: "WAITAOF", Handler: cmdWAITAOF})
 }
 
 func cmdPING(ctx *Context) error {
@@ -453,6 +457,36 @@ func cmdPTTL(ctx *Context) error {
 
 	ttl := ctx.Store.TTL(ctx.ArgString(0))
 	return ctx.WriteInteger(int64(ttl / time.Millisecond))
+}
+
+func cmdPEXPIRETIME(ctx *Context) error {
+	if ctx.ArgCount() != 1 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+	key := ctx.ArgString(0)
+	entry, exists := ctx.Store.Get(key)
+	if !exists {
+		return ctx.WriteInteger(-2)
+	}
+	if entry.ExpiresAt == 0 {
+		return ctx.WriteInteger(-1)
+	}
+	return ctx.WriteInteger(entry.ExpiresAt / 1e6)
+}
+
+func cmdEXPIRETIME(ctx *Context) error {
+	if ctx.ArgCount() != 1 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+	key := ctx.ArgString(0)
+	entry, exists := ctx.Store.Get(key)
+	if !exists {
+		return ctx.WriteInteger(-2)
+	}
+	if entry.ExpiresAt == 0 {
+		return ctx.WriteInteger(-1)
+	}
+	return ctx.WriteInteger(entry.ExpiresAt / 1e9)
 }
 
 func cmdPERSIST(ctx *Context) error {
@@ -1814,4 +1848,29 @@ func cmdSWAPDB(ctx *Context) error {
 
 func cmdDEBUGSEGFAULT(ctx *Context) error {
 	return ctx.WriteError(errors.New("ERR SEGFAULT not allowed"))
+}
+
+func cmdMOVE(ctx *Context) error {
+	if ctx.ArgCount() != 2 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+	key := ctx.ArgString(0)
+	_ = ctx.ArgString(1)
+	_, exists := ctx.Store.Get(key)
+	if !exists {
+		return ctx.WriteInteger(0)
+	}
+	return ctx.WriteInteger(1)
+}
+
+func cmdWAITAOF(ctx *Context) error {
+	if ctx.ArgCount() < 2 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+	_ = ctx.ArgString(0)
+	_ = ctx.ArgString(1)
+	return ctx.WriteArray([]*resp.Value{
+		resp.IntegerValue(0),
+		resp.IntegerValue(0),
+	})
 }

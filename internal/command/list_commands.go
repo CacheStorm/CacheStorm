@@ -1,6 +1,7 @@
 package command
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -32,6 +33,7 @@ func RegisterListCommands(router *Router) {
 	router.Register(&CommandDef{Name: "LPOS", Handler: cmdLPOS})
 	router.Register(&CommandDef{Name: "LMPOP", Handler: cmdLMPOP})
 	router.Register(&CommandDef{Name: "LMPUSH", Handler: cmdLMPUSH})
+	router.Register(&CommandDef{Name: "BLMPOP", Handler: cmdBLMPOP})
 }
 
 func getOrCreateList(ctx *Context, key string) (*store.ListValue, error) {
@@ -1026,4 +1028,66 @@ func cmdLMPUSH(ctx *Context) error {
 
 	list.Elements = append(elements, list.Elements...)
 	return ctx.WriteInteger(int64(len(list.Elements)))
+}
+
+func cmdBLMPOP(ctx *Context) error {
+	if ctx.ArgCount() < 3 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+	timeout := parseFloatExt([]byte(ctx.ArgString(0)))
+	if ctx.ArgCount() < 3 || ctx.ArgString(1) != "1" {
+		return ctx.WriteError(fmt.Errorf("ERR syntax error"))
+	}
+	numKeys := int(parseInt64(ctx.ArgString(2)))
+	if ctx.ArgCount() < 3+numKeys+2 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+	keys := make([]string, numKeys)
+	for i := 0; i < numKeys; i++ {
+		keys[i] = ctx.ArgString(3 + i)
+	}
+	idx := 3 + numKeys
+	dir := "LEFT"
+	count := 1
+	for idx < ctx.ArgCount() {
+		arg := strings.ToUpper(ctx.ArgString(idx))
+		if arg == "LEFT" || arg == "RIGHT" {
+			dir = arg
+			idx++
+		} else if arg == "COUNT" && idx+1 < ctx.ArgCount() {
+			count = int(parseInt64(ctx.ArgString(idx + 1)))
+			idx += 2
+		} else {
+			idx++
+		}
+	}
+	for _, key := range keys {
+		list, err := getList(ctx, key)
+		if err != nil {
+			return ctx.WriteError(err)
+		}
+		if list != nil && len(list.Elements) > 0 {
+			elements := make([]*resp.Value, 0, count)
+			for i := 0; i < count && len(list.Elements) > 0; i++ {
+				var value []byte
+				if dir == "LEFT" {
+					value = list.Elements[0]
+					list.Elements = list.Elements[1:]
+				} else {
+					value = list.Elements[len(list.Elements)-1]
+					list.Elements = list.Elements[:len(list.Elements)-1]
+				}
+				elements = append(elements, resp.BulkBytes(value))
+			}
+			if len(list.Elements) == 0 {
+				ctx.Store.Delete(key)
+			}
+			return ctx.WriteArray([]*resp.Value{
+				resp.BulkString(key),
+				resp.ArrayValue(elements),
+			})
+		}
+	}
+	_ = timeout
+	return ctx.WriteNull()
 }

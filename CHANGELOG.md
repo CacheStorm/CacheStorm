@@ -13,6 +13,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - WebSocket support
 - GraphQL subscriptions
 
+## [0.1.25] - 2026-02-21
+
+### Added - Redis Compatibility Improvements (8 new commands - Total: 1,606)
+
+**Redis 7 Sharded Pub/Sub**
+- `SSUBSCRIBE` - Subscribe to sharded channel
+- `SUNSUBSCRIBE` - Unsubscribe from sharded channel
+- `SPUBLISH` - Publish to sharded channel
+
+**Key Commands**
+- `EXPIRETIME` - Get expiration Unix timestamp
+- `PEXPIRETIME` - Get expiration Unix millisecond timestamp
+- `MOVE` - Move key between databases
+
+**Server Commands**
+- `WAITAOF` - Wait for AOF sync
+- `BLMPOP` - Blocking multiple list pop
+
+### Redis Compatibility
+- **~99% Redis Compatible** - All core Redis commands implemented
+- Full support for: Strings, Hashes, Lists, Sets, Sorted Sets, Bitmaps, HyperLogLog, Geo, Streams
+- Complete Pub/Sub including sharded (Redis 7)
+- Full transaction support (MULTI/EXEC/DISCARD/WATCH)
+- Lua scripting (EVAL/EVALSHA/SCRIPT)
+- Cluster and replication commands
+- ACL support
+
 ## [0.1.24] - 2026-02-21
 
 ### Added - Machine Learning Commands (80 new commands - Total: 1,598)
@@ -454,6 +481,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Commands | Description |
 |---------|------|----------|-------------|
+| 0.1.25 | 2026-02-21 | 1,606 | Redis compatibility improvements |
 | 0.1.24 | 2026-02-21 | 1,598 | Machine learning commands |
 | 0.1.23 | 2026-02-21 | 1,518 | Resilience patterns |
 | 0.1.22 | 2026-02-21 | 1,393 | Advanced commands 2 |
@@ -465,8 +493,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/cachestorm/cachestorm/compare/v0.1.24...HEAD
-[0.1.24]: https://github.com/cachestorm/cachestorm/compare/v0.1.23...v0.1.24
+[Unreleased]: https://github.com/cachestorm/cachestorm/compare/v0.1.25...HEAD
+[0.1.25]: https://github.com/cachestorm/cachestorm/compare/v0.1.24...v0.1.25
 [0.1.23]: https://github.com/cachestorm/cachestorm/compare/v0.1.22...v0.1.23
 [0.1.22]: https://github.com/cachestorm/cachestorm/compare/v0.1.21...v0.1.22
 [0.1.21]: https://github.com/cachestorm/cachestorm/compare/v0.1.20...v0.1.21
