@@ -2,6 +2,194 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.13] - 2026-02-21
+
+### Added - Workflow, State Machine, Chained and Reactive
+
+**Workflow Commands**
+- WORKFLOW.CREATE, DELETE, GET, LIST, START, PAUSE, COMPLETE, FAIL, RESET
+- WORKFLOW.NEXT, SETVAR, GETVAR, ADDSTEP
+
+**Template Commands**
+- TEMPLATE.CREATE, DELETE, GET, INSTANTIATE
+
+**State Machine Commands**
+- STATEM.CREATE, DELETE, ADDSTATE, ADDTRANS, TRIGGER
+- STATEM.CURRENT, CANTRIGGER, EVENTS, RESET, ISFINAL, INFO, LIST
+
+**Chained Commands**
+- CHAINED.SET, GET, DEL
+
+**Reactive Commands**
+- REACTIVE.WATCH, UNWATCH, TRIGGER
+
+## [0.1.12] - 2026-02-21
+
+### Added - Expression, Validation, String manipulation
+
+**Expression Commands**
+- EVAL.EXPR, FORMAT, JSONPATH, TEMPLATE
+- EVAL.REGEX, REGEXMATCH, REGEXREPLACE
+
+**Validation Commands**
+- VALIDATE.EMAIL, URL, IP, JSON
+- VALIDATE.INT, FLOAT, ALPHA, ALPHANUM, LENGTH, RANGE
+
+**String Commands**
+- STR.FORMAT, TRUNCATE, PADLEFT, PADRIGHT, REVERSE, REPEAT
+- STR.SPLIT, JOIN, CONTAINS, STARTSWITH, ENDSWITH
+- STR.INDEX, LASTINDEX, REPLACE, TRIM, TRIMLEFT, TRIMRIGHT
+- STR.TITLE, WORDS, LINES
+
+## [0.1.11] - 2026-02-21
+
+### Added - Audit Log, Feature Flags, Atomic Counter, Backup
+
+**Audit Commands**
+- AUDIT.LOG, GET, GETRANGE, GETBYCMD, GETBYKEY
+- AUDIT.CLEAR, COUNT, STATS, ENABLE, DISABLE
+
+**Feature Flag Commands**
+- FLAG.CREATE, DELETE, GET, ENABLE, DISABLE, TOGGLE, ISENABLED
+- FLAG.LIST, LISTENABLED, ADDVARIANT, GETVARIANT, ADDRULE
+
+**Counter Commands**
+- COUNTER.GET, SET, INCR, DECR, INCRBY, DECRBY
+- COUNTER.DELETE, LIST, GETALL, RESET, RESETALL
+
+**Backup Commands**
+- BACKUP.CREATE, RESTORE, LIST, DELETE
+
+**Memory Commands**
+- MEMORY.TRIM, FRAG, PURGE, ALLOC
+
+## [0.1.10] - 2026-02-21
+
+### Added - Events, Webhooks, Compression, Queue, Stack
+
+**Event Commands**
+- EVENT.EMIT, GET, LIST, CLEAR
+
+**Webhook Commands**
+- WEBHOOK.CREATE, DELETE, GET, LIST, ENABLE, DISABLE, STATS
+
+**Compression Commands**
+- COMPRESS/DECOMPRESS RLE, LZ4, CUSTOM
+
+**Queue Commands**
+- QUEUE.CREATE, PUSH, POP, PEEK, LEN, CLEAR
+
+**Stack Commands**
+- STACK.CREATE, PUSH, POP, PEEK, LEN, CLEAR
+
+## [0.1.9] - 2026-02-21
+
+### Added - Job Scheduler, Circuit Breaker, Session Manager
+
+**Job Commands**
+- JOB.CREATE, DELETE, GET, LIST, ENABLE, DISABLE, RUN, STATS, RESET, UPDATE
+
+**Circuit Breaker Commands**
+- CIRCUIT.CREATE, DELETE, ALLOW, SUCCESS, FAILURE, STATE, RESET, STATS, LIST
+
+**Session Commands**
+- SESSION.CREATE, GET, SET, DEL, EXISTS, TTL, REFRESH, CLEAR
+- SESSION.ALL, LIST, COUNT, CLEANUP
+
+## [0.1.8] - 2026-02-21
+
+### Added - Statistical Data Structures
+
+**TDigest Commands**
+- TDIGEST.CREATE, ADD, QUANTILE, CDF, MEAN, MIN, MAX, INFO, RESET, MERGE
+
+**Sampler Commands**
+- SAMPLE.CREATE, ADD, GET, RESET, INFO
+
+**Histogram Commands**
+- HISTOGRAM.CREATE, ADD, GET, MEAN, RESET, INFO
+
+## [0.1.7] - 2026-02-21
+
+### Added - Cache Warming and Key Management
+
+**Cache Warming Commands**
+- WARM.PRELOAD, PREFETCH, INVALIDATE, STATUS
+
+**Batch Commands**
+- BATCH.GET, SET, DEL, MGET, MSET, MDEL, EXEC, PIPELINE.EXEC
+
+**Key Commands**
+- KEY.RENAME, RENAMENX, COPY, MOVE, DUMP, RESTORE
+- KEY.OBJECT, ENCODE, FREQ, IDLETIME, REFCOUNT
+
+## [0.1.6] - 2026-02-21
+
+### Added - Monitoring Commands
+
+**Metrics Commands**
+- METRICS.GET, RESET, CMD
+
+**SlowLog Commands**
+- SLOWLOG.GET, LEN, RESET, CONFIG
+
+**Stats Commands**
+- STATS.KEYSPACE, MEMORY, CPU, CLIENTS, ALL
+
+**Health Commands**
+- HEALTH.CHECK, LIVENESS, READINESS
+
+## [0.1.5] - 2026-02-21
+
+### Added - Utility Commands
+
+**Rate Limiter Commands**
+- RL.CREATE, ALLOW, GET, DELETE, RESET
+
+**Distributed Lock Commands**
+- LOCK.TRY, ACQUIRE, RELEASE, RENEW, INFO, ISLOCKED
+
+**ID Generator Commands**
+- ID.CREATE, NEXT, NEXTN, CURRENT, SET, DELETE
+
+**Snowflake Commands**
+- SNOWFLAKE.NEXT, PARSE
+
+## [0.1.4] - 2026-02-21
+
+### Added - Digest and Crypto Commands
+
+**Digest Commands**
+- DIGEST.MD5, SHA1, SHA256, SHA512
+- DIGEST.HMAC, HMACMD5, HMACSHA1, HMACSHA256, HMACSHA512
+- DIGEST.CRC32, ADLER32
+- DIGEST.BASE64ENCODE, BASE64DECODE, HEXENCODE, HEXDECODE
+
+**Crypto Commands**
+- CRYPTO.HASH, CRYPTO.HMAC
+
+## [0.1.3] - 2026-02-21
+
+### Added - Probabilistic and Graph Modules
+
+**Bloom Filter Commands**
+- BF.ADD, EXISTS, INFO, RESERVE
+
+**Cuckoo Filter Commands**
+- CF.ADD, EXISTS, DEL, INFO
+
+**Count-Min Sketch Commands**
+- CMS.INCRBY, QUERY, INFO
+
+**Top-K Commands**
+- TOPK.ADD, QUERY, LIST, INFO
+
+**Graph Commands**
+- GRAPH.CREATE, DELETE, INFO, LIST
+- GRAPH.ADDNODE, GETNODE, DELNODE
+- GRAPH.ADDEDGE, GETEDGE, DELEDGE
+- GRAPH.QUERY, NEIGHBORS
+
 ## [0.1.2] - 2026-02-21
 
 ### Added - Full-text Search Module
