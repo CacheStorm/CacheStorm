@@ -2,6 +2,52 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.19] - 2026-02-21
+
+### Added - Extended Commands (97 new commands - Total: 951)
+
+**Message Queue Commands**
+- MSGQUEUE.CREATE, PUBLISH, CONSUME, ACK, NACK, DEADLETTER, REQUEUE, PURGE, STATS, DELETE
+
+**Service Discovery Commands**
+- SERVICE.REGISTER, DEREGISTER, DISCOVER, HEARTBEAT, LIST, HEALTHY, WEIGHT, TAGS
+
+**Health Extended Commands**
+- HEALTHX.REGISTER, UNREGISTER, CHECK, STATUS, HISTORY, LIST
+
+**Cron Commands**
+- CRON.ADD, REMOVE, LIST, TRIGGER, PAUSE, RESUME, NEXT, HISTORY
+
+**Vector Search Commands**
+- VECTOR.CREATE, ADD, GET, DELETE, SEARCH, SIMILARITY, NORMALIZE, DIMENSIONS, MERGE, STATS
+
+**Document Store Commands**
+- DOC.INSERT, FIND, FINDONE, UPDATE, DELETE, COUNT, DISTINCT, AGGREGATE, INDEX, DROPINDEX
+
+**Topic Commands**
+- TOPIC.SUBSCRIBE, UNSUBSCRIBE, PUBLISH, SUBSCRIBERS, LIST, HISTORY
+
+**WebSocket Commands**
+- WS.CONNECT, DISCONNECT, SEND, BROADCAST, LIST, ROOMS, JOIN, LEAVE
+
+**Leader Election Commands**
+- LEADER.ELECT, RENEW, RESIGN, CURRENT, HISTORY
+
+**Memoization Commands**
+- MEMO.CACHE, INVALIDATE, STATS, CLEAR, WARM
+
+**Sentinel Extended Commands**
+- SENTINELX.WATCH, UNWATCH, STATUS, ALERTS, CONFIG
+
+**Backup Extended Commands**
+- BACKUPX.CREATE, RESTORE, LIST, DELETE
+
+**Replay Commands**
+- REPLAY.START, STOP, STATUS, SPEED, SEEK
+
+**Aggregate Commands**
+- AGG.SUM, AVG, MIN, MAX, COUNT, PUSH, CLEAR
+
 ## [0.1.18] - 2026-02-21
 
 ### Added - Integration Commands (71 new commands - Total: 854)

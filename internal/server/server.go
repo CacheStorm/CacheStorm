@@ -79,6 +79,7 @@ func New(cfg *config.Config) (*Server, error) {
 	command.RegisterActorCommands(s.router)
 	command.RegisterMVCCCommands(s.router)
 	command.RegisterIntegrationCommands(s.router)
+	command.RegisterExtendedCommands(s.router)
 
 	command.InitReplicationManager(s.store)
 
