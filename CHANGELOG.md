@@ -2,6 +2,112 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.23] - 2026-02-21
+
+### Added - Resilience Commands (138 new commands - Total: 1531)
+
+**Circuit Breaker Extended Commands**
+- CIRCUITX.CREATE, OPEN, CLOSE, HALFOPEN, STATUS, METRICS, RESET, DELETE
+
+**Rate Limiter Commands**
+- RATELIMITER.CREATE, TRY, WAIT, RESET, STATUS, DELETE
+
+**Retry Commands**
+- RETRY.CREATE, EXECUTE, STATUS, DELETE
+
+**Timeout Commands**
+- TIMEOUT.CREATE, EXECUTE, DELETE
+
+**Bulkhead Commands**
+- BULKHEAD.CREATE, ACQUIRE, RELEASE, STATUS, DELETE
+
+**Fallback Commands**
+- FALLBACK.CREATE, EXECUTE, DELETE
+
+**Observability Commands**
+- OBSERVABILITY.TRACE, METRIC, LOG, SPAN
+
+**Telemetry Commands**
+- TELEMETRY.RECORD, QUERY, EXPORT
+
+**Diagnostic Commands**
+- DIAGNOSTIC.RUN, RESULT, LIST
+
+**Profile Extended Commands**
+- PROFILE.START, STOP, RESULT, PROFILEX.LIST
+
+**Heap Commands**
+- HEAP.STATS, DUMP, GC
+
+**Memory Extended Commands**
+- MEMORYX.ALLOC, FREE, STATS, TRACK
+
+**Connection Pool Commands**
+- CONPOOL.CREATE, GET, RETURN, STATUS, DELETE
+
+**Batch Extended Commands**
+- BATCHX.CREATE, ADD, EXECUTE, STATUS, DELETE
+
+**Pipeline Extended Commands**
+- PIPELINEX.START, ADD, EXECUTE, CANCEL
+
+**Transaction Extended Commands**
+- TRANSX.BEGIN, COMMIT, ROLLBACK, STATUS
+
+**Lock Extended Commands**
+- LOCKX.ACQUIRE, RELEASE, EXTEND, STATUS
+
+**Semaphore Extended Commands**
+- SEMAPHOREX.CREATE, ACQUIRE, RELEASE, STATUS
+
+**Async Commands**
+- ASYNC.SUBMIT, STATUS, RESULT, CANCEL
+
+**Promise Commands**
+- PROMISE.CREATE, RESOLVE, REJECT, STATUS, AWAIT
+
+**Future Commands**
+- FUTURE.CREATE, COMPLETE, GET, CANCEL
+
+**Observable Commands**
+- OBSERVABLE.CREATE, NEXT, COMPLETE, ERROR, SUBSCRIBE
+
+**Stream Processing Commands**
+- STREAMPROC.CREATE, PUSH, POP, PEEK, DELETE
+
+**Event Sourcing Commands**
+- EVENTSOURCING.APPEND, REPLAY, SNAPSHOT, GET
+
+**Compact Commands**
+- COMPACT.MERGE, STATUS
+
+**Backpressure Commands**
+- BACKPRESSURE.CREATE, CHECK, STATUS
+
+**Throttle Extended Commands**
+- THROTTLEX.CREATE, CHECK, STATUS
+
+**Debounce Extended Commands**
+- DEBOUNCEX.CREATE, CALL, CANCEL, FLUSH
+
+**Coalesce Commands**
+- COALESCE.CREATE, ADD, GET, CLEAR
+
+**Aggregator Commands**
+- AGGREGATOR.CREATE, ADD, GET, RESET
+
+**Window Extended Commands**
+- WINDOWX.CREATE, ADD, GET, AGGREGATE
+
+**Join Extended Commands**
+- JOINX.CREATE, ADD, GET, DELETE
+
+**Shuffle Commands**
+- SHUFFLE.CREATE, ADD, GET
+
+**Partition Extended Commands**
+- PARTITIONX.CREATE, ADD, GET, REBALANCE
+
 ## [0.1.22] - 2026-02-21
 
 ### Added - Advanced Commands 2 (175 new commands - Total: 1393)
