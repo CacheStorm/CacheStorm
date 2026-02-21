@@ -1,25 +1,34 @@
-version: 2
-
-project_name: cachestorm
-
 before:
   hooks:
     - go mod tidy
+    - go generate ./...
 
 builds:
   - env:
       - CGO_ENABLED=0
     goos:
       - linux
-      - darwin
       - windows
+      - darwin
+      - freebsd
     goarch:
       - amd64
       - arm64
-    main: ./cmd/cachestorm
-    binary: cachestorm
+      - arm
+      - 386
+    goarm:
+      - 6
+      - 7
+    ignore:
+      - goos: darwin
+        goarch: 386
+      - goos: windows
+        goarch: arm
+      - goos: freebsd
+        goarch: arm
     ldflags:
-      - -s -w -X main.version={{.Version}}
+      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}}
+    binary: cachestorm
 
 archives:
   - format: tar.gz
@@ -27,17 +36,199 @@ archives:
     format_overrides:
       - goos: windows
         format: zip
+    files:
+      - README.md
+      - LICENSE
+      - CHANGELOG.md
+      - config/**/*
+      - docs/**/*
 
 checksum:
   name_template: 'checksums.txt'
+  algorithm: sha256
 
 snapshot:
   name_template: "{{ incpatch .Version }}-next"
 
 changelog:
   sort: asc
+  use: github
   filters:
     exclude:
       - '^docs:'
       - '^test:'
       - '^ci:'
+      - Merge pull request
+      - Merge branch
+
+release:
+  github:
+    owner: cachestorm
+    name: cachestorm
+  draft: false
+  prerelease: auto
+  mode: replace
+  header: |
+    ## CacheStorm {{ .Tag }}
+    
+    A high-performance Redis-compatible in-memory database with 1,500+ commands.
+  footer: |
+    ## Installation
+    
+    ### Binary Download
+    Download the binary for your platform from the assets below.
+    
+    ### Docker
+    ```bash
+    docker pull cachestorm/cachestorm:{{ .Tag }}
+    ```
+    
+    ### Build from Source
+    ```bash
+    go install github.com/cachestorm/cachestorm@{{ .Tag }}
+    ```
+    
+    **Full Changelog**: https://github.com/cachestorm/cachestorm/compare/{{ .PreviousTag }}...{{ .Tag }}
+
+nfpms:
+  - id: cachestorm
+    package_name: cachestorm
+    file_name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    homepage: https://github.com/cachestorm/cachestorm
+    maintainer: CacheStorm Team <team@cachestorm.dev>
+    description: High-performance Redis-compatible in-memory database
+    license: MIT
+    formats:
+      - deb
+      - rpm
+      - apk
+    contents:
+      - src: ./config/cachestorm.yaml
+        dst: /etc/cachestorm/cachestorm.yaml
+        type: config
+    scripts:
+      postinstall: "scripts/postinstall.sh"
+      preremove: "scripts/preremove.sh"
+
+brews:
+  - name: cachestorm
+    homepage: https://github.com/cachestorm/cachestorm
+    description: High-performance Redis-compatible in-memory database with 1,500+ commands
+    license: MIT
+    folder: Formula
+    repository:
+      owner: cachestorm
+      name: homebrew-cachestorm
+      branch: main
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    install: |
+      bin.install "cachestorm"
+    test: |
+      system "#{bin}/cachestorm --version"
+
+scoops:
+  - url_template: "https://github.com/cachestorm/scoop-bucket/releases/download/{{ .Tag }}/{{ .ArtifactName }}"
+    bucket:
+      owner: cachestorm
+      name: scoop-bucket
+      branch: main
+    homepage: https://github.com/cachestorm/cachestorm
+    description: High-performance Redis-compatible in-memory database
+    license: MIT
+
+snapcrafts:
+  - name: cachestorm
+    summary: High-performance Redis-compatible in-memory database
+    description: |
+      CacheStorm is a Redis-compatible in-memory database with 1,500+ commands
+      including distributed systems features, data processing, and modern application capabilities.
+    grade: stable
+    confinement: strict
+    license: MIT
+    base: core22
+    apps:
+      cachestorm:
+        command: cachestorm
+        plugs:
+          - network
+          - network-bind
+          - home
+          - removable-media
+
+dockers:
+  - image_templates:
+      - "cachestorm/cachestorm:{{ .Version }}-amd64"
+      - "ghcr.io/cachestorm/cachestorm:{{ .Version }}-amd64"
+    dockerfile: Dockerfile
+    use: buildx
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.title={{.ProjectName}}"
+      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+
+  - image_templates:
+      - "cachestorm/cachestorm:{{ .Version }}-arm64"
+      - "ghcr.io/cachestorm/cachestorm:{{ .Version }}-arm64"
+    dockerfile: Dockerfile
+    use: buildx
+    build_flag_templates:
+      - "--platform=linux/arm64"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.title={{.ProjectName}}"
+      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+
+docker_manifests:
+  - name_template: "cachestorm/cachestorm:{{ .Version }}"
+    image_templates:
+      - "cachestorm/cachestorm:{{ .Version }}-amd64"
+      - "cachestorm/cachestorm:{{ .Version }}-arm64"
+  - name_template: "cachestorm/cachestorm:latest"
+    image_templates:
+      - "cachestorm/cachestorm:{{ .Version }}-amd64"
+      - "cachestorm/cachestorm:{{ .Version }}-arm64"
+  - name_template: "ghcr.io/cachestorm/cachestorm:{{ .Version }}"
+    image_templates:
+      - "ghcr.io/cachestorm/cachestorm:{{ .Version }}-amd64"
+      - "ghcr.io/cachestorm/cachestorm:{{ .Version }}-arm64"
+  - name_template: "ghcr.io/cachestorm/cachestorm:latest"
+    image_templates:
+      - "ghcr.io/cachestorm/cachestorm:{{ .Version }}-amd64"
+      - "ghcr.io/cachestorm/cachestorm:{{ .Version }}-arm64"
+
+signs:
+  - cmd: cosign
+    certificate: '${artifact}.pem'
+    args:
+      - sign-blob
+      - '--output-certificate=${certificate}'
+      - '--output-signature=${signature}'
+      - '${artifact}'
+      - --yes
+    artifacts: checksum
+    output: true
+
+docker_signs:
+  - cmd: cosign
+    args:
+      - sign
+      - '${artifact}'
+      - --yes
+    artifacts: all
+    output: true
+
+announce:
+  twitter:
+    enabled: false
+  slack:
+    enabled: false
+  discord:
+    enabled: false
+
+universal_binaries:
+  - replace: true
+    name_template: cachestorm

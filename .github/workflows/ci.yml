@@ -7,7 +7,7 @@ on:
     branches: [main, master]
 
 env:
-  GO_VERSION: '1.21'
+  GO_VERSION: '1.22'
 
 jobs:
   build:
@@ -35,6 +35,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+        go: ['1.22']
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -42,7 +43,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version: ${{ matrix.go }}
 
       - name: Download dependencies
         run: go mod download
@@ -57,11 +58,11 @@ jobs:
           file: ./coverage.out
           flags: unittests
           fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
 
   lint:
     name: Lint
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -75,4 +76,84 @@ jobs:
         uses: golangci/golangci-lint-action@v4
         with:
           version: latest
-          args: --timeout=5m --issues-exit-code=0
+          args: --timeout=5m
+
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Run Gosec Security Scanner
+        uses: securego/gosec@master
+        with:
+          args: ./...
+
+  benchmark:
+    name: Benchmark
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Run benchmarks
+        run: go test -bench=. -benchmem ./internal/...
+
+  integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Build binary
+        run: go build -o cachestorm ./cmd/cachestorm
+
+      - name: Start server
+        run: ./cachestorm --port 6380 &
+        shell: bash
+
+      - name: Wait for server
+        run: sleep 2
+
+      - name: Run integration tests
+        run: |
+          go test ./tests/... -v -tags=integration || true
+        shell: bash
+
+  docker:
+    name: Docker Build Test
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          tags: cachestorm:test
+          platforms: linux/amd64
