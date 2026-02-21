@@ -26,6 +26,10 @@ func NewPriorityQueue() *PriorityQueue {
 }
 
 func (pq *PriorityQueue) Len() int {
+	return len(pq.items)
+}
+
+func (pq *PriorityQueue) Size() int {
 	pq.mu.RLock()
 	defer pq.mu.RUnlock()
 	return len(pq.items)

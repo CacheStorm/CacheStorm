@@ -206,7 +206,7 @@ func generateID() string {
 	const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	id := make([]byte, 16)
 	for i := range id {
-		id[i] = chars[fastRand(int64(len(chars)))]
+		id[i] = chars[absInt(fastRand(int64(len(chars))))]
 	}
 	return string(id)
 }
@@ -214,6 +214,13 @@ func generateID() string {
 func fastRand(n int64) int64 {
 	seed := currentTimeMillis()
 	return (seed*1103515245 + 12345) % n
+}
+
+func absInt(n int64) int64 {
+	if n < 0 {
+		return -n
+	}
+	return n
 }
 
 func currentTimeMillis() int64 {

@@ -937,3 +937,217 @@ func TestMonitoringCommandsComprehensive(t *testing.T) {
 		})
 	}
 }
+
+func TestGraphCommandsComprehensive(t *testing.T) {
+	s := store.NewStore()
+	router := NewRouter()
+	RegisterGraphCommands(router)
+
+	tests := []struct {
+		name string
+		cmd  string
+		args [][]byte
+	}{
+		{"GRAPH.CREATE", "GRAPH.CREATE", [][]byte{[]byte("g1")}},
+		{"GRAPH.LIST", "GRAPH.LIST", nil},
+		{"GRAPH.ADDNODE", "GRAPH.ADDNODE", [][]byte{[]byte("g1"), []byte("n1"), []byte(`{"name":"node1"}`)}},
+		{"GRAPH.GETNODE", "GRAPH.GETNODE", [][]byte{[]byte("g1"), []byte("n1")}},
+		{"GRAPH.INFO", "GRAPH.INFO", [][]byte{[]byte("g1")}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := newTestCtx(tt.cmd, tt.args, s)
+			handler, ok := router.Get(tt.cmd)
+			if !ok {
+				t.Fatalf("Command %s not found", tt.cmd)
+			}
+			if err := handler.Handler(ctx); err != nil {
+				t.Errorf("Command %s failed: %v", tt.cmd, err)
+			}
+		})
+	}
+}
+
+func TestSearchCommandsComprehensive(t *testing.T) {
+	s := store.NewStore()
+	router := NewRouter()
+	RegisterSearchCommands(router)
+
+	tests := []struct {
+		name string
+		cmd  string
+		args [][]byte
+	}{
+		{"FT.CREATE", "FT.CREATE", [][]byte{[]byte("idx1"), []byte("SCHEMA"), []byte("title"), []byte("TEXT")}},
+		{"FT._LIST", "FT._LIST", nil},
+		{"FT.INFO", "FT.INFO", [][]byte{[]byte("idx1")}},
+		{"FT.ADD", "FT.ADD", [][]byte{[]byte("idx1"), []byte("doc1"), []byte("1.0"), []byte("FIELDS"), []byte("title"), []byte("hello world")}},
+		{"FT.SEARCH", "FT.SEARCH", [][]byte{[]byte("idx1"), []byte("hello")}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := newTestCtx(tt.cmd, tt.args, s)
+			handler, ok := router.Get(tt.cmd)
+			if !ok {
+				t.Fatalf("Command %s not found", tt.cmd)
+			}
+			if err := handler.Handler(ctx); err != nil {
+				t.Errorf("Command %s failed: %v", tt.cmd, err)
+			}
+		})
+	}
+}
+
+func TestDataStructuresCommandsComprehensive(t *testing.T) {
+	s := store.NewStore()
+	router := NewRouter()
+	RegisterDataStructuresCommands(router)
+
+	tests := []struct {
+		name string
+		cmd  string
+		args [][]byte
+	}{
+		{"PQ.CREATE", "PQ.CREATE", [][]byte{[]byte("pq1")}},
+		{"PQ.PUSH", "PQ.PUSH", [][]byte{[]byte("pq1"), []byte("item1"), []byte("5")}},
+		{"PQ.PEEK", "PQ.PEEK", [][]byte{[]byte("pq1")}},
+		{"PQ.LEN", "PQ.LEN", [][]byte{[]byte("pq1")}},
+		{"LRU.CREATE", "LRU.CREATE", [][]byte{[]byte("lru1"), []byte("100")}},
+		{"LRU.SET", "LRU.SET", [][]byte{[]byte("lru1"), []byte("k1"), []byte("v1")}},
+		{"LRU.GET", "LRU.GET", [][]byte{[]byte("lru1"), []byte("k1")}},
+		{"TOKENBUCKET.CREATE", "TOKENBUCKET.CREATE", [][]byte{[]byte("tb1"), []byte("10"), []byte("1")}},
+		{"SLIDINGWINDOW.CREATE", "SLIDINGWINDOW.CREATE", [][]byte{[]byte("sw1"), []byte("60000"), []byte("10")}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := newTestCtx(tt.cmd, tt.args, s)
+			handler, ok := router.Get(tt.cmd)
+			if !ok {
+				t.Fatalf("Command %s not found", tt.cmd)
+			}
+			if err := handler.Handler(ctx); err != nil {
+				t.Errorf("Command %s failed: %v", tt.cmd, err)
+			}
+		})
+	}
+}
+
+func TestWorkflowCommandsComprehensive(t *testing.T) {
+	s := store.NewStore()
+	router := NewRouter()
+	RegisterWorkflowCommands(router)
+
+	tests := []struct {
+		name string
+		cmd  string
+		args [][]byte
+	}{
+		{"WORKFLOW.CREATE", "WORKFLOW.CREATE", [][]byte{[]byte("wf1")}},
+		{"WORKFLOW.LIST", "WORKFLOW.LIST", nil},
+		{"WORKFLOW.GET", "WORKFLOW.GET", [][]byte{[]byte("wf1")}},
+		{"TEMPLATE.CREATE", "TEMPLATE.CREATE", [][]byte{[]byte("tpl1"), []byte("Hello {{.name}}")}},
+		{"STATEM.CREATE", "STATEM.CREATE", [][]byte{[]byte("sm1"), []byte("initial")}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := newTestCtx(tt.cmd, tt.args, s)
+			handler, ok := router.Get(tt.cmd)
+			if !ok {
+				t.Fatalf("Command %s not found", tt.cmd)
+			}
+			if err := handler.Handler(ctx); err != nil {
+				t.Errorf("Command %s failed: %v", tt.cmd, err)
+			}
+		})
+	}
+}
+
+func TestSchedulerCommandsComprehensive(t *testing.T) {
+	s := store.NewStore()
+	router := NewRouter()
+	RegisterSchedulerCommands(router)
+
+	tests := []struct {
+		name string
+		cmd  string
+		args [][]byte
+	}{
+		{"JOB.CREATE", "JOB.CREATE", [][]byte{[]byte("job1"), []byte("* * * * *"), []byte("test command")}},
+		{"JOB.LIST", "JOB.LIST", nil},
+		{"JOB.GET", "JOB.GET", [][]byte{[]byte("job1")}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := newTestCtx(tt.cmd, tt.args, s)
+			handler, ok := router.Get(tt.cmd)
+			if !ok {
+				t.Fatalf("Command %s not found", tt.cmd)
+			}
+			if err := handler.Handler(ctx); err != nil {
+				t.Errorf("Command %s failed: %v", tt.cmd, err)
+			}
+		})
+	}
+}
+
+func TestEventCommandsComprehensive(t *testing.T) {
+	s := store.NewStore()
+	router := NewRouter()
+	RegisterEventCommands(router)
+
+	tests := []struct {
+		name string
+		cmd  string
+		args [][]byte
+	}{
+		{"EVENT.EMIT", "EVENT.EMIT", [][]byte{[]byte("test.event"), []byte(`{"data":"value"}`)}},
+		{"EVENT.LIST", "EVENT.LIST", nil},
+		{"WEBHOOK.LIST", "WEBHOOK.LIST", nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := newTestCtx(tt.cmd, tt.args, s)
+			handler, ok := router.Get(tt.cmd)
+			if !ok {
+				t.Fatalf("Command %s not found", tt.cmd)
+			}
+			if err := handler.Handler(ctx); err != nil {
+				t.Errorf("Command %s failed: %v", tt.cmd, err)
+			}
+		})
+	}
+}
+
+func TestMVCCCommandsComprehensive(t *testing.T) {
+	s := store.NewStore()
+	router := NewRouter()
+	RegisterMVCCCommands(router)
+
+	tests := []struct {
+		name string
+		cmd  string
+		args [][]byte
+	}{
+		{"MVCC.BEGIN", "MVCC.BEGIN", nil},
+		{"MVCC.STATUS", "MVCC.STATUS", nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := newTestCtx(tt.cmd, tt.args, s)
+			handler, ok := router.Get(tt.cmd)
+			if !ok {
+				t.Fatalf("Command %s not found", tt.cmd)
+			}
+			if err := handler.Handler(ctx); err != nil {
+				t.Errorf("Command %s failed: %v", tt.cmd, err)
+			}
+		})
+	}
+}
