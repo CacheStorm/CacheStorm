@@ -99,14 +99,14 @@ func (p *Pool) Get() (*Conn, error) {
 	for i := len(p.conns) - 1; i >= 0; i-- {
 		c := p.conns[i]
 		if !c.inUse.Load() {
-			p.conns = append(p.conns[:i], p.conns[i+1:]...)
-			p.mu.Unlock()
-
 			if time.Since(c.lastUsed) > p.config.IdleTimeout {
 				c.conn.Close()
+				p.conns = append(p.conns[:i], p.conns[i+1:]...)
 				continue
 			}
 
+			p.conns = append(p.conns[:i], p.conns[i+1:]...)
+			p.mu.Unlock()
 			c.inUse.Store(true)
 			c.lastUsed = time.Now()
 			return c, nil

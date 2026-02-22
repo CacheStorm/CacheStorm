@@ -61,6 +61,7 @@ type Manager struct {
 	stopCh         chan struct{}
 	wg             sync.WaitGroup
 	onRoleChange   func(Role)
+	stopped        atomic.Bool
 }
 
 var globalManager *Manager
@@ -101,6 +102,9 @@ func (m *Manager) Start() error {
 }
 
 func (m *Manager) Stop() {
+	if m.stopped.Swap(true) {
+		return
+	}
 	close(m.stopCh)
 	if m.masterConn != nil {
 		m.masterConn.Close()

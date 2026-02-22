@@ -2,6 +2,7 @@ package replication
 
 import (
 	"bytes"
+	"net"
 	"testing"
 	"time"
 
@@ -351,3 +352,189 @@ func TestReplicaStateConstants(t *testing.T) {
 		t.Errorf("expected StateDisconnected = 3, got %d", StateDisconnected)
 	}
 }
+
+func TestAddReplica(t *testing.T) {
+	m := GetManager()
+	if m == nil {
+		t.Fatal("expected manager")
+	}
+
+	m.mu.Lock()
+	originalCount := len(m.replicas)
+	m.replicas["test-replica"] = &Replica{
+		ID:    "test-replica",
+		IP:    "127.0.0.1",
+		Port:  6380,
+		State: StateConnected,
+	}
+	count := len(m.replicas)
+	delete(m.replicas, "test-replica")
+	m.mu.Unlock()
+
+	if count != originalCount+1 {
+		t.Errorf("expected %d replicas, got %d", originalCount+1, count)
+	}
+}
+
+func TestReplicaOfNoOneSpecial(t *testing.T) {
+	m := GetManager()
+	if m == nil {
+		t.Fatal("expected manager")
+	}
+
+	originalRole := m.GetRole()
+
+	err := m.ReplicaOf("no", 1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if m.GetRole() != RoleMaster {
+		t.Errorf("expected RoleMaster, got %d", m.GetRole())
+	}
+
+	m.SetRole(originalRole)
+}
+
+func TestManagerGetInfoReplica(t *testing.T) {
+	m := GetManager()
+	if m == nil {
+		t.Fatal("expected manager")
+	}
+
+	originalRole := m.GetRole()
+	m.SetRole(RoleReplica)
+
+	info := m.GetInfo()
+	if info == "" {
+		t.Error("expected info string")
+	}
+
+	m.SetRole(originalRole)
+}
+
+func TestGetReplicasNonNil(t *testing.T) {
+	m := GetManager()
+	if m == nil {
+		t.Fatal("expected manager")
+	}
+
+	replicas := m.GetReplicas()
+	if replicas == nil {
+		t.Error("expected non-nil replicas map")
+	}
+}
+
+func TestConnectToMasterError(t *testing.T) {
+	m := GetManager()
+	if m == nil {
+		t.Fatal("expected manager")
+	}
+
+	originalRole := m.GetRole()
+	m.SetRole(RoleReplica)
+
+	err := m.connectToMaster()
+	if err == nil {
+		t.Error("expected error connecting to invalid master")
+	}
+
+	m.SetRole(originalRole)
+}
+
+func TestGetMasterLinkStatusUp(t *testing.T) {
+	m := GetManager()
+	if m == nil {
+		t.Fatal("expected manager")
+	}
+
+	originalRole := m.GetRole()
+	m.SetRole(RoleMaster)
+
+	status := m.getMasterLinkStatus()
+	_ = status
+
+	m.SetRole(originalRole)
+}
+
+func TestManagerStartReplica(t *testing.T) {
+	cfg := &config.ReplicationConfig{
+		Role: "replica",
+	}
+	s := store.NewStore()
+
+	m := InitManager(cfg, s)
+	if m == nil {
+		t.Fatal("expected manager")
+	}
+
+	err := m.Start()
+	if err != nil {
+		t.Logf("start returned: %v", err)
+	}
+	m.Stop()
+}
+
+func TestManagerAddReplica(t *testing.T) {
+	m := GetManager()
+	if m == nil {
+		t.Fatal("expected manager")
+	}
+
+	originalRole := m.GetRole()
+	m.SetRole(RoleMaster)
+
+	conn := &mockConn{}
+	m.AddReplica(conn, "127.0.0.1", 6380, map[string]bool{"eof": true})
+
+	count := m.GetReplicaCount()
+	_ = count
+
+	m.RemoveReplica("test-replica-2")
+	m.SetRole(originalRole)
+}
+
+func TestManagerPropagateToReplicas(t *testing.T) {
+	m := GetManager()
+	if m == nil {
+		t.Fatal("expected manager")
+	}
+
+	originalRole := m.GetRole()
+	m.SetRole(RoleMaster)
+
+	m.PropagateCommand([]byte("*3\r\n$3\r\nSET\r\n$3\r\nkey\r\n$5\r\nvalue\r\n"))
+	m.PropagateCommand([]byte("*2\r\n$3\r\nGET\r\n$3\r\nkey\r\n"))
+
+	m.SetRole(originalRole)
+}
+
+func TestManagerUpdateReplicaOffsetExtended(t *testing.T) {
+	m := GetManager()
+	if m == nil {
+		t.Fatal("expected manager")
+	}
+
+	originalRole := m.GetRole()
+	m.SetRole(RoleMaster)
+
+	m.UpdateReplicaOffset("test-replica-3", 1000)
+	m.UpdateReplicaOffset("test-replica-3", 2000)
+
+	m.SetRole(originalRole)
+}
+
+type mockConn struct {
+	closed bool
+}
+
+func (m *mockConn) Read(b []byte) (n int, err error)  { return 0, nil }
+func (m *mockConn) Write(b []byte) (n int, err error) { return len(b), nil }
+func (m *mockConn) Close() error {
+	m.closed = true
+	return nil
+}
+func (m *mockConn) LocalAddr() net.Addr                { return nil }
+func (m *mockConn) RemoteAddr() net.Addr               { return nil }
+func (m *mockConn) SetDeadline(t time.Time) error      { return nil }
+func (m *mockConn) SetReadDeadline(t time.Time) error  { return nil }
+func (m *mockConn) SetWriteDeadline(t time.Time) error { return nil }

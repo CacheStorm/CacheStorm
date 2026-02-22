@@ -51,7 +51,7 @@ func NewStore() *Store {
 func NewStoreWithNamespaces() *Store {
 	s := &Store{
 		tagIndex:     NewTagIndex(),
-		namespaceMgr: NewNamespaceManager(),
+		namespaceMgr: NewNamespaceManagerNoCycle(),
 		pubsub:       NewPubSub(),
 		versions:     make(map[string]int64),
 	}

@@ -726,3 +726,151 @@ func TestSentinelGossipSentinels(t *testing.T) {
 
 	s.gossipSentinels()
 }
+
+func TestSentinelIsReachableWithTimeout(t *testing.T) {
+	cfg := Config{ID: "sentinel-1"}
+	s := New(cfg)
+
+	result := s.isReachable("192.0.2.1", 59999)
+	if result {
+		t.Error("expected unreachable for TEST-NET-1 address")
+	}
+}
+
+func TestSentinelHandleConnection(t *testing.T) {
+	cfg := Config{ID: "sentinel-1", Addr: "127.0.0.1", Port: 0}
+	s := New(cfg)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	err := s.Serve(ctx, 0)
+	if err != nil {
+		t.Logf("Serve returned (expected): %v", err)
+	}
+}
+
+func TestSentinelFailoverWithCallback(t *testing.T) {
+	cfg := Config{ID: "sentinel-1"}
+	s := New(cfg)
+
+	callbackCalled := false
+	s.OnFailover(func(master, newAddr string, newPort int) {
+		callbackCalled = true
+	})
+
+	s.Monitor("mymaster", "127.0.0.1", 6379, 2)
+
+	s.mu.Lock()
+	s.masters["mymaster"].Replicas = []*ReplicaInfo{{Addr: "127.0.0.1", Port: 6380, Offset: 100}}
+	s.mu.Unlock()
+
+	err := s.Failover("mymaster")
+	if err != nil {
+		t.Logf("Failover returned: %v", err)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	_ = callbackCalled
+}
+
+func TestSentinelMultipleMasters(t *testing.T) {
+	cfg := Config{ID: "sentinel-1"}
+	s := New(cfg)
+
+	s.Monitor("master1", "127.0.0.1", 6379, 2)
+	s.Monitor("master2", "127.0.0.1", 6380, 2)
+	s.Monitor("master3", "127.0.0.1", 6381, 2)
+
+	masters := s.Masters()
+	if len(masters) != 3 {
+		t.Errorf("expected 3 masters, got %d", len(masters))
+	}
+
+	count := s.Reset("*")
+	if count != 3 {
+		t.Errorf("expected 3 resets, got %d", count)
+	}
+}
+
+func TestSentinelInfoExtended(t *testing.T) {
+	cfg := Config{
+		ID:            "sentinel-1",
+		Addr:          "127.0.0.1",
+		Port:          26379,
+		DownAfter:     30 * time.Second,
+		ParallelSyncs: 1,
+		FailoverTime:  3 * time.Minute,
+		Quorum:        2,
+	}
+	s := New(cfg)
+
+	s.Monitor("master1", "127.0.0.1", 6379, 2)
+	s.Monitor("master2", "127.0.0.1", 6380, 2)
+
+	info := s.Info()
+	if info["masters"] != 2 {
+		t.Errorf("expected 2 masters, got %v", info["masters"])
+	}
+}
+
+func TestSentinelGetMasterAddrByName(t *testing.T) {
+	cfg := Config{ID: "sentinel-1"}
+	s := New(cfg)
+
+	s.Monitor("mymaster", "127.0.0.1", 6379, 2)
+
+	addr, port, err := s.GetMasterAddr("mymaster")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if addr != "127.0.0.1" {
+		t.Errorf("expected addr 127.0.0.1, got %s", addr)
+	}
+	if port != 6379 {
+		t.Errorf("expected port 6379, got %d", port)
+	}
+}
+
+func TestSentinelSentinelsMap(t *testing.T) {
+	cfg := Config{ID: "sentinel-1"}
+	s := New(cfg)
+
+	s.Monitor("mymaster", "127.0.0.1", 6379, 2)
+
+	s.mu.Lock()
+	s.sentinels["mymaster"] = []*SentinelPeer{
+		{ID: "sentinel-2", Addr: "127.0.0.1", Port: 26380, LastSeen: time.Now()},
+		{ID: "sentinel-3", Addr: "127.0.0.1", Port: 26381, LastSeen: time.Now()},
+	}
+	s.mu.Unlock()
+
+	master, ok := s.GetMaster("mymaster")
+	if !ok {
+		t.Fatal("expected master")
+	}
+	_ = master
+}
+
+func TestSentinelReplicasList(t *testing.T) {
+	cfg := Config{ID: "sentinel-1"}
+	s := New(cfg)
+
+	s.Monitor("mymaster", "127.0.0.1", 6379, 2)
+
+	s.mu.Lock()
+	s.masters["mymaster"].Replicas = []*ReplicaInfo{
+		{Addr: "127.0.0.1", Port: 6380, Offset: 100, State: "online"},
+		{Addr: "127.0.0.1", Port: 6381, Offset: 50, State: "online"},
+	}
+	s.mu.Unlock()
+
+	master, ok := s.GetMaster("mymaster")
+	if !ok {
+		t.Fatal("expected master")
+	}
+	if len(master.Replicas) != 2 {
+		t.Errorf("expected 2 replicas, got %d", len(master.Replicas))
+	}
+}

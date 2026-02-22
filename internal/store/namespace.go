@@ -35,6 +35,21 @@ func NewNamespaceManager() *NamespaceManager {
 	return nm
 }
 
+func NewNamespaceManagerNoCycle() *NamespaceManager {
+	nm := &NamespaceManager{
+		namespaces: make(map[string]*Namespace),
+	}
+
+	nm.defaultNS = &Namespace{
+		Name:      "default",
+		Tags:      NewTagIndex(),
+		CreatedAt: time.Now(),
+	}
+	nm.namespaces["default"] = nm.defaultNS
+
+	return nm
+}
+
 func (nm *NamespaceManager) createNamespace(name string) *Namespace {
 	return &Namespace{
 		Name:      name,

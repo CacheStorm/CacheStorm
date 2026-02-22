@@ -302,3 +302,79 @@ func TestPoolNotifyChannel(t *testing.T) {
 	default:
 	}
 }
+
+func TestPoolCleanupIdleConnsWithTimeout(t *testing.T) {
+	factory := func() (net.Conn, error) { return &mockConn{}, nil }
+	cfg := PoolConfig{
+		MaxSize:     10,
+		InitialSize: 2,
+		MaxIdle:     2,
+		IdleTimeout: 50 * time.Millisecond,
+	}
+	p := NewPool(cfg, factory)
+	defer p.Close()
+
+	time.Sleep(100 * time.Millisecond)
+}
+
+func TestPoolGetExpiredConnection(t *testing.T) {
+	factory := func() (net.Conn, error) { return &mockConn{}, nil }
+	cfg := PoolConfig{
+		MaxSize:     5,
+		InitialSize: 0,
+		IdleTimeout: 10 * time.Millisecond,
+	}
+	p := NewPool(cfg, factory)
+	defer p.Close()
+
+	conn1, _ := p.Get()
+	conn1.Close()
+
+	time.Sleep(20 * time.Millisecond)
+
+	conn2, _ := p.Get()
+	conn2.Close()
+}
+
+func TestPoolStatsDetails(t *testing.T) {
+	factory := func() (net.Conn, error) { return &mockConn{}, nil }
+	p := NewPool(PoolConfig{MaxSize: 10, InitialSize: 2}, factory)
+	defer p.Close()
+
+	stats := p.Stats()
+	if stats.Total < 2 {
+		t.Errorf("expected at least 2 total, got %d", stats.Total)
+	}
+
+	conn, _ := p.Get()
+	_ = conn
+
+	stats = p.Stats()
+	if stats.Waiting != 0 {
+		t.Errorf("expected 0 waiting, got %d", stats.Waiting)
+	}
+}
+
+func TestPoolNotifyOnRelease(t *testing.T) {
+	factory := func() (net.Conn, error) { return &mockConn{}, nil }
+	p := NewPool(PoolConfig{MaxSize: 1, InitialSize: 1}, factory)
+	defer p.Close()
+
+	conn1, _ := p.Get()
+
+	done := make(chan struct{})
+	go func() {
+		conn2, _ := p.Get()
+		conn2.Close()
+		close(done)
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+	conn1.Close()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Error("expected connection to be released")
+	}
+}

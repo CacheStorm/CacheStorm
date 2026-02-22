@@ -243,7 +243,7 @@ func cmdCFDEL(ctx *Context) error {
 	key := ctx.ArgString(0)
 	item := ctx.Arg(1)
 
-	probabilisticMu.Lock()
+	probabilisticMu.RLock()
 	cf, exists := cuckooFilters[key]
 	probabilisticMu.RUnlock()
 

@@ -1046,3 +1046,130 @@ func TestHTTPServerHandleMethods(t *testing.T) {
 		}
 	}
 }
+
+func TestHTTPServerNamespace(t *testing.T) {
+	h := newTestHTTPServer()
+
+	req := httptest.NewRequest("GET", "/api/namespace/default", nil)
+	w := httptest.NewRecorder()
+
+	h.handleNamespace(w, req)
+}
+
+func TestHTTPServerNamespaceDELETE(t *testing.T) {
+	h := newTestHTTPServer()
+
+	req := httptest.NewRequest("DELETE", "/api/namespace/testns", nil)
+	w := httptest.NewRecorder()
+
+	h.handleNamespace(w, req)
+}
+
+func TestConnectionHandle(t *testing.T) {
+	s := store.NewStore()
+	router := command.NewRouter()
+
+	client, server := net.Pipe()
+	defer client.Close()
+
+	conn := NewConnection(1, server, s, router)
+
+	go func() {
+		client.Write([]byte("*1\r\n$4\r\nPING\r\n"))
+	}()
+
+	done := make(chan struct{})
+	go func() {
+		conn.Handle()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(100 * time.Millisecond):
+		conn.Close()
+	}
+}
+
+func TestHTTPServerStart(t *testing.T) {
+	s := store.NewStore()
+	cfg := &HTTPConfig{Enabled: true, Port: 0}
+	router := command.NewRouter()
+	h := NewHTTPServer(s, router, cfg)
+
+	go h.Start()
+	time.Sleep(50 * time.Millisecond)
+	h.Stop()
+}
+
+func TestHTTPServerNamespacesDELETE(t *testing.T) {
+	h := newTestHTTPServer()
+
+	req := httptest.NewRequest("DELETE", "/api/namespaces?name=testns", nil)
+	w := httptest.NewRecorder()
+
+	h.handleNamespaces(w, req)
+}
+
+func TestHTTPServerKeyPUT(t *testing.T) {
+	h := newTestHTTPServer()
+	h.store.Set("mykey", &store.StringValue{Data: []byte("myvalue")}, store.SetOptions{})
+
+	body := `{"value":"newvalue"}`
+	req := httptest.NewRequest("PUT", "/api/key/mykey", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	h.handleKey(w, req)
+}
+
+func TestHTTPServerKeyInvalidJSON(t *testing.T) {
+	h := newTestHTTPServer()
+
+	body := `{invalid}`
+	req := httptest.NewRequest("POST", "/api/key/mykey", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	h.handleKey(w, req)
+}
+
+func TestHTTPServerTagInvalidate(t *testing.T) {
+	h := newTestHTTPServer()
+
+	req := httptest.NewRequest("POST", "/api/tag/mytag/invalidate", nil)
+	w := httptest.NewRecorder()
+
+	h.handleTag(w, req)
+}
+
+func TestHTTPServerClusterNodes(t *testing.T) {
+	h := newTestHTTPServer()
+
+	req := httptest.NewRequest("GET", "/api/cluster/nodes", nil)
+	w := httptest.NewRecorder()
+
+	h.handleCluster(w, req)
+}
+
+func TestHTTPServerClusterLeave(t *testing.T) {
+	h := newTestHTTPServer()
+
+	body := `{"node_id":"node-1"}`
+	req := httptest.NewRequest("POST", "/api/cluster/leave", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	h.handleCluster(w, req)
+}
+
+func TestHTTPServerKeysDELETE(t *testing.T) {
+	h := newTestHTTPServer()
+	h.store.Set("key1", &store.StringValue{Data: []byte("value1")}, store.SetOptions{})
+	h.store.Set("key2", &store.StringValue{Data: []byte("value2")}, store.SetOptions{})
+
+	req := httptest.NewRequest("DELETE", "/api/keys?keys=key1,key2", nil)
+	w := httptest.NewRecorder()
+
+	h.handleKeys(w, req)
+}
