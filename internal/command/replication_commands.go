@@ -44,7 +44,7 @@ func InitReplicationManager(s *store.Store) {
 	replManager = &ReplicationManager{
 		store:     s,
 		role:      "master",
-		replicaID: fmt.Sprintf("%x", time.Now().UnixNano())[:40],
+		replicaID: fmt.Sprintf("%040x", time.Now().UnixNano()),
 	}
 }
 
