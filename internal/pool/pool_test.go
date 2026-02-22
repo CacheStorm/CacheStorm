@@ -237,3 +237,68 @@ func TestPoolInitialSizeWithErrors(t *testing.T) {
 	p := NewPool(PoolConfig{MaxSize: 10, InitialSize: 5}, factory)
 	defer p.Close()
 }
+
+func TestPoolGetReusesIdleConnection(t *testing.T) {
+	factory := func() (net.Conn, error) { return &mockConn{}, nil }
+	p := NewPool(PoolConfig{MaxSize: 5, InitialSize: 0}, factory)
+	defer p.Close()
+
+	conn1, _ := p.Get()
+	conn1.Close()
+
+	conn2, _ := p.Get()
+	conn2.Close()
+}
+
+func TestPoolMaxIdleLimit(t *testing.T) {
+	factory := func() (net.Conn, error) { return &mockConn{}, nil }
+	p := NewPool(PoolConfig{MaxSize: 10, MaxIdle: 2}, factory)
+	defer p.Close()
+
+	conns := make([]*Conn, 5)
+	for i := 0; i < 5; i++ {
+		conns[i], _ = p.Get()
+	}
+
+	for _, c := range conns {
+		c.Close()
+	}
+}
+
+func TestConnRead(t *testing.T) {
+	mc := &mockConn{}
+	c := &Conn{conn: mc}
+
+	buf := make([]byte, 10)
+	n, err := c.Read(buf)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("expected 0 bytes, got %d", n)
+	}
+}
+
+func TestConnWrite(t *testing.T) {
+	mc := &mockConn{}
+	c := &Conn{conn: mc}
+
+	n, err := c.Write([]byte("test"))
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if n != 4 {
+		t.Errorf("expected 4 bytes, got %d", n)
+	}
+}
+
+func TestPoolNotifyChannel(t *testing.T) {
+	factory := func() (net.Conn, error) { return &mockConn{}, nil }
+	p := NewPool(PoolConfig{MaxSize: 1}, factory)
+	defer p.Close()
+
+	select {
+	case p.notifyCh <- struct{}{}:
+	default:
+	}
+}
