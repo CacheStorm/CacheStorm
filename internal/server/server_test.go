@@ -76,7 +76,7 @@ func TestServerStore(t *testing.T) {
 
 func TestServerStartStop(t *testing.T) {
 	cfg := &config.Config{
-		Server: config.ServerConfig{Bind: "127.0.0.1", Port: 16379},
+		Server: config.ServerConfig{Bind: "127.0.0.1", Port: 0},
 		HTTP:   config.HTTPConfig{Enabled: false},
 	}
 
@@ -829,4 +829,220 @@ func TestConnectionClose(t *testing.T) {
 
 	conn := NewConnection(1, server, s, router)
 	conn.Close()
+}
+
+func TestServerStopWithoutStart(t *testing.T) {
+	cfg := &config.Config{
+		Server: config.ServerConfig{Bind: "127.0.0.1", Port: 16380},
+		HTTP:   config.HTTPConfig{Enabled: false},
+	}
+
+	s, _ := New(cfg)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	err := s.Stop(ctx)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestServerWithHTTPEnabled(t *testing.T) {
+	cfg := &config.Config{
+		Server: config.ServerConfig{Bind: "127.0.0.1", Port: 0},
+		HTTP: config.HTTPConfig{
+			Enabled:  true,
+			Port:     0,
+			Password: "",
+		},
+	}
+
+	s, err := New(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	ctx := context.Background()
+	err = s.Start(ctx)
+	if err != nil {
+		t.Fatalf("unexpected error starting server: %v", err)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+
+	stopCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	err = s.Stop(stopCtx)
+	if err != nil {
+		t.Fatalf("unexpected error stopping server: %v", err)
+	}
+}
+
+func TestHTTPServerKeysInvalidJSON(t *testing.T) {
+	h := newTestHTTPServer()
+
+	body := `{"key":invalid`
+	req := httptest.NewRequest("POST", "/api/keys", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	h.handleKeys(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected status 400, got %d", w.Code)
+	}
+}
+
+func TestHTTPServerNamespacesInvalidJSON(t *testing.T) {
+	h := newTestHTTPServer()
+
+	body := `{invalid}`
+	req := httptest.NewRequest("POST", "/api/namespaces", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	h.handleNamespaces(w, req)
+}
+
+func TestHTTPServerClusterJoinInvalidJSON(t *testing.T) {
+	h := newTestHTTPServer()
+
+	body := `{invalid}`
+	req := httptest.NewRequest("POST", "/api/cluster/join", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	h.handleClusterJoin(w, req)
+}
+
+func TestHTTPServerExecuteInvalidJSON(t *testing.T) {
+	h := newTestHTTPServer()
+
+	body := `{invalid}`
+	req := httptest.NewRequest("POST", "/api/execute", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	h.handleExecute(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected status 400, got %d", w.Code)
+	}
+}
+
+func TestHTTPServerLoginInvalidJSON(t *testing.T) {
+	h := newTestHTTPServer()
+
+	body := `{invalid}`
+	req := httptest.NewRequest("POST", "/api/login", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	h.handleLogin(w, req)
+}
+
+func TestHTTPServerKeysWithTTL(t *testing.T) {
+	h := newTestHTTPServer()
+
+	body := `{"key":"ttlkey","value":"value","type":"string","ttl":"1h"}`
+	req := httptest.NewRequest("POST", "/api/keys", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	h.handleKeys(w, req)
+}
+
+func TestHTTPServerKeysWithTypeList(t *testing.T) {
+	h := newTestHTTPServer()
+
+	body := `{"key":"listkey","value":"a,b,c","type":"list"}`
+	req := httptest.NewRequest("POST", "/api/keys", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	h.handleKeys(w, req)
+}
+
+func TestHTTPServerKeysWithTypeSet(t *testing.T) {
+	h := newTestHTTPServer()
+
+	body := `{"key":"setkey","value":"a,b,c","type":"set"}`
+	req := httptest.NewRequest("POST", "/api/keys", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	h.handleKeys(w, req)
+}
+
+func TestHTTPServerKeysWithTypeHash(t *testing.T) {
+	h := newTestHTTPServer()
+
+	body := `{"key":"hashkey","value":"field1=value1,field2=value2","type":"hash"}`
+	req := httptest.NewRequest("POST", "/api/keys", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	h.handleKeys(w, req)
+}
+
+func TestHTTPServerKeysWithTags(t *testing.T) {
+	h := newTestHTTPServer()
+
+	body := `{"key":"taggedkey","value":"value","type":"string","tags":"tag1,tag2"}`
+	req := httptest.NewRequest("POST", "/api/keys", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	h.handleKeys(w, req)
+}
+
+func TestHTTPServerHandleMethods(t *testing.T) {
+	h := newTestHTTPServer()
+
+	tests := []struct {
+		method string
+		path   string
+		body   string
+	}{
+		{"GET", "/api/health", ""},
+		{"GET", "/api/info", ""},
+		{"GET", "/api/metrics", ""},
+		{"GET", "/api/keys", ""},
+		{"GET", "/api/tags", ""},
+		{"GET", "/api/namespaces", ""},
+		{"GET", "/api/cluster", ""},
+		{"GET", "/api/slowlog", ""},
+		{"GET", "/api/stats", ""},
+	}
+
+	for _, tt := range tests {
+		var req *http.Request
+		if tt.body != "" {
+			req = httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body))
+		} else {
+			req = httptest.NewRequest(tt.method, tt.path, nil)
+		}
+		w := httptest.NewRecorder()
+
+		switch tt.path {
+		case "/api/health":
+			h.handleHealth(w, req)
+		case "/api/info":
+			h.handleInfo(w, req)
+		case "/api/metrics":
+			h.handleMetrics(w, req)
+		case "/api/keys":
+			h.handleKeys(w, req)
+		case "/api/tags":
+			h.handleTags(w, req)
+		case "/api/namespaces":
+			h.handleNamespaces(w, req)
+		case "/api/cluster":
+			h.handleCluster(w, req)
+		case "/api/slowlog":
+			h.handleSlowlog(w, req)
+		case "/api/stats":
+			h.handleStats(w, req)
+		}
+	}
 }
