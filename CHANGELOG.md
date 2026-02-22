@@ -23,19 +23,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed deadlock in `SREM` command when deleting empty set
 - Fixed deadlock in `SPOP` command when deleting empty set
 - Fixed deadlock in `ZREM` command when deleting empty sorted set
+- Fixed deadlock in `PriorityQueue` by removing lock from `Len()` method (heap interface requirement)
 
-**Test Improvements**
-- Fixed `TestTransactionCommands` name conflict in comprehensive_test.go
-- Fixed `s.Set()` calls to use proper `store.StringValue` type
-- Fixed infinite loop in `XADD` command argument parsing
-- Fixed `generateUUID()` random number generator producing negative indices
+**Random Number Generator Fixes**
+- Fixed negative index bug in `generateUUID()` by using `math/rand`
+- Fixed negative index bug in `generateID()` for events
 
-**Coverage**
-- Command coverage: 13.9%
-- Store coverage: 12.3%
-- Cluster coverage: 23.3%
-- RESP coverage: 45.6%
-- Total registered commands: 1,578
+**Infinite Loop Fixes**
+- Fixed infinite loop in `XADD` command argument parsing by using labeled break
+
+**Config Fixes**
+- Fixed `ParseMemorySize` to check longer suffixes first (e.g., "kb" before "b")
+
+### Testing - Major Coverage Improvements
+
+**Package Coverage**
+| Package | Coverage |
+|---------|----------|
+| logger | 100.0% ✓ |
+| buffer | 98.4% ✓ |
+| module | 96.4% ✓ |
+| batch | 95.6% ✓ |
+| plugin | 95.6% ✓ |
+| config | 95.4% ✓ |
+| acl | 89.9% ✓ |
+| pool | 74.5% |
+| resp | 57.8% |
+| cluster | 23.3% |
+| store | 18.5% |
+| command | 16.3% |
+
+**New Test Files Added**
+- `internal/acl/acl_test.go`
+- `internal/batch/batch_test.go`
+- `internal/buffer/buffer_test.go`
+- `internal/command/comprehensive_test.go`
+- `internal/config/config_test.go`
+- `internal/logger/logger_test.go`
+- `internal/module/module_test.go`
+- `internal/plugin/plugin_test.go`
+- `internal/pool/pool_test.go`
+- `internal/store/datastructures_test.go`
+- Updated `internal/resp/reader_test.go`
 
 ## [0.1.25] - 2026-02-21
 
