@@ -62,26 +62,29 @@ func ParseMemorySize(s string) (int64, error) {
 
 	s = strings.TrimSpace(strings.ToLower(s))
 
-	multipliers := map[string]int64{
-		"b":   1,
-		"kb":  1024,
-		"mb":  1024 * 1024,
-		"gb":  1024 * 1024 * 1024,
-		"tb":  1024 * 1024 * 1024 * 1024,
-		"kib": 1024,
-		"mib": 1024 * 1024,
-		"gib": 1024 * 1024 * 1024,
-		"tib": 1024 * 1024 * 1024 * 1024,
+	suffixes := []struct {
+		suffix string
+		mult   int64
+	}{
+		{"tib", 1024 * 1024 * 1024 * 1024},
+		{"gib", 1024 * 1024 * 1024},
+		{"mib", 1024 * 1024},
+		{"kib", 1024},
+		{"tb", 1024 * 1024 * 1024 * 1024},
+		{"gb", 1024 * 1024 * 1024},
+		{"mb", 1024 * 1024},
+		{"kb", 1024},
+		{"b", 1},
 	}
 
-	for suffix, mult := range multipliers {
-		if strings.HasSuffix(s, suffix) {
-			numStr := strings.TrimSuffix(s, suffix)
+	for _, sf := range suffixes {
+		if strings.HasSuffix(s, sf.suffix) {
+			numStr := strings.TrimSuffix(s, sf.suffix)
 			num, err := strconv.ParseInt(numStr, 10, 64)
 			if err != nil {
 				return 0, fmt.Errorf("invalid memory size: %s", s)
 			}
-			return num * mult, nil
+			return num * sf.mult, nil
 		}
 	}
 
