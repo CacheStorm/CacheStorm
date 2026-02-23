@@ -2149,3 +2149,352 @@ func TestMemoryTrackerExtended(t *testing.T) {
 		}
 	})
 }
+
+func TestSortedSetValueMethods2(t *testing.T) {
+	ss := &SortedSetValue{Members: make(map[string]float64)}
+	ss.Members["a"] = 1.0
+	ss.Members["b"] = 2.0
+	ss.Members["c"] = 3.0
+
+	t.Run("Count", func(t *testing.T) {
+		count := ss.Count(1.0, 2.5)
+		if count != 2 {
+			t.Errorf("Count(1.0, 2.5) = %d, want 2", count)
+		}
+	})
+
+	t.Run("RangeByScore", func(t *testing.T) {
+		entries := ss.RangeByScore(1.0, 2.5, false, false)
+		if len(entries) != 2 {
+			t.Errorf("RangeByScore returned %d entries, want 2", len(entries))
+		}
+	})
+
+	t.Run("RangeByScoreReverse", func(t *testing.T) {
+		entries := ss.RangeByScore(1.0, 3.0, false, true)
+		if len(entries) != 3 {
+			t.Errorf("RangeByScore reverse returned %d entries, want 3", len(entries))
+		}
+	})
+
+	t.Run("RemoveRangeByRank", func(t *testing.T) {
+		ss2 := &SortedSetValue{Members: make(map[string]float64)}
+		ss2.Members["a"] = 1.0
+		ss2.Members["b"] = 2.0
+		ss2.Members["c"] = 3.0
+		removed := ss2.RemoveRangeByRank(0, 0)
+		if removed != 1 {
+			t.Errorf("RemoveRangeByRank(0, 0) = %d, want 1", removed)
+		}
+	})
+
+	t.Run("RemoveRangeByScore", func(t *testing.T) {
+		ss3 := &SortedSetValue{Members: make(map[string]float64)}
+		ss3.Members["a"] = 1.0
+		ss3.Members["b"] = 2.0
+		ss3.Members["c"] = 3.0
+		removed := ss3.RemoveRangeByScore(1.0, 2.5)
+		if removed != 2 {
+			t.Errorf("RemoveRangeByScore = %d, want 2", removed)
+		}
+	})
+
+	t.Run("Remove", func(t *testing.T) {
+		ss4 := &SortedSetValue{Members: make(map[string]float64)}
+		ss4.Members["a"] = 1.0
+		if !ss4.Remove("a") {
+			t.Error("Remove should return true")
+		}
+		if ss4.Remove("b") {
+			t.Error("Remove should return false for non-existent")
+		}
+	})
+
+	t.Run("GetScore", func(t *testing.T) {
+		score, ok := ss.GetScore("a")
+		if !ok || score != 1.0 {
+			t.Errorf("GetScore(a) = %f, %v, want 1.0, true", score, ok)
+		}
+		_, ok = ss.GetScore("z")
+		if ok {
+			t.Error("GetScore(z) should return false")
+		}
+	})
+
+	t.Run("Add", func(t *testing.T) {
+		ss5 := &SortedSetValue{Members: make(map[string]float64)}
+		if !ss5.Add("a", 1.0) {
+			t.Error("Add new member should return true")
+		}
+		if ss5.Add("a", 2.0) {
+			t.Error("Add existing member should return false")
+		}
+	})
+
+	t.Run("Card", func(t *testing.T) {
+		if ss.Card() != 3 {
+			t.Errorf("Card() = %d, want 3", ss.Card())
+		}
+	})
+
+	t.Run("LexCount", func(t *testing.T) {
+		ss6 := &SortedSetValue{Members: make(map[string]float64)}
+		ss6.Members["a"] = 0
+		ss6.Members["b"] = 0
+		ss6.Members["c"] = 0
+		count := ss6.LexCount("[a", "[b")
+		if count != 2 {
+			t.Errorf("LexCount = %d, want 2", count)
+		}
+	})
+
+	t.Run("RangeByLex", func(t *testing.T) {
+		ss7 := &SortedSetValue{Members: make(map[string]float64)}
+		ss7.Members["a"] = 0
+		ss7.Members["b"] = 0
+		ss7.Members["c"] = 0
+		result := ss7.RangeByLex("[a", "[b", 0, 10, false)
+		if len(result) != 2 {
+			t.Errorf("RangeByLex returned %d entries, want 2", len(result))
+		}
+	})
+
+	t.Run("RangeByLexReverse", func(t *testing.T) {
+		ss8 := &SortedSetValue{Members: make(map[string]float64)}
+		ss8.Members["a"] = 0
+		ss8.Members["b"] = 0
+		ss8.Members["c"] = 0
+		result := ss8.RangeByLex("[a", "[b", 0, 10, true)
+		if len(result) != 2 {
+			t.Errorf("RangeByLex reverse returned %d entries, want 2", len(result))
+		}
+	})
+
+	t.Run("RemoveRangeByLex", func(t *testing.T) {
+		ss9 := &SortedSetValue{Members: make(map[string]float64)}
+		ss9.Members["a"] = 0
+		ss9.Members["b"] = 0
+		ss9.Members["c"] = 0
+		removed := ss9.RemoveRangeByLex("[a", "[b")
+		if removed != 2 {
+			t.Errorf("RemoveRangeByLex = %d, want 2", removed)
+		}
+	})
+
+	t.Run("GetAllEntries", func(t *testing.T) {
+		entries := ss.GetAllEntries()
+		if len(entries) != 3 {
+			t.Errorf("GetAllEntries returned %d entries, want 3", len(entries))
+		}
+	})
+
+	t.Run("GetByScoreRange", func(t *testing.T) {
+		entries := ss.GetByScoreRange(1.0, false, 2.5, false, false)
+		if len(entries) != 2 {
+			t.Errorf("GetByScoreRange returned %d entries, want 2", len(entries))
+		}
+	})
+
+	t.Run("GetByLexRange", func(t *testing.T) {
+		ss10 := &SortedSetValue{Members: make(map[string]float64)}
+		ss10.Members["a"] = 0
+		ss10.Members["b"] = 0
+		ss10.Members["c"] = 0
+		result := ss10.GetByLexRange("a", false, "c", false, false)
+		if len(result) != 3 {
+			t.Errorf("GetByLexRange returned %d entries, want 3", len(result))
+		}
+	})
+}
+
+func TestStreamValueMethods(t *testing.T) {
+	sv := NewStreamValue(1000)
+	sv.Add("1-0", map[string][]byte{"field": []byte("value")})
+
+	t.Run("String", func(t *testing.T) {
+		str := sv.String()
+		if str == "" {
+			t.Error("String() should not return empty")
+		}
+	})
+
+	t.Run("Clone", func(t *testing.T) {
+		cloned := sv.Clone()
+		if cloned == nil {
+			t.Error("Clone() should not return nil")
+		}
+	})
+
+	t.Run("Add", func(t *testing.T) {
+		sv2 := NewStreamValue(1000)
+		entry, err := sv2.Add("1-0", map[string][]byte{"field": []byte("value")})
+		if err != nil {
+			t.Errorf("Add failed: %v", err)
+		}
+		if entry == nil {
+			t.Error("Add should return an entry")
+		}
+	})
+
+	t.Run("GetRange", func(t *testing.T) {
+		entries := sv.GetRange("-", "+", 10)
+		if len(entries) != 1 {
+			t.Errorf("GetRange returned %d entries, want 1", len(entries))
+		}
+	})
+
+	t.Run("Len", func(t *testing.T) {
+		if sv.Len() != 1 {
+			t.Errorf("Len() = %d, want 1", sv.Len())
+		}
+	})
+
+	t.Run("Delete", func(t *testing.T) {
+		sv2 := NewStreamValue(1000)
+		entry, _ := sv2.Add("1-0", map[string][]byte{"field": []byte("value")})
+		deleted := sv2.Delete(entry.ID)
+		if deleted != 1 {
+			t.Errorf("Delete should return 1, got %d", deleted)
+		}
+	})
+
+	t.Run("Trim", func(t *testing.T) {
+		sv3 := NewStreamValue(1000)
+		sv3.Add("1-0", map[string][]byte{"field": []byte("value1")})
+		sv3.Add("2-0", map[string][]byte{"field": []byte("value2")})
+		trimmed := sv3.Trim(1, false)
+		_ = trimmed
+	})
+
+	t.Run("TrimByMinID", func(t *testing.T) {
+		sv4 := NewStreamValue(1000)
+		sv4.Add("1-0", map[string][]byte{"field": []byte("value1")})
+		sv4.Add("2-0", map[string][]byte{"field": []byte("value2")})
+		trimmed := sv4.TrimByMinID("2-0", false)
+		_ = trimmed
+	})
+
+	t.Run("CreateGroup", func(t *testing.T) {
+		sv5 := NewStreamValue(1000)
+		sv5.Add("1-0", map[string][]byte{"field": []byte("value")})
+		err := sv5.CreateGroup("testgroup", "$")
+		if err != nil {
+			t.Errorf("CreateGroup failed: %v", err)
+		}
+	})
+
+	t.Run("DestroyGroup", func(t *testing.T) {
+		sv6 := NewStreamValue(1000)
+		sv6.Add("1-0", map[string][]byte{"field": []byte("value")})
+		sv6.CreateGroup("testgroup", "$")
+		destroyed := sv6.DestroyGroup("testgroup")
+		if !destroyed {
+			t.Error("DestroyGroup should return true")
+		}
+	})
+
+	t.Run("GetGroup", func(t *testing.T) {
+		sv7 := NewStreamValue(1000)
+		sv7.Add("1-0", map[string][]byte{"field": []byte("value")})
+		sv7.CreateGroup("testgroup", "$")
+		group := sv7.GetGroup("testgroup")
+		if group == nil {
+			t.Error("GetGroup should return a group")
+		}
+	})
+
+	t.Run("SetGroupLastID", func(t *testing.T) {
+		sv8 := NewStreamValue(1000)
+		sv8.Add("1-0", map[string][]byte{"field": []byte("value")})
+		sv8.CreateGroup("testgroup", "$")
+		sv8.SetGroupLastID("testgroup", "1-0")
+	})
+
+	t.Run("GetEntriesAfter", func(t *testing.T) {
+		sv9 := NewStreamValue(1000)
+		entry1, _ := sv9.Add("1-0", map[string][]byte{"field": []byte("value1")})
+		sv9.Add("2-0", map[string][]byte{"field": []byte("value2")})
+		entries := sv9.GetEntriesAfter(entry1.ID, 10)
+		if len(entries) != 1 {
+			t.Errorf("GetEntriesAfter returned %d entries, want 1", len(entries))
+		}
+	})
+
+	t.Run("GetEntryByID", func(t *testing.T) {
+		sv10 := NewStreamValue(1000)
+		entry, _ := sv10.Add("1-0", map[string][]byte{"field": []byte("value")})
+		e := sv10.GetEntryByID(entry.ID)
+		if e == nil {
+			t.Error("GetEntryByID should return an entry")
+		}
+	})
+
+	t.Run("SetLastID", func(t *testing.T) {
+		sv11 := NewStreamValue(1000)
+		sv11.Add("1-0", map[string][]byte{"field": []byte("value")})
+		sv11.SetLastID("1-0")
+	})
+
+	t.Run("GetLastID", func(t *testing.T) {
+		sv12 := NewStreamValue(1000)
+		sv12.Add("1-0", map[string][]byte{"field": []byte("value")})
+		id := sv12.GetLastID()
+		if id != "1-0" {
+			t.Errorf("GetLastID = %s, want 1-0", id)
+		}
+	})
+
+	t.Run("GetGroups", func(t *testing.T) {
+		sv13 := NewStreamValue(1000)
+		sv13.Add("1-0", map[string][]byte{"field": []byte("value")})
+		sv13.CreateGroup("g1", "$")
+		groups := sv13.GetGroups()
+		if len(groups) != 1 {
+			t.Errorf("GetGroups returned %d groups, want 1", len(groups))
+		}
+	})
+
+	t.Run("GetGroupCount", func(t *testing.T) {
+		sv14 := NewStreamValue(1000)
+		sv14.Add("1-0", map[string][]byte{"field": []byte("value")})
+		sv14.CreateGroup("g1", "$")
+		if sv14.GetGroupCount() != 1 {
+			t.Errorf("GetGroupCount = %d, want 1", sv14.GetGroupCount())
+		}
+	})
+}
+
+func TestConsumerGroupMethods(t *testing.T) {
+	sv := NewStreamValue(1000)
+	sv.Add("1-0", map[string][]byte{"field": []byte("value")})
+	err := sv.CreateGroup("testgroup", "0")
+	if err != nil {
+		t.Fatalf("CreateGroup failed: %v", err)
+	}
+	cg := sv.GetGroup("testgroup")
+	if cg == nil {
+		t.Fatal("GetGroup returned nil")
+	}
+
+	t.Run("GetConsumerPending", func(t *testing.T) {
+		cg.GetOrCreateConsumer("consumer1")
+		pending := cg.GetConsumerPending("consumer1")
+		_ = pending
+	})
+
+	t.Run("GetAllConsumers", func(t *testing.T) {
+		cg.GetOrCreateConsumer("consumer1")
+		consumers := cg.GetAllConsumers()
+		if len(consumers) != 1 {
+			t.Errorf("GetAllConsumers returned %d, want 1", len(consumers))
+		}
+	})
+
+	t.Run("GetConsumer", func(t *testing.T) {
+		cg.GetOrCreateConsumer("consumer1")
+		cons := cg.GetConsumer("consumer1")
+		if cons == nil {
+			t.Error("GetConsumer should return consumer")
+		}
+	})
+}
