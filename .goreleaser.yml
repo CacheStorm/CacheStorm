@@ -103,7 +103,7 @@ nfpms:
       - rpm
       - apk
     contents:
-      - src: ./config/cachestorm.yaml
+      - src: ./config/cachestorm.example.yaml
         dst: /etc/cachestorm/cachestorm.yaml
         type: config
     scripts:

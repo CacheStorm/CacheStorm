@@ -1,0 +1,40 @@
+name: cachestorm
+version: git
+summary: High-performance Redis-compatible in-memory database
+description: |
+  CacheStorm is a Redis-compatible in-memory database with 1,600+ commands
+  including distributed systems features, data processing, and modern
+  application capabilities.
+
+grade: stable
+confinement: strict
+base: core22
+
+architectures:
+  - build-on: amd64
+  - build-on: arm64
+
+apps:
+  cachestorm:
+    command: bin/cachestorm
+    daemon: simple
+    plugs:
+      - network
+      - network-bind
+      - home
+      - removable-media
+    restart-condition: on-abort
+
+parts:
+  cachestorm:
+    plugin: go
+    source: .
+    source-type: git
+    build-packages:
+      - gcc
+      - git
+    override-build: |
+      go build -ldflags="-s -w -X main.version=$(git describe --tags --always)" \
+        -o $SNAPCRAFT_PART_INSTALL/bin/cachestorm ./cmd/cachestorm
+    organize:
+      config/cachestorm.example.yaml: etc/cachestorm/cachestorm.yaml
