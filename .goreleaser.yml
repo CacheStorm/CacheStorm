@@ -1,7 +1,6 @@
 before:
   hooks:
     - go mod tidy
-    - go generate ./...
 
 builds:
   - env:
@@ -41,7 +40,6 @@ archives:
       - LICENSE
       - CHANGELOG.md
       - config/**/*
-      - docs/**/*
 
 checksum:
   name_template: 'checksums.txt'
@@ -70,24 +68,24 @@ release:
   mode: replace
   header: |
     ## CacheStorm {{ .Tag }}
-    
-    A high-performance Redis-compatible in-memory database with 1,500+ commands.
+
+    A high-performance Redis-compatible in-memory database with 1,600+ commands.
   footer: |
     ## Installation
-    
+
     ### Binary Download
     Download the binary for your platform from the assets below.
-    
+
     ### Docker
     ```bash
-    docker pull cachestorm/cachestorm:{{ .Tag }}
+    docker pull ghcr.io/cachestorm/cachestorm:{{ .Tag }}
     ```
-    
+
     ### Build from Source
     ```bash
     go install github.com/cachestorm/cachestorm@{{ .Tag }}
     ```
-    
+
     **Full Changelog**: https://github.com/cachestorm/cachestorm/compare/{{ .PreviousTag }}...{{ .Tag }}
 
 nfpms:
@@ -106,128 +104,6 @@ nfpms:
       - src: ./config/cachestorm.example.yaml
         dst: /etc/cachestorm/cachestorm.yaml
         type: config
-    scripts:
-      postinstall: "scripts/postinstall.sh"
-      preremove: "scripts/preremove.sh"
-
-brews:
-  - name: cachestorm
-    homepage: https://github.com/cachestorm/cachestorm
-    description: High-performance Redis-compatible in-memory database with 1,500+ commands
-    license: MIT
-    folder: Formula
-    repository:
-      owner: cachestorm
-      name: homebrew-cachestorm
-      branch: main
-    commit_author:
-      name: goreleaserbot
-      email: bot@goreleaser.com
-    install: |
-      bin.install "cachestorm"
-    test: |
-      system "#{bin}/cachestorm --version"
-
-scoops:
-  - url_template: "https://github.com/cachestorm/scoop-bucket/releases/download/{{ .Tag }}/{{ .ArtifactName }}"
-    bucket:
-      owner: cachestorm
-      name: scoop-bucket
-      branch: main
-    homepage: https://github.com/cachestorm/cachestorm
-    description: High-performance Redis-compatible in-memory database
-    license: MIT
-
-snapcrafts:
-  - name: cachestorm
-    summary: High-performance Redis-compatible in-memory database
-    description: |
-      CacheStorm is a Redis-compatible in-memory database with 1,500+ commands
-      including distributed systems features, data processing, and modern application capabilities.
-    grade: stable
-    confinement: strict
-    license: MIT
-    base: core22
-    apps:
-      cachestorm:
-        command: cachestorm
-        plugs:
-          - network
-          - network-bind
-          - home
-          - removable-media
-
-dockers:
-  - image_templates:
-      - "cachestorm/cachestorm:{{ .Version }}-amd64"
-      - "ghcr.io/cachestorm/cachestorm:{{ .Version }}-amd64"
-    dockerfile: Dockerfile
-    use: buildx
-    build_flag_templates:
-      - "--platform=linux/amd64"
-      - "--label=org.opencontainers.image.created={{.Date}}"
-      - "--label=org.opencontainers.image.title={{.ProjectName}}"
-      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
-      - "--label=org.opencontainers.image.version={{.Version}}"
-
-  - image_templates:
-      - "cachestorm/cachestorm:{{ .Version }}-arm64"
-      - "ghcr.io/cachestorm/cachestorm:{{ .Version }}-arm64"
-    dockerfile: Dockerfile
-    use: buildx
-    build_flag_templates:
-      - "--platform=linux/arm64"
-      - "--label=org.opencontainers.image.created={{.Date}}"
-      - "--label=org.opencontainers.image.title={{.ProjectName}}"
-      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
-      - "--label=org.opencontainers.image.version={{.Version}}"
-
-docker_manifests:
-  - name_template: "cachestorm/cachestorm:{{ .Version }}"
-    image_templates:
-      - "cachestorm/cachestorm:{{ .Version }}-amd64"
-      - "cachestorm/cachestorm:{{ .Version }}-arm64"
-  - name_template: "cachestorm/cachestorm:latest"
-    image_templates:
-      - "cachestorm/cachestorm:{{ .Version }}-amd64"
-      - "cachestorm/cachestorm:{{ .Version }}-arm64"
-  - name_template: "ghcr.io/cachestorm/cachestorm:{{ .Version }}"
-    image_templates:
-      - "ghcr.io/cachestorm/cachestorm:{{ .Version }}-amd64"
-      - "ghcr.io/cachestorm/cachestorm:{{ .Version }}-arm64"
-  - name_template: "ghcr.io/cachestorm/cachestorm:latest"
-    image_templates:
-      - "ghcr.io/cachestorm/cachestorm:{{ .Version }}-amd64"
-      - "ghcr.io/cachestorm/cachestorm:{{ .Version }}-arm64"
-
-signs:
-  - cmd: cosign
-    certificate: '${artifact}.pem'
-    args:
-      - sign-blob
-      - '--output-certificate=${certificate}'
-      - '--output-signature=${signature}'
-      - '${artifact}'
-      - --yes
-    artifacts: checksum
-    output: true
-
-docker_signs:
-  - cmd: cosign
-    args:
-      - sign
-      - '${artifact}'
-      - --yes
-    artifacts: all
-    output: true
-
-announce:
-  twitter:
-    enabled: false
-  slack:
-    enabled: false
-  discord:
-    enabled: false
 
 universal_binaries:
   - replace: true

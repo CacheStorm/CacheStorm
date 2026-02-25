@@ -1,4 +1,4 @@
-name: Release Simple
+name: Release
 
 on:
   push:
@@ -37,11 +37,8 @@ jobs:
       - name: Run tests
         run: go test ./internal/... -v
 
-      - name: Build test
-        run: go build -v ./cmd/cachestorm
-
-  release:
-    name: Release
+  goreleaser:
+    name: GoReleaser
     runs-on: ubuntu-latest
     needs: test
     steps:
@@ -55,98 +52,12 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
 
-      - name: Get version
-        id: get_version
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION="${{ github.event.inputs.version }}"
-          else
-            VERSION=${GITHUB_REF#refs/tags/}
-          fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Version: $VERSION"
-
-      - name: Build binaries
-        run: |
-          VERSION="${{ steps.get_version.outputs.version }}"
-          mkdir -p dist
-
-          # Linux AMD64
-          GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X main.version=$VERSION" -o dist/cachestorm-linux-amd64 ./cmd/cachestorm
-
-          # Linux ARM64
-          GOOS=linux GOARCH=arm64 go build -ldflags="-s -w -X main.version=$VERSION" -o dist/cachestorm-linux-arm64 ./cmd/cachestorm
-
-          # macOS AMD64
-          GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w -X main.version=$VERSION" -o dist/cachestorm-darwin-amd64 ./cmd/cachestorm
-
-          # macOS ARM64
-          GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w -X main.version=$VERSION" -o dist/cachestorm-darwin-arm64 ./cmd/cachestorm
-
-          # Windows AMD64
-          GOOS=windows GOARCH=amd64 go build -ldflags="-s -w -X main.version=$VERSION" -o dist/cachestorm-windows-amd64.exe ./cmd/cachestorm
-
-      - name: Create archives
-        run: |
-          VERSION="${{ steps.get_version.outputs.version }}"
-          cd dist
-
-          for binary in cachestorm-*; do
-            if [[ "$binary" == *.exe ]]; then
-              name="${binary%.exe}"
-              zip "${name}.zip" "$binary"
-            else
-              tar -czf "${binary}.tar.gz" "$binary"
-            fi
-          done
-
-          ls -la
-
-      - name: Generate checksums
-        run: |
-          cd dist
-          sha256sum *.tar.gz *.zip > checksums.txt
-          cat checksums.txt
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v5
         with:
-          name: "CacheStorm ${{ steps.get_version.outputs.version }}"
-          body: |
-            ## CacheStorm ${{ steps.get_version.outputs.version }}
-
-            ### Binaries
-
-            | Platform | Architecture | Download |
-            |----------|-------------|----------|
-            | Linux | AMD64 | [cachestorm-linux-amd64.tar.gz](https://github.com/CacheStorm/CacheStorm/releases/download/${{ steps.get_version.outputs.version }}/cachestorm-linux-amd64.tar.gz) |
-            | Linux | ARM64 | [cachestorm-linux-arm64.tar.gz](https://github.com/CacheStorm/CacheStorm/releases/download/${{ steps.get_version.outputs.version }}/cachestorm-linux-arm64.tar.gz) |
-            | macOS | AMD64 | [cachestorm-darwin-amd64.tar.gz](https://github.com/CacheStorm/CacheStorm/releases/download/${{ steps.get_version.outputs.version }}/cachestorm-darwin-amd64.tar.gz) |
-            | macOS | ARM64 | [cachestorm-darwin-arm64.tar.gz](https://github.com/CacheStorm/CacheStorm/releases/download/${{ steps.get_version.outputs.version }}/cachestorm-darwin-arm64.tar.gz) |
-            | Windows | AMD64 | [cachestorm-windows-amd64.zip](https://github.com/CacheStorm/CacheStorm/releases/download/${{ steps.get_version.outputs.version }}/cachestorm-windows-amd64.zip) |
-
-            ### Quick Install
-
-            **Linux/macOS:**
-            ```bash
-            curl -fsSL https://raw.githubusercontent.com/CacheStorm/CacheStorm/main/scripts/install.sh | bash
-            ```
-
-            **Windows:**
-            ```powershell
-            irm https://raw.githubusercontent.com/CacheStorm/CacheStorm/main/scripts/install.ps1 | iex
-            ```
-
-            ### Docker
-            ```bash
-            docker pull cachestorm/cachestorm:${{ steps.get_version.outputs.version }}
-            ```
-          files: |
-            dist/*.tar.gz
-            dist/*.zip
-            dist/checksums.txt
-          draft: false
-          prerelease: ${{ contains(steps.get_version.outputs.version, '-') }}
+          distribution: goreleaser
+          version: latest
+          args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
