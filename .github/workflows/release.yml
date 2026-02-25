@@ -1,4 +1,4 @@
-name: Release
+name: Release Simple
 
 on:
   push:
@@ -13,31 +13,47 @@ on:
 
 env:
   GO_VERSION: '1.22'
-  REGISTRY: ghcr.io
-  IMAGE_NAME: cachestorm/cachestorm
 
 permissions:
   contents: write
   packages: write
-  id-token: write
-  attestations: write
-
-concurrency:
-  group: release-${{ github.ref }}
-  cancel-in-progress: false
 
 jobs:
-  # Pre-release checks
-  pre-release-checks:
-    name: Pre-Release Checks
+  test:
+    name: Test
     runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.get_version.outputs.version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run tests
+        run: go test ./internal/... -v
+
+      - name: Build test
+        run: go build -v ./cmd/cachestorm
+
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    needs: test
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
 
       - name: Get version
         id: get_version
@@ -48,132 +64,99 @@ jobs:
             VERSION=${GITHUB_REF#refs/tags/}
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Releasing version: $VERSION"
+          echo "Version: $VERSION"
 
-      - name: Check version format
+      - name: Build binaries
         run: |
           VERSION="${{ steps.get_version.outputs.version }}"
-          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+)?$ ]]; then
-            echo "Invalid version format: $VERSION"
-            echo "Expected format: v0.1.0 or v0.1.0-rc1"
-            exit 1
-          fi
+          mkdir -p dist
 
-      - name: Check if tag exists
+          # Linux AMD64
+          GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X main.version=$VERSION" -o dist/cachestorm-linux-amd64 ./cmd/cachestorm
+
+          # Linux ARM64
+          GOOS=linux GOARCH=arm64 go build -ldflags="-s -w -X main.version=$VERSION" -o dist/cachestorm-linux-arm64 ./cmd/cachestorm
+
+          # macOS AMD64
+          GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w -X main.version=$VERSION" -o dist/cachestorm-darwin-amd64 ./cmd/cachestorm
+
+          # macOS ARM64
+          GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w -X main.version=$VERSION" -o dist/cachestorm-darwin-arm64 ./cmd/cachestorm
+
+          # Windows AMD64
+          GOOS=windows GOARCH=amd64 go build -ldflags="-s -w -X main.version=$VERSION" -o dist/cachestorm-windows-amd64.exe ./cmd/cachestorm
+
+      - name: Create archives
         run: |
           VERSION="${{ steps.get_version.outputs.version }}"
-          if git rev-parse "$VERSION" >/dev/null 2>&1; then
-            echo "Tag $VERSION already exists"
-          else
-            echo "Creating new tag $VERSION"
-            git tag "$VERSION"
-            git push origin "$VERSION"
-          fi
+          cd dist
 
-      - name: Check CHANGELOG
+          for binary in cachestorm-*; do
+            if [[ "$binary" == *.exe ]]; then
+              name="${binary%.exe}"
+              zip "${name}.zip" "$binary"
+            else
+              tar -czf "${binary}.tar.gz" "$binary"
+            fi
+          done
+
+          ls -la
+
+      - name: Generate checksums
         run: |
-          VERSION="${{ steps.get_version.outputs.version }}"
-          if ! grep -q "## \[$VERSION\]" CHANGELOG.md; then
-            echo "Warning: CHANGELOG.md does not contain entry for $VERSION"
-          fi
-        continue-on-error: true
+          cd dist
+          sha256sum *.tar.gz *.zip > checksums.txt
+          cat checksums.txt
 
-  # Run full test suite
-  test:
-    name: Test Suite
-    runs-on: ubuntu-latest
-    needs: pre-release-checks
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
         with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
+          name: "CacheStorm ${{ steps.get_version.outputs.version }}"
+          body: |
+            ## CacheStorm ${{ steps.get_version.outputs.version }}
 
-      - name: Download dependencies
-        run: go mod download
+            ### Binaries
 
-      - name: Run tests
-        run: go test ./internal/... -v -coverprofile=coverage.out
+            | Platform | Architecture | Download |
+            |----------|-------------|----------|
+            | Linux | AMD64 | [cachestorm-linux-amd64.tar.gz](https://github.com/CacheStorm/CacheStorm/releases/download/${{ steps.get_version.outputs.version }}/cachestorm-linux-amd64.tar.gz) |
+            | Linux | ARM64 | [cachestorm-linux-arm64.tar.gz](https://github.com/CacheStorm/CacheStorm/releases/download/${{ steps.get_version.outputs.version }}/cachestorm-linux-arm64.tar.gz) |
+            | macOS | AMD64 | [cachestorm-darwin-amd64.tar.gz](https://github.com/CacheStorm/CacheStorm/releases/download/${{ steps.get_version.outputs.version }}/cachestorm-darwin-amd64.tar.gz) |
+            | macOS | ARM64 | [cachestorm-darwin-arm64.tar.gz](https://github.com/CacheStorm/CacheStorm/releases/download/${{ steps.get_version.outputs.version }}/cachestorm-darwin-arm64.tar.gz) |
+            | Windows | AMD64 | [cachestorm-windows-amd64.zip](https://github.com/CacheStorm/CacheStorm/releases/download/${{ steps.get_version.outputs.version }}/cachestorm-windows-amd64.zip) |
 
-      - name: Upload coverage
-        uses: codecov/codecov-action@v4
-        with:
-          file: ./coverage.out
-          token: ${{ secrets.CODECOV_TOKEN }}
+            ### Quick Install
 
-  # Build and release with GoReleaser
-  goreleaser:
-    name: GoReleaser
-    runs-on: ubuntu-latest
-    needs: [pre-release-checks, test]
-    outputs:
-      artifacts: ${{ steps.goreleaser.outputs.artifacts }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+            **Linux/macOS:**
+            ```bash
+            curl -fsSL https://raw.githubusercontent.com/CacheStorm/CacheStorm/main/scripts/install.sh | bash
+            ```
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
+            **Windows:**
+            ```powershell
+            irm https://raw.githubusercontent.com/CacheStorm/CacheStorm/main/scripts/install.ps1 | iex
+            ```
 
-      - name: Import GPG key
-        id: import_gpg
-        uses: crazy-max/ghaction-import-gpg@v6
-        with:
-          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
-          passphrase: ${{ secrets.GPG_PASSPHRASE }}
-        continue-on-error: true
-
-      - name: Run GoReleaser
-        id: goreleaser
-        uses: goreleaser/goreleaser-action@v5
-        with:
-          version: latest
-          args: release --clean
+            ### Docker
+            ```bash
+            docker pull cachestorm/cachestorm:${{ steps.get_version.outputs.version }}
+            ```
+          files: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/checksums.txt
+          draft: false
+          prerelease: ${{ contains(steps.get_version.outputs.version, '-') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GPG_FINGERPRINT: ${{ steps.import_gpg.outputs.fingerprint }}
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-artifacts
-          path: dist/
-          retention-days: 30
-
-  # Build and push Docker images
   docker:
-    name: Docker Build & Push
+    name: Docker Build
     runs-on: ubuntu-latest
-    needs: [pre-release-checks, test]
-    strategy:
-      fail-fast: false
-      matrix:
-        platform: [linux/amd64, linux/arm64, linux/386, linux/arm/v7]
+    needs: test
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Docker meta
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: |
-            cachestorm/cachestorm
-            ghcr.io/cachestorm/cachestorm
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=raw,value=latest,enable=${{ !contains(github.ref, '-') }}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -181,11 +164,22 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Get version
+        id: get_version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION=${GITHUB_REF#refs/tags/}
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
+        continue-on-error: true
 
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
@@ -194,328 +188,17 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push by digest
-        id: build
+      - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
           context: .
-          platforms: ${{ matrix.platform }}
+          platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: |
+            ghcr.io/cachestorm/cachestorm:${{ steps.get_version.outputs.version }}
+            ghcr.io/cachestorm/cachestorm:latest
+            cachestorm/cachestorm:${{ steps.get_version.outputs.version }}
+            cachestorm/cachestorm:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          outputs: type=image,name=ghcr.io/cachestorm/cachestorm,push-by-digest=true,name-canonical=true,push=true
-
-      - name: Export digest
-        run: |
-          mkdir -p /tmp/digests
-          digest="${{ steps.build.outputs.digest }}"
-          touch "/tmp/digests/${digest#sha256:}"
-
-      - name: Upload digest
-        uses: actions/upload-artifact@v4
-        with:
-          name: digests-${{ matrix.platform }}
-          path: /tmp/digests/*
-          if-no-files-found: error
-          retention-days: 1
-
-  # Merge Docker manifests
-  docker-merge:
-    name: Docker Merge Manifests
-    runs-on: ubuntu-latest
-    needs: docker
-    steps:
-      - name: Download digests
-        uses: actions/download-artifact@v4
-        with:
-          path: /tmp/digests
-          pattern: digests-*
-          merge-multiple: true
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Docker meta
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: |
-            cachestorm/cachestorm
-            ghcr.io/cachestorm/cachestorm
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=raw,value=latest,enable=${{ !contains(github.ref, '-') }}
-
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
-
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Create manifest list and push
-        working-directory: /tmp/digests
-        run: |
-          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' << "${{ steps.meta.outputs.json }}") \
-            $(printf 'ghcr.io/cachestorm/cachestorm@sha256:%s ' *)
-
-      - name: Inspect image
-        run: |
-          docker buildx imagetools inspect ghcr.io/cachestorm/cachestorm:${{ steps.meta.outputs.version }}
-
-  # Generate release notes
-  release-notes:
-    name: Generate Release Notes
-    runs-on: ubuntu-latest
-    needs: [goreleaser, docker-merge]
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Generate changelog
-        id: changelog
-        run: |
-          VERSION=${{ needs.pre-release-checks.outputs.version }}
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-
-          # Extract changelog for this version
-          echo "## CacheStorm $VERSION" > release_notes.md
-          echo "" >> release_notes.md
-
-          # Get changes from CHANGELOG.md
-          awk "/^## \[$VERSION\]/ {found=1; next} /^## \[/ {found=0} found" CHANGELOG.md >> release_notes.md || true
-
-          # Add installation instructions
-          echo "" >> release_notes.md
-          echo "## Installation" >> release_notes.md
-          echo "" >> release_notes.md
-          echo "### Quick Install" >> release_notes.md
-          echo '```bash' >> release_notes.md
-          echo '# Linux/macOS' >> release_notes.md
-          echo 'curl -fsSL https://raw.githubusercontent.com/cachestorm/cachestorm/main/scripts/install.sh | bash' >> release_notes.md
-          echo '' >> release_notes.md
-          echo '# Windows' >> release_notes.md
-          echo 'irm https://raw.githubusercontent.com/cachestorm/cachestorm/main/scripts/install.ps1 | iex' >> release_notes.md
-          echo '```' >> release_notes.md
-          echo "" >> release_notes.md
-          echo "### Docker" >> release_notes.md
-          echo '```bash' >> release_notes.md
-          echo 'docker pull cachestorm/cachestorm:$VERSION' >> release_notes.md
-          echo 'docker run -d -p 6379:6379 -p 8080:8080 cachestorm/cachestorm:$VERSION' >> release_notes.md
-          echo '```' >> release_notes.md
-
-          cat release_notes.md
-
-      - name: Update Release
-        uses: softprops/action-gh-release@v1
-        with:
-          body_path: release_notes.md
-          draft: false
-          prerelease: ${{ contains(github.ref, '-rc') || contains(github.ref, '-beta') || contains(github.ref, '-alpha') }}
-          generate_release_notes: true
-          files: |
-            dist/*.tar.gz
-            dist/*.zip
-            dist/*.deb
-            dist/*.rpm
-            dist/checksums.txt
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # Update Homebrew formula
-  homebrew:
-    name: Update Homebrew Formula
-    runs-on: ubuntu-latest
-    needs: goreleaser
-    if: ${{ !contains(github.ref, '-') }}
-    steps:
-      - name: Update Homebrew formula
-        uses: mislav/bump-homebrew-formula-action@v3
-        with:
-          formula-name: cachestorm
-          homebrew-tap: cachestorm/homebrew-cachestorm
-          base-branch: main
-          download-url: https://github.com/cachestorm/cachestorm/releases/download/${{ github.ref_name }}/cachestorm-${{ github.ref_name }}-darwin-amd64.tar.gz
-          commit-message: |
-            {{formulaName}} {{version}}
-
-            Created by https://github.com/mislav/bump-homebrew-formula-action
-        env:
-          COMMITTER_TOKEN: ${{ secrets.COMMITTER_TOKEN }}
         continue-on-error: true
-
-  # Build and publish Snap package
-  snap:
-    name: Snap Package
-    runs-on: ubuntu-latest
-    needs: goreleaser
-    if: ${{ !contains(github.ref, '-') }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Build Snap
-        uses: snapcore/action-build@v1
-        id: snapcraft
-
-      - name: Publish Snap
-        uses: snapcore/action-publish@v1
-        env:
-          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAP_STORE_LOGIN }}
-        with:
-          snap: ${{ steps.snapcraft.outputs.snap }}
-          release: stable
-        continue-on-error: true
-
-  # Update Scoop manifest (Windows)
-  scoop:
-    name: Update Scoop Manifest
-    runs-on: ubuntu-latest
-    needs: goreleaser
-    if: ${{ !contains(github.ref, '-') }}
-    steps:
-      - name: Checkout scoop bucket
-        uses: actions/checkout@v4
-        with:
-          repository: cachestorm/scoop-cachestorm
-          token: ${{ secrets.COMMITTER_TOKEN }}
-          path: scoop-bucket
-
-      - name: Update manifest
-        run: |
-          VERSION="${{ github.ref_name }}"
-          VERSION="${VERSION#v}"
-
-          cat > scoop-bucket/cachestorm.json << EOF
-          {
-            "version": "$VERSION",
-            "description": "High-Performance Redis-Compatible In-Memory Database",
-            "homepage": "https://github.com/cachestorm/cachestorm",
-            "license": "MIT",
-            "architecture": {
-              "64bit": {
-                "url": "https://github.com/cachestorm/cachestorm/releases/download/v$VERSION/cachestorm-v$VERSION-windows-amd64.zip",
-                "extract_dir": "cachestorm-v$VERSION-windows-amd64"
-              }
-            },
-            "bin": "cachestorm.exe",
-            "checkver": {
-              "github": "https://github.com/cachestorm/cachestorm"
-            },
-            "autoupdate": {
-              "architecture": {
-                "64bit": {
-                  "url": "https://github.com/cachestorm/cachestorm/releases/download/v\$version/cachestorm-v\$version-windows-amd64.zip"
-                }
-              }
-            }
-          }
-          EOF
-
-          cd scoop-bucket
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add cachestorm.json
-          git commit -m "Update cachestorm to $VERSION" || exit 0
-          git push
-        continue-on-error: true
-
-  # Create GitHub Discussion for release
-  discussion:
-    name: Create Release Discussion
-    runs-on: ubuntu-latest
-    needs: release-notes
-    if: ${{ !contains(github.ref, '-') }}
-    steps:
-      - name: Create Discussion
-        uses: abirismyhead/create-discussion@v1
-        with:
-          title: "CacheStorm ${{ github.ref_name }} Released"
-          body: |
-            CacheStorm ${{ github.ref_name }} has been released!
-
-            ## What's New
-            See the [release notes](https://github.com/cachestorm/cachestorm/releases/tag/${{ github.ref_name }}) for details.
-
-            ## Installation
-            ```bash
-            # Linux/macOS
-            curl -fsSL https://raw.githubusercontent.com/cachestorm/cachestorm/main/scripts/install.sh | bash
-
-            # Windows
-            irm https://raw.githubusercontent.com/cachestorm/cachestorm/main/scripts/install.ps1 | iex
-            ```
-
-            ## Feedback
-            Please share your feedback and report any issues you encounter.
-          category: "Releases"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        continue-on-error: true
-
-  # Notify on release
-  notify:
-    name: Notify
-    runs-on: ubuntu-latest
-    needs: [release-notes, docker-merge]
-    if: always()
-    steps:
-      - name: Notify Slack
-        if: success()
-        uses: 8398a7/action-slack@v3
-        with:
-          status: ${{ job.status }}
-          channel: '#releases'
-          fields: repo,message,commit,author,action,eventName,ref,workflow
-          text: "CacheStorm ${{ github.ref_name }} has been released! 🎉"
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-        continue-on-error: true
-
-      - name: Notify Discord
-        if: success()
-        uses: Ilshidur/action-discord@master
-        with:
-          args: |
-            CacheStorm ${{ github.ref_name }} has been released! 🎉
-
-            Docker: `docker pull cachestorm/cachestorm:${{ github.ref_name }}`
-
-            Install: https://github.com/cachestorm/cachestorm#quick-start
-        env:
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
-        continue-on-error: true
-
-  # Summary
-  release-summary:
-    name: Release Summary
-    runs-on: ubuntu-latest
-    needs: [goreleaser, docker-merge, release-notes, homebrew, snap, scoop]
-    if: always()
-    steps:
-      - name: Summary
-        run: |
-          echo "## Release Summary for ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| GoReleaser | ${{ needs.goreleaser.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Docker | ${{ needs.docker-merge.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Release Notes | ${{ needs.release-notes.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Homebrew | ${{ needs.homebrew.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Snap | ${{ needs.snap.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Scoop | ${{ needs.scoop.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Release URL: https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
