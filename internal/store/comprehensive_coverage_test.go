@@ -2498,3 +2498,50 @@ func TestConsumerGroupMethods(t *testing.T) {
 		}
 	})
 }
+
+func TestTimingWheelCascade(t *testing.T) {
+	s := NewStore()
+	tw := NewTimingWheel(s)
+	tw.Start()
+	defer tw.Stop()
+
+	// Add a key with expiration far in the future to trigger cascade
+	s.Set("cascadekey", &StringValue{Data: []byte("value")}, SetOptions{TTL: 5 * time.Second})
+
+	// Manually trigger cascade
+	now := time.Now().UnixNano() / 1e6
+	tw.cascade(1, now)
+	tw.cascade(2, now)
+	tw.cascade(3, now)
+	tw.cascade(4, now) // This should return immediately (out of bounds)
+}
+
+func TestTimingWheelExpireKey(t *testing.T) {
+	s := NewStore()
+	ti := NewTagIndex()
+	tw := NewTimingWheel(s)
+	tw.tagIndex = ti
+
+	// Set up a key
+	s.Set("expirekey", &StringValue{Data: []byte("value")}, SetOptions{})
+
+	// Add tag
+	ti.AddTags("expirekey", []string{"tag1"})
+
+	// Call expireKey directly
+	tw.expireKey("expirekey")
+
+	// Verify key is deleted
+	if s.Exists("expirekey") {
+		t.Error("Key should be deleted after expireKey")
+	}
+}
+
+func TestWaitNextMillis(t *testing.T) {
+	// Call waitNextMillis with current timestamp
+	now := time.Now().UnixMilli()
+	result := waitNextMillis(now)
+	if result < now {
+		t.Errorf("waitNextMillis returned %d, expected >= %d", result, now)
+	}
+}

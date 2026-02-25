@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"encoding/json"
+	"net"
 	"testing"
 	"time"
 )
@@ -367,4 +368,308 @@ func TestCRC16ExtCoverage(t *testing.T) {
 func TestKeySlotExtCoverage(t *testing.T) {
 	slot := KeySlot("{user:1}:profile")
 	_ = slot
+}
+
+func TestGossipHandleMessage(t *testing.T) {
+	c := New("node1", "127.0.0.1", 7000, 7001, nil)
+	g := NewGossip(c)
+
+	msg := &GossipMessage{
+		Type:      "ping",
+		SenderID:  "other-node",
+		Timestamp: time.Now().Unix(),
+		Nodes:     []NodeInfo{},
+	}
+
+	response := g.handleMessage(msg)
+	if response == nil {
+		t.Error("handleMessage ping should return response")
+	}
+
+	msg2 := &GossipMessage{
+		Type:      "pong",
+		SenderID:  "other-node",
+		Timestamp: time.Now().Unix(),
+		Nodes:     []NodeInfo{},
+	}
+	response = g.handleMessage(msg2)
+	_ = response
+
+	msg3 := &GossipMessage{
+		Type:      "meet",
+		SenderID:  "other-node",
+		Timestamp: time.Now().Unix(),
+		Nodes:     []NodeInfo{},
+	}
+	response = g.handleMessage(msg3)
+	_ = response
+
+	msg4 := &GossipMessage{
+		Type:      "fail",
+		SenderID:  "other-node",
+		TargetID:  "target-node",
+		Timestamp: time.Now().Unix(),
+	}
+	response = g.handleMessage(msg4)
+	_ = response
+
+	msg5 := &GossipMessage{
+		Type:      "slot_migrate",
+		SenderID:  "other-node",
+		Timestamp: time.Now().Unix(),
+	}
+	response = g.handleMessage(msg5)
+	_ = response
+
+	msg6 := &GossipMessage{
+		Type:      "unknown",
+		SenderID:  "other-node",
+		Timestamp: time.Now().Unix(),
+	}
+	response = g.handleMessage(msg6)
+	_ = response
+}
+
+func TestGossipUpdateNodeFromInfo(t *testing.T) {
+	c := New("node1", "127.0.0.1", 7000, 7001, nil)
+	g := NewGossip(c)
+
+	nodes := []NodeInfo{
+		{ID: "node2", Addr: "127.0.0.1", Port: 7002, State: "connected", Role: "master"},
+		{ID: "node1", Addr: "127.0.0.1", Port: 7000, State: "connected", Role: "master"},
+	}
+
+	g.updateNodeFromInfo(nodes)
+}
+
+func TestGossipSendPingToAll(t *testing.T) {
+	c := New("node1", "127.0.0.1", 7000, 7001, nil)
+	g := NewGossip(c)
+
+	// Add a node
+	c.AddNode(&Node{ID: "node2", Addr: "127.0.0.1", Port: 7002, State: NodeStateOnline})
+
+	g.sendPingToAll()
+}
+
+func TestGossipCheckFailedNodes(t *testing.T) {
+	c := New("node1", "127.0.0.1", 7000, 7001, nil)
+	g := NewGossip(c)
+
+	// Add nodes
+	c.AddNode(&Node{ID: "node2", Addr: "127.0.0.1", Port: 7002, State: NodeStateOnline})
+	c.AddNode(&Node{ID: "node3", Addr: "127.0.0.1", Port: 7003, State: NodeStateOnline})
+
+	g.checkFailedNodes()
+}
+
+func TestGossipBroadcastFail(t *testing.T) {
+	c := New("node1", "127.0.0.1", 7000, 7001, nil)
+	g := NewGossip(c)
+
+	g.broadcastFail("node2")
+}
+
+func TestFailoverRequestVotes(t *testing.T) {
+	c := New("node1", "127.0.0.1", 7000, 7001, nil)
+	g := NewGossip(c)
+	fm := NewFailoverManager(c, g)
+
+	fm.requestVotes()
+}
+
+func TestFailoverCompleteFailover(t *testing.T) {
+	c := New("node1", "127.0.0.1", 7000, 7001, nil)
+	g := NewGossip(c)
+	fm := NewFailoverManager(c, g)
+
+	fm.completeFailover()
+}
+
+func TestGossipHandleConnection(t *testing.T) {
+	c := New("node1", "127.0.0.1", 7000, 7001, nil)
+	g := NewGossip(c)
+
+	// Create pipe connection
+	server, client := net.Pipe()
+	defer server.Close()
+	defer client.Close()
+
+	// Add to WaitGroup before starting handleConnection
+	g.wg.Add(1)
+
+	// Start handleConnection in goroutine
+	done := make(chan struct{})
+	go func() {
+		g.handleConnection(server)
+		close(done)
+	}()
+
+	// Send a ping message
+	ping := GossipMessage{
+		Type:      "ping",
+		SenderID:  "node2",
+		Timestamp: time.Now().Unix(),
+		Nodes:     []NodeInfo{},
+	}
+	data, _ := json.Marshal(ping)
+	client.Write(data)
+	client.Write([]byte("\n"))
+
+	// Give time for processing
+	time.Sleep(50 * time.Millisecond)
+
+	// Close to trigger exit
+	client.Close()
+	g.Stop()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Error("handleConnection did not exit")
+	}
+}
+
+func TestFailoverVoteWithQuorum(t *testing.T) {
+	c := New("node1", "127.0.0.1", 7000, 7001, nil)
+	g := NewGossip(c)
+	fm := NewFailoverManager(c, g)
+
+	// Add nodes for voting
+	primary := &Node{
+		ID:        "primary-1",
+		Addr:      "127.0.0.1",
+		Port:      6380,
+		Role:      RolePrimary,
+		State:     NodeStateOnline,
+		ReplicaOf: "",
+	}
+	c.AddNode(primary)
+
+	replica := &Node{
+		ID:        "replica-1",
+		Addr:      "127.0.0.1",
+		Port:      6381,
+		Role:      RoleReplica,
+		State:     NodeStateOnline,
+		ReplicaOf: "primary-1",
+	}
+	c.AddNode(replica)
+
+	// Set up failover state
+	fm.mu.Lock()
+	fm.state = FailoverInProgress
+	fm.leader = "replica-1"
+	fm.failedNode = "primary-1"
+	fm.quorum = 1
+	fm.votes = make(map[string]bool)
+	fm.mu.Unlock()
+
+	// Vote should succeed
+	voted := fm.Vote("voter-1", "replica-1")
+	_ = voted
+
+	// Test vote with wrong candidate
+	voted2 := fm.Vote("voter-2", "wrong-candidate")
+	if voted2 {
+		t.Error("vote should fail with wrong candidate")
+	}
+}
+
+func TestFailoverCompleteFailoverWithNodes(t *testing.T) {
+	c := New("node1", "127.0.0.1", 7000, 7001, nil)
+	g := NewGossip(c)
+	fm := NewFailoverManager(c, g)
+
+	// Add failed primary
+	failedPrimary := &Node{
+		ID:        "failed-primary",
+		Addr:      "127.0.0.1",
+		Port:      6380,
+		Role:      RolePrimary,
+		State:     NodeStateFailed,
+		ReplicaOf: "",
+		Slots:     []SlotRange{{Start: 0, End: 5000}},
+	}
+	c.AddNode(failedPrimary)
+
+	// Add new primary candidate
+	newPrimary := &Node{
+		ID:        "new-primary",
+		Addr:      "127.0.0.1",
+		Port:      6381,
+		Role:      RoleReplica,
+		State:     NodeStateOnline,
+		ReplicaOf: "failed-primary",
+	}
+	c.AddNode(newPrimary)
+
+	// Set failover state
+	fm.mu.Lock()
+	fm.leader = "new-primary"
+	fm.failedNode = "failed-primary"
+	fm.state = FailoverInProgress
+	fm.mu.Unlock()
+
+	fm.completeFailover()
+}
+
+func TestFailoverRunElectionWithCandidates(t *testing.T) {
+	c := New("node1", "127.0.0.1", 7000, 7001, nil)
+	g := NewGossip(c)
+	fm := NewFailoverManager(c, g)
+
+	// Add failed primary
+	failedPrimary := &Node{
+		ID:        "failed-primary",
+		Addr:      "127.0.0.1",
+		Port:      6380,
+		Role:      RolePrimary,
+		State:     NodeStateFailed,
+		ReplicaOf: "",
+	}
+	c.AddNode(failedPrimary)
+
+	// Add replicas
+	for i := 1; i <= 3; i++ {
+		replica := &Node{
+			ID:        "replica-" + string(rune('0'+i)),
+			Addr:      "127.0.0.1",
+			Port:      6380 + i,
+			Role:      RoleReplica,
+			State:     NodeStateOnline,
+			ReplicaOf: "failed-primary",
+		}
+		c.AddNode(replica)
+	}
+
+	// Set failover state
+	fm.mu.Lock()
+	fm.failedNode = "failed-primary"
+	fm.state = FailoverWaiting
+	fm.mu.Unlock()
+
+	fm.runElection()
+}
+
+func TestGossipSendMessage(t *testing.T) {
+	c := New("node1", "127.0.0.1", 7000, 7001, nil)
+	g := NewGossip(c)
+
+	// Add a node
+	node := &Node{
+		ID:    "node2",
+		Addr:  "127.0.0.1",
+		Port:  7002,
+		State: NodeStateOnline,
+	}
+	c.AddNode(node)
+
+	msg := &GossipMessage{
+		Type:      "ping",
+		SenderID:  "node1",
+		Timestamp: time.Now().Unix(),
+	}
+
+	g.sendMessage("node2", msg)
 }

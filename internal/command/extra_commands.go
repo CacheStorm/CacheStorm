@@ -153,7 +153,7 @@ func RegisterExtraCommands(router *Router) {
 	router.Register(&CommandDef{Name: "GRID.GET", Handler: cmdGRIDGET})
 	router.Register(&CommandDef{Name: "GRID.DELETE", Handler: cmdGRIDDELETE})
 	router.Register(&CommandDef{Name: "GRID.QUERY", Handler: cmdGRIDQUERY})
-	router.Register(&CommandDef{Name: "GRID.CLEAR", Handler: cmdGRIDGET})
+	router.Register(&CommandDef{Name: "GRID.CLEAR", Handler: cmdGRIDCLEAR})
 
 	router.Register(&CommandDef{Name: "TAPE.CREATE", Handler: cmdTAPECREATE})
 	router.Register(&CommandDef{Name: "TAPE.WRITE", Handler: cmdTAPEWRITE})

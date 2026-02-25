@@ -1173,3 +1173,166 @@ func TestHTTPServerKeysDELETE(t *testing.T) {
 
 	h.handleKeys(w, req)
 }
+
+func TestHTTPServerInvalidateWithBody(t *testing.T) {
+	h := newTestHTTPServer()
+
+	// Add a tag with some keys
+	h.store.Set("key1", &store.StringValue{Data: []byte("value1")}, store.SetOptions{Tags: []string{"mytag"}})
+	h.store.Set("key2", &store.StringValue{Data: []byte("value2")}, store.SetOptions{Tags: []string{"mytag"}})
+
+	req := httptest.NewRequest("POST", "/api/invalidate/mytag", nil)
+	w := httptest.NewRecorder()
+
+	h.handleInvalidate(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", w.Code)
+	}
+}
+
+func TestHTTPServerInvalidateInvalidMethod(t *testing.T) {
+	h := newTestHTTPServer()
+
+	req := httptest.NewRequest("GET", "/api/invalidate/mytag", nil)
+	w := httptest.NewRecorder()
+
+	h.handleInvalidate(w, req)
+}
+
+func TestHTTPServerNamespaceWithNamespace(t *testing.T) {
+	h := newTestHTTPServer()
+
+	// Create namespace using namespace manager
+	nm := h.store.GetNamespaceManager()
+	if nm != nil {
+		nm.GetOrCreate("testns")
+	}
+
+	req := httptest.NewRequest("GET", "/api/namespace/testns", nil)
+	w := httptest.NewRecorder()
+
+	h.handleNamespace(w, req)
+}
+
+func TestHTTPServerNamespaceNotFound(t *testing.T) {
+	h := newTestHTTPServer()
+
+	req := httptest.NewRequest("GET", "/api/namespace/nonexistent", nil)
+	w := httptest.NewRecorder()
+
+	h.handleNamespace(w, req)
+}
+
+func TestHTTPServerNamespacesList(t *testing.T) {
+	h := newTestHTTPServer()
+
+	// Create multiple namespaces if namespace manager exists
+	nm := h.store.GetNamespaceManager()
+	if nm != nil {
+		nm.GetOrCreate("ns1")
+		nm.GetOrCreate("ns2")
+	}
+
+	req := httptest.NewRequest("GET", "/api/namespaces", nil)
+	w := httptest.NewRecorder()
+
+	h.handleNamespaces(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", w.Code)
+	}
+}
+
+func TestHTTPServerNamespacesDelete(t *testing.T) {
+	h := newTestHTTPServer()
+
+	// Create namespace first if namespace manager exists
+	nm := h.store.GetNamespaceManager()
+	if nm != nil {
+		nm.GetOrCreate("deletens")
+	}
+
+	req := httptest.NewRequest("DELETE", "/api/namespaces?name=deletens", nil)
+	w := httptest.NewRecorder()
+
+	h.handleNamespaces(w, req)
+}
+
+func TestServerAcceptLoop(t *testing.T) {
+	cfg := &config.Config{
+		Server: config.ServerConfig{Bind: "127.0.0.1", Port: 0},
+		HTTP:   config.HTTPConfig{Enabled: false},
+	}
+
+	s, err := New(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	ctx := context.Background()
+	err = s.Start(ctx)
+	if err != nil {
+		t.Fatalf("unexpected error starting server: %v", err)
+	}
+
+	// Give server time to start
+	time.Sleep(50 * time.Millisecond)
+
+	// Get actual address
+	addr := s.listener.Addr().String()
+
+	// Connect to server
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+
+	// Send PING command
+	conn.Write([]byte("*1\r\n$4\r\nPING\r\n"))
+
+	// Read response
+	buf := make([]byte, 1024)
+	n, _ := conn.Read(buf)
+	response := string(buf[:n])
+
+	if !strings.Contains(response, "PONG") && !strings.Contains(response, "+") {
+		t.Errorf("unexpected response: %s", response)
+	}
+
+	conn.Close()
+
+	// Stop server
+	stopCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	s.Stop(stopCtx)
+}
+
+func TestConnectionHandleMultipleCommands(t *testing.T) {
+	s := store.NewStore()
+	router := command.NewRouter()
+
+	client, server := net.Pipe()
+	defer client.Close()
+
+	conn := NewConnection(1, server, s, router)
+
+	go func() {
+		// Send multiple commands
+		client.Write([]byte("*1\r\n$4\r\nPING\r\n"))
+		client.Write([]byte("*3\r\n$3\r\nSET\r\n$3\r\nkey\r\n$5\r\nvalue\r\n"))
+		client.Write([]byte("*2\r\n$3\r\nGET\r\n$3\r\nkey\r\n"))
+	}()
+
+	done := make(chan struct{})
+	go func() {
+		conn.Handle()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(200 * time.Millisecond):
+		conn.Close()
+	}
+}

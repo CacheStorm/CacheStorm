@@ -254,6 +254,12 @@ func TestIntegrationInfo(t *testing.T) {
 }
 
 func TestIntegrationConcurrent(t *testing.T) {
+	// Check if server is running first
+	_, err := net.Dial("tcp", "localhost:6380")
+	if err != nil {
+		t.Skipf("server not running: %v", err)
+	}
+
 	const numClients = 10
 	const numOps = 100
 

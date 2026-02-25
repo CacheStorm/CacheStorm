@@ -1,6 +1,8 @@
 package persistence
 
 import (
+	"bufio"
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
@@ -495,4 +497,390 @@ func TestAOFManagerMultipleAppends(t *testing.T) {
 
 	mgr.Flush()
 	mgr.Stop()
+}
+
+func TestAOFWriterSyncFile(t *testing.T) {
+	tmpFile := filepath.Join(os.TempDir(), "test_sync.aof")
+	defer os.Remove(tmpFile)
+
+	f, err := os.Create(tmpFile)
+	if err != nil {
+		t.Fatalf("Failed to create file: %v", err)
+	}
+
+	w := &AOFWriter{
+		file:   f,
+		writer: bufio.NewWriter(f),
+		config: AOFConfig{
+			SyncPolicy: AOFAlways,
+		},
+	}
+
+	// Write something
+	w.writer.WriteString("test data\n")
+
+	// Sync
+	w.syncFile()
+
+	// Verify
+	w.file.Close()
+	data, err := os.ReadFile(tmpFile)
+	if err != nil {
+		t.Fatalf("Failed to read file: %v", err)
+	}
+	if string(data) != "test data\n" {
+		t.Errorf("Expected 'test data\\n', got %q", string(data))
+	}
+}
+
+func TestAOFRewriterWriteEntry2(t *testing.T) {
+	rw := &AOFRewriter{
+		config: AOFConfig{},
+	}
+
+	var buf bytes.Buffer
+	w := bufio.NewWriter(&buf)
+
+	// Test with string entry
+	err := rw.writeEntry(w, "mykey", "myvalue")
+	if err != nil {
+		t.Errorf("writeEntry failed: %v", err)
+	}
+	w.Flush()
+
+	if buf.Len() == 0 {
+		t.Error("writeEntry should write data")
+	}
+
+	// Test with []byte entry
+	buf.Reset()
+	w = bufio.NewWriter(&buf)
+	err = rw.writeEntry(w, "key2", []byte("value2"))
+	if err != nil {
+		t.Errorf("writeEntry with []byte failed: %v", err)
+	}
+	w.Flush()
+
+	if buf.Len() == 0 {
+		t.Error("writeEntry should write data for []byte")
+	}
+
+	// Test with other type
+	buf.Reset()
+	w = bufio.NewWriter(&buf)
+	err = rw.writeEntry(w, "key3", 12345)
+	if err != nil {
+		t.Errorf("writeEntry with int failed: %v", err)
+	}
+	w.Flush()
+
+	if buf.Len() == 0 {
+		t.Error("writeEntry should write data for int")
+	}
+}
+
+func TestRDBReaderReadLength(t *testing.T) {
+	s := store.NewStore()
+	reader := NewRDBReader(s)
+
+	t.Run("6-bit length", func(t *testing.T) {
+		// 6-bit encoding: first 2 bits are 00, remaining 6 bits are length
+		data := []byte{0x05} // 00 000101 = 5
+		r := bytes.NewReader(data)
+		length, err := reader.readLength(r)
+		if err != nil {
+			t.Errorf("readLength failed: %v", err)
+		}
+		if length != 5 {
+			t.Errorf("expected length 5, got %d", length)
+		}
+	})
+
+	t.Run("14-bit length", func(t *testing.T) {
+		// 14-bit encoding: first 2 bits are 01, remaining 14 bits are length
+		data := []byte{0x41, 0x00} // 01 000001 00000000 = 256
+		r := bytes.NewReader(data)
+		length, err := reader.readLength(r)
+		if err != nil {
+			t.Errorf("readLength failed: %v", err)
+		}
+		if length != 256 {
+			t.Errorf("expected length 256, got %d", length)
+		}
+	})
+
+	t.Run("32-bit length", func(t *testing.T) {
+		// 32-bit encoding: first 2 bits are 10, followed by 4 bytes
+		data := []byte{0x80, 0x00, 0x01, 0x00, 0x00} // 10000000 followed by 65536 in big-endian
+		r := bytes.NewReader(data)
+		length, err := reader.readLength(r)
+		if err != nil {
+			t.Errorf("readLength failed: %v", err)
+		}
+		if length != 65536 {
+			t.Errorf("expected length 65536, got %d", length)
+		}
+	})
+}
+
+func TestRDBReaderReadEntry(t *testing.T) {
+	s := store.NewStore()
+	reader := NewRDBReader(s)
+
+	t.Run("string value", func(t *testing.T) {
+		// Write key and value
+		keyData := []byte{0x03} // length 3
+		keyData = append(keyData, []byte("key")...)
+		valData := []byte{0x05} // length 5
+		valData = append(valData, []byte("value")...)
+
+		data := append(keyData, valData...)
+		r := bytes.NewReader(data)
+
+		err := reader.readEntry(r, 0) // type 0 = string
+		if err != nil {
+			t.Errorf("readEntry failed: %v", err)
+		}
+
+		val, exists := s.Get("key")
+		if !exists {
+			t.Error("key should exist")
+		}
+		if val == nil {
+			t.Error("value should not be nil")
+		}
+	})
+
+	t.Run("list value", func(t *testing.T) {
+		s2 := store.NewStore()
+		reader2 := NewRDBReader(s2)
+
+		// Build list data: key + length + items
+		var data []byte
+		data = append(data, 0x04) // key length 4
+		data = append(data, []byte("list")...)
+		data = append(data, 0x02) // list length 2
+		data = append(data, 0x05) // item1 length 5
+		data = append(data, []byte("item1")...)
+		data = append(data, 0x05) // item2 length 5
+		data = append(data, []byte("item2")...)
+
+		r := bytes.NewReader(data)
+		err := reader2.readEntry(r, 1) // type 1 = list
+		if err != nil {
+			t.Errorf("readEntry for list failed: %v", err)
+		}
+	})
+
+	t.Run("set value", func(t *testing.T) {
+		s3 := store.NewStore()
+		reader3 := NewRDBReader(s3)
+
+		// Build set data: key + length + members
+		var data []byte
+		data = append(data, 0x03) // key length 3
+		data = append(data, []byte("set")...)
+		data = append(data, 0x02) // set size 2
+		data = append(data, 0x01) // member1 length 1
+		data = append(data, []byte("a")...)
+		data = append(data, 0x01) // member2 length 1
+		data = append(data, []byte("b")...)
+
+		r := bytes.NewReader(data)
+		err := reader3.readEntry(r, 2) // type 2 = set
+		if err != nil {
+			t.Errorf("readEntry for set failed: %v", err)
+		}
+	})
+
+	t.Run("hash value", func(t *testing.T) {
+		s4 := store.NewStore()
+		reader4 := NewRDBReader(s4)
+
+		// Build hash data: key + length + field/value pairs
+		var data []byte
+		data = append(data, 0x04) // key length 4
+		data = append(data, []byte("hash")...)
+		data = append(data, 0x01) // hash size 1
+		data = append(data, 0x05) // field length 5
+		data = append(data, []byte("field")...)
+		data = append(data, 0x05) // value length 5
+		data = append(data, []byte("value")...)
+
+		r := bytes.NewReader(data)
+		err := reader4.readEntry(r, 3) // type 3 = hash
+		if err != nil {
+			t.Errorf("readEntry for hash failed: %v", err)
+		}
+	})
+
+	t.Run("default value type", func(t *testing.T) {
+		s5 := store.NewStore()
+		reader5 := NewRDBReader(s5)
+
+		var data []byte
+		data = append(data, 0x04) // key length 4
+		data = append(data, []byte("defk")...)
+		data = append(data, 0x04) // value length 4
+		data = append(data, []byte("defv")...)
+
+		r := bytes.NewReader(data)
+		err := reader5.readEntry(r, 99) // unknown type, should default to string
+		if err != nil {
+			t.Errorf("readEntry for default type failed: %v", err)
+		}
+	})
+}
+
+func TestRDBReaderReadString(t *testing.T) {
+	s := store.NewStore()
+	reader := NewRDBReader(s)
+
+	t.Run("simple string", func(t *testing.T) {
+		data := []byte{0x05} // length 5
+		data = append(data, []byte("hello")...)
+		r := bytes.NewReader(data)
+
+		str, err := reader.readString(r)
+		if err != nil {
+			t.Errorf("readString failed: %v", err)
+		}
+		if str != "hello" {
+			t.Errorf("expected 'hello', got %q", str)
+		}
+	})
+}
+
+func TestRDBReaderReadRDB(t *testing.T) {
+	s := store.NewStore()
+	reader := NewRDBReader(s)
+
+	t.Run("valid header", func(t *testing.T) {
+		// Create minimal valid RDB data
+		var data []byte
+		data = append(data, []byte("REDIS0009")...) // magic + version
+		data = append(data, 0xFE)                   // AUX field marker
+		data = append(data, 0x05)                   // key length
+		data = append(data, []byte("redis-ver")...)
+		data = append(data, 0x05) // value length
+		data = append(data, []byte("5.0.0")...)
+		data = append(data, 0xFE) // AUX field
+		data = append(data, 0x09) // key length
+		data = append(data, []byte("redis-bits")...)
+		data = append(data, 0x02) // value length
+		data = append(data, []byte("64")...)
+		data = append(data, 0xFE) // AUX field
+		data = append(data, 0x05) // key length
+		data = append(data, []byte("ctime")...)
+		data = append(data, 0x0A) // value length
+		data = append(data, []byte("1234567890")...)
+		data = append(data, 0xFF) // EOF marker
+
+		r := bytes.NewReader(data)
+		err := reader.readRDB(r)
+		if err != nil {
+			t.Logf("readRDB returned: %v", err)
+		}
+	})
+}
+
+func TestAOFManagerLoadWithCommands(t *testing.T) {
+	cfg := AOFConfig{
+		Enabled:     true,
+		Filename:    "test_load_cmd.aof",
+		DataDir:     os.TempDir(),
+		SyncPolicy:  AOFAlways,
+		RewriteSize: 1000000,
+		RewritePct:  100,
+		AutoRewrite: false,
+	}
+	defer os.Remove(filepath.Join(cfg.DataDir, cfg.Filename))
+
+	// Create AOF file with commands
+	f, err := os.Create(filepath.Join(cfg.DataDir, cfg.Filename))
+	if err != nil {
+		t.Fatalf("failed to create file: %v", err)
+	}
+	f.WriteString("*3\r\n$3\r\nSET\r\n$3\r\nkey\r\n$5\r\nvalue\r\n")
+	f.Close()
+
+	store := &mockStoreForCoverage{data: make(map[string]interface{})}
+	mgr := NewAOFManager(cfg, store)
+
+	commands, err := mgr.Load()
+	if err != nil {
+		t.Logf("Load returned: %v", err)
+	}
+	_ = commands
+}
+
+func TestAOFManagerShouldRewrite(t *testing.T) {
+	cfg := AOFConfig{
+		Enabled:     true,
+		Filename:    "test_should_rewrite.aof",
+		DataDir:     os.TempDir(),
+		SyncPolicy:  AOFAlways,
+		RewriteSize: 100,
+		RewritePct:  50,
+		AutoRewrite: true,
+	}
+	defer os.Remove(filepath.Join(cfg.DataDir, cfg.Filename))
+
+	store := &mockStoreForCoverage{data: make(map[string]interface{})}
+	mgr := NewAOFManager(cfg, store)
+	mgr.Start()
+
+	// Write enough data to trigger rewrite consideration
+	for i := 0; i < 20; i++ {
+		mgr.Append("SET", [][]byte{[]byte("key"), []byte("value")})
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	mgr.Stop()
+}
+
+func TestRDBWriterWriteValue(t *testing.T) {
+	s := store.NewStore()
+	cfg := RDBConfig{
+		Version:     RDBVersion9,
+		Compression: false,
+		Checksum:    false,
+	}
+
+	writer := NewRDBWriter(s, cfg)
+
+	var buf bytes.Buffer
+	w := bufio.NewWriter(&buf)
+
+	t.Run("string value", func(t *testing.T) {
+		val := &store.StringValue{Data: []byte("test")}
+		err := writer.writeValue(w, val, 0)
+		if err != nil {
+			t.Errorf("writeValue for string failed: %v", err)
+		}
+	})
+
+	t.Run("list value", func(t *testing.T) {
+		val := &store.ListValue{Elements: [][]byte{[]byte("a"), []byte("b")}}
+		err := writer.writeValue(w, val, 1)
+		if err != nil {
+			t.Errorf("writeValue for list failed: %v", err)
+		}
+	})
+
+	t.Run("set value", func(t *testing.T) {
+		val := &store.SetValue{Members: map[string]struct{}{"a": {}, "b": {}}}
+		err := writer.writeValue(w, val, 2)
+		if err != nil {
+			t.Errorf("writeValue for set failed: %v", err)
+		}
+	})
+
+	t.Run("hash value", func(t *testing.T) {
+		val := &store.HashValue{Fields: map[string][]byte{"field": []byte("value")}}
+		err := writer.writeValue(w, val, 3)
+		if err != nil {
+			t.Errorf("writeValue for hash failed: %v", err)
+		}
+	})
 }

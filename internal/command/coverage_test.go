@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"math"
 	"testing"
+	"time"
 
 	"github.com/cachestorm/cachestorm/internal/cluster"
 	"github.com/cachestorm/cachestorm/internal/module"
@@ -82,19 +83,37 @@ func TestObjectCommands(t *testing.T) {
 	RegisterStringCommands(router)
 
 	s.Set("mykey", &store.StringValue{Data: []byte("myvalue")}, store.SetOptions{})
+	s.Set("myhash", &store.HashValue{Fields: map[string][]byte{"field1": []byte("value1")}}, store.SetOptions{})
+	s.Set("mylist", &store.ListValue{Elements: [][]byte{[]byte("item1"), []byte("item2")}}, store.SetOptions{})
+	s.Set("myset", &store.SetValue{Members: map[string]struct{}{"member1": {}}}, store.SetOptions{})
+	s.Set("myzset", &store.SortedSetValue{Members: map[string]float64{"member1": 1.0}}, store.SetOptions{})
 
 	tests := []struct {
 		name string
 		cmd  string
 		args [][]byte
 	}{
-		{"OBJECT ENCODING", "OBJECT", [][]byte{[]byte("ENCODING"), []byte("mykey")}},
+		{"OBJECT ENCODING string", "OBJECT", [][]byte{[]byte("ENCODING"), []byte("mykey")}},
+		{"OBJECT ENCODING hash", "OBJECT", [][]byte{[]byte("ENCODING"), []byte("myhash")}},
+		{"OBJECT ENCODING list", "OBJECT", [][]byte{[]byte("ENCODING"), []byte("mylist")}},
+		{"OBJECT ENCODING set", "OBJECT", [][]byte{[]byte("ENCODING"), []byte("myset")}},
+		{"OBJECT ENCODING zset", "OBJECT", [][]byte{[]byte("ENCODING"), []byte("myzset")}},
+		{"OBJECT ENCODING not found", "OBJECT", [][]byte{[]byte("ENCODING"), []byte("notfound")}},
 		{"OBJECT IDLETIME", "OBJECT", [][]byte{[]byte("IDLETIME"), []byte("mykey")}},
+		{"OBJECT FREQ", "OBJECT", [][]byte{[]byte("FREQ"), []byte("mykey")}},
 		{"OBJECT REFCOUNT", "OBJECT", [][]byte{[]byte("REFCOUNT"), []byte("mykey")}},
+		{"OBJECT unknown subcommand", "OBJECT", [][]byte{[]byte("UNKNOWN"), []byte("mykey")}},
+		{"OBJECT no args", "OBJECT", nil},
 		{"MEMORY USAGE", "MEMORY", [][]byte{[]byte("USAGE"), []byte("mykey")}},
+		{"MEMORY USAGE with samples", "MEMORY", [][]byte{[]byte("USAGE"), []byte("mykey"), []byte("SAMPLES"), []byte("5")}},
+		{"MEMORY USAGE not found", "MEMORY", [][]byte{[]byte("USAGE"), []byte("notfound")}},
+		{"MEMORY USAGE no args", "MEMORY", [][]byte{[]byte("USAGE")}},
 		{"MEMORY STATS", "MEMORY", [][]byte{[]byte("STATS")}},
 		{"MEMORY DOCTOR", "MEMORY", [][]byte{[]byte("DOCTOR")}},
 		{"MEMORY MALLOC-STATS", "MEMORY", [][]byte{[]byte("MALLOC-STATS")}},
+		{"MEMORY PURGE", "MEMORY", [][]byte{[]byte("PURGE")}},
+		{"MEMORY unknown subcommand", "MEMORY", [][]byte{[]byte("UNKNOWN")}},
+		{"MEMORY no args", "MEMORY", nil},
 	}
 
 	for _, tt := range tests {
@@ -168,12 +187,36 @@ func TestTimestampCommands(t *testing.T) {
 		args [][]byte
 	}{
 		{"TIMESTAMP.NOW", "TIMESTAMP.NOW", nil},
-		{"TIMESTAMP.PARSE", "TIMESTAMP.PARSE", [][]byte{[]byte("2024-01-01T00:00:00Z")}},
+		{"TIMESTAMP.PARSE", "TIMESTAMP.PARSE", [][]byte{[]byte("2024-01-01T00:00:00Z"), []byte(time.RFC3339)}},
 		{"TIMESTAMP.FORMAT", "TIMESTAMP.FORMAT", [][]byte{[]byte("1704067200"), []byte("2006-01-02")}},
-		{"TIMESTAMP.ADD", "TIMESTAMP.ADD", [][]byte{[]byte("1704067200"), []byte("24h")}},
-		{"TIMESTAMP.DIFF", "TIMESTAMP.DIFF", [][]byte{[]byte("1704067200"), []byte("1704153600")}},
-		{"TIMESTAMP.STARTOF", "TIMESTAMP.STARTOF", [][]byte{[]byte("1704067200"), []byte("day")}},
-		{"TIMESTAMP.ENDOF", "TIMESTAMP.ENDOF", [][]byte{[]byte("1704067200"), []byte("day")}},
+		{"TIMESTAMP.ADD seconds", "TIMESTAMP.ADD", [][]byte{[]byte("1704067200"), []byte("seconds"), []byte("30")}},
+		{"TIMESTAMP.ADD minutes", "TIMESTAMP.ADD", [][]byte{[]byte("1704067200"), []byte("minutes"), []byte("5")}},
+		{"TIMESTAMP.ADD hours", "TIMESTAMP.ADD", [][]byte{[]byte("1704067200"), []byte("hours"), []byte("2")}},
+		{"TIMESTAMP.ADD days", "TIMESTAMP.ADD", [][]byte{[]byte("1704067200"), []byte("days"), []byte("1")}},
+		{"TIMESTAMP.ADD weeks", "TIMESTAMP.ADD", [][]byte{[]byte("1704067200"), []byte("weeks"), []byte("1")}},
+		{"TIMESTAMP.ADD months", "TIMESTAMP.ADD", [][]byte{[]byte("1704067200"), []byte("months"), []byte("1")}},
+		{"TIMESTAMP.ADD years", "TIMESTAMP.ADD", [][]byte{[]byte("1704067200"), []byte("years"), []byte("1")}},
+		{"TIMESTAMP.ADD unknown unit", "TIMESTAMP.ADD", [][]byte{[]byte("1704067200"), []byte("unknown"), []byte("1")}},
+		{"TIMESTAMP.ADD no args", "TIMESTAMP.ADD", nil},
+		{"TIMESTAMP.DIFF seconds", "TIMESTAMP.DIFF", [][]byte{[]byte("1704067200"), []byte("1704153600"), []byte("seconds")}},
+		{"TIMESTAMP.DIFF minutes", "TIMESTAMP.DIFF", [][]byte{[]byte("1704067200"), []byte("1704153600"), []byte("minutes")}},
+		{"TIMESTAMP.DIFF hours", "TIMESTAMP.DIFF", [][]byte{[]byte("1704067200"), []byte("1704153600"), []byte("hours")}},
+		{"TIMESTAMP.DIFF days", "TIMESTAMP.DIFF", [][]byte{[]byte("1704067200"), []byte("1704153600"), []byte("days")}},
+		{"TIMESTAMP.DIFF milliseconds", "TIMESTAMP.DIFF", [][]byte{[]byte("1704067200"), []byte("1704153600"), []byte("milliseconds")}},
+		{"TIMESTAMP.DIFF microseconds", "TIMESTAMP.DIFF", [][]byte{[]byte("1704067200"), []byte("1704153600"), []byte("microseconds")}},
+		{"TIMESTAMP.DIFF nanoseconds", "TIMESTAMP.DIFF", [][]byte{[]byte("1704067200"), []byte("1704153600"), []byte("nanoseconds")}},
+		{"TIMESTAMP.DIFF unknown unit", "TIMESTAMP.DIFF", [][]byte{[]byte("1704067200"), []byte("1704153600"), []byte("unknown")}},
+		{"TIMESTAMP.DIFF no args", "TIMESTAMP.DIFF", nil},
+		{"TIMESTAMP.STARTOF second", "TIMESTAMP.STARTOF", [][]byte{[]byte("1704067200"), []byte("second")}},
+		{"TIMESTAMP.STARTOF minute", "TIMESTAMP.STARTOF", [][]byte{[]byte("1704067200"), []byte("minute")}},
+		{"TIMESTAMP.STARTOF hour", "TIMESTAMP.STARTOF", [][]byte{[]byte("1704067200"), []byte("hour")}},
+		{"TIMESTAMP.STARTOF day", "TIMESTAMP.STARTOF", [][]byte{[]byte("1704067200"), []byte("day")}},
+		{"TIMESTAMP.STARTOF week", "TIMESTAMP.STARTOF", [][]byte{[]byte("1704067200"), []byte("week")}},
+		{"TIMESTAMP.STARTOF month", "TIMESTAMP.STARTOF", [][]byte{[]byte("1704067200"), []byte("month")}},
+		{"TIMESTAMP.STARTOF year", "TIMESTAMP.STARTOF", [][]byte{[]byte("1704067200"), []byte("year")}},
+		{"TIMESTAMP.STARTOF no args", "TIMESTAMP.STARTOF", nil},
+		{"TIMESTAMP.ENDOF day", "TIMESTAMP.ENDOF", [][]byte{[]byte("1704067200"), []byte("day")}},
+		{"TIMESTAMP.ENDOF no args", "TIMESTAMP.ENDOF", nil},
 	}
 
 	for _, tt := range tests {
@@ -197,13 +240,24 @@ func TestEventCommands(t *testing.T) {
 		{"EVENT.GET", "EVENT.GET", [][]byte{[]byte("test.event")}},
 		{"EVENT.LIST", "EVENT.LIST", nil},
 		{"EVENT.CLEAR", "EVENT.CLEAR", nil},
-		{"WEBHOOK.CREATE", "WEBHOOK.CREATE", [][]byte{[]byte("wh1"), []byte("http://example.com/hook")}},
+		{"WEBHOOK.CREATE", "WEBHOOK.CREATE", [][]byte{[]byte("wh1"), []byte("http://example.com/hook"), []byte("POST"), []byte("event1"), []byte("event2")}},
+		{"WEBHOOK.CREATE no args", "WEBHOOK.CREATE", nil},
 		{"WEBHOOK.LIST", "WEBHOOK.LIST", nil},
-		{"WEBHOOK.GET", "WEBHOOK.GET", [][]byte{[]byte("wh1")}},
-		{"WEBHOOK.ENABLE", "WEBHOOK.ENABLE", [][]byte{[]byte("wh1")}},
-		{"WEBHOOK.DISABLE", "WEBHOOK.DISABLE", [][]byte{[]byte("wh1")}},
-		{"WEBHOOK.STATS", "WEBHOOK.STATS", [][]byte{[]byte("wh1")}},
-		{"WEBHOOK.DELETE", "WEBHOOK.DELETE", [][]byte{[]byte("wh1")}},
+		{"WEBHOOK.GET exists", "WEBHOOK.GET", [][]byte{[]byte("wh1")}},
+		{"WEBHOOK.GET not found", "WEBHOOK.GET", [][]byte{[]byte("notfound")}},
+		{"WEBHOOK.GET no args", "WEBHOOK.GET", nil},
+		{"WEBHOOK.ENABLE exists", "WEBHOOK.ENABLE", [][]byte{[]byte("wh1")}},
+		{"WEBHOOK.ENABLE not found", "WEBHOOK.ENABLE", [][]byte{[]byte("notfound")}},
+		{"WEBHOOK.ENABLE no args", "WEBHOOK.ENABLE", nil},
+		{"WEBHOOK.DISABLE exists", "WEBHOOK.DISABLE", [][]byte{[]byte("wh1")}},
+		{"WEBHOOK.DISABLE not found", "WEBHOOK.DISABLE", [][]byte{[]byte("notfound")}},
+		{"WEBHOOK.DISABLE no args", "WEBHOOK.DISABLE", nil},
+		{"WEBHOOK.STATS exists", "WEBHOOK.STATS", [][]byte{[]byte("wh1")}},
+		{"WEBHOOK.STATS not found", "WEBHOOK.STATS", [][]byte{[]byte("notfound")}},
+		{"WEBHOOK.STATS no args", "WEBHOOK.STATS", nil},
+		{"WEBHOOK.DELETE exists", "WEBHOOK.DELETE", [][]byte{[]byte("wh1")}},
+		{"WEBHOOK.DELETE not found", "WEBHOOK.DELETE", [][]byte{[]byte("notfound")}},
+		{"WEBHOOK.DELETE no args", "WEBHOOK.DELETE", nil},
 	}
 
 	for _, tt := range tests {
@@ -921,18 +975,36 @@ func TestCacheCommands(t *testing.T) {
 	router := NewRouter()
 	RegisterCacheCommands(router)
 
+	// Setup test data with different types
+	s.Set("key1", &store.StringValue{Data: []byte("value1")}, store.SetOptions{})
+	s.Set("key2", &store.StringValue{Data: []byte("value2")}, store.SetOptions{})
+	s.Set("key3", &store.StringValue{Data: []byte("value3")}, store.SetOptions{})
+	s.Set("hash1", &store.HashValue{Fields: map[string][]byte{"field1": []byte("value1")}}, store.SetOptions{})
+	s.Set("list1", &store.ListValue{Elements: [][]byte{[]byte("item1"), []byte("item2")}}, store.SetOptions{})
+	s.Set("set1", &store.SetValue{Members: map[string]struct{}{"member1": {}, "member2": {}}}, store.SetOptions{})
+
 	tests := []struct {
 		name string
 		cmd  string
 		args [][]byte
 	}{
-		{"CACHE.BULKGET", "CACHE.BULKGET", [][]byte{[]byte("k1"), []byte("k2"), []byte("k3")}},
-		{"CACHE.BULKDEL", "CACHE.BULKDEL", [][]byte{[]byte("k1"), []byte("k2")}},
+		{"CACHE.BULKGET pattern", "CACHE.BULKGET", [][]byte{[]byte("key*")}},
+		{"CACHE.BULKGET pattern with limit", "CACHE.BULKGET", [][]byte{[]byte("key*"), []byte("2")}},
+		{"CACHE.BULKGET no args", "CACHE.BULKGET", nil},
+		{"CACHE.BULKGET invalid limit", "CACHE.BULKGET", [][]byte{[]byte("key*"), []byte("invalid")}},
+		{"CACHE.BULKDEL pattern", "CACHE.BULKDEL", [][]byte{[]byte("key*")}},
+		{"CACHE.BULKDEL pattern with limit", "CACHE.BULKDEL", [][]byte{[]byte("key*"), []byte("1")}},
+		{"CACHE.BULKDEL no args", "CACHE.BULKDEL", nil},
+		{"CACHE.BULKDEL invalid limit", "CACHE.BULKDEL", [][]byte{[]byte("key*"), []byte("invalid")}},
 		{"CACHE.STATS", "CACHE.STATS", nil},
-		{"CACHE.PREFETCH", "CACHE.PREFETCH", [][]byte{[]byte("k1"), []byte("k2")}},
-		{"CACHE.EXPORT", "CACHE.EXPORT", nil},
+		{"CACHE.PREFETCH", "CACHE.PREFETCH", [][]byte{[]byte("key1"), []byte("key2")}},
+		{"CACHE.EXPORT pattern", "CACHE.EXPORT", [][]byte{[]byte("key*")}},
+		{"CACHE.EXPORT all types", "CACHE.EXPORT", [][]byte{[]byte("*")}},
+		{"CACHE.EXPORT no args", "CACHE.EXPORT", nil},
 		{"CACHE.IMPORT", "CACHE.IMPORT", [][]byte{[]byte(`{"k1":"v1","k2":"v2"}`)}},
-		{"CACHE.CLEAR", "CACHE.CLEAR", nil},
+		{"CACHE.CLEAR pattern", "CACHE.CLEAR", [][]byte{[]byte("key*")}},
+		{"CACHE.CLEAR all", "CACHE.CLEAR", [][]byte{[]byte("*")}},
+		{"CACHE.CLEAR no args", "CACHE.CLEAR", nil},
 	}
 
 	for _, tt := range tests {
@@ -3465,16 +3537,25 @@ func TestSemaphoreCommandsCoverage(t *testing.T) {
 	router := NewRouter()
 	RegisterActorCommands(router)
 
+	runCommandTest(t, router, s, "SEM.CREATE", [][]byte{[]byte("sem1"), []byte("10")})
+
 	tests := []struct {
 		name string
 		cmd  string
 		args [][]byte
 	}{
-		{"SEM.CREATE", "SEM.CREATE", [][]byte{[]byte("sem1"), []byte("3")}},
-		{"SEM.ACQUIRE", "SEM.ACQUIRE", [][]byte{[]byte("sem1")}},
-		{"SEM.RELEASE", "SEM.RELEASE", [][]byte{[]byte("sem1")}},
-		{"SEM.TRYACQUIRE", "SEM.TRYACQUIRE", [][]byte{[]byte("sem1")}},
+		{"SEM.CREATE", "SEM.CREATE", [][]byte{[]byte("sem2"), []byte("3")}},
+		{"SEM.ACQUIRE success", "SEM.ACQUIRE", [][]byte{[]byte("sem1"), []byte("2")}},
+		{"SEM.ACQUIRE not enough", "SEM.ACQUIRE", [][]byte{[]byte("sem1"), []byte("100")}},
+		{"SEM.RELEASE", "SEM.RELEASE", [][]byte{[]byte("sem1"), []byte("3")}},
+		{"SEM.TRYACQUIRE success", "SEM.TRYACQUIRE", [][]byte{[]byte("sem1"), []byte("1")}},
+		{"SEM.TRYACQUIRE fail", "SEM.TRYACQUIRE", [][]byte{[]byte("sem1"), []byte("100")}},
 		{"SEM.VALUE", "SEM.VALUE", [][]byte{[]byte("sem1")}},
+		{"SEM.ACQUIRE no args", "SEM.ACQUIRE", nil},
+		{"SEM.RELEASE no args", "SEM.RELEASE", nil},
+		{"SEM.TRYACQUIRE no args", "SEM.TRYACQUIRE", nil},
+		{"SEM.VALUE no args", "SEM.VALUE", nil},
+		{"SEM.CREATE no args", "SEM.CREATE", nil},
 	}
 
 	for _, tt := range tests {
@@ -5661,11 +5742,40 @@ func TestExtendedCommandsVectorCoverage(t *testing.T) {
 		cmd  string
 		args [][]byte
 	}{
-		{"VECTOR.CREATE", "VECTOR.CREATE", [][]byte{[]byte("v1"), []byte("3")}},
-		{"VECTOR.ADD", "VECTOR.ADD", [][]byte{[]byte("v1"), []byte("1,2,3")}},
-		{"VECTOR.GET", "VECTOR.GET", [][]byte{[]byte("v1")}},
-		{"VECTOR.SEARCH", "VECTOR.SEARCH", [][]byte{[]byte("v1"), []byte("1,2,3"), []byte("5")}},
-		{"VECTOR.DELETE", "VECTOR.DELETE", [][]byte{[]byte("v1")}},
+		{"VECTOR.CREATE", "VECTOR.CREATE", [][]byte{[]byte("vs1"), []byte("3")}},
+		{"VECTOR.CREATE with normalize", "VECTOR.CREATE", [][]byte{[]byte("vs2"), []byte("3"), []byte("NORMALIZE")}},
+		{"VECTOR.CREATE no args", "VECTOR.CREATE", nil},
+		{"VECTOR.ADD", "VECTOR.ADD", [][]byte{[]byte("vs1"), []byte("vec1"), []byte("1.0"), []byte("2.0"), []byte("3.0")}},
+		{"VECTOR.ADD to existing store", "VECTOR.ADD", [][]byte{[]byte("vs1"), []byte("vec2"), []byte("4.0"), []byte("5.0"), []byte("6.0")}},
+		{"VECTOR.ADD wrong dimensions", "VECTOR.ADD", [][]byte{[]byte("vs1"), []byte("vec3"), []byte("1.0"), []byte("2.0")}},
+		{"VECTOR.ADD store not found", "VECTOR.ADD", [][]byte{[]byte("notfound"), []byte("vec1"), []byte("1.0"), []byte("2.0"), []byte("3.0")}},
+		{"VECTOR.ADD no args", "VECTOR.ADD", nil},
+		{"VECTOR.GET", "VECTOR.GET", [][]byte{[]byte("vs1"), []byte("vec1")}},
+		{"VECTOR.GET not found", "VECTOR.GET", [][]byte{[]byte("vs1"), []byte("notfound")}},
+		{"VECTOR.GET store not found", "VECTOR.GET", [][]byte{[]byte("notfound"), []byte("vec1")}},
+		{"VECTOR.GET no args", "VECTOR.GET", nil},
+		{"VECTOR.NORMALIZE", "VECTOR.NORMALIZE", [][]byte{[]byte("vs1"), []byte("vec1")}},
+		{"VECTOR.NORMALIZE not found", "VECTOR.NORMALIZE", [][]byte{[]byte("vs1"), []byte("notfound")}},
+		{"VECTOR.NORMALIZE store not found", "VECTOR.NORMALIZE", [][]byte{[]byte("notfound"), []byte("vec1")}},
+		{"VECTOR.NORMALIZE no args", "VECTOR.NORMALIZE", nil},
+		{"VECTOR.SEARCH", "VECTOR.SEARCH", [][]byte{[]byte("vs1"), []byte("1.0"), []byte("2.0"), []byte("3.0"), []byte("2")}},
+		{"VECTOR.SEARCH store not found", "VECTOR.SEARCH", [][]byte{[]byte("notfound"), []byte("1.0"), []byte("2.0"), []byte("3.0"), []byte("2")}},
+		{"VECTOR.SEARCH no args", "VECTOR.SEARCH", nil},
+		{"VECTOR.DELETE", "VECTOR.DELETE", [][]byte{[]byte("vs1"), []byte("vec1")}},
+		{"VECTOR.DELETE not found", "VECTOR.DELETE", [][]byte{[]byte("vs1"), []byte("notfound")}},
+		{"VECTOR.DELETE store not found", "VECTOR.DELETE", [][]byte{[]byte("notfound"), []byte("vec1")}},
+		{"VECTOR.DELETE no args", "VECTOR.DELETE", nil},
+		{"VECTOR.DIMENSIONS", "VECTOR.DIMENSIONS", [][]byte{[]byte("vs1")}},
+		{"VECTOR.DIMENSIONS store not found", "VECTOR.DIMENSIONS", [][]byte{[]byte("notfound")}},
+		{"VECTOR.DIMENSIONS no args", "VECTOR.DIMENSIONS", nil},
+		{"VECTOR.MERGE", "VECTOR.MERGE", [][]byte{[]byte("vs1"), []byte("vec1"), []byte("vec2")}},
+		{"VECTOR.MERGE with custom ID", "VECTOR.MERGE", [][]byte{[]byte("vs1"), []byte("vec1"), []byte("vec2"), []byte("merged_vec")}},
+		{"VECTOR.MERGE not found", "VECTOR.MERGE", [][]byte{[]byte("vs1"), []byte("notfound1"), []byte("notfound2")}},
+		{"VECTOR.MERGE store not found", "VECTOR.MERGE", [][]byte{[]byte("notfound"), []byte("vec1"), []byte("vec2")}},
+		{"VECTOR.MERGE no args", "VECTOR.MERGE", nil},
+		{"VECTOR.STATS", "VECTOR.STATS", [][]byte{[]byte("vs1")}},
+		{"VECTOR.STATS store not found", "VECTOR.STATS", [][]byte{[]byte("notfound")}},
+		{"VECTOR.STATS no args", "VECTOR.STATS", nil},
 	}
 
 	for _, tt := range tests {
@@ -6744,11 +6854,35 @@ func TestExtendedCommandsDocCoverage(t *testing.T) {
 		cmd  string
 		args [][]byte
 	}{
-		{"DOC.ADD", "DOC.ADD", [][]byte{[]byte("doc1"), []byte("{\"field\":\"value\"}")}},
-		{"DOC.GET", "DOC.GET", [][]byte{[]byte("doc1")}},
-		{"DOC.SEARCH", "DOC.SEARCH", [][]byte{[]byte("field:value")}},
-		{"DOC.DELETE", "DOC.DELETE", [][]byte{[]byte("doc1")}},
-		{"DOC.COUNT", "DOC.COUNT", [][]byte{}},
+		{"DOC.INSERT", "DOC.INSERT", [][]byte{[]byte("docs1"), []byte("id1"), []byte("name"), []byte("John"), []byte("age"), []byte("30")}},
+		{"DOC.INSERT no args", "DOC.INSERT", nil},
+		{"DOC.FIND all", "DOC.FIND", [][]byte{[]byte("docs1")}},
+		{"DOC.FIND with filter", "DOC.FIND", [][]byte{[]byte("docs1"), []byte("name"), []byte("John")}},
+		{"DOC.FIND store not found", "DOC.FIND", [][]byte{[]byte("notfound")}},
+		{"DOC.FIND no args", "DOC.FIND", nil},
+		{"DOC.FINDONE", "DOC.FINDONE", [][]byte{[]byte("docs1"), []byte("name"), []byte("John")}},
+		{"DOC.FINDONE not found", "DOC.FINDONE", [][]byte{[]byte("docs1"), []byte("name"), []byte("NotFound")}},
+		{"DOC.FINDONE store not found", "DOC.FINDONE", [][]byte{[]byte("notfound"), []byte("name"), []byte("John")}},
+		{"DOC.FINDONE no args", "DOC.FINDONE", nil},
+		{"DOC.UPDATE", "DOC.UPDATE", [][]byte{[]byte("docs1"), []byte("id1"), []byte("age"), []byte("31")}},
+		{"DOC.UPDATE not found", "DOC.UPDATE", [][]byte{[]byte("docs1"), []byte("notfound"), []byte("age"), []byte("31")}},
+		{"DOC.UPDATE store not found", "DOC.UPDATE", [][]byte{[]byte("notfound"), []byte("id1"), []byte("age"), []byte("31")}},
+		{"DOC.UPDATE no args", "DOC.UPDATE", nil},
+		{"DOC.DELETE", "DOC.DELETE", [][]byte{[]byte("docs1"), []byte("id1")}},
+		{"DOC.DELETE not found", "DOC.DELETE", [][]byte{[]byte("docs1"), []byte("notfound")}},
+		{"DOC.DELETE store not found", "DOC.DELETE", [][]byte{[]byte("notfound"), []byte("id1")}},
+		{"DOC.DELETE no args", "DOC.DELETE", nil},
+		{"DOC.COUNT", "DOC.COUNT", [][]byte{[]byte("docs1")}},
+		{"DOC.COUNT store not found", "DOC.COUNT", [][]byte{[]byte("notfound")}},
+		{"DOC.COUNT no args", "DOC.COUNT", nil},
+		{"DOC.DISTINCT", "DOC.DISTINCT", [][]byte{[]byte("docs1"), []byte("name")}},
+		{"DOC.DISTINCT no args", "DOC.DISTINCT", nil},
+		{"DOC.AGGREGATE", "DOC.AGGREGATE", [][]byte{[]byte("docs1"), []byte("count")}},
+		{"DOC.AGGREGATE no args", "DOC.AGGREGATE", nil},
+		{"DOC.INDEX", "DOC.INDEX", [][]byte{[]byte("docs1"), []byte("name")}},
+		{"DOC.INDEX no args", "DOC.INDEX", nil},
+		{"DOC.DROPINDEX", "DOC.DROPINDEX", [][]byte{[]byte("docs1"), []byte("name")}},
+		{"DOC.DROPINDEX no args", "DOC.DROPINDEX", nil},
 	}
 
 	for _, tt := range tests {
@@ -13078,4 +13212,207 @@ func TestWaitAof(t *testing.T) {
 	RegisterServerCommands(router)
 
 	runCommandTest(t, router, s, "WAITAOF", [][]byte{[]byte("1"), []byte("0")})
+}
+
+func TestGridClearCommand(t *testing.T) {
+	s := store.NewStore()
+	router := NewRouter()
+	RegisterExtraCommands(router)
+
+	// Create grid first
+	runCommandTest(t, router, s, "GRID.CREATE", [][]byte{[]byte("g1"), []byte("10"), []byte("10")})
+	runCommandTest(t, router, s, "GRID.SET", [][]byte{[]byte("g1"), []byte("0"), []byte("0"), []byte("value")})
+	// Clear it
+	runCommandTest(t, router, s, "GRID.CLEAR", [][]byte{[]byte("g1")})
+}
+
+func TestRegisterModuleFunc(t *testing.T) {
+	// Just verify the function exists and can be called
+	// RegisterModule requires a module.Module interface
+	_ = RegisterModule
+}
+
+func TestReplicationRDBFunctions(t *testing.T) {
+	s := store.NewStore()
+
+	t.Run("GenerateRDB", func(t *testing.T) {
+		data := generateRDB(s)
+		if len(data) == 0 {
+			t.Error("generateRDB should return data")
+		}
+	})
+
+	t.Run("WriteRDBString", func(t *testing.T) {
+		var buf bytes.Buffer
+		writeRDBString(&buf, []byte("test"))
+		if buf.Len() == 0 {
+			t.Error("writeRDBString should write data")
+		}
+	})
+
+	t.Run("WriteUint64LE", func(t *testing.T) {
+		var buf bytes.Buffer
+		writeUint64LE(&buf, 12345)
+		if buf.Len() != 8 {
+			t.Errorf("writeUint64LE wrote %d bytes, want 8", buf.Len())
+		}
+	})
+}
+
+func TestExecuteQueuedCommand(t *testing.T) {
+	s := store.NewStore()
+	router := NewRouter()
+	RegisterStringCommands(router)
+
+	buf := &bytes.Buffer{}
+	w := resp.NewWriter(buf)
+	ctx := NewContext("SET", [][]byte{[]byte("key"), []byte("value")}, s, w)
+	tx := NewTransaction()
+	ctx.Transaction = tx
+
+	qc := queuedCommand{
+		cmd:  "SET",
+		args: [][]byte{[]byte("key"), []byte("value")},
+	}
+
+	_ = executeQueuedCommand(ctx, qc)
+	// executeQueuedCommand returns the result of the command handler
+	// For SET, it may return nil or a success message
+}
+
+func TestCheckClusterRoutingCmd(t *testing.T) {
+	s := store.NewStore()
+	c := cluster.New("node1", "127.0.0.1", 7000, 7001, nil)
+	InitCluster(c)
+
+	buf := &bytes.Buffer{}
+	w := resp.NewWriter(buf)
+	ctx := NewContext("GET", [][]byte{[]byte("key")}, s, w)
+
+	result := checkClusterRouting(ctx, "GET")
+	_ = result
+}
+
+func TestHandleSentinelCommands3(t *testing.T) {
+	s := store.NewStore()
+	router := NewRouter()
+	RegisterSentinelCommands(router)
+
+	cfg := sentinel.Config{}
+	InitSentinel(cfg)
+
+	// These commands call handleSentinelGetMaster and handleSentinelIsMasterDown
+	runCommandTest(t, router, s, "SENTINEL", [][]byte{[]byte("GET-MASTER-ADDR-BY-NAME"), []byte("mymaster")})
+	runCommandTest(t, router, s, "SENTINEL", [][]byte{[]byte("IS-MASTER-DOWN-BY-ADDR"), []byte("127.0.0.1"), []byte("6379")})
+}
+
+func TestMapToValue2(t *testing.T) {
+	// Test mapToValue with various inputs
+	m := map[string]interface{}{
+		"key1": "value1",
+		"key2": 123,
+		"key3": true,
+	}
+	v := mapToValue(m)
+	if v == nil {
+		t.Error("mapToValue returned nil")
+	}
+}
+
+func TestSyncRWMutexMethods(t *testing.T) {
+	// Test syncRWMutex methods in event_commands.go
+	var m syncRWMutex
+	m.Lock()
+	m.Unlock()
+	m.RLock()
+	m.RUnlock()
+
+	// Test syncRWMutexExt methods in workflow_commands.go
+	var m2 syncRWMutexExt
+	m2.Lock()
+	m2.Unlock()
+	m2.RLock()
+	m2.RUnlock()
+}
+
+func TestGridClearCmd(t *testing.T) {
+	s := store.NewStore()
+	router := NewRouter()
+	RegisterExtraCommands(router)
+
+	// Create and populate grid
+	runCommandTest(t, router, s, "GRID.CREATE", [][]byte{[]byte("testgrid"), []byte("5"), []byte("5")})
+	runCommandTest(t, router, s, "GRID.SET", [][]byte{[]byte("testgrid"), []byte("0"), []byte("0"), []byte("val")})
+	// Clear
+	runCommandTest(t, router, s, "GRID.CLEAR", [][]byte{[]byte("testgrid")})
+}
+
+func TestRegisterModuleFunc2(t *testing.T) {
+	// RegisterModule requires module.Module interface
+	// Just verify it exists
+	_ = RegisterModule
+}
+
+func TestSentinelHandleCommands(t *testing.T) {
+	s := store.NewStore()
+	router := NewRouter()
+	RegisterSentinelCommands(router)
+
+	cfg := sentinel.Config{}
+	InitSentinel(cfg)
+
+	buf := &bytes.Buffer{}
+	w := resp.NewWriter(buf)
+	ctx := NewContext("SENTINEL", [][]byte{[]byte("GET-MASTER-ADDR-BY-NAME"), []byte("mymaster")}, s, w)
+
+	// Call the handler functions directly
+	err := handleSentinelGetMaster(ctx)
+	_ = err
+
+	ctx2 := NewContext("SENTINEL", [][]byte{[]byte("IS-MASTER-DOWN-BY-ADDR"), []byte("127.0.0.1"), []byte("6379")}, s, w)
+	err = handleSentinelIsMasterDown(ctx2)
+	_ = err
+}
+
+func TestWaitAofCmd(t *testing.T) {
+	s := store.NewStore()
+	router := NewRouter()
+	RegisterServerCommands(router)
+
+	buf := &bytes.Buffer{}
+	w := resp.NewWriter(buf)
+	ctx := NewContext("WAITAOF", [][]byte{[]byte("1"), []byte("1000")}, s, w)
+
+	err := cmdWAITAOF(ctx)
+	_ = err
+}
+
+// Test syncRWMutex and syncRWMutexExt methods via direct struct initialization
+func TestDummyMutexMethods(t *testing.T) {
+	// Call event_commands.go syncRWMutex methods
+	var m1 syncRWMutex
+	_ = &m1
+	m1.Lock()
+	m1.Unlock()
+	m1.RLock()
+	m1.RUnlock()
+
+	// Call workflow_commands.go syncRWMutexExt methods
+	var m2 syncRWMutexExt
+	_ = &m2
+	m2.Lock()
+	m2.Unlock()
+	m2.RLock()
+	m2.RUnlock()
+}
+
+func TestCmdShutdown(t *testing.T) {
+	// cmdSHUTDOWN calls os.Exit which cannot be tested normally
+	// We just verify the function exists
+	_ = cmdSHUTDOWN
+}
+
+func TestCmdDebugSegfault(t *testing.T) {
+	// cmdDEBUGSEGFAULT causes panic, cannot be tested
+	_ = cmdDEBUGSEGFAULT
 }
