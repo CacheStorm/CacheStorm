@@ -21,6 +21,15 @@ CacheStorm implements **1,606 commands** across 50+ modules, providing ~99% Redi
 | [Monitoring](#monitoring-commands) | 80+ | Metrics, alerts |
 | [Security](#security-commands) | 40+ | ACL, encryption |
 | [Machine Learning](#machine-learning-commands) | 80+ | Models, embeddings |
+| [Namespace](#namespace-commands) | 5 | Multi-tenant namespaces |
+| [Tag Management](#tag-based-invalidation-commands) | 10 | Tag-based cache invalidation |
+| [Workflow](#workflow-commands) | 30+ | Workflows and state machines |
+| [Advanced](#advanced-commands) | 100+ | Advanced data structures |
+| [Encoding](#encoding-commands) | 40+ | Data encoding/decoding |
+| [Digest](#digest-commands) | 20+ | Hashing and crypto |
+| [Events](#event-commands) | 30+ | Event sourcing and webhooks |
+| [Utilities](#utility-commands) | 100+ | Various utilities |
+| [Integration](#integration-commands) | 100+ | External integrations |
 
 ---
 
@@ -364,7 +373,7 @@ TS.DECRBY key value [TIMESTAMP timestamp] [RETENTION retentionTime] [UNCOMPRESSE
 TS.DEL key fromTimestamp toTimestamp
 TS.CREATERULE sourceKey destKey AGGREGATION aggregationType timeBucket
 TS.DELETERULE sourceKey destKey
-nTS.RANGE key fromTimestamp toTimestamp [COUNT count] [AGGREGATION aggregationType timeBucket [BUCKETTIMESTAMP bt] [EMPTY]]
+TS.RANGE key fromTimestamp toTimestamp [COUNT count] [AGGREGATION aggregationType timeBucket [BUCKETTIMESTAMP bt] [EMPTY]]
 TS.REVRANGE key fromTimestamp toTimestamp [COUNT count] [AGGREGATION aggregationType timeBucket [BUCKETTIMESTAMP bt] [EMPTY]]
 TS.MRANGE fromTimestamp toTimestamp [COUNT count] [AGGREGATION aggregationType timeBucket [BUCKETTIMESTAMP bt] [EMPTY]] [WITHLABELS] [SELECTED_LABELS label [label ...]] [FILTER filter [filter ...]] [GROUPBY label REDUCE reducer]
 TS.MREVRANGE fromTimestamp toTimestamp [COUNT count] [AGGREGATION aggregationType timeBucket [BUCKETTIMESTAMP bt] [EMPTY]] [WITHLABELS] [SELECTED_LABELS label [label ...]] [FILTER filter [filter ...]] [GROUPBY label REDUCE reducer]
@@ -382,7 +391,7 @@ TS.QUERYINDEX filter [filter ...]
 FT.CREATE index [ON HASH|JSON] [PREFIX count prefix [prefix ...]] [SCHEMA field type [field type ...]]
 FT.DROPINDEX index [DD]
 FT.LIST
-nFT.ADD index docId score [NOSAVE] [REPLACE] [PARTIAL] [LANGUAGE lang] [PAYLOAD payload] [FIELDS field value [field value ...]]
+FT.ADD index docId score [NOSAVE] [REPLACE] [PARTIAL] [LANGUAGE lang] [PAYLOAD payload] [FIELDS field value [field value ...]]
 FT.DEL index docId [DD]
 FT.GET index docId
 FT.MGET index [index ...] docId [docId ...]
@@ -408,7 +417,7 @@ FT.ALIASADD name index
 FT.ALIASUPDATE name index
 FT.ALIASDEL name
 FT.INFO index
-nFT._LIST
+FT._LIST
 FT.CONFIG GET option [option ...]
 FT.CONFIG SET option value
 FT.CONFIG HELP [option]
@@ -425,7 +434,7 @@ GRAPH.EXPLAIN graphName query
 GRAPH.PROFILE graphName query [TIMEOUT timeout]
 GRAPH.DELETE graphName
 GRAPH.SLOWLOG graphName
-nGRAPH.CONFIG GET name
+GRAPH.CONFIG GET name
 GRAPH.CONFIG SET name value
 GRAPH.LIST
 GRAPH.CONSTRAINT CREATE graphName constraintType nodeLabel|relType properties [entityType entityType]
@@ -449,7 +458,7 @@ BF.SCANDUMP key iterator
 BF.LOADCHUNK key iterator data
 BF.INFO key
 BF.DEBUG key
-n```
+```
 
 ### Cuckoo Filter
 
@@ -659,6 +668,515 @@ Or visit the [CacheStorm documentation](https://github.com/cachestorm/cachestorm
 - Extended commands follow the same RESP protocol
 - Commands with `.` prefix are CacheStorm-specific extensions
 - Use `COMMAND LIST` to see all available commands at runtime
+
+---
+
+## Namespace Commands
+
+CacheStorm supports multi-tenant namespaces for data isolation.
+
+```
+NAMESPACE name                    # Switch to namespace
+NAMESPACES                        # List all namespaces
+NAMESPACEDEL name                 # Delete a namespace
+NAMESPACEINFO [name]              # Get namespace info
+SELECT index                      # Select database (alias for namespace)
+```
+
+---
+
+## Workflow Commands
+
+### Workflow Management
+
+```
+WORKFLOW.CREATE name [description]
+WORKFLOW.DELETE name
+WORKFLOW.GET name
+WORKFLOW.LIST [pattern]
+WORKFLOW.START name [vars...]
+WORKFLOW.PAUSE id
+WORKFLOW.COMPLETE id
+WORKFLOW.FAIL id [reason]
+WORKFLOW.RESET id
+WORKFLOW.NEXT id
+WORKFLOW.SETVAR id key value
+WORKFLOW.GETVAR id key
+WORKFLOW.ADDSTEP workflow name type [config]
+```
+
+### State Machine
+
+```
+STATEM.CREATE name [description]
+STATEM.DELETE name
+STATEM.ADDSTATE machine state [type]
+STATEM.ADDTRANS machine from to event [condition]
+STATEM.TRIGGER machine event [data]
+STATEM.CURRENT machine
+STATEM.CANTRIGGER machine event
+STATEM.EVENTS machine
+STATEM.RESET machine [state]
+STATEM.ISFINAL machine
+STATEM.INFO machine
+STATEM.LIST [pattern]
+```
+
+### Templates
+
+```
+TEMPLATE.CREATE name content
+TEMPLATE.DELETE name
+TEMPLATE.GET name
+TEMPLATE.INSTANTIATE name [vars...]
+```
+
+---
+
+## Advanced Commands
+
+### Actor Model
+
+```
+ACTOR.CREATE name [mailbox_size]
+ACTOR.DELETE name
+ACTOR.SEND name message
+ACTOR.RECV name [timeout]
+ACTOR.POKE name
+ACTOR.PEEK name
+ACTOR.LEN name
+ACTOR.LIST [pattern]
+ACTOR.CLEAR name
+```
+
+### DAG (Directed Acyclic Graph)
+
+```
+DAG.CREATE name
+DAG.DELETE name
+DAG.ADDNODE name node [data]
+DAG.ADDEDGE name from to [weight]
+DAG.TOPO name
+DAG.PARENTS name node
+DAG.CHILDREN name node
+DAG.LIST [pattern]
+```
+
+### Parallel Processing
+
+```
+PARALLEL.EXEC commands... [MAX max]
+PARALLEL.MAP key command
+PARALLEL.REDUCE key command [INITIAL value]
+PARALLEL.FILTER key command
+```
+
+### Secrets Management
+
+```
+SECRET.SET key value [TTL ttl]
+SECRET.GET key
+SECRET.DELETE key
+SECRET.LIST [pattern]
+SECRET.ROTATE key
+SECRET.VERSION key
+```
+
+### Configuration
+
+```
+CONFIG.SET key value [NAMESPACE ns]
+CONFIG.GET key [NAMESPACE ns]
+CONFIG.DELETE key [NAMESPACE ns]
+CONFIG.LIST [pattern] [NAMESPACE ns]
+CONFIG.NAMESPACE ns command
+CONFIG.IMPORT data [FORMAT format]
+CONFIG.EXPORT [pattern] [FORMAT format]
+```
+
+### Data Structures
+
+```
+TRIE.ADD name key [value]
+TRIE.SEARCH name prefix
+TRIE.PREFIX name prefix [COUNT count]
+TRIE.DELETE name key
+TRIE.AUTOCOMPLETE name prefix [COUNT count]
+
+RING.CREATE name [replicas]
+RING.ADD name node [weight]
+RING.GET name key
+RING.NODES name
+RING.REMOVE name node
+
+SEM.CREATE name count
+SEM.ACQUIRE name [timeout]
+SEM.RELEASE name
+SEM.TRYACQUIRE name
+SEM.VALUE name
+```
+
+---
+
+## Encoding Commands
+
+```
+MSGPACK.ENCODE data
+MSGPACK.DECODE data
+
+BSON.ENCODE data
+BSON.DECODE data
+
+URL.ENCODE string
+URL.DECODE string
+
+XML.ENCODE data [ROOT root]
+XML.DECODE xml
+
+YAML.ENCODE data
+YAML.DECODE yaml
+
+TOML.ENCODE data
+TOML.DECODE toml
+
+CBOR.ENCODE data
+CBOR.DECODE data
+
+CSV.ENCODE rows [DELIMITER delim]
+CSV.DECODE csv [DELIMITER delim]
+
+UUID.GEN [VERSION version]
+UUID.VALIDATE uuid
+UUID.VERSION uuid
+
+ULID.GEN
+ULID.EXTRACT ulid
+
+TIMESTAMP.NOW [UNIT unit]
+TIMESTAMP.PARSE format string
+TIMESTAMP.FORMAT timestamp format
+TIMESTAMP.ADD timestamp amount unit
+TIMESTAMP.DIFF t1 t2 unit
+TIMESTAMP.STARTOF timestamp unit
+TIMESTAMP.ENDOF timestamp unit
+
+DIFF.TEXT text1 text2
+DIFF.JSON json1 json2
+
+POOL.CREATE name size [FACTORY factory]
+POOL.GET name [TIMEOUT timeout]
+POOL.PUT name item
+POOL.CLEAR name
+POOL.STATS name
+```
+
+---
+
+## Digest Commands
+
+```
+DIGEST.MD5 data
+DIGEST.SHA1 data
+DIGEST.SHA256 data
+DIGEST.SHA512 data
+DIGEST.HMAC algorithm key data
+DIGEST.HMACMD5 key data
+DIGEST.HMACSHA1 key data
+DIGEST.HMACSHA256 key data
+DIGEST.HMACSHA512 key data
+DIGEST.CRC32 data
+DIGEST.ADLER32 data
+DIGEST.BASE64ENCODE data
+DIGEST.BASE64DECODE data
+DIGEST.HEXENCODE data
+DIGEST.HEXDECODE data
+
+CRYPTO.HASH algorithm data
+CRYPTO.HMAC algorithm key data
+```
+
+---
+
+## Event Commands
+
+### Event Sourcing
+
+```
+EVENT.EMIT channel event [data]
+EVENT.GET channel [cursor] [COUNT count]
+EVENT.LIST [pattern]
+EVENT.CLEAR channel
+```
+
+### Webhooks
+
+```
+WEBHOOK.CREATE name url [EVENTS events...] [SECRET secret]
+WEBHOOK.DELETE name
+WEBHOOK.GET name
+WEBHOOK.LIST [pattern]
+WEBHOOK.ENABLE name
+WEBHOOK.DISABLE name
+WEBHOOK.STATS name
+```
+
+### Compression
+
+```
+COMPRESS.RLE data
+DECOMPRESS.RLE data
+COMPRESS.LZ4 data
+DECOMPRESS.LZ4 data
+COMPRESS.CUSTOM algorithm data [LEVEL level]
+```
+
+### Queue & Stack
+
+```
+QUEUE.CREATE name [MAX max]
+QUEUE.PUSH name item
+QUEUE.POP name [TIMEOUT timeout]
+QUEUE.PEEK name
+QUEUE.LEN name
+QUEUE.CLEAR name
+
+STACK.CREATE name [MAX max]
+STACK.PUSH name item
+STACK.POP name
+STACK.PEEK name
+STACK.LEN name
+STACK.CLEAR name
+```
+
+---
+
+## Utility Commands
+
+### Rate Limiting
+
+```
+RL.CREATE name rate interval [BURST burst]
+RL.ALLOW name [COST cost]
+RL.GET name
+RL.DELETE name
+RL.RESET name
+```
+
+### Distributed Locks
+
+```
+LOCK.TRY key ttl
+LOCK.ACQUIRE key ttl [RETRY retry] [DELAY delay]
+LOCK.RELEASE key
+LOCK.RENEW key ttl
+LOCK.INFO key
+LOCK.ISLOCKED key
+```
+
+### ID Generation
+
+```
+ID.CREATE name [START start] [STEP step]
+ID.NEXT name
+ID.NEXTN name count
+ID.CURRENT name
+ID.SET name value
+ID.DELETE name
+
+SNOWFLAKE.NEXT [NODE node]
+SNOWFLAKE.PARSE id
+```
+
+### Audit Logging
+
+```
+AUDIT.LOG command key [DETAILS details]
+AUDIT.GET [COUNT count]
+AUDIT.GETRANGE start end
+AUDIT.GETBYCMD command [COUNT count]
+AUDIT.GETBYKEY key [COUNT count]
+AUDIT.CLEAR [BEFORE timestamp]
+AUDIT.COUNT [COMMAND command] [KEY key]
+AUDIT.STATS
+AUDIT.ENABLE
+AUDIT.DISABLE
+```
+
+### Feature Flags
+
+```
+FLAG.CREATE name [DEFAULT default]
+FLAG.DELETE name
+FLAG.GET name
+FLAG.ENABLE name
+FLAG.DISABLE name
+FLAG.TOGGLE name
+FLAG.ISENABLED name
+FLAG.LIST [pattern]
+FLAG.LISTENABLED
+FLAG.ADDVARIANT name variant value [WEIGHT weight]
+FLAG.GETVARIANT name [USER user]
+FLAG.ADDRULE name rule value
+```
+
+### Counters
+
+```
+COUNTER.GET name
+COUNTER.SET name value
+COUNTER.INCR name [BY increment]
+COUNTER.DECR name [BY decrement]
+COUNTER.INCRBY name increment
+COUNTER.DECRBY name decrement
+COUNTER.DELETE name
+COUNTER.LIST [pattern]
+COUNTER.GETALL [pattern]
+COUNTER.RESET name
+COUNTER.RESETALL [pattern]
+```
+
+### Backup
+
+```
+BACKUP.CREATE [NAME name] [TYPE type]
+BACKUP.RESTORE name [OPTIONS options]
+BACKUP.LIST [pattern]
+BACKUP.DELETE name
+```
+
+### Memory Management
+
+```
+MEMORY.TRIM
+MEMORY.FRAG
+MEMORY.PURGE
+MEMORY.ALLOC size
+```
+
+---
+
+## Integration Commands
+
+### Circuit Breaker
+
+```
+CIRCUITBREAKER.CREATE name [THRESHOLD threshold] [TIMEOUT timeout]
+CIRCUITBREAKER.STATE name
+CIRCUITBREAKER.TRIP name
+CIRCUITBREAKER.RESET name
+```
+
+### Rate Limit
+
+```
+RATELIMIT.CREATE name rate window
+RATELIMIT.CHECK name [COST cost]
+RATELIMIT.RESET name
+RATELIMIT.DELETE name
+```
+
+### Cache Operations
+
+```
+CACHE.LOCK key ttl
+CACHE.UNLOCK key
+CACHE.LOCKED key
+CACHE.REFRESH key
+```
+
+### Network
+
+```
+NET.WHOIS domain
+NET.DNS domain [TYPE type]
+NET.PING host [COUNT count]
+NET.PORT host port [TIMEOUT timeout]
+```
+
+### Array Operations
+
+```
+ARRAY.PUSH key value [value ...]
+ARRAY.POP key
+ARRAY.SHIFT key
+ARRAY.UNSHIFT key value [value ...]
+ARRAY.SLICE key start end
+ARRAY.SPLICE key start deleteCount [value ...]
+ARRAY.REVERSE key
+ARRAY.SORT key [ASC|DESC]
+ARRAY.UNIQUE key
+ARRAY.FLATTEN key [DEPTH depth]
+ARRAY.MERGE key1 key2 [OUT out]
+ARRAY.INTERSECT key1 key2 [OUT out]
+ARRAY.DIFF key1 key2 [OUT out]
+ARRAY.INDEXOF key value
+ARRAY.LASTINDEXOF key value
+ARRAY.INCLUDES key value
+```
+
+### Object Operations
+
+```
+OBJECT.KEYS key
+OBJECT.VALUES key
+OBJECT.ENTRIES key
+OBJECT.FROMENTRIES entries
+OBJECT.MERGE key1 key2 [OUT out]
+OBJECT.PICK key fields...
+OBJECT.OMIT key fields...
+OBJECT.HAS key field
+OBJECT.GET key field [DEFAULT default]
+OBJECT.SET key field value
+OBJECT.DELETE key field
+```
+
+### Math Operations
+
+```
+MATH.ADD a b
+MATH.SUB a b
+MATH.MUL a b
+MATH.DIV a b
+MATH.MOD a b
+MATH.POW base exp
+MATH.SQRT x
+MATH.ABS x
+MATH.MIN a b [c ...]
+MATH.MAX a b [c ...]
+MATH.FLOOR x
+MATH.CEIL x
+MATH.ROUND x [DECIMALS decimals]
+MATH.RANDOM [MIN min] [MAX max]
+MATH.SUM key
+MATH.AVG key
+MATH.MEDIAN key
+MATH.STDDEV key
+```
+
+### Geo Operations
+
+```
+GEO.ENCODE lat lon [PRECISION precision]
+GEO.DECODE hash
+GEO.DISTANCE lat1 lon1 lat2 lon2 [UNIT unit]
+GEO.BOUNDINGBOX lat lon radius [UNIT unit]
+```
+
+### Captcha
+
+```
+CAPTCHA.GENERATE [WIDTH width] [HEIGHT height] [LENGTH length]
+CAPTCHA.VERIFY id code
+```
+
+### Sequence
+
+```
+SEQUENCE.NEXT name
+SEQUENCE.CURRENT name
+SEQUENCE.RESET name [VALUE value]
+SEQUENCE.SET name value
+```
 
 ---
 

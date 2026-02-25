@@ -1,0 +1,26 @@
+# Simple Docker Compose - Just CacheStorm
+version: '3.8'
+
+services:
+  cachestorm:
+    build:
+      context: ../..
+      dockerfile: examples/docker/Dockerfile
+    container_name: cachestorm-demo
+    ports:
+      - "6379:6379"
+      - "8080:8080"
+    volumes:
+      - cachestorm-demo-data:/data
+    environment:
+      - CACHESTORM_MAX_MEMORY=512mb
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  cachestorm-demo-data:

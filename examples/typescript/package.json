@@ -1,0 +1,19 @@
+{
+  "name": "cachestorm-typescript-demo",
+  "version": "1.0.0",
+  "description": "CacheStorm TypeScript SDK Demo",
+  "main": "demo.ts",
+  "scripts": {
+    "demo": "ts-node demo.ts",
+    "build": "tsc",
+    "start": "node dist/demo.js"
+  },
+  "dependencies": {
+    "@cachestorm/client": "file:../../clients/typescript"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.3.0"
+  }
+}

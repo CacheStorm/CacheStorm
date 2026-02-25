@@ -1,0 +1,27 @@
+{
+  "name": "@cachestorm/client",
+  "version": "0.1.27",
+  "description": "Official TypeScript client for CacheStorm - High-Performance Redis-Compatible Database",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "jest",
+    "lint": "eslint src/**/*.ts",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "cachestorm",
+    "redis",
+    "cache",
+    "database",
+    "typescript"
+  ],
+  "author": "CacheStorm Team",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {}
+}

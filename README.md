@@ -34,6 +34,7 @@ A high-performance, Redis-compatible in-memory database written in Go with **1,6
 - [Features](#features)
 - [Quick Start](#quick-start)
 - [Installation](#installation)
+- [Examples](#examples)
 - [Command Modules](#command-modules)
 - [Data Types](#data-types)
 - [Performance](#performance)
@@ -89,30 +90,59 @@ A high-performance, Redis-compatible in-memory database written in Go with **1,6
 - **Monitoring**: Slow Log, Latency monitoring, Hot key detection
 - **HTTP API**: RESTful API on port 8080
 
-## Quick Start (One-Click Install)
+## Quick Start
 
-### Linux/macOS (curl)
+### One-Click Install
+
+**Linux/macOS:**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cachestorm/cachestorm/main/scripts/install.sh | bash
 ```
 
-### Windows (PowerShell)
+**Windows:**
 ```powershell
 irm https://raw.githubusercontent.com/cachestorm/cachestorm/main/scripts/install.ps1 | iex
 ```
 
-### Docker Compose (All Platforms)
+**Docker Compose:**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/cachestorm/cachestorm/main/docker-compose.yml -o docker-compose.yml
 docker-compose up -d
 ```
 
-### Makefile (Development)
+### Using SDKs
+
+**Go:**
+```go
+import cachestorm "github.com/cachestorm/cachestorm/clients/go"
+
+client, _ := cachestorm.NewClient("localhost:6379")
+client.Set(ctx, "key", "value", 0)
+val, _ := client.Get(ctx, "key")
+```
+
+**TypeScript:**
+```typescript
+import { CacheStormClient } from '@cachestorm/client';
+
+const client = new CacheStormClient({ host: 'localhost', port: 6379 });
+await client.connect();
+await client.set('key', 'value');
+const val = await client.get('key');
+```
+
+**Python:**
+```python
+from cachestorm import CacheStormClient
+
+client = CacheStormClient(host='localhost', port=6379)
+client.set('key', 'value')
+val = client.get('key')
+```
+
+**Redis CLI:**
 ```bash
-make setup    # Setup development environment
-make build    # Build binary
-make run      # Run server
-make test     # Run tests
+redis-cli -p 6379 SET mykey myvalue
+redis-cli -p 6379 GET mykey
 ```
 
 ## Installation Methods
@@ -173,6 +203,31 @@ curl -fsSL https://raw.githubusercontent.com/cachestorm/cachestorm/main/scripts/
 # Windows
 irm https://raw.githubusercontent.com/cachestorm/cachestorm/main/scripts/install.ps1 | iex -Method uninstall
 ```
+
+## Examples
+
+Working examples for all SDKs:
+
+```bash
+# Start CacheStorm
+docker-compose up -d
+
+# Go example
+cd examples/go
+go run main.go
+
+# Python example
+cd examples/python
+pip install -r requirements.txt
+python demo.py
+
+# TypeScript example
+cd examples/typescript
+npm install
+npm run demo
+```
+
+See [examples/](./examples/) directory for complete working examples.
 
 ## Command Modules
 
@@ -484,6 +539,51 @@ golangci-lint run
 go build -o cachestorm ./cmd/cachestorm
 ```
 
+## Official SDKs
+
+CacheStorm provides official SDKs for popular programming languages:
+
+| Language | Package | Installation | Documentation |
+|----------|---------|--------------|---------------|
+| **Go** | `github.com/cachestorm/cachestorm/clients/go` | `go get github.com/cachestorm/cachestorm/clients/go` | [Go SDK](./clients/go/README.md) |
+| **TypeScript** | `@cachestorm/client` | `npm install @cachestorm/client` | [TypeScript SDK](./clients/typescript/README.md) |
+| **Python** | `cachestorm` | `pip install cachestorm` | [Python SDK](./clients/python/README.md) |
+
+### SDK Features
+
+All official SDKs support:
+- ✅ Full Redis protocol compatibility
+- ✅ Connection pooling
+- ✅ Pipeline support
+- ✅ Pub/Sub support
+- ✅ Automatic reconnection
+- ✅ Type-safe APIs
+- ✅ CacheStorm-specific features (tags, invalidation)
+
+### Using Any Redis Client
+
+Since CacheStorm is ~99% Redis compatible, you can use any existing Redis client:
+
+```python
+# Python with redis-py
+import redis
+r = redis.Redis(host='localhost', port=6379)
+
+# Node.js with ioredis
+const Redis = require('ioredis');
+const redis = new Redis({ port: 6379 });
+
+# Go with go-redis
+import "github.com/redis/go-redis/v9"
+rdb := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
+
+# Java with Jedis
+Jedis jedis = new Jedis("localhost", 6379);
+
+# C# with StackExchange.Redis
+var redis = ConnectionMultiplexer.Connect("localhost:6379");
+```
+
 ## Project Structure
 
 ```
@@ -508,7 +608,12 @@ cachestorm/
 │   ├── sentinel/          # Redis Sentinel
 │   ├── server/            # Server implementation
 │   └── store/             # Data store (256-shard)
+├── clients/               # Official SDKs
+│   ├── go/                # Go client
+│   ├── typescript/        # TypeScript/JavaScript client
+│   └── python/            # Python client
 ├── plugins/               # Plugin implementations
+├── scripts/               # Installation scripts
 ├── tests/                 # Integration tests
 ├── benchmarks/            # Performance benchmarks
 ├── docs/                  # Documentation

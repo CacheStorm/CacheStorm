@@ -1,0 +1,101 @@
+# CacheStorm Configuration Example
+
+server:
+  port: 6379
+  http_port: 8080
+  bind: 0.0.0.0
+  max_clients: 10000
+  tcp_keepalive: 300
+
+tls:
+  enabled: false
+  cert_file: /etc/cachestorm/server.crt
+  key_file: /etc/cachestorm/server.key
+
+storage:
+  max_memory: 1gb
+  eviction_policy: allkeys-lru
+  # Options: allkeys-lru, allkeys-lfu, allkeys-random, volatile-lru, volatile-lfu, volatile-random, volatile-ttl, noeviction
+
+persistence:
+  enabled: true
+  mode: aof
+  # Options: aof, rdb, both
+  aof_fsync: everysec
+  # Options: always, everysec, no
+  aof_rewrite_min_size: 64mb
+  aof_rewrite_percentage: 100
+  rdb_interval: 300
+  rdb_compression: true
+  dir: /data
+
+logging:
+  level: info
+  # Options: debug, info, warn, error
+  format: json
+  # Options: json, text
+  output: stdout
+  # Options: stdout, stderr, file
+  file: /data/cachestorm.log
+
+cluster:
+  enabled: false
+  node_id: ""
+  bind_addr: ""
+  gossip_port: 7946
+  peers: []
+
+replication:
+  enabled: false
+  role: master
+  # Options: master, slave
+  master_host: ""
+  master_port: 6379
+  sync_timeout: 30
+
+sentinel:
+  enabled: false
+  master_name: mymaster
+  quorum: 2
+
+acl:
+  enabled: false
+  default_user: default
+  users:
+    - username: default
+      password: ""
+      commands: ["+@all"]
+      keys: ["*"]
+
+slow_log:
+  enabled: true
+  threshold_ms: 10
+  max_entries: 128
+
+latency_monitor:
+  enabled: true
+  threshold_ms: 1
+
+# CacheStorm-specific settings
+cachestorm:
+  # Tag-based invalidation settings
+  tags:
+    max_tags_per_key: 10
+    max_keys_per_tag: 10000
+
+  # HTTP API settings
+  http:
+    enabled: true
+    cors:
+      enabled: true
+      origins: ["*"]
+    auth:
+      enabled: false
+      token: ""
+
+  # Metrics and monitoring
+  metrics:
+    enabled: true
+    prefix: cachestorm
+    labels:
+      service: cachestorm
