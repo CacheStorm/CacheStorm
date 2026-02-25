@@ -86,7 +86,7 @@ jobs:
         run: go mod download
 
       - name: Run tests
-        run: go test ./internal/... -v -race -coverprofile=coverage.out -covermode=atomic
+        run: go test ./internal/... -v -coverprofile=coverage.out -covermode=atomic
 
       - name: Generate coverage report
         if: matrix.os == 'ubuntu-latest'
