@@ -34,7 +34,7 @@ go build -o cachestorm ./cmd/cachestorm
 
 ```bash
 docker pull cachestorm/cachestorm:latest
-docker run -d -p 6380:6380 -p 8080:8080 cachestorm/cachestorm
+docker run -d -p 6379:6379 -p 8080:8080 cachestorm/cachestorm
 ```
 
 ### Using Docker Compose
@@ -45,7 +45,7 @@ services:
   cachestorm:
     image: cachestorm/cachestorm:latest
     ports:
-      - "6380:6380"
+      - "6379:6379"
       - "8080:8080"
     volumes:
       - ./data:/var/lib/cachestorm
@@ -64,41 +64,41 @@ services:
 
 Output:
 ```
-2024-01-15T10:00:00Z INFO CacheStorm server started addr=0.0.0.0:6380
+2024-01-15T10:00:00Z INFO CacheStorm server started addr=0.0.0.0:6379
 2024-01-15T10:00:00Z INFO HTTP admin server started port=8080
 ```
 
 ### 2. Connect with redis-cli
 
 ```bash
-redis-cli -p 6380
+redis-cli -p 6379
 ```
 
 ```redis
-127.0.0.1:6380> PING
+127.0.0.1:6379> PING
 PONG
 
-127.0.0.1:6380> SET mykey "Hello CacheStorm"
+127.0.0.1:6379> SET mykey "Hello CacheStorm"
 OK
 
-127.0.0.1:6380> GET mykey
+127.0.0.1:6379> GET mykey
 "Hello CacheStorm"
 ```
 
 ### 3. Use Tag-Based Invalidation
 
 ```redis
-127.0.0.1:6380> SET user:1 '{"name":"John"}' TAGS "user" "session"
+127.0.0.1:6379> SET user:1 '{"name":"John"}' TAGS "user" "session"
 OK
 
-127.0.0.1:6380> SET user:2 '{"name":"Jane"}' TAGS "user"
+127.0.0.1:6379> SET user:2 '{"name":"Jane"}' TAGS "user"
 OK
 
-127.0.0.1:6380> TAGKEYS user
+127.0.0.1:6379> TAGKEYS user
 1) "user:1"
 2) "user:2"
 
-127.0.0.1:6380> INVALIDATE user
+127.0.0.1:6379> INVALIDATE user
 1) "user:1"
 2) "user:2"
 ```
@@ -114,7 +114,7 @@ Open your browser to `http://localhost:8080`
 ```python
 import redis
 
-r = redis.Redis(host='localhost', port=6380, decode_responses=True)
+r = redis.Redis(host='localhost', port=6379, decode_responses=True)
 
 # Basic operations
 r.set('key', 'value')
@@ -133,7 +133,7 @@ print(r.rpop('queue'))  # 'task1'
 
 ```javascript
 const Redis = require('ioredis');
-const redis = new Redis({ port: 6380 });
+const redis = new Redis({ port: 6379 });
 
 // Basic operations
 await redis.set('key', 'value');
@@ -161,7 +161,7 @@ import (
 
 func main() {
     rdb := redis.NewClient(&redis.Options{
-        Addr: "localhost:6380",
+        Addr: "localhost:6379",
     })
 
     ctx := context.Background()
@@ -200,7 +200,7 @@ Options:
 |----------|-------------|---------|
 | `CACHESTORM_CONFIG` | Path to config file | |
 | `CACHESTORM_BIND` | Bind address | `0.0.0.0` |
-| `CACHESTORM_PORT` | Server port | `6380` |
+| `CACHESTORM_PORT` | Server port | `6379` |
 | `CACHESTORM_MAX_MEMORY` | Max memory limit | `0` (unlimited) |
 | `CACHESTORM_LOG_LEVEL` | Log level | `info` |
 

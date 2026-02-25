@@ -1,0 +1,94 @@
+name: Changelog
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    types: [opened, reopened, synchronize]
+  workflow_dispatch:
+
+jobs:
+  update-changelog:
+    name: Update Changelog
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate changelog
+        uses: github-changelog-generator/github-changelog-generator@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          output: CHANGELOG.md
+          user: cachestorm
+          project: cachestorm
+          unreleased: true
+          issues: true
+          issues-wo-labels: true
+          pull-requests: true
+          pr-wo-labels: true
+          filter-by-milestone: false
+          author: true
+          usernames-as-github-logins: true
+          exclude-labels: duplicate,question,invalid,wontfix
+          breaking-labels: breaking
+          enhancement-labels: enhancement,feature
+          bug-labels: bug,fix
+          deprecated-labels: deprecated
+          removed-labels: removed
+          security-labels: security
+          exclude-tags-regex: "^v0\.0\."
+          since-tag: v0.1.0
+        continue-on-error: true
+
+      - name: Commit changelog
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add CHANGELOG.md
+          git diff --cached --quiet || git commit -m "docs: update changelog"
+          git push
+        continue-on-error: true
+
+  validate-changelog:
+    name: Validate Changelog
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check CHANGELOG.md exists
+        run: |
+          if [ ! -f CHANGELOG.md ]; then
+            echo "ERROR: CHANGELOG.md does not exist"
+            exit 1
+          fi
+
+      - name: Validate changelog format
+        run: |
+          # Check for required sections
+          if ! grep -q "## \[Unreleased\]" CHANGELOG.md; then
+            echo "WARNING: CHANGELOG.md is missing [Unreleased] section"
+          fi
+
+          # Check for version links
+          if ! grep -q "\[Unreleased\]:" CHANGELOG.md; then
+            echo "WARNING: CHANGELOG.md is missing version links"
+          fi
+
+      - name: Check for changes
+        if: github.event_name == 'pull_request'
+        run: |
+          # Check if PR includes changelog update
+          if git diff --name-only origin/${{ github.base_ref }} | grep -q "CHANGELOG.md"; then
+            echo "✓ CHANGELOG.md updated in this PR"
+          else
+            echo "⚠ WARNING: Consider updating CHANGELOG.md for user-facing changes"
+          fi
+        continue-on-error: true

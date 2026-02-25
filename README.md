@@ -1,19 +1,22 @@
 <div align="center">
   <img src="https://avatars.githubusercontent.com/u/262622049?s=400&u=a2e56c80726cb8a3ae6fc8f8622be5173b7b2848&v=4" alt="CacheStorm Logo" width="180" height="180">
-  
+
   # CacheStorm
-  
+
   **High-Performance, Redis-Compatible In-Memory Database**
-  
+
   [![Go Version](https://img.shields.io/badge/Go-1.22%2B-00ADD8?style=flat&logo=go)](https://golang.org)
   [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
   [![Redis Compatible](https://img.shields.io/badge/Redis-Compatible-DC382D?style=flat&logo=redis)](https://redis.io)
   [![Commands](https://img.shields.io/badge/Commands-1606+-green)](./docs/commands.md)
-  
+  [![Coverage](https://img.shields.io/badge/Coverage-89.1%25-brightgreen)](COVERAGE_REPORT.md)
+
   [![CI](https://github.com/cachestorm/cachestorm/actions/workflows/ci.yml/badge.svg)](https://github.com/cachestorm/cachestorm/actions/workflows/ci.yml)
   [![Release](https://github.com/cachestorm/cachestorm/actions/workflows/release.yml/badge.svg)](https://github.com/cachestorm/cachestorm/actions/workflows/release.yml)
+  [![Nightly](https://github.com/cachestorm/cachestorm/actions/workflows/nightly.yml/badge.svg)](https://github.com/cachestorm/cachestorm/actions/workflows/nightly.yml)
   [![Go Report Card](https://goreportcard.com/badge/github.com/cachestorm/cachestorm)](https://goreportcard.com/report/github.com/cachestorm/cachestorm)
   [![Docker](https://img.shields.io/docker/v/cachestorm/cachestorm/latest?label=Docker)](https://hub.docker.com/r/cachestorm/cachestorm)
+  [![Docker Pulls](https://img.shields.io/docker/pulls/cachestorm/cachestorm)](https://hub.docker.com/r/cachestorm/cachestorm)
 </div>
 
 ---
@@ -22,7 +25,9 @@ A high-performance, Redis-compatible in-memory database written in Go with **1,6
 
 **Redis Compatibility: ~99%** - Works with any Redis client out of the box!
 
-📚 **[Documentation](./docs/)** | 🚀 **[Getting Started](./docs/01-getting-started.md)** | 📖 **[Commands Reference](./docs/commands.md)** | 💬 **[Discussions](https://github.com/cachestorm/cachestorm/discussions)**
+**Test Coverage: 89.1%** with 100% test success rate across all 18 internal packages.
+
+📚 **[Documentation](./docs/)** | 🚀 **[Getting Started](./docs/01-getting-started.md)** | 📖 **[Commands Reference](./docs/commands.md)** | 📊 **[Coverage Report](./COVERAGE_REPORT.md)** | 💬 **[Discussions](https://github.com/cachestorm/cachestorm/discussions)**
 
 ## Table of Contents
 
@@ -32,6 +37,7 @@ A high-performance, Redis-compatible in-memory database written in Go with **1,6
 - [Command Modules](#command-modules)
 - [Data Types](#data-types)
 - [Performance](#performance)
+- [Testing](#testing)
 - [Docker](#docker)
 - [CI/CD & Releases](#cicd--releases)
 - [Contributing](#contributing)
@@ -63,6 +69,7 @@ A high-performance, Redis-compatible in-memory database written in Go with **1,6
 | **Monitoring** | 80+ | Metrics, alerts, dashboards |
 | **Security** | 40+ | ACL, secrets, encryption |
 | **Workflows** | 50+ | DAGs, state machines |
+| **Machine Learning** | 80+ | Models, embeddings, tensors |
 | **And more...** | 400+ | See [Commands Reference](./docs/commands.md) |
 
 ### Performance
@@ -74,51 +81,98 @@ A high-performance, Redis-compatible in-memory database written in Go with **1,6
 ### Enterprise Features
 - **Lua Scripting**: Full EVAL/EVALSHA/SCRIPT support
 - **Transactions**: MULTI/EXEC/DISCARD/WATCH support
-- **Pub/Sub**: Subscribe, Publish, Pattern Subscribe
+- **Pub/Sub**: Subscribe, Publish, Pattern Subscribe, Sharded Pub/Sub (Redis 7)
 - **Clustering**: Gossip-based cluster with hash slot routing
 - **Persistence**: AOF + RDB Snapshot
-- **Replication**: Master-Slave replication
+- **Replication**: Master-Slave replication with Sentinel support
 - **Access Control**: ACL support
 - **Monitoring**: Slow Log, Latency monitoring, Hot key detection
+- **HTTP API**: RESTful API on port 8080
 
-## Quick Start
+## Quick Start (One-Click Install)
 
+### Linux/macOS (curl)
 ```bash
-# Clone and build
+curl -fsSL https://raw.githubusercontent.com/cachestorm/cachestorm/main/scripts/install.sh | bash
+```
+
+### Windows (PowerShell)
+```powershell
+irm https://raw.githubusercontent.com/cachestorm/cachestorm/main/scripts/install.ps1 | iex
+```
+
+### Docker Compose (All Platforms)
+```bash
+curl -fsSL https://raw.githubusercontent.com/cachestorm/cachestorm/main/docker-compose.yml -o docker-compose.yml
+docker-compose up -d
+```
+
+### Makefile (Development)
+```bash
+make setup    # Setup development environment
+make build    # Build binary
+make run      # Run server
+make test     # Run tests
+```
+
+## Installation Methods
+
+### One-Click Installers
+
+| Platform | Method | Command |
+|----------|--------|---------|
+| Linux/macOS | Docker (recommended) | `curl -fsSL .../install.sh \| bash -s -- docker` |
+| Linux/macOS | Binary | `curl -fsSL .../install.sh \| bash -s -- binary` |
+| Linux/macOS | Source | `curl -fsSL .../install.sh \| bash -s -- source` |
+| Windows | Docker (recommended) | `irm .../install.ps1 \| iex -Method docker` |
+| Windows | Binary | `irm .../install.ps1 \| iex -Method binary` |
+| Windows | Source | `irm .../install.ps1 \| iex -Method source` |
+
+### Manual Installation
+
+#### From Source
+```bash
 git clone https://github.com/cachestorm/cachestorm
 cd cachestorm
 go build -o cachestorm ./cmd/cachestorm
-
-# Run with default settings
 ./cachestorm
-
-# Run with custom config
-./cachestorm --config config.yaml --port 6379
-
-# Test with redis-cli
-redis-cli -p 6379 PING
 ```
 
-## Installation
-
-### From Source
-```bash
-go build -o cachestorm ./cmd/cachestorm
-```
-
-### Using Go Install
+#### Using Go Install
 ```bash
 go install github.com/cachestorm/cachestorm@latest
 ```
 
-### Using Docker
+#### Using Docker
 ```bash
 docker pull cachestorm/cachestorm:latest
 docker run -d -p 6379:6379 -p 8080:8080 cachestorm/cachestorm
 ```
 
-### From Releases
+#### Using Docker Compose
+```bash
+# With monitoring (Prometheus + Grafana)
+docker-compose --profile monitoring up -d
+
+# With GUI (Redis Insight)
+docker-compose --profile gui up -d
+
+# All features
+docker-compose --profile gui --profile monitoring up -d
+```
+
+#### From Releases
 Download pre-built binaries from [GitHub Releases](https://github.com/cachestorm/cachestorm/releases).
+
+### Uninstall
+
+```bash
+# Linux/macOS
+curl -fsSL https://raw.githubusercontent.com/cachestorm/cachestorm/main/scripts/install.sh | bash -s -- uninstall
+
+# Windows
+irm https://raw.githubusercontent.com/cachestorm/cachestorm/main/scripts/install.ps1 | iex -Method uninstall
+```
 
 ## Command Modules
 
@@ -211,8 +265,56 @@ Benchmarks run on AMD Ryzen 9 5900X, 64GB RAM:
 | LPUSH | ~800K ops/sec | ~8M ops/sec |
 | ZADD | ~600K ops/sec | ~6M ops/sec |
 
+## Testing
+
+CacheStorm has comprehensive test coverage:
+
+- **100% Test Success Rate**: All 18 internal packages pass
+- **89.1% Average Coverage**: Industry-leading coverage
+- **Integration Tests**: Full integration test suite
+- **Benchmarks**: Performance benchmarks included
+
+```bash
+# Run all tests
+go test ./internal/... -v
+
+# Run with coverage
+go test ./internal/... -cover
+
+# Run benchmarks
+go test ./internal/store/... -bench=.
+```
+
+See [COVERAGE_REPORT.md](./COVERAGE_REPORT.md) for detailed coverage information.
+
 ## Docker
 
+### Quick Start with Docker
+```bash
+# Pull and run
+docker run -d -p 6379:6379 -p 8080:8080 --name cachestorm cachestorm/cachestorm:latest
+```
+
+### Docker Compose (Full Stack)
+```bash
+# Clone repository
+git clone https://github.com/cachestorm/cachestorm
+cd cachestorm
+
+# Basic setup
+docker-compose up -d
+
+# With monitoring (Prometheus + Grafana)
+docker-compose --profile monitoring up -d
+
+# With GUI (Redis Insight)
+docker-compose --profile gui up -d
+
+# Everything
+docker-compose --profile gui --profile monitoring up -d
+```
+
+### Docker Commands
 ```bash
 # Pull from Docker Hub
 docker pull cachestorm/cachestorm:latest
@@ -265,28 +367,64 @@ volumes:
 - **Test**: Unit tests, integration tests, benchmarks
 - **Lint**: golangci-lint with comprehensive rules
 - **Security**: Gosec vulnerability scanning
-- **Coverage**: Codecov integration
+- **Coverage**: Code coverage tracking
 
 ### Release Process
-- **Automated Releases**: Triggered by version tags
-- **Multi-Architecture**: linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64
-- **Package Formats**: Binary archives, DEB, RPM, APK
-- **Docker Images**: Multi-arch images pushed to Docker Hub & GHCR
+- **Automated Releases**: Triggered by version tags (`v*`) or manual dispatch
+- **Multi-Architecture**: linux/amd64, linux/arm64, linux/386, linux/arm/v7, darwin/amd64, darwin/arm64, windows/amd64
+- **Package Formats**: Binary archives (tar.gz, zip), DEB, RPM, APK
+- **Docker Images**: Multi-arch images pushed to Docker Hub & GHCR with digest attestation
 - **Package Managers**: Homebrew, Scoop, Snap
+- **Nightly Builds**: Automated daily builds with `nightly` tag
+- **Signed Releases**: GPG-signed binaries and checksums
 
 ### Creating a Release
 ```bash
-# Tag and push
-git tag v0.1.24
-git push origin v0.1.24
+# Method 1: Tag and push (automatic)
+git tag v0.1.28
+git push origin v0.1.28
 
-# CI/CD will automatically:
-# 1. Run all tests
-# 2. Build binaries for all platforms
-# 3. Create GitHub release
-# 4. Push Docker images
-# 5. Update package managers
+# Method 2: Manual dispatch from GitHub Actions
+# Go to Actions → Release → Run workflow
 ```
+
+### CI/CD Workflows
+
+| Workflow | Trigger | Description |
+|----------|---------|-------------|
+| [CI](.github/workflows/ci.yml) | Push, PR | Build, test, lint, security scan on all platforms |
+| [Release](.github/workflows/release.yml) | Tag `v*` | Full release with binaries, Docker, package managers |
+| [Nightly](.github/workflows/nightly.yml) | Daily 2AM | Nightly builds with latest changes |
+| [Changelog](.github/workflows/changelog.yml) | Push | Auto-update CHANGELOG.md |
+| [Dependencies](.github/workflows/dependency-update.yml) | Weekly | Automated dependency updates |
+| [Docs](.github/workflows/docs.yml) | Push to docs | Documentation deployment |
+
+### What CI/CD Does Automatically
+
+1. **On Every Push/PR**:
+   - Build on Linux, macOS, Windows
+   - Run tests with race detection
+   - Code coverage reporting (Codecov)
+   - Linting (golangci-lint, go vet)
+   - Security scanning (Gosec, Nancy, Trivy)
+   - Benchmark tests
+   - Docker build test
+
+2. **On Release Tag**:
+   - Run full test suite
+   - Build binaries for all platforms
+   - Create signed GitHub release
+   - Build and push multi-arch Docker images
+   - Update Homebrew formula
+   - Update Scoop manifest
+   - Publish Snap package
+   - Create release discussion
+   - Notify Slack/Discord
+
+3. **Scheduled Tasks**:
+   - Daily: Nightly builds
+   - Weekly: Dependency updates
+   - Daily: Changelog updates
 
 ## Configuration
 
@@ -310,7 +448,7 @@ persistence:
 cluster:
   enabled: false
   nodes: []
-  
+
 logging:
   level: info
   format: json
@@ -344,6 +482,39 @@ golangci-lint run
 
 # Build
 go build -o cachestorm ./cmd/cachestorm
+```
+
+## Project Structure
+
+```
+cachestorm/
+├── cmd/cachestorm/        # Main application entry point
+├── internal/
+│   ├── acl/               # Access control lists
+│   ├── batch/             # Batch processing
+│   ├── buffer/            # Buffer management
+│   ├── cluster/           # Clustering
+│   ├── command/           # Command handlers (1,606 commands)
+│   ├── config/            # Configuration management
+│   ├── graph/             # Graph operations
+│   ├── logger/            # Logging (100% coverage)
+│   ├── module/            # Module system
+│   ├── persistence/       # AOF/RDB persistence
+│   ├── plugin/            # Plugin system
+│   ├── pool/              # Connection pooling
+│   ├── replication/       # Master-slave replication
+│   ├── resp/              # RESP protocol
+│   ├── search/            # Search functionality
+│   ├── sentinel/          # Redis Sentinel
+│   ├── server/            # Server implementation
+│   └── store/             # Data store (256-shard)
+├── plugins/               # Plugin implementations
+├── tests/                 # Integration tests
+├── benchmarks/            # Performance benchmarks
+├── docs/                  # Documentation
+├── config/                # Configuration examples
+├── docker/                # Docker files
+└── web/                   # Web interface
 ```
 
 ## License

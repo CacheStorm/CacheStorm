@@ -1,0 +1,124 @@
+name: Documentation
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'docs/**'
+      - 'README.md'
+      - 'CHANGELOG.md'
+      - '.github/workflows/docs.yml'
+  pull_request:
+    paths:
+      - 'docs/**'
+      - 'README.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build Documentation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Build documentation site
+        run: |
+          # Create a simple static site from markdown
+          mkdir -p _site
+
+          # Copy README as index
+          cp README.md _site/
+
+          # Copy all docs
+          cp -r docs/* _site/ 2>/dev/null || true
+
+          # Create index.html
+          cat > _site/index.html << 'EOF'
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="UTF-8">
+            <meta http-equiv="refresh" content="0; url=https://github.com/cachestorm/cachestorm">
+            <title>CacheStorm Documentation</title>
+          </head>
+          <body>
+            <p>Redirecting to <a href="https://github.com/cachestorm/cachestorm">GitHub</a>...</p>
+          </body>
+          </html>
+          EOF
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    name: Deploy to GitHub Pages
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+  markdown-lint:
+    name: Markdown Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run markdownlint
+        uses: DavidAnson/markdownlint-cli2-action@v14
+        with:
+          globs: '**/*.md'
+          config: |
+            {
+              "MD013": false,
+              "MD024": false,
+              "MD033": false,
+              "MD041": false
+            }
+        continue-on-error: true
+
+  link-check:
+    name: Link Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check links
+        uses: lycheeverse/lychee-action@v1
+        with:
+          args: --timeout 60 --max-concurrency 1 --retry 3 README.md docs/
+        continue-on-error: true
+
+      - name: Upload link check results
+        uses: actions/upload-artifact@v4
+        with:
+          name: lychee-report
+          path: lychee/out.md
+        continue-on-error: true
