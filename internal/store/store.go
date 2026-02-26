@@ -2,15 +2,25 @@ package store
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 )
 
+const (
+	// MaxKeySize limits the maximum key length in bytes
+	MaxKeySize = 64 * 1024 // 64KB
+	// MaxValueSize limits the maximum value size in bytes
+	MaxValueSize = 512 * 1024 * 1024 // 512MB
+)
+
 var (
-	ErrKeyNotFound = errors.New("key not found")
-	ErrKeyExists   = errors.New("key already exists")
-	ErrWrongType   = errors.New("WRONGTYPE Operation against a key holding the wrong kind of value")
-	ErrMemoryLimit = errors.New("OOM command not allowed when used memory > 'maxmemory'")
+	ErrKeyNotFound   = errors.New("key not found")
+	ErrKeyExists    = errors.New("key already exists")
+	ErrWrongType    = errors.New("WRONGTYPE Operation against a key holding the wrong kind of value")
+	ErrMemoryLimit  = errors.New("OOM command not allowed when used memory > 'maxmemory'")
+	ErrKeyTooLarge  = fmt.Errorf("ERR string length limit is %d bytes", MaxKeySize)
+	ErrValueTooLarge = fmt.Errorf("ERR string length limit is %d bytes", MaxValueSize)
 )
 
 type GetResult struct {
@@ -31,7 +41,6 @@ type Store struct {
 	tagIndex     *TagIndex
 	namespaceMgr *NamespaceManager
 	pubsub       *PubSub
-	mu           sync.RWMutex
 	versions     map[string]int64
 	versionMu    sync.RWMutex
 }
@@ -73,6 +82,12 @@ func (s *Store) IncrementVersion(key string) {
 	s.versions[key]++
 }
 
+func (s *Store) DeleteVersion(key string) {
+	s.versionMu.Lock()
+	defer s.versionMu.Unlock()
+	delete(s.versions, key)
+}
+
 func (s *Store) shardIndex(key string) uint32 {
 	return fnv32a(key) & ShardMask
 }
@@ -101,6 +116,7 @@ func (s *Store) Get(key string) (*Entry, bool) {
 
 	if entry.IsExpired() {
 		shard.Delete(key)
+		s.DeleteVersion(key) // Clean up version to prevent memory leak
 		return nil, false
 	}
 
@@ -109,6 +125,16 @@ func (s *Store) Get(key string) (*Entry, bool) {
 }
 
 func (s *Store) Set(key string, value Value, opts SetOptions) error {
+	// Validate key size
+	if len(key) > MaxKeySize {
+		return ErrKeyTooLarge
+	}
+
+	// Validate value size
+	if value.SizeOf() > MaxValueSize {
+		return ErrValueTooLarge
+	}
+
 	idx := s.shardIndex(key)
 	shard := s.shards[idx]
 
@@ -139,6 +165,11 @@ func (s *Store) Set(key string, value Value, opts SetOptions) error {
 }
 
 func (s *Store) SetEntry(key string, entry *Entry) {
+	// Validate key size
+	if len(key) > MaxKeySize {
+		return
+	}
+
 	idx := s.shardIndex(key)
 	shard := s.shards[idx]
 	shard.Set(key, entry)
@@ -158,6 +189,7 @@ func (s *Store) Delete(key string) bool {
 	_, deleted := shard.Delete(key)
 	if deleted {
 		s.IncrementVersion(key)
+		s.DeleteVersion(key) // Clean up version to prevent memory leak
 	}
 	return deleted
 }
@@ -173,6 +205,7 @@ func (s *Store) Exists(key string) bool {
 
 	if entry.IsExpired() {
 		shard.Delete(key)
+		s.DeleteVersion(key) // Clean up version to prevent memory leak
 		return false
 	}
 
@@ -287,6 +320,10 @@ func (s *Store) Flush() {
 	for i := 0; i < NumShards; i++ {
 		s.shards[i].Flush()
 	}
+	// Clear version map to prevent memory leak
+	s.versionMu.Lock()
+	s.versions = make(map[string]int64)
+	s.versionMu.Unlock()
 }
 
 func (s *Store) GetShard(key string) *Shard {

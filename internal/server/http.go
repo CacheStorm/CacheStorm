@@ -1,15 +1,18 @@
 package server
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cachestorm/cachestorm/internal/command"
+	"github.com/cachestorm/cachestorm/internal/logger"
 	"github.com/cachestorm/cachestorm/internal/store"
 )
 
@@ -20,19 +23,33 @@ type HTTPConfig struct {
 }
 
 type HTTPServer struct {
-	store   *store.Store
-	router  *command.Router
-	server  *http.Server
-	started time.Time
-	config  *HTTPConfig
+	ctx         context.Context
+	cancel      context.CancelFunc
+	store       *store.Store
+	router      *command.Router
+	server      *http.Server
+	started     time.Time
+	config      *HTTPConfig
+	metricsCache *metricsCache
+}
+
+type metricsCache struct {
+	keys      int64
+	mem       int64
+	cachedAt  time.Time
+	mu        sync.RWMutex
 }
 
 func NewHTTPServer(s *store.Store, router *command.Router, cfg *HTTPConfig) *HTTPServer {
+	ctx, cancel := context.WithCancel(context.Background())
 	h := &HTTPServer{
-		store:   s,
-		router:  router,
-		started: time.Now(),
-		config:  cfg,
+		ctx:         ctx,
+		cancel:      cancel,
+		store:       s,
+		router:      router,
+		started:     time.Now(),
+		config:      cfg,
+		metricsCache: &metricsCache{},
 	}
 
 	mux := http.NewServeMux()
@@ -111,17 +128,26 @@ func (h *HTTPServer) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func (h *HTTPServer) Start() error {
+	if h.config.Password == "" {
+		logger.Warn().Msg("HTTP server starting without authentication - this is insecure for production")
+	}
 	return h.server.ListenAndServe()
 }
 
 func (h *HTTPServer) Stop() error {
-	return h.server.Close()
+	// Cancel the context to signal shutdown
+	h.cancel()
+	ctx, cancel := context.WithTimeout(h.ctx, 5*time.Second)
+	defer cancel()
+	return h.server.Shutdown(ctx)
 }
 
 func (h *HTTPServer) writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(data)
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		logger.Debug().Err(err).Msg("failed to encode JSON response")
+	}
 }
 
 func (h *HTTPServer) writeError(w http.ResponseWriter, status int, message string) {
@@ -160,8 +186,36 @@ func (h *HTTPServer) handleInfo(w http.ResponseWriter, _ *http.Request) {
 func (h *HTTPServer) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
 
+	// Check cache (5 second TTL)
+	h.metricsCache.mu.RLock()
+	if time.Since(h.metricsCache.cachedAt) < 5*time.Second {
+		keys := h.metricsCache.keys
+		mem := h.metricsCache.mem
+		h.metricsCache.mu.RUnlock()
+		metrics := fmt.Sprintf(`# HELP cachestorm_keys_total Total number of keys
+# TYPE cachestorm_keys_total gauge
+cachestorm_keys_total %d
+# HELP cachestorm_memory_bytes Memory usage in bytes
+# TYPE cachestorm_memory_bytes gauge
+cachestorm_memory_bytes %d
+# HELP cachestorm_uptime_seconds Server uptime in seconds
+# TYPE cachestorm_uptime_seconds gauge
+cachestorm_uptime_seconds %.0f
+`, keys, mem, time.Since(h.started).Seconds())
+		w.Write([]byte(metrics))
+		return
+	}
+	h.metricsCache.mu.RUnlock()
+
+	// Update cache
 	keys := h.store.KeyCount()
 	mem := h.store.MemUsage()
+
+	h.metricsCache.mu.Lock()
+	h.metricsCache.keys = keys
+	h.metricsCache.mem = mem
+	h.metricsCache.cachedAt = time.Now()
+	h.metricsCache.mu.Unlock()
 
 	metrics := fmt.Sprintf(`# HELP cachestorm_keys_total Total number of keys
 # TYPE cachestorm_keys_total gauge

@@ -117,6 +117,8 @@ func (tw *TimingWheel) Remove(key string) {
 func (tw *TimingWheel) Start() {
 	tw.wg.Add(1)
 	go tw.tickLoop()
+	tw.wg.Add(1)
+	go tw.farFutureCleanup()
 }
 
 func (tw *TimingWheel) Stop() {
@@ -165,24 +167,43 @@ func (tw *TimingWheel) cascade(level int, now int64) {
 	tw.levels[level].current = (tw.levels[level].current + 1) % tw.levels[level].numSlots
 	tw.levels[level].mu.Unlock()
 
+	// Process keys directly without creating a full map copy
+	// First, collect keys to process while holding lock
 	bucket.mu.Lock()
-	keys := make(map[string]int64, len(bucket.keys))
-	for k, v := range bucket.keys {
-		keys[k] = v
+	var expired []string
+	var toMove []struct {
+		key       string
+		expiresAt int64
 	}
-	bucket.keys = make(map[string]int64)
-	bucket.mu.Unlock()
 
-	for key, expiresAt := range keys {
+	for key, expiresAt := range bucket.keys {
+		delete(bucket.keys, key)
 		duration := time.Duration(expiresAt - now)
 		if duration <= 0 {
-			tw.expireKey(key)
-		} else if level == 1 {
-			tw.addToLevel(0, key, expiresAt, duration)
-		} else if level == 2 {
-			tw.addToLevel(1, key, expiresAt, duration)
+			expired = append(expired, key)
 		} else {
-			tw.addToLevel(2, key, expiresAt, duration)
+			toMove = append(toMove, struct {
+				key       string
+				expiresAt int64
+			}{key, expiresAt})
+		}
+	}
+	bucket.mu.Unlock()
+
+	// Process expired keys
+	for _, key := range expired {
+		tw.expireKey(key)
+	}
+
+	// Move keys to appropriate levels
+	for _, item := range toMove {
+		duration := time.Duration(item.expiresAt - now)
+		if level == 1 {
+			tw.addToLevel(0, item.key, item.expiresAt, duration)
+		} else if level == 2 {
+			tw.addToLevel(1, item.key, item.expiresAt, duration)
+		} else {
+			tw.addToLevel(2, item.key, item.expiresAt, duration)
 		}
 	}
 
@@ -210,8 +231,83 @@ func (tw *TimingWheel) expireBucket(bucket *wheelBucket, now int64) {
 }
 
 func (tw *TimingWheel) expireKey(key string) {
-	tw.store.Delete(key)
-	if tw.tagIndex != nil {
-		tw.tagIndex.RemoveKey(key, nil)
+	// Get entry before deleting to ensure proper cleanup
+	entry, exists := tw.store.Get(key)
+	if exists {
+		tw.store.Delete(key)
+		if tw.tagIndex != nil {
+			tw.tagIndex.RemoveKey(key, entry.Tags)
+		}
+	}
+}
+
+// farFutureCleanup periodically checks and cleans up expired keys in farFuture bucket
+// and moves keys that are now within range to appropriate timing wheel levels
+func (tw *TimingWheel) farFutureCleanup() {
+	defer tw.wg.Done()
+
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-tw.stopCh:
+			return
+		case <-ticker.C:
+			tw.cleanupFarFuture()
+		}
+	}
+}
+
+func (tw *TimingWheel) cleanupFarFuture() {
+	tw.mu.Lock()
+	defer tw.mu.Unlock()
+
+	now := time.Now().UnixNano()
+
+	tw.farFuture.mu.Lock()
+	var expired []string
+	var toMove map[string]int64
+
+	for key, expiresAt := range tw.farFuture.keys {
+		if expiresAt <= now {
+			expired = append(expired, key)
+		} else {
+			duration := time.Duration(expiresAt - now)
+			if duration < 365*24*time.Hour {
+				if toMove == nil {
+					toMove = make(map[string]int64)
+				}
+				toMove[key] = expiresAt
+			}
+		}
+	}
+
+	// Remove expired keys
+	for _, key := range expired {
+		delete(tw.farFuture.keys, key)
+	}
+
+	// Move keys that are now within range
+	for key, expiresAt := range toMove {
+		delete(tw.farFuture.keys, key)
+		duration := time.Duration(expiresAt - now)
+		switch {
+		case duration < time.Hour:
+			tw.addToLevel(0, key, expiresAt, duration)
+		case duration < 24*time.Hour:
+			tw.addToLevel(1, key, expiresAt, duration)
+		case duration < 30*24*time.Hour:
+			tw.addToLevel(2, key, expiresAt, duration)
+		default:
+			// Still in far future, keep it
+			tw.farFuture.keys[key] = expiresAt
+		}
+	}
+	tw.farFuture.mu.Unlock()
+
+	// Expire keys that have passed their expiration time
+	for _, key := range expired {
+		tw.expireKey(key)
 	}
 }

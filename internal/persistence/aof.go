@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -39,8 +40,8 @@ type AOFWriter struct {
 	file      *os.File
 	writer    *bufio.Writer
 	writerBuf []byte
-	size      int64
-	dirty     int64
+	size      atomic.Int64
+	dirty     atomic.Int64
 	lastSync  time.Time
 	stopCh    chan struct{}
 	wg        sync.WaitGroup
@@ -73,7 +74,7 @@ func (w *AOFWriter) Start() error {
 		w.file.Close()
 		return fmt.Errorf("failed to stat AOF file: %v", err)
 	}
-	w.size = stat.Size()
+	w.size.Store(stat.Size())
 
 	w.writer = bufio.NewWriterSize(w.file, 8192)
 	w.running.Store(true)
@@ -146,18 +147,18 @@ func (w *AOFWriter) Append(cmd string, args [][]byte) error {
 
 	w.writerBuf = w.writerBuf[:0]
 	w.writerBuf = append(w.writerBuf, '*')
-	w.writerBuf = append(w.writerBuf, fmt.Sprintf("%d", len(args)+1)...)
+	w.writerBuf = strconv.AppendInt(w.writerBuf, int64(len(args)+1), 10)
 	w.writerBuf = append(w.writerBuf, '\r', '\n')
 
 	w.writerBuf = append(w.writerBuf, '$')
-	w.writerBuf = append(w.writerBuf, fmt.Sprintf("%d", len(cmd))...)
+	w.writerBuf = strconv.AppendInt(w.writerBuf, int64(len(cmd)), 10)
 	w.writerBuf = append(w.writerBuf, '\r', '\n')
 	w.writerBuf = append(w.writerBuf, cmd...)
 	w.writerBuf = append(w.writerBuf, '\r', '\n')
 
 	for _, arg := range args {
 		w.writerBuf = append(w.writerBuf, '$')
-		w.writerBuf = append(w.writerBuf, fmt.Sprintf("%d", len(arg))...)
+		w.writerBuf = strconv.AppendInt(w.writerBuf, int64(len(arg)), 10)
 		w.writerBuf = append(w.writerBuf, '\r', '\n')
 		w.writerBuf = append(w.writerBuf, arg...)
 		w.writerBuf = append(w.writerBuf, '\r', '\n')
@@ -168,8 +169,8 @@ func (w *AOFWriter) Append(cmd string, args [][]byte) error {
 		return fmt.Errorf("failed to write to AOF: %v", err)
 	}
 
-	w.size += int64(n)
-	w.dirty++
+	w.size.Add(int64(n))
+	w.dirty.Add(1)
 
 	if w.config.SyncPolicy == AOFAlways {
 		w.writer.Flush()
@@ -180,15 +181,11 @@ func (w *AOFWriter) Append(cmd string, args [][]byte) error {
 }
 
 func (w *AOFWriter) Size() int64 {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.size
+	return w.size.Load()
 }
 
 func (w *AOFWriter) Dirty() int64 {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.dirty
+	return w.dirty.Load()
 }
 
 func (w *AOFWriter) Flush() error {

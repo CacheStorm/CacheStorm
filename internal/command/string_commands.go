@@ -1,6 +1,7 @@
 package command
 
 import (
+	"errors"
 	"strconv"
 	"strings"
 	"time"
@@ -134,10 +135,10 @@ func cmdSET(ctx *Context) error {
 
 	err := ctx.Store.Set(key, &store.StringValue{Data: value}, opts)
 	if err != nil {
-		if err == store.ErrKeyExists {
+		if errors.Is(err, store.ErrKeyExists) {
 			return ctx.WriteNull()
 		}
-		if err == store.ErrKeyNotFound {
+		if errors.Is(err, store.ErrKeyNotFound) {
 			return ctx.WriteNull()
 		}
 		return ctx.WriteError(err)
@@ -431,7 +432,7 @@ func cmdSETNX(ctx *Context) error {
 
 	err := ctx.Store.Set(key, &store.StringValue{Data: value}, store.SetOptions{NX: true})
 	if err != nil {
-		if err == store.ErrKeyExists {
+		if errors.Is(err, store.ErrKeyExists) {
 			return ctx.WriteInteger(0)
 		}
 		return ctx.WriteError(err)

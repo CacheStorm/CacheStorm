@@ -1,6 +1,7 @@
 package pool
 
 import (
+	"log"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -100,7 +101,9 @@ func (p *Pool) Get() (*Conn, error) {
 		c := p.conns[i]
 		if !c.inUse.Load() {
 			if time.Since(c.lastUsed) > p.config.IdleTimeout {
-				c.conn.Close()
+				if err := c.conn.Close(); err != nil {
+					log.Printf("pool: error closing idle connection: %v", err)
+				}
 				p.conns = append(p.conns[:i], p.conns[i+1:]...)
 				continue
 			}
@@ -176,7 +179,9 @@ func (p *Pool) Close() {
 
 	p.mu.Lock()
 	for _, c := range p.conns {
-		c.conn.Close()
+		if err := c.conn.Close(); err != nil {
+			log.Printf("pool: error closing connection: %v", err)
+		}
 	}
 	p.conns = nil
 	p.mu.Unlock()
@@ -197,7 +202,9 @@ func (p *Pool) cleanup() {
 
 		for _, c := range p.conns {
 			if !c.inUse.Load() && now.Sub(c.lastUsed) > p.config.IdleTimeout {
-				c.conn.Close()
+				if err := c.conn.Close(); err != nil {
+					log.Printf("pool: error closing idle connection during cleanup: %v", err)
+				}
 			} else {
 				active = append(active, c)
 			}
