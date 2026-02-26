@@ -26,7 +26,30 @@ func NewScriptEngine(s *store.Store) *ScriptEngine {
 }
 
 func (e *ScriptEngine) CreateState(keys []string, args []string) *lua.LState {
-	L := lua.NewState()
+	L := lua.NewState(lua.Options{
+		SkipOpenLibs: true,
+	})
+
+	// Open only safe libraries
+	for _, pair := range []struct {
+		name string
+		fn   lua.LGFunction
+	}{
+		{lua.LoadLibName, lua.OpenPackage},
+		{lua.BaseLibName, lua.OpenBase},
+		{lua.TabLibName, lua.OpenTable},
+		{lua.StringLibName, lua.OpenString},
+		{lua.MathLibName, lua.OpenMath},
+	} {
+		L.Push(L.NewFunction(pair.fn))
+		L.Push(lua.LString(pair.name))
+		L.Call(1, 0)
+	}
+
+	// Remove dangerous functions
+	L.SetGlobal("dofile", lua.LNil)
+	L.SetGlobal("loadfile", lua.LNil)
+	L.SetGlobal("require", lua.LNil)
 
 	redisTable := L.NewTable()
 	L.SetGlobal("redis", redisTable)
@@ -874,6 +897,12 @@ func (e *ScriptEngine) executeCommand(L *lua.LState, cmd string, args []string) 
 	default:
 		return lua.LNil
 	}
+}
+
+func (e *ScriptEngine) WithState(keys []string, args []string, fn func(*lua.LState) error) error {
+	L := e.CreateState(keys, args)
+	defer L.Close()
+	return fn(L)
 }
 
 func (e *ScriptEngine) Eval(script string, keys []string, args []string) (interface{}, error) {

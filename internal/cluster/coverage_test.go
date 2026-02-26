@@ -374,6 +374,9 @@ func TestGossipHandleMessage(t *testing.T) {
 	c := New("node1", "127.0.0.1", 7000, 7001, nil)
 	g := NewGossip(c)
 
+	// Add test node to known nodes to pass validation
+	g.knownNodes["other-node"] = true
+
 	msg := &GossipMessage{
 		Type:      "ping",
 		SenderID:  "other-node",

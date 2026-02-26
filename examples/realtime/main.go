@@ -7,7 +7,7 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/cachestorm/cachestorm/clients/go/cachestorm"
+	"github.com/cachestorm/cachestorm/clients/go"
 )
 
 // SensorData represents IoT sensor data

@@ -1,8 +1,10 @@
 package command
 
 import (
+	"crypto/rand"
 	"errors"
 	"fmt"
+	"math/big"
 	"sort"
 	"strconv"
 	"strings"
@@ -1814,15 +1816,15 @@ func cmdACL(ctx *Context) error {
 }
 
 func generatePassword(bits int) string {
-	const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*"
 	length := bits / 6
-	if length < 1 {
-		length = 1
+	if length < 8 {
+		length = 8
 	}
 	result := make([]byte, length)
 	for i := range result {
-		result[i] = chars[time.Now().UnixNano()%int64(len(chars))]
-		time.Sleep(time.Nanosecond)
+		n, _ := rand.Int(rand.Reader, big.NewInt(int64(len(chars))))
+		result[i] = chars[n.Int64()]
 	}
 	return string(result)
 }

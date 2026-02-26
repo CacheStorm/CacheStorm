@@ -24,6 +24,7 @@ type EvictionController struct {
 	memTracker *MemoryTracker
 	sampleSize int
 	onEvict    func(key string, entry *Entry)
+	rnd        *rand.Rand
 }
 
 func NewEvictionController(policy EvictionPolicy, maxMemory int64, s *Store, mt *MemoryTracker, sampleSize int) *EvictionController {
@@ -33,6 +34,7 @@ func NewEvictionController(policy EvictionPolicy, maxMemory int64, s *Store, mt 
 		store:      s,
 		memTracker: mt,
 		sampleSize: sampleSize,
+		rnd:        rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 }
 
@@ -82,11 +84,18 @@ func (ec *EvictionController) evictOne() bool {
 		return false
 	}
 
-	ec.store.Delete(key)
+	// Get entry before deleting to avoid race condition
+	// where key could be re-created between Delete and Get
+	var entry *Entry
+	var exists bool
 	if ec.onEvict != nil {
-		if entry, exists := ec.store.Get(key); exists {
-			ec.onEvict(key, entry)
-		}
+		entry, exists = ec.store.Get(key)
+	}
+
+	ec.store.Delete(key)
+
+	if exists && ec.onEvict != nil {
+		ec.onEvict(key, entry)
 	}
 	return true
 }
@@ -156,14 +165,14 @@ func (ec *EvictionController) selectRandom() string {
 	if len(keys) == 0 {
 		return ""
 	}
-	return keys[rand.Intn(len(keys))]
+	return keys[ec.rnd.Intn(len(keys))]
 }
 
 func (ec *EvictionController) sampleKeys() []candidate {
 	candidates := make([]candidate, 0, ec.sampleSize)
 
 	for i := 0; i < ec.sampleSize; i++ {
-		shardIdx := rand.Intn(NumShards)
+		shardIdx := ec.rnd.Intn(NumShards)
 		shard := ec.store.shards[shardIdx]
 
 		shard.mu.RLock()
@@ -190,7 +199,7 @@ func (ec *EvictionController) sampleVolatileKeys() []candidate {
 	candidates := make([]candidate, 0, ec.sampleSize)
 
 	for i := 0; i < ec.sampleSize*2 && len(candidates) < ec.sampleSize; i++ {
-		shardIdx := rand.Intn(NumShards)
+		shardIdx := ec.rnd.Intn(NumShards)
 		shard := ec.store.shards[shardIdx]
 
 		shard.mu.RLock()
@@ -221,6 +230,3 @@ func (ec *EvictionController) ForceEvict(n int) int {
 	return evicted
 }
 
-func init() {
-	rand.Seed(time.Now().UnixNano())
-}

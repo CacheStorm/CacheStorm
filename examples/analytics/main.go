@@ -7,7 +7,7 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/cachestorm/cachestorm/clients/go/cachestorm"
+	"github.com/cachestorm/cachestorm/clients/go"
 )
 
 // Event represents an analytics event

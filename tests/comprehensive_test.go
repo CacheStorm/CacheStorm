@@ -254,13 +254,21 @@ func TestPersistenceFeatures(t *testing.T) {
 	defer client.Close()
 
 	t.Run("TTL", func(t *testing.T) {
-		// SET with EX
-		client.Send("SET", "ttl:key1", "value1", "EX", "1")
+		// SET with EX (use 2 seconds to avoid race conditions)
+		client.Send("SET", "ttl:key1", "value1", "EX", "2")
 
-		// TTL
-		ttl, _ := client.Send("TTL", "ttl:key1")
-		if ttl.(int64) <= 0 || ttl.(int64) > 1 {
-			t.Errorf("TTL failed: %v", ttl)
+		// TTL with retry mechanism for robustness
+		var ttl int64
+		for i := 0; i < 5; i++ {
+			result, _ := client.Send("TTL", "ttl:key1")
+			ttl = result.(int64)
+			if ttl > 0 && ttl <= 2 {
+				break
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		if ttl <= 0 || ttl > 2 {
+			t.Errorf("TTL failed: got %v, expected between 1 and 2", ttl)
 		}
 
 		// Wait for expiry

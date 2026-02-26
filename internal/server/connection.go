@@ -44,7 +44,15 @@ func (c *Connection) Handle() {
 		Str("remote", c.conn.RemoteAddr().String()).
 		Msg("client connected")
 
+	// Set read timeout to prevent slowloris attacks
+	if tcpConn, ok := c.conn.(*net.TCPConn); ok {
+		tcpConn.SetKeepAlive(true)
+		tcpConn.SetKeepAlivePeriod(3 * time.Minute)
+	}
+
 	for {
+		// Set read deadline for each command
+		c.conn.SetReadDeadline(time.Now().Add(5 * time.Minute))
 		cmd, args, err := c.reader.ReadCommand()
 		if err != nil {
 			if err.Error() == "EOF" {

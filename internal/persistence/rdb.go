@@ -57,16 +57,22 @@ func (w *RDBWriter) Save(path string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create file: %v", err)
 	}
-	defer f.Close()
 
 	if err := w.writeRDB(f); err != nil {
+		f.Close()
 		os.Remove(tempPath)
 		return err
 	}
 
 	if err := f.Sync(); err != nil {
+		f.Close()
 		os.Remove(tempPath)
 		return fmt.Errorf("failed to sync file: %v", err)
+	}
+
+	if err := f.Close(); err != nil {
+		os.Remove(tempPath)
+		return fmt.Errorf("failed to close file: %v", err)
 	}
 
 	if err := os.Rename(tempPath, path); err != nil {

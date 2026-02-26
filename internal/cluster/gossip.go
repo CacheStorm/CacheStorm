@@ -31,12 +31,13 @@ type NodeInfo struct {
 }
 
 type Gossip struct {
-	cluster  *Cluster
-	mu       sync.RWMutex
-	peers    map[string]*gossipPeer
-	stopCh   chan struct{}
-	wg       sync.WaitGroup
-	interval time.Duration
+	cluster   *Cluster
+	mu        sync.RWMutex
+	peers     map[string]*gossipPeer
+	stopCh    chan struct{}
+	wg        sync.WaitGroup
+	interval  time.Duration
+	knownNodes map[string]bool // Track known node IDs for validation
 }
 
 type gossipPeer struct {
@@ -48,10 +49,11 @@ type gossipPeer struct {
 
 func NewGossip(c *Cluster) *Gossip {
 	return &Gossip{
-		cluster:  c,
-		peers:    make(map[string]*gossipPeer),
-		stopCh:   make(chan struct{}),
-		interval: 1 * time.Second,
+		cluster:    c,
+		peers:      make(map[string]*gossipPeer),
+		knownNodes: make(map[string]bool),
+		stopCh:     make(chan struct{}),
+		interval:   1 * time.Second,
 	}
 }
 
@@ -136,7 +138,45 @@ func (g *Gossip) handleConnection(conn net.Conn) {
 	}
 }
 
+func (g *Gossip) validateSender(msg *GossipMessage) bool {
+	// Reject messages with empty sender ID
+	if msg.SenderID == "" {
+		return false
+	}
+
+	// Reject messages from self (loop detection)
+	if msg.SenderID == g.cluster.Self().ID {
+		return false
+	}
+
+	// Check if sender is a known node or in our peer list
+	g.mu.RLock()
+	_, isKnownPeer := g.peers[msg.SenderID]
+	g.mu.RUnlock()
+
+	if isKnownPeer {
+		return true
+	}
+
+	// For "meet" messages, allow new nodes
+	if msg.Type == "meet" {
+		return true
+	}
+
+	// For other messages, check known nodes
+	g.mu.RLock()
+	_, isKnown := g.knownNodes[msg.SenderID]
+	g.mu.RUnlock()
+
+	return isKnown
+}
+
 func (g *Gossip) handleMessage(msg *GossipMessage) *GossipMessage {
+	// Validate sender
+	if !g.validateSender(msg) {
+		return nil
+	}
+
 	switch msg.Type {
 	case "ping":
 		g.updateNodeFromInfo(msg.Nodes)

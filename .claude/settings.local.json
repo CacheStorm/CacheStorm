@@ -1,0 +1,15 @@
+{
+  "autoUpdatesChannel": "latest",
+  "permissions": {
+    "allow": [
+      "Bash(mkdir:*)",
+      "Bash(cd:*)",
+      "Bash(where:*)",
+      "Bash(ls:*)",
+      "Bash(find:*)",
+      "Bash(dir:*)",
+      "Write",
+      "Edit"
+    ]
+  }
+}

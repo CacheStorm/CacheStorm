@@ -106,27 +106,45 @@ func (w *Writer) WriteBulkBytes(b []byte) error {
 }
 
 func (w *Writer) WriteNullBulkString() error {
-	w.wr.WriteByte(byte(TypeBulkString))
-	w.wr.WriteString("-1\r\n")
+	if err := w.wr.WriteByte(byte(TypeBulkString)); err != nil {
+		return err
+	}
+	if _, err := w.wr.WriteString("-1\r\n"); err != nil {
+		return err
+	}
 	return w.wr.Flush()
 }
 
 func (w *Writer) WriteNull() error {
-	w.wr.WriteByte(byte(TypeNull))
-	w.wr.WriteString("\r\n")
+	if err := w.wr.WriteByte(byte(TypeNull)); err != nil {
+		return err
+	}
+	if _, err := w.wr.WriteString("\r\n"); err != nil {
+		return err
+	}
 	return w.wr.Flush()
 }
 
 func (w *Writer) WriteNullArray() error {
-	w.wr.WriteByte(byte(TypeArray))
-	w.wr.WriteString("-1\r\n")
+	if err := w.wr.WriteByte(byte(TypeArray)); err != nil {
+		return err
+	}
+	if _, err := w.wr.WriteString("-1\r\n"); err != nil {
+		return err
+	}
 	return w.wr.Flush()
 }
 
 func (w *Writer) WriteArray(items []*Value) error {
-	w.wr.WriteByte(byte(TypeArray))
-	w.wr.WriteString(strconv.Itoa(len(items)))
-	w.wr.WriteString("\r\n")
+	if err := w.wr.WriteByte(byte(TypeArray)); err != nil {
+		return err
+	}
+	if _, err := w.wr.WriteString(strconv.Itoa(len(items))); err != nil {
+		return err
+	}
+	if _, err := w.wr.WriteString("\r\n"); err != nil {
+		return err
+	}
 	for _, item := range items {
 		if err := w.WriteValueNoFlush(item); err != nil {
 			return err

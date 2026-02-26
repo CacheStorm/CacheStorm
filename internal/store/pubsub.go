@@ -2,6 +2,7 @@ package store
 
 import (
 	"sync"
+	"sync/atomic"
 )
 
 type PubSub struct {
@@ -12,10 +13,11 @@ type PubSub struct {
 }
 
 type Subscriber struct {
-	ID     int64
-	ch     chan []byte
-	mu     sync.Mutex
-	closed bool
+	ID        int64
+	ch        chan []byte
+	mu        sync.Mutex
+	closed    bool
+	dropCount atomic.Int64
 }
 
 func NewPubSub() *PubSub {
@@ -45,8 +47,13 @@ func (s *Subscriber) Send(message []byte) bool {
 	case s.ch <- message:
 		return true
 	default:
+		s.dropCount.Add(1)
 		return false
 	}
+}
+
+func (s *Subscriber) DropCount() int64 {
+	return s.dropCount.Load()
 }
 
 func (s *Subscriber) Channel() <-chan []byte {
