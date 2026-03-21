@@ -6,15 +6,23 @@ services:
     container_name: cachestorm
     ports:
       - "6380:6380"
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"  # Admin API bound to localhost only
     volumes:
       - cachestorm-data:/data
       - ./config:/etc/cachestorm:ro
     environment:
       - CACHESTORM_CONFIG=/etc/cachestorm/cachestorm.yaml
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+          cpus: '2'
+        reservations:
+          memory: 512m
+          cpus: '0.5'
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/api/health"]
       interval: 30s
       timeout: 3s
       retries: 3
@@ -24,7 +32,7 @@ services:
 
   # Optional: Redis Insight for GUI management
   redisinsight:
-    image: redis/redisinsight:latest
+    image: redis/redisinsight:2.68
     container_name: cachestorm-insight
     ports:
       - "5540:5540"
@@ -38,7 +46,7 @@ services:
 
   # Optional: Prometheus for metrics collection
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v2.53.0
     container_name: cachestorm-prometheus
     ports:
       - "9090:9090"
@@ -56,7 +64,7 @@ services:
 
   # Optional: Grafana for visualization
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:11.1.0
     container_name: cachestorm-grafana
     ports:
       - "3000:3000"

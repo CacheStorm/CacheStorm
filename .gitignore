@@ -47,3 +47,22 @@ config/cachestorm.yaml
 # Logs
 *.log
 nul
+
+# Profiling
+*.prof
+*.pprof
+*.memprof
+*.cpuprof
+
+# TLS certificates (keep examples)
+*.pem
+*.key
+!config/*.example.*
+
+# Core dumps
+core
+core.*
+
+# Temp files
+*.tmp
+.tmp/

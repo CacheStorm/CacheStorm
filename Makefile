@@ -129,7 +129,7 @@ docker-push: docker-build
 docker-run:
 	@echo "Starting CacheStorm with Docker Compose..."
 	docker-compose up -d
-	@echo "✓ Running on localhost:6379 (Redis) and localhost:8080 (HTTP)"
+	@echo "✓ Running on localhost:6380 (RESP) and localhost:8080 (HTTP)"
 
 ## docker-stop: Stop Docker containers
 docker-stop:

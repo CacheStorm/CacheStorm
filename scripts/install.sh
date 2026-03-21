@@ -120,7 +120,7 @@ install_docker() {
     if [ ! -f "$CONFIG_DIR/cachestorm.yaml" ]; then
         cat > "$CONFIG_DIR/cachestorm.yaml" << 'EOF'
 server:
-  port: 6379
+  port: 6380
   http_port: 8080
   bind: 0.0.0.0
 
@@ -149,7 +149,7 @@ services:
     image: ${REPO}:latest
     container_name: cachestorm
     ports:
-      - "6379:6379"
+      - "6380:6380"
       - "8080:8080"
     volumes:
       - ${DATA_DIR}/data:/data
@@ -186,7 +186,7 @@ EOF
     echo ""
     echo -e "${GREEN}✓ CacheStorm is running!${NC}"
     echo ""
-    echo -e "  ${BLUE}Redis Protocol:${NC} localhost:6379"
+    echo -e "  ${BLUE}Redis Protocol:${NC} localhost:6380"
     echo -e "  ${BLUE}HTTP API:${NC}      http://localhost:8080"
     echo -e "  ${BLUE}Admin UI:${NC}      http://localhost:8080"
     echo -e "  ${BLUE}Data Directory:${NC} ${DATA_DIR}/data"
@@ -260,7 +260,7 @@ install_binary() {
     if [ ! -f "$CONFIG_DIR/cachestorm.yaml" ]; then
         cat > "$CONFIG_DIR/cachestorm.yaml" << 'EOF'
 server:
-  port: 6379
+  port: 6380
   http_port: 8080
   bind: 0.0.0.0
 
@@ -400,7 +400,7 @@ install_source() {
     if [ ! -f "$CONFIG_DIR/cachestorm.yaml" ]; then
         cp "$TMP_DIR/cachestorm/config/example.yaml" "$CONFIG_DIR/cachestorm.yaml" 2>/dev/null || cat > "$CONFIG_DIR/cachestorm.yaml" << 'EOF'
 server:
-  port: 6379
+  port: 6380
   http_port: 8080
   bind: 0.0.0.0
 
@@ -551,7 +551,7 @@ main() {
 
             # Test connection
             if command_exists redis-cli; then
-                if redis-cli -p 6379 PING 2>/dev/null | grep -q PONG; then
+                if redis-cli -p 6380 PING 2>/dev/null | grep -q PONG; then
                     echo -e "${GREEN}✓ Redis protocol responding${NC}"
                 fi
             fi

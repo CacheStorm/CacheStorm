@@ -1,0 +1,62 @@
+# CacheStorm Production Configuration
+# Copy this file and adjust values for your environment
+
+server:
+  bind: "0.0.0.0"
+  port: 6380
+  max_connections: 10000
+  tcp_keepalive: 300
+  read_timeout: "5m"
+  write_timeout: "5m"
+  # TLS - REQUIRED for production
+  # tls_cert_file: "/etc/cachestorm/tls/server.crt"
+  # tls_key_file: "/etc/cachestorm/tls/server.key"
+  # Authentication - REQUIRED for production
+  requirepass: "CHANGE_ME_TO_A_STRONG_PASSWORD"
+
+http:
+  enabled: true
+  port: 8080
+  # Authentication - REQUIRED for production
+  password: "CHANGE_ME_TO_A_STRONG_PASSWORD"
+  cors_origin: ""
+  rate_limit: 100
+  rate_window: "1m"
+
+memory:
+  max_memory: "1gb"
+  eviction_policy: "allkeys-lru"
+  pressure_warning: 70
+  pressure_critical: 85
+  eviction_sample_size: 5
+
+persistence:
+  enabled: true
+  aof: true
+  aof_sync: "everysec"
+  snapshot_interval: "5m"
+  data_dir: "/data"
+
+replication:
+  role: "master"
+  read_only: true
+
+cluster:
+  enabled: false
+
+logging:
+  level: "info"
+  format: "json"
+  output: "stderr"
+
+plugins:
+  stats:
+    enabled: true
+  metrics:
+    enabled: true
+    port: 9090
+    path: "/metrics"
+  slowlog:
+    enabled: true
+    threshold: "10ms"
+    max_entries: 1000
