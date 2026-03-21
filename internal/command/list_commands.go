@@ -77,11 +77,16 @@ func cmdLPUSH(ctx *Context) error {
 		return ctx.WriteError(err)
 	}
 
-	for i := 1; i < ctx.ArgCount(); i++ {
-		value := ctx.Arg(i)
-		list.Elements = append([][]byte{value}, list.Elements...)
+	argCount := ctx.ArgCount() - 1
+	newElements := make([][]byte, argCount+len(list.Elements))
+	// LPUSH inserts in reverse order (last arg ends up at head), matching Redis behavior
+	for i := 0; i < argCount; i++ {
+		newElements[i] = ctx.Arg(argCount - i)
 	}
+	copy(newElements[argCount:], list.Elements)
+	list.Elements = newElements
 
+	ctx.Store.KeyNotifier().NotifyKey(key)
 	return ctx.WriteInteger(int64(len(list.Elements)))
 }
 
@@ -101,6 +106,7 @@ func cmdRPUSH(ctx *Context) error {
 		list.Elements = append(list.Elements, value)
 	}
 
+	ctx.Store.KeyNotifier().NotifyKey(key)
 	return ctx.WriteInteger(int64(len(list.Elements)))
 }
 
@@ -118,10 +124,13 @@ func cmdLPUSHX(ctx *Context) error {
 		return ctx.WriteInteger(0)
 	}
 
-	for i := 1; i < ctx.ArgCount(); i++ {
-		value := ctx.Arg(i)
-		list.Elements = append([][]byte{value}, list.Elements...)
+	argCount := ctx.ArgCount() - 1
+	newElements := make([][]byte, argCount+len(list.Elements))
+	for i := 0; i < argCount; i++ {
+		newElements[i] = ctx.Arg(argCount - i)
 	}
+	copy(newElements[argCount:], list.Elements)
+	list.Elements = newElements
 
 	return ctx.WriteInteger(int64(len(list.Elements)))
 }
@@ -369,14 +378,21 @@ func cmdLREM(ctx *Context) error {
 			}
 		}
 	} else {
+		// Build in forward order then reverse to avoid O(n^2) prepend
+		kept := make([][]byte, 0, len(list.Elements))
 		for i := len(list.Elements) - 1; i >= 0; i-- {
 			elem := list.Elements[i]
 			if removed < -count && string(elem) == string(value) {
 				removed++
 			} else {
-				newElements = append([][]byte{elem}, newElements...)
+				kept = append(kept, elem)
 			}
 		}
+		// Reverse kept to restore original order
+		for i, j := 0, len(kept)-1; i < j; i, j = i+1, j-1 {
+			kept[i], kept[j] = kept[j], kept[i]
+		}
+		newElements = kept
 	}
 
 	list.Elements = newElements
@@ -518,7 +534,10 @@ func cmdRPOPLPUSH(ctx *Context) error {
 		return ctx.WriteError(err)
 	}
 
-	dstList.Elements = append([][]byte{value}, dstList.Elements...)
+	newElements := make([][]byte, 1+len(dstList.Elements))
+	newElements[0] = value
+	copy(newElements[1:], dstList.Elements)
+	dstList.Elements = newElements
 
 	return ctx.WriteBulkBytes(value)
 }
@@ -564,7 +583,10 @@ func cmdLMOVE(ctx *Context) error {
 
 	switch whereTo {
 	case "LEFT":
-		dstList.Elements = append([][]byte{value}, dstList.Elements...)
+		newElements := make([][]byte, 1+len(dstList.Elements))
+		newElements[0] = value
+		copy(newElements[1:], dstList.Elements)
+		dstList.Elements = newElements
 	case "RIGHT":
 		dstList.Elements = append(dstList.Elements, value)
 	default:
@@ -595,63 +617,75 @@ func cmdBLMOVE(ctx *Context) error {
 		return ctx.WriteError(ErrSyntaxError)
 	}
 
-	deadline := time.Now().Add(time.Duration(timeout) * time.Second)
+	// Try immediate move
+	if value, ok := tryListMove(ctx, srcKey, dstKey, whereFrom, whereTo); ok {
+		return ctx.WriteBulkBytes(value)
+	}
+
+	if timeout == 0 {
+		return ctx.WriteNull()
+	}
+
+	notifier := ctx.Store.KeyNotifier()
+	dur := time.Duration(timeout) * time.Second
 
 	for {
-		srcList, err := getList(ctx, srcKey)
-		if err != nil {
-			return ctx.WriteError(err)
-		}
-
-		if srcList != nil && len(srcList.Elements) > 0 {
-			srcList.Lock()
-			if len(srcList.Elements) > 0 {
-				var value []byte
-				switch whereFrom {
-				case "LEFT":
-					value = srcList.Elements[0]
-					srcList.Elements = srcList.Elements[1:]
-				case "RIGHT":
-					value = srcList.Elements[len(srcList.Elements)-1]
-					srcList.Elements = srcList.Elements[:len(srcList.Elements)-1]
-				}
-
-				srcEmpty := len(srcList.Elements) == 0
-				srcList.Unlock()
-
-				if srcEmpty {
-					ctx.Store.Delete(srcKey)
-				}
-
-				dstList, err := getOrCreateList(ctx, dstKey)
-				if err != nil {
-					return ctx.WriteError(err)
-				}
-
-				dstList.Lock()
-				switch whereTo {
-				case "LEFT":
-					dstList.Elements = append([][]byte{value}, dstList.Elements...)
-				case "RIGHT":
-					dstList.Elements = append(dstList.Elements, value)
-				}
-				dstList.Unlock()
-
-				return ctx.WriteBulkBytes(value)
-			}
-			srcList.Unlock()
-		}
-
-		if timeout == 0 {
+		if !notifier.WaitForKey(srcKey, dur) {
 			return ctx.WriteNull()
 		}
-
-		if time.Now().After(deadline) {
-			return ctx.WriteNull()
+		if value, ok := tryListMove(ctx, srcKey, dstKey, whereFrom, whereTo); ok {
+			return ctx.WriteBulkBytes(value)
 		}
-
-		time.Sleep(10 * time.Millisecond)
 	}
+}
+
+func tryListMove(ctx *Context, srcKey, dstKey, whereFrom, whereTo string) ([]byte, bool) {
+	srcList, err := getList(ctx, srcKey)
+	if err != nil || srcList == nil || len(srcList.Elements) == 0 {
+		return nil, false
+	}
+
+	srcList.Lock()
+	if len(srcList.Elements) == 0 {
+		srcList.Unlock()
+		return nil, false
+	}
+
+	var value []byte
+	switch whereFrom {
+	case "LEFT":
+		value = srcList.Elements[0]
+		srcList.Elements = srcList.Elements[1:]
+	case "RIGHT":
+		value = srcList.Elements[len(srcList.Elements)-1]
+		srcList.Elements = srcList.Elements[:len(srcList.Elements)-1]
+	}
+	srcEmpty := len(srcList.Elements) == 0
+	srcList.Unlock()
+
+	if srcEmpty {
+		ctx.Store.Delete(srcKey)
+	}
+
+	dstList, err := getOrCreateList(ctx, dstKey)
+	if err != nil {
+		return nil, false
+	}
+
+	dstList.Lock()
+	switch whereTo {
+	case "LEFT":
+		newEl := make([][]byte, 1+len(dstList.Elements))
+		newEl[0] = value
+		copy(newEl[1:], dstList.Elements)
+		dstList.Elements = newEl
+	case "RIGHT":
+		dstList.Elements = append(dstList.Elements, value)
+	}
+	dstList.Unlock()
+
+	ctx.Store.KeyNotifier().NotifyKey(dstKey)
+	return value, true
 }
 
 func cmdBLPOP(ctx *Context) error {
@@ -660,54 +694,82 @@ func cmdBLPOP(ctx *Context) error {
 	}
 
 	keys := make([]string, 0, ctx.ArgCount()-1)
-	var timeout int
-	var err error
-
 	for i := 0; i < ctx.ArgCount()-1; i++ {
 		keys = append(keys, ctx.ArgString(i))
 	}
-	timeout, err = strconv.Atoi(ctx.ArgString(ctx.ArgCount() - 1))
+	timeout, err := strconv.Atoi(ctx.ArgString(ctx.ArgCount() - 1))
 	if err != nil {
 		return ctx.WriteError(ErrNotInteger)
 	}
 
-	deadline := time.Now().Add(time.Duration(timeout) * time.Second)
+	// Try immediate pop first
+	if key, value, ok := tryLPop(ctx, keys); ok {
+		return ctx.WriteArray([]*resp.Value{
+			resp.BulkString(key),
+			resp.BulkBytes(value),
+		})
+	}
+
+	if timeout == 0 {
+		return ctx.WriteNull()
+	}
+
+	// Block until notified or timeout
+	deadline := time.Duration(timeout) * time.Second
+	notifier := ctx.Store.KeyNotifier()
 
 	for {
-		for _, key := range keys {
-			list, err := getList(ctx, key)
-			if err != nil {
-				return ctx.WriteError(err)
-			}
-			if list != nil && len(list.Elements) > 0 {
-				list.Lock()
-				if len(list.Elements) > 0 {
-					value := list.Elements[0]
-					list.Elements = list.Elements[1:]
-					isEmpty := len(list.Elements) == 0
-					list.Unlock()
-					if isEmpty {
-						ctx.Store.Delete(key)
-					}
-					return ctx.WriteArray([]*resp.Value{
-						resp.BulkString(key),
-						resp.BulkBytes(value),
-					})
-				}
+		notifiedKey, notified := notifier.WaitForKeys(keys, deadline)
+		if !notified {
+			return ctx.WriteNull()
+		}
+
+		// A key was notified — try to pop from it
+		list, err := getList(ctx, notifiedKey)
+		if err != nil {
+			return ctx.WriteError(err)
+		}
+		if list != nil && len(list.Elements) > 0 {
+			list.Lock()
+			if len(list.Elements) > 0 {
+				value := list.Elements[0]
+				list.Elements = list.Elements[1:]
+				isEmpty := len(list.Elements) == 0
 				list.Unlock()
+				if isEmpty {
+					ctx.Store.Delete(notifiedKey)
+				}
+				return ctx.WriteArray([]*resp.Value{
+					resp.BulkString(notifiedKey),
+					resp.BulkBytes(value),
+				})
 			}
+			list.Unlock()
 		}
-
-		if timeout == 0 {
-			return ctx.WriteNull()
-		}
-
-		if time.Now().After(deadline) {
-			return ctx.WriteNull()
-		}
-
-		time.Sleep(10 * time.Millisecond)
+		// Someone else grabbed it — retry
 	}
+}
+
+func tryLPop(ctx *Context, keys []string) (string, []byte, bool) {
+	for _, key := range keys {
+		list, err := getList(ctx, key)
+		if err != nil || list == nil || len(list.Elements) == 0 {
+			continue
+		}
+		list.Lock()
+		if len(list.Elements) > 0 {
+			value := list.Elements[0]
+			list.Elements = list.Elements[1:]
+			isEmpty := len(list.Elements) == 0
+			list.Unlock()
+			if isEmpty {
+				ctx.Store.Delete(key)
+			}
+			return key, value, true
+		}
+		list.Unlock()
+	}
+	return "", nil, false
 }
 
 func cmdBRPOP(ctx *Context) error {
@@ -716,55 +778,81 @@ func cmdBRPOP(ctx *Context) error {
 	}
 
 	keys := make([]string, 0, ctx.ArgCount()-1)
-	var timeout int
-	var err error
-
 	for i := 0; i < ctx.ArgCount()-1; i++ {
 		keys = append(keys, ctx.ArgString(i))
 	}
-	timeout, err = strconv.Atoi(ctx.ArgString(ctx.ArgCount() - 1))
+	timeout, err := strconv.Atoi(ctx.ArgString(ctx.ArgCount() - 1))
 	if err != nil {
 		return ctx.WriteError(ErrNotInteger)
 	}
 
-	deadline := time.Now().Add(time.Duration(timeout) * time.Second)
+	// Try immediate pop first
+	if key, value, ok := tryRPop(ctx, keys); ok {
+		return ctx.WriteArray([]*resp.Value{
+			resp.BulkString(key),
+			resp.BulkBytes(value),
+		})
+	}
+
+	if timeout == 0 {
+		return ctx.WriteNull()
+	}
+
+	deadline := time.Duration(timeout) * time.Second
+	notifier := ctx.Store.KeyNotifier()
 
 	for {
-		for _, key := range keys {
-			list, err := getList(ctx, key)
-			if err != nil {
-				return ctx.WriteError(err)
-			}
-			if list != nil && len(list.Elements) > 0 {
-				list.Lock()
-				if len(list.Elements) > 0 {
-					idx := len(list.Elements) - 1
-					value := list.Elements[idx]
-					list.Elements = list.Elements[:idx]
-					isEmpty := len(list.Elements) == 0
-					list.Unlock()
-					if isEmpty {
-						ctx.Store.Delete(key)
-					}
-					return ctx.WriteArray([]*resp.Value{
-						resp.BulkString(key),
-						resp.BulkBytes(value),
-					})
-				}
+		notifiedKey, notified := notifier.WaitForKeys(keys, deadline)
+		if !notified {
+			return ctx.WriteNull()
+		}
+
+		list, err := getList(ctx, notifiedKey)
+		if err != nil {
+			return ctx.WriteError(err)
+		}
+		if list != nil && len(list.Elements) > 0 {
+			list.Lock()
+			if len(list.Elements) > 0 {
+				idx := len(list.Elements) - 1
+				value := list.Elements[idx]
+				list.Elements = list.Elements[:idx]
+				isEmpty := len(list.Elements) == 0
 				list.Unlock()
+				if isEmpty {
+					ctx.Store.Delete(notifiedKey)
+				}
+				return ctx.WriteArray([]*resp.Value{
+					resp.BulkString(notifiedKey),
+					resp.BulkBytes(value),
+				})
 			}
+			list.Unlock()
 		}
-
-		if timeout == 0 {
-			return ctx.WriteNull()
-		}
-
-		if time.Now().After(deadline) {
-			return ctx.WriteNull()
-		}
-
-		time.Sleep(10 * time.Millisecond)
 	}
+}
+
+func tryRPop(ctx *Context, keys []string) (string, []byte, bool) {
+	for _, key := range keys {
+		list, err := getList(ctx, key)
+		if err != nil || list == nil || len(list.Elements) == 0 {
+			continue
+		}
+		list.Lock()
+		if len(list.Elements) > 0 {
+			idx := len(list.Elements) - 1
+			value := list.Elements[idx]
+			list.Elements = list.Elements[:idx]
+			isEmpty := len(list.Elements) == 0
+			list.Unlock()
+			if isEmpty {
+				ctx.Store.Delete(key)
+			}
+			return key, value, true
+		}
+		list.Unlock()
+	}
+	return "", nil, false
 }
 
 func cmdBRPOPLPUSH(ctx *Context) error {
@@ -779,49 +867,25 @@ func cmdBRPOPLPUSH(ctx *Context) error {
 		return ctx.WriteError(ErrNotInteger)
 	}
 
-	deadline := time.Now().Add(time.Duration(timeout) * time.Second)
+	// BRPOPLPUSH is RPOP src + LPUSH dst
+	if value, ok := tryListMove(ctx, srcKey, dstKey, "RIGHT", "LEFT"); ok {
+		return ctx.WriteBulkBytes(value)
+	}
+
+	if timeout == 0 {
+		return ctx.WriteNull()
+	}
+
+	notifier := ctx.Store.KeyNotifier()
+	dur := time.Duration(timeout) * time.Second
 
 	for {
-		srcList, err := getList(ctx, srcKey)
-		if err != nil {
-			return ctx.WriteError(err)
-		}
-
-		if srcList != nil && len(srcList.Elements) > 0 {
-			srcList.Lock()
-			if len(srcList.Elements) > 0 {
-				idx := len(srcList.Elements) - 1
-				value := srcList.Elements[idx]
-				srcList.Elements = srcList.Elements[:idx]
-				isEmpty := len(srcList.Elements) == 0
-				srcList.Unlock()
-
-				if isEmpty {
-					ctx.Store.Delete(srcKey)
-				}
-
-				dstList, err := getOrCreateList(ctx, dstKey)
-				if err != nil {
-					return ctx.WriteError(err)
-				}
-				dstList.Lock()
-				dstList.Elements = append([][]byte{value}, dstList.Elements...)
-				dstList.Unlock()
-
-				return ctx.WriteBulkBytes(value)
-			}
-			srcList.Unlock()
-		}
-
-		if timeout == 0 {
+		if !notifier.WaitForKey(srcKey, dur) {
 			return ctx.WriteNull()
 		}
-
-		if time.Now().After(deadline) {
-			return ctx.WriteNull()
+		if value, ok := tryListMove(ctx, srcKey, dstKey, "RIGHT", "LEFT"); ok {
+			return ctx.WriteBulkBytes(value)
 		}
-
-		time.Sleep(10 * time.Millisecond)
 	}
 }
 
@@ -1026,7 +1090,10 @@ func cmdLMPUSH(ctx *Context) error {
 		return ctx.WriteError(err)
 	}
 
-	list.Elements = append(elements, list.Elements...)
+	newElements := make([][]byte, len(elements)+len(list.Elements))
+	copy(newElements, elements)
+	copy(newElements[len(elements):], list.Elements)
+	list.Elements = newElements
 	return ctx.WriteInteger(int64(len(list.Elements)))
 }
 

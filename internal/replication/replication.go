@@ -52,12 +52,12 @@ type Manager struct {
 	store          *store.Store
 	role           atomic.Int32
 	masterConn     net.Conn
-	masterOffset   int64
+	masterOffset   atomic.Int64
 	masterID       string
 	replicas       map[string]*Replica
 	replicaID      string
 	replBacklog    []byte
-	replBacklogIdx int64
+	replBacklogIdx atomic.Int64
 	stopCh         chan struct{}
 	wg             sync.WaitGroup
 	onRoleChange   func(Role)
@@ -126,7 +126,7 @@ func (m *Manager) GetReplicaID() string {
 }
 
 func (m *Manager) GetMasterOffset() int64 {
-	return m.masterOffset
+	return m.masterOffset.Load()
 }
 
 func (m *Manager) GetReplicas() []*Replica {
@@ -166,10 +166,10 @@ func (m *Manager) GetInfo() string {
 			}
 		}
 		sb.WriteString(fmt.Sprintf("master_replid:%s\r\n", m.replicaID))
-		sb.WriteString(fmt.Sprintf("master_repl_offset:%d\r\n", m.replBacklogIdx))
+		sb.WriteString(fmt.Sprintf("master_repl_offset:%d\r\n", m.replBacklogIdx.Load()))
 		sb.WriteString("repl_backlog_active:1\r\n")
 		sb.WriteString("repl_backlog_size:1048576\r\n")
-		sb.WriteString(fmt.Sprintf("repl_backlog_first_byte_offset:%d\r\n", m.replBacklogIdx))
+		sb.WriteString(fmt.Sprintf("repl_backlog_first_byte_offset:%d\r\n", m.replBacklogIdx.Load()))
 	} else {
 		sb.WriteString("# Replication\r\n")
 		sb.WriteString("role:slave\r\n")
@@ -178,7 +178,7 @@ func (m *Manager) GetInfo() string {
 		sb.WriteString(fmt.Sprintf("master_link_status:%s\r\n", m.getMasterLinkStatus()))
 		sb.WriteString(fmt.Sprintf("master_last_io_seconds_ago:%d\r\n", m.getSecondsSinceMasterIO()))
 		sb.WriteString(fmt.Sprintf("master_sync_in_progress:%d\r\n", m.getSyncInProgress()))
-		sb.WriteString(fmt.Sprintf("slave_repl_offset:%d\r\n", m.masterOffset))
+		sb.WriteString(fmt.Sprintf("slave_repl_offset:%d\r\n", m.masterOffset.Load()))
 		sb.WriteString(fmt.Sprintf("slave_priority:100\r\n"))
 		sb.WriteString(fmt.Sprintf("slave_read_only:%d\r\n", boolToInt(m.cfg.ReadOnly)))
 	}
@@ -273,7 +273,7 @@ func (m *Manager) handleMasterResponse(line string, reader *bufio.Reader) {
 			m.mu.Lock()
 			m.masterID = parts[0]
 			if offset, err := strconv.ParseInt(parts[1], 10, 64); err == nil {
-				m.masterOffset = offset
+				m.masterOffset.Store(offset)
 			}
 			m.mu.Unlock()
 			logger.Info().Str("master_id", m.masterID).Msg("full sync started")
@@ -282,8 +282,10 @@ func (m *Manager) handleMasterResponse(line string, reader *bufio.Reader) {
 	} else if strings.HasPrefix(line, "+CONTINUE") {
 		logger.Info().Msg("partial sync continued")
 	} else if strings.HasPrefix(line, "$") {
-		length, _ := strconv.Atoi(line[1:])
-		if length > 0 {
+		length, err := strconv.Atoi(line[1:])
+		if err != nil {
+			logger.Error().Err(err).Str("line", line).Msg("invalid bulk length in replication stream")
+		} else if length > 0 {
 			buf := make([]byte, length)
 			if _, err := io.ReadFull(reader, buf); err == nil {
 				m.processWriteCommand(buf)
@@ -291,9 +293,7 @@ func (m *Manager) handleMasterResponse(line string, reader *bufio.Reader) {
 		}
 	}
 
-	m.mu.Lock()
-	m.masterOffset++
-	m.mu.Unlock()
+	m.masterOffset.Add(1)
 }
 
 func (m *Manager) receiveRDB(reader *bufio.Reader) {
@@ -304,10 +304,17 @@ func (m *Manager) receiveRDB(reader *bufio.Reader) {
 	line = strings.TrimSpace(line)
 
 	if strings.HasPrefix(line, "$") {
-		length, _ := strconv.ParseInt(line[1:], 10, 64)
+		length, err := strconv.ParseInt(line[1:], 10, 64)
+		if err != nil {
+			logger.Error().Err(err).Str("line", line).Msg("invalid RDB length")
+			return
+		}
 		if length > 0 {
 			buf := make([]byte, length)
-			io.ReadFull(reader, buf)
+			if _, err := io.ReadFull(reader, buf); err != nil {
+				logger.Error().Err(err).Msg("failed to read RDB data")
+				return
+			}
 			logger.Info().Int64("size", length).Msg("RDB received, syncing complete")
 		}
 	}
@@ -368,8 +375,8 @@ func (m *Manager) PropagateCommand(cmd []byte) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	m.replBacklogIdx++
-	idx := int(m.replBacklogIdx) % len(m.replBacklog)
+	newIdx := m.replBacklogIdx.Add(1)
+	idx := int(newIdx) % len(m.replBacklog)
 	copy(m.replBacklog[idx:], cmd)
 
 	for _, replica := range m.replicas {

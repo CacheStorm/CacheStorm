@@ -31,13 +31,14 @@ type NodeInfo struct {
 }
 
 type Gossip struct {
-	cluster   *Cluster
-	mu        sync.RWMutex
-	peers     map[string]*gossipPeer
-	stopCh    chan struct{}
-	wg        sync.WaitGroup
-	interval  time.Duration
+	cluster    *Cluster
+	mu         sync.RWMutex
+	peers      map[string]*gossipPeer
+	stopCh     chan struct{}
+	wg         sync.WaitGroup
+	interval   time.Duration
 	knownNodes map[string]bool // Track known node IDs for validation
+	listener   net.Listener
 }
 
 type gossipPeer struct {
@@ -65,6 +66,7 @@ func (g *Gossip) Start() error {
 	if err != nil {
 		return fmt.Errorf("failed to start gossip listener: %v", err)
 	}
+	g.listener = ln
 
 	g.wg.Add(1)
 	go g.acceptLoop(ln)
@@ -77,23 +79,24 @@ func (g *Gossip) Start() error {
 
 func (g *Gossip) Stop() {
 	close(g.stopCh)
+	if g.listener != nil {
+		g.listener.Close() // Unblocks acceptLoop
+	}
 	g.wg.Wait()
 }
 
 func (g *Gossip) acceptLoop(ln net.Listener) {
 	defer g.wg.Done()
-	defer ln.Close()
 
 	for {
-		select {
-		case <-g.stopCh:
-			return
-		default:
-		}
-
 		conn, err := ln.Accept()
 		if err != nil {
-			continue
+			select {
+			case <-g.stopCh:
+				return
+			default:
+				continue
+			}
 		}
 
 		g.wg.Add(1)
@@ -131,7 +134,10 @@ func (g *Gossip) handleConnection(conn net.Conn) {
 
 		response := g.handleMessage(&msg)
 		if response != nil {
-			data, _ := json.Marshal(response)
+			data, err := json.Marshal(response)
+			if err != nil {
+				continue
+			}
 			conn.Write(data)
 			conn.Write([]byte("\n"))
 		}
@@ -337,7 +343,10 @@ func (g *Gossip) sendMessage(addr string, msg *GossipMessage) {
 	}
 	defer conn.Close()
 
-	data, _ := json.Marshal(msg)
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return
+	}
 	conn.Write(data)
 	conn.Write([]byte("\n"))
 

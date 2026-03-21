@@ -17,20 +17,22 @@ import (
 )
 
 type HTTPConfig struct {
-	Enabled  bool   `yaml:"enabled" default:"true"`
-	Port     int    `yaml:"port" default:"8080"`
-	Password string `yaml:"password"`
+	Enabled    bool   `yaml:"enabled" default:"true"`
+	Port       int    `yaml:"port" default:"8080"`
+	Password   string `yaml:"password"`
+	CORSOrigin string `yaml:"cors_origin"` // empty or "*" = allow all, specific origin for production
 }
 
 type HTTPServer struct {
-	ctx         context.Context
-	cancel      context.CancelFunc
-	store       *store.Store
-	router      *command.Router
-	server      *http.Server
-	started     time.Time
-	config      *HTTPConfig
+	ctx          context.Context
+	cancel       context.CancelFunc
+	store        *store.Store
+	router       *command.Router
+	server       *http.Server
+	started      time.Time
+	config       *HTTPConfig
 	metricsCache *metricsCache
+	connCount    func() int64 // callback to get active connection count
 }
 
 type metricsCache struct {
@@ -77,14 +79,21 @@ func NewHTTPServer(s *store.Store, router *command.Router, cfg *HTTPConfig) *HTT
 		Addr:              ":" + strconv.Itoa(cfg.Port),
 		Handler:           h.corsMiddleware(mux),
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	return h
 }
 
 func (h *HTTPServer) corsMiddleware(next http.Handler) http.Handler {
+	origin := h.config.CORSOrigin
+	if origin == "" {
+		origin = "*"
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Origin", origin)
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 
@@ -135,10 +144,10 @@ func (h *HTTPServer) Start() error {
 }
 
 func (h *HTTPServer) Stop() error {
-	// Cancel the context to signal shutdown
-	h.cancel()
-	ctx, cancel := context.WithTimeout(h.ctx, 5*time.Second)
+	// Use a fresh context for shutdown timeout — h.ctx would be cancelled immediately by h.cancel()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	defer h.cancel()
 	return h.server.Shutdown(ctx)
 }
 
@@ -184,51 +193,51 @@ func (h *HTTPServer) handleInfo(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (h *HTTPServer) handleMetrics(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "text/plain")
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 
-	// Check cache (5 second TTL)
-	h.metricsCache.mu.RLock()
-	if time.Since(h.metricsCache.cachedAt) < 5*time.Second {
-		keys := h.metricsCache.keys
-		mem := h.metricsCache.mem
-		h.metricsCache.mu.RUnlock()
-		metrics := fmt.Sprintf(`# HELP cachestorm_keys_total Total number of keys
-# TYPE cachestorm_keys_total gauge
-cachestorm_keys_total %d
-# HELP cachestorm_memory_bytes Memory usage in bytes
-# TYPE cachestorm_memory_bytes gauge
-cachestorm_memory_bytes %d
-# HELP cachestorm_uptime_seconds Server uptime in seconds
-# TYPE cachestorm_uptime_seconds gauge
-cachestorm_uptime_seconds %.0f
-`, keys, mem, time.Since(h.started).Seconds())
-		w.Write([]byte(metrics))
-		return
-	}
-	h.metricsCache.mu.RUnlock()
-
-	// Update cache
 	keys := h.store.KeyCount()
 	mem := h.store.MemUsage()
+	uptime := time.Since(h.started).Seconds()
 
-	h.metricsCache.mu.Lock()
-	h.metricsCache.keys = keys
-	h.metricsCache.mem = mem
-	h.metricsCache.cachedAt = time.Now()
-	h.metricsCache.mu.Unlock()
+	var connCount int64
+	if h.connCount != nil {
+		connCount = h.connCount()
+	}
 
-	metrics := fmt.Sprintf(`# HELP cachestorm_keys_total Total number of keys
-# TYPE cachestorm_keys_total gauge
-cachestorm_keys_total %d
-# HELP cachestorm_memory_bytes Memory usage in bytes
-# TYPE cachestorm_memory_bytes gauge
-cachestorm_memory_bytes %d
-# HELP cachestorm_uptime_seconds Server uptime in seconds
-# TYPE cachestorm_uptime_seconds gauge
-cachestorm_uptime_seconds %.0f
-`, keys, mem, time.Since(h.started).Seconds())
+	var memMax int64
+	var memPressure float64
+	if mt := h.store.MemoryTracker(); mt != nil {
+		memMax = mt.Max()
+		memPressure = mt.PressurePercent()
+	}
 
-	w.Write([]byte(metrics))
+	fmt.Fprintf(w, "# HELP cachestorm_keys_total Total number of keys stored\n")
+	fmt.Fprintf(w, "# TYPE cachestorm_keys_total gauge\n")
+	fmt.Fprintf(w, "cachestorm_keys_total %d\n", keys)
+
+	fmt.Fprintf(w, "# HELP cachestorm_memory_used_bytes Current memory usage in bytes\n")
+	fmt.Fprintf(w, "# TYPE cachestorm_memory_used_bytes gauge\n")
+	fmt.Fprintf(w, "cachestorm_memory_used_bytes %d\n", mem)
+
+	fmt.Fprintf(w, "# HELP cachestorm_memory_max_bytes Configured maximum memory in bytes\n")
+	fmt.Fprintf(w, "# TYPE cachestorm_memory_max_bytes gauge\n")
+	fmt.Fprintf(w, "cachestorm_memory_max_bytes %d\n", memMax)
+
+	fmt.Fprintf(w, "# HELP cachestorm_memory_pressure_percent Memory pressure percentage\n")
+	fmt.Fprintf(w, "# TYPE cachestorm_memory_pressure_percent gauge\n")
+	fmt.Fprintf(w, "cachestorm_memory_pressure_percent %.2f\n", memPressure)
+
+	fmt.Fprintf(w, "# HELP cachestorm_connected_clients Number of active client connections\n")
+	fmt.Fprintf(w, "# TYPE cachestorm_connected_clients gauge\n")
+	fmt.Fprintf(w, "cachestorm_connected_clients %d\n", connCount)
+
+	fmt.Fprintf(w, "# HELP cachestorm_uptime_seconds Server uptime in seconds\n")
+	fmt.Fprintf(w, "# TYPE cachestorm_uptime_seconds gauge\n")
+	fmt.Fprintf(w, "cachestorm_uptime_seconds %.0f\n", uptime)
+
+	fmt.Fprintf(w, "# HELP cachestorm_up Whether the server is up (always 1)\n")
+	fmt.Fprintf(w, "# TYPE cachestorm_up gauge\n")
+	fmt.Fprintf(w, "cachestorm_up 1\n")
 }
 
 func (h *HTTPServer) handleKeys(w http.ResponseWriter, r *http.Request) {

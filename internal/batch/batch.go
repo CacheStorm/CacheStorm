@@ -95,7 +95,9 @@ func (b *Batcher) Add(item BatchItem) <-chan BatchResult {
 		defer func() { <-b.workerPool }() // Release worker slot
 		result := <-b.results
 		if ch, ok := b.pending.Load(result.Key); ok {
-			ch.(chan BatchResult) <- result
+			if resCh, ok := ch.(chan BatchResult); ok {
+				resCh <- result
+			}
 			b.pending.Delete(result.Key)
 		}
 	}()
@@ -128,12 +130,16 @@ func (b *Batcher) AddAsync(item BatchItem, callback func(BatchResult)) {
 		}
 	}
 
+	// Register in pending so resultDispatcher routes the result to us
+	resultCh := make(chan BatchResult, 1)
+	b.pending.Store(item.Key, resultCh)
+
 	// Acquire worker slot (blocks if MaxWorkers reached)
 	b.workerPool <- struct{}{}
 
 	go func() {
-		defer func() { <-b.workerPool }() // Release worker slot
-		result := <-b.results
+		defer func() { <-b.workerPool }()
+		result := <-resultCh
 		callback(result)
 	}()
 }
@@ -203,8 +209,13 @@ func (b *Batcher) resultDispatcher() {
 			return
 		case result := <-b.results:
 			if ch, ok := b.pending.Load(result.Key); ok {
+				resCh, validCh := ch.(chan BatchResult)
+				if !validCh {
+					b.pending.Delete(result.Key)
+					continue
+				}
 				select {
-				case ch.(chan BatchResult) <- result:
+				case resCh <- result:
 					b.pending.Delete(result.Key)
 				case <-b.stopCh:
 					return

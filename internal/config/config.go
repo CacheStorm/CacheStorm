@@ -29,6 +29,9 @@ type ServerConfig struct {
 	WriteTimeout    string `yaml:"write_timeout" default:"0"`
 	ReadBufferSize  int    `yaml:"read_buffer_size" default:"4096"`
 	WriteBufferSize int    `yaml:"write_buffer_size" default:"4096"`
+	RequirePass     string `yaml:"requirepass"`
+	TLSCertFile     string `yaml:"tls_cert_file"`
+	TLSKeyFile      string `yaml:"tls_key_file"`
 }
 
 type HTTPConfig struct {

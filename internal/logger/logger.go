@@ -11,6 +11,11 @@ import (
 
 var log zerolog.Logger
 
+func init() {
+	// Default to a working logger so uninitialized usage doesn't panic
+	log = zerolog.New(os.Stderr).Level(zerolog.InfoLevel).With().Timestamp().Logger()
+}
+
 func Init(level, format, output string) {
 	var lvl zerolog.Level
 	switch strings.ToLower(level) {

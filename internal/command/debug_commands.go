@@ -58,6 +58,15 @@ func cmdDebugSleep(ctx *Context) error {
 		return ctx.WriteError(ErrNotInteger)
 	}
 
+	// Cap at 300 seconds to prevent indefinite blocking
+	const maxSleepSeconds = 300.0
+	if seconds < 0 {
+		seconds = 0
+	}
+	if seconds > maxSleepSeconds {
+		seconds = maxSleepSeconds
+	}
+
 	time.Sleep(time.Duration(seconds * float64(time.Second)))
 	return ctx.WriteOK()
 }

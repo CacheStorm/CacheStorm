@@ -211,6 +211,10 @@ func cmdZADD(ctx *Context) error {
 		i += 2
 	}
 
+	if added > 0 || changed > 0 {
+		ctx.Store.KeyNotifier().NotifyKey(key)
+	}
+
 	if ch {
 		return ctx.WriteInteger(int64(changed))
 	}
@@ -1785,60 +1789,66 @@ func cmdBZPOPGeneric(ctx *Context, max bool) error {
 	}
 
 	keys := make([]string, 0, ctx.ArgCount()-1)
-	var timeout int
-	var err error
-
 	for i := 0; i < ctx.ArgCount()-1; i++ {
 		keys = append(keys, ctx.ArgString(i))
 	}
-	timeout, err = strconv.Atoi(ctx.ArgString(ctx.ArgCount() - 1))
+	timeout, err := strconv.Atoi(ctx.ArgString(ctx.ArgCount() - 1))
 	if err != nil {
 		return ctx.WriteError(ErrNotInteger)
 	}
 
-	deadline := time.Now().Add(time.Duration(timeout) * time.Second)
+	// Try immediate pop
+	if key, member, score, ok := tryZPop(ctx, keys, max); ok {
+		return ctx.WriteArray([]*resp.Value{
+			resp.BulkString(key),
+			resp.BulkString(member),
+			resp.BulkString(strconv.FormatFloat(score, 'f', -1, 64)),
+		})
+	}
+
+	if timeout == 0 {
+		return ctx.WriteNull()
+	}
+
+	notifier := ctx.Store.KeyNotifier()
+	dur := time.Duration(timeout) * time.Second
 
 	for {
-		for _, key := range keys {
-			zset, err := getSortedSet(ctx, key)
-			if err != nil {
-				return ctx.WriteError(err)
-			}
-			if zset == nil || len(zset.Members) == 0 {
-				continue
-			}
-
-			zset.Lock()
-			entries := zset.GetSortedRange(0, 0, false, max)
-			if len(entries) > 0 {
-				entry := entries[0]
-				delete(zset.Members, entry.Member)
-				isEmpty := len(zset.Members) == 0
-				zset.Unlock()
-
-				if isEmpty {
-					ctx.Store.Delete(key)
-				}
-
-				return ctx.WriteArray([]*resp.Value{
-					resp.BulkString(key),
-					resp.BulkString(entry.Member),
-					resp.BulkString(strconv.FormatFloat(entry.Score, 'f', -1, 64)),
-				})
-			}
-			zset.Unlock()
-		}
-
-		if timeout == 0 {
+		notifiedKey, notified := notifier.WaitForKeys(keys, dur)
+		if !notified {
 			return ctx.WriteNull()
 		}
-
-		if time.Now().After(deadline) {
-			return ctx.WriteNull()
+		if key, member, score, ok := tryZPop(ctx, []string{notifiedKey}, max); ok {
+			return ctx.WriteArray([]*resp.Value{
+				resp.BulkString(key),
+				resp.BulkString(member),
+				resp.BulkString(strconv.FormatFloat(score, 'f', -1, 64)),
+			})
 		}
-
-		time.Sleep(10 * time.Millisecond)
 	}
+}
+
+func tryZPop(ctx *Context, keys []string, max bool) (string, string, float64, bool) {
+	for _, key := range keys {
+		zset, err := getSortedSet(ctx, key)
+		if err != nil || zset == nil || len(zset.Members) == 0 {
+			continue
+		}
+		zset.Lock()
+		entries := zset.GetSortedRange(0, 0, false, max)
+		if len(entries) > 0 {
+			entry := entries[0]
+			delete(zset.Members, entry.Member)
+			isEmpty := len(zset.Members) == 0
+			zset.Unlock()
+			if isEmpty {
+				ctx.Store.Delete(key)
+			}
+			return key, entry.Member, entry.Score, true
+		}
+		zset.Unlock()
+	}
+	return "", "", 0, false
 }
 
 func cmdBZMPOP(ctx *Context) error {
@@ -1890,63 +1900,69 @@ func cmdBZMPOP(ctx *Context) error {
 		}
 	}
 
-	deadline := time.Now().Add(time.Duration(timeout) * time.Second)
 	max := dir == "MAX"
 
+	// Try immediate pop
+	if key, popped := tryZMPop(ctx, keys, count, max); popped != nil {
+		return ctx.WriteArray([]*resp.Value{
+			resp.BulkString(key),
+			resp.ArrayValue(popped),
+		})
+	}
+
+	if timeout == 0 {
+		return ctx.WriteNull()
+	}
+
+	notifier := ctx.Store.KeyNotifier()
+	dur := time.Duration(timeout) * time.Second
+
 	for {
-		for _, key := range keys {
-			zset, err := getSortedSet(ctx, key)
-			if err != nil {
-				return ctx.WriteError(err)
-			}
-			if zset == nil || len(zset.Members) == 0 {
-				continue
-			}
-
-			zset.Lock()
-			if len(zset.Members) == 0 {
-				zset.Unlock()
-				continue
-			}
-
-			entries := zset.GetSortedRange(0, count-1, false, max)
-			if len(entries) == 0 {
-				zset.Unlock()
-				continue
-			}
-
-			popped := make([]*resp.Value, 0, len(entries))
-			for _, entry := range entries {
-				delete(zset.Members, entry.Member)
-				popped = append(popped, resp.ArrayValue([]*resp.Value{
-					resp.BulkString(entry.Member),
-					resp.BulkString(strconv.FormatFloat(entry.Score, 'f', -1, 64)),
-				}))
-			}
-
-			isEmpty := len(zset.Members) == 0
-			zset.Unlock()
-
-			if isEmpty {
-				ctx.Store.Delete(key)
-			}
-
+		_, notified := notifier.WaitForKeys(keys, dur)
+		if !notified {
+			return ctx.WriteNull()
+		}
+		if key, popped := tryZMPop(ctx, keys, count, max); popped != nil {
 			return ctx.WriteArray([]*resp.Value{
 				resp.BulkString(key),
 				resp.ArrayValue(popped),
 			})
 		}
-
-		if timeout == 0 {
-			return ctx.WriteNull()
-		}
-
-		if time.Now().After(deadline) {
-			return ctx.WriteNull()
-		}
-
-		time.Sleep(10 * time.Millisecond)
 	}
+}
+
+func tryZMPop(ctx *Context, keys []string, count int, max bool) (string, []*resp.Value) {
+	for _, key := range keys {
+		zset, err := getSortedSet(ctx, key)
+		if err != nil || zset == nil || len(zset.Members) == 0 {
+			continue
+		}
+		zset.Lock()
+		if len(zset.Members) == 0 {
+			zset.Unlock()
+			continue
+		}
+		entries := zset.GetSortedRange(0, count-1, false, max)
+		if len(entries) == 0 {
+			zset.Unlock()
+			continue
+		}
+		popped := make([]*resp.Value, 0, len(entries))
+		for _, entry := range entries {
+			delete(zset.Members, entry.Member)
+			popped = append(popped, resp.ArrayValue([]*resp.Value{
+				resp.BulkString(entry.Member),
+				resp.BulkString(strconv.FormatFloat(entry.Score, 'f', -1, 64)),
+			}))
+		}
+		isEmpty := len(zset.Members) == 0
+		zset.Unlock()
+		if isEmpty {
+			ctx.Store.Delete(key)
+		}
+		return key, popped
+	}
+	return "", nil
 }
 
 func cmdZREVRANGEBYLEX(ctx *Context) error {

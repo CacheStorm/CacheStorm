@@ -41,15 +41,19 @@ type Store struct {
 	tagIndex     *TagIndex
 	namespaceMgr *NamespaceManager
 	pubsub       *PubSub
+	keyNotifier  *KeyNotifier
 	versions     map[string]int64
 	versionMu    sync.RWMutex
+	memTracker   *MemoryTracker
+	evictor      *EvictionController
 }
 
 func NewStore() *Store {
 	s := &Store{
-		tagIndex: NewTagIndex(),
-		pubsub:   NewPubSub(),
-		versions: make(map[string]int64),
+		tagIndex:    NewTagIndex(),
+		pubsub:      NewPubSub(),
+		keyNotifier: NewKeyNotifier(),
+		versions:    make(map[string]int64),
 	}
 	for i := 0; i < NumShards; i++ {
 		s.shards[i] = NewShard()
@@ -57,11 +61,30 @@ func NewStore() *Store {
 	return s
 }
 
+// ConfigureMemory sets up memory tracking and eviction. Call after NewStore().
+func (s *Store) ConfigureMemory(maxMemory int64, policy EvictionPolicy, warningPct, criticalPct, sampleSize int) {
+	s.memTracker = NewMemoryTracker(maxMemory, warningPct, criticalPct)
+	s.evictor = NewEvictionController(policy, maxMemory, s, s.memTracker, sampleSize)
+}
+
+func (s *Store) MemoryTracker() *MemoryTracker {
+	return s.memTracker
+}
+
+func (s *Store) Evictor() *EvictionController {
+	return s.evictor
+}
+
+func (s *Store) KeyNotifier() *KeyNotifier {
+	return s.keyNotifier
+}
+
 func NewStoreWithNamespaces() *Store {
 	s := &Store{
 		tagIndex:     NewTagIndex(),
 		namespaceMgr: NewNamespaceManagerNoCycle(),
 		pubsub:       NewPubSub(),
+		keyNotifier:  NewKeyNotifier(),
 		versions:     make(map[string]int64),
 	}
 	for i := 0; i < NumShards; i++ {
@@ -135,6 +158,20 @@ func (s *Store) Set(key string, value Value, opts SetOptions) error {
 		return ErrValueTooLarge
 	}
 
+	// Check memory limit and try eviction if needed
+	if s.memTracker != nil && s.memTracker.Max() > 0 {
+		valueSize := value.SizeOf()
+		if !s.memTracker.CanAllocate(valueSize) {
+			// Try eviction before rejecting
+			if s.evictor != nil {
+				s.evictor.CheckAndEvict()
+			}
+			if !s.memTracker.CanAllocate(valueSize) {
+				return ErrMemoryLimit
+			}
+		}
+	}
+
 	idx := s.shardIndex(key)
 	shard := s.shards[idx]
 
@@ -161,6 +198,7 @@ func (s *Store) Set(key string, value Value, opts SetOptions) error {
 
 	shard.Set(key, entry)
 	s.IncrementVersion(key)
+	s.keyNotifier.NotifyKey(key)
 	return nil
 }
 

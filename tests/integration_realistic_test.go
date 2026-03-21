@@ -346,6 +346,9 @@ func BenchmarkRealisticWorkload(b *testing.B) {
 		client, _ := NewRedisClient(ts.Addr())
 		defer client.Close()
 
+		// Each goroutine gets its own generator to avoid race on shared rand.Rand
+		localGen := NewRealisticDataGenerator()
+
 		opCount := 0
 		for pb.Next() {
 			op := opCount % 100
@@ -369,12 +372,12 @@ func BenchmarkRealisticWorkload(b *testing.B) {
 				client.Send("ZRANGEBYSCORE", "products:by_rating", "4.0", "5.0", "LIMIT", "0", "10")
 
 			case op < 95: // 10% writes
-				session := gen.GenerateUserSession(rand.Intn(100000))
+				session := localGen.GenerateUserSession(rand.Intn(100000))
 				sessionJSON, _ := json.Marshal(session)
 				client.Send("SET", fmt.Sprintf("session:%d", session["user_id"]), string(sessionJSON), "EX", "3600")
 
 			default: // 5% analytics
-				event := gen.GenerateAnalyticsEvent(rand.Intn(1000000))
+				event := localGen.GenerateAnalyticsEvent(rand.Intn(1000000))
 				eventJSON, _ := json.Marshal(event)
 				client.Send("LPUSH", "analytics:events", string(eventJSON))
 				client.Send("LTRIM", "analytics:events", "0", "9999")
@@ -401,7 +404,11 @@ func BenchmarkHighConcurrency(b *testing.B) {
 		b.Run(fmt.Sprintf("concurrency_%d", concurrency), func(b *testing.B) {
 			b.SetParallelism(concurrency)
 			b.RunParallel(func(pb *testing.PB) {
-				client, _ := NewRedisClient(ts.Addr())
+				client, err := NewRedisClient(ts.Addr())
+				if err != nil {
+					b.Logf("Failed to connect: %v", err)
+					return
+				}
 				defer client.Close()
 
 				for pb.Next() {

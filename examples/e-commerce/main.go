@@ -1,13 +1,14 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"math/rand"
 	"time"
 
-	"github.com/cachestorm/cachestorm/clients/go"
+	cachestorm "github.com/cachestorm/cachestorm/clients/go"
 )
 
 // Product represents an e-commerce product
@@ -37,48 +38,50 @@ type ShoppingCart struct {
 
 func main() {
 	// Connect to CacheStorm
-	client, err := cachestorm.New("localhost:6379")
+	client, err := cachestorm.NewClient("localhost:6379")
 	if err != nil {
 		log.Fatalf("Failed to connect: %v", err)
 	}
 	defer client.Close()
 
+	ctx := context.Background()
+
 	fmt.Println("=== E-Commerce Example with CacheStorm ===")
 
 	// 1. Initialize products
 	fmt.Println("\n1. Initializing products...")
-	initializeProducts(client)
+	initializeProducts(ctx, client)
 
 	// 2. Simulate user browsing
 	fmt.Println("\n2. Simulating user browsing...")
-	simulateBrowsing(client)
+	simulateBrowsing(ctx, client)
 
 	// 3. Add items to cart
 	fmt.Println("\n3. Adding items to cart...")
 	userID := 12345
-	cart := addToCart(client, userID, 42, 2)
-	addToCart(client, userID, 15, 1)
+	cart := addToCart(ctx, client, userID, 42, 2)
+	addToCart(ctx, client, userID, 15, 1)
 
 	// 4. View cart
 	fmt.Println("\n4. Viewing cart...")
-	viewCart(client, userID)
+	viewCart(ctx, client, userID)
 
 	// 5. Apply discount
 	fmt.Println("\n5. Applying discount...")
-	applyDiscount(client, userID, 10) // 10% discount
+	applyDiscount(ctx, client, userID, 10) // 10% discount
 
 	// 6. Process order
 	fmt.Println("\n6. Processing order...")
-	processOrder(client, userID, cart)
+	processOrder(ctx, client, userID, cart)
 
 	// 7. Show analytics
 	fmt.Println("\n7. Showing analytics...")
-	showAnalytics(client)
+	showAnalytics(ctx, client)
 
 	fmt.Println("\n=== E-Commerce Example Complete ===")
 }
 
-func initializeProducts(client *cachestorm.Client) {
+func initializeProducts(ctx context.Context, client *cachestorm.Client) {
 	categories := []string{"electronics", "clothing", "food", "books"}
 	tags := [][]string{
 		{"new", "featured"},
@@ -101,24 +104,24 @@ func initializeProducts(client *cachestorm.Client) {
 		data, _ := json.Marshal(product)
 
 		// Store product
-		client.Set(fmt.Sprintf("product:%d", i), string(data))
+		client.Set(ctx, fmt.Sprintf("product:%d", i), string(data), 0)
 
 		// Add to category index
-		client.SAdd(fmt.Sprintf("category:%s", product.Category), i)
+		client.SAdd(ctx, fmt.Sprintf("category:%s", product.Category), fmt.Sprintf("%d", i))
 
 		// Add to price sorted set
-		client.ZAdd("products:by_price", product.Price, i)
+		client.ZAdd(ctx, "products:by_price", product.Price, fmt.Sprintf("%d", i))
 
 		// Add tags
 		for _, tag := range product.Tags {
-			client.SAdd(fmt.Sprintf("tag:%s", tag), i)
+			client.SAdd(ctx, fmt.Sprintf("tag:%s", tag), fmt.Sprintf("%d", i))
 		}
 	}
 
 	fmt.Println("  - 100 products initialized")
 }
 
-func simulateBrowsing(client *cachestorm.Client) {
+func simulateBrowsing(ctx context.Context, client *cachestorm.Client) {
 	// Simulate 10 users browsing
 	for userID := 0; userID < 10; userID++ {
 		// Record page view
@@ -128,17 +131,17 @@ func simulateBrowsing(client *cachestorm.Client) {
 			"timestamp": time.Now().Unix(),
 		}
 		viewJSON, _ := json.Marshal(view)
-		client.LPush("analytics:page_views", string(viewJSON))
+		client.LPush(ctx, "analytics:page_views", string(viewJSON))
 
 		// Get recommended products (high rated)
-		recommended, _ := client.ZRevRange("products:by_price", 0, 4)
+		recommended, _ := client.ZRevRange(ctx, "products:by_price", 0, 4)
 		fmt.Printf("  - User %d viewed top 5 expensive products: %v\n", userID, recommended)
 	}
 }
 
-func addToCart(client *cachestorm.Client, userID, productID, qty int) *ShoppingCart {
+func addToCart(ctx context.Context, client *cachestorm.Client, userID, productID, qty int) *ShoppingCart {
 	// Get product
-	productData, err := client.Get(fmt.Sprintf("product:%d", productID))
+	productData, err := client.Get(ctx, fmt.Sprintf("product:%d", productID))
 	if err != nil {
 		log.Printf("Product not found: %d", productID)
 		return nil
@@ -155,18 +158,18 @@ func addToCart(client *cachestorm.Client, userID, productID, qty int) *ShoppingC
 		Price:     product.Price,
 	}
 	itemJSON, _ := json.Marshal(item)
-	client.HSet(cartKey, fmt.Sprintf("item:%d", productID), string(itemJSON))
+	client.HSet(ctx, cartKey, fmt.Sprintf("item:%d", productID), string(itemJSON))
 
 	// Set cart expiry (1 hour)
-	client.Expire(cartKey, 3600)
+	client.Expire(ctx, cartKey, time.Hour)
 
 	fmt.Printf("  - Added %d x Product %d to cart\n", qty, productID)
 	return nil
 }
 
-func viewCart(client *cachestorm.Client, userID int) {
+func viewCart(ctx context.Context, client *cachestorm.Client, userID int) {
 	cartKey := fmt.Sprintf("cart:%d", userID)
-	items, _ := client.HGetAll(cartKey)
+	items, _ := client.HGetAll(ctx, cartKey)
 
 	var total float64
 	fmt.Printf("  - Cart for user %d:\n", userID)
@@ -180,21 +183,20 @@ func viewCart(client *cachestorm.Client, userID int) {
 	fmt.Printf("    Total: $%.2f\n", total)
 }
 
-func applyDiscount(client *cachestorm.Client, userID int, discountPercent float64) {
+func applyDiscount(ctx context.Context, client *cachestorm.Client, userID int, discountPercent float64) {
 	discountKey := fmt.Sprintf("discount:%d", userID)
-	client.Set(discountKey, fmt.Sprintf("%.0f", discountPercent))
-	client.Expire(discountKey, 3600)
+	client.Set(ctx, discountKey, fmt.Sprintf("%.0f", discountPercent), time.Hour)
 	fmt.Printf("  - Applied %d%% discount for user %d\n", int(discountPercent), userID)
 }
 
-func processOrder(client *cachestorm.Client, userID int, cart *ShoppingCart) {
+func processOrder(ctx context.Context, client *cachestorm.Client, userID int, cart *ShoppingCart) {
 	// Generate order ID
 	orderID := rand.Intn(1000000)
 	orderKey := fmt.Sprintf("order:%d", orderID)
 
 	// Get cart items
 	cartKey := fmt.Sprintf("cart:%d", userID)
-	items, _ := client.HGetAll(cartKey)
+	items, _ := client.HGetAll(ctx, cartKey)
 
 	// Calculate total
 	var total float64
@@ -206,7 +208,7 @@ func processOrder(client *cachestorm.Client, userID int, cart *ShoppingCart) {
 
 	// Apply discount if exists
 	discountKey := fmt.Sprintf("discount:%d", userID)
-	discountData, err := client.Get(discountKey)
+	discountData, err := client.Get(ctx, discountKey)
 	if err == nil && discountData != "" {
 		var discount float64
 		fmt.Sscanf(discountData, "%f", &discount)
@@ -225,31 +227,31 @@ func processOrder(client *cachestorm.Client, userID int, cart *ShoppingCart) {
 		"created_at": time.Now().Format(time.RFC3339),
 	}
 	orderJSON, _ := json.Marshal(order)
-	client.Set(orderKey, string(orderJSON))
+	client.Set(ctx, orderKey, string(orderJSON), 0)
 
 	// Clear cart
-	client.Del(cartKey)
+	client.Del(ctx, cartKey)
 
 	// Add to user's order history
-	client.SAdd(fmt.Sprintf("user:%d:orders", userID), orderID)
+	client.SAdd(ctx, fmt.Sprintf("user:%d:orders", userID), fmt.Sprintf("%d", orderID))
 
 	fmt.Printf("  - Order %d created: $%.2f\n", orderID, total)
 }
 
-func showAnalytics(client *cachestorm.Client) {
+func showAnalytics(ctx context.Context, client *cachestorm.Client) {
 	// Total products by category
 	categories := []string{"electronics", "clothing", "food", "books"}
 	fmt.Println("  - Products by category:")
 	for _, cat := range categories {
-		count, _ := client.SCard(fmt.Sprintf("category:%s", cat))
+		count, _ := client.SCard(ctx, fmt.Sprintf("category:%s", cat))
 		fmt.Printf("    %s: %d\n", cat, count)
 	}
 
 	// Recent page views
-	views, _ := client.LRange("analytics:page_views", 0, 9)
+	views, _ := client.LRange(ctx, "analytics:page_views", 0, 9)
 	fmt.Printf("  - Recent page views: %d\n", len(views))
 
 	// Top expensive products
-	topProducts, _ := client.ZRevRange("products:by_price", 0, 4)
+	topProducts, _ := client.ZRevRange(ctx, "products:by_price", 0, 4)
 	fmt.Printf("  - Top 5 expensive products: %v\n", topProducts)
 }

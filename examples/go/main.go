@@ -26,10 +26,11 @@ func main() {
 
 	// Test connection
 	fmt.Println("→ Testing connection...")
-	if err := client.Ping(ctx); err != nil {
+	pong, err := client.Ping(ctx)
+	if err != nil {
 		log.Fatalf("Failed to ping server: %v", err)
 	}
-	fmt.Println("  ✓ Connected to CacheStorm")
+	fmt.Printf("  ✓ Connected to CacheStorm (%s)\n", pong)
 	fmt.Println()
 
 	// String operations
@@ -145,12 +146,12 @@ func main() {
 		fmt.Printf("  ✓ SMEMBERS demo:tags = %v\n", tags)
 	}
 
-	// SISMEMBER
-	isMember, err := client.SIsMember(ctx, "demo:tags", "go")
+	// SCARD (instead of SISMEMBER which is not in the client)
+	tagCount, err := client.SCard(ctx, "demo:tags")
 	if err != nil {
-		log.Printf("  ✗ SISMEMBER failed: %v", err)
+		log.Printf("  ✗ SCARD failed: %v", err)
 	} else {
-		fmt.Printf("  ✓ SISMEMBER demo:tags go = %v\n", isMember)
+		fmt.Printf("  ✓ SCARD demo:tags = %d\n", tagCount)
 	}
 	fmt.Println()
 
@@ -167,12 +168,12 @@ func main() {
 	client.ZAdd(ctx, "demo:leaderboard", 200, "player2")
 	client.ZAdd(ctx, "demo:leaderboard", 150, "player3")
 
-	// ZRANGE
-	leaders, err := client.ZRange(ctx, "demo:leaderboard", 0, -1)
+	// ZREVRANGE (use ZRevRange instead of ZRange, which is not in the client)
+	leaders, err := client.ZRevRange(ctx, "demo:leaderboard", 0, -1)
 	if err != nil {
-		log.Printf("  ✗ ZRANGE failed: %v", err)
+		log.Printf("  ✗ ZREVRANGE failed: %v", err)
 	} else {
-		fmt.Printf("  ✓ ZRANGE demo:leaderboard = %v\n", leaders)
+		fmt.Printf("  ✓ ZREVRANGE demo:leaderboard = %v\n", leaders)
 	}
 	fmt.Println()
 
@@ -197,30 +198,21 @@ func main() {
 		fmt.Printf("  ✓ TAGKEYS products = %v\n", productKeys)
 	}
 
-	// Get tags of a key
-	keyTags, err := client.Tags(ctx, "demo:product:1")
-	if err != nil {
-		log.Printf("  ✗ TAGS failed: %v", err)
-	} else {
-		fmt.Printf("  ✓ TAGS demo:product:1 = %v\n", keyTags)
-	}
-
 	// Invalidate by tag
-	invalidated, err := client.Invalidate(ctx, "featured")
-	if err != nil {
+	if err := client.Invalidate(ctx, "featured"); err != nil {
 		log.Printf("  ✗ INVALIDATE failed: %v", err)
 	} else {
-		fmt.Printf("  ✓ INVALIDATE featured = %d keys removed\n", invalidated)
+		fmt.Println("  ✓ INVALIDATE featured - keys removed")
 	}
 	fmt.Println()
 
 	// Pipeline demo
 	fmt.Println("→ Pipeline (Batch Operations):")
 	pipe := client.Pipeline()
-	pipe.Set("demo:pipe:1", "value1")
-	pipe.Set("demo:pipe:2", "value2")
-	pipe.Set("demo:pipe:3", "value3")
-	pipe.Get("demo:pipe:1")
+	pipe.Set(ctx, "demo:pipe:1", "value1", 0)
+	pipe.Set(ctx, "demo:pipe:2", "value2", 0)
+	pipe.Set(ctx, "demo:pipe:3", "value3", 0)
+	pipe.Get(ctx, "demo:pipe:1")
 
 	pipeResults, err := pipe.Exec(ctx)
 	if err != nil {

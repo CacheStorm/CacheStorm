@@ -20,7 +20,18 @@ type Reader struct {
 }
 
 func NewReader(rd io.Reader) *Reader {
+	if br, ok := rd.(*bufio.Reader); ok {
+		return &Reader{rd: br}
+	}
 	return &Reader{rd: bufio.NewReader(rd)}
+}
+
+func (r *Reader) Reset(rd io.Reader) {
+	if br, ok := rd.(*bufio.Reader); ok {
+		r.rd = br
+	} else {
+		r.rd.Reset(rd)
+	}
 }
 
 func (r *Reader) ReadValue() (*Value, error) {
@@ -175,25 +186,15 @@ func (r *Reader) readArray() (*Value, error) {
 }
 
 func (r *Reader) readLine() ([]byte, error) {
-	var line []byte
-	for {
-		b, err := r.rd.ReadByte()
-		if err != nil {
-			return nil, err
-		}
-		if b == '\r' {
-			next, err := r.rd.ReadByte()
-			if err != nil {
-				return nil, err
-			}
-			if next == '\n' {
-				return line, nil
-			}
-			line = append(line, b, next)
-		} else {
-			line = append(line, b)
-		}
+	line, err := r.rd.ReadBytes('\n')
+	if err != nil {
+		return nil, err
 	}
+	// Strip trailing \r\n
+	if len(line) >= 2 && line[len(line)-2] == '\r' {
+		return line[:len(line)-2], nil
+	}
+	return nil, ErrInvalidFormat
 }
 
 func (r *Reader) readCRLF() error {

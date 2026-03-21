@@ -74,21 +74,27 @@ A high-performance, Redis-compatible in-memory database written in Go with **1,6
 | **And more...** | 400+ | See [Commands Reference](./docs/commands.md) |
 
 ### Performance
-- **High Throughput**: ~14M GET/sec, ~1.5M SET/sec (single thread)
-- **Parallel Performance**: ~77M GET/sec, ~15M SET/sec (parallel)
+- **High Throughput**: ~20M GET/sec, ~1.3M SET/sec (single thread)
+- **Parallel Performance**: ~106M GET/sec, ~2.2M SET/sec (parallel)
 - **256-Shard Architecture**: Concurrent access with minimal lock contention
+- **Channel-Based Blocking**: BLPOP/BRPOP/BZPOPMIN/XREADGROUP use event-driven waiting, not polling
 - **Zero Core Dependencies**: Core functionality implemented from scratch
 
 ### Enterprise Features
+- **TLS Support**: TLS 1.2+ with configurable certificate/key files
+- **Authentication**: `requirepass` with constant-time password validation
 - **Lua Scripting**: Full EVAL/EVALSHA/SCRIPT support
 - **Transactions**: MULTI/EXEC/DISCARD/WATCH support
 - **Pub/Sub**: Subscribe, Publish, Pattern Subscribe, Sharded Pub/Sub (Redis 7)
 - **Clustering**: Gossip-based cluster with hash slot routing
-- **Persistence**: AOF + RDB Snapshot
+- **Persistence**: AOF with everysec/always sync policies, auto-replay on startup
 - **Replication**: Master-Slave replication with Sentinel support
-- **Access Control**: ACL support
-- **Monitoring**: Slow Log, Latency monitoring, Hot key detection
-- **HTTP API**: RESTful API on port 8080
+- **Memory Management**: Configurable maxmemory with LRU/LFU/Random eviction + OOM rejection
+- **Access Control**: ACL support with per-command authentication enforcement
+- **Graceful Shutdown**: Connection draining with configurable timeout
+- **Panic Recovery**: Per-connection panic recovery with stack trace logging
+- **Monitoring**: Prometheus `/metrics` endpoint, Slow Log, Latency monitoring, Hot key detection
+- **HTTP API**: RESTful API with Read/Write/Idle timeouts on port 8080
 
 ## Quick Start
 
@@ -113,9 +119,13 @@ docker-compose up -d
 
 **Go:**
 ```go
-import cachestorm "github.com/cachestorm/cachestorm/clients/go"
+import (
+	"context"
+	cachestorm "github.com/cachestorm/cachestorm/clients/go"
+)
 
-client, _ := cachestorm.NewClient("localhost:6379")
+ctx := context.Background()
+client, _ := cachestorm.NewClient("localhost:6380")
 client.Set(ctx, "key", "value", 0)
 val, _ := client.Get(ctx, "key")
 ```
@@ -124,7 +134,7 @@ val, _ := client.Get(ctx, "key")
 ```typescript
 import { CacheStormClient } from '@cachestorm/client';
 
-const client = new CacheStormClient({ host: 'localhost', port: 6379 });
+const client = new CacheStormClient({ host: 'localhost', port: 6380 });
 await client.connect();
 await client.set('key', 'value');
 const val = await client.get('key');
@@ -134,15 +144,15 @@ const val = await client.get('key');
 ```python
 from cachestorm import CacheStormClient
 
-client = CacheStormClient(host='localhost', port=6379)
+client = CacheStormClient(host='localhost', port=6380)
 client.set('key', 'value')
 val = client.get('key')
 ```
 
 **Redis CLI:**
 ```bash
-redis-cli -p 6379 SET mykey myvalue
-redis-cli -p 6379 GET mykey
+redis-cli -p 6380 SET mykey myvalue
+redis-cli -p 6380 GET mykey
 ```
 
 ## Installation Methods
@@ -176,7 +186,7 @@ go install github.com/cachestorm/cachestorm@latest
 #### Using Docker
 ```bash
 docker pull cachestorm/cachestorm:latest
-docker run -d -p 6379:6379 -p 8080:8080 cachestorm/cachestorm
+docker run -d -p 6380:6380 -p 8080:8080 cachestorm/cachestorm
 ```
 
 #### Using Docker Compose
@@ -309,16 +319,28 @@ METRICX.RECORD/QUERY/AGGREGATE               - Metrics
 
 ## Performance
 
-Benchmarks run on AMD Ryzen 9 5900X, 64GB RAM:
+Benchmarks on AMD Ryzen 9 9950X3D, 64GB RAM, Windows 11 (in-memory, no network):
 
-| Operation | Single-thread | Multi-thread |
-|-----------|---------------|--------------|
-| GET | ~14M ops/sec | ~77M ops/sec |
-| SET | ~1.5M ops/sec | ~15M ops/sec |
-| HGET | ~12M ops/sec | ~65M ops/sec |
-| HSET | ~1.2M ops/sec | ~12M ops/sec |
-| LPUSH | ~800K ops/sec | ~8M ops/sec |
-| ZADD | ~600K ops/sec | ~6M ops/sec |
+| Operation | ops/sec | ns/op | Allocs/op |
+|-----------|---------|-------|-----------|
+| GET (sequential) | 20M | 50 ns | 0 |
+| GET (parallel, 32 cores) | 106M | 9.4 ns | 0 |
+| SET (sequential) | 1.3M | 796 ns | 3 |
+| SET (parallel, 32 cores) | 2.2M | 449 ns | 3 |
+| RESP ReadCommand | 861K | 1,531 ns | 17 |
+| RESP WriteBulkString (1KB) | 1M | 1,137 ns | 2 |
+| Tag Invalidate (10K keys) | 597 | 1.7 ms | 19,982 |
+| Tag Count | 52M | 23 ns | 0 |
+
+E2E benchmarks (full TCP round-trip):
+
+| Operation | ops/sec | ns/op |
+|-----------|---------|-------|
+| SET | 32K | 37 us |
+| GET | 33K | 37 us |
+| HSET | 33K | 38 us |
+| ZADD | 31K | 36 us |
+| XADD | 31K | 39 us |
 
 ## Testing
 
@@ -347,7 +369,7 @@ See [COVERAGE_REPORT.md](./COVERAGE_REPORT.md) for detailed coverage information
 ### Quick Start with Docker
 ```bash
 # Pull and run
-docker run -d -p 6379:6379 -p 8080:8080 --name cachestorm cachestorm/cachestorm:latest
+docker run -d -p 6380:6380 -p 8080:8080 --name cachestorm cachestorm/cachestorm:latest
 ```
 
 ### Docker Compose (Full Stack)
@@ -377,7 +399,7 @@ docker pull cachestorm/cachestorm:latest
 # Run container
 docker run -d \
   --name cachestorm \
-  -p 6379:6379 \
+  -p 6380:6380 \
   -p 8080:8080 \
   -v cachestorm-data:/data \
   cachestorm/cachestorm:latest
@@ -385,7 +407,7 @@ docker run -d \
 # With custom config
 docker run -d \
   --name cachestorm \
-  -p 6379:6379 \
+  -p 6380:6380 \
   -v $(pwd)/config:/etc/cachestorm \
   cachestorm/cachestorm:latest \
   --config /etc/cachestorm/cachestorm.yaml
@@ -399,7 +421,7 @@ services:
   cachestorm:
     image: cachestorm/cachestorm:latest
     ports:
-      - "6379:6379"
+      - "6380:6380"
       - "8080:8080"
     volumes:
       - cachestorm-data:/data
@@ -484,29 +506,49 @@ git push origin v0.1.28
 ## Configuration
 
 ```yaml
-# config.yaml
+# cachestorm.yaml
 server:
-  port: 6379
-  http_port: 8080
-  max_clients: 10000
+  bind: "0.0.0.0"
+  port: 6380
+  max_connections: 10000
+  requirepass: ""              # Set password for AUTH
+  tls_cert_file: ""            # Path to TLS certificate
+  tls_key_file: ""             # Path to TLS private key
+  read_timeout: "5m"
+  write_timeout: "5m"
 
-storage:
-  max_memory: 4gb
-  eviction_policy: allkeys-lru
+http:
+  enabled: true
+  port: 8080
+  password: ""                 # HTTP API auth password
+
+memory:
+  max_memory: "0"              # 0 = unlimited, or e.g. "4gb"
+  eviction_policy: "allkeys-lru"  # noeviction, allkeys-lru, allkeys-lfu, volatile-lru, allkeys-random
+  pressure_warning: 70
+  pressure_critical: 85
+  eviction_sample_size: 5
 
 persistence:
-  enabled: true
-  mode: aof
-  aof_fsync: everysec
-  rdb_interval: 300
+  enabled: false
+  aof: true
+  aof_sync: "everysec"         # always, everysec, no
+  data_dir: "/var/lib/cachestorm"
+
+replication:
+  role: "master"               # master or slave
+  master_host: ""
+  master_port: 6380
 
 cluster:
   enabled: false
-  nodes: []
+  node_name: ""
+  seeds: []
 
 logging:
-  level: info
-  format: json
+  level: "info"
+  format: "json"
+  output: "stdout"
 ```
 
 ## Contributing
@@ -567,21 +609,21 @@ Since CacheStorm is ~99% Redis compatible, you can use any existing Redis client
 ```python
 # Python with redis-py
 import redis
-r = redis.Redis(host='localhost', port=6379)
+r = redis.Redis(host='localhost', port=6380)
 
 # Node.js with ioredis
 const Redis = require('ioredis');
-const redis = new Redis({ port: 6379 });
+const redis = new Redis({ port: 6380 });
 
 # Go with go-redis
 import "github.com/redis/go-redis/v9"
-rdb := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
+rdb := redis.NewClient(&redis.Options{Addr: "localhost:6380"})
 
 # Java with Jedis
-Jedis jedis = new Jedis("localhost", 6379);
+Jedis jedis = new Jedis("localhost", 6380);
 
 # C# with StackExchange.Redis
-var redis = ConnectionMultiplexer.Connect("localhost:6379");
+var redis = ConnectionMultiplexer.Connect("localhost:6380");
 ```
 
 ## Project Structure

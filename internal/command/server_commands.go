@@ -833,7 +833,14 @@ func cmdAUTH(ctx *Context) error {
 
 	password := ctx.ArgString(0)
 
-	_ = password
+	if globalRouter == nil || globalRouter.RequirePass() == "" {
+		return ctx.Writer.WriteError("ERR Client sent AUTH, but no password is set. Did you mean ACL SETUSER with >password?")
+	}
+
+	if !globalRouter.ValidatePassword(password) {
+		ctx.SetAuthenticated(false)
+		return ctx.Writer.WriteError("WRONGPASS invalid username-password pair or user is disabled.")
+	}
 
 	ctx.SetAuthenticated(true)
 	return ctx.WriteOK()

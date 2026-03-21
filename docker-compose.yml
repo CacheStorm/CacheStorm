@@ -5,7 +5,7 @@ services:
     image: cachestorm/cachestorm:latest
     container_name: cachestorm
     ports:
-      - "6379:6379"
+      - "6380:6380"
       - "8080:8080"
     volumes:
       - cachestorm-data:/data

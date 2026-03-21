@@ -1,6 +1,7 @@
 package store
 
 import (
+	"runtime"
 	"sync"
 	"time"
 )
@@ -149,35 +150,75 @@ func (dl *DistributedLock) TryLock(key, holder, token string, ttl time.Duration)
 }
 
 func (dl *DistributedLock) Lock(key, holder, token string, ttl time.Duration, timeout time.Duration) bool {
-	deadline := time.Now().Add(timeout)
+	// Try immediate acquire
+	if dl.TryLock(key, holder, token, ttl) {
+		return true
+	}
+
+	if timeout == 0 {
+		return false
+	}
+
+	// Register as waiter
+	ch := make(chan struct{}, 1)
+	dl.mu.Lock()
+	dl.waitQueue[key] = append(dl.waitQueue[key], ch)
+	dl.mu.Unlock()
+
+	defer func() {
+		dl.mu.Lock()
+		waiters := dl.waitQueue[key]
+		for i, w := range waiters {
+			if w == ch {
+				dl.waitQueue[key] = append(waiters[:i], waiters[i+1:]...)
+				break
+			}
+		}
+		dl.mu.Unlock()
+	}()
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
 
 	for {
-		if dl.TryLock(key, holder, token, ttl) {
-			return true
-		}
-
-		if time.Now().After(deadline) {
+		select {
+		case <-ch:
+			if dl.TryLock(key, holder, token, ttl) {
+				return true
+			}
+			// Another waiter grabbed it — re-register and wait
+		case <-timer.C:
 			return false
 		}
-
-		time.Sleep(10 * time.Millisecond)
 	}
 }
 
 func (dl *DistributedLock) Unlock(key, holder, token string) bool {
 	dl.mu.Lock()
-	defer dl.mu.Unlock()
 
 	lock, exists := dl.Locks[key]
 	if !exists {
+		dl.mu.Unlock()
 		return false
 	}
 
 	if lock.Holder == holder && lock.Token == token {
 		delete(dl.Locks, key)
+		// Wake all waiters for this key
+		waiters := dl.waitQueue[key]
+		delete(dl.waitQueue, key)
+		dl.mu.Unlock()
+
+		for _, ch := range waiters {
+			select {
+			case ch <- struct{}{}:
+			default:
+			}
+		}
 		return true
 	}
 
+	dl.mu.Unlock()
 	return false
 }
 
@@ -421,7 +462,7 @@ func currentTimestamp() int64 {
 func waitNextMillis(lastTimestamp int64) int64 {
 	now := currentTimestamp()
 	for now <= lastTimestamp {
-		time.Sleep(100 * time.Microsecond)
+		runtime.Gosched() // Yield CPU instead of sleeping — sub-millisecond wait
 		now = currentTimestamp()
 	}
 	return now

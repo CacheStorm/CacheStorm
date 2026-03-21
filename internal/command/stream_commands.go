@@ -185,6 +185,7 @@ loop:
 
 	_ = entry
 	_ = approximate
+	ctx.Store.KeyNotifier().NotifyKey(key)
 	return ctx.WriteBulkString(id)
 }
 
@@ -338,37 +339,77 @@ func cmdXREAD(ctx *Context) error {
 		}
 	}
 
-	_ = block
-
 	remaining := ctx.ArgCount() - streamsIdx
 	if remaining < 2 || remaining%2 != 0 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
 	numStreams := remaining / 2
-	results := make([]*resp.Value, 0, numStreams)
+	keys := make([]string, numStreams)
+	ids := make([]string, numStreams)
 
 	for i := 0; i < numStreams; i++ {
-		key := ctx.ArgString(streamsIdx + i)
-		id := ctx.ArgString(streamsIdx + numStreams + i)
+		keys[i] = ctx.ArgString(streamsIdx + i)
+		ids[i] = ctx.ArgString(streamsIdx + numStreams + i)
+	}
 
+	// Resolve "$" IDs to current last ID before blocking
+	for i, id := range ids {
+		if id == "$" {
+			stream := getStream(ctx, keys[i])
+			if stream != nil {
+				ids[i] = stream.LastID
+			} else {
+				ids[i] = "0-0"
+			}
+		}
+	}
+
+	// Try immediate read
+	results := xreadStreams(ctx, keys, ids, count)
+	if len(results) > 0 {
+		return ctx.WriteArray(results)
+	}
+
+	// If no BLOCK, return null
+	if block <= 0 {
+		return ctx.WriteNull()
+	}
+
+	// Block until notified or timeout
+	notifier := ctx.Store.KeyNotifier()
+	dur := time.Duration(block) * time.Millisecond
+
+	for {
+		_, notified := notifier.WaitForKeys(keys, dur)
+		if !notified {
+			return ctx.WriteNull()
+		}
+
+		results = xreadStreams(ctx, keys, ids, count)
+		if len(results) > 0 {
+			return ctx.WriteArray(results)
+		}
+	}
+}
+
+func xreadStreams(ctx *Context, keys, ids []string, count int64) []*resp.Value {
+	results := make([]*resp.Value, 0, len(keys))
+
+	for i, key := range keys {
 		stream := getStream(ctx, key)
 		if stream == nil {
 			continue
 		}
 
-		if id == "$" {
-			id = stream.LastID
-		}
-
-		entries := stream.GetRange(id, "+", count)
+		entries := stream.GetRange(ids[i], "+", count)
 		if len(entries) == 0 {
 			continue
 		}
 
 		entryResults := make([]*resp.Value, 0, len(entries))
 		for _, entry := range entries {
-			if entry.ID == id {
+			if entry.ID == ids[i] {
 				continue
 			}
 			fields := make([]*resp.Value, 0, len(entry.Fields)*2)
@@ -388,12 +429,7 @@ func cmdXREAD(ctx *Context) error {
 			}))
 		}
 	}
-
-	if len(results) == 0 {
-		return ctx.WriteNull()
-	}
-
-	return ctx.WriteArray(results)
+	return results
 }
 
 func cmdXDEL(ctx *Context) error {
@@ -810,8 +846,15 @@ func cmdXREADGROUP(ctx *Context) error {
 	}
 
 	if totalEntries == 0 && block > 0 {
-		deadline := time.Now().Add(time.Duration(block) * time.Second)
-		for time.Now().Before(deadline) {
+		notifier := ctx.Store.KeyNotifier()
+		dur := time.Duration(block) * time.Second
+
+		for {
+			_, notified := notifier.WaitForKeys(keys, dur)
+			if !notified {
+				break
+			}
+
 			for i, key := range keys {
 				stream := getStream(ctx, key)
 				if stream == nil {
@@ -847,7 +890,6 @@ func cmdXREADGROUP(ctx *Context) error {
 			if totalEntries > 0 {
 				break
 			}
-			time.Sleep(10 * time.Millisecond)
 		}
 	}
 

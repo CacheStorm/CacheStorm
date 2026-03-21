@@ -234,7 +234,17 @@ func (s *Sentinel) startFailover(name string, master *MasterInfo) {
 
 	logger.Info().Str("master", name).Msg("Starting failover")
 
-	time.Sleep(5 * time.Second)
+	// Wait for failover delay (configurable, default 5s)
+	failoverDelay := s.failoverTime
+	if failoverDelay == 0 {
+		failoverDelay = 5 * time.Second
+	}
+
+	select {
+	case <-time.After(failoverDelay):
+	case <-s.stopCh:
+		return
+	}
 
 	var bestReplica *ReplicaInfo
 	s.mu.RLock()
