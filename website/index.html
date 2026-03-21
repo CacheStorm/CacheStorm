@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CacheStorm - High-Performance Redis-Compatible Cache</title>
+    <meta name="description" content="CacheStorm is a high-performance, Redis-compatible caching server built in Go with 256-shard architecture, sub-millisecond latency, and enterprise security." />
+    <script>
+      (function() {
+        const params = new URLSearchParams(window.location.search);
+        const path = params.get('p');
+        if (path) {
+          window.history.replaceState(null, '', path);
+        }
+      })();
+    </script>
+  </head>
+  <body class="bg-slate-950 text-slate-100 antialiased">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
