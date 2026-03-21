@@ -263,7 +263,7 @@ func cmdGEORADIUS(ctx *Context) error {
 			}
 			var err error
 			count, err = strconv.Atoi(ctx.ArgString(i))
-			if err != nil {
+			if err != nil || count < 0 {
 				return ctx.WriteError(ErrNotInteger)
 			}
 		case "ASC":
@@ -303,11 +303,20 @@ func cmdGEORADIUS(ctx *Context) error {
 	}
 	results := make([]result, 0)
 
+	// Safety cap to prevent OOM when no COUNT specified
+	maxResults := 100000
+	if count > 0 && sortOrder == "" {
+		maxResults = count // Can early-exit when no sorting needed
+	}
+
 	for member, point := range geo.Points {
 		dist := store.Haversine(lon, lat, point.Lon, point.Lat)
 		if dist <= radiusKm {
 			hash := store.EncodeGeohashInt(point.Lon, point.Lat)
 			results = append(results, result{member: member, dist: dist, point: point, hash: hash})
+			if len(results) >= maxResults && sortOrder == "" {
+				break
+			}
 		}
 	}
 
@@ -452,7 +461,7 @@ func cmdGEORADIUSBYMEMBER(ctx *Context) error {
 			}
 			var err error
 			count, err = strconv.Atoi(ctx.ArgString(i))
-			if err != nil {
+			if err != nil || count < 0 {
 				return ctx.WriteError(ErrNotInteger)
 			}
 		case "ASC":

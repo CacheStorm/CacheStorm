@@ -54,12 +54,19 @@ func GetFunctionRegistry(s *store.Store) *FunctionRegistry {
 	return functionRegistry
 }
 
+const maxLibraries = 1000 // Maximum number of function libraries
+
 func (r *FunctionRegistry) CreateLibrary(name string, code string, replace bool) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	if _, exists := r.libraries[name]; exists && !replace {
 		return fmt.Errorf("ERR library '%s' already exists", name)
+	}
+
+	// Enforce library count limit (only for new, not replacement)
+	if _, exists := r.libraries[name]; !exists && len(r.libraries) >= maxLibraries {
+		return fmt.Errorf("ERR maximum number of libraries (%d) reached", maxLibraries)
 	}
 
 	sha := sha1.Sum([]byte(code))

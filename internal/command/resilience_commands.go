@@ -1,6 +1,7 @@
 package command
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -212,6 +213,10 @@ func cmdCIRCUITXCREATE(ctx *Context) error {
 		halfOpenMax = parseInt64(ctx.ArgString(3))
 	}
 	circuitsMu.Lock()
+	if _, exists := circuits[name]; !exists && len(circuits) >= 10000 {
+		circuitsMu.Unlock()
+		return ctx.WriteError(errors.New("ERR maximum number of circuits reached"))
+	}
 	circuits[name] = &Circuit{
 		Name:            name,
 		State:           "closed",
@@ -371,6 +376,10 @@ func cmdRATELIMITERCREATE(ctx *Context) error {
 		strategy = ctx.ArgString(3)
 	}
 	rateLimitersXMux.Lock()
+	if _, exists := rateLimitersX[name]; !exists && len(rateLimitersX) >= 10000 {
+		rateLimitersXMux.Unlock()
+		return ctx.WriteError(errors.New("ERR maximum number of rate limiters reached"))
+	}
 	rateLimitersX[name] = &RateLimiterX{
 		Name:     name,
 		Limit:    limit,

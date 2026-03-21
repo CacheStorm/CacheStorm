@@ -74,9 +74,19 @@ func cmdMSGPACKENCODE(ctx *Context) error {
 }
 
 func msgpackEncode(data []byte) []byte {
-	result := make([]byte, 0)
-	result = append(result, 0xDA)
-	result = append(result, byte(len(data)>>8), byte(len(data)))
+	n := len(data)
+	var result []byte
+	if n <= 0xFFFF {
+		// str 16: 0xDA + 2-byte length
+		result = make([]byte, 0, 3+n)
+		result = append(result, 0xDA)
+		result = append(result, byte(n>>8), byte(n))
+	} else {
+		// str 32: 0xDB + 4-byte length
+		result = make([]byte, 0, 5+n)
+		result = append(result, 0xDB)
+		result = append(result, byte(n>>24), byte(n>>16), byte(n>>8), byte(n))
+	}
 	result = append(result, data...)
 	return result
 }
@@ -95,14 +105,32 @@ func cmdMSGPACKDECODE(ctx *Context) error {
 }
 
 func msgpackDecode(data []byte) ([]byte, error) {
-	if len(data) < 3 || data[0] != 0xDA {
+	if len(data) < 3 {
 		return nil, fmt.Errorf("invalid msgpack format")
 	}
-	length := int(data[1])<<8 | int(data[2])
-	if len(data) < 3+length {
+
+	var length int
+	var headerSize int
+	switch data[0] {
+	case 0xDA: // str 16
+		if len(data) < 3 {
+			return nil, fmt.Errorf("invalid msgpack format")
+		}
+		length = int(data[1])<<8 | int(data[2])
+		headerSize = 3
+	case 0xDB: // str 32
+		if len(data) < 5 {
+			return nil, fmt.Errorf("invalid msgpack format")
+		}
+		length = int(data[1])<<24 | int(data[2])<<16 | int(data[3])<<8 | int(data[4])
+		headerSize = 5
+	default:
+		return nil, fmt.Errorf("invalid msgpack format")
+	}
+	if len(data) < headerSize+length {
 		return nil, fmt.Errorf("incomplete msgpack data")
 	}
-	return data[3 : 3+length], nil
+	return data[headerSize : headerSize+length], nil
 }
 
 func cmdBSONENCODE(ctx *Context) error {
@@ -405,9 +433,24 @@ func cmdCBORENCODE(ctx *Context) error {
 }
 
 func cborEncode(data []byte) []byte {
-	result := make([]byte, 0)
-	result = append(result, 0x78)
-	result = append(result, byte(len(data)))
+	n := len(data)
+	var result []byte
+	if n <= 0xFF {
+		// 1-byte length: 0x78 + 1 byte
+		result = make([]byte, 0, 2+n)
+		result = append(result, 0x78)
+		result = append(result, byte(n))
+	} else if n <= 0xFFFF {
+		// 2-byte length: 0x79 + 2 bytes
+		result = make([]byte, 0, 3+n)
+		result = append(result, 0x79)
+		result = append(result, byte(n>>8), byte(n))
+	} else {
+		// 4-byte length: 0x7A + 4 bytes
+		result = make([]byte, 0, 5+n)
+		result = append(result, 0x7A)
+		result = append(result, byte(n>>24), byte(n>>16), byte(n>>8), byte(n))
+	}
 	result = append(result, data...)
 	return result
 }
@@ -426,14 +469,36 @@ func cmdCBORDECODE(ctx *Context) error {
 }
 
 func cborDecode(data []byte) ([]byte, error) {
-	if len(data) < 2 || data[0] != 0x78 {
+	if len(data) < 2 {
 		return nil, fmt.Errorf("invalid CBOR format")
 	}
-	length := int(data[1])
-	if len(data) < 2+length {
+
+	var length int
+	var headerSize int
+	switch data[0] {
+	case 0x78: // 1-byte length
+		length = int(data[1])
+		headerSize = 2
+	case 0x79: // 2-byte length
+		if len(data) < 3 {
+			return nil, fmt.Errorf("incomplete CBOR header")
+		}
+		length = int(data[1])<<8 | int(data[2])
+		headerSize = 3
+	case 0x7A: // 4-byte length
+		if len(data) < 5 {
+			return nil, fmt.Errorf("incomplete CBOR header")
+		}
+		length = int(data[1])<<24 | int(data[2])<<16 | int(data[3])<<8 | int(data[4])
+		headerSize = 5
+	default:
+		return nil, fmt.Errorf("invalid CBOR format")
+	}
+
+	if len(data) < headerSize+length {
 		return nil, fmt.Errorf("incomplete CBOR data")
 	}
-	return data[2 : 2+length], nil
+	return data[headerSize : headerSize+length], nil
 }
 
 func cmdCSVENCODE(ctx *Context) error {

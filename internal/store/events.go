@@ -67,9 +67,22 @@ func (em *EventManager) Emit(name string, data map[string]interface{}) *Event {
 	return event
 }
 
+const (
+	maxListenersPerEvent = 100   // Max listeners per event type
+	maxEventTypes        = 10000 // Max distinct event types
+)
+
 func (em *EventManager) Subscribe(name string) chan Event {
 	em.mu.Lock()
 	defer em.mu.Unlock()
+
+	// Enforce limits to prevent resource exhaustion
+	if len(em.Listeners[name]) >= maxListenersPerEvent {
+		return nil
+	}
+	if _, exists := em.Listeners[name]; !exists && len(em.Listeners) >= maxEventTypes {
+		return nil
+	}
 
 	ch := make(chan Event, 100)
 	em.Listeners[name] = append(em.Listeners[name], ch)
