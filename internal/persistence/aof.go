@@ -274,24 +274,35 @@ func (rw *AOFRewriter) Rewrite(aofPath string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create temp file: %v", err)
 	}
-	defer f.Close()
 
 	writer := bufio.NewWriterSize(f, 8192)
 
 	entries := rw.store.GetAll()
 	for key, entry := range entries {
 		if err := rw.writeEntry(writer, key, entry); err != nil {
+			f.Close()
 			os.Remove(tempPath)
 			return err
 		}
 	}
 
 	if err := writer.Flush(); err != nil {
+		f.Close()
 		os.Remove(tempPath)
 		return err
 	}
 
 	if err := f.Sync(); err != nil {
+		f.Close()
+		os.Remove(tempPath)
+		return err
+	}
+
+	stat, _ := f.Stat()
+	rw.lastSize = stat.Size()
+
+	// Close before rename — required on Windows where open files can't be renamed
+	if err := f.Close(); err != nil {
 		os.Remove(tempPath)
 		return err
 	}
@@ -300,9 +311,6 @@ func (rw *AOFRewriter) Rewrite(aofPath string) error {
 		os.Remove(tempPath)
 		return fmt.Errorf("failed to rename AOF file: %v", err)
 	}
-
-	stat, _ := f.Stat()
-	rw.lastSize = stat.Size()
 
 	logger.Info().Str("path", aofPath).Msg("AOF rewrite completed")
 	return nil
