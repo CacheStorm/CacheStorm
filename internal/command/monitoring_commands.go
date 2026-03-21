@@ -70,17 +70,21 @@ func cmdMETRICSCMD(ctx *Context) error {
 		return ctx.WriteNull()
 	}
 
-	latency := stats["latency"].(map[string]interface{})
+	latency, _ := stats["latency"].(map[string]interface{})
+	count, _ := stats["count"].(int64)
+	avgNs, _ := latency["avg"].(int64)
+	minNs, _ := latency["min"].(int64)
+	maxNs, _ := latency["max"].(int64)
 
 	results := []*resp.Value{
 		resp.BulkString("count"),
-		resp.IntegerValue(stats["count"].(int64)),
+		resp.IntegerValue(count),
 		resp.BulkString("avg_ns"),
-		resp.IntegerValue(latency["avg"].(int64)),
+		resp.IntegerValue(avgNs),
 		resp.BulkString("min_ns"),
-		resp.IntegerValue(latency["min"].(int64)),
+		resp.IntegerValue(minNs),
 		resp.BulkString("max_ns"),
-		resp.IntegerValue(latency["max"].(int64)),
+		resp.IntegerValue(maxNs),
 	}
 
 	return ctx.WriteArray(results)

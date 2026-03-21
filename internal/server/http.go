@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cachestorm/cachestorm/internal/command"
@@ -45,7 +46,7 @@ type HTTPServer struct {
 	connCount    func() int64 // callback to get active connection count
 	sessions     *sessionStore
 	rateLimiter  *rateLimiter
-	ready        bool
+	ready        atomic.Bool
 }
 
 type sessionStore struct {
@@ -282,7 +283,7 @@ func (h *HTTPServer) Start() error {
 	if h.config.Password == "" {
 		logger.Warn().Msg("HTTP server starting without authentication - this is insecure for production")
 	}
-	h.ready = true
+	h.ready.Store(true)
 
 	// Start background cleanup for sessions and rate limiter
 	go h.cleanupLoop()
@@ -306,11 +307,11 @@ func (h *HTTPServer) cleanupLoop() {
 }
 
 func (h *HTTPServer) SetReady(ready bool) {
-	h.ready = ready
+	h.ready.Store(ready)
 }
 
 func (h *HTTPServer) handleReady(w http.ResponseWriter, _ *http.Request) {
-	if !h.ready {
+	if !h.ready.Load() {
 		h.writeError(w, http.StatusServiceUnavailable, "server not ready")
 		return
 	}

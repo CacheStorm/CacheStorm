@@ -3,6 +3,7 @@ package command
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
@@ -42,7 +43,10 @@ type WarmCacheStatus struct {
 	LastWarm    time.Time
 }
 
-var warmStatus WarmCacheStatus
+var (
+	warmStatus   WarmCacheStatus
+	warmStatusMu sync.Mutex
+)
 
 func cmdWARMPRELOAD(ctx *Context) error {
 	if ctx.ArgCount() < 1 {
@@ -57,8 +61,10 @@ func cmdWARMPRELOAD(ctx *Context) error {
 		}
 	}
 
+	warmStatusMu.Lock()
 	warmStatus.Preloaded += int64(preloaded)
 	warmStatus.LastWarm = time.Now()
+	warmStatusMu.Unlock()
 
 	return ctx.WriteInteger(int64(preloaded))
 }
@@ -76,8 +82,10 @@ func cmdWARMPREFETCH(ctx *Context) error {
 		}
 	}
 
+	warmStatusMu.Lock()
 	warmStatus.Prefetched += int64(prefetched)
 	warmStatus.LastWarm = time.Now()
+	warmStatusMu.Unlock()
 
 	return ctx.WriteInteger(int64(prefetched))
 }
@@ -94,21 +102,27 @@ func cmdWARMINVALIDATE(ctx *Context) error {
 		}
 	}
 
+	warmStatusMu.Lock()
 	warmStatus.Invalidated += int64(invalidated)
+	warmStatusMu.Unlock()
 
 	return ctx.WriteInteger(int64(invalidated))
 }
 
 func cmdWARMSTATUS(ctx *Context) error {
+	warmStatusMu.Lock()
+	s := warmStatus
+	warmStatusMu.Unlock()
+
 	return ctx.WriteArray([]*resp.Value{
 		resp.BulkString("preloaded"),
-		resp.IntegerValue(warmStatus.Preloaded),
+		resp.IntegerValue(s.Preloaded),
 		resp.BulkString("prefetched"),
-		resp.IntegerValue(warmStatus.Prefetched),
+		resp.IntegerValue(s.Prefetched),
 		resp.BulkString("invalidated"),
-		resp.IntegerValue(warmStatus.Invalidated),
+		resp.IntegerValue(s.Invalidated),
 		resp.BulkString("last_warm"),
-		resp.BulkString(warmStatus.LastWarm.Format(time.RFC3339)),
+		resp.BulkString(s.LastWarm.Format(time.RFC3339)),
 	})
 }
 

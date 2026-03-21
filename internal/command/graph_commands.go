@@ -65,17 +65,23 @@ func cmdGRAPHINFO(ctx *Context) error {
 
 	info := g.Info()
 
+	nameStr, _ := info["name"].(string)
+	nodes, _ := info["nodes"].(int)
+	edges, _ := info["edges"].(int)
+	labels, _ := info["labels"].(int)
+	relations, _ := info["relations"].(int)
+
 	return ctx.WriteArray([]*resp.Value{
 		resp.BulkString("name"),
-		resp.BulkString(info["name"].(string)),
+		resp.BulkString(nameStr),
 		resp.BulkString("nodes"),
-		resp.IntegerValue(int64(info["nodes"].(int))),
+		resp.IntegerValue(int64(nodes)),
 		resp.BulkString("edges"),
-		resp.IntegerValue(int64(info["edges"].(int))),
+		resp.IntegerValue(int64(edges)),
 		resp.BulkString("labels"),
-		resp.IntegerValue(int64(info["labels"].(int))),
+		resp.IntegerValue(int64(labels)),
 		resp.BulkString("relations"),
-		resp.IntegerValue(int64(info["relations"].(int))),
+		resp.IntegerValue(int64(relations)),
 	})
 }
 

@@ -2,6 +2,8 @@ package config
 
 import (
 	"fmt"
+	"net"
+	"os"
 	"strconv"
 	"strings"
 )
@@ -50,6 +52,39 @@ func Validate(cfg *Config) error {
 
 	if cfg.Cluster.Enabled && cfg.Cluster.NodeName == "" {
 		return fmt.Errorf("node_name is required when cluster is enabled")
+	}
+
+	// Validate bind address
+	if cfg.Server.Bind != "" && cfg.Server.Bind != "0.0.0.0" {
+		if net.ParseIP(cfg.Server.Bind) == nil {
+			return fmt.Errorf("invalid bind address: %s", cfg.Server.Bind)
+		}
+	}
+
+	// Validate HTTP port
+	if cfg.HTTP.Enabled {
+		if cfg.HTTP.Port < 1 || cfg.HTTP.Port > 65535 {
+			return fmt.Errorf("invalid HTTP port: %d", cfg.HTTP.Port)
+		}
+	}
+
+	// Validate cluster bind port
+	if cfg.Cluster.Enabled && cfg.Cluster.BindPort != 0 {
+		if cfg.Cluster.BindPort < 1 || cfg.Cluster.BindPort > 65535 {
+			return fmt.Errorf("invalid cluster bind port: %d", cfg.Cluster.BindPort)
+		}
+	}
+
+	// Validate TLS files exist when specified
+	if cfg.Server.TLSCertFile != "" {
+		if _, err := os.Stat(cfg.Server.TLSCertFile); os.IsNotExist(err) {
+			return fmt.Errorf("TLS cert file not found: %s", cfg.Server.TLSCertFile)
+		}
+	}
+	if cfg.Server.TLSKeyFile != "" {
+		if _, err := os.Stat(cfg.Server.TLSKeyFile); os.IsNotExist(err) {
+			return fmt.Errorf("TLS key file not found: %s", cfg.Server.TLSKeyFile)
+		}
 	}
 
 	return nil

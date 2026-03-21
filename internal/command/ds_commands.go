@@ -377,13 +377,17 @@ func cmdLRUSTATS(ctx *Context) error {
 
 	stats := lru.Stats()
 
+	size, _ := stats["size"].(int)
+	capacity, _ := stats["capacity"].(int)
+	usage := stats["usage"]
+
 	return ctx.WriteArray([]*resp.Value{
 		resp.BulkString("size"),
-		resp.IntegerValue(int64(stats["size"].(int))),
+		resp.IntegerValue(int64(size)),
 		resp.BulkString("capacity"),
-		resp.IntegerValue(int64(stats["capacity"].(int))),
+		resp.IntegerValue(int64(capacity)),
 		resp.BulkString("usage"),
-		resp.BulkString(fmt.Sprintf("%.2f", stats["usage"])),
+		resp.BulkString(fmt.Sprintf("%.2f", usage)),
 	})
 }
 
