@@ -11,9 +11,9 @@
   [![Coverage](https://img.shields.io/badge/Coverage-96%25-brightgreen)](COVERAGE_REPORT.md)
   [![RESP Compatible](https://img.shields.io/badge/RESP-Compatible-blue)](https://cachestorm.com/docs/commands)
 
-  [![CI](https://github.com/cachestorm/cachestorm/actions/workflows/ci.yml/badge.svg)](https://github.com/cachestorm/cachestorm/actions/workflows/ci.yml)
-  [![Release](https://github.com/cachestorm/cachestorm/actions/workflows/release.yml/badge.svg)](https://github.com/cachestorm/cachestorm/actions/workflows/release.yml)
-  [![Nightly](https://github.com/cachestorm/cachestorm/actions/workflows/nightly.yml/badge.svg)](https://github.com/cachestorm/cachestorm/actions/workflows/nightly.yml)
+  [![CI](https://github.com/CacheStorm/CacheStorm/actions/workflows/ci.yml/badge.svg)](https://github.com/CacheStorm/CacheStorm/actions/workflows/ci.yml)
+  [![Release](https://github.com/CacheStorm/CacheStorm/actions/workflows/release.yml/badge.svg)](https://github.com/CacheStorm/CacheStorm/actions/workflows/release.yml)
+  [![Nightly](https://github.com/CacheStorm/CacheStorm/actions/workflows/nightly.yml/badge.svg)](https://github.com/CacheStorm/CacheStorm/actions/workflows/nightly.yml)
   [![Go Report Card](https://goreportcard.com/badge/github.com/cachestorm/cachestorm)](https://goreportcard.com/report/github.com/cachestorm/cachestorm)
   [![Website](https://img.shields.io/badge/Website-cachestorm.com-blue)](https://cachestorm.com)
 </div>
@@ -24,7 +24,7 @@ A high-performance in-memory data store written in Go. **1,600+ commands**, 256-
 
 **Test Coverage: ~96%** with 100% test success rate across all 18 internal packages. Works with any RESP-compatible client.
 
-📚 **[Documentation](./docs/)** | 🚀 **[Getting Started](./docs/01-getting-started.md)** | 📖 **[Commands Reference](./docs/commands.md)** | 📊 **[Coverage Report](./COVERAGE_REPORT.md)** | 💬 **[Discussions](https://github.com/cachestorm/cachestorm/discussions)**
+🌐 **[Website](https://cachestorm.com)** | 📚 **[Documentation](https://cachestorm.com/docs)** | 📖 **[Commands](https://cachestorm.com/docs/commands)** | 📊 **[Coverage Report](./COVERAGE_REPORT.md)** | 💬 **[Discussions](https://github.com/CacheStorm/CacheStorm/discussions)**
 
 ## Table of Contents
 
@@ -172,7 +172,7 @@ redis-cli -p 6380 GET mykey
 
 #### From Source
 ```bash
-git clone https://github.com/cachestorm/cachestorm
+git clone https://github.com/CacheStorm/CacheStorm
 cd cachestorm
 go build -o cachestorm ./cmd/cachestorm
 ./cachestorm
@@ -202,7 +202,7 @@ docker-compose --profile gui --profile monitoring up -d
 ```
 
 #### From Releases
-Download pre-built binaries from [GitHub Releases](https://github.com/cachestorm/cachestorm/releases).
+Download pre-built binaries from [GitHub Releases](https://github.com/CacheStorm/CacheStorm/releases).
 
 ### Uninstall
 
@@ -375,7 +375,7 @@ docker run -d -p 6380:6380 -p 8080:8080 --name cachestorm cachestorm/cachestorm:
 ### Docker Compose (Full Stack)
 ```bash
 # Clone repository
-git clone https://github.com/cachestorm/cachestorm
+git clone https://github.com/CacheStorm/CacheStorm
 cd cachestorm
 
 # Basic setup
