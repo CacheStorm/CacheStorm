@@ -1754,44 +1754,43 @@ func TestCmdREACTIVETRIGGER_Success(t *testing.T) {
 // REPLICATION COMMANDS
 // =============================================================================
 
-func TestCmdREPLCONF_ListeningPort(t *testing.T) {
+func TestCmdREPLCONF_Subcommands(t *testing.T) {
 	s := store.NewStore()
-	// InitReplicationManager removed — singleton already initialized by other tests
-	// Use very high clientID to avoid conflicts with other tests
+	InitReplicationManager(s)
 	clientID := int64(99900)
+
+	// LISTENING-PORT
 	ctx := discardCtx("REPLCONF", bytesArgs("LISTENING-PORT", "6380"), s)
 	ctx.ClientID = clientID
 	ctx.RemoteAddr = "127.0.0.1:12345"
-	err := cmdREPLCONF(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err := cmdREPLCONF(ctx); err != nil {
+		t.Fatalf("LISTENING-PORT: %v", err)
 	}
-	replManager.RemoveReplica(clientID)
-}
 
-func TestCmdREPLCONF_CAPA(t *testing.T) {
-	s := store.NewStore()
-	// InitReplicationManager removed — singleton already initialized by other tests
-	clientID := int64(99901)
-	ctx := discardCtx("REPLCONF", bytesArgs("CAPA", "eof", "psync2"), s)
-	ctx.ClientID = clientID
-	ctx.RemoteAddr = "127.0.0.1:12345"
-	err := cmdREPLCONF(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	// IP-ADDRESS (reuses same clientID)
+	ctx2 := discardCtx("REPLCONF", bytesArgs("IP-ADDRESS", "10.0.0.1"), s)
+	ctx2.ClientID = clientID
+	if err := cmdREPLCONF(ctx2); err != nil {
+		t.Fatalf("IP-ADDRESS: %v", err)
 	}
-	replManager.RemoveReplica(clientID)
-}
 
-func TestCmdREPLCONF_ACK(t *testing.T) {
-	s := store.NewStore()
-	// InitReplicationManager removed — singleton already initialized by other tests
-	ctx := discardCtx("REPLCONF", bytesArgs("ACK", "0"), s)
-	ctx.ClientID = int64(99902)
-	err := cmdREPLCONF(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	// CAPA (reuses same clientID)
+	ctx3 := discardCtx("REPLCONF", bytesArgs("CAPA", "eof", "psync2"), s)
+	ctx3.ClientID = clientID
+	ctx3.RemoteAddr = "127.0.0.1:12345"
+	if err := cmdREPLCONF(ctx3); err != nil {
+		t.Fatalf("CAPA: %v", err)
 	}
+
+	// ACK
+	ctx4 := discardCtx("REPLCONF", bytesArgs("ACK", "0"), s)
+	ctx4.ClientID = clientID
+	if err := cmdREPLCONF(ctx4); err != nil {
+		t.Fatalf("ACK: %v", err)
+	}
+
+	// Clean up global state to avoid interfering with other tests
+	replManager.RemoveReplica(clientID)
 }
 
 func TestCmdSYNC_Success(t *testing.T) {
