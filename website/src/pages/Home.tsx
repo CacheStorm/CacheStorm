@@ -2,19 +2,23 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   Zap, Shield, Database, BarChart3, Network, Eye,
-  ArrowRight, Terminal, Github,
+  ArrowRight, Terminal, Github, Clock, Layers, Lock,
 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card, CardContent } from "../components/ui/card";
 
 const terminalLines = [
-  { prompt: "$ ", command: "redis-cli -p 6380", delay: 600 },
-  { prompt: "127.0.0.1:6380> ", command: 'SET mykey "Hello CacheStorm"', delay: 800 },
-  { prompt: "", command: "OK", delay: 400, isResponse: true },
-  { prompt: "127.0.0.1:6380> ", command: "GET mykey", delay: 600 },
-  { prompt: "", command: '"Hello CacheStorm"', delay: 400, isResponse: true },
-  { prompt: "127.0.0.1:6380> ", command: "HSET user:1 name Alice age 30", delay: 700 },
-  { prompt: "", command: "(integer) 2", delay: 400, isResponse: true },
+  { prompt: "$ ", command: "cachestorm --config cachestorm.yaml", delay: 800 },
+  { prompt: "", command: "CacheStorm v1.0.0 started on :6380", delay: 500, isResponse: true },
+  { prompt: "", command: "256 shards initialized, ready for connections", delay: 400, isResponse: true },
+  { prompt: "", command: "", delay: 300, isResponse: true },
+  { prompt: "$ ", command: "cachestorm-cli", delay: 600 },
+  { prompt: "cachestorm> ", command: 'SET user:1001 \'{"name":"Alice","role":"admin"}\'', delay: 900 },
+  { prompt: "", command: "OK (0.04ms)", delay: 400, isResponse: true },
+  { prompt: "cachestorm> ", command: "EXPIRE user:1001 3600", delay: 600 },
+  { prompt: "", command: "(integer) 1", delay: 300, isResponse: true },
+  { prompt: "cachestorm> ", command: "HSET analytics:daily visitors 48291 pageviews 182440", delay: 800 },
+  { prompt: "", command: "(integer) 2", delay: 300, isResponse: true },
 ];
 
 function AnimatedTerminal() {
@@ -57,7 +61,7 @@ function AnimatedTerminal() {
           return updated;
         });
         setCurrentChar((prev) => prev + 1);
-      }, 30 + Math.random() * 40);
+      }, 25 + Math.random() * 35);
       return () => clearTimeout(timer);
     } else {
       const timer = setTimeout(() => {
@@ -79,9 +83,9 @@ function AnimatedTerminal() {
           <div className="h-3 w-3 rounded-full bg-yellow-400" />
           <div className="h-3 w-3 rounded-full bg-green-400" />
         </div>
-        <span className="ml-2 text-xs font-mono" style={{ color: "var(--color-text-tertiary)" }}>terminal</span>
+        <span className="ml-2 text-xs font-mono" style={{ color: "var(--color-text-tertiary)" }}>cachestorm</span>
       </div>
-      <div className="p-4 font-mono text-sm leading-relaxed h-[280px] overflow-hidden" style={{ backgroundColor: "var(--color-terminal-bg)" }}>
+      <div className="p-4 font-mono text-sm leading-relaxed h-[320px] overflow-hidden" style={{ backgroundColor: "var(--color-terminal-bg)" }}>
         {visibleLines.map((line, i) => (
           <div key={i} className="flex">
             {line.prompt && <span className="text-green-400 select-none shrink-0">{line.prompt}</span>}
@@ -96,39 +100,79 @@ function AnimatedTerminal() {
 
 const stats = [
   { value: "20M+", label: "Operations/sec" },
-  { value: "99%", label: "Redis Compatible" },
   { value: "<1ms", label: "P99 Latency" },
-  { value: "256", label: "Shards" },
+  { value: "256", label: "Concurrent Shards" },
+  { value: "1,600+", label: "Built-in Commands" },
 ];
 
 const features = [
-  { icon: Zap, title: "Extreme Performance", description: "Lock-free 256-shard architecture delivers 20M+ ops/sec with sub-millisecond latency." },
-  { icon: Database, title: "Redis Compatible", description: "Drop-in replacement. Use redis-cli, existing client libraries, and tooling without changes." },
-  { icon: Shield, title: "Enterprise Security", description: "TLS 1.2+, ACL system, password auth, command restrictions, and rate limiting." },
-  { icon: BarChart3, title: "Persistence", description: "AOF and RDB persistence ensures data survives restarts. Configurable sync policies." },
-  { icon: Network, title: "Clustering", description: "Built-in cluster support with automatic sharding, replication, and failover." },
-  { icon: Eye, title: "Observability", description: "Prometheus metrics, Grafana dashboards, pprof profiling, and structured logging." },
+  {
+    icon: Zap,
+    title: "Designed for Speed",
+    description: "Lock-free 256-shard architecture processes 20M+ operations per second. No GC pauses, no lock contention, just raw throughput.",
+  },
+  {
+    icon: Layers,
+    title: "Rich Data Structures",
+    description: "Strings, hashes, lists, sets, sorted sets, streams, JSON, time series, graphs, HyperLogLog, bitmaps and more. 1,600+ commands out of the box.",
+  },
+  {
+    icon: Lock,
+    title: "Production Security",
+    description: "TLS 1.2+ with hardened ciphers, ACL system with per-user permissions, rate limiting, and command-level access control.",
+  },
+  {
+    icon: Database,
+    title: "Durable When You Need It",
+    description: "AOF with configurable sync policies and point-in-time snapshots. Choose between speed and durability per workload.",
+  },
+  {
+    icon: Network,
+    title: "Scale Horizontally",
+    description: "Built-in clustering with hash-slot sharding, automatic replication, sentinel monitoring, and zero-downtime failover.",
+  },
+  {
+    icon: Eye,
+    title: "Full Observability",
+    description: "Prometheus metrics, Grafana dashboards, pprof endpoints, structured JSON logging, and slow query analysis. Know what's happening.",
+  },
 ];
 
-const codeExample = `$ redis-cli -p 6380
+const whyCacheStorm = [
+  {
+    icon: Clock,
+    title: "5 Minutes to Production",
+    description: "Single binary, Docker image, or one-line install. No JVM, no external dependencies. Configure with a YAML file and you're live.",
+  },
+  {
+    icon: BarChart3,
+    title: "Built-in HTTP API",
+    description: "REST API alongside the wire protocol. Manage keys, monitor health, execute commands, and integrate with any stack over HTTP.",
+  },
+  {
+    icon: Shield,
+    title: "Hardened by Default",
+    description: "Input validation, memory bounds, execution timeouts, panic recovery on every goroutine. Security isn't an afterthought.",
+  },
+];
 
-127.0.0.1:6380> SET session:abc "user_data"
-OK
-127.0.0.1:6380> EXPIRE session:abc 3600
-(integer) 1
-127.0.0.1:6380> HSET product:1 name "Widget" price 29.99
-(integer) 2
-127.0.0.1:6380> HGETALL product:1
-1) "name"
-2) "Widget"
-3) "price"
-4) "29.99"`;
+const quickStart = `# Install with one command
+curl -fsSL https://cachestorm.com/install.sh | bash
 
-const configExample = `server:
+# Or build from source
+git clone https://github.com/CacheStorm/CacheStorm.git
+cd CacheStorm && make build
+
+# Start and connect
+./cachestorm --config cachestorm.yaml
+cachestorm-cli
+cachestorm> SET hello "world"
+OK`;
+
+const configExample = `# cachestorm.yaml - that's all you need
+server:
   port: 6380
-  requirepass: "your_password"
-  tls_cert_file: "/path/to/cert.pem"
-  tls_key_file: "/path/to/key.pem"
+  requirepass: "your_secret"
 
 memory:
   max_memory: "4gb"
@@ -137,7 +181,15 @@ memory:
 persistence:
   enabled: true
   aof: true
-  aof_sync: "everysec"`;
+  aof_sync: "everysec"
+
+http:
+  enabled: true
+  port: 8080
+
+logging:
+  level: "info"
+  format: "json"`;
 
 export function Home() {
   return (
@@ -148,18 +200,29 @@ export function Home() {
           <div className="grid items-center gap-12 lg:grid-cols-2 lg:gap-16">
             <div className="max-w-xl">
               <div className="animate-fade-in-up">
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-full border" style={{ borderColor: "var(--color-border)", color: "var(--color-text-secondary)" }}>
+                <span
+                  className="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-full border"
+                  style={{ borderColor: "var(--color-border)", color: "var(--color-text-secondary)" }}
+                >
                   <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
                   Open Source
                 </span>
               </div>
 
-              <h1 className="animate-fade-in-up animation-delay-100 mt-6 text-4xl font-bold tracking-tight sm:text-5xl" style={{ color: "var(--color-text)" }}>
-                High-Performance Redis-Compatible Cache
+              <h1
+                className="animate-fade-in-up animation-delay-100 mt-6 text-4xl font-bold tracking-tight sm:text-5xl"
+                style={{ color: "var(--color-text)" }}
+              >
+                The In-Memory Data Store Built for What's Next
               </h1>
 
-              <p className="animate-fade-in-up animation-delay-200 mt-5 text-lg leading-relaxed" style={{ color: "var(--color-text-secondary)" }}>
-                A blazing-fast caching server written in Go. Drop-in Redis replacement with 256-shard architecture, sub-millisecond latency, and enterprise security.
+              <p
+                className="animate-fade-in-up animation-delay-200 mt-5 text-lg leading-relaxed"
+                style={{ color: "var(--color-text-secondary)" }}
+              >
+                CacheStorm is a high-performance caching server written in Go.
+                256-shard lock-free architecture, 1,600+ commands, enterprise
+                security, and full observability — in a single binary.
               </p>
 
               <div className="animate-fade-in-up animation-delay-300 mt-8 flex flex-wrap gap-3">
@@ -177,7 +240,9 @@ export function Home() {
 
               <div className="mt-6 flex items-center gap-2 text-sm" style={{ color: "var(--color-text-tertiary)" }}>
                 <Terminal className="h-4 w-4" />
-                <code className="font-mono" style={{ color: "var(--color-text-secondary)" }}>docker pull cachestorm/cachestorm</code>
+                <code className="font-mono" style={{ color: "var(--color-text-secondary)" }}>
+                  curl -fsSL https://cachestorm.com/install.sh | bash
+                </code>
               </div>
             </div>
 
@@ -207,10 +272,10 @@ export function Home() {
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="mx-auto max-w-2xl text-center">
             <h2 className="text-3xl font-bold tracking-tight sm:text-4xl" style={{ color: "var(--color-text)" }}>
-              Built for production
+              Everything, out of the box
             </h2>
             <p className="mt-4 text-lg" style={{ color: "var(--color-text-secondary)" }}>
-              Everything you need to run a high-performance cache in production.
+              No plugins, no modules, no extra downloads. CacheStorm ships with every feature you need for production.
             </p>
           </div>
 
@@ -230,25 +295,53 @@ export function Home() {
         </div>
       </section>
 
-      {/* Code */}
+      {/* Why CacheStorm */}
       <section className="border-y py-24 lg:py-28" style={{ borderColor: "var(--color-border)", backgroundColor: "var(--color-bg-secondary)" }}>
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="mx-auto max-w-2xl text-center">
             <h2 className="text-3xl font-bold tracking-tight sm:text-4xl" style={{ color: "var(--color-text)" }}>
-              Works with your existing tools
+              Why teams switch to CacheStorm
             </h2>
             <p className="mt-4 text-lg" style={{ color: "var(--color-text-secondary)" }}>
-              Use redis-cli, any Redis client library, or the HTTP API.
+              We didn't build another cache layer. We built the one we wanted to use.
+            </p>
+          </div>
+
+          <div className="mt-14 grid gap-8 lg:grid-cols-3">
+            {whyCacheStorm.map((item) => (
+              <div key={item.title} className="flex gap-4">
+                <div className="shrink-0 flex h-10 w-10 items-center justify-center rounded-lg" style={{ backgroundColor: "var(--color-surface)" }}>
+                  <item.icon className="h-5 w-5" style={{ color: "var(--color-primary)" }} />
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold" style={{ color: "var(--color-text)" }}>{item.title}</h3>
+                  <p className="mt-1.5 text-sm leading-relaxed" style={{ color: "var(--color-text-secondary)" }}>{item.description}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Quick Start + Config */}
+      <section className="py-24 lg:py-28">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <div className="mx-auto max-w-2xl text-center">
+            <h2 className="text-3xl font-bold tracking-tight sm:text-4xl" style={{ color: "var(--color-text)" }}>
+              Up and running in seconds
+            </h2>
+            <p className="mt-4 text-lg" style={{ color: "var(--color-text-secondary)" }}>
+              One command to install. One file to configure. That's it.
             </p>
           </div>
 
           <div className="mt-14 grid gap-5 lg:grid-cols-2">
             <div className="rounded-xl border overflow-hidden" style={{ borderColor: "var(--color-border)" }}>
               <div className="flex items-center border-b px-4 py-2.5" style={{ borderColor: "var(--color-border)", backgroundColor: "var(--color-surface)" }}>
-                <span className="text-xs font-mono" style={{ color: "var(--color-text-tertiary)" }}>redis-cli</span>
+                <span className="text-xs font-mono" style={{ color: "var(--color-text-tertiary)" }}>Quick Start</span>
               </div>
               <pre className="p-4 text-sm font-mono leading-relaxed overflow-x-auto" style={{ backgroundColor: "var(--color-code-bg)", color: "var(--color-code-text)" }}>
-                <code>{codeExample}</code>
+                <code>{quickStart}</code>
               </pre>
             </div>
             <div className="rounded-xl border overflow-hidden" style={{ borderColor: "var(--color-border)" }}>
@@ -260,21 +353,27 @@ export function Home() {
               </pre>
             </div>
           </div>
+
+          <p className="mt-6 text-center text-sm" style={{ color: "var(--color-text-tertiary)" }}>
+            Works with any RESP-compatible client library. Existing tools and SDKs just work.
+          </p>
         </div>
       </section>
 
       {/* CTA */}
-      <section className="py-24 lg:py-28">
+      <section className="border-t py-24 lg:py-28" style={{ borderColor: "var(--color-border)", backgroundColor: "var(--color-bg-secondary)" }}>
         <div className="mx-auto max-w-2xl px-4 text-center sm:px-6 lg:px-8">
           <h2 className="text-3xl font-bold tracking-tight sm:text-4xl" style={{ color: "var(--color-text)" }}>
-            Ready to get started?
+            Your cache should be fast, secure, and simple.
           </h2>
           <p className="mx-auto mt-4 max-w-lg text-lg" style={{ color: "var(--color-text-secondary)" }}>
-            Deploy in minutes. Compatible with your existing Redis setup.
+            Stop fighting your infrastructure. Start shipping.
           </p>
           <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
             <Link to="/docs/getting-started">
-              <Button size="lg" className="gap-2">Get Started <ArrowRight className="h-4 w-4" /></Button>
+              <Button size="lg" className="gap-2">
+                Get Started <ArrowRight className="h-4 w-4" />
+              </Button>
             </Link>
             <Link to="/docs">
               <Button variant="outline" size="lg">Documentation</Button>
