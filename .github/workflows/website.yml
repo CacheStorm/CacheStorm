@@ -28,6 +28,8 @@ jobs:
         run: cd website && npm ci
       - name: Build
         run: cd website && npm run build
+      - name: Copy index.html to 404.html for SPA routing
+        run: cp website/dist/index.html website/dist/404.html
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
