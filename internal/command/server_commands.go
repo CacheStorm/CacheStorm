@@ -326,7 +326,7 @@ func cmdINFO(ctx *Context) error {
 	var sb strings.Builder
 
 	sb.WriteString("# Server\r\n")
-	sb.WriteString("cachestorm_version:0.1.0\r\n")
+	sb.WriteString("cachestorm_version:0.2.0\r\n")
 	sb.WriteString("arch_bits:64\r\n")
 	sb.WriteString("tcp_port:")
 	sb.WriteString(strconv.Itoa(globalConfig.port))

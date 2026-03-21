@@ -9,7 +9,7 @@ import { Card, CardContent } from "../components/ui/card";
 
 const terminalLines = [
   { prompt: "$ ", command: "cachestorm --config cachestorm.yaml", delay: 800 },
-  { prompt: "", command: "CacheStorm v1.0.0 started on :6380", delay: 500, isResponse: true },
+  { prompt: "", command: "CacheStorm v0.2.0 started on :6380", delay: 500, isResponse: true },
   { prompt: "", command: "256 shards initialized, ready for connections", delay: 400, isResponse: true },
   { prompt: "", command: "", delay: 300, isResponse: true },
   { prompt: "$ ", command: "cachestorm-cli", delay: 600 },
