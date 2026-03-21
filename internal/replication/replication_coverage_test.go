@@ -176,35 +176,25 @@ func TestSyncWithMaster_StopChannel(t *testing.T) {
 	server, client := net.Pipe()
 	m.masterConn = client
 
-	handshakeDone := make(chan struct{})
+	// Pre-close stopCh so the for-loop's select immediately takes the stopCh case
+	close(m.stopCh)
+
 	go func() {
-		// Consume handshake data from server side
+		// Consume handshake data from server side so writes don't block
 		buf := make([]byte, 4096)
-		for i := 0; i < 20; i++ {
-			server.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+		for {
+			server.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
 			_, err := server.Read(buf)
 			if err != nil {
 				break
 			}
 		}
-		server.SetReadDeadline(time.Time{}) // clear deadline
-		close(handshakeDone)
-
-		// Close stopCh immediately so that when the for loop starts,
-		// the select picks up the stopCh closure.
-		close(m.stopCh)
-
-		// Now send a line to unblock the ReadString (in case the select
-		// doesn't fire because ReadString is called before the goroutine
-		// scheduler checks stopCh). Actually, the select is non-blocking
-		// (default case), so if stopCh is closed, it fires immediately.
-		// But we need the server to stay alive briefly.
-		time.Sleep(100 * time.Millisecond)
 		server.Close()
 	}()
 
 	m.wg.Add(1)
 	m.syncWithMaster()
+	client.Close()
 }
 
 func TestSyncWithMaster_NonEOFReadError(t *testing.T) {
