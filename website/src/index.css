@@ -168,6 +168,56 @@ body {
     linear-gradient(90deg, rgba(59, 130, 246, 0.06) 1px, transparent 1px);
 }
 
+/* ── Docs prose styles ──────────────────────────────────────── */
+.prose-docs p {
+  margin-bottom: 0.75rem;
+  line-height: 1.7;
+}
+
+.prose-docs ul,
+.prose-docs ol {
+  margin-bottom: 0.75rem;
+}
+
+.prose-docs code {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+}
+
+.prose-docs a {
+  color: #60a5fa;
+  text-decoration: none;
+  transition: color 0.15s;
+}
+
+.prose-docs a:hover {
+  color: #93bbfd;
+  text-decoration: underline;
+}
+
+.prose-docs table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+/* Thin scrollbar utility for sidebar */
+.scrollbar-thin::-webkit-scrollbar {
+  width: 4px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 2px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+
 /* ── Scrollbar styling ───────────────────────────────────────── */
 ::-webkit-scrollbar {
   width: 8px;

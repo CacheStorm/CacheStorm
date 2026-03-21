@@ -4,16 +4,19 @@ import { Separator } from "./ui/separator";
 
 const footerLinks = {
   Product: [
-    { label: "Features", href: "/#features" },
+    { label: "Features", href: "/features" },
     { label: "Pricing", href: "/#pricing" },
-    { label: "Changelog", href: "/docs/changelog" },
-    { label: "Roadmap", href: "/docs/roadmap" },
+    { label: "Changelog", href: "/docs/getting-started" },
+    { label: "Roadmap", href: "/docs/getting-started" },
   ],
   Documentation: [
     { label: "Getting Started", href: "/docs/getting-started" },
     { label: "Configuration", href: "/docs/configuration" },
-    { label: "API Reference", href: "/docs/api" },
-    { label: "CLI Reference", href: "/docs/cli" },
+    { label: "Commands", href: "/docs/commands" },
+    { label: "HTTP API", href: "/docs/api" },
+    { label: "Security", href: "/docs/security" },
+    { label: "Monitoring", href: "/docs/monitoring" },
+    { label: "Clustering", href: "/docs/clustering" },
   ],
   Community: [
     {

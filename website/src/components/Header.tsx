@@ -6,7 +6,7 @@ import { useTheme } from "./ThemeProvider";
 import { cn } from "../lib/utils";
 
 const navLinks = [
-  { href: "/#features", label: "Features" },
+  { href: "/features", label: "Features" },
   { href: "/docs", label: "Docs" },
   { href: "/#pricing", label: "Pricing" },
 ];
