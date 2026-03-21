@@ -4,7 +4,7 @@ import DocsLayout, {
   InfoBox,
   type TocItem,
 } from "@/components/DocsLayout";
-import { Network, Server, GitBranch, Shield, Activity, RefreshCw } from "lucide-react";
+import { Network, GitBranch, Shield, Activity, RefreshCw } from "lucide-react";
 
 const toc: TocItem[] = [
   { id: "overview", text: "Overview", level: 2 },
@@ -225,14 +225,14 @@ memory:
         language="bash"
         title="Monitor replication"
         code={`# On master: check connected replicas
-redis-cli -p 6380 INFO replication
+cachestorm-cli -p 6380 INFO replication
 # role: master
 # connected_replicas: 2
 # replica0: ip=10.0.1.11,port=6380,state=online,lag=0
 # replica1: ip=10.0.1.12,port=6380,state=online,lag=0
 
 # On replica: check replication status
-redis-cli -p 6381 INFO replication
+cachestorm-cli -p 6381 INFO replication
 # role: replica
 # master_host: 10.0.1.10
 # master_port: 6380
@@ -317,7 +317,7 @@ redis-cli -p 6381 INFO replication
         language="bash"
         title="Sentinel commands"
         code={`# Connect to sentinel
-redis-cli -p 26380
+cachestorm-cli -p 26380
 
 # Get master address
 SENTINEL get-master-addr-by-name cachestorm-primary

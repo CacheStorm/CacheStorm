@@ -97,11 +97,11 @@ export default function Security() {
         code={`# Set the password
 export CACHESTORM_PASSWORD="your-strong-password-here"
 
-# Connect with redis-cli
-redis-cli -p 6380 -a "your-strong-password-here"
+# Connect with cachestorm-cli
+cachestorm-cli -p 6380 -a "your-strong-password-here"
 
 # Or authenticate after connecting
-redis-cli -p 6380
+cachestorm-cli -p 6380
 127.0.0.1:6380> AUTH your-strong-password-here
 OK
 
@@ -179,8 +179,8 @@ rm server.csr`}
       <CodeBlock
         language="bash"
         title="Connect with TLS"
-        code={`# Using redis-cli with TLS
-redis-cli -p 6380 --tls \\
+        code={`# Connecting to CacheStorm with TLS
+cachestorm-cli -p 6380 --tls \\
   --cert /etc/cachestorm/tls/client.crt \\
   --key /etc/cachestorm/tls/client.key \\
   --cacert /etc/cachestorm/tls/ca.crt

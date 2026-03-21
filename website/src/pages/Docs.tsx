@@ -4,7 +4,6 @@ import { Button } from "../components/ui/button";
 import { Card, CardContent } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
 import {
-  BookOpen,
   Settings,
   Terminal,
   Shield,
@@ -14,7 +13,7 @@ import {
   ArrowRight,
   Loader2,
 } from "lucide-react";
-import { docRoutes, getDocBySlug, defaultDocSlug } from "./docs/index";
+import { getDocBySlug, defaultDocSlug } from "./docs/index";
 
 /* ------------------------------------------------------------------ */
 /*  Cards for the docs index page                                     */

@@ -81,7 +81,7 @@ export default function Commands() {
 
       <p className="mb-4 text-[var(--color-text-secondary)]">
         Commands follow the standard Redis protocol (RESP). Use any Redis client library or{" "}
-        <code className="text-xs bg-[var(--color-surface)] px-1 py-0.5 rounded">redis-cli</code> to interact
+        <code className="text-xs bg-[var(--color-surface)] px-1 py-0.5 rounded">cachestorm-cli</code> to interact
         with CacheStorm.
       </p>
 

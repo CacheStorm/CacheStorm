@@ -238,9 +238,9 @@ cachestorm --port 6380 --maxmemory 256mb`}
 
       <CodeBlock
         language="bash"
-        title="Using redis-cli"
-        code={`# Connect with redis-cli
-redis-cli -p 6380
+        title="Connecting to CacheStorm"
+        code={`# Connect with cachestorm-cli
+cachestorm-cli -p 6380
 
 # Ping the server
 127.0.0.1:6380> PING
