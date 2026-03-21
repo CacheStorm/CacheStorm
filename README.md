@@ -15,8 +15,7 @@
   [![Release](https://github.com/cachestorm/cachestorm/actions/workflows/release.yml/badge.svg)](https://github.com/cachestorm/cachestorm/actions/workflows/release.yml)
   [![Nightly](https://github.com/cachestorm/cachestorm/actions/workflows/nightly.yml/badge.svg)](https://github.com/cachestorm/cachestorm/actions/workflows/nightly.yml)
   [![Go Report Card](https://goreportcard.com/badge/github.com/cachestorm/cachestorm)](https://goreportcard.com/report/github.com/cachestorm/cachestorm)
-  [![Docker](https://img.shields.io/docker/v/cachestorm/cachestorm/latest?label=Docker)](https://hub.docker.com/r/cachestorm/cachestorm)
-  [![Docker Pulls](https://img.shields.io/docker/pulls/cachestorm/cachestorm)](https://hub.docker.com/r/cachestorm/cachestorm)
+  [![Website](https://img.shields.io/badge/Website-cachestorm.com-blue)](https://cachestorm.com)
 </div>
 
 ---
