@@ -134,3 +134,24 @@ func (ctx *Context) WriteNullBulkString() error {
 func (ctx *Context) WriteArray(items []*resp.Value) error {
 	return ctx.Writer.WriteArray(items)
 }
+
+// Safe map accessors to prevent panics from type assertions
+func mapInt64(m map[string]interface{}, key string) int64 {
+	v, _ := m[key].(int64)
+	return v
+}
+
+func mapInt(m map[string]interface{}, key string) int {
+	v, _ := m[key].(int)
+	return v
+}
+
+func mapString(m map[string]interface{}, key string) string {
+	v, _ := m[key].(string)
+	return v
+}
+
+func mapUint(m map[string]interface{}, key string) uint {
+	v, _ := m[key].(uint)
+	return v
+}

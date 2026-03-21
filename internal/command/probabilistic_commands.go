@@ -104,13 +104,13 @@ func cmdBFINFO(ctx *Context) error {
 
 	return ctx.WriteArray([]*resp.Value{
 		resp.BulkString("size"),
-		resp.IntegerValue(int64(info["size"].(uint))),
+		resp.IntegerValue(int64(mapUint(info, "size"))),
 		resp.BulkString("hashes"),
-		resp.IntegerValue(int64(info["hashes"].(uint))),
+		resp.IntegerValue(int64(mapUint(info, "hashes"))),
 		resp.BulkString("count"),
-		resp.IntegerValue(int64(info["count"].(uint))),
+		resp.IntegerValue(int64(mapUint(info, "count"))),
 		resp.BulkString("bits_set"),
-		resp.IntegerValue(int64(info["bits_set"].(int))),
+		resp.IntegerValue(int64(mapInt(info, "bits_set"))),
 		resp.BulkString("fill_rate"),
 		resp.BulkString(fmt.Sprintf("%.4f", info["fill_rate"])),
 	})
@@ -480,9 +480,11 @@ func cmdTOPKLIST(ctx *Context) error {
 		items := tk.ListWithCount()
 		results := make([]*resp.Value, 0, len(items))
 		for _, item := range items {
+			itemStr, _ := item["item"].(string)
+			countVal, _ := item["count"].(uint64)
 			results = append(results, resp.ArrayValue([]*resp.Value{
-				resp.BulkString(item["item"].(string)),
-				resp.IntegerValue(int64(item["count"].(uint64))),
+				resp.BulkString(itemStr),
+				resp.IntegerValue(int64(countVal)),
 			}))
 		}
 		return ctx.WriteArray(results)
@@ -514,13 +516,17 @@ func cmdTOPKINFO(ctx *Context) error {
 
 	info := tk.Info()
 
+	kVal, _ := info["k"].(int)
+	itemsVal, _ := info["items"].(int)
+	totalVal, _ := info["total"].(uint64)
+
 	return ctx.WriteArray([]*resp.Value{
 		resp.BulkString("k"),
-		resp.IntegerValue(int64(info["k"].(int))),
+		resp.IntegerValue(int64(kVal)),
 		resp.BulkString("items"),
-		resp.IntegerValue(int64(info["items"].(int))),
+		resp.IntegerValue(int64(itemsVal)),
 		resp.BulkString("total"),
-		resp.IntegerValue(int64(info["total"].(uint64))),
+		resp.IntegerValue(int64(totalVal)),
 	})
 }
 

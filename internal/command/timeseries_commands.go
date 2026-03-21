@@ -2,6 +2,7 @@ package command
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -441,19 +442,9 @@ func cmdTSDECRBY(ctx *Context) error {
 }
 
 func parseInt64(s string) int64 {
-	var result int64
-	var sign int64 = 1
-	i := 0
-
-	if len(s) > 0 && s[0] == '-' {
-		sign = -1
-		i = 1
+	v, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return 0
 	}
-
-	for i < len(s) && s[i] >= '0' && s[i] <= '9' {
-		result = result*10 + int64(s[i]-'0')
-		i++
-	}
-
-	return result * sign
+	return v
 }

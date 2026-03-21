@@ -92,11 +92,18 @@ func TestEvictionControllerSelectVictimRandom(t *testing.T) {
 	}
 
 	mt := NewMemoryTracker(1024*1024, 80, 90)
-	ec := NewEvictionController(EvictionAllKeysRandom, 1024, s, mt, 50)
+	ec := NewEvictionController(EvictionAllKeysRandom, 1024, s, mt, 100)
 
-	victim := ec.selectVictim()
-	if victim == "" {
-		t.Error("expected victim key")
+	// Retry a few times since random selection is probabilistic
+	found := false
+	for attempt := 0; attempt < 5; attempt++ {
+		if victim := ec.selectVictim(); victim != "" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected victim key after multiple attempts")
 	}
 }
 

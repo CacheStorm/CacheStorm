@@ -266,7 +266,9 @@ func cmdCommandDocs(ctx *Context) error {
 		result := make([]*resp.Value, 0, len(doc)+2)
 		result = append(result, resp.BulkString(commandName))
 		for i := 0; i < len(doc); i += 2 {
-			result = append(result, resp.BulkString(doc[i].(string)), resp.BulkString(doc[i+1].(string)))
+			k, _ := doc[i].(string)
+			v, _ := doc[i+1].(string)
+			result = append(result, resp.BulkString(k), resp.BulkString(v))
 		}
 		return ctx.WriteArray(result)
 	}

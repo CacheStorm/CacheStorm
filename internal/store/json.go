@@ -2,8 +2,11 @@ package store
 
 import (
 	"encoding/json"
+	"fmt"
 	"sync"
 )
+
+const maxJSONPathDepth = 128 // Maximum nesting depth for JSON path operations
 
 type JSONValue struct {
 	Data []byte
@@ -140,6 +143,11 @@ func parseJSONPath(path string) []string {
 		parts = append(parts, current)
 	}
 
+	// Cap depth to prevent stack overflow in recursive operations
+	if len(parts) > maxJSONPathDepth {
+		return parts[:maxJSONPathDepth]
+	}
+
 	return parts
 }
 
@@ -192,6 +200,9 @@ func setByPath(data interface{}, path string, value interface{}) error {
 	parts := parseJSONPath(path)
 	if len(parts) == 0 {
 		return nil
+	}
+	if len(parts) > maxJSONPathDepth {
+		return fmt.Errorf("ERR JSON path exceeds maximum depth of %d", maxJSONPathDepth)
 	}
 
 	switch d := data.(type) {

@@ -110,13 +110,13 @@ func cmdFTINFO(ctx *Context) error {
 
 	results := []*resp.Value{
 		resp.BulkString("index_name"),
-		resp.BulkString(info["name"].(string)),
+		resp.BulkString(mapString(info, "name")),
 		resp.BulkString("index_options"),
 		resp.ArrayValue([]*resp.Value{}),
 		resp.BulkString("fields"),
 		formatSchema(idx.Schema),
 		resp.BulkString("num_docs"),
-		resp.IntegerValue(int64(info["document_count"].(int))),
+		resp.IntegerValue(int64(mapInt(info, "document_count"))),
 	}
 
 	return ctx.WriteArray(results)

@@ -93,17 +93,17 @@ func cmdJOBGET(ctx *Context) error {
 
 	return ctx.WriteArray([]*resp.Value{
 		resp.BulkString("id"),
-		resp.BulkString(stats["id"].(string)),
+		resp.BulkString(mapString(stats, "id")),
 		resp.BulkString("name"),
-		resp.BulkString(stats["name"].(string)),
+		resp.BulkString(mapString(stats, "name")),
 		resp.BulkString("command"),
-		resp.BulkString(stats["command"].(string)),
+		resp.BulkString(mapString(stats, "command")),
 		resp.BulkString("interval"),
-		resp.IntegerValue(stats["interval"].(int64)),
+		resp.IntegerValue(mapInt64(stats, "interval")),
 		resp.BulkString("runs"),
-		resp.IntegerValue(stats["runs"].(int64)),
+		resp.IntegerValue(mapInt64(stats, "runs")),
 		resp.BulkString("errors"),
-		resp.IntegerValue(stats["errors"].(int64)),
+		resp.IntegerValue(mapInt64(stats, "errors")),
 		resp.BulkString("enabled"),
 		resp.BulkString(fmt.Sprintf("%v", stats["enabled"])),
 	})

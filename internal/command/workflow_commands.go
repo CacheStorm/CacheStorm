@@ -110,17 +110,17 @@ func cmdWORKFLOWGET(ctx *Context) error {
 
 	return ctx.WriteArray([]*resp.Value{
 		resp.BulkString("id"),
-		resp.BulkString(info["id"].(string)),
+		resp.BulkString(mapString(info, "id")),
 		resp.BulkString("name"),
-		resp.BulkString(info["name"].(string)),
+		resp.BulkString(mapString(info, "name")),
 		resp.BulkString("status"),
-		resp.BulkString(info["status"].(string)),
+		resp.BulkString(mapString(info, "status")),
 		resp.BulkString("current_step"),
-		resp.IntegerValue(int64(info["current_step"].(int))),
+		resp.IntegerValue(int64(mapInt(info, "current_step"))),
 		resp.BulkString("total_steps"),
-		resp.IntegerValue(int64(info["total_steps"].(int))),
+		resp.IntegerValue(int64(mapInt(info, "total_steps"))),
 		resp.BulkString("error"),
-		resp.BulkString(info["error"].(string)),
+		resp.BulkString(mapString(info, "error")),
 	})
 }
 
@@ -601,11 +601,11 @@ func cmdSTATEMINFO(ctx *Context) error {
 
 	return ctx.WriteArray([]*resp.Value{
 		resp.BulkString("name"),
-		resp.BulkString(info["name"].(string)),
+		resp.BulkString(mapString(info, "name")),
 		resp.BulkString("current"),
-		resp.BulkString(info["current"].(string)),
+		resp.BulkString(mapString(info, "current")),
 		resp.BulkString("initial"),
-		resp.BulkString(info["initial"].(string)),
+		resp.BulkString(mapString(info, "initial")),
 		resp.BulkString("is_final"),
 		resp.BulkString(fmt.Sprintf("%v", info["is_final"])),
 	})
