@@ -44,16 +44,16 @@ function FeatureBlock({ feature }: { feature: FeatureSection }) {
       {/* Text side */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-3 mb-4">
-          <div className="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center">
+          <div className="w-10 h-10 rounded-xl bg-[var(--color-surface)] border border-[var(--color-border)] flex items-center justify-center">
             {feature.icon}
           </div>
-          <h3 className="text-2xl font-bold text-white">{feature.title}</h3>
+          <h3 className="text-2xl font-bold text-[var(--color-text)]">{feature.title}</h3>
         </div>
-        <p className="text-slate-400 leading-relaxed mb-5">{feature.description}</p>
+        <p className="text-[var(--color-text-secondary)] leading-relaxed mb-5">{feature.description}</p>
         <ul className="space-y-2">
           {feature.highlights.map((h) => (
-            <li key={h} className="flex items-start gap-2 text-sm text-slate-300">
-              <Check className="w-4 h-4 text-emerald-400 mt-0.5 shrink-0" />
+            <li key={h} className="flex items-start gap-2 text-sm text-[var(--color-text-secondary)]">
+              <Check className="w-4 h-4 text-green-600 dark:text-green-400 mt-0.5 shrink-0" />
               {h}
             </li>
           ))}
@@ -62,17 +62,17 @@ function FeatureBlock({ feature }: { feature: FeatureSection }) {
 
       {/* Code side */}
       <div className="flex-1 min-w-0 w-full">
-        <div className="rounded-xl overflow-hidden border border-slate-800 bg-slate-900">
-          <div className="flex items-center gap-2 px-4 py-2.5 bg-slate-800/60 border-b border-slate-800">
+        <div className="rounded-xl overflow-hidden border border-[var(--color-border)] bg-[var(--color-bg-secondary)]">
+          <div className="flex items-center gap-2 px-4 py-2.5 bg-[var(--color-surface)] border-b border-[var(--color-border)]">
             <div className="flex gap-1.5">
               <div className="w-3 h-3 rounded-full bg-red-500/60" />
               <div className="w-3 h-3 rounded-full bg-yellow-500/60" />
               <div className="w-3 h-3 rounded-full bg-green-500/60" />
             </div>
-            <span className="text-xs text-slate-500 ml-2">{feature.codeTitle}</span>
+            <span className="text-xs text-[var(--color-text-tertiary)] ml-2">{feature.codeTitle}</span>
           </div>
           <pre className="p-4 overflow-x-auto text-sm leading-relaxed">
-            <code className="text-slate-300">{feature.code}</code>
+            <code className="text-[var(--color-text-secondary)]">{feature.code}</code>
           </pre>
         </div>
       </div>
@@ -111,13 +111,13 @@ function BenchmarkBar({ item }: { item: BenchmarkItem }) {
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between text-sm">
-        <span className="text-slate-300 font-medium">{item.label}</span>
-        <span className="text-xs text-slate-500">{item.unit}</span>
+        <span className="text-[var(--color-text-secondary)] font-medium">{item.label}</span>
+        <span className="text-xs text-[var(--color-text-tertiary)]">{item.unit}</span>
       </div>
       <div className="space-y-1.5">
         <div className="flex items-center gap-3">
-          <span className="text-xs text-blue-400 w-24 shrink-0">CacheStorm</span>
-          <div className="flex-1 h-5 bg-slate-800 rounded-full overflow-hidden">
+          <span className="text-xs text-[var(--color-primary)] w-24 shrink-0">CacheStorm</span>
+          <div className="flex-1 h-5 bg-[var(--color-surface)] rounded-full overflow-hidden">
             <div
               className={cn(
                 "h-full rounded-full transition-all duration-1000",
@@ -126,19 +126,19 @@ function BenchmarkBar({ item }: { item: BenchmarkItem }) {
               style={{ width: `${csWidth}%` }}
             />
           </div>
-          <span className="text-xs text-slate-300 w-20 text-right font-mono">
+          <span className="text-xs text-[var(--color-text-secondary)] w-20 text-right font-mono">
             {item.cachestorm.toLocaleString()}
           </span>
         </div>
         <div className="flex items-center gap-3">
-          <span className="text-xs text-slate-500 w-24 shrink-0">Redis</span>
-          <div className="flex-1 h-5 bg-slate-800 rounded-full overflow-hidden">
+          <span className="text-xs text-[var(--color-text-tertiary)] w-24 shrink-0">Redis</span>
+          <div className="flex-1 h-5 bg-[var(--color-surface)] rounded-full overflow-hidden">
             <div
-              className="h-full bg-slate-600 rounded-full transition-all duration-1000"
+              className="h-full bg-[var(--color-text-tertiary)] rounded-full transition-all duration-1000"
               style={{ width: `${rdWidth}%` }}
             />
           </div>
-          <span className="text-xs text-slate-500 w-20 text-right font-mono">
+          <span className="text-xs text-[var(--color-text-tertiary)] w-20 text-right font-mono">
             {item.redis.toLocaleString()}
           </span>
         </div>
@@ -182,7 +182,7 @@ const comparisonData: CompareRow[] = [
 function CompareIcon({ val }: { val: CompareVal }) {
   switch (val) {
     case "yes":
-      return <Check className="w-4 h-4 text-emerald-400" />;
+      return <Check className="w-4 h-4 text-green-600 dark:text-green-400" />;
     case "no":
       return <X className="w-4 h-4 text-red-400/60" />;
     case "partial":
@@ -196,7 +196,7 @@ function CompareIcon({ val }: { val: CompareVal }) {
 
 const features: FeatureSection[] = [
   {
-    icon: <Zap className="w-5 h-5 text-blue-400" />,
+    icon: <Zap className="w-5 h-5 text-[var(--color-primary)]" />,
     title: "Blazing Fast Performance",
     description:
       "CacheStorm is built from the ground up in Go for maximum performance. Multi-threaded I/O, zero-copy networking, and optimized data structures deliver sub-millisecond latencies at scale.",
@@ -217,7 +217,7 @@ Startup time: <100ms`,
     ],
   },
   {
-    icon: <Terminal className="w-5 h-5 text-blue-400" />,
+    icon: <Terminal className="w-5 h-5 text-[var(--color-primary)]" />,
     title: "Full Redis Compatibility",
     description:
       "Drop-in replacement for Redis. CacheStorm speaks the RESP protocol and supports 200+ commands across all major data structures. Use your existing Redis clients and tools without changes.",
@@ -248,7 +248,7 @@ top = r.zrange('leaderboard', 0, 9, desc=True)`,
     reverse: true,
   },
   {
-    icon: <Globe className="w-5 h-5 text-blue-400" />,
+    icon: <Globe className="w-5 h-5 text-[var(--color-primary)]" />,
     title: "Built-in HTTP API",
     description:
       "Unlike Redis, CacheStorm includes a native HTTP/REST API. Execute commands, manage keys, check health, and configure the server -- all through standard HTTP requests with JSON.",
@@ -274,7 +274,7 @@ $ curl http://localhost:7280/api/v1/keys/mykey
     ],
   },
   {
-    icon: <Shield className="w-5 h-5 text-blue-400" />,
+    icon: <Shield className="w-5 h-5 text-[var(--color-primary)]" />,
     title: "Enterprise-Grade Security",
     description:
       "Secure your data with TLS encryption, fine-grained ACLs, and password authentication. CacheStorm supports mutual TLS for zero-trust environments and per-user command restrictions.",
@@ -304,7 +304,7 @@ user reader on >read-pwd ~* +@read`,
     reverse: true,
   },
   {
-    icon: <BarChart3 className="w-5 h-5 text-blue-400" />,
+    icon: <BarChart3 className="w-5 h-5 text-[var(--color-primary)]" />,
     title: "Native Observability",
     description:
       "CacheStorm includes built-in Prometheus metrics, Go pprof profiling, and comprehensive server statistics. No external exporters needed -- monitoring is a first-class feature.",
@@ -329,7 +329,7 @@ $ go tool pprof http://localhost:6060/debug/pprof/heap`,
     ],
   },
   {
-    icon: <Network className="w-5 h-5 text-blue-400" />,
+    icon: <Network className="w-5 h-5 text-[var(--color-primary)]" />,
     title: "High Availability & Clustering",
     description:
       "Scale horizontally with cluster mode or vertically with replication. Sentinel provides automatic failover for zero-downtime deployments. Deploy across availability zones for geographic redundancy.",
@@ -364,7 +364,7 @@ $ SENTINEL get-master-addr-by-name primary
 
 export default function Features() {
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-300">
+    <div className="min-h-screen bg-[var(--color-bg)] text-[var(--color-text-secondary)]">
       {/* ── Hero ─────────────────────────────────────────────── */}
       <section className="relative overflow-hidden">
         {/* background decorations */}
@@ -373,12 +373,12 @@ export default function Features() {
         </div>
 
         <div className="relative max-w-6xl mx-auto px-6 pt-24 pb-16 text-center">
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-sm font-medium mb-6">
+          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-primary)] text-sm font-medium mb-6">
             <Zap className="w-4 h-4" />
             Features
           </div>
 
-          <h1 className="text-5xl lg:text-6xl font-extrabold text-white tracking-tight mb-6">
+          <h1 className="text-5xl lg:text-6xl font-extrabold text-[var(--color-text)] tracking-tight mb-6">
             Everything You Need
             <br />
             <span className="bg-gradient-to-r from-blue-400 to-cyan-400 bg-clip-text text-transparent">
@@ -386,7 +386,7 @@ export default function Features() {
             </span>
           </h1>
 
-          <p className="text-xl text-slate-400 max-w-2xl mx-auto leading-relaxed mb-10">
+          <p className="text-xl text-[var(--color-text-secondary)] max-w-2xl mx-auto leading-relaxed mb-10">
             CacheStorm combines Redis compatibility with modern features like a built-in HTTP API,
             native Prometheus metrics, and single-binary deployment.
           </p>
@@ -405,9 +405,9 @@ export default function Features() {
             ].map((item) => (
               <div
                 key={item.label}
-                className="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-slate-800 bg-slate-900/50 text-sm text-slate-300"
+                className="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-secondary)] text-sm text-[var(--color-text-secondary)]"
               >
-                <span className="text-blue-400">{item.icon}</span>
+                <span className="text-[var(--color-primary)]">{item.icon}</span>
                 {item.label}
               </div>
             ))}
@@ -423,29 +423,29 @@ export default function Features() {
       </section>
 
       {/* ── Benchmarks ───────────────────────────────────────── */}
-      <section className="border-t border-slate-800">
+      <section className="border-t border-[var(--color-border)]">
         <div className="max-w-4xl mx-auto px-6 py-20">
           <div className="text-center mb-12">
-            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-sm font-medium mb-4">
+            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-green-600 dark:text-green-400 text-sm font-medium mb-4">
               <BarChart3 className="w-4 h-4" />
               Performance
             </div>
-            <h2 className="text-3xl lg:text-4xl font-extrabold text-white tracking-tight mb-4">
+            <h2 className="text-3xl lg:text-4xl font-extrabold text-[var(--color-text)] tracking-tight mb-4">
               Benchmark Comparison
             </h2>
-            <p className="text-slate-400 max-w-xl mx-auto">
+            <p className="text-[var(--color-text-secondary)] max-w-xl mx-auto">
               Benchmarked on Linux with 100 concurrent connections, 1M requests.
               Higher is better for throughput; lower is better for latency.
             </p>
           </div>
 
-          <div className="space-y-6 p-6 rounded-2xl border border-slate-800 bg-slate-900/50">
+          <div className="space-y-6 p-6 rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg-secondary)]">
             {benchmarks.map((b) => (
               <BenchmarkBar key={b.label} item={b} />
             ))}
           </div>
 
-          <p className="text-xs text-slate-600 text-center mt-4">
+          <p className="text-xs text-[var(--color-text-tertiary)] text-center mt-4">
             * Benchmarks run on AWS c6i.xlarge (4 vCPU, 8 GB RAM), Ubuntu 22.04, default configurations.
             Results may vary by workload and hardware.
           </p>
@@ -453,26 +453,26 @@ export default function Features() {
       </section>
 
       {/* ── Comparison table ─────────────────────────────────── */}
-      <section className="border-t border-slate-800">
+      <section className="border-t border-[var(--color-border)]">
         <div className="max-w-4xl mx-auto px-6 py-20">
           <div className="text-center mb-12">
-            <h2 className="text-3xl lg:text-4xl font-extrabold text-white tracking-tight mb-4">
+            <h2 className="text-3xl lg:text-4xl font-extrabold text-[var(--color-text)] tracking-tight mb-4">
               CacheStorm vs Redis
             </h2>
-            <p className="text-slate-400 max-w-xl mx-auto">
+            <p className="text-[var(--color-text-secondary)] max-w-xl mx-auto">
               Feature-by-feature comparison with Redis 7.x
             </p>
           </div>
 
-          <div className="rounded-2xl border border-slate-800 overflow-hidden">
+          <div className="rounded-2xl border border-[var(--color-border)] overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-slate-800 text-left">
-                    <th className="px-5 py-3 font-medium text-slate-400">Feature</th>
-                    <th className="px-5 py-3 font-medium text-blue-400 text-center">CacheStorm</th>
-                    <th className="px-5 py-3 font-medium text-slate-500 text-center">Redis</th>
-                    <th className="px-5 py-3 font-medium text-slate-500">Note</th>
+                  <tr className="border-b border-[var(--color-border)] text-left">
+                    <th className="px-5 py-3 font-medium text-[var(--color-text-secondary)]">Feature</th>
+                    <th className="px-5 py-3 font-medium text-[var(--color-primary)] text-center">CacheStorm</th>
+                    <th className="px-5 py-3 font-medium text-[var(--color-text-tertiary)] text-center">Redis</th>
+                    <th className="px-5 py-3 font-medium text-[var(--color-text-tertiary)]">Note</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -480,11 +480,11 @@ export default function Features() {
                     <tr
                       key={row.feature}
                       className={cn(
-                        i < comparisonData.length - 1 && "border-b border-slate-800/60",
-                        i % 2 === 0 && "bg-slate-900/30"
+                        i < comparisonData.length - 1 && "border-b border-[var(--color-border)]",
+                        i % 2 === 0 && "bg-[var(--color-bg-secondary)]"
                       )}
                     >
-                      <td className="px-5 py-3 text-slate-300">{row.feature}</td>
+                      <td className="px-5 py-3 text-[var(--color-text-secondary)]">{row.feature}</td>
                       <td className="px-5 py-3 text-center">
                         <span className="inline-flex items-center justify-center">
                           <CompareIcon val={row.cachestorm} />
@@ -495,7 +495,7 @@ export default function Features() {
                           <CompareIcon val={row.redis} />
                         </span>
                       </td>
-                      <td className="px-5 py-3 text-xs text-slate-500">{row.note || ""}</td>
+                      <td className="px-5 py-3 text-xs text-[var(--color-text-tertiary)]">{row.note || ""}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -506,18 +506,18 @@ export default function Features() {
       </section>
 
       {/* ── CTA ──────────────────────────────────────────────── */}
-      <section className="border-t border-slate-800">
+      <section className="border-t border-[var(--color-border)]">
         <div className="max-w-3xl mx-auto px-6 py-20 text-center">
-          <h2 className="text-3xl font-extrabold text-white tracking-tight mb-4">
+          <h2 className="text-3xl font-extrabold text-[var(--color-text)] tracking-tight mb-4">
             Ready to Get Started?
           </h2>
-          <p className="text-slate-400 mb-8 max-w-xl mx-auto">
+          <p className="text-[var(--color-text-secondary)] mb-8 max-w-xl mx-auto">
             Install CacheStorm in under a minute and start building faster applications.
           </p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
             <Link
               to="/docs/getting-started"
-              className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold transition-colors"
+              className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-[var(--color-text)] font-semibold transition-colors"
             >
               Read the Docs
               <ArrowRight className="w-4 h-4" />
@@ -526,7 +526,7 @@ export default function Features() {
               href="https://github.com/nicktretyakov/CacheStorm"
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 px-6 py-3 rounded-xl border border-slate-700 hover:border-slate-600 text-slate-300 font-medium transition-colors"
+              className="inline-flex items-center gap-2 px-6 py-3 rounded-xl border border-[var(--color-border)] hover:border-[var(--color-border)] text-[var(--color-text-secondary)] font-medium transition-colors"
             >
               View on GitHub
             </a>

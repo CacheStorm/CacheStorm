@@ -26,14 +26,14 @@ export default function Security() {
     <DocsLayout toc={toc}>
       {/* Hero */}
       <div className="mb-10">
-        <div className="flex items-center gap-2 text-blue-400 text-sm font-medium mb-2">
+        <div className="flex items-center gap-2 text-[var(--color-primary)] text-sm font-medium mb-2">
           <Shield className="w-4 h-4" />
           Operations
         </div>
-        <h1 className="text-4xl font-extrabold text-white tracking-tight mb-4">
+        <h1 className="text-4xl font-extrabold text-[var(--color-text)] tracking-tight mb-4">
           Security Guide
         </h1>
-        <p className="text-lg text-slate-400 leading-relaxed max-w-2xl">
+        <p className="text-lg text-[var(--color-text-secondary)] leading-relaxed max-w-2xl">
           Secure your CacheStorm deployment with TLS encryption, access control lists,
           and authentication. This guide covers all security features and best practices.
         </p>
@@ -44,25 +44,25 @@ export default function Security() {
         Overview
       </DocHeading>
 
-      <p className="mb-4 text-slate-400">
+      <p className="mb-4 text-[var(--color-text-secondary)]">
         CacheStorm provides multiple layers of security:
       </p>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
         {[
-          { icon: <Lock className="w-5 h-5 text-blue-400" />, title: "Authentication", desc: "Password-based auth with AUTH command" },
-          { icon: <FileKey className="w-5 h-5 text-emerald-400" />, title: "TLS/SSL", desc: "End-to-end encryption for all connections" },
+          { icon: <Lock className="w-5 h-5 text-[var(--color-primary)]" />, title: "Authentication", desc: "Password-based auth with AUTH command" },
+          { icon: <FileKey className="w-5 h-5 text-green-600 dark:text-green-400" />, title: "TLS/SSL", desc: "End-to-end encryption for all connections" },
           { icon: <UserCheck className="w-5 h-5 text-amber-400" />, title: "ACL", desc: "Fine-grained per-user command and key permissions" },
           { icon: <Network className="w-5 h-5 text-purple-400" />, title: "Network", desc: "Bind address restrictions and firewall rules" },
         ].map((item) => (
           <div
             key={item.title}
-            className="flex items-start gap-3 p-4 rounded-xl border border-slate-800 bg-slate-900/50"
+            className="flex items-start gap-3 p-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-secondary)]"
           >
             {item.icon}
             <div>
-              <p className="text-sm font-semibold text-white">{item.title}</p>
-              <p className="text-xs text-slate-500 mt-0.5">{item.desc}</p>
+              <p className="text-sm font-semibold text-[var(--color-text)]">{item.title}</p>
+              <p className="text-xs text-[var(--color-text-tertiary)] mt-0.5">{item.desc}</p>
             </div>
           </div>
         ))}
@@ -75,12 +75,12 @@ export default function Security() {
 
       {/* ── Authentication ───────────────────────────────────── */}
       <DocHeading id="authentication" level={2}>
-        <KeyRound className="w-5 h-5 text-blue-400" />
+        <KeyRound className="w-5 h-5 text-[var(--color-primary)]" />
         Authentication
       </DocHeading>
 
-      <p className="mb-4 text-slate-400">
-        Simple password-based authentication using the <code className="text-xs bg-slate-800 px-1 py-0.5 rounded">requirepass</code> directive.
+      <p className="mb-4 text-[var(--color-text-secondary)]">
+        Simple password-based authentication using the <code className="text-xs bg-[var(--color-surface)] px-1 py-0.5 rounded">requirepass</code> directive.
       </p>
 
       <CodeBlock
@@ -117,11 +117,11 @@ OK`}
 
       {/* ── TLS ──────────────────────────────────────────────── */}
       <DocHeading id="tls" level={2}>
-        <Lock className="w-5 h-5 text-blue-400" />
+        <Lock className="w-5 h-5 text-[var(--color-primary)]" />
         TLS Encryption
       </DocHeading>
 
-      <p className="mb-4 text-slate-400">
+      <p className="mb-4 text-[var(--color-text-secondary)]">
         TLS encrypts all traffic between clients and the server, preventing eavesdropping
         and man-in-the-middle attacks.
       </p>
@@ -194,7 +194,7 @@ openssl s_client -connect localhost:6380 \\
         Mutual TLS (mTLS)
       </DocHeading>
 
-      <p className="mb-4 text-slate-400">
+      <p className="mb-4 text-[var(--color-text-secondary)]">
         Mutual TLS requires both the server and client to present certificates,
         providing strong two-way authentication.
       </p>
@@ -226,11 +226,11 @@ rm client.csr`}
 
       {/* ── ACL ──────────────────────────────────────────────── */}
       <DocHeading id="acl" level={2}>
-        <UserCheck className="w-5 h-5 text-blue-400" />
+        <UserCheck className="w-5 h-5 text-[var(--color-primary)]" />
         Access Control Lists (ACL)
       </DocHeading>
 
-      <p className="mb-4 text-slate-400">
+      <p className="mb-4 text-[var(--color-text-secondary)]">
         ACLs provide fine-grained access control, allowing you to define per-user permissions
         for commands, keys, and channels.
       </p>
@@ -276,16 +276,16 @@ user pubsub_user on >pubsub-password &events:* +subscribe +publish +psubscribe`}
         ACL Rule Syntax
       </DocHeading>
 
-      <div className="my-4 rounded-xl border border-slate-800 overflow-hidden">
+      <div className="my-4 rounded-xl border border-[var(--color-border)] overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-800 text-left text-slate-400">
+              <tr className="border-b border-[var(--color-border)] text-left text-[var(--color-text-secondary)]">
                 <th className="px-4 py-2 font-medium">Rule</th>
                 <th className="px-4 py-2 font-medium">Description</th>
               </tr>
             </thead>
-            <tbody className="text-slate-300">
+            <tbody className="text-[var(--color-text-secondary)]">
               {[
                 ["on / off", "Enable or disable the user"],
                 [">password", "Add a password for the user"],
@@ -300,9 +300,9 @@ user pubsub_user on >pubsub-password &events:* +subscribe +publish +psubscribe`}
                 ["resetkeys", "Reset all key patterns"],
                 ["nopass", "Allow connecting without a password"],
               ].map(([rule, desc], i, arr) => (
-                <tr key={rule} className={i < arr.length - 1 ? "border-b border-slate-800/60" : ""}>
-                  <td className="px-4 py-2 font-mono text-xs text-blue-300 whitespace-nowrap">{rule}</td>
-                  <td className="px-4 py-2 text-slate-400">{desc}</td>
+                <tr key={rule} className={i < arr.length - 1 ? "border-b border-[var(--color-border)]" : ""}>
+                  <td className="px-4 py-2 font-mono text-xs text-[var(--color-primary)] whitespace-nowrap">{rule}</td>
+                  <td className="px-4 py-2 text-[var(--color-text-secondary)]">{desc}</td>
                 </tr>
               ))}
             </tbody>
@@ -310,7 +310,7 @@ user pubsub_user on >pubsub-password &events:* +subscribe +publish +psubscribe`}
         </div>
       </div>
 
-      <p className="mb-3 text-slate-400">Available command categories:</p>
+      <p className="mb-3 text-[var(--color-text-secondary)]">Available command categories:</p>
 
       <div className="flex flex-wrap gap-2 mb-6">
         {[
@@ -320,7 +320,7 @@ user pubsub_user on >pubsub-password &events:* +subscribe +publish +psubscribe`}
         ].map((cat) => (
           <span
             key={cat}
-            className="text-xs font-mono px-2 py-1 rounded-md bg-slate-800 text-slate-300 border border-slate-700"
+            className="text-xs font-mono px-2 py-1 rounded-md bg-[var(--color-surface)] text-[var(--color-text-secondary)] border border-[var(--color-border)]"
           >
             {cat}
           </span>
@@ -364,11 +364,11 @@ ACL LOAD`}
 
       {/* ── Network Security ─────────────────────────────────── */}
       <DocHeading id="network" level={2}>
-        <Network className="w-5 h-5 text-blue-400" />
+        <Network className="w-5 h-5 text-[var(--color-primary)]" />
         Network Security
       </DocHeading>
 
-      <p className="mb-4 text-slate-400">
+      <p className="mb-4 text-[var(--color-text-secondary)]">
         Restrict which network interfaces CacheStorm listens on and use firewall rules to
         limit access.
       </p>
@@ -441,12 +441,12 @@ iptables -A INPUT -p tcp --dport 7280 -j DROP`}
         ].map((item) => (
           <div
             key={item.title}
-            className="flex items-start gap-3 p-3 rounded-lg border border-slate-800 bg-slate-900/30"
+            className="flex items-start gap-3 p-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)]"
           >
             <div className="w-1.5 h-1.5 rounded-full bg-blue-400 mt-2 shrink-0" />
             <div>
-              <p className="text-sm font-medium text-white">{item.title}</p>
-              <p className="text-xs text-slate-500 mt-0.5">{item.desc}</p>
+              <p className="text-sm font-medium text-[var(--color-text)]">{item.title}</p>
+              <p className="text-xs text-[var(--color-text-tertiary)] mt-0.5">{item.desc}</p>
             </div>
           </div>
         ))}

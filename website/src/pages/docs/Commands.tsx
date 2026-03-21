@@ -22,10 +22,10 @@ const toc: TocItem[] = [
 
 function CommandBadge({ complexity }: { complexity: string }) {
   const color = complexity.startsWith("O(1)")
-    ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/30"
+    ? "text-green-600 dark:text-green-400 bg-emerald-500/10 border-emerald-500/30"
     : complexity.startsWith("O(N)")
     ? "text-amber-400 bg-amber-500/10 border-amber-500/30"
-    : "text-slate-400 bg-slate-500/10 border-slate-500/30";
+    : "text-[var(--color-text-secondary)] bg-[var(--color-surface)] border-[var(--color-border)]";
 
   return (
     <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${color}`}>
@@ -46,13 +46,13 @@ function CommandEntry({
   complexity: string;
 }) {
   return (
-    <div className="py-3 border-b border-slate-800/60 last:border-0">
+    <div className="py-3 border-b border-[var(--color-border)] last:border-0">
       <div className="flex items-center gap-2 flex-wrap mb-1">
-        <code className="text-sm font-bold text-blue-300">{name}</code>
+        <code className="text-sm font-bold text-[var(--color-primary)]">{name}</code>
         <CommandBadge complexity={complexity} />
       </div>
-      <p className="text-xs font-mono text-slate-500 mb-1">{syntax}</p>
-      <p className="text-sm text-slate-400">{desc}</p>
+      <p className="text-xs font-mono text-[var(--color-text-tertiary)] mb-1">{syntax}</p>
+      <p className="text-sm text-[var(--color-text-secondary)]">{desc}</p>
     </div>
   );
 }
@@ -62,14 +62,14 @@ export default function Commands() {
     <DocsLayout toc={toc}>
       {/* Hero */}
       <div className="mb-10">
-        <div className="flex items-center gap-2 text-blue-400 text-sm font-medium mb-2">
+        <div className="flex items-center gap-2 text-[var(--color-primary)] text-sm font-medium mb-2">
           <Terminal className="w-4 h-4" />
           Reference
         </div>
-        <h1 className="text-4xl font-extrabold text-white tracking-tight mb-4">
+        <h1 className="text-4xl font-extrabold text-[var(--color-text)] tracking-tight mb-4">
           Command Reference
         </h1>
-        <p className="text-lg text-slate-400 leading-relaxed max-w-2xl">
+        <p className="text-lg text-[var(--color-text-secondary)] leading-relaxed max-w-2xl">
           CacheStorm supports 200+ Redis-compatible commands across all major data structures.
           This page covers the most commonly used commands with examples.
         </p>
@@ -79,31 +79,31 @@ export default function Commands() {
         Overview
       </DocHeading>
 
-      <p className="mb-4 text-slate-400">
+      <p className="mb-4 text-[var(--color-text-secondary)]">
         Commands follow the standard Redis protocol (RESP). Use any Redis client library or{" "}
-        <code className="text-xs bg-slate-800 px-1 py-0.5 rounded">redis-cli</code> to interact
+        <code className="text-xs bg-[var(--color-surface)] px-1 py-0.5 rounded">redis-cli</code> to interact
         with CacheStorm.
       </p>
 
       <InfoBox type="info">
         All commands are case-insensitive.{" "}
-        <code className="text-xs bg-slate-800 px-1 py-0.5 rounded">SET</code>,{" "}
-        <code className="text-xs bg-slate-800 px-1 py-0.5 rounded">set</code>, and{" "}
-        <code className="text-xs bg-slate-800 px-1 py-0.5 rounded">Set</code> are all equivalent.
+        <code className="text-xs bg-[var(--color-surface)] px-1 py-0.5 rounded">SET</code>,{" "}
+        <code className="text-xs bg-[var(--color-surface)] px-1 py-0.5 rounded">set</code>, and{" "}
+        <code className="text-xs bg-[var(--color-surface)] px-1 py-0.5 rounded">Set</code> are all equivalent.
       </InfoBox>
 
       {/* ── Strings ──────────────────────────────────────────── */}
       <DocHeading id="strings" level={2}>
-        <Type className="w-5 h-5 text-blue-400" />
+        <Type className="w-5 h-5 text-[var(--color-primary)]" />
         Strings
       </DocHeading>
 
-      <p className="mb-4 text-slate-400">
+      <p className="mb-4 text-[var(--color-text-secondary)]">
         Strings are the most basic data type. They can hold any data: text, serialized objects,
         or binary data up to 512 MB.
       </p>
 
-      <div className="rounded-xl border border-slate-800 overflow-hidden px-4 mb-4">
+      <div className="rounded-xl border border-[var(--color-border)] overflow-hidden px-4 mb-4">
         <CommandEntry name="SET" syntax="SET key value [EX seconds] [PX milliseconds] [NX|XX]" desc="Set a key to a string value with optional expiration and condition." complexity="O(1)" />
         <CommandEntry name="GET" syntax="GET key" desc="Get the string value of a key. Returns nil if the key does not exist." complexity="O(1)" />
         <CommandEntry name="MSET" syntax="MSET key value [key value ...]" desc="Set multiple keys to multiple values atomically." complexity="O(N)" />
@@ -146,15 +146,15 @@ MGET key1 key2 key3
 
       {/* ── Hashes ───────────────────────────────────────────── */}
       <DocHeading id="hashes" level={2}>
-        <Hash className="w-5 h-5 text-blue-400" />
+        <Hash className="w-5 h-5 text-[var(--color-primary)]" />
         Hashes
       </DocHeading>
 
-      <p className="mb-4 text-slate-400">
+      <p className="mb-4 text-[var(--color-text-secondary)]">
         Hashes are maps of field-value pairs, ideal for representing objects.
       </p>
 
-      <div className="rounded-xl border border-slate-800 overflow-hidden px-4 mb-4">
+      <div className="rounded-xl border border-[var(--color-border)] overflow-hidden px-4 mb-4">
         <CommandEntry name="HSET" syntax="HSET key field value [field value ...]" desc="Set one or more fields in a hash." complexity="O(N)" />
         <CommandEntry name="HGET" syntax="HGET key field" desc="Get the value of a hash field." complexity="O(1)" />
         <CommandEntry name="HGETALL" syntax="HGETALL key" desc="Get all fields and values of a hash." complexity="O(N)" />
@@ -192,15 +192,15 @@ HEXISTS user:1 phone
 
       {/* ── Lists ────────────────────────────────────────────── */}
       <DocHeading id="lists" level={2}>
-        <List className="w-5 h-5 text-blue-400" />
+        <List className="w-5 h-5 text-[var(--color-primary)]" />
         Lists
       </DocHeading>
 
-      <p className="mb-4 text-slate-400">
+      <p className="mb-4 text-[var(--color-text-secondary)]">
         Lists are linked lists of string values, useful for queues, stacks, and recent item tracking.
       </p>
 
-      <div className="rounded-xl border border-slate-800 overflow-hidden px-4 mb-4">
+      <div className="rounded-xl border border-[var(--color-border)] overflow-hidden px-4 mb-4">
         <CommandEntry name="LPUSH" syntax="LPUSH key value [value ...]" desc="Prepend one or more values to a list." complexity="O(N)" />
         <CommandEntry name="RPUSH" syntax="RPUSH key value [value ...]" desc="Append one or more values to a list." complexity="O(N)" />
         <CommandEntry name="LPOP" syntax="LPOP key [count]" desc="Remove and return elements from the head of a list." complexity="O(N)" />
@@ -235,15 +235,15 @@ BLPOP queue:tasks 30`}
 
       {/* ── Sets ─────────────────────────────────────────────── */}
       <DocHeading id="sets" level={2}>
-        <Layers className="w-5 h-5 text-blue-400" />
+        <Layers className="w-5 h-5 text-[var(--color-primary)]" />
         Sets
       </DocHeading>
 
-      <p className="mb-4 text-slate-400">
+      <p className="mb-4 text-[var(--color-text-secondary)]">
         Sets are unordered collections of unique strings, perfect for tags, unique visitors, and set operations.
       </p>
 
-      <div className="rounded-xl border border-slate-800 overflow-hidden px-4 mb-4">
+      <div className="rounded-xl border border-[var(--color-border)] overflow-hidden px-4 mb-4">
         <CommandEntry name="SADD" syntax="SADD key member [member ...]" desc="Add one or more members to a set." complexity="O(N)" />
         <CommandEntry name="SREM" syntax="SREM key member [member ...]" desc="Remove one or more members from a set." complexity="O(N)" />
         <CommandEntry name="SMEMBERS" syntax="SMEMBERS key" desc="Get all members of a set." complexity="O(N)" />
@@ -278,16 +278,16 @@ SCARD visitors:2024-01-15
 
       {/* ── Sorted Sets ──────────────────────────────────────── */}
       <DocHeading id="sorted-sets" level={2}>
-        <SortAsc className="w-5 h-5 text-blue-400" />
+        <SortAsc className="w-5 h-5 text-[var(--color-primary)]" />
         Sorted Sets
       </DocHeading>
 
-      <p className="mb-4 text-slate-400">
+      <p className="mb-4 text-[var(--color-text-secondary)]">
         Sorted sets are sets where each member has an associated score, maintaining order by score.
         Ideal for leaderboards, rate limiting, and priority queues.
       </p>
 
-      <div className="rounded-xl border border-slate-800 overflow-hidden px-4 mb-4">
+      <div className="rounded-xl border border-[var(--color-border)] overflow-hidden px-4 mb-4">
         <CommandEntry name="ZADD" syntax="ZADD key [NX|XX] [GT|LT] [CH] score member [score member ...]" desc="Add members with scores to a sorted set." complexity="O(log N)" />
         <CommandEntry name="ZREM" syntax="ZREM key member [member ...]" desc="Remove one or more members from a sorted set." complexity="O(log N)" />
         <CommandEntry name="ZSCORE" syntax="ZSCORE key member" desc="Get the score of a member." complexity="O(1)" />
@@ -327,15 +327,15 @@ ZCOUNT rate:user:1 1704999900 1705000100
 
       {/* ── Streams ──────────────────────────────────────────── */}
       <DocHeading id="streams" level={2}>
-        <Radio className="w-5 h-5 text-blue-400" />
+        <Radio className="w-5 h-5 text-[var(--color-primary)]" />
         Streams
       </DocHeading>
 
-      <p className="mb-4 text-slate-400">
+      <p className="mb-4 text-[var(--color-text-secondary)]">
         Streams are append-only log data structures for event sourcing, message queues, and real-time data.
       </p>
 
-      <div className="rounded-xl border border-slate-800 overflow-hidden px-4 mb-4">
+      <div className="rounded-xl border border-[var(--color-border)] overflow-hidden px-4 mb-4">
         <CommandEntry name="XADD" syntax="XADD key [MAXLEN|MINID [=|~] threshold] *|id field value [field value ...]" desc="Append a new entry to a stream." complexity="O(1)" />
         <CommandEntry name="XREAD" syntax="XREAD [COUNT count] [BLOCK milliseconds] STREAMS key [key ...] id [id ...]" desc="Read entries from one or more streams." complexity="O(N)" />
         <CommandEntry name="XRANGE" syntax="XRANGE key start end [COUNT count]" desc="Return a range of entries from a stream." complexity="O(N)" />
@@ -370,15 +370,15 @@ XREADGROUP GROUP analytics worker-1 COUNT 1 BLOCK 5000 STREAMS events >`}
 
       {/* ── Pub/Sub ──────────────────────────────────────────── */}
       <DocHeading id="pubsub" level={2}>
-        <MessageSquare className="w-5 h-5 text-blue-400" />
+        <MessageSquare className="w-5 h-5 text-[var(--color-primary)]" />
         Pub/Sub
       </DocHeading>
 
-      <p className="mb-4 text-slate-400">
+      <p className="mb-4 text-[var(--color-text-secondary)]">
         Publish/Subscribe messaging for real-time communication between clients.
       </p>
 
-      <div className="rounded-xl border border-slate-800 overflow-hidden px-4 mb-4">
+      <div className="rounded-xl border border-[var(--color-border)] overflow-hidden px-4 mb-4">
         <CommandEntry name="SUBSCRIBE" syntax="SUBSCRIBE channel [channel ...]" desc="Subscribe to one or more channels." complexity="O(N)" />
         <CommandEntry name="UNSUBSCRIBE" syntax="UNSUBSCRIBE [channel [channel ...]]" desc="Unsubscribe from channels." complexity="O(N)" />
         <CommandEntry name="PUBLISH" syntax="PUBLISH channel message" desc="Post a message to a channel." complexity="O(N+M)" />
@@ -410,11 +410,11 @@ PUBLISH events:purchase "user:42 bought item:99"
 
       {/* ── Keys ─────────────────────────────────────────────── */}
       <DocHeading id="keys" level={2}>
-        <Key className="w-5 h-5 text-blue-400" />
+        <Key className="w-5 h-5 text-[var(--color-primary)]" />
         Keys &amp; Expiration
       </DocHeading>
 
-      <div className="rounded-xl border border-slate-800 overflow-hidden px-4 mb-4">
+      <div className="rounded-xl border border-[var(--color-border)] overflow-hidden px-4 mb-4">
         <CommandEntry name="DEL" syntax="DEL key [key ...]" desc="Delete one or more keys." complexity="O(N)" />
         <CommandEntry name="EXISTS" syntax="EXISTS key [key ...]" desc="Check if keys exist." complexity="O(N)" />
         <CommandEntry name="EXPIRE" syntax="EXPIRE key seconds" desc="Set a timeout on a key (seconds)." complexity="O(1)" />
@@ -452,11 +452,11 @@ TYPE user:1
 
       {/* ── Server Commands ──────────────────────────────────── */}
       <DocHeading id="server-cmds" level={2}>
-        <Clock className="w-5 h-5 text-blue-400" />
+        <Clock className="w-5 h-5 text-[var(--color-primary)]" />
         Server Commands
       </DocHeading>
 
-      <div className="rounded-xl border border-slate-800 overflow-hidden px-4 mb-4">
+      <div className="rounded-xl border border-[var(--color-border)] overflow-hidden px-4 mb-4">
         <CommandEntry name="PING" syntax="PING [message]" desc="Test server connectivity. Returns PONG or the given message." complexity="O(1)" />
         <CommandEntry name="INFO" syntax="INFO [section]" desc="Get server information and statistics." complexity="O(1)" />
         <CommandEntry name="DBSIZE" syntax="DBSIZE" desc="Return the number of keys in the current database." complexity="O(1)" />
@@ -475,11 +475,11 @@ TYPE user:1
         Scripting
       </DocHeading>
 
-      <p className="mb-4 text-slate-400">
+      <p className="mb-4 text-[var(--color-text-secondary)]">
         CacheStorm supports Lua scripting for atomic multi-step operations.
       </p>
 
-      <div className="rounded-xl border border-slate-800 overflow-hidden px-4 mb-4">
+      <div className="rounded-xl border border-[var(--color-border)] overflow-hidden px-4 mb-4">
         <CommandEntry name="EVAL" syntax="EVAL script numkeys key [key ...] arg [arg ...]" desc="Execute a Lua script." complexity="O(N)" />
         <CommandEntry name="EVALSHA" syntax="EVALSHA sha1 numkeys key [key ...] arg [arg ...]" desc="Execute a cached Lua script by SHA1 hash." complexity="O(N)" />
         <CommandEntry name="SCRIPT LOAD" syntax="SCRIPT LOAD script" desc="Load a Lua script into the script cache." complexity="O(N)" />
@@ -516,9 +516,9 @@ EVAL "
       />
 
       <InfoBox type="tip">
-        Use <code className="text-xs bg-slate-800 px-1 py-0.5 rounded">EVALSHA</code> in production
+        Use <code className="text-xs bg-[var(--color-surface)] px-1 py-0.5 rounded">EVALSHA</code> in production
         to avoid sending the full script text on every call. Load scripts once with{" "}
-        <code className="text-xs bg-slate-800 px-1 py-0.5 rounded">SCRIPT LOAD</code> and call them
+        <code className="text-xs bg-[var(--color-surface)] px-1 py-0.5 rounded">SCRIPT LOAD</code> and call them
         by their SHA1 hash.
       </InfoBox>
     </DocsLayout>

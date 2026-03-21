@@ -22,8 +22,8 @@ const toc: TocItem[] = [
 
 function EndpointBadge({ method }: { method: "GET" | "POST" | "PUT" | "DELETE" }) {
   const colors = {
-    GET: "text-emerald-400 bg-emerald-500/10 border-emerald-500/30",
-    POST: "text-blue-400 bg-blue-500/10 border-blue-500/30",
+    GET: "text-green-600 dark:text-green-400 bg-emerald-500/10 border-emerald-500/30",
+    POST: "text-[var(--color-primary)] bg-[var(--color-surface)] border-blue-500/30",
     PUT: "text-amber-400 bg-amber-500/10 border-amber-500/30",
     DELETE: "text-red-400 bg-red-500/10 border-red-500/30",
   };
@@ -45,12 +45,12 @@ function Endpoint({
   desc: string;
 }) {
   return (
-    <div className="py-3 border-b border-slate-800/60 last:border-0">
+    <div className="py-3 border-b border-[var(--color-border)] last:border-0">
       <div className="flex items-center gap-2.5 flex-wrap mb-1">
         <EndpointBadge method={method} />
-        <code className="text-sm font-bold text-white">{path}</code>
+        <code className="text-sm font-bold text-[var(--color-text)]">{path}</code>
       </div>
-      <p className="text-sm text-slate-400 ml-0.5">{desc}</p>
+      <p className="text-sm text-[var(--color-text-secondary)] ml-0.5">{desc}</p>
     </div>
   );
 }
@@ -60,14 +60,14 @@ export default function API() {
     <DocsLayout toc={toc}>
       {/* Hero */}
       <div className="mb-10">
-        <div className="flex items-center gap-2 text-blue-400 text-sm font-medium mb-2">
+        <div className="flex items-center gap-2 text-[var(--color-primary)] text-sm font-medium mb-2">
           <Globe className="w-4 h-4" />
           Reference
         </div>
-        <h1 className="text-4xl font-extrabold text-white tracking-tight mb-4">
+        <h1 className="text-4xl font-extrabold text-[var(--color-text)] tracking-tight mb-4">
           HTTP API Reference
         </h1>
-        <p className="text-lg text-slate-400 leading-relaxed max-w-2xl">
+        <p className="text-lg text-[var(--color-text-secondary)] leading-relaxed max-w-2xl">
           CacheStorm provides a RESTful HTTP API for management, monitoring, and executing
           commands. The API runs on a separate port (default: 7280) alongside the RESP protocol.
         </p>
@@ -78,7 +78,7 @@ export default function API() {
         Overview
       </DocHeading>
 
-      <p className="mb-3 text-slate-400">
+      <p className="mb-3 text-[var(--color-text-secondary)]">
         The HTTP API provides a JSON-based interface for all CacheStorm operations. It runs
         alongside the main RESP server on a configurable port.
       </p>
@@ -93,15 +93,15 @@ export default function API() {
   cors_origins: ["*"]`}
       />
 
-      <p className="mb-3 text-slate-400">Base URL:</p>
+      <p className="mb-3 text-[var(--color-text-secondary)]">Base URL:</p>
       <CodeBlock
         language="bash"
         code={`http://localhost:7280`}
       />
 
-      <p className="mb-4 text-slate-400">All endpoints summary:</p>
+      <p className="mb-4 text-[var(--color-text-secondary)]">All endpoints summary:</p>
 
-      <div className="rounded-xl border border-slate-800 overflow-hidden px-4 mb-6">
+      <div className="rounded-xl border border-[var(--color-border)] overflow-hidden px-4 mb-6">
         <Endpoint method="GET" path="/health" desc="Health check" />
         <Endpoint method="GET" path="/health/ready" desc="Readiness check" />
         <Endpoint method="POST" path="/api/v1/command" desc="Execute any CacheStorm command" />
@@ -117,11 +117,11 @@ export default function API() {
 
       {/* ── Authentication ───────────────────────────────────── */}
       <DocHeading id="authentication" level={2}>
-        <Shield className="w-5 h-5 text-blue-400" />
+        <Shield className="w-5 h-5 text-[var(--color-primary)]" />
         Authentication
       </DocHeading>
 
-      <p className="mb-3 text-slate-400">
+      <p className="mb-3 text-[var(--color-text-secondary)]">
         When a server password is configured, the HTTP API requires authentication via
         Bearer token or Basic auth.
       </p>
@@ -149,11 +149,11 @@ curl -u "admin:admin-password" \\
 
       {/* ── Health ───────────────────────────────────────────── */}
       <DocHeading id="health" level={2}>
-        <Heart className="w-5 h-5 text-blue-400" />
+        <Heart className="w-5 h-5 text-[var(--color-primary)]" />
         Health Endpoints
       </DocHeading>
 
-      <p className="mb-3 text-slate-400">
+      <p className="mb-3 text-[var(--color-text-secondary)]">
         Use these endpoints for load balancer health checks and Kubernetes probes.
       </p>
 
@@ -196,11 +196,11 @@ curl http://localhost:7280/health/ready
 
       {/* ── Command Execution ────────────────────────────────── */}
       <DocHeading id="command-exec" level={2}>
-        <Terminal className="w-5 h-5 text-blue-400" />
+        <Terminal className="w-5 h-5 text-[var(--color-primary)]" />
         Command Execution
       </DocHeading>
 
-      <p className="mb-3 text-slate-400">
+      <p className="mb-3 text-[var(--color-text-secondary)]">
         Execute any CacheStorm command through the HTTP API.
       </p>
 
@@ -256,11 +256,11 @@ curl -X POST http://localhost:7280/api/v1/command/pipeline \\
 
       {/* ── Key Operations ───────────────────────────────────── */}
       <DocHeading id="key-ops" level={2}>
-        <Database className="w-5 h-5 text-blue-400" />
+        <Database className="w-5 h-5 text-[var(--color-primary)]" />
         Key Operations
       </DocHeading>
 
-      <p className="mb-3 text-slate-400">
+      <p className="mb-3 text-[var(--color-text-secondary)]">
         RESTful CRUD operations for key-value pairs.
       </p>
 
@@ -307,7 +307,7 @@ curl -I http://localhost:7280/api/v1/keys/mykey
 
       {/* ── Server Info ──────────────────────────────────────── */}
       <DocHeading id="info" level={2}>
-        <BarChart3 className="w-5 h-5 text-blue-400" />
+        <BarChart3 className="w-5 h-5 text-[var(--color-primary)]" />
         Server Info
       </DocHeading>
 
@@ -346,7 +346,7 @@ curl http://localhost:7280/api/v1/info/keyspace`}
         Metrics
       </DocHeading>
 
-      <p className="mb-3 text-slate-400">
+      <p className="mb-3 text-[var(--color-text-secondary)]">
         Prometheus-format metrics are available at the metrics endpoint.
       </p>
 
@@ -366,7 +366,7 @@ curl -H "Accept: application/json" http://localhost:7280/api/v1/metrics
 
       {/* ── Configuration ────────────────────────────────────── */}
       <DocHeading id="config-api" level={2}>
-        <Settings className="w-5 h-5 text-blue-400" />
+        <Settings className="w-5 h-5 text-[var(--color-primary)]" />
         Configuration
       </DocHeading>
 
@@ -398,20 +398,20 @@ curl -X PUT http://localhost:7280/api/v1/config \\
         Error Handling
       </DocHeading>
 
-      <p className="mb-3 text-slate-400">
+      <p className="mb-3 text-[var(--color-text-secondary)]">
         The API uses standard HTTP status codes and returns errors in a consistent JSON format.
       </p>
 
-      <div className="my-4 rounded-xl border border-slate-800 overflow-hidden">
+      <div className="my-4 rounded-xl border border-[var(--color-border)] overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-800 text-left text-slate-400">
+              <tr className="border-b border-[var(--color-border)] text-left text-[var(--color-text-secondary)]">
                 <th className="px-4 py-2 font-medium">Status</th>
                 <th className="px-4 py-2 font-medium">Meaning</th>
               </tr>
             </thead>
-            <tbody className="text-slate-300">
+            <tbody className="text-[var(--color-text-secondary)]">
               {[
                 ["200", "Success"],
                 ["201", "Created (key didn't exist before)"],
@@ -423,9 +423,9 @@ curl -X PUT http://localhost:7280/api/v1/config \\
                 ["500", "Internal server error"],
                 ["503", "Service unavailable (server loading or shutting down)"],
               ].map(([code, meaning], i, arr) => (
-                <tr key={code} className={i < arr.length - 1 ? "border-b border-slate-800/60" : ""}>
-                  <td className="px-4 py-2 font-mono text-blue-300">{code}</td>
-                  <td className="px-4 py-2 text-slate-400">{meaning}</td>
+                <tr key={code} className={i < arr.length - 1 ? "border-b border-[var(--color-border)]" : ""}>
+                  <td className="px-4 py-2 font-mono text-[var(--color-primary)]">{code}</td>
+                  <td className="px-4 py-2 text-[var(--color-text-secondary)]">{meaning}</td>
                 </tr>
               ))}
             </tbody>
@@ -450,7 +450,7 @@ curl -X PUT http://localhost:7280/api/v1/config \\
         Rate Limiting
       </DocHeading>
 
-      <p className="mb-3 text-slate-400">
+      <p className="mb-3 text-[var(--color-text-secondary)]">
         The HTTP API supports optional rate limiting per IP or per authenticated user.
       </p>
 
@@ -469,7 +469,7 @@ curl -X PUT http://localhost:7280/api/v1/config \\
       reader: 1000`}
       />
 
-      <p className="mb-3 text-slate-400">
+      <p className="mb-3 text-[var(--color-text-secondary)]">
         Rate limit headers are included in all responses:
       </p>
 
@@ -487,7 +487,7 @@ Retry-After: 1  # Only included when rate limited (429)`}
         Client SDKs
       </DocHeading>
 
-      <p className="mb-4 text-slate-400">
+      <p className="mb-4 text-[var(--color-text-secondary)]">
         Since CacheStorm is Redis-compatible, you can use any Redis client library. For the HTTP
         API specifically, use standard HTTP clients:
       </p>

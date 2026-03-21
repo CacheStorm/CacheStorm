@@ -27,14 +27,14 @@ export default function Clustering() {
     <DocsLayout toc={toc}>
       {/* Hero */}
       <div className="mb-10">
-        <div className="flex items-center gap-2 text-blue-400 text-sm font-medium mb-2">
+        <div className="flex items-center gap-2 text-[var(--color-primary)] text-sm font-medium mb-2">
           <Network className="w-4 h-4" />
           Operations
         </div>
-        <h1 className="text-4xl font-extrabold text-white tracking-tight mb-4">
+        <h1 className="text-4xl font-extrabold text-[var(--color-text)] tracking-tight mb-4">
           Clustering &amp; High Availability
         </h1>
-        <p className="text-lg text-slate-400 leading-relaxed max-w-2xl">
+        <p className="text-lg text-[var(--color-text-secondary)] leading-relaxed max-w-2xl">
           Scale CacheStorm with replication, automatic failover via Sentinel mode,
           and horizontal scaling with cluster mode. This guide covers all high-availability
           deployment patterns.
@@ -46,19 +46,19 @@ export default function Clustering() {
         Overview
       </DocHeading>
 
-      <p className="mb-4 text-slate-400">
+      <p className="mb-4 text-[var(--color-text-secondary)]">
         CacheStorm supports three high-availability modes:
       </p>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
         {[
           {
-            icon: <GitBranch className="w-5 h-5 text-blue-400" />,
+            icon: <GitBranch className="w-5 h-5 text-[var(--color-primary)]" />,
             title: "Replication",
             desc: "Master-replica for read scaling and data redundancy",
           },
           {
-            icon: <Shield className="w-5 h-5 text-emerald-400" />,
+            icon: <Shield className="w-5 h-5 text-green-600 dark:text-green-400" />,
             title: "Sentinel",
             desc: "Automatic failover and service discovery",
           },
@@ -70,11 +70,11 @@ export default function Clustering() {
         ].map((item) => (
           <div
             key={item.title}
-            className="flex flex-col items-center gap-2 p-4 rounded-xl border border-slate-800 bg-slate-900/50 text-center"
+            className="flex flex-col items-center gap-2 p-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-secondary)] text-center"
           >
             {item.icon}
-            <p className="text-sm font-semibold text-white">{item.title}</p>
-            <p className="text-xs text-slate-500">{item.desc}</p>
+            <p className="text-sm font-semibold text-[var(--color-text)]">{item.title}</p>
+            <p className="text-xs text-[var(--color-text-tertiary)]">{item.desc}</p>
           </div>
         ))}
       </div>
@@ -84,19 +84,19 @@ export default function Clustering() {
         Architecture
       </DocHeading>
 
-      <p className="mb-4 text-slate-400">
+      <p className="mb-4 text-[var(--color-text-secondary)]">
         CacheStorm uses asynchronous replication with a single master accepting writes and one
         or more replicas receiving updates. This provides:
       </p>
 
-      <ul className="list-disc list-inside text-slate-400 space-y-1 mb-4 ml-2">
+      <ul className="list-disc list-inside text-[var(--color-text-secondary)] space-y-1 mb-4 ml-2">
         <li>Read scaling by distributing reads across replicas</li>
         <li>Data redundancy with automatic re-sync on reconnection</li>
         <li>Geographic distribution for lower latency</li>
         <li>Online backup without impacting the master</li>
       </ul>
 
-      <div className="my-6 p-6 rounded-xl border border-slate-800 bg-slate-900/50 font-mono text-sm text-slate-400">
+      <div className="my-6 p-6 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-secondary)] font-mono text-sm text-[var(--color-text-secondary)]">
         <pre>{`                    ┌─────────────────┐
                     │   Application   │
                     └────────┬────────┘
@@ -119,7 +119,7 @@ export default function Clustering() {
 
       {/* ── Replication ──────────────────────────────────────── */}
       <DocHeading id="replication" level={2}>
-        <GitBranch className="w-5 h-5 text-blue-400" />
+        <GitBranch className="w-5 h-5 text-[var(--color-primary)]" />
         Replication
       </DocHeading>
 
@@ -127,7 +127,7 @@ export default function Clustering() {
         Setup
       </DocHeading>
 
-      <p className="mb-4 text-slate-400">
+      <p className="mb-4 text-[var(--color-text-secondary)]">
         Set up a master with two replicas using Docker Compose:
       </p>
 
@@ -243,11 +243,11 @@ redis-cli -p 6381 INFO replication
 
       {/* ── Sentinel ─────────────────────────────────────────── */}
       <DocHeading id="sentinel" level={2}>
-        <Shield className="w-5 h-5 text-blue-400" />
+        <Shield className="w-5 h-5 text-[var(--color-primary)]" />
         Sentinel Mode
       </DocHeading>
 
-      <p className="mb-4 text-slate-400">
+      <p className="mb-4 text-[var(--color-text-secondary)]">
         Sentinel provides automatic failover when the master becomes unavailable. It monitors
         master and replica nodes, and promotes a replica to master when needed.
       </p>
@@ -256,7 +256,7 @@ redis-cli -p 6381 INFO replication
         Sentinel Setup
       </DocHeading>
 
-      <p className="mb-4 text-slate-400">
+      <p className="mb-4 text-[var(--color-text-secondary)]">
         Deploy at least 3 sentinel instances for reliable quorum-based failover.
       </p>
 
@@ -361,11 +361,11 @@ client := redis.NewFailoverClient(&redis.FailoverOptions{
 
       {/* ── Cluster Mode ─────────────────────────────────────── */}
       <DocHeading id="cluster-mode" level={2}>
-        <Network className="w-5 h-5 text-blue-400" />
+        <Network className="w-5 h-5 text-[var(--color-primary)]" />
         Cluster Mode
       </DocHeading>
 
-      <p className="mb-4 text-slate-400">
+      <p className="mb-4 text-[var(--color-text-secondary)]">
         Cluster mode distributes data across multiple master nodes using hash slots.
         Each master owns a subset of the 16,384 hash slots, and data is sharded based on the key's
         hash slot.
@@ -375,7 +375,7 @@ client := redis.NewFailoverClient(&redis.FailoverOptions{
         Cluster Setup
       </DocHeading>
 
-      <p className="mb-4 text-slate-400">
+      <p className="mb-4 text-[var(--color-text-secondary)]">
         Minimum recommended cluster: 3 masters, each with 1 replica (6 nodes total).
       </p>
 
@@ -524,46 +524,46 @@ cachestorm-cli --cluster fix existing-node:6380`}
       />
 
       <InfoBox type="info">
-        When using cluster mode, use hash tags <code className="text-xs bg-slate-800 px-1 py-0.5 rounded">{"{tag}"}</code> to
+        When using cluster mode, use hash tags <code className="text-xs bg-[var(--color-surface)] px-1 py-0.5 rounded">{"{tag}"}</code> to
         ensure related keys are stored on the same node. For example:{" "}
-        <code className="text-xs bg-slate-800 px-1 py-0.5 rounded">{"{user:1}:name"}</code> and{" "}
-        <code className="text-xs bg-slate-800 px-1 py-0.5 rounded">{"{user:1}:email"}</code> will
+        <code className="text-xs bg-[var(--color-surface)] px-1 py-0.5 rounded">{"{user:1}:name"}</code> and{" "}
+        <code className="text-xs bg-[var(--color-surface)] px-1 py-0.5 rounded">{"{user:1}:email"}</code> will
         share the same slot.
       </InfoBox>
 
       {/* ── Production Topology ──────────────────────────────── */}
       <DocHeading id="production" level={2}>
-        <Activity className="w-5 h-5 text-blue-400" />
+        <Activity className="w-5 h-5 text-[var(--color-primary)]" />
         Production Topology
       </DocHeading>
 
-      <p className="mb-4 text-slate-400">
+      <p className="mb-4 text-[var(--color-text-secondary)]">
         Recommended production topology for different workload sizes:
       </p>
 
-      <div className="my-4 rounded-xl border border-slate-800 overflow-hidden">
+      <div className="my-4 rounded-xl border border-[var(--color-border)] overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-800 text-left text-slate-400">
+              <tr className="border-b border-[var(--color-border)] text-left text-[var(--color-text-secondary)]">
                 <th className="px-4 py-2 font-medium">Scale</th>
                 <th className="px-4 py-2 font-medium">Topology</th>
                 <th className="px-4 py-2 font-medium">Nodes</th>
                 <th className="px-4 py-2 font-medium">Best For</th>
               </tr>
             </thead>
-            <tbody className="text-slate-300">
+            <tbody className="text-[var(--color-text-secondary)]">
               {[
                 ["Small", "1 master + 1 replica", "2", "Dev/staging, low traffic"],
                 ["Medium", "1 master + 2 replicas + 3 sentinels", "6", "Production with auto-failover"],
                 ["Large", "3 masters + 3 replicas (cluster)", "6", "High throughput, large datasets"],
                 ["Enterprise", "6 masters + 6 replicas + 3 sentinels", "15", "Mission-critical, multi-AZ"],
               ].map(([scale, topology, nodes, best], i, arr) => (
-                <tr key={scale} className={i < arr.length - 1 ? "border-b border-slate-800/60" : ""}>
-                  <td className="px-4 py-2 font-medium text-white">{scale}</td>
-                  <td className="px-4 py-2 text-slate-400">{topology}</td>
-                  <td className="px-4 py-2 text-center text-blue-300">{nodes}</td>
-                  <td className="px-4 py-2 text-slate-500">{best}</td>
+                <tr key={scale} className={i < arr.length - 1 ? "border-b border-[var(--color-border)]" : ""}>
+                  <td className="px-4 py-2 font-medium text-[var(--color-text)]">{scale}</td>
+                  <td className="px-4 py-2 text-[var(--color-text-secondary)]">{topology}</td>
+                  <td className="px-4 py-2 text-center text-[var(--color-primary)]">{nodes}</td>
+                  <td className="px-4 py-2 text-[var(--color-text-tertiary)]">{best}</td>
                 </tr>
               ))}
             </tbody>
@@ -592,12 +592,12 @@ cachestorm-cli --cluster fix existing-node:6380`}
         ].map((item) => (
           <div
             key={item.title}
-            className="flex items-start gap-3 p-3 rounded-lg border border-slate-800 bg-slate-900/30"
+            className="flex items-start gap-3 p-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)]"
           >
             <div className="w-1.5 h-1.5 rounded-full bg-blue-400 mt-2 shrink-0" />
             <div>
-              <p className="text-sm font-medium text-white">{item.title}</p>
-              <p className="text-xs text-slate-500 mt-0.5">{item.desc}</p>
+              <p className="text-sm font-medium text-[var(--color-text)]">{item.title}</p>
+              <p className="text-xs text-[var(--color-text-tertiary)] mt-0.5">{item.desc}</p>
             </div>
           </div>
         ))}

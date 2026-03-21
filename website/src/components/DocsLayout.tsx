@@ -120,7 +120,7 @@ function SidebarSection({
     <div className="mb-1">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold uppercase tracking-wider text-slate-400 hover:text-slate-200 transition-colors"
+        className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-secondary)] hover:text-[var(--color-text)] transition-colors"
       >
         {section.title}
         {open ? (
@@ -142,8 +142,8 @@ function SidebarSection({
                   className={cn(
                     "flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-all duration-150",
                     active
-                      ? "bg-blue-600/20 text-blue-400 font-medium border-l-2 border-blue-500 ml-0 pl-2.5"
-                      : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
+                      ? "bg-blue-600/20 text-[var(--color-primary)] font-medium border-l-2 border-blue-500 ml-0 pl-2.5"
+                      : "text-[var(--color-text-secondary)] hover:text-[var(--color-text)] hover:bg-white/5"
                   )}
                 >
                   {item.icon}
@@ -189,7 +189,7 @@ function TableOfContents({ items }: { items: TocItem[] }) {
 
   return (
     <nav className="space-y-1">
-      <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">
+      <p className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-secondary)] mb-3">
         On this page
       </p>
       {items.map((item) => (
@@ -200,8 +200,8 @@ function TableOfContents({ items }: { items: TocItem[] }) {
             "block text-sm py-1 transition-colors duration-150 border-l-2",
             item.level === 2 ? "pl-3" : "pl-6",
             activeId === item.id
-              ? "text-blue-400 border-blue-500"
-              : "text-slate-500 hover:text-slate-300 border-transparent"
+              ? "text-[var(--color-primary)] border-blue-500"
+              : "text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)] border-transparent"
           )}
         >
           {item.text}
@@ -245,9 +245,9 @@ export default function DocsLayout({
   }, [sidebarOpen]);
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-300">
+    <div className="min-h-screen bg-[var(--color-bg)] text-[var(--color-text-secondary)]">
       {/* ── Top bar (mobile) ────────────────────────────────────── */}
-      <div className="lg:hidden sticky top-0 z-40 flex items-center gap-3 px-4 py-3 bg-slate-900/95 backdrop-blur border-b border-slate-800">
+      <div className="lg:hidden sticky top-0 z-40 flex items-center gap-3 px-4 py-3 bg-[var(--color-bg-secondary)] backdrop-blur border-b border-[var(--color-border)]">
         <button
           onClick={() => setSidebarOpen(true)}
           className="p-1.5 rounded-lg hover:bg-white/10 transition-colors"
@@ -255,7 +255,7 @@ export default function DocsLayout({
         >
           <Menu className="w-5 h-5" />
         </button>
-        <Link to="/" className="text-lg font-bold text-white tracking-tight">
+        <Link to="/" className="text-lg font-bold text-[var(--color-text)] tracking-tight">
           CacheStorm
         </Link>
       </div>
@@ -272,18 +272,18 @@ export default function DocsLayout({
         {/* ── Left sidebar ─────────────────────────────────────── */}
         <aside
           className={cn(
-            "fixed top-0 left-0 z-50 h-screen w-72 bg-slate-900 border-r border-slate-800 flex flex-col transition-transform duration-300 lg:sticky lg:translate-x-0 lg:z-0",
+            "fixed top-0 left-0 z-50 h-screen w-72 bg-[var(--color-bg-secondary)] border-r border-[var(--color-border)] flex flex-col transition-transform duration-300 lg:sticky lg:translate-x-0 lg:z-0",
             sidebarOpen ? "translate-x-0" : "-translate-x-full"
           )}
         >
           {/* logo / brand */}
-          <div className="flex items-center justify-between px-4 py-4 border-b border-slate-800">
+          <div className="flex items-center justify-between px-4 py-4 border-b border-[var(--color-border)]">
             <Link
               to="/"
-              className="flex items-center gap-2 text-lg font-bold text-white tracking-tight"
+              className="flex items-center gap-2 text-lg font-bold text-[var(--color-text)] tracking-tight"
             >
               <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-500 to-cyan-400 flex items-center justify-center">
-                <span className="text-white text-xs font-black">CS</span>
+                <span className="text-[var(--color-text)] text-xs font-black">CS</span>
               </div>
               CacheStorm
             </Link>
@@ -309,12 +309,12 @@ export default function DocsLayout({
           </nav>
 
           {/* footer links */}
-          <div className="border-t border-slate-800 px-4 py-3 space-y-2">
+          <div className="border-t border-[var(--color-border)] px-4 py-3 space-y-2">
             <a
               href="https://github.com/nicktretyakov/CacheStorm"
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-2 text-sm text-slate-500 hover:text-slate-300 transition-colors"
+              className="flex items-center gap-2 text-sm text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)] transition-colors"
             >
               GitHub
               <ExternalLink className="w-3.5 h-3.5" />
@@ -360,14 +360,14 @@ export function DocHeading({
       className={cn(
         "group scroll-mt-24 flex items-center gap-2",
         level === 2
-          ? "text-2xl font-bold text-white mt-12 mb-4 pb-2 border-b border-slate-800"
-          : "text-xl font-semibold text-white mt-8 mb-3"
+          ? "text-2xl font-bold text-[var(--color-text)] mt-12 mb-4 pb-2 border-b border-[var(--color-border)]"
+          : "text-xl font-semibold text-[var(--color-text)] mt-8 mb-3"
       )}
     >
       {children}
       <a
         href={`#${id}`}
-        className="opacity-0 group-hover:opacity-100 transition-opacity text-blue-400"
+        className="opacity-0 group-hover:opacity-100 transition-opacity text-[var(--color-primary)]"
         aria-label={`Link to ${typeof children === "string" ? children : id}`}
       >
         <Hash className="w-4 h-4" />
@@ -386,14 +386,14 @@ export function CodeBlock({
   title?: string;
 }) {
   return (
-    <div className="my-4 rounded-xl overflow-hidden border border-slate-800 bg-slate-900">
+    <div className="my-4 rounded-xl overflow-hidden border border-[var(--color-border)] bg-[var(--color-bg-secondary)]">
       {title && (
-        <div className="px-4 py-2 text-xs font-medium text-slate-400 bg-slate-800/60 border-b border-slate-800">
+        <div className="px-4 py-2 text-xs font-medium text-[var(--color-text-secondary)] bg-[var(--color-surface)] border-b border-[var(--color-border)]">
           {title}
         </div>
       )}
       <pre className="p-4 overflow-x-auto text-sm leading-relaxed">
-        <code className={`language-${language} text-slate-300`}>{code}</code>
+        <code className={`language-${language} text-[var(--color-text-secondary)]`}>{code}</code>
       </pre>
     </div>
   );
@@ -407,7 +407,7 @@ export function InfoBox({
   children: ReactNode;
 }) {
   const styles = {
-    info: "border-blue-500/40 bg-blue-500/10 text-blue-300",
+    info: "border-blue-500/40 bg-[var(--color-surface)] text-[var(--color-primary)]",
     warning: "border-amber-500/40 bg-amber-500/10 text-amber-300",
     tip: "border-emerald-500/40 bg-emerald-500/10 text-emerald-300",
   };

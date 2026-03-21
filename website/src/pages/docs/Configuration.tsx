@@ -25,29 +25,29 @@ function ConfigTable({
   rows: { key: string; type: string; def: string; desc: string }[];
 }) {
   return (
-    <div className="my-4 rounded-xl border border-slate-800 overflow-hidden">
+    <div className="my-4 rounded-xl border border-[var(--color-border)] overflow-hidden">
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-slate-800 text-left text-slate-400">
+            <tr className="border-b border-[var(--color-border)] text-left text-[var(--color-text-secondary)]">
               <th className="px-4 py-2 font-medium">Key</th>
               <th className="px-4 py-2 font-medium">Type</th>
               <th className="px-4 py-2 font-medium">Default</th>
               <th className="px-4 py-2 font-medium">Description</th>
             </tr>
           </thead>
-          <tbody className="text-slate-300">
+          <tbody className="text-[var(--color-text-secondary)]">
             {rows.map((r, i) => (
               <tr
                 key={r.key}
-                className={i < rows.length - 1 ? "border-b border-slate-800/60" : ""}
+                className={i < rows.length - 1 ? "border-b border-[var(--color-border)]" : ""}
               >
-                <td className="px-4 py-2 font-mono text-xs text-blue-300 whitespace-nowrap">
+                <td className="px-4 py-2 font-mono text-xs text-[var(--color-primary)] whitespace-nowrap">
                   {r.key}
                 </td>
-                <td className="px-4 py-2 text-xs text-slate-500 whitespace-nowrap">{r.type}</td>
+                <td className="px-4 py-2 text-xs text-[var(--color-text-tertiary)] whitespace-nowrap">{r.type}</td>
                 <td className="px-4 py-2 font-mono text-xs text-amber-300/80">{r.def}</td>
-                <td className="px-4 py-2 text-slate-400">{r.desc}</td>
+                <td className="px-4 py-2 text-[var(--color-text-secondary)]">{r.desc}</td>
               </tr>
             ))}
           </tbody>
@@ -62,14 +62,14 @@ export default function Configuration() {
     <DocsLayout toc={toc}>
       {/* Hero */}
       <div className="mb-10">
-        <div className="flex items-center gap-2 text-blue-400 text-sm font-medium mb-2">
+        <div className="flex items-center gap-2 text-[var(--color-primary)] text-sm font-medium mb-2">
           <Settings className="w-4 h-4" />
           Reference
         </div>
-        <h1 className="text-4xl font-extrabold text-white tracking-tight mb-4">
+        <h1 className="text-4xl font-extrabold text-[var(--color-text)] tracking-tight mb-4">
           Configuration Reference
         </h1>
-        <p className="text-lg text-slate-400 leading-relaxed max-w-2xl">
+        <p className="text-lg text-[var(--color-text-secondary)] leading-relaxed max-w-2xl">
           Complete reference for all CacheStorm configuration options. Configuration can be
           set via YAML file, environment variables, or CLI flags.
         </p>
@@ -80,28 +80,28 @@ export default function Configuration() {
         Overview
       </DocHeading>
 
-      <p className="mb-3 text-slate-400">
+      <p className="mb-3 text-[var(--color-text-secondary)]">
         CacheStorm loads configuration in the following order of precedence
         (highest to lowest):
       </p>
 
-      <ol className="list-decimal list-inside text-slate-400 space-y-1 mb-4 ml-2">
-        <li>CLI flags (<code className="text-xs bg-slate-800 px-1 py-0.5 rounded">--port 6380</code>)</li>
-        <li>Environment variables (<code className="text-xs bg-slate-800 px-1 py-0.5 rounded">CACHESTORM_SERVER_PORT</code>)</li>
-        <li>Configuration file (<code className="text-xs bg-slate-800 px-1 py-0.5 rounded">cachestorm.yaml</code>)</li>
+      <ol className="list-decimal list-inside text-[var(--color-text-secondary)] space-y-1 mb-4 ml-2">
+        <li>CLI flags (<code className="text-xs bg-[var(--color-surface)] px-1 py-0.5 rounded">--port 6380</code>)</li>
+        <li>Environment variables (<code className="text-xs bg-[var(--color-surface)] px-1 py-0.5 rounded">CACHESTORM_SERVER_PORT</code>)</li>
+        <li>Configuration file (<code className="text-xs bg-[var(--color-surface)] px-1 py-0.5 rounded">cachestorm.yaml</code>)</li>
         <li>Default values</li>
       </ol>
 
       <InfoBox type="info">
-        Environment variables use the <code className="text-xs bg-slate-800 px-1 py-0.5 rounded">CACHESTORM_</code> prefix
+        Environment variables use the <code className="text-xs bg-[var(--color-surface)] px-1 py-0.5 rounded">CACHESTORM_</code> prefix
         with underscores replacing dots. For example,{" "}
-        <code className="text-xs bg-slate-800 px-1 py-0.5 rounded">server.port</code> becomes{" "}
-        <code className="text-xs bg-slate-800 px-1 py-0.5 rounded">CACHESTORM_SERVER_PORT</code>.
+        <code className="text-xs bg-[var(--color-surface)] px-1 py-0.5 rounded">server.port</code> becomes{" "}
+        <code className="text-xs bg-[var(--color-surface)] px-1 py-0.5 rounded">CACHESTORM_SERVER_PORT</code>.
       </InfoBox>
 
       {/* ── Server ───────────────────────────────────────────── */}
       <DocHeading id="server" level={2}>
-        <Server className="w-5 h-5 text-blue-400" />
+        <Server className="w-5 h-5 text-[var(--color-primary)]" />
         Server
       </DocHeading>
 
@@ -132,7 +132,7 @@ export default function Configuration() {
 
       {/* ── Memory ───────────────────────────────────────────── */}
       <DocHeading id="memory" level={2}>
-        <Database className="w-5 h-5 text-blue-400" />
+        <Database className="w-5 h-5 text-[var(--color-primary)]" />
         Memory
       </DocHeading>
 
@@ -144,18 +144,18 @@ export default function Configuration() {
         ]}
       />
 
-      <p className="mb-3 text-slate-400">Available eviction policies:</p>
+      <p className="mb-3 text-[var(--color-text-secondary)]">Available eviction policies:</p>
 
-      <div className="my-4 rounded-xl border border-slate-800 overflow-hidden">
+      <div className="my-4 rounded-xl border border-[var(--color-border)] overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-800 text-left text-slate-400">
+              <tr className="border-b border-[var(--color-border)] text-left text-[var(--color-text-secondary)]">
                 <th className="px-4 py-2 font-medium">Policy</th>
                 <th className="px-4 py-2 font-medium">Description</th>
               </tr>
             </thead>
-            <tbody className="text-slate-300">
+            <tbody className="text-[var(--color-text-secondary)]">
               {[
                 ["noeviction", "Return errors when memory limit is reached"],
                 ["allkeys-lru", "Evict least recently used keys from all keys"],
@@ -166,9 +166,9 @@ export default function Configuration() {
                 ["volatile-random", "Randomly evict keys with TTL set"],
                 ["volatile-ttl", "Evict keys with the shortest TTL"],
               ].map(([policy, desc], i, arr) => (
-                <tr key={policy} className={i < arr.length - 1 ? "border-b border-slate-800/60" : ""}>
+                <tr key={policy} className={i < arr.length - 1 ? "border-b border-[var(--color-border)]" : ""}>
                   <td className="px-4 py-2 font-mono text-xs text-amber-300/80">{policy}</td>
-                  <td className="px-4 py-2 text-slate-400">{desc}</td>
+                  <td className="px-4 py-2 text-[var(--color-text-secondary)]">{desc}</td>
                 </tr>
               ))}
             </tbody>
@@ -187,7 +187,7 @@ export default function Configuration() {
 
       {/* ── Persistence ──────────────────────────────────────── */}
       <DocHeading id="persistence" level={2}>
-        <HardDrive className="w-5 h-5 text-blue-400" />
+        <HardDrive className="w-5 h-5 text-[var(--color-primary)]" />
         Persistence
       </DocHeading>
 
@@ -221,7 +221,7 @@ export default function Configuration() {
 
       {/* ── HTTP ─────────────────────────────────────────────── */}
       <DocHeading id="http" level={2}>
-        <Globe className="w-5 h-5 text-blue-400" />
+        <Globe className="w-5 h-5 text-[var(--color-primary)]" />
         HTTP API
       </DocHeading>
 
@@ -251,7 +251,7 @@ export default function Configuration() {
 
       {/* ── Security ─────────────────────────────────────────── */}
       <DocHeading id="security" level={2}>
-        <Shield className="w-5 h-5 text-blue-400" />
+        <Shield className="w-5 h-5 text-[var(--color-primary)]" />
         Security
       </DocHeading>
 
@@ -286,7 +286,7 @@ export default function Configuration() {
 
       {/* ── Logging ──────────────────────────────────────────── */}
       <DocHeading id="logging" level={2}>
-        <ScrollText className="w-5 h-5 text-blue-400" />
+        <ScrollText className="w-5 h-5 text-[var(--color-primary)]" />
         Logging
       </DocHeading>
 
@@ -311,7 +311,7 @@ export default function Configuration() {
 
       {/* ── Cluster ──────────────────────────────────────────── */}
       <DocHeading id="cluster" level={2}>
-        <Server className="w-5 h-5 text-blue-400" />
+        <Server className="w-5 h-5 text-[var(--color-primary)]" />
         Cluster
       </DocHeading>
 
@@ -344,7 +344,7 @@ export default function Configuration() {
 
       {/* ── Metrics ──────────────────────────────────────────── */}
       <DocHeading id="metrics" level={2}>
-        <BarChart3 className="w-5 h-5 text-blue-400" />
+        <BarChart3 className="w-5 h-5 text-[var(--color-primary)]" />
         Metrics
       </DocHeading>
 
@@ -375,7 +375,7 @@ export default function Configuration() {
         Full Example
       </DocHeading>
 
-      <p className="mb-3 text-slate-400">
+      <p className="mb-3 text-[var(--color-text-secondary)]">
         A production-ready configuration example:
       </p>
 

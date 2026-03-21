@@ -25,14 +25,14 @@ export default function Monitoring() {
     <DocsLayout toc={toc}>
       {/* Hero */}
       <div className="mb-10">
-        <div className="flex items-center gap-2 text-blue-400 text-sm font-medium mb-2">
+        <div className="flex items-center gap-2 text-[var(--color-primary)] text-sm font-medium mb-2">
           <BarChart3 className="w-4 h-4" />
           Operations
         </div>
-        <h1 className="text-4xl font-extrabold text-white tracking-tight mb-4">
+        <h1 className="text-4xl font-extrabold text-[var(--color-text)] tracking-tight mb-4">
           Monitoring &amp; Observability
         </h1>
-        <p className="text-lg text-slate-400 leading-relaxed max-w-2xl">
+        <p className="text-lg text-[var(--color-text-secondary)] leading-relaxed max-w-2xl">
           Monitor CacheStorm with Prometheus metrics, Grafana dashboards, and Go pprof profiling.
           Track performance, memory usage, and connection statistics in real time.
         </p>
@@ -45,28 +45,28 @@ export default function Monitoring() {
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
         {[
-          { icon: <Gauge className="w-5 h-5 text-blue-400" />, title: "Prometheus", desc: "Metrics endpoint for scraping" },
-          { icon: <LineChart className="w-5 h-5 text-emerald-400" />, title: "Grafana", desc: "Pre-built visualization dashboards" },
+          { icon: <Gauge className="w-5 h-5 text-[var(--color-primary)]" />, title: "Prometheus", desc: "Metrics endpoint for scraping" },
+          { icon: <LineChart className="w-5 h-5 text-green-600 dark:text-green-400" />, title: "Grafana", desc: "Pre-built visualization dashboards" },
           { icon: <Bug className="w-5 h-5 text-amber-400" />, title: "pprof", desc: "Go runtime profiling" },
         ].map((item) => (
           <div
             key={item.title}
-            className="flex flex-col items-center gap-2 p-4 rounded-xl border border-slate-800 bg-slate-900/50 text-center"
+            className="flex flex-col items-center gap-2 p-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-secondary)] text-center"
           >
             {item.icon}
-            <p className="text-sm font-semibold text-white">{item.title}</p>
-            <p className="text-xs text-slate-500">{item.desc}</p>
+            <p className="text-sm font-semibold text-[var(--color-text)]">{item.title}</p>
+            <p className="text-xs text-[var(--color-text-tertiary)]">{item.desc}</p>
           </div>
         ))}
       </div>
 
       {/* ── Prometheus ───────────────────────────────────────── */}
       <DocHeading id="prometheus" level={2}>
-        <Gauge className="w-5 h-5 text-blue-400" />
+        <Gauge className="w-5 h-5 text-[var(--color-primary)]" />
         Prometheus
       </DocHeading>
 
-      <p className="mb-4 text-slate-400">
+      <p className="mb-4 text-[var(--color-text-secondary)]">
         CacheStorm exposes a Prometheus-compatible metrics endpoint for scraping. Metrics cover
         server health, memory, connections, commands, and key statistics.
       </p>
@@ -122,17 +122,17 @@ curl http://localhost:9121/metrics
         Available Metrics
       </DocHeading>
 
-      <div className="my-4 rounded-xl border border-slate-800 overflow-hidden">
+      <div className="my-4 rounded-xl border border-[var(--color-border)] overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-800 text-left text-slate-400">
+              <tr className="border-b border-[var(--color-border)] text-left text-[var(--color-text-secondary)]">
                 <th className="px-4 py-2 font-medium">Metric</th>
                 <th className="px-4 py-2 font-medium">Type</th>
                 <th className="px-4 py-2 font-medium">Description</th>
               </tr>
             </thead>
-            <tbody className="text-slate-300">
+            <tbody className="text-[var(--color-text-secondary)]">
               {[
                 ["cachestorm_uptime_seconds", "Gauge", "Server uptime in seconds"],
                 ["cachestorm_connected_clients", "Gauge", "Number of connected clients"],
@@ -154,10 +154,10 @@ curl http://localhost:9121/metrics
                 ["cachestorm_persistence_last_save_seconds", "Gauge", "Time since last successful save"],
                 ["cachestorm_persistence_rdb_changes_since_save", "Gauge", "Changes since last RDB save"],
               ].map(([metric, type, desc], i, arr) => (
-                <tr key={metric} className={i < arr.length - 1 ? "border-b border-slate-800/60" : ""}>
-                  <td className="px-4 py-2 font-mono text-xs text-blue-300 whitespace-nowrap">{metric}</td>
-                  <td className="px-4 py-2 text-xs text-slate-500 whitespace-nowrap">{type}</td>
-                  <td className="px-4 py-2 text-slate-400">{desc}</td>
+                <tr key={metric} className={i < arr.length - 1 ? "border-b border-[var(--color-border)]" : ""}>
+                  <td className="px-4 py-2 font-mono text-xs text-[var(--color-primary)] whitespace-nowrap">{metric}</td>
+                  <td className="px-4 py-2 text-xs text-[var(--color-text-tertiary)] whitespace-nowrap">{type}</td>
+                  <td className="px-4 py-2 text-[var(--color-text-secondary)]">{desc}</td>
                 </tr>
               ))}
             </tbody>
@@ -167,7 +167,7 @@ curl http://localhost:9121/metrics
 
       {/* ── Grafana ──────────────────────────────────────────── */}
       <DocHeading id="grafana" level={2}>
-        <LineChart className="w-5 h-5 text-blue-400" />
+        <LineChart className="w-5 h-5 text-[var(--color-primary)]" />
         Grafana Dashboards
       </DocHeading>
 
@@ -175,7 +175,7 @@ curl http://localhost:9121/metrics
         Setup
       </DocHeading>
 
-      <p className="mb-4 text-slate-400">
+      <p className="mb-4 text-[var(--color-text-secondary)]">
         Import our pre-built Grafana dashboard for a comprehensive overview of your CacheStorm cluster.
       </p>
 
@@ -229,7 +229,7 @@ volumes:
         Dashboard Panels
       </DocHeading>
 
-      <p className="mb-3 text-slate-400">
+      <p className="mb-3 text-[var(--color-text-secondary)]">
         Our Grafana dashboard includes the following panels:
       </p>
 
@@ -244,18 +244,18 @@ volumes:
         ].map((row) => (
           <div
             key={row.title}
-            className="flex items-start gap-3 p-3 rounded-lg border border-slate-800 bg-slate-900/30"
+            className="flex items-start gap-3 p-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)]"
           >
-            <Activity className="w-4 h-4 text-blue-400 mt-0.5 shrink-0" />
+            <Activity className="w-4 h-4 text-[var(--color-primary)] mt-0.5 shrink-0" />
             <div>
-              <p className="text-sm font-medium text-white">{row.title}</p>
-              <p className="text-xs text-slate-500 mt-0.5">{row.items}</p>
+              <p className="text-sm font-medium text-[var(--color-text)]">{row.title}</p>
+              <p className="text-xs text-[var(--color-text-tertiary)] mt-0.5">{row.items}</p>
             </div>
           </div>
         ))}
       </div>
 
-      <p className="text-slate-400 mb-4">
+      <p className="text-[var(--color-text-secondary)] mb-4">
         Key PromQL queries for your dashboards:
       </p>
 
@@ -284,11 +284,11 @@ rate(cachestorm_connections_total[5m])`}
 
       {/* ── pprof ────────────────────────────────────────────── */}
       <DocHeading id="pprof" level={2}>
-        <Bug className="w-5 h-5 text-blue-400" />
+        <Bug className="w-5 h-5 text-[var(--color-primary)]" />
         pprof Profiling
       </DocHeading>
 
-      <p className="mb-4 text-slate-400">
+      <p className="mb-4 text-[var(--color-text-secondary)]">
         CacheStorm includes Go's built-in pprof profiler for diagnosing performance issues.
       </p>
 
@@ -350,8 +350,8 @@ GET /debug/pprof/trace         # Execution trace`}
         INFO Command
       </DocHeading>
 
-      <p className="mb-4 text-slate-400">
-        The <code className="text-xs bg-slate-800 px-1 py-0.5 rounded">INFO</code> command provides
+      <p className="mb-4 text-[var(--color-text-secondary)]">
+        The <code className="text-xs bg-[var(--color-surface)] px-1 py-0.5 rounded">INFO</code> command provides
         a comprehensive snapshot of server state, useful for quick diagnostics.
       </p>
 
@@ -387,7 +387,7 @@ INFO persistence
         Slow Log
       </DocHeading>
 
-      <p className="mb-4 text-slate-400">
+      <p className="mb-4 text-[var(--color-text-secondary)]">
         The slow log records commands that exceed a configurable execution time threshold.
       </p>
 
@@ -422,11 +422,11 @@ SLOWLOG RESET`}
 
       {/* ── Alerting ─────────────────────────────────────────── */}
       <DocHeading id="alerting" level={2}>
-        <AlertTriangle className="w-5 h-5 text-blue-400" />
+        <AlertTriangle className="w-5 h-5 text-[var(--color-primary)]" />
         Alerting
       </DocHeading>
 
-      <p className="mb-4 text-slate-400">
+      <p className="mb-4 text-[var(--color-text-secondary)]">
         Set up Prometheus alerting rules to catch issues before they affect your application.
       </p>
 

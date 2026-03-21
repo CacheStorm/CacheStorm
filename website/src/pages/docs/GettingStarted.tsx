@@ -25,14 +25,14 @@ export default function GettingStarted() {
     <DocsLayout toc={toc}>
       {/* Hero */}
       <div className="mb-10">
-        <div className="flex items-center gap-2 text-blue-400 text-sm font-medium mb-2">
+        <div className="flex items-center gap-2 text-[var(--color-primary)] text-sm font-medium mb-2">
           <Rocket className="w-4 h-4" />
           Getting Started
         </div>
-        <h1 className="text-4xl font-extrabold text-white tracking-tight mb-4">
+        <h1 className="text-4xl font-extrabold text-[var(--color-text)] tracking-tight mb-4">
           Install &amp; Run CacheStorm
         </h1>
-        <p className="text-lg text-slate-400 leading-relaxed max-w-2xl">
+        <p className="text-lg text-[var(--color-text-secondary)] leading-relaxed max-w-2xl">
           CacheStorm is a high-performance, Redis-compatible caching server written in Go.
           Get up and running in under a minute with Docker, pre-built binaries, or from source.
         </p>
@@ -40,11 +40,11 @@ export default function GettingStarted() {
 
       {/* ── Installation ─────────────────────────────────────── */}
       <DocHeading id="installation" level={2}>
-        <Download className="w-5 h-5 text-blue-400" />
+        <Download className="w-5 h-5 text-[var(--color-primary)]" />
         Installation
       </DocHeading>
 
-      <p className="mb-6 text-slate-400">
+      <p className="mb-6 text-[var(--color-text-secondary)]">
         Choose the installation method that works best for your environment.
       </p>
 
@@ -54,7 +54,7 @@ export default function GettingStarted() {
         Docker
       </DocHeading>
 
-      <p className="mb-3 text-slate-400">
+      <p className="mb-3 text-[var(--color-text-secondary)]">
         The fastest way to try CacheStorm. The image is available on Docker Hub and GitHub Container Registry.
       </p>
 
@@ -80,7 +80,7 @@ docker run -d \\
       />
 
       <InfoBox type="tip">
-        Use <code className="text-xs bg-slate-800 px-1 py-0.5 rounded">docker compose</code> for
+        Use <code className="text-xs bg-[var(--color-surface)] px-1 py-0.5 rounded">docker compose</code> for
         production deployments with persistent volumes and health checks.
       </InfoBox>
 
@@ -113,7 +113,7 @@ volumes:
         Pre-built Binaries
       </DocHeading>
 
-      <p className="mb-3 text-slate-400">
+      <p className="mb-3 text-[var(--color-text-secondary)]">
         Download the latest release for your platform from GitHub Releases.
       </p>
 
@@ -144,26 +144,26 @@ Expand-Archive cachestorm.zip -DestinationPath .
 .\\cachestorm.exe --version`}
       />
 
-      <div className="my-4 rounded-xl border border-slate-800 overflow-hidden">
-        <div className="px-4 py-2 text-xs font-medium text-slate-400 bg-slate-800/60 border-b border-slate-800">
+      <div className="my-4 rounded-xl border border-[var(--color-border)] overflow-hidden">
+        <div className="px-4 py-2 text-xs font-medium text-[var(--color-text-secondary)] bg-[var(--color-surface)] border-b border-[var(--color-border)]">
           Supported platforms
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-800 text-left text-slate-400">
+              <tr className="border-b border-[var(--color-border)] text-left text-[var(--color-text-secondary)]">
                 <th className="px-4 py-2 font-medium">OS</th>
                 <th className="px-4 py-2 font-medium">Architecture</th>
                 <th className="px-4 py-2 font-medium">File</th>
               </tr>
             </thead>
-            <tbody className="text-slate-300">
-              <tr className="border-b border-slate-800/60">
+            <tbody className="text-[var(--color-text-secondary)]">
+              <tr className="border-b border-[var(--color-border)]">
                 <td className="px-4 py-2">Linux</td>
                 <td className="px-4 py-2">amd64, arm64</td>
                 <td className="px-4 py-2 font-mono text-xs">cachestorm-linux-*.tar.gz</td>
               </tr>
-              <tr className="border-b border-slate-800/60">
+              <tr className="border-b border-[var(--color-border)]">
                 <td className="px-4 py-2">macOS</td>
                 <td className="px-4 py-2">amd64, arm64 (Apple Silicon)</td>
                 <td className="px-4 py-2 font-mono text-xs">cachestorm-darwin-*.tar.gz</td>
@@ -184,7 +184,7 @@ Expand-Archive cachestorm.zip -DestinationPath .
         Build from Source
       </DocHeading>
 
-      <p className="mb-3 text-slate-400">
+      <p className="mb-3 text-[var(--color-text-secondary)]">
         Requires Go 1.22+ and Git.
       </p>
 
@@ -207,11 +207,11 @@ go install ./cmd/cachestorm`}
 
       {/* ── Quick Start ──────────────────────────────────────── */}
       <DocHeading id="quick-start" level={2}>
-        <Rocket className="w-5 h-5 text-blue-400" />
+        <Rocket className="w-5 h-5 text-[var(--color-primary)]" />
         Quick Start
       </DocHeading>
 
-      <p className="mb-4 text-slate-400">
+      <p className="mb-4 text-[var(--color-text-secondary)]">
         Start the server and begin storing data in seconds.
       </p>
 
@@ -232,7 +232,7 @@ cachestorm --port 6380 --maxmemory 256mb`}
         Connecting
       </DocHeading>
 
-      <p className="mb-3 text-slate-400">
+      <p className="mb-3 text-[var(--color-text-secondary)]">
         CacheStorm speaks the Redis RESP protocol, so you can use any Redis client.
       </p>
 
@@ -300,7 +300,7 @@ TTL session:abc123`}
 
       {/* ── Configuration ────────────────────────────────────── */}
       <DocHeading id="configuration" level={2}>
-        <Settings className="w-5 h-5 text-blue-400" />
+        <Settings className="w-5 h-5 text-[var(--color-primary)]" />
         Configuration
       </DocHeading>
 
@@ -308,10 +308,10 @@ TTL session:abc123`}
         Configuration File
       </DocHeading>
 
-      <p className="mb-3 text-slate-400">
+      <p className="mb-3 text-[var(--color-text-secondary)]">
         CacheStorm uses a YAML configuration file. Create a{" "}
-        <code className="text-xs bg-slate-800 px-1 py-0.5 rounded">cachestorm.yaml</code> in
-        your working directory or specify the path with <code className="text-xs bg-slate-800 px-1 py-0.5 rounded">--config</code>.
+        <code className="text-xs bg-[var(--color-surface)] px-1 py-0.5 rounded">cachestorm.yaml</code> in
+        your working directory or specify the path with <code className="text-xs bg-[var(--color-surface)] px-1 py-0.5 rounded">--config</code>.
       </p>
 
       <CodeBlock
@@ -347,9 +347,9 @@ logging:
         Environment Variables
       </DocHeading>
 
-      <p className="mb-3 text-slate-400">
+      <p className="mb-3 text-[var(--color-text-secondary)]">
         All config options can be set via environment variables with the{" "}
-        <code className="text-xs bg-slate-800 px-1 py-0.5 rounded">CACHESTORM_</code> prefix.
+        <code className="text-xs bg-[var(--color-surface)] px-1 py-0.5 rounded">CACHESTORM_</code> prefix.
       </p>
 
       <CodeBlock
@@ -384,12 +384,12 @@ cachestorm`}
           <a
             key={item.href}
             href={item.href}
-            className="flex flex-col gap-1 p-4 rounded-xl border border-slate-800 hover:border-blue-500/40 hover:bg-blue-500/5 transition-all duration-200 group"
+            className="flex flex-col gap-1 p-4 rounded-xl border border-[var(--color-border)] hover:border-blue-500/40 hover:bg-blue-500/5 transition-all duration-200 group"
           >
-            <span className="text-sm font-semibold text-white group-hover:text-blue-400 transition-colors">
+            <span className="text-sm font-semibold text-[var(--color-text)] group-hover:text-[var(--color-primary)] transition-colors">
               {item.label} &rarr;
             </span>
-            <span className="text-xs text-slate-500">{item.desc}</span>
+            <span className="text-xs text-[var(--color-text-tertiary)]">{item.desc}</span>
           </a>
         ))}
       </div>
