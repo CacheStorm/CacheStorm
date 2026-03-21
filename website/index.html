@@ -4,19 +4,32 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>CacheStorm - High-Performance Redis-Compatible Cache</title>
-    <meta name="description" content="CacheStorm is a high-performance, Redis-compatible caching server built in Go with 256-shard architecture, sub-millisecond latency, and enterprise security." />
+    <title>CacheStorm - High-Performance In-Memory Data Store</title>
+    <meta name="description" content="CacheStorm is a high-performance in-memory data store built in Go. 256-shard lock-free architecture, 1,600+ commands, enterprise security, and full observability." />
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="CacheStorm - High-Performance In-Memory Data Store" />
+    <meta property="og:description" content="256-shard lock-free architecture, 1,600+ commands, sub-millisecond latency. Built in Go." />
+    <meta property="og:url" content="https://cachestorm.com" />
+    <meta property="og:site_name" content="CacheStorm" />
+
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="CacheStorm - High-Performance In-Memory Data Store" />
+    <meta name="twitter:description" content="256-shard lock-free architecture, 1,600+ commands, sub-millisecond latency." />
+
+    <meta name="theme-color" content="#0b0f1a" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+
     <script>
       (function() {
-        const params = new URLSearchParams(window.location.search);
-        const path = params.get('p');
-        if (path) {
-          window.history.replaceState(null, '', path);
-        }
+        var p = new URLSearchParams(window.location.search).get('p');
+        if (p) window.history.replaceState(null, '', p);
       })();
     </script>
   </head>
-  <body class="bg-slate-950 text-slate-100 antialiased">
+  <body class="antialiased" style="background-color: var(--color-bg); color: var(--color-text);">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

@@ -5,6 +5,7 @@ import { Home } from "./pages/Home";
 import Features from "./pages/Features";
 import Changelog from "./pages/Changelog";
 import { DocsIndex, DocPage } from "./pages/Docs";
+import NotFound from "./pages/NotFound";
 
 export default function App() {
   return (
@@ -17,6 +18,7 @@ export default function App() {
           <Route path="/changelog" element={<Changelog />} />
           <Route path="/docs" element={<DocsIndex />} />
           <Route path="/docs/:slug" element={<DocPage />} />
+          <Route path="*" element={<NotFound />} />
         </Routes>
       </main>
       <Footer />

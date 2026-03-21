@@ -3,13 +3,13 @@
 
   # CacheStorm
 
-  **High-Performance, Redis-Compatible In-Memory Database**
+  **High-Performance In-Memory Data Store**
 
   [![Go Version](https://img.shields.io/badge/Go-1.22%2B-00ADD8?style=flat&logo=go)](https://golang.org)
   [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-  [![Redis Compatible](https://img.shields.io/badge/Redis-Compatible-DC382D?style=flat&logo=redis)](https://redis.io)
   [![Commands](https://img.shields.io/badge/Commands-1606+-green)](./docs/commands.md)
-  [![Coverage](https://img.shields.io/badge/Coverage-89.1%25-brightgreen)](COVERAGE_REPORT.md)
+  [![Coverage](https://img.shields.io/badge/Coverage-96%25-brightgreen)](COVERAGE_REPORT.md)
+  [![RESP Compatible](https://img.shields.io/badge/RESP-Compatible-blue)](https://cachestorm.com/docs/commands)
 
   [![CI](https://github.com/cachestorm/cachestorm/actions/workflows/ci.yml/badge.svg)](https://github.com/cachestorm/cachestorm/actions/workflows/ci.yml)
   [![Release](https://github.com/cachestorm/cachestorm/actions/workflows/release.yml/badge.svg)](https://github.com/cachestorm/cachestorm/actions/workflows/release.yml)
@@ -21,11 +21,9 @@
 
 ---
 
-A high-performance, Redis-compatible in-memory database written in Go with **1,606 commands** across 50+ modules. CacheStorm extends Redis with modern distributed systems features, data processing capabilities, and application-level abstractions.
+A high-performance in-memory data store written in Go. **1,600+ commands**, 256-shard lock-free architecture, built-in HTTP API, enterprise security, and full observability — in a single binary.
 
-**Redis Compatibility: ~99%** - Works with any Redis client out of the box!
-
-**Test Coverage: 89.1%** with 100% test success rate across all 18 internal packages.
+**Test Coverage: ~96%** with 100% test success rate across all 18 internal packages. Works with any RESP-compatible client.
 
 📚 **[Documentation](./docs/)** | 🚀 **[Getting Started](./docs/01-getting-started.md)** | 📖 **[Commands Reference](./docs/commands.md)** | 📊 **[Coverage Report](./COVERAGE_REPORT.md)** | 💬 **[Discussions](https://github.com/cachestorm/cachestorm/discussions)**
 
