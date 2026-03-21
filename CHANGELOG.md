@@ -13,6 +13,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - WebSocket support
 - GraphQL subscriptions
 
+## [0.2.0] - 2026-03-21
+
+### Security
+- TLS 1.2+ with hardened cipher suites (AEAD-only: AES-GCM, ChaCha20-Poly1305)
+- CLUSTER MEET IP/port validation to prevent SSRF attacks
+- Gossip node data validation (IP format, port range)
+- HTTP API command blacklist (SHUTDOWN, FLUSHALL, DEBUG, CONFIG blocked)
+- Lua script execution timeout (5 seconds) to prevent DoS
+- Null byte validation in key names
+- CONFIG SET value validation (maxmemory, maxclients, eviction policy)
+- Bitmap offset bounds validation (0 to 2^32-1)
+- JSON path depth limit (128 levels) to prevent stack overflow
+- parseInt64 replaced with strconv.ParseInt to prevent integer overflow
+
+### Fixed
+- Network I/O write errors now checked in gossip, sentinel, replication
+- Tag broadcast messages actually sent to cluster peers (was silently dropped)
+- Data race in failover completeFailover() with proper mutex
+- Data race in warmStatus global with sync.Mutex
+- HTTPServer.ready changed to atomic.Bool
+- Unsafe type assertions across 8+ command files (panic prevention)
+- PubSub subscriber leak on connection disconnect
+- AOF Rewrite file handle leak on Windows (close before rename)
+- Slot migration completion logic rewritten with proper range merging
+- SyncWriter methods now return errors
+- Encoding integer overflow in msgpack/cbor for data >255 bytes
+- SCAN cursor int64 parsing with negative check
+- GEORADIUS negative COUNT validation
+- Flaky random eviction tests made deterministic
+
+### Added
+- Panic recovery on 6+ unprotected goroutines
+- Store layer logging (eviction pressure, OOM rejections, flush)
+- AOF replay error detection and detailed logging
+- pprof debug endpoints (auth-protected) at /debug/pprof/
+- logger.RecoverPanic() shared helper
+- HTTP session and rate limiter periodic cleanup goroutines
+- Resource limits: function registry (1k), event listeners (100/event), circuits (10k)
+- PubSub per-subscriber channel limit (10k) and channel name validation
+- KEYS command result cap (100k), XREAD BLOCK bounded (100 retries + deadline)
+- TS.DEL iteration limit (100k), GEORADIUS result safety cap (100k)
+- SETRANGE/APPEND bounds checking against MaxValueSize (512MB)
+- Memory accounting includes key name size in shard tracking
+- Config validation for bind address, HTTP/cluster ports, TLS file existence
+- HTTP MaxHeaderBytes (1MB) and request body limit (10MB)
+- SECURITY.md with vulnerability reporting policy and security best practices
+- Production config template (config/cachestorm.production.yaml)
+- Prometheus alert rules (CacheStormDown, HighMemoryPressure, etc.)
+- Grafana dashboard with 6 panels (keys, memory, pressure, clients, uptime, status)
+- .dockerignore to reduce Docker image size
+- govulncheck security scanning in CI
+
+### Changed
+- Default port standardized to 6380 across all files
+- Docker Compose: resource limits, pinned image versions, localhost-bound admin API
+- docker/Dockerfile aligned with root (non-root user, healthcheck, tzdata)
+- README updated with Security, Production Deployment, and Monitoring sections
+
+### Testing
+- Test coverage: 82% average → 96% average
+- 3 packages at 100%: acl, config, logger
+- 13 packages at 95%+
+- ~2500+ new test functions added
+- Integration tests and benchmarks verified
+- 18/18 packages pass with 100% success rate
+
 ## [0.1.27] - 2026-02-25
 
 ### Added - Test Coverage Improvements
