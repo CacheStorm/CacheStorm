@@ -2,7 +2,8 @@ version: '3.8'
 
 services:
   cachestorm:
-    image: cachestorm/cachestorm:latest
+    build: .
+    image: cachestorm
     container_name: cachestorm
     ports:
       - "6380:6380"

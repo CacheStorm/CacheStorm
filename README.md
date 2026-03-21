@@ -185,8 +185,9 @@ go install github.com/cachestorm/cachestorm@latest
 
 #### Using Docker
 ```bash
-docker pull cachestorm/cachestorm:latest
-docker run -d -p 6380:6380 -p 8080:8080 cachestorm/cachestorm
+# Build from the included Dockerfile
+docker build -t cachestorm .
+docker run -d -p 6380:6380 -p 8080:8080 cachestorm
 ```
 
 #### Using Docker Compose
@@ -393,8 +394,8 @@ docker-compose --profile gui --profile monitoring up -d
 
 ### Docker Commands
 ```bash
-# Pull from Docker Hub
-docker pull cachestorm/cachestorm:latest
+# Build image
+docker build -t cachestorm .
 
 # Run container
 docker run -d \
