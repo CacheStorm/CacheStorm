@@ -218,32 +218,32 @@ Startup time: <100ms`,
   },
   {
     icon: <Terminal className="w-5 h-5 text-[var(--color-primary)]" />,
-    title: "Full Redis Compatibility",
+    title: "Rich Data Structures",
     description:
-      "Drop-in replacement for Redis. CacheStorm speaks the RESP protocol and supports 200+ commands across all major data structures. Use your existing Redis clients and tools without changes.",
-    code: `# Use any Redis client - it just works
-import redis
+      "Strings, hashes, lists, sets, sorted sets, streams, JSON, time series, bitmaps, HyperLogLog, and geospatial indexes. 1,600+ built-in commands cover every use case without external modules.",
+    code: `from cachestorm import CacheStorm
 
-r = redis.Redis(host='localhost', port=6380)
+cs = CacheStorm(host='localhost', port=6380)
 
-# Strings
-r.set('user:1:name', 'Alice')
+# Session storage
+cs.set('session:abc', user_data, ex=3600)
 
-# Hashes
-r.hset('user:1', mapping={
-    'name': 'Alice',
-    'email': 'alice@example.com'
-})
+# Real-time leaderboard
+cs.zadd('leaderboard', {'alice': 1500, 'bob': 1200})
+top_10 = cs.zrange('leaderboard', 0, 9, desc=True)
 
-# Sorted Sets (leaderboard)
-r.zadd('leaderboard', {'alice': 1500, 'bob': 1200})
-top = r.zrange('leaderboard', 0, 9, desc=True)`,
+# Analytics pipeline
+cs.xadd('events', {'type': 'pageview', 'url': '/home'})
+
+# Geospatial queries
+cs.geoadd('stores', 28.9784, 41.0082, 'istanbul-hq')
+nearby = cs.georadius('stores', 29.0, 41.0, 10, unit='km')`,
     codeTitle: "app.py",
     highlights: [
-      "200+ Redis commands supported",
-      "Strings, Hashes, Lists, Sets, Sorted Sets, Streams",
-      "Pub/Sub, Lua scripting, Transactions",
-      "Compatible with all Redis client libraries",
+      "1,600+ commands across 12+ data types",
+      "JSON documents, time series, graphs built-in",
+      "Pub/Sub, Lua scripting, transactions",
+      "Works with any RESP-compatible client library",
     ],
     reverse: true,
   },
@@ -251,20 +251,22 @@ top = r.zrange('leaderboard', 0, 9, desc=True)`,
     icon: <Globe className="w-5 h-5 text-[var(--color-primary)]" />,
     title: "Built-in HTTP API",
     description:
-      "Unlike Redis, CacheStorm includes a native HTTP/REST API. Execute commands, manage keys, check health, and configure the server -- all through standard HTTP requests with JSON.",
-    code: `# Health check
-$ curl http://localhost:7280/health
-{"status":"ok","uptime":86400}
+      "CacheStorm ships with a native REST API. Execute commands, manage keys, check health, and pull metrics — all over HTTP with JSON. No sidecars, no proxies.",
+    code: `# Health & readiness probes
+$ curl http://localhost:8080/api/health
+{"status":"ok","uptime":"24h3m"}
 
-# Execute commands via HTTP
-$ curl -X POST http://localhost:7280/api/v1/command \\
-  -H "Content-Type: application/json" \\
+# Execute any command over HTTP
+$ curl -X POST http://localhost:8080/api/execute \\
+  -H "Authorization: Bearer your_token" \\
   -d '{"command":"SET","args":["key","value"]}'
 {"result":"OK"}
 
-# RESTful key operations
-$ curl http://localhost:7280/api/v1/keys/mykey
-{"key":"mykey","value":"hello","ttl":3540}`,
+# Prometheus metrics, built-in
+$ curl http://localhost:8080/api/metrics
+cachestorm_keys_total 48291
+cachestorm_memory_used_bytes 134217728
+cachestorm_connected_clients 42`,
     codeTitle: "terminal",
     highlights: [
       "RESTful CRUD for key-value operations",
@@ -366,29 +368,22 @@ export default function Features() {
   return (
     <div className="min-h-screen bg-[var(--color-bg)] text-[var(--color-text-secondary)]">
       {/* ── Hero ─────────────────────────────────────────────── */}
-      <section className="relative overflow-hidden">
-        {/* background decorations */}
-        <div className="absolute inset-0 overflow-hidden pointer-events-none">
-          <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[800px] h-[800px] rounded-full bg-blue-500/5 blur-3xl" />
-        </div>
-
-        <div className="relative max-w-6xl mx-auto px-6 pt-24 pb-16 text-center">
+      <section>
+        <div className="max-w-6xl mx-auto px-6 pt-24 pb-16 text-center">
           <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-primary)] text-sm font-medium mb-6">
             <Zap className="w-4 h-4" />
             Features
           </div>
 
           <h1 className="text-5xl lg:text-6xl font-extrabold text-[var(--color-text)] tracking-tight mb-6">
-            Everything You Need
+            Everything You Need,
             <br />
-            <span className="bg-gradient-to-r from-blue-400 to-cyan-400 bg-clip-text text-transparent">
-              Out of the Box
-            </span>
+            Nothing You Don't
           </h1>
 
           <p className="text-xl text-[var(--color-text-secondary)] max-w-2xl mx-auto leading-relaxed mb-10">
-            CacheStorm combines Redis compatibility with modern features like a built-in HTTP API,
-            native Prometheus metrics, and single-binary deployment.
+            One binary. 1,600+ commands. Built-in HTTP API, Prometheus metrics, TLS, ACL, clustering,
+            persistence, and profiling. No plugins, no sidecars, no extra dependencies.
           </p>
 
           {/* Quick feature grid */}
@@ -426,7 +421,7 @@ export default function Features() {
       <section className="border-t border-[var(--color-border)]">
         <div className="max-w-4xl mx-auto px-6 py-20">
           <div className="text-center mb-12">
-            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-green-600 dark:text-green-400 text-sm font-medium mb-4">
+            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-primary)] text-sm font-medium mb-4">
               <BarChart3 className="w-4 h-4" />
               Performance
             </div>
@@ -457,10 +452,10 @@ export default function Features() {
         <div className="max-w-4xl mx-auto px-6 py-20">
           <div className="text-center mb-12">
             <h2 className="text-3xl lg:text-4xl font-extrabold text-[var(--color-text)] tracking-tight mb-4">
-              CacheStorm vs Redis
+              Feature Comparison
             </h2>
             <p className="text-[var(--color-text-secondary)] max-w-xl mx-auto">
-              Feature-by-feature comparison with Redis 7.x
+              See what CacheStorm brings to the table
             </p>
           </div>
 
