@@ -3,8 +3,11 @@ package store
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/cachestorm/cachestorm/internal/logger"
 )
 
 const (
@@ -19,6 +22,7 @@ var (
 	ErrKeyExists    = errors.New("key already exists")
 	ErrWrongType    = errors.New("WRONGTYPE Operation against a key holding the wrong kind of value")
 	ErrMemoryLimit  = errors.New("OOM command not allowed when used memory > 'maxmemory'")
+	ErrInvalidKey   = errors.New("ERR invalid key name")
 	ErrKeyTooLarge  = fmt.Errorf("ERR string length limit is %d bytes", MaxKeySize)
 	ErrValueTooLarge = fmt.Errorf("ERR string length limit is %d bytes", MaxValueSize)
 )
@@ -148,9 +152,15 @@ func (s *Store) Get(key string) (*Entry, bool) {
 }
 
 func (s *Store) Set(key string, value Value, opts SetOptions) error {
-	// Validate key size
+	// Validate key
+	if len(key) == 0 {
+		return ErrInvalidKey
+	}
 	if len(key) > MaxKeySize {
 		return ErrKeyTooLarge
+	}
+	if strings.ContainsRune(key, 0) {
+		return ErrInvalidKey
 	}
 
 	// Validate value size
@@ -167,6 +177,11 @@ func (s *Store) Set(key string, value Value, opts SetOptions) error {
 				s.evictor.CheckAndEvict()
 			}
 			if !s.memTracker.CanAllocate(valueSize) {
+				logger.Warn().
+					Int64("value_size", valueSize).
+					Int64("usage", s.memTracker.Usage()).
+					Int64("max", s.memTracker.Max()).
+					Msg("OOM: rejecting write, memory limit exceeded")
 				return ErrMemoryLimit
 			}
 		}
@@ -355,6 +370,7 @@ func (s *Store) Keys() []string {
 }
 
 func (s *Store) Flush() {
+	keyCount := s.KeyCount()
 	for i := 0; i < NumShards; i++ {
 		s.shards[i].Flush()
 	}
@@ -362,6 +378,7 @@ func (s *Store) Flush() {
 	s.versionMu.Lock()
 	s.versions = make(map[string]int64)
 	s.versionMu.Unlock()
+	logger.Info().Int64("flushed_keys", keyCount).Msg("store flushed")
 }
 
 func (s *Store) GetShard(key string) *Shard {

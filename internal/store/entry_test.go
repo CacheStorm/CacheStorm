@@ -16,7 +16,7 @@ func TestNewEntry(t *testing.T) {
 		t.Error("expected CreatedAt to be set")
 	}
 
-	if entry.LastAccess == 0 {
+	if entry.LastAccess.Load() == 0 {
 		t.Error("expected LastAccess to be set")
 	}
 }
@@ -51,17 +51,17 @@ func TestEntrySetTTL(t *testing.T) {
 
 func TestEntryTouch(t *testing.T) {
 	entry := NewEntry(&StringValue{Data: []byte("test")})
-	oldAccess := entry.LastAccess
-	oldCount := entry.AccessCount
+	oldAccess := entry.LastAccess.Load()
+	oldCount := entry.AccessCount.Load()
 
 	time.Sleep(1 * time.Millisecond)
 	entry.Touch()
 
-	if entry.LastAccess <= oldAccess {
+	if entry.LastAccess.Load() <= oldAccess {
 		t.Error("expected LastAccess to be updated")
 	}
 
-	if entry.AccessCount != oldCount+1 {
+	if entry.AccessCount.Load() != oldCount+1 {
 		t.Errorf("expected AccessCount to increment")
 	}
 }

@@ -379,9 +379,15 @@ func cmdXREAD(ctx *Context) error {
 	// Block until notified or timeout
 	notifier := ctx.Store.KeyNotifier()
 	dur := time.Duration(block) * time.Millisecond
+	deadline := time.Now().Add(dur)
+	const maxRetries = 100
 
-	for {
-		_, notified := notifier.WaitForKeys(keys, dur)
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return ctx.WriteNull()
+		}
+		_, notified := notifier.WaitForKeys(keys, remaining)
 		if !notified {
 			return ctx.WriteNull()
 		}
@@ -391,6 +397,7 @@ func cmdXREAD(ctx *Context) error {
 			return ctx.WriteArray(results)
 		}
 	}
+	return ctx.WriteNull()
 }
 
 func xreadStreams(ctx *Context, keys, ids []string, count int64) []*resp.Value {

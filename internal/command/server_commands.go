@@ -326,7 +326,9 @@ func cmdINFO(ctx *Context) error {
 	sb.WriteString("# Server\r\n")
 	sb.WriteString("cachestorm_version:0.1.0\r\n")
 	sb.WriteString("arch_bits:64\r\n")
-	sb.WriteString("tcp_port:6380\r\n")
+	sb.WriteString("tcp_port:")
+	sb.WriteString(strconv.Itoa(globalConfig.port))
+	sb.WriteString("\r\n")
 	sb.WriteString("\r\n")
 
 	sb.WriteString("# Memory\r\n")
@@ -561,6 +563,8 @@ func cmdKEYS(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
+	const maxKeysResult = 100000 // Safety cap to prevent OOM on large databases
+
 	pattern := ctx.ArgString(0)
 	keys := ctx.Store.Keys()
 
@@ -568,6 +572,9 @@ func cmdKEYS(ctx *Context) error {
 	for _, key := range keys {
 		if matchPattern(key, pattern) {
 			matched = append(matched, resp.BulkString(key))
+			if len(matched) >= maxKeysResult {
+				break
+			}
 		}
 	}
 
@@ -851,10 +858,11 @@ func cmdSCAN(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
-	cursor, err := strconv.Atoi(ctx.ArgString(0))
-	if err != nil {
+	cursor64, err := strconv.ParseInt(ctx.ArgString(0), 10, 64)
+	if err != nil || cursor64 < 0 {
 		return ctx.WriteError(ErrNotInteger)
 	}
+	cursor := int(cursor64)
 
 	count := 10
 	pattern := "*"
@@ -940,7 +948,7 @@ func cmdHOTKEYS(ctx *Context) error {
 	for _, key := range keys {
 		entry, exists := ctx.Store.Get(key)
 		if exists {
-			hotKeys = append(hotKeys, hotKey{key: key, access: entry.AccessCount})
+			hotKeys = append(hotKeys, hotKey{key: key, access: entry.AccessCount.Load()})
 		}
 	}
 

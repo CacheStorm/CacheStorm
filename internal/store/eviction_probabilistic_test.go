@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"testing"
 	"time"
 )
@@ -40,7 +41,7 @@ func TestEvictionControllerCheckAndEvictNoMemory(t *testing.T) {
 func TestEvictionControllerEvictKeys(t *testing.T) {
 	s := NewStore()
 	for i := 0; i < 100; i++ {
-		s.Set("key"+string(rune(i)), &StringValue{Data: []byte("value")}, SetOptions{})
+		s.Set(fmt.Sprintf("key:%d", i), &StringValue{Data: []byte("value")}, SetOptions{})
 	}
 
 	mt := NewMemoryTracker(1024*1024, 80, 90)
@@ -57,7 +58,7 @@ func TestEvictionControllerEvictKeys(t *testing.T) {
 func TestEvictionControllerSelectVictimLRU(t *testing.T) {
 	s := NewStore()
 	for i := 0; i < 100; i++ {
-		s.Set("key"+string(rune(i)), &StringValue{Data: []byte("value")}, SetOptions{})
+		s.Set(fmt.Sprintf("key:%d", i), &StringValue{Data: []byte("value")}, SetOptions{})
 	}
 
 	mt := NewMemoryTracker(1024*1024, 80, 90)
@@ -72,7 +73,7 @@ func TestEvictionControllerSelectVictimLRU(t *testing.T) {
 func TestEvictionControllerSelectVictimLFU(t *testing.T) {
 	s := NewStore()
 	for i := 0; i < 100; i++ {
-		s.Set("key"+string(rune(i)), &StringValue{Data: []byte("value")}, SetOptions{})
+		s.Set(fmt.Sprintf("key:%d", i), &StringValue{Data: []byte("value")}, SetOptions{})
 	}
 
 	mt := NewMemoryTracker(1024*1024, 80, 90)
@@ -86,8 +87,8 @@ func TestEvictionControllerSelectVictimLFU(t *testing.T) {
 
 func TestEvictionControllerSelectVictimRandom(t *testing.T) {
 	s := NewStore()
-	for i := 0; i < 100; i++ {
-		s.Set("key"+string(rune(i)), &StringValue{Data: []byte("value")}, SetOptions{})
+	for i := 0; i < 1000; i++ {
+		s.Set(fmt.Sprintf("rndkey:%d", i), &StringValue{Data: []byte("value")}, SetOptions{})
 	}
 
 	mt := NewMemoryTracker(1024*1024, 80, 90)
@@ -102,7 +103,7 @@ func TestEvictionControllerSelectVictimRandom(t *testing.T) {
 func TestEvictionControllerSelectVictimVolatileLRU(t *testing.T) {
 	s := NewStore()
 	for i := 0; i < 100; i++ {
-		s.Set("key"+string(rune(i)), &StringValue{Data: []byte("value")}, SetOptions{TTL: time.Minute})
+		s.Set(fmt.Sprintf("key:%d", i), &StringValue{Data: []byte("value")}, SetOptions{TTL: time.Minute})
 	}
 
 	mt := NewMemoryTracker(1024*1024, 80, 90)
@@ -141,7 +142,7 @@ func TestEvictionControllerSampleKeysEmpty(t *testing.T) {
 func TestEvictionControllerForceEvict(t *testing.T) {
 	s := NewStore()
 	for i := 0; i < 100; i++ {
-		s.Set("key"+string(rune(i)), &StringValue{Data: []byte("value")}, SetOptions{})
+		s.Set(fmt.Sprintf("key:%d", i), &StringValue{Data: []byte("value")}, SetOptions{})
 	}
 
 	mt := NewMemoryTracker(1024*1024, 80, 90)

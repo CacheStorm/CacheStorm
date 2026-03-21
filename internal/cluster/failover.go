@@ -3,6 +3,7 @@ package cluster
 import (
 	"fmt"
 	"math"
+	"sort"
 	"sync"
 	"time"
 )
@@ -185,10 +186,14 @@ func (f *FailoverManager) completeFailover() {
 		return
 	}
 
+	// Acquire cluster lock to safely modify node and slot state
+	f.cluster.mu.Lock()
+	defer f.cluster.mu.Unlock()
+
 	newPrimary.Role = RolePrimary
 	newPrimary.ReplicaOf = ""
 
-	failedNode := f.cluster.GetNode(f.failedNode)
+	failedNode := f.cluster.nodes[f.failedNode]
 	if failedNode != nil {
 		newPrimary.Slots = failedNode.Slots
 		failedNode.Role = RoleReplica
@@ -281,34 +286,84 @@ func (m *SlotMigrator) Complete() error {
 		return fmt.Errorf("no migration in progress")
 	}
 
-	target := m.cluster.GetNode(m.target)
+	// Acquire cluster lock to safely modify slot table and node state
+	m.cluster.mu.Lock()
+	defer m.cluster.mu.Unlock()
+
+	target := m.cluster.nodes[m.target]
 	if target == nil {
 		return fmt.Errorf("target node not found")
 	}
 
+	source := m.cluster.nodes[m.source]
+
+	// Update the slot table
 	for _, slot := range m.slots {
 		m.cluster.slots[slot] = &SlotInfo{Primary: target}
 	}
 
-	for _, slot := range m.slots {
-		for i, sr := range target.Slots {
-			if slot >= sr.Start && slot <= sr.End {
-				continue
-			}
-			if slot < sr.Start {
-				if i > 0 && slot <= target.Slots[i-1].End+1 {
-					target.Slots[i-1].End = slot
-				} else {
-					target.Slots = append(target.Slots[:i], append([]SlotRange{{Start: slot, End: slot}}, target.Slots[i:]...)...)
-				}
-			}
-		}
+	// Remove migrated slots from source and add to target
+	if source != nil {
+		source.Slots = removeSlots(source.Slots, m.slots)
 	}
+	target.Slots = addSlots(target.Slots, m.slots)
 
 	m.state = "completed"
 	m.progress = 100
 
 	return nil
+}
+
+// removeSlots removes individual slots from a list of slot ranges.
+func removeSlots(ranges []SlotRange, slots []uint16) []SlotRange {
+	slotSet := make(map[uint16]bool, len(slots))
+	for _, s := range slots {
+		slotSet[s] = true
+	}
+
+	var result []SlotRange
+	for _, sr := range ranges {
+		for s := sr.Start; s <= sr.End; s++ {
+			if !slotSet[s] {
+				if len(result) > 0 && result[len(result)-1].End == s-1 {
+					result[len(result)-1].End = s
+				} else {
+					result = append(result, SlotRange{Start: s, End: s})
+				}
+			}
+		}
+	}
+	return result
+}
+
+// addSlots adds individual slots to a list of slot ranges and merges adjacent ranges.
+func addSlots(ranges []SlotRange, slots []uint16) []SlotRange {
+	for _, s := range slots {
+		ranges = append(ranges, SlotRange{Start: s, End: s})
+	}
+
+	if len(ranges) <= 1 {
+		return ranges
+	}
+
+	// Sort by start
+	sort.Slice(ranges, func(i, j int) bool {
+		return ranges[i].Start < ranges[j].Start
+	})
+
+	// Merge adjacent/overlapping
+	merged := []SlotRange{ranges[0]}
+	for _, r := range ranges[1:] {
+		last := &merged[len(merged)-1]
+		if r.Start <= last.End+1 {
+			if r.End > last.End {
+				last.End = r.End
+			}
+		} else {
+			merged = append(merged, r)
+		}
+	}
+	return merged
 }
 
 func (m *SlotMigrator) Cancel() {

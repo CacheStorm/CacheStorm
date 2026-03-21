@@ -138,8 +138,12 @@ func (g *Gossip) handleConnection(conn net.Conn) {
 			if err != nil {
 				continue
 			}
-			conn.Write(data)
-			conn.Write([]byte("\n"))
+			if _, err := conn.Write(data); err != nil {
+				return
+			}
+			if _, err := conn.Write([]byte("\n")); err != nil {
+				return
+			}
 		}
 	}
 }
@@ -231,6 +235,14 @@ func (g *Gossip) handleMessage(msg *GossipMessage) *GossipMessage {
 func (g *Gossip) updateNodeFromInfo(nodes []NodeInfo) {
 	for _, info := range nodes {
 		if info.ID == g.cluster.Self().ID {
+			continue
+		}
+
+		// Validate node info from gossip to prevent injection
+		if info.ID == "" || info.Addr == "" || info.Port < 1 || info.Port > 65535 || info.GossipPort < 1 || info.GossipPort > 65535 {
+			continue
+		}
+		if net.ParseIP(info.Addr) == nil {
 			continue
 		}
 
@@ -347,8 +359,12 @@ func (g *Gossip) sendMessage(addr string, msg *GossipMessage) {
 	if err != nil {
 		return
 	}
-	conn.Write(data)
-	conn.Write([]byte("\n"))
+	if _, err := conn.Write(data); err != nil {
+		return
+	}
+	if _, err := conn.Write([]byte("\n")); err != nil {
+		return
+	}
 
 	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 	reader := bufio.NewReader(conn)

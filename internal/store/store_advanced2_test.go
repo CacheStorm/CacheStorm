@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"testing"
 	"time"
 )
@@ -10,7 +11,7 @@ func TestStoreBulkOperations(t *testing.T) {
 		s := NewStore()
 
 		for i := 0; i < 1000; i++ {
-			key := "bulkkey" + string(rune(i%256))
+			key := fmt.Sprintf("bulkkey:%d", i%256)
 			s.Set(key, &StringValue{Data: []byte("value")}, SetOptions{})
 		}
 
@@ -24,13 +25,13 @@ func TestStoreBulkOperations(t *testing.T) {
 
 		// Add keys
 		for i := 0; i < 100; i++ {
-			key := "delkey" + string(rune(i))
+			key := fmt.Sprintf("delkey:%d", i)
 			s.Set(key, &StringValue{Data: []byte("value")}, SetOptions{})
 		}
 
 		// Delete all
 		for i := 0; i < 100; i++ {
-			key := "delkey" + string(rune(i))
+			key := fmt.Sprintf("delkey:%d", i)
 			s.Delete(key)
 		}
 
@@ -49,7 +50,7 @@ func TestStoreExpirationAdvanced(t *testing.T) {
 		// Set keys with different TTLs
 		for i := 0; i < 10; i++ {
 			opts := SetOptions{TTL: time.Duration(50+i*10) * time.Millisecond}
-			key := "expirekey" + string(rune(i))
+			key := fmt.Sprintf("expirekey:%d", i)
 			s.Set(key, &StringValue{Data: []byte("value")}, opts)
 		}
 
@@ -194,13 +195,13 @@ func TestStoreShardAdvanced(t *testing.T) {
 
 		// Add keys that might go to different shards
 		for i := 0; i < 100; i++ {
-			key := "shardtest" + string(rune(i))
+			key := fmt.Sprintf("shardtest:%d", i)
 			s.Set(key, &StringValue{Data: []byte("value")}, SetOptions{})
 		}
 
 		// All should be retrievable
 		for i := 0; i < 100; i++ {
-			key := "shardtest" + string(rune(i))
+			key := fmt.Sprintf("shardtest:%d", i)
 			if _, exists := s.Get(key); !exists {
 				t.Errorf("Key %s should exist", key)
 			}

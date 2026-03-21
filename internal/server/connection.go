@@ -32,6 +32,7 @@ type Connection struct {
 	lastCmd      string
 	readTimeout  time.Duration
 	writeTimeout time.Duration
+	subscriber   *store.Subscriber // PubSub subscriber, persists across commands
 }
 
 func NewConnection(id int64, conn net.Conn, s *store.Store, r *command.Router) *Connection {
@@ -80,6 +81,10 @@ func (c *Connection) Handle() {
 		c.lastCmd = cmd
 
 		ctx := command.NewContextWithClient(cmd, args, c.store, c.writer, c.ID, c.conn.RemoteAddr().String())
+		// Share the subscriber across commands so PubSub state persists
+		if c.subscriber != nil {
+			ctx.Subscriber = c.subscriber
+		}
 
 		if cmd == "QUIT" {
 			c.conn.SetWriteDeadline(time.Now().Add(c.writeTimeout))
@@ -94,6 +99,10 @@ func (c *Connection) Handle() {
 			} else {
 				c.writer.WriteError(err.Error())
 			}
+		}
+		// Capture subscriber if created during this command (e.g. SUBSCRIBE)
+		if ctx.Subscriber != nil && c.subscriber == nil {
+			c.subscriber = ctx.Subscriber
 		}
 	}
 }
@@ -111,6 +120,13 @@ func (c *Connection) recoverPanic() {
 }
 
 func (c *Connection) Close() {
+	// Clean up PubSub subscriber to prevent resource leak
+	if c.subscriber != nil {
+		if ps := c.store.GetPubSub(); ps != nil {
+			ps.RemoveSubscriber(c.subscriber)
+		}
+		c.subscriber = nil
+	}
 	c.conn.Close()
 	logger.Debug().
 		Int64("conn_id", c.ID).

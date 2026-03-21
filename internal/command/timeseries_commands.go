@@ -73,10 +73,15 @@ func cmdTSDEL(ctx *Context) error {
 		return ctx.WriteInteger(0)
 	}
 
+	// Limit iteration to prevent CPU exhaustion on huge ranges
+	const maxDeleteIterations = 100000
+	if to-from > maxDeleteIterations {
+		to = from + maxDeleteIterations
+	}
+
 	deleted := 0
-	for t := from; t <= to; {
+	for t := from; t <= to; t++ {
 		deleted += ts.Delete(t)
-		t++
 	}
 
 	return ctx.WriteInteger(int64(deleted))

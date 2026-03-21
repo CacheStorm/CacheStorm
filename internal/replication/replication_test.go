@@ -275,7 +275,9 @@ func TestSyncWriter(t *testing.T) {
 	var buf bytes.Buffer
 	w := NewSyncWriter(&buf)
 
-	w.WriteRDBHeader()
+	if err := w.WriteRDBHeader(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if buf.Len() == 0 {
 		t.Error("expected header to be written")
 	}
@@ -285,7 +287,9 @@ func TestSyncWriterWriteDatabaseSelect(t *testing.T) {
 	var buf bytes.Buffer
 	w := NewSyncWriter(&buf)
 
-	w.WriteDatabaseSelect(0)
+	if err := w.WriteDatabaseSelect(0); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if buf.Len() == 0 {
 		t.Error("expected database select to be written")
 	}
@@ -295,7 +299,9 @@ func TestSyncWriterWriteKeyValuePairWithTTL(t *testing.T) {
 	var buf bytes.Buffer
 	w := NewSyncWriter(&buf)
 
-	w.WriteKeyValuePair("mykey", "myvalue", time.Hour, time.Now().Add(time.Hour).Unix())
+	if err := w.WriteKeyValuePair("mykey", "myvalue", time.Hour, time.Now().Add(time.Hour).Unix()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if buf.Len() == 0 {
 		t.Error("expected key-value pair to be written")
 	}
@@ -305,7 +311,9 @@ func TestSyncWriterWriteKeyValuePairNoTTL(t *testing.T) {
 	var buf bytes.Buffer
 	w := NewSyncWriter(&buf)
 
-	w.WriteKeyValuePair("mykey", "myvalue", 0, 0)
+	if err := w.WriteKeyValuePair("mykey", "myvalue", 0, 0); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if buf.Len() == 0 {
 		t.Error("expected key-value pair to be written")
 	}
@@ -315,7 +323,9 @@ func TestSyncWriterWriteKeyValuePairBytes(t *testing.T) {
 	var buf bytes.Buffer
 	w := NewSyncWriter(&buf)
 
-	w.WriteKeyValuePair("mykey", []byte("myvalue"), 0, 0)
+	if err := w.WriteKeyValuePair("mykey", []byte("myvalue"), 0, 0); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if buf.Len() == 0 {
 		t.Error("expected key-value pair to be written")
 	}
@@ -325,7 +335,9 @@ func TestSyncWriterWriteEnd(t *testing.T) {
 	var buf bytes.Buffer
 	w := NewSyncWriter(&buf)
 
-	w.WriteEnd()
+	if err := w.WriteEnd(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if buf.Len() == 0 {
 		t.Error("expected end marker to be written")
 	}

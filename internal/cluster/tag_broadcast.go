@@ -2,6 +2,8 @@ package cluster
 
 import (
 	"encoding/json"
+	"fmt"
+	"net"
 	"sync"
 	"time"
 
@@ -67,7 +69,25 @@ func (tb *TagBroadcaster) Broadcast(tag string, keys []string) error {
 		Int("keys", len(keys)).
 		Msg("broadcasting tag invalidation")
 
-	_ = data
+	// Send the message to all peer nodes in the cluster
+	selfID := tb.cluster.Self().ID
+	for _, node := range tb.cluster.GetNodes() {
+		if node.ID == selfID {
+			continue
+		}
+		addr := fmt.Sprintf("%s:%d", node.Addr, node.GossipPort)
+		go func(addr string, payload []byte) {
+			conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
+			if err != nil {
+				return
+			}
+			defer conn.Close()
+			if _, err := conn.Write(payload); err != nil {
+				return
+			}
+			conn.Write([]byte("\n"))
+		}(addr, data)
+	}
 
 	return nil
 }

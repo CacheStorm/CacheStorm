@@ -1,6 +1,7 @@
 package batch
 
 import (
+	"log"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -92,7 +93,12 @@ func (b *Batcher) Add(item BatchItem) <-chan BatchResult {
 	b.workerPool <- struct{}{}
 
 	go func() {
-		defer func() { <-b.workerPool }() // Release worker slot
+		defer func() {
+			<-b.workerPool // Release worker slot
+			if r := recover(); r != nil {
+				log.Printf("batch: panic recovered in worker: %v", r)
+			}
+		}()
 		result := <-b.results
 		if ch, ok := b.pending.Load(result.Key); ok {
 			if resCh, ok := ch.(chan BatchResult); ok {
@@ -138,7 +144,12 @@ func (b *Batcher) AddAsync(item BatchItem, callback func(BatchResult)) {
 	b.workerPool <- struct{}{}
 
 	go func() {
-		defer func() { <-b.workerPool }()
+		defer func() {
+			<-b.workerPool
+			if r := recover(); r != nil {
+				log.Printf("batch: panic recovered in async worker: %v", r)
+			}
+		}()
 		result := <-resultCh
 		callback(result)
 	}()

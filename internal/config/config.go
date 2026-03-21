@@ -35,9 +35,11 @@ type ServerConfig struct {
 }
 
 type HTTPConfig struct {
-	Enabled  bool   `yaml:"enabled" default:"true"`
-	Port     int    `yaml:"port" default:"8080"`
-	Password string `yaml:"password"`
+	Enabled      bool   `yaml:"enabled" default:"true"`
+	Port         int    `yaml:"port" default:"8080"`
+	Password     string `yaml:"password"`
+	RateLimit    int    `yaml:"rate_limit" default:"100"`
+	RateWindow   string `yaml:"rate_window" default:"1m"`
 }
 
 type MemoryConfig struct {

@@ -2,6 +2,7 @@ package command
 
 import (
 	"encoding/binary"
+	"errors"
 	"strconv"
 	"strings"
 
@@ -75,6 +76,9 @@ func cmdSETBIT(ctx *Context) error {
 	if err != nil {
 		return ctx.WriteError(ErrNotInteger)
 	}
+	if offset < 0 || offset > 4294967295 { // 2^32 - 1, same as Redis
+		return ctx.WriteError(errors.New("ERR bit offset is not an integer or out of range"))
+	}
 	bit, err := strconv.Atoi(ctx.ArgString(2))
 	if err != nil {
 		return ctx.WriteError(ErrNotInteger)
@@ -120,6 +124,9 @@ func cmdGETBIT(ctx *Context) error {
 	offset, err := strconv.ParseInt(ctx.ArgString(1), 10, 64)
 	if err != nil {
 		return ctx.WriteError(ErrNotInteger)
+	}
+	if offset < 0 || offset > 4294967295 {
+		return ctx.WriteError(errors.New("ERR bit offset is not an integer or out of range"))
 	}
 
 	bm := getBitmap(ctx, key)

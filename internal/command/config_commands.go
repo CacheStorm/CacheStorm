@@ -1,6 +1,7 @@
 package command
 
 import (
+	"errors"
 	"strconv"
 	"strings"
 	"sync"
@@ -54,7 +55,7 @@ var globalConfig = &Config{
 	appendFsync:            "everysec",
 	daemonize:              false,
 	pidfile:                "",
-	port:                   6379,
+	port:                   6380,
 	bind:                   "0.0.0.0",
 	protectedMode:          true,
 	tcpKeepalive:           300,
@@ -172,6 +173,17 @@ func cmdConfigSet(ctx *Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	validEvictionPolicies := map[string]bool{
+		"noeviction":      true,
+		"allkeys-lru":     true,
+		"allkeys-lfu":     true,
+		"allkeys-random":  true,
+		"volatile-lru":    true,
+		"volatile-lfu":    true,
+		"volatile-random": true,
+		"volatile-ttl":    true,
+	}
+
 	for i := 1; i < ctx.ArgCount(); i += 2 {
 		param := strings.ToLower(ctx.ArgString(i))
 		value := ctx.ArgString(i + 1)
@@ -179,16 +191,28 @@ func cmdConfigSet(ctx *Context) error {
 		switch param {
 		case "maxmemory":
 			if v, err := strconv.ParseInt(value, 10, 64); err == nil {
+				if v < 0 {
+					return ctx.WriteError(errors.New("ERR Invalid argument '" + value + "' for CONFIG SET 'maxmemory'"))
+				}
 				c.maxMemory = v
 			}
 		case "maxmemory-policy":
+			if !validEvictionPolicies[value] {
+				return ctx.WriteError(errors.New("ERR Invalid argument '" + value + "' for CONFIG SET 'maxmemory-policy'"))
+			}
 			c.maxMemoryPolicy = value
 		case "maxclients":
 			if v, err := strconv.ParseInt(value, 10, 64); err == nil {
+				if v < 1 {
+					return ctx.WriteError(errors.New("ERR Invalid argument '" + value + "' for CONFIG SET 'maxclients'"))
+				}
 				c.maxClients = v
 			}
 		case "timeout":
 			if v, err := strconv.Atoi(value); err == nil {
+				if v < 0 {
+					return ctx.WriteError(errors.New("ERR Invalid argument '" + value + "' for CONFIG SET 'timeout'"))
+				}
 				c.timeout = v
 			}
 		case "slowlog-log-slower-than":

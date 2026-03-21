@@ -207,6 +207,18 @@ func (s *Server) Start(_ context.Context) error {
 		tlsCfg := &tls.Config{
 			Certificates: []tls.Certificate{cert},
 			MinVersion:   tls.VersionTLS12,
+			CurvePreferences: []tls.CurveID{
+				tls.X25519,
+				tls.CurveP256,
+			},
+			CipherSuites: []uint16{
+				tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+				tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+				tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+				tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+				tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
+				tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
+			},
 		}
 		listener, err = tls.Listen("tcp", addr, tlsCfg)
 		if err != nil {
@@ -227,6 +239,7 @@ func (s *Server) Start(_ context.Context) error {
 
 	if s.httpServer != nil {
 		go func() {
+			defer logger.RecoverPanic("http-server")
 			logger.Info().
 				Int("port", s.cfg.HTTP.Port).
 				Msg("HTTP admin server started")
@@ -328,7 +341,7 @@ func (s *Server) Stop(ctx context.Context) error {
 			return true
 		})
 
-		// Wait a bit more for goroutines to finish
+		// Fresh context: parent ctx is already expired (that's why we're here), so a new base is needed
 		forceCtx, forceCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer forceCancel()
 		select {
@@ -352,10 +365,25 @@ func (s *Server) Store() *store.Store {
 }
 
 func (s *Server) replayAOF(commands []persistence.Command) {
+	replayed := 0
+	failed := 0
 	for _, cmd := range commands {
 		ctx := command.NewContext(cmd.Name, cmd.Args, s.store, nil)
-		// Silently replay — errors during replay are expected for some commands
-		_ = s.router.ExecuteSilent(ctx)
+		if err := s.router.ExecuteSilent(ctx); err != nil {
+			failed++
+			if failed <= 10 {
+				logger.Warn().Err(err).Str("cmd", cmd.Name).Msg("AOF replay command failed")
+			}
+		} else {
+			replayed++
+		}
+	}
+	if failed > 0 {
+		logger.Warn().
+			Int("total", len(commands)).
+			Int("replayed", replayed).
+			Int("failed", failed).
+			Msg("AOF replay completed with errors")
 	}
 }
 

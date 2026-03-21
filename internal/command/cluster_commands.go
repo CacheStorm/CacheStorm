@@ -1,7 +1,9 @@
 package command
 
 import (
+	"errors"
 	"fmt"
+	"net"
 	"strconv"
 	"strings"
 
@@ -86,6 +88,12 @@ func handleClusterMeet(ctx *Context) error {
 	}
 
 	ip := ctx.ArgString(1)
+
+	// Validate IP address format
+	if net.ParseIP(ip) == nil {
+		return ctx.WriteError(errors.New("ERR invalid IP address"))
+	}
+
 	port := 7946
 	if ctx.ArgCount() >= 3 {
 		var err error
@@ -93,6 +101,11 @@ func handleClusterMeet(ctx *Context) error {
 		if err != nil {
 			return ctx.WriteError(ErrNotInteger)
 		}
+	}
+
+	// Validate port range
+	if port < 1 || port > 65535 {
+		return ctx.WriteError(errors.New("ERR invalid port number"))
 	}
 
 	if globalGossip != nil {

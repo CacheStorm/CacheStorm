@@ -1,6 +1,7 @@
 package command
 
 import (
+	"context"
 	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
@@ -10,6 +11,11 @@ import (
 
 	"github.com/cachestorm/cachestorm/internal/store"
 	lua "github.com/yuin/gopher-lua"
+)
+
+const (
+	// luaScriptTimeout is the maximum execution time for a Lua script
+	luaScriptTimeout = 5 * time.Second
 )
 
 type ScriptEngine struct {
@@ -255,9 +261,15 @@ func (e *ScriptEngine) executeCommand(L *lua.LState, cmd string, args []string) 
 			hv = &store.HashValue{Fields: make(map[string][]byte)}
 			e.store.Set(args[0], hv, store.SetOptions{})
 		} else {
-			hv = entry.Value.(*store.HashValue)
+			var ok bool
+			hv, ok = entry.Value.(*store.HashValue)
+			if !ok {
+				return lua.LNil
+			}
 		}
+		hv.Lock()
 		hv.Fields[args[1]] = []byte(args[2])
+		hv.Unlock()
 		return lua.LNumber(1)
 
 	case "HGETALL":
@@ -288,10 +300,17 @@ func (e *ScriptEngine) executeCommand(L *lua.LState, cmd string, args []string) 
 			lv = &store.ListValue{Elements: make([][]byte, 0)}
 			e.store.Set(args[0], lv, store.SetOptions{})
 		} else {
-			lv = entry.Value.(*store.ListValue)
+			var ok bool
+			lv, ok = entry.Value.(*store.ListValue)
+			if !ok {
+				return lua.LNumber(0)
+			}
 		}
+		lv.Lock()
 		lv.Elements = append([][]byte{[]byte(args[1])}, lv.Elements...)
-		return lua.LNumber(len(lv.Elements))
+		n := len(lv.Elements)
+		lv.Unlock()
+		return lua.LNumber(n)
 
 	case "RPUSH":
 		if len(args) < 2 {
@@ -303,10 +322,17 @@ func (e *ScriptEngine) executeCommand(L *lua.LState, cmd string, args []string) 
 			lv = &store.ListValue{Elements: make([][]byte, 0)}
 			e.store.Set(args[0], lv, store.SetOptions{})
 		} else {
-			lv = entry.Value.(*store.ListValue)
+			var ok bool
+			lv, ok = entry.Value.(*store.ListValue)
+			if !ok {
+				return lua.LNumber(0)
+			}
 		}
+		lv.Lock()
 		lv.Elements = append(lv.Elements, []byte(args[1]))
-		return lua.LNumber(len(lv.Elements))
+		n := len(lv.Elements)
+		lv.Unlock()
+		return lua.LNumber(n)
 
 	case "LPOP":
 		if len(args) < 1 {
@@ -316,10 +342,15 @@ func (e *ScriptEngine) executeCommand(L *lua.LState, cmd string, args []string) 
 		if !exists {
 			return lua.LNil
 		}
-		if lv, ok := entry.Value.(*store.ListValue); ok && len(lv.Elements) > 0 {
-			val := lv.Elements[0]
-			lv.Elements = lv.Elements[1:]
-			return lua.LString(string(val))
+		if lv, ok := entry.Value.(*store.ListValue); ok {
+			lv.Lock()
+			if len(lv.Elements) > 0 {
+				val := lv.Elements[0]
+				lv.Elements = lv.Elements[1:]
+				lv.Unlock()
+				return lua.LString(string(val))
+			}
+			lv.Unlock()
 		}
 		return lua.LNil
 
@@ -331,10 +362,15 @@ func (e *ScriptEngine) executeCommand(L *lua.LState, cmd string, args []string) 
 		if !exists {
 			return lua.LNil
 		}
-		if lv, ok := entry.Value.(*store.ListValue); ok && len(lv.Elements) > 0 {
-			val := lv.Elements[len(lv.Elements)-1]
-			lv.Elements = lv.Elements[:len(lv.Elements)-1]
-			return lua.LString(string(val))
+		if lv, ok := entry.Value.(*store.ListValue); ok {
+			lv.Lock()
+			if len(lv.Elements) > 0 {
+				val := lv.Elements[len(lv.Elements)-1]
+				lv.Elements = lv.Elements[:len(lv.Elements)-1]
+				lv.Unlock()
+				return lua.LString(string(val))
+			}
+			lv.Unlock()
 		}
 		return lua.LNil
 
@@ -348,12 +384,19 @@ func (e *ScriptEngine) executeCommand(L *lua.LState, cmd string, args []string) 
 			sv = &store.SetValue{Members: make(map[string]struct{})}
 			e.store.Set(args[0], sv, store.SetOptions{})
 		} else {
-			sv = entry.Value.(*store.SetValue)
+			var ok bool
+			sv, ok = entry.Value.(*store.SetValue)
+			if !ok {
+				return lua.LNumber(0)
+			}
 		}
+		sv.Lock()
 		if _, ok := sv.Members[args[1]]; !ok {
 			sv.Members[args[1]] = struct{}{}
+			sv.Unlock()
 			return lua.LNumber(1)
 		}
+		sv.Unlock()
 		return lua.LNumber(0)
 
 	case "SISMEMBER":
@@ -467,6 +510,7 @@ func (e *ScriptEngine) executeCommand(L *lua.LState, cmd string, args []string) 
 			return lua.LNumber(0)
 		}
 		if hv, ok := entry.Value.(*store.HashValue); ok {
+			hv.Lock()
 			deleted := 0
 			for i := 1; i < len(args); i++ {
 				if _, ok := hv.Fields[args[i]]; ok {
@@ -474,6 +518,7 @@ func (e *ScriptEngine) executeCommand(L *lua.LState, cmd string, args []string) 
 					deleted++
 				}
 			}
+			hv.Unlock()
 			return lua.LNumber(deleted)
 		}
 		return lua.LNumber(0)
@@ -902,6 +947,11 @@ func (e *ScriptEngine) executeCommand(L *lua.LState, cmd string, args []string) 
 func (e *ScriptEngine) WithState(keys []string, args []string, fn func(*lua.LState) error) error {
 	L := e.CreateState(keys, args)
 	defer L.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), luaScriptTimeout)
+	defer cancel()
+	L.SetContext(ctx)
+
 	return fn(L)
 }
 
@@ -909,7 +959,15 @@ func (e *ScriptEngine) Eval(script string, keys []string, args []string) (interf
 	L := e.CreateState(keys, args)
 	defer L.Close()
 
+	// Enforce execution timeout to prevent infinite loops / DoS
+	ctx, cancel := context.WithTimeout(context.Background(), luaScriptTimeout)
+	defer cancel()
+	L.SetContext(ctx)
+
 	if err := L.DoString(script); err != nil {
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("ERR script timeout exceeded %.0f seconds", luaScriptTimeout.Seconds())
+		}
 		return nil, err
 	}
 

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"testing"
 	"time"
 )
@@ -2070,10 +2071,13 @@ func TestEvictionController(t *testing.T) {
 		s4 := NewStore()
 		mt4 := NewMemoryTracker(1000000, 80, 90)
 
-		ecRandom := NewEvictionController(EvictionAllKeysRandom, 1000000, s4, mt4, 5)
-		ecNone := NewEvictionController(EvictionNoEviction, 1000000, s4, mt4, 5)
+		// Add enough keys across shards to make random selection reliable
+		for i := 0; i < 1000; i++ {
+			s4.Set(fmt.Sprintf("key%d", i), &StringValue{Data: []byte("value")}, SetOptions{})
+		}
 
-		s4.Set("key1", &StringValue{Data: []byte("value")}, SetOptions{})
+		ecRandom := NewEvictionController(EvictionAllKeysRandom, 1000000, s4, mt4, 50)
+		ecNone := NewEvictionController(EvictionNoEviction, 1000000, s4, mt4, 50)
 
 		if key := ecRandom.selectVictim(); key == "" {
 			t.Error("Random should select a key")

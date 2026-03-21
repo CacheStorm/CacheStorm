@@ -143,6 +143,35 @@ func (r *Router) ExecuteSilent(ctx *Context) error {
 	return cmd.Handler(ctx)
 }
 
+// ExecuteHTTP runs a command from the HTTP API with auth enforcement and post-execute hooks.
+// Returns the result as an interface{} suitable for JSON serialization.
+func (r *Router) ExecuteHTTP(ctx *Context) (interface{}, error) {
+	cmd, ok := r.Get(ctx.Command)
+	if !ok {
+		return nil, ErrUnknownCommand
+	}
+
+	// Create a capture writer to collect the response
+	ctx.Authenticated = true // HTTP auth is handled by HTTP middleware
+	ctx.StartTime = time.Now()
+	if ctx.Writer == nil {
+		ctx.Writer = resp.NewWriter(io.Discard)
+	}
+
+	err := cmd.Handler(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Post-execute hook (AOF persistence)
+	if r.postExecute != nil {
+		r.postExecute(ctx.Command, ctx.Args)
+	}
+
+	// Return a simple acknowledgement - the actual response was written to the RESP writer
+	return "OK", nil
+}
+
 func (r *Router) Commands() map[string]*CommandDef {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

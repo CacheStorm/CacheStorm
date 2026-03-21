@@ -310,6 +310,10 @@ func cmdAPPEND(ctx *Context) error {
 		newData = append(strVal.Data, suffix...)
 	}
 
+	if int64(len(newData)) > store.MaxValueSize {
+		return ctx.WriteError(store.ErrValueTooLarge)
+	}
+
 	ctx.Store.Set(key, &store.StringValue{Data: newData}, store.SetOptions{})
 	return ctx.WriteInteger(int64(len(newData)))
 }
@@ -398,6 +402,12 @@ func cmdSETRANGE(ctx *Context) error {
 	}
 	value := ctx.Arg(2)
 
+	// Prevent massive memory allocation via large offset
+	newLen := int64(offset) + int64(len(value))
+	if newLen > store.MaxValueSize {
+		return ctx.WriteError(store.ErrValueTooLarge)
+	}
+
 	entry, exists := ctx.Store.Get(key)
 	var data []byte
 	if !exists {
@@ -410,9 +420,8 @@ func cmdSETRANGE(ctx *Context) error {
 		data = strVal.Data
 	}
 
-	newLen := offset + len(value)
-	if newLen > len(data) {
-		newData := make([]byte, newLen)
+	if int(newLen) > len(data) {
+		newData := make([]byte, int(newLen))
 		copy(newData, data)
 		data = newData
 	}

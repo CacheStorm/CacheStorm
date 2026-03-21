@@ -2,10 +2,13 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/pprof"
 	"strconv"
 	"strings"
 	"sync"
@@ -15,6 +18,13 @@ import (
 	"github.com/cachestorm/cachestorm/internal/logger"
 	"github.com/cachestorm/cachestorm/internal/store"
 )
+
+// pprof wrapper functions to match http.HandlerFunc signature
+func pprofIndex(w http.ResponseWriter, r *http.Request)   { pprof.Index(w, r) }
+func pprofCmdline(w http.ResponseWriter, r *http.Request)  { pprof.Cmdline(w, r) }
+func pprofProfile(w http.ResponseWriter, r *http.Request)  { pprof.Profile(w, r) }
+func pprofSymbol(w http.ResponseWriter, r *http.Request)   { pprof.Symbol(w, r) }
+func pprofTrace(w http.ResponseWriter, r *http.Request)    { pprof.Trace(w, r) }
 
 type HTTPConfig struct {
 	Enabled    bool   `yaml:"enabled" default:"true"`
@@ -33,6 +43,116 @@ type HTTPServer struct {
 	config       *HTTPConfig
 	metricsCache *metricsCache
 	connCount    func() int64 // callback to get active connection count
+	sessions     *sessionStore
+	rateLimiter  *rateLimiter
+	ready        bool
+}
+
+type sessionStore struct {
+	tokens map[string]time.Time // token -> expiry
+	mu     sync.RWMutex
+}
+
+func newSessionStore() *sessionStore {
+	return &sessionStore{tokens: make(map[string]time.Time)}
+}
+
+func (s *sessionStore) Create() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	token := hex.EncodeToString(b)
+	s.mu.Lock()
+	s.tokens[token] = time.Now().Add(24 * time.Hour)
+	s.mu.Unlock()
+	return token, nil
+}
+
+func (s *sessionStore) Valid(token string) bool {
+	s.mu.RLock()
+	expiry, ok := s.tokens[token]
+	s.mu.RUnlock()
+	if !ok {
+		return false
+	}
+	if time.Now().After(expiry) {
+		s.mu.Lock()
+		delete(s.tokens, token)
+		s.mu.Unlock()
+		return false
+	}
+	return true
+}
+
+func (s *sessionStore) Cleanup() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now()
+	for token, expiry := range s.tokens {
+		if now.After(expiry) {
+			delete(s.tokens, token)
+		}
+	}
+}
+
+type rateLimiter struct {
+	mu       sync.Mutex
+	requests map[string][]time.Time
+	limit    int
+	window   time.Duration
+}
+
+func newRateLimiter(limit int, window time.Duration) *rateLimiter {
+	return &rateLimiter{
+		requests: make(map[string][]time.Time),
+		limit:    limit,
+		window:   window,
+	}
+}
+
+func (rl *rateLimiter) Allow(ip string) bool {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	now := time.Now()
+	cutoff := now.Add(-rl.window)
+
+	// Remove expired entries
+	reqs := rl.requests[ip]
+	valid := reqs[:0]
+	for _, t := range reqs {
+		if t.After(cutoff) {
+			valid = append(valid, t)
+		}
+	}
+
+	if len(valid) >= rl.limit {
+		rl.requests[ip] = valid
+		return false
+	}
+
+	rl.requests[ip] = append(valid, now)
+	return true
+}
+
+// Cleanup removes IPs with no recent activity to prevent unbounded map growth.
+func (rl *rateLimiter) Cleanup() {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	cutoff := time.Now().Add(-rl.window)
+	for ip, reqs := range rl.requests {
+		active := false
+		for _, t := range reqs {
+			if t.After(cutoff) {
+				active = true
+				break
+			}
+		}
+		if !active {
+			delete(rl.requests, ip)
+		}
+	}
 }
 
 type metricsCache struct {
@@ -45,20 +165,23 @@ type metricsCache struct {
 func NewHTTPServer(s *store.Store, router *command.Router, cfg *HTTPConfig) *HTTPServer {
 	ctx, cancel := context.WithCancel(context.Background())
 	h := &HTTPServer{
-		ctx:         ctx,
-		cancel:      cancel,
-		store:       s,
-		router:      router,
-		started:     time.Now(),
-		config:      cfg,
+		ctx:          ctx,
+		cancel:       cancel,
+		store:        s,
+		router:       router,
+		started:      time.Now(),
+		config:       cfg,
 		metricsCache: &metricsCache{},
+		sessions:     newSessionStore(),
+		rateLimiter:  newRateLimiter(100, time.Minute), // 100 req/min per IP
 	}
 
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/api/health", h.handleHealth)
+	mux.HandleFunc("/api/ready", h.handleReady)
 	mux.HandleFunc("/api/info", h.authMiddleware(h.handleInfo))
-	mux.HandleFunc("/api/metrics", h.handleMetrics)
+	mux.HandleFunc("/api/metrics", h.authMiddleware(h.handleMetrics))
 	mux.HandleFunc("/api/keys", h.authMiddleware(h.handleKeys))
 	mux.HandleFunc("/api/key/", h.authMiddleware(h.handleKey))
 	mux.HandleFunc("/api/tags", h.authMiddleware(h.handleTags))
@@ -73,6 +196,13 @@ func NewHTTPServer(s *store.Store, router *command.Router, cfg *HTTPConfig) *HTT
 	mux.HandleFunc("/api/stats", h.authMiddleware(h.handleStats))
 	mux.HandleFunc("/api/login", h.handleLogin)
 
+	// pprof endpoints for production debugging (auth-protected)
+	mux.HandleFunc("/debug/pprof/", h.authMiddleware(pprofIndex))
+	mux.HandleFunc("/debug/pprof/cmdline", h.authMiddleware(pprofCmdline))
+	mux.HandleFunc("/debug/pprof/profile", h.authMiddleware(pprofProfile))
+	mux.HandleFunc("/debug/pprof/symbol", h.authMiddleware(pprofSymbol))
+	mux.HandleFunc("/debug/pprof/trace", h.authMiddleware(pprofTrace))
+
 	mux.HandleFunc("/", h.handleStatic)
 
 	h.server = &http.Server{
@@ -82,25 +212,39 @@ func NewHTTPServer(s *store.Store, router *command.Router, cfg *HTTPConfig) *HTT
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 20, // 1MB - prevents large header DoS
 	}
 
 	return h
 }
 
 func (h *HTTPServer) corsMiddleware(next http.Handler) http.Handler {
-	origin := h.config.CORSOrigin
-	if origin == "" {
-		origin = "*"
-	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", origin)
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		origin := h.config.CORSOrigin
+		if origin != "" {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+		}
 
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
+
+		// Rate limiting
+		ip := r.RemoteAddr
+		if idx := strings.LastIndex(ip, ":"); idx != -1 {
+			ip = ip[:idx]
+		}
+		if !h.rateLimiter.Allow(ip) {
+			h.writeError(w, http.StatusTooManyRequests, "rate limit exceeded")
+			return
+		}
+
+		// Limit request body to 10MB to prevent resource exhaustion
+		r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
 
 		next.ServeHTTP(w, r)
 	})
@@ -113,26 +257,24 @@ func (h *HTTPServer) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		token := r.Header.Get("Authorization")
-		if token == "" {
-			token = r.URL.Query().Get("token")
-		}
-
-		if token == "" {
-			cookie, err := r.Cookie("auth_token")
-			if err == nil {
-				token = cookie.Value
+		// Try session token from cookie first
+		if cookie, err := r.Cookie("session_token"); err == nil {
+			if h.sessions.Valid(cookie.Value) {
+				next(w, r)
+				return
 			}
 		}
 
+		// Try Bearer token from Authorization header
+		token := r.Header.Get("Authorization")
 		token = strings.TrimPrefix(token, "Bearer ")
 
-		if subtle.ConstantTimeCompare([]byte(token), []byte(h.config.Password)) != 1 {
-			h.writeError(w, http.StatusUnauthorized, "unauthorized")
+		if token != "" && subtle.ConstantTimeCompare([]byte(token), []byte(h.config.Password)) == 1 {
+			next(w, r)
 			return
 		}
 
-		next(w, r)
+		h.writeError(w, http.StatusUnauthorized, "unauthorized")
 	}
 }
 
@@ -140,7 +282,43 @@ func (h *HTTPServer) Start() error {
 	if h.config.Password == "" {
 		logger.Warn().Msg("HTTP server starting without authentication - this is insecure for production")
 	}
+	h.ready = true
+
+	// Start background cleanup for sessions and rate limiter
+	go h.cleanupLoop()
+
 	return h.server.ListenAndServe()
+}
+
+func (h *HTTPServer) cleanupLoop() {
+	defer logger.RecoverPanic("http-cleanup")
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-h.ctx.Done():
+			return
+		case <-ticker.C:
+			h.sessions.Cleanup()
+			h.rateLimiter.Cleanup()
+		}
+	}
+}
+
+func (h *HTTPServer) SetReady(ready bool) {
+	h.ready = ready
+}
+
+func (h *HTTPServer) handleReady(w http.ResponseWriter, _ *http.Request) {
+	if !h.ready {
+		h.writeError(w, http.StatusServiceUnavailable, "server not ready")
+		return
+	}
+	h.writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status": "ready",
+		"uptime": time.Since(h.started).String(),
+		"keys":   h.store.KeyCount(),
+	})
 }
 
 func (h *HTTPServer) Stop() error {
@@ -296,6 +474,7 @@ func (h *HTTPServer) handleKeys(w http.ResponseWriter, r *http.Request) {
 			Tags  []string      `json:"tags"`
 		}
 
+		r.Body = http.MaxBytesReader(w, r.Body, 10*1024*1024) // 10MB limit
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			h.writeError(w, http.StatusBadRequest, "invalid JSON")
 			return
@@ -485,6 +664,7 @@ func (h *HTTPServer) handleNamespaces(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			Name string `json:"name"`
 		}
+		r.Body = http.MaxBytesReader(w, r.Body, 1024) // 1KB limit
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			h.writeError(w, http.StatusBadRequest, "invalid JSON")
 			return
@@ -569,6 +749,7 @@ func (h *HTTPServer) handleClusterJoin(w http.ResponseWriter, r *http.Request) {
 		Port int    `json:"port"`
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 1024) // 1KB limit
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.writeError(w, http.StatusBadRequest, "invalid JSON")
 		return
@@ -578,6 +759,27 @@ func (h *HTTPServer) handleClusterJoin(w http.ResponseWriter, r *http.Request) {
 		"result":  "OK",
 		"message": fmt.Sprintf("Joining cluster at %s:%d", req.Host, req.Port),
 	})
+}
+
+// httpDangerousCommands are blocked from execution via the HTTP API
+var httpDangerousCommands = map[string]bool{
+	"SHUTDOWN":       true,
+	"DEBUG":          true,
+	"DEBUGSEGFAULT":  true,
+	"FLUSHALL":       true,
+	"FLUSHDB":        true,
+	"REPLICAOF":      true,
+	"SLAVEOF":        true,
+	"CLUSTER":        true,
+	"CONFIG":         true,
+	"BGREWRITEAOF":   true,
+	"BGSAVE":         true,
+	"SAVE":           true,
+	"MONITOR":        true,
+	"SYNC":           true,
+	"PSYNC":          true,
+	"ACL":            true,
+	"MODULE":         true,
 }
 
 func (h *HTTPServer) handleExecute(w http.ResponseWriter, r *http.Request) {
@@ -591,115 +793,41 @@ func (h *HTTPServer) handleExecute(w http.ResponseWriter, r *http.Request) {
 		Args    []string `json:"args"`
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 1*1024*1024) // 1MB limit
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.writeError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
 
+	upperCmd := strings.ToUpper(req.Command)
+
+	// Block dangerous commands from HTTP API
+	if httpDangerousCommands[upperCmd] {
+		h.writeError(w, http.StatusForbidden, "command '"+upperCmd+"' is not allowed via HTTP API")
+		return
+	}
+
+	// Route through the command router for proper auth enforcement and AOF persistence
 	args := make([][]byte, len(req.Args))
 	for i, arg := range req.Args {
 		args[i] = []byte(arg)
 	}
 
-	result := h.executeCommand(strings.ToUpper(req.Command), args)
+	ctx := &command.Context{
+		Command: upperCmd,
+		Args:    args,
+		Store:   h.store,
+	}
+
+	result, err := h.router.ExecuteHTTP(ctx)
+	if err != nil {
+		h.writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	h.writeJSON(w, http.StatusOK, map[string]interface{}{
 		"result": result,
 	})
-}
-
-func (h *HTTPServer) executeCommand(cmd string, args [][]byte) interface{} {
-	switch cmd {
-	case "GET":
-		if len(args) < 1 {
-			return "ERROR: wrong number of arguments"
-		}
-		key := string(args[0])
-		entry, exists := h.store.Get(key)
-		if !exists {
-			return nil
-		}
-		if sv, ok := entry.Value.(*store.StringValue); ok {
-			return string(sv.Data)
-		}
-		return entry.Value.String()
-
-	case "SET":
-		if len(args) < 2 {
-			return "ERROR: wrong number of arguments"
-		}
-		key := string(args[0])
-		value := &store.StringValue{Data: args[1]}
-		if err := h.store.Set(key, value, store.SetOptions{}); err != nil {
-			return "ERROR: " + err.Error()
-		}
-		return "OK"
-
-	case "DEL":
-		if len(args) < 1 {
-			return "ERROR: wrong number of arguments"
-		}
-		count := 0
-		for _, arg := range args {
-			if h.store.Delete(string(arg)) {
-				count++
-			}
-		}
-		return count
-
-	case "KEYS":
-		pattern := "*"
-		if len(args) > 0 {
-			pattern = string(args[0])
-		}
-		keys := h.store.Keys()
-		if pattern != "*" {
-			filtered := make([]string, 0)
-			for _, k := range keys {
-				if matchPattern(k, pattern) {
-					filtered = append(filtered, k)
-				}
-			}
-			return filtered
-		}
-		return keys
-
-	case "DBSIZE":
-		return h.store.KeyCount()
-
-	case "PING":
-		return "PONG"
-
-	case "INFO":
-		return map[string]interface{}{
-			"keys":   h.store.KeyCount(),
-			"memory": h.store.MemUsage(),
-			"uptime": time.Since(h.started).String(),
-		}
-
-	case "FLUSHDB":
-		h.store.Flush()
-		return "OK"
-
-	case "TTL":
-		if len(args) < 1 {
-			return "ERROR: wrong number of arguments"
-		}
-		ttl := h.store.TTL(string(args[0]))
-		return int(ttl.Milliseconds())
-
-	case "TYPE":
-		if len(args) < 1 {
-			return "ERROR: wrong number of arguments"
-		}
-		entry, exists := h.store.Get(string(args[0]))
-		if !exists {
-			return "none"
-		}
-		return entry.Value.Type().String()
-
-	default:
-		return fmt.Sprintf("ERROR: unknown command '%s'", cmd)
-	}
 }
 
 func (h *HTTPServer) handleSlowlog(w http.ResponseWriter, r *http.Request) {
@@ -746,6 +874,7 @@ func (h *HTTPServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 		Password string `json:"password"`
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 1024) // 1KB limit for login
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.writeError(w, http.StatusBadRequest, "invalid JSON")
 		return
@@ -760,18 +889,25 @@ func (h *HTTPServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if subtle.ConstantTimeCompare([]byte(req.Password), []byte(h.config.Password)) == 1 {
+		sessionToken, err := h.sessions.Create()
+		if err != nil {
+			h.writeError(w, http.StatusInternalServerError, "failed to create session")
+			return
+		}
+
 		http.SetCookie(w, &http.Cookie{
-			Name:     "auth_token",
-			Value:    req.Password,
+			Name:     "session_token",
+			Value:    sessionToken,
 			Path:     "/",
 			HttpOnly: true,
-			Secure:   false,
-			SameSite: http.SameSiteLaxMode,
+			Secure:   r.TLS != nil,
+			SameSite: http.SameSiteStrictMode,
+			MaxAge:   86400, // 24 hours
 		})
 
 		h.writeJSON(w, http.StatusOK, map[string]interface{}{
 			"success": true,
-			"token":   req.Password,
+			"token":   sessionToken,
 		})
 		return
 	}

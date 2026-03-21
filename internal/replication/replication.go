@@ -210,6 +210,7 @@ func (m *Manager) connectToMaster() error {
 func (m *Manager) syncWithMaster() {
 	defer m.wg.Done()
 	defer m.masterConn.Close()
+	defer logger.RecoverPanic("replication-sync")
 
 	reader := bufio.NewReader(m.masterConn)
 	writer := bufio.NewWriter(m.masterConn)
@@ -243,25 +244,33 @@ func (m *Manager) sendHandshake(writer *bufio.Writer) error {
 	if _, err := writer.WriteString("*1\r\n$4\r\nPING\r\n"); err != nil {
 		return err
 	}
-	writer.Flush()
+	if err := writer.Flush(); err != nil {
+		return err
+	}
 
 	if _, err := fmt.Fprintf(writer, "*3\r\n$5\r\nREPLCONF\r\n$8\r\nlistening-port\r\n$4\r\n%d\r\n",
 		m.cfg.ReplicaAnnouncePort); err != nil {
 		return err
 	}
-	writer.Flush()
+	if err := writer.Flush(); err != nil {
+		return err
+	}
 
 	if _, err := writer.WriteString("*3\r\n$5\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n"); err != nil {
 		return err
 	}
-	writer.Flush()
+	if err := writer.Flush(); err != nil {
+		return err
+	}
 
 	psyncCmd := fmt.Sprintf("*3\r\n$5\r\nPSYNC\r\n$40\r\n%s\r\n$1\r\n%d\r\n",
 		strings.Repeat("?", 40), -1)
 	if _, err := writer.WriteString(psyncCmd); err != nil {
 		return err
 	}
-	writer.Flush()
+	if err := writer.Flush(); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -379,10 +388,16 @@ func (m *Manager) PropagateCommand(cmd []byte) {
 	idx := int(newIdx) % len(m.replBacklog)
 	copy(m.replBacklog[idx:], cmd)
 
-	for _, replica := range m.replicas {
+	for id, replica := range m.replicas {
 		if replica.State == StateConnected && replica.Writer != nil {
-			replica.Writer.Write(cmd)
-			replica.Writer.Flush()
+			if _, err := replica.Writer.Write(cmd); err != nil {
+				logger.Error().Err(err).Str("replica", id).Msg("failed to write to replica")
+				continue
+			}
+			if err := replica.Writer.Flush(); err != nil {
+				logger.Error().Err(err).Str("replica", id).Msg("failed to flush replica writer")
+				continue
+			}
 			replica.Offset++
 		}
 	}
@@ -458,18 +473,20 @@ func NewSyncWriter(w io.Writer) *SyncWriter {
 	return &SyncWriter{writer: w}
 }
 
-func (w *SyncWriter) WriteRDBHeader() {
-	w.writer.Write([]byte("REDIS0011\xfe\x00"))
+func (w *SyncWriter) WriteRDBHeader() error {
+	_, err := w.writer.Write([]byte("REDIS0011\xfe\x00"))
+	return err
 }
 
-func (w *SyncWriter) WriteDatabaseSelect(db int) {
+func (w *SyncWriter) WriteDatabaseSelect(db int) error {
 	buf := make([]byte, 2)
 	buf[0] = 0xFE
 	buf[1] = byte(db)
-	w.writer.Write(buf)
+	_, err := w.writer.Write(buf)
+	return err
 }
 
-func (w *SyncWriter) WriteKeyValuePair(key string, value interface{}, ttl time.Duration, expireAt int64) {
+func (w *SyncWriter) WriteKeyValuePair(key string, value interface{}, ttl time.Duration, expireAt int64) error {
 	keyBytes := []byte(key)
 	var buf []byte
 
@@ -486,25 +503,30 @@ func (w *SyncWriter) WriteKeyValuePair(key string, value interface{}, ttl time.D
 		buf[1] = byte(len(keyBytes))
 		copy(buf[2:], keyBytes)
 	}
-	w.writer.Write(buf)
+	if _, err := w.writer.Write(buf); err != nil {
+		return err
+	}
 
 	switch v := value.(type) {
 	case string:
-		w.writeStringValue(v)
+		return w.writeStringValue(v)
 	case []byte:
-		w.writeStringValue(string(v))
+		return w.writeStringValue(string(v))
 	}
+	return nil
 }
 
-func (w *SyncWriter) writeStringValue(s string) {
+func (w *SyncWriter) writeStringValue(s string) error {
 	data := []byte(s)
 	buf := make([]byte, 1+4+len(data))
 	buf[0] = '$'
 	binary.BigEndian.PutUint32(buf[1:5], uint32(len(data)))
 	copy(buf[5:], data)
-	w.writer.Write(buf)
+	_, err := w.writer.Write(buf)
+	return err
 }
 
-func (w *SyncWriter) WriteEnd() {
-	w.writer.Write([]byte{0xFF})
+func (w *SyncWriter) WriteEnd() error {
+	_, err := w.writer.Write([]byte{0xFF})
+	return err
 }

@@ -2,6 +2,7 @@ package store
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -193,17 +194,18 @@ type Entry struct {
 	Tags        []string
 	ExpiresAt   int64
 	CreatedAt   int64
-	LastAccess  int64
-	AccessCount uint64
+	LastAccess  atomic.Int64
+	AccessCount atomic.Uint64
 }
 
 func NewEntry(value Value) *Entry {
 	now := time.Now().UnixNano()
-	return &Entry{
-		Value:      value,
-		CreatedAt:  now,
-		LastAccess: now,
+	e := &Entry{
+		Value:     value,
+		CreatedAt: now,
 	}
+	e.LastAccess.Store(now)
+	return e
 }
 
 func (e *Entry) IsExpired() bool {
@@ -223,8 +225,8 @@ func (e *Entry) MemoryUsage() int64 {
 }
 
 func (e *Entry) Touch() {
-	e.LastAccess = time.Now().UnixNano()
-	e.AccessCount++
+	e.LastAccess.Store(time.Now().UnixNano())
+	e.AccessCount.Add(1)
 }
 
 func (e *Entry) SetTTL(ttl time.Duration) {

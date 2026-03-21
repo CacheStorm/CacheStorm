@@ -2,6 +2,7 @@ package acl
 
 import (
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"errors"
 	"strings"
@@ -137,7 +138,7 @@ func (a *ACL) Authenticate(username, password string) (*User, error) {
 
 	hashedPassword := hashPassword(password)
 	for _, stored := range user.Passwords {
-		if stored == hashedPassword || stored == password {
+		if subtle.ConstantTimeCompare([]byte(stored), []byte(hashedPassword)) == 1 {
 			return user, nil
 		}
 	}

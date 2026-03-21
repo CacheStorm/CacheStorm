@@ -76,3 +76,13 @@ func Fatal() *zerolog.Event {
 func With() zerolog.Context {
 	return log.With()
 }
+
+// RecoverPanic logs a recovered panic with context. Use as: defer logger.RecoverPanic("component")
+func RecoverPanic(component string) {
+	if r := recover(); r != nil {
+		log.Error().
+			Str("component", component).
+			Interface("panic", r).
+			Msg("panic recovered in goroutine")
+	}
+}

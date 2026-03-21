@@ -3,7 +3,10 @@ package store
 import (
 	"math/rand"
 	"sort"
+	"sync"
 	"time"
+
+	"github.com/cachestorm/cachestorm/internal/logger"
 )
 
 type EvictionPolicy int
@@ -25,6 +28,7 @@ type EvictionController struct {
 	sampleSize int
 	onEvict    func(key string, entry *Entry)
 	rnd        *rand.Rand
+	rndMu      sync.Mutex
 }
 
 func NewEvictionController(policy EvictionPolicy, maxMemory int64, s *Store, mt *MemoryTracker, sampleSize int) *EvictionController {
@@ -51,10 +55,22 @@ func (ec *EvictionController) CheckAndEvict() error {
 
 	switch pressure {
 	case PressureEmergency:
+		logger.Warn().
+			Int64("usage", ec.memTracker.Usage()).
+			Int64("max", ec.maxMemory).
+			Msg("memory pressure emergency, aggressive eviction")
 		ec.evictUntil(0.85)
 	case PressureCritical:
+		logger.Warn().
+			Int64("usage", ec.memTracker.Usage()).
+			Int64("max", ec.maxMemory).
+			Msg("memory pressure critical, evicting keys")
 		ec.evictKeys(100)
 	case PressureWarning:
+		logger.Debug().
+			Int64("usage", ec.memTracker.Usage()).
+			Int64("max", ec.maxMemory).
+			Msg("memory pressure warning, evicting keys")
 		ec.evictKeys(10)
 	}
 
@@ -161,18 +177,27 @@ func (ec *EvictionController) selectVolatileLRU() string {
 }
 
 func (ec *EvictionController) selectRandom() string {
-	keys := ec.store.Keys()
-	if len(keys) == 0 {
-		return ""
+	// Sample a random key from a random shard instead of materializing all keys
+	ec.rndMu.Lock()
+	shardIdx := ec.rnd.Intn(NumShards)
+	ec.rndMu.Unlock()
+
+	shard := ec.store.shards[shardIdx]
+	shard.mu.RLock()
+	defer shard.mu.RUnlock()
+	for key := range shard.data {
+		return key
 	}
-	return keys[ec.rnd.Intn(len(keys))]
+	return ""
 }
 
 func (ec *EvictionController) sampleKeys() []candidate {
 	candidates := make([]candidate, 0, ec.sampleSize)
 
 	for i := 0; i < ec.sampleSize; i++ {
+		ec.rndMu.Lock()
 		shardIdx := ec.rnd.Intn(NumShards)
+		ec.rndMu.Unlock()
 		shard := ec.store.shards[shardIdx]
 
 		shard.mu.RLock()
@@ -184,8 +209,8 @@ func (ec *EvictionController) sampleKeys() []candidate {
 		for key, entry := range shard.data {
 			candidates = append(candidates, candidate{
 				key:         key,
-				lastAccess:  entry.LastAccess,
-				accessCount: entry.AccessCount,
+				lastAccess:  entry.LastAccess.Load(),
+				accessCount: entry.AccessCount.Load(),
 			})
 			break
 		}
@@ -199,7 +224,9 @@ func (ec *EvictionController) sampleVolatileKeys() []candidate {
 	candidates := make([]candidate, 0, ec.sampleSize)
 
 	for i := 0; i < ec.sampleSize*2 && len(candidates) < ec.sampleSize; i++ {
+		ec.rndMu.Lock()
 		shardIdx := ec.rnd.Intn(NumShards)
+		ec.rndMu.Unlock()
 		shard := ec.store.shards[shardIdx]
 
 		shard.mu.RLock()
@@ -207,7 +234,7 @@ func (ec *EvictionController) sampleVolatileKeys() []candidate {
 			if entry.ExpiresAt > 0 {
 				candidates = append(candidates, candidate{
 					key:        key,
-					lastAccess: entry.LastAccess,
+					lastAccess: entry.LastAccess.Load(),
 				})
 			}
 			break
@@ -226,6 +253,9 @@ func (ec *EvictionController) ForceEvict(n int) int {
 		} else {
 			break
 		}
+	}
+	if evicted > 0 {
+		logger.Info().Int("evicted", evicted).Int("requested", n).Msg("force eviction completed")
 	}
 	return evicted
 }

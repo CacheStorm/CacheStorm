@@ -411,7 +411,7 @@ func cmdKEYOBJECT(ctx *Context) error {
 	case "REFCOUNT":
 		return ctx.WriteInteger(1)
 	case "FREQ":
-		return ctx.WriteInteger(int64(entry.AccessCount))
+		return ctx.WriteInteger(int64(entry.AccessCount.Load()))
 	case "TYPE":
 		return ctx.WriteBulkString(entry.Value.Type().String())
 	default:
@@ -446,7 +446,7 @@ func cmdKEYFREQ(ctx *Context) error {
 		return ctx.WriteNull()
 	}
 
-	return ctx.WriteInteger(int64(entry.AccessCount))
+	return ctx.WriteInteger(int64(entry.AccessCount.Load()))
 }
 
 func cmdKEYIDLETIME(ctx *Context) error {
@@ -461,7 +461,7 @@ func cmdKEYIDLETIME(ctx *Context) error {
 		return ctx.WriteNull()
 	}
 
-	idleNs := time.Now().UnixNano() - entry.LastAccess
+	idleNs := time.Now().UnixNano() - entry.LastAccess.Load()
 	idleSec := idleNs / 1e9
 
 	return ctx.WriteInteger(idleSec)

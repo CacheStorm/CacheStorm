@@ -304,11 +304,11 @@ func TestEntryTouchMethod(t *testing.T) {
 	time.Sleep(time.Millisecond)
 	e.Touch()
 
-	if e.LastAccess <= e.CreatedAt {
+	if e.LastAccess.Load() <= e.CreatedAt {
 		t.Error("LastAccess should be updated")
 	}
-	if e.AccessCount != 1 {
-		t.Errorf("AccessCount should be 1, got %d", e.AccessCount)
+	if e.AccessCount.Load() != 1 {
+		t.Errorf("AccessCount should be 1, got %d", e.AccessCount.Load())
 	}
 }
 

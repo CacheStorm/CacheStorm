@@ -70,20 +70,37 @@ func (s *Subscriber) Close() {
 	}
 }
 
+const (
+	maxChannelsPerSubscriber = 10000  // Max channels a single subscriber can join
+	maxChannelNameLength     = 256    // Max channel name length in bytes
+)
+
 func (ps *PubSub) Subscribe(sub *Subscriber, channels ...string) int {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 
 	ps.subscribers[sub] = struct{}{}
 
+	subscribed := 0
 	for _, ch := range channels {
+		// Validate channel name
+		if len(ch) == 0 || len(ch) > maxChannelNameLength {
+			continue
+		}
+
+		// Count how many channels this subscriber is already on
+		if subscribed >= maxChannelsPerSubscriber {
+			break
+		}
+
 		if ps.channels[ch] == nil {
 			ps.channels[ch] = make(map[*Subscriber]struct{})
 		}
 		ps.channels[ch][sub] = struct{}{}
+		subscribed++
 	}
 
-	return len(channels)
+	return subscribed
 }
 
 func (ps *PubSub) Unsubscribe(sub *Subscriber, channels ...string) int {

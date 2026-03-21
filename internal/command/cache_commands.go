@@ -115,7 +115,7 @@ func cmdCacheStats(ctx *Context) error {
 				totalTTL += int64(ttl / time.Second)
 				keysWitTTL++
 			}
-			accessTotal += entry.AccessCount
+			accessTotal += entry.AccessCount.Load()
 		}
 	}
 

@@ -91,9 +91,9 @@ func cmdDebugObject(ctx *Context) error {
 	sb.WriteString(" serializedlength:")
 	sb.WriteString(strconv.FormatInt(int64(len(key)), 10))
 	sb.WriteString(" lru:")
-	sb.WriteString(strconv.FormatInt(entry.LastAccess/1000000, 10))
+	sb.WriteString(strconv.FormatInt(entry.LastAccess.Load()/1000000, 10))
 	sb.WriteString(" lru_seconds_idle:")
-	sb.WriteString(strconv.FormatInt(int64(time.Since(time.Unix(0, entry.LastAccess)).Seconds()), 10))
+	sb.WriteString(strconv.FormatInt(int64(time.Since(time.Unix(0, entry.LastAccess.Load())).Seconds()), 10))
 
 	return ctx.WriteSimpleString(sb.String())
 }
@@ -132,10 +132,10 @@ func cmdOBJECT(ctx *Context) error {
 	case "ENCODING":
 		return ctx.WriteSimpleString(getEncoding(entry.Value))
 	case "IDLETIME":
-		idleSeconds := int64(time.Since(time.Unix(0, entry.LastAccess)).Seconds())
+		idleSeconds := int64(time.Since(time.Unix(0, entry.LastAccess.Load())).Seconds())
 		return ctx.WriteInteger(idleSeconds)
 	case "FREQ":
-		return ctx.WriteInteger(int64(entry.AccessCount))
+		return ctx.WriteInteger(int64(entry.AccessCount.Load()))
 	case "REFCOUNT":
 		return ctx.WriteInteger(1)
 	default:

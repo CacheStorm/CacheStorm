@@ -33,15 +33,17 @@ func (s *Shard) Set(key string, entry *Entry) int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	keyOverhead := int64(len(key)) + 16 // key string + map entry overhead
+
 	oldMem := int64(0)
 	if old, exists := s.data[key]; exists {
-		oldMem = old.MemoryUsage()
+		oldMem = old.MemoryUsage() + keyOverhead
 		s.memUsage -= oldMem
 	} else {
 		s.keyCount++
 	}
 
-	newMem := entry.MemoryUsage()
+	newMem := entry.MemoryUsage() + keyOverhead
 	s.memUsage += newMem
 	s.data[key] = entry
 
@@ -57,7 +59,8 @@ func (s *Shard) Delete(key string) (int64, bool) {
 		return 0, false
 	}
 
-	mem := entry.MemoryUsage()
+	keyOverhead := int64(len(key)) + 16
+	mem := entry.MemoryUsage() + keyOverhead
 	s.memUsage -= mem
 	s.keyCount--
 	delete(s.data, key)

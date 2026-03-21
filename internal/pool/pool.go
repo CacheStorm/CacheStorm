@@ -188,6 +188,11 @@ func (p *Pool) Close() {
 }
 
 func (p *Pool) cleanup() {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("pool: panic recovered in cleanup: %v", r)
+		}
+	}()
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 

@@ -191,7 +191,10 @@ func (s *Sentinel) checkMasters() {
 					Str("master", name).
 					Msg("Master marked as objectively down")
 
-				go s.startFailover(name, master)
+				go func(name string, master *MasterInfo) {
+					defer logger.RecoverPanic("sentinel-failover")
+					s.startFailover(name, master)
+				}(name, master)
 			}
 		}
 	}
@@ -488,7 +491,9 @@ func (s *Sentinel) handleConnection(conn net.Conn) {
 			}
 
 			response := s.handleCommand(line)
-			conn.Write([]byte(response + "\r\n"))
+			if _, err := conn.Write([]byte(response + "\r\n")); err != nil {
+				return
+			}
 		}
 	}
 }

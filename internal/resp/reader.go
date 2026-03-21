@@ -11,9 +11,13 @@ var (
 	ErrInvalidType      = errors.New("invalid RESP type")
 	ErrInvalidFormat    = errors.New("invalid RESP format")
 	ErrBulkStringTooBig = errors.New("bulk string exceeds maximum size")
+	ErrArrayTooLarge    = errors.New("array exceeds maximum element count")
 )
 
-const MaxBulkStringSize = 512 * 1024 * 1024
+const (
+	MaxBulkStringSize = 512 * 1024 * 1024
+	MaxArrayElements  = 1048576 // 1M elements max per array
+)
 
 type Reader struct {
 	rd *bufio.Reader
@@ -171,6 +175,10 @@ func (r *Reader) readArray() (*Value, error) {
 
 	if count == 0 {
 		return ArrayValue([]*Value{}), nil
+	}
+
+	if count > MaxArrayElements {
+		return nil, ErrArrayTooLarge
 	}
 
 	elements := make([]*Value, 0, count)
