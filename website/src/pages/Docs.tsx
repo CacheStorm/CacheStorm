@@ -197,7 +197,7 @@ export function DocPage() {
                 This page does not exist. Browse the available documentation
                 sections below or visit the{" "}
                 <a
-                  href="https://github.com/nicktretyakov/CacheStorm"
+                  href="https://github.com/CacheStorm/CacheStorm"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-[var(--color-primary)] hover:text-[var(--color-primary)] underline underline-offset-4"

@@ -518,7 +518,7 @@ export default function Features() {
               <ArrowRight className="w-4 h-4" />
             </Link>
             <a
-              href="https://github.com/nicktretyakov/CacheStorm"
+              href="https://github.com/CacheStorm/CacheStorm"
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-2 px-6 py-3 rounded-xl border border-[var(--color-border)] hover:border-[var(--color-border)] text-[var(--color-text-secondary)] font-medium transition-colors"

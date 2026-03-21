@@ -136,7 +136,7 @@ export default function Clustering() {
         title="docker-compose.replication.yml"
         code={`services:
   master:
-    image: ghcr.io/nicktretyakov/cachestorm:latest
+    image: ghcr.io/cachestorm/cachestorm:latest
     ports:
       - "6380:6380"
     volumes:
@@ -144,7 +144,7 @@ export default function Clustering() {
       - master-data:/data
 
   replica-1:
-    image: ghcr.io/nicktretyakov/cachestorm:latest
+    image: ghcr.io/cachestorm/cachestorm:latest
     ports:
       - "6381:6380"
     volumes:
@@ -154,7 +154,7 @@ export default function Clustering() {
       - master
 
   replica-2:
-    image: ghcr.io/nicktretyakov/cachestorm:latest
+    image: ghcr.io/cachestorm/cachestorm:latest
     ports:
       - "6382:6380"
     volumes:
@@ -284,7 +284,7 @@ cachestorm-cli -p 6381 INFO replication
         title="docker-compose.sentinel.yml"
         code={`services:
   sentinel-1:
-    image: ghcr.io/nicktretyakov/cachestorm:latest
+    image: ghcr.io/cachestorm/cachestorm:latest
     command: ["cachestorm-sentinel", "--config", "/etc/cachestorm/sentinel.yaml"]
     ports:
       - "26380:26380"
@@ -292,7 +292,7 @@ cachestorm-cli -p 6381 INFO replication
       - ./sentinel.yaml:/etc/cachestorm/sentinel.yaml
 
   sentinel-2:
-    image: ghcr.io/nicktretyakov/cachestorm:latest
+    image: ghcr.io/cachestorm/cachestorm:latest
     command: ["cachestorm-sentinel", "--config", "/etc/cachestorm/sentinel.yaml"]
     ports:
       - "26381:26380"
@@ -300,7 +300,7 @@ cachestorm-cli -p 6381 INFO replication
       - ./sentinel.yaml:/etc/cachestorm/sentinel.yaml
 
   sentinel-3:
-    image: ghcr.io/nicktretyakov/cachestorm:latest
+    image: ghcr.io/cachestorm/cachestorm:latest
     command: ["cachestorm-sentinel", "--config", "/etc/cachestorm/sentinel.yaml"]
     ports:
       - "26382:26380"
@@ -410,7 +410,7 @@ memory:
         title="docker-compose.cluster.yml"
         code={`services:
   node-1:
-    image: ghcr.io/nicktretyakov/cachestorm:latest
+    image: ghcr.io/cachestorm/cachestorm:latest
     ports: ["6380:6380", "16380:16380"]
     environment:
       CACHESTORM_CLUSTER_ENABLED: "true"
@@ -419,7 +419,7 @@ memory:
       - node1-data:/data
 
   node-2:
-    image: ghcr.io/nicktretyakov/cachestorm:latest
+    image: ghcr.io/cachestorm/cachestorm:latest
     ports: ["6381:6380", "16381:16380"]
     environment:
       CACHESTORM_CLUSTER_ENABLED: "true"
@@ -428,7 +428,7 @@ memory:
       - node2-data:/data
 
   node-3:
-    image: ghcr.io/nicktretyakov/cachestorm:latest
+    image: ghcr.io/cachestorm/cachestorm:latest
     ports: ["6382:6380", "16382:16380"]
     environment:
       CACHESTORM_CLUSTER_ENABLED: "true"
@@ -437,7 +437,7 @@ memory:
       - node3-data:/data
 
   node-4:
-    image: ghcr.io/nicktretyakov/cachestorm:latest
+    image: ghcr.io/cachestorm/cachestorm:latest
     ports: ["6383:6380", "16383:16380"]
     environment:
       CACHESTORM_CLUSTER_ENABLED: "true"
@@ -446,7 +446,7 @@ memory:
       - node4-data:/data
 
   node-5:
-    image: ghcr.io/nicktretyakov/cachestorm:latest
+    image: ghcr.io/cachestorm/cachestorm:latest
     ports: ["6384:6380", "16384:16380"]
     environment:
       CACHESTORM_CLUSTER_ENABLED: "true"
@@ -455,7 +455,7 @@ memory:
       - node5-data:/data
 
   node-6:
-    image: ghcr.io/nicktretyakov/cachestorm:latest
+    image: ghcr.io/cachestorm/cachestorm:latest
     ports: ["6385:6380", "16385:16380"]
     environment:
       CACHESTORM_CLUSTER_ENABLED: "true"

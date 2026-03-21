@@ -311,7 +311,7 @@ export default function DocsLayout({
           {/* footer links */}
           <div className="border-t border-[var(--color-border)] px-4 py-3 space-y-2">
             <a
-              href="https://github.com/nicktretyakov/CacheStorm"
+              href="https://github.com/CacheStorm/CacheStorm"
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-2 text-sm text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)] transition-colors"

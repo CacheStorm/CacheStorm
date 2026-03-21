@@ -62,20 +62,20 @@ export default function GettingStarted() {
         language="bash"
         title="Pull & run"
         code={`# Pull the latest image
-docker pull ghcr.io/nicktretyakov/cachestorm:latest
+docker pull ghcr.io/cachestorm/cachestorm:latest
 
 # Run CacheStorm on port 6380
 docker run -d \\
   --name cachestorm \\
   -p 6380:6380 \\
-  ghcr.io/nicktretyakov/cachestorm:latest
+  ghcr.io/cachestorm/cachestorm:latest
 
 # With a custom config file
 docker run -d \\
   --name cachestorm \\
   -p 6380:6380 \\
   -v $(pwd)/cachestorm.yaml:/etc/cachestorm/cachestorm.yaml \\
-  ghcr.io/nicktretyakov/cachestorm:latest \\
+  ghcr.io/cachestorm/cachestorm:latest \\
   --config /etc/cachestorm/cachestorm.yaml`}
       />
 
@@ -89,7 +89,7 @@ docker run -d \\
         title="docker-compose.yml"
         code={`services:
   cachestorm:
-    image: ghcr.io/nicktretyakov/cachestorm:latest
+    image: ghcr.io/cachestorm/cachestorm:latest
     ports:
       - "6380:6380"
       - "7280:7280"   # HTTP API
@@ -121,7 +121,7 @@ volumes:
         language="bash"
         title="Linux / macOS"
         code={`# Download (replace with your OS/arch)
-curl -fsSL https://github.com/nicktretyakov/CacheStorm/releases/latest/download/cachestorm-linux-amd64.tar.gz \\
+curl -fsSL https://github.com/CacheStorm/CacheStorm/releases/latest/download/cachestorm-linux-amd64.tar.gz \\
   | tar xz
 
 # Move to PATH
@@ -135,7 +135,7 @@ cachestorm --version`}
         language="bash"
         title="Windows (PowerShell)"
         code={`# Download the zip
-Invoke-WebRequest -Uri "https://github.com/nicktretyakov/CacheStorm/releases/latest/download/cachestorm-windows-amd64.zip" -OutFile cachestorm.zip
+Invoke-WebRequest -Uri "https://github.com/CacheStorm/CacheStorm/releases/latest/download/cachestorm-windows-amd64.zip" -OutFile cachestorm.zip
 
 # Extract
 Expand-Archive cachestorm.zip -DestinationPath .
@@ -192,7 +192,7 @@ Expand-Archive cachestorm.zip -DestinationPath .
         language="bash"
         title="Build from source"
         code={`# Clone the repository
-git clone https://github.com/nicktretyakov/CacheStorm.git
+git clone https://github.com/CacheStorm/CacheStorm.git
 cd CacheStorm
 
 # Build
