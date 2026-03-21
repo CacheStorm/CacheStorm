@@ -9,7 +9,7 @@
     Redis Clients          │  ┌──────────────────────────────────┐   │
     (ioredis, go-redis,    │  │       TCP Server (:6380)          │   │
      redis-py, jedis,      │  │  ┌────────────────────────────┐  │   │
-     redis-cli)        ────┼──│  │   Connection Handler        │  │   │
+     cachestorm-cli)        ────┼──│  │   Connection Handler        │  │   │
                            │  │  │   (goroutine per client)    │  │   │
                            │  │  └─────────┬──────────────────┘  │   │
                            │  └────────────┼─────────────────────┘   │

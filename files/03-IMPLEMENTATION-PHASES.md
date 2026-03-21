@@ -145,12 +145,12 @@ func (r *Router) Execute(ctx *CommandContext) error
 - Test PING → PONG
 - Test SET/GET round-trip
 - Test DEL
-- Verify with `redis-cli -p 6380` (manual test)
+- Verify with `cachestorm-cli -p 6380` (manual test)
 
 ### Phase 1 Deliverables
-- [ ] `redis-cli -p 6380 PING` returns PONG
-- [ ] `redis-cli -p 6380 SET foo bar` + `GET foo` works
-- [ ] `redis-cli -p 6380 DEL foo` works
+- [ ] `cachestorm-cli -p 6380 PING` returns PONG
+- [ ] `cachestorm-cli -p 6380 SET foo bar` + `GET foo` works
+- [ ] `cachestorm-cli -p 6380 DEL foo` works
 - [ ] All unit tests pass
 - [ ] RESP benchmarks exist
 
@@ -232,7 +232,7 @@ Each command needs:
 - Integration: SET with EX, verify TTL countdown, verify expiration
 
 ### Phase 2 Deliverables
-- [ ] All string commands work via redis-cli
+- [ ] All string commands work via cachestorm-cli
 - [ ] TTL works: SET with EX → TTL decreases → key expires automatically
 - [ ] Memory limit works: set max_memory, fill it, verify eviction occurs
 - [ ] KEYS pattern matching works
@@ -291,7 +291,7 @@ Implement all set commands from 02-PROTOCOL-SPEC.md section 2.6.
 - Test memory tracking accuracy with different types
 
 ### Phase 3 Deliverables
-- [ ] All Hash commands work via redis-cli: HSET/HGET/HGETALL/etc.
+- [ ] All Hash commands work via cachestorm-cli: HSET/HGET/HGETALL/etc.
 - [ ] All List commands work: LPUSH/RPUSH/LPOP/RPOP/LRANGE/etc.
 - [ ] All Set commands work: SADD/SMEMBERS/SUNION/SINTER/etc.
 - [ ] WRONGTYPE errors on type mismatch

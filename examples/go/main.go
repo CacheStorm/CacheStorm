@@ -16,7 +16,7 @@ func main() {
 	fmt.Println()
 
 	// Create client
-	client, err := cachestorm.NewClient("localhost:6379")
+	client, err := cachestorm.NewClient("localhost:6380")
 	if err != nil {
 		log.Fatalf("Failed to create client: %v", err)
 	}

@@ -29,7 +29,7 @@ type Metric struct {
 }
 
 func main() {
-	client, err := cachestorm.NewClient("localhost:6379")
+	client, err := cachestorm.NewClient("localhost:6380")
 	if err != nil {
 		log.Fatalf("Failed to connect: %v", err)
 	}
