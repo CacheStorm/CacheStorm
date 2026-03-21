@@ -1,0 +1,47 @@
+groups:
+  - name: cachestorm
+    rules:
+      - alert: CacheStormDown
+        expr: cachestorm_up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "CacheStorm instance is down"
+          description: "CacheStorm has been unreachable for more than 1 minute."
+
+      - alert: CacheStormHighMemoryPressure
+        expr: cachestorm_memory_pressure_percent > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "CacheStorm memory pressure is high ({{ $value }}%)"
+          description: "Memory pressure has been above 85% for 5 minutes. Eviction is active."
+
+      - alert: CacheStormCriticalMemoryPressure
+        expr: cachestorm_memory_pressure_percent > 95
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "CacheStorm memory pressure is critical ({{ $value }}%)"
+          description: "Memory pressure above 95% - emergency eviction active, risk of OOM."
+
+      - alert: CacheStormHighClientCount
+        expr: cachestorm_connected_clients > 5000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "CacheStorm has {{ $value }} connected clients"
+          description: "High number of connected clients. Check for connection leaks."
+
+      - alert: CacheStormNoKeys
+        expr: cachestorm_keys_total == 0
+        for: 10m
+        labels:
+          severity: info
+        annotations:
+          summary: "CacheStorm has no keys stored"
+          description: "The cache is empty for 10+ minutes. This may indicate a problem."

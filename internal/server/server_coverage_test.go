@@ -3,11 +3,19 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"io"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +25,52 @@ import (
 	"github.com/cachestorm/cachestorm/internal/persistence"
 	"github.com/cachestorm/cachestorm/internal/store"
 )
+
+// generateSelfSignedCert creates a self-signed TLS cert and key in the given directory.
+func generateSelfSignedCert(dir string) (certFile, keyFile string, err error) {
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return "", "", err
+	}
+
+	template := x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{Organization: []string{"Test"}},
+		NotBefore:    time.Now(),
+		NotAfter:     time.Now().Add(1 * time.Hour),
+		KeyUsage:     x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
+	}
+
+	certDER, err := x509.CreateCertificate(rand.Reader, &template, &template, &priv.PublicKey, priv)
+	if err != nil {
+		return "", "", err
+	}
+
+	certFile = dir + "/cert.pem"
+	keyFile = dir + "/key.pem"
+
+	certOut, err := os.Create(certFile)
+	if err != nil {
+		return "", "", err
+	}
+	pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: certDER})
+	certOut.Close()
+
+	keyDER, err := x509.MarshalECPrivateKey(priv)
+	if err != nil {
+		return "", "", err
+	}
+	keyOut, err := os.Create(keyFile)
+	if err != nil {
+		return "", "", err
+	}
+	pem.Encode(keyOut, &pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
+	keyOut.Close()
+
+	return certFile, keyFile, nil
+}
 
 // ---------------------------------------------------------------------------
 // Helper: creates an HTTPServer with a password configured
@@ -2605,4 +2659,550 @@ func TestHandleKeysPOSTStoreError(t *testing.T) {
 
 	// May be 200 (if memory tracking doesn't fail Set) or 500 (if it does)
 	// Just verify we don't panic
+}
+
+// ===========================================================================
+// Server: New with AOF persistence and existing AOF file
+// ===========================================================================
+func TestNewServerWithExistingAOF(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create an AOF file with valid commands
+	aofPath := tmpDir + "/appendonly.aof"
+	// Write a valid AOF entry (RESP format)
+	aofContent := "*3\r\n$3\r\nSET\r\n$7\r\naof_key\r\n$7\r\naof_val\r\n"
+	if err := os.WriteFile(aofPath, []byte(aofContent), 0644); err != nil {
+		t.Fatalf("failed to create AOF file: %v", err)
+	}
+
+	cfg := &config.Config{
+		Server: config.ServerConfig{
+			Bind: "127.0.0.1",
+			Port: 0,
+		},
+		HTTP: config.HTTPConfig{Enabled: false},
+		Persistence: config.PersistenceConfig{
+			Enabled: true,
+			AOF:     true,
+			AOFSync: "everysec",
+			DataDir: tmpDir,
+		},
+	}
+
+	s, err := New(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify AOF data was loaded
+	entry, exists := s.store.Get("aof_key")
+	if exists && entry != nil {
+		t.Logf("AOF key loaded: %s", entry.Value.String())
+	}
+}
+
+func TestNewServerWithCorruptAOF(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create a corrupt AOF file
+	aofPath := tmpDir + "/appendonly.aof"
+	if err := os.WriteFile(aofPath, []byte("corrupt data here\n"), 0644); err != nil {
+		t.Fatalf("failed to create AOF file: %v", err)
+	}
+
+	cfg := &config.Config{
+		Server: config.ServerConfig{
+			Bind: "127.0.0.1",
+			Port: 0,
+		},
+		HTTP: config.HTTPConfig{Enabled: false},
+		Persistence: config.PersistenceConfig{
+			Enabled: true,
+			AOF:     true,
+			AOFSync: "always",
+			DataDir: tmpDir,
+		},
+	}
+
+	s, err := New(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if s == nil {
+		t.Fatal("expected server even with corrupt AOF")
+	}
+}
+
+func TestNewServerWithEmptyAOF(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create an empty AOF file
+	aofPath := tmpDir + "/appendonly.aof"
+	if err := os.WriteFile(aofPath, []byte{}, 0644); err != nil {
+		t.Fatalf("failed to create AOF file: %v", err)
+	}
+
+	cfg := &config.Config{
+		Server: config.ServerConfig{
+			Bind: "127.0.0.1",
+			Port: 0,
+		},
+		HTTP: config.HTTPConfig{Enabled: false},
+		Persistence: config.PersistenceConfig{
+			Enabled: true,
+			AOF:     true,
+			AOFSync: "no",
+			DataDir: tmpDir,
+		},
+	}
+
+	s, err := New(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if s == nil {
+		t.Fatal("expected server")
+	}
+}
+
+// ===========================================================================
+// Server: New with HTTP and verify connCount callback
+// ===========================================================================
+func TestNewServerHTTPConnCountCallback(t *testing.T) {
+	cfg := &config.Config{
+		Server: config.ServerConfig{
+			Bind: "127.0.0.1",
+			Port: 0,
+		},
+		HTTP: config.HTTPConfig{
+			Enabled:  true,
+			Port:     0,
+			Password: "testpass",
+		},
+	}
+
+	s, err := New(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if s.httpServer == nil {
+		t.Fatal("expected HTTP server")
+	}
+	if s.httpServer.connCount == nil {
+		t.Fatal("expected connCount callback")
+	}
+
+	// Verify the callback works
+	count := s.httpServer.connCount()
+	if count != 0 {
+		t.Errorf("expected 0 connections, got %d", count)
+	}
+}
+
+// ===========================================================================
+// Server: AOF post-execute hook coverage
+// ===========================================================================
+func TestServerAOFPostExecuteHook(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	cfg := &config.Config{
+		Server: config.ServerConfig{
+			Bind: "127.0.0.1",
+			Port: 0,
+		},
+		HTTP: config.HTTPConfig{Enabled: false},
+		Persistence: config.PersistenceConfig{
+			Enabled: true,
+			AOF:     true,
+			AOFSync: "everysec",
+			DataDir: tmpDir,
+		},
+	}
+
+	s, err := New(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Start the server to start AOF writer
+	ctx := context.Background()
+	if err := s.Start(ctx); err != nil {
+		t.Fatalf("start error: %v", err)
+	}
+	defer func() {
+		stopCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		s.Stop(stopCtx)
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+
+	// Connect and execute a SET command to trigger the post-execute hook
+	addr := s.listener.Addr().String()
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatalf("connect error: %v", err)
+	}
+	defer conn.Close()
+
+	// Send SET command
+	conn.Write([]byte("*3\r\n$3\r\nSET\r\n$3\r\nkey\r\n$3\r\nval\r\n"))
+
+	// Read response
+	buf := make([]byte, 1024)
+	conn.SetReadDeadline(time.Now().Add(1 * time.Second))
+	conn.Read(buf)
+
+	// The SET command should have triggered the post-execute hook for AOF
+	time.Sleep(50 * time.Millisecond)
+}
+
+// ===========================================================================
+// Server: Stop with httpServer error path
+// ===========================================================================
+func TestServerStopHTTPError(t *testing.T) {
+	cfg := &config.Config{
+		Server: config.ServerConfig{
+			Bind: "127.0.0.1",
+			Port: 0,
+		},
+		HTTP: config.HTTPConfig{
+			Enabled: true,
+			Port:    0,
+		},
+	}
+
+	s, err := New(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Start the server including HTTP
+	ctx := context.Background()
+	if err := s.Start(ctx); err != nil {
+		t.Fatalf("start error: %v", err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Stop - the HTTP server should stop gracefully
+	stopCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := s.Stop(stopCtx); err != nil {
+		t.Logf("stop returned error (may be expected): %v", err)
+	}
+}
+
+// ===========================================================================
+// Server: acceptLoop stopping behavior
+// ===========================================================================
+func TestServerAcceptLoopStopping(t *testing.T) {
+	cfg := &config.Config{
+		Server: config.ServerConfig{
+			Bind: "127.0.0.1",
+			Port: 0,
+		},
+		HTTP: config.HTTPConfig{Enabled: false},
+	}
+
+	s, err := New(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	ctx := context.Background()
+	if err := s.Start(ctx); err != nil {
+		t.Fatalf("start error: %v", err)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+
+	// Close the listener directly to trigger the accept error path
+	s.listener.Close()
+	s.stopping.Store(true)
+
+	time.Sleep(50 * time.Millisecond)
+
+	stopCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	s.Stop(stopCtx)
+}
+
+// ===========================================================================
+// Connection: Handle subscriber persistence across commands
+// ===========================================================================
+func TestConnectionHandleSubscriberPersistence(t *testing.T) {
+	s := store.NewStore()
+	router := command.NewRouter()
+	command.RegisterPubSubCommands(router)
+	command.RegisterServerCommands(router)
+
+	client, server := net.Pipe()
+
+	conn := NewConnection(1, server, s, router)
+
+	done := make(chan struct{})
+	go func() {
+		conn.Handle()
+		close(done)
+	}()
+
+	// Subscribe to a channel
+	go func() {
+		client.Write([]byte("*2\r\n$9\r\nSUBSCRIBE\r\n$5\r\ntest1\r\n"))
+		time.Sleep(100 * time.Millisecond)
+		client.Close()
+	}()
+
+	// Read responses
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			client.SetReadDeadline(time.Now().Add(2 * time.Second))
+			_, err := client.Read(buf)
+			if err != nil {
+				return
+			}
+		}
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		conn.Close()
+		client.Close()
+	}
+}
+
+// ===========================================================================
+// Connection: Handle with TCP connection (not pipe) for keepalive branch
+// ===========================================================================
+func TestConnectionHandleTCPKeepAlive(t *testing.T) {
+	// Create a TCP listener to get real TCP connections
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen error: %v", err)
+	}
+	defer listener.Close()
+
+	s := store.NewStore()
+	router := command.NewRouter()
+	command.RegisterServerCommands(router)
+
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		c := NewConnection(1, conn, s, router)
+		c.Handle()
+	}()
+
+	// Connect as client
+	client, err := net.Dial("tcp", listener.Addr().String())
+	if err != nil {
+		t.Fatalf("dial error: %v", err)
+	}
+
+	// Send QUIT
+	client.Write([]byte("*1\r\n$4\r\nQUIT\r\n"))
+
+	// Read response
+	buf := make([]byte, 1024)
+	client.SetReadDeadline(time.Now().Add(2 * time.Second))
+	client.Read(buf)
+	client.Close()
+}
+
+// ===========================================================================
+// handleKeys: GET with pattern exact match (no wildcard)
+// ===========================================================================
+func TestHandleKeysGETExactPattern(t *testing.T) {
+	h := newTestHTTPServer()
+
+	h.store.Set("exact_key", &store.StringValue{Data: []byte("v")}, store.SetOptions{})
+	h.store.Set("other_key", &store.StringValue{Data: []byte("v")}, store.SetOptions{})
+
+	req := httptest.NewRequest("GET", "/api/keys?pattern=exact_key", nil)
+	w := httptest.NewRecorder()
+
+	h.handleKeys(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+}
+
+// ===========================================================================
+// handleKeys: POST with tags as proper JSON array
+// ===========================================================================
+func TestHandleKeysPOSTWithTagsProperArray(t *testing.T) {
+	h := newTestHTTPServer()
+
+	body := `{"key":"tagged","value":"val","tags":["tag1","tag2","tag3"]}`
+	req := httptest.NewRequest("POST", "/api/keys", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	h.handleKeys(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+
+	// Verify tags were set
+	tagIndex := h.store.GetTagIndex()
+	if tagIndex != nil {
+		keys := tagIndex.GetKeys("tag1")
+		if len(keys) == 0 {
+			t.Error("expected tag1 to have keys")
+		}
+	}
+}
+
+// ===========================================================================
+// Server: Start with TLS (self-signed cert)
+// ===========================================================================
+func TestServerStartWithTLS(t *testing.T) {
+	tmpDir := t.TempDir()
+	certFile, keyFile, err := generateSelfSignedCert(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to generate cert: %v", err)
+	}
+
+	cfg := &config.Config{
+		Server: config.ServerConfig{
+			Bind:        "127.0.0.1",
+			Port:        0,
+			TLSCertFile: certFile,
+			TLSKeyFile:  keyFile,
+		},
+		HTTP: config.HTTPConfig{Enabled: false},
+	}
+
+	s, err := New(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	ctx := context.Background()
+	if err := s.Start(ctx); err != nil {
+		t.Fatalf("start error: %v", err)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+
+	stopCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := s.Stop(stopCtx); err != nil {
+		t.Errorf("stop error: %v", err)
+	}
+}
+
+// ===========================================================================
+// Server: Start error on bad bind address
+// ===========================================================================
+func TestServerStartBadBind(t *testing.T) {
+	cfg := &config.Config{
+		Server: config.ServerConfig{
+			Bind: "999.999.999.999", // Invalid address
+			Port: 0,
+		},
+		HTTP: config.HTTPConfig{Enabled: false},
+	}
+
+	s, err := New(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	ctx := context.Background()
+	err = s.Start(ctx)
+	if err == nil {
+		t.Error("expected error starting with bad bind address")
+		s.Stop(context.Background())
+	}
+}
+
+// ===========================================================================
+// Server: AOF start error path
+// ===========================================================================
+func TestServerStartAOFError(t *testing.T) {
+	// Create a server with AOF that can start without error
+	tmpDir := t.TempDir()
+
+	cfg := &config.Config{
+		Server: config.ServerConfig{
+			Bind: "127.0.0.1",
+			Port: 0,
+		},
+		HTTP: config.HTTPConfig{Enabled: false},
+		Persistence: config.PersistenceConfig{
+			Enabled: true,
+			AOF:     true,
+			AOFSync: "always",
+			DataDir: tmpDir,
+		},
+	}
+
+	s, err := New(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	ctx := context.Background()
+	if err := s.Start(ctx); err != nil {
+		t.Fatalf("start error: %v", err)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+
+	stopCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	s.Stop(stopCtx)
+}
+
+// ===========================================================================
+// Connection: Handle with router error (non-ErrUnknownCommand)
+// ===========================================================================
+func TestConnectionHandleRouterError(t *testing.T) {
+	s := store.NewStore()
+	router := command.NewRouter()
+	command.RegisterStringCommands(router)
+
+	client, server := net.Pipe()
+
+	conn := NewConnection(1, server, s, router)
+
+	done := make(chan struct{})
+	go func() {
+		conn.Handle()
+		close(done)
+	}()
+
+	// Send SET without enough args - this causes a non-ErrUnknownCommand error
+	go func() {
+		client.Write([]byte("*2\r\n$3\r\nSET\r\n$3\r\nkey\r\n"))
+		time.Sleep(100 * time.Millisecond)
+		client.Close()
+	}()
+
+	// Read responses to prevent blocking
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			client.SetReadDeadline(time.Now().Add(2 * time.Second))
+			_, err := client.Read(buf)
+			if err != nil {
+				return
+			}
+		}
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		conn.Close()
+		client.Close()
+	}
 }

@@ -40,6 +40,9 @@ A high-performance, Redis-compatible in-memory database written in Go with **1,6
 - [Performance](#performance)
 - [Testing](#testing)
 - [Docker](#docker)
+- [Security](#security)
+- [Production Deployment](#production-deployment)
+- [Monitoring & Observability](#monitoring--observability)
 - [CI/CD & Releases](#cicd--releases)
 - [Contributing](#contributing)
 - [License](#license)
@@ -428,7 +431,7 @@ services:
     environment:
       - CACHESTORM_MAX_MEMORY=4gb
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/api/health"]
       interval: 30s
       timeout: 3s
       retries: 3
@@ -436,6 +439,176 @@ services:
 volumes:
   cachestorm-data:
 ```
+
+## Security
+
+For full details, see [SECURITY.md](./SECURITY.md).
+
+CacheStorm includes built-in security features for production deployments:
+
+- **TLS 1.2+** with hardened cipher suites (AEAD-only: AES-GCM, ChaCha20-Poly1305) and secure curve preferences
+- **Authentication** via `requirepass` for RESP protocol and password-protected HTTP API with constant-time comparison
+- **ACL System** with per-user command, key, and channel permissions
+- **HTTP API Hardening** including command blacklists (SHUTDOWN, FLUSHALL, DEBUG, CONFIG blocked), per-IP rate limiting, and request body size limits
+- **Input Validation** with key name validation, value size limits, integer overflow protection, and RESP protocol bounds
+
+To report a vulnerability, use [GitHub Security Advisories](https://github.com/CacheStorm/CacheStorm/security/advisories/new) -- do not open public issues for security concerns.
+
+## Production Deployment
+
+### Configuration
+
+Copy the production configuration template and adjust values for your environment:
+
+```bash
+cp config/cachestorm.production.yaml config/cachestorm.yaml
+```
+
+See [`config/cachestorm.production.yaml`](./config/cachestorm.production.yaml) for the full reference with recommended production settings including authentication, persistence, memory limits, and logging.
+
+Key production settings to configure:
+- `server.requirepass` -- set a strong password for RESP authentication
+- `http.password` -- set a strong password for the HTTP API
+- `server.tls_cert_file` / `server.tls_key_file` -- enable TLS encryption
+- `memory.max_memory` -- set an appropriate memory limit (e.g., `"1gb"`, `"4gb"`)
+- `persistence.enabled: true` -- enable AOF persistence
+- `logging.format: "json"` -- use structured JSON logging for log aggregation
+
+### Docker Deployment
+
+The project includes a production-ready [`docker-compose.yml`](./docker-compose.yml) with resource limits, health checks, and optional monitoring services.
+
+```bash
+# Basic production deployment
+docker-compose up -d
+
+# With Prometheus + Grafana monitoring
+docker-compose --profile monitoring up -d
+
+# With Redis Insight GUI
+docker-compose --profile gui up -d
+
+# Full stack (all services)
+docker-compose --profile gui --profile monitoring up -d
+```
+
+The Docker Compose configuration includes:
+- Memory and CPU resource limits (2GB / 2 CPUs by default)
+- Automatic restarts (`unless-stopped`)
+- Health checks against `/api/health`
+- Admin API (port 8080) bound to localhost only
+- Read-only config volume mount
+
+### Health Check Endpoints
+
+CacheStorm exposes two unauthenticated health endpoints on the HTTP API (port 8080):
+
+| Endpoint | Purpose | Description |
+|----------|---------|-------------|
+| `GET /api/health` | Liveness probe | Returns `200 OK` if the server process is running |
+| `GET /api/ready` | Readiness probe | Returns `200 OK` when the server is ready to accept traffic |
+
+Use these for Docker health checks, Kubernetes probes, or load balancer health checks:
+
+```yaml
+# Kubernetes example
+livenessProbe:
+  httpGet:
+    path: /api/health
+    port: 8080
+  initialDelaySeconds: 5
+  periodSeconds: 30
+readinessProbe:
+  httpGet:
+    path: /api/ready
+    port: 8080
+  initialDelaySeconds: 5
+  periodSeconds: 10
+```
+
+### Monitoring Setup (Prometheus + Grafana)
+
+The `docker-compose.yml` includes optional Prometheus and Grafana services under the `monitoring` profile:
+
+```bash
+docker-compose --profile monitoring up -d
+```
+
+This starts:
+- **Prometheus** on port `9090` -- scrapes CacheStorm metrics automatically via `monitoring/prometheus.yml`
+- **Grafana** on port `3000` -- pre-configured with dashboards from `monitoring/grafana/dashboards/`
+
+Default Grafana credentials: `admin` / `admin` (change immediately in production).
+
+## Monitoring & Observability
+
+### Prometheus Metrics
+
+CacheStorm exposes a Prometheus-compatible metrics endpoint:
+
+```
+GET http://localhost:8080/api/metrics
+```
+
+This endpoint requires authentication (session token or HTTP API password). It provides metrics including command throughput, memory usage, connection counts, and latency histograms.
+
+Example Prometheus scrape configuration:
+
+```yaml
+scrape_configs:
+  - job_name: 'cachestorm'
+    scrape_interval: 15s
+    static_configs:
+      - targets: ['cachestorm:8080']
+    metrics_path: /api/metrics
+```
+
+### pprof Debug Endpoints
+
+Go pprof profiling endpoints are available for runtime diagnostics (authentication required):
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /debug/pprof/` | Index of available profiles |
+| `GET /debug/pprof/cmdline` | Command line arguments |
+| `GET /debug/pprof/profile` | CPU profile (30s default) |
+| `GET /debug/pprof/symbol` | Symbol lookup |
+| `GET /debug/pprof/trace` | Execution trace |
+
+Usage example:
+
+```bash
+# Collect a 30-second CPU profile
+go tool pprof http://localhost:8080/debug/pprof/profile
+
+# View heap profile
+go tool pprof http://localhost:8080/debug/pprof/heap
+```
+
+### Structured JSON Logging
+
+Set `logging.format: "json"` in the configuration to enable structured JSON logs suitable for log aggregation systems (ELK, Loki, Datadog, etc.):
+
+```yaml
+logging:
+  level: "info"
+  format: "json"
+  output: "stderr"
+```
+
+### Slow Log
+
+Enable the slow log to identify commands exceeding a latency threshold:
+
+```yaml
+plugins:
+  slowlog:
+    enabled: true
+    threshold: "10ms"
+    max_entries: 1000
+```
+
+Query the slow log via the `SLOWLOG GET` command from any Redis client.
 
 ## CI/CD & Releases
 

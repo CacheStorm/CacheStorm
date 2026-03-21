@@ -231,7 +231,7 @@ func cmdEXAMPLE(ctx *Context) error {
 
 ## Testing
 
-CacheStorm maintains **89.1% average coverage** across 18 internal packages with **100% test success rate**.
+CacheStorm maintains **~96% average coverage** across 18 internal packages with **100% test success rate**.
 
 ### Writing Unit Tests
 
@@ -484,10 +484,10 @@ Example: `v0.1.27`
 
 | Range | Count | Packages |
 |-------|-------|----------|
-| 100% | 1 | logger |
-| 95-99% | 6 | graph, buffer, search, module, plugin, config |
-| 85-94% | 5 | batch, store, acl, cluster, resp |
-| 70-84% | 6 | server, pool, replication, command, persistence, sentinel |
+| 100% | 3 | acl, config, logger |
+| 95-99% | 10 | replication, store, graph, buffer, cluster, batch, search, module, plugin, sentinel |
+| 90-94% | 3 | persistence, server, resp |
+| 84-86% | 2 | pool, command |
 
 ### When Writing Tests
 
