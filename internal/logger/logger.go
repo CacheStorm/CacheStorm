@@ -39,7 +39,7 @@ func Init(level, format, output string) {
 		writer = os.Stdout
 	}
 
-	if strings.ToLower(format) == "console" {
+	if strings.EqualFold(format, "console") {
 		writer = zerolog.ConsoleWriter{
 			Out:        writer,
 			TimeFormat: time.RFC3339,

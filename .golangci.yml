@@ -93,6 +93,7 @@ issues:
     - path: internal/resp/
       linters:
         - gocritic
+        - errcheck
 
     - path: examples/
       linters:
