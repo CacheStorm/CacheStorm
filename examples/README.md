@@ -99,14 +99,14 @@ Make sure CacheStorm is running:
 ```bash
 docker ps | grep cachestorm
 # or
-redis-cli -p 6379 PING
+cachestorm-cli -p 6380 PING
 ```
 
 ### Port Already in Use
 Change the port mapping in docker-compose:
 ```yaml
 ports:
-  - "6380:6379"  # Use 6380 on host
+  - "6380:6380"  # Use 6380 on host
 ```
 
 Then update examples to use port 6380.

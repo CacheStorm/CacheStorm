@@ -29,7 +29,7 @@ import { CacheStormClient } from '@cachestorm/client';
 
 const client = new CacheStormClient({
   host: 'localhost',
-  port: 6379,
+  port: 6380,
 });
 
 await client.connect();
@@ -53,7 +53,7 @@ await client.quit();
 ```typescript
 const client = new CacheStormClient({
   host: 'localhost',
-  port: 6379,
+  port: 6380,
   pool: {
     min: 5,
     max: 20,

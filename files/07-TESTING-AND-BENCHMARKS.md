@@ -406,15 +406,15 @@ echo "=== CacheStorm Benchmark ==="
 CS_PID=$!
 sleep 1
 
-redis-benchmark -p 6380 -t set,get -n 100000 -c 50 -q
-redis-benchmark -p 6380 -t set,get -n 100000 -c 50 -d 1024 -q  # 1KB values
+cachestorm-benchmark -p 6380 -t set,get -n 100000 -c 50 -q
+cachestorm-benchmark -p 6380 -t set,get -n 100000 -c 50 -d 1024 -q  # 1KB values
 
 kill $CS_PID
 
 echo ""
 echo "=== Redis Benchmark (for comparison) ==="
-redis-benchmark -p 6379 -t set,get -n 100000 -c 50 -q
-redis-benchmark -p 6379 -t set,get -n 100000 -c 50 -d 1024 -q
+cachestorm-benchmark -p 6380 -t set,get -n 100000 -c 50 -q
+cachestorm-benchmark -p 6380 -t set,get -n 100000 -c 50 -d 1024 -q
 
 echo ""
 echo "=== CacheStorm Tag Benchmark (Redis has no equivalent) ==="
@@ -486,7 +486,7 @@ jobs:
         run: |
           docker run -d --name cs-test -p 6380:6380 cachestorm:test
           sleep 2
-          redis-cli -p 6380 PING | grep PONG
+          cachestorm-cli -p 6380 PING | grep PONG
           docker stop cs-test
 ```
 

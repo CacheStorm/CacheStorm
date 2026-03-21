@@ -68,7 +68,7 @@ go build -ldflags="-s -w" -o cachestorm ./cmd/cachestorm
 ./cachestorm
 
 # Run with custom config
-./cachestorm --config config.yaml --port 6379
+./cachestorm --config config.yaml --port 6380
 
 # Run with debug logging
 ./cachestorm --log-level debug
@@ -297,7 +297,7 @@ func TestIntegrationFeature(t *testing.T) {
     }
 
     // Check if server is running
-    conn, err := net.Dial("tcp", "localhost:6379")
+    conn, err := net.Dial("tcp", "localhost:6380")
     if err != nil {
         t.Skipf("Server not running: %v", err)
     }

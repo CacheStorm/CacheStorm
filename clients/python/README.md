@@ -28,7 +28,7 @@ conda install -c conda-forge cachestorm
 from cachestorm import CacheStormClient
 
 # Create client
-client = CacheStormClient(host='localhost', port=6379)
+client = CacheStormClient(host='localhost', port=6380)
 
 # Connect
 client.connect()
@@ -52,7 +52,7 @@ import asyncio
 from cachestorm import AsyncCacheStormClient
 
 async def main():
-    client = AsyncCacheStormClient(host='localhost', port=6379)
+    client = AsyncCacheStormClient(host='localhost', port=6380)
     await client.connect()
 
     await client.set('key', 'value')
@@ -73,7 +73,7 @@ from cachestorm import ConnectionPool
 
 pool = ConnectionPool(
     host='localhost',
-    port=6379,
+    port=6380,
     max_connections=20,
     min_connections=5,
 )

@@ -33,7 +33,7 @@ import (
 
 func main() {
     // Create client
-    client, err := cachestorm.NewClient("localhost:6379")
+    client, err := cachestorm.NewClient("localhost:6380")
     if err != nil {
         log.Fatal(err)
     }
@@ -60,7 +60,7 @@ func main() {
 ### Connection Pool
 
 ```go
-client, err := cachestorm.NewClient("localhost:6379",
+client, err := cachestorm.NewClient("localhost:6380",
     cachestorm.WithPoolSize(10),
     cachestorm.WithMinIdleConns(5),
     cachestorm.WithMaxRetries(3),
