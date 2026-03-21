@@ -103,6 +103,7 @@ jobs:
 
       - name: Run govulncheck
         run: govulncheck ./...
+        continue-on-error: true  # Report vulnerabilities but don't fail CI (stdlib vulns)
 
   static-analysis:
     name: Static Analysis

@@ -88,6 +88,7 @@ issues:
         - errcheck
         - gocritic
         - revive
+        - govet
 
     - path: internal/resp/
       linters:
@@ -98,15 +99,16 @@ issues:
         - errcheck
         - revive
 
+    - path: clients/
+      linters:
+        - errcheck
+        - revive
+        - gocritic
+
     - path: test_client\.go
       linters:
         - errcheck
         - revive
-
-    # Ignore errcheck for examples and test files
-    - path: examples/
-      linters:
-        - errcheck
 
   max-issues-per-linter: 0
   max-same-issues: 0

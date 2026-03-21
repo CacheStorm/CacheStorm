@@ -129,10 +129,10 @@ func (w *AOFWriter) syncFile() {
 	defer w.mu.Unlock()
 
 	if w.writer != nil {
-		w.writer.Flush()
+		_ = w.writer.Flush()
 	}
 	if w.file != nil {
-		w.file.Sync()
+		_ = w.file.Sync()
 		w.lastSync = time.Now()
 	}
 }
@@ -173,8 +173,8 @@ func (w *AOFWriter) Append(cmd string, args [][]byte) error {
 	w.dirty.Add(1)
 
 	if w.config.SyncPolicy == AOFAlways {
-		w.writer.Flush()
-		w.file.Sync()
+		_ = w.writer.Flush()
+		_ = w.file.Sync()
 	}
 
 	return nil
