@@ -1,9 +1,10 @@
 <div align="center">
-  <img src="https://avatars.githubusercontent.com/u/262622049?s=400&u=a2e56c80726cb8a3ae6fc8f8622be5173b7b2848&v=4" alt="CacheStorm Logo" width="180" height="180">
 
-  # CacheStorm
+## CacheStorm
 
-  **High-Performance In-Memory Data Store**
+**High-Performance In-Memory Data Store**
+
+  <img src="assets/cachestorm_.jpeg" alt="CacheStorm" width="100%">
 
   [![Go Version](https://img.shields.io/badge/Go-1.22%2B-00ADD8?style=flat&logo=go)](https://golang.org)
   [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
