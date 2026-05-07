@@ -9,7 +9,7 @@
   [![Go Version](https://img.shields.io/badge/Go-1.22%2B-00ADD8?style=flat&logo=go)](https://golang.org)
   [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
   [![Commands](https://img.shields.io/badge/Commands-1606+-green)](./docs/commands.md)
-  [![Coverage](https://img.shields.io/badge/Coverage-96%25-brightgreen)](COVERAGE_REPORT.md)
+  [![Coverage](https://img.shields.io/badge/Coverage-93%25-brightgreen)](COVERAGE_REPORT.md)
   [![RESP Compatible](https://img.shields.io/badge/RESP-Compatible-blue)](https://cachestorm.com/docs/commands)
 
   [![CI](https://github.com/CacheStorm/CacheStorm/actions/workflows/ci.yml/badge.svg)](https://github.com/CacheStorm/CacheStorm/actions/workflows/ci.yml)
@@ -23,7 +23,7 @@
 
 A high-performance in-memory data store written in Go. **1,600+ commands**, 256-shard lock-free architecture, built-in HTTP API, enterprise security, and full observability — in a single binary.
 
-**Test Coverage: ~96%** with 100% test success rate across all 18 internal packages. Works with any RESP-compatible client.
+**Test Coverage: 90-99%** across 18 internal packages (core store: 99.2%). 100% test success rate. Works with any RESP-compatible client.
 
 🌐 **[Website](https://cachestorm.com)** | 📚 **[Documentation](https://cachestorm.com/docs)** | 📖 **[Commands](https://cachestorm.com/docs/commands)** | 📊 **[Coverage Report](./COVERAGE_REPORT.md)** | 💬 **[Discussions](https://github.com/CacheStorm/CacheStorm/discussions)**
 
@@ -329,10 +329,14 @@ Benchmarks on AMD Ryzen 9 9950X3D, 64GB RAM, Windows 11 (in-memory, no network):
 | GET (parallel, 32 cores) | 106M | 9.4 ns | 0 |
 | SET (sequential) | 1.3M | 796 ns | 3 |
 | SET (parallel, 32 cores) | 2.2M | 449 ns | 3 |
-| RESP ReadCommand | 861K | 1,531 ns | 17 |
-| RESP WriteBulkString (1KB) | 1M | 1,137 ns | 2 |
-| Tag Invalidate (10K keys) | 597 | 1.7 ms | 19,982 |
-| Tag Count | 52M | 23 ns | 0 |
+| RESP ReadCommand | 672K | 1,488 ns | - |
+| RESP WriteBulkString (1KB) | 1.2M | 833 ns | - |
+| Store Delete (100 keys) | 968K | 1,034 ns | - |
+| Store Delete Batch (100 keys) | 82K | 12,162 ns | - |
+| Store Delete (10K keys) | 9.1K | 109,133 ns | - |
+| Store Delete Batch (10K keys) | 1.4K | 717,362 ns | - |
+| Tag Invalidate (10K keys) | 510 | 1.96 ms | - |
+| Tag Count | 73M | 13.7 ns | 0 |
 
 E2E benchmarks (full TCP round-trip):
 
@@ -349,7 +353,7 @@ E2E benchmarks (full TCP round-trip):
 CacheStorm has comprehensive test coverage:
 
 - **100% Test Success Rate**: All 18 internal packages pass
-- **89.1% Average Coverage**: Industry-leading coverage
+- **90-99% Coverage**: Core packages 95-99%, range 86-100%
 - **Integration Tests**: Full integration test suite
 - **Benchmarks**: Performance benchmarks included
 
