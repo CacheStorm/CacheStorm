@@ -38,6 +38,50 @@ func TestStoreDelete(t *testing.T) {
 	}
 }
 
+func TestStoreDeleteBatch(t *testing.T) {
+	s := NewStore()
+	keys := make([]string, 100)
+
+	// Setup keys
+	for i := 0; i < 100; i++ {
+		key := "key:" + string(rune('a'+i%26)) + string(rune('0'+i/26))
+		keys[i] = key
+		s.Set(key, &StringValue{Data: []byte("value")}, SetOptions{})
+	}
+
+	// Verify all keys exist
+	for _, key := range keys {
+		if !s.Exists(key) {
+			t.Errorf("key %s should exist", key)
+		}
+	}
+
+	// Delete batch
+	deleted := s.DeleteBatch(keys)
+	if deleted != 100 {
+		t.Errorf("expected 100 deleted, got %d", deleted)
+	}
+
+	// Verify all keys deleted
+	for _, key := range keys {
+		if s.Exists(key) {
+			t.Errorf("key %s should not exist after batch delete", key)
+		}
+	}
+
+	// Delete empty batch
+	deleted = s.DeleteBatch([]string{})
+	if deleted != 0 {
+		t.Errorf("expected 0 for empty batch, got %d", deleted)
+	}
+
+	// Delete already-deleted keys
+	deleted = s.DeleteBatch(keys)
+	if deleted != 0 {
+		t.Errorf("expected 0 when deleting already-deleted keys, got %d", deleted)
+	}
+}
+
 func TestStoreExists(t *testing.T) {
 	s := NewStore()
 
