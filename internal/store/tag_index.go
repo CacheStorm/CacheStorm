@@ -43,6 +43,14 @@ func (ti *TagIndex) shardIndex(tag string) uint32 {
 }
 
 func (ti *TagIndex) AddTags(key string, tags []string) {
+	ti.AddTagsBatch([]string{key}, tags)
+}
+
+func (ti *TagIndex) AddTagsBatch(keys []string, tags []string) {
+	if len(keys) == 0 || len(tags) == 0 {
+		return
+	}
+
 	for _, tag := range tags {
 		idx := ti.shardIndex(tag)
 		shard := ti.shards[idx]
@@ -50,19 +58,30 @@ func (ti *TagIndex) AddTags(key string, tags []string) {
 		if shard.index[tag] == nil {
 			shard.index[tag] = make(map[string]struct{})
 		}
-		shard.index[tag][key] = struct{}{}
+		for _, key := range keys {
+			shard.index[tag][key] = struct{}{}
+		}
 		shard.mu.Unlock()
 	}
 }
 
 func (ti *TagIndex) RemoveTags(key string, tags []string) {
+	ti.RemoveTagsBatch([]string{key}, tags)
+}
+
+func (ti *TagIndex) RemoveTagsBatch(keys []string, tags []string) {
+	if len(keys) == 0 || len(tags) == 0 {
+		return
+	}
 	for _, tag := range tags {
 		idx := ti.shardIndex(tag)
 		shard := ti.shards[idx]
 		shard.mu.Lock()
-		if keys, exists := shard.index[tag]; exists {
-			delete(keys, key)
-			if len(keys) == 0 {
+		if keySet, exists := shard.index[tag]; exists {
+			for _, k := range keys {
+				delete(keySet, k)
+			}
+			if len(keySet) == 0 {
 				delete(shard.index, tag)
 			}
 		}
@@ -75,12 +94,18 @@ func (ti *TagIndex) RemoveKey(key string, tags []string) {
 		ti.RemoveTags(key, tags)
 		return
 	}
+	ti.RemoveTagsBatchAllShards([]string{key})
+}
+
+func (ti *TagIndex) RemoveTagsBatchAllShards(keys []string) {
 	for i := 0; i < TagShards; i++ {
 		shard := ti.shards[i]
 		shard.mu.Lock()
-		for tag, keys := range shard.index {
-			delete(keys, key)
-			if len(keys) == 0 {
+		for tag, keySet := range shard.index {
+			for _, key := range keys {
+				delete(keySet, key)
+			}
+			if len(keySet) == 0 {
 				delete(shard.index, tag)
 			}
 		}

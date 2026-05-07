@@ -242,8 +242,49 @@ func (s *Store) Delete(key string) bool {
 	_, deleted := shard.Delete(key)
 	if deleted {
 		s.IncrementVersion(key)
-		s.DeleteVersion(key) // Clean up version to prevent memory leak
+		s.DeleteVersion(key)
 	}
+	return deleted
+}
+
+func (s *Store) DeleteBatch(keys []string) int {
+	if len(keys) == 0 {
+		return 0
+	}
+
+	type shardOp struct {
+		shard *Shard
+		keys  []string
+	}
+
+	shardOps := make(map[*Shard][]string)
+	for _, key := range keys {
+		idx := s.shardIndex(key)
+		shard := s.shards[idx]
+		shardOps[shard] = append(shardOps[shard], key)
+	}
+
+	deleted := 0
+	s.versionMu.Lock()
+	for shard, shardKeys := range shardOps {
+		shard.mu.Lock()
+		for _, key := range shardKeys {
+			entry, exists := shard.data[key]
+			if !exists {
+				continue
+			}
+			keyOverhead := int64(len(key)) + 16
+			mem := entry.MemoryUsage() + keyOverhead
+			shard.memUsage -= mem
+			shard.keyCount--
+			delete(shard.data, key)
+			delete(s.versions, key)
+			deleted++
+		}
+		shard.mu.Unlock()
+	}
+	s.versionMu.Unlock()
+
 	return deleted
 }
 

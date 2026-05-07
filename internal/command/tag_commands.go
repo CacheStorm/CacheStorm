@@ -141,18 +141,20 @@ func cmdINVALIDATE(ctx *Context) error {
 		keysToDelete = ctx.Store.GetTagIndex().Invalidate(tag)
 	}
 
-	deleted := 0
-	uniqueKeys := make(map[string]struct{})
-	for _, key := range keysToDelete {
-		uniqueKeys[key] = struct{}{}
+	if len(keysToDelete) == 0 {
+		return ctx.WriteInteger(0)
 	}
 
-	for key := range uniqueKeys {
-		if ctx.Store.Delete(key) {
-			deleted++
+	uniqueKeys := make([]string, 0, len(keysToDelete))
+	seen := make(map[string]struct{})
+	for _, key := range keysToDelete {
+		if _, exists := seen[key]; !exists {
+			seen[key] = struct{}{}
+			uniqueKeys = append(uniqueKeys, key)
 		}
 	}
 
+	deleted := ctx.Store.DeleteBatch(uniqueKeys)
 	return ctx.WriteInteger(int64(deleted))
 }
 
