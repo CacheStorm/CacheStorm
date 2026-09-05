@@ -22,10 +22,10 @@ import (
 
 // pprof wrapper functions to match http.HandlerFunc signature
 func pprofIndex(w http.ResponseWriter, r *http.Request)   { pprof.Index(w, r) }
-func pprofCmdline(w http.ResponseWriter, r *http.Request)  { pprof.Cmdline(w, r) }
-func pprofProfile(w http.ResponseWriter, r *http.Request)  { pprof.Profile(w, r) }
-func pprofSymbol(w http.ResponseWriter, r *http.Request)   { pprof.Symbol(w, r) }
-func pprofTrace(w http.ResponseWriter, r *http.Request)    { pprof.Trace(w, r) }
+func pprofCmdline(w http.ResponseWriter, r *http.Request) { pprof.Cmdline(w, r) }
+func pprofProfile(w http.ResponseWriter, r *http.Request) { pprof.Profile(w, r) }
+func pprofSymbol(w http.ResponseWriter, r *http.Request)  { pprof.Symbol(w, r) }
+func pprofTrace(w http.ResponseWriter, r *http.Request)   { pprof.Trace(w, r) }
 
 type HTTPConfig struct {
 	Enabled    bool   `yaml:"enabled" default:"true"`
@@ -35,18 +35,17 @@ type HTTPConfig struct {
 }
 
 type HTTPServer struct {
-	ctx          context.Context
-	cancel       context.CancelFunc
-	store        *store.Store
-	router       *command.Router
-	server       *http.Server
-	started      time.Time
-	config       *HTTPConfig
-	metricsCache *metricsCache
-	connCount    func() int64 // callback to get active connection count
-	sessions     *sessionStore
-	rateLimiter  *rateLimiter
-	ready        atomic.Bool
+	ctx         context.Context
+	cancel      context.CancelFunc
+	store       *store.Store
+	router      *command.Router
+	server      *http.Server
+	started     time.Time
+	config      *HTTPConfig
+	connCount   func() int64 // callback to get active connection count
+	sessions    *sessionStore
+	rateLimiter *rateLimiter
+	ready       atomic.Bool
 }
 
 type sessionStore struct {
@@ -156,25 +155,17 @@ func (rl *rateLimiter) Cleanup() {
 	}
 }
 
-type metricsCache struct {
-	keys      int64
-	mem       int64
-	cachedAt  time.Time
-	mu        sync.RWMutex
-}
-
 func NewHTTPServer(s *store.Store, router *command.Router, cfg *HTTPConfig) *HTTPServer {
 	ctx, cancel := context.WithCancel(context.Background())
 	h := &HTTPServer{
-		ctx:          ctx,
-		cancel:       cancel,
-		store:        s,
-		router:       router,
-		started:      time.Now(),
-		config:       cfg,
-		metricsCache: &metricsCache{},
-		sessions:     newSessionStore(),
-		rateLimiter:  newRateLimiter(100, time.Minute), // 100 req/min per IP
+		ctx:         ctx,
+		cancel:      cancel,
+		store:       s,
+		router:      router,
+		started:     time.Now(),
+		config:      cfg,
+		sessions:    newSessionStore(),
+		rateLimiter: newRateLimiter(100, time.Minute), // 100 req/min per IP
 	}
 
 	mux := http.NewServeMux()
@@ -651,7 +642,10 @@ func (h *HTTPServer) handleNamespaces(w http.ResponseWriter, r *http.Request) {
 		for _, name := range names {
 			ns := nsMgr.Get(name)
 			if ns != nil {
-				stats, _ := nsMgr.Stats(name)
+				stats, err := nsMgr.Stats(name)
+				if err != nil {
+					continue
+				}
 				nsData = append(nsData, stats)
 			}
 		}
@@ -764,23 +758,23 @@ func (h *HTTPServer) handleClusterJoin(w http.ResponseWriter, r *http.Request) {
 
 // httpDangerousCommands are blocked from execution via the HTTP API
 var httpDangerousCommands = map[string]bool{
-	"SHUTDOWN":       true,
-	"DEBUG":          true,
-	"DEBUGSEGFAULT":  true,
-	"FLUSHALL":       true,
-	"FLUSHDB":        true,
-	"REPLICAOF":      true,
-	"SLAVEOF":        true,
-	"CLUSTER":        true,
-	"CONFIG":         true,
-	"BGREWRITEAOF":   true,
-	"BGSAVE":         true,
-	"SAVE":           true,
-	"MONITOR":        true,
-	"SYNC":           true,
-	"PSYNC":          true,
-	"ACL":            true,
-	"MODULE":         true,
+	"SHUTDOWN":      true,
+	"DEBUG":         true,
+	"DEBUGSEGFAULT": true,
+	"FLUSHALL":      true,
+	"FLUSHDB":       true,
+	"REPLICAOF":     true,
+	"SLAVEOF":       true,
+	"CLUSTER":       true,
+	"CONFIG":        true,
+	"BGREWRITEAOF":  true,
+	"BGSAVE":        true,
+	"SAVE":          true,
+	"MONITOR":       true,
+	"SYNC":          true,
+	"PSYNC":         true,
+	"ACL":           true,
+	"MODULE":        true,
 }
 
 func (h *HTTPServer) handleExecute(w http.ResponseWriter, r *http.Request) {

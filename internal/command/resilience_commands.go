@@ -997,9 +997,8 @@ func cmdHEAPGC(ctx *Context) error {
 }
 
 var (
-	memoryAllocs = make(map[string]int64)
-	memoryStats  = make(map[string]*MemoryStat)
-	memoryMu     sync.RWMutex
+	memoryStats = make(map[string]*MemoryStat)
+	memoryMu    sync.RWMutex
 )
 
 type MemoryStat struct {
@@ -1717,7 +1716,7 @@ func cmdPROMISEAWAIT(ctx *Context) error {
 	if p.Status == "resolved" {
 		return ctx.WriteBulkString(p.Value)
 	}
-	return ctx.WriteError(fmt.Errorf(p.Error))
+	return ctx.WriteError(errors.New(p.Error))
 }
 
 var (
@@ -1773,7 +1772,7 @@ func cmdFUTUREGET(ctx *Context) error {
 	if f.Status == "completed" {
 		return ctx.WriteBulkString(f.Value)
 	}
-	return ctx.WriteError(fmt.Errorf(f.Error))
+	return ctx.WriteError(errors.New(f.Error))
 }
 
 func cmdFUTURECANCEL(ctx *Context) error {

@@ -336,8 +336,6 @@ func cmdIDDELETE(ctx *Context) error {
 	return ctx.WriteInteger(0)
 }
 
-var snowflakeGen = store.NewSnowflakeIDGenerator(1)
-
 func cmdSNOWFLAKENEXT(ctx *Context) error {
 	nodeID := int64(1)
 	if ctx.ArgCount() >= 1 {

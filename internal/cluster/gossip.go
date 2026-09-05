@@ -254,9 +254,10 @@ func (g *Gossip) updateNodeFromInfo(nodes []NodeInfo) {
 			}
 
 			state := NodeStateOnline
-			if info.State == "failed" {
+			switch info.State {
+			case "failed":
 				state = NodeStateFailed
-			} else if info.State == "joining" {
+			case "joining":
 				state = NodeStateJoining
 			}
 

@@ -1,6 +1,7 @@
 package command
 
 import (
+	"fmt"
 	"math"
 	"sort"
 	"strconv"
@@ -358,7 +359,10 @@ func cmdZRANGE(ctx *Context) error {
 	var entries []store.SortedEntry
 
 	if byScore {
-		minScore, minExclusive, maxScore, maxExclusive := parseScoreRange(startStr, stopStr)
+		minScore, minExclusive, maxScore, maxExclusive, err := parseScoreRange(startStr, stopStr)
+		if err != nil {
+			return ctx.WriteError(err)
+		}
 		entries = zset.GetByScoreRange(minScore, minExclusive, maxScore, maxExclusive, rev)
 		if offset > 0 || count >= 0 {
 			start := offset
@@ -408,29 +412,35 @@ func cmdZRANGE(ctx *Context) error {
 	return ctx.WriteArray(results)
 }
 
-func parseScoreRange(minStr, maxStr string) (min float64, minExclusive bool, max float64, maxExclusive bool) {
+func parseScoreRange(minStr, maxStr string) (min float64, minExclusive bool, max float64, maxExclusive bool, err error) {
 	minExclusive = strings.HasPrefix(minStr, "(")
 	if minExclusive {
 		minStr = minStr[1:]
 	}
-	if minStr == "-inf" {
+	switch minStr {
+	case "-inf":
 		min = math.Inf(-1)
-	} else if minStr == "+inf" || minStr == "inf" {
+	case "+inf", "inf":
 		min = math.Inf(1)
-	} else {
-		min, _ = strconv.ParseFloat(minStr, 64)
+	default:
+		if min, err = strconv.ParseFloat(minStr, 64); err != nil {
+			return min, minExclusive, max, maxExclusive, fmt.Errorf("ERR min or max is not a valid float")
+		}
 	}
 
 	maxExclusive = strings.HasPrefix(maxStr, "(")
 	if maxExclusive {
 		maxStr = maxStr[1:]
 	}
-	if maxStr == "-inf" {
+	switch maxStr {
+	case "-inf":
 		max = math.Inf(-1)
-	} else if maxStr == "+inf" || maxStr == "inf" {
+	case "+inf", "inf":
 		max = math.Inf(1)
-	} else {
-		max, _ = strconv.ParseFloat(maxStr, 64)
+	default:
+		if max, err = strconv.ParseFloat(maxStr, 64); err != nil {
+			return min, minExclusive, max, maxExclusive, fmt.Errorf("ERR min or max is not a valid float")
+		}
 	}
 
 	return
@@ -964,8 +974,7 @@ func cmdZSCAN(ctx *Context) error {
 	result := make([]*resp.Value, 0, (end-start)*2)
 	for i := start; i < end; i++ {
 		entry := members[i]
-		result = append(result, resp.BulkString(entry.Member))
-		result = append(result, resp.BulkString(strconv.FormatFloat(entry.Score, 'f', -1, 64)))
+		result = append(result, resp.BulkString(entry.Member), resp.BulkString(strconv.FormatFloat(entry.Score, 'f', -1, 64)))
 	}
 
 	return ctx.WriteArray([]*resp.Value{
@@ -1004,8 +1013,7 @@ func cmdZPOPMIN(ctx *Context) error {
 
 	result := make([]*resp.Value, 0, len(entries)*2)
 	for _, entry := range entries {
-		result = append(result, resp.BulkString(entry.Member))
-		result = append(result, resp.BulkString(strconv.FormatFloat(entry.Score, 'f', -1, 64)))
+		result = append(result, resp.BulkString(entry.Member), resp.BulkString(strconv.FormatFloat(entry.Score, 'f', -1, 64)))
 		zset.Remove(entry.Member)
 	}
 
@@ -1043,8 +1051,7 @@ func cmdZPOPMAX(ctx *Context) error {
 	result := make([]*resp.Value, 0, len(entries)*2)
 	for i := len(entries) - 1; i >= 0; i-- {
 		entry := entries[i]
-		result = append(result, resp.BulkString(entry.Member))
-		result = append(result, resp.BulkString(strconv.FormatFloat(entry.Score, 'f', -1, 64)))
+		result = append(result, resp.BulkString(entry.Member), resp.BulkString(strconv.FormatFloat(entry.Score, 'f', -1, 64)))
 		zset.Remove(entry.Member)
 	}
 
@@ -1461,10 +1468,7 @@ func cmdZDIFF(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
-	withScores := false
-	if ctx.ArgCount() > 1+numKeys && strings.ToUpper(ctx.ArgString(1+numKeys)) == "WITHSCORES" {
-		withScores = true
-	}
+	withScores := ctx.ArgCount() > 1+numKeys && strings.ToUpper(ctx.ArgString(1+numKeys)) == "WITHSCORES"
 
 	firstZset, err := getSortedSet(ctx, ctx.ArgString(1))
 	if err != nil {
@@ -1754,8 +1758,7 @@ func cmdZMPOP(ctx *Context) error {
 
 		popped := make([]*resp.Value, 0, len(entries)*2)
 		for _, e := range entries {
-			popped = append(popped, resp.BulkString(e.Member))
-			popped = append(popped, resp.BulkString(strconv.FormatFloat(e.Score, 'f', -1, 64)))
+			popped = append(popped, resp.BulkString(e.Member), resp.BulkString(strconv.FormatFloat(e.Score, 'f', -1, 64)))
 			delete(zset.Members, e.Member)
 		}
 
@@ -1979,8 +1982,7 @@ func cmdZREVRANGEBYLEX(ctx *Context) error {
 
 	for i := 3; i < ctx.ArgCount(); i++ {
 		arg := strings.ToUpper(ctx.ArgString(i))
-		switch arg {
-		case "LIMIT":
+		if arg == "LIMIT" {
 			if i+2 >= ctx.ArgCount() {
 				return ctx.WriteError(ErrSyntaxError)
 			}

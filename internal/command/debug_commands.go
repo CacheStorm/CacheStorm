@@ -84,7 +84,7 @@ func cmdDebugObject(ctx *Context) error {
 
 	var sb strings.Builder
 	sb.WriteString("Value at:")
-	sb.WriteString(fmt.Sprintf("%p", entry.Value))
+	fmt.Fprintf(&sb, "%p", entry.Value)
 	sb.WriteString(" refcount:1 ")
 	sb.WriteString("encoding:")
 	sb.WriteString(getEncoding(entry.Value))
@@ -164,12 +164,12 @@ func cmdMEMORY(ctx *Context) error {
 		memUsage := ctx.Store.MemUsage()
 		keyCount := ctx.Store.KeyCount()
 
-		diagnosis.WriteString(fmt.Sprintf("Total memory usage: %d bytes\n", memUsage))
-		diagnosis.WriteString(fmt.Sprintf("Total keys: %d\n", keyCount))
+		fmt.Fprintf(&diagnosis, "Total memory usage: %d bytes\n", memUsage)
+		fmt.Fprintf(&diagnosis, "Total keys: %d\n", keyCount)
 
 		if keyCount > 0 {
 			avgSize := memUsage / keyCount
-			diagnosis.WriteString(fmt.Sprintf("Average key size: %d bytes\n", avgSize))
+			fmt.Fprintf(&diagnosis, "Average key size: %d bytes\n", avgSize)
 
 			if avgSize > 10000 {
 				diagnosis.WriteString("\nWarning: Average key size is high.\n")
@@ -225,8 +225,7 @@ func cmdMemoryStats(ctx *Context) error {
 	var results []*resp.Value
 
 	addResult := func(k, v string) {
-		results = append(results, resp.BulkString(k))
-		results = append(results, resp.BulkString(v))
+		results = append(results, resp.BulkString(k), resp.BulkString(v))
 	}
 
 	addResult("peak.allocated", strconv.FormatInt(ctx.Store.MemUsage(), 10))

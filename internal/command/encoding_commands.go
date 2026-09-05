@@ -79,13 +79,11 @@ func msgpackEncode(data []byte) []byte {
 	if n <= 0xFFFF {
 		// str 16: 0xDA + 2-byte length
 		result = make([]byte, 0, 3+n)
-		result = append(result, 0xDA)
-		result = append(result, byte(n>>8), byte(n))
+		result = append(result, 0xDA, byte(n>>8), byte(n))
 	} else {
 		// str 32: 0xDB + 4-byte length
 		result = make([]byte, 0, 5+n)
-		result = append(result, 0xDB)
-		result = append(result, byte(n>>24), byte(n>>16), byte(n>>8), byte(n))
+		result = append(result, 0xDB, byte(n>>24), byte(n>>16), byte(n>>8), byte(n))
 	}
 	result = append(result, data...)
 	return result
@@ -438,18 +436,15 @@ func cborEncode(data []byte) []byte {
 	if n <= 0xFF {
 		// 1-byte length: 0x78 + 1 byte
 		result = make([]byte, 0, 2+n)
-		result = append(result, 0x78)
-		result = append(result, byte(n))
+		result = append(result, 0x78, byte(n))
 	} else if n <= 0xFFFF {
 		// 2-byte length: 0x79 + 2 bytes
 		result = make([]byte, 0, 3+n)
-		result = append(result, 0x79)
-		result = append(result, byte(n>>8), byte(n))
+		result = append(result, 0x79, byte(n>>8), byte(n))
 	} else {
 		// 4-byte length: 0x7A + 4 bytes
 		result = make([]byte, 0, 5+n)
-		result = append(result, 0x7A)
-		result = append(result, byte(n>>24), byte(n>>16), byte(n>>8), byte(n))
+		result = append(result, 0x7A, byte(n>>24), byte(n>>16), byte(n>>8), byte(n))
 	}
 	result = append(result, data...)
 	return result
@@ -626,7 +621,7 @@ func isValidUUID(s string) bool {
 				return false
 			}
 		} else {
-			if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			if c != '-' && (c < '0' || c > '9') && (c < 'a' || c > 'f') && (c < 'A' || c > 'F') {
 				return false
 			}
 		}

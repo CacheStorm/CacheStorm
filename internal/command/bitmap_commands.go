@@ -566,7 +566,7 @@ func bitfieldIncr(bm *BitmapValue, encoding string, offset int64, increment int6
 				newValue += (1 << bits)
 			}
 		} else {
-			newValue = newValue & ((1 << bits) - 1)
+			newValue &= ((1 << bits) - 1)
 		}
 	}
 

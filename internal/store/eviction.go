@@ -23,7 +23,6 @@ type EvictionController struct {
 	policy     EvictionPolicy
 	maxMemory  int64
 	store      *Store
-	tagIndex   *TagIndex
 	memTracker *MemoryTracker
 	sampleSize int
 	onEvict    func(key string, entry *Entry)
@@ -259,4 +258,3 @@ func (ec *EvictionController) ForceEvict(n int) int {
 	}
 	return evicted
 }
-

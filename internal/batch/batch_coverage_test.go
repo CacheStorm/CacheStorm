@@ -393,4 +393,3 @@ func TestResultDispatcherStopDuringSend(t *testing.T) {
 	// Now close - the dispatcher should exit via the stopCh case in the inner select
 	b.Close()
 }
-

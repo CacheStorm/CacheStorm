@@ -742,7 +742,7 @@ func TestDeep2_MsgpackEncodeDecode(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Bad data
-	ctx3 := discardCtx("MSGPACK.DECODE", [][]byte{[]byte{0xFF, 0x01}}, s)
+	ctx3 := discardCtx("MSGPACK.DECODE", [][]byte{{0xFF, 0x01}}, s)
 	if err := cmdMSGPACKDECODE(ctx3); err != nil {
 		t.Fatal(err)
 	}
@@ -760,7 +760,7 @@ func TestDeep2_BsonEncodeDecode(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Bad data
-	ctx3 := discardCtx("BSON.DECODE", [][]byte{[]byte{0x01, 0x02}}, s)
+	ctx3 := discardCtx("BSON.DECODE", [][]byte{{0x01, 0x02}}, s)
 	if err := cmdBSONDECODE(ctx3); err != nil {
 		t.Fatal(err)
 	}
@@ -831,7 +831,7 @@ func TestDeep2_CborEncodeDecode(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Bad data
-	ctx3 := discardCtx("CBOR.DECODE", [][]byte{[]byte{0xFF}}, s)
+	ctx3 := discardCtx("CBOR.DECODE", [][]byte{{0xFF}}, s)
 	if err := cmdCBORDECODE(ctx3); err != nil {
 		t.Fatal(err)
 	}

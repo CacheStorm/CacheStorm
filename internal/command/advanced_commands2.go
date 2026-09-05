@@ -1326,8 +1326,7 @@ func cmdRECORDGET(ctx *Context) error {
 		return ctx.WriteError(fmt.Errorf("ERR record not found"))
 	}
 	results := make([]*resp.Value, 0)
-	results = append(results, resp.BulkString("id"), resp.BulkString(r.ID))
-	results = append(results, resp.BulkString("name"), resp.BulkString(r.Name))
+	results = append(results, resp.BulkString("id"), resp.BulkString(r.ID), resp.BulkString("name"), resp.BulkString(r.Name))
 	for k, v := range r.Fields {
 		results = append(results, resp.BulkString(k), resp.BulkString(v))
 	}
@@ -1397,8 +1396,7 @@ func cmdENTITYGET(ctx *Context) error {
 		return ctx.WriteError(fmt.Errorf("ERR entity not found"))
 	}
 	results := make([]*resp.Value, 0)
-	results = append(results, resp.BulkString("id"), resp.BulkString(e.ID))
-	results = append(results, resp.BulkString("type"), resp.BulkString(e.Type))
+	results = append(results, resp.BulkString("id"), resp.BulkString(e.ID), resp.BulkString("type"), resp.BulkString(e.Type))
 	for k, v := range e.Attributes {
 		results = append(results, resp.BulkString(k), resp.BulkString(v))
 	}
@@ -2883,8 +2881,7 @@ func cmdPROFILEGET(ctx *Context) error {
 		return ctx.WriteError(fmt.Errorf("ERR profile not found"))
 	}
 	results := make([]*resp.Value, 0)
-	results = append(results, resp.BulkString("id"), resp.BulkString(profile.ID))
-	results = append(results, resp.BulkString("user"), resp.BulkString(profile.User))
+	results = append(results, resp.BulkString("id"), resp.BulkString(profile.ID), resp.BulkString("user"), resp.BulkString(profile.User))
 	for k, v := range profile.Attributes {
 		results = append(results, resp.BulkString(k), resp.BulkString(v))
 	}

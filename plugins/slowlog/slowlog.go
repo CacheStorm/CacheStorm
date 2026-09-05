@@ -49,7 +49,7 @@ func (s *SlowLogPlugin) AfterCommand(ctx *command.Context) {
 	duration := time.Since(ctx.StartTime)
 
 	if duration >= s.threshold {
-		s.addEntry(SlowLogEntry{
+		s.addEntry(&SlowLogEntry{
 			ID:        s.nextID,
 			StartTime: ctx.StartTime,
 			Duration:  duration,
@@ -60,7 +60,7 @@ func (s *SlowLogPlugin) AfterCommand(ctx *command.Context) {
 	}
 }
 
-func (s *SlowLogPlugin) addEntry(entry SlowLogEntry) {
+func (s *SlowLogPlugin) addEntry(entry *SlowLogEntry) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

@@ -30,16 +30,16 @@ type BatchConfig struct {
 }
 
 type Batcher struct {
-	config      BatchConfig
-	processor   Processor
-	items       chan BatchItem
-	results     chan BatchResult
-	pending     sync.Map
-	stopCh      chan struct{}
-	wg          sync.WaitGroup
-	flushCh     chan struct{}
-	count       atomic.Int32
-	workerPool  chan struct{} // Semaphore for limiting concurrent goroutines
+	config     BatchConfig
+	processor  Processor
+	items      chan BatchItem
+	results    chan BatchResult
+	pending    sync.Map
+	stopCh     chan struct{}
+	wg         sync.WaitGroup
+	flushCh    chan struct{}
+	count      atomic.Int32
+	workerPool chan struct{} // Semaphore for limiting concurrent goroutines
 }
 
 func NewBatcher(config BatchConfig, processor Processor) *Batcher {

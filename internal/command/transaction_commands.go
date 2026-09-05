@@ -388,7 +388,9 @@ func executeQueuedCommand(ctx *Context, qc queuedCommand) *resp.Value {
 			value := qc.args[1]
 			if entry, exists := ctx.Store.Get(key); exists {
 				if sv, ok := entry.Value.(*store.StringValue); ok {
-					newData := append(sv.Data, value...)
+					newData := make([]byte, 0, len(sv.Data)+len(value))
+					newData = append(newData, sv.Data...)
+					newData = append(newData, value...)
 					ctx.Store.Set(key, &store.StringValue{Data: newData}, store.SetOptions{})
 					return resp.IntegerValue(int64(len(newData)))
 				}
@@ -539,12 +541,10 @@ func executeQueuedCommand(ctx *Context, qc queuedCommand) *resp.Value {
 		return resp.ErrorValue("ERR wrong number of arguments")
 	case "HGET":
 		if len(qc.args) >= 2 {
-			key := string(qc.args[0])
-			field := string(qc.args[1])
-			if entry, exists := ctx.Store.Get(key); exists {
+			if entry, exists := ctx.Store.Get(string(qc.args[0])); exists {
 				if hv, ok := entry.Value.(*store.HashValue); ok {
 					hv.RLock()
-					val, exists := hv.Fields[field]
+					val, exists := hv.Fields[string(qc.args[1])]
 					hv.RUnlock()
 					if exists {
 						return resp.BulkBytes(val)
@@ -580,12 +580,10 @@ func executeQueuedCommand(ctx *Context, qc queuedCommand) *resp.Value {
 		return resp.ErrorValue("ERR wrong number of arguments")
 	case "HEXISTS":
 		if len(qc.args) >= 2 {
-			key := string(qc.args[0])
-			field := string(qc.args[1])
-			if entry, exists := ctx.Store.Get(key); exists {
+			if entry, exists := ctx.Store.Get(string(qc.args[0])); exists {
 				if hv, ok := entry.Value.(*store.HashValue); ok {
 					hv.RLock()
-					_, exists := hv.Fields[field]
+					_, exists := hv.Fields[string(qc.args[1])]
 					hv.RUnlock()
 					if exists {
 						return resp.IntegerValue(1)
@@ -747,12 +745,10 @@ func executeQueuedCommand(ctx *Context, qc queuedCommand) *resp.Value {
 		return resp.ErrorValue("ERR wrong number of arguments")
 	case "SISMEMBER":
 		if len(qc.args) >= 2 {
-			key := string(qc.args[0])
-			member := string(qc.args[1])
-			if entry, exists := ctx.Store.Get(key); exists {
+			if entry, exists := ctx.Store.Get(string(qc.args[0])); exists {
 				if sv, ok := entry.Value.(*store.SetValue); ok {
 					sv.RLock()
-					_, exists := sv.Members[member]
+					_, exists := sv.Members[string(qc.args[1])]
 					sv.RUnlock()
 					if exists {
 						return resp.IntegerValue(1)
@@ -836,12 +832,10 @@ func executeQueuedCommand(ctx *Context, qc queuedCommand) *resp.Value {
 		return resp.ErrorValue("ERR wrong number of arguments")
 	case "ZSCORE":
 		if len(qc.args) >= 2 {
-			key := string(qc.args[0])
-			member := string(qc.args[1])
-			if entry, exists := ctx.Store.Get(key); exists {
+			if entry, exists := ctx.Store.Get(string(qc.args[0])); exists {
 				if zv, ok := entry.Value.(*store.SortedSetValue); ok {
 					zv.RLock()
-					score, exists := zv.Members[member]
+					score, exists := zv.Members[string(qc.args[1])]
 					zv.RUnlock()
 					if exists {
 						return resp.BulkString(float64ToString(score))

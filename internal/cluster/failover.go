@@ -476,14 +476,15 @@ func (c *Cluster) CheckClusterHealth() map[string]interface{} {
 	onlineReplicas := 0
 
 	for _, n := range c.nodes {
-		if n.State == NodeStateOnline {
+		switch n.State {
+		case NodeStateOnline:
 			healthyNodes++
 			if n.Role == RolePrimary {
 				onlinePrimaries++
 			} else {
 				onlineReplicas++
 			}
-		} else if n.State == NodeStateFailed {
+		case NodeStateFailed:
 			failedNodes++
 		}
 	}

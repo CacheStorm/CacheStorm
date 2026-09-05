@@ -896,10 +896,8 @@ func cmdVECTORCREATE(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	dim := int(parseInt64(ctx.ArgString(1)))
-	normalize := false
-	if ctx.ArgCount() >= 3 && ctx.ArgString(2) == "NORMALIZE" {
-		normalize = true
-	}
+	normalize := ctx.ArgCount() >= 3 && ctx.ArgString(2) == "NORMALIZE"
+
 	vectorStoresMu.Lock()
 	vectorStores[name] = &VectorStore{
 		Name:      name,

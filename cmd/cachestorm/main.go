@@ -62,6 +62,7 @@ func main() {
 
 	if err := srv.Stop(shutdownCtx); err != nil {
 		logger.Error().Err(err).Msg("shutdown error")
+		//nolint:gocritic // process is terminating; srv.Stop already performed all cleanup
 		os.Exit(1)
 	}
 }

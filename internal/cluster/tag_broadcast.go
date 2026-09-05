@@ -85,7 +85,7 @@ func (tb *TagBroadcaster) Broadcast(tag string, keys []string) error {
 			if _, err := conn.Write(payload); err != nil {
 				return
 			}
-			conn.Write([]byte("\n"))
+			conn.Write([]byte("\n")) //nolint:errcheck // best-effort delimiter; payload failure already aborts
 		}(addr, data)
 	}
 

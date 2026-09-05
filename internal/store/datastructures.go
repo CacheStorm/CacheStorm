@@ -430,16 +430,3 @@ func (swc *SlidingWindowCounter) Reset() {
 	defer swc.mu.Unlock()
 	swc.Windows = make(map[int64]int64)
 }
-
-var (
-	priorityQueues          = make(map[string]*PriorityQueue)
-	priorityQueuesMu        sync.RWMutex
-	lruCaches               = make(map[string]*LRUCache)
-	lruCachesMu             sync.RWMutex
-	tokenBuckets            = make(map[string]*TokenBucket)
-	tokenBucketsMu          sync.RWMutex
-	leakyBuckets            = make(map[string]*LeakyBucket)
-	leakyBucketsMu          sync.RWMutex
-	slidingWindowCounters   = make(map[string]*SlidingWindowCounter)
-	slidingWindowCountersMu sync.RWMutex
-)

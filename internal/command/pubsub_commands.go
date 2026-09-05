@@ -201,8 +201,7 @@ func cmdPUBSUB(ctx *Context) error {
 		numsub := ps.NumSub(channels...)
 		results := make([]*resp.Value, 0, len(numsub)*2)
 		for _, ch := range channels {
-			results = append(results, resp.BulkString(ch))
-			results = append(results, resp.IntegerValue(int64(numsub[ch])))
+			results = append(results, resp.BulkString(ch), resp.IntegerValue(int64(numsub[ch])))
 		}
 		return ctx.WriteArray(results)
 

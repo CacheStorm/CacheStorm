@@ -212,7 +212,9 @@ func cmdJSONNUMMULTBY(ctx *Context) error {
 
 	if num, ok := val.(float64); ok {
 		result := num * multiplier
-		jv.SetPath(path, result)
+		if err := jv.SetPath(path, result); err != nil {
+			return ctx.WriteError(err)
+		}
 		return ctx.WriteBulkString(fmt.Sprintf("%.f", result))
 	}
 
@@ -245,7 +247,9 @@ func cmdJSONSTRAPPEND(ctx *Context) error {
 
 	if str, ok := val.(string); ok {
 		newStr := str + appendStr
-		jv.SetPath(path, newStr)
+		if err := jv.SetPath(path, newStr); err != nil {
+			return ctx.WriteError(err)
+		}
 		return ctx.WriteInteger(int64(len(newStr)))
 	}
 

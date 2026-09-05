@@ -85,8 +85,14 @@ func evaluateExpression(expr string) (string, error) {
 				return "", err
 			}
 
-			l, _ := strconv.ParseFloat(left, 64)
-			r, _ := strconv.ParseFloat(right, 64)
+			l, err := strconv.ParseFloat(left, 64)
+			if err != nil {
+				return "", err
+			}
+			r, err := strconv.ParseFloat(right, 64)
+			if err != nil {
+				return "", err
+			}
 
 			var result float64
 			switch op {
@@ -355,7 +361,7 @@ func applyTemplate(template string, vars map[string]string) string {
 	for i < len(template) {
 		if i+1 < len(template) && template[i] == '{' && template[i+1] == '{' {
 			j := i + 2
-			for j < len(template) && !(template[j] == '}' && j+1 < len(template) && template[j+1] == '}') {
+			for j < len(template) && (template[j] != '}' || j+1 >= len(template) || template[j+1] != '}') {
 				j++
 			}
 			if j < len(template) {
@@ -658,7 +664,7 @@ func isAlpha(s string) bool {
 	}
 
 	for _, c := range s {
-		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
+		if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') {
 			return false
 		}
 	}
@@ -685,7 +691,7 @@ func isAlphaNum(s string) bool {
 	}
 
 	for _, c := range s {
-		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) {
+		if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') {
 			return false
 		}
 	}
@@ -715,9 +721,18 @@ func cmdVALIDATERANGE(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
-	val, _ := parseTemplateFloat(ctx.Arg(0))
-	min, _ := parseTemplateFloat(ctx.Arg(1))
-	max, _ := parseTemplateFloat(ctx.Arg(2))
+	val, err := parseTemplateFloat(ctx.Arg(0))
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	min, err := parseTemplateFloat(ctx.Arg(1))
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	max, err := parseTemplateFloat(ctx.Arg(2))
+	if err != nil {
+		return ctx.WriteError(err)
+	}
 
 	if val >= min && val <= max {
 		return ctx.WriteInteger(1)
@@ -820,7 +835,7 @@ func cmdSTRPADRIGHT(ctx *Context) error {
 	}
 
 	for len(s) < totalLen {
-		s = s + string(padChar[0])
+		s += string(padChar[0])
 	}
 
 	return ctx.WriteBulkString(s)

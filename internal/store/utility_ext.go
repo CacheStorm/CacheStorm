@@ -22,10 +22,9 @@ type Job struct {
 }
 
 type JobScheduler struct {
-	Jobs    map[string]*Job
-	mu      sync.RWMutex
-	stopCh  chan struct{}
-	running bool
+	Jobs   map[string]*Job
+	mu     sync.RWMutex
+	stopCh chan struct{}
 }
 
 func NewJobScheduler() *JobScheduler {

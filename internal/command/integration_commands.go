@@ -703,10 +703,7 @@ func cmdARRAYSORT(ctx *Context) error {
 	}
 
 	name := ctx.ArgString(0)
-	desc := false
-	if ctx.ArgCount() >= 2 && ctx.ArgString(1) == "DESC" {
-		desc = true
-	}
+	desc := ctx.ArgCount() >= 2 && ctx.ArgString(1) == "DESC"
 
 	arraysMu.Lock()
 	defer arraysMu.Unlock()

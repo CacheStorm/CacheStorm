@@ -187,8 +187,7 @@ func cmdHGETALL(ctx *Context) error {
 	defer hash.RUnlock()
 	results := make([]*resp.Value, 0, len(hash.Fields)*2)
 	for field, value := range hash.Fields {
-		results = append(results, resp.BulkString(field))
-		results = append(results, resp.BulkBytes(value))
+		results = append(results, resp.BulkString(field), resp.BulkBytes(value))
 	}
 
 	return ctx.WriteArray(results)
@@ -513,8 +512,7 @@ func cmdHSCAN(ctx *Context) error {
 	result := make([]*resp.Value, 0, (end-start)*2)
 	for i := start; i < end; i++ {
 		field := fields[i]
-		result = append(result, resp.BulkString(field))
-		result = append(result, resp.BulkBytes(hash.Fields[field]))
+		result = append(result, resp.BulkString(field), resp.BulkBytes(hash.Fields[field]))
 	}
 
 	return ctx.WriteArray([]*resp.Value{

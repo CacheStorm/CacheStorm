@@ -271,10 +271,7 @@ func cmdCacheImport(ctx *Context) error {
 	}
 
 	format := strings.ToUpper(ctx.ArgString(0))
-	replace := false
-	if ctx.ArgCount() >= 2 && strings.ToUpper(ctx.ArgString(1)) == "REPLACE" {
-		replace = true
-	}
+	replace := ctx.ArgCount() >= 2 && strings.ToUpper(ctx.ArgString(1)) == "REPLACE"
 
 	_ = format
 	_ = replace

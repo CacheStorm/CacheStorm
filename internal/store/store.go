@@ -19,11 +19,11 @@ const (
 
 var (
 	ErrKeyNotFound   = errors.New("key not found")
-	ErrKeyExists    = errors.New("key already exists")
-	ErrWrongType    = errors.New("WRONGTYPE Operation against a key holding the wrong kind of value")
-	ErrMemoryLimit  = errors.New("OOM command not allowed when used memory > 'maxmemory'")
-	ErrInvalidKey   = errors.New("ERR invalid key name")
-	ErrKeyTooLarge  = fmt.Errorf("ERR string length limit is %d bytes", MaxKeySize)
+	ErrKeyExists     = errors.New("key already exists")
+	ErrWrongType     = errors.New("WRONGTYPE Operation against a key holding the wrong kind of value")
+	ErrMemoryLimit   = errors.New("OOM command not allowed when used memory > 'maxmemory'")
+	ErrInvalidKey    = errors.New("ERR invalid key name")
+	ErrKeyTooLarge   = fmt.Errorf("ERR string length limit is %d bytes", MaxKeySize)
 	ErrValueTooLarge = fmt.Errorf("ERR string length limit is %d bytes", MaxValueSize)
 )
 
@@ -174,7 +174,9 @@ func (s *Store) Set(key string, value Value, opts SetOptions) error {
 		if !s.memTracker.CanAllocate(valueSize) {
 			// Try eviction before rejecting
 			if s.evictor != nil {
-				s.evictor.CheckAndEvict()
+				if err := s.evictor.CheckAndEvict(); err != nil {
+					logger.Warn().Err(err).Msg("eviction attempt failed")
+				}
 			}
 			if !s.memTracker.CanAllocate(valueSize) {
 				logger.Warn().
@@ -250,11 +252,6 @@ func (s *Store) Delete(key string) bool {
 func (s *Store) DeleteBatch(keys []string) int {
 	if len(keys) == 0 {
 		return 0
-	}
-
-	type shardOp struct {
-		shard *Shard
-		keys  []string
 	}
 
 	shardOps := make(map[*Shard][]string)

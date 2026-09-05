@@ -354,7 +354,7 @@ func (cf *CuckooFilter) Add(item []byte) bool {
 
 	for n := uint(0); n < cf.kicks; n++ {
 		fp, cf.buckets[i%cf.size][0] = cf.buckets[i%cf.size][0], fp
-		i = i ^ cf.hash2(fp)
+		i ^= cf.hash2(fp)
 		if cf.insert(i, fp) {
 			cf.count++
 			return true

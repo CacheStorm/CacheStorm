@@ -71,8 +71,8 @@ func (s *Subscriber) Close() {
 }
 
 const (
-	maxChannelsPerSubscriber = 10000  // Max channels a single subscriber can join
-	maxChannelNameLength     = 256    // Max channel name length in bytes
+	maxChannelsPerSubscriber = 10000 // Max channels a single subscriber can join
+	maxChannelNameLength     = 256   // Max channel name length in bytes
 )
 
 func (ps *PubSub) Subscribe(sub *Subscriber, channels ...string) int {

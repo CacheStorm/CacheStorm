@@ -36,8 +36,6 @@ func (v *TimeSeriesValue) SizeOf() int64 {
 }
 
 func (v *TimeSeriesValue) String() string {
-	v.mu.RLock()
-	defer v.mu.RUnlock()
 	return "timeseries"
 }
 

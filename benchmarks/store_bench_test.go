@@ -7,16 +7,6 @@ import (
 	"github.com/cachestorm/cachestorm/internal/store"
 )
 
-func runStoreDelete(n int, s *store.Store, keys []string) {
-	for i := 0; i < n; i++ {
-		s.Delete(keys[i])
-	}
-}
-
-func runStoreDeleteBatch(keys []string, s *store.Store) {
-	s.DeleteBatch(keys)
-}
-
 func BenchmarkStoreDelete100(b *testing.B) {
 	s := store.NewStore()
 	tag := "bench-tag"

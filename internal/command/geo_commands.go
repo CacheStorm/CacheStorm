@@ -59,15 +59,16 @@ func cmdGEOADD(ctx *Context) error {
 
 	for argIdx < ctx.ArgCount() {
 		arg := strings.ToUpper(ctx.ArgString(argIdx))
-		if arg == "NX" {
+		switch arg {
+		case "NX":
 			nx = true
 			argIdx++
-		} else if arg == "XX" {
+		case "XX":
 			xx = true
 			argIdx++
-		} else if arg == "CH" {
+		case "CH":
 			argIdx++
-		} else {
+		default:
 			break
 		}
 	}
@@ -137,14 +138,14 @@ func cmdGEODIST(ctx *Context) error {
 
 	switch unit {
 	case "m":
-		dist = dist * 1000
+		dist *= 1000
 	case "km":
 	case "mi":
-		dist = dist * 0.621371
+		dist *= 0.621371
 	case "ft":
-		dist = dist * 3280.84
+		dist *= 3280.84
 	default:
-		dist = dist * 1000
+		dist *= 1000
 	}
 
 	return ctx.WriteBulkString(strconv.FormatFloat(dist, 'f', -1, 64))
@@ -320,7 +321,8 @@ func cmdGEORADIUS(ctx *Context) error {
 		}
 	}
 
-	if sortOrder == "ASC" {
+	switch sortOrder {
+	case "ASC":
 		for i := 0; i < len(results)-1; i++ {
 			for j := i + 1; j < len(results); j++ {
 				if results[j].dist < results[i].dist {
@@ -328,7 +330,7 @@ func cmdGEORADIUS(ctx *Context) error {
 				}
 			}
 		}
-	} else if sortOrder == "DESC" {
+	case "DESC":
 		for i := 0; i < len(results)-1; i++ {
 			for j := i + 1; j < len(results); j++ {
 				if results[j].dist > results[i].dist {
@@ -514,7 +516,8 @@ func cmdGEORADIUSBYMEMBER(ctx *Context) error {
 		}
 	}
 
-	if sortOrder == "ASC" {
+	switch sortOrder {
+	case "ASC":
 		for i := 0; i < len(results)-1; i++ {
 			for j := i + 1; j < len(results); j++ {
 				if results[j].dist < results[i].dist {
@@ -522,7 +525,7 @@ func cmdGEORADIUSBYMEMBER(ctx *Context) error {
 				}
 			}
 		}
-	} else if sortOrder == "DESC" {
+	case "DESC":
 		for i := 0; i < len(results)-1; i++ {
 			for j := i + 1; j < len(results); j++ {
 				if results[j].dist > results[i].dist {
@@ -617,7 +620,7 @@ func cmdGEOSEARCH(ctx *Context) error {
 	var fromLon, fromLat, radius float64
 	var hasFromMember bool
 	var fromMember string
-	var unit string = "km"
+	var unit = "km"
 
 	i := 1
 	for i < ctx.ArgCount() {
@@ -687,11 +690,11 @@ func cmdGEOSEARCH(ctx *Context) error {
 
 	switch unit {
 	case "mi":
-		radius = radius / 0.621371
+		radius /= 0.621371
 	case "ft":
-		radius = radius / 3280.84
+		radius /= 3280.84
 	case "m":
-		radius = radius / 1000
+		radius /= 1000
 	}
 
 	results := make([]*resp.Value, 0)
@@ -716,7 +719,7 @@ func cmdGEOSEARCHSTORE(ctx *Context) error {
 	var fromLon, fromLat, radius float64
 	var hasFromMember bool
 	var fromMember string
-	var unit string = "km"
+	var unit = "km"
 
 	i := 2
 	for i < ctx.ArgCount() {
@@ -788,11 +791,11 @@ func cmdGEOSEARCHSTORE(ctx *Context) error {
 
 	switch unit {
 	case "mi":
-		radius = radius / 0.621371
+		radius /= 0.621371
 	case "ft":
-		radius = radius / 3280.84
+		radius /= 3280.84
 	case "m":
-		radius = radius / 1000
+		radius /= 1000
 	}
 
 	destGeo := getOrCreateGeo(ctx, destKey)

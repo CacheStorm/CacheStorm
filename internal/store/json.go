@@ -205,8 +205,7 @@ func setByPath(data interface{}, path string, value interface{}) error {
 		return fmt.Errorf("ERR JSON path exceeds maximum depth of %d", maxJSONPathDepth)
 	}
 
-	switch d := data.(type) {
-	case map[string]interface{}:
+	if d, ok := data.(map[string]interface{}); ok {
 		if len(parts) == 1 {
 			d[parts[0]] = value
 			return nil
@@ -254,8 +253,7 @@ func deleteByPath(data interface{}, parts []string) {
 		return
 	}
 
-	switch d := data.(type) {
-	case map[string]interface{}:
+	if d, ok := data.(map[string]interface{}); ok {
 		if len(parts) == 1 {
 			delete(d, parts[0])
 			return
@@ -275,11 +273,11 @@ func (v *JSONValue) TypeAt(path string) (string, error) {
 		return "null", nil
 	}
 
-	switch val.(type) {
+	switch val := val.(type) {
 	case bool:
 		return "boolean", nil
 	case float64:
-		if float64(int(val.(float64))) == val.(float64) {
+		if float64(int(val)) == val {
 			return "integer", nil
 		}
 		return "number", nil
@@ -307,7 +305,10 @@ func (v *JSONValue) NumIncrBy(path string, increment float64) (float64, error) {
 	if len(parts) == 0 {
 		if num, ok := data.(float64); ok {
 			result := num + increment
-			b, _ := json.Marshal(result)
+			b, err := json.Marshal(result)
+			if err != nil {
+				return 0, err
+			}
 			v.Data = b
 			return result, nil
 		}
@@ -334,8 +335,7 @@ func incrByPath(data interface{}, parts []string, increment float64) (float64, e
 		return 0, nil
 	}
 
-	switch d := data.(type) {
-	case map[string]interface{}:
+	if d, ok := data.(map[string]interface{}); ok {
 		if len(parts) == 1 {
 			if num, ok := d[parts[0]].(float64); ok {
 				result := num + increment
@@ -383,8 +383,7 @@ func arrAppendPath(data interface{}, parts []string, values []interface{}) (int,
 		return 0, nil
 	}
 
-	switch d := data.(type) {
-	case map[string]interface{}:
+	if d, ok := data.(map[string]interface{}); ok {
 		if len(parts) == 1 {
 			if arr, ok := d[parts[0]].([]interface{}); ok {
 				arr = append(arr, values...)

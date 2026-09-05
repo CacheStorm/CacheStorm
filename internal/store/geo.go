@@ -103,7 +103,7 @@ func EncodeGeohash(lon, lat float64) string {
 				bits = bits*2 + 1
 				minLon = mid
 			} else {
-				bits = bits * 2
+				bits *= 2
 				maxLon = mid
 			}
 		} else {
@@ -112,7 +112,7 @@ func EncodeGeohash(lon, lat float64) string {
 				bits = bits*2 + 1
 				minLat = mid
 			} else {
-				bits = bits * 2
+				bits *= 2
 				maxLat = mid
 			}
 		}
@@ -139,7 +139,7 @@ func EncodeGeohashInt(lon, lat float64) uint64 {
 				bits = bits*2 + 1
 				minLon = mid
 			} else {
-				bits = bits * 2
+				bits *= 2
 				maxLon = mid
 			}
 		} else {
@@ -148,7 +148,7 @@ func EncodeGeohashInt(lon, lat float64) uint64 {
 				bits = bits*2 + 1
 				minLat = mid
 			} else {
-				bits = bits * 2
+				bits *= 2
 				maxLat = mid
 			}
 		}

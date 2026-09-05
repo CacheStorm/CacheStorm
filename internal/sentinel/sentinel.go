@@ -558,8 +558,8 @@ func (s *Sentinel) formatMasters() string {
 
 	var result strings.Builder
 	for _, m := range s.masters {
-		result.WriteString(fmt.Sprintf("name:%s\r\nip:%s\r\nport:%d\r\nflags:%s\r\nnum-replicas:%d\r\n",
-			m.Name, m.Addr, m.Port, strings.Join(m.Flags, ","), m.NumReplicas))
+		fmt.Fprintf(&result, "name:%s\r\nip:%s\r\nport:%d\r\nflags:%s\r\nnum-replicas:%d\r\n",
+			m.Name, m.Addr, m.Port, strings.Join(m.Flags, ","), m.NumReplicas)
 	}
 	return result.String()
 }

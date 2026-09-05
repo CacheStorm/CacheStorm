@@ -56,7 +56,9 @@ func cmdTSCREATE(ctx *Context) error {
 		}
 	}
 
-	tsManager.Create(key, retention, labels)
+	if err := tsManager.Create(key, retention, labels); err != nil {
+		return ctx.WriteError(err)
+	}
 	return ctx.WriteOK()
 }
 
@@ -128,7 +130,9 @@ func cmdTSADD(ctx *Context) error {
 
 	ts, ok := tsManager.Get(key)
 	if !ok {
-		tsManager.Create(key, retention, labels)
+		if err := tsManager.Create(key, retention, labels); err != nil {
+			return ctx.WriteError(err)
+		}
 		ts, _ = tsManager.Get(key)
 	}
 
@@ -152,7 +156,9 @@ func cmdTSMADD(ctx *Context) error {
 
 		ts, ok := tsManager.Get(key)
 		if !ok {
-			tsManager.Create(key, 0, nil)
+			if err := tsManager.Create(key, 0, nil); err != nil {
+				return ctx.WriteError(err)
+			}
 			ts, _ = tsManager.Get(key)
 		}
 
@@ -399,7 +405,9 @@ func cmdTSINCRBY(ctx *Context) error {
 
 	ts, ok := tsManager.Get(key)
 	if !ok {
-		tsManager.Create(key, 0, nil)
+		if err := tsManager.Create(key, 0, nil); err != nil {
+			return ctx.WriteError(err)
+		}
 		ts, _ = tsManager.Get(key)
 	}
 
@@ -425,7 +433,9 @@ func cmdTSDECRBY(ctx *Context) error {
 
 	ts, ok := tsManager.Get(key)
 	if !ok {
-		tsManager.Create(key, 0, nil)
+		if err := tsManager.Create(key, 0, nil); err != nil {
+			return ctx.WriteError(err)
+		}
 		ts, _ = tsManager.Get(key)
 	}
 

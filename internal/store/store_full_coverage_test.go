@@ -940,9 +940,7 @@ func TestPubSub_RemoveSubscriber(t *testing.T) {
 	ps.RemoveSubscriber(sub)
 
 	// Subscriber should be removed from all channels and patterns
-	if len(ps.Channels("")) != 0 {
-		// channels may still exist but empty
-	}
+	ps.Channels("") // channels may still exist but empty
 }
 
 func TestMatchPattern_EdgeCases(t *testing.T) {
@@ -1995,9 +1993,7 @@ func TestEvictionController_EvictOne_WithCallback(t *testing.T) {
 	})
 
 	ec.evictOne()
-	if evictedKey == "" {
-		// May not always evict due to random sampling; that's OK
-	}
+	_ = evictedKey // may remain empty: random sampling may not evict
 }
 
 func TestEvictionController_SelectVolatileLRU(t *testing.T) {
@@ -2891,7 +2887,7 @@ func TestLZ4Decompress_MatchCopy(t *testing.T) {
 		0x00, 'B', // literal 'B'
 		0x00, 'C', // literal 'C'
 		0x00, 'D', // literal 'D'
-		0x00,      // token: lit=0, match=0 (matchLen=4)
+		0x00,       // token: lit=0, match=0 (matchLen=4)
 		0x04, 0x00, // offset = 4
 	}
 	result := lz4Decompress(buf)
@@ -3263,12 +3259,12 @@ func TestTimingWheel_CleanupFarFuture_AllBranches(t *testing.T) {
 	now := time.Now().UnixNano()
 
 	tw.farFuture.mu.Lock()
-	tw.farFuture.keys["short"] = now + int64(30*time.Minute)         // < 1 hour -> level 0
-	tw.farFuture.keys["medium"] = now + int64(12*time.Hour)          // < 24 hours -> level 1
-	tw.farFuture.keys["long"] = now + int64(15*24*time.Hour)         // < 30 days -> level 2
-	tw.farFuture.keys["verylong"] = now + int64(200*24*time.Hour)    // < 365 days -> level 3
-	tw.farFuture.keys["stillfar"] = now + int64(400*24*time.Hour)    // >= 365 days -> stays in farFuture
-	tw.farFuture.keys["expired"] = now - int64(time.Second)          // expired
+	tw.farFuture.keys["short"] = now + int64(30*time.Minute)      // < 1 hour -> level 0
+	tw.farFuture.keys["medium"] = now + int64(12*time.Hour)       // < 24 hours -> level 1
+	tw.farFuture.keys["long"] = now + int64(15*24*time.Hour)      // < 30 days -> level 2
+	tw.farFuture.keys["verylong"] = now + int64(200*24*time.Hour) // < 365 days -> level 3
+	tw.farFuture.keys["stillfar"] = now + int64(400*24*time.Hour) // >= 365 days -> stays in farFuture
+	tw.farFuture.keys["expired"] = now - int64(time.Second)       // expired
 	tw.farFuture.mu.Unlock()
 
 	tw.cleanupFarFuture()

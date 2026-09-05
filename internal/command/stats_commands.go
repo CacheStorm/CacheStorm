@@ -419,8 +419,14 @@ func cmdHISTOGRAMCREATE(ctx *Context) error {
 	}
 
 	key := ctx.ArgString(0)
-	min, _ := parseFloat(ctx.Arg(1))
-	max, _ := parseFloat(ctx.Arg(2))
+	min, err := parseFloat(ctx.Arg(1))
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	max, err := parseFloat(ctx.Arg(2))
+	if err != nil {
+		return ctx.WriteError(err)
+	}
 	bucketWidth := 1.0
 
 	if ctx.ArgCount() >= 4 {

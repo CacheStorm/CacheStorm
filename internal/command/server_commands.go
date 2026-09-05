@@ -656,7 +656,7 @@ func cmdDUMP(ctx *Context) error {
 	var dump strings.Builder
 	dump.WriteString("CACHSTORM001")
 	dump.WriteByte(byte(entry.Value.Type()))
-	dump.WriteString(fmt.Sprintf("%d", entry.ExpiresAt))
+	fmt.Fprintf(&dump, "%d", entry.ExpiresAt)
 	dump.WriteString(":")
 
 	switch v := entry.Value.(type) {
@@ -681,7 +681,7 @@ func cmdDUMP(ctx *Context) error {
 		}
 	case *store.SortedSetValue:
 		for _, se := range v.GetSortedRange(0, -1, true, false) {
-			dump.WriteString(fmt.Sprintf("%s:%f,", se.Member, se.Score))
+			fmt.Fprintf(&dump, "%s:%f,", se.Member, se.Score)
 		}
 	}
 
@@ -1507,9 +1507,10 @@ func cmdSHUTDOWN(ctx *Context) error {
 	save := true
 	for i := 0; i < ctx.ArgCount(); i++ {
 		arg := strings.ToUpper(ctx.ArgString(i))
-		if arg == "NOSAVE" {
+		switch arg {
+		case "NOSAVE":
 			save = false
-		} else if arg == "SAVE" {
+		case "SAVE":
 			save = true
 		}
 	}
@@ -1840,7 +1841,10 @@ func generatePassword(bits int) string {
 	}
 	result := make([]byte, length)
 	for i := range result {
-		n, _ := rand.Int(rand.Reader, big.NewInt(int64(len(chars))))
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(chars))))
+		if err != nil {
+			n = big.NewInt(0) // crypto/rand failure is practically impossible; fall back to first char
+		}
 		result[i] = chars[n.Int64()]
 	}
 	return string(result)

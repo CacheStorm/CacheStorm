@@ -568,8 +568,7 @@ func cmdEXPERIMENTRESULTS(ctx *Context) error {
 		return ctx.WriteError(fmt.Errorf("ERR experiment not found"))
 	}
 	results := make([]*resp.Value, 0)
-	results = append(results, resp.BulkString("name"), resp.BulkString(exp.Name))
-	results = append(results, resp.BulkString("assignments"), resp.IntegerValue(int64(len(exp.Assignments))))
+	results = append(results, resp.BulkString("name"), resp.BulkString(exp.Name), resp.BulkString("assignments"), resp.IntegerValue(int64(len(exp.Assignments))))
 	for _, v := range exp.Variants {
 		count := 0
 		for _, a := range exp.Assignments {
@@ -1285,9 +1284,7 @@ func cmdTRACEGET(ctx *Context) error {
 		return ctx.WriteError(fmt.Errorf("ERR trace not found"))
 	}
 	results := make([]*resp.Value, 0)
-	results = append(results, resp.BulkString("id"), resp.BulkString(trace.ID))
-	results = append(results, resp.BulkString("status"), resp.BulkString(trace.Status))
-	results = append(results, resp.BulkString("spans"), resp.IntegerValue(int64(len(trace.Spans))))
+	results = append(results, resp.BulkString("id"), resp.BulkString(trace.ID), resp.BulkString("status"), resp.BulkString(trace.Status), resp.BulkString("spans"), resp.IntegerValue(int64(len(trace.Spans))))
 	return ctx.WriteArray(results)
 }
 

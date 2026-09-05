@@ -57,9 +57,7 @@ func TestAllHyperLogLogCommands(t *testing.T) {
 func TestHyperLogLogValueOperations(t *testing.T) {
 	t.Run("HyperLogLog Value Creation", func(t *testing.T) {
 		hll := &HyperLogLogValue{}
-		if hll == nil {
-			t.Fatal("Failed to create HyperLogLogValue")
-		}
+		_ = hll // struct literal can never be nil
 	})
 
 	t.Run("HyperLogLog Value Type", func(t *testing.T) {

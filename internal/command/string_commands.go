@@ -307,7 +307,9 @@ func cmdAPPEND(ctx *Context) error {
 		if !ok {
 			return ctx.WriteError(store.ErrWrongType)
 		}
-		newData = append(strVal.Data, suffix...)
+		newData = make([]byte, 0, len(strVal.Data)+len(suffix))
+		newData = append(newData, strVal.Data...)
+		newData = append(newData, suffix...)
 	}
 
 	if int64(len(newData)) > store.MaxValueSize {
@@ -493,13 +495,10 @@ func cmdMSETNX(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
-	keys := make([]string, 0, ctx.ArgCount()/2)
 	for i := 0; i < ctx.ArgCount(); i += 2 {
-		key := ctx.ArgString(i)
-		if ctx.Store.Exists(key) {
+		if ctx.Store.Exists(ctx.ArgString(i)) {
 			return ctx.WriteInteger(0)
 		}
-		keys = append(keys, key)
 	}
 
 	for i := 0; i < ctx.ArgCount(); i += 2 {
@@ -821,9 +820,7 @@ func cmdLCS(ctx *Context) error {
 		}
 		matchArray = append(matchArray, resp.ArrayValue(matchEntry))
 	}
-	result = append(result, resp.ArrayValue(matchArray))
-	result = append(result, resp.BulkString("len"))
-	result = append(result, resp.IntegerValue(int64(lcsLen)))
+	result = append(result, resp.ArrayValue(matchArray), resp.BulkString("len"), resp.IntegerValue(int64(lcsLen)))
 
 	return ctx.WriteArray(result)
 }

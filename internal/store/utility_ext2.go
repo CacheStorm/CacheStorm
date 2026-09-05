@@ -162,7 +162,6 @@ type FeatureFlag struct {
 	Variants    map[string]string
 	CreatedAt   int64
 	UpdatedAt   int64
-	mu          sync.RWMutex
 }
 
 type FeatureRule struct {

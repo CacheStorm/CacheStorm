@@ -573,14 +573,14 @@ func TestUpdateNodeFromInfoInvalidNodeInfo(t *testing.T) {
 	initialCount := c.NodeCount()
 
 	nodes := []NodeInfo{
-		{ID: "", Addr: "127.0.0.2", Port: 6381, GossipPort: 7947},            // empty ID
-		{ID: "n2", Addr: "", Port: 6381, GossipPort: 7947},                    // empty Addr
-		{ID: "n3", Addr: "127.0.0.2", Port: 0, GossipPort: 7947},             // invalid Port
-		{ID: "n4", Addr: "127.0.0.2", Port: 6381, GossipPort: 0},             // invalid GossipPort
-		{ID: "n5", Addr: "127.0.0.2", Port: 70000, GossipPort: 7947},         // Port > 65535
-		{ID: "n6", Addr: "127.0.0.2", Port: 6381, GossipPort: 70000},         // GossipPort > 65535
-		{ID: "n7", Addr: "not-an-ip", Port: 6381, GossipPort: 7947},          // invalid IP address
-		{ID: "n8", Addr: "invalid.hostname", Port: 6381, GossipPort: 7947},   // hostname not IP
+		{ID: "", Addr: "127.0.0.2", Port: 6381, GossipPort: 7947},          // empty ID
+		{ID: "n2", Addr: "", Port: 6381, GossipPort: 7947},                 // empty Addr
+		{ID: "n3", Addr: "127.0.0.2", Port: 0, GossipPort: 7947},           // invalid Port
+		{ID: "n4", Addr: "127.0.0.2", Port: 6381, GossipPort: 0},           // invalid GossipPort
+		{ID: "n5", Addr: "127.0.0.2", Port: 70000, GossipPort: 7947},       // Port > 65535
+		{ID: "n6", Addr: "127.0.0.2", Port: 6381, GossipPort: 70000},       // GossipPort > 65535
+		{ID: "n7", Addr: "not-an-ip", Port: 6381, GossipPort: 7947},        // invalid IP address
+		{ID: "n8", Addr: "invalid.hostname", Port: 6381, GossipPort: 7947}, // hostname not IP
 	}
 
 	g.updateNodeFromInfo(nodes)

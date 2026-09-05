@@ -327,8 +327,7 @@ func lz4Compress(data []byte) []byte {
 		matchPos := 0
 
 		for l := min(12, len(data)-pos); l >= 4; l-- {
-			key := string(data[pos : pos+l])
-			if idx, ok := window[key]; ok && pos-idx < 65536 {
+			if idx, ok := window[string(data[pos:pos+l])]; ok && pos-idx < 65536 {
 				matchLen = l
 				matchPos = idx
 				break
@@ -337,7 +336,7 @@ func lz4Compress(data []byte) []byte {
 
 		if matchLen >= 4 {
 			offset := pos - matchPos
-			token := byte((min(matchLen-4, 15) << 4) | 0)
+			token := byte(min(matchLen-4, 15) << 4)
 			result = append(result, token, byte(offset&0xFF), byte(offset>>8))
 
 			if matchLen-4 >= 15 {
@@ -427,13 +426,6 @@ func lz4Decompress(data []byte) []byte {
 	}
 
 	return result
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 var GlobalEventManager = NewEventManager()

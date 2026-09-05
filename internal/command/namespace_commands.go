@@ -85,9 +85,9 @@ func cmdNAMESPACEINFO(ctx *Context) error {
 
 	var sb strings.Builder
 	sb.WriteString("# Namespace\r\n")
-	sb.WriteString(fmt.Sprintf("name:%s\r\n", stats["name"]))
-	sb.WriteString(fmt.Sprintf("keys:%d\r\n", stats["keys"]))
-	sb.WriteString(fmt.Sprintf("memory:%d\r\n", stats["memory"]))
+	fmt.Fprintf(&sb, "name:%s\r\n", stats["name"])
+	fmt.Fprintf(&sb, "keys:%d\r\n", stats["keys"])
+	fmt.Fprintf(&sb, "memory:%d\r\n", stats["memory"])
 
 	return ctx.WriteBulkString(sb.String())
 }

@@ -9,9 +9,10 @@ import (
 	"sync"
 	"time"
 
+	lua "github.com/yuin/gopher-lua"
+
 	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
-	lua "github.com/yuin/gopher-lua"
 )
 
 type Function struct {
@@ -324,8 +325,7 @@ func handleFunctionList(ctx *Context, registry *FunctionRegistry) error {
 			fnList = append(fnList, fnInfo)
 		}
 
-		libInfo = append(libInfo, resp.BulkString("functions"))
-		libInfo = append(libInfo, resp.ArrayValue(fnList))
+		libInfo = append(libInfo, resp.BulkString("functions"), resp.ArrayValue(fnList))
 
 		result = append(result, resp.ArrayValue(libInfo))
 	}
@@ -339,7 +339,7 @@ func handleFunctionDump(ctx *Context, registry *FunctionRegistry) error {
 
 	var result strings.Builder
 	for name, lib := range registry.libraries {
-		result.WriteString(fmt.Sprintf("LIBRARY %s ENGINE %s CODE %s\n", name, lib.Engine, lib.SHA))
+		fmt.Fprintf(&result, "LIBRARY %s ENGINE %s CODE %s\n", name, lib.Engine, lib.SHA)
 	}
 
 	return ctx.WriteBulkString(result.String())

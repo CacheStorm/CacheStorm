@@ -3171,9 +3171,7 @@ func TestAdvCoverage_BitmapValue_Methods(t *testing.T) {
 	if bm.SizeOf() <= 0 {
 		t.Fatal("expected positive size")
 	}
-	if bm.String() == "" {
-		// Data is non-printable; just make sure it doesn't panic
-	}
+	_ = bm.String() // data is non-printable; just make sure it doesn't panic
 	cloned := bm.Clone()
 	if cloned == nil {
 		t.Fatal("expected non-nil clone")

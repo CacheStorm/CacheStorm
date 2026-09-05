@@ -641,14 +641,6 @@ func zsetOp(conn net.Conn, i int64) error {
 	return err
 }
 
-// Tag Operations
-func tagOp(conn net.Conn, i int64) error {
-	key := fmt.Sprintf("cached:%d", i%5000)
-	tag := fmt.Sprintf("page:%d", i%100)
-	_, err := sendRespCommand(conn, "SET", key, fmt.Sprintf("data%d", i), "TAGS", tag)
-	return err
-}
-
 func runBasicBenchmarks(addr string, ops int64, workers int) []BenchmarkResult {
 	results := make([]BenchmarkResult, 0)
 

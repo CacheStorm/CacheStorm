@@ -34,8 +34,7 @@ func cmdFTCREATE(ctx *Context) error {
 
 	for i := 1; i < ctx.ArgCount(); i++ {
 		arg := strings.ToUpper(ctx.ArgString(i))
-		switch arg {
-		case "SCHEMA":
+		if arg == "SCHEMA" {
 			for i+1 < ctx.ArgCount() {
 				i++
 				fieldName := ctx.ArgString(i)
@@ -53,15 +52,15 @@ func cmdFTCREATE(ctx *Context) error {
 				for i+1 < ctx.ArgCount() {
 					i++
 					nextArg := strings.ToUpper(ctx.ArgString(i))
-					if nextArg == "TEXT" || nextArg == "NUMERIC" || nextArg == "TAG" || nextArg == "GEO" {
+					switch nextArg {
+					case "TEXT", "NUMERIC", "TAG", "GEO":
 						fieldSchema.Type = nextArg
-					} else if nextArg == "SORTABLE" {
+					case "SORTABLE":
 						fieldSchema.Sortable = true
-					} else if nextArg == "NOINDEX" {
+					case "NOINDEX":
 						fieldSchema.NoIndex = true
-					} else {
+					default:
 						i--
-						break
 					}
 				}
 

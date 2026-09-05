@@ -14,10 +14,9 @@ var (
 )
 
 type AuthPlugin struct {
-	mu          sync.RWMutex
-	password    string
-	enabled     bool
-	authChecker func(string) bool
+	mu       sync.RWMutex
+	password string
+	enabled  bool
 }
 
 func New(password string, enabled bool) *AuthPlugin {

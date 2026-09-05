@@ -9,8 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cachestorm/cachestorm/internal/store"
 	lua "github.com/yuin/gopher-lua"
+
+	"github.com/cachestorm/cachestorm/internal/store"
 )
 
 const (
@@ -786,7 +787,9 @@ func (e *ScriptEngine) executeCommand(L *lua.LState, cmd string, args []string) 
 			return lua.LNumber(len(args[1]))
 		}
 		if sv, ok := entry.Value.(*store.StringValue); ok {
-			newData := append(sv.Data, []byte(args[1])...)
+			newData := make([]byte, 0, len(sv.Data)+len(args[1]))
+			newData = append(newData, sv.Data...)
+			newData = append(newData, []byte(args[1])...)
 			e.store.Set(args[0], &store.StringValue{Data: newData}, store.SetOptions{})
 			return lua.LNumber(len(newData))
 		}

@@ -128,9 +128,10 @@ func cmdMVCCCOMMIT(ctx *Context) error {
 	}
 
 	for key, change := range txn.Changes {
-		if change.Operation == "set" {
+		switch change.Operation {
+		case "set":
 			ctx.Store.Set(key, &store.StringValue{Data: []byte(change.NewValue)}, store.SetOptions{})
-		} else if change.Operation == "delete" {
+		case "delete":
 			ctx.Store.Delete(key)
 		}
 	}
@@ -585,7 +586,7 @@ func cmdCHAINADD(ctx *Context) error {
 	}
 
 	var index int64 = 0
-	var prevHash string = "0"
+	var prevHash = "0"
 	if len(chain.Blocks) > 0 {
 		lastBlock := chain.Blocks[len(chain.Blocks)-1]
 		index = lastBlock.Index + 1

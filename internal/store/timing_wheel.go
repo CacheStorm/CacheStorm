@@ -198,11 +198,12 @@ func (tw *TimingWheel) cascade(level int, now int64) {
 	// Move keys to appropriate levels
 	for _, item := range toMove {
 		duration := time.Duration(item.expiresAt - now)
-		if level == 1 {
+		switch level {
+		case 1:
 			tw.addToLevel(0, item.key, item.expiresAt, duration)
-		} else if level == 2 {
+		case 2:
 			tw.addToLevel(1, item.key, item.expiresAt, duration)
-		} else {
+		default:
 			tw.addToLevel(2, item.key, item.expiresAt, duration)
 		}
 	}

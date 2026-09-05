@@ -1,6 +1,7 @@
 package command
 
 import (
+	"bytes"
 	"fmt"
 	"strconv"
 	"strings"
@@ -363,7 +364,7 @@ func cmdLREM(ctx *Context) error {
 
 	if count == 0 {
 		for _, elem := range list.Elements {
-			if string(elem) == string(value) {
+			if bytes.Equal(elem, value) {
 				removed++
 			} else {
 				newElements = append(newElements, elem)
@@ -371,7 +372,7 @@ func cmdLREM(ctx *Context) error {
 		}
 	} else if count > 0 {
 		for _, elem := range list.Elements {
-			if removed < count && string(elem) == string(value) {
+			if removed < count && bytes.Equal(elem, value) {
 				removed++
 			} else {
 				newElements = append(newElements, elem)
@@ -382,7 +383,7 @@ func cmdLREM(ctx *Context) error {
 		kept := make([][]byte, 0, len(list.Elements))
 		for i := len(list.Elements) - 1; i >= 0; i-- {
 			elem := list.Elements[i]
-			if removed < -count && string(elem) == string(value) {
+			if removed < -count && bytes.Equal(elem, value) {
 				removed++
 			} else {
 				kept = append(kept, elem)
@@ -428,7 +429,7 @@ func cmdLINSERT(ctx *Context) error {
 
 	pivotIdx := -1
 	for i, elem := range list.Elements {
-		if string(elem) == string(pivot) {
+		if bytes.Equal(elem, pivot) {
 			pivotIdx = i
 			break
 		}
@@ -958,14 +959,14 @@ func cmdLPOS(ctx *Context) error {
 
 	if rank > 0 {
 		for i := 0; i < searchLen && found < absRank; i++ {
-			if string(list.Elements[i]) == string(element) {
+			if bytes.Equal(list.Elements[i], element) {
 				found++
 				if found == absRank {
 					if count > 0 {
 						result := make([]*resp.Value, 0)
 						result = append(result, resp.IntegerValue(int64(i)))
 						for j := i + 1; j < searchLen && len(result) < count; j++ {
-							if string(list.Elements[j]) == string(element) {
+							if bytes.Equal(list.Elements[j], element) {
 								result = append(result, resp.IntegerValue(int64(j)))
 							}
 						}
@@ -977,14 +978,14 @@ func cmdLPOS(ctx *Context) error {
 		}
 	} else {
 		for i := searchLen - 1; i >= 0 && found < absRank; i-- {
-			if string(list.Elements[i]) == string(element) {
+			if bytes.Equal(list.Elements[i], element) {
 				found++
 				if found == absRank {
 					if count > 0 {
 						result := make([]*resp.Value, 0)
 						result = append(result, resp.IntegerValue(int64(i)))
 						for j := i - 1; j >= 0 && len(result) < count; j-- {
-							if string(list.Elements[j]) == string(element) {
+							if bytes.Equal(list.Elements[j], element) {
 								result = append(result, resp.IntegerValue(int64(j)))
 							}
 						}

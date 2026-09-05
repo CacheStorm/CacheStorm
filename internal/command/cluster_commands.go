@@ -13,14 +13,10 @@ import (
 
 var globalCluster *cluster.Cluster
 var globalGossip *cluster.Gossip
-var globalFailover *cluster.FailoverManager
-var globalMigrator *cluster.SlotMigrator
 
 func InitCluster(c *cluster.Cluster) {
 	globalCluster = c
 	globalGossip = cluster.NewGossip(c)
-	globalFailover = cluster.NewFailoverManager(c, globalGossip)
-	globalMigrator = cluster.NewSlotMigrator(c)
 }
 
 func RegisterClusterCommands(router *Router) {

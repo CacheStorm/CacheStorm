@@ -67,9 +67,10 @@ func handleSentinelMasters(ctx *Context) error {
 
 	for _, m := range masters {
 		state := "ok"
-		if m.State == sentinel.MasterStateSDown {
+		switch m.State {
+		case sentinel.MasterStateSDown:
 			state = "sdown"
-		} else if m.State == sentinel.MasterStateODown {
+		case sentinel.MasterStateODown:
 			state = "odown"
 		}
 
@@ -106,9 +107,10 @@ func handleSentinelMaster(ctx *Context) error {
 	}
 
 	state := "ok"
-	if master.State == sentinel.MasterStateSDown {
+	switch master.State {
+	case sentinel.MasterStateSDown:
 		state = "sdown"
-	} else if master.State == sentinel.MasterStateODown {
+	case sentinel.MasterStateODown:
 		state = "odown"
 	}
 
@@ -282,12 +284,12 @@ func handleSentinelInfo(ctx *Context) error {
 
 	var sb strings.Builder
 	sb.WriteString("# Sentinel\r\n")
-	sb.WriteString(fmt.Sprintf("sentinel_id:%s\r\n", info["sentinel_id"]))
-	sb.WriteString(fmt.Sprintf("sentinel_addr:%s\r\n", info["sentinel_addr"]))
-	sb.WriteString(fmt.Sprintf("sentinel_port:%d\r\n", info["sentinel_port"]))
-	sb.WriteString(fmt.Sprintf("masters:%d\r\n", info["masters"]))
-	sb.WriteString(fmt.Sprintf("running:%v\r\n", info["running"]))
-	sb.WriteString(fmt.Sprintf("quorum:%d\r\n", info["quorum"]))
+	fmt.Fprintf(&sb, "sentinel_id:%s\r\n", info["sentinel_id"])
+	fmt.Fprintf(&sb, "sentinel_addr:%s\r\n", info["sentinel_addr"])
+	fmt.Fprintf(&sb, "sentinel_port:%d\r\n", info["sentinel_port"])
+	fmt.Fprintf(&sb, "masters:%d\r\n", info["masters"])
+	fmt.Fprintf(&sb, "running:%v\r\n", info["running"])
+	fmt.Fprintf(&sb, "quorum:%d\r\n", info["quorum"])
 
 	return ctx.WriteBulkString(sb.String())
 }

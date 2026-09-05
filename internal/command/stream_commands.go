@@ -969,7 +969,7 @@ func cmdXPENDING(ctx *Context) error {
 		return ctx.WriteError(ErrNoGroup)
 	}
 
-	start := "-"
+	var start string
 	end := "+"
 	var count int64 = 10
 	var consumer string
@@ -1062,7 +1062,10 @@ func cmdXCLAIM(ctx *Context) error {
 				return ctx.WriteError(ErrSyntaxError)
 			}
 			if arg == "RETRYCOUNT" {
-				retryCount, _ = strconv.ParseInt(ctx.ArgString(i+1), 10, 64)
+				var err error
+				if retryCount, err = strconv.ParseInt(ctx.ArgString(i+1), 10, 64); err != nil {
+					return ctx.WriteError(ErrSyntaxError)
+				}
 			}
 			i += 2
 		case "FORCE":

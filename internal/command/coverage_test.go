@@ -8,6 +8,7 @@ import (
 
 	"github.com/cachestorm/cachestorm/internal/cluster"
 	"github.com/cachestorm/cachestorm/internal/module"
+	"github.com/cachestorm/cachestorm/internal/persistence"
 	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/sentinel"
 	"github.com/cachestorm/cachestorm/internal/store"
@@ -13027,15 +13028,24 @@ func TestGoValueToResp(t *testing.T) {
 }
 
 func TestParseScoreRange(t *testing.T) {
-	min, minEx, max, maxEx := parseScoreRange("10", "20")
+	min, minEx, max, maxEx, err := parseScoreRange("10", "20")
+	if err != nil {
+		t.Fatalf("parseScoreRange error: %v", err)
+	}
 	if min != 10 || minEx || max != 20 || maxEx {
 		t.Errorf("parseScoreRange failed: %f, %v, %f, %v", min, minEx, max, maxEx)
 	}
-	min2, minEx2, max2, maxEx2 := parseScoreRange("(10", "(20")
+	min2, minEx2, max2, maxEx2, err := parseScoreRange("(10", "(20")
+	if err != nil {
+		t.Fatalf("parseScoreRange exclusive error: %v", err)
+	}
 	if min2 != 10 || !minEx2 || max2 != 20 || !maxEx2 {
 		t.Errorf("parseScoreRange exclusive failed: %f, %v, %f, %v", min2, minEx2, max2, maxEx2)
 	}
-	min3, _, max3, _ := parseScoreRange("-inf", "+inf")
+	min3, _, max3, _, err := parseScoreRange("-inf", "+inf")
+	if err != nil {
+		t.Fatalf("parseScoreRange inf error: %v", err)
+	}
 	if !math.IsInf(min3, -1) || !math.IsInf(max3, 1) {
 		t.Errorf("parseScoreRange inf failed: %f, %f", min3, max3)
 	}
@@ -13247,11 +13257,15 @@ func TestReplicationRDBFunctions(t *testing.T) {
 		}
 	})
 
-	t.Run("WriteRDBString", func(t *testing.T) {
+	t.Run("WriteRDBLength", func(t *testing.T) {
 		var buf bytes.Buffer
-		writeRDBString(&buf, []byte("test"))
-		if buf.Len() == 0 {
-			t.Error("writeRDBString should write data")
+		if err := persistence.WriteRDBLength(&buf, len("test")); err != nil {
+			t.Fatalf("WriteRDBLength: %v", err)
+		}
+		buf.WriteString("test")
+		// Lengths < 64 encode as 1 length byte + raw data.
+		if got := buf.String(); got != "\x04test" {
+			t.Errorf("encoded = %q, want %q", got, "\x04test")
 		}
 	})
 
