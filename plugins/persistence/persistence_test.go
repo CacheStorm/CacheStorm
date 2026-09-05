@@ -46,13 +46,20 @@ func TestAfterCommandVsCloseRace(t *testing.T) {
 	}
 
 	time.Sleep(50 * time.Millisecond)
-	close(stop)
-	wg.Wait()
-
 	if err := p.OnShutdown(); err != nil {
 		t.Fatalf("OnShutdown failed: %v", err)
 	}
-	if err := p.Close(); err != nil {
+
+	// True overlap: Close runs while writers are still spinning.
+	closeDone := make(chan error, 1)
+	go func() {
+		closeDone <- p.Close()
+	}()
+	time.Sleep(50 * time.Millisecond)
+
+	close(stop)
+	wg.Wait()
+	if err := <-closeDone; err != nil {
 		t.Fatalf("Close failed: %v", err)
 	}
 
