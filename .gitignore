@@ -71,3 +71,7 @@ core.*
 !/.wrongstack/
 /.wrongstack/*
 !/.wrongstack/project.json
+
+# Agent tooling state
+.temp_files/
+.wrongstack/
