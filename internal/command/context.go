@@ -42,6 +42,7 @@ func NewContext(cmd string, args [][]byte, s *store.Store, w *resp.Writer) *Cont
 		Args:        args,
 		Store:       s,
 		Writer:      w,
+		StartTime:   time.Now(),
 		Transaction: NewTransaction(),
 	}
 }
@@ -52,6 +53,7 @@ func NewContextWithClient(cmd string, args [][]byte, s *store.Store, w *resp.Wri
 		Args:        args,
 		Store:       s,
 		Writer:      w,
+		StartTime:   time.Now(),
 		Transaction: NewTransaction(),
 		ClientID:    clientID,
 		RemoteAddr:  remoteAddr,

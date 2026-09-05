@@ -10,6 +10,7 @@ import (
 
 	"github.com/cachestorm/cachestorm/internal/command"
 	"github.com/cachestorm/cachestorm/internal/logger"
+	"github.com/cachestorm/cachestorm/internal/plugin"
 	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
 )
@@ -27,6 +28,7 @@ type Connection struct {
 	writer       *resp.Writer
 	store        *store.Store
 	router       *command.Router
+	plugins      *plugin.Manager
 	namespace    string
 	createdAt    time.Time
 	lastCmd      string
@@ -35,7 +37,7 @@ type Connection struct {
 	subscriber   *store.Subscriber // PubSub subscriber, persists across commands
 }
 
-func NewConnection(id int64, conn net.Conn, s *store.Store, r *command.Router) *Connection {
+func NewConnection(id int64, conn net.Conn, s *store.Store, r *command.Router, pm *plugin.Manager) *Connection {
 	return &Connection{
 		ID:           id,
 		conn:         conn,
@@ -43,6 +45,7 @@ func NewConnection(id int64, conn net.Conn, s *store.Store, r *command.Router) *
 		writer:       resp.NewWriter(bufio.NewWriter(conn)),
 		store:        s,
 		router:       r,
+		plugins:      pm,
 		namespace:    "default",
 		createdAt:    time.Now(),
 		readTimeout:  defaultReadTimeout,
@@ -92,6 +95,12 @@ func (c *Connection) Handle() {
 			return
 		}
 
+		if c.plugins != nil {
+			if err := c.plugins.RunBeforeHooks(ctx); err != nil {
+				logger.Warn().Err(err).Int64("conn_id", c.ID).Msg("before-command hook error")
+			}
+		}
+
 		c.conn.SetWriteDeadline(time.Now().Add(c.writeTimeout))
 		if err := c.router.Execute(ctx); err != nil {
 			if err == command.ErrUnknownCommand {
@@ -99,6 +108,9 @@ func (c *Connection) Handle() {
 			} else {
 				c.writer.WriteError(err.Error())
 			}
+		}
+		if c.plugins != nil {
+			c.plugins.RunAfterHooks(ctx)
 		}
 		// Capture subscriber if created during this command (e.g. SUBSCRIBE)
 		if ctx.Subscriber != nil && c.subscriber == nil {
