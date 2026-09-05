@@ -33,10 +33,10 @@ func (m *mockStoreForRewrite) GetAll() map[string]interface{} {
 func buildRESPCommand(cmd string, args ...string) []byte {
 	var buf bytes.Buffer
 	total := 1 + len(args)
-	buf.WriteString(fmt.Sprintf("*%d\r\n", total))
-	buf.WriteString(fmt.Sprintf("$%d\r\n%s\r\n", len(cmd), cmd))
+	fmt.Fprintf(&buf, "*%d\r\n", total)
+	fmt.Fprintf(&buf, "$%d\r\n%s\r\n", len(cmd), cmd)
 	for _, a := range args {
-		buf.WriteString(fmt.Sprintf("$%d\r\n%s\r\n", len(a), a))
+		fmt.Fprintf(&buf, "$%d\r\n%s\r\n", len(a), a)
 	}
 	return buf.Bytes()
 }
@@ -55,21 +55,12 @@ func buildValidRDB(version string, body []byte) []byte {
 	return buf.Bytes()
 }
 
-// writeRDBLength writes a length value using the same encoding as the RDB writer.
+// writeRDBLength writes a length value using the canonical RDB encoding.
+// It delegates to the production encoder so test fixtures can never diverge
+// from it (the former inline 5-byte 4-byte-class form matched the old buggy
+// reader, not the writer).
 func writeRDBLength(buf *bytes.Buffer, length int) {
-	if length < 64 {
-		buf.WriteByte(byte(length))
-	} else if length < 16384 {
-		buf.WriteByte(byte((length >> 8) | 0x40))
-		buf.WriteByte(byte(length & 0xFF))
-	} else {
-		// Reader expects: 1 marker byte (top 2 bits = 10) then 4 bytes big-endian.
-		buf.WriteByte(0x80) // marker only — value is in next 4 bytes
-		buf.WriteByte(byte((length >> 24) & 0xFF))
-		buf.WriteByte(byte((length >> 16) & 0xFF))
-		buf.WriteByte(byte((length >> 8) & 0xFF))
-		buf.WriteByte(byte(length & 0xFF))
-	}
+	_ = WriteRDBLength(buf, length)
 }
 
 // writeRDBString writes a length-prefixed string using RDB encoding.
@@ -616,9 +607,10 @@ func TestReadRDBAllOpcodes(t *testing.T) {
 	writeRDBString(&body, "redis-ver")
 	writeRDBString(&body, "7.0.0")
 
-	// 0xFE: select DB — NOTE: reader does not consume the DB number byte,
-	// so we must NOT write one here (to match the reader's behavior).
-	// Instead we skip 0xFE to avoid confusing the reader.
+	// 0xFE: select DB (db 0) — the reader flushes the store and consumes the
+	// DB-number length that follows, matching the writer's format.
+	body.WriteByte(0xFE)
+	writeRDBLength(&body, 0)
 
 	// 0xFB: resize db (hash table size=2, expires size=1)
 	body.WriteByte(0xFB)
@@ -668,16 +660,14 @@ func TestReadRDBAllOpcodes(t *testing.T) {
 	}
 }
 
-// Test the 0xFE opcode (select DB) specifically — reader calls store.Flush().
+// Test the 0xFE opcode (select DB) specifically — reader calls store.Flush()
+// and consumes the DB-number length that follows, matching the writer format.
 func TestReadRDBSelectDB(t *testing.T) {
-	// 0xFE triggers store.Flush(). We feed it followed by a string entry that the
-	// reader will interpret correctly (since 0xFE doesn't consume a DB number).
 	var body bytes.Buffer
 	body.WriteByte(0xFE)
-	// The next byte (which is the DB number from the writer's perspective) will be
-	// interpreted by the reader as the next opcode. We use 0x00 which means "string entry".
-	// So we provide a valid string entry after 0xFE.
-	body.WriteByte(0x00) // This is really the DB number, but reader sees it as value-type
+	writeRDBLength(&body, 0) // DB number consumed after the flush
+	// A string entry follows the select-db opcode.
+	body.WriteByte(0x00) // value type = string
 	writeRDBString(&body, "after_select")
 	writeRDBString(&body, "value_after_select")
 
@@ -1990,15 +1980,17 @@ func TestRDBWriterWriteLengthError(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestReadRDBWithFEAndFBSequence(t *testing.T) {
-	// Test the 0xFE -> 0xFB sequence which the writer produces.
-	// After 0xFE (which flushes the store), the reader sees 0x00 (DB number)
-	// as a value-type opcode. Then 0xFB is the key's length byte.
-	// We construct a valid sequence where this works.
+	// Test the 0xFE -> 0xFB sequence which the writer produces:
+	// 0xFE flushes and consumes the DB number, then 0xFB carries the
+	// resize counts before the entries follow.
 	var body bytes.Buffer
 	body.WriteByte(0xFE)
-	// Next byte: 0x00 will be read as value-type (string entry)
-	body.WriteByte(0x00)
-	// Now a valid string key+value must follow
+	writeRDBLength(&body, 0) // DB number consumed after the flush
+	body.WriteByte(0xFB)     // resize db
+	writeRDBLength(&body, 1) // hash table size
+	writeRDBLength(&body, 0) // expires size
+	// A string entry follows the resize-db opcode.
+	body.WriteByte(0x00) // value type = string
 	writeRDBString(&body, "afterfe")
 	writeRDBString(&body, "afterfe_val")
 
@@ -2045,9 +2037,9 @@ func TestReadLength2ByteTruncated(t *testing.T) {
 func TestReadLength4ByteTruncated(t *testing.T) {
 	var raw bytes.Buffer
 	raw.WriteString("REDIS0011")
-	raw.WriteByte(0x00)  // string type opcode
-	raw.WriteByte(0x80)  // encType=2 (4-byte), but only 1 byte follows
-	raw.WriteByte(0x00)  // only 1 of 4 required
+	raw.WriteByte(0x00) // string type opcode
+	raw.WriteByte(0x80) // encType=2 (4-byte), but only 1 byte follows
+	raw.WriteByte(0x00) // only 1 of 4 required
 
 	s := store.NewStore()
 	reader := NewRDBReader(s)

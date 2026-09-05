@@ -245,6 +245,19 @@ func (w *RDBWriter) writeValue(f io.Writer, v store.Value, valueType int) error 
 				return err
 			}
 		}
+	case *store.SortedSetValue:
+		members := vt.Members
+		if err := w.writeLength(f, len(members)); err != nil {
+			return err
+		}
+		for member, score := range members {
+			if err := w.writeString(f, member); err != nil {
+				return err
+			}
+			if err := binary.Write(f, binary.LittleEndian, score); err != nil {
+				return err
+			}
+		}
 	default:
 		return w.writeString(f, v.String())
 	}
@@ -266,24 +279,32 @@ func (w *RDBWriter) writeByte(f io.Writer, b byte) error {
 	return err
 }
 
-func (w *RDBWriter) writeLength(f io.Writer, length int) error {
+// WriteRDBLength writes an RDB length value using the canonical length
+// encoding: < 64 → 1 byte; < 16384 → 2 bytes (0x40 marker); else 4 bytes
+// (0x80 marker). Exported so replication-side RDB emitters produce bytes
+// that RDBReader parses symmetrically instead of hand-rolling raw bytes.
+func WriteRDBLength(w io.Writer, length int) error {
 	if length < 64 {
-		return w.writeByte(f, byte(length))
+		_, err := w.Write([]byte{byte(length)})
+		return err
 	} else if length < 16384 {
 		buf := make([]byte, 2)
 		buf[0] = byte((length >> 8) | 0x40)
 		buf[1] = byte(length & 0xFF)
-		_, err := f.Write(buf)
-		return err
-	} else {
-		buf := make([]byte, 4)
-		buf[0] = byte((length >> 24) | 0x80)
-		buf[1] = byte((length >> 16) & 0xFF)
-		buf[2] = byte((length >> 8) & 0xFF)
-		buf[3] = byte(length & 0xFF)
-		_, err := f.Write(buf)
+		_, err := w.Write(buf)
 		return err
 	}
+	buf := make([]byte, 4)
+	buf[0] = byte((length >> 24) | 0x80)
+	buf[1] = byte((length >> 16) & 0xFF)
+	buf[2] = byte((length >> 8) & 0xFF)
+	buf[3] = byte(length & 0xFF)
+	_, err := w.Write(buf)
+	return err
+}
+
+func (w *RDBWriter) writeLength(f io.Writer, length int) error {
+	return WriteRDBLength(f, length)
 }
 
 func (w *RDBWriter) writeString(f io.Writer, s string) error {
@@ -344,6 +365,10 @@ func (r *RDBReader) readRDB(f io.Reader) error {
 		return fmt.Errorf("unsupported RDB version: %d", version)
 	}
 
+	// Expiry (unix ms) from a preceding 0xFC/0xFD opcode; applies to the
+	// next entry only.
+	var pendingExpiryMS int64
+
 	for {
 		opcode, err := r.readByte(f)
 		if err != nil {
@@ -378,35 +403,41 @@ func (r *RDBReader) readRDB(f io.Reader) error {
 
 		case 0xFE:
 			r.store.Flush()
+			// The writer emits the DB number right after 0xFE; consume it so
+			// the following bytes are not misparsed as the next opcode.
+			if _, err := r.readLength(f); err != nil {
+				return err
+			}
 
 		case 0xFC:
 			var expiresAt int64
 			if err := binary.Read(f, binary.LittleEndian, &expiresAt); err != nil {
 				return err
 			}
-			_ = expiresAt
+			pendingExpiryMS = expiresAt
 
 		case 0xFD:
 			var expiresAt uint32
 			if err := binary.Read(f, binary.LittleEndian, &expiresAt); err != nil {
 				return err
 			}
-			_ = expiresAt
+			pendingExpiryMS = int64(expiresAt) * 1000
 
 		case 0xFF:
 			return nil
 
 		default:
-			if err := r.readEntry(f, opcode); err != nil {
+			if err := r.readEntry(f, opcode, pendingExpiryMS); err != nil {
 				return err
 			}
+			pendingExpiryMS = 0
 		}
 	}
 
 	return nil
 }
 
-func (r *RDBReader) readEntry(f io.Reader, valueType byte) error {
+func (r *RDBReader) readEntry(f io.Reader, valueType byte, expiresAtMS int64) error {
 	key, err := r.readString(f)
 	if err != nil {
 		return err
@@ -471,6 +502,25 @@ func (r *RDBReader) readEntry(f io.Reader, valueType byte) error {
 		}
 		value = &store.HashValue{Fields: fields}
 
+	case 4:
+		length, err := r.readLength(f)
+		if err != nil {
+			return err
+		}
+		members := make(map[string]float64, length)
+		for i := 0; i < length; i++ {
+			member, err := r.readString(f)
+			if err != nil {
+				return err
+			}
+			var score float64
+			if err := binary.Read(f, binary.LittleEndian, &score); err != nil {
+				return err
+			}
+			members[member] = score
+		}
+		value = &store.SortedSetValue{Members: members}
+
 	default:
 		strVal, err := r.readString(f)
 		if err != nil {
@@ -479,7 +529,19 @@ func (r *RDBReader) readEntry(f io.Reader, valueType byte) error {
 		value = &store.StringValue{Data: []byte(strVal)}
 	}
 
-	r.store.Set(key, value, store.SetOptions{})
+	// Restore expiry from a preceding 0xFC (ms) / 0xFD (s) opcode, if any.
+	opts := store.SetOptions{}
+	if expiresAtMS > 0 {
+		remaining := time.Duration(expiresAtMS-time.Now().UnixMilli()) * time.Millisecond
+		if remaining <= 0 {
+			// Already expired — skip, mirroring the writer which drops
+			// expired entries when saving.
+			return nil
+		}
+		opts.TTL = remaining
+	}
+
+	r.store.Set(key, value, opts)
 	return nil
 }
 
@@ -507,11 +569,13 @@ func (r *RDBReader) readLength(f io.Reader) (int, error) {
 		}
 		return int(b&0x3F)<<8 | int(b2), nil
 	case 2:
-		buf := make([]byte, 4)
+		// The length byte carries the 0x80 marker plus the top 7 bits of the
+		// length; three more bytes follow (4 bytes total, matching the writer).
+		buf := make([]byte, 3)
 		if _, err := io.ReadFull(f, buf); err != nil {
 			return 0, err
 		}
-		return int(buf[0])<<24 | int(buf[1])<<16 | int(buf[2])<<8 | int(buf[3]), nil
+		return int(b&0x7F)<<24 | int(buf[0])<<16 | int(buf[1])<<8 | int(buf[2]), nil
 	default:
 		return 0, fmt.Errorf("unsupported length encoding: %d", encType)
 	}
@@ -641,7 +705,14 @@ func (pm *PersistenceManager) BGSAVE() error {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
-	go pm.saveRDB()
+	go func() {
+		// saveRDB touches pm.dirty/pm.lastSave; take the manager lock so the
+		// async save serializes with Stop/autoSaveLoop/SAVE instead of racing
+		// their mu-held accesses.
+		pm.mu.Lock()
+		defer pm.mu.Unlock()
+		pm.saveRDB()
+	}()
 	return nil
 }
 

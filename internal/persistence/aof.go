@@ -132,8 +132,11 @@ func (w *AOFWriter) syncFile() {
 		_ = w.writer.Flush()
 	}
 	if w.file != nil {
-		_ = w.file.Sync()
-		w.lastSync = time.Now()
+		if err := w.file.Sync(); err != nil {
+			logger.Error().Err(err).Msg("aof fsync failed")
+		} else {
+			w.lastSync = time.Now()
+		}
 	}
 }
 
@@ -148,9 +151,7 @@ func (w *AOFWriter) Append(cmd string, args [][]byte) error {
 	w.writerBuf = w.writerBuf[:0]
 	w.writerBuf = append(w.writerBuf, '*')
 	w.writerBuf = strconv.AppendInt(w.writerBuf, int64(len(args)+1), 10)
-	w.writerBuf = append(w.writerBuf, '\r', '\n')
-
-	w.writerBuf = append(w.writerBuf, '$')
+	w.writerBuf = append(w.writerBuf, '\r', '\n', '$')
 	w.writerBuf = strconv.AppendInt(w.writerBuf, int64(len(cmd)), 10)
 	w.writerBuf = append(w.writerBuf, '\r', '\n')
 	w.writerBuf = append(w.writerBuf, cmd...)
@@ -173,8 +174,12 @@ func (w *AOFWriter) Append(cmd string, args [][]byte) error {
 	w.dirty.Add(1)
 
 	if w.config.SyncPolicy == AOFAlways {
-		_ = w.writer.Flush()
-		_ = w.file.Sync()
+		if err := w.writer.Flush(); err != nil {
+			return err
+		}
+		if err := w.file.Sync(); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -250,7 +255,6 @@ func (r *AOFReader) Load(path string) ([]Command, error) {
 type AOFRewriter struct {
 	config    AOFConfig
 	store     interface{ GetAll() map[string]interface{} }
-	mu        sync.Mutex
 	rewriting atomic.Bool
 	lastSize  int64
 }
@@ -298,7 +302,10 @@ func (rw *AOFRewriter) Rewrite(aofPath string) error {
 		return err
 	}
 
-	stat, _ := f.Stat()
+	stat, err := f.Stat()
+	if err != nil {
+		return err
+	}
 	rw.lastSize = stat.Size()
 
 	// Close before rename — required on Windows where open files can't be renamed
@@ -318,11 +325,7 @@ func (rw *AOFRewriter) Rewrite(aofPath string) error {
 
 func (rw *AOFRewriter) writeEntry(w *bufio.Writer, key string, entry interface{}) error {
 	var buf []byte
-	buf = append(buf, '*')
-	buf = append(buf, '3')
-	buf = append(buf, '\r', '\n')
-
-	buf = append(buf, '$', '3', '\r', '\n', 'S', 'E', 'T', '\r', '\n')
+	buf = append(buf, '*', '3', '\r', '\n', '$', '3', '\r', '\n', 'S', 'E', 'T', '\r', '\n')
 
 	keyBytes := []byte(key)
 	buf = append(buf, '$')
