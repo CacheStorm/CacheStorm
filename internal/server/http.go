@@ -347,7 +347,7 @@ func (h *HTTPServer) handleHealth(w http.ResponseWriter, _ *http.Request) {
 func (h *HTTPServer) handleInfo(w http.ResponseWriter, _ *http.Request) {
 	info := map[string]interface{}{
 		"server": map[string]interface{}{
-			"version":    "0.2.1",
+			"version":    "0.2.2",
 			"uptime":     time.Since(h.started).String(),
 			"keys":       h.store.KeyCount(),
 			"memory":     h.store.MemUsage(),
