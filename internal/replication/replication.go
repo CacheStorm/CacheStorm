@@ -14,6 +14,7 @@ import (
 
 	"github.com/cachestorm/cachestorm/internal/config"
 	"github.com/cachestorm/cachestorm/internal/logger"
+	"github.com/cachestorm/cachestorm/internal/persistence"
 	"github.com/cachestorm/cachestorm/internal/store"
 )
 
@@ -60,7 +61,7 @@ type Manager struct {
 	replBacklogIdx atomic.Int64
 	stopCh         chan struct{}
 	wg             sync.WaitGroup
-	onRoleChange   func(Role)
+	onRoleChange   atomic.Value // func(Role); accessed atomically — SetRole fires from under m.mu (ReplicaOf), so locking here would self-deadlock
 	stopped        atomic.Bool
 }
 
@@ -106,14 +107,16 @@ func (m *Manager) Stop() {
 		return
 	}
 	close(m.stopCh)
-	if m.masterConn != nil {
-		m.masterConn.Close()
-	}
 	m.mu.Lock()
+	conn := m.masterConn
+	m.masterConn = nil
 	for _, r := range m.replicas {
 		r.Conn.Close()
 	}
 	m.mu.Unlock()
+	if conn != nil {
+		conn.Close()
+	}
 	m.wg.Wait()
 }
 
@@ -155,50 +158,68 @@ func (m *Manager) GetInfo() string {
 	if role == RoleMaster {
 		sb.WriteString("# Replication\r\n")
 		sb.WriteString("role:master\r\n")
-		sb.WriteString(fmt.Sprintf("connected_replicas:%d\r\n", len(m.replicas)))
+		fmt.Fprintf(&sb, "connected_replicas:%d\r\n", len(m.replicas))
 
 		i := 0
 		for _, r := range m.replicas {
 			if r.State == StateConnected {
-				sb.WriteString(fmt.Sprintf("slave%d:ip=%s,port=%d,state=online,offset=%d,lag=%d\r\n",
-					i, r.IP, r.Port, r.Offset, int(time.Since(r.LastAckTime).Seconds())))
+				fmt.Fprintf(&sb, "slave%d:ip=%s,port=%d,state=online,offset=%d,lag=%d\r\n",
+					i, r.IP, r.Port, r.Offset, int(time.Since(r.LastAckTime).Seconds()))
 				i++
 			}
 		}
-		sb.WriteString(fmt.Sprintf("master_replid:%s\r\n", m.replicaID))
-		sb.WriteString(fmt.Sprintf("master_repl_offset:%d\r\n", m.replBacklogIdx.Load()))
+		fmt.Fprintf(&sb, "master_replid:%s\r\n", m.replicaID)
+		fmt.Fprintf(&sb, "master_repl_offset:%d\r\n", m.replBacklogIdx.Load())
 		sb.WriteString("repl_backlog_active:1\r\n")
 		sb.WriteString("repl_backlog_size:1048576\r\n")
-		sb.WriteString(fmt.Sprintf("repl_backlog_first_byte_offset:%d\r\n", m.replBacklogIdx.Load()))
+		fmt.Fprintf(&sb, "repl_backlog_first_byte_offset:%d\r\n", m.replBacklogIdx.Load())
 	} else {
 		sb.WriteString("# Replication\r\n")
 		sb.WriteString("role:slave\r\n")
-		sb.WriteString(fmt.Sprintf("master_host:%s\r\n", m.cfg.MasterHost))
-		sb.WriteString(fmt.Sprintf("master_port:%d\r\n", m.cfg.MasterPort))
-		sb.WriteString(fmt.Sprintf("master_link_status:%s\r\n", m.getMasterLinkStatus()))
-		sb.WriteString(fmt.Sprintf("master_last_io_seconds_ago:%d\r\n", m.getSecondsSinceMasterIO()))
-		sb.WriteString(fmt.Sprintf("master_sync_in_progress:%d\r\n", m.getSyncInProgress()))
-		sb.WriteString(fmt.Sprintf("slave_repl_offset:%d\r\n", m.masterOffset.Load()))
-		sb.WriteString(fmt.Sprintf("slave_priority:100\r\n"))
-		sb.WriteString(fmt.Sprintf("slave_read_only:%d\r\n", boolToInt(m.cfg.ReadOnly)))
+		fmt.Fprintf(&sb, "master_host:%s\r\n", m.cfg.MasterHost)
+		fmt.Fprintf(&sb, "master_port:%d\r\n", m.cfg.MasterPort)
+		fmt.Fprintf(&sb, "master_link_status:%s\r\n", m.getMasterLinkStatus())
+		fmt.Fprintf(&sb, "master_last_io_seconds_ago:%d\r\n", m.getSecondsSinceMasterIO())
+		fmt.Fprintf(&sb, "master_sync_in_progress:%d\r\n", m.getSyncInProgress())
+		fmt.Fprintf(&sb, "slave_repl_offset:%d\r\n", m.masterOffset.Load())
+		sb.WriteString("slave_priority:100\r\n")
+		fmt.Fprintf(&sb, "slave_read_only:%d\r\n", boolToInt(m.cfg.ReadOnly))
 	}
 
 	return sb.String()
 }
 
 func (m *Manager) connectToMaster() error {
-	if m.cfg.MasterHost == "" || m.cfg.MasterPort == 0 {
+	// Snapshot the target under the lock: a concurrent ReplicaOf may
+	// reconfigure or clear the master at any time (previously these reads
+	// raced ReplicaOf's mu-held writes).
+	m.mu.RLock()
+	host, port := m.cfg.MasterHost, m.cfg.MasterPort
+	m.mu.RUnlock()
+
+	if host == "" || port == 0 {
 		return fmt.Errorf("master host/port not configured")
 	}
 
-	addr := net.JoinHostPort(m.cfg.MasterHost, strconv.Itoa(m.cfg.MasterPort))
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
 	conn, err := net.DialTimeout("tcp", addr, 10*time.Second)
 	if err != nil {
 		logger.Error().Err(err).Msg("failed to connect to master")
 		return err
 	}
 
+	m.mu.Lock()
+	// The dial is slow; the master may have been reconfigured or cleared
+	// while it was in flight. Publishing the connection then would leak a
+	// stale link to a master this node has already left.
+	if m.cfg.MasterHost != host || m.cfg.MasterPort != port || m.masterConn != nil {
+		conn.Close()
+		m.mu.Unlock()
+		return fmt.Errorf("master reconfigured during connect")
+	}
 	m.masterConn = conn
+	m.mu.Unlock()
+
 	logger.Info().Str("addr", addr).Msg("connected to master")
 
 	m.wg.Add(1)
@@ -209,11 +230,20 @@ func (m *Manager) connectToMaster() error {
 
 func (m *Manager) syncWithMaster() {
 	defer m.wg.Done()
-	defer m.masterConn.Close()
+
+	// Snapshot the connection once: ReplicaOf may clear m.masterConn
+	// concurrently (previously these reads raced that mu-held write).
+	m.mu.RLock()
+	conn := m.masterConn
+	m.mu.RUnlock()
+	if conn == nil {
+		return
+	}
+	defer conn.Close()
 	defer logger.RecoverPanic("replication-sync")
 
-	reader := bufio.NewReader(m.masterConn)
-	writer := bufio.NewWriter(m.masterConn)
+	reader := bufio.NewReader(conn)
+	writer := bufio.NewWriter(conn)
 
 	if err := m.sendHandshake(writer); err != nil {
 		logger.Error().Err(err).Msg("handshake failed")
@@ -285,7 +315,7 @@ func (m *Manager) handleMasterResponse(line string, reader *bufio.Reader) {
 				m.masterOffset.Store(offset)
 			}
 			m.mu.Unlock()
-			logger.Info().Str("master_id", m.masterID).Msg("full sync started")
+			logger.Info().Str("master_id", parts[0]).Msg("full sync started")
 		}
 		m.receiveRDB(reader)
 	} else if strings.HasPrefix(line, "+CONTINUE") {
@@ -420,13 +450,13 @@ func (m *Manager) getSyncInProgress() int {
 
 func (m *Manager) SetRole(role Role) {
 	m.role.Store(int32(role))
-	if m.onRoleChange != nil {
-		m.onRoleChange(role)
+	if fn, ok := m.onRoleChange.Load().(func(Role)); ok && fn != nil {
+		fn(role)
 	}
 }
 
 func (m *Manager) OnRoleChange(fn func(Role)) {
-	m.onRoleChange = fn
+	m.onRoleChange.Store(fn)
 }
 
 func (m *Manager) ReplicaOf(host string, port int) error {
@@ -474,36 +504,43 @@ func NewSyncWriter(w io.Writer) *SyncWriter {
 }
 
 func (w *SyncWriter) WriteRDBHeader() error {
-	_, err := w.writer.Write([]byte("REDIS0011\xfe\x00"))
-	return err
+	if _, err := w.writer.Write([]byte("REDIS0011")); err != nil {
+		return err
+	}
+	if _, err := w.writer.Write([]byte{0xFE}); err != nil {
+		return err
+	}
+	return persistence.WriteRDBLength(w.writer, 0)
 }
 
 func (w *SyncWriter) WriteDatabaseSelect(db int) error {
-	buf := make([]byte, 2)
-	buf[0] = 0xFE
-	buf[1] = byte(db)
-	_, err := w.writer.Write(buf)
-	return err
+	if _, err := w.writer.Write([]byte{0xFE}); err != nil {
+		return err
+	}
+	return persistence.WriteRDBLength(w.writer, db)
 }
 
 func (w *SyncWriter) WriteKeyValuePair(key string, value interface{}, ttl time.Duration, expireAt int64) error {
-	keyBytes := []byte(key)
-	var buf []byte
-
 	if ttl > 0 {
-		buf = make([]byte, 1+8+2+len(keyBytes))
-		buf[0] = 0xFC
-		binary.LittleEndian.PutUint64(buf[1:9], uint64(expireAt))
-		buf[9] = 0x00
-		buf[10] = byte(len(keyBytes))
-		copy(buf[11:], keyBytes)
-	} else {
-		buf = make([]byte, 2+len(keyBytes))
-		buf[0] = 0x00
-		buf[1] = byte(len(keyBytes))
-		copy(buf[2:], keyBytes)
+		if err := w.writeByte(0xFC); err != nil {
+			return err
+		}
+		var exp [8]byte
+		binary.LittleEndian.PutUint64(exp[:], uint64(expireAt))
+		if _, err := w.writer.Write(exp[:]); err != nil {
+			return err
+		}
 	}
-	if _, err := w.writer.Write(buf); err != nil {
+	// Value type: string. The key length uses the canonical RDB length
+	// encoding so entries parse symmetrically with persistence.RDBReader
+	// (a raw byte(len) misparses for lengths >= 64).
+	if err := w.writeByte(0x00); err != nil {
+		return err
+	}
+	if err := persistence.WriteRDBLength(w.writer, len(key)); err != nil {
+		return err
+	}
+	if _, err := w.writer.Write([]byte(key)); err != nil {
 		return err
 	}
 
@@ -516,13 +553,19 @@ func (w *SyncWriter) WriteKeyValuePair(key string, value interface{}, ttl time.D
 	return nil
 }
 
+// writeStringValue writes a string value using the canonical RDB length
+// encoding (replaces the former RESP-style "$" + 4-byte raw length, which
+// the RDB reader could not parse for any length).
 func (w *SyncWriter) writeStringValue(s string) error {
-	data := []byte(s)
-	buf := make([]byte, 1+4+len(data))
-	buf[0] = '$'
-	binary.BigEndian.PutUint32(buf[1:5], uint32(len(data)))
-	copy(buf[5:], data)
-	_, err := w.writer.Write(buf)
+	if err := persistence.WriteRDBLength(w.writer, len(s)); err != nil {
+		return err
+	}
+	_, err := w.writer.Write([]byte(s))
+	return err
+}
+
+func (w *SyncWriter) writeByte(b byte) error {
+	_, err := w.writer.Write([]byte{b})
 	return err
 }
 

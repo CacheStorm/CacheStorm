@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cachestorm/cachestorm/internal/persistence"
 	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
 )
@@ -32,10 +33,10 @@ var (
 
 type ReplicationManager struct {
 	store      *store.Store
+	mu         sync.RWMutex // guards role/masterHost/masterPort/masterOff/replicaID (per-conn goroutines)
 	role       string
 	masterHost string
 	masterPort int
-	masterID   string
 	masterOff  int64
 	replicaID  string
 }
@@ -53,22 +54,32 @@ func GetReplicationManager() *ReplicationManager {
 }
 
 func (m *ReplicationManager) GetRole() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return m.role
 }
 
 func (m *ReplicationManager) GetReplicaID() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return m.replicaID
 }
 
 func (m *ReplicationManager) GetMasterOffset() int64 {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return m.masterOff
 }
 
 func (m *ReplicationManager) GetMasterHost() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return m.masterHost
 }
 
 func (m *ReplicationManager) GetMasterPort() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return m.masterPort
 }
 
@@ -118,6 +129,8 @@ func (m *ReplicationManager) RemoveReplica(clientID int64) {
 }
 
 func (m *ReplicationManager) ReplicaOf(host string, port int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.masterHost = host
 	m.masterPort = port
 	if host == "" || (host == "no" && port == 1) {
@@ -128,31 +141,33 @@ func (m *ReplicationManager) ReplicaOf(host string, port int) {
 }
 
 func (m *ReplicationManager) GetInfo() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	var sb strings.Builder
 	sb.WriteString("# Replication\r\n")
 
 	if m.role == "master" {
 		sb.WriteString("role:master\r\n")
-		sb.WriteString(fmt.Sprintf("connected_replicas:%d\r\n", m.GetReplicaCount()))
-		sb.WriteString(fmt.Sprintf("master_replid:%s\r\n", m.replicaID))
-		sb.WriteString(fmt.Sprintf("master_repl_offset:%d\r\n", m.masterOff))
+		fmt.Fprintf(&sb, "connected_replicas:%d\r\n", m.GetReplicaCount())
+		fmt.Fprintf(&sb, "master_replid:%s\r\n", m.replicaID)
+		fmt.Fprintf(&sb, "master_repl_offset:%d\r\n", m.masterOff)
 		sb.WriteString("repl_backlog_active:1\r\n")
 		sb.WriteString("repl_backlog_size:1048576\r\n")
 
 		i := 0
 		for _, r := range m.GetReplicas() {
-			sb.WriteString(fmt.Sprintf("slave%d:ip=%s,port=%d,state=%s,offset=%d,lag=%d\r\n",
-				i, r.IP, r.Port, r.State, r.Offset, int(time.Since(r.LastAckTime).Seconds())))
+			fmt.Fprintf(&sb, "slave%d:ip=%s,port=%d,state=%s,offset=%d,lag=%d\r\n",
+				i, r.IP, r.Port, r.State, r.Offset, int(time.Since(r.LastAckTime).Seconds()))
 			i++
 		}
 	} else {
 		sb.WriteString("role:slave\r\n")
-		sb.WriteString(fmt.Sprintf("master_host:%s\r\n", m.masterHost))
-		sb.WriteString(fmt.Sprintf("master_port:%d\r\n", m.masterPort))
+		fmt.Fprintf(&sb, "master_host:%s\r\n", m.masterHost)
+		fmt.Fprintf(&sb, "master_port:%d\r\n", m.masterPort)
 		sb.WriteString("master_link_status:up\r\n")
 		sb.WriteString("master_last_io_seconds_ago:0\r\n")
 		sb.WriteString("master_sync_in_progress:0\r\n")
-		sb.WriteString(fmt.Sprintf("slave_repl_offset:%d\r\n", m.masterOff))
+		fmt.Fprintf(&sb, "slave_repl_offset:%d\r\n", m.masterOff)
 		sb.WriteString("slave_priority:100\r\n")
 		sb.WriteString("slave_read_only:1\r\n")
 	}
@@ -165,7 +180,10 @@ func generateRDB(s *store.Store) []byte {
 
 	buf.WriteString("REDIS0011")
 	buf.WriteByte(0xFE)
-	buf.WriteByte(0x00)
+	// Length-encode the DB number so the payload matches persistence's
+	// canonical RDB format (raw 0x00 is only valid for db 0 by coincidence).
+	// bytes.Buffer writes never fail.
+	persistence.WriteRDBLength(&buf, 0) //nolint:errcheck // bytes.Buffer writes never fail
 
 	entries := s.GetAll()
 	for key, entry := range entries {
@@ -187,30 +205,18 @@ func generateRDB(s *store.Store) []byte {
 		}
 
 		buf.WriteByte(0x00)
-		writeRDBString(&buf, keyBytes)
-		writeRDBString(&buf, valueBytes)
+		// Key and value use the canonical RDB length encoding; bytes.Buffer
+		// writes never fail.
+		persistence.WriteRDBLength(&buf, len(keyBytes)) //nolint:errcheck // bytes.Buffer writes never fail
+		buf.Write(keyBytes)
+		persistence.WriteRDBLength(&buf, len(valueBytes)) //nolint:errcheck // bytes.Buffer writes never fail
+		buf.Write(valueBytes)
 	}
 
 	buf.WriteByte(0xFF)
 	buf.Write(make([]byte, 8))
 
 	return buf.Bytes()
-}
-
-func writeRDBString(buf *bytes.Buffer, data []byte) {
-	length := len(data)
-	if length < 64 {
-		buf.WriteByte(byte(length))
-	} else if length < 16384 {
-		buf.WriteByte(byte((length >> 8) | 0x40))
-		buf.WriteByte(byte(length & 0xFF))
-	} else {
-		buf.WriteByte(byte((length >> 24) | 0x80))
-		buf.WriteByte(byte((length >> 16) & 0xFF))
-		buf.WriteByte(byte((length >> 8) & 0xFF))
-		buf.WriteByte(byte(length & 0xFF))
-	}
-	buf.Write(data)
 }
 
 func writeUint64LE(buf *bytes.Buffer, v uint64) {
@@ -286,8 +292,10 @@ func cmdREPLCONF(ctx *Context) error {
 
 	case "ACK":
 		if ctx.ArgCount() >= 2 {
-			offset, _ := strconv.ParseInt(ctx.ArgString(1), 10, 64)
-			replManager.UpdateReplicaAck(ctx.ClientID, offset)
+			// Malformed ACK offsets are ignored: the next ACK re-syncs.
+			if offset, err := strconv.ParseInt(ctx.ArgString(1), 10, 64); err == nil {
+				replManager.UpdateReplicaAck(ctx.ClientID, offset)
+			}
 		}
 		return nil
 
@@ -328,7 +336,9 @@ func cmdPSYNC(ctx *Context) error {
 		masterReplID = ctx.ArgString(0)
 	}
 	if ctx.ArgCount() >= 2 {
-		offset, _ = strconv.ParseInt(ctx.ArgString(1), 10, 64)
+		if parsed, err := strconv.ParseInt(ctx.ArgString(1), 10, 64); err == nil {
+			offset = parsed
+		}
 	}
 
 	currentReplID := replManager.GetReplicaID()

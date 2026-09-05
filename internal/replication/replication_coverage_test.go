@@ -62,7 +62,7 @@ func (w *countingErrWriter) Write(b []byte) (int, error) {
 
 // nthCallErrWriter fails on the nth Write call (0-indexed).
 type nthCallErrWriter struct {
-	calls    int
+	calls      int
 	failOnCall int
 }
 
@@ -1148,7 +1148,7 @@ func TestSetRole_WithCallback(t *testing.T) {
 
 func TestSetRole_WithoutCallback(t *testing.T) {
 	m := newTestManager(&config.ReplicationConfig{Role: "master"}, store.NewStore())
-	m.onRoleChange = nil
+	m.OnRoleChange(nil)
 	m.SetRole(RoleReplica)
 	// Should not panic
 }

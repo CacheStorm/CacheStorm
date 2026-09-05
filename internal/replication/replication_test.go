@@ -115,7 +115,7 @@ func TestManagerOnRoleChange(t *testing.T) {
 		t.Fatal("expected manager")
 	}
 
-	originalCallback := m.onRoleChange
+	originalCallback, _ := m.onRoleChange.Load().(func(Role))
 	changed := false
 	m.OnRoleChange(func(r Role) {
 		changed = true
@@ -127,7 +127,7 @@ func TestManagerOnRoleChange(t *testing.T) {
 	}
 
 	m.SetRole(RoleMaster)
-	m.onRoleChange = originalCallback
+	m.onRoleChange.Store(originalCallback)
 }
 
 func TestManagerGetInfoMaster(t *testing.T) {
