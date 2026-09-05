@@ -14,6 +14,7 @@ import (
 
 	"github.com/cachestorm/cachestorm/internal/logger"
 	"github.com/cachestorm/cachestorm/internal/resp"
+	"github.com/cachestorm/cachestorm/internal/store"
 )
 
 type AOFSyncPolicy int
@@ -324,34 +325,128 @@ func (rw *AOFRewriter) Rewrite(aofPath string) error {
 }
 
 func (rw *AOFRewriter) writeEntry(w *bufio.Writer, key string, entry interface{}) error {
-	var buf []byte
-	buf = append(buf, '*', '3', '\r', '\n', '$', '3', '\r', '\n', 'S', 'E', 'T', '\r', '\n')
-
-	keyBytes := []byte(key)
-	buf = append(buf, '$')
-	buf = append(buf, fmt.Sprintf("%d", len(keyBytes))...)
-	buf = append(buf, '\r', '\n')
-	buf = append(buf, keyBytes...)
-	buf = append(buf, '\r', '\n')
-
-	var valueBytes []byte
 	switch v := entry.(type) {
+	case *store.Entry:
+		return rw.writeValueCommands(w, key, v.Value)
+	case store.Value:
+		return rw.writeValueCommands(w, key, v)
 	case string:
-		valueBytes = []byte(v)
+		return rw.writeCommand(w, "SET", key, v)
 	case []byte:
-		valueBytes = v
+		return rw.writeCommand(w, "SET", key, string(v))
 	default:
-		valueBytes = []byte(fmt.Sprintf("%v", v))
+		return rw.writeCommand(w, "SET", key, fmt.Sprintf("%v", v))
 	}
+}
 
-	buf = append(buf, '$')
-	buf = append(buf, fmt.Sprintf("%d", len(valueBytes))...)
-	buf = append(buf, '\r', '\n')
-	buf = append(buf, valueBytes...)
-	buf = append(buf, '\r', '\n')
+// writeCommand appends one RESP array command to the rewrite buffer.
+func (rw *AOFRewriter) writeCommand(w *bufio.Writer, name string, args ...string) error {
+	total := 1 + len(args)
+	if _, err := fmt.Fprintf(w, "*%d\r\n$%d\r\n%s\r\n", total, len(name), name); err != nil {
+		return err
+	}
+	for _, arg := range args {
+		if _, err := fmt.Fprintf(w, "$%d\r\n%s\r\n", len(arg), arg); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
-	_, err := w.Write(buf)
-	return err
+// writeValueCommands emits router-executable commands that reconstruct the
+// typed value on AOF replay, instead of flattening every type to SET.
+func (rw *AOFRewriter) writeValueCommands(w *bufio.Writer, key string, value store.Value) error {
+	switch vt := value.(type) {
+	case *store.StringValue:
+		return rw.writeCommand(w, "SET", key, string(vt.Data))
+
+	case *store.HashValue:
+		for field, val := range vt.Fields {
+			if err := rw.writeCommand(w, "HSET", key, field, string(val)); err != nil {
+				return err
+			}
+		}
+		return nil
+
+	case *store.ListValue:
+		args := make([]string, 0, len(vt.Elements)+1)
+		args = append(args, key)
+		for _, el := range vt.Elements {
+			args = append(args, string(el))
+		}
+		return rw.writeCommand(w, "RPUSH", args...)
+
+	case *store.SetValue:
+		args := make([]string, 0, len(vt.Members)+1)
+		args = append(args, key)
+		for member := range vt.Members {
+			args = append(args, member)
+		}
+		return rw.writeCommand(w, "SADD", args...)
+
+	case *store.SortedSetValue:
+		args := make([]string, 0, len(vt.Members)*2+1)
+		args = append(args, key)
+		for member, score := range vt.Members {
+			args = append(args, strconv.FormatFloat(score, 'f', -1, 64), member)
+		}
+		return rw.writeCommand(w, "ZADD", args...)
+
+	case *store.GeoValue:
+		args := make([]string, 0, len(vt.Points)*3+1)
+		args = append(args, key)
+		for member, point := range vt.Points {
+			args = append(args,
+				strconv.FormatFloat(point.Lon, 'f', -1, 64),
+				strconv.FormatFloat(point.Lat, 'f', -1, 64),
+				member)
+		}
+		return rw.writeCommand(w, "GEOADD", args...)
+
+	case *store.JSONValue:
+		return rw.writeCommand(w, "JSON.SET", key, "$", string(vt.Data))
+
+	case *store.StreamValue:
+		for _, entry := range vt.Entries {
+			args := make([]string, 0, len(entry.Fields)*2+2)
+			args = append(args, key, entry.ID)
+			for k, val := range entry.Fields {
+				args = append(args, k, string(val))
+			}
+			if err := rw.writeCommand(w, "XADD", args...); err != nil {
+				return err
+			}
+		}
+		return nil
+
+	case *store.TimeSeriesValue:
+		retentionMS := int64(vt.Retention / time.Millisecond)
+		createArgs := []string{key}
+		if retentionMS > 0 {
+			createArgs = append(createArgs, "RETENTION", strconv.FormatInt(retentionMS, 10))
+		}
+		if len(vt.Labels) > 0 {
+			createArgs = append(createArgs, "LABELS")
+			for k, val := range vt.Labels {
+				createArgs = append(createArgs, k, val)
+			}
+		}
+		if err := rw.writeCommand(w, "TS.CREATE", createArgs...); err != nil {
+			return err
+		}
+		for _, sample := range vt.Samples {
+			if err := rw.writeCommand(w, "TS.ADD", key,
+				strconv.FormatInt(sample.Timestamp, 10),
+				strconv.FormatFloat(sample.Value, 'f', -1, 64)); err != nil {
+				return err
+			}
+		}
+		return nil
+
+	default:
+		// Unknown value shape: preserve the legacy lossy SET fallback.
+		return rw.writeCommand(w, "SET", key, fmt.Sprintf("%v", value))
+	}
 }
 
 func (rw *AOFRewriter) IsRewriting() bool {

@@ -57,6 +57,7 @@ func cmdGEOADD(ctx *Context) error {
 	xx := false
 	argIdx := 1
 
+options:
 	for argIdx < ctx.ArgCount() {
 		arg := strings.ToUpper(ctx.ArgString(argIdx))
 		switch arg {
@@ -69,7 +70,7 @@ func cmdGEOADD(ctx *Context) error {
 		case "CH":
 			argIdx++
 		default:
-			break
+			break options
 		}
 	}
 
