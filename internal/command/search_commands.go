@@ -49,6 +49,7 @@ func cmdFTCREATE(ctx *Context) error {
 					Type: "TEXT",
 				}
 
+			options:
 				for i+1 < ctx.ArgCount() {
 					i++
 					nextArg := strings.ToUpper(ctx.ArgString(i))
@@ -60,7 +61,11 @@ func cmdFTCREATE(ctx *Context) error {
 					case "NOINDEX":
 						fieldSchema.NoIndex = true
 					default:
+						// Not an option: un-consume the token so the field
+						// loop re-reads it as the next field name, then exit
+						// the options loop. (Plain i-- spun forever.)
 						i--
+						break options
 					}
 				}
 
