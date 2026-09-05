@@ -62,18 +62,18 @@ func (a *AOFWriter) Append(cmd string, args [][]byte) error {
 	defer a.mu.Unlock()
 
 	a.writer.WriteByte('*')
-	a.writer.WriteString(fmt.Sprintf("%d", len(args)+1))
+	fmt.Fprintf(a.writer, "%d", len(args)+1)
 	a.writer.WriteString("\r\n")
 
 	a.writer.WriteByte('$')
-	a.writer.WriteString(fmt.Sprintf("%d", len(cmd)))
+	fmt.Fprintf(a.writer, "%d", len(cmd))
 	a.writer.WriteString("\r\n")
 	a.writer.WriteString(cmd)
 	a.writer.WriteString("\r\n")
 
 	for _, arg := range args {
 		a.writer.WriteByte('$')
-		a.writer.WriteString(fmt.Sprintf("%d", len(arg)))
+		fmt.Fprintf(a.writer, "%d", len(arg))
 		a.writer.WriteString("\r\n")
 		a.writer.Write(arg)
 		a.writer.WriteString("\r\n")
@@ -82,13 +82,17 @@ func (a *AOFWriter) Append(cmd string, args [][]byte) error {
 	switch a.syncMode {
 	case "always":
 		a.writer.Flush()
-		a.file.Sync()
+		if err := a.file.Sync(); err != nil {
+			logger.Error().Err(err).Msg("aof sync failed")
+		}
 	case "everysec":
 		go func() {
 			time.Sleep(time.Second)
 			a.mu.Lock()
 			a.writer.Flush()
-			a.file.Sync()
+			if err := a.file.Sync(); err != nil {
+				logger.Error().Err(err).Msg("aof sync failed")
+			}
 			a.mu.Unlock()
 		}()
 	}
@@ -100,6 +104,8 @@ func (a *AOFWriter) Flush() error {
 	if !a.enabled || a.writer == nil {
 		return nil
 	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	return a.writer.Flush()
 }
 
@@ -107,6 +113,8 @@ func (a *AOFWriter) Close() error {
 	if !a.enabled || a.file == nil {
 		return nil
 	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	a.writer.Flush()
 	return a.file.Close()
 }
@@ -232,7 +240,9 @@ func (s *SnapshotWriter) Save(st *store.Store) error {
 		}
 	}
 
-	f.Sync()
+	if err := f.Sync(); err != nil {
+		return err
+	}
 	return os.Rename(tmpPath, path)
 }
 
@@ -398,6 +408,7 @@ func readBytes(f io.Reader) ([]byte, error) {
 }
 
 type PersistencePlugin struct {
+	mu       sync.RWMutex // serializes shutdown Flush/Close against the AfterCommand Append hot path
 	aof      *AOFWriter
 	snapshot *SnapshotWriter
 	reader   *SnapshotReader
@@ -434,6 +445,8 @@ func (p *PersistencePlugin) Init(config interface{}) error {
 func (p *PersistencePlugin) Close() error {
 	close(p.stopCh)
 	p.wg.Wait()
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.aof.Flush()
 	return p.aof.Close()
 }
@@ -451,7 +464,11 @@ func (p *PersistencePlugin) AfterCommand(ctx *command.Context) {
 	}
 
 	if mutatingCommands[ctx.Command] {
-		p.aof.Append(ctx.Command, ctx.Args)
+		p.mu.RLock()
+		defer p.mu.RUnlock()
+		if err := p.aof.Append(ctx.Command, ctx.Args); err != nil {
+			logger.Error().Err(err).Msg("aof append failed")
+		}
 	}
 }
 
