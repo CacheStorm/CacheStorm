@@ -806,7 +806,7 @@ func TestReadEntryHashType(t *testing.T) {
 
 func TestReadEntryDefaultType(t *testing.T) {
 	var body bytes.Buffer
-	body.WriteByte(0x05) // unknown, fallback to string
+	body.WriteByte(0x63) // 99: outside the allocated 0-8 type range, fallback to string
 	writeRDBString(&body, "unknown_type_key")
 	writeRDBString(&body, "some_value")
 

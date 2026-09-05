@@ -203,6 +203,14 @@ func (w *RDBWriter) getValueType(v store.Value) int {
 		return 3
 	case *store.SortedSetValue:
 		return 4
+	case *store.GeoValue:
+		return 5
+	case *store.JSONValue:
+		return 6
+	case *store.StreamValue:
+		return 7
+	case *store.TimeSeriesValue:
+		return 8
 	default:
 		return 0
 	}
@@ -256,6 +264,89 @@ func (w *RDBWriter) writeValue(f io.Writer, v store.Value, valueType int) error 
 			}
 			if err := binary.Write(f, binary.LittleEndian, score); err != nil {
 				return err
+			}
+		}
+	case *store.GeoValue:
+		points := vt.Points
+		if err := w.writeLength(f, len(points)); err != nil {
+			return err
+		}
+		for member, point := range points {
+			if err := w.writeString(f, member); err != nil {
+				return err
+			}
+			if err := binary.Write(f, binary.LittleEndian, point.Lon); err != nil {
+				return err
+			}
+			if err := binary.Write(f, binary.LittleEndian, point.Lat); err != nil {
+				return err
+			}
+		}
+	case *store.JSONValue:
+		if err := w.writeLength(f, len(vt.Data)); err != nil {
+			return err
+		}
+		if _, err := f.Write(vt.Data); err != nil {
+			return err
+		}
+	case *store.StreamValue:
+		if err := w.writeLength(f, len(vt.Entries)); err != nil {
+			return err
+		}
+		if err := w.writeLength(f, int(vt.MaxLen)); err != nil {
+			return err
+		}
+		for _, entry := range vt.Entries {
+			if err := w.writeString(f, entry.ID); err != nil {
+				return err
+			}
+			if err := w.writeLength(f, len(entry.Fields)); err != nil {
+				return err
+			}
+			for k, val := range entry.Fields {
+				if err := w.writeString(f, k); err != nil {
+					return err
+				}
+				if err := w.writeString(f, string(val)); err != nil {
+					return err
+				}
+			}
+		}
+	case *store.TimeSeriesValue:
+		if err := binary.Write(f, binary.LittleEndian, int64(vt.Retention)); err != nil {
+			return err
+		}
+		if err := w.writeLength(f, len(vt.Labels)); err != nil {
+			return err
+		}
+		for k, val := range vt.Labels {
+			if err := w.writeString(f, k); err != nil {
+				return err
+			}
+			if err := w.writeString(f, val); err != nil {
+				return err
+			}
+		}
+		if err := w.writeLength(f, len(vt.Samples)); err != nil {
+			return err
+		}
+		for _, sample := range vt.Samples {
+			if err := binary.Write(f, binary.LittleEndian, sample.Timestamp); err != nil {
+				return err
+			}
+			if err := binary.Write(f, binary.LittleEndian, sample.Value); err != nil {
+				return err
+			}
+			if err := w.writeLength(f, len(sample.Labels)); err != nil {
+				return err
+			}
+			for k, val := range sample.Labels {
+				if err := w.writeString(f, k); err != nil {
+					return err
+				}
+				if err := w.writeString(f, val); err != nil {
+					return err
+				}
 			}
 		}
 	default:
@@ -520,6 +611,135 @@ func (r *RDBReader) readEntry(f io.Reader, valueType byte, expiresAtMS int64) er
 			members[member] = score
 		}
 		value = &store.SortedSetValue{Members: members}
+
+	case 5:
+		length, err := r.readLength(f)
+		if err != nil {
+			return err
+		}
+		points := make(map[string]store.GeoPoint, length)
+		for i := 0; i < length; i++ {
+			member, err := r.readString(f)
+			if err != nil {
+				return err
+			}
+			var point store.GeoPoint
+			if err := binary.Read(f, binary.LittleEndian, &point.Lon); err != nil {
+				return err
+			}
+			if err := binary.Read(f, binary.LittleEndian, &point.Lat); err != nil {
+				return err
+			}
+			points[member] = point
+		}
+		value = &store.GeoValue{Points: points}
+
+	case 6:
+		data, err := r.readString(f)
+		if err != nil {
+			return err
+		}
+		value = &store.JSONValue{Data: []byte(data)}
+
+	case 7:
+		length, err := r.readLength(f)
+		if err != nil {
+			return err
+		}
+		maxLen, err := r.readLength(f)
+		if err != nil {
+			return err
+		}
+		entries := make([]*store.StreamEntry, 0, length)
+		lastID := ""
+		for i := 0; i < length; i++ {
+			id, err := r.readString(f)
+			if err != nil {
+				return err
+			}
+			fieldCount, err := r.readLength(f)
+			if err != nil {
+				return err
+			}
+			fields := make(map[string][]byte, fieldCount)
+			for j := 0; j < fieldCount; j++ {
+				k, err := r.readString(f)
+				if err != nil {
+					return err
+				}
+				val, err := r.readString(f)
+				if err != nil {
+					return err
+				}
+				fields[k] = []byte(val)
+			}
+			entries = append(entries, &store.StreamEntry{ID: id, Fields: fields})
+			lastID = id
+		}
+		value = &store.StreamValue{
+			Entries: entries,
+			LastID:  lastID,
+			Length:  int64(len(entries)),
+			MaxLen:  int64(maxLen),
+			Groups:  make(map[string]*store.ConsumerGroup),
+		}
+
+	case 8:
+		var retention int64
+		if err := binary.Read(f, binary.LittleEndian, &retention); err != nil {
+			return err
+		}
+		labelCount, err := r.readLength(f)
+		if err != nil {
+			return err
+		}
+		labels := make(map[string]string, labelCount)
+		for i := 0; i < labelCount; i++ {
+			k, err := r.readString(f)
+			if err != nil {
+				return err
+			}
+			val, err := r.readString(f)
+			if err != nil {
+				return err
+			}
+			labels[k] = val
+		}
+		sampleCount, err := r.readLength(f)
+		if err != nil {
+			return err
+		}
+		ts := store.NewTimeSeriesValue(time.Duration(retention))
+		ts.Labels = labels
+		for i := 0; i < sampleCount; i++ {
+			var sample store.TimeSeriesSample
+			if err := binary.Read(f, binary.LittleEndian, &sample.Timestamp); err != nil {
+				return err
+			}
+			if err := binary.Read(f, binary.LittleEndian, &sample.Value); err != nil {
+				return err
+			}
+			sampleLabelCount, err := r.readLength(f)
+			if err != nil {
+				return err
+			}
+			if sampleLabelCount > 0 {
+				sample.Labels = make(map[string]string, sampleLabelCount)
+				for j := 0; j < sampleLabelCount; j++ {
+					k, err := r.readString(f)
+					if err != nil {
+						return err
+					}
+					val, err := r.readString(f)
+					if err != nil {
+						return err
+					}
+					sample.Labels[k] = val
+				}
+			}
+			ts.Samples = append(ts.Samples, sample)
+		}
+		value = ts
 
 	default:
 		strVal, err := r.readString(f)
