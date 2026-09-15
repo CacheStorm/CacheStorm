@@ -556,7 +556,7 @@ func TestNewSlowLogZeroSize(t *testing.T) {
 
 func TestSlowLogAdd(t *testing.T) {
 	sl := NewSlowLog(10)
-	sl.Add(100*time.Millisecond, "GET", []string{"key"}, "127.0.0.1")
+	sl.Add(100*time.Millisecond, "GET", [][]byte{[]byte("key")}, "127.0.0.1")
 
 	if sl.Len() != 1 {
 		t.Errorf("expected 1 entry, got %d", sl.Len())
@@ -565,8 +565,8 @@ func TestSlowLogAdd(t *testing.T) {
 
 func TestSlowLogGet(t *testing.T) {
 	sl := NewSlowLog(10)
-	sl.Add(100*time.Millisecond, "GET", []string{"key1"}, "127.0.0.1")
-	sl.Add(200*time.Millisecond, "SET", []string{"key2", "value"}, "127.0.0.1")
+	sl.Add(100*time.Millisecond, "GET", [][]byte{[]byte("key1")}, "127.0.0.1")
+	sl.Add(200*time.Millisecond, "SET", [][]byte{[]byte("key2"), []byte("value")}, "127.0.0.1")
 
 	entries := sl.Get(10)
 	if len(entries) != 2 {
@@ -576,7 +576,7 @@ func TestSlowLogGet(t *testing.T) {
 
 func TestSlowLogGetNegative(t *testing.T) {
 	sl := NewSlowLog(10)
-	sl.Add(100*time.Millisecond, "GET", []string{"key"}, "127.0.0.1")
+	sl.Add(100*time.Millisecond, "GET", [][]byte{[]byte("key")}, "127.0.0.1")
 
 	entries := sl.Get(-1)
 	if len(entries) != 1 {
@@ -586,7 +586,7 @@ func TestSlowLogGetNegative(t *testing.T) {
 
 func TestSlowLogClear(t *testing.T) {
 	sl := NewSlowLog(10)
-	sl.Add(100*time.Millisecond, "GET", []string{"key"}, "127.0.0.1")
+	sl.Add(100*time.Millisecond, "GET", [][]byte{[]byte("key")}, "127.0.0.1")
 	sl.Clear()
 
 	if sl.Len() != 0 {
@@ -597,7 +597,7 @@ func TestSlowLogClear(t *testing.T) {
 func TestSlowLogOverflow(t *testing.T) {
 	sl := NewSlowLog(3)
 	for i := 0; i < 10; i++ {
-		sl.Add(time.Duration(i)*time.Millisecond, "GET", []string{"key"}, "127.0.0.1")
+		sl.Add(time.Duration(i)*time.Millisecond, "GET", [][]byte{[]byte("key")}, "127.0.0.1")
 	}
 
 	if sl.Len() != 3 {

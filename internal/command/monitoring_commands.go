@@ -30,8 +30,6 @@ func RegisterMonitoringCommands(router *Router) {
 	router.Register(&CommandDef{Name: "HEALTH.READINESS", Handler: cmdHEALTHREADINESS})
 }
 
-var slowLogThreshold = 10 * time.Millisecond
-
 func cmdMETRICSGET(ctx *Context) error {
 	snapshot := store.GlobalMetrics.Snapshot()
 
@@ -109,9 +107,7 @@ func cmdSLOWLOGGET(ctx *Context) error {
 			resp.IntegerValue(entry.ID),
 			resp.IntegerValue(entry.Timestamp.Unix()),
 			resp.IntegerValue(entry.Duration.Microseconds()),
-			resp.ArrayValue([]*resp.Value{
-				resp.BulkString(entry.Command),
-			}),
+			resp.ArrayValue(append([]*resp.Value{resp.BulkString(entry.Command)}, args...)),
 			resp.BulkString(entry.ClientIP),
 			resp.BulkString(""),
 		})
@@ -140,7 +136,7 @@ func cmdSLOWLOGCONFIG(ctx *Context) error {
 	switch setting {
 	case "THRESHOLD":
 		ms := parseInt64(value)
-		slowLogThreshold = time.Duration(ms) * time.Millisecond
+		store.GlobalSlowLog.SetThreshold(time.Duration(ms) * time.Millisecond)
 		return ctx.WriteOK()
 	case "MAXLEN":
 		maxLen := int(parseInt64(value))
@@ -280,8 +276,4 @@ func formatBytes(n int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
-}
-
-func init() {
-	_ = slowLogThreshold.String()
 }

@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/cachestorm/cachestorm/internal/command"
@@ -37,12 +38,42 @@ type Connection struct {
 	subscriber   *store.Subscriber // PubSub subscriber, persists across commands
 }
 
+// countingConn wraps a connection and feeds the global byte counters so the
+// advertised bytes_in/bytes_out statistics reflect real traffic.
+type countingConn struct {
+	net.Conn
+}
+
+func (c *countingConn) Read(b []byte) (int, error) {
+	n, err := c.Conn.Read(b)
+	if n > 0 {
+		store.GlobalMetrics.RecordBytesIn(int64(n))
+	}
+	return n, err
+}
+
+func (c *countingConn) Write(b []byte) (int, error) {
+	n, err := c.Conn.Write(b)
+	if n > 0 {
+		store.GlobalMetrics.RecordBytesOut(int64(n))
+	}
+	return n, err
+}
+
 func NewConnection(id int64, conn net.Conn, s *store.Store, r *command.Router, pm *plugin.Manager) *Connection {
+	// Keep-alive needs the raw TCP connection: Handle()'s type assertion
+	// would miss the counting wrapper installed below.
+	if tcpConn, ok := conn.(*net.TCPConn); ok {
+		tcpConn.SetKeepAlive(true)
+		tcpConn.SetKeepAlivePeriod(keepAlivePeriod)
+	}
+
+	cc := &countingConn{Conn: conn}
 	return &Connection{
 		ID:           id,
-		conn:         conn,
-		reader:       resp.NewReader(bufio.NewReader(conn)),
-		writer:       resp.NewWriter(bufio.NewWriter(conn)),
+		conn:         cc,
+		reader:       resp.NewReader(bufio.NewReader(cc)),
+		writer:       resp.NewWriter(bufio.NewWriter(cc)),
 		store:        s,
 		router:       r,
 		plugins:      pm,
@@ -61,11 +92,6 @@ func (c *Connection) Handle() {
 		Int64("conn_id", c.ID).
 		Str("remote", c.conn.RemoteAddr().String()).
 		Msg("client connected")
-
-	if tcpConn, ok := c.conn.(*net.TCPConn); ok {
-		tcpConn.SetKeepAlive(true)
-		tcpConn.SetKeepAlivePeriod(keepAlivePeriod)
-	}
 
 	for {
 		c.conn.SetReadDeadline(time.Now().Add(c.readTimeout))
@@ -103,11 +129,20 @@ func (c *Connection) Handle() {
 
 		c.conn.SetWriteDeadline(time.Now().Add(c.writeTimeout))
 		if err := c.router.Execute(ctx); err != nil {
+			store.GlobalMetrics.RecordError()
 			if err == command.ErrUnknownCommand {
 				c.writer.WriteError("ERR unknown command '" + cmd + "'")
 			} else {
 				c.writer.WriteError(err.Error())
 			}
+		}
+		elapsed := time.Since(ctx.StartTime)
+		store.GlobalMetrics.RecordCommand(cmd, elapsed.Nanoseconds())
+		store.GlobalSlowLog.AddIfSlow(elapsed, cmd, ctx.Args, ctx.RemoteAddr)
+		if writeCommands[strings.ToUpper(cmd)] {
+			store.GlobalMetrics.RecordWrite()
+		} else {
+			store.GlobalMetrics.RecordRead()
 		}
 		if c.plugins != nil {
 			c.plugins.RunAfterHooks(ctx)

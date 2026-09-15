@@ -78,6 +78,15 @@ func New(cfg *config.Config) (*Server, error) {
 		}
 	}
 
+	// Slow log: honor the configured enabled flag, threshold, and size.
+	store.GlobalSlowLog.SetEnabled(cfg.Plugins.SlowLog.Enabled)
+	if d, err := time.ParseDuration(cfg.Plugins.SlowLog.Threshold); err == nil && d >= 0 {
+		store.GlobalSlowLog.SetThreshold(d)
+	}
+	if cfg.Plugins.SlowLog.MaxEntries > 0 {
+		store.GlobalSlowLog.MaxSize = cfg.Plugins.SlowLog.MaxEntries
+	}
+
 	// Configure memory limits and eviction
 	if maxMem, err := config.ParseMemorySize(cfg.Memory.MaxMemory); err == nil && maxMem > 0 {
 		policy := parseEvictionPolicy(cfg.Memory.EvictionPolicy)
