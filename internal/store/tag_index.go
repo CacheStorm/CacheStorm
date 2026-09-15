@@ -21,10 +21,11 @@ func newTagShard() *tagShard {
 }
 
 type TagIndex struct {
-	shards    [TagShards]*tagShard
-	hierarchy sync.RWMutex
-	children  map[string]map[string]struct{}
-	parents   map[string]string
+	shards       [TagShards]*tagShard
+	hierarchy    sync.RWMutex
+	children     map[string]map[string]struct{}
+	parents      map[string]string
+	onInvalidate func(tag string, keys []string)
 }
 
 func NewTagIndex() *TagIndex {
@@ -126,7 +127,22 @@ func (ti *TagIndex) GetKeys(tag string) []string {
 	return keys
 }
 
+// SetOnInvalidate installs a callback fired after a tag's keys are removed
+// from the index. The callback runs outside the shard lock so the consumer
+// may call back into the store safely.
+func (ti *TagIndex) SetOnInvalidate(fn func(tag string, keys []string)) {
+	ti.onInvalidate = fn
+}
+
 func (ti *TagIndex) Invalidate(tag string) []string {
+	keys := ti.invalidate(tag)
+	if ti.onInvalidate != nil {
+		ti.onInvalidate(tag, keys)
+	}
+	return keys
+}
+
+func (ti *TagIndex) invalidate(tag string) []string {
 	idx := ti.shardIndex(tag)
 	shard := ti.shards[idx]
 	shard.mu.Lock()

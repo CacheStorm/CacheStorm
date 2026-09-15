@@ -53,6 +53,8 @@ type Store struct {
 	expiry       *TimingWheel
 	expiryMu     sync.Mutex
 	expiryActive bool
+	hooksMu      sync.RWMutex
+	hooks        StoreHooks
 }
 
 func NewStore() *Store {
@@ -73,6 +75,9 @@ func NewStore() *Store {
 func (s *Store) ConfigureMemory(maxMemory int64, policy EvictionPolicy, warningPct, criticalPct, sampleSize int) {
 	s.memTracker = NewMemoryTracker(maxMemory, warningPct, criticalPct)
 	s.evictor = NewEvictionController(policy, maxMemory, s, s.memTracker, sampleSize)
+	s.evictor.SetOnEvict(func(key string, entry *Entry) {
+		s.fireEvict(key, entry.Value)
+	})
 }
 
 // trackMemory applies a shard-size delta to the configured memory tracker so
@@ -152,6 +157,7 @@ func (s *Store) DeleteIfExpired(key string) bool {
 	s.tagIndex.RemoveKey(key, entry.Tags)
 	s.IncrementVersion(key)
 	s.DeleteVersion(key)
+	s.fireExpire(key, entry.Value)
 	return true
 }
 
@@ -223,6 +229,7 @@ func (s *Store) Get(key string) (*Entry, bool) {
 		mem, _ := shard.Delete(key)
 		s.trackMemory(-mem)
 		s.DeleteVersion(key) // Clean up version to prevent memory leak
+		s.fireExpire(key, entry.Value)
 		// A lookup of an expired key counts as both a miss and an expiration
 		// (lazy expiry here is the only expiry path that observes reads).
 		GlobalMetrics.RecordMiss()
