@@ -68,15 +68,27 @@ func New(cfg *config.Config) (*Server, error) {
 		stopCh: make(chan struct{}),
 	}
 
+	// The plugin manager exists unconditionally: command hooks and store
+	// event hooks (evict/expire/tag-invalidate) dispatch to whatever is
+	// registered; an empty manager is a no-op.
+	s.pluginMgr = plugin.NewManager()
+
 	// Wire the metrics plugin (command hooks + standalone Prometheus endpoint)
 	// when enabled; see config: plugins.metrics.{enabled,port,path}.
 	if cfg.Plugins.Metrics.Enabled {
-		s.pluginMgr = plugin.NewManager()
 		s.metricsPlugin = metrics.New(true)
 		if err := s.pluginMgr.Register(s.metricsPlugin); err != nil {
 			return nil, err
 		}
 	}
+
+	// Bridge the store's lifecycle events (eviction, expiry, tag
+	// invalidation) to the registered plugin consumers.
+	s.store.SetHooks(store.StoreHooks{
+		OnEvict:         s.pluginMgr.RunEvictHooks,
+		OnExpire:        s.pluginMgr.RunExpireHooks,
+		OnTagInvalidate: s.pluginMgr.RunTagInvalidateHooks,
+	})
 
 	// Slow log: honor the configured enabled flag, threshold, and size.
 	store.GlobalSlowLog.SetEnabled(cfg.Plugins.SlowLog.Enabled)
