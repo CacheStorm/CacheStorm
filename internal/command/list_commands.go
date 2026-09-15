@@ -977,14 +977,20 @@ func cmdLPOS(ctx *Context) error {
 			}
 		}
 	} else {
-		for i := searchLen - 1; i >= 0 && found < absRank; i-- {
+		// MAXLEN caps comparisons in the search direction: a tail search
+		// compares the LAST maxlen elements, not the first.
+		tailStart := 0
+		if maxlen > 0 && maxlen < len(list.Elements) {
+			tailStart = len(list.Elements) - maxlen
+		}
+		for i := len(list.Elements) - 1; i >= tailStart && found < absRank; i-- {
 			if bytes.Equal(list.Elements[i], element) {
 				found++
 				if found == absRank {
 					if count > 0 {
 						result := make([]*resp.Value, 0)
 						result = append(result, resp.IntegerValue(int64(i)))
-						for j := i - 1; j >= 0 && len(result) < count; j-- {
+						for j := i - 1; j >= tailStart && len(result) < count; j-- {
 							if bytes.Equal(list.Elements[j], element) {
 								result = append(result, resp.IntegerValue(int64(j)))
 							}
