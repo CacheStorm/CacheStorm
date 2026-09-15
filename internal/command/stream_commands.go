@@ -89,6 +89,40 @@ func generateStreamID(lastID string) string {
 	return strconv.FormatInt(ms, 10) + "-" + strconv.FormatInt(seq+1, 10)
 }
 
+// normalizeStreamBound expands a partial stream ID for range bounds: a bare
+// millisecond becomes ms-0 (start) or ms-maxseq (end); "-" and "+" map to
+// the extremes. Malformed IDs are rejected.
+func normalizeStreamBound(bound string, isEnd bool) (string, error) {
+	switch bound {
+	case "-":
+		return "0-0", nil
+	case "+":
+		return "9223372036854775807-9223372036854775807", nil
+	}
+	parts := strings.Split(bound, "-")
+	switch len(parts) {
+	case 1:
+		ms, err := strconv.ParseInt(parts[0], 10, 64)
+		if err != nil {
+			return "", errors.New("ERR Invalid stream ID specified as stream command argument")
+		}
+		if isEnd {
+			return strconv.FormatInt(ms, 10) + "-9223372036854775807", nil
+		}
+		return strconv.FormatInt(ms, 10) + "-0", nil
+	case 2:
+		if _, err1 := strconv.ParseInt(parts[0], 10, 64); err1 != nil {
+			return "", errors.New("ERR Invalid stream ID specified as stream command argument")
+		}
+		if _, err2 := strconv.ParseInt(parts[1], 10, 64); err2 != nil {
+			return "", errors.New("ERR Invalid stream ID specified as stream command argument")
+		}
+		return bound, nil
+	default:
+		return "", errors.New("ERR Invalid stream ID specified as stream command argument")
+	}
+}
+
 func cmdXADD(ctx *Context) error {
 	if ctx.ArgCount() < 4 {
 		return ctx.WriteError(ErrWrongArgCount)
@@ -100,6 +134,7 @@ func cmdXADD(ctx *Context) error {
 	minID := ""
 	approximate := false
 	trimStrategy := ""
+	nomkstream := false
 	argIdx := 1
 
 loop:
@@ -139,6 +174,7 @@ loop:
 				argIdx++
 			}
 		case "NOMKSTREAM":
+			nomkstream = true
 			argIdx++
 		case "LIMIT":
 			argIdx += 2
@@ -161,6 +197,12 @@ loop:
 	fields := make(map[string][]byte)
 	for i := argIdx; i < ctx.ArgCount(); i += 2 {
 		fields[ctx.ArgString(i)] = ctx.Arg(i + 1)
+	}
+
+	if nomkstream {
+		if _, exists := ctx.Store.Get(key); !exists {
+			return ctx.WriteNull()
+		}
 	}
 
 	stream := getOrCreateStream(ctx, key, maxLen)
@@ -233,7 +275,16 @@ func cmdXRANGE(ctx *Context) error {
 		start = "0-0"
 	}
 	if end == "+" {
-		end = "9999999999999-9999999999999"
+		end = "9223372036854775807-9223372036854775807"
+	}
+
+	start, err := normalizeStreamBound(start, false)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	end, err = normalizeStreamBound(end, true)
+	if err != nil {
+		return ctx.WriteError(err)
 	}
 
 	entries := stream.GetRange(start, end, count)
