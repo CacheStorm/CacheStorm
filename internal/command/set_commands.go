@@ -2,6 +2,7 @@ package command
 
 import (
 	"math/rand"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -322,41 +323,15 @@ func cmdSMOVE(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
-	srcKey := ctx.ArgString(0)
-	dstKey := ctx.ArgString(1)
-	member := ctx.ArgString(2)
-
-	srcSet, err := getSet(ctx, srcKey)
-	if err != nil {
-		return ctx.WriteError(err)
-	}
-	if srcSet == nil {
-		return ctx.WriteInteger(0)
-	}
-
-	srcSet.Lock()
-	if _, exists := srcSet.Members[member]; !exists {
-		srcSet.Unlock()
-		return ctx.WriteInteger(0)
-	}
-
-	delete(srcSet.Members, member)
-	srcEmpty := len(srcSet.Members) == 0
-	srcSet.Unlock()
-
-	if srcEmpty {
-		ctx.Store.Delete(srcKey)
-	}
-
-	dstSet, err := getOrCreateSet(ctx, dstKey)
+	moved, err := ctx.Store.MoveSetMember(ctx.ArgString(0), ctx.ArgString(1), ctx.ArgString(2))
 	if err != nil {
 		return ctx.WriteError(err)
 	}
 
-	dstSet.Lock()
-	dstSet.Members[member] = struct{}{}
-	dstSet.Unlock()
-	return ctx.WriteInteger(1)
+	if moved {
+		return ctx.WriteInteger(1)
+	}
+	return ctx.WriteInteger(0)
 }
 
 func cmdSUNION(ctx *Context) error {
@@ -364,17 +339,44 @@ func cmdSUNION(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
-	result := make(map[string]struct{})
+	// The shared set-operations lock: a concurrent MoveSetMember takes it
+	// exclusively, so this multi-set snapshot can never observe the move
+	// half-applied.
+	ctx.Store.SetOpsRLock()
+	defer ctx.Store.SetOpsRUnlock()
+
+	// Resolve every source set, then lock them all simultaneously in
+	// deterministic key order. Holding every lock at once makes the union
+	// an atomic multi-set snapshot: a concurrent SMOVE (which acquires the
+	// same locks in the same order) can never be observed half-applied.
+	type keyedSet struct {
+		key string
+		set *store.SetValue
+	}
+	sets := make([]keyedSet, 0, ctx.ArgCount())
 	for i := 0; i < ctx.ArgCount(); i++ {
-		set, err := getSetOrEmpty(ctx, ctx.ArgString(i))
+		key := ctx.ArgString(i)
+		set, err := getSetOrEmpty(ctx, key)
 		if err != nil {
 			return ctx.WriteError(err)
 		}
-		set.RLock()
-		for member := range set.Members {
+		sets = append(sets, keyedSet{key: key, set: set})
+	}
+	sort.Slice(sets, func(i, j int) bool { return sets[i].key < sets[j].key })
+	for _, ks := range sets {
+		ks.set.RLock()
+	}
+	defer func() {
+		for _, ks := range sets {
+			ks.set.RUnlock()
+		}
+	}()
+
+	result := make(map[string]struct{})
+	for _, ks := range sets {
+		for member := range ks.set.Members {
 			result[member] = struct{}{}
 		}
-		set.RUnlock()
 	}
 
 	members := make([]*resp.Value, 0, len(result))

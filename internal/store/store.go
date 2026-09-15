@@ -50,6 +50,7 @@ type Store struct {
 	memTracker   *MemoryTracker
 	evictor      *EvictionController
 	expiry       *TimingWheel
+	setOpsMu     sync.RWMutex
 	expiryMu     sync.Mutex
 	expiryActive bool
 	hooksMu      sync.RWMutex
@@ -518,6 +519,116 @@ func (s *Store) Flush() {
 func (s *Store) GetShard(key string) *Shard {
 	return s.shards[s.shardIndex(key)]
 }
+
+// getLiveEntry reads an entry without counting a client hit or touching
+// LRU state, treating an expired entry as absent. For internal operations
+// whose reads must not distort hit-rate accounting.
+func (s *Store) getLiveEntry(key string) *Entry {
+	entry, _ := s.GetShard(key).Get(key)
+	if entry == nil {
+		return nil
+	}
+	if entry.ExpiresAt > 0 && entry.ExpiresAt <= time.Now().UnixNano() {
+		return nil
+	}
+	return entry
+}
+
+// MoveSetMember atomically moves member from the set at srcKey to the set
+// at dstKey, creating the destination when missing and deleting an emptied
+// source. Both set locks are acquired in deterministic key order, so
+// concurrent opposite-direction moves cannot deadlock, and no observer can
+// see the member in neither set: the destination is populated before the
+// source is drained. A wrong-type source or destination fails before any
+// mutation, leaving the member in place.
+func (s *Store) MoveSetMember(srcKey, dstKey, member string) (bool, error) {
+	// The set-operations lock: exclusive for cross-key moves, shared for
+	// multi-key reads (SUNION and friends). This is what makes SMOVE
+	// atomic from every observer's perspective: no multi-key reader can
+	// interleave inside the move, and the per-set value locks below keep
+	// single-key operations mutually exclusive with it.
+	s.setOpsMu.Lock()
+	defer s.setOpsMu.Unlock()
+
+	srcEntry := s.getLiveEntry(srcKey)
+	if srcEntry == nil {
+		return false, nil
+	}
+	srcSet, ok := srcEntry.Value.(*SetValue)
+	if !ok {
+		return false, ErrWrongType
+	}
+
+	var dstSet *SetValue
+	if dstEntry := s.getLiveEntry(dstKey); dstEntry != nil {
+		v, ok := dstEntry.Value.(*SetValue)
+		if !ok {
+			return false, ErrWrongType
+		}
+		dstSet = v
+	}
+
+	// Same key: nothing to move; report membership like Redis does.
+	if srcKey == dstKey {
+		srcSet.Lock()
+		_, exists := srcSet.Members[member]
+		srcSet.Unlock()
+		return exists, nil
+	}
+
+	// Per-set value locks in deterministic key order so concurrent
+	// single-key operations on both sets serializes with the move.
+	first, second := srcSet, dstSet
+	if dstKey < srcKey {
+		if second != nil {
+			first, second = second, first
+		}
+	}
+	first.Lock()
+	if second != nil {
+		second.Lock()
+	}
+
+	if _, exists := srcSet.Members[member]; !exists {
+		if second != nil {
+			second.Unlock()
+		}
+		first.Unlock()
+		return false, nil
+	}
+
+	// Destination first: while both locks are held the member may be
+	// visible in both sets, never in neither.
+	if dstSet == nil {
+		dstSet = &SetValue{Members: map[string]struct{}{member: {}}}
+		s.Set(dstKey, dstSet, SetOptions{})
+	} else {
+		dstSet.Members[member] = struct{}{}
+	}
+	delete(srcSet.Members, member)
+	srcEmptied := len(srcSet.Members) == 0
+
+	if second != nil {
+		second.Unlock()
+	}
+	first.Unlock()
+
+	// The emptiness snapshot was taken under both locks; the delete only
+	// performs bookkeeping (tracker, tags, versions) and cannot race.
+	if srcEmptied {
+		s.Delete(srcKey)
+	}
+	return true, nil
+}
+
+// SetOpsRLock takes the shared set-operations lock. Multi-key set reads
+// (SUNION, SDIFF, SINTER and their STORE variants) hold it so a concurrent
+// MoveSetMember — which takes it exclusively — cannot interleave inside
+// their snapshots.
+func (s *Store) SetOpsRLock() { s.setOpsMu.RLock() }
+
+// SetOpsRUnlock releases the shared set-operations lock.
+func (s *Store) SetOpsRUnlock() { s.setOpsMu.RUnlock() }
 
 func (s *Store) GetTagIndex() *TagIndex {
 	return s.tagIndex
