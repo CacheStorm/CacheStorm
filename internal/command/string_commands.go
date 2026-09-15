@@ -2,6 +2,7 @@ package command
 
 import (
 	"errors"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -201,12 +202,32 @@ func cmdMSET(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
+	// MSET is atomic ("all given keys are set at once"): validate every pair
+	// and pre-check capacity before applying anything — a mid-application
+	// failure would leave a partially applied MSET. The padding keeps the
+	// estimate conservative against the tracker's per-entry overhead.
+	var estimated int64
 	for i := 0; i < ctx.ArgCount(); i += 2 {
-		key := ctx.ArgString(i)
-		value := ctx.Arg(i + 1)
-		ctx.Store.Set(key, &store.StringValue{Data: value}, store.SetOptions{})
+		k := ctx.ArgString(i)
+		if len(k) == 0 || len(k) > store.MaxKeySize || strings.ContainsRune(k, 0) {
+			return ctx.WriteError(store.ErrInvalidKey)
+		}
+		if len(ctx.Arg(i+1)) > store.MaxValueSize {
+			return ctx.WriteError(store.ErrValueTooLarge)
+		}
+		estimated += int64(len(k) + len(ctx.Arg(i+1)) + 128)
+	}
+	if mt := ctx.Store.MemoryTracker(); mt != nil && !mt.CanAllocate(estimated) {
+		return ctx.WriteError(store.ErrMemoryLimit)
 	}
 
+	for i := 0; i < ctx.ArgCount(); i += 2 {
+		if err := ctx.Store.Set(ctx.ArgString(i), &store.StringValue{Data: ctx.Arg(i + 1)}, store.SetOptions{}); err != nil {
+			// Reachable only under concurrent pressure after the pre-flight:
+			// report it rather than hiding a partial application behind +OK.
+			return ctx.WriteError(err)
+		}
+	}
 	return ctx.WriteOK()
 }
 
@@ -271,23 +292,25 @@ func incrBy(ctx *Context, incr int64) error {
 	key := ctx.ArgString(0)
 	entry, exists := ctx.Store.Get(key)
 
-	var newVal int64
-	if !exists {
-		newVal = incr
-	} else {
+	if exists {
 		strVal, ok := entry.Value.(*store.StringValue)
 		if !ok {
 			return ctx.WriteError(store.ErrWrongType)
 		}
-		current, err := strconv.ParseInt(string(strVal.Data), 10, 64)
+		newVal, err := computeIntIncr(strVal.Data, incr)
 		if err != nil {
-			return ctx.WriteError(ErrNotInteger)
+			return ctx.WriteError(err)
 		}
-		newVal = current + incr
+		if err := ctx.Store.Set(key, &store.StringValue{Data: []byte(strconv.FormatInt(newVal, 10))}, store.SetOptions{}); err != nil {
+			return ctx.WriteError(err)
+		}
+		return ctx.WriteInteger(newVal)
 	}
 
-	ctx.Store.Set(key, &store.StringValue{Data: []byte(strconv.FormatInt(newVal, 10))}, store.SetOptions{})
-	return ctx.WriteInteger(newVal)
+	if err := ctx.Store.Set(key, &store.StringValue{Data: []byte(strconv.FormatInt(incr, 10))}, store.SetOptions{}); err != nil {
+		return ctx.WriteError(err)
+	}
+	return ctx.WriteInteger(incr)
 }
 
 func cmdAPPEND(ctx *Context) error {
@@ -642,11 +665,18 @@ func cmdINCRBYFLOAT(ctx *Context) error {
 	if err != nil {
 		return ctx.WriteError(ErrInvalidArg)
 	}
+	// A NaN/Inf increment can only produce a NaN/Inf result — reject it
+	// instead of poisoning the key.
+	if math.IsNaN(incr) || math.IsInf(incr, 0) {
+		return ctx.WriteError(ErrFloatOverflow)
+	}
 
 	entry, exists := ctx.Store.Get(key)
 	if !exists {
 		result := strconv.FormatFloat(incr, 'f', -1, 64)
-		ctx.Store.Set(key, &store.StringValue{Data: []byte(result)}, store.SetOptions{})
+		if err := ctx.Store.Set(key, &store.StringValue{Data: []byte(result)}, store.SetOptions{}); err != nil {
+			return ctx.WriteError(err)
+		}
 		return ctx.WriteBulkString(result)
 	}
 
@@ -660,9 +690,15 @@ func cmdINCRBYFLOAT(ctx *Context) error {
 		return ctx.WriteError(ErrInvalidArg)
 	}
 
-	result := strconv.FormatFloat(current+incr, 'f', -1, 64)
-	ctx.Store.Set(key, &store.StringValue{Data: []byte(result)}, store.SetOptions{})
-	return ctx.WriteBulkString(result)
+	result := current + incr
+	if math.IsNaN(result) || math.IsInf(result, 0) {
+		return ctx.WriteError(ErrFloatOverflow)
+	}
+	formatted := strconv.FormatFloat(result, 'f', -1, 64)
+	if err := ctx.Store.Set(key, &store.StringValue{Data: []byte(formatted)}, store.SetOptions{}); err != nil {
+		return ctx.WriteError(err)
+	}
+	return ctx.WriteBulkString(formatted)
 }
 
 func cmdLCS(ctx *Context) error {

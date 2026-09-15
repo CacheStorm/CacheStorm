@@ -16,6 +16,8 @@ var (
 	ErrSyntaxError     = errors.New("ERR syntax error")
 	ErrNotInteger      = errors.New("ERR value is not an integer or out of range")
 	ErrNotFloat        = errors.New("ERR value is not a valid float")
+	ErrOverflow        = errors.New("ERR increment or decrement would overflow")
+	ErrFloatOverflow   = errors.New("ERR increment would produce NaN or Infinity")
 	ErrIndexOutOfRange = errors.New("ERR index out of range")
 )
 
