@@ -1885,7 +1885,7 @@ func TestTimingWheel_Cascade(t *testing.T) {
 	level1.slots[level1.current].keys["cascadekey"] = now + int64(30*time.Minute)
 	level1.slots[level1.current].mu.Unlock()
 
-	tw.cascade(1, now)
+	tw.cascadeLevel(1, now)
 }
 
 func TestTimingWheel_CascadeLevel2(t *testing.T) {
@@ -1898,7 +1898,7 @@ func TestTimingWheel_CascadeLevel2(t *testing.T) {
 	level2.slots[level2.current].keys["cascadekey2"] = now + int64(12*time.Hour)
 	level2.slots[level2.current].mu.Unlock()
 
-	tw.cascade(2, now)
+	tw.cascadeLevel(2, now)
 }
 
 func TestTimingWheel_CascadeLevel3(t *testing.T) {
@@ -1911,7 +1911,7 @@ func TestTimingWheel_CascadeLevel3(t *testing.T) {
 	level3.slots[level3.current].keys["cascadekey3"] = now + int64(15*24*time.Hour)
 	level3.slots[level3.current].mu.Unlock()
 
-	tw.cascade(3, now)
+	tw.cascadeLevel(3, now)
 }
 
 func TestTimingWheel_CascadeExpired(t *testing.T) {
@@ -1925,7 +1925,7 @@ func TestTimingWheel_CascadeExpired(t *testing.T) {
 	level1.slots[level1.current].keys["expired_cascade"] = now - int64(time.Second)
 	level1.slots[level1.current].mu.Unlock()
 
-	tw.cascade(1, now)
+	tw.cascadeLevel(1, now)
 }
 
 func TestTimingWheel_CascadeBeyondLevel3(t *testing.T) {
@@ -1933,7 +1933,7 @@ func TestTimingWheel_CascadeBeyondLevel3(t *testing.T) {
 	tw := NewTimingWheel(s)
 	now := time.Now().UnixNano()
 	// Cascade at level 4 should return immediately
-	tw.cascade(4, now)
+	tw.cascadeLevel(4, now)
 }
 
 // =============================
@@ -3240,7 +3240,7 @@ func TestTimingWheel_CascadeLevel3_Move(t *testing.T) {
 	level3.slots[level3.current].keys["movedkey"] = now + int64(20*24*time.Hour)
 	level3.slots[level3.current].mu.Unlock()
 
-	tw.cascade(3, now)
+	tw.cascadeLevel(3, now)
 }
 
 // timing_wheel.go:256 - farFutureCleanup: stopCh branch
@@ -3405,7 +3405,7 @@ func TestTimingWheel_CascadeChain(t *testing.T) {
 	tw.levels[1].mu.Unlock()
 
 	now := time.Now().UnixNano()
-	tw.cascade(1, now)
+	tw.cascadeLevel(1, now)
 }
 
 // =============================
