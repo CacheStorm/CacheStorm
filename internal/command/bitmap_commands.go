@@ -44,7 +44,12 @@ func getOrCreateBitmap(ctx *Context, key string) *BitmapValue {
 	case *BitmapValue:
 		return v
 	case *store.StringValue:
-		return &BitmapValue{Data: v.Data}
+		// Convert and store back: SETBIT on a string-created key must grow a
+		// value the store actually holds, or the reallocation branch loses
+		// the write behind a success reply.
+		bm := &BitmapValue{Data: v.Data}
+		ctx.Store.Set(key, bm, store.SetOptions{})
+		return bm
 	default:
 		return nil
 	}
