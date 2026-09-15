@@ -179,8 +179,6 @@ func NewHTTPServer(s *store.Store, router *command.Router, cfg *HTTPConfig) *HTT
 	mux.HandleFunc("/api/tags", h.authMiddleware(h.handleTags))
 	mux.HandleFunc("/api/tag/", h.authMiddleware(h.handleTag))
 	mux.HandleFunc("/api/invalidate/", h.authMiddleware(h.handleInvalidate))
-	mux.HandleFunc("/api/namespaces", h.authMiddleware(h.handleNamespaces))
-	mux.HandleFunc("/api/namespace/", h.authMiddleware(h.handleNamespace))
 	mux.HandleFunc("/api/cluster", h.authMiddleware(h.handleCluster))
 	mux.HandleFunc("/api/cluster/join", h.authMiddleware(h.handleClusterJoin))
 	mux.HandleFunc("/api/execute", h.authMiddleware(h.handleExecute))
@@ -626,93 +624,6 @@ func (h *HTTPServer) handleInvalidate(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h *HTTPServer) handleNamespaces(w http.ResponseWriter, r *http.Request) {
-	nsMgr := h.store.GetNamespaceManager()
-	if nsMgr == nil {
-		h.writeJSON(w, http.StatusOK, map[string]interface{}{
-			"namespaces": []interface{}{},
-		})
-		return
-	}
-
-	switch r.Method {
-	case "GET":
-		names := nsMgr.List()
-		nsData := make([]map[string]interface{}, 0)
-		for _, name := range names {
-			ns := nsMgr.Get(name)
-			if ns != nil {
-				stats, err := nsMgr.Stats(name)
-				if err != nil {
-					continue
-				}
-				nsData = append(nsData, stats)
-			}
-		}
-
-		h.writeJSON(w, http.StatusOK, map[string]interface{}{
-			"count":      len(nsData),
-			"namespaces": nsData,
-		})
-
-	case "POST":
-		var req struct {
-			Name string `json:"name"`
-		}
-		r.Body = http.MaxBytesReader(w, r.Body, 1024) // 1KB limit
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			h.writeError(w, http.StatusBadRequest, "invalid JSON")
-			return
-		}
-
-		nsMgr.GetOrCreate(req.Name)
-		h.writeJSON(w, http.StatusOK, map[string]interface{}{
-			"result":    "OK",
-			"namespace": req.Name,
-		})
-
-	default:
-		h.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
-	}
-}
-
-func (h *HTTPServer) handleNamespace(w http.ResponseWriter, r *http.Request) {
-	name := strings.TrimPrefix(r.URL.Path, "/api/namespace/")
-	if name == "" {
-		h.writeError(w, http.StatusBadRequest, "namespace required")
-		return
-	}
-
-	nsMgr := h.store.GetNamespaceManager()
-	if nsMgr == nil {
-		h.writeError(w, http.StatusNotFound, "namespace manager not available")
-		return
-	}
-
-	switch r.Method {
-	case "GET":
-		stats, err := nsMgr.Stats(name)
-		if err != nil {
-			h.writeError(w, http.StatusNotFound, err.Error())
-			return
-		}
-		h.writeJSON(w, http.StatusOK, stats)
-
-	case "DELETE":
-		if err := nsMgr.Delete(name); err != nil {
-			h.writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		h.writeJSON(w, http.StatusOK, map[string]interface{}{
-			"result":    "OK",
-			"namespace": name,
-		})
-
-	default:
-		h.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
-	}
-}
-
 func (h *HTTPServer) handleCluster(w http.ResponseWriter, _ *http.Request) {
 	h.writeJSON(w, http.StatusOK, map[string]interface{}{
 		"state":          "ok",
@@ -842,17 +753,10 @@ func (h *HTTPServer) handleStats(w http.ResponseWriter, _ *http.Request) {
 		tagCount = len(tagIndex.Tags())
 	}
 
-	nsMgr := h.store.GetNamespaceManager()
-	nsCount := 0
-	if nsMgr != nil {
-		nsCount = len(nsMgr.List())
-	}
-
 	h.writeJSON(w, http.StatusOK, map[string]interface{}{
 		"keys":       h.store.KeyCount(),
 		"memory":     h.store.MemUsage(),
 		"tags":       tagCount,
-		"namespaces": nsCount,
 		"uptime":     time.Since(h.started).String(),
 		"shards":     store.NumShards,
 		"started_at": h.started,
@@ -1011,11 +915,6 @@ const adminUIHTML = `<!DOCTYPE html>
                         class="sidebar-item w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-slate-300 hover:bg-slate-700 transition-colors">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/></svg>
                         Tags
-                    </button>
-                    <button @click="currentView = 'namespaces'" :class="{'active': currentView === 'namespaces'}"
-                        class="sidebar-item w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-slate-300 hover:bg-slate-700 transition-colors">
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
-                        Namespaces
                     </button>
                     <button @click="currentView = 'cluster'" :class="{'active': currentView === 'cluster'}"
                         class="sidebar-item w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-slate-300 hover:bg-slate-700 transition-colors">
@@ -1200,38 +1099,6 @@ const adminUIHTML = `<!DOCTYPE html>
                     </div>
                 </div>
 
-                <div x-show="currentView === 'namespaces'" x-cloak>
-                    <div class="flex items-center justify-between mb-6">
-                        <h2 class="text-2xl font-bold">Namespaces</h2>
-                        <button @click="showAddNamespaceModal = true" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
-                            Add Namespace
-                        </button>
-                    </div>
-                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        <template x-for="ns in namespaces" :key="ns.name">
-                            <div class="bg-slate-800 rounded-xl p-6 border border-slate-700">
-                                <div class="flex items-center justify-between mb-4">
-                                    <h3 class="font-semibold text-white" x-text="ns.name"></h3>
-                                    <span x-show="ns.name === 'default'" class="px-2 py-1 text-xs rounded-full bg-green-500/20 text-green-400">Default</span>
-                                </div>
-                                <div class="space-y-2 text-sm">
-                                    <div class="flex justify-between">
-                                        <span class="text-slate-400">Keys:</span>
-                                        <span class="text-white" x-text="ns.keys"></span>
-                                    </div>
-                                    <div class="flex justify-between">
-                                        <span class="text-slate-400">Memory:</span>
-                                        <span class="text-white" x-text="formatBytes(ns.memory)"></span>
-                                    </div>
-                                </div>
-                                <button x-show="ns.name !== 'default'" @click="deleteNamespace(ns.name)" class="w-full mt-4 py-2 bg-red-600/20 text-red-400 rounded-lg hover:bg-red-600/30 transition-colors text-sm">
-                                    Delete
-                                </button>
-                            </div>
-                        </template>
-                    </div>
-                </div>
-
                 <div x-show="currentView === 'cluster'" x-cloak>
                     <div class="flex items-center justify-between mb-6">
                         <h2 class="text-2xl font-bold">Cluster</h2>
@@ -1389,20 +1256,6 @@ const adminUIHTML = `<!DOCTYPE html>
             </div>
         </div>
 
-        <div x-show="showAddNamespaceModal" x-cloak class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-            <div class="bg-slate-800 rounded-xl p-6 w-full max-w-md border border-slate-700">
-                <h3 class="text-lg font-semibold mb-4">Add Namespace</h3>
-                <div>
-                    <label class="block text-sm text-slate-400 mb-1">Name</label>
-                    <input type="text" x-model="newNamespace" class="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
-                </div>
-                <div class="flex gap-3 mt-6">
-                    <button @click="showAddNamespaceModal = false" class="flex-1 py-2 bg-slate-700 text-slate-300 rounded-lg hover:bg-slate-600 transition-colors">Cancel</button>
-                    <button @click="addNamespace()" class="flex-1 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">Add</button>
-                </div>
-            </div>
-        </div>
-
         <div x-show="showJoinClusterModal" x-cloak class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
             <div class="bg-slate-800 rounded-xl p-6 w-full max-w-md border border-slate-700">
                 <h3 class="text-lg font-semibold mb-4">Join Cluster</h3>
@@ -1485,12 +1338,11 @@ const adminUIHTML = `<!DOCTYPE html>
                 loginPassword: '',
                 loginError: '',
                 currentView: 'dashboard',
-                stats: { keys: 0, memory: 0, tags: 0, namespaces: 0, uptime: '0s', shards: 256, started_at: null },
+                stats: { keys: 0, memory: 0, tags: 0, uptime: '0s', shards: 256, started_at: null },
                 keys: [],
                 filteredKeys: [],
                 keySearch: '',
                 tags: [],
-                namespaces: [],
                 cluster: { state: 'ok', known_nodes: 1, size: 1, slots_assigned: 16384, current_epoch: 1, nodes: [] },
                 slowlog: [],
                 consoleHistory: [],
@@ -1498,12 +1350,10 @@ const adminUIHTML = `<!DOCTYPE html>
                 recentActivity: [],
                 topTags: [],
                 showAddKeyModal: false,
-                showAddNamespaceModal: false,
                 showJoinClusterModal: false,
                 showViewKeyModal: false,
                 showTagKeysModal: false,
                 newKey: { key: '', value: '', type: 'string', tags: '' },
-                newNamespace: '',
                 joinCluster: { host: '127.0.0.1', port: 7946 },
                 viewingKey: {},
                 viewingTagName: '',
@@ -1553,7 +1403,6 @@ const adminUIHTML = `<!DOCTYPE html>
                         this.refreshStats(),
                         this.refreshKeys(),
                         this.refreshTags(),
-                        this.refreshNamespaces(),
                         this.refreshCluster()
                     ]);
                 },
@@ -1602,15 +1451,6 @@ const adminUIHTML = `<!DOCTYPE html>
                     }
                 },
 
-                async refreshNamespaces() {
-                    try {
-                        const resp = await fetch('/api/namespaces', { headers: this.getAuthHeaders() });
-                        const data = await resp.json();
-                        this.namespaces = data.namespaces || [];
-                    } catch (e) {
-                        console.error('Failed to refresh namespaces:', e);
-                    }
-                },
 
                 async refreshCluster() {
                     try {
@@ -1713,44 +1553,7 @@ const adminUIHTML = `<!DOCTYPE html>
                     }
                 },
 
-                async addNamespace() {
-                    if (!this.newNamespace) return;
-                    try {
-                        const resp = await fetch('/api/namespaces', {
-                            method: 'POST',
-                            headers: this.getAuthHeaders(),
-                            body: JSON.stringify({ name: this.newNamespace })
-                        });
-                        const data = await resp.json();
-                        if (data.result === 'OK') {
-                            this.showAddNamespaceModal = false;
-                            this.newNamespace = '';
-                            await this.refreshNamespaces();
-                            this.notify('Namespace created', 'success');
-                        }
-                    } catch (e) {
-                        this.notify('Failed to create namespace', 'error');
-                    }
-                },
 
-                async deleteNamespace(name) {
-                    if (!confirm('Delete namespace "' + name + '"?')) return;
-                    try {
-                        const resp = await fetch('/api/namespace/' + encodeURIComponent(name), {
-                            method: 'DELETE',
-                            headers: this.getAuthHeaders()
-                        });
-                        const data = await resp.json();
-                        if (data.result === 'OK') {
-                            await this.refreshNamespaces();
-                            this.notify('Namespace deleted', 'success');
-                        } else {
-                            this.notify(data.reason || 'Failed to delete namespace', 'error');
-                        }
-                    } catch (e) {
-                        this.notify('Failed to delete namespace', 'error');
-                    }
-                },
 
                 async joinClusterNode() {
                     try {

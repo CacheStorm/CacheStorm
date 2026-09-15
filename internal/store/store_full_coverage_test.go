@@ -2094,64 +2094,7 @@ func TestLeakyBucket_Overflow(t *testing.T) {
 }
 
 // =============================
-// namespace.go coverage tests
 // =============================
-
-func TestNamespaceManager_GetOrCreate(t *testing.T) {
-	nm := NewNamespaceManager()
-
-	// Get existing
-	ns := nm.GetOrCreate("default")
-	if ns == nil {
-		t.Fatal("expected non-nil")
-	}
-
-	// Create new
-	ns = nm.GetOrCreate("test")
-	if ns == nil || ns.Name != "test" {
-		t.Fatal("expected new namespace 'test'")
-	}
-
-	// Get same one again
-	ns2 := nm.GetOrCreate("test")
-	if ns != ns2 {
-		t.Fatal("expected same pointer")
-	}
-}
-
-func TestNamespaceManager_Delete(t *testing.T) {
-	nm := NewNamespaceManager()
-	nm.GetOrCreate("test")
-
-	// Delete non-existent
-	err := nm.Delete("nonexistent")
-	if err != ErrNamespaceNotFound {
-		t.Fatalf("expected ErrNamespaceNotFound, got %v", err)
-	}
-
-	// Cannot delete default
-	err = nm.Delete("default")
-	if err == nil {
-		t.Fatal("expected error deleting default")
-	}
-
-	// Delete existing
-	err = nm.Delete("test")
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestNamespaceManager_List(t *testing.T) {
-	nm := NewNamespaceManager()
-	nm.GetOrCreate("ns1")
-	nm.GetOrCreate("ns2")
-
-	names := nm.List()
-	if len(names) < 3 { // default + ns1 + ns2
-		t.Fatalf("expected >= 3 namespaces, got %d", len(names))
-	}
-}
 
 // =============================
 // geo.go coverage tests

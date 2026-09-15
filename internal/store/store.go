@@ -43,7 +43,6 @@ type SetOptions struct {
 type Store struct {
 	shards       [NumShards]*Shard
 	tagIndex     *TagIndex
-	namespaceMgr *NamespaceManager
 	pubsub       *PubSub
 	keyNotifier  *KeyNotifier
 	versions     map[string]int64
@@ -163,21 +162,6 @@ func (s *Store) DeleteIfExpired(key string) bool {
 
 func (s *Store) KeyNotifier() *KeyNotifier {
 	return s.keyNotifier
-}
-
-func NewStoreWithNamespaces() *Store {
-	s := &Store{
-		tagIndex:     NewTagIndex(),
-		namespaceMgr: NewNamespaceManagerNoCycle(),
-		pubsub:       NewPubSub(),
-		keyNotifier:  NewKeyNotifier(),
-		versions:     make(map[string]int64),
-	}
-	s.expiry = NewTimingWheel(s)
-	for i := 0; i < NumShards; i++ {
-		s.shards[i] = NewShard()
-	}
-	return s
 }
 
 func (s *Store) GetVersion(key string) int64 {
@@ -537,10 +521,6 @@ func (s *Store) GetShard(key string) *Shard {
 
 func (s *Store) GetTagIndex() *TagIndex {
 	return s.tagIndex
-}
-
-func (s *Store) GetNamespaceManager() *NamespaceManager {
-	return s.namespaceMgr
 }
 
 func (s *Store) GetPubSub() *PubSub {

@@ -821,33 +821,6 @@ func TestTagCommandsComprehensive(t *testing.T) {
 	}
 }
 
-func TestNamespaceCommandsComprehensive(t *testing.T) {
-	s := store.NewStoreWithNamespaces()
-	router := NewRouter()
-	RegisterNamespaceCommands(router)
-
-	tests := []struct {
-		name string
-		cmd  string
-		args [][]byte
-	}{
-		{"NAMESPACES", "NAMESPACES", nil},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ctx := newTestCtx(tt.cmd, tt.args, s)
-			handler, ok := router.Get(tt.cmd)
-			if !ok {
-				t.Fatalf("Command %s not found", tt.cmd)
-			}
-			if err := handler.Handler(ctx); err != nil {
-				t.Errorf("Command %s failed: %v", tt.cmd, err)
-			}
-		})
-	}
-}
-
 func TestUtilityCommandsComprehensive(t *testing.T) {
 	s := store.NewStore()
 	router := NewRouter()

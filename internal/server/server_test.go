@@ -296,34 +296,6 @@ func TestHTTPServerInvalidate(t *testing.T) {
 	h.handleInvalidate(w, req)
 }
 
-func TestHTTPServerNamespacesGET(t *testing.T) {
-	h := newTestHTTPServer()
-
-	req := httptest.NewRequest("GET", "/api/namespaces", nil)
-	w := httptest.NewRecorder()
-
-	h.handleNamespaces(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("expected status 200, got %d", w.Code)
-	}
-}
-
-func TestHTTPServerNamespacesPOST(t *testing.T) {
-	h := newTestHTTPServer()
-
-	body := `{"name":"mynamespace"}`
-	req := httptest.NewRequest("POST", "/api/namespaces", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-
-	h.handleNamespaces(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("expected status 200, got %d", w.Code)
-	}
-}
-
 func TestHTTPServerCluster(t *testing.T) {
 	h := newTestHTTPServer()
 
@@ -910,17 +882,6 @@ func TestHTTPServerKeysInvalidJSON(t *testing.T) {
 	}
 }
 
-func TestHTTPServerNamespacesInvalidJSON(t *testing.T) {
-	h := newTestHTTPServer()
-
-	body := `{invalid}`
-	req := httptest.NewRequest("POST", "/api/namespaces", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-
-	h.handleNamespaces(w, req)
-}
-
 func TestHTTPServerClusterJoinInvalidJSON(t *testing.T) {
 	h := newTestHTTPServer()
 
@@ -1026,7 +987,6 @@ func TestHTTPServerHandleMethods(t *testing.T) {
 		{"GET", "/api/metrics", ""},
 		{"GET", "/api/keys", ""},
 		{"GET", "/api/tags", ""},
-		{"GET", "/api/namespaces", ""},
 		{"GET", "/api/cluster", ""},
 		{"GET", "/api/slowlog", ""},
 		{"GET", "/api/stats", ""},
@@ -1052,8 +1012,6 @@ func TestHTTPServerHandleMethods(t *testing.T) {
 			h.handleKeys(w, req)
 		case "/api/tags":
 			h.handleTags(w, req)
-		case "/api/namespaces":
-			h.handleNamespaces(w, req)
 		case "/api/cluster":
 			h.handleCluster(w, req)
 		case "/api/slowlog":
@@ -1062,24 +1020,6 @@ func TestHTTPServerHandleMethods(t *testing.T) {
 			h.handleStats(w, req)
 		}
 	}
-}
-
-func TestHTTPServerNamespace(t *testing.T) {
-	h := newTestHTTPServer()
-
-	req := httptest.NewRequest("GET", "/api/namespace/default", nil)
-	w := httptest.NewRecorder()
-
-	h.handleNamespace(w, req)
-}
-
-func TestHTTPServerNamespaceDELETE(t *testing.T) {
-	h := newTestHTTPServer()
-
-	req := httptest.NewRequest("DELETE", "/api/namespace/testns", nil)
-	w := httptest.NewRecorder()
-
-	h.handleNamespace(w, req)
 }
 
 func TestConnectionHandle(t *testing.T) {
@@ -1117,15 +1057,6 @@ func TestHTTPServerStart(t *testing.T) {
 	go h.Start()
 	time.Sleep(50 * time.Millisecond)
 	h.Stop()
-}
-
-func TestHTTPServerNamespacesDELETE(t *testing.T) {
-	h := newTestHTTPServer()
-
-	req := httptest.NewRequest("DELETE", "/api/namespaces?name=testns", nil)
-	w := httptest.NewRecorder()
-
-	h.handleNamespaces(w, req)
 }
 
 func TestHTTPServerKeyPUT(t *testing.T) {
@@ -1215,65 +1146,6 @@ func TestHTTPServerInvalidateInvalidMethod(t *testing.T) {
 	w := httptest.NewRecorder()
 
 	h.handleInvalidate(w, req)
-}
-
-func TestHTTPServerNamespaceWithNamespace(t *testing.T) {
-	h := newTestHTTPServer()
-
-	// Create namespace using namespace manager
-	nm := h.store.GetNamespaceManager()
-	if nm != nil {
-		nm.GetOrCreate("testns")
-	}
-
-	req := httptest.NewRequest("GET", "/api/namespace/testns", nil)
-	w := httptest.NewRecorder()
-
-	h.handleNamespace(w, req)
-}
-
-func TestHTTPServerNamespaceNotFound(t *testing.T) {
-	h := newTestHTTPServer()
-
-	req := httptest.NewRequest("GET", "/api/namespace/nonexistent", nil)
-	w := httptest.NewRecorder()
-
-	h.handleNamespace(w, req)
-}
-
-func TestHTTPServerNamespacesList(t *testing.T) {
-	h := newTestHTTPServer()
-
-	// Create multiple namespaces if namespace manager exists
-	nm := h.store.GetNamespaceManager()
-	if nm != nil {
-		nm.GetOrCreate("ns1")
-		nm.GetOrCreate("ns2")
-	}
-
-	req := httptest.NewRequest("GET", "/api/namespaces", nil)
-	w := httptest.NewRecorder()
-
-	h.handleNamespaces(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("expected status 200, got %d", w.Code)
-	}
-}
-
-func TestHTTPServerNamespacesDelete(t *testing.T) {
-	h := newTestHTTPServer()
-
-	// Create namespace first if namespace manager exists
-	nm := h.store.GetNamespaceManager()
-	if nm != nil {
-		nm.GetOrCreate("deletens")
-	}
-
-	req := httptest.NewRequest("DELETE", "/api/namespaces?name=deletens", nil)
-	w := httptest.NewRecorder()
-
-	h.handleNamespaces(w, req)
 }
 
 func TestServerAcceptLoop(t *testing.T) {

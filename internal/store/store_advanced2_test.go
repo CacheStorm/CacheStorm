@@ -209,17 +209,6 @@ func TestStoreShardAdvanced(t *testing.T) {
 	})
 }
 
-func TestStoreNamespaceAdvanced(t *testing.T) {
-	t.Run("Namespace Manager", func(t *testing.T) {
-		s := NewStoreWithNamespaces()
-		nm := s.GetNamespaceManager()
-
-		if nm == nil {
-			t.Fatal("NamespaceManager should not be nil")
-		}
-	})
-}
-
 func TestStorePubSubAdvanced(t *testing.T) {
 	t.Run("PubSub Instance", func(t *testing.T) {
 		s := NewStore()

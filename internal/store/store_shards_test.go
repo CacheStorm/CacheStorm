@@ -61,15 +61,6 @@ func TestStoreStats(t *testing.T) {
 	})
 }
 
-func TestStoreNamespace(t *testing.T) {
-	s := NewStore()
-
-	t.Run("Default Namespace", func(t *testing.T) {
-		// Namespace manager test - just verify it doesn't panic
-		_ = s.GetNamespaceManager()
-	})
-}
-
 func TestStorePubSub(t *testing.T) {
 	s := NewStore()
 

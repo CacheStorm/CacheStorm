@@ -1,114 +1,28 @@
 package command
 
 import (
-	"fmt"
 	"strconv"
-	"strings"
-
-	"github.com/cachestorm/cachestorm/internal/resp"
 )
 
+// RegisterNamespaceCommands registers SELECT, the Redis compatibility
+// command. CacheStorm serves a single shared keyspace: SELECT answers OK
+// like the single-db no-op that Redis-compatible single-keyspace servers
+// provide, and the dead multi-namespace surface (NAMESPACE, NAMESPACES,
+// NAMESPACEDEL, NAMESPACEINFO — a manager no production path could ever
+// write data into) has been removed.
 func RegisterNamespaceCommands(router *Router) {
-	router.Register(&CommandDef{Name: "NAMESPACE", Handler: cmdNAMESPACE})
-	router.Register(&CommandDef{Name: "NAMESPACES", Handler: cmdNAMESPACES})
-	router.Register(&CommandDef{Name: "NAMESPACEDEL", Handler: cmdNAMESPACEDEL})
-	router.Register(&CommandDef{Name: "NAMESPACEINFO", Handler: cmdNAMESPACEINFO})
 	router.Register(&CommandDef{Name: "SELECT", Handler: cmdSELECT})
 }
 
-func cmdNAMESPACE(ctx *Context) error {
-	if ctx.ArgCount() != 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	_ = ctx.ArgString(0)
-
-	ctx.WriteOK()
-	return nil
-}
-
-func cmdNAMESPACES(ctx *Context) error {
-	if ctx.ArgCount() != 0 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	nm := ctx.Store.GetNamespaceManager()
-	if nm == nil {
-		return ctx.WriteArray([]*resp.Value{resp.BulkString("default")})
-	}
-
-	names := nm.List()
-	results := make([]*resp.Value, 0, len(names))
-	for _, name := range names {
-		results = append(results, resp.BulkString(name))
-	}
-
-	return ctx.WriteArray(results)
-}
-
-func cmdNAMESPACEDEL(ctx *Context) error {
-	if ctx.ArgCount() != 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	name := ctx.ArgString(0)
-
-	nm := ctx.Store.GetNamespaceManager()
-	if nm == nil {
-		return ctx.WriteError(fmt.Errorf("namespace not found"))
-	}
-
-	err := nm.Delete(name)
-	if err != nil {
-		return ctx.WriteError(err)
-	}
-
-	return ctx.WriteOK()
-}
-
-func cmdNAMESPACEINFO(ctx *Context) error {
-	if ctx.ArgCount() != 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	name := ctx.ArgString(0)
-
-	nm := ctx.Store.GetNamespaceManager()
-	if nm == nil {
-		return ctx.WriteBulkString("# Namespace\r\nname:default\r\nkeys:0\r\nmemory:0\r\n")
-	}
-
-	stats, err := nm.Stats(name)
-	if err != nil {
-		return ctx.WriteError(err)
-	}
-
-	var sb strings.Builder
-	sb.WriteString("# Namespace\r\n")
-	fmt.Fprintf(&sb, "name:%s\r\n", stats["name"])
-	fmt.Fprintf(&sb, "keys:%d\r\n", stats["keys"])
-	fmt.Fprintf(&sb, "memory:%d\r\n", stats["memory"])
-
-	return ctx.WriteBulkString(sb.String())
-}
-
+// cmdSELECT answers OK after validating the index argument. The server has
+// one shared keyspace, so there is nothing to switch.
 func cmdSELECT(ctx *Context) error {
 	if ctx.ArgCount() != 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
-	index, err := strconv.Atoi(ctx.ArgString(0))
-	if err != nil {
+	if _, err := strconv.Atoi(ctx.ArgString(0)); err != nil {
 		return ctx.WriteError(ErrNotInteger)
-	}
-
-	nm := ctx.Store.GetNamespaceManager()
-	if nm != nil {
-		if index == 0 {
-			nm.GetOrCreate("default")
-		} else {
-			nm.GetOrCreate(fmt.Sprintf("db%d", index))
-		}
 	}
 
 	return ctx.WriteOK()

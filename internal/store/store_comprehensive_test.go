@@ -118,24 +118,6 @@ func TestStoreGetPubSub(t *testing.T) {
 	}
 }
 
-func TestStoreGetNamespaceManager(t *testing.T) {
-	s := NewStoreWithNamespaces()
-
-	nm := s.GetNamespaceManager()
-	if nm == nil {
-		t.Error("expected namespace manager")
-	}
-}
-
-func TestStoreGetNamespaceManagerNil(t *testing.T) {
-	s := NewStore()
-
-	nm := s.GetNamespaceManager()
-	if nm != nil {
-		t.Error("expected nil namespace manager for store without namespaces")
-	}
-}
-
 func TestStoreVersion(t *testing.T) {
 	s := NewStore()
 

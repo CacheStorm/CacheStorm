@@ -97,15 +97,6 @@ func newTestHTTPServerNoCORS() *HTTPServer {
 }
 
 // Helper: creates an HTTPServer with namespace support
-func newTestHTTPServerWithNamespaces() *HTTPServer {
-	s := store.NewStoreWithNamespaces()
-	cfg := &HTTPConfig{Enabled: true, Port: 8080, CORSOrigin: "*"}
-	router := command.NewRouter()
-	command.RegisterServerCommands(router)
-	command.RegisterKeyCommands(router)
-	command.RegisterStringCommands(router)
-	return NewHTTPServer(s, router, cfg)
-}
 
 // ===========================================================================
 // parseEvictionPolicy coverage
@@ -590,181 +581,10 @@ func TestAuthMiddlewareEmptyAuthHeader(t *testing.T) {
 }
 
 // ===========================================================================
-// handleNamespaces full coverage (GET, POST with namespace manager)
 // ===========================================================================
-func TestHandleNamespacesGETWithNsMgr(t *testing.T) {
-	// Use a normal store (without namespace manager) since
-	// NewStoreWithNamespaces creates namespaces with nil Store pointers
-	// that panic in Stats(). This tests the non-namespace code path.
-	h := newTestHTTPServer()
-
-	req := httptest.NewRequest("GET", "/api/namespaces", nil)
-	w := httptest.NewRecorder()
-
-	h.handleNamespaces(w, req)
-}
-
-func TestHandleNamespacesPOSTWithNsMgr(t *testing.T) {
-	h := newTestHTTPServerWithNamespaces()
-
-	body := `{"name":"new_ns"}`
-	req := httptest.NewRequest("POST", "/api/namespaces", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-
-	h.handleNamespaces(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", w.Code)
-	}
-}
-
-func TestHandleNamespacesMethodNotAllowed(t *testing.T) {
-	h := newTestHTTPServerWithNamespaces()
-
-	req := httptest.NewRequest("PUT", "/api/namespaces", nil)
-	w := httptest.NewRecorder()
-
-	h.handleNamespaces(w, req)
-
-	if w.Code != http.StatusMethodNotAllowed {
-		t.Errorf("expected 405, got %d", w.Code)
-	}
-}
-
-func TestHandleNamespacesInvalidJSONWithNsMgr(t *testing.T) {
-	h := newTestHTTPServerWithNamespaces()
-
-	body := `{invalid_json}`
-	req := httptest.NewRequest("POST", "/api/namespaces", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-
-	h.handleNamespaces(w, req)
-
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("expected 400, got %d", w.Code)
-	}
-}
 
 // ===========================================================================
-// handleNamespace full coverage (GET, DELETE with namespace manager)
 // ===========================================================================
-func TestHandleNamespaceGETExisting(t *testing.T) {
-	h := newTestHTTPServerWithNamespaces()
-
-	nsMgr := h.store.GetNamespaceManager()
-	nsMgr.GetOrCreate("test_ns")
-
-	req := httptest.NewRequest("GET", "/api/namespace/test_ns", nil)
-	w := httptest.NewRecorder()
-
-	h.handleNamespace(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", w.Code)
-	}
-}
-
-func TestHandleNamespaceGETNonExistent(t *testing.T) {
-	h := newTestHTTPServerWithNamespaces()
-
-	req := httptest.NewRequest("GET", "/api/namespace/doesnotexist", nil)
-	w := httptest.NewRecorder()
-
-	h.handleNamespace(w, req)
-
-	if w.Code != http.StatusNotFound {
-		t.Errorf("expected 404, got %d", w.Code)
-	}
-}
-
-func TestHandleNamespaceDELETEExisting(t *testing.T) {
-	h := newTestHTTPServerWithNamespaces()
-
-	nsMgr := h.store.GetNamespaceManager()
-	nsMgr.GetOrCreate("delete_me")
-
-	req := httptest.NewRequest("DELETE", "/api/namespace/delete_me", nil)
-	w := httptest.NewRecorder()
-
-	h.handleNamespace(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", w.Code)
-	}
-}
-
-func TestHandleNamespaceEmptyName(t *testing.T) {
-	h := newTestHTTPServerWithNamespaces()
-
-	req := httptest.NewRequest("GET", "/api/namespace/", nil)
-	w := httptest.NewRecorder()
-
-	h.handleNamespace(w, req)
-
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("expected 400, got %d", w.Code)
-	}
-}
-
-func TestHandleNamespaceMethodNotAllowed(t *testing.T) {
-	h := newTestHTTPServerWithNamespaces()
-
-	nsMgr := h.store.GetNamespaceManager()
-	nsMgr.GetOrCreate("test_ns")
-
-	req := httptest.NewRequest("PUT", "/api/namespace/test_ns", nil)
-	w := httptest.NewRecorder()
-
-	h.handleNamespace(w, req)
-
-	if w.Code != http.StatusMethodNotAllowed {
-		t.Errorf("expected 405, got %d", w.Code)
-	}
-}
-
-// handleNamespace with nil nsMgr
-func TestHandleNamespaceNilNsMgr(t *testing.T) {
-	h := newTestHTTPServer() // No namespace manager
-
-	req := httptest.NewRequest("GET", "/api/namespace/test", nil)
-	w := httptest.NewRecorder()
-
-	h.handleNamespace(w, req)
-
-	if w.Code != http.StatusNotFound {
-		t.Errorf("expected 404, got %d", w.Code)
-	}
-}
-
-// handleNamespace DELETE error (can't delete default)
-func TestHandleNamespaceDELETEDefault(t *testing.T) {
-	h := newTestHTTPServerWithNamespaces()
-
-	req := httptest.NewRequest("DELETE", "/api/namespace/default", nil)
-	w := httptest.NewRecorder()
-
-	h.handleNamespace(w, req)
-
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("expected 400, got %d", w.Code)
-	}
-}
-
-// handleNamespace DELETE nonexistent
-func TestHandleNamespaceDELETENonExistent(t *testing.T) {
-	h := newTestHTTPServerWithNamespaces()
-
-	req := httptest.NewRequest("DELETE", "/api/namespace/nonexistent", nil)
-	w := httptest.NewRecorder()
-
-	h.handleNamespace(w, req)
-
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("expected 400, got %d", w.Code)
-	}
-}
 
 // ===========================================================================
 // handleKeys: method not allowed path
@@ -1057,15 +877,11 @@ func TestHandleMetricsWithMemoryTracker(t *testing.T) {
 // ===========================================================================
 // handleStats: with tag index and namespace manager
 // ===========================================================================
-func TestHandleStatsWithTagsAndNamespaces(t *testing.T) {
-	h := newTestHTTPServerWithNamespaces()
+func TestHandleStatsWithTags(t *testing.T) {
+	h := newTestHTTPServer()
 
 	// Create tagged data
 	h.store.Set("k1", &store.StringValue{Data: []byte("v1")}, store.SetOptions{Tags: []string{"t1"}})
-
-	// Create namespace
-	nsMgr := h.store.GetNamespaceManager()
-	nsMgr.GetOrCreate("stats_ns")
 
 	req := httptest.NewRequest("GET", "/api/stats", nil)
 	w := httptest.NewRecorder()
@@ -1080,9 +896,9 @@ func TestHandleStatsWithTagsAndNamespaces(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode error: %v", err)
 	}
-	nsCount, ok := resp["namespaces"].(float64)
-	if !ok || nsCount < 1 {
-		t.Errorf("expected namespaces >= 1, got %v", resp["namespaces"])
+	tagCount, ok := resp["tags"].(float64)
+	if !ok || tagCount < 1 {
+		t.Errorf("expected tags >= 1, got %v", resp["tags"])
 	}
 }
 
@@ -2009,55 +1825,12 @@ func TestWriteJSONEncodeError(t *testing.T) {
 }
 
 // ===========================================================================
-// handleNamespaces: when nsMgr is nil (no manager)
 // ===========================================================================
-func TestHandleNamespacesNilManager(t *testing.T) {
-	// NewStore() does NOT create a namespace manager
-	h := newTestHTTPServer()
-
-	nsMgr := h.store.GetNamespaceManager()
-	if nsMgr != nil {
-		t.Skip("namespace manager is not nil; skipping nil manager test")
-	}
-
-	// handleNamespaces should return empty list for nil nsMgr
-	req := httptest.NewRequest("GET", "/api/namespaces", nil)
-	w := httptest.NewRecorder()
-	h.handleNamespaces(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", w.Code)
-	}
-
-	var resp map[string]interface{}
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode error: %v", err)
-	}
-	ns, ok := resp["namespaces"].([]interface{})
-	if !ok || len(ns) != 0 {
-		t.Errorf("expected empty namespaces array, got %v", resp["namespaces"])
-	}
-}
 
 // ===========================================================================
-// handleNamespace: when nsMgr is available, GET stats error
 // ===========================================================================
-func TestHandleNamespaceGETStatsError(t *testing.T) {
-	h := newTestHTTPServerWithNamespaces()
-
-	// Request a namespace that doesn't exist - Stats should return error
-	req := httptest.NewRequest("GET", "/api/namespace/nonexistent_ns_xyz", nil)
-	w := httptest.NewRecorder()
-
-	h.handleNamespace(w, req)
-
-	if w.Code != http.StatusNotFound {
-		t.Errorf("expected 404, got %d", w.Code)
-	}
-}
 
 // ===========================================================================
-// handleNamespace: DELETE error path
 // ===========================================================================
 // TestHandleNamespaceDELETEError is now covered by TestHandleNamespaceDELETEDefault above
 
@@ -2465,19 +2238,7 @@ func TestHandleLoginNoPasswordConfigured(t *testing.T) {
 }
 
 // ===========================================================================
-// handleNamespaces: GET with manager and various ns scenarios
 // ===========================================================================
-func TestHandleNamespacesGETWithManagerMultipleNs(t *testing.T) {
-	h := newTestHTTPServer()
-
-	req := httptest.NewRequest("GET", "/api/namespaces", nil)
-	w := httptest.NewRecorder()
-	h.handleNamespaces(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", w.Code)
-	}
-}
 
 // ===========================================================================
 // Test: handleKey with key that has no TTL vs with TTL
@@ -2631,12 +2392,10 @@ func TestServerStoreAccessor(t *testing.T) {
 }
 
 // ===========================================================================
-// handleNamespaces: DELETE method not allowed
 // ===========================================================================
 // Covered by TestHandleNamespacesMethodNotAllowed above
 
 // ===========================================================================
-// handleNamespace: GET, DELETE, method not allowed with non-nil nsMgr
 // ===========================================================================
 // Covered by TestHandleNamespaceMethodNotAllowed above
 
