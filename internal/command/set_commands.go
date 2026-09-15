@@ -392,6 +392,11 @@ func cmdSINTER(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
+	// The shared set-operations lock: a concurrent MoveSetMember takes it
+	// exclusively, so this multi-set read can never observe the move
+	// half-applied.
+	ctx.Store.SetOpsRLock()
+	defer ctx.Store.SetOpsRUnlock()
 	firstSet, err := getSetOrEmpty(ctx, ctx.ArgString(0))
 	if err != nil {
 		return ctx.WriteError(err)
@@ -435,6 +440,11 @@ func cmdSDIFF(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
+	// The shared set-operations lock: a concurrent MoveSetMember takes it
+	// exclusively, so this multi-set read can never observe the move
+	// half-applied.
+	ctx.Store.SetOpsRLock()
+	defer ctx.Store.SetOpsRUnlock()
 	firstSet, err := getSetOrEmpty(ctx, ctx.ArgString(0))
 	if err != nil {
 		return ctx.WriteError(err)
@@ -472,6 +482,11 @@ func cmdSUNIONSTORE(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
+	// The shared set-operations lock: a concurrent MoveSetMember takes it
+	// exclusively, so this multi-set read can never observe the move
+	// half-applied.
+	ctx.Store.SetOpsRLock()
+	defer ctx.Store.SetOpsRUnlock()
 	dstKey := ctx.ArgString(0)
 	result := make(map[string]struct{})
 
@@ -503,6 +518,11 @@ func cmdSINTERSTORE(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
+	// The shared set-operations lock: a concurrent MoveSetMember takes it
+	// exclusively, so this multi-set read can never observe the move
+	// half-applied.
+	ctx.Store.SetOpsRLock()
+	defer ctx.Store.SetOpsRUnlock()
 	dstKey := ctx.ArgString(0)
 
 	firstSet, err := getSetOrEmpty(ctx, ctx.ArgString(1))
@@ -552,6 +572,11 @@ func cmdSDIFFSTORE(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
+	// The shared set-operations lock: a concurrent MoveSetMember takes it
+	// exclusively, so this multi-set read can never observe the move
+	// half-applied.
+	ctx.Store.SetOpsRLock()
+	defer ctx.Store.SetOpsRUnlock()
 	dstKey := ctx.ArgString(0)
 
 	firstSet, err := getSetOrEmpty(ctx, ctx.ArgString(1))
@@ -675,6 +700,11 @@ func cmdSINTERCARD(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
+	// The shared set-operations lock: a concurrent MoveSetMember takes it
+	// exclusively, so this multi-set read can never observe the move
+	// half-applied.
+	ctx.Store.SetOpsRLock()
+	defer ctx.Store.SetOpsRUnlock()
 	numKeys := ctx.ArgCount()
 	limit := -1
 
