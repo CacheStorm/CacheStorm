@@ -99,18 +99,15 @@ func (ec *EvictionController) evictOne() bool {
 		return false
 	}
 
-	// Get entry before deleting to avoid race condition
-	// where key could be re-created between Delete and Get
-	var entry *Entry
-	var exists bool
-	if ec.onEvict != nil {
-		entry, exists = ec.store.Get(key)
-	}
+	// Read the victim through the shard directly: Store.Get would count this
+	// internal lookup as a client hit and touch the LRU state of a key that
+	// is about to be deleted.
+	entry, _ := ec.store.GetShard(key).Get(key)
 
 	ec.store.Delete(key)
 	GlobalMetrics.RecordEviction()
 
-	if exists && ec.onEvict != nil {
+	if entry != nil && ec.onEvict != nil {
 		ec.onEvict(key, entry)
 	}
 	return true
