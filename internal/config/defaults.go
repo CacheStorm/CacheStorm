@@ -37,9 +37,6 @@ func Default() *Config {
 			MaxAOFSize:       "1gb",
 		},
 		Plugins: PluginsConfig{
-			Stats: StatsPluginConfig{
-				Enabled: true,
-			},
 			Metrics: MetricsPluginConfig{
 				Enabled: true,
 				Port:    9090,

@@ -813,7 +813,7 @@ func TestNewConnection(t *testing.T) {
 	defer client.Close()
 	defer server.Close()
 
-	conn := NewConnection(1, server, s, router)
+	conn := NewConnection(1, server, s, router, nil)
 	if conn.ID != 1 {
 		t.Errorf("expected ID 1, got %d", conn.ID)
 	}
@@ -830,7 +830,7 @@ func TestConnectionRemoteAddr(t *testing.T) {
 	defer client.Close()
 	defer server.Close()
 
-	conn := NewConnection(1, server, s, router)
+	conn := NewConnection(1, server, s, router, nil)
 	addr := conn.RemoteAddr()
 	if addr == "" {
 		t.Error("expected remote address")
@@ -844,7 +844,7 @@ func TestConnectionClose(t *testing.T) {
 	client, server := net.Pipe()
 	defer client.Close()
 
-	conn := NewConnection(1, server, s, router)
+	conn := NewConnection(1, server, s, router, nil)
 	conn.Close()
 }
 
@@ -1089,7 +1089,7 @@ func TestConnectionHandle(t *testing.T) {
 	client, server := net.Pipe()
 	defer client.Close()
 
-	conn := NewConnection(1, server, s, router)
+	conn := NewConnection(1, server, s, router, nil)
 
 	go func() {
 		client.Write([]byte("*1\r\n$4\r\nPING\r\n"))
@@ -1332,7 +1332,7 @@ func TestConnectionHandleMultipleCommands(t *testing.T) {
 	client, server := net.Pipe()
 	defer client.Close()
 
-	conn := NewConnection(1, server, s, router)
+	conn := NewConnection(1, server, s, router, nil)
 
 	go func() {
 		// Send multiple commands

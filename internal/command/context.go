@@ -16,6 +16,8 @@ var (
 	ErrSyntaxError     = errors.New("ERR syntax error")
 	ErrNotInteger      = errors.New("ERR value is not an integer or out of range")
 	ErrNotFloat        = errors.New("ERR value is not a valid float")
+	ErrOverflow        = errors.New("ERR increment or decrement would overflow")
+	ErrFloatOverflow   = errors.New("ERR increment would produce NaN or Infinity")
 	ErrIndexOutOfRange = errors.New("ERR index out of range")
 )
 
@@ -42,6 +44,7 @@ func NewContext(cmd string, args [][]byte, s *store.Store, w *resp.Writer) *Cont
 		Args:        args,
 		Store:       s,
 		Writer:      w,
+		StartTime:   time.Now(),
 		Transaction: NewTransaction(),
 	}
 }
@@ -52,6 +55,7 @@ func NewContextWithClient(cmd string, args [][]byte, s *store.Store, w *resp.Wri
 		Args:        args,
 		Store:       s,
 		Writer:      w,
+		StartTime:   time.Now(),
 		Transaction: NewTransaction(),
 		ClientID:    clientID,
 		RemoteAddr:  remoteAddr,

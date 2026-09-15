@@ -3,7 +3,10 @@ package server
 import (
 	"context"
 	"crypto/tls"
+	"errors"
+	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -16,7 +19,9 @@ import (
 	"github.com/cachestorm/cachestorm/internal/config"
 	"github.com/cachestorm/cachestorm/internal/logger"
 	"github.com/cachestorm/cachestorm/internal/persistence"
+	"github.com/cachestorm/cachestorm/internal/plugin"
 	"github.com/cachestorm/cachestorm/internal/store"
+	"github.com/cachestorm/cachestorm/plugins/metrics"
 )
 
 // writeCommands lists commands that mutate state and should be persisted to AOF
@@ -38,18 +43,21 @@ var writeCommands = map[string]bool{
 }
 
 type Server struct {
-	cfg        *config.Config
-	listener   net.Listener
-	router     *command.Router
-	store      *store.Store
-	httpServer *HTTPServer
-	aof        *persistence.AOFWriter
-	conns      sync.Map
-	connID     atomic.Int64
-	connCount  atomic.Int64
-	stopping   atomic.Bool
-	stopCh     chan struct{}
-	wg         sync.WaitGroup
+	cfg           *config.Config
+	listener      net.Listener
+	router        *command.Router
+	store         *store.Store
+	httpServer    *HTTPServer
+	pluginMgr     *plugin.Manager
+	metricsPlugin *metrics.MetricsPlugin
+	metricsServer *http.Server
+	aof           *persistence.AOFWriter
+	conns         sync.Map
+	connID        atomic.Int64
+	connCount     atomic.Int64
+	stopping      atomic.Bool
+	stopCh        chan struct{}
+	wg            sync.WaitGroup
 }
 
 func New(cfg *config.Config) (*Server, error) {
@@ -58,6 +66,25 @@ func New(cfg *config.Config) (*Server, error) {
 		store:  store.NewStore(),
 		router: command.NewRouter(),
 		stopCh: make(chan struct{}),
+	}
+
+	// Wire the metrics plugin (command hooks + standalone Prometheus endpoint)
+	// when enabled; see config: plugins.metrics.{enabled,port,path}.
+	if cfg.Plugins.Metrics.Enabled {
+		s.pluginMgr = plugin.NewManager()
+		s.metricsPlugin = metrics.New(true)
+		if err := s.pluginMgr.Register(s.metricsPlugin); err != nil {
+			return nil, err
+		}
+	}
+
+	// Slow log: honor the configured enabled flag, threshold, and size.
+	store.GlobalSlowLog.SetEnabled(cfg.Plugins.SlowLog.Enabled)
+	if d, err := time.ParseDuration(cfg.Plugins.SlowLog.Threshold); err == nil && d >= 0 {
+		store.GlobalSlowLog.SetThreshold(d)
+	}
+	if cfg.Plugins.SlowLog.MaxEntries > 0 {
+		store.GlobalSlowLog.MaxSize = cfg.Plugins.SlowLog.MaxEntries
 	}
 
 	// Configure memory limits and eviction
@@ -235,6 +262,9 @@ func (s *Server) Start(_ context.Context) error {
 
 	s.listener = listener
 
+	// Active expiration: remove expired keys without requiring reads.
+	s.store.StartExpiry()
+
 	go s.acceptLoop()
 
 	if s.httpServer != nil {
@@ -249,7 +279,67 @@ func (s *Server) Start(_ context.Context) error {
 		}()
 	}
 
+	if s.metricsPlugin != nil {
+		s.startMetricsServer()
+	}
+
 	return nil
+}
+
+// startMetricsServer serves the metrics plugin's Prometheus exposition on
+// the configured plugins.metrics.{port,path} and keeps its gauges current.
+func (s *Server) startMetricsServer() {
+	mux := http.NewServeMux()
+	mux.HandleFunc(s.cfg.Plugins.Metrics.Path, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+		fmt.Fprint(w, s.metricsPlugin.ExportPrometheus())
+	})
+
+	s.metricsServer = &http.Server{
+		Addr:    net.JoinHostPort(s.cfg.Server.Bind, strconv.Itoa(s.cfg.Plugins.Metrics.Port)),
+		Handler: mux,
+	}
+
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		defer logger.RecoverPanic("metrics-server")
+		logger.Info().
+			Int("port", s.cfg.Plugins.Metrics.Port).
+			Str("path", s.cfg.Plugins.Metrics.Path).
+			Msg("metrics server started")
+		if err := s.metricsServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Error().Err(err).Msg("metrics server error")
+		}
+	}()
+
+	// Refresh the advertised counters and gauges periodically.
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-s.stopCh:
+				return
+			case <-ticker.C:
+				s.updateMetricsGauges()
+			}
+		}
+	}()
+}
+
+// updateMetricsGauges pushes current store and connection counters into the
+// metrics plugin so the Prometheus exposition reflects live state.
+func (s *Server) updateMetricsGauges() {
+	s.metricsPlugin.SetKeysTotal(int64(s.store.KeyCount()))
+	s.metricsPlugin.SetMemoryBytes(s.store.MemUsage())
+	s.metricsPlugin.SetConnectedClients(s.connCount.Load())
+	s.metricsPlugin.SetHitCount(store.GlobalMetrics.TotalHits.Load())
+	s.metricsPlugin.SetMissCount(store.GlobalMetrics.TotalMisses.Load())
+	s.metricsPlugin.SetEvictedCount(store.GlobalMetrics.TotalEvictions.Load())
+	s.metricsPlugin.SetExpiredCount(store.GlobalMetrics.TotalExpirations.Load())
 }
 
 func (s *Server) acceptLoop() {
@@ -278,7 +368,8 @@ func (s *Server) acceptLoop() {
 
 		connID := s.connID.Add(1)
 		s.connCount.Add(1)
-		c := NewConnection(connID, conn, s.store, s.router)
+		store.GlobalMetrics.RecordConnection()
+		c := NewConnection(connID, conn, s.store, s.router, s.pluginMgr)
 
 		// Apply configured timeouts
 		if rt := s.cfg.Server.ReadTimeoutDuration(); rt > 0 {
@@ -295,6 +386,7 @@ func (s *Server) acceptLoop() {
 			defer s.wg.Done()
 			defer s.conns.Delete(connID)
 			defer s.connCount.Add(-1)
+			defer store.GlobalMetrics.RecordDisconnection()
 			c.Handle()
 		}()
 	}
@@ -316,6 +408,23 @@ func (s *Server) Stop(ctx context.Context) error {
 			logger.Error().Err(err).Msg("HTTP server stop error")
 		}
 	}
+
+	// 2b. Stop the metrics endpoint and plugins
+	if s.metricsServer != nil {
+		metricsCtx, metricsCancel := context.WithTimeout(ctx, 5*time.Second)
+		if err := s.metricsServer.Shutdown(metricsCtx); err != nil {
+			logger.Error().Err(err).Msg("metrics server stop error")
+		}
+		metricsCancel()
+	}
+	if s.pluginMgr != nil {
+		if err := s.pluginMgr.CloseAll(); err != nil {
+			logger.Error().Err(err).Msg("plugin close error")
+		}
+	}
+
+	// Stop active expiration with the server.
+	s.store.StopExpiry()
 
 	// 3. Wait for in-flight requests to complete (with timeout)
 	done := make(chan struct{})

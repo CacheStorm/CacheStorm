@@ -1,6 +1,9 @@
 package store
 
 import (
+	"errors"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -258,8 +261,22 @@ func (v *StreamValue) Clone() Value {
 }
 
 func (v *StreamValue) Add(id string, fields map[string][]byte) (*StreamEntry, error) {
+	ms, seq, err := parseStreamIDPair(id)
+	if err != nil {
+		return nil, err
+	}
+	if ms == 0 && seq == 0 {
+		return nil, errors.New("ERR The ID specified in XADD must be greater than 0-0")
+	}
+
 	v.mu.Lock()
 	defer v.mu.Unlock()
+
+	if lastMS, lastSeq, lastErr := parseStreamIDPair(v.LastID); lastErr == nil {
+		if ms < lastMS || (ms == lastMS && seq <= lastSeq) {
+			return nil, errors.New("ERR The ID specified in XADD is equal or smaller than the target stream top item")
+		}
+	}
 
 	entry := &StreamEntry{
 		ID:        id,
@@ -280,6 +297,21 @@ func (v *StreamValue) Add(id string, fields map[string][]byte) (*StreamEntry, er
 	return entry, nil
 }
 
+// parseStreamIDPair parses a stream ID of "ms-seq"; bare, malformed, or
+// non-numeric IDs are rejected.
+func parseStreamIDPair(id string) (int64, int64, error) {
+	parts := strings.Split(id, "-")
+	if len(parts) != 2 {
+		return 0, 0, errors.New("ERR Invalid stream ID specified as stream command argument")
+	}
+	ms, err1 := strconv.ParseInt(parts[0], 10, 64)
+	seq, err2 := strconv.ParseInt(parts[1], 10, 64)
+	if err1 != nil || err2 != nil {
+		return 0, 0, errors.New("ERR Invalid stream ID specified as stream command argument")
+	}
+	return ms, seq, nil
+}
+
 func (v *StreamValue) GetRange(start, end string, count int64) []*StreamEntry {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
@@ -288,13 +320,38 @@ func (v *StreamValue) GetRange(start, end string, count int64) []*StreamEntry {
 		count = int64(len(v.Entries))
 	}
 
+	startMS, startSeq, errStart := parseStreamIDPair(start)
+	if errStart != nil {
+		if start == "-" {
+			startMS, startSeq = 0, 0
+		} else {
+			return nil
+		}
+	}
+	endMS, endSeq, errEnd := parseStreamIDPair(end)
+	if errEnd != nil {
+		if end == "+" {
+			endMS, endSeq = 9223372036854775807, 9223372036854775807
+		} else {
+			return nil
+		}
+	}
+
 	var result []*StreamEntry
 	for _, entry := range v.Entries {
-		if entry.ID >= start && (end == "+" || entry.ID <= end) {
-			result = append(result, entry)
-			if int64(len(result)) >= count {
-				break
-			}
+		eMS, eSeq, err := parseStreamIDPair(entry.ID)
+		if err != nil {
+			continue
+		}
+		if eMS < startMS || (eMS == startMS && eSeq < startSeq) {
+			continue
+		}
+		if eMS > endMS || (eMS == endMS && eSeq > endSeq) {
+			continue
+		}
+		result = append(result, entry)
+		if int64(len(result)) >= count {
+			break
 		}
 	}
 

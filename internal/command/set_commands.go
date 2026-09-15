@@ -439,18 +439,22 @@ func cmdSDIFF(ctx *Context) error {
 	}
 
 	result := make(map[string]struct{})
+	firstSet.RLock()
 	for member := range firstSet.Members {
 		result[member] = struct{}{}
 	}
+	firstSet.RUnlock()
 
 	for i := 1; i < ctx.ArgCount(); i++ {
 		set, err := getSetOrEmpty(ctx, ctx.ArgString(i))
 		if err != nil {
 			return ctx.WriteError(err)
 		}
+		set.RLock()
 		for member := range set.Members {
 			delete(result, member)
 		}
+		set.RUnlock()
 	}
 
 	members := make([]*resp.Value, 0, len(result))
@@ -474,9 +478,11 @@ func cmdSUNIONSTORE(ctx *Context) error {
 		if err != nil {
 			return ctx.WriteError(err)
 		}
+		set.RLock()
 		for member := range set.Members {
 			result[member] = struct{}{}
 		}
+		set.RUnlock()
 	}
 
 	if len(result) == 0 {
@@ -503,9 +509,11 @@ func cmdSINTERSTORE(ctx *Context) error {
 	}
 
 	result := make(map[string]struct{})
+	firstSet.RLock()
 	for member := range firstSet.Members {
 		result[member] = struct{}{}
 	}
+	firstSet.RUnlock()
 
 	for i := 2; i < ctx.ArgCount(); i++ {
 		set, err := getSet(ctx, ctx.ArgString(i))
@@ -517,11 +525,13 @@ func cmdSINTERSTORE(ctx *Context) error {
 			return ctx.WriteInteger(0)
 		}
 
+		set.RLock()
 		for member := range result {
 			if _, exists := set.Members[member]; !exists {
 				delete(result, member)
 			}
 		}
+		set.RUnlock()
 	}
 
 	if len(result) == 0 {
@@ -548,18 +558,22 @@ func cmdSDIFFSTORE(ctx *Context) error {
 	}
 
 	result := make(map[string]struct{})
+	firstSet.RLock()
 	for member := range firstSet.Members {
 		result[member] = struct{}{}
 	}
+	firstSet.RUnlock()
 
 	for i := 2; i < ctx.ArgCount(); i++ {
 		set, err := getSetOrEmpty(ctx, ctx.ArgString(i))
 		if err != nil {
 			return ctx.WriteError(err)
 		}
+		set.RLock()
 		for member := range set.Members {
 			delete(result, member)
 		}
+		set.RUnlock()
 	}
 
 	if len(result) == 0 {

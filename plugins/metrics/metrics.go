@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"net/http"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -157,6 +158,22 @@ func (m *MetricsPlugin) SetMemoryBytes(n int64) {
 	atomic.StoreInt64(&m.metrics.memoryBytes, n)
 }
 
+func (m *MetricsPlugin) SetHitCount(n int64) {
+	atomic.StoreInt64(&m.metrics.hitCount, n)
+}
+
+func (m *MetricsPlugin) SetMissCount(n int64) {
+	atomic.StoreInt64(&m.metrics.missCount, n)
+}
+
+func (m *MetricsPlugin) SetEvictedCount(n int64) {
+	atomic.StoreInt64(&m.metrics.evictedCount, n)
+}
+
+func (m *MetricsPlugin) SetExpiredCount(n int64) {
+	atomic.StoreInt64(&m.metrics.expiredCount, n)
+}
+
 func (m *MetricsPlugin) ExportPrometheus() string {
 	var result string
 
@@ -166,41 +183,41 @@ func (m *MetricsPlugin) ExportPrometheus() string {
 	m.metrics.mu.RLock()
 	for cmd, count := range m.metrics.commandsTotal {
 		result += "cachestorm_commands_total{command=\"" + cmd + "\"} " +
-			string(rune(atomic.LoadInt64(count))) + "\n"
+			strconv.FormatInt(atomic.LoadInt64(count), 10) + "\n"
 	}
 	m.metrics.mu.RUnlock()
 
 	result += "\n# HELP cachestorm_hit_total Total cache hits\n"
 	result += "# TYPE cachestorm_hit_total counter\n"
-	result += "cachestorm_hit_total " + string(rune(atomic.LoadInt64(&m.metrics.hitCount))) + "\n"
+	result += "cachestorm_hit_total " + strconv.FormatInt(atomic.LoadInt64(&m.metrics.hitCount), 10) + "\n"
 
 	result += "\n# HELP cachestorm_miss_total Total cache misses\n"
 	result += "# TYPE cachestorm_miss_total counter\n"
-	result += "cachestorm_miss_total " + string(rune(atomic.LoadInt64(&m.metrics.missCount))) + "\n"
+	result += "cachestorm_miss_total " + strconv.FormatInt(atomic.LoadInt64(&m.metrics.missCount), 10) + "\n"
 
 	result += "\n# HELP cachestorm_evicted_total Total keys evicted\n"
 	result += "# TYPE cachestorm_evicted_total counter\n"
-	result += "cachestorm_evicted_total " + string(rune(atomic.LoadInt64(&m.metrics.evictedCount))) + "\n"
+	result += "cachestorm_evicted_total " + strconv.FormatInt(atomic.LoadInt64(&m.metrics.evictedCount), 10) + "\n"
 
 	result += "\n# HELP cachestorm_expired_total Total keys expired\n"
 	result += "# TYPE cachestorm_expired_total counter\n"
-	result += "cachestorm_expired_total " + string(rune(atomic.LoadInt64(&m.metrics.expiredCount))) + "\n"
+	result += "cachestorm_expired_total " + strconv.FormatInt(atomic.LoadInt64(&m.metrics.expiredCount), 10) + "\n"
 
 	result += "\n# HELP cachestorm_connected_clients Number of connected clients\n"
 	result += "# TYPE cachestorm_connected_clients gauge\n"
-	result += "cachestorm_connected_clients " + string(rune(atomic.LoadInt64(&m.metrics.connectedClients))) + "\n"
+	result += "cachestorm_connected_clients " + strconv.FormatInt(atomic.LoadInt64(&m.metrics.connectedClients), 10) + "\n"
 
 	result += "\n# HELP cachestorm_keys_total Total number of keys\n"
 	result += "# TYPE cachestorm_keys_total gauge\n"
-	result += "cachestorm_keys_total " + string(rune(atomic.LoadInt64(&m.metrics.keysTotal))) + "\n"
+	result += "cachestorm_keys_total " + strconv.FormatInt(atomic.LoadInt64(&m.metrics.keysTotal), 10) + "\n"
 
 	result += "\n# HELP cachestorm_memory_bytes Memory usage in bytes\n"
 	result += "# TYPE cachestorm_memory_bytes gauge\n"
-	result += "cachestorm_memory_bytes " + string(rune(atomic.LoadInt64(&m.metrics.memoryBytes))) + "\n"
+	result += "cachestorm_memory_bytes " + strconv.FormatInt(atomic.LoadInt64(&m.metrics.memoryBytes), 10) + "\n"
 
 	result += "\n# HELP cachestorm_tag_invalidations_total Total tag invalidations\n"
 	result += "# TYPE cachestorm_tag_invalidations_total counter\n"
-	result += "cachestorm_tag_invalidations_total " + string(rune(atomic.LoadInt64(&m.metrics.tagInvalidations))) + "\n"
+	result += "cachestorm_tag_invalidations_total " + strconv.FormatInt(atomic.LoadInt64(&m.metrics.tagInvalidations), 10) + "\n"
 
 	return result
 }

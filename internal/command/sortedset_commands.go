@@ -279,6 +279,9 @@ func cmdZINCRBY(ctx *Context) error {
 	if err != nil {
 		return ctx.WriteError(ErrNotInteger)
 	}
+	if math.IsNaN(incr) || math.IsInf(incr, 0) {
+		return ctx.WriteError(ErrFloatOverflow)
+	}
 	member := ctx.ArgString(2)
 
 	zset, err := getOrCreateSortedSet(ctx, key)
@@ -292,9 +295,39 @@ func cmdZINCRBY(ctx *Context) error {
 	if current, exists := zset.Members[member]; exists {
 		newScore = current + incr
 	}
+	if math.IsNaN(newScore) || math.IsInf(newScore, 0) {
+		return ctx.WriteError(ErrFloatOverflow)
+	}
 	zset.Members[member] = newScore
 
 	return ctx.WriteBulkString(strconv.FormatFloat(newScore, 'f', -1, 64))
+}
+
+// respZIncrBy is the transaction-replay form of ZINCRBY: it mirrors
+// cmdZINCRBY's semantics but returns the RESP value for the EXEC array.
+func respZIncrBy(ctx *Context, qc queuedCommand, incr float64) *resp.Value {
+	if len(qc.args) < 3 {
+		return resp.ErrorValue("ERR wrong number of arguments")
+	}
+	key := string(qc.args[0])
+	member := string(qc.args[2])
+
+	zset, err := getOrCreateSortedSet(ctx, key)
+	if err != nil {
+		return resp.ErrorValue(err.Error())
+	}
+
+	zset.Lock()
+	defer zset.Unlock()
+	newScore := incr
+	if current, exists := zset.Members[member]; exists {
+		newScore = current + incr
+	}
+	if math.IsNaN(newScore) || math.IsInf(newScore, 0) {
+		return resp.ErrorValue(ErrFloatOverflow.Error())
+	}
+	zset.Members[member] = newScore
+	return resp.BulkString(strconv.FormatFloat(newScore, 'f', -1, 64))
 }
 
 func cmdZRANGE(ctx *Context) error {

@@ -35,14 +35,20 @@ func newWheelLevel(numSlots int, tickSize time.Duration) *wheelLevel {
 	}
 }
 
+// wheelTickInterval is the wheel's sweep cadence. Slot pointers advance once
+// per slot-second (time.Second / wheelTickInterval sweeps), and every sweep
+// re-checks the current slot with a wall-clock comparison.
+const wheelTickInterval = 100 * time.Millisecond
+
 type TimingWheel struct {
-	levels    [4]*wheelLevel
-	farFuture *wheelBucket
-	store     *Store
-	tagIndex  *TagIndex
-	stopCh    chan struct{}
-	wg        sync.WaitGroup
-	mu        sync.RWMutex
+	levels      [4]*wheelLevel
+	farFuture   *wheelBucket
+	store       *Store
+	stopCh      chan struct{}
+	wg          sync.WaitGroup
+	mu          sync.RWMutex
+	subtick     int
+	hourElapsed int
 }
 
 func NewTimingWheel(s *Store) *TimingWheel {
@@ -124,12 +130,14 @@ func (tw *TimingWheel) Start() {
 func (tw *TimingWheel) Stop() {
 	close(tw.stopCh)
 	tw.wg.Wait()
+	// Reset the channel so a stopped wheel can be started again.
+	tw.stopCh = make(chan struct{})
 }
 
 func (tw *TimingWheel) tickLoop() {
 	defer tw.wg.Done()
 
-	ticker := time.NewTicker(100 * time.Millisecond)
+	ticker := time.NewTicker(wheelTickInterval)
 	defer ticker.Stop()
 
 	for {
@@ -147,28 +155,55 @@ func (tw *TimingWheel) tick() {
 
 	tw.levels[0].mu.Lock()
 	bucket := tw.levels[0].slots[tw.levels[0].current]
-	tw.levels[0].current = (tw.levels[0].current + 1) % tw.levels[0].numSlots
+	advance := false
+	tw.subtick++
+	if tw.subtick >= int(time.Second/wheelTickInterval) {
+		tw.subtick = 0
+		tw.levels[0].current = (tw.levels[0].current + 1) % tw.levels[0].numSlots
+		advance = true
+	}
 	tw.levels[0].mu.Unlock()
 
+	// Sweep the current slot every tick: expireBucket's wall-clock check makes
+	// repeated sweeps exact for sub-second remainders, while the slot pointer
+	// only advances once per slot-second — matching the slot math in Add,
+	// where slot = duration / level tickSize.
 	tw.expireBucket(bucket, now)
 
-	if tw.levels[0].current == 0 {
-		tw.cascade(1, now)
+	if advance && tw.levels[0].current == 0 {
+		tw.cascadeHour(now)
 	}
 }
 
-func (tw *TimingWheel) cascade(level int, now int64) {
+// cascadeHour is called once per level-0 wrap (every hour of level-0 time):
+// level 1 sweeps the sixty 1-minute slots that just elapsed, level 2 one
+// 1-hour slot, and level 3 one 1-day slot per 24 wraps.
+func (tw *TimingWheel) cascadeHour(now int64) {
+	for i := 0; i < 60; i++ {
+		tw.cascadeLevel(1, now)
+	}
+	tw.cascadeLevel(2, now)
+	tw.hourElapsed++
+	if tw.hourElapsed >= 24 {
+		tw.hourElapsed = 0
+		tw.cascadeLevel(3, now)
+	}
+}
+
+// cascadeLevel sweeps the level's current slot — removing keys whose expiry
+// has passed and moving future keys down one level as they come into range —
+// then advances the pointer. Levels above 3 do not exist.
+func (tw *TimingWheel) cascadeLevel(level int, now int64) {
 	if level > 3 {
 		return
 	}
 
-	tw.levels[level].mu.Lock()
-	bucket := tw.levels[level].slots[tw.levels[level].current]
-	tw.levels[level].current = (tw.levels[level].current + 1) % tw.levels[level].numSlots
-	tw.levels[level].mu.Unlock()
+	l := tw.levels[level]
+	l.mu.Lock()
+	bucket := l.slots[l.current]
+	l.current = (l.current + 1) % l.numSlots
+	l.mu.Unlock()
 
-	// Process keys directly without creating a full map copy
-	// First, collect keys to process while holding lock
 	bucket.mu.Lock()
 	var expired []string
 	var toMove []struct {
@@ -178,8 +213,7 @@ func (tw *TimingWheel) cascade(level int, now int64) {
 
 	for key, expiresAt := range bucket.keys {
 		delete(bucket.keys, key)
-		duration := time.Duration(expiresAt - now)
-		if duration <= 0 {
+		if expiresAt <= now {
 			expired = append(expired, key)
 		} else {
 			toMove = append(toMove, struct {
@@ -190,26 +224,12 @@ func (tw *TimingWheel) cascade(level int, now int64) {
 	}
 	bucket.mu.Unlock()
 
-	// Process expired keys
 	for _, key := range expired {
 		tw.expireKey(key)
 	}
 
-	// Move keys to appropriate levels
 	for _, item := range toMove {
-		duration := time.Duration(item.expiresAt - now)
-		switch level {
-		case 1:
-			tw.addToLevel(0, item.key, item.expiresAt, duration)
-		case 2:
-			tw.addToLevel(1, item.key, item.expiresAt, duration)
-		default:
-			tw.addToLevel(2, item.key, item.expiresAt, duration)
-		}
-	}
-
-	if tw.levels[level].current == 0 {
-		tw.cascade(level+1, now)
+		tw.addToLevel(level-1, item.key, item.expiresAt, time.Duration(item.expiresAt-now))
 	}
 }
 
@@ -232,13 +252,12 @@ func (tw *TimingWheel) expireBucket(bucket *wheelBucket, now int64) {
 }
 
 func (tw *TimingWheel) expireKey(key string) {
-	// Get entry before deleting to ensure proper cleanup
-	entry, exists := tw.store.Get(key)
-	if exists {
-		tw.store.Delete(key)
-		if tw.tagIndex != nil {
-			tw.tagIndex.RemoveKey(key, entry.Tags)
-		}
+	// DeleteIfExpired checks and removes under the shard lock: a stale
+	// schedule (the key was deleted, rescheduled, or PERSISTed after it was
+	// queued) must never remove a live key. Active expirations count as
+	// expirations, not client misses.
+	if tw.store.DeleteIfExpired(key) {
+		GlobalMetrics.RecordExpiration()
 	}
 }
 

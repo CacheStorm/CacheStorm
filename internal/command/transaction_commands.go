@@ -3,6 +3,8 @@ package command
 import (
 	"errors"
 	"fmt"
+	"math"
+	"strconv"
 	"sync"
 	"time"
 
@@ -14,6 +16,7 @@ var (
 	ErrExecWithoutMulti    = errors.New("ERR EXEC without MULTI")
 	ErrDiscardWithoutMulti = errors.New("ERR DISCARD without MULTI")
 	ErrWatchInMulti        = errors.New("ERR WATCH inside MULTI is not allowed")
+	ErrMultiNested         = errors.New("ERR MULTI calls can not be nested")
 )
 
 type Transaction struct {
@@ -109,9 +112,11 @@ func RegisterTransactionCommands(router *Router) {
 }
 
 func cmdMULTI(ctx *Context) error {
-	if ctx.Transaction.HasWatchedKeys() {
-		ctx.Transaction.ClearWatch()
+	if ctx.Transaction.IsActive() {
+		return ctx.WriteError(ErrMultiNested)
 	}
+	// Watches recorded before MULTI stay armed: EXEC's dirty check needs the
+	// baseline taken at WATCH time (MULTI does not clear watches).
 	ctx.Transaction.Start()
 	return ctx.WriteOK()
 }
@@ -131,6 +136,7 @@ func cmdEXEC(ctx *Context) error {
 
 	queued := ctx.Transaction.GetQueued()
 	ctx.Transaction.Clear()
+	ctx.Transaction.ClearWatch()
 
 	if len(queued) == 0 {
 		return ctx.WriteArray([]*resp.Value{})
@@ -219,85 +225,45 @@ func executeQueuedCommand(ctx *Context, qc queuedCommand) *resp.Value {
 		}
 		return resp.ErrorValue("ERR wrong number of arguments")
 	case "INCR":
-		if len(qc.args) >= 1 {
-			key := string(qc.args[0])
-			if entry, exists := ctx.Store.Get(key); exists {
-				if sv, ok := entry.Value.(*store.StringValue); ok {
-					var newVal int64
-					for _, b := range sv.Data {
-						newVal = newVal*10 + int64(b-'0')
-					}
-					newVal++
-					ctx.Store.Set(key, &store.StringValue{Data: []byte(int64ToBytes(newVal))}, store.SetOptions{})
-					return resp.IntegerValue(newVal)
-				}
-			}
-			ctx.Store.Set(key, &store.StringValue{Data: []byte("1")}, store.SetOptions{})
-			return resp.IntegerValue(1)
+		return respIncrBy(ctx, qc, 1)
+	case "HINCRBY":
+		if len(qc.args) < 3 {
+			return resp.ErrorValue("ERR wrong number of arguments")
 		}
-		return resp.ErrorValue("ERR wrong number of arguments")
+		incr, err := parseInt(qc.args[2])
+		if err != nil {
+			return resp.ErrorValue("ERR value is not an integer")
+		}
+		return respHIncrBy(ctx, qc, incr)
+	case "ZINCRBY":
+		if len(qc.args) < 3 {
+			return resp.ErrorValue("ERR wrong number of arguments")
+		}
+		incr, err := strconv.ParseFloat(string(qc.args[1]), 64)
+		if err != nil {
+			return resp.ErrorValue("ERR value is not a valid float")
+		}
+		return respZIncrBy(ctx, qc, incr)
 	case "DECR":
-		if len(qc.args) >= 1 {
-			key := string(qc.args[0])
-			if entry, exists := ctx.Store.Get(key); exists {
-				if sv, ok := entry.Value.(*store.StringValue); ok {
-					var newVal int64
-					for _, b := range sv.Data {
-						newVal = newVal*10 + int64(b-'0')
-					}
-					newVal--
-					ctx.Store.Set(key, &store.StringValue{Data: []byte(int64ToBytes(newVal))}, store.SetOptions{})
-					return resp.IntegerValue(newVal)
-				}
-			}
-			ctx.Store.Set(key, &store.StringValue{Data: []byte("-1")}, store.SetOptions{})
-			return resp.IntegerValue(-1)
-		}
-		return resp.ErrorValue("ERR wrong number of arguments")
+		return respIncrBy(ctx, qc, -1)
 	case "INCRBY":
-		if len(qc.args) >= 2 {
-			key := string(qc.args[0])
-			incr, err := parseInt(qc.args[1])
-			if err != nil {
-				return resp.ErrorValue("ERR value is not an integer")
-			}
-			if entry, exists := ctx.Store.Get(key); exists {
-				if sv, ok := entry.Value.(*store.StringValue); ok {
-					var current int64
-					for _, b := range sv.Data {
-						current = current*10 + int64(b-'0')
-					}
-					newVal := current + incr
-					ctx.Store.Set(key, &store.StringValue{Data: []byte(int64ToBytes(newVal))}, store.SetOptions{})
-					return resp.IntegerValue(newVal)
-				}
-			}
-			ctx.Store.Set(key, &store.StringValue{Data: []byte(int64ToBytes(incr))}, store.SetOptions{})
-			return resp.IntegerValue(incr)
+		if len(qc.args) < 2 {
+			return resp.ErrorValue("ERR wrong number of arguments")
 		}
-		return resp.ErrorValue("ERR wrong number of arguments")
+		incr, err := parseInt(qc.args[1])
+		if err != nil {
+			return resp.ErrorValue("ERR value is not an integer")
+		}
+		return respIncrBy(ctx, qc, incr)
 	case "DECRBY":
-		if len(qc.args) >= 2 {
-			key := string(qc.args[0])
-			decr, err := parseInt(qc.args[1])
-			if err != nil {
-				return resp.ErrorValue("ERR value is not an integer")
-			}
-			if entry, exists := ctx.Store.Get(key); exists {
-				if sv, ok := entry.Value.(*store.StringValue); ok {
-					var current int64
-					for _, b := range sv.Data {
-						current = current*10 + int64(b-'0')
-					}
-					newVal := current - decr
-					ctx.Store.Set(key, &store.StringValue{Data: []byte(int64ToBytes(newVal))}, store.SetOptions{})
-					return resp.IntegerValue(newVal)
-				}
-			}
-			ctx.Store.Set(key, &store.StringValue{Data: []byte(int64ToBytes(-decr))}, store.SetOptions{})
-			return resp.IntegerValue(-decr)
+		if len(qc.args) < 2 {
+			return resp.ErrorValue("ERR wrong number of arguments")
 		}
-		return resp.ErrorValue("ERR wrong number of arguments")
+		decr, err := parseInt(qc.args[1])
+		if err != nil {
+			return resp.ErrorValue("ERR value is not an integer")
+		}
+		return respIncrBy(ctx, qc, -decr)
 	case "EXPIRE":
 		if len(qc.args) >= 2 {
 			key := string(qc.args[0])
@@ -899,6 +865,48 @@ func parseFloat(data []byte) (float64, error) {
 
 func float64ToString(f float64) string {
 	return fmt.Sprintf("%g", f)
+}
+
+// computeIntIncr parses current as a base-10 int64 and applies incr with an
+// overflow guard, mirroring Redis: non-integer values and boundary overflows
+// are rejected instead of wrapping.
+func computeIntIncr(current []byte, incr int64) (int64, error) {
+	parsed, err := strconv.ParseInt(string(current), 10, 64)
+	if err != nil {
+		return 0, ErrNotInteger
+	}
+	if (incr > 0 && parsed > math.MaxInt64-incr) || (incr < 0 && parsed < math.MinInt64-incr) {
+		return 0, ErrOverflow
+	}
+	return parsed + incr, nil
+}
+
+// respIncrBy applies incr to the queued command's key and returns the RESP
+// reply, mirroring the interactive incrBy semantics (reject wrong type,
+// non-integer values, and boundary overflows instead of wrapping).
+func respIncrBy(ctx *Context, qc queuedCommand, incr int64) *resp.Value {
+	if len(qc.args) < 1 {
+		return resp.ErrorValue("ERR wrong number of arguments")
+	}
+	key := string(qc.args[0])
+	if entry, exists := ctx.Store.Get(key); exists {
+		sv, ok := entry.Value.(*store.StringValue)
+		if !ok {
+			return resp.ErrorValue(store.ErrWrongType.Error())
+		}
+		newVal, err := computeIntIncr(sv.Data, incr)
+		if err != nil {
+			return resp.ErrorValue(err.Error())
+		}
+		if err := ctx.Store.Set(key, &store.StringValue{Data: []byte(strconv.FormatInt(newVal, 10))}, store.SetOptions{}); err != nil {
+			return resp.ErrorValue(err.Error())
+		}
+		return resp.IntegerValue(newVal)
+	}
+	if err := ctx.Store.Set(key, &store.StringValue{Data: []byte(strconv.FormatInt(incr, 10))}, store.SetOptions{}); err != nil {
+		return resp.ErrorValue(err.Error())
+	}
+	return resp.IntegerValue(incr)
 }
 
 func parseInt(data []byte) (int64, error) {

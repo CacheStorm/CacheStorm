@@ -1202,7 +1202,7 @@ func TestConnectionHandleQUIT(t *testing.T) {
 
 	client, server := net.Pipe()
 
-	conn := NewConnection(1, server, s, router)
+	conn := NewConnection(1, server, s, router, nil)
 
 	done := make(chan struct{})
 	go func() {
@@ -1261,7 +1261,7 @@ func TestConnectionHandleUnknownCommand(t *testing.T) {
 
 	client, server := net.Pipe()
 
-	conn := NewConnection(1, server, s, router)
+	conn := NewConnection(1, server, s, router, nil)
 
 	go func() {
 		// Send unknown command then close
@@ -1294,7 +1294,7 @@ func TestConnectionHandleReadError(t *testing.T) {
 
 	client, server := net.Pipe()
 
-	conn := NewConnection(1, server, s, router)
+	conn := NewConnection(1, server, s, router, nil)
 
 	// Close client immediately to cause read error
 	client.Close()
@@ -1324,7 +1324,7 @@ func TestConnectionCloseWithSubscriber(t *testing.T) {
 	client, server := net.Pipe()
 	defer client.Close()
 
-	conn := NewConnection(1, server, s, router)
+	conn := NewConnection(1, server, s, router, nil)
 
 	// Set up a subscriber by creating one and subscribing through PubSub
 	ps := s.GetPubSub()
@@ -1352,7 +1352,7 @@ func TestConnectionRecoverPanic(t *testing.T) {
 	defer client.Close()
 	defer server.Close()
 
-	conn := NewConnection(1, server, s, router)
+	conn := NewConnection(1, server, s, router, nil)
 	conn.lastCmd = "TEST"
 
 	// Call recoverPanic in a goroutine that panics
@@ -1968,7 +1968,7 @@ func TestConnectionHandleWithSubscriber(t *testing.T) {
 
 	client, server := net.Pipe()
 
-	conn := NewConnection(1, server, s, router)
+	conn := NewConnection(1, server, s, router, nil)
 
 	go func() {
 		// Send SUBSCRIBE command
@@ -2071,7 +2071,7 @@ func TestConnectionHandleCommandError(t *testing.T) {
 
 	client, server := net.Pipe()
 
-	conn := NewConnection(1, server, s, router)
+	conn := NewConnection(1, server, s, router, nil)
 
 	go func() {
 		// Send a command that will fail (SET with no args)
@@ -2393,7 +2393,7 @@ func TestConnectionHandleTimeout(t *testing.T) {
 
 	client, server := net.Pipe()
 
-	conn := NewConnection(1, server, s, router)
+	conn := NewConnection(1, server, s, router, nil)
 	conn.readTimeout = 100 * time.Millisecond // Very short timeout
 
 	// Don't send any data - connection should timeout
@@ -2939,7 +2939,7 @@ func TestConnectionHandleSubscriberPersistence(t *testing.T) {
 
 	client, server := net.Pipe()
 
-	conn := NewConnection(1, server, s, router)
+	conn := NewConnection(1, server, s, router, nil)
 
 	done := make(chan struct{})
 	go func() {
@@ -2994,7 +2994,7 @@ func TestConnectionHandleTCPKeepAlive(t *testing.T) {
 		if err != nil {
 			return
 		}
-		c := NewConnection(1, conn, s, router)
+		c := NewConnection(1, conn, s, router, nil)
 		c.Handle()
 	}()
 
@@ -3172,7 +3172,7 @@ func TestConnectionHandleRouterError(t *testing.T) {
 
 	client, server := net.Pipe()
 
-	conn := NewConnection(1, server, s, router)
+	conn := NewConnection(1, server, s, router, nil)
 
 	done := make(chan struct{})
 	go func() {

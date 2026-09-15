@@ -68,6 +68,21 @@ func (s *Shard) Delete(key string) (int64, bool) {
 	return mem, true
 }
 
+// updateExpiry sets a key's absolute expiry under the shard lock so active
+// expiration cannot race expiry writes (EXPIRE/PEXPIRE/PERSIST). Reports
+// whether the key exists and is still live.
+func (s *Shard) updateExpiry(key string, expiresAt int64) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	entry, exists := s.data[key]
+	if !exists || entry.IsExpired() {
+		return false
+	}
+	entry.ExpiresAt = expiresAt
+	return true
+}
+
 func (s *Shard) Exists(key string) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
