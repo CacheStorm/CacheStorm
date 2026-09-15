@@ -117,6 +117,12 @@ func (r *Router) Execute(ctx *Context) error {
 		return ctx.Writer.WriteError("NOAUTH Authentication required.")
 	}
 
+	// MULTI queues commands for atomic execution at EXEC.
+	if ctx.Transaction != nil && ctx.Transaction.IsActive() && !isTransactionControl(ctx.Command) {
+		ctx.Transaction.Queue(ctx.Command, ctx.Args)
+		return ctx.Writer.WriteSimpleString("QUEUED")
+	}
+
 	ctx.StartTime = time.Now()
 	err := cmd.Handler(ctx)
 
@@ -126,6 +132,17 @@ func (r *Router) Execute(ctx *Context) error {
 	}
 
 	return err
+}
+
+// isTransactionControl reports whether cmd runs immediately even inside
+// MULTI: transaction bookkeeping is never queued, and UNWATCH executes
+// immediately because the replay dispatcher has no UNWATCH case.
+func isTransactionControl(cmd string) bool {
+	switch strings.ToUpper(cmd) {
+	case "MULTI", "EXEC", "DISCARD", "WATCH", "UNWATCH":
+		return true
+	}
+	return false
 }
 
 // ExecuteSilent runs a command without auth checks or post-execute hooks.

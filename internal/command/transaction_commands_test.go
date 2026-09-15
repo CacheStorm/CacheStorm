@@ -48,7 +48,10 @@ func TestAllTransactionCommands(t *testing.T) {
 				{"SET", [][]byte{[]byte("discardkey"), []byte("value")}},
 				{"DISCARD", nil},
 			},
-			// Note: In current implementation, SET executes immediately, DISCARD just clears transaction state
+			validate: func(ctx *Context) bool {
+				_, exists := s.Get("discardkey")
+				return !exists // the queued SET was discarded before EXEC
+			},
 		},
 		{
 			name: "WATCH-EXEC success",
@@ -134,14 +137,11 @@ func TestAllTransactionCommands(t *testing.T) {
 			}
 
 			for _, cmd := range tt.commands {
-				handler, ok := router.Get(cmd.cmd)
-				if !ok {
-					t.Fatalf("Command %s not found", cmd.cmd)
-				}
-
 				cmdCtx := newTestContext(cmd.cmd, cmd.args, s)
 				cmdCtx.Transaction = ctx.Transaction
-				handler.Handler(cmdCtx)
+				if err := router.Execute(cmdCtx); err != nil {
+					t.Fatalf("Command %s: %v", cmd.cmd, err)
+				}
 			}
 
 			if tt.validate != nil && !tt.validate(ctx) {
