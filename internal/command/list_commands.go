@@ -2,6 +2,7 @@ package command
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -10,6 +11,8 @@ import (
 	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
 )
+
+var errLPosRankZero = errors.New("ERR RANK should not be 0")
 
 func RegisterListCommands(router *Router) {
 	router.Register(&CommandDef{Name: "LPUSH", Handler: cmdLPUSH})
@@ -900,6 +903,7 @@ func cmdLPOS(ctx *Context) error {
 
 	rank := 1
 	count := 0
+	countSpecified := false
 	maxlen := 0
 
 	for i := 2; i < ctx.ArgCount(); i++ {
@@ -915,6 +919,9 @@ func cmdLPOS(ctx *Context) error {
 			if err != nil {
 				return ctx.WriteError(ErrNotInteger)
 			}
+			if rank == 0 {
+				return ctx.WriteError(errLPosRankZero)
+			}
 		case "COUNT":
 			i++
 			if i >= ctx.ArgCount() {
@@ -925,6 +932,7 @@ func cmdLPOS(ctx *Context) error {
 			if err != nil {
 				return ctx.WriteError(ErrNotInteger)
 			}
+			countSpecified = true
 		case "MAXLEN":
 			i++
 			if i >= ctx.ArgCount() {
@@ -962,10 +970,10 @@ func cmdLPOS(ctx *Context) error {
 			if bytes.Equal(list.Elements[i], element) {
 				found++
 				if found == absRank {
-					if count > 0 {
+					if countSpecified {
 						result := make([]*resp.Value, 0)
 						result = append(result, resp.IntegerValue(int64(i)))
-						for j := i + 1; j < searchLen && len(result) < count; j++ {
+						for j := i + 1; j < searchLen && (count == 0 || len(result) < count); j++ {
 							if bytes.Equal(list.Elements[j], element) {
 								result = append(result, resp.IntegerValue(int64(j)))
 							}
@@ -987,10 +995,10 @@ func cmdLPOS(ctx *Context) error {
 			if bytes.Equal(list.Elements[i], element) {
 				found++
 				if found == absRank {
-					if count > 0 {
+					if countSpecified {
 						result := make([]*resp.Value, 0)
 						result = append(result, resp.IntegerValue(int64(i)))
-						for j := i - 1; j >= tailStart && len(result) < count; j-- {
+						for j := i - 1; j >= tailStart && (count == 0 || len(result) < count); j-- {
 							if bytes.Equal(list.Elements[j], element) {
 								result = append(result, resp.IntegerValue(int64(j)))
 							}

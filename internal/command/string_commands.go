@@ -161,6 +161,9 @@ func cmdGET(ctx *Context) error {
 
 	strVal, ok := entry.Value.(*store.StringValue)
 	if !ok {
+		if bmVal, isBitmap := entry.Value.(*BitmapValue); isBitmap {
+			return ctx.WriteBulkBytes(bmVal.Data)
+		}
 		return ctx.WriteError(store.ErrWrongType)
 	}
 
