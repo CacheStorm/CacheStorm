@@ -87,25 +87,14 @@ type ReplicationConfig struct {
 }
 
 type PluginsConfig struct {
-	Stats   StatsPluginConfig   `yaml:"stats"`
 	Metrics MetricsPluginConfig `yaml:"metrics"`
-	Auth    AuthPluginConfig    `yaml:"auth"`
 	SlowLog SlowLogPluginConfig `yaml:"slowlog"`
-}
-
-type StatsPluginConfig struct {
-	Enabled bool `yaml:"enabled" default:"true"`
 }
 
 type MetricsPluginConfig struct {
 	Enabled bool   `yaml:"enabled" default:"true"`
 	Port    int    `yaml:"port" default:"9090"`
 	Path    string `yaml:"path" default:"/metrics"`
-}
-
-type AuthPluginConfig struct {
-	Enabled  bool   `yaml:"enabled" default:"false"`
-	Password string `yaml:"password"`
 }
 
 type SlowLogPluginConfig struct {
