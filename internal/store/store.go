@@ -214,6 +214,7 @@ func (s *Store) Get(key string) (*Entry, bool) {
 		mem, _ := shard.Delete(key)
 		s.trackMemory(-mem)
 		s.DeleteVersion(key) // Clean up version to prevent memory leak
+		s.tagIndex.RemoveKey(key, entry.Tags)
 		s.fireExpire(key, entry.Value)
 		// A lookup of an expired key counts as both a miss and an expiration
 		// (lazy expiry here is the only expiry path that observes reads).
