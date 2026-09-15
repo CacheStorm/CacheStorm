@@ -102,7 +102,7 @@ func cmdSLOWLOGGET(ctx *Context) error {
 	for i, entry := range entries {
 		args := make([]*resp.Value, len(entry.Args))
 		for j, arg := range entry.Args {
-			args[j] = resp.BulkString(arg)
+			args[j] = resp.BulkString(string(arg))
 		}
 
 		results[i] = resp.ArrayValue([]*resp.Value{

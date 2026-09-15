@@ -2509,35 +2509,36 @@ func TestTimingWheelCascade(t *testing.T) {
 	tw.Start()
 	defer tw.Stop()
 
-	// Add a key with expiration far in the future to trigger cascade
+	// Add a key with an expiration to trigger the hourly cascade sweep.
 	s.Set("cascadekey", &StringValue{Data: []byte("value")}, SetOptions{TTL: 5 * time.Second})
 
-	// Manually trigger cascade
-	now := time.Now().UnixNano() / 1e6
-	tw.cascade(1, now)
-	tw.cascade(2, now)
-	tw.cascade(3, now)
-	tw.cascade(4, now) // This should return immediately (out of bounds)
+	// Manually drive one hourly cascade (level 0 wrapped).
+	tw.cascadeHour(time.Now().UnixNano())
 }
 
 func TestTimingWheelExpireKey(t *testing.T) {
 	s := NewStore()
-	ti := NewTagIndex()
 	tw := NewTimingWheel(s)
-	tw.tagIndex = ti
 
-	// Set up a key
-	s.Set("expirekey", &StringValue{Data: []byte("value")}, SetOptions{})
-
-	// Add tag
-	ti.AddTags("expirekey", []string{"tag1"})
-
-	// Call expireKey directly
+	// An expired key is removed by expireKey...
+	if err := s.Set("expirekey", &StringValue{Data: []byte("value")}, SetOptions{TTL: 5 * time.Millisecond}); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	time.Sleep(20 * time.Millisecond)
 	tw.expireKey("expirekey")
-
-	// Verify key is deleted
 	if s.Exists("expirekey") {
-		t.Error("Key should be deleted after expireKey")
+		t.Error("expired key should be deleted after expireKey")
+	}
+
+	// ...while a live key must survive it: expireKey only removes entries
+	// that are actually expired, so a stale schedule can never delete a key
+	// that was rescheduled or has no TTL.
+	if err := s.Set("livekey", &StringValue{Data: []byte("value")}, SetOptions{}); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	tw.expireKey("livekey")
+	if !s.Exists("livekey") {
+		t.Error("live key must not be deleted by expireKey")
 	}
 }
 

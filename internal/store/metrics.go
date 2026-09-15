@@ -14,6 +14,8 @@ type Metrics struct {
 	TotalWrites       atomic.Int64
 	TotalHits         atomic.Int64
 	TotalMisses       atomic.Int64
+	TotalEvictions    atomic.Int64
+	TotalExpirations  atomic.Int64
 	TotalErrors       atomic.Int64
 	TotalBytesIn      atomic.Int64
 	TotalBytesOut     atomic.Int64
@@ -138,6 +140,14 @@ func (m *Metrics) RecordMiss() {
 	m.TotalMisses.Add(1)
 }
 
+func (m *Metrics) RecordEviction() {
+	m.TotalEvictions.Add(1)
+}
+
+func (m *Metrics) RecordExpiration() {
+	m.TotalExpirations.Add(1)
+}
+
 func (m *Metrics) RecordError() {
 	m.TotalErrors.Add(1)
 }
@@ -196,6 +206,8 @@ func (m *Metrics) Reset() {
 	m.TotalWrites.Store(0)
 	m.TotalHits.Store(0)
 	m.TotalMisses.Store(0)
+	m.TotalEvictions.Store(0)
+	m.TotalExpirations.Store(0)
 	m.TotalErrors.Store(0)
 	m.TotalBytesIn.Store(0)
 	m.TotalBytesOut.Store(0)
@@ -223,10 +235,12 @@ func (m *Metrics) GetCommandStats(cmd string) map[string]interface{} {
 }
 
 type SlowLog struct {
-	Entries  []SlowLogEntry
-	MaxSize  int
-	mu       sync.RWMutex
-	sequence atomic.Int64
+	Entries   []SlowLogEntry
+	MaxSize   int
+	mu        sync.RWMutex
+	sequence  atomic.Int64
+	threshold time.Duration
+	enabled   bool
 }
 
 type SlowLogEntry struct {
@@ -234,24 +248,59 @@ type SlowLogEntry struct {
 	Timestamp time.Time
 	Duration  time.Duration
 	Command   string
-	Args      []string
+	Args      [][]byte
 	ClientIP  string
 }
+
+// defaultSlowLogThreshold matches the shipped slowlog config default and the
+// historical SLOWLOG.CONFIG default.
+const defaultSlowLogThreshold = 10 * time.Millisecond
 
 func NewSlowLog(maxSize int) *SlowLog {
 	if maxSize <= 0 {
 		maxSize = 128
 	}
 	return &SlowLog{
-		Entries: make([]SlowLogEntry, 0, maxSize),
-		MaxSize: maxSize,
+		Entries:   make([]SlowLogEntry, 0, maxSize),
+		MaxSize:   maxSize,
+		threshold: defaultSlowLogThreshold,
+		enabled:   true,
 	}
 }
 
-func (sl *SlowLog) Add(duration time.Duration, cmd string, args []string, clientIP string) {
+// Add records a slow-log entry unconditionally.
+func (sl *SlowLog) Add(duration time.Duration, cmd string, args [][]byte, clientIP string) {
 	sl.mu.Lock()
 	defer sl.mu.Unlock()
+	sl.addLocked(duration, cmd, args, clientIP)
+}
 
+// AddIfSlow records the command only when recording is enabled and its
+// duration reached the configured threshold. Safe for concurrent use.
+func (sl *SlowLog) AddIfSlow(duration time.Duration, cmd string, args [][]byte, clientIP string) {
+	sl.mu.Lock()
+	defer sl.mu.Unlock()
+	if !sl.enabled || duration < sl.threshold {
+		return
+	}
+	sl.addLocked(duration, cmd, args, clientIP)
+}
+
+// SetThreshold sets the minimum command duration AddIfSlow records.
+func (sl *SlowLog) SetThreshold(threshold time.Duration) {
+	sl.mu.Lock()
+	defer sl.mu.Unlock()
+	sl.threshold = threshold
+}
+
+// SetEnabled toggles slow-log recording.
+func (sl *SlowLog) SetEnabled(enabled bool) {
+	sl.mu.Lock()
+	defer sl.mu.Unlock()
+	sl.enabled = enabled
+}
+
+func (sl *SlowLog) addLocked(duration time.Duration, cmd string, args [][]byte, clientIP string) {
 	entry := SlowLogEntry{
 		ID:        sl.sequence.Add(1),
 		Timestamp: time.Now(),

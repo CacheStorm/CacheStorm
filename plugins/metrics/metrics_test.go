@@ -47,3 +47,26 @@ func TestAfterCommandCountsCommandWithDuration(t *testing.T) {
 		t.Errorf("SET counter missing or not numeric:\n%s", out)
 	}
 }
+
+// Regression: the server pushes store-side counter absolutes through these
+// setters every refresh tick; they must render as decimal values on /metrics.
+func TestSetCountersExportPrometheus(t *testing.T) {
+	p := New(true)
+	p.SetHitCount(7)
+	p.SetMissCount(3)
+	p.SetEvictedCount(2)
+	p.SetExpiredCount(5)
+
+	out := p.ExportPrometheus()
+
+	for _, want := range []string{
+		"cachestorm_hit_total 7\n",
+		"cachestorm_miss_total 3\n",
+		"cachestorm_evicted_total 2\n",
+		"cachestorm_expired_total 5\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in output:\n%s", want, out)
+		}
+	}
+}

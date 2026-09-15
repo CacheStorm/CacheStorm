@@ -253,6 +253,9 @@ func (s *Server) Start(_ context.Context) error {
 
 	s.listener = listener
 
+	// Active expiration: remove expired keys without requiring reads.
+	s.store.StartExpiry()
+
 	go s.acceptLoop()
 
 	if s.httpServer != nil {
@@ -301,7 +304,7 @@ func (s *Server) startMetricsServer() {
 		}
 	}()
 
-	// Refresh the advertised gauges (keys/memory/clients) periodically.
+	// Refresh the advertised counters and gauges periodically.
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
@@ -312,12 +315,22 @@ func (s *Server) startMetricsServer() {
 			case <-s.stopCh:
 				return
 			case <-ticker.C:
-				s.metricsPlugin.SetKeysTotal(int64(s.store.KeyCount()))
-				s.metricsPlugin.SetMemoryBytes(s.store.MemUsage())
-				s.metricsPlugin.SetConnectedClients(s.connCount.Load())
+				s.updateMetricsGauges()
 			}
 		}
 	}()
+}
+
+// updateMetricsGauges pushes current store and connection counters into the
+// metrics plugin so the Prometheus exposition reflects live state.
+func (s *Server) updateMetricsGauges() {
+	s.metricsPlugin.SetKeysTotal(int64(s.store.KeyCount()))
+	s.metricsPlugin.SetMemoryBytes(s.store.MemUsage())
+	s.metricsPlugin.SetConnectedClients(s.connCount.Load())
+	s.metricsPlugin.SetHitCount(store.GlobalMetrics.TotalHits.Load())
+	s.metricsPlugin.SetMissCount(store.GlobalMetrics.TotalMisses.Load())
+	s.metricsPlugin.SetEvictedCount(store.GlobalMetrics.TotalEvictions.Load())
+	s.metricsPlugin.SetExpiredCount(store.GlobalMetrics.TotalExpirations.Load())
 }
 
 func (s *Server) acceptLoop() {
@@ -346,6 +359,7 @@ func (s *Server) acceptLoop() {
 
 		connID := s.connID.Add(1)
 		s.connCount.Add(1)
+		store.GlobalMetrics.RecordConnection()
 		c := NewConnection(connID, conn, s.store, s.router, s.pluginMgr)
 
 		// Apply configured timeouts
@@ -363,6 +377,7 @@ func (s *Server) acceptLoop() {
 			defer s.wg.Done()
 			defer s.conns.Delete(connID)
 			defer s.connCount.Add(-1)
+			defer store.GlobalMetrics.RecordDisconnection()
 			c.Handle()
 		}()
 	}
@@ -398,6 +413,9 @@ func (s *Server) Stop(ctx context.Context) error {
 			logger.Error().Err(err).Msg("plugin close error")
 		}
 	}
+
+	// Stop active expiration with the server.
+	s.store.StopExpiry()
 
 	// 3. Wait for in-flight requests to complete (with timeout)
 	done := make(chan struct{})

@@ -108,6 +108,7 @@ func (ec *EvictionController) evictOne() bool {
 	}
 
 	ec.store.Delete(key)
+	GlobalMetrics.RecordEviction()
 
 	if exists && ec.onEvict != nil {
 		ec.onEvict(key, entry)
@@ -176,16 +177,26 @@ func (ec *EvictionController) selectVolatileLRU() string {
 }
 
 func (ec *EvictionController) selectRandom() string {
-	// Sample a random key from a random shard instead of materializing all keys
-	ec.rndMu.Lock()
-	shardIdx := ec.rnd.Intn(NumShards)
-	ec.rndMu.Unlock()
+	// Sample a random key from a random shard instead of materializing all
+	// keys. An empty shard must not end the search: rescan distinct shards so
+	// the policy can enforce max_memory whenever any key exists.
+	tried := make(map[int]struct{}, NumShards)
+	for len(tried) < NumShards {
+		ec.rndMu.Lock()
+		shardIdx := ec.rnd.Intn(NumShards)
+		ec.rndMu.Unlock()
+		if _, seen := tried[shardIdx]; seen {
+			continue
+		}
+		tried[shardIdx] = struct{}{}
 
-	shard := ec.store.shards[shardIdx]
-	shard.mu.RLock()
-	defer shard.mu.RUnlock()
-	for key := range shard.data {
-		return key
+		shard := ec.store.shards[shardIdx]
+		shard.mu.RLock()
+		for key := range shard.data {
+			shard.mu.RUnlock()
+			return key
+		}
+		shard.mu.RUnlock()
 	}
 	return ""
 }
@@ -193,18 +204,23 @@ func (ec *EvictionController) selectRandom() string {
 func (ec *EvictionController) sampleKeys() []candidate {
 	candidates := make([]candidate, 0, ec.sampleSize)
 
-	for i := 0; i < ec.sampleSize; i++ {
+	// Sample distinct shards until we have sampleSize candidates (or every
+	// shard has been tried): an empty shard must not consume a sample slot,
+	// otherwise victim selection no-ops under pressure even when evictable
+	// keys exist and the policy cannot enforce max_memory.
+	tried := make(map[int]struct{}, NumShards)
+	for len(candidates) < ec.sampleSize && len(tried) < NumShards {
 		ec.rndMu.Lock()
 		shardIdx := ec.rnd.Intn(NumShards)
 		ec.rndMu.Unlock()
+		if _, seen := tried[shardIdx]; seen {
+			continue
+		}
+		tried[shardIdx] = struct{}{}
+
 		shard := ec.store.shards[shardIdx]
 
 		shard.mu.RLock()
-		if len(shard.data) == 0 {
-			shard.mu.RUnlock()
-			continue
-		}
-
 		for key, entry := range shard.data {
 			candidates = append(candidates, candidate{
 				key:         key,

@@ -158,6 +158,22 @@ func (m *MetricsPlugin) SetMemoryBytes(n int64) {
 	atomic.StoreInt64(&m.metrics.memoryBytes, n)
 }
 
+func (m *MetricsPlugin) SetHitCount(n int64) {
+	atomic.StoreInt64(&m.metrics.hitCount, n)
+}
+
+func (m *MetricsPlugin) SetMissCount(n int64) {
+	atomic.StoreInt64(&m.metrics.missCount, n)
+}
+
+func (m *MetricsPlugin) SetEvictedCount(n int64) {
+	atomic.StoreInt64(&m.metrics.evictedCount, n)
+}
+
+func (m *MetricsPlugin) SetExpiredCount(n int64) {
+	atomic.StoreInt64(&m.metrics.expiredCount, n)
+}
+
 func (m *MetricsPlugin) ExportPrometheus() string {
 	var result string
 
