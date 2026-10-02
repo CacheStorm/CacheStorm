@@ -76,9 +76,15 @@ func NewBatcher(config BatchConfig, processor Processor) *Batcher {
 }
 
 func (b *Batcher) Add(item BatchItem) <-chan BatchResult {
-	resultCh := make(chan BatchResult, 1)
+	// Two channels: pendingCh is what resultDispatcher routes into, callerCh
+	// is what the caller reads. They must not be the same channel — the
+	// internal goroutine below consumes pendingCh and forwards, so sharing one
+	// channel would let the goroutine and the caller race for the single
+	// result, leaving the loser blocked forever holding its workerPool slot.
+	callerCh := make(chan BatchResult, 1)
+	pendingCh := make(chan BatchResult, 1)
 
-	b.pending.Store(item.Key, resultCh)
+	b.pending.Store(item.Key, pendingCh)
 	b.items <- item
 	b.count.Add(1)
 
@@ -99,16 +105,18 @@ func (b *Batcher) Add(item BatchItem) <-chan BatchResult {
 				log.Printf("batch: panic recovered in worker: %v", r)
 			}
 		}()
-		result := <-b.results
-		if ch, ok := b.pending.Load(result.Key); ok {
-			if resCh, ok := ch.(chan BatchResult); ok {
-				resCh <- result
-			}
-			b.pending.Delete(result.Key)
+		// Wait on this item's own registered channel, not the shared
+		// b.results: resultDispatcher already drains b.results and routes each
+		// result into b.pending. Receiving from b.results meant the dispatcher
+		// normally consumed the result first, so this goroutine blocked forever
+		// while still holding its workerPool slot and the batcher deadlocked
+		// once MaxWorkers slots leaked. Then forward to the caller's channel.
+		if result, ok := <-pendingCh; ok {
+			callerCh <- result
 		}
 	}()
 
-	return resultCh
+	return callerCh
 }
 
 func (b *Batcher) AddAsync(item BatchItem, callback func(BatchResult)) {
@@ -126,6 +134,16 @@ func (b *Batcher) AddAsync(item BatchItem, callback func(BatchResult)) {
 		return
 	}
 
+	// Register in pending BEFORE publishing the item. Publishing first let
+	// processLoop run the processor and hand the result to resultDispatcher
+	// before this key was in b.pending; the dispatcher's
+	// `if ch, ok := b.pending.Load(key); ok` then found nothing, discarded the
+	// result, and this callback blocked on <-resultCh forever holding its
+	// workerPool slot — so drops accumulated until AddAsync deadlocked.
+	// Batcher.Add already orders it this way (Store, then publish).
+	resultCh := make(chan BatchResult, 1)
+	b.pending.Store(item.Key, resultCh)
+
 	b.items <- item
 	b.count.Add(1)
 
@@ -135,10 +153,6 @@ func (b *Batcher) AddAsync(item BatchItem, callback func(BatchResult)) {
 		default:
 		}
 	}
-
-	// Register in pending so resultDispatcher routes the result to us
-	resultCh := make(chan BatchResult, 1)
-	b.pending.Store(item.Key, resultCh)
 
 	// Acquire worker slot (blocks if MaxWorkers reached)
 	b.workerPool <- struct{}{}

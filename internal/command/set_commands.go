@@ -1,6 +1,7 @@
 package command
 
 import (
+	"errors"
 	"math/rand"
 	"sort"
 	"strconv"
@@ -9,6 +10,11 @@ import (
 	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
 )
+
+// A count argument that must be non-negative: SPOP's pop count and XTRIM's
+// MAXLEN both reject a negative value. (SRANDMEMBER instead treats a negative
+// count as a repetition count, per Redis.)
+var errCountOutOfRange = errors.New("ERR value is out of range, must be positive")
 
 func RegisterSetCommands(router *Router) {
 	router.Register(&CommandDef{Name: "SADD", Handler: cmdSADD})
@@ -210,6 +216,9 @@ func cmdSPOP(ctx *Context) error {
 		if err != nil {
 			return ctx.WriteError(ErrNotInteger)
 		}
+		if count < 0 {
+			return ctx.WriteError(errCountOutOfRange)
+		}
 	}
 
 	set, err := getSet(ctx, key)
@@ -306,7 +315,18 @@ func cmdSRANDMEMBER(ctx *Context) error {
 		return ctx.WriteBulkString(members[idx])
 	}
 
-	if count > 0 && count > len(members) {
+	if count < 0 {
+		// Redis: a negative count returns exactly |count| elements chosen at
+		// random, with repetition allowed.
+		n := -count
+		result := make([]*resp.Value, 0, n)
+		for i := 0; i < n && len(members) > 0; i++ {
+			result = append(result, resp.BulkString(members[rand.Intn(len(members))]))
+		}
+		return ctx.WriteArray(result)
+	}
+
+	if count > len(members) {
 		count = len(members)
 	}
 
@@ -621,7 +641,7 @@ func cmdSSCAN(ctx *Context) error {
 
 	key := ctx.ArgString(0)
 	cursor, err := strconv.Atoi(ctx.ArgString(1))
-	if err != nil {
+	if err != nil || cursor < 0 {
 		return ctx.WriteError(ErrNotInteger)
 	}
 
@@ -705,23 +725,40 @@ func cmdSINTERCARD(ctx *Context) error {
 	// half-applied.
 	ctx.Store.SetOpsRLock()
 	defer ctx.Store.SetOpsRUnlock()
-	numKeys := ctx.ArgCount()
-	limit := -1
-
-	if numKeys >= 3 && strings.ToUpper(ctx.ArgString(numKeys-2)) == "LIMIT" {
-		var err error
-		limit, err = strconv.Atoi(ctx.ArgString(numKeys - 1))
-		if err != nil {
-			return ctx.WriteError(ErrNotInteger)
-		}
-		numKeys -= 2
+	// Redis grammar: SINTERCARD numkeys key [key ...] [LIMIT limit].
+	// The FIRST argument is a COUNT of how many keys follow, not a key. This
+	// handler used to set numKeys from ctx.ArgCount() and read its first set
+	// from ctx.ArgString(0) — i.e. it looked up a set named after the numkeys
+	// token ("2"), got an empty one, and intersected from there, so EVERY
+	// well-formed call answered 0.
+	numKeys, err := strconv.Atoi(ctx.ArgString(0))
+	if err != nil {
+		return ctx.WriteError(ErrNotInteger)
 	}
-
+	// numkeys is a key COUNT and must be at least 1.
 	if numKeys < 1 {
+		return ctx.WriteError(ErrInvalidArg)
+	}
+	if ctx.ArgCount() < 1+numKeys {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
-	firstSet, err := getSetOrEmpty(ctx, ctx.ArgString(0))
+	limit := -1
+	optIdx := 1 + numKeys
+	if ctx.ArgCount() >= optIdx+2 && strings.ToUpper(ctx.ArgString(optIdx)) == "LIMIT" {
+		if ctx.ArgCount() > optIdx+2 {
+			return ctx.WriteError(ErrSyntaxError)
+		}
+		limit, err = strconv.Atoi(ctx.ArgString(optIdx + 1))
+		if err != nil {
+			return ctx.WriteError(ErrNotInteger)
+		}
+		if limit < 0 {
+			return ctx.WriteError(ErrInvalidArg)
+		}
+	}
+
+	firstSet, err := getSetOrEmpty(ctx, ctx.ArgString(1))
 	if err != nil {
 		return ctx.WriteError(err)
 	}
@@ -733,7 +770,7 @@ func cmdSINTERCARD(ctx *Context) error {
 	}
 	firstSet.RUnlock()
 
-	for i := 1; i < numKeys; i++ {
+	for i := 2; i < 1+numKeys; i++ {
 		set, err := getSet(ctx, ctx.ArgString(i))
 		if err != nil {
 			return ctx.WriteError(err)

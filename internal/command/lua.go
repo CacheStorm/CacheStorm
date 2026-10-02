@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -160,7 +161,15 @@ func (e *ScriptEngine) CreateState(keys []string, args []string) *lua.LState {
 }
 
 func (e *ScriptEngine) executeCommand(L *lua.LState, cmd string, args []string) lua.LValue {
-	switch cmd {
+	// Redis command names are case-insensitive and lowercase is the
+	// conventional Lua spelling (redis.call('get', k)). The switch below only
+	// has uppercase labels, so a lowercase name matched no arm and fell out of
+	// the switch as nil WITHOUT RUNNING ANYTHING — a mutating call such as
+	// redis.call('del', k) or redis.call('incr', k) silently left the store
+	// untouched while the script reported success. Normalise once, here, so
+	// redis.call and redis.pcall (both of which route through this function)
+	// are fixed together.
+	switch strings.ToUpper(cmd) {
 	case "GET":
 		if len(args) < 1 {
 			return lua.LNil

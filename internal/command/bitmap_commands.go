@@ -225,6 +225,7 @@ func cmdBITPOS(ctx *Context) error {
 
 	start := 0
 	end := -1
+	endGiven := false
 
 	if ctx.ArgCount() >= 3 {
 		start, err = strconv.Atoi(ctx.ArgString(2))
@@ -237,6 +238,7 @@ func cmdBITPOS(ctx *Context) error {
 		if err != nil {
 			return ctx.WriteError(ErrNotInteger)
 		}
+		endGiven = true
 	}
 
 	bm := getBitmap(ctx, key)
@@ -289,6 +291,12 @@ func cmdBITPOS(ctx *Context) error {
 	}
 
 	if bit == 0 {
+		// Redis confines the search to an explicitly supplied end offset, so a
+		// 0 bit absent from that range is "not found". Answering with a position
+		// past the last bit is only correct when no end offset was given.
+		if endGiven {
+			return ctx.WriteInteger(-1)
+		}
 		return ctx.WriteInteger(int64(len(data) * 8))
 	}
 
@@ -307,16 +315,50 @@ func cmdBITOP(ctx *Context) error {
 		srcKeys = append(srcKeys, ctx.ArgString(i))
 	}
 
+	// NOT is unary, not a combining op: Redis takes exactly one source and
+	// stores its inversion. It used to be handled by a `case "NOT"` inside
+	// the combining loop below, but that switch is only reached from the
+	// i > 0 iterations (i == 0 copies and continues), so the branch was
+	// unreachable and NOT silently stored an unmodified copy of the source.
+	if op == "NOT" {
+		if len(srcKeys) != 1 {
+			return ctx.WriteError(errors.New("ERR BITOP NOT must be called with a single source key"))
+		}
+		bm := getBitmap(ctx, srcKeys[0])
+		if bm == nil {
+			return ctx.WriteInteger(0)
+		}
+		inverted := make([]byte, len(bm.Data))
+		for j := range bm.Data {
+			inverted[j] = ^bm.Data[j]
+		}
+		ctx.Store.Set(destKey, &BitmapValue{Data: inverted}, store.SetOptions{})
+		return ctx.WriteInteger(int64(len(inverted)))
+	}
+
+	// A source key that does not exist "counts as an empty string" (Redis
+	// BITOP). An empty string is the IDENTITY element for OR and XOR, but the
+	// ANNIHILATOR for AND: ANDing with an all-zero operand can only clear
+	// every bit. The old `continue` skipped the missing source outright, so
+	// `BITOP AND dest k1 missing` stored a byte-for-byte COPY of k1 — which is
+	// what OR produces — and AND was not even commutative, because seeding was
+	// keyed on the loop INDEX (i == 0) rather than on whether the accumulator
+	// had been seeded yet.
 	var result []byte
-	for i, k := range srcKeys {
+	seeded := false
+	sawMissing := false
+
+	for _, k := range srcKeys {
 		bm := getBitmap(ctx, k)
 		if bm == nil {
+			sawMissing = true
 			continue
 		}
 
-		if i == 0 {
+		if !seeded {
 			result = make([]byte, len(bm.Data))
 			copy(result, bm.Data)
+			seeded = true
 			continue
 		}
 
@@ -334,11 +376,14 @@ func cmdBITOP(ctx *Context) error {
 				result[j] |= bm.Data[j]
 			case "XOR":
 				result[j] ^= bm.Data[j]
-			case "NOT":
-				if i == 0 {
-					result[j] = ^bm.Data[j]
-				}
 			}
+		}
+	}
+
+	// Apply the missing operand's zero bits to an AND result.
+	if op == "AND" && sawMissing && result != nil {
+		for j := range result {
+			result[j] = 0
 		}
 	}
 
@@ -496,7 +541,13 @@ func bitfieldSet(bm *BitmapValue, encoding string, offset int64, value int64) in
 	byteOffset := int(offset / 8)
 	bitOffset := int(offset % 8)
 
-	totalBytes := byteOffset + (bits+7)/8 + 1
+	// Grow to exactly the bytes the field spans. A field of `bits` width
+	// starting at bit `bitOffset` ends at bit bitOffset+bits-1, so it needs
+	// ceil((bitOffset+bits)/8) bytes from byteOffset onwards. The previous
+	// "byteOffset + (bits+7)/8 + 1" appended a phantom trailing byte to every
+	// BITFIELD SET, so the stored string was one byte longer than Redis's and
+	// BITOP reported a too-large destination length.
+	totalBytes := byteOffset + (bitOffset+bits+7)/8
 	if totalBytes > len(bm.Data) {
 		newData := make([]byte, totalBytes)
 		copy(newData, bm.Data)

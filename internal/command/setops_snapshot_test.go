@@ -100,7 +100,7 @@ func TestSINTERCARDSnapshotUnderConcurrentMoves(t *testing.T) {
 				return
 			default:
 			}
-			count := runCmd(t, s, r, "SINTERCARD", "x", "y")
+			count := runCmd(t, s, r, "SINTERCARD", "2", "x", "y")
 			if !strings.Contains(count, ":0") && !strings.Contains(count, ":1") {
 				t.Errorf("SINTERCARD returned a malformed reply: %q", count)
 			}
@@ -110,7 +110,7 @@ func TestSINTERCARDSnapshotUnderConcurrentMoves(t *testing.T) {
 	<-done
 	<-observerDone
 
-	if sintercard := runCmd(t, s, r, "SINTERCARD", "x", "y"); !strings.Contains(sintercard, ":0") {
+	if sintercard := runCmd(t, s, r, "SINTERCARD", "2", "x", "y"); !strings.Contains(sintercard, ":0") {
 		t.Fatalf("after the moves stopped the sets must be disjoint, got SINTERCARD=%q", sintercard)
 	}
 }
@@ -236,7 +236,7 @@ func TestSINTERSTORESnapshotUnderConcurrentMoves(t *testing.T) {
 
 	// After the moves stop the sets are disjoint, so the intersection
 	// store must be empty.
-	if sintercard := runCmd(t, s, r, "SINTERCARD", "x", "y"); !strings.Contains(sintercard, ":0") {
+	if sintercard := runCmd(t, s, r, "SINTERCARD", "2", "x", "y"); !strings.Contains(sintercard, ":0") {
 		t.Fatalf("the sets must be disjoint after the moves, got %q", sintercard)
 	}
 }

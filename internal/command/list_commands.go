@@ -556,6 +556,20 @@ func cmdLMOVE(ctx *Context) error {
 	whereFrom := strings.ToUpper(ctx.ArgString(2))
 	whereTo := strings.ToUpper(ctx.ArgString(3))
 
+	// Both directions are syntax, so validate them BEFORE touching any state.
+	// The whereTo check used to live in a switch at the very end of the
+	// handler, by which time the element had already been popped off the
+	// source (deleting the key when it emptied) and the destination key had
+	// already been created — so a client typo destroyed a list element behind
+	// an "ERR syntax error" reply. The sibling cmdBLMOVE already validated
+	// both up front.
+	if whereFrom != "LEFT" && whereFrom != "RIGHT" {
+		return ctx.WriteError(ErrSyntaxError)
+	}
+	if whereTo != "LEFT" && whereTo != "RIGHT" {
+		return ctx.WriteError(ErrSyntaxError)
+	}
+
 	srcList, err := getList(ctx, srcKey)
 	if err != nil {
 		return ctx.WriteError(err)
@@ -565,15 +579,12 @@ func cmdLMOVE(ctx *Context) error {
 	}
 
 	var value []byte
-	switch whereFrom {
-	case "LEFT":
+	if whereFrom == "LEFT" {
 		value = srcList.Elements[0]
 		srcList.Elements = srcList.Elements[1:]
-	case "RIGHT":
+	} else {
 		value = srcList.Elements[len(srcList.Elements)-1]
 		srcList.Elements = srcList.Elements[:len(srcList.Elements)-1]
-	default:
-		return ctx.WriteError(ErrSyntaxError)
 	}
 
 	if len(srcList.Elements) == 0 {
@@ -585,16 +596,13 @@ func cmdLMOVE(ctx *Context) error {
 		return ctx.WriteError(err)
 	}
 
-	switch whereTo {
-	case "LEFT":
+	if whereTo == "LEFT" {
 		newElements := make([][]byte, 1+len(dstList.Elements))
 		newElements[0] = value
 		copy(newElements[1:], dstList.Elements)
 		dstList.Elements = newElements
-	case "RIGHT":
+	} else {
 		dstList.Elements = append(dstList.Elements, value)
-	default:
-		return ctx.WriteError(ErrSyntaxError)
 	}
 
 	return ctx.WriteBulkBytes(value)
@@ -1026,6 +1034,11 @@ func cmdLMPOP(ctx *Context) error {
 	if err != nil {
 		return ctx.WriteError(ErrNotInteger)
 	}
+	// numkeys is a key COUNT and must be at least 1; a negative value would
+	// otherwise reach make() as a negative length.
+	if numKeys < 1 {
+		return ctx.WriteError(ErrInvalidArg)
+	}
 
 	if ctx.ArgCount() < 1+numKeys {
 		return ctx.WriteError(ErrWrongArgCount)
@@ -1121,6 +1134,11 @@ func cmdBLMPOP(ctx *Context) error {
 		return ctx.WriteError(fmt.Errorf("ERR syntax error"))
 	}
 	numKeys := int(parseInt64(ctx.ArgString(2)))
+	// numkeys is a key COUNT and must be at least 1; a negative value would
+	// otherwise reach make() as a negative length.
+	if numKeys < 1 {
+		return ctx.WriteError(ErrInvalidArg)
+	}
 	if ctx.ArgCount() < 3+numKeys+2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}

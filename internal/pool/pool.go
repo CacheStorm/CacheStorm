@@ -108,10 +108,11 @@ func (p *Pool) Get() (*Conn, error) {
 				continue
 			}
 
-			p.conns = append(p.conns[:i], p.conns[i+1:]...)
-			p.mu.Unlock()
+			// Claimed under the lock and kept in p.conns: removing it would
+			// make len(p.conns) count only idle conns, so MaxSize is never enforced.
 			c.inUse.Store(true)
 			c.lastUsed = time.Now()
+			p.mu.Unlock()
 			return c, nil
 		}
 	}
@@ -122,7 +123,6 @@ func (p *Pool) Get() (*Conn, error) {
 			p.mu.Unlock()
 			return nil, err
 		}
-		p.mu.Unlock()
 
 		c := &Conn{
 			conn:      conn,
@@ -131,6 +131,8 @@ func (p *Pool) Get() (*Conn, error) {
 			lastUsed:  time.Now(),
 		}
 		c.inUse.Store(true)
+		p.conns = append(p.conns, c)
+		p.mu.Unlock()
 		return c, nil
 	}
 
@@ -152,16 +154,43 @@ func (p *Pool) Release(c *Conn) error {
 		return c.conn.Close()
 	}
 
-	c.inUse.Store(false)
-	c.lastUsed = time.Now()
-
 	p.mu.Lock()
-	if len(p.conns) < p.config.MaxIdle {
-		p.conns = append(p.conns, c)
-	} else {
+	// The connection stays in p.conns while it is checked out, so Release
+	// marks it idle rather than re-appending it — re-appending would duplicate
+	// the entry and inflate len(p.conns) past the real connection count.
+	found := false
+	for _, existing := range p.conns {
+		if existing == c {
+			found = true
+			break
+		}
+	}
+	if !found {
 		p.mu.Unlock()
 		return c.conn.Close()
 	}
+
+	// c is still in-use here, so releasing it makes the idle count idle+1.
+	idle := 0
+	for _, existing := range p.conns {
+		if !existing.inUse.Load() {
+			idle++
+		}
+	}
+	if idle >= p.config.MaxIdle {
+		for i, existing := range p.conns {
+			if existing == c {
+				p.conns = append(p.conns[:i], p.conns[i+1:]...)
+				break
+			}
+		}
+		c.inUse.Store(false)
+		p.mu.Unlock()
+		return c.conn.Close()
+	}
+
+	c.inUse.Store(false)
+	c.lastUsed = time.Now()
 	p.mu.Unlock()
 
 	select {

@@ -1,6 +1,7 @@
 package command
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -38,9 +39,14 @@ func cmdFTCREATE(ctx *Context) error {
 			for i+1 < ctx.ArgCount() {
 				i++
 				fieldName := ctx.ArgString(i)
-				if strings.HasPrefix(strings.ToUpper(fieldName), "ON") ||
-					strings.HasPrefix(strings.ToUpper(fieldName), "PREFIX") ||
-					strings.HasPrefix(strings.ToUpper(fieldName), "STOPWORDS") {
+				// Detect the schema modifier by WHOLE-TOKEN equality. Using
+				// strings.HasPrefix meant any field name merely starting with
+				// those letters ("Onyx", "Only", "PrefixSum", "Stopwatch") was
+				// mistaken for a modifier, so the loop broke and silently
+				// dropped that field AND every field after it — while FT.CREATE
+				// still replied +OK.
+				upperField := strings.ToUpper(fieldName)
+				if upperField == "ON" || upperField == "PREFIX" || upperField == "STOPWORDS" {
 					break
 				}
 
@@ -49,13 +55,29 @@ func cmdFTCREATE(ctx *Context) error {
 					Type: "TEXT",
 				}
 
+			// The type position is positional: it is filled exactly once per
+				// field. Without this guard the options loop kept scanning after
+				// the type was set, so a following field whose NAME happened to
+				// equal a type keyword ("tag", "text", "geo", "numeric") was
+				// absorbed as another type and never became a field. That is the
+				// same token-role confusion as the modifier check above — the
+				// parser could not tell a field-name token from a keyword token.
+				typeSet := false
+
 			options:
 				for i+1 < ctx.ArgCount() {
 					i++
 					nextArg := strings.ToUpper(ctx.ArgString(i))
 					switch nextArg {
 					case "TEXT", "NUMERIC", "TAG", "GEO":
+						if typeSet {
+							// The type is already filled, so this keyword is
+							// really the next field's NAME. Un-consume it.
+							i--
+							break options
+						}
 						fieldSchema.Type = nextArg
+						typeSet = true
 					case "SORTABLE":
 						fieldSchema.Sortable = true
 					case "NOINDEX":
@@ -158,6 +180,14 @@ func cmdFTSEARCH(ctx *Context) error {
 			if i+2 < ctx.ArgCount() {
 				offset = int(parseInt64(ctx.ArgString(i + 1)))
 				limit = int(parseInt64(ctx.ArgString(i + 2)))
+				// parseInt64 returns a negative value verbatim, and the offset was
+				// passed unchecked into search.Index.Search, whose
+				// `offset >= len(scored)` guard does not catch a negative offset —
+				// the result loop then indexed scored[-1] and panicked. Reject here
+				// so the engine only ever sees a sane window.
+				if offset < 0 || limit < 0 {
+					return ctx.WriteError(errors.New("ERR LIMIT offset and num must be non-negative"))
+				}
 				i += 2
 			}
 		case "NOCONTENT":

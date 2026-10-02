@@ -140,9 +140,25 @@ func cmdZADD(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
-	zset, err := getOrCreateSortedSet(ctx, key)
+	// XX means "only update an existing key, never create one" (Redis ZADD),
+	// so a missing key must be resolved WITHOUT the creating helper: calling
+	// getOrCreateSortedSet first would materialize an empty zset that survives
+	// the xx guard below and leaves a phantom key behind.
+	zset, err := getSortedSet(ctx, key)
 	if err != nil {
 		return ctx.WriteError(err)
+	}
+	if zset == nil {
+		if xx {
+			if incr {
+				return ctx.WriteNullBulkString()
+			}
+			return ctx.WriteInteger(0)
+		}
+		zset, err = getOrCreateSortedSet(ctx, key)
+		if err != nil {
+			return ctx.WriteError(err)
+		}
 	}
 
 	zset.Lock()
@@ -527,9 +543,33 @@ func cmdZRANGEBYSCORE(ctx *Context) error {
 	}
 
 	withScores := false
+	limitOffset := 0
+	limitCount := -1
 	for i := 3; i < ctx.ArgCount(); i++ {
-		if strings.ToUpper(ctx.ArgString(i)) == "WITHSCORES" {
+		switch strings.ToUpper(ctx.ArgString(i)) {
+		case "WITHSCORES":
 			withScores = true
+		case "LIMIT":
+			// LIMIT pages the result set. It was previously parsed by nobody:
+			// this loop only looked for WITHSCORES, so LIMIT was consumed and
+			// silently discarded and a paging client got the WHOLE set back.
+			i++
+			if i >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			var err error
+			limitOffset, err = strconv.Atoi(ctx.ArgString(i))
+			if err != nil {
+				return ctx.WriteError(ErrNotInteger)
+			}
+			i++
+			if i >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			limitCount, err = strconv.Atoi(ctx.ArgString(i))
+			if err != nil {
+				return ctx.WriteError(ErrNotInteger)
+			}
 		}
 	}
 
@@ -545,6 +585,8 @@ func cmdZRANGEBYSCORE(ctx *Context) error {
 	entries := zset.RangeByScore(minScore, maxScore, withScores, false)
 	zset.RUnlock()
 
+	entries = applyLimit(entries, limitOffset, limitCount)
+
 	results := make([]*resp.Value, 0, len(entries)*2)
 	for _, e := range entries {
 		results = append(results, resp.BulkString(e.Member))
@@ -554,6 +596,37 @@ func cmdZRANGEBYSCORE(ctx *Context) error {
 	}
 
 	return ctx.WriteArray(results)
+}
+
+// applyLimit applies a Redis "LIMIT offset count" window to a sorted slice.
+// A negative offset counts back from the end, and a negative count means
+// "all remaining" (Redis ZRANGE/ZRANGEBYSCORE/ZRANGEBYLEX semantics).
+func applyLimit(entries []store.SortedEntry, offset, count int) []store.SortedEntry {
+	if offset == 0 && count < 0 {
+		return entries
+	}
+
+	start := offset
+	if start < 0 {
+		start = len(entries) + start
+		if start < 0 {
+			start = 0
+		}
+	}
+	if start > len(entries) {
+		start = len(entries)
+	}
+	if count < 0 {
+		return entries[start:]
+	}
+	end := start + count
+	if end > len(entries) {
+		end = len(entries)
+	}
+	if end < start {
+		end = start
+	}
+	return entries[start:end]
 }
 
 func cmdZRANK(ctx *Context) error {
@@ -797,9 +870,30 @@ func cmdZREVRANGEBYSCORE(ctx *Context) error {
 	}
 
 	withScores := false
+	limitOffset := 0
+	limitCount := -1
 	for i := 3; i < ctx.ArgCount(); i++ {
-		if strings.ToUpper(ctx.ArgString(i)) == "WITHSCORES" {
+		switch strings.ToUpper(ctx.ArgString(i)) {
+		case "WITHSCORES":
 			withScores = true
+		case "LIMIT":
+			i++
+			if i >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			var err error
+			limitOffset, err = strconv.Atoi(ctx.ArgString(i))
+			if err != nil {
+				return ctx.WriteError(ErrNotInteger)
+			}
+			i++
+			if i >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			limitCount, err = strconv.Atoi(ctx.ArgString(i))
+			if err != nil {
+				return ctx.WriteError(ErrNotInteger)
+			}
 		}
 	}
 
@@ -811,7 +905,11 @@ func cmdZREVRANGEBYSCORE(ctx *Context) error {
 		return ctx.WriteArray([]*resp.Value{})
 	}
 
+	zset.RLock()
 	entries := zset.RangeByScore(min, max, withScores, true)
+	zset.RUnlock()
+
+	entries = applyLimit(entries, limitOffset, limitCount)
 
 	results := make([]*resp.Value, 0, len(entries)*2)
 	for _, e := range entries {
@@ -939,7 +1037,7 @@ func cmdZSCAN(ctx *Context) error {
 
 	key := ctx.ArgString(0)
 	cursor, err := strconv.Atoi(ctx.ArgString(1))
-	if err != nil {
+	if err != nil || cursor < 0 {
 		return ctx.WriteError(ErrNotInteger)
 	}
 
@@ -1099,11 +1197,13 @@ func cmdZRANDMEMBER(ctx *Context) error {
 	key := ctx.ArgString(0)
 	withScores := false
 	count := 1
+	countProvided := false
 
 	for i := 1; i < ctx.ArgCount(); i++ {
 		arg := strings.ToUpper(ctx.ArgString(i))
 		switch arg {
 		case "COUNT":
+			countProvided = true
 			i++
 			if i >= ctx.ArgCount() {
 				return ctx.WriteError(ErrSyntaxError)
@@ -1123,7 +1223,8 @@ func cmdZRANDMEMBER(ctx *Context) error {
 		return ctx.WriteError(err)
 	}
 	if zset == nil {
-		if count == 0 {
+		if countProvided {
+			// The count form replies an empty array even for a missing key.
 			return ctx.WriteArray([]*resp.Value{})
 		}
 		return ctx.WriteNullBulkString()
@@ -1131,7 +1232,15 @@ func cmdZRANDMEMBER(ctx *Context) error {
 
 	entries := zset.GetSortedRange(0, -1, true, false)
 	if len(entries) == 0 {
+		if countProvided {
+			return ctx.WriteArray([]*resp.Value{})
+		}
 		return ctx.WriteNullBulkString()
+	}
+
+	// Without a count the reply is a single member, not an array.
+	if !countProvided {
+		return ctx.WriteBulkString(entries[0].Member)
 	}
 
 	if count > 0 {
@@ -1148,8 +1257,24 @@ func cmdZRANDMEMBER(ctx *Context) error {
 		return ctx.WriteArray(result)
 	}
 
-	result := make([]*resp.Value, 0, (-count)*2)
-	for i := 0; i < -count; i++ {
+	// COUNT < 0 repeats elements, so the reply size is caller-controlled:
+	// bound the pre-allocation (append grows as needed) and cap the loop so
+	// an absurd magnitude cannot overflow the capacity math or run for years.
+	capacity := count * 2
+	if capacity < 0 {
+		capacity = -capacity
+	}
+	if capacity > 8192 {
+		capacity = 8192
+	}
+	result := make([]*resp.Value, 0, capacity)
+	limit := -count
+	if limit < 0 {
+		limit = 0
+	} else if limit > 1000000 {
+		limit = 1000000
+	}
+	for i := 0; i < limit; i++ {
 		idx := i % len(entries)
 		result = append(result, resp.BulkString(entries[idx].Member))
 		if withScores {

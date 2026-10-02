@@ -11,6 +11,31 @@ import (
 	"github.com/cachestorm/cachestorm/internal/store"
 )
 
+// stringValueOf returns the raw bytes of any value that Redis models as the
+// string type.
+//
+// CacheStorm keeps bitmap bits in a *BitmapValue, which is a SECOND Go
+// representation of the same Redis type: BitmapValue.Type() reports
+// store.DataTypeString, so TYPE answers "string" and GET (which already
+// bridged the two) returns the bytes. Every other string command used to
+// type-assert *store.StringValue alone and answer WRONGTYPE, so the server
+// would report a key's type and then refuse to serve that key — a
+// self-contradiction, and a compatibility break: in Redis a bit is not a
+// distinct type, so SETBIT/BITCOUNT/BITFIELD all operate on an ordinary
+// string and STRLEN/APPEND/GETRANGE must all work on the result.
+//
+// Values that are genuinely not strings (lists, hashes, ...) still return
+// false and keep their WRONGTYPE reply.
+func stringValueOf(v store.Value) ([]byte, bool) {
+	switch val := v.(type) {
+	case *store.StringValue:
+		return val.Data, true
+	case *BitmapValue:
+		return val.Data, true
+	}
+	return nil, false
+}
+
 func RegisterStringCommands(router *Router) {
 	router.Register(&CommandDef{Name: "SET", Handler: cmdSET})
 	router.Register(&CommandDef{Name: "GET", Handler: cmdGET})
@@ -62,6 +87,9 @@ func cmdSET(ctx *Context) error {
 			if err != nil {
 				return ctx.WriteError(ErrNotInteger)
 			}
+			if sec <= 0 {
+				return ctx.WriteError(ErrInvalidArg)
+			}
 			opts.TTL = time.Duration(sec) * time.Second
 		case "PX":
 			i++
@@ -71,6 +99,9 @@ func cmdSET(ctx *Context) error {
 			ms, err := strconv.ParseInt(string(args[i]), 10, 64)
 			if err != nil {
 				return ctx.WriteError(ErrNotInteger)
+			}
+			if ms <= 0 {
+				return ctx.WriteError(ErrInvalidArg)
 			}
 			opts.TTL = time.Duration(ms) * time.Millisecond
 		case "EXAT":
@@ -82,7 +113,16 @@ func cmdSET(ctx *Context) error {
 			if err != nil {
 				return ctx.WriteError(ErrNotInteger)
 			}
+			// Bound the input before the nanosecond conversion, and reject a
+			// time that is not in the future: Store.Set treats a non-positive
+			// TTL as "no expiry", which would silently make the key permanent.
+			if ts > maxExpireAtSeconds || ts < -maxExpireAtSeconds {
+				return ctx.WriteError(errInvalidExpireTime)
+			}
 			opts.TTL = time.Until(time.Unix(ts, 0))
+			if opts.TTL <= 0 {
+				return ctx.WriteError(errInvalidExpireTime)
+			}
 		case "PXAT":
 			i++
 			if i >= len(args) {
@@ -92,7 +132,17 @@ func cmdSET(ctx *Context) error {
 			if err != nil {
 				return ctx.WriteError(ErrNotInteger)
 			}
+			// The conversion multiplies by 1e6, so bound the input before it
+			// overflows, then reject a time that is not in the future:
+			// Store.Set treats a non-positive TTL as "no expiry", which would
+			// silently make the key permanent.
+			if ts > maxExpireAtMillis || ts < -maxExpireAtMillis {
+				return ctx.WriteError(errInvalidExpireTime)
+			}
 			opts.TTL = time.Until(time.Unix(0, ts*int64(time.Millisecond)))
+			if opts.TTL <= 0 {
+				return ctx.WriteError(errInvalidExpireTime)
+			}
 		case "NX":
 			opts.NX = true
 		case "XX":
@@ -113,12 +163,12 @@ func cmdSET(ctx *Context) error {
 	if getOldValue {
 		entry, exists := ctx.Store.Get(key)
 		if exists {
-			strVal, ok := entry.Value.(*store.StringValue)
+			old, ok := stringValueOf(entry.Value)
 			if !ok {
 				return ctx.WriteError(store.ErrWrongType)
 			}
-			oldValue := make([]byte, len(strVal.Data))
-			copy(oldValue, strVal.Data)
+			oldValue := make([]byte, len(old))
+			copy(oldValue, old)
 
 			err := ctx.Store.Set(key, &store.StringValue{Data: value}, opts)
 			if err != nil {
@@ -159,15 +209,12 @@ func cmdGET(ctx *Context) error {
 		return ctx.WriteNullBulkString()
 	}
 
-	strVal, ok := entry.Value.(*store.StringValue)
+	data, ok := stringValueOf(entry.Value)
 	if !ok {
-		if bmVal, isBitmap := entry.Value.(*BitmapValue); isBitmap {
-			return ctx.WriteBulkBytes(bmVal.Data)
-		}
 		return ctx.WriteError(store.ErrWrongType)
 	}
 
-	return ctx.WriteBulkBytes(strVal.Data)
+	return ctx.WriteBulkBytes(data)
 }
 
 func cmdDEL(ctx *Context) error {
@@ -246,12 +293,12 @@ func cmdMGET(ctx *Context) error {
 			results[i] = resp.NullBulkString()
 			continue
 		}
-		strVal, ok := entry.Value.(*store.StringValue)
+		data, ok := stringValueOf(entry.Value)
 		if !ok {
 			results[i] = resp.NullBulkString()
 			continue
 		}
-		results[i] = resp.BulkBytes(strVal.Data)
+		results[i] = resp.BulkBytes(data)
 	}
 
 	return ctx.WriteArray(results)
@@ -296,15 +343,15 @@ func incrBy(ctx *Context, incr int64) error {
 	entry, exists := ctx.Store.Get(key)
 
 	if exists {
-		strVal, ok := entry.Value.(*store.StringValue)
+		data, ok := stringValueOf(entry.Value)
 		if !ok {
 			return ctx.WriteError(store.ErrWrongType)
 		}
-		newVal, err := computeIntIncr(strVal.Data, incr)
+		newVal, err := computeIntIncr(data, incr)
 		if err != nil {
 			return ctx.WriteError(err)
 		}
-		if err := ctx.Store.Set(key, &store.StringValue{Data: []byte(strconv.FormatInt(newVal, 10))}, store.SetOptions{}); err != nil {
+		if err := ctx.Store.Set(key, &store.StringValue{Data: []byte(strconv.FormatInt(newVal, 10))}, store.SetOptions{KeepTTL: true}); err != nil {
 			return ctx.WriteError(err)
 		}
 		return ctx.WriteInteger(newVal)
@@ -329,12 +376,12 @@ func cmdAPPEND(ctx *Context) error {
 	if !exists {
 		newData = suffix
 	} else {
-		strVal, ok := entry.Value.(*store.StringValue)
+		cur, ok := stringValueOf(entry.Value)
 		if !ok {
 			return ctx.WriteError(store.ErrWrongType)
 		}
-		newData = make([]byte, 0, len(strVal.Data)+len(suffix))
-		newData = append(newData, strVal.Data...)
+		newData = make([]byte, 0, len(cur)+len(suffix))
+		newData = append(newData, cur...)
 		newData = append(newData, suffix...)
 	}
 
@@ -342,7 +389,9 @@ func cmdAPPEND(ctx *Context) error {
 		return ctx.WriteError(store.ErrValueTooLarge)
 	}
 
-	ctx.Store.Set(key, &store.StringValue{Data: newData}, store.SetOptions{})
+	if err := ctx.Store.Set(key, &store.StringValue{Data: newData}, store.SetOptions{KeepTTL: true}); err != nil {
+		return ctx.WriteError(err)
+	}
 	return ctx.WriteInteger(int64(len(newData)))
 }
 
@@ -357,12 +406,12 @@ func cmdSTRLEN(ctx *Context) error {
 		return ctx.WriteInteger(0)
 	}
 
-	strVal, ok := entry.Value.(*store.StringValue)
+	data, ok := stringValueOf(entry.Value)
 	if !ok {
 		return ctx.WriteError(store.ErrWrongType)
 	}
 
-	return ctx.WriteInteger(int64(len(strVal.Data)))
+	return ctx.WriteInteger(int64(len(data)))
 }
 
 func cmdGETRANGE(ctx *Context) error {
@@ -385,12 +434,11 @@ func cmdGETRANGE(ctx *Context) error {
 		return ctx.WriteBulkString("")
 	}
 
-	strVal, ok := entry.Value.(*store.StringValue)
+	data, ok := stringValueOf(entry.Value)
 	if !ok {
 		return ctx.WriteError(store.ErrWrongType)
 	}
 
-	data := strVal.Data
 	length := len(data)
 	if length == 0 {
 		return ctx.WriteBulkString("")
@@ -401,6 +449,9 @@ func cmdGETRANGE(ctx *Context) error {
 	}
 	if end < 0 {
 		end = length + end
+		if end < 0 {
+			end = 0
+		}
 	}
 	if start < 0 {
 		start = 0
@@ -441,11 +492,11 @@ func cmdSETRANGE(ctx *Context) error {
 	if !exists {
 		data = []byte{}
 	} else {
-		strVal, ok := entry.Value.(*store.StringValue)
+		cur, ok := stringValueOf(entry.Value)
 		if !ok {
 			return ctx.WriteError(store.ErrWrongType)
 		}
-		data = strVal.Data
+		data = cur
 	}
 
 	if int(newLen) > len(data) {
@@ -455,7 +506,9 @@ func cmdSETRANGE(ctx *Context) error {
 	}
 
 	copy(data[offset:], value)
-	ctx.Store.Set(key, &store.StringValue{Data: data}, store.SetOptions{})
+	if err := ctx.Store.Set(key, &store.StringValue{Data: data}, store.SetOptions{KeepTTL: true}); err != nil {
+		return ctx.WriteError(err)
+	}
 	return ctx.WriteInteger(int64(len(data)))
 }
 
@@ -491,6 +544,12 @@ func cmdSETEX(ctx *Context) error {
 	if sec <= 0 {
 		return ctx.WriteError(ErrInvalidArg)
 	}
+	// The duration multiplication overflows for larger values, which would
+	// yield a non-positive TTL that Store.Set reads as "no expiry" — a silent
+	// permanent key behind a success reply.
+	if sec > maxExpireAtSeconds {
+		return ctx.WriteError(errInvalidExpireTime)
+	}
 	value := ctx.Arg(2)
 
 	ctx.Store.Set(key, &store.StringValue{Data: value}, store.SetOptions{TTL: time.Duration(sec) * time.Second})
@@ -509,6 +568,12 @@ func cmdPSETEX(ctx *Context) error {
 	}
 	if ms <= 0 {
 		return ctx.WriteError(ErrInvalidArg)
+	}
+	// The duration multiplication overflows for larger values, which would
+	// yield a non-positive TTL that Store.Set reads as "no expiry" — a silent
+	// permanent key behind a success reply.
+	if ms > maxExpireAtMillis {
+		return ctx.WriteError(errInvalidExpireTime)
 	}
 	value := ctx.Arg(2)
 
@@ -552,12 +617,12 @@ func cmdGETSET(ctx *Context) error {
 		return ctx.WriteNullBulkString()
 	}
 
-	strVal, ok := entry.Value.(*store.StringValue)
+	data, ok := stringValueOf(entry.Value)
 	if !ok {
 		return ctx.WriteError(store.ErrWrongType)
 	}
 
-	return ctx.WriteBulkBytes(strVal.Data)
+	return ctx.WriteBulkBytes(data)
 }
 
 func cmdGETDEL(ctx *Context) error {
@@ -571,13 +636,13 @@ func cmdGETDEL(ctx *Context) error {
 		return ctx.WriteNullBulkString()
 	}
 
-	strVal, ok := entry.Value.(*store.StringValue)
+	data, ok := stringValueOf(entry.Value)
 	if !ok {
 		return ctx.WriteError(store.ErrWrongType)
 	}
 
-	result := make([]byte, len(strVal.Data))
-	copy(result, strVal.Data)
+	result := make([]byte, len(data))
+	copy(result, data)
 
 	ctx.Store.Delete(key)
 
@@ -595,13 +660,13 @@ func cmdGETEX(ctx *Context) error {
 		return ctx.WriteNullBulkString()
 	}
 
-	strVal, ok := entry.Value.(*store.StringValue)
+	data, ok := stringValueOf(entry.Value)
 	if !ok {
 		return ctx.WriteError(store.ErrWrongType)
 	}
 
-	result := make([]byte, len(strVal.Data))
-	copy(result, strVal.Data)
+	result := make([]byte, len(data))
+	copy(result, data)
 
 	if ctx.ArgCount() > 1 {
 		for i := 1; i < ctx.ArgCount(); i++ {
@@ -683,12 +748,12 @@ func cmdINCRBYFLOAT(ctx *Context) error {
 		return ctx.WriteBulkString(result)
 	}
 
-	strVal, ok := entry.Value.(*store.StringValue)
+	data, ok := stringValueOf(entry.Value)
 	if !ok {
 		return ctx.WriteError(store.ErrWrongType)
 	}
 
-	current, err := strconv.ParseFloat(string(strVal.Data), 64)
+	current, err := strconv.ParseFloat(string(data), 64)
 	if err != nil {
 		return ctx.WriteError(ErrInvalidArg)
 	}
@@ -698,7 +763,7 @@ func cmdINCRBYFLOAT(ctx *Context) error {
 		return ctx.WriteError(ErrFloatOverflow)
 	}
 	formatted := strconv.FormatFloat(result, 'f', -1, 64)
-	if err := ctx.Store.Set(key, &store.StringValue{Data: []byte(formatted)}, store.SetOptions{}); err != nil {
+	if err := ctx.Store.Set(key, &store.StringValue{Data: []byte(formatted)}, store.SetOptions{KeepTTL: true}); err != nil {
 		return ctx.WriteError(err)
 	}
 	return ctx.WriteBulkString(formatted)
@@ -751,6 +816,15 @@ func cmdLCS(ctx *Context) error {
 		if lenOnly {
 			return ctx.WriteInteger(0)
 		}
+		if idx {
+			// The requested reply shape applies to empty results too.
+			return ctx.WriteArray([]*resp.Value{
+				resp.BulkString("matches"),
+				resp.ArrayValue([]*resp.Value{}),
+				resp.BulkString("len"),
+				resp.IntegerValue(0),
+			})
+		}
 		return ctx.WriteBulkString("")
 	}
 
@@ -767,6 +841,15 @@ func cmdLCS(ctx *Context) error {
 	if len(s1) == 0 || len(s2) == 0 {
 		if lenOnly {
 			return ctx.WriteInteger(0)
+		}
+		if idx {
+			// The requested reply shape applies to empty results too.
+			return ctx.WriteArray([]*resp.Value{
+				resp.BulkString("matches"),
+				resp.ArrayValue([]*resp.Value{}),
+				resp.BulkString("len"),
+				resp.IntegerValue(0),
+			})
 		}
 		return ctx.WriteBulkString("")
 	}

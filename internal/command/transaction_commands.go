@@ -194,12 +194,20 @@ func executeQueuedCommand(ctx *Context, qc queuedCommand) *resp.Value {
 	case "GET":
 		if len(qc.args) >= 1 {
 			key := string(qc.args[0])
-			if entry, exists := ctx.Store.Get(key); exists {
-				if sv, ok := entry.Value.(*store.StringValue); ok {
-					return resp.BulkBytes(sv.Data)
-				}
+			entry, exists := ctx.Store.Get(key)
+			if !exists {
+				return resp.NullBulkString()
 			}
-			return resp.NullBulkString()
+			// Accept every representation of the Redis string type, exactly as
+			// cmdGET does, and report a genuinely non-string key as WRONGTYPE.
+			// This case used to fall through to NullBulkString whenever the
+			// *store.StringValue assertion failed, so a transaction reported a
+			// wrong-type key as ABSENT — and silently dropped bitmap bits.
+			data, ok := stringValueOf(entry.Value)
+			if !ok {
+				return resp.ErrorValue(store.ErrWrongType.Error())
+			}
+			return resp.BulkBytes(data)
 		}
 		return resp.ErrorValue("ERR wrong number of arguments")
 	case "DEL":
@@ -823,6 +831,23 @@ func executeQueuedCommand(ctx *Context, qc queuedCommand) *resp.Value {
 	case "FLUSHDB":
 		ctx.Store.Flush()
 		return resp.SimpleString("OK")
+	case "MSETNX":
+		// Same all-or-nothing semantics as the live command: set every key
+		// only when none exists, otherwise set nothing and reply 0.
+		if len(qc.args) >= 2 && len(qc.args)%2 == 0 {
+			for i := 0; i < len(qc.args); i += 2 {
+				if ctx.Store.Exists(string(qc.args[i])) {
+					return resp.IntegerValue(0)
+				}
+			}
+			for i := 0; i < len(qc.args); i += 2 {
+				key := string(qc.args[i])
+				value := qc.args[i+1]
+				ctx.Store.Set(key, &store.StringValue{Data: value}, store.SetOptions{})
+			}
+			return resp.IntegerValue(1)
+		}
+		return resp.ErrorValue("ERR wrong number of arguments")
 	default:
 		return resp.ErrorValue("ERR command not supported in transaction")
 	}
@@ -898,7 +923,7 @@ func respIncrBy(ctx *Context, qc queuedCommand, incr int64) *resp.Value {
 		if err != nil {
 			return resp.ErrorValue(err.Error())
 		}
-		if err := ctx.Store.Set(key, &store.StringValue{Data: []byte(strconv.FormatInt(newVal, 10))}, store.SetOptions{}); err != nil {
+		if err := ctx.Store.Set(key, &store.StringValue{Data: []byte(strconv.FormatInt(newVal, 10))}, store.SetOptions{KeepTTL: true}); err != nil {
 			return resp.ErrorValue(err.Error())
 		}
 		return resp.IntegerValue(newVal)

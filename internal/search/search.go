@@ -114,6 +114,17 @@ func (idx *Index) AddDocument(doc *Document) error {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 
+	// Reconcile a document that is already indexed. Re-adding (including
+	// FT.ADD ... REPLACE) used to overwrite idx.Documents[doc.ID] and then
+	// APPEND fresh postings, leaving the previous revision's postings behind:
+	// idx.Inverted is keyed by docID, so the old term stayed mapped to this
+	// document and FT.SEARCH kept returning it as a match for content the
+	// document no longer held. Remove the old postings first, exactly as
+	// DeleteDocument does.
+	if prev, exists := idx.Documents[doc.ID]; exists {
+		idx.removePostings(prev, doc.ID)
+	}
+
 	idx.Documents[doc.ID] = doc
 
 	for fieldName, fieldValue := range doc.Fields {
@@ -141,15 +152,9 @@ func (idx *Index) AddDocument(doc *Document) error {
 	return nil
 }
 
-func (idx *Index) DeleteDocument(docID string) bool {
-	idx.mu.Lock()
-	defer idx.mu.Unlock()
-
-	doc, exists := idx.Documents[docID]
-	if !exists {
-		return false
-	}
-
+// removePostings strips every index entry that references docID. The caller
+// must hold idx.mu.
+func (idx *Index) removePostings(doc *Document, docID string) {
 	for fieldName, fieldValue := range doc.Fields {
 		tokens := idx.tokenize(fieldValue)
 		for _, token := range tokens {
@@ -169,7 +174,18 @@ func (idx *Index) DeleteDocument(docID string) bool {
 			}
 		}
 	}
+}
 
+func (idx *Index) DeleteDocument(docID string) bool {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+
+	doc, exists := idx.Documents[docID]
+	if !exists {
+		return false
+	}
+
+	idx.removePostings(doc, docID)
 	delete(idx.Documents, docID)
 	return true
 }
@@ -204,6 +220,16 @@ func (idx *Index) Search(query string, limit, offset int) *SearchResult {
 	})
 
 	total := len(scored)
+	// Clamp a negative window. cmdFTSEARCH rejects one up front, but this guard
+	// keeps the engine total for every caller: the `offset >= len(scored)` test
+	// below is FALSE for a negative offset, so the result loop would index
+	// scored[-1] and panic.
+	if offset < 0 {
+		offset = 0
+	}
+	if limit < 0 {
+		limit = total
+	}
 	if offset >= len(scored) {
 		return &SearchResult{Total: total, Documents: []*Document{}}
 	}
@@ -254,6 +280,16 @@ func (idx *Index) SearchField(fieldName, value string, limit, offset int) *Searc
 	})
 
 	total := len(scored)
+	// Clamp a negative window. cmdFTSEARCH rejects one up front, but this guard
+	// keeps the engine total for every caller: the `offset >= len(scored)` test
+	// below is FALSE for a negative offset, so the result loop would index
+	// scored[-1] and panic.
+	if offset < 0 {
+		offset = 0
+	}
+	if limit < 0 {
+		limit = total
+	}
 	if offset >= len(scored) {
 		return &SearchResult{Total: total, Documents: []*Document{}}
 	}

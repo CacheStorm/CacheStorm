@@ -2,12 +2,23 @@ package command
 
 import (
 	"errors"
+	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
 )
+
+var errUnsupportedGeoUnit = errors.New("ERR unsupported unit provided. please use m, km, ft, mi")
+
+func geoUnitValid(unit string) bool {
+	switch unit {
+	case "m", "km", "ft", "mi":
+		return true
+	}
+	return false
+}
 
 func RegisterGeoCommands(router *Router) {
 	router.Register(&CommandDef{Name: "GEOADD", Handler: cmdGEOADD})
@@ -47,7 +58,7 @@ func getGeo(ctx *Context, key string) *store.GeoValue {
 }
 
 func cmdGEOADD(ctx *Context) error {
-	if ctx.ArgCount() < 4 || (ctx.ArgCount()-1)%3 != 0 {
+	if ctx.ArgCount() < 4 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
@@ -55,6 +66,7 @@ func cmdGEOADD(ctx *Context) error {
 
 	nx := false
 	xx := false
+	ch := false
 	argIdx := 1
 
 options:
@@ -68,6 +80,7 @@ options:
 			xx = true
 			argIdx++
 		case "CH":
+			ch = true
 			argIdx++
 		default:
 			break options
@@ -79,12 +92,21 @@ options:
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
+	// Redis XX never adds, so on a missing key nothing is stored and no key
+	// is created.
+	if xx {
+		if _, exists := ctx.Store.Get(key); !exists {
+			return ctx.WriteInteger(0)
+		}
+	}
+
 	geo := getOrCreateGeo(ctx, key)
 	if geo == nil {
 		return ctx.WriteError(store.ErrWrongType)
 	}
 
 	added := 0
+	changed := 0
 	for i := argIdx; i < ctx.ArgCount(); i += 3 {
 		lon, err1 := strconv.ParseFloat(ctx.ArgString(i), 64)
 		lat, err2 := strconv.ParseFloat(ctx.ArgString(i+1), 64)
@@ -98,7 +120,7 @@ options:
 
 		member := ctx.ArgString(i + 2)
 
-		_, exists := geo.Get(member)
+		existing, exists := geo.Get(member)
 		if xx && !exists {
 			continue
 		}
@@ -107,9 +129,18 @@ options:
 		}
 
 		geo.Add(member, lon, lat)
-		added++
+		if exists {
+			if existing != (store.GeoPoint{Lon: lon, Lat: lat}) {
+				changed++
+			}
+		} else {
+			added++
+		}
 	}
 
+	if ch {
+		return ctx.WriteInteger(int64(added + changed))
+	}
 	return ctx.WriteInteger(int64(added))
 }
 
@@ -146,7 +177,7 @@ func cmdGEODIST(ctx *Context) error {
 	case "ft":
 		dist *= 3280.84
 	default:
-		dist *= 1000
+		return ctx.WriteError(errUnsupportedGeoUnit)
 	}
 
 	return ctx.WriteBulkString(strconv.FormatFloat(dist, 'f', -1, 64))
@@ -239,6 +270,8 @@ func cmdGEORADIUS(ctx *Context) error {
 		radiusKm = radius / 3280.84
 	case "m":
 		radiusKm = radius / 1000
+	default:
+		return ctx.WriteError(errUnsupportedGeoUnit)
 	}
 
 	withCoord := false
@@ -438,6 +471,8 @@ func cmdGEORADIUSBYMEMBER(ctx *Context) error {
 		radiusKm = radius / 3280.84
 	case "m":
 		radiusKm = radius / 1000
+	default:
+		return ctx.WriteError(errUnsupportedGeoUnit)
 	}
 
 	withCoord := false
@@ -622,6 +657,9 @@ func cmdGEOSEARCH(ctx *Context) error {
 	var hasFromMember bool
 	var fromMember string
 	var unit = "km"
+	var withCoord, withDist, withHash bool
+	var count int
+	var sortOrder string
 
 	i := 1
 	for i < ctx.ArgCount() {
@@ -656,6 +694,9 @@ func cmdGEOSEARCH(ctx *Context) error {
 				return ctx.WriteError(ErrNotFloat)
 			}
 			unit = strings.ToLower(ctx.ArgString(i + 2))
+			if !geoUnitValid(unit) {
+				return ctx.WriteError(errUnsupportedGeoUnit)
+			}
 			i += 3
 		case "BYBOX":
 			if i+4 >= ctx.ArgCount() {
@@ -667,8 +708,35 @@ func cmdGEOSEARCH(ctx *Context) error {
 				return ctx.WriteError(ErrNotFloat)
 			}
 			unit = strings.ToLower(ctx.ArgString(i + 3))
+			if !geoUnitValid(unit) {
+				return ctx.WriteError(errUnsupportedGeoUnit)
+			}
 			i += 5
-		case "ASC", "DESC", "COUNT", "WITHCOORD", "WITHDIST", "WITHHASH":
+		case "WITHCOORD":
+			withCoord = true
+			i++
+		case "WITHDIST":
+			withDist = true
+			i++
+		case "WITHHASH":
+			withHash = true
+			i++
+		case "COUNT":
+			i++
+			if i >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			var err error
+			count, err = strconv.Atoi(ctx.ArgString(i))
+			if err != nil || count < 0 {
+				return ctx.WriteError(ErrNotInteger)
+			}
+			i++
+		case "ASC":
+			sortOrder = "ASC"
+			i++
+		case "DESC":
+			sortOrder = "DESC"
 			i++
 		default:
 			i++
@@ -698,15 +766,54 @@ func cmdGEOSEARCH(ctx *Context) error {
 		radius /= 1000
 	}
 
-	results := make([]*resp.Value, 0)
+	type result struct {
+		member string
+		dist   float64
+		point  store.GeoPoint
+		hash   uint64
+	}
+
+	results := make([]result, 0)
 	for member, point := range geo.Points {
 		dist := store.Haversine(fromLon, fromLat, point.Lon, point.Lat)
 		if dist <= radius {
-			results = append(results, resp.BulkString(member))
+			results = append(results, result{member, dist, point, store.EncodeGeohashInt(point.Lon, point.Lat)})
 		}
 	}
 
-	return ctx.WriteArray(results)
+	if sortOrder == "DESC" {
+		sort.Slice(results, func(i, j int) bool { return results[i].dist > results[j].dist })
+	} else if sortOrder == "ASC" || count > 0 {
+		sort.Slice(results, func(i, j int) bool { return results[i].dist < results[j].dist })
+	}
+
+	if count > 0 && count < len(results) {
+		results = results[:count]
+	}
+
+	respResults := make([]*resp.Value, 0, len(results))
+	for _, r := range results {
+		if !withCoord && !withDist && !withHash {
+			respResults = append(respResults, resp.BulkString(r.member))
+			continue
+		}
+		entry := []*resp.Value{resp.BulkString(r.member)}
+		if withDist {
+			entry = append(entry, resp.BulkString(strconv.FormatFloat(r.dist, 'f', -1, 64)))
+		}
+		if withHash {
+			entry = append(entry, resp.IntegerValue(int64(r.hash)))
+		}
+		if withCoord {
+			entry = append(entry, resp.ArrayValue([]*resp.Value{
+				resp.BulkString(strconv.FormatFloat(r.point.Lon, 'f', -1, 64)),
+				resp.BulkString(strconv.FormatFloat(r.point.Lat, 'f', -1, 64)),
+			}))
+		}
+		respResults = append(respResults, resp.ArrayValue(entry))
+	}
+
+	return ctx.WriteArray(respResults)
 }
 
 func cmdGEOSEARCHSTORE(ctx *Context) error {
@@ -721,6 +828,9 @@ func cmdGEOSEARCHSTORE(ctx *Context) error {
 	var hasFromMember bool
 	var fromMember string
 	var unit = "km"
+	var storeDist bool
+	var count int
+	var sortOrder string
 
 	i := 2
 	for i < ctx.ArgCount() {
@@ -755,6 +865,9 @@ func cmdGEOSEARCHSTORE(ctx *Context) error {
 				return ctx.WriteError(ErrNotFloat)
 			}
 			unit = strings.ToLower(ctx.ArgString(i + 2))
+			if !geoUnitValid(unit) {
+				return ctx.WriteError(errUnsupportedGeoUnit)
+			}
 			i += 3
 		case "BYBOX":
 			if i+4 >= ctx.ArgCount() {
@@ -766,8 +879,29 @@ func cmdGEOSEARCHSTORE(ctx *Context) error {
 				return ctx.WriteError(ErrNotFloat)
 			}
 			unit = strings.ToLower(ctx.ArgString(i + 3))
+			if !geoUnitValid(unit) {
+				return ctx.WriteError(errUnsupportedGeoUnit)
+			}
 			i += 5
-		case "ASC", "DESC", "COUNT", "STOREDIST":
+		case "STOREDIST":
+			storeDist = true
+			i++
+		case "ASC":
+			sortOrder = "ASC"
+			i++
+		case "DESC":
+			sortOrder = "DESC"
+			i++
+		case "COUNT":
+			i++
+			if i >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			var err error
+			count, err = strconv.Atoi(ctx.ArgString(i))
+			if err != nil || count < 0 {
+				return ctx.WriteError(ErrNotInteger)
+			}
 			i++
 		default:
 			i++
@@ -799,23 +933,66 @@ func cmdGEOSEARCHSTORE(ctx *Context) error {
 		radius /= 1000
 	}
 
-	destGeo := getOrCreateGeo(ctx, destKey)
-	if destGeo == nil {
-		return ctx.WriteError(store.ErrWrongType)
+	type match struct {
+		member string
+		dist   float64
+		point  store.GeoPoint
 	}
 
-	count := 0
+	matches := make([]match, 0)
 	for member, point := range geo.Points {
 		dist := store.Haversine(fromLon, fromLat, point.Lon, point.Lat)
 		if dist <= radius {
-			destGeo.Add(member, point.Lon, point.Lat)
-			count++
+			matches = append(matches, match{member, dist, point})
 		}
 	}
 
-	if count == 0 {
-		ctx.Store.Delete(destKey)
+	// COUNT implies nearest-first, exactly as in the read-only sibling
+	// GEOSEARCH: the map iteration above is unordered, so an untruncated
+	// "first N" would keep an arbitrary N rather than the closest N.
+	if sortOrder == "DESC" {
+		sort.Slice(matches, func(i, j int) bool { return matches[i].dist > matches[j].dist })
+	} else if sortOrder == "ASC" || count > 0 {
+		sort.Slice(matches, func(i, j int) bool { return matches[i].dist < matches[j].dist })
 	}
 
-	return ctx.WriteInteger(int64(count))
+	if count > 0 && count < len(matches) {
+		matches = matches[:count]
+	}
+
+	stored := len(matches)
+	if stored == 0 {
+		ctx.Store.Delete(destKey)
+		return ctx.WriteInteger(0)
+	}
+
+	var destValue store.Value
+	if storeDist {
+		destZset := &store.SortedSetValue{Members: make(map[string]float64)}
+		for _, m := range matches {
+			switch unit {
+			case "m":
+				destZset.Members[m.member] = m.dist * 1000
+			case "mi":
+				destZset.Members[m.member] = m.dist * 0.621371
+			case "ft":
+				destZset.Members[m.member] = m.dist * 3280.84
+			default:
+				destZset.Members[m.member] = m.dist
+			}
+		}
+		destValue = destZset
+	} else {
+		destGeo := store.NewGeoValue()
+		for _, m := range matches {
+			destGeo.Add(m.member, m.point.Lon, m.point.Lat)
+		}
+		destValue = destGeo
+	}
+
+	if err := ctx.Store.Set(destKey, destValue, store.SetOptions{}); err != nil {
+		return ctx.WriteError(err)
+	}
+
+	return ctx.WriteInteger(int64(stored))
 }
