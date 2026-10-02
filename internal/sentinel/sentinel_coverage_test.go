@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -876,9 +877,11 @@ func TestMatchPattern_Comprehensive(t *testing.T) {
 }
 
 // --- Tests for checkMasters ---
-// NOTE: checkMasters has a re-entrant lock issue when calling checkODown
-// for unreachable masters (checkMasters holds mu.Lock, checkODown tries
-// mu.RLock). We can only safely test the reachable-master path directly.
+// The unreachable-master path is testable directly now. checkMasters used to
+// call checkODown while already holding s.mu, and checkODown's own RLock then
+// parked forever on the non-reentrant RWMutex, so these tests had to avoid
+// unreachable masters entirely. checkMasters now calls the lock-free
+// checkODownLocked core; see TestCheckMasters_UnreachableMaster.
 
 func TestCheckMasters_ReachableMaster(t *testing.T) {
 	// Start a real listener so the master is reachable
@@ -934,6 +937,69 @@ func TestCheckMasters_Empty(t *testing.T) {
 	s := New(Config{ID: "s1"})
 	// No masters registered - should not panic
 	s.checkMasters()
+}
+
+// TestCheckMasters_UnreachableMaster exercises the unreachable-master path
+// these tests previously had to avoid: checkMasters holds s.mu for its whole
+// body and used to call checkODown, whose own RLock parked forever on the
+// non-reentrant RWMutex. It now calls the lock-free checkODownLocked core.
+//
+// Quorum 2 is deliberate. With no peers recorded the reached count is 1, so
+// 1 >= 2 is false and the master settles at SDown without reaching the ODown
+// branch — which would otherwise spawn startFailover and leave a goroutine
+// sleeping for failoverTime (3 minutes by default) after the test ends.
+func TestCheckMasters_UnreachableMaster(t *testing.T) {
+	// Bind then immediately release a loopback port so the dial is refused
+	// fast and deterministically.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to listen: %v", err)
+	}
+	deadPort := ln.Addr().(*net.TCPAddr).Port
+	ln.Close()
+
+	// Guard: prove the unreachable branch is genuinely taken. Without this the
+	// test could silently stop covering the path it exists to cover.
+	s := New(Config{ID: "s1", Quorum: 2, DownAfter: 10 * time.Second})
+	if s.isReachable("127.0.0.1", deadPort) {
+		t.Fatalf("harness broken: 127.0.0.1:%d accepted a dial, so the unreachable branch "+
+			"would never run", deadPort)
+	}
+	if err := s.Monitor("deadmaster", "127.0.0.1", deadPort, 2); err != nil {
+		t.Fatalf("Monitor failed: %v", err)
+	}
+
+	// Run behind a watchdog: if the nested-lock deadlock ever returns, this
+	// reports it with a stack instead of hanging the whole package until the
+	// runner's own timeout.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		s.checkMasters()
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		buf := make([]byte, 1<<20)
+		n := runtime.Stack(buf, true)
+		t.Fatalf("checkMasters deadlocked again — it did not return within 10s.\n"+
+			"--- goroutine stack evidence ---\n%s", string(buf[:n]))
+	}
+
+	master, ok := s.GetMaster("deadmaster")
+	if !ok {
+		t.Fatal("master disappeared after checkMasters")
+	}
+	if master.State != MasterStateSDown {
+		t.Errorf("expected MasterStateSDown for an unreachable master, got %d", master.State)
+	}
+	if master.State == MasterStateODown {
+		t.Error("expected NOT MasterStateODown: quorum 2 is unmet with only this sentinel")
+	}
+	if len(master.Flags) != 2 || master.Flags[0] != "master" || master.Flags[1] != "s_down" {
+		t.Errorf("expected flags [master s_down], got %v", master.Flags)
+	}
 }
 
 func TestCheckMasters_MultipleMasters_AllReachable(t *testing.T) {
@@ -1066,7 +1132,8 @@ func TestServe_FullFlow(t *testing.T) {
 }
 
 // --- Test for monitorLoop and gossipLoop via Start/Stop ---
-// Only test with no masters to avoid the checkODown deadlock.
+// Masters are optional: the loops are safe to run with unreachable masters
+// too, since checkMasters no longer re-acquires s.mu it already holds.
 
 func TestMonitorAndGossipLoops_NoMasters(t *testing.T) {
 	s := New(Config{ID: "s1", DownAfter: 50 * time.Millisecond})
@@ -1084,7 +1151,7 @@ func TestMonitorAndGossipLoops_NoMasters(t *testing.T) {
 }
 
 func TestMonitorAndGossipLoops_ReachableMaster(t *testing.T) {
-	// Use a reachable master so checkMasters doesn't hit the deadlock path
+	// Use a reachable master so this test isolates the reachable-master path
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("failed to listen: %v", err)

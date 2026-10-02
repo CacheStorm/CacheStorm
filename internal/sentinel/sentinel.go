@@ -36,6 +36,7 @@ type Sentinel struct {
 	parallelSyncs int
 	failoverTime  time.Duration
 	quorum        int
+	seeds         []string
 	onFailover    func(master string, newAddr string, newPort int)
 }
 
@@ -82,6 +83,12 @@ type Config struct {
 	ParallelSyncs int
 	FailoverTime  time.Duration
 	Quorum        int
+	// Seeds are "addr:port" addresses of sentinels to announce ourselves to on
+	// every gossip tick. A sentinel has no other way to learn that peers exist,
+	// so discovery starts from these bootstrap addresses and spreads: each peer
+	// we reach learns about us via SENTINEL HELLO, and its reply tells us who
+	// it is.
+	Seeds []string
 }
 
 func New(cfg Config) *Sentinel {
@@ -109,11 +116,28 @@ func New(cfg Config) *Sentinel {
 		parallelSyncs: cfg.ParallelSyncs,
 		failoverTime:  cfg.FailoverTime,
 		quorum:        cfg.Quorum,
+		seeds:         cfg.Seeds,
 	}
 }
 
 func (s *Sentinel) Start() error {
+	s.mu.Lock()
+	if s.running.Load() {
+		s.mu.Unlock()
+		return fmt.Errorf("sentinel already started")
+	}
+	// stopCh is one-shot: Stop closes it and never recreates it. Without this
+	// a restart would launch loops reading an already-closed channel (they exit
+	// at once) and the next Stop would close it again — "close of closed
+	// channel". The server wires Start/Stop per Server instance, so a restart
+	// is reachable.
+	select {
+	case <-s.stopCh:
+		s.stopCh = make(chan struct{})
+	default:
+	}
 	s.running.Store(true)
+	s.mu.Unlock()
 
 	s.wg.Add(1)
 	go s.monitorLoop()
@@ -184,7 +208,10 @@ func (s *Sentinel) checkMasters() {
 					Msg("Master marked as subjectively down")
 			}
 
-			if s.checkODown(master) {
+			// checkMasters holds s.mu for its whole body, so read the peers
+			// directly and use the lock-free core — calling checkODown here
+			// deadlocked on its nested RLock.
+			if s.checkODownLocked(master, s.sentinels[name]) {
 				master.State = MasterStateODown
 				master.Flags = []string{"master", "s_down", "o_down"}
 				logger.Error().
@@ -216,14 +243,41 @@ func (s *Sentinel) checkODown(master *MasterInfo) bool {
 	peers := s.sentinels[master.Name]
 	s.mu.RUnlock()
 
+	return s.checkODownLocked(master, peers)
+}
+
+// checkODownLocked is the lock-free core of checkODown. checkMasters already
+// holds the exclusive lock for its whole body and sync.RWMutex is not
+// reentrant, so calling checkODown from there parked forever on its nested
+// RLock: a new RLock cannot be granted while a writer holds the lock, and the
+// deferred Unlock that would release it sits downstream of the stuck call. That
+// wedged the monitor on the first unreachable master. Callers already holding
+// s.mu pass in the peer slice they read themselves.
+func (s *Sentinel) checkODownLocked(master *MasterInfo, peers []*SentinelPeer) bool {
 	downCount := 0
 	for _, peer := range peers {
+		// Skip this sentinel's own entry: the "+1" below already counts it, and
+		// gossipSentinels registers self as a peer for liveness bookkeeping.
+		// Counting both would let a lone sentinel meet a quorum of 2.
+		if peer.ID == s.id {
+			continue
+		}
 		if time.Since(peer.LastSeen) < s.downAfter {
 			downCount++
 		}
 	}
 
-	return downCount+1 >= s.quorum
+	// Honour the quorum Monitor stored for THIS master. Comparing against the
+	// sentinel-wide s.quorum ignored MasterInfo.Quorum entirely, so a caller
+	// passing quorum to Monitor had that argument silently discarded and every
+	// master was governed by one global number. Fall back to the global value
+	// only when the master has no quorum of its own.
+	quorum := master.Quorum
+	if quorum <= 0 {
+		quorum = s.quorum
+	}
+
+	return downCount+1 >= quorum
 }
 
 func (s *Sentinel) startFailover(name string, master *MasterInfo) {
@@ -286,7 +340,217 @@ func (s *Sentinel) startFailover(name string, master *MasterInfo) {
 	}
 }
 
+// recordPeer registers a peer announced by SENTINEL HELLO, against every
+// monitored master, and refreshes its LastSeen if it is already known. This is
+// the receiving half of automatic discovery: the announcing sentinel is added
+// to our own table with no manual registration.
+func (s *Sentinel) recordPeer(addr string, port int) {
+	id := fmt.Sprintf("%s:%d", addr, port)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now()
+	for name := range s.masters {
+		peers := s.sentinels[name]
+		found := false
+		for _, p := range peers {
+			if p.ID == id {
+				p.LastSeen = now
+				found = true
+				break
+			}
+		}
+		if !found {
+			s.sentinels[name] = append(peers, &SentinelPeer{
+				ID: id, Addr: addr, Port: port, LastSeen: now,
+			})
+		}
+	}
+}
+
+// announceTo tells a peer who we are with SENTINEL HELLO, so it records us in
+// its own table with no manual registration. The reply carries that peer's
+// identity, which we record in turn — one round trip makes the two sentinels
+// aware of each other.
+//
+// Unlike pingPeer (which only tests liveness), this changes the peer's view of
+// the cluster, so it is what gossip uses to spread discovery.
+func (s *Sentinel) announceTo(addr string, port int) bool {
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(addr, strconv.Itoa(port)), 2*time.Second)
+	if err != nil {
+		return false
+	}
+	defer conn.Close()
+
+	_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
+	req := fmt.Sprintf("SENTINEL HELLO %s %d\r\n", s.addr, s.port)
+	if _, err := conn.Write([]byte(req)); err != nil {
+		return false
+	}
+
+	buf := make([]byte, 256)
+	n, err := conn.Read(buf)
+	if err != nil {
+		return false
+	}
+
+	// Reply shape: "+OK <id> <addr> <port>".
+	fields := strings.Fields(string(buf[:n]))
+	if len(fields) < 4 || fields[0] != "+OK" {
+		return false
+	}
+	replyPort, err := strconv.Atoi(fields[3])
+	if err != nil || replyPort <= 0 || replyPort > 65535 {
+		return false
+	}
+	s.recordPeer(fields[2], replyPort)
+	return true
+}
+
+// parseSeed splits a "addr:port" seed into its parts.
+func parseSeed(seed string) (string, int, bool) {
+	host, portStr, err := net.SplitHostPort(strings.TrimSpace(seed))
+	if err != nil {
+		return "", 0, false
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil || port <= 0 || port > 65535 {
+		return "", 0, false
+	}
+	return host, port, true
+}
+
+// pingPeer sends a PING to another sentinel and reports whether it answered.
+// This is the same wire protocol Serve/handleCommand already speaks, so any
+// CacheStorm sentinel (or a plain listener answering +PONG) is a valid peer.
+func (s *Sentinel) pingPeer(p *SentinelPeer) bool {
+	addr := p.Addr
+	if addr == "" {
+		return false
+	}
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(addr, strconv.Itoa(p.Port)), 2*time.Second)
+	if err != nil {
+		return false
+	}
+	defer conn.Close()
+
+	_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
+	if _, err := conn.Write([]byte("PING\r\n")); err != nil {
+		return false
+	}
+	buf := make([]byte, 64)
+	n, err := conn.Read(buf)
+	if err != nil {
+		return false
+	}
+	return strings.Contains(string(buf[:n]), "+PONG")
+}
+
+// gossipSentinels maintains the peer table for every monitored master.
+//
+// It does three things on each tick: registers this sentinel as its own peer so
+// the table is populated at all (it used to be empty forever, which is why
+// CKQUORUM always answered 1 and checkODown's downCount was always 0); actively
+// PINGs every known peer and refreshes LastSeen when it answers; and drops peers
+// that have been silent past the retention window so the table cannot grow
+// without bound.
+//
+// Self is registered as a peer for liveness bookkeeping, but the "+1" in
+// checkODownLocked and CKQUORUM already counts this sentinel, so those counting
+// sites skip the entry whose ID is s.id. Otherwise self would be counted twice
+// and a quorum of 2 would be met by a lone sentinel.
+//
+// NOTE: this maintains peers that are already known. Genuine discovery of NEW
+// peers needs a transport to hear them announce themselves (Redis uses the
+// __sentinel__:hello pub/sub channel); CacheStorm's sentinel has no such
+// transport and Sentinel.Serve is not yet wired into the server, so peers are
+// currently only reachable once something has registered them.
 func (s *Sentinel) gossipSentinels() {
+	s.mu.Lock()
+	masters := make([]string, 0, len(s.masters))
+	for name := range s.masters {
+		masters = append(masters, name)
+	}
+
+	now := time.Now()
+	type peerRef struct {
+		master string
+		peer   *SentinelPeer
+	}
+	var toProbe []peerRef
+
+	for _, name := range masters {
+		peers := s.sentinels[name]
+		hasSelf := false
+		for _, p := range peers {
+			if p.ID == s.id {
+				hasSelf = true
+				p.LastSeen = now
+				continue
+			}
+			toProbe = append(toProbe, peerRef{master: name, peer: p})
+		}
+		if !hasSelf {
+			peers = append(peers, &SentinelPeer{
+				ID:       s.id,
+				Addr:     s.addr,
+				Port:     s.port,
+				LastSeen: now,
+			})
+			s.sentinels[name] = peers
+		}
+	}
+	s.mu.Unlock()
+
+	// Probe outside the lock: a dial can take up to 2s and checkMasters must
+	// not be blocked behind it. Results are applied under the lock below so
+	// LastSeen is never written concurrently with a reader.
+	var alive []*SentinelPeer
+	for _, pr := range toProbe {
+		if s.pingPeer(pr.peer) {
+			alive = append(alive, pr.peer)
+		}
+	}
+
+	// Announce ourselves to the configured seeds so they record us without any
+	// manual registration, and record whoever answers so we learn them too.
+	// This is the discovery path: without it a sentinel has no way to learn that
+	// any peer exists. Runs outside the lock because announceTo -> recordPeer
+	// takes s.mu itself.
+	for _, seed := range s.seeds {
+		host, port, ok := parseSeed(seed)
+		if !ok {
+			logger.Warn().Str("seed", seed).Msg("skipping malformed sentinel seed")
+			continue
+		}
+		if net.JoinHostPort(host, strconv.Itoa(port)) == net.JoinHostPort(s.addr, strconv.Itoa(s.port)) {
+			continue // announcing to ourselves
+		}
+		s.announceTo(host, port)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, p := range alive {
+		p.LastSeen = now
+	}
+
+	// Prune peers that have gone quiet past the retention window.
+	retention := 3 * s.downAfter
+	if retention <= 0 {
+		retention = 90 * time.Second
+	}
+	for _, name := range masters {
+		peers := s.sentinels[name]
+		kept := make([]*SentinelPeer, 0, len(peers))
+		for _, p := range peers {
+			if now.Sub(p.LastSeen) <= retention {
+				kept = append(kept, p)
+			}
+		}
+		s.sentinels[name] = kept
+	}
 }
 
 func (s *Sentinel) Monitor(name, addr string, port, quorum int) error {
@@ -371,6 +635,11 @@ func (s *Sentinel) CKQUORUM(name string) (int, error) {
 	peers := s.sentinels[name]
 	alive := 0
 	for _, p := range peers {
+		// Skip self: the "+1" below already counts this sentinel, and
+		// gossipSentinels registers self as a peer.
+		if p.ID == s.id {
+			continue
+		}
 		if time.Since(p.LastSeen) < s.downAfter {
 			alive++
 		}
@@ -541,6 +810,23 @@ func (s *Sentinel) handleSentinel(parts []string) string {
 			return "-ERR " + err.Error()
 		}
 		return fmt.Sprintf("*2\r\n$%d\r\n%s\r\n:%d\r\n", len(addr), addr, port)
+	case "HELLO":
+		// SENTINEL HELLO <addr> <port> — the peer-announcement command.
+		// A sentinel that can reach us tells us who and where it is; we record
+		// it against every master we monitor and refresh its LastSeen. This is
+		// what lets sentinels discover each other: gossip sends HELLO to a peer,
+		// and the receiving side adds the sender to its own table with no manual
+		// registration. It replies with our identity so the sender can do the
+		// same in one round trip.
+		if len(parts) < 3 {
+			return "-ERR wrong number of arguments"
+		}
+		peerPort, err := strconv.Atoi(parts[2])
+		if err != nil || peerPort <= 0 || peerPort > 65535 {
+			return "-ERR invalid port"
+		}
+		s.recordPeer(parts[1], peerPort)
+		return fmt.Sprintf("+OK %s %s %d", s.id, s.addr, s.port)
 	case "RESET":
 		if len(parts) < 2 {
 			return "-ERR wrong number of arguments"

@@ -42,7 +42,7 @@ func Default() *Config {
 				Port:    9090,
 				Path:    "/metrics",
 			},
-			SlowLog: SlowLogPluginConfig{
+			SlowLog: SlowLogConfig{
 				Enabled:    true,
 				Threshold:  "10ms",
 				MaxEntries: 1000,
@@ -52,6 +52,14 @@ func Default() *Config {
 			Level:  "info",
 			Format: "json",
 			Output: "stdout",
+		},
+		Sentinel: SentinelConfig{
+			ID:           "sentinel-1",
+			Addr:         "127.0.0.1",
+			Port:         26379,
+			Quorum:       2,
+			DownAfter:    "30s",
+			FailoverTime: "3m",
 		},
 	}
 }

@@ -1,6 +1,7 @@
 package command
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -10,10 +11,65 @@ import (
 	"github.com/cachestorm/cachestorm/internal/sentinel"
 )
 
+// ServeSentinel listens on the configured sentinel port for peer traffic. It
+// blocks until ctx is cancelled, at which point Serve closes its listener and
+// returns, so callers should run it on its own goroutine and cancel ctx during
+// shutdown.
+func ServeSentinel(ctx context.Context) error {
+	s := EnsureSentinel()
+	port := sentinelConfig.Port
+	if port <= 0 {
+		return fmt.Errorf("sentinel port not configured")
+	}
+	return s.Serve(ctx, port)
+}
+
 var globalSentinel *sentinel.Sentinel
 
 func InitSentinel(cfg sentinel.Config) {
 	globalSentinel = sentinel.New(cfg)
+}
+
+// sentinelConfig is the configuration EnsureSentinel builds the singleton
+// from. server.New overwrites it from the `sentinel` section of the loaded
+// config (see ConfigureSentinel) so deployments can set ID, Addr, Port, Quorum,
+// DownAfter and FailoverTime. The value below is the fallback used when nothing
+// configured one — it mirrors config.Default().Sentinel.
+var sentinelConfig = sentinel.Config{
+	ID:   "sentinel-1",
+	Addr: "127.0.0.1",
+	Port: 26379,
+}
+
+// ConfigureSentinel installs the configuration EnsureSentinel will use for any
+// sentinel constructed from now on. It does not replace an already-constructed
+// singleton; call it during startup, before the first SENTINEL command.
+func ConfigureSentinel(cfg sentinel.Config) {
+	sentinelConfig = cfg
+}
+
+// SentinelConfigTemplate returns a copy of the configuration EnsureSentinel
+// currently holds, so callers can inspect what would be built.
+func SentinelConfigTemplate() sentinel.Config {
+	return sentinelConfig
+}
+
+// EnsureSentinel constructs the singleton on first use so SENTINEL commands
+// answer instead of reporting "sentinel not initialized". Nothing in production
+// ever called InitSentinel, so globalSentinel stayed nil for the whole life of
+// the server and every SENTINEL subcommand was dead at runtime.
+//
+// It is idempotent and never replaces a sentinel InitSentinel already
+// installed, so an explicit configuration still wins. Constructing is cheap and
+// side-effect free: sentinel.New only fills in defaults — no listener, no
+// goroutines. StartSentinel remains the explicit step that launches the monitor
+// and gossip loops, so building a Server does not silently begin dialling
+// masters from every instance.
+func EnsureSentinel() *sentinel.Sentinel {
+	if globalSentinel == nil {
+		globalSentinel = sentinel.New(sentinelConfig)
+	}
+	return globalSentinel
 }
 
 func GetSentinel() *sentinel.Sentinel {
@@ -25,9 +81,10 @@ func cmdSENTINEL(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
-	if globalSentinel == nil {
-		return ctx.WriteError(fmt.Errorf("ERR sentinel not initialized"))
-	}
+	// Construct the singleton on first use. Previously this bailed with
+	// "ERR sentinel not initialized" and SENTINEL was unusable at runtime,
+	// because nothing in production ever called InitSentinel.
+	EnsureSentinel()
 
 	subCmd := strings.ToUpper(ctx.ArgString(0))
 

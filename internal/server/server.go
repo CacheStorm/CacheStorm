@@ -20,6 +20,7 @@ import (
 	"github.com/cachestorm/cachestorm/internal/logger"
 	"github.com/cachestorm/cachestorm/internal/persistence"
 	"github.com/cachestorm/cachestorm/internal/plugin"
+	"github.com/cachestorm/cachestorm/internal/sentinel"
 	"github.com/cachestorm/cachestorm/internal/store"
 	"github.com/cachestorm/cachestorm/plugins/metrics"
 )
@@ -58,6 +59,8 @@ type Server struct {
 	stopping      atomic.Bool
 	stopCh        chan struct{}
 	wg            sync.WaitGroup
+	// sentinelCancel stops the Sentinel peer listener started in Start().
+	sentinelCancel context.CancelFunc
 }
 
 func New(cfg *config.Config) (*Server, error) {
@@ -138,6 +141,17 @@ func New(cfg *config.Config) (*Server, error) {
 	command.RegisterFunctionCommands(s.router)
 	command.RegisterModuleCommands(s.router)
 	command.RegisterSentinelCommands(s.router)
+	// Feed the loaded `sentinel` config section into the command layer, which
+	// builds the singleton lazily on the first SENTINEL command. Without this
+	// the values in config.Sentinel would never reach a Sentinel instance.
+	command.ConfigureSentinel(sentinel.Config{
+		ID:           cfg.Sentinel.ID,
+		Addr:         cfg.Sentinel.Addr,
+		Port:         cfg.Sentinel.Port,
+		Quorum:       cfg.Sentinel.Quorum,
+		DownAfter:    cfg.Sentinel.DownAfterDuration(),
+		FailoverTime: cfg.Sentinel.FailoverTimeDuration(),
+	})
 	command.RegisterJSONCommands(s.router)
 	command.RegisterTSCommands(s.router)
 	command.RegisterSearchCommands(s.router)
@@ -295,6 +309,31 @@ func (s *Server) Start(_ context.Context) error {
 		s.startMetricsServer()
 	}
 
+	// Launch the Sentinel monitor and gossip loops so monitored masters are
+	// actually health-checked. The singleton itself is built lazily on the first
+	// SENTINEL command (see command.EnsureSentinel); starting here is safe and
+	// cheap because Start on an empty Sentinel just runs the two loops, and
+	// checkMasters iterates zero masters. Stop() calls command.StopSentinel to
+	// join them, so they do not outlive the server.
+	if err := command.StartSentinel(); err != nil {
+		logger.Warn().Err(err).Msg("sentinel not started")
+	}
+
+	// Listen for Sentinel peer traffic (SENTINEL MONITOR, PING, INFO from other
+	// sentinels) on the configured sentinel port. Serve blocks, so it runs on its
+	// own goroutine and closes its listener when this context is cancelled in
+	// Stop(). A bind failure is logged rather than fatal: the data server is
+	// fully functional without peer gossip, and a port clash (another instance
+	// on the same host) must not stop it from starting.
+	sentinelCtx, sentinelCancel := context.WithCancel(context.Background())
+	s.sentinelCancel = sentinelCancel
+	go func() {
+		defer logger.RecoverPanic("sentinel-serve")
+		if err := command.ServeSentinel(sentinelCtx); err != nil {
+			logger.Warn().Err(err).Msg("sentinel peer listener stopped")
+		}
+	}()
+
 	return nil
 }
 
@@ -413,6 +452,16 @@ func (s *Server) Stop(ctx context.Context) error {
 		s.listener.Close()
 	}
 	logger.Info().Msg("stopped accepting new connections")
+
+	// 1b. Stop the Sentinel monitor and gossip loops. Stop joins both via
+	// wg.Wait, so they cannot outlive the server.
+	command.StopSentinel()
+
+	// 1c. Close the Sentinel peer listener so Serve returns and its port is
+	// released before the server goes away.
+	if s.sentinelCancel != nil {
+		s.sentinelCancel()
+	}
 
 	// 2. Stop HTTP server
 	if s.httpServer != nil {

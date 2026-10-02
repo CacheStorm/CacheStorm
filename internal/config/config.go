@@ -18,6 +18,39 @@ type Config struct {
 	Replication ReplicationConfig          `yaml:"replication"`
 	Plugins     PluginsConfig              `yaml:"plugins"`
 	Logging     LoggingConfig              `yaml:"logging"`
+	Sentinel    SentinelConfig             `yaml:"sentinel"`
+}
+
+// SentinelConfig configures the Sentinel subsystem wired up by
+// command.EnsureSentinel. Durations are strings so YAML can carry "30s"; use
+// the DownAfterDuration/FailoverTimeDuration accessors to read them.
+type SentinelConfig struct {
+	ID           string `yaml:"id" default:"sentinel-1"`
+	Addr         string `yaml:"addr" default:"127.0.0.1"`
+	Port         int    `yaml:"port" default:"26379"`
+	Quorum       int    `yaml:"quorum" default:"2"`
+	DownAfter    string `yaml:"down_after" default:"30s"`
+	FailoverTime string `yaml:"failover_time" default:"3m"`
+}
+
+// DownAfterDuration parses DownAfter, falling back to 0 when unset or
+// unparseable so the Sentinel applies its own default.
+func (c *SentinelConfig) DownAfterDuration() time.Duration {
+	d, err := time.ParseDuration(c.DownAfter)
+	if err != nil {
+		return 0
+	}
+	return d
+}
+
+// FailoverTimeDuration parses FailoverTime, falling back to 0 when unset or
+// unparseable.
+func (c *SentinelConfig) FailoverTimeDuration() time.Duration {
+	d, err := time.ParseDuration(c.FailoverTime)
+	if err != nil {
+		return 0
+	}
+	return d
 }
 
 type ServerConfig struct {
@@ -88,7 +121,7 @@ type ReplicationConfig struct {
 
 type PluginsConfig struct {
 	Metrics MetricsPluginConfig `yaml:"metrics"`
-	SlowLog SlowLogPluginConfig `yaml:"slowlog"`
+	SlowLog SlowLogConfig       `yaml:"slowlog"`
 }
 
 type MetricsPluginConfig struct {
@@ -97,7 +130,7 @@ type MetricsPluginConfig struct {
 	Path    string `yaml:"path" default:"/metrics"`
 }
 
-type SlowLogPluginConfig struct {
+type SlowLogConfig struct {
 	Enabled    bool   `yaml:"enabled" default:"true"`
 	Threshold  string `yaml:"threshold" default:"10ms"`
 	MaxEntries int    `yaml:"max_entries" default:"1000"`

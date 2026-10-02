@@ -2,6 +2,7 @@ package sentinel
 
 import (
 	"context"
+	"net"
 	"strings"
 	"testing"
 	"time"
@@ -875,12 +876,165 @@ func TestSentinelReplicasList(t *testing.T) {
 	}
 }
 
+// TestSentinelCheckMastersDirect calls the unexported checkMasters directly
+// (the same "Direct" convention as TestSentinelCheckODownDirect below) rather
+// than waiting for monitorLoop to tick. It covers the mixed case in one pass: a
+// reachable master must go to OK and an unreachable one to SDown.
+//
+// Quorum 2 with no peers keeps the unreachable master out of the ODown branch,
+// which would otherwise spawn startFailover and leave a goroutine asleep for
+// failoverTime (3 minutes by default) after the test returns.
 func TestSentinelCheckMastersDirect(t *testing.T) {
-	t.Skip("Skipping due to deadlock issues in pipe connections")
+	// A real listener so the "up" master is genuinely reachable.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to listen: %v", err)
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			conn.Close()
+		}
+	}()
+	upPort := ln.Addr().(*net.TCPAddr).Port
+
+	// Bind then release a port so the "down" master refuses the dial fast.
+	deadLn, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to listen: %v", err)
+	}
+	deadPort := deadLn.Addr().(*net.TCPAddr).Port
+	deadLn.Close()
+
+	s := New(Config{ID: "sentinel-1", Quorum: 2, DownAfter: 10 * time.Second})
+	if err := s.Monitor("up", "127.0.0.1", upPort, 2); err != nil {
+		t.Fatalf("Monitor(up) failed: %v", err)
+	}
+	if err := s.Monitor("down", "127.0.0.1", deadPort, 2); err != nil {
+		t.Fatalf("Monitor(down) failed: %v", err)
+	}
+
+	s.checkMasters()
+
+	upMaster, ok := s.GetMaster("up")
+	if !ok {
+		t.Fatal("master \"up\" disappeared")
+	}
+	if upMaster.State != MasterStateOK {
+		t.Errorf("expected \"up\" to be MasterStateOK, got %d", upMaster.State)
+	}
+	if upMaster.LastOkPing.IsZero() {
+		t.Error("expected LastOkPing to be set for the reachable master")
+	}
+
+	downMaster, ok := s.GetMaster("down")
+	if !ok {
+		t.Fatal("master \"down\" disappeared")
+	}
+	if downMaster.State != MasterStateSDown {
+		t.Errorf("expected \"down\" to be MasterStateSDown, got %d", downMaster.State)
+	}
+	if downMaster.State == MasterStateODown {
+		t.Error("expected NOT MasterStateODown: quorum 2 is unmet with only this sentinel")
+	}
 }
 
+// TestSentinelHandleConnectionDirect drives the unexported handleConnection
+// over an in-memory net.Pipe and ASSERTs the replies.
+//
+// It previously existed only as an empty t.Skip("deadlock issues in pipe
+// connections"). That referred to a test-harness hazard, not a production bug:
+// net.Pipe is synchronous and unbuffered, while handleConnection writes one
+// reply per input line. A naive test that writes two commands and only then
+// reads deadlocks — handleConnection parks in conn.Write(reply1) waiting for a
+// reader, never loops back to Read, and the second Write blocks forever.
+//
+// The cure is to drain the response side concurrently, which this does. Unlike
+// the older smoke test, this one checks the replies are correct.
 func TestSentinelHandleConnectionDirect(t *testing.T) {
-	t.Skip("Skipping due to deadlock issues in pipe connections")
+	s := New(Config{ID: "sentinel-1"})
+	if err := s.Monitor("mymaster", "127.0.0.1", 6379, 2); err != nil {
+		t.Fatalf("Monitor failed: %v", err)
+	}
+
+	server, client := net.Pipe()
+
+	served := make(chan struct{})
+	go func() {
+		defer close(served)
+		s.handleConnection(server)
+	}()
+
+	// Concurrent reader: without it handleConnection cannot get past its first
+	// Write on the unbuffered pipe. The replies arrive on THIS end — handleConnection
+	// owns `server`, so everything it writes is what we read here.
+	lines := make(chan string, 16)
+	readErr := make(chan error, 1)
+	go func() {
+		defer close(lines)
+		buf := make([]byte, 4096)
+		var carry string
+		for {
+			n, err := client.Read(buf)
+			if n > 0 {
+				carry += string(buf[:n])
+				for {
+					idx := strings.Index(carry, "\r\n")
+					if idx < 0 {
+						break
+					}
+					lines <- carry[:idx]
+					carry = carry[idx+2:]
+				}
+			}
+			if err != nil {
+				readErr <- err
+				return
+			}
+		}
+	}()
+
+	// One write carries three commands; handleConnection splits on \r\n.
+	if _, err := client.Write([]byte("PING\r\nINFO\r\nNOTACOMMAND\r\n")); err != nil {
+		t.Fatalf("client write failed: %v", err)
+	}
+
+	got := make([]string, 0, 3)
+	deadline := time.After(10 * time.Second)
+	for len(got) < 3 {
+		select {
+		case l, ok := <-lines:
+			if !ok {
+				t.Fatalf("response stream closed after %d of 3 replies: %v", len(got), <-readErr)
+			}
+			got = append(got, l)
+		case <-deadline:
+			t.Fatalf("timed out after %v waiting for replies; got %v", 10*time.Second, got)
+		}
+	}
+
+	if got[0] != "+PONG" {
+		t.Errorf("reply 1: got %q, want \"+PONG\"", got[0])
+	}
+	if got[1] != "+OK" {
+		t.Errorf("reply 2: got %q, want \"+OK\"", got[1])
+	}
+	if got[2] != "-ERR unknown command 'NOTACOMMAND'" {
+		t.Errorf("reply 3: got %q, want \"-ERR unknown command 'NOTACOMMAND'\"", got[2])
+	}
+
+	// Close the client so handleConnection's blocking Read returns and the
+	// goroutine can exit; otherwise the package leaks it.
+	client.Close()
+	select {
+	case <-served:
+	case <-time.After(5 * time.Second):
+		t.Fatal("handleConnection did not return after the client closed")
+	}
 }
 
 func TestSentinelCheckODownDirect(t *testing.T) {
