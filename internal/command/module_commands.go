@@ -47,7 +47,7 @@ func handleModuleList(ctx *Context, registry *module.Registry) error {
 }
 
 func handleModuleLoad(ctx *Context, registry *module.Registry) error {
-	if ctx.ArgCount() < 2 {
+	if ctx.ArgCount() < 2 || ctx.ArgCount()%2 != 0 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 

@@ -135,6 +135,10 @@ func (r *Reader) readBulkString() (*Value, error) {
 		return NullBulkString(), nil
 	}
 
+	if size < 0 {
+		return nil, ErrInvalidFormat
+	}
+
 	if size > MaxBulkStringSize {
 		return nil, ErrBulkStringTooBig
 	}
@@ -171,6 +175,10 @@ func (r *Reader) readArray() (*Value, error) {
 
 	if count == -1 {
 		return NullArray(), nil
+	}
+
+	if count < 0 {
+		return nil, ErrInvalidFormat
 	}
 
 	if count == 0 {

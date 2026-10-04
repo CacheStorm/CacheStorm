@@ -1,6 +1,7 @@
 package sentinel
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"net"
@@ -744,25 +745,20 @@ func (s *Sentinel) Serve(ctx context.Context, port int) error {
 func (s *Sentinel) handleConnection(conn net.Conn) {
 	defer conn.Close()
 
-	buf := make([]byte, 4096)
+	reader := bufio.NewReader(conn)
 	for {
-		n, err := conn.Read(buf)
+		line, err := reader.ReadString('\n')
 		if err != nil {
 			return
 		}
 
-		data := string(buf[:n])
-		lines := strings.Split(data, "\r\n")
-
-		for _, line := range lines {
-			if line == "" {
-				continue
-			}
-
-			response := s.handleCommand(line)
-			if _, err := conn.Write([]byte(response + "\r\n")); err != nil {
-				return
-			}
+		line = strings.TrimSuffix(strings.TrimSuffix(line, "\n"), "\r")
+		if line == "" {
+			continue
+		}
+		response := s.handleCommand(line)
+		if _, err := conn.Write([]byte(response + "\r\n")); err != nil {
+			return
 		}
 	}
 }

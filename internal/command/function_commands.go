@@ -105,7 +105,6 @@ func (r *FunctionRegistry) CreateLibrary(name string, code string, replace bool)
 							CreatedAt: time.Now(),
 						}
 						lib.Functions[fnName] = function
-						r.functions[name+"."+fnName] = function
 					}
 				}
 			}
@@ -116,6 +115,9 @@ func (r *FunctionRegistry) CreateLibrary(name string, code string, replace bool)
 		for fnName := range oldLib.Functions {
 			delete(r.functions, name+"."+fnName)
 		}
+	}
+	for fnName, function := range lib.Functions {
+		r.functions[name+"."+fnName] = function
 	}
 
 	r.libraries[name] = lib

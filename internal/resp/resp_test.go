@@ -342,7 +342,7 @@ func TestValueStringMethods(t *testing.T) {
 	}{
 		{SimpleString("hello"), "hello"},
 		{ErrorValue("ERR test"), "ERR test"},
-		{IntegerValue(65), "A"},
+		{IntegerValue(65), "65"},
 		{BulkBytes([]byte("data")), "data"},
 		{NullBulkString(), "(nil)"},
 		{NullArray(), "(nil)"},

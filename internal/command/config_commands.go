@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
+	"github.com/cachestorm/cachestorm/internal/store"
 )
 
 type Config struct {
@@ -165,7 +166,12 @@ func boolStr(b bool) string {
 }
 
 func cmdConfigSet(ctx *Context) error {
-	if ctx.ArgCount()%2 != 0 {
+	// Index 0 holds the "SET" subcommand, so a well-formed call carries 1+2k
+	// arguments: an ODD count, with at least one key/value pair. Testing for
+	// even counts rejected every valid call, and accepted malformed ones — the
+	// pair loop then read ctx.ArgString(i+1) past the end and silently did
+	// nothing while replying +OK.
+	if ctx.ArgCount() < 3 || ctx.ArgCount()%2 == 0 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
@@ -249,6 +255,8 @@ func cmdConfigSet(ctx *Context) error {
 			}
 		case "activedefrag":
 			c.activedefrag = value == "yes"
+		default:
+			return ctx.WriteError(errors.New("ERR Unknown option or number of arguments for CONFIG SET '" + param + "'"))
 		}
 	}
 
@@ -256,7 +264,11 @@ func cmdConfigSet(ctx *Context) error {
 }
 
 func cmdConfigResetStat(ctx *Context) error {
-	// Reset stats
+	// Mirror the sibling METRICS.RESET (monitoring_commands.go), which already
+	// performs this reset. Without the call the handler answers +OK while every
+	// counter keeps climbing, so a client that trusts the +OK keeps reading
+	// stale, ever-growing statistics from INFO/STATSALL.
+	store.GlobalMetrics.Reset()
 	return ctx.WriteOK()
 }
 

@@ -41,11 +41,13 @@ func cmdSUBSCRIBE(ctx *Context) error {
 	count := ps.Subscribe(sub, channels...)
 
 	for _, ch := range channels {
-		ctx.Writer.WriteValue(resp.ArrayValue([]*resp.Value{
+		if err := ctx.Writer.WriteValue(resp.ArrayValue([]*resp.Value{
 			resp.SimpleString("subscribe"),
 			resp.BulkString(ch),
 			resp.IntegerValue(int64(count)),
-		}))
+		})); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -67,18 +69,22 @@ func cmdUNSUBSCRIBE(ctx *Context) error {
 	count := ps.Unsubscribe(sub, channels...)
 
 	if len(channels) == 0 {
-		ctx.Writer.WriteValue(resp.ArrayValue([]*resp.Value{
+		if err := ctx.Writer.WriteValue(resp.ArrayValue([]*resp.Value{
 			resp.SimpleString("unsubscribe"),
 			resp.NullBulkString(),
 			resp.IntegerValue(0),
-		}))
+		})); err != nil {
+			return err
+		}
 	} else {
 		for _, ch := range channels {
-			ctx.Writer.WriteValue(resp.ArrayValue([]*resp.Value{
+			if err := ctx.Writer.WriteValue(resp.ArrayValue([]*resp.Value{
 				resp.SimpleString("unsubscribe"),
 				resp.BulkString(ch),
 				resp.IntegerValue(int64(count)),
-			}))
+			})); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -104,11 +110,13 @@ func cmdPSUBSCRIBE(ctx *Context) error {
 	count := ps.PSubscribe(sub, patterns...)
 
 	for _, p := range patterns {
-		ctx.Writer.WriteValue(resp.ArrayValue([]*resp.Value{
+		if err := ctx.Writer.WriteValue(resp.ArrayValue([]*resp.Value{
 			resp.SimpleString("psubscribe"),
 			resp.BulkString(p),
 			resp.IntegerValue(int64(count)),
-		}))
+		})); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -130,18 +138,22 @@ func cmdPUNSUBSCRIBE(ctx *Context) error {
 	count := ps.PUnsubscribe(sub, patterns...)
 
 	if len(patterns) == 0 {
-		ctx.Writer.WriteValue(resp.ArrayValue([]*resp.Value{
+		if err := ctx.Writer.WriteValue(resp.ArrayValue([]*resp.Value{
 			resp.SimpleString("punsubscribe"),
 			resp.NullBulkString(),
 			resp.IntegerValue(0),
-		}))
+		})); err != nil {
+			return err
+		}
 	} else {
 		for _, p := range patterns {
-			ctx.Writer.WriteValue(resp.ArrayValue([]*resp.Value{
+			if err := ctx.Writer.WriteValue(resp.ArrayValue([]*resp.Value{
 				resp.SimpleString("punsubscribe"),
 				resp.BulkString(p),
 				resp.IntegerValue(int64(count)),
-			}))
+			})); err != nil {
+				return err
+			}
 		}
 	}
 

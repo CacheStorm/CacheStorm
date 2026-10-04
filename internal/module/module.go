@@ -73,6 +73,7 @@ type Registry struct {
 	mu      sync.RWMutex
 	modules map[string]Module
 	loaded  map[string]bool
+	busy    map[string]bool
 }
 
 var globalRegistry = NewRegistry()
@@ -81,6 +82,7 @@ func NewRegistry() *Registry {
 	return &Registry{
 		modules: make(map[string]Module),
 		loaded:  make(map[string]bool),
+		busy:    make(map[string]bool),
 	}
 }
 
@@ -89,56 +91,85 @@ func GetRegistry() *Registry {
 }
 
 func (r *Registry) Register(m Module) error {
+	name := m.Name()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if _, exists := r.modules[m.Name()]; exists {
-		return fmt.Errorf("module '%s' already registered", m.Name())
+	if _, exists := r.modules[name]; exists {
+		return fmt.Errorf("module '%s' already registered", name)
 	}
 
-	r.modules[m.Name()] = m
+	r.modules[name] = m
 	return nil
 }
 
 func (r *Registry) Load(name string, ctx *Context) error {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 
 	m, exists := r.modules[name]
 	if !exists {
+		r.mu.Unlock()
 		return fmt.Errorf("module '%s' not found", name)
 	}
 
 	if r.loaded[name] {
+		r.mu.Unlock()
 		return fmt.Errorf("module '%s' already loaded", name)
 	}
+	if r.busy[name] {
+		r.mu.Unlock()
+		return fmt.Errorf("module '%s' operation in progress", name)
+	}
+	r.busy[name] = true
+	r.mu.Unlock()
+	defer func() {
+		r.mu.Lock()
+		delete(r.busy, name)
+		r.mu.Unlock()
+	}()
 
 	if err := m.Init(ctx); err != nil {
-		return fmt.Errorf("failed to initialize module '%s': %v", name, err)
+		return fmt.Errorf("failed to initialize module '%s': %w", name, err)
 	}
 
+	r.mu.Lock()
 	r.loaded[name] = true
+	r.mu.Unlock()
 	return nil
 }
 
 func (r *Registry) Unload(name string) error {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 
 	m, exists := r.modules[name]
 	if !exists {
+		r.mu.Unlock()
 		return fmt.Errorf("module '%s' not found", name)
 	}
 
 	if !r.loaded[name] {
+		r.mu.Unlock()
 		return fmt.Errorf("module '%s' not loaded", name)
 	}
+	if r.busy[name] {
+		r.mu.Unlock()
+		return fmt.Errorf("module '%s' operation in progress", name)
+	}
+	r.busy[name] = true
+	r.mu.Unlock()
+	defer func() {
+		r.mu.Lock()
+		delete(r.busy, name)
+		r.mu.Unlock()
+	}()
 
 	if err := m.Shutdown(); err != nil {
-		return fmt.Errorf("failed to shutdown module '%s': %v", name, err)
+		return fmt.Errorf("failed to shutdown module '%s': %w", name, err)
 	}
 
+	r.mu.Lock()
 	r.loaded[name] = false
+	r.mu.Unlock()
 	return nil
 }
 
@@ -151,28 +182,36 @@ func (r *Registry) GetModule(name string) (Module, bool) {
 
 func (r *Registry) ListModules() []ModuleInfo {
 	r.mu.RLock()
-	defer r.mu.RUnlock()
 
 	result := make([]ModuleInfo, 0, len(r.modules))
+	modules := make([]Module, 0, len(r.modules))
 	for name, m := range r.modules {
 		result = append(result, ModuleInfo{
-			Name:    name,
-			Version: m.Version(),
-			Loaded:  r.loaded[name],
+			Name:   name,
+			Loaded: r.loaded[name],
 		})
+		modules = append(modules, m)
+	}
+	r.mu.RUnlock()
+	for i, m := range modules {
+		result[i].Version = m.Version()
 	}
 	return result
 }
 
 func (r *Registry) GetCommands() []CommandDef {
 	r.mu.RLock()
-	defer r.mu.RUnlock()
 
-	var commands []CommandDef
+	var modules []Module
 	for name, m := range r.modules {
 		if r.loaded[name] {
-			commands = append(commands, m.Commands()...)
+			modules = append(modules, m)
 		}
+	}
+	r.mu.RUnlock()
+	var commands []CommandDef
+	for _, m := range modules {
+		commands = append(commands, m.Commands()...)
 	}
 	return commands
 }

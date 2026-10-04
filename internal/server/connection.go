@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cachestorm/cachestorm/internal/acl"
 	"github.com/cachestorm/cachestorm/internal/command"
 	"github.com/cachestorm/cachestorm/internal/logger"
 	"github.com/cachestorm/cachestorm/internal/plugin"
@@ -36,6 +37,13 @@ type Connection struct {
 	readTimeout  time.Duration
 	writeTimeout time.Duration
 	subscriber   *store.Subscriber // PubSub subscriber, persists across commands
+	// authenticated belongs to the connection, not the per-command Context:
+	// Handle() builds a fresh Context for every command, so auth state set
+	// during AUTH would otherwise be discarded before the next command runs.
+	authenticated bool
+	// aclUser is the ACL user resolved by AUTH, carried the same way: it must
+	// outlive the per-command Context for permissions to persist.
+	aclUser *acl.User
 }
 
 // countingConn wraps a connection and feeds the global byte counters so the
@@ -114,6 +122,9 @@ func (c *Connection) Handle() {
 		if c.subscriber != nil {
 			ctx.Subscriber = c.subscriber
 		}
+		// Auth state lives on the connection; the Context is per-command.
+		ctx.SetAuthenticated(c.authenticated)
+		ctx.ACLUser = c.aclUser
 
 		if cmd == "QUIT" {
 			c.conn.SetWriteDeadline(time.Now().Add(c.writeTimeout))
@@ -151,6 +162,10 @@ func (c *Connection) Handle() {
 		if ctx.Subscriber != nil && c.subscriber == nil {
 			c.subscriber = ctx.Subscriber
 		}
+		// Carry auth state back onto the connection: AUTH sets the flag on
+		// the Context, which is rebuilt from scratch for the next command.
+		c.authenticated = ctx.IsAuthenticated()
+		c.aclUser = ctx.ACLUser
 	}
 }
 

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -126,14 +127,14 @@ func (v *ListValue) SizeOf() int64 {
 func (v *ListValue) String() string {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
-	result := ""
+	var result strings.Builder
 	for _, el := range v.Elements {
-		if result != "" {
-			result += ", "
+		if result.Len() != 0 {
+			result.WriteString(", ")
 		}
-		result += string(el)
+		result.Write(el)
 	}
-	return result
+	return result.String()
 }
 func (v *ListValue) Clone() Value {
 	v.mu.RLock()

@@ -245,9 +245,9 @@ func (v *SortedSetValue) RangeByLex(min, max string, offset, count int, reverse 
 	if count <= 0 {
 		return result[offset:]
 	}
-	end := offset + count
-	if end > len(result) {
-		end = len(result)
+	end := len(result)
+	if count < end-offset {
+		end = offset + count
 	}
 	return result[offset:end]
 }
@@ -268,6 +268,8 @@ func lexCompare(member, min, max string) bool {
 	maxInclusive := true
 	minVal := min
 	maxVal := max
+	minBounded := min != "" && min != "-"
+	maxBounded := max != "" && max != "+"
 
 	if len(min) > 0 {
 		if min[0] == '[' {
@@ -299,7 +301,7 @@ func lexCompare(member, min, max string) bool {
 		}
 	}
 
-	if minVal != "" {
+	if minBounded {
 		if minInclusive {
 			if member < minVal {
 				return false
@@ -311,7 +313,7 @@ func lexCompare(member, min, max string) bool {
 		}
 	}
 
-	if maxVal != "" && maxVal != string([]byte{0xFF}) {
+	if maxBounded {
 		if maxInclusive {
 			if member > maxVal {
 				return false

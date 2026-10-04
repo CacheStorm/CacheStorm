@@ -59,6 +59,9 @@ func NewPool(config PoolConfig, factory func() (net.Conn, error)) *Pool {
 	if config.MaxSize <= 0 {
 		config.MaxSize = 10
 	}
+	if config.InitialSize > config.MaxSize {
+		config.InitialSize = config.MaxSize
+	}
 	if config.MaxIdle <= 0 {
 		config.MaxIdle = config.MaxSize
 	}
@@ -82,6 +85,7 @@ func NewPool(config PoolConfig, factory func() (net.Conn, error)) *Pool {
 			conn:      conn,
 			pool:      p,
 			createdAt: time.Now(),
+			lastUsed:  time.Now(),
 		})
 	}
 

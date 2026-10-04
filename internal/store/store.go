@@ -293,7 +293,14 @@ func (s *Store) Set(key string, value Value, opts SetOptions) error {
 	}
 
 	entry := NewEntry(value)
-	if opts.TTL > 0 {
+	if opts.KeepTTL {
+		// Carry the previous expiry instant unchanged: in-place
+		// modifications (APPEND, SETRANGE, INCR family) must not reset or
+		// drop the key's TTL.
+		if prev, exists := shard.Get(key); exists {
+			entry.ExpiresAt = prev.ExpiresAt
+		}
+	} else if opts.TTL > 0 {
 		entry.SetTTL(opts.TTL)
 		s.scheduleExpiry(key, entry.ExpiresAt)
 	}
@@ -316,6 +323,16 @@ func (s *Store) SetEntry(key string, entry *Entry) {
 
 	idx := s.shardIndex(key)
 	shard := s.shards[idx]
+
+	// Reconcile tag membership: a key being replaced (RENAME/COPY over an
+	// existing key) must drop its old mappings before the entry's own tags
+	// are added. RemoveKey with no tags sweeps every tag, so mappings left by
+	// a previous occupant cannot survive the overwrite.
+	s.tagIndex.RemoveKey(key, nil)
+	if len(entry.Tags) > 0 {
+		s.tagIndex.AddTags(key, entry.Tags)
+	}
+
 	s.trackMemory(shard.Set(key, entry))
 	s.IncrementVersion(key)
 	s.scheduleExpiry(key, entry.ExpiresAt)

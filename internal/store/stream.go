@@ -66,6 +66,12 @@ func (g *ConsumerGroup) AddPending(entryID, consumer string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
+	if previous, exists := g.Pending[entryID]; exists {
+		if c, exists := g.Consumers[previous.Consumer]; exists {
+			c.Pending--
+		}
+	}
+
 	g.Pending[entryID] = &PendingEntry{
 		ID:         entryID,
 		Consumer:   consumer,
@@ -92,24 +98,83 @@ func (g *ConsumerGroup) Ack(entryID string) bool {
 	return false
 }
 
+// ClaimOptions tunes ClaimWithOptions: MinIdleTime gates claims to entries
+// idle at least this many milliseconds; JustID suppresses the delivery-counter
+// increment; SetRetry/RetryCount set the counter outright; Force claims stream
+// entries that were never delivered; SetIdle/SetTime override the
+// last-delivery timestamp (the IDLE/TIME options).
+type ClaimOptions struct {
+	MinIdleTime int64
+	JustID      bool
+	Force       bool
+	RetryCount  int64
+	SetRetry    bool
+	IdleMS      int64
+	SetIdle     bool
+	TimeMS      int64
+	SetTime     bool
+}
+
 func (g *ConsumerGroup) Claim(entryIDs []string, newConsumer string) []string {
+	return g.ClaimWithOptions(entryIDs, newConsumer, ClaimOptions{})
+}
+
+func (g *ConsumerGroup) ClaimWithOptions(entryIDs []string, newConsumer string, opts ClaimOptions) []string {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
+	now := time.Now().UnixMilli()
 	var claimed []string
 	for _, id := range entryIDs {
-		if p, exists := g.Pending[id]; exists {
-			if c, exists := g.Consumers[p.Consumer]; exists {
-				c.Pending--
-			}
-			p.Consumer = newConsumer
-			p.DeliveryTS = time.Now().UnixMilli()
-			p.Deliveries++
-			if c, exists := g.Consumers[newConsumer]; exists {
+		p, exists := g.Pending[id]
+		if !exists {
+			if opts.Force {
+				g.Pending[id] = &PendingEntry{
+					ID:         id,
+					Consumer:   newConsumer,
+					DeliveryTS: now,
+					Deliveries: 1,
+				}
+				if opts.SetRetry {
+					g.Pending[id].Deliveries = opts.RetryCount
+				}
+				c, exists := g.Consumers[newConsumer]
+				if !exists {
+					c = &Consumer{Name: newConsumer, SeenTime: now, Active: true}
+					g.Consumers[newConsumer] = c
+				}
 				c.Pending++
+				claimed = append(claimed, id)
 			}
-			claimed = append(claimed, id)
+			continue
 		}
+		if now-p.DeliveryTS < opts.MinIdleTime {
+			continue
+		}
+		if c, exists := g.Consumers[p.Consumer]; exists {
+			c.Pending--
+		}
+		p.Consumer = newConsumer
+		switch {
+		case opts.SetTime:
+			p.DeliveryTS = opts.TimeMS
+		case opts.SetIdle:
+			p.DeliveryTS = now - opts.IdleMS
+		default:
+			p.DeliveryTS = now
+		}
+		if opts.SetRetry {
+			p.Deliveries = opts.RetryCount
+		} else if !opts.JustID {
+			p.Deliveries++
+		}
+		c, exists := g.Consumers[newConsumer]
+		if !exists {
+			c = &Consumer{Name: newConsumer, SeenTime: now, Active: true}
+			g.Consumers[newConsumer] = c
+		}
+		c.Pending++
+		claimed = append(claimed, id)
 	}
 	return claimed
 }
@@ -140,13 +205,20 @@ func (g *ConsumerGroup) GetFirstLastID() (string, string) {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 
+	// Pending IDs are "ms-seq"; comparing them as strings reports the wrong
+	// extremes for variable-width sequence parts ("9-0" > "11-0").
 	var firstID, lastID string
+	var firstMS, firstSeq, lastMS, lastSeq int64
 	for id := range g.Pending {
-		if firstID == "" || id < firstID {
-			firstID = id
+		ms, seq, err := parseStreamIDPair(id)
+		if err != nil {
+			continue
 		}
-		if lastID == "" || id > lastID {
-			lastID = id
+		if firstID == "" || ms < firstMS || (ms == firstMS && seq < firstSeq) {
+			firstID, firstMS, firstSeq = id, ms, seq
+		}
+		if lastID == "" || ms > lastMS || (ms == lastMS && seq > lastSeq) {
+			lastID, lastMS, lastSeq = id, ms, seq
 		}
 	}
 	return firstID, lastID
@@ -179,12 +251,13 @@ func (g *ConsumerGroup) GetConsumer(name string) *Consumer {
 }
 
 type StreamValue struct {
-	mu      sync.RWMutex
-	Entries []*StreamEntry
-	LastID  string
-	Length  int64
-	MaxLen  int64
-	Groups  map[string]*ConsumerGroup
+	mu           sync.RWMutex
+	Entries      []*StreamEntry
+	LastID       string
+	MaxDeletedID string
+	Length       int64
+	MaxLen       int64
+	Groups       map[string]*ConsumerGroup
 }
 
 func NewStreamValue(maxLen int64) *StreamValue {
@@ -234,11 +307,12 @@ func (v *StreamValue) Clone() Value {
 	defer v.mu.RUnlock()
 
 	cloned := &StreamValue{
-		Entries: make([]*StreamEntry, len(v.Entries)),
-		LastID:  v.LastID,
-		Length:  v.Length,
-		MaxLen:  v.MaxLen,
-		Groups:  make(map[string]*ConsumerGroup),
+		Entries:      make([]*StreamEntry, len(v.Entries)),
+		LastID:       v.LastID,
+		MaxDeletedID: v.MaxDeletedID,
+		Length:       v.Length,
+		MaxLen:       v.MaxLen,
+		Groups:       make(map[string]*ConsumerGroup),
 	}
 
 	for i, entry := range v.Entries {
@@ -253,8 +327,23 @@ func (v *StreamValue) Clone() Value {
 	}
 
 	for name, group := range v.Groups {
-		cloned.Groups[name] = NewConsumerGroup(group.Name)
-		cloned.Groups[name].LastID = group.LastID
+		group.mu.RLock()
+		clonedGroup := &ConsumerGroup{
+			Name:      group.Name,
+			LastID:    group.LastID,
+			Consumers: make(map[string]*Consumer, len(group.Consumers)),
+			Pending:   make(map[string]*PendingEntry, len(group.Pending)),
+		}
+		for consumerName, consumer := range group.Consumers {
+			consumerCopy := *consumer
+			clonedGroup.Consumers[consumerName] = &consumerCopy
+		}
+		for id, pending := range group.Pending {
+			pendingCopy := *pending
+			clonedGroup.Pending[id] = &pendingCopy
+		}
+		group.mu.RUnlock()
+		cloned.Groups[name] = clonedGroup
 	}
 
 	return cloned
@@ -275,6 +364,11 @@ func (v *StreamValue) Add(id string, fields map[string][]byte) (*StreamEntry, er
 	if lastMS, lastSeq, lastErr := parseStreamIDPair(v.LastID); lastErr == nil {
 		if ms < lastMS || (ms == lastMS && seq <= lastSeq) {
 			return nil, errors.New("ERR The ID specified in XADD is equal or smaller than the target stream top item")
+		}
+	}
+	if delMS, delSeq, delErr := parseStreamIDPair(v.MaxDeletedID); delErr == nil {
+		if ms < delMS || (ms == delMS && seq <= delSeq) {
+			return nil, errors.New("ERR The ID specified in XADD is equal or smaller than the ID of an entry already deleted in the stream")
 		}
 	}
 
@@ -405,18 +499,31 @@ func (v *StreamValue) Trim(maxLen int64, _ bool) int64 {
 	return remove
 }
 
+// TrimByMinID removes entries whose ID is numerically below minID, comparing
+// (ms, seq) pairs — not raw strings, whose lexicographic order diverges from
+// numeric order whenever ID widths differ ("9-0" > "10-0", "1000-9" > "1000-10").
 func (v *StreamValue) TrimByMinID(minID string, _ bool) int64 {
 	v.mu.Lock()
 	defer v.mu.Unlock()
+
+	minMS, minSeq, err := parseStreamIDPair(minID)
+	if err != nil {
+		return 0
+	}
 
 	remaining := make([]*StreamEntry, 0)
 	removed := int64(0)
 
 	for _, entry := range v.Entries {
-		if entry.ID >= minID {
+		eMS, eSeq, err := parseStreamIDPair(entry.ID)
+		if err != nil {
 			remaining = append(remaining, entry)
-		} else {
+			continue
+		}
+		if eMS < minMS || (eMS == minMS && eSeq < minSeq) {
 			removed++
+		} else {
+			remaining = append(remaining, entry)
 		}
 	}
 

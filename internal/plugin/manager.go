@@ -79,10 +79,13 @@ func (m *Manager) CloseAll() error {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
+	var firstErr error
 	for i := len(m.plugins) - 1; i >= 0; i-- {
-		m.plugins[i].Close()
+		if err := m.plugins[i].Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
 	}
-	return nil
+	return firstErr
 }
 
 func (m *Manager) RunBeforeHooks(ctx *command.Context) error {
@@ -160,5 +163,7 @@ func (m *Manager) RunShutdownHooks() error {
 func (m *Manager) Plugins() []Plugin {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.plugins
+	result := make([]Plugin, len(m.plugins))
+	copy(result, m.plugins)
+	return result
 }

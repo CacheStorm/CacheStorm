@@ -42,16 +42,16 @@ func getOrCreateHLL(ctx *Context, key string) *HyperLogLogValue {
 	return nil
 }
 
-func getHLL(ctx *Context, key string) *HyperLogLogValue {
+func getHLL(ctx *Context, key string) (*HyperLogLogValue, error) {
 	entry, exists := ctx.Store.Get(key)
 	if !exists {
-		return nil
+		return nil, nil
 	}
 
 	if hll, ok := entry.Value.(*HyperLogLogValue); ok {
-		return hll
+		return hll, nil
 	}
-	return nil
+	return nil, store.ErrWrongType
 }
 
 func murmurHash(data []byte) uint64 {
@@ -151,7 +151,10 @@ func cmdPFCOUNT(ctx *Context) error {
 
 	if ctx.ArgCount() == 1 {
 		key := ctx.ArgString(0)
-		hll := getHLL(ctx, key)
+		hll, err := getHLL(ctx, key)
+		if err != nil {
+			return ctx.WriteError(err)
+		}
 		if hll == nil {
 			return ctx.WriteInteger(0)
 		}
@@ -160,7 +163,10 @@ func cmdPFCOUNT(ctx *Context) error {
 
 	merged := &HyperLogLogValue{}
 	for i := 0; i < ctx.ArgCount(); i++ {
-		hll := getHLL(ctx, ctx.ArgString(i))
+		hll, err := getHLL(ctx, ctx.ArgString(i))
+		if err != nil {
+			return ctx.WriteError(err)
+		}
 		if hll != nil {
 			merged.Merge(hll)
 		}
@@ -175,16 +181,23 @@ func cmdPFMERGE(ctx *Context) error {
 	}
 
 	destKey := ctx.ArgString(0)
+	sources := make([]*HyperLogLogValue, 0, ctx.ArgCount()-1)
+	for i := 1; i < ctx.ArgCount(); i++ {
+		src, err := getHLL(ctx, ctx.ArgString(i))
+		if err != nil {
+			return ctx.WriteError(err)
+		}
+		if src != nil {
+			sources = append(sources, src)
+		}
+	}
 	dest := getOrCreateHLL(ctx, destKey)
 	if dest == nil {
 		return ctx.WriteError(store.ErrWrongType)
 	}
 
-	for i := 1; i < ctx.ArgCount(); i++ {
-		src := getHLL(ctx, ctx.ArgString(i))
-		if src != nil {
-			dest.Merge(src)
-		}
+	for _, src := range sources {
+		dest.Merge(src)
 	}
 
 	return ctx.WriteOK()

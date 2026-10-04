@@ -82,6 +82,7 @@ func Haversine(lon1, lat1, lon2, lat2 float64) float64 {
 	a := math.Sin(deltaLat/2)*math.Sin(deltaLat/2) +
 		math.Cos(lat1Rad)*math.Cos(lat2Rad)*
 			math.Sin(deltaLon/2)*math.Sin(deltaLon/2)
+	a = math.Max(0, math.Min(1, a))
 	c := 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
 
 	return earthRadius * c

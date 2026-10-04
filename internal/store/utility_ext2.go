@@ -43,8 +43,12 @@ func (al *AuditLog) Log(command, key string, args []string, clientIP, user strin
 		return 0
 	}
 
+	id := int64(1)
+	if n := len(al.Entries); n > 0 {
+		id = al.Entries[n-1].ID + 1
+	}
 	entry := &AuditEntry{
-		ID:        int64(len(al.Entries) + 1),
+		ID:        id,
 		Timestamp: time.Now().UnixMilli(),
 		Command:   command,
 		Key:       key,

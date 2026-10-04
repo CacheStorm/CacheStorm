@@ -287,8 +287,9 @@ func cmdCacheClear(ctx *Context) error {
 	pattern := ctx.ArgString(0)
 
 	if pattern == "*" {
+		deleted := ctx.Store.KeyCount()
 		ctx.Store.Flush()
-		return ctx.WriteInteger(ctx.Store.KeyCount())
+		return ctx.WriteInteger(deleted)
 	}
 
 	keys := ctx.Store.Keys()

@@ -158,39 +158,41 @@ func (w *Writer) WriteValueNoFlush(v *Value) error {
 	case TypeSimpleString:
 		w.wr.WriteByte(byte(TypeSimpleString))
 		w.wr.WriteString(v.Str)
-		w.wr.WriteString("\r\n")
-		return nil
+		_, err := w.wr.WriteString("\r\n")
+		return err
 	case TypeError:
 		w.wr.WriteByte(byte(TypeError))
 		w.wr.WriteString(v.Err)
-		w.wr.WriteString("\r\n")
-		return nil
+		_, err := w.wr.WriteString("\r\n")
+		return err
 	case TypeInteger:
 		w.wr.WriteByte(byte(TypeInteger))
 		w.wr.WriteString(strconv.FormatInt(v.Int, 10))
-		w.wr.WriteString("\r\n")
-		return nil
+		_, err := w.wr.WriteString("\r\n")
+		return err
 	case TypeBulkString:
 		if v.IsNull {
 			w.wr.WriteByte(byte(TypeBulkString))
-			w.wr.WriteString("-1\r\n")
-			return nil
+			_, err := w.wr.WriteString("-1\r\n")
+			return err
 		}
 		w.wr.WriteByte(byte(TypeBulkString))
 		w.wr.WriteString(strconv.Itoa(len(v.Bulk)))
 		w.wr.WriteString("\r\n")
 		w.wr.Write(v.Bulk)
-		w.wr.WriteString("\r\n")
-		return nil
+		_, err := w.wr.WriteString("\r\n")
+		return err
 	case TypeArray:
 		if v.IsNull {
 			w.wr.WriteByte(byte(TypeArray))
-			w.wr.WriteString("-1\r\n")
-			return nil
+			_, err := w.wr.WriteString("-1\r\n")
+			return err
 		}
 		w.wr.WriteByte(byte(TypeArray))
 		w.wr.WriteString(strconv.Itoa(len(v.Array)))
-		w.wr.WriteString("\r\n")
+		if _, err := w.wr.WriteString("\r\n"); err != nil {
+			return err
+		}
 		for _, item := range v.Array {
 			if err := w.WriteValueNoFlush(item); err != nil {
 				return err
@@ -199,8 +201,8 @@ func (w *Writer) WriteValueNoFlush(v *Value) error {
 		return nil
 	case TypeNull:
 		w.wr.WriteByte(byte(TypeNull))
-		w.wr.WriteString("\r\n")
-		return nil
+		_, err := w.wr.WriteString("\r\n")
+		return err
 	default:
 		return ErrInvalidType
 	}

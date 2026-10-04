@@ -5,6 +5,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/cachestorm/cachestorm/internal/acl"
 	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
 )
@@ -36,6 +37,10 @@ type Context struct {
 	Subscriber    *store.Subscriber
 	Username      string
 	RemoteAddr    string
+	// ACLUser is the ACL user this command runs as, resolved from AUTH by the
+	// connection. nil means the connection is running as the permissive default
+	// user, which is how Redis treats unauthenticated clients.
+	ACLUser *acl.User
 }
 
 func NewContext(cmd string, args [][]byte, s *store.Store, w *resp.Writer) *Context {

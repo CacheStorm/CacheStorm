@@ -2,6 +2,7 @@ package store
 
 import (
 	"hash/fnv"
+	"sort"
 	"sync"
 )
 
@@ -239,13 +240,9 @@ func (tk *TopK) List() []string {
 		sorted = append(sorted, kv{k, v})
 	}
 
-	for i := 0; i < len(sorted); i++ {
-		for j := i + 1; j < len(sorted); j++ {
-			if sorted[j].value > sorted[i].value {
-				sorted[i], sorted[j] = sorted[j], sorted[i]
-			}
-		}
-	}
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].value > sorted[j].value
+	})
 
 	result := make([]string, 0, tk.k)
 	for i := 0; i < len(sorted) && i < tk.k; i++ {
@@ -269,13 +266,9 @@ func (tk *TopK) ListWithCount() []map[string]interface{} {
 		sorted = append(sorted, kv{k, v})
 	}
 
-	for i := 0; i < len(sorted); i++ {
-		for j := i + 1; j < len(sorted); j++ {
-			if sorted[j].value > sorted[i].value {
-				sorted[i], sorted[j] = sorted[j], sorted[i]
-			}
-		}
-	}
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].value > sorted[j].value
+	})
 
 	result := make([]map[string]interface{}, 0, tk.k)
 	for i := 0; i < len(sorted) && i < tk.k; i++ {
@@ -348,7 +341,7 @@ func (cf *CuckooFilter) Add(item []byte) bool {
 	}
 
 	i := i1
-	if cf.buckets[i2][0] == 0 {
+	if cf.buckets[i2%cf.size][0] == 0 {
 		i = i2
 	}
 

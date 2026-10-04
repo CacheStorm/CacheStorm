@@ -33,6 +33,11 @@ func cmdEVAL(ctx *Context) error {
 	if err != nil {
 		return ctx.WriteError(ErrNotInteger)
 	}
+	// numkeys is a key COUNT: a negative value would reach make() as a
+	// negative length. Zero is legal (a script with no keys).
+	if numKeys < 0 {
+		return ctx.WriteError(ErrInvalidArg)
+	}
 
 	if ctx.ArgCount() < 2+numKeys {
 		return ctx.WriteError(ErrWrongArgCount)
@@ -69,6 +74,11 @@ func cmdEVALSHA(ctx *Context) error {
 	numKeys, err := strconv.Atoi(ctx.ArgString(1))
 	if err != nil {
 		return ctx.WriteError(ErrNotInteger)
+	}
+	// numkeys is a key COUNT: a negative value would reach make() as a
+	// negative length. Zero is legal (a script with no keys).
+	if numKeys < 0 {
+		return ctx.WriteError(ErrInvalidArg)
 	}
 
 	if ctx.ArgCount() < 2+numKeys {

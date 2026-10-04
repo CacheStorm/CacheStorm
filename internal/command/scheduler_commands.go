@@ -2,6 +2,7 @@ package command
 
 import (
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
@@ -54,6 +55,9 @@ func cmdJOBCREATE(ctx *Context) error {
 	name := ctx.ArgString(1)
 	command := ctx.ArgString(2)
 	intervalMs := parseInt64(ctx.ArgString(3))
+	if intervalMs > math.MaxInt64/int64(time.Millisecond) || intervalMs < math.MinInt64/int64(time.Millisecond) {
+		return ctx.WriteError(fmt.Errorf("ERR job interval is out of range"))
+	}
 
 	job := store.GlobalJobScheduler.Create(id, name, command, time.Duration(intervalMs)*time.Millisecond)
 
@@ -219,6 +223,9 @@ func cmdJOBUPDATE(ctx *Context) error {
 
 	id := ctx.ArgString(0)
 	intervalMs := parseInt64(ctx.ArgString(1))
+	if intervalMs > math.MaxInt64/int64(time.Millisecond) || intervalMs < math.MinInt64/int64(time.Millisecond) {
+		return ctx.WriteError(fmt.Errorf("ERR job interval is out of range"))
+	}
 
 	if store.GlobalJobScheduler.UpdateInterval(id, time.Duration(intervalMs)*time.Millisecond) {
 		return ctx.WriteOK()

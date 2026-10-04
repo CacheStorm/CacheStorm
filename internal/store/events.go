@@ -1,6 +1,7 @@
 package store
 
 import (
+	"math/rand"
 	"sync"
 	"time"
 )
@@ -97,6 +98,9 @@ func (em *EventManager) Unsubscribe(name string, ch chan Event) {
 		for i, listener := range listeners {
 			if listener == ch {
 				em.Listeners[name] = append(listeners[:i], listeners[i+1:]...)
+				if len(em.Listeners[name]) == 0 {
+					delete(em.Listeners, name)
+				}
 				close(ch)
 				break
 			}
@@ -219,7 +223,7 @@ func generateID() string {
 	const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	id := make([]byte, 16)
 	for i := range id {
-		id[i] = chars[absInt(fastRand(int64(len(chars))))]
+		id[i] = chars[rand.Intn(len(chars))]
 	}
 	return string(id)
 }

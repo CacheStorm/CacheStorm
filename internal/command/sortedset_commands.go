@@ -394,6 +394,10 @@ func cmdZRANGE(ctx *Context) error {
 		}
 	}
 
+	if byLex && (!validLexRangeItem(startStr) || !validLexRangeItem(stopStr)) {
+		return ctx.WriteError(fmt.Errorf("ERR min or max not valid string range item"))
+	}
+
 	zset, err := getSortedSet(ctx, key)
 	if err != nil {
 		return ctx.WriteError(err)
@@ -413,31 +417,11 @@ func cmdZRANGE(ctx *Context) error {
 			return ctx.WriteError(err)
 		}
 		entries = zset.GetByScoreRange(minScore, minExclusive, maxScore, maxExclusive, rev)
-		if offset > 0 || count >= 0 {
-			start := offset
-			if start > len(entries) {
-				start = len(entries)
-			}
-			end := len(entries)
-			if count >= 0 && start+count < end {
-				end = start + count
-			}
-			entries = entries[start:end]
-		}
+		entries = applyLimit(entries, offset, count)
 	} else if byLex {
 		minLex, minExclusive, maxLex, maxExclusive := parseLexRange(startStr, stopStr)
 		entries = zset.GetByLexRange(minLex, minExclusive, maxLex, maxExclusive, rev)
-		if offset > 0 || count >= 0 {
-			start := offset
-			if start > len(entries) {
-				start = len(entries)
-			}
-			end := len(entries)
-			if count >= 0 && start+count < end {
-				end = start + count
-			}
-			entries = entries[start:end]
-		}
+		entries = applyLimit(entries, offset, count)
 	} else {
 		start, err := strconv.Atoi(startStr)
 		if err != nil {
@@ -493,6 +477,10 @@ func parseScoreRange(minStr, maxStr string) (min float64, minExclusive bool, max
 	}
 
 	return
+}
+
+func validLexRangeItem(item string) bool {
+	return item == "-" || item == "+" || strings.HasPrefix(item, "[") || strings.HasPrefix(item, "(")
 }
 
 func parseLexRange(minStr, maxStr string) (min string, minExclusive bool, max string, maxExclusive bool) {
@@ -599,34 +587,16 @@ func cmdZRANGEBYSCORE(ctx *Context) error {
 }
 
 // applyLimit applies a Redis "LIMIT offset count" window to a sorted slice.
-// A negative offset counts back from the end, and a negative count means
-// "all remaining" (Redis ZRANGE/ZRANGEBYSCORE/ZRANGEBYLEX semantics).
+// A negative offset returns no entries, and a negative count means "all remaining".
 func applyLimit(entries []store.SortedEntry, offset, count int) []store.SortedEntry {
-	if offset == 0 && count < 0 {
-		return entries
+	if offset < 0 || offset >= len(entries) || count == 0 {
+		return nil
 	}
-
-	start := offset
-	if start < 0 {
-		start = len(entries) + start
-		if start < 0 {
-			start = 0
-		}
+	end := len(entries)
+	if count > 0 && count < end-offset {
+		end = offset + count
 	}
-	if start > len(entries) {
-		start = len(entries)
-	}
-	if count < 0 {
-		return entries[start:]
-	}
-	end := start + count
-	if end > len(entries) {
-		end = len(entries)
-	}
-	if end < start {
-		end = start
-	}
-	return entries[start:end]
+	return entries[offset:end]
 }
 
 func cmdZRANK(ctx *Context) error {
@@ -931,6 +901,10 @@ func cmdZLEXCOUNT(ctx *Context) error {
 	min := ctx.ArgString(1)
 	max := ctx.ArgString(2)
 
+	if !validLexRangeItem(min) || !validLexRangeItem(max) {
+		return ctx.WriteError(fmt.Errorf("ERR min or max not valid string range item"))
+	}
+
 	zset, err := getSortedSet(ctx, key)
 	if err != nil {
 		return ctx.WriteError(err)
@@ -978,14 +952,20 @@ func cmdZRANGEBYLEX(ctx *Context) error {
 			i += 2
 		case "REV":
 			rev = true
+		default:
+			return ctx.WriteError(ErrSyntaxError)
 		}
+	}
+
+	if !validLexRangeItem(min) || !validLexRangeItem(max) {
+		return ctx.WriteError(fmt.Errorf("ERR min or max not valid string range item"))
 	}
 
 	zset, err := getSortedSet(ctx, key)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
-	if zset == nil {
+	if zset == nil || count == 0 || offset < 0 {
 		return ctx.WriteArray([]*resp.Value{})
 	}
 
@@ -1009,6 +989,10 @@ func cmdZREMRANGEBYLEX(ctx *Context) error {
 	key := ctx.ArgString(0)
 	min := ctx.ArgString(1)
 	max := ctx.ArgString(2)
+
+	if !validLexRangeItem(min) || !validLexRangeItem(max) {
+		return ctx.WriteError(fmt.Errorf("ERR min or max not valid string range item"))
+	}
 
 	zset, err := getSortedSet(ctx, key)
 	if err != nil {
@@ -2154,14 +2138,20 @@ func cmdZREVRANGEBYLEX(ctx *Context) error {
 				return ctx.WriteError(ErrNotInteger)
 			}
 			i += 2
+		} else {
+			return ctx.WriteError(ErrSyntaxError)
 		}
+	}
+
+	if !validLexRangeItem(min) || !validLexRangeItem(max) {
+		return ctx.WriteError(fmt.Errorf("ERR min or max not valid string range item"))
 	}
 
 	zset, err := getSortedSet(ctx, key)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
-	if zset == nil {
+	if zset == nil || count == 0 || offset < 0 {
 		return ctx.WriteArray([]*resp.Value{})
 	}
 
@@ -2170,8 +2160,8 @@ func cmdZREVRANGEBYLEX(ctx *Context) error {
 	zset.RUnlock()
 
 	results := make([]*resp.Value, 0, len(members))
-	for i := len(members) - 1; i >= 0; i-- {
-		results = append(results, resp.BulkString(members[i]))
+	for _, member := range members {
+		results = append(results, resp.BulkString(member))
 	}
 
 	return ctx.WriteArray(results)

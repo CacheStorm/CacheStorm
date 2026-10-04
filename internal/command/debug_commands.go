@@ -123,9 +123,15 @@ func cmdOBJECT(ctx *Context) error {
 	subCmd := strings.ToUpper(ctx.ArgString(0))
 	key := ctx.ArgString(1)
 
-	entry, exists := ctx.Store.Get(key)
+	entry, exists := ctx.Store.GetShard(key).Get(key)
 	if !exists {
 		return ctx.WriteNull()
+	}
+	if entry.IsExpired() {
+		entry, exists = ctx.Store.Get(key)
+		if !exists {
+			return ctx.WriteNull()
+		}
 	}
 
 	switch subCmd {

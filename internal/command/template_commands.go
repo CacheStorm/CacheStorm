@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
 )
@@ -437,6 +438,9 @@ func cmdEVALREGEXMATCH(ctx *Context) error {
 }
 
 func findMatches(pattern, input string) []string {
+	if pattern == "" {
+		return make([]string, utf8.RuneCountInString(input)+1)
+	}
 	matches := make([]string, 0)
 
 	start := 0

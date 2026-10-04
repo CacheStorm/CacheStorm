@@ -660,6 +660,9 @@ func cmdSSCAN(ctx *Context) error {
 			if err != nil {
 				return ctx.WriteError(ErrNotInteger)
 			}
+			if count <= 0 {
+				return ctx.WriteError(ErrInvalidArg)
+			}
 		case "MATCH":
 			i++
 			if i >= ctx.ArgCount() {
@@ -694,9 +697,9 @@ func cmdSSCAN(ctx *Context) error {
 		start = 0
 	}
 
-	end := start + count
-	if end > len(members) {
-		end = len(members)
+	end := len(members)
+	if count < end-start {
+		end = start + count
 	}
 
 	nextCursor := 0

@@ -21,8 +21,12 @@ func cmdSELECT(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
-	if _, err := strconv.Atoi(ctx.ArgString(0)); err != nil {
+	index, err := strconv.Atoi(ctx.ArgString(0))
+	if err != nil {
 		return ctx.WriteError(ErrNotInteger)
+	}
+	if index < 0 {
+		return ctx.WriteError(ErrInvalidArg)
 	}
 
 	return ctx.WriteOK()

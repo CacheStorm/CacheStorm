@@ -183,7 +183,7 @@ plugins:
     # Password for AUTH command. Empty = no password.
     password: ""
 
-  # SlowLog plugin — log slow queries.
+  # SlowLog — log slow queries.
   slowlog:
     enabled: true
     # Commands taking longer than this are logged.

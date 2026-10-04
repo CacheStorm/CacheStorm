@@ -61,6 +61,10 @@ func (w *AOFWriter) Start() error {
 	if !w.config.Enabled {
 		return nil
 	}
+	if w.running.Load() {
+		return nil
+	}
+	w.stopCh = make(chan struct{})
 
 	path := filepath.Join(w.config.DataDir, w.config.Filename)
 
@@ -327,7 +331,10 @@ func (rw *AOFRewriter) Rewrite(aofPath string) error {
 func (rw *AOFRewriter) writeEntry(w *bufio.Writer, key string, entry interface{}) error {
 	switch v := entry.(type) {
 	case *store.Entry:
-		return rw.writeValueCommands(w, key, v.Value)
+		if err := rw.writeValueCommands(w, key, v.Value); err != nil {
+			return err
+		}
+		return rw.writeExpiry(w, key, v.ExpiresAt)
 	case store.Value:
 		return rw.writeValueCommands(w, key, v)
 	case string:
@@ -337,6 +344,35 @@ func (rw *AOFRewriter) writeEntry(w *bufio.Writer, key string, entry interface{}
 	default:
 		return rw.writeCommand(w, "SET", key, fmt.Sprintf("%v", v))
 	}
+}
+
+// writeStreamGroups re-emits a stream's consumer groups as XGROUP CREATE so a
+// rewrite preserves them. Each group is created at its current read position
+// (LastID); pending entries are runtime state and are not replayed.
+func (rw *AOFRewriter) writeStreamGroups(w *bufio.Writer, key string, sv *store.StreamValue) error {
+	for name, group := range sv.Groups {
+		if group == nil {
+			continue
+		}
+		lastID := group.LastID
+		if lastID == "" {
+			lastID = "0-0"
+		}
+		if err := rw.writeCommand(w, "XGROUP", "CREATE", key, name, lastID, "MKSTREAM"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// writeExpiry re-emits a key's absolute expiry after its value commands.
+// Entry.ExpiresAt is Unix nanoseconds; PEXPIREAT takes milliseconds. Without
+// this a rewrite drops every TTL and silently turns expiring keys permanent.
+func (rw *AOFRewriter) writeExpiry(w *bufio.Writer, key string, expiresAt int64) error {
+	if expiresAt <= 0 {
+		return nil
+	}
+	return rw.writeCommand(w, "PEXPIREAT", key, strconv.FormatInt(expiresAt/int64(time.Millisecond), 10))
 }
 
 // writeCommand appends one RESP array command to the rewrite buffer.
@@ -417,6 +453,14 @@ func (rw *AOFRewriter) writeValueCommands(w *bufio.Writer, key string, value sto
 				return err
 			}
 		}
+		// Consumer groups are stream state, not entry data: without these the
+		// entries replay fine but every group is lost, so a client resuming a
+		// group gets NOGROUP and the group's read position silently resets.
+		// Groups are emitted after the entries so XGROUP CREATE finds the
+		// stream already present.
+		if err := rw.writeStreamGroups(w, key, vt); err != nil {
+			return err
+		}
 		return nil
 
 	case *store.TimeSeriesValue:
@@ -435,9 +479,21 @@ func (rw *AOFRewriter) writeValueCommands(w *bufio.Writer, key string, value sto
 			return err
 		}
 		for _, sample := range vt.Samples {
-			if err := rw.writeCommand(w, "TS.ADD", key,
+			addArgs := []string{
+				key,
 				strconv.FormatInt(sample.Timestamp, 10),
-				strconv.FormatFloat(sample.Value, 'f', -1, 64)); err != nil {
+				strconv.FormatFloat(sample.Value, 'f', -1, 64),
+			}
+			// LABELS must come last: cmdTSADD reads label key/value pairs from
+			// the keyword to the end of the argument list, so anything after it
+			// would be swallowed as another label.
+			if len(sample.Labels) > 0 {
+				addArgs = append(addArgs, "LABELS")
+				for k, val := range sample.Labels {
+					addArgs = append(addArgs, k, val)
+				}
+			}
+			if err := rw.writeCommand(w, "TS.ADD", addArgs...); err != nil {
 				return err
 			}
 		}
@@ -496,6 +552,8 @@ func (m *AOFManager) Stop() {
 }
 
 func (m *AOFManager) Append(cmd string, args [][]byte) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	return m.writer.Append(cmd, args)
 }
 
@@ -509,7 +567,21 @@ func (m *AOFManager) BGREWRITEAOF() error {
 	defer m.mu.Unlock()
 
 	path := filepath.Join(m.config.DataDir, m.config.Filename)
-	return m.rewriter.Rewrite(path)
+	wasRunning := m.writer.running.Load()
+	if wasRunning {
+		m.writer.Stop()
+	}
+
+	rewriteErr := m.rewriter.Rewrite(path)
+	if wasRunning {
+		if startErr := m.writer.Start(); startErr != nil {
+			if rewriteErr != nil {
+				return fmt.Errorf("%v; failed to restart AOF writer: %w", rewriteErr, startErr)
+			}
+			return startErr
+		}
+	}
+	return rewriteErr
 }
 
 func (m *AOFManager) Size() int64 {

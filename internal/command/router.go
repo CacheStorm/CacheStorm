@@ -117,6 +117,15 @@ func (r *Router) Execute(ctx *Context) error {
 		return ctx.Writer.WriteError("NOAUTH Authentication required.")
 	}
 
+	// Enforce the per-connection ACL user's command and key permissions. A
+	// connection that never ran ACL AUTH has no ACLUser and keeps the
+	// permissive default-user behaviour. enforceACL writes its own NOPERM
+	// reply, so the router must stop on the bool and return nil — returning
+	// the error would make the caller write a second reply.
+	if enforceACL(ctx, upperCmd) {
+		return nil
+	}
+
 	// MULTI queues commands for atomic execution at EXEC.
 	if ctx.Transaction != nil && ctx.Transaction.IsActive() && !isTransactionControl(ctx.Command) {
 		ctx.Transaction.Queue(ctx.Command, ctx.Args)

@@ -80,8 +80,11 @@ func cmdTDIGESTADD(ctx *Context) error {
 
 	if !exists {
 		tdigestsMu.Lock()
-		td = store.NewTDigest(100)
-		tdigests[key] = td
+		td, exists = tdigests[key]
+		if !exists {
+			td = store.NewTDigest(100)
+			tdigests[key] = td
+		}
 		tdigestsMu.Unlock()
 	}
 

@@ -1,6 +1,7 @@
 package command
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"math"
@@ -42,7 +43,11 @@ func NewTransaction() *Transaction {
 func (t *Transaction) Queue(cmd string, args [][]byte) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.queued = append(t.queued, queuedCommand{cmd: cmd, args: args})
+	argsCopy := make([][]byte, len(args))
+	for i, arg := range args {
+		argsCopy[i] = bytes.Clone(arg)
+	}
+	t.queued = append(t.queued, queuedCommand{cmd: cmd, args: argsCopy})
 }
 
 func (t *Transaction) GetQueued() []queuedCommand {

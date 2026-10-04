@@ -65,6 +65,9 @@ func GetBuffer(size int) *bytes.Buffer {
 }
 
 func PutBuffer(buf *bytes.Buffer) {
+	if buf == nil {
+		return
+	}
 	switch {
 	case buf.Cap() <= 1024:
 		smallPool.Put(buf)

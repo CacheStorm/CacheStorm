@@ -410,6 +410,7 @@ func (c *Cluster) Rebalance() map[string]interface{} {
 		return map[string]interface{}{"error": "no primary nodes available"}
 	}
 
+	c.slots = [NumSlots]*SlotInfo{}
 	slotsPerNode := 16384 / len(primaries)
 	remainder := 16384 % len(primaries)
 
@@ -425,12 +426,6 @@ func (c *Cluster) Rebalance() map[string]interface{} {
 		newSlots := []SlotRange{}
 		if count > 0 {
 			newSlots = append(newSlots, SlotRange{Start: slot, End: slot + uint16(count) - 1})
-		}
-
-		for _, sr := range node.Slots {
-			for j := sr.Start; j <= sr.End; j++ {
-				c.slots[j] = nil
-			}
 		}
 
 		node.Slots = newSlots

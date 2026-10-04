@@ -1,6 +1,7 @@
 package store
 
 import (
+	"maps"
 	"sort"
 	"sync"
 	"time"
@@ -44,9 +45,12 @@ func (v *TimeSeriesValue) Clone() Value {
 	defer v.mu.RUnlock()
 	samples := make([]TimeSeriesSample, len(v.Samples))
 	copy(samples, v.Samples)
+	for i := range samples {
+		samples[i].Labels = maps.Clone(samples[i].Labels)
+	}
 	return &TimeSeriesValue{
 		Samples:   samples,
-		Labels:    v.Labels,
+		Labels:    maps.Clone(v.Labels),
 		Retention: v.Retention,
 	}
 }
@@ -94,6 +98,17 @@ func (v *TimeSeriesValue) AddWithLabels(timestamp int64, value float64, labels m
 
 	for k, val := range labels {
 		v.Labels[k] = val
+	}
+
+	if v.Retention > 0 {
+		cutoff := time.Now().Add(-v.Retention).UnixMilli()
+		newSamples := make([]TimeSeriesSample, 0)
+		for _, s := range v.Samples {
+			if s.Timestamp >= cutoff {
+				newSamples = append(newSamples, s)
+			}
+		}
+		v.Samples = newSamples
 	}
 
 	return timestamp
@@ -306,7 +321,7 @@ func (m *TimeSeriesManager) Create(key string, retention time.Duration, labels m
 	}
 
 	ts := NewTimeSeriesValue(retention)
-	ts.Labels = labels
+	ts.SetLabels(labels)
 	m.series[key] = ts
 
 	for k, v := range labels {

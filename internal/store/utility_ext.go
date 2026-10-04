@@ -146,7 +146,11 @@ func (js *JobScheduler) UpdateInterval(id string, interval time.Duration) bool {
 		return false
 	}
 	job.Interval = interval
-	job.NextRun = job.LastRun.Add(interval)
+	base := job.LastRun
+	if base.IsZero() {
+		base = time.Now()
+	}
+	job.NextRun = base.Add(interval)
 	return true
 }
 

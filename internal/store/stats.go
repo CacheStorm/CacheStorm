@@ -242,13 +242,16 @@ func (td *TDigest) Reset() {
 }
 
 func (td *TDigest) Merge(other *TDigest) {
+	other.mu.RLock()
+	means := append([]float64(nil), other.Means...)
+	counts := append([]float64(nil), other.Counts...)
+	other.mu.RUnlock()
+
 	td.mu.Lock()
 	defer td.mu.Unlock()
-	other.mu.RLock()
-	defer other.mu.RUnlock()
 
-	for i, m := range other.Means {
-		td.addUnsafe(m, other.Counts[i])
+	for i, m := range means {
+		td.addUnsafe(m, counts[i])
 	}
 }
 

@@ -163,7 +163,7 @@ func (ec *EvictionController) selectLFU() string {
 func (ec *EvictionController) selectVolatileLRU() string {
 	candidates := ec.sampleVolatileKeys()
 	if len(candidates) == 0 {
-		return ec.selectLRU()
+		return ""
 	}
 
 	sort.Slice(candidates, func(i, j int) bool {

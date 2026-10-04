@@ -6,6 +6,7 @@ import (
 	"crypto/sha1"
 	"crypto/sha256"
 	"crypto/sha512"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"hash"
@@ -354,50 +355,14 @@ func base64Encode(data []byte) string {
 }
 
 func base64Decode(encoded string) ([]byte, error) {
-	const base64Chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-
-	decodeMap := make(map[byte]int)
-	for i := 0; i < 64; i++ {
-		decodeMap[base64Chars[i]] = i
-	}
-
-	encoded = strings.ReplaceAll(encoded, "=", "")
 	encoded = strings.ReplaceAll(encoded, "\n", "")
 	encoded = strings.ReplaceAll(encoded, "\r", "")
 	encoded = strings.ReplaceAll(encoded, " ", "")
 
-	if len(encoded)%4 != 0 {
+	result, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
 		return nil, ErrInvalidBase64
 	}
-
-	result := make([]byte, 0, len(encoded)*3/4)
-
-	for i := 0; i < len(encoded); i += 4 {
-		var n uint32
-		padding := 0
-
-		for j := 0; j < 4 && i+j < len(encoded); j++ {
-			c := encoded[i+j]
-			if c == '=' {
-				padding++
-				continue
-			}
-			val, ok := decodeMap[c]
-			if !ok {
-				return nil, ErrInvalidBase64
-			}
-			n |= uint32(val) << uint(18-j*6)
-		}
-
-		result = append(result, byte(n>>16&0xFF))
-		if padding < 2 {
-			result = append(result, byte(n>>8&0xFF))
-		}
-		if padding < 1 {
-			result = append(result, byte(n&0xFF))
-		}
-	}
-
 	return result, nil
 }
 

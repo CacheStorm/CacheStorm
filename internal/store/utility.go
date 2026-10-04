@@ -2,6 +2,7 @@ package store
 
 import (
 	"runtime"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -371,19 +372,10 @@ func (s *Sequence) formatID(n int64) string {
 }
 
 func formatNumber(n int64, padding int) string {
-	numStr := ""
+	numStr := strconv.FormatInt(n, 10)
 	neg := n < 0
 	if neg {
-		n = -n
-	}
-
-	for n > 0 {
-		numStr = string(rune('0'+n%10)) + numStr
-		n /= 10
-	}
-
-	if numStr == "" {
-		numStr = "0"
+		numStr = numStr[1:]
 	}
 
 	for len(numStr) < padding {

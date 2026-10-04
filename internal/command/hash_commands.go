@@ -477,7 +477,7 @@ func cmdHSCAN(ctx *Context) error {
 
 	key := ctx.ArgString(0)
 	cursor, err := strconv.Atoi(ctx.ArgString(1))
-	if err != nil {
+	if err != nil || cursor < 0 {
 		return ctx.WriteError(ErrNotInteger)
 	}
 
@@ -561,6 +561,7 @@ func cmdHRANDFIELD(ctx *Context) error {
 
 	key := ctx.ArgString(0)
 	count := 1
+	countProvided := false
 	withValues := false
 
 	for i := 1; i < ctx.ArgCount(); i++ {
@@ -569,6 +570,7 @@ func cmdHRANDFIELD(ctx *Context) error {
 		case "WITHVALUES":
 			withValues = true
 		default:
+			countProvided = true
 			var err error
 			count, err = strconv.Atoi(ctx.ArgString(i))
 			if err != nil {
@@ -582,6 +584,10 @@ func cmdHRANDFIELD(ctx *Context) error {
 		return ctx.WriteError(err)
 	}
 	if hash == nil {
+		if countProvided {
+			// The count form replies an empty array even for a missing key.
+			return ctx.WriteArray([]*resp.Value{})
+		}
 		return ctx.WriteNullBulkString()
 	}
 
@@ -592,8 +598,14 @@ func cmdHRANDFIELD(ctx *Context) error {
 	}
 	hash.RUnlock()
 
-	if count == 0 || len(fields) == 0 {
+	if len(fields) == 0 {
+		if countProvided {
+			return ctx.WriteArray([]*resp.Value{})
+		}
 		return ctx.WriteNullBulkString()
+	}
+	if count == 0 {
+		return ctx.WriteArray([]*resp.Value{})
 	}
 
 	if count == 1 && !withValues {
@@ -602,7 +614,18 @@ func cmdHRANDFIELD(ctx *Context) error {
 
 	hash.RLock()
 	defer hash.RUnlock()
-	result := make([]*resp.Value, 0, count*2)
+	// A negative count is supported (see the branch below) but its magnitude
+	// is caller-controlled: bound the pre-allocation (append grows as needed)
+	// and cap the loop so an absurd magnitude cannot overflow the capacity
+	// math or run for years.
+	capacity := count * 2
+	if capacity < 0 {
+		capacity = -capacity
+	}
+	if capacity > 8192 {
+		capacity = 8192
+	}
+	result := make([]*resp.Value, 0, capacity)
 	if count > 0 {
 		for i := 0; i < count && i < len(fields); i++ {
 			field := fields[i]
@@ -612,7 +635,13 @@ func cmdHRANDFIELD(ctx *Context) error {
 			}
 		}
 	} else {
-		for i := 0; i < -count; i++ {
+		limit := -count
+		if limit < 0 {
+			limit = 0
+		} else if limit > 1000000 {
+			limit = 1000000
+		}
+		for i := 0; i < limit; i++ {
 			field := fields[i%len(fields)]
 			result = append(result, resp.BulkString(field))
 			if withValues {
@@ -694,15 +723,14 @@ func cmdHGETEX(ctx *Context) error {
 	for i := 1; i < ctx.ArgCount(); i++ {
 		arg := strings.ToUpper(ctx.ArgString(i))
 		switch arg {
-		case "EX", "PX", "EXAT", "PXAT", "PERSIST":
-			break
-		default:
-			if strings.HasPrefix(arg, "F") && i+1 < ctx.ArgCount() {
-				i++
-				fields = append(fields, ctx.ArgString(i))
-			} else if !strings.ContainsAny(arg, "0123456789") {
-				fields = append(fields, ctx.ArgString(i))
+		case "EX", "PX", "EXAT", "PXAT":
+			i++
+			if i >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
 			}
+		case "PERSIST":
+		default:
+			fields = append(fields, ctx.ArgString(i))
 		}
 	}
 
@@ -746,6 +774,32 @@ func cmdHGETEX(ctx *Context) error {
 			ctx.Store.SetTTL(key, time.Duration(ms)*time.Millisecond)
 		case "PERSIST":
 			ctx.Store.Persist(key)
+		case "EXAT":
+			i++
+			if i >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			ts, err := strconv.ParseInt(ctx.ArgString(i), 10, 64)
+			if err != nil {
+				return ctx.WriteError(ErrNotInteger)
+			}
+			if ts > maxExpireAtSeconds || ts < -maxExpireAtSeconds {
+				return ctx.WriteError(errInvalidExpireTime)
+			}
+			ctx.Store.SetExpiresAt(key, time.Unix(ts, 0).UnixNano())
+		case "PXAT":
+			i++
+			if i >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			ms, err := strconv.ParseInt(ctx.ArgString(i), 10, 64)
+			if err != nil {
+				return ctx.WriteError(ErrNotInteger)
+			}
+			if ms > maxExpireAtMillis || ms < -maxExpireAtMillis {
+				return ctx.WriteError(errInvalidExpireTime)
+			}
+			ctx.Store.SetExpiresAt(key, time.Unix(0, ms*int64(time.Millisecond)).UnixNano())
 		}
 	}
 

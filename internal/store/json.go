@@ -3,6 +3,7 @@ package store
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"sync"
 )
 
@@ -82,19 +83,11 @@ func getByPath(data interface{}, path string) (interface{}, error) {
 				return nil, nil
 			}
 		case []interface{}:
-			idx := 0
-			for _, c := range part {
-				if c >= '0' && c <= '9' {
-					idx = idx*10 + int(c-'0')
-				} else {
-					return nil, nil
-				}
-			}
-			if idx >= 0 && idx < len(v) {
-				current = v[idx]
-			} else {
+			idx, err := strconv.ParseUint(part, 10, 64)
+			if err != nil || idx >= uint64(len(v)) {
 				return nil, nil
 			}
+			current = v[idx]
 		default:
 			return nil, nil
 		}
@@ -205,6 +198,10 @@ func setByPath(data interface{}, path string, value interface{}) error {
 		return fmt.Errorf("ERR JSON path exceeds maximum depth of %d", maxJSONPathDepth)
 	}
 
+	return setByPathParts(data, parts, value)
+}
+
+func setByPathParts(data interface{}, parts []string, value interface{}) error {
 	if d, ok := data.(map[string]interface{}); ok {
 		if len(parts) == 1 {
 			d[parts[0]] = value
@@ -213,7 +210,7 @@ func setByPath(data interface{}, path string, value interface{}) error {
 		if _, ok := d[parts[0]]; !ok {
 			d[parts[0]] = make(map[string]interface{})
 		}
-		return setByPath(d[parts[0]], path[len(parts[0])+1:], value)
+		return setByPathParts(d[parts[0]], parts[1:], value)
 	}
 
 	return nil
@@ -361,9 +358,19 @@ func (v *JSONValue) ArrAppend(path string, values []interface{}) (int, error) {
 	}
 
 	parts := parseJSONPath(path)
-	length, err := arrAppendPath(data, parts, values)
-	if err != nil {
-		return 0, err
+	var length int
+	if len(parts) == 0 {
+		if arr, ok := data.([]interface{}); ok {
+			updated := append(arr, values...)
+			data = updated
+			length = len(updated)
+		}
+	} else {
+		var err error
+		length, err = arrAppendPath(data, parts, values)
+		if err != nil {
+			return 0, err
+		}
 	}
 
 	b, err := json.Marshal(data)

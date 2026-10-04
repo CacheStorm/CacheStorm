@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"strconv"
 	"sync"
 	"time"
 )
@@ -119,6 +120,11 @@ func (c *Cluster) RemoveNode(id string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.nodes, id)
+	for slot, info := range c.slots {
+		if info != nil && info.Primary != nil && info.Primary.ID == id {
+			c.slots[slot] = nil
+		}
+	}
 }
 
 func (c *Cluster) Self() *Node {
@@ -220,7 +226,7 @@ func (c *Cluster) GetClusterNodes() []map[string]interface{} {
 			if slots != "" {
 				slots += " "
 			}
-			slots += string(rune(sr.Start)) + "-" + string(rune(sr.End))
+			slots += strconv.Itoa(int(sr.Start)) + "-" + strconv.Itoa(int(sr.End))
 		}
 
 		role := "master"
@@ -230,7 +236,7 @@ func (c *Cluster) GetClusterNodes() []map[string]interface{} {
 
 		result = append(result, map[string]interface{}{
 			"id":    n.ID,
-			"addr":  n.Addr + ":" + string(rune(n.Port)),
+			"addr":  n.Addr + ":" + strconv.Itoa(n.Port),
 			"role":  role,
 			"slots": slots,
 			"state": n.State.String(),

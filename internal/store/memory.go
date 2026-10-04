@@ -73,6 +73,9 @@ func (mt *MemoryTracker) CanAllocate(bytes int64) bool {
 
 	current := mt.currentUsage.Load()
 	newUsage := current + bytes
+	if bytes > 0 && newUsage < current {
+		return false
+	}
 
 	return float64(newUsage)/float64(mt.maxMemory) < mt.emergencyPct
 }

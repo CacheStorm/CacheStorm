@@ -76,13 +76,17 @@ func cmdADDTAG(ctx *Context) error {
 	}
 
 	added := 0
+	newTags := make([]string, 0, ctx.ArgCount()-1)
 	for i := 1; i < ctx.ArgCount(); i++ {
 		tag := ctx.ArgString(i)
 		if _, exists := existingTags[tag]; !exists {
+			existingTags[tag] = struct{}{}
 			entry.Tags = append(entry.Tags, tag)
+			newTags = append(newTags, tag)
 			added++
 		}
 	}
+	ctx.Store.GetTagIndex().AddTags(key, newTags)
 
 	return ctx.WriteInteger(int64(added))
 }
@@ -113,6 +117,9 @@ func cmdREMTAG(ctx *Context) error {
 		}
 	}
 	entry.Tags = newTags
+	for tag := range removeTags {
+		ctx.Store.GetTagIndex().RemoveTags(key, []string{tag})
+	}
 
 	return ctx.WriteInteger(int64(removed))
 }

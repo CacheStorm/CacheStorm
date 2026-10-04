@@ -1,6 +1,7 @@
 package store
 
 import (
+	"slices"
 	"sync"
 	"time"
 )
@@ -113,6 +114,9 @@ func (wm *WorkflowManager) CreateFromTemplate(templateName, id string) (*Workflo
 
 	steps := make([]WorkflowStep, len(template.Steps))
 	copy(steps, template.Steps)
+	for i := range steps {
+		steps[i].Args = slices.Clone(steps[i].Args)
+	}
 
 	workflow := &Workflow{
 		ID:        id,
@@ -448,11 +452,12 @@ func (sm *StateMachine) Info() map[string]interface{} {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 
+	state, ok := sm.States[sm.Current]
 	return map[string]interface{}{
 		"name":     sm.Name,
 		"current":  sm.Current,
 		"initial":  sm.Initial,
-		"is_final": sm.IsFinal(),
+		"is_final": ok && state.Final,
 	}
 }
 

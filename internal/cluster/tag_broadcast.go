@@ -54,7 +54,7 @@ func (tb *TagBroadcaster) Broadcast(tag string, keys []string) error {
 
 	tb.cleanOldMessages()
 
-	msgID := msg.OriginNode + string(rune(msg.Timestamp))
+	msgID := fmt.Sprintf("%s:%d", msg.OriginNode, msg.Timestamp)
 	tb.mu.Lock()
 	tb.recentMsgs[msgID] = msg.Timestamp
 	tb.mu.Unlock()
@@ -102,7 +102,7 @@ func (tb *TagBroadcaster) HandleMessage(data []byte) error {
 		return nil
 	}
 
-	msgID := msg.OriginNode + string(rune(msg.Timestamp))
+	msgID := fmt.Sprintf("%s:%d", msg.OriginNode, msg.Timestamp)
 	tb.mu.RLock()
 	_, seen := tb.recentMsgs[msgID]
 	tb.mu.RUnlock()

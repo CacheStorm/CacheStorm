@@ -293,10 +293,17 @@ func cmdCFRESERVE(ctx *Context) error {
 
 	key := ctx.ArgString(0)
 	capacity := int(parseInt64(ctx.ArgString(1)))
+	if capacity <= 0 {
+		return ctx.WriteError(fmt.Errorf("ERR capacity must be positive"))
+	}
 	bucketSize := uint(2)
 
 	if ctx.ArgCount() >= 3 {
-		bucketSize = uint(parseInt64(ctx.ArgString(2)))
+		size := parseInt64(ctx.ArgString(2))
+		if size <= 0 {
+			return ctx.WriteError(fmt.Errorf("ERR bucket size must be positive"))
+		}
+		bucketSize = uint(size)
 	}
 
 	probabilisticMu.Lock()

@@ -39,6 +39,7 @@ type Gossip struct {
 	interval   time.Duration
 	knownNodes map[string]bool // Track known node IDs for validation
 	listener   net.Listener
+	conns      map[net.Conn]struct{}
 }
 
 type gossipPeer struct {
@@ -55,6 +56,7 @@ func NewGossip(c *Cluster) *Gossip {
 		knownNodes: make(map[string]bool),
 		stopCh:     make(chan struct{}),
 		interval:   1 * time.Second,
+		conns:      make(map[net.Conn]struct{}),
 	}
 }
 
@@ -82,6 +84,11 @@ func (g *Gossip) Stop() {
 	if g.listener != nil {
 		g.listener.Close() // Unblocks acceptLoop
 	}
+	g.mu.Lock()
+	for conn := range g.conns {
+		conn.Close()
+	}
+	g.mu.Unlock()
 	g.wg.Wait()
 }
 
@@ -106,7 +113,22 @@ func (g *Gossip) acceptLoop(ln net.Listener) {
 
 func (g *Gossip) handleConnection(conn net.Conn) {
 	defer g.wg.Done()
-	defer conn.Close()
+	g.mu.Lock()
+	select {
+	case <-g.stopCh:
+		g.mu.Unlock()
+		conn.Close()
+		return
+	default:
+		g.conns[conn] = struct{}{}
+	}
+	g.mu.Unlock()
+	defer func() {
+		conn.Close()
+		g.mu.Lock()
+		delete(g.conns, conn)
+		g.mu.Unlock()
+	}()
 
 	reader := bufio.NewReader(conn)
 

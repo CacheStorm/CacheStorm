@@ -329,28 +329,17 @@ func cmdPSYNC(ctx *Context) error {
 		return ctx.WriteError(fmt.Errorf("ERR can't sync from a replica"))
 	}
 
-	var masterReplID string
-	var offset int64 = -1
-
-	if ctx.ArgCount() >= 1 {
-		masterReplID = ctx.ArgString(0)
-	}
-	if ctx.ArgCount() >= 2 {
-		if parsed, err := strconv.ParseInt(ctx.ArgString(1), 10, 64); err == nil {
-			offset = parsed
-		}
-	}
-
 	currentReplID := replManager.GetReplicaID()
 	currentOffset := replManager.GetMasterOffset()
 
-	if masterReplID == currentReplID && offset >= 0 {
-		ctx.Writer.WriteSimpleString(fmt.Sprintf("CONTINUE %s", currentReplID))
-	} else {
-		ctx.Writer.WriteSimpleString(fmt.Sprintf("FULLRESYNC %s %d", currentReplID, currentOffset))
-		rdbData := generateRDB(ctx.Store)
-		ctx.Writer.WriteBulkBytes(rdbData)
-	}
+	// Always send a full resync. This manager keeps no replication backlog, so
+	// it can never honour the <replid>/<offset> a resuming replica presents.
+	// Answering +CONTINUE would promise the commands that replica is missing
+	// and then send none, leaving it silently diverged from the master; a full
+	// snapshot is slower but actually correct.
+	ctx.Writer.WriteSimpleString(fmt.Sprintf("FULLRESYNC %s %d", currentReplID, currentOffset))
+	rdbData := generateRDB(ctx.Store)
+	ctx.Writer.WriteBulkBytes(rdbData)
 
 	return nil
 }

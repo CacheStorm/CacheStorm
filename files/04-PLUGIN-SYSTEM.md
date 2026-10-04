@@ -1,5 +1,7 @@
 # CacheStorm — Plugin System Specification
 
+> **Status (2026-09-15):** only the metrics plugin ships. plugins/stats, plugins/auth, plugins/slowlog, and plugins/persistence were removed. The hook interfaces below remain implemented by the metrics plugin (BeforeCommandHook/AfterCommandHook) and by native subsystems (slowlog recording, auth hooks).
+
 ## 1. Plugin Architecture
 
 The plugin system is designed around Go interface composition. A plugin implements the base `Plugin` interface and optionally implements additional hook interfaces for the behaviors it needs.

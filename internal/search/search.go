@@ -234,16 +234,17 @@ func (idx *Index) Search(query string, limit, offset int) *SearchResult {
 		return &SearchResult{Total: total, Documents: []*Document{}}
 	}
 
-	end := offset + limit
-	if end > len(scored) {
-		end = len(scored)
+	end := len(scored)
+	if limit < end-offset {
+		end = offset + limit
 	}
 
 	docs := make([]*Document, 0, end-offset)
 	for i := offset; i < end; i++ {
 		if doc, ok := idx.Documents[scored[i].id]; ok {
-			doc.Score = scored[i].score
-			docs = append(docs, doc)
+			resultDoc := *doc
+			resultDoc.Score = scored[i].score
+			docs = append(docs, &resultDoc)
 		}
 	}
 
@@ -294,16 +295,17 @@ func (idx *Index) SearchField(fieldName, value string, limit, offset int) *Searc
 		return &SearchResult{Total: total, Documents: []*Document{}}
 	}
 
-	end := offset + limit
-	if end > len(scored) {
-		end = len(scored)
+	end := len(scored)
+	if limit < end-offset {
+		end = offset + limit
 	}
 
 	docs := make([]*Document, 0, end-offset)
 	for i := offset; i < end; i++ {
 		if doc, ok := idx.Documents[scored[i].id]; ok {
-			doc.Score = scored[i].score
-			docs = append(docs, doc)
+			resultDoc := *doc
+			resultDoc.Score = scored[i].score
+			docs = append(docs, &resultDoc)
 		}
 	}
 

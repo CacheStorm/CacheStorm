@@ -371,6 +371,8 @@ type TagIndex struct {
 ## Phase 5: Namespace System
 
 ### Goal
+> **Status (2026-09-15):** the namespace phase was removed — CacheStorm serves a single shared keyspace (SELECT is a no-op stub).
+
 Named namespaces as independent keyspaces, replacing Redis numbered databases.
 
 ### Steps

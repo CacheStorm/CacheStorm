@@ -423,6 +423,9 @@ func cmdBITFIELD(ctx *Context) error {
 			if err != nil {
 				return ctx.WriteError(ErrNotInteger)
 			}
+			if offset < 0 {
+				return ctx.WriteError(errors.New("ERR bit offset is not an integer or out of range"))
+			}
 
 			val := bitfieldGet(bm.Data, encoding, offset)
 			results = append(results, resp.IntegerValue(val))
@@ -436,6 +439,9 @@ func cmdBITFIELD(ctx *Context) error {
 			offset, err := strconv.ParseInt(ctx.ArgString(i+2), 10, 64)
 			if err != nil {
 				return ctx.WriteError(ErrNotInteger)
+			}
+			if offset < 0 {
+				return ctx.WriteError(errors.New("ERR bit offset is not an integer or out of range"))
 			}
 			value, err := strconv.ParseInt(ctx.ArgString(i+3), 10, 64)
 			if err != nil {
@@ -454,6 +460,9 @@ func cmdBITFIELD(ctx *Context) error {
 			offset, err := strconv.ParseInt(ctx.ArgString(i+2), 10, 64)
 			if err != nil {
 				return ctx.WriteError(ErrNotInteger)
+			}
+			if offset < 0 {
+				return ctx.WriteError(errors.New("ERR bit offset is not an integer or out of range"))
 			}
 			increment, err := strconv.ParseInt(ctx.ArgString(i+3), 10, 64)
 			if err != nil {
@@ -521,6 +530,8 @@ func bitfieldGet(data []byte, encoding string, offset int64) int64 {
 			currentByte++
 		}
 	}
+
+	result <<= remaining
 
 	if strings.HasPrefix(encoding, "i") && bits > 0 {
 		signBit := int64(1 << (bits - 1))
@@ -601,28 +612,24 @@ func bitfieldIncr(bm *BitmapValue, encoding string, offset int64, increment int6
 	}
 
 	newValue := current + increment
+	positiveOverflow := increment > 0 && newValue < current
+	negativeOverflow := increment < 0 && newValue > current
 
 	switch overflow {
 	case "SAT":
-		if newValue > maxVal {
+		if positiveOverflow || newValue > maxVal {
 			newValue = maxVal
-		} else if newValue < minVal {
+		} else if negativeOverflow || newValue < minVal {
 			newValue = minVal
 		}
 	case "FAIL":
-		if newValue > maxVal || newValue < minVal {
+		if positiveOverflow || negativeOverflow || newValue > maxVal || newValue < minVal {
 			return current, true
 		}
 	default:
-		if strings.HasPrefix(encoding, "i") {
-			for newValue > maxVal {
-				newValue -= (1 << bits)
-			}
-			for newValue < minVal {
-				newValue += (1 << bits)
-			}
-		} else {
-			newValue &= ((1 << bits) - 1)
+		newValue &= (1 << bits) - 1
+		if strings.HasPrefix(encoding, "i") && newValue&(1<<(bits-1)) != 0 {
+			newValue |= ^((1 << bits) - 1)
 		}
 	}
 
@@ -631,18 +638,20 @@ func bitfieldIncr(bm *BitmapValue, encoding string, offset int64, increment int6
 }
 
 func parseEncoding(encoding string) int {
-	switch strings.ToLower(encoding) {
-	case "i8", "u8":
-		return 8
-	case "i16", "u16":
-		return 16
-	case "i32", "u32":
-		return 32
-	case "i64", "u64":
-		return 64
-	default:
+	encoding = strings.ToLower(encoding)
+	if len(encoding) < 2 || (encoding[0] != 'i' && encoding[0] != 'u') {
 		return 0
 	}
+	for _, c := range encoding[1:] {
+		if c < '0' || c > '9' {
+			return 0
+		}
+	}
+	bits, err := strconv.Atoi(encoding[1:])
+	if err != nil || bits < 1 || bits > 64 {
+		return 0
+	}
+	return bits
 }
 
 var _ = binary.BigEndian

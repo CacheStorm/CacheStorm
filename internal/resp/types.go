@@ -1,5 +1,7 @@
 package resp
 
+import "strconv"
+
 type Type byte
 
 const (
@@ -88,7 +90,7 @@ func (v *Value) String() string {
 	case TypeError:
 		return v.Err
 	case TypeInteger:
-		return string(rune(v.Int))
+		return strconv.FormatInt(v.Int, 10)
 	case TypeBulkString:
 		if v.IsNull {
 			return "(nil)"

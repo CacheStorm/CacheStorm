@@ -524,18 +524,17 @@ func cmdRPOPLPUSH(ctx *Context) error {
 	if srcList == nil || len(srcList.Elements) == 0 {
 		return ctx.WriteNullBulkString()
 	}
+	dstList, err := getOrCreateList(ctx, dstKey)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
 
 	idx := len(srcList.Elements) - 1
 	value := srcList.Elements[idx]
 	srcList.Elements = srcList.Elements[:idx]
 
-	if len(srcList.Elements) == 0 {
+	if len(srcList.Elements) == 0 && srcKey != dstKey {
 		ctx.Store.Delete(srcKey)
-	}
-
-	dstList, err := getOrCreateList(ctx, dstKey)
-	if err != nil {
-		return ctx.WriteError(err)
 	}
 
 	newElements := make([][]byte, 1+len(dstList.Elements))
@@ -577,6 +576,10 @@ func cmdLMOVE(ctx *Context) error {
 	if srcList == nil || len(srcList.Elements) == 0 {
 		return ctx.WriteNullBulkString()
 	}
+	dstList, err := getOrCreateList(ctx, dstKey)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
 
 	var value []byte
 	if whereFrom == "LEFT" {
@@ -587,13 +590,8 @@ func cmdLMOVE(ctx *Context) error {
 		srcList.Elements = srcList.Elements[:len(srcList.Elements)-1]
 	}
 
-	if len(srcList.Elements) == 0 {
+	if len(srcList.Elements) == 0 && srcKey != dstKey {
 		ctx.Store.Delete(srcKey)
-	}
-
-	dstList, err := getOrCreateList(ctx, dstKey)
-	if err != nil {
-		return ctx.WriteError(err)
 	}
 
 	if whereTo == "LEFT" {

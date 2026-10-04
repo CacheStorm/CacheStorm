@@ -98,7 +98,7 @@ func cmdGRAPHLIST(ctx *Context) error {
 }
 
 func cmdGRAPHADDNODE(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
+	if ctx.ArgCount() < 2 || ctx.ArgCount()%2 != 0 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
@@ -174,7 +174,7 @@ func cmdGRAPHDELNODE(ctx *Context) error {
 }
 
 func cmdGRAPHADDEDGE(ctx *Context) error {
-	if ctx.ArgCount() < 4 {
+	if ctx.ArgCount() < 4 || ctx.ArgCount()%2 != 0 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 

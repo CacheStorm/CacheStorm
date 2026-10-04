@@ -383,6 +383,8 @@ type EvictionController struct {
 
 ```go
 // Namespace wraps a ShardMap + TagIndex + TimingWheel + EvictionController
+> **Status (2026-09-15):** the multi-namespace surface described here was removed — CacheStorm serves a single shared keyspace (SELECT is a no-op stub). This section is retained as the original design record.
+
 // Each namespace is an independent keyspace.
 type Namespace struct {
     Name       string
@@ -621,7 +623,7 @@ type PluginsConfig struct {
     Stats     StatsPluginConfig     `yaml:"stats"`
     Metrics   MetricsPluginConfig   `yaml:"metrics"`
     Auth      AuthPluginConfig      `yaml:"auth"`
-    SlowLog   SlowLogPluginConfig   `yaml:"slowlog"`
+    SlowLog   SlowLogConfig   `yaml:"slowlog"`
 }
 
 type StatsPluginConfig struct {
@@ -639,7 +641,7 @@ type AuthPluginConfig struct {
     Password string `yaml:"password"`
 }
 
-type SlowLogPluginConfig struct {
+type SlowLogConfig struct {
     Enabled    bool   `yaml:"enabled" default:"true"`
     Threshold  string `yaml:"threshold" default:"10ms"`
     MaxEntries int    `yaml:"max_entries" default:"1000"`

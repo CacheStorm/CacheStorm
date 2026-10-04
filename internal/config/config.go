@@ -31,6 +31,12 @@ type SentinelConfig struct {
 	Quorum       int    `yaml:"quorum" default:"2"`
 	DownAfter    string `yaml:"down_after" default:"30s"`
 	FailoverTime string `yaml:"failover_time" default:"3m"`
+	// Seeds are "addr:port" addresses of other sentinels to announce ourselves
+	// to on each gossip tick. They are how HELLO discovery bootstraps: a
+	// sentinel has no other way to learn that peers exist, and knowledge then
+	// spreads because every peer we reach records us in turn. Default is empty
+	// (no peers), which is correct for a single-sentinel deployment.
+	Seeds []string `yaml:"seeds"`
 }
 
 // DownAfterDuration parses DownAfter, falling back to 0 when unset or

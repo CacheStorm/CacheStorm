@@ -151,6 +151,7 @@ func New(cfg *config.Config) (*Server, error) {
 		Quorum:       cfg.Sentinel.Quorum,
 		DownAfter:    cfg.Sentinel.DownAfterDuration(),
 		FailoverTime: cfg.Sentinel.FailoverTimeDuration(),
+		Seeds:        cfg.Sentinel.Seeds,
 	})
 	command.RegisterJSONCommands(s.router)
 	command.RegisterTSCommands(s.router)

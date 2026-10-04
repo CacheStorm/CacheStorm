@@ -280,6 +280,9 @@ func (tb *TokenBucket) Consume(tokens float64) bool {
 	tb.mu.Lock()
 	defer tb.mu.Unlock()
 
+	if tokens < 0 {
+		return false
+	}
 	tb.refill()
 
 	if tb.Tokens >= tokens {
@@ -336,6 +339,9 @@ func (lb *LeakyBucket) Add(amount int64) bool {
 	lb.mu.Lock()
 	defer lb.mu.Unlock()
 
+	if amount < 0 {
+		return false
+	}
 	lb.leak()
 
 	if lb.Remaining >= amount {
@@ -355,7 +361,7 @@ func (lb *LeakyBucket) leak() {
 		lb.Remaining = lb.Capacity
 	}
 
-	lb.LastLeak = now
+	lb.LastLeak += elapsed * int64(time.Second)
 }
 
 func (lb *LeakyBucket) Available() int64 {

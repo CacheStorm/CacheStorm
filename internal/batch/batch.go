@@ -1,6 +1,7 @@
 package batch
 
 import (
+	"bytes"
 	"log"
 	"sync"
 	"sync/atomic"
@@ -285,6 +286,15 @@ func (p *Pipeline) Commands() []Command {
 	defer p.mu.Unlock()
 	result := make([]Command, len(p.commands))
 	copy(result, p.commands)
+	for i, command := range p.commands {
+		if command.Args == nil {
+			continue
+		}
+		result[i].Args = make([][]byte, len(command.Args))
+		for j, arg := range command.Args {
+			result[i].Args[j] = bytes.Clone(arg)
+		}
+	}
 	return result
 }
 

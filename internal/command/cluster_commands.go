@@ -375,9 +375,13 @@ func cmdMIGRATE(ctx *Context) error {
 		return ctx.WriteBulkString("NOKEY")
 	}
 
+	// This build cannot reach a destination instance, so no transfer is
+	// possible. Answering +OK would tell the caller the key has moved when
+	// nothing was transferred — and, without COPY, Redis only reports OK once
+	// the key has also been removed from this instance. Refuse explicitly
+	// instead of claiming a migration that never ran.
 	_ = entry
-
-	return ctx.WriteOK()
+	return ctx.WriteError(fmt.Errorf("ERR MIGRATE is not supported by this server (destination %s:%s db %s)", host, port, destinationDB))
 }
 
 func cmdASKING(ctx *Context) error {

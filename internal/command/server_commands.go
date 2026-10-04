@@ -411,6 +411,18 @@ func cmdPEXPIRE(ctx *Context) error {
 	return ctx.WriteInteger(0)
 }
 
+// An absolute expiry is stored as a Unix nanosecond timestamp, so the input
+// must stay inside the int64 nanosecond range (~year 1678..2262). Converting an
+// out-of-range value overflows into a PAST instant, which would expire the key
+// immediately while the command reported success. These bounds are the largest
+// second/millisecond values whose conversion to nanoseconds cannot overflow.
+const (
+	maxExpireAtSeconds = 9223372036    // MaxInt64 / time.Second
+	maxExpireAtMillis  = 9223372036854 // MaxInt64 / time.Millisecond
+)
+
+var errInvalidExpireTime = errors.New("ERR invalid expire time")
+
 func cmdEXPIREAT(ctx *Context) error {
 	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(ErrWrongArgCount)
@@ -420,6 +432,9 @@ func cmdEXPIREAT(ctx *Context) error {
 	ts, err := strconv.ParseInt(ctx.ArgString(1), 10, 64)
 	if err != nil {
 		return ctx.WriteError(ErrNotInteger)
+	}
+	if ts > maxExpireAtSeconds || ts < -maxExpireAtSeconds {
+		return ctx.WriteError(errInvalidExpireTime)
 	}
 
 	expiresAt := time.Unix(ts, 0).UnixNano()
@@ -439,6 +454,9 @@ func cmdPEXPIREAT(ctx *Context) error {
 	if err != nil {
 		return ctx.WriteError(ErrNotInteger)
 	}
+	if ts > maxExpireAtMillis || ts < -maxExpireAtMillis {
+		return ctx.WriteError(errInvalidExpireTime)
+	}
 
 	expiresAt := time.Unix(0, ts*int64(time.Millisecond)).UnixNano()
 	if ctx.Store.SetExpiresAt(key, expiresAt) {
@@ -453,6 +471,12 @@ func cmdTTL(ctx *Context) error {
 	}
 
 	ttl := ctx.Store.TTL(ctx.ArgString(0))
+	// Store.TTL returns bare -1 (no expiry) and -2 (no key) as nanosecond
+	// sentinels. Dividing them by time.Second collapses both to 0, so report
+	// them verbatim the way Redis does.
+	if ttl < 0 {
+		return ctx.WriteInteger(int64(ttl))
+	}
 	return ctx.WriteInteger(int64(ttl / time.Second))
 }
 
@@ -462,6 +486,11 @@ func cmdPTTL(ctx *Context) error {
 	}
 
 	ttl := ctx.Store.TTL(ctx.ArgString(0))
+	// Same sentinel handling as cmdTTL: report -1/-2 verbatim rather than
+	// dividing the bare nanosecond sentinels into 0.
+	if ttl < 0 {
+		return ctx.WriteInteger(int64(ttl))
+	}
 	return ctx.WriteInteger(int64(ttl / time.Millisecond))
 }
 
@@ -775,12 +804,15 @@ func cmdRESTORE(ctx *Context) error {
 		return ctx.WriteError(errors.New("ERR unsupported type for RESTORE"))
 	}
 
-	opts := store.SetOptions{}
+	ctx.Store.Set(key, value, store.SetOptions{})
+	// Redis defines RESTORE's ttl as an ABSOLUTE Unix timestamp in
+	// milliseconds (since 3.0), not a relative duration. Apply it through the
+	// absolute-expiry path so a past timestamp yields an already-expired key —
+	// Store.Get hides those — rather than reviving it with a fresh lifetime.
 	if ttl > 0 {
-		opts.TTL = time.Duration(ttl) * time.Millisecond
+		ctx.Store.SetExpiresAt(key, time.UnixMilli(ttl).UnixNano())
 	}
 
-	ctx.Store.Set(key, value, opts)
 	return ctx.WriteOK()
 }
 
@@ -838,6 +870,27 @@ func cmdCOPY(ctx *Context) error {
 func cmdAUTH(ctx *Context) error {
 	if ctx.ArgCount() < 1 {
 		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	// AUTH <username> <password> selects an ACL user. This is checked BEFORE
+	// the requirepass gate so ACL users can authenticate on a server that has
+	// no requirepass configured.
+	if ctx.ArgCount() >= 2 {
+		username := ctx.ArgString(0)
+		password := ctx.ArgString(1)
+
+		user, err := globalACL.Authenticate(username, password)
+		if err != nil {
+			ctx.SetAuthenticated(false)
+			ctx.ACLUser = nil
+			ctx.Username = ""
+			return ctx.Writer.WriteError("WRONGPASS invalid username-password pair or user is disabled.")
+		}
+
+		ctx.SetAuthenticated(true)
+		ctx.ACLUser = user
+		ctx.Username = username
+		return ctx.WriteOK()
 	}
 
 	password := ctx.ArgString(0)
@@ -1161,6 +1214,51 @@ func cmdSORTRO(ctx *Context) error {
 	return doSort(ctx, true)
 }
 
+// sortExpandPattern expands a SORT BY/GET pattern for one element: the first
+// '*' is replaced by the element, and a pattern with no '*' behaves as if it
+// ended in "_*", matching Redis.
+func sortExpandPattern(pattern, elem string) string {
+	if i := strings.IndexByte(pattern, '*'); i >= 0 {
+		return pattern[:i] + elem + pattern[i+1:]
+	}
+	return pattern + "_" + elem
+}
+
+// sortLookupValue reads the external key a BY/GET pattern expands to. Only
+// string values are usable; a missing key or any other type is a miss, which
+// BY treats as weight 0 and GET reports as a nil element.
+func sortLookupValue(ctx *Context, pattern, elem string) (string, bool) {
+	entry, ok := ctx.Store.Get(sortExpandPattern(pattern, elem))
+	if !ok {
+		return "", false
+	}
+	sv, ok := entry.Value.(*store.StringValue)
+	if !ok {
+		return "", false
+	}
+	return string(sv.Data), true
+}
+
+// sortProjectElements applies each GET clause to every element, in the order
+// the clauses were given, so each element yields len(patterns) values.
+func sortProjectElements(ctx *Context, elements []string, patterns []string) []*resp.Value {
+	out := make([]*resp.Value, 0, len(elements)*len(patterns))
+	for _, elem := range elements {
+		for _, p := range patterns {
+			if p == "#" {
+				out = append(out, resp.BulkString(elem))
+				continue
+			}
+			if v, ok := sortLookupValue(ctx, p, elem); ok {
+				out = append(out, resp.BulkString(v))
+			} else {
+				out = append(out, resp.NullBulkString())
+			}
+		}
+	}
+	return out
+}
+
 func doSort(ctx *Context, readOnly bool) error {
 	if ctx.ArgCount() < 1 {
 		return ctx.WriteError(ErrWrongArgCount)
@@ -1173,6 +1271,9 @@ func doSort(ctx *Context, readOnly bool) error {
 	offset := 0
 	count := -1
 	storeKey := ""
+	byPattern := ""
+	nosort := false
+	var getPatterns []string
 
 	for i := 1; i < ctx.ArgCount(); i++ {
 		arg := strings.ToUpper(ctx.ArgString(i))
@@ -1207,8 +1308,21 @@ func doSort(ctx *Context, readOnly bool) error {
 				return ctx.WriteError(ErrSyntaxError)
 			}
 			storeKey = ctx.ArgString(i)
-		case "BY", "GET":
+		case "BY":
 			i++
+			if i >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			byPattern = ctx.ArgString(i)
+			if strings.EqualFold(byPattern, "nosort") {
+				nosort = true
+			}
+		case "GET":
+			i++
+			if i >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			getPatterns = append(getPatterns, ctx.ArgString(i))
 		}
 	}
 
@@ -1240,7 +1354,47 @@ func doSort(ctx *Context, readOnly bool) error {
 		return ctx.WriteError(errors.New("ERR wrong type for SORT"))
 	}
 
-	if alpha {
+	if byPattern != "" && !nosort {
+		// BY <pattern>: order the elements by the value of the external key
+		// each one expands to, rather than by the element itself. A missing
+		// or non-numeric weight counts as 0, matching Redis.
+		type sortItem struct {
+			elem    string
+			weight  float64
+			sweight string
+		}
+		items := make([]sortItem, 0, len(elements))
+		for _, elem := range elements {
+			it := sortItem{elem: elem}
+			if w, ok := sortLookupValue(ctx, byPattern, elem); ok {
+				it.sweight = w
+				if f, err := strconv.ParseFloat(w, 64); err == nil {
+					it.weight = f
+				}
+			}
+			items = append(items, it)
+		}
+		if alpha {
+			sort.SliceStable(items, func(i, j int) bool {
+				if desc {
+					return items[i].sweight > items[j].sweight
+				}
+				return items[i].sweight < items[j].sweight
+			})
+		} else {
+			sort.SliceStable(items, func(i, j int) bool {
+				if desc {
+					return items[i].weight > items[j].weight
+				}
+				return items[i].weight < items[j].weight
+			})
+		}
+		sorted := make([]string, 0, len(items))
+		for _, it := range items {
+			sorted = append(sorted, it.elem)
+		}
+		elements = sorted
+	} else if alpha {
 		if desc {
 			sort.Slice(elements, func(i, j int) bool {
 				return elements[i] > elements[j]
@@ -1279,12 +1433,18 @@ func doSort(ctx *Context, readOnly bool) error {
 	start := 0
 	end := len(elements)
 
-	if offset > 0 {
-		if offset < len(elements) {
-			start = offset
+	// Redis treats a negative LIMIT offset as a count back from the end
+	// (-1 is the last element); a non-negative one is clamped to the list.
+	if offset < 0 {
+		if -offset < len(elements) {
+			start = len(elements) + offset
 		} else {
 			start = len(elements)
 		}
+	} else if offset >= len(elements) {
+		start = len(elements)
+	} else {
+		start = offset
 	}
 	if count >= 0 {
 		end = start + count
@@ -1294,6 +1454,34 @@ func doSort(ctx *Context, readOnly bool) error {
 	}
 
 	elements = elements[start:end]
+
+	// GET <pattern>: project each element through the external key its pattern
+	// expands to, after LIMIT, so paging is decided on the sorted elements.
+	if len(getPatterns) > 0 {
+		projected := sortProjectElements(ctx, elements, getPatterns)
+
+		if storeKey != "" {
+			if readOnly {
+				return ctx.WriteError(errors.New("ERR SORT_RO does not support STORE"))
+			}
+			if len(projected) == 0 {
+				ctx.Store.Delete(storeKey)
+				return ctx.WriteInteger(0)
+			}
+			list := &store.ListValue{Elements: make([][]byte, 0, len(projected))}
+			for _, p := range projected {
+				if p.Type == resp.TypeNull || p.IsNull {
+					list.Elements = append(list.Elements, nil)
+					continue
+				}
+				list.Elements = append(list.Elements, p.Bulk)
+			}
+			ctx.Store.Set(storeKey, list, store.SetOptions{})
+			return ctx.WriteInteger(int64(len(projected)))
+		}
+
+		return ctx.WriteArray(projected)
+	}
 
 	if storeKey != "" {
 		if readOnly {

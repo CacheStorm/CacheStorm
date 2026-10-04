@@ -3,6 +3,7 @@ package command
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
@@ -363,9 +364,9 @@ func cmdCOMPRESSCUSTOM(ctx *Context) error {
 
 var (
 	queues   = make(map[string][]string)
-	queuesMu syncRWMutex
+	queuesMu sync.RWMutex
 	stacks   = make(map[string][]string)
-	stacksMu syncRWMutex
+	stacksMu sync.RWMutex
 )
 
 type syncRWMutex struct{}
@@ -402,9 +403,10 @@ func cmdQUEUEPUSH(ctx *Context) error {
 		queues[name] = make([]string, 0)
 	}
 	queues[name] = append(queues[name], value)
+	length := len(queues[name])
 	queuesMu.Unlock()
 
-	return ctx.WriteInteger(int64(len(queues[name])))
+	return ctx.WriteInteger(int64(length))
 }
 
 func cmdQUEUEPOP(ctx *Context) error {
@@ -500,9 +502,10 @@ func cmdSTACKPUSH(ctx *Context) error {
 		stacks[name] = make([]string, 0)
 	}
 	stacks[name] = append(stacks[name], value)
+	length := len(stacks[name])
 	stacksMu.Unlock()
 
-	return ctx.WriteInteger(int64(len(stacks[name])))
+	return ctx.WriteInteger(int64(length))
 }
 
 func cmdSTACKPOP(ctx *Context) error {

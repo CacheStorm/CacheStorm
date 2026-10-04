@@ -47,11 +47,11 @@ func CRC16(data []byte) uint16 {
 
 func KeySlot(key string) uint16 {
 	start := -1
-	end := len(key)
+	end := -1
 	inBrace := false
 
 	for i := 0; i < len(key); i++ {
-		if key[i] == '{' {
+		if key[i] == '{' && !inBrace {
 			inBrace = true
 			start = i + 1
 		} else if key[i] == '}' && inBrace {

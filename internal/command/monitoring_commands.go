@@ -149,20 +149,24 @@ func cmdSLOWLOGCONFIG(ctx *Context) error {
 
 func cmdSTATSKEYSPACE(ctx *Context) error {
 	totalKeys := ctx.Store.KeyCount()
+	typeCounts := make(map[store.DataType]int64)
+	for _, entry := range ctx.Store.GetAll() {
+		typeCounts[entry.Value.Type()]++
+	}
 
 	return ctx.WriteArray([]*resp.Value{
 		resp.BulkString("total_keys"),
 		resp.IntegerValue(totalKeys),
 		resp.BulkString("string_keys"),
-		resp.IntegerValue(0),
+		resp.IntegerValue(typeCounts[store.DataTypeString]),
 		resp.BulkString("hash_keys"),
-		resp.IntegerValue(0),
+		resp.IntegerValue(typeCounts[store.DataTypeHash]),
 		resp.BulkString("list_keys"),
-		resp.IntegerValue(0),
+		resp.IntegerValue(typeCounts[store.DataTypeList]),
 		resp.BulkString("set_keys"),
-		resp.IntegerValue(0),
+		resp.IntegerValue(typeCounts[store.DataTypeSet]),
 		resp.BulkString("zset_keys"),
-		resp.IntegerValue(0),
+		resp.IntegerValue(typeCounts[store.DataTypeSortedSet]),
 		resp.BulkString("expires"),
 		resp.IntegerValue(0),
 		resp.BulkString("avg_ttl"),

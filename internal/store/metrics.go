@@ -1,6 +1,7 @@
 package store
 
 import (
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -113,15 +114,22 @@ func (m *Metrics) RecordDisconnection() {
 func (m *Metrics) RecordCommand(cmd string, latencyNs int64) {
 	m.TotalCommands.Add(1)
 
+	// Every map access must happen under m.mu: reading the maps after
+	// unlocking races with a concurrent RecordCommand on the shared
+	// GlobalMetrics, one goroutine per connection. The stored values are
+	// pointers, so the atomic updates below stay outside the lock.
 	m.mu.Lock()
-	if _, exists := m.CommandCounts[cmd]; !exists {
-		m.CommandCounts[cmd] = &atomic.Int64{}
+	counter, exists := m.CommandCounts[cmd]
+	if !exists {
+		counter = &atomic.Int64{}
+		m.CommandCounts[cmd] = counter
 		m.CommandLatencies[cmd] = NewLatencyTracker()
 	}
+	tracker := m.CommandLatencies[cmd]
 	m.mu.Unlock()
 
-	m.CommandCounts[cmd].Add(1)
-	m.CommandLatencies[cmd].Record(latencyNs)
+	counter.Add(1)
+	tracker.Record(latencyNs)
 }
 
 func (m *Metrics) RecordRead() {
@@ -211,9 +219,9 @@ func (m *Metrics) Reset() {
 	m.TotalErrors.Store(0)
 	m.TotalBytesIn.Store(0)
 	m.TotalBytesOut.Store(0)
-	m.StartTime = time.Now()
 
 	m.mu.Lock()
+	m.StartTime = time.Now()
 	m.CommandCounts = make(map[string]*atomic.Int64)
 	m.CommandLatencies = make(map[string]*LatencyTracker)
 	m.mu.Unlock()
@@ -301,6 +309,10 @@ func (sl *SlowLog) SetEnabled(enabled bool) {
 }
 
 func (sl *SlowLog) addLocked(duration time.Duration, cmd string, args [][]byte, clientIP string) {
+	args = slices.Clone(args)
+	for i := range args {
+		args[i] = slices.Clone(args[i])
+	}
 	entry := SlowLogEntry{
 		ID:        sl.sequence.Add(1),
 		Timestamp: time.Now(),
@@ -327,6 +339,12 @@ func (sl *SlowLog) Get(n int) []SlowLogEntry {
 
 	result := make([]SlowLogEntry, n)
 	copy(result, sl.Entries[len(sl.Entries)-n:])
+	for i := range result {
+		result[i].Args = slices.Clone(result[i].Args)
+		for j := range result[i].Args {
+			result[i].Args[j] = slices.Clone(result[i].Args[j])
+		}
+	}
 	for i, j := 0, len(result)-1; i < j; i, j = i+1, j-1 {
 		result[i], result[j] = result[j], result[i]
 	}

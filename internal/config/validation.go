@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"net"
 	"os"
 	"strconv"
@@ -117,6 +118,9 @@ func ParseMemorySize(s string) (int64, error) {
 			numStr := strings.TrimSuffix(s, sf.suffix)
 			num, err := strconv.ParseInt(numStr, 10, 64)
 			if err != nil {
+				return 0, fmt.Errorf("invalid memory size: %s", s)
+			}
+			if num > math.MaxInt64/sf.mult || num < math.MinInt64/sf.mult {
 				return 0, fmt.Errorf("invalid memory size: %s", s)
 			}
 			return num * sf.mult, nil

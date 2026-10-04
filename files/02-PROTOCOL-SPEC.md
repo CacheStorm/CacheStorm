@@ -140,7 +140,7 @@ type CommandDef struct {
 type CommandContext struct {
     Conn      *Connection
     Args      [][]byte        // command arguments (NOT including command name)
-    Namespace *Namespace      // resolved namespace for this connection
+    // [removed 2026-09-15 — CacheStorm serves a single shared keyspace]
     Server    *Server         // reference for server-level commands
     StartTime time.Time       // for latency tracking
 }
@@ -249,7 +249,7 @@ func (ctx *CommandContext) WriteStringArray(items []string) error
 │                      │ cursor=0 in response means complete.                   │
 │                      │ Implement cursor as: shard_index:offset encoded.       │
 ├──────────────────────┼────────────────────────────────────────────────────────┤
-│ RANDOMKEY            │ Return a random key from current namespace.            │
+│ RANDOMKEY            │ Return a random key from the keyspace.                 │
 ├──────────────────────┼────────────────────────────────────────────────────────┤
 │ UNLINK key [key...]  │ Same as DEL but async (in Go, just use DEL logic).    │
 └──────────────────────┴────────────────────────────────────────────────────────┘

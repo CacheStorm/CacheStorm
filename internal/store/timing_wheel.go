@@ -93,8 +93,10 @@ func (tw *TimingWheel) Add(key string, expiresAt int64) {
 
 func (tw *TimingWheel) addToLevel(level int, key string, expiresAt int64, duration time.Duration) {
 	l := tw.levels[level]
+	l.mu.Lock()
 	slot := int(duration / l.tickSize)
 	slot = (l.current + slot) % l.numSlots
+	l.mu.Unlock()
 	if slot < 0 {
 		slot = 0
 	}
@@ -162,6 +164,7 @@ func (tw *TimingWheel) tick() {
 		tw.levels[0].current = (tw.levels[0].current + 1) % tw.levels[0].numSlots
 		advance = true
 	}
+	wrapped := advance && tw.levels[0].current == 0
 	tw.levels[0].mu.Unlock()
 
 	// Sweep the current slot every tick: expireBucket's wall-clock check makes
@@ -170,7 +173,7 @@ func (tw *TimingWheel) tick() {
 	// where slot = duration / level tickSize.
 	tw.expireBucket(bucket, now)
 
-	if advance && tw.levels[0].current == 0 {
+	if wrapped {
 		tw.cascadeHour(now)
 	}
 }

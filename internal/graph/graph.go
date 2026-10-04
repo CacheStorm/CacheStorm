@@ -2,6 +2,7 @@ package graph
 
 import (
 	"fmt"
+	"reflect"
 	"sync"
 )
 
@@ -88,9 +89,9 @@ func (g *Graph) DeleteNode(id uint64) bool {
 	}
 	g.NodeLabel[node.Label] = newNodes
 
-	for i, edgeID := range g.Edges {
-		if edgeID.From == id || edgeID.To == id {
-			delete(g.Edges, i)
+	for edgeID, edge := range g.Edges {
+		if edge.From == id || edge.To == id {
+			g.deleteEdgeLocked(edgeID)
 		}
 	}
 
@@ -137,6 +138,10 @@ func (g *Graph) DeleteEdge(id uint64) bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
+	return g.deleteEdgeLocked(id)
+}
+
+func (g *Graph) deleteEdgeLocked(id uint64) bool {
 	edge, exists := g.Edges[id]
 	if !exists {
 		return false
@@ -152,6 +157,14 @@ func (g *Graph) DeleteEdge(id uint64) bool {
 		}
 	}
 	g.EdgeLabel[edge.Relation] = newEdges
+
+	neighbors := g.Adjacency[edge.From]
+	for i, neighbor := range neighbors {
+		if neighbor == edge.To {
+			g.Adjacency[edge.From] = append(neighbors[:i], neighbors[i+1:]...)
+			break
+		}
+	}
 
 	return true
 }
@@ -195,7 +208,15 @@ func (g *Graph) QueryNodes(label string, filters map[string]interface{}) []*Node
 	for _, node := range nodes {
 		match := true
 		for k, v := range filters {
-			if node.Properties[k] != v {
+			property := node.Properties[k]
+			propertyValue := reflect.ValueOf(property)
+			var equal bool
+			if propertyValue.IsValid() && !propertyValue.Comparable() {
+				equal = reflect.DeepEqual(property, v)
+			} else {
+				equal = property == v
+			}
+			if !equal {
 				match = false
 				break
 			}

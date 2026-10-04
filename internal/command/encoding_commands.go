@@ -192,7 +192,8 @@ func urlEncode(s string) string {
 	hexChars := "0123456789ABCDEF"
 	result := ""
 
-	for _, c := range s {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
 		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
 			c == '-' || c == '_' || c == '.' || c == '~' {
 			result += string(c)
@@ -220,25 +221,25 @@ func cmdURLDECODE(ctx *Context) error {
 }
 
 func urlDecode(s string) (string, error) {
-	result := ""
+	var result strings.Builder
 	i := 0
 
 	for i < len(s) {
 		if s[i] == '%' && i+2 < len(s) {
 			hex := s[i+1 : i+3]
 			val := hexToByte(hex)
-			result += string(rune(val))
+			result.WriteByte(val)
 			i += 3
 		} else if s[i] == '+' {
-			result += " "
+			result.WriteByte(' ')
 			i++
 		} else {
-			result += string(s[i])
+			result.WriteByte(s[i])
 			i++
 		}
 	}
 
-	return result, nil
+	return result.String(), nil
 }
 
 func hexToByte(hex string) byte {
