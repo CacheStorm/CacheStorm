@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"slices"
 	"sync"
 
 	"github.com/cachestorm/cachestorm/internal/command"
@@ -64,9 +65,10 @@ func (m *Manager) Register(p Plugin) error {
 
 func (m *Manager) InitAll(configs map[string]interface{}) error {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
+	plugins := slices.Clone(m.plugins)
+	m.mu.RUnlock()
 
-	for _, p := range m.plugins {
+	for _, p := range plugins {
 		cfg := configs[p.Name()]
 		if err := p.Init(cfg); err != nil {
 			return err
@@ -77,11 +79,12 @@ func (m *Manager) InitAll(configs map[string]interface{}) error {
 
 func (m *Manager) CloseAll() error {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
+	plugins := slices.Clone(m.plugins)
+	m.mu.RUnlock()
 
 	var firstErr error
-	for i := len(m.plugins) - 1; i >= 0; i-- {
-		if err := m.plugins[i].Close(); err != nil && firstErr == nil {
+	for i := len(plugins) - 1; i >= 0; i-- {
+		if err := plugins[i].Close(); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
@@ -90,9 +93,10 @@ func (m *Manager) CloseAll() error {
 
 func (m *Manager) RunBeforeHooks(ctx *command.Context) error {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
+	hooks := slices.Clone(m.beforeHooks)
+	m.mu.RUnlock()
 
-	for _, hook := range m.beforeHooks {
+	for _, hook := range hooks {
 		if err := hook.BeforeCommand(ctx); err != nil {
 			return err
 		}
@@ -102,45 +106,50 @@ func (m *Manager) RunBeforeHooks(ctx *command.Context) error {
 
 func (m *Manager) RunAfterHooks(ctx *command.Context) {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
+	hooks := slices.Clone(m.afterHooks)
+	m.mu.RUnlock()
 
-	for _, hook := range m.afterHooks {
+	for _, hook := range hooks {
 		hook.AfterCommand(ctx)
 	}
 }
 
 func (m *Manager) RunEvictHooks(key string, value interface{}) {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
+	hooks := slices.Clone(m.evictHooks)
+	m.mu.RUnlock()
 
-	for _, hook := range m.evictHooks {
+	for _, hook := range hooks {
 		hook.OnEvict(key, value)
 	}
 }
 
 func (m *Manager) RunExpireHooks(key string, value interface{}) {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
+	hooks := slices.Clone(m.expireHooks)
+	m.mu.RUnlock()
 
-	for _, hook := range m.expireHooks {
+	for _, hook := range hooks {
 		hook.OnExpire(key, value)
 	}
 }
 
 func (m *Manager) RunTagInvalidateHooks(tag string, keys []string) {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
+	hooks := slices.Clone(m.tagHooks)
+	m.mu.RUnlock()
 
-	for _, hook := range m.tagHooks {
+	for _, hook := range hooks {
 		hook.OnTagInvalidate(tag, keys)
 	}
 }
 
 func (m *Manager) RunStartupHooks() error {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
+	hooks := slices.Clone(m.startupHooks)
+	m.mu.RUnlock()
 
-	for _, hook := range m.startupHooks {
+	for _, hook := range hooks {
 		if err := hook.OnStartup(); err != nil {
 			return err
 		}
@@ -150,9 +159,10 @@ func (m *Manager) RunStartupHooks() error {
 
 func (m *Manager) RunShutdownHooks() error {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
+	hooks := slices.Clone(m.shutdownHooks)
+	m.mu.RUnlock()
 
-	for _, hook := range m.shutdownHooks {
+	for _, hook := range hooks {
 		if err := hook.OnShutdown(); err != nil {
 			return err
 		}

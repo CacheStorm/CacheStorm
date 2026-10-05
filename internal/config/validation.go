@@ -17,6 +17,10 @@ func Validate(cfg *Config) error {
 	if cfg.Server.MaxConnections < 0 {
 		return fmt.Errorf("max_connections cannot be negative")
 	}
+	maxMemory, err := ParseMemorySize(cfg.Memory.MaxMemory)
+	if err != nil || maxMemory < 0 {
+		return fmt.Errorf("invalid max_memory: %s", cfg.Memory.MaxMemory)
+	}
 
 	if cfg.Memory.WarningPct < 0 || cfg.Memory.WarningPct > 100 {
 		return fmt.Errorf("warning percentage must be 0-100")
