@@ -345,7 +345,12 @@ func (cf *CuckooFilter) Add(item []byte) bool {
 		i = i2
 	}
 
+	original := make(map[uint]byte)
 	for n := uint(0); n < cf.kicks; n++ {
+		index := i % cf.size
+		if _, exists := original[index]; !exists {
+			original[index] = cf.buckets[index][0]
+		}
 		fp, cf.buckets[i%cf.size][0] = cf.buckets[i%cf.size][0], fp
 		i ^= cf.hash2(fp)
 		if cf.insert(i, fp) {
@@ -354,6 +359,9 @@ func (cf *CuckooFilter) Add(item []byte) bool {
 		}
 	}
 
+	for index, value := range original {
+		cf.buckets[index][0] = value
+	}
 	return false
 }
 

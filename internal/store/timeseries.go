@@ -374,7 +374,8 @@ func (m *TimeSeriesManager) QueryByLabels(labels map[string]string, filter strin
 	for key, ts := range m.series {
 		match := true
 		for k, v := range labels {
-			if ts.Labels[k] != v {
+			value, exists := ts.Labels[k]
+			if !exists || value != v {
 				match = false
 				break
 			}
