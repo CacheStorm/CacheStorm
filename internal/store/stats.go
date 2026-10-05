@@ -1,9 +1,9 @@
 package store
 
 import (
-	"math"
 	"math/rand"
 	"sort"
+	"strconv"
 	"sync"
 )
 
@@ -404,36 +404,7 @@ func formatBucket(start, end float64) string {
 }
 
 func formatFloat(f float64) string {
-	if f == math.Floor(f) {
-		return formatInt(int64(f))
-	}
-	s := ""
-	if f < 0 {
-		s = "-"
-		f = -f
-	}
-
-	intPart := int64(f)
-	fracPart := f - float64(intPart)
-
-	s += formatInt(intPart)
-	if fracPart > 0 {
-		fracStr := ""
-		for fracPart > 0 && len(fracStr) < 6 {
-			fracPart *= 10
-			digit := int64(fracPart)
-			fracPart -= float64(digit)
-			fracStr += string(rune('0' + digit))
-		}
-		for len(fracStr) > 0 && fracStr[len(fracStr)-1] == '0' {
-			fracStr = fracStr[:len(fracStr)-1]
-		}
-		if fracStr != "" {
-			s += "." + fracStr
-		}
-	}
-
-	return s
+	return strconv.FormatFloat(f, 'f', -1, 64)
 }
 
 func formatInt(n int64) string {

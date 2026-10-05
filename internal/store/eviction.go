@@ -235,10 +235,15 @@ func (ec *EvictionController) sampleKeys() []candidate {
 func (ec *EvictionController) sampleVolatileKeys() []candidate {
 	candidates := make([]candidate, 0, ec.sampleSize)
 
-	for i := 0; i < ec.sampleSize*2 && len(candidates) < ec.sampleSize; i++ {
+	tried := make(map[int]struct{}, NumShards)
+	for len(candidates) < ec.sampleSize && len(tried) < NumShards {
 		ec.rndMu.Lock()
 		shardIdx := ec.rnd.Intn(NumShards)
 		ec.rndMu.Unlock()
+		if _, seen := tried[shardIdx]; seen {
+			continue
+		}
+		tried[shardIdx] = struct{}{}
 		shard := ec.store.shards[shardIdx]
 
 		shard.mu.RLock()
@@ -248,8 +253,8 @@ func (ec *EvictionController) sampleVolatileKeys() []candidate {
 					key:        key,
 					lastAccess: entry.LastAccess.Load(),
 				})
+				break
 			}
-			break
 		}
 		shard.mu.RUnlock()
 	}
