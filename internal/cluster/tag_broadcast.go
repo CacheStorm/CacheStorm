@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"slices"
 	"sync"
 	"time"
 
@@ -127,7 +128,7 @@ func (tb *TagBroadcaster) HandleMessage(data []byte) error {
 	tb.mu.RUnlock()
 
 	for _, h := range handlers {
-		h(msg.Tag, msg.Keys)
+		h(msg.Tag, slices.Clone(msg.Keys))
 	}
 
 	return nil
