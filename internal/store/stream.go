@@ -182,10 +182,20 @@ func (g *ConsumerGroup) ClaimWithOptions(entryIDs []string, newConsumer string, 
 func (g *ConsumerGroup) GetPending(start, end string, count int64) []*PendingEntry {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
+	startMS, startSeq, startErr := parseStreamIDPair(start)
+	endMS, endSeq, endErr := parseStreamIDPair(end)
+	if (start != "-" && startErr != nil) || (end != "+" && endErr != nil) {
+		return nil
+	}
 
 	var result []*PendingEntry
 	for _, p := range g.Pending {
-		if (start == "-" || p.ID >= start) && (end == "+" || p.ID <= end) {
+		ms, seq, err := parseStreamIDPair(p.ID)
+		if err != nil {
+			continue
+		}
+		if (start == "-" || ms > startMS || (ms == startMS && seq >= startSeq)) &&
+			(end == "+" || ms < endMS || (ms == endMS && seq <= endSeq)) {
 			result = append(result, p)
 			if count > 0 && int64(len(result)) >= count {
 				break
@@ -589,10 +599,18 @@ func (v *StreamValue) SetGroupLastID(groupName, lastID string) bool {
 func (v *StreamValue) GetEntriesAfter(id string, count int64) []*StreamEntry {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
+	startMS, startSeq, err := parseStreamIDPair(id)
+	if err != nil {
+		return nil
+	}
 
 	var result []*StreamEntry
 	for _, entry := range v.Entries {
-		if entry.ID > id {
+		ms, seq, err := parseStreamIDPair(entry.ID)
+		if err != nil {
+			continue
+		}
+		if ms > startMS || (ms == startMS && seq > startSeq) {
 			result = append(result, entry)
 			if count > 0 && int64(len(result)) >= count {
 				break

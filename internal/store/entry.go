@@ -128,8 +128,8 @@ func (v *ListValue) String() string {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 	var result strings.Builder
-	for _, el := range v.Elements {
-		if result.Len() != 0 {
+	for i, el := range v.Elements {
+		if i > 0 {
 			result.WriteString(", ")
 		}
 		result.Write(el)
