@@ -109,10 +109,13 @@ func (ps *PubSub) Unsubscribe(sub *Subscriber, channels ...string) int {
 
 	count := 0
 	if len(channels) == 0 {
-		for _, subs := range ps.channels {
+		for ch, subs := range ps.channels {
 			if _, member := subs[sub]; member {
 				delete(subs, sub)
 				count++
+			}
+			if len(subs) == 0 {
+				delete(ps.channels, ch)
 			}
 		}
 	} else {
@@ -121,6 +124,9 @@ func (ps *PubSub) Unsubscribe(sub *Subscriber, channels ...string) int {
 				if _, member := subs[sub]; member {
 					delete(subs, sub)
 					count++
+				}
+				if len(subs) == 0 {
+					delete(ps.channels, ch)
 				}
 			}
 		}
@@ -152,10 +158,13 @@ func (ps *PubSub) PUnsubscribe(sub *Subscriber, patterns ...string) int {
 
 	count := 0
 	if len(patterns) == 0 {
-		for _, subs := range ps.patterns {
+		for p, subs := range ps.patterns {
 			if _, member := subs[sub]; member {
 				delete(subs, sub)
 				count++
+			}
+			if len(subs) == 0 {
+				delete(ps.patterns, p)
 			}
 		}
 	} else {
@@ -164,6 +173,9 @@ func (ps *PubSub) PUnsubscribe(sub *Subscriber, patterns ...string) int {
 				if _, member := subs[sub]; member {
 					delete(subs, sub)
 					count++
+				}
+				if len(subs) == 0 {
+					delete(ps.patterns, p)
 				}
 			}
 		}

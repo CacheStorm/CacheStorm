@@ -325,6 +325,7 @@ func lz4Compress(data []byte) []byte {
 	result := make([]byte, 0)
 	window := make(map[string]int)
 	pos := 0
+	literals := make([]byte, 0)
 
 	for pos < len(data) {
 		matchLen := 0
@@ -340,8 +341,19 @@ func lz4Compress(data []byte) []byte {
 
 		if matchLen >= 4 {
 			offset := pos - matchPos
-			token := byte(min(matchLen-4, 15) << 4)
-			result = append(result, token, byte(offset&0xFF), byte(offset>>8))
+			token := byte(min(len(literals), 15)<<4 | min(matchLen-4, 15))
+			result = append(result, token)
+			if len(literals) >= 15 {
+				extra := len(literals) - 15
+				for extra >= 255 {
+					result = append(result, 255)
+					extra -= 255
+				}
+				result = append(result, byte(extra))
+			}
+			result = append(result, literals...)
+			literals = literals[:0]
+			result = append(result, byte(offset&0xFF), byte(offset>>8))
 
 			if matchLen-4 >= 15 {
 				extra := matchLen - 4 - 15
@@ -359,13 +371,23 @@ func lz4Compress(data []byte) []byte {
 			}
 		} else {
 			literal := data[pos]
-			result = append(result, 0, literal)
+			literals = append(literals, literal)
 			key := string(data[pos : pos+min(4, len(data)-pos)])
 			window[key] = pos
 			pos++
 		}
 	}
 
+	result = append(result, byte(min(len(literals), 15)<<4))
+	if len(literals) >= 15 {
+		extra := len(literals) - 15
+		for extra >= 255 {
+			result = append(result, 255)
+			extra -= 255
+		}
+		result = append(result, byte(extra))
+	}
+	result = append(result, literals...)
 	return result
 }
 
