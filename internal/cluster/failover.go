@@ -262,7 +262,7 @@ func (m *SlotMigrator) StartMigration(sourceID, targetID string, slots []uint16)
 
 	m.source = sourceID
 	m.target = targetID
-	m.slots = slots
+	m.slots = append([]uint16(nil), slots...)
 	m.state = "migrating"
 	m.progress = 0
 	m.bytesSent = 0
@@ -296,6 +296,12 @@ func (m *SlotMigrator) Complete() error {
 	}
 
 	source := m.cluster.nodes[m.source]
+	for _, slot := range m.slots {
+		info := m.cluster.slots[slot]
+		if info == nil || info.Primary == nil || info.Primary.ID != m.source {
+			return fmt.Errorf("slot %d not owned by source", slot)
+		}
+	}
 
 	// Update the slot table
 	for _, slot := range m.slots {

@@ -251,11 +251,15 @@ func (lru *LRUCache) Keys() []string {
 func (lru *LRUCache) Stats() map[string]interface{} {
 	lru.mu.RLock()
 	defer lru.mu.RUnlock()
+	usage := float64(0)
+	if lru.Capacity > 0 {
+		usage = float64(lru.Size) / float64(lru.Capacity) * 100
+	}
 
 	return map[string]interface{}{
 		"size":     lru.Size,
 		"capacity": lru.Capacity,
-		"usage":    float64(lru.Size) / float64(lru.Capacity) * 100,
+		"usage":    usage,
 	}
 }
 

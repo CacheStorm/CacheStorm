@@ -75,7 +75,7 @@ func TestProofStringCommandsAcceptBitmapRepresentation(t *testing.T) {
 	if got := execS(s, r, "SETBIT", "precedent", "0", "1"); got != ":0\r\n" {
 		t.Fatalf("CONTROL 2 broken harness: SETBIT = %q", got)
 	}
-	if got := execS(s, r, "GET", "precedent"); got != "$1\r\n\x01\r\n" {
+	if got := execS(s, r, "GET", "precedent"); got != "$1\r\n\x80\r\n" {
 		t.Fatalf("CONTROL 2 broken harness: GET on a bitmap key = %q, want the byte", got)
 	}
 	t.Log("CONTROL 2 ok: GET already accepts the bitmap representation")
@@ -109,7 +109,7 @@ func TestProofStringCommandsAcceptBitmapRepresentation(t *testing.T) {
 		want string
 	}{
 		{"STRLEN", []string{"B"}, ":1\r\n"},
-		{"GETRANGE", []string{"B", "0", "-1"}, "$1\r\n\x01\r\n"},
+		{"GETRANGE", []string{"B", "0", "-1"}, "$1\r\n\x80\r\n"},
 	} {
 		execS(s, r, "SETBIT", "B", "0", "1")
 		got := execS(s, r, tc.cmd, tc.args...)
@@ -130,8 +130,8 @@ func TestProofStringCommandsAcceptBitmapRepresentation(t *testing.T) {
 		t.Fatalf("FAIL: APPEND C x answered %q — APPEND must extend a key TYPE calls a string",
 			strings.TrimSpace(got))
 	}
-	if got := execS(s, r, "GET", "C"); got != "$2\r\n\x01x\r\n" {
-		t.Fatalf("FAIL: after APPEND, GET C = %q, want the two bytes 0x01 'x'", got)
+	if got := execS(s, r, "GET", "C"); got != "$2\r\n\x80x\r\n" {
+		t.Fatalf("FAIL: after APPEND, GET C = %q, want the two bytes 0x80 'x'", got)
 	}
 	t.Log("PASS: APPEND extends a bitmap-typed key and the bytes survive")
 

@@ -737,12 +737,26 @@ func (h *HTTPServer) handleExecute(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *HTTPServer) handleSlowlog(w http.ResponseWriter, r *http.Request) {
-	_ = r.URL.Query().Get("count")
+	count, _ := strconv.Atoi(r.URL.Query().Get("count"))
+	entries := store.GlobalSlowLog.Get(count)
+	rows := make([]map[string]interface{}, 0, len(entries))
+	for _, entry := range entries {
+		parts := make([]string, 1, len(entry.Args)+1)
+		parts[0] = entry.Command
+		for _, arg := range entry.Args {
+			parts = append(parts, string(arg))
+		}
+		rows = append(rows, map[string]interface{}{
+			"id":         entry.ID,
+			"start_time": entry.Timestamp,
+			"duration":   entry.Duration.String(),
+			"command":    strings.Join(parts, " "),
+		})
+	}
 
 	h.writeJSON(w, http.StatusOK, map[string]interface{}{
-		"count":   0,
-		"entries": []interface{}{},
-		"message": "slowlog requires plugin initialization",
+		"count":   len(rows),
+		"entries": rows,
 	})
 }
 

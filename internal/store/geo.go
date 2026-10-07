@@ -3,6 +3,7 @@ package store
 import (
 	"fmt"
 	"math"
+	"sync"
 )
 
 type GeoPoint struct {
@@ -11,8 +12,14 @@ type GeoPoint struct {
 }
 
 type GeoValue struct {
+	mu     sync.RWMutex
 	Points map[string]GeoPoint
 }
+
+func (v *GeoValue) Lock()    { v.mu.Lock() }
+func (v *GeoValue) Unlock()  { v.mu.Unlock() }
+func (v *GeoValue) RLock()   { v.mu.RLock() }
+func (v *GeoValue) RUnlock() { v.mu.RUnlock() }
 
 func NewGeoValue() *GeoValue {
 	return &GeoValue{
@@ -22,9 +29,13 @@ func NewGeoValue() *GeoValue {
 
 func (v *GeoValue) Type() DataType { return DataTypeGeo }
 func (v *GeoValue) SizeOf() int64 {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
 	return int64(len(v.Points))*24 + 48
 }
 func (v *GeoValue) String() string {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
 	result := ""
 	for member, point := range v.Points {
 		if result != "" {
@@ -35,6 +46,8 @@ func (v *GeoValue) String() string {
 	return result
 }
 func (v *GeoValue) Clone() Value {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
 	cloned := NewGeoValue()
 	for k, p := range v.Points {
 		cloned.Points[k] = p
@@ -43,15 +56,21 @@ func (v *GeoValue) Clone() Value {
 }
 
 func (v *GeoValue) Add(member string, lon, lat float64) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
 	v.Points[member] = GeoPoint{Lon: lon, Lat: lat}
 }
 
 func (v *GeoValue) Get(member string) (GeoPoint, bool) {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
 	p, ok := v.Points[member]
 	return p, ok
 }
 
 func (v *GeoValue) Remove(members ...string) int {
+	v.mu.Lock()
+	defer v.mu.Unlock()
 	removed := 0
 	for _, m := range members {
 		if _, exists := v.Points[m]; exists {
@@ -63,6 +82,8 @@ func (v *GeoValue) Remove(members ...string) int {
 }
 
 func (v *GeoValue) Distance(from, to string) float64 {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
 	p1, ok1 := v.Points[from]
 	p2, ok2 := v.Points[to]
 	if !ok1 || !ok2 {

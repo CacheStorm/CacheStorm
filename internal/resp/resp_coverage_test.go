@@ -212,22 +212,12 @@ func TestReadCRLFBadBytes(t *testing.T) {
 	}
 }
 
-// TestReadCommandWithIntegerArg tests ReadCommand with a non-bulk-string arg.
 func TestReadCommandWithIntegerArg(t *testing.T) {
 	input := "*2\r\n$3\r\nGET\r\n:42\r\n"
 	r := NewReader(strings.NewReader(input))
 	cmd, args, err := r.ReadCommand()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if cmd != "GET" {
-		t.Errorf("expected 'GET', got '%s'", cmd)
-	}
-	if len(args) != 1 {
-		t.Fatalf("expected 1 arg, got %d", len(args))
-	}
-	if args[0] != nil {
-		t.Errorf("expected nil arg for integer type, got %v", args[0])
+	if err != ErrInvalidFormat || cmd != "" || args != nil {
+		t.Fatalf("expected empty command, nil args, ErrInvalidFormat; got command=%q args=%q error=%v", cmd, args, err)
 	}
 }
 

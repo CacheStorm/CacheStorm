@@ -161,7 +161,16 @@ func (c *Cluster) BalanceSlots() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	nodeCount := len(c.nodes)
+	primaries := make([]*Node, 0, len(c.nodes))
+	for _, node := range c.nodes {
+		if node.Role == RolePrimary {
+			primaries = append(primaries, node)
+		} else {
+			node.Slots = nil
+		}
+	}
+	c.slots = [NumSlots]*SlotInfo{}
+	nodeCount := len(primaries)
 	if nodeCount == 0 {
 		return
 	}
@@ -170,7 +179,7 @@ func (c *Cluster) BalanceSlots() {
 	remainder := 16384 % nodeCount
 
 	i := 0
-	for _, node := range c.nodes {
+	for _, node := range primaries {
 		count := slotsPerNode
 		if remainder > 0 {
 			count++

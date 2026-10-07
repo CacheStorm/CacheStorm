@@ -76,7 +76,7 @@ func TestProofBitopMissingSourceAndAnnihilates(t *testing.T) {
 	r := NewRouter()
 	RegisterBitmapCommands(r)
 
-	// k1 = 0xFF (all eight bits set). k2 = 0x01 (only bit 0 set).
+	// k1 = 0xFF (all eight bits set). k2 = 0x80 (only bit 0 set).
 	for i := 0; i < 8; i++ {
 		execB(s, r, "SETBIT", "k1", string(rune('0'+i)), "1")
 	}
@@ -105,8 +105,8 @@ func TestProofBitopMissingSourceAndAnnihilates(t *testing.T) {
 	if got := execB(s, r, "BITOP", "AND", "b1", "k1", "k2"); got != ":1\r\n" {
 		t.Fatalf("CONTROL 3 broken harness: BITOP AND reply = %q, want \":1\\r\\n\"", got)
 	}
-	if got := destBytes(t, s, "b1"); got != "\x01" {
-		t.Fatalf("CONTROL 3 broken harness: BITOP AND k1 k2 stored %q, want 0x01 (0xff AND 0x01)", got)
+	if got := destBytes(t, s, "b1"); got != "\x80" {
+		t.Fatalf("CONTROL 3 broken harness: BITOP AND k1 k2 stored %q, want 0x80 (0xff AND 0x80)", got)
 	}
 	t.Log("CONTROL 3 ok: AND with both sources present really ANDs")
 

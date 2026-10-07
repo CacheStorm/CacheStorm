@@ -104,17 +104,16 @@ func (tb *TagBroadcaster) HandleMessage(data []byte) error {
 	}
 
 	msgID := fmt.Sprintf("%s:%d", msg.OriginNode, msg.Timestamp)
-	tb.mu.RLock()
+	tb.mu.Lock()
 	_, seen := tb.recentMsgs[msgID]
-	tb.mu.RUnlock()
+	if !seen {
+		tb.recentMsgs[msgID] = msg.Timestamp
+	}
+	tb.mu.Unlock()
 
 	if seen {
 		return nil
 	}
-
-	tb.mu.Lock()
-	tb.recentMsgs[msgID] = msg.Timestamp
-	tb.mu.Unlock()
 
 	logger.Debug().
 		Str("tag", msg.Tag).

@@ -221,7 +221,10 @@ func (w *RDBWriter) writeValue(f io.Writer, v store.Value, valueType int) error 
 	case *store.StringValue:
 		return w.writeString(f, string(vt.Data))
 	case *store.ListValue:
-		items := vt.Elements
+		vt.RLock()
+		items := make([][]byte, len(vt.Elements))
+		copy(items, vt.Elements)
+		vt.RUnlock()
 		if err := w.writeLength(f, len(items)); err != nil {
 			return err
 		}
@@ -231,7 +234,12 @@ func (w *RDBWriter) writeValue(f io.Writer, v store.Value, valueType int) error 
 			}
 		}
 	case *store.SetValue:
-		members := vt.Members
+		vt.RLock()
+		members := make(map[string]struct{}, len(vt.Members))
+		for m := range vt.Members {
+			members[m] = struct{}{}
+		}
+		vt.RUnlock()
 		if err := w.writeLength(f, len(members)); err != nil {
 			return err
 		}
@@ -241,7 +249,12 @@ func (w *RDBWriter) writeValue(f io.Writer, v store.Value, valueType int) error 
 			}
 		}
 	case *store.HashValue:
-		fields := vt.Fields
+		vt.RLock()
+		fields := make(map[string][]byte, len(vt.Fields))
+		for field, value := range vt.Fields {
+			fields[field] = value
+		}
+		vt.RUnlock()
 		if err := w.writeLength(f, len(fields)); err != nil {
 			return err
 		}
@@ -254,7 +267,12 @@ func (w *RDBWriter) writeValue(f io.Writer, v store.Value, valueType int) error 
 			}
 		}
 	case *store.SortedSetValue:
-		members := vt.Members
+		vt.RLock()
+		members := make(map[string]float64, len(vt.Members))
+		for m, score := range vt.Members {
+			members[m] = score
+		}
+		vt.RUnlock()
 		if err := w.writeLength(f, len(members)); err != nil {
 			return err
 		}
@@ -267,7 +285,12 @@ func (w *RDBWriter) writeValue(f io.Writer, v store.Value, valueType int) error 
 			}
 		}
 	case *store.GeoValue:
-		points := vt.Points
+		vt.RLock()
+		points := make(map[string]store.GeoPoint, len(vt.Points))
+		for member, point := range vt.Points {
+			points[member] = point
+		}
+		vt.RUnlock()
 		if err := w.writeLength(f, len(points)); err != nil {
 			return err
 		}
@@ -283,20 +306,29 @@ func (w *RDBWriter) writeValue(f io.Writer, v store.Value, valueType int) error 
 			}
 		}
 	case *store.JSONValue:
-		if err := w.writeLength(f, len(vt.Data)); err != nil {
+		vt.RLock()
+		data := make([]byte, len(vt.Data))
+		copy(data, vt.Data)
+		vt.RUnlock()
+		if err := w.writeLength(f, len(data)); err != nil {
 			return err
 		}
-		if _, err := f.Write(vt.Data); err != nil {
+		if _, err := f.Write(data); err != nil {
 			return err
 		}
 	case *store.StreamValue:
-		if err := w.writeLength(f, len(vt.Entries)); err != nil {
+		vt.RLock()
+		entries := make([]*store.StreamEntry, len(vt.Entries))
+		copy(entries, vt.Entries)
+		maxLen := vt.MaxLen
+		vt.RUnlock()
+		if err := w.writeLength(f, len(entries)); err != nil {
 			return err
 		}
-		if err := w.writeLength(f, int(vt.MaxLen)); err != nil {
+		if err := w.writeLength(f, int(maxLen)); err != nil {
 			return err
 		}
-		for _, entry := range vt.Entries {
+		for _, entry := range entries {
 			if err := w.writeString(f, entry.ID); err != nil {
 				return err
 			}
@@ -313,13 +345,22 @@ func (w *RDBWriter) writeValue(f io.Writer, v store.Value, valueType int) error 
 			}
 		}
 	case *store.TimeSeriesValue:
-		if err := binary.Write(f, binary.LittleEndian, int64(vt.Retention)); err != nil {
-			return err
-		}
-		if err := w.writeLength(f, len(vt.Labels)); err != nil {
-			return err
-		}
+		vt.RLock()
+		retention := vt.Retention
+		labels := make(map[string]string, len(vt.Labels))
 		for k, val := range vt.Labels {
+			labels[k] = val
+		}
+		samples := make([]store.TimeSeriesSample, len(vt.Samples))
+		copy(samples, vt.Samples)
+		vt.RUnlock()
+		if err := binary.Write(f, binary.LittleEndian, int64(retention)); err != nil {
+			return err
+		}
+		if err := w.writeLength(f, len(labels)); err != nil {
+			return err
+		}
+		for k, val := range labels {
 			if err := w.writeString(f, k); err != nil {
 				return err
 			}
@@ -327,10 +368,10 @@ func (w *RDBWriter) writeValue(f io.Writer, v store.Value, valueType int) error 
 				return err
 			}
 		}
-		if err := w.writeLength(f, len(vt.Samples)); err != nil {
+		if err := w.writeLength(f, len(samples)); err != nil {
 			return err
 		}
-		for _, sample := range vt.Samples {
+		for _, sample := range samples {
 			if err := binary.Write(f, binary.LittleEndian, sample.Timestamp); err != nil {
 				return err
 			}
@@ -464,7 +505,7 @@ func (r *RDBReader) readRDB(f io.Reader) error {
 		opcode, err := r.readByte(f)
 		if err != nil {
 			if err == io.EOF {
-				break
+				return io.ErrUnexpectedEOF
 			}
 			return err
 		}
@@ -524,8 +565,6 @@ func (r *RDBReader) readRDB(f io.Reader) error {
 			pendingExpiryMS = 0
 		}
 	}
-
-	return nil
 }
 
 func (r *RDBReader) readEntry(f io.Reader, valueType byte, expiresAtMS int64) error {
@@ -761,8 +800,7 @@ func (r *RDBReader) readEntry(f io.Reader, valueType byte, expiresAtMS int64) er
 		opts.TTL = remaining
 	}
 
-	r.store.Set(key, value, opts)
-	return nil
+	return r.store.Set(key, value, opts)
 }
 
 func (r *RDBReader) readByte(f io.Reader) (byte, error) {

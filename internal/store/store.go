@@ -526,6 +526,9 @@ func (s *Store) Flush() {
 	for i := 0; i < NumShards; i++ {
 		freed += s.shards[i].Flush()
 	}
+	for _, tag := range s.tagIndex.Tags() {
+		s.tagIndex.invalidate(tag)
+	}
 	s.trackMemory(-freed)
 	// Clear version map to prevent memory leak
 	s.versionMu.Lock()

@@ -2,6 +2,7 @@ package resp
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"io"
 	"strconv"
@@ -55,6 +56,8 @@ func (r *Reader) ReadValue() (*Value, error) {
 		return r.readBulkString()
 	case TypeArray:
 		return r.readArray()
+	case TypeMap:
+		return r.readMap()
 	case TypeNull:
 		if err := r.readCRLF(); err != nil {
 			return nil, err
@@ -79,13 +82,17 @@ func (r *Reader) ReadCommand() (string, [][]byte, error) {
 		return "", nil, ErrInvalidFormat
 	}
 
+	if val.Array[0].Type != TypeBulkString || val.Array[0].IsNull {
+		return "", nil, ErrInvalidFormat
+	}
+
 	cmd := string(val.Array[0].Bulk)
 	args := make([][]byte, 0, len(val.Array)-1)
 	for i := 1; i < len(val.Array); i++ {
 		if val.Array[i].Type == TypeBulkString && !val.Array[i].IsNull {
 			args = append(args, val.Array[i].Bulk)
 		} else {
-			args = append(args, nil)
+			return "", nil, ErrInvalidFormat
 		}
 	}
 
@@ -124,6 +131,9 @@ func (r *Reader) readBulkString() (*Value, error) {
 	line, err := r.readLine()
 	if err != nil {
 		return nil, err
+	}
+	if len(line) > 0 && (line[0] == '+' || line[0] == '-' && string(line) != "-1") {
+		return nil, ErrInvalidFormat
 	}
 
 	size, err := strconv.ParseInt(string(line), 10, 64)
@@ -167,6 +177,9 @@ func (r *Reader) readArray() (*Value, error) {
 	if err != nil {
 		return nil, err
 	}
+	if len(line) > 0 && (line[0] == '+' || line[0] == '-' && string(line) != "-1") {
+		return nil, ErrInvalidFormat
+	}
 
 	count, err := strconv.ParseInt(string(line), 10, 64)
 	if err != nil {
@@ -207,7 +220,7 @@ func (r *Reader) readLine() ([]byte, error) {
 		return nil, err
 	}
 	// Strip trailing \r\n
-	if len(line) >= 2 && line[len(line)-2] == '\r' {
+	if len(line) >= 2 && line[len(line)-2] == '\r' && bytes.IndexByte(line[:len(line)-2], '\r') < 0 {
 		return line[:len(line)-2], nil
 	}
 	return nil, ErrInvalidFormat

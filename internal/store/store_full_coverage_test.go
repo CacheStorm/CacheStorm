@@ -472,8 +472,8 @@ func TestParseJSONPath_MaxDepth(t *testing.T) {
 		path += ".x"
 	}
 	parts := parseJSONPath(path)
-	if len(parts) > maxJSONPathDepth {
-		t.Fatalf("expected parts capped at %d, got %d", maxJSONPathDepth, len(parts))
+	if len(parts) != maxJSONPathDepth+10 {
+		t.Fatalf("expected full path depth %d, got %d", maxJSONPathDepth+10, len(parts))
 	}
 }
 

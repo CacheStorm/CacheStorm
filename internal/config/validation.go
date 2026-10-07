@@ -44,6 +44,7 @@ func Validate(cfg *Config) error {
 	if !validPolicies[strings.ToLower(cfg.Memory.EvictionPolicy)] {
 		return fmt.Errorf("invalid eviction policy: %s", cfg.Memory.EvictionPolicy)
 	}
+	cfg.Memory.EvictionPolicy = strings.ToLower(cfg.Memory.EvictionPolicy)
 
 	validLogLevels := map[string]bool{
 		"debug": true,

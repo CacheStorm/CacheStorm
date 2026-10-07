@@ -397,7 +397,13 @@ func (rw *AOFRewriter) writeValueCommands(w *bufio.Writer, key string, value sto
 		return rw.writeCommand(w, "SET", key, string(vt.Data))
 
 	case *store.HashValue:
+		vt.RLock()
+		fields := make(map[string][]byte, len(vt.Fields))
 		for field, val := range vt.Fields {
+			fields[field] = val
+		}
+		vt.RUnlock()
+		for field, val := range fields {
 			if err := rw.writeCommand(w, "HSET", key, field, string(val)); err != nil {
 				return err
 			}
@@ -405,30 +411,47 @@ func (rw *AOFRewriter) writeValueCommands(w *bufio.Writer, key string, value sto
 		return nil
 
 	case *store.ListValue:
+		vt.RLock()
 		args := make([]string, 0, len(vt.Elements)+1)
 		args = append(args, key)
 		for _, el := range vt.Elements {
 			args = append(args, string(el))
 		}
+		vt.RUnlock()
 		return rw.writeCommand(w, "RPUSH", args...)
 
 	case *store.SetValue:
-		args := make([]string, 0, len(vt.Members)+1)
-		args = append(args, key)
+		vt.RLock()
+		members := make([]string, 0, len(vt.Members))
 		for member := range vt.Members {
-			args = append(args, member)
+			members = append(members, member)
 		}
-		return rw.writeCommand(w, "SADD", args...)
+		vt.RUnlock()
+		for _, member := range members {
+			if err := rw.writeCommand(w, "SADD", key, member); err != nil {
+				return err
+			}
+		}
+		return nil
 
 	case *store.SortedSetValue:
-		args := make([]string, 0, len(vt.Members)*2+1)
-		args = append(args, key)
+		vt.RLock()
+		members := make([]string, 0, len(vt.Members))
+		scores := make([]float64, 0, len(vt.Members))
 		for member, score := range vt.Members {
-			args = append(args, strconv.FormatFloat(score, 'f', -1, 64), member)
+			members = append(members, member)
+			scores = append(scores, score)
 		}
-		return rw.writeCommand(w, "ZADD", args...)
+		vt.RUnlock()
+		for i, member := range members {
+			if err := rw.writeCommand(w, "ZADD", key, strconv.FormatFloat(scores[i], 'f', -1, 64), member); err != nil {
+				return err
+			}
+		}
+		return nil
 
 	case *store.GeoValue:
+		vt.RLock()
 		args := make([]string, 0, len(vt.Points)*3+1)
 		args = append(args, key)
 		for member, point := range vt.Points {
@@ -437,12 +460,27 @@ func (rw *AOFRewriter) writeValueCommands(w *bufio.Writer, key string, value sto
 				strconv.FormatFloat(point.Lat, 'f', -1, 64),
 				member)
 		}
+		vt.RUnlock()
 		return rw.writeCommand(w, "GEOADD", args...)
 
 	case *store.JSONValue:
-		return rw.writeCommand(w, "JSON.SET", key, "$", string(vt.Data))
+		vt.RLock()
+		data := make([]byte, len(vt.Data))
+		copy(data, vt.Data)
+		vt.RUnlock()
+		return rw.writeCommand(w, "JSON.SET", key, "$", string(data))
 
 	case *store.StreamValue:
+		vt.RLock()
+		defer vt.RUnlock()
+		if len(vt.Entries) == 0 {
+			if err := rw.writeCommand(w, "XGROUP", "CREATE", key, "", "0-0", "MKSTREAM"); err != nil {
+				return err
+			}
+			if err := rw.writeCommand(w, "XGROUP", "DESTROY", key, ""); err != nil {
+				return err
+			}
+		}
 		for _, entry := range vt.Entries {
 			args := make([]string, 0, len(entry.Fields)*2+2)
 			args = append(args, key, entry.ID)
@@ -450,6 +488,15 @@ func (rw *AOFRewriter) writeValueCommands(w *bufio.Writer, key string, value sto
 				args = append(args, k, string(val))
 			}
 			if err := rw.writeCommand(w, "XADD", args...); err != nil {
+				return err
+			}
+		}
+		if vt.LastID != "" {
+			args := []string{key, vt.LastID}
+			if vt.MaxDeletedID != "" {
+				args = append(args, "MAXDELETEDID", vt.MaxDeletedID)
+			}
+			if err := rw.writeCommand(w, "XSETID", args...); err != nil {
 				return err
 			}
 		}
@@ -464,21 +511,29 @@ func (rw *AOFRewriter) writeValueCommands(w *bufio.Writer, key string, value sto
 		return nil
 
 	case *store.TimeSeriesValue:
+		vt.RLock()
 		retentionMS := int64(vt.Retention / time.Millisecond)
+		labels := make(map[string]string, len(vt.Labels))
+		for k, val := range vt.Labels {
+			labels[k] = val
+		}
+		samples := make([]store.TimeSeriesSample, len(vt.Samples))
+		copy(samples, vt.Samples)
+		vt.RUnlock()
 		createArgs := []string{key}
 		if retentionMS > 0 {
 			createArgs = append(createArgs, "RETENTION", strconv.FormatInt(retentionMS, 10))
 		}
-		if len(vt.Labels) > 0 {
+		if len(labels) > 0 {
 			createArgs = append(createArgs, "LABELS")
-			for k, val := range vt.Labels {
+			for k, val := range labels {
 				createArgs = append(createArgs, k, val)
 			}
 		}
 		if err := rw.writeCommand(w, "TS.CREATE", createArgs...); err != nil {
 			return err
 		}
-		for _, sample := range vt.Samples {
+		for _, sample := range samples {
 			addArgs := []string{
 				key,
 				strconv.FormatInt(sample.Timestamp, 10),

@@ -344,6 +344,7 @@ func cmdGEORADIUS(ctx *Context) error {
 		maxResults = count // Can early-exit when no sorting needed
 	}
 
+	geo.RLock()
 	for member, point := range geo.Points {
 		dist := store.Haversine(lon, lat, point.Lon, point.Lat)
 		if dist <= radiusKm {
@@ -354,6 +355,7 @@ func cmdGEORADIUS(ctx *Context) error {
 			}
 		}
 	}
+	geo.RUnlock()
 
 	switch sortOrder {
 	case "ASC":
@@ -544,6 +546,7 @@ func cmdGEORADIUSBYMEMBER(ctx *Context) error {
 	}
 	results := make([]result, 0)
 
+	geo.RLock()
 	for m, point := range geo.Points {
 		dist := store.Haversine(centerPoint.Lon, centerPoint.Lat, point.Lon, point.Lat)
 		if dist <= radiusKm {
@@ -551,6 +554,7 @@ func cmdGEORADIUSBYMEMBER(ctx *Context) error {
 			results = append(results, result{member: m, dist: dist, point: point, hash: hash})
 		}
 	}
+	geo.RUnlock()
 
 	switch sortOrder {
 	case "ASC":
@@ -699,7 +703,7 @@ func cmdGEOSEARCH(ctx *Context) error {
 			}
 			i += 3
 		case "BYBOX":
-			if i+4 >= ctx.ArgCount() {
+			if i+3 >= ctx.ArgCount() {
 				return ctx.WriteError(ErrSyntaxError)
 			}
 			var err error
@@ -711,7 +715,7 @@ func cmdGEOSEARCH(ctx *Context) error {
 			if !geoUnitValid(unit) {
 				return ctx.WriteError(errUnsupportedGeoUnit)
 			}
-			i += 5
+			i += 4
 		case "WITHCOORD":
 			withCoord = true
 			i++
@@ -774,12 +778,14 @@ func cmdGEOSEARCH(ctx *Context) error {
 	}
 
 	results := make([]result, 0)
+	geo.RLock()
 	for member, point := range geo.Points {
 		dist := store.Haversine(fromLon, fromLat, point.Lon, point.Lat)
 		if dist <= radius {
 			results = append(results, result{member, dist, point, store.EncodeGeohashInt(point.Lon, point.Lat)})
 		}
 	}
+	geo.RUnlock()
 
 	if sortOrder == "DESC" {
 		sort.Slice(results, func(i, j int) bool { return results[i].dist > results[j].dist })
@@ -870,7 +876,7 @@ func cmdGEOSEARCHSTORE(ctx *Context) error {
 			}
 			i += 3
 		case "BYBOX":
-			if i+4 >= ctx.ArgCount() {
+			if i+3 >= ctx.ArgCount() {
 				return ctx.WriteError(ErrSyntaxError)
 			}
 			var err error
@@ -882,7 +888,7 @@ func cmdGEOSEARCHSTORE(ctx *Context) error {
 			if !geoUnitValid(unit) {
 				return ctx.WriteError(errUnsupportedGeoUnit)
 			}
-			i += 5
+			i += 4
 		case "STOREDIST":
 			storeDist = true
 			i++
@@ -940,12 +946,14 @@ func cmdGEOSEARCHSTORE(ctx *Context) error {
 	}
 
 	matches := make([]match, 0)
+	geo.RLock()
 	for member, point := range geo.Points {
 		dist := store.Haversine(fromLon, fromLat, point.Lon, point.Lat)
 		if dist <= radius {
 			matches = append(matches, match{member, dist, point})
 		}
 	}
+	geo.RUnlock()
 
 	// COUNT implies nearest-first, exactly as in the read-only sibling
 	// GEOSEARCH: the map iteration above is unordered, so an untruncated

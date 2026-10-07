@@ -35,7 +35,9 @@ func getOrCreateHash(ctx *Context, key string) (*store.HashValue, error) {
 	entry, exists := ctx.Store.Get(key)
 	if !exists {
 		hash := &store.HashValue{Fields: make(map[string][]byte)}
-		ctx.Store.Set(key, hash, store.SetOptions{})
+		if err := ctx.Store.Set(key, hash, store.SetOptions{}); err != nil {
+			return nil, err
+		}
 		return hash, nil
 	}
 
@@ -393,6 +395,9 @@ func cmdHINCRBYFLOAT(ctx *Context) error {
 	if err != nil {
 		return ctx.WriteError(ErrInvalidArg)
 	}
+	if math.IsNaN(incr) || math.IsInf(incr, 0) {
+		return ctx.WriteError(ErrFloatOverflow)
+	}
 
 	hash, err := getOrCreateHash(ctx, key)
 	if err != nil {
@@ -608,7 +613,7 @@ func cmdHRANDFIELD(ctx *Context) error {
 		return ctx.WriteArray([]*resp.Value{})
 	}
 
-	if count == 1 && !withValues {
+	if !countProvided && !withValues {
 		return ctx.WriteBulkString(fields[0])
 	}
 

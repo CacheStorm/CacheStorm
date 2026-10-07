@@ -98,7 +98,7 @@ func cmdSETBIT(ctx *Context) error {
 	}
 
 	byteIndex := int(offset / 8)
-	bitIndex := uint(offset % 8)
+	bitIndex := uint(7 - offset%8)
 
 	if byteIndex >= len(bm.Data) {
 		newData := make([]byte, byteIndex+1)
@@ -140,7 +140,7 @@ func cmdGETBIT(ctx *Context) error {
 	}
 
 	byteIndex := int(offset / 8)
-	bitIndex := uint(offset % 8)
+	bitIndex := uint(7 - offset%8)
 
 	if byteIndex >= len(bm.Data) {
 		return ctx.WriteInteger(0)
@@ -278,7 +278,7 @@ func cmdBITPOS(ctx *Context) error {
 	for i := start; i <= end; i++ {
 		b := data[i]
 		for j := 0; j < 8; j++ {
-			if (b & (1 << uint(j))) != 0 {
+			if (b & (1 << uint(7-j))) != 0 {
 				if target == 1 {
 					return ctx.WriteInteger(int64(i*8 + j))
 				}
@@ -377,6 +377,9 @@ func cmdBITOP(ctx *Context) error {
 			case "XOR":
 				result[j] ^= bm.Data[j]
 			}
+		}
+		if op == "AND" {
+			clear(result[len(bm.Data):])
 		}
 	}
 

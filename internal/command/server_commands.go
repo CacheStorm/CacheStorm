@@ -378,7 +378,7 @@ func cmdTIME(ctx *Context) error {
 }
 
 func cmdEXPIRE(ctx *Context) error {
-	if ctx.ArgCount() != 2 {
+	if ctx.ArgCount() < 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
@@ -387,15 +387,23 @@ func cmdEXPIRE(ctx *Context) error {
 	if err != nil {
 		return ctx.WriteError(ErrNotInteger)
 	}
+	cond, err := parseExpireCondition(ctx, 2)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
 
-	if ctx.Store.SetTTL(key, time.Duration(sec)*time.Second) {
+	newTTL := time.Duration(sec) * time.Second
+	if !expireConditionAllows(ctx.Store.TTL(key), newTTL, cond) {
+		return ctx.WriteInteger(0)
+	}
+	if ctx.Store.SetTTL(key, newTTL) {
 		return ctx.WriteInteger(1)
 	}
 	return ctx.WriteInteger(0)
 }
 
 func cmdPEXPIRE(ctx *Context) error {
-	if ctx.ArgCount() != 2 {
+	if ctx.ArgCount() < 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
@@ -404,8 +412,16 @@ func cmdPEXPIRE(ctx *Context) error {
 	if err != nil {
 		return ctx.WriteError(ErrNotInteger)
 	}
+	cond, err := parseExpireCondition(ctx, 2)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
 
-	if ctx.Store.SetTTL(key, time.Duration(ms)*time.Millisecond) {
+	newTTL := time.Duration(ms) * time.Millisecond
+	if !expireConditionAllows(ctx.Store.TTL(key), newTTL, cond) {
+		return ctx.WriteInteger(0)
+	}
+	if ctx.Store.SetTTL(key, newTTL) {
 		return ctx.WriteInteger(1)
 	}
 	return ctx.WriteInteger(0)
@@ -423,8 +439,57 @@ const (
 
 var errInvalidExpireTime = errors.New("ERR invalid expire time")
 
+type expireCondition int
+
+const (
+	expireCondNone expireCondition = iota
+	expireCondNX
+	expireCondXX
+	expireCondGT
+	expireCondLT
+)
+
+func parseExpireCondition(ctx *Context, start int) (expireCondition, error) {
+	cond := expireCondNone
+	for i := start; i < ctx.ArgCount(); i++ {
+		var next expireCondition
+		switch strings.ToUpper(ctx.ArgString(i)) {
+		case "NX":
+			next = expireCondNX
+		case "XX":
+			next = expireCondXX
+		case "GT":
+			next = expireCondGT
+		case "LT":
+			next = expireCondLT
+		default:
+			return cond, ErrSyntaxError
+		}
+		if cond != expireCondNone {
+			return cond, ErrSyntaxError
+		}
+		cond = next
+	}
+	return cond, nil
+}
+
+func expireConditionAllows(current time.Duration, newTTL time.Duration, cond expireCondition) bool {
+	volatile := current > 0
+	switch cond {
+	case expireCondNX:
+		return !volatile
+	case expireCondXX:
+		return volatile
+	case expireCondGT:
+		return volatile && newTTL > current
+	case expireCondLT:
+		return !volatile || newTTL < current
+	}
+	return true
+}
+
 func cmdEXPIREAT(ctx *Context) error {
-	if ctx.ArgCount() != 2 {
+	if ctx.ArgCount() < 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
@@ -436,8 +501,15 @@ func cmdEXPIREAT(ctx *Context) error {
 	if ts > maxExpireAtSeconds || ts < -maxExpireAtSeconds {
 		return ctx.WriteError(errInvalidExpireTime)
 	}
+	cond, err := parseExpireCondition(ctx, 2)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
 
 	expiresAt := time.Unix(ts, 0).UnixNano()
+	if !expireConditionAllows(ctx.Store.TTL(key), time.Until(time.Unix(0, expiresAt)), cond) {
+		return ctx.WriteInteger(0)
+	}
 	if ctx.Store.SetExpiresAt(key, expiresAt) {
 		return ctx.WriteInteger(1)
 	}
@@ -445,7 +517,7 @@ func cmdEXPIREAT(ctx *Context) error {
 }
 
 func cmdPEXPIREAT(ctx *Context) error {
-	if ctx.ArgCount() != 2 {
+	if ctx.ArgCount() < 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
@@ -457,8 +529,15 @@ func cmdPEXPIREAT(ctx *Context) error {
 	if ts > maxExpireAtMillis || ts < -maxExpireAtMillis {
 		return ctx.WriteError(errInvalidExpireTime)
 	}
+	cond, err := parseExpireCondition(ctx, 2)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
 
 	expiresAt := time.Unix(0, ts*int64(time.Millisecond)).UnixNano()
+	if !expireConditionAllows(ctx.Store.TTL(key), time.Until(time.Unix(0, expiresAt)), cond) {
+		return ctx.WriteInteger(0)
+	}
 	if ctx.Store.SetExpiresAt(key, expiresAt) {
 		return ctx.WriteInteger(1)
 	}
@@ -1215,22 +1294,41 @@ func cmdSORTRO(ctx *Context) error {
 }
 
 // sortExpandPattern expands a SORT BY/GET pattern for one element: the first
-// '*' is replaced by the element, and a pattern with no '*' behaves as if it
-// ended in "_*", matching Redis.
-func sortExpandPattern(pattern, elem string) string {
-	if i := strings.IndexByte(pattern, '*'); i >= 0 {
-		return pattern[:i] + elem + pattern[i+1:]
+// '*' is replaced by the element. A pattern with no '*' expands to nothing:
+// Redis skips sorting for such a BY pattern and misses such a GET pattern.
+func sortExpandPattern(pattern, elem string) (string, bool) {
+	i := strings.IndexByte(pattern, '*')
+	if i < 0 {
+		return pattern, false
 	}
-	return pattern + "_" + elem
+	return pattern[:i] + elem + pattern[i+1:], true
 }
 
-// sortLookupValue reads the external key a BY/GET pattern expands to. Only
-// string values are usable; a missing key or any other type is a miss, which
-// BY treats as weight 0 and GET reports as a nil element.
+// sortLookupValue reads the external key a BY/GET pattern expands to. A
+// pattern with no '*' is a miss; hash-field patterns (key->field) resolve the
+// named hash field. Only string values and hash fields are usable; anything
+// else is a miss, which BY treats as weight 0 (skipping the sort when every
+// element misses) and GET reports as a nil element.
 func sortLookupValue(ctx *Context, pattern, elem string) (string, bool) {
-	entry, ok := ctx.Store.Get(sortExpandPattern(pattern, elem))
+	expanded, ok := sortExpandPattern(pattern, elem)
 	if !ok {
 		return "", false
+	}
+	lookup, field, hasField := strings.Cut(expanded, "->")
+	entry, exists := ctx.Store.Get(lookup)
+	if !exists {
+		return "", false
+	}
+	if hasField {
+		hv, ok := entry.Value.(*store.HashValue)
+		if !ok {
+			return "", false
+		}
+		v, ok := hv.Fields[field]
+		if !ok {
+			return "", false
+		}
+		return string(v), true
 	}
 	sv, ok := entry.Value.(*store.StringValue)
 	if !ok {
@@ -1563,11 +1661,11 @@ func (s *SlowLog) Get(count int) []SlowLogEntry {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	if count > len(s.entries) {
+	if count < 0 {
 		count = len(s.entries)
 	}
-	if count <= 0 {
-		count = 10
+	if count > len(s.entries) {
+		count = len(s.entries)
 	}
 
 	result := make([]SlowLogEntry, count)

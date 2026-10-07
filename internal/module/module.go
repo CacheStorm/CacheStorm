@@ -253,7 +253,9 @@ func (m *BaseModule) Shutdown() error {
 }
 
 func (m *BaseModule) Commands() []CommandDef {
-	return m.commands
+	commands := make([]CommandDef, len(m.commands))
+	copy(commands, m.commands)
+	return commands
 }
 
 func (m *BaseModule) AddCommand(name string, handler CommandHandler, flags CommandFlags) {

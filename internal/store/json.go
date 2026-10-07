@@ -14,6 +14,11 @@ type JSONValue struct {
 	mu   sync.RWMutex
 }
 
+func (v *JSONValue) Lock()    { v.mu.Lock() }
+func (v *JSONValue) Unlock()  { v.mu.Unlock() }
+func (v *JSONValue) RLock()   { v.mu.RLock() }
+func (v *JSONValue) RUnlock() { v.mu.RUnlock() }
+
 func NewJSONValue(data interface{}) (*JSONValue, error) {
 	b, err := json.Marshal(data)
 	if err != nil {
@@ -72,6 +77,9 @@ func (v *JSONValue) GetPath(path string) (interface{}, error) {
 
 func getByPath(data interface{}, path string) (interface{}, error) {
 	parts := parseJSONPath(path)
+	if len(parts) > maxJSONPathDepth {
+		return nil, fmt.Errorf("ERR JSON path exceeds maximum depth of %d", maxJSONPathDepth)
+	}
 	current := data
 
 	for _, part := range parts {
@@ -134,11 +142,6 @@ func parseJSONPath(path string) []string {
 
 	if current != "" {
 		parts = append(parts, current)
-	}
-
-	// Cap depth to prevent stack overflow in recursive operations
-	if len(parts) > maxJSONPathDepth {
-		return parts[:maxJSONPathDepth]
 	}
 
 	return parts
@@ -231,6 +234,9 @@ func (v *JSONValue) DeletePath(path string) error {
 	}
 
 	parts := parseJSONPath(path)
+	if len(parts) > maxJSONPathDepth {
+		return fmt.Errorf("ERR JSON path exceeds maximum depth of %d", maxJSONPathDepth)
+	}
 	if len(parts) == 0 {
 		return nil
 	}
@@ -299,6 +305,9 @@ func (v *JSONValue) NumIncrBy(path string, increment float64) (float64, error) {
 	}
 
 	parts := parseJSONPath(path)
+	if len(parts) > maxJSONPathDepth {
+		return 0, fmt.Errorf("ERR JSON path exceeds maximum depth of %d", maxJSONPathDepth)
+	}
 	if len(parts) == 0 {
 		if num, ok := data.(float64); ok {
 			result := num + increment
@@ -358,6 +367,9 @@ func (v *JSONValue) ArrAppend(path string, values []interface{}) (int, error) {
 	}
 
 	parts := parseJSONPath(path)
+	if len(parts) > maxJSONPathDepth {
+		return 0, fmt.Errorf("ERR JSON path exceeds maximum depth of %d", maxJSONPathDepth)
+	}
 	var length int
 	if len(parts) == 0 {
 		if arr, ok := data.([]interface{}); ok {

@@ -1,6 +1,7 @@
 package search
 
 import (
+	"maps"
 	"regexp"
 	"sort"
 	"strings"
@@ -113,6 +114,7 @@ func (m *IndexManager) ListIndexes() []string {
 func (idx *Index) AddDocument(doc *Document) error {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
+	doc = copyDocumentFields(doc)
 
 	// Reconcile a document that is already indexed. Re-adding (including
 	// FT.ADD ... REPLACE) used to overwrite idx.Documents[doc.ID] and then
@@ -242,9 +244,9 @@ func (idx *Index) Search(query string, limit, offset int) *SearchResult {
 	docs := make([]*Document, 0, end-offset)
 	for i := offset; i < end; i++ {
 		if doc, ok := idx.Documents[scored[i].id]; ok {
-			resultDoc := *doc
+			resultDoc := copyDocumentFields(doc)
 			resultDoc.Score = scored[i].score
-			docs = append(docs, &resultDoc)
+			docs = append(docs, resultDoc)
 		}
 	}
 
@@ -303,9 +305,9 @@ func (idx *Index) SearchField(fieldName, value string, limit, offset int) *Searc
 	docs := make([]*Document, 0, end-offset)
 	for i := offset; i < end; i++ {
 		if doc, ok := idx.Documents[scored[i].id]; ok {
-			resultDoc := *doc
+			resultDoc := copyDocumentFields(doc)
 			resultDoc.Score = scored[i].score
-			docs = append(docs, &resultDoc)
+			docs = append(docs, resultDoc)
 		}
 	}
 
@@ -316,7 +318,16 @@ func (idx *Index) GetDocument(docID string) (*Document, bool) {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 	doc, ok := idx.Documents[docID]
-	return doc, ok
+	if !ok {
+		return nil, false
+	}
+	return copyDocumentFields(doc), true
+}
+
+func copyDocumentFields(doc *Document) *Document {
+	result := *doc
+	result.Fields = maps.Clone(doc.Fields)
+	return &result
 }
 
 func (idx *Index) DocumentCount() int {

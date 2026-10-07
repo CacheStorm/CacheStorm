@@ -2,6 +2,7 @@ package command
 
 import (
 	"bytes"
+	"reflect"
 	"testing"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
@@ -87,7 +88,11 @@ func TestSortByPatternWithoutWildcardControl(t *testing.T) {
 	sortByGetRun(t, s, "SET", "w_a", "2")
 	sortByGetRun(t, s, "SET", "w_b", "1")
 
-	assertSortReply(t, sortByGetStrings(sortByGetRun(t, s, "SORT", "mylist", "BY", "w")), "b", "a")
+	// The fetched SORT doc: "A pattern with no *, or a hash-field pattern
+	// that resolves the same for all elements, skips sorting." The w_a/w_b
+	// keys must therefore be ignored here; this used to pin the old
+	// invented w_<elem> expansion, which the r17 fix removed.
+	assertSortReply(t, sortByGetStrings(sortByGetRun(t, s, "SORT", "mylist", "BY", "w")), "a", "b")
 }
 
 // BY with DESC reverses the weight order.
@@ -248,4 +253,100 @@ func TestSortByNonStringValueControl(t *testing.T) {
 	sortByGetRun(t, s, "SET", "w_b", "5")
 
 	assertSortReply(t, sortByGetStrings(sortByGetRun(t, s, "SORT", "mylist", "BY", "w_*")), "a", "b")
+}
+func TestSortByGetX(t *testing.T) {
+	s := store.NewStore()
+	router := NewRouter()
+	RegisterListCommands(router)
+	RegisterStringCommands(router)
+	RegisterHashCommands(router)
+	RegisterKeyCommands(router)
+	RegisterServerCommands(router)
+	run := func(name string, args ...string) *resp.Value {
+		t.Helper()
+		raw := make([][]byte, len(args))
+		for i, arg := range args {
+			raw[i] = []byte(arg)
+		}
+		var output bytes.Buffer
+		if err := router.Execute(NewContext(name, raw, s, resp.NewWriter(&output))); err != nil {
+			t.Fatal(err)
+		}
+		value, err := resp.NewReader(&output).ReadValue()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return value
+	}
+	strs := func(v *resp.Value) []string {
+		t.Helper()
+		if v.Type != resp.TypeArray {
+			t.Fatalf("expected array, got %v", v)
+		}
+		out := make([]string, 0, len(v.Array))
+		for _, e := range v.Array {
+			if e.Type != resp.TypeBulkString {
+				t.Fatalf("expected bulk element, got %v", e)
+			}
+			out = append(out, string(e.Bulk))
+		}
+		return out
+	}
+	seedList := func() {
+		if v := run("DEL", "l"); v.Type != resp.TypeInteger {
+			t.Fatalf("seed del failed: %v", v)
+		}
+		if v := run("RPUSH", "l", "b", "a", "c"); v.Type != resp.TypeInteger || v.Int != 3 {
+			t.Fatalf("seed list failed: %v", v)
+		}
+	}
+	check := func(label string, v *resp.Value, want ...string) {
+		t.Helper()
+		if got := strs(v); !reflect.DeepEqual(got, want) {
+			t.Errorf("FAIL %s: got %v, want %v", label, got, want)
+		} else {
+			t.Logf("PASS %s: %v", label, got)
+		}
+	}
+	seedList()
+	for _, kv := range [][2]string{{"weight_b", "5"}, {"weight_a", "30"}, {"weight_c", "3"}} {
+		if v := run("SET", kv[0], kv[1]); v.Type != resp.TypeSimpleString {
+			t.Fatalf("seed %s failed: %v", kv[0], v)
+		}
+	}
+	check("star BY control", run("SORT", "l", "BY", "weight_*"), "c", "b", "a")
+	check("star BY DESC control", run("SORT", "l", "BY", "weight_*", "DESC"), "a", "b", "c")
+
+	seedList()
+	for _, kv := range [][2]string{{"object_b", "OB"}, {"object_c", "OC"}} {
+		if v := run("SET", kv[0], kv[1]); v.Type != resp.TypeSimpleString {
+			t.Fatalf("seed %s failed: %v", kv[0], v)
+		}
+	}
+	projected := strs(run("SORT", "l", "BY", "weight_*", "GET", "object_*", "GET", "#"))
+	if len(projected) != 6 || projected[0] != "OC" || projected[1] != "c" || projected[2] != "OB" || projected[3] != "b" || projected[5] != "a" {
+		t.Errorf("FAIL star GET control: got %v, want [OC c OB b <nil> a]", projected)
+	} else {
+		t.Log("PASS star GET control: [OC c OB b <nil> a]")
+	}
+
+	seedList()
+	for _, kv := range [][2]string{{"static_a", "30"}, {"static_b", "5"}, {"static_c", "3"}} {
+		if v := run("SET", kv[0], kv[1]); v.Type != resp.TypeSimpleString {
+			t.Fatalf("seed %s failed: %v", kv[0], v)
+		}
+	}
+	check("no-star BY skips sorting", run("SORT", "l", "BY", "static"), "b", "a", "c")
+
+	seedList()
+	for _, kv := range [][2]string{{"hw_b", "5"}, {"hw_a", "30"}, {"hw_c", "3"}} {
+		if v := run("HSET", kv[0], "w", kv[1]); v.Type != resp.TypeInteger || v.Int != 1 {
+			t.Fatalf("seed %s failed: %v", kv[0], v)
+		}
+	}
+	check("hash-field BY", run("SORT", "l", "BY", "hw_*->w"), "c", "b", "a")
+	check("hash-field GET", run("SORT", "l", "BY", "weight_*", "GET", "hw_*->w"), "3", "5", "30")
+
+	check("missing BY keys stay stable", run("SORT", "l", "BY", "nomiss_*"), "b", "a", "c")
+	check("plain sort control", run("SORT", "l"), "b", "a", "c")
 }

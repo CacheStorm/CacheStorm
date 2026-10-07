@@ -600,7 +600,7 @@ func (s *Sentinel) Masters() []*MasterInfo {
 
 	result := make([]*MasterInfo, 0, len(s.masters))
 	for _, m := range s.masters {
-		result = append(result, m)
+		result = append(result, snapshotMasterInfoX(m))
 	}
 	return result
 }
@@ -609,7 +609,28 @@ func (s *Sentinel) GetMaster(name string) (*MasterInfo, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	m, ok := s.masters[name]
-	return m, ok
+	if !ok {
+		return nil, false
+	}
+	return snapshotMasterInfoX(m), true
+}
+
+func snapshotMasterInfoX(master *MasterInfo) *MasterInfo {
+	snapshot := *master
+	if master.Flags != nil {
+		snapshot.Flags = make([]string, len(master.Flags))
+		copy(snapshot.Flags, master.Flags)
+	}
+	if master.Replicas != nil {
+		snapshot.Replicas = make([]*ReplicaInfo, len(master.Replicas))
+		for i, replica := range master.Replicas {
+			if replica != nil {
+				copyX := *replica
+				snapshot.Replicas[i] = &copyX
+			}
+		}
+	}
+	return &snapshot
 }
 
 func (s *Sentinel) GetMasterAddr(name string) (string, int, error) {
@@ -757,7 +778,10 @@ func (s *Sentinel) handleConnection(conn net.Conn) {
 			continue
 		}
 		response := s.handleCommand(line)
-		if _, err := conn.Write([]byte(response + "\r\n")); err != nil {
+		if !strings.HasSuffix(response, "\r\n") {
+			response += "\r\n"
+		}
+		if _, err := conn.Write([]byte(response)); err != nil {
 			return
 		}
 	}
@@ -855,7 +879,7 @@ func (s *Sentinel) formatMaster(name string) string {
 		return "-ERR no such master"
 	}
 
-	return fmt.Sprintf("*28\r\n"+
+	return fmt.Sprintf("*8\r\n"+
 		"$4\r\nname\r\n$%d\r\n%s\r\n"+
 		"$2\r\nip\r\n$%d\r\n%s\r\n"+
 		"$4\r\nport\r\n:%d\r\n"+

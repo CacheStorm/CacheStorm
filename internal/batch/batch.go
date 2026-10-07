@@ -278,7 +278,14 @@ func NewPipeline() *Pipeline {
 func (p *Pipeline) Add(name string, args [][]byte) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.commands = append(p.commands, Command{Name: name, Args: args})
+	var ownedArgs [][]byte
+	if args != nil {
+		ownedArgs = make([][]byte, len(args))
+		for i, arg := range args {
+			ownedArgs[i] = bytes.Clone(arg)
+		}
+	}
+	p.commands = append(p.commands, Command{Name: name, Args: ownedArgs})
 }
 
 func (p *Pipeline) Commands() []Command {

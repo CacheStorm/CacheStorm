@@ -43,7 +43,8 @@ type Connection struct {
 	authenticated bool
 	// aclUser is the ACL user resolved by AUTH, carried the same way: it must
 	// outlive the per-command Context for permissions to persist.
-	aclUser *acl.User
+	aclUser     *acl.User
+	transaction *command.Transaction
 }
 
 // countingConn wraps a connection and feeds the global byte counters so the
@@ -89,6 +90,7 @@ func NewConnection(id int64, conn net.Conn, s *store.Store, r *command.Router, p
 		createdAt:    time.Now(),
 		readTimeout:  defaultReadTimeout,
 		writeTimeout: defaultWriteTimeout,
+		transaction:  command.NewTransaction(),
 	}
 }
 
@@ -118,6 +120,10 @@ func (c *Connection) Handle() {
 		c.lastCmd = cmd
 
 		ctx := command.NewContextWithClient(cmd, args, c.store, c.writer, c.ID, c.conn.RemoteAddr().String())
+		if c.transaction == nil {
+			c.transaction = ctx.Transaction
+		}
+		ctx.Transaction = c.transaction
 		// Share the subscriber across commands so PubSub state persists
 		if c.subscriber != nil {
 			ctx.Subscriber = c.subscriber

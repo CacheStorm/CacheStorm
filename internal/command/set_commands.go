@@ -40,7 +40,9 @@ func getOrCreateSet(ctx *Context, key string) (*store.SetValue, error) {
 	entry, exists := ctx.Store.Get(key)
 	if !exists {
 		set := &store.SetValue{Members: make(map[string]struct{})}
-		ctx.Store.Set(key, set, store.SetOptions{})
+		if err := ctx.Store.Set(key, set, store.SetOptions{}); err != nil {
+			return nil, err
+		}
 		return set, nil
 	}
 
@@ -210,7 +212,8 @@ func cmdSPOP(ctx *Context) error {
 
 	key := ctx.ArgString(0)
 	count := 1
-	if ctx.ArgCount() >= 2 {
+	withCount := ctx.ArgCount() >= 2
+	if withCount {
 		var err error
 		count, err = strconv.Atoi(ctx.ArgString(1))
 		if err != nil {
@@ -226,14 +229,14 @@ func cmdSPOP(ctx *Context) error {
 		return ctx.WriteError(err)
 	}
 	if set == nil {
-		if count == 1 {
+		if !withCount {
 			return ctx.WriteNullBulkString()
 		}
 		return ctx.WriteArray([]*resp.Value{})
 	}
 
 	set.Lock()
-	if count == 1 {
+	if !withCount {
 		for member := range set.Members {
 			delete(set.Members, member)
 			isEmpty := len(set.Members) == 0
@@ -435,7 +438,8 @@ func cmdSINTER(ctx *Context) error {
 			return ctx.WriteError(err)
 		}
 		if set == nil {
-			return ctx.WriteArray([]*resp.Value{})
+			clear(result)
+			continue
 		}
 
 		set.RLock()
@@ -528,7 +532,9 @@ func cmdSUNIONSTORE(ctx *Context) error {
 	}
 
 	dstSet := &store.SetValue{Members: result}
-	ctx.Store.Set(dstKey, dstSet, store.SetOptions{})
+	if err := ctx.Store.Set(dstKey, dstSet, store.SetOptions{}); err != nil {
+		return ctx.WriteError(err)
+	}
 
 	return ctx.WriteInteger(int64(len(result)))
 }
@@ -563,8 +569,8 @@ func cmdSINTERSTORE(ctx *Context) error {
 			return ctx.WriteError(err)
 		}
 		if set == nil {
-			ctx.Store.Delete(dstKey)
-			return ctx.WriteInteger(0)
+			clear(result)
+			continue
 		}
 
 		set.RLock()
@@ -582,7 +588,9 @@ func cmdSINTERSTORE(ctx *Context) error {
 	}
 
 	dstSet := &store.SetValue{Members: result}
-	ctx.Store.Set(dstKey, dstSet, store.SetOptions{})
+	if err := ctx.Store.Set(dstKey, dstSet, store.SetOptions{}); err != nil {
+		return ctx.WriteError(err)
+	}
 
 	return ctx.WriteInteger(int64(len(result)))
 }
@@ -629,7 +637,9 @@ func cmdSDIFFSTORE(ctx *Context) error {
 	}
 
 	dstSet := &store.SetValue{Members: result}
-	ctx.Store.Set(dstKey, dstSet, store.SetOptions{})
+	if err := ctx.Store.Set(dstKey, dstSet, store.SetOptions{}); err != nil {
+		return ctx.WriteError(err)
+	}
 
 	return ctx.WriteInteger(int64(len(result)))
 }
@@ -748,8 +758,11 @@ func cmdSINTERCARD(ctx *Context) error {
 
 	limit := -1
 	optIdx := 1 + numKeys
-	if ctx.ArgCount() >= optIdx+2 && strings.ToUpper(ctx.ArgString(optIdx)) == "LIMIT" {
-		if ctx.ArgCount() > optIdx+2 {
+	if ctx.ArgCount() > optIdx {
+		if strings.ToUpper(ctx.ArgString(optIdx)) != "LIMIT" {
+			return ctx.WriteError(ErrSyntaxError)
+		}
+		if ctx.ArgCount() != optIdx+2 {
 			return ctx.WriteError(ErrSyntaxError)
 		}
 		limit, err = strconv.Atoi(ctx.ArgString(optIdx + 1))
@@ -779,7 +792,8 @@ func cmdSINTERCARD(ctx *Context) error {
 			return ctx.WriteError(err)
 		}
 		if set == nil {
-			return ctx.WriteInteger(0)
+			clear(result)
+			continue
 		}
 
 		set.RLock()

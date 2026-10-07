@@ -3,6 +3,7 @@ package store
 import (
 	"maps"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -19,6 +20,11 @@ type TimeSeriesValue struct {
 	Retention time.Duration
 	mu        sync.RWMutex
 }
+
+func (v *TimeSeriesValue) Lock()    { v.mu.Lock() }
+func (v *TimeSeriesValue) Unlock()  { v.mu.Unlock() }
+func (v *TimeSeriesValue) RLock()   { v.mu.RLock() }
+func (v *TimeSeriesValue) RUnlock() { v.mu.RUnlock() }
 
 func NewTimeSeriesValue(retention time.Duration) *TimeSeriesValue {
 	return &TimeSeriesValue{
@@ -55,6 +61,35 @@ func (v *TimeSeriesValue) Clone() Value {
 	}
 }
 
+type DuplicatePolicy int
+
+const (
+	DuplicateReject DuplicatePolicy = iota
+	DuplicateFirst
+	DuplicateLast
+	DuplicateMin
+	DuplicateMax
+	DuplicateSum
+)
+
+func ParseDuplicatePolicy(policy string) (DuplicatePolicy, bool) {
+	switch strings.ToUpper(policy) {
+	case "BLOCK":
+		return DuplicateReject, true
+	case "FIRST":
+		return DuplicateFirst, true
+	case "LAST":
+		return DuplicateLast, true
+	case "MIN":
+		return DuplicateMin, true
+	case "MAX":
+		return DuplicateMax, true
+	case "SUM":
+		return DuplicateSum, true
+	}
+	return DuplicateReject, false
+}
+
 func (v *TimeSeriesValue) Add(timestamp int64, value float64) int64 {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -80,6 +115,61 @@ func (v *TimeSeriesValue) Add(timestamp int64, value float64) int64 {
 	}
 
 	return timestamp
+}
+
+func (v *TimeSeriesValue) AddWithPolicy(timestamp int64, value float64, policy DuplicatePolicy) (bool, int64) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	if timestamp == 0 {
+		timestamp = time.Now().UnixMilli()
+	}
+
+	for i := range v.Samples {
+		if v.Samples[i].Timestamp != timestamp {
+			continue
+		}
+		switch policy {
+		case DuplicateFirst:
+			return true, timestamp
+		case DuplicateLast:
+			v.Samples[i].Value = value
+			return true, timestamp
+		case DuplicateMin:
+			if value < v.Samples[i].Value {
+				v.Samples[i].Value = value
+			}
+			return true, timestamp
+		case DuplicateMax:
+			if value > v.Samples[i].Value {
+				v.Samples[i].Value = value
+			}
+			return true, timestamp
+		case DuplicateSum:
+			v.Samples[i].Value += value
+			return true, timestamp
+		default:
+			return false, timestamp
+		}
+	}
+
+	v.Samples = append(v.Samples, TimeSeriesSample{
+		Timestamp: timestamp,
+		Value:     value,
+	})
+
+	if v.Retention > 0 {
+		cutoff := time.Now().Add(-v.Retention).UnixMilli()
+		newSamples := make([]TimeSeriesSample, 0)
+		for _, s := range v.Samples {
+			if s.Timestamp >= cutoff {
+				newSamples = append(newSamples, s)
+			}
+		}
+		v.Samples = newSamples
+	}
+
+	return true, timestamp
 }
 
 func (v *TimeSeriesValue) AddWithLabels(timestamp int64, value float64, labels map[string]string) int64 {
@@ -220,6 +310,15 @@ func (v *TimeSeriesValue) SetRetention(retention time.Duration) {
 func (v *TimeSeriesValue) SetLabels(labels map[string]string) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
+	for k, val := range labels {
+		v.Labels[k] = val
+	}
+}
+
+func (v *TimeSeriesValue) ReplaceLabels(labels map[string]string) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.Labels = make(map[string]string, len(labels))
 	for k, val := range labels {
 		v.Labels[k] = val
 	}

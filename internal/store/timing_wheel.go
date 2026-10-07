@@ -75,7 +75,7 @@ func (tw *TimingWheel) Add(key string, expiresAt int64) {
 
 	switch {
 	case duration <= 0:
-		return
+		tw.addToLevel(0, key, expiresAt, 0)
 	case duration < time.Hour:
 		tw.addToLevel(0, key, expiresAt, duration)
 	case duration < 24*time.Hour:
@@ -284,7 +284,6 @@ func (tw *TimingWheel) farFutureCleanup() {
 
 func (tw *TimingWheel) cleanupFarFuture() {
 	tw.mu.Lock()
-	defer tw.mu.Unlock()
 
 	now := time.Now().UnixNano()
 
@@ -328,6 +327,7 @@ func (tw *TimingWheel) cleanupFarFuture() {
 		}
 	}
 	tw.farFuture.mu.Unlock()
+	tw.mu.Unlock()
 
 	// Expire keys that have passed their expiration time
 	for _, key := range expired {

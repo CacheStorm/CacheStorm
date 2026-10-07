@@ -189,13 +189,19 @@ func cmdUNWATCH(ctx *Context) error {
 func executeQueuedCommand(ctx *Context, qc queuedCommand) *resp.Value {
 	switch qc.cmd {
 	case "SET":
-		if len(qc.args) >= 2 {
-			key := string(qc.args[0])
-			value := qc.args[1]
-			ctx.Store.Set(key, &store.StringValue{Data: value}, store.SetOptions{})
-			return resp.SimpleString("OK")
+		var output bytes.Buffer
+		replayCtx := *ctx
+		replayCtx.Command = qc.cmd
+		replayCtx.Args = qc.args
+		replayCtx.Writer = resp.NewWriter(&output)
+		if err := cmdSET(&replayCtx); err != nil {
+			return resp.ErrorValue(err.Error())
 		}
-		return resp.ErrorValue("ERR wrong number of arguments")
+		result, err := resp.NewReader(&output).ReadValue()
+		if err != nil {
+			return resp.ErrorValue(err.Error())
+		}
+		return result
 	case "GET":
 		if len(qc.args) >= 1 {
 			key := string(qc.args[0])
@@ -940,23 +946,7 @@ func respIncrBy(ctx *Context, qc queuedCommand, incr int64) *resp.Value {
 }
 
 func parseInt(data []byte) (int64, error) {
-	var result int64
-	var negative bool
-	i := 0
-	if len(data) > 0 && data[0] == '-' {
-		negative = true
-		i = 1
-	}
-	for ; i < len(data); i++ {
-		if data[i] < '0' || data[i] > '9' {
-			return 0, fmt.Errorf("not an integer")
-		}
-		result = result*10 + int64(data[i]-'0')
-	}
-	if negative {
-		result = -result
-	}
-	return result, nil
+	return strconv.ParseInt(string(data), 10, 64)
 }
 
 func int64ToBytes(n int64) []byte {

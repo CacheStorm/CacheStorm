@@ -132,8 +132,8 @@ func TestProofExecReplayGetDistinguishesWrongTypeFromMissing(t *testing.T) {
 	// not vanish inside a transaction.
 	replayedBmp := replayTx(ctx, r, "GET", "abmp")
 	directBmp := execTx(ctx, r, "GET", "abmp")
-	if directBmp != "$1\r\n\x01\r\n" {
-		t.Fatalf("SECONDARY setup: direct GET on a bitmap key = %q, want the byte 0x01", directBmp)
+	if directBmp != "$1\r\n\x80\r\n" {
+		t.Fatalf("SECONDARY setup: direct GET on a bitmap key = %q, want the byte 0x80", directBmp)
 	}
 	if replayedBmp != directBmp {
 		t.Fatalf("FAIL: GET inside a transaction LOST real data. Direct GET abmp = %q but "+

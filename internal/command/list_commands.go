@@ -81,6 +81,7 @@ func cmdLPUSH(ctx *Context) error {
 		return ctx.WriteError(err)
 	}
 
+	list.Lock()
 	argCount := ctx.ArgCount() - 1
 	newElements := make([][]byte, argCount+len(list.Elements))
 	// LPUSH inserts in reverse order (last arg ends up at head), matching Redis behavior
@@ -89,9 +90,11 @@ func cmdLPUSH(ctx *Context) error {
 	}
 	copy(newElements[argCount:], list.Elements)
 	list.Elements = newElements
+	length := int64(len(list.Elements))
+	list.Unlock()
 
 	ctx.Store.KeyNotifier().NotifyKey(key)
-	return ctx.WriteInteger(int64(len(list.Elements)))
+	return ctx.WriteInteger(length)
 }
 
 func cmdRPUSH(ctx *Context) error {
@@ -105,13 +108,16 @@ func cmdRPUSH(ctx *Context) error {
 		return ctx.WriteError(err)
 	}
 
+	list.Lock()
 	for i := 1; i < ctx.ArgCount(); i++ {
 		value := ctx.Arg(i)
 		list.Elements = append(list.Elements, value)
 	}
+	length := int64(len(list.Elements))
+	list.Unlock()
 
 	ctx.Store.KeyNotifier().NotifyKey(key)
-	return ctx.WriteInteger(int64(len(list.Elements)))
+	return ctx.WriteInteger(length)
 }
 
 func cmdLPUSHX(ctx *Context) error {
@@ -128,6 +134,7 @@ func cmdLPUSHX(ctx *Context) error {
 		return ctx.WriteInteger(0)
 	}
 
+	list.Lock()
 	argCount := ctx.ArgCount() - 1
 	newElements := make([][]byte, argCount+len(list.Elements))
 	for i := 0; i < argCount; i++ {
@@ -135,8 +142,10 @@ func cmdLPUSHX(ctx *Context) error {
 	}
 	copy(newElements[argCount:], list.Elements)
 	list.Elements = newElements
+	length := int64(len(list.Elements))
+	list.Unlock()
 
-	return ctx.WriteInteger(int64(len(list.Elements)))
+	return ctx.WriteInteger(length)
 }
 
 func cmdRPUSHX(ctx *Context) error {
@@ -153,12 +162,15 @@ func cmdRPUSHX(ctx *Context) error {
 		return ctx.WriteInteger(0)
 	}
 
+	list.Lock()
 	for i := 1; i < ctx.ArgCount(); i++ {
 		value := ctx.Arg(i)
 		list.Elements = append(list.Elements, value)
 	}
+	length := int64(len(list.Elements))
+	list.Unlock()
 
-	return ctx.WriteInteger(int64(len(list.Elements)))
+	return ctx.WriteInteger(length)
 }
 
 func cmdLPOP(ctx *Context) error {
@@ -171,14 +183,21 @@ func cmdLPOP(ctx *Context) error {
 	if err != nil {
 		return ctx.WriteError(err)
 	}
-	if list == nil || len(list.Elements) == 0 {
+	if list == nil {
 		return ctx.WriteNullBulkString()
 	}
 
+	list.Lock()
+	if len(list.Elements) == 0 {
+		list.Unlock()
+		return ctx.WriteNullBulkString()
+	}
 	value := list.Elements[0]
 	list.Elements = list.Elements[1:]
+	empty := len(list.Elements) == 0
+	list.Unlock()
 
-	if len(list.Elements) == 0 {
+	if empty {
 		ctx.Store.Delete(key)
 	}
 
@@ -195,15 +214,22 @@ func cmdRPOP(ctx *Context) error {
 	if err != nil {
 		return ctx.WriteError(err)
 	}
-	if list == nil || len(list.Elements) == 0 {
+	if list == nil {
 		return ctx.WriteNullBulkString()
 	}
 
+	list.Lock()
+	if len(list.Elements) == 0 {
+		list.Unlock()
+		return ctx.WriteNullBulkString()
+	}
 	idx := len(list.Elements) - 1
 	value := list.Elements[idx]
 	list.Elements = list.Elements[:idx]
+	empty := len(list.Elements) == 0
+	list.Unlock()
 
-	if len(list.Elements) == 0 {
+	if empty {
 		ctx.Store.Delete(key)
 	}
 
@@ -224,7 +250,11 @@ func cmdLLEN(ctx *Context) error {
 		return ctx.WriteInteger(0)
 	}
 
-	return ctx.WriteInteger(int64(len(list.Elements)))
+	list.RLock()
+	length := int64(len(list.Elements))
+	list.RUnlock()
+
+	return ctx.WriteInteger(length)
 }
 
 func cmdLRANGE(ctx *Context) error {
@@ -249,6 +279,9 @@ func cmdLRANGE(ctx *Context) error {
 	if list == nil {
 		return ctx.WriteArray([]*resp.Value{})
 	}
+
+	list.RLock()
+	defer list.RUnlock()
 
 	length := len(list.Elements)
 	if length == 0 {
@@ -299,6 +332,9 @@ func cmdLINDEX(ctx *Context) error {
 		return ctx.WriteNullBulkString()
 	}
 
+	list.RLock()
+	defer list.RUnlock()
+
 	length := len(list.Elements)
 	if index < 0 {
 		index = length + index
@@ -330,15 +366,18 @@ func cmdLSET(ctx *Context) error {
 		return ctx.WriteError(store.ErrKeyNotFound)
 	}
 
+	list.Lock()
 	length := len(list.Elements)
 	if index < 0 {
 		index = length + index
 	}
 	if index < 0 || index >= length {
+		list.Unlock()
 		return ctx.WriteError(ErrIndexOutOfRange)
 	}
 
 	list.Elements[index] = value
+	list.Unlock()
 	return ctx.WriteOK()
 }
 
@@ -361,6 +400,8 @@ func cmdLREM(ctx *Context) error {
 	if list == nil {
 		return ctx.WriteInteger(0)
 	}
+
+	list.Lock()
 
 	removed := 0
 	newElements := make([][]byte, 0, len(list.Elements))
@@ -400,8 +441,10 @@ func cmdLREM(ctx *Context) error {
 	}
 
 	list.Elements = newElements
+	empty := len(list.Elements) == 0
+	list.Unlock()
 
-	if len(list.Elements) == 0 {
+	if empty {
 		ctx.Store.Delete(key)
 	}
 
@@ -429,6 +472,9 @@ func cmdLINSERT(ctx *Context) error {
 	if list == nil {
 		return ctx.WriteInteger(0)
 	}
+
+	list.Lock()
+	defer list.Unlock()
 
 	pivotIdx := -1
 	for i, elem := range list.Elements {
@@ -481,8 +527,10 @@ func cmdLTRIM(ctx *Context) error {
 		return ctx.WriteOK()
 	}
 
+	list.Lock()
 	length := len(list.Elements)
 	if length == 0 {
+		list.Unlock()
 		return ctx.WriteOK()
 	}
 
@@ -501,11 +549,13 @@ func cmdLTRIM(ctx *Context) error {
 	}
 	if start > stop || start >= length {
 		list.Elements = make([][]byte, 0)
+		list.Unlock()
 		ctx.Store.Delete(key)
 		return ctx.WriteOK()
 	}
 
 	list.Elements = list.Elements[start : stop+1]
+	list.Unlock()
 	return ctx.WriteOK()
 }
 
@@ -628,7 +678,9 @@ func cmdBLMOVE(ctx *Context) error {
 	}
 
 	// Try immediate move
-	if value, ok := tryListMove(ctx, srcKey, dstKey, whereFrom, whereTo); ok {
+	if value, ok, err := tryListMove(ctx, srcKey, dstKey, whereFrom, whereTo); err != nil {
+		return ctx.WriteError(err)
+	} else if ok {
 		return ctx.WriteBulkBytes(value)
 	}
 
@@ -643,22 +695,39 @@ func cmdBLMOVE(ctx *Context) error {
 		if !notifier.WaitForKey(srcKey, dur) {
 			return ctx.WriteNull()
 		}
-		if value, ok := tryListMove(ctx, srcKey, dstKey, whereFrom, whereTo); ok {
+		if value, ok, err := tryListMove(ctx, srcKey, dstKey, whereFrom, whereTo); err != nil {
+			return ctx.WriteError(err)
+		} else if ok {
 			return ctx.WriteBulkBytes(value)
 		}
 	}
 }
 
-func tryListMove(ctx *Context, srcKey, dstKey, whereFrom, whereTo string) ([]byte, bool) {
+func tryListMove(ctx *Context, srcKey, dstKey, whereFrom, whereTo string) ([]byte, bool, error) {
 	srcList, err := getList(ctx, srcKey)
-	if err != nil || srcList == nil || len(srcList.Elements) == 0 {
-		return nil, false
+	if err != nil {
+		return nil, false, err
+	}
+	if srcList == nil {
+		return nil, false, nil
+	}
+
+	srcList.RLock()
+	sourceEmpty := len(srcList.Elements) == 0
+	srcList.RUnlock()
+	if sourceEmpty {
+		return nil, false, nil
+	}
+
+	dstList, err := getOrCreateList(ctx, dstKey)
+	if err != nil {
+		return nil, false, err
 	}
 
 	srcList.Lock()
 	if len(srcList.Elements) == 0 {
 		srcList.Unlock()
-		return nil, false
+		return nil, false, nil
 	}
 
 	var value []byte
@@ -673,13 +742,8 @@ func tryListMove(ctx *Context, srcKey, dstKey, whereFrom, whereTo string) ([]byt
 	srcEmpty := len(srcList.Elements) == 0
 	srcList.Unlock()
 
-	if srcEmpty {
+	if srcEmpty && srcKey != dstKey {
 		ctx.Store.Delete(srcKey)
-	}
-
-	dstList, err := getOrCreateList(ctx, dstKey)
-	if err != nil {
-		return nil, false
 	}
 
 	dstList.Lock()
@@ -695,7 +759,7 @@ func tryListMove(ctx *Context, srcKey, dstKey, whereFrom, whereTo string) ([]byt
 	dstList.Unlock()
 
 	ctx.Store.KeyNotifier().NotifyKey(dstKey)
-	return value, true
+	return value, true, nil
 }
 
 func cmdBLPOP(ctx *Context) error {
@@ -878,7 +942,9 @@ func cmdBRPOPLPUSH(ctx *Context) error {
 	}
 
 	// BRPOPLPUSH is RPOP src + LPUSH dst
-	if value, ok := tryListMove(ctx, srcKey, dstKey, "RIGHT", "LEFT"); ok {
+	if value, ok, err := tryListMove(ctx, srcKey, dstKey, "RIGHT", "LEFT"); err != nil {
+		return ctx.WriteError(err)
+	} else if ok {
 		return ctx.WriteBulkBytes(value)
 	}
 
@@ -893,7 +959,9 @@ func cmdBRPOPLPUSH(ctx *Context) error {
 		if !notifier.WaitForKey(srcKey, dur) {
 			return ctx.WriteNull()
 		}
-		if value, ok := tryListMove(ctx, srcKey, dstKey, "RIGHT", "LEFT"); ok {
+		if value, ok, err := tryListMove(ctx, srcKey, dstKey, "RIGHT", "LEFT"); err != nil {
+			return ctx.WriteError(err)
+		} else if ok {
 			return ctx.WriteBulkBytes(value)
 		}
 	}
@@ -959,6 +1027,9 @@ func cmdLPOS(ctx *Context) error {
 	if list == nil {
 		return ctx.WriteNull()
 	}
+
+	list.RLock()
+	defer list.RUnlock()
 
 	absRank := rank
 	if rank < 0 {

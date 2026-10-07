@@ -264,20 +264,8 @@ func TestReadCommandWithNilArg(t *testing.T) {
 	r := NewReader(bytes.NewReader([]byte(input)))
 
 	cmd, args, err := r.ReadCommand()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if cmd != "GET" {
-		t.Errorf("expected 'GET', got '%s'", cmd)
-	}
-
-	if len(args) != 1 {
-		t.Errorf("expected 1 arg, got %d", len(args))
-	}
-
-	if args[0] != nil {
-		t.Errorf("expected nil arg, got %v", args[0])
+	if err != ErrInvalidFormat || cmd != "" || args != nil {
+		t.Fatalf("expected empty command, nil args, ErrInvalidFormat; got command=%q args=%q error=%v", cmd, args, err)
 	}
 }
 
@@ -624,12 +612,8 @@ func TestReadLineWithEmbeddedCR(t *testing.T) {
 	r := NewReader(bytes.NewReader([]byte(input)))
 
 	v, err := r.ReadValue()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if v.Str != "hello\rworld" {
-		t.Errorf("expected 'hello\\rworld', got '%s'", v.Str)
+	if err != ErrInvalidFormat || v != nil {
+		t.Fatalf("expected nil value and ErrInvalidFormat, got value=%v error=%v", v, err)
 	}
 }
 

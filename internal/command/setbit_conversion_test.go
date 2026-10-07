@@ -59,10 +59,10 @@ func TestSetBitInPlaceRoundTrip(t *testing.T) {
 	if reply := runCmd(t, s, router, "SET", "k", "hello"); reply == "" {
 		t.Fatal("SET setup failed")
 	}
-	if reply := runCmd(t, s, router, "SETBIT", "k", "4", "1"); !strings.Contains(reply, ":0") {
+	if reply := runCmd(t, s, router, "SETBIT", "k", "7", "1"); !strings.Contains(reply, ":0") {
 		t.Fatalf("SETBIT must report the old bit 0, got %q", reply)
 	}
-	if got := runCmd(t, s, router, "GETBIT", "k", "4"); !strings.Contains(got, ":1") {
+	if got := runCmd(t, s, router, "GETBIT", "k", "7"); !strings.Contains(got, ":1") {
 		t.Fatalf("in-place bit lost, GETBIT got %q", got)
 	}
 }

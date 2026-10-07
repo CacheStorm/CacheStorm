@@ -130,9 +130,18 @@ func cmdTSADD(ctx *Context) error {
 		ts, _ = tsManager.Get(key)
 	}
 
-	_ = onDuplicate
+	policy := store.DuplicateReject
+	if onDuplicate != "" {
+		var ok bool
+		if policy, ok = store.ParseDuplicatePolicy(onDuplicate); !ok {
+			return ctx.WriteError(ErrInvalidArg)
+		}
+	}
 
-	resultTs := ts.Add(timestamp, value)
+	written, resultTs := ts.AddWithPolicy(timestamp, value, policy)
+	if !written {
+		return ctx.WriteError(fmt.Errorf("TSDB: duplicate timestamp"))
+	}
 	return ctx.WriteInteger(resultTs)
 }
 
@@ -156,7 +165,10 @@ func cmdTSMADD(ctx *Context) error {
 			ts, _ = tsManager.Get(key)
 		}
 
-		resultTs := ts.Add(timestamp, value)
+		written, resultTs := ts.AddWithPolicy(timestamp, value, store.DuplicateReject)
+		if !written {
+			return ctx.WriteError(fmt.Errorf("TSDB: duplicate timestamp"))
+		}
 		results = append(results, resp.IntegerValue(resultTs))
 	}
 
@@ -187,7 +199,7 @@ func cmdTSRANGE(ctx *Context) error {
 		case "AGGREGATION":
 			i++
 			if i < ctx.ArgCount() {
-				aggType = strings.ToUpper(ctx.ArgString(i))
+				aggType = strings.ToLower(ctx.ArgString(i))
 			}
 			i++
 			if i < ctx.ArgCount() {
@@ -204,6 +216,9 @@ func cmdTSRANGE(ctx *Context) error {
 	var samples []store.TimeSeriesSample
 	if aggType != "" && bucketSize > 0 {
 		samples = ts.Aggregation(from, to, aggType, bucketSize)
+		if count > 0 && len(samples) > count {
+			samples = samples[:count]
+		}
 	} else if count > 0 {
 		samples = ts.RangeWithCount(from, to, count)
 	} else {
@@ -230,12 +245,44 @@ func cmdTSREVRANGE(ctx *Context) error {
 	from := parseInt64(ctx.ArgString(1))
 	to := parseInt64(ctx.ArgString(2))
 
+	count := 0
+	aggType := ""
+	bucketSize := int64(0)
+
+	for i := 3; i < ctx.ArgCount(); i++ {
+		arg := strings.ToUpper(ctx.ArgString(i))
+		switch arg {
+		case "COUNT":
+			i++
+			if i < ctx.ArgCount() {
+				count = int(parseInt64(ctx.ArgString(i)))
+			}
+		case "AGGREGATION":
+			i++
+			if i < ctx.ArgCount() {
+				aggType = strings.ToLower(ctx.ArgString(i))
+			}
+			i++
+			if i < ctx.ArgCount() {
+				bucketSize = parseInt64(ctx.ArgString(i))
+			}
+		}
+	}
+
 	ts, ok := tsManager.Get(key)
 	if !ok {
 		return ctx.WriteArray([]*resp.Value{})
 	}
 
-	samples := ts.Range(from, to)
+	var samples []store.TimeSeriesSample
+	if aggType != "" && bucketSize > 0 {
+		samples = ts.Aggregation(from, to, aggType, bucketSize)
+	} else {
+		samples = ts.Range(from, to)
+	}
+	if count > 0 && len(samples) > count {
+		samples = samples[len(samples)-count:]
+	}
 
 	results := make([]*resp.Value, 0, len(samples))
 	for i := len(samples) - 1; i >= 0; i-- {
@@ -351,6 +398,8 @@ func cmdTSALTER(ctx *Context) error {
 
 	key := ctx.ArgString(0)
 	retention := time.Duration(0)
+	clearRetention := false
+	replaceLabels := false
 	labels := make(map[string]string)
 
 	for i := 1; i < ctx.ArgCount(); i++ {
@@ -359,10 +408,18 @@ func cmdTSALTER(ctx *Context) error {
 		case "RETENTION":
 			i++
 			if i < ctx.ArgCount() {
-				ms := parseInt64(ctx.ArgString(i))
+				ms, err := strconv.ParseInt(ctx.ArgString(i), 10, 64)
+				if err != nil {
+					ms = 0
+				}
 				retention = time.Duration(ms) * time.Millisecond
+				clearRetention = err == nil && ms == 0
 			}
 		case "LABELS":
+			if (ctx.ArgCount()-i-1)%2 != 0 {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			replaceLabels = true
 			for i+2 < ctx.ArgCount() {
 				i++
 				labelKey := ctx.ArgString(i)
@@ -378,12 +435,12 @@ func cmdTSALTER(ctx *Context) error {
 		return ctx.WriteError(fmt.Errorf("ERR key does not exist"))
 	}
 
-	if retention > 0 {
+	if retention > 0 || clearRetention {
 		ts.SetRetention(retention)
 	}
 
-	if len(labels) > 0 {
-		ts.SetLabels(labels)
+	if replaceLabels {
+		ts.ReplaceLabels(labels)
 	}
 
 	return ctx.WriteOK()
@@ -397,6 +454,16 @@ func cmdTSINCRBY(ctx *Context) error {
 	key := ctx.ArgString(0)
 	increment := parseJSONFloat(ctx.ArgString(1))
 
+	timestamp := int64(0)
+	for i := 2; i < ctx.ArgCount(); i++ {
+		if strings.ToUpper(ctx.ArgString(i)) == "TIMESTAMP" {
+			i++
+			if i < ctx.ArgCount() {
+				timestamp = parseInt64(ctx.ArgString(i))
+			}
+		}
+	}
+
 	ts, ok := tsManager.Get(key)
 	if !ok {
 		if err := tsManager.Create(key, 0, nil); err != nil {
@@ -406,6 +473,13 @@ func cmdTSINCRBY(ctx *Context) error {
 	}
 
 	latest := ts.Latest()
+	if timestamp == 0 {
+		timestamp = time.Now().UnixMilli()
+	}
+	if latest != nil && timestamp < latest.Timestamp {
+		return ctx.WriteError(fmt.Errorf("TSDB: timestamp must be equal to or higher than the maximum existing timestamp"))
+	}
+
 	var newValue float64
 	if latest != nil {
 		newValue = latest.Value + increment
@@ -413,8 +487,8 @@ func cmdTSINCRBY(ctx *Context) error {
 		newValue = increment
 	}
 
-	timestamp := ts.Add(0, newValue)
-	return ctx.WriteInteger(timestamp)
+	_, result := ts.AddWithPolicy(timestamp, newValue, store.DuplicateLast)
+	return ctx.WriteInteger(result)
 }
 
 func cmdTSDECRBY(ctx *Context) error {
@@ -425,6 +499,16 @@ func cmdTSDECRBY(ctx *Context) error {
 	key := ctx.ArgString(0)
 	decrement := parseJSONFloat(ctx.ArgString(1))
 
+	timestamp := int64(0)
+	for i := 2; i < ctx.ArgCount(); i++ {
+		if strings.ToUpper(ctx.ArgString(i)) == "TIMESTAMP" {
+			i++
+			if i < ctx.ArgCount() {
+				timestamp = parseInt64(ctx.ArgString(i))
+			}
+		}
+	}
+
 	ts, ok := tsManager.Get(key)
 	if !ok {
 		if err := tsManager.Create(key, 0, nil); err != nil {
@@ -434,6 +518,13 @@ func cmdTSDECRBY(ctx *Context) error {
 	}
 
 	latest := ts.Latest()
+	if timestamp == 0 {
+		timestamp = time.Now().UnixMilli()
+	}
+	if latest != nil && timestamp < latest.Timestamp {
+		return ctx.WriteError(fmt.Errorf("TSDB: timestamp must be equal to or higher than the maximum existing timestamp"))
+	}
+
 	var newValue float64
 	if latest != nil {
 		newValue = latest.Value - decrement
@@ -441,8 +532,8 @@ func cmdTSDECRBY(ctx *Context) error {
 		newValue = -decrement
 	}
 
-	timestamp := ts.Add(0, newValue)
-	return ctx.WriteInteger(timestamp)
+	_, result := ts.AddWithPolicy(timestamp, newValue, store.DuplicateLast)
+	return ctx.WriteInteger(result)
 }
 
 func parseInt64(s string) int64 {

@@ -140,7 +140,7 @@ func (m *Manager) RunTagInvalidateHooks(tag string, keys []string) {
 	m.mu.RUnlock()
 
 	for _, hook := range hooks {
-		hook.OnTagInvalidate(tag, keys)
+		hook.OnTagInvalidate(tag, slices.Clone(keys))
 	}
 }
 
@@ -162,12 +162,13 @@ func (m *Manager) RunShutdownHooks() error {
 	hooks := slices.Clone(m.shutdownHooks)
 	m.mu.RUnlock()
 
+	var firstErr error
 	for _, hook := range hooks {
-		if err := hook.OnShutdown(); err != nil {
-			return err
+		if err := hook.OnShutdown(); err != nil && firstErr == nil {
+			firstErr = err
 		}
 	}
-	return nil
+	return firstErr
 }
 
 func (m *Manager) Plugins() []Plugin {

@@ -4,7 +4,10 @@ import (
 	"bufio"
 	"io"
 	"strconv"
+	"strings"
 )
+
+var errorLineReplacer = strings.NewReplacer("\r", " ", "\n", " ")
 
 type Writer struct {
 	wr *bufio.Writer
@@ -19,6 +22,9 @@ func (w *Writer) Flush() error {
 }
 
 func (w *Writer) WriteValue(v *Value) error {
+	if v == nil {
+		return ErrInvalidType
+	}
 	switch v.Type {
 	case TypeSimpleString:
 		return w.WriteSimpleString(v.Str)
@@ -36,6 +42,11 @@ func (w *Writer) WriteValue(v *Value) error {
 			return w.WriteNullArray()
 		}
 		return w.WriteArray(v.Array)
+	case TypeMap:
+		if err := w.writeMapNoFlush(v.Map); err != nil {
+			return err
+		}
+		return w.wr.Flush()
 	case TypeNull:
 		return w.WriteNull()
 	default:
@@ -47,7 +58,7 @@ func (w *Writer) WriteSimpleString(s string) error {
 	if err := w.wr.WriteByte(byte(TypeSimpleString)); err != nil {
 		return err
 	}
-	if _, err := w.wr.WriteString(s); err != nil {
+	if _, err := w.wr.WriteString(errorLineReplacer.Replace(s)); err != nil {
 		return err
 	}
 	if _, err := w.wr.WriteString("\r\n"); err != nil {
@@ -60,7 +71,7 @@ func (w *Writer) WriteError(s string) error {
 	if err := w.wr.WriteByte(byte(TypeError)); err != nil {
 		return err
 	}
-	if _, err := w.wr.WriteString(s); err != nil {
+	if _, err := w.wr.WriteString(errorLineReplacer.Replace(s)); err != nil {
 		return err
 	}
 	if _, err := w.wr.WriteString("\r\n"); err != nil {
@@ -154,15 +165,18 @@ func (w *Writer) WriteArray(items []*Value) error {
 }
 
 func (w *Writer) WriteValueNoFlush(v *Value) error {
+	if v == nil {
+		return ErrInvalidType
+	}
 	switch v.Type {
 	case TypeSimpleString:
 		w.wr.WriteByte(byte(TypeSimpleString))
-		w.wr.WriteString(v.Str)
+		w.wr.WriteString(errorLineReplacer.Replace(v.Str))
 		_, err := w.wr.WriteString("\r\n")
 		return err
 	case TypeError:
 		w.wr.WriteByte(byte(TypeError))
-		w.wr.WriteString(v.Err)
+		w.wr.WriteString(errorLineReplacer.Replace(v.Err))
 		_, err := w.wr.WriteString("\r\n")
 		return err
 	case TypeInteger:
@@ -199,6 +213,8 @@ func (w *Writer) WriteValueNoFlush(v *Value) error {
 			}
 		}
 		return nil
+	case TypeMap:
+		return w.writeMapNoFlush(v.Map)
 	case TypeNull:
 		w.wr.WriteByte(byte(TypeNull))
 		_, err := w.wr.WriteString("\r\n")

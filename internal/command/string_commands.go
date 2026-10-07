@@ -586,18 +586,39 @@ func cmdMSETNX(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
+	// MSETNX is atomic ("all given keys are set at once"): validate every
+	// pair and pre-check capacity before applying anything — a mid-way
+	// failure would leave a partially applied MSETNX. The padding keeps the
+	// estimate conservative against the tracker's per-entry overhead.
+	var estimated int64
+	for i := 0; i < ctx.ArgCount(); i += 2 {
+		k := ctx.ArgString(i)
+		if len(k) == 0 || len(k) > store.MaxKeySize || strings.ContainsRune(k, 0) {
+			return ctx.WriteError(store.ErrInvalidKey)
+		}
+		if len(ctx.Arg(i+1)) > store.MaxValueSize {
+			return ctx.WriteError(store.ErrValueTooLarge)
+		}
+		estimated += int64(len(k) + len(ctx.Arg(i+1)) + 128)
+	}
+
 	for i := 0; i < ctx.ArgCount(); i += 2 {
 		if ctx.Store.Exists(ctx.ArgString(i)) {
 			return ctx.WriteInteger(0)
 		}
 	}
 
-	for i := 0; i < ctx.ArgCount(); i += 2 {
-		key := ctx.ArgString(i)
-		value := ctx.Arg(i + 1)
-		ctx.Store.Set(key, &store.StringValue{Data: value}, store.SetOptions{})
+	if mt := ctx.Store.MemoryTracker(); mt != nil && !mt.CanAllocate(estimated) {
+		return ctx.WriteError(store.ErrMemoryLimit)
 	}
 
+	for i := 0; i < ctx.ArgCount(); i += 2 {
+		if err := ctx.Store.Set(ctx.ArgString(i), &store.StringValue{Data: ctx.Arg(i + 1)}, store.SetOptions{}); err != nil {
+			// Reachable only under concurrent pressure after the pre-flight:
+			// report it rather than hiding a partial application behind :1.
+			return ctx.WriteError(err)
+		}
+	}
 	return ctx.WriteInteger(1)
 }
 
@@ -611,15 +632,20 @@ func cmdGETSET(ctx *Context) error {
 
 	entry, exists := ctx.Store.Get(key)
 
-	ctx.Store.Set(key, &store.StringValue{Data: newValue}, store.SetOptions{})
-
-	if !exists {
-		return ctx.WriteNullBulkString()
+	var data []byte
+	if exists {
+		var ok bool
+		data, ok = stringValueOf(entry.Value)
+		if !ok {
+			return ctx.WriteError(store.ErrWrongType)
+		}
 	}
 
-	data, ok := stringValueOf(entry.Value)
-	if !ok {
-		return ctx.WriteError(store.ErrWrongType)
+	if err := ctx.Store.Set(key, &store.StringValue{Data: newValue}, store.SetOptions{}); err != nil {
+		return ctx.WriteError(err)
+	}
+	if !exists {
+		return ctx.WriteNullBulkString()
 	}
 
 	return ctx.WriteBulkBytes(data)
@@ -681,6 +707,9 @@ func cmdGETEX(ctx *Context) error {
 				if err != nil {
 					return ctx.WriteError(ErrNotInteger)
 				}
+				if sec <= 0 || sec > maxExpireAtSeconds {
+					return ctx.WriteError(errInvalidExpireTime)
+				}
 				ctx.Store.SetTTL(key, time.Duration(sec)*time.Second)
 			case "PX":
 				i++
@@ -690,6 +719,9 @@ func cmdGETEX(ctx *Context) error {
 				ms, err := strconv.ParseInt(ctx.ArgString(i), 10, 64)
 				if err != nil {
 					return ctx.WriteError(ErrNotInteger)
+				}
+				if ms <= 0 || ms > maxExpireAtMillis {
+					return ctx.WriteError(errInvalidExpireTime)
 				}
 				ctx.Store.SetTTL(key, time.Duration(ms)*time.Millisecond)
 			case "EXAT":
@@ -701,6 +733,9 @@ func cmdGETEX(ctx *Context) error {
 				if err != nil {
 					return ctx.WriteError(ErrNotInteger)
 				}
+				if ts > maxExpireAtSeconds || ts < -maxExpireAtSeconds {
+					return ctx.WriteError(errInvalidExpireTime)
+				}
 				ctx.Store.SetExpiresAt(key, time.Unix(ts, 0).UnixNano())
 			case "PXAT":
 				i++
@@ -710,6 +745,9 @@ func cmdGETEX(ctx *Context) error {
 				ts, err := strconv.ParseInt(ctx.ArgString(i), 10, 64)
 				if err != nil {
 					return ctx.WriteError(ErrNotInteger)
+				}
+				if ts > maxExpireAtMillis || ts < -maxExpireAtMillis {
+					return ctx.WriteError(errInvalidExpireTime)
 				}
 				ctx.Store.SetExpiresAt(key, ts*int64(time.Millisecond))
 			case "PERSIST":

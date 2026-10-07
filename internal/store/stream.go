@@ -270,6 +270,11 @@ type StreamValue struct {
 	Groups       map[string]*ConsumerGroup
 }
 
+func (v *StreamValue) Lock()    { v.mu.Lock() }
+func (v *StreamValue) Unlock()  { v.mu.Unlock() }
+func (v *StreamValue) RLock()   { v.mu.RLock() }
+func (v *StreamValue) RUnlock() { v.mu.RUnlock() }
+
 func NewStreamValue(maxLen int64) *StreamValue {
 	return &StreamValue{
 		Entries: make([]*StreamEntry, 0),
@@ -382,9 +387,17 @@ func (v *StreamValue) Add(id string, fields map[string][]byte) (*StreamEntry, er
 		}
 	}
 
+	var ownedFields map[string][]byte
+	if fields != nil {
+		ownedFields = make(map[string][]byte, len(fields))
+		for name, value := range fields {
+			ownedFields[name] = append([]byte(nil), value...)
+		}
+	}
+
 	entry := &StreamEntry{
 		ID:        id,
-		Fields:    fields,
+		Fields:    ownedFields,
 		CreatedAt: time.Now(),
 	}
 
@@ -525,6 +538,61 @@ func (v *StreamValue) TrimByMinID(minID string, _ bool) int64 {
 	removed := int64(0)
 
 	for _, entry := range v.Entries {
+		eMS, eSeq, err := parseStreamIDPair(entry.ID)
+		if err != nil {
+			remaining = append(remaining, entry)
+			continue
+		}
+		if eMS < minMS || (eMS == minMS && eSeq < minSeq) {
+			removed++
+		} else {
+			remaining = append(remaining, entry)
+		}
+	}
+
+	v.Entries = remaining
+	v.Length -= removed
+	return removed
+}
+
+// TrimLimited trims to maxLen but evicts at most limit entries when limit is
+// positive; a limit of 0 (or absent) keeps the unbounded exact behavior.
+func (v *StreamValue) TrimLimited(maxLen int64, limit int64) int64 {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	if maxLen >= v.Length {
+		return 0
+	}
+
+	remove := v.Length - maxLen
+	if limit > 0 && remove > limit {
+		remove = limit
+	}
+	v.Entries = v.Entries[remove:]
+	v.Length -= remove
+	return remove
+}
+
+// TrimByMinIDLimited removes entries numerically below minID but evicts at
+// most limit entries when limit is positive; 0 or negative keeps unlimited.
+func (v *StreamValue) TrimByMinIDLimited(minID string, limit int64) int64 {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	minMS, minSeq, err := parseStreamIDPair(minID)
+	if err != nil {
+		return 0
+	}
+
+	remaining := make([]*StreamEntry, 0, len(v.Entries))
+	removed := int64(0)
+
+	for _, entry := range v.Entries {
+		if limit > 0 && removed >= limit {
+			remaining = append(remaining, entry)
+			continue
+		}
 		eMS, eSeq, err := parseStreamIDPair(entry.ID)
 		if err != nil {
 			remaining = append(remaining, entry)

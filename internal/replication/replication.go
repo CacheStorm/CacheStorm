@@ -278,22 +278,23 @@ func (m *Manager) sendHandshake(writer *bufio.Writer) error {
 		return err
 	}
 
-	if _, err := fmt.Fprintf(writer, "*3\r\n$5\r\nREPLCONF\r\n$8\r\nlistening-port\r\n$4\r\n%d\r\n",
-		m.cfg.ReplicaAnnouncePort); err != nil {
+	port := strconv.Itoa(m.cfg.ReplicaAnnouncePort)
+	if _, err := fmt.Fprintf(writer, "*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$%d\r\n%s\r\n",
+		len(port), port); err != nil {
 		return err
 	}
 	if err := writer.Flush(); err != nil {
 		return err
 	}
 
-	if _, err := writer.WriteString("*3\r\n$5\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n"); err != nil {
+	if _, err := writer.WriteString("*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n"); err != nil {
 		return err
 	}
 	if err := writer.Flush(); err != nil {
 		return err
 	}
 
-	psyncCmd := fmt.Sprintf("*3\r\n$5\r\nPSYNC\r\n$40\r\n%s\r\n$1\r\n%d\r\n",
+	psyncCmd := fmt.Sprintf("*3\r\n$5\r\nPSYNC\r\n$40\r\n%s\r\n$2\r\n%d\r\n",
 		strings.Repeat("?", 40), -1)
 	if _, err := writer.WriteString(psyncCmd); err != nil {
 		return err

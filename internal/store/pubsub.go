@@ -78,6 +78,11 @@ const (
 func (ps *PubSub) Subscribe(sub *Subscriber, channels ...string) int {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
+	sub.mu.Lock()
+	defer sub.mu.Unlock()
+	if sub.closed {
+		return 0
+	}
 
 	ps.subscribers[sub] = struct{}{}
 
@@ -139,6 +144,11 @@ func (ps *PubSub) Unsubscribe(sub *Subscriber, channels ...string) int {
 func (ps *PubSub) PSubscribe(sub *Subscriber, patterns ...string) int {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
+	sub.mu.Lock()
+	defer sub.mu.Unlock()
+	if sub.closed {
+		return 0
+	}
 
 	ps.subscribers[sub] = struct{}{}
 
@@ -266,9 +276,9 @@ func (ps *PubSub) NumPat() int {
 }
 
 func (ps *PubSub) RemoveSubscriber(sub *Subscriber) {
+	sub.Close()
 	ps.Unsubscribe(sub)
 	ps.PUnsubscribe(sub)
-	sub.Close()
 }
 
 func matchPattern(s, pattern string) bool {

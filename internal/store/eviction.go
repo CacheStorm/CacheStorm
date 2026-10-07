@@ -26,6 +26,7 @@ type EvictionController struct {
 	memTracker *MemoryTracker
 	sampleSize int
 	onEvict    func(key string, entry *Entry)
+	onEvictMu  sync.RWMutex
 	rnd        *rand.Rand
 	rndMu      sync.Mutex
 }
@@ -42,6 +43,8 @@ func NewEvictionController(policy EvictionPolicy, maxMemory int64, s *Store, mt 
 }
 
 func (ec *EvictionController) SetOnEvict(fn func(key string, entry *Entry)) {
+	ec.onEvictMu.Lock()
+	defer ec.onEvictMu.Unlock()
 	ec.onEvict = fn
 }
 
@@ -107,8 +110,11 @@ func (ec *EvictionController) evictOne() bool {
 	ec.store.Delete(key)
 	GlobalMetrics.RecordEviction()
 
-	if entry != nil && ec.onEvict != nil {
-		ec.onEvict(key, entry)
+	ec.onEvictMu.RLock()
+	onEvict := ec.onEvict
+	ec.onEvictMu.RUnlock()
+	if entry != nil && onEvict != nil {
+		onEvict(key, entry)
 	}
 	return true
 }

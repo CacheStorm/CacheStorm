@@ -255,24 +255,21 @@ func (g *Graph) Neighbors(nodeID uint64, relation string) []*Node {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 
-	neighborIDs, ok := g.Adjacency[nodeID]
-	if !ok {
-		return []*Node{}
-	}
-
 	neighbors := make([]*Node, 0)
-	for _, id := range neighborIDs {
-		if node, ok := g.Nodes[id]; ok {
-			if relation == "" {
-				neighbors = append(neighbors, node)
-			} else {
-				for _, edge := range g.Edges {
-					if edge.From == nodeID && edge.To == id && edge.Relation == relation {
-						neighbors = append(neighbors, node)
-						break
-					}
+	if relation != "" {
+		for _, edgeID := range g.EdgeLabel[relation] {
+			edge := g.Edges[edgeID]
+			if edge != nil && edge.From == nodeID {
+				if node, ok := g.Nodes[edge.To]; ok {
+					neighbors = append(neighbors, node)
 				}
 			}
+		}
+		return neighbors
+	}
+	for _, id := range g.Adjacency[nodeID] {
+		if node, ok := g.Nodes[id]; ok {
+			neighbors = append(neighbors, node)
 		}
 	}
 

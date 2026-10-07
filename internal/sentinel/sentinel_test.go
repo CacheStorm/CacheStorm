@@ -349,7 +349,7 @@ func TestHandleSentinel(t *testing.T) {
 		{[]string{}, "-ERR wrong number of arguments"},
 		{[]string{"MASTERS"}, "name:mymaster"},
 		{[]string{"MASTER"}, "-ERR wrong number of arguments"},
-		{[]string{"MASTER", "mymaster"}, "*28"},
+		{[]string{"MASTER", "mymaster"}, "*8"},
 		{[]string{"MASTER", "nonexistent"}, "-ERR no such master"},
 		{[]string{"GETMASTER"}, "-ERR wrong number of arguments"},
 		{[]string{"GETMASTER", "mymaster"}, "*2"},

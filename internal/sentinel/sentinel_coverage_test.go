@@ -530,7 +530,7 @@ func TestHandleSentinel_AllSubcommands(t *testing.T) {
 	}{
 		{"empty parts", []string{}, "-ERR wrong number of arguments"},
 		{"MASTERS", []string{"MASTERS"}, "name:mymaster"},
-		{"MASTER with name", []string{"MASTER", "mymaster"}, "*28"},
+		{"MASTER with name", []string{"MASTER", "mymaster"}, "*8"},
 		{"MASTER missing name", []string{"MASTER"}, "-ERR wrong number of arguments"},
 		{"MASTER nonexistent", []string{"MASTER", "missing"}, "-ERR no such master"},
 		{"GETMASTER with name", []string{"GETMASTER", "mymaster"}, "*2"},
@@ -597,8 +597,8 @@ func TestFormatMaster_Existing(t *testing.T) {
 	s.mu.Unlock()
 
 	result := s.formatMaster("mymaster")
-	if !strings.Contains(result, "*28") {
-		t.Errorf("expected *28 prefix, got: %s", result)
+	if !strings.Contains(result, "*8") {
+		t.Errorf("expected *8 prefix, got: %s", result)
 	}
 	if !strings.Contains(result, "mymaster") {
 		t.Errorf("expected mymaster in output, got: %s", result)

@@ -173,6 +173,10 @@ func (p *Pool) Release(c *Conn) error {
 		p.mu.Unlock()
 		return c.conn.Close()
 	}
+	if !c.inUse.Load() {
+		p.mu.Unlock()
+		return nil
+	}
 
 	// c is still in-use here, so releasing it makes the idle count idle+1.
 	idle := 0

@@ -241,11 +241,17 @@ func New(cfg *config.Config) (*Server, error) {
 }
 
 func (s *Server) Start(_ context.Context) error {
+	startupComplete := false
 	// Start AOF writer if configured
 	if s.aof != nil {
 		if err := s.aof.Start(); err != nil {
 			return err
 		}
+		defer func() {
+			if !startupComplete {
+				s.aof.Stop()
+			}
+		}()
 	}
 
 	addr := net.JoinHostPort(s.cfg.Server.Bind, strconv.Itoa(s.cfg.Server.Port))
@@ -335,6 +341,7 @@ func (s *Server) Start(_ context.Context) error {
 		}
 	}()
 
+	startupComplete = true
 	return nil
 }
 

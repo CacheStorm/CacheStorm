@@ -140,6 +140,16 @@ func cmdZADD(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
+	scoreStart := i
+	scores := make([]float64, scoreMemberCount/2)
+	for j := i; j < ctx.ArgCount(); j += 2 {
+		score, err := strconv.ParseFloat(ctx.ArgString(j), 64)
+		if err != nil || math.IsNaN(score) {
+			return ctx.WriteError(ErrNotFloat)
+		}
+		scores[(j-scoreStart)/2] = score
+	}
+
 	// XX means "only update an existing key, never create one" (Redis ZADD),
 	// so a missing key must be resolved WITHOUT the creating helper: calling
 	// getOrCreateSortedSet first would materialize an empty zset that survives
@@ -175,10 +185,7 @@ func cmdZADD(ctx *Context) error {
 	changed := 0
 
 	for i < ctx.ArgCount() {
-		score, err := strconv.ParseFloat(ctx.ArgString(i), 64)
-		if err != nil {
-			return ctx.WriteError(ErrNotInteger)
-		}
+		score := scores[(i-scoreStart)/2]
 		member := ctx.ArgString(i + 1)
 
 		currentScore, exists := zset.Members[member]
@@ -1113,6 +1120,13 @@ func cmdZPOPMIN(ctx *Context) error {
 		}
 	}
 
+	if count < 0 {
+		return ctx.WriteError(ErrInvalidArg)
+	}
+	if count == 0 {
+		return ctx.WriteArray([]*resp.Value{})
+	}
+
 	zset, err := getSortedSet(ctx, key)
 	if err != nil {
 		return ctx.WriteError(err)
@@ -1148,6 +1162,13 @@ func cmdZPOPMAX(ctx *Context) error {
 		if err != nil {
 			return ctx.WriteError(ErrNotInteger)
 		}
+	}
+
+	if count < 0 {
+		return ctx.WriteError(ErrInvalidArg)
+	}
+	if count == 0 {
+		return ctx.WriteArray([]*resp.Value{})
 	}
 
 	zset, err := getSortedSet(ctx, key)
@@ -1881,6 +1902,10 @@ func cmdZMPOP(ctx *Context) error {
 		}
 	}
 
+	if count < 1 {
+		return ctx.WriteError(ErrInvalidArg)
+	}
+
 	for i := 0; i < numKeys; i++ {
 		key := ctx.ArgString(1 + i)
 		zset, err := getSortedSet(ctx, key)
@@ -2043,6 +2068,10 @@ func cmdBZMPOP(ctx *Context) error {
 		default:
 			return ctx.WriteError(ErrSyntaxError)
 		}
+	}
+
+	if count < 1 {
+		return ctx.WriteError(ErrInvalidArg)
 	}
 
 	max := dir == "MAX"

@@ -1088,8 +1088,8 @@ func TestReadRDBEOFWithoutEndMarker(t *testing.T) {
 	os.WriteFile(path, rdbData, 0644)
 
 	err := reader.Load(path)
-	if err != nil {
-		t.Errorf("expected graceful EOF, got: %v", err)
+	if err == nil {
+		t.Error("expected error for EOF without end marker")
 	}
 }
 
@@ -1591,10 +1591,9 @@ func TestReadByteEOF(t *testing.T) {
 	path := filepath.Join(tmpDir, "readbyte_eof.rdb")
 	os.WriteFile(path, rdbData, 0644)
 
-	// EOF after header should be handled gracefully.
 	err := reader.Load(path)
-	if err != nil {
-		t.Errorf("expected nil for EOF after header, got: %v", err)
+	if err == nil {
+		t.Error("expected error for EOF after header")
 	}
 }
 

@@ -2,6 +2,7 @@ package command
 
 import (
 	"errors"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -145,6 +146,7 @@ func cmdXADD(ctx *Context) error {
 	key := ctx.ArgString(0)
 
 	maxLen := int64(0)
+	trimLimit := int64(0)
 	minID := ""
 	approximate := false
 	trimStrategy := ""
@@ -191,7 +193,19 @@ loop:
 			nomkstream = true
 			argIdx++
 		case "LIMIT":
-			argIdx += 2
+			argIdx++
+			if argIdx >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			var err error
+			trimLimit, err = strconv.ParseInt(ctx.ArgString(argIdx), 10, 64)
+			if err != nil {
+				return ctx.WriteError(ErrNotInteger)
+			}
+			if trimLimit < 0 {
+				return ctx.WriteError(errCountOutOfRange)
+			}
+			argIdx++
 		default:
 			break loop
 		}
@@ -234,9 +248,17 @@ loop:
 	}
 
 	if trimStrategy == "MINID" && minID != "" {
-		stream.TrimByMinID(minID, approximate)
+		if approximate {
+			stream.TrimByMinIDLimited(minID, trimLimit)
+		} else {
+			stream.TrimByMinID(minID, false)
+		}
 	} else if trimStrategy == "MAXLEN" && maxLen > 0 {
-		stream.Trim(maxLen, approximate)
+		if approximate {
+			stream.TrimLimited(maxLen, trimLimit)
+		} else {
+			stream.Trim(maxLen, approximate)
+		}
 	}
 
 	_ = entry
@@ -357,7 +379,10 @@ func cmdXREVRANGE(ctx *Context) error {
 		return ctx.WriteError(err)
 	}
 
-	entries := stream.GetRange(start, end, count)
+	entries := stream.GetRange(start, end, 0)
+	if count > 0 && int64(len(entries)) > count {
+		entries = entries[int64(len(entries))-count:]
+	}
 
 	results := make([]*resp.Value, 0, len(entries))
 	for i := len(entries) - 1; i >= 0; i-- {
@@ -382,6 +407,7 @@ func cmdXREAD(ctx *Context) error {
 
 	count := int64(0)
 	block := int64(0)
+	blockSpecified := false
 	streamsIdx := -1
 
 	// Args exclude the command name, so options start at index 0; parsing
@@ -415,6 +441,7 @@ func cmdXREAD(ctx *Context) error {
 			if block < 0 {
 				return ctx.WriteError(errCountOutOfRange)
 			}
+			blockSpecified = true
 		case "STREAMS":
 			streamsIdx = i + 1
 			i = ctx.ArgCount()
@@ -471,13 +498,18 @@ func cmdXREAD(ctx *Context) error {
 	}
 
 	// If no BLOCK, return null
-	if block <= 0 {
+	if !blockSpecified {
 		return ctx.WriteNull()
 	}
 
-	// Block until notified or timeout
+	// Block until notified or timeout. BLOCK 0 blocks indefinitely, so it
+	// gets a deadline far enough out that only arriving data can return
+	// before it.
 	notifier := ctx.Store.KeyNotifier()
 	dur := time.Duration(block) * time.Millisecond
+	if block == 0 {
+		dur = time.Duration(1) << 62
+	}
 	deadline := time.Now().Add(dur)
 	const maxRetries = 100
 
@@ -508,7 +540,11 @@ func xreadStreams(ctx *Context, keys, ids []string, count int64) []*resp.Value {
 			continue
 		}
 
-		entries := stream.GetRange(ids[i], "+", count)
+		readCount := count
+		if count > 0 && count < math.MaxInt64 && stream.GetEntryByID(ids[i]) != nil {
+			readCount++
+		}
+		entries := stream.GetRange(ids[i], "+", readCount)
 		if len(entries) == 0 {
 			continue
 		}
@@ -526,6 +562,9 @@ func xreadStreams(ctx *Context, keys, ids []string, count int64) []*resp.Value {
 				resp.BulkString(entry.ID),
 				resp.ArrayValue(fields),
 			}))
+			if count > 0 && int64(len(entryResults)) >= count {
+				break
+			}
 		}
 
 		if len(entryResults) > 0 {
@@ -591,13 +630,22 @@ func cmdXTRIM(ctx *Context) error {
 		if err != nil {
 			return ctx.WriteError(err)
 		}
+		idx++
+
+		limit, err := parseTrimLimit(ctx, idx)
+		if err != nil {
+			return ctx.WriteError(err)
+		}
 
 		stream := getStream(ctx, key)
 		if stream == nil {
 			return ctx.WriteInteger(0)
 		}
 
-		return ctx.WriteInteger(stream.TrimByMinID(minID, approximate))
+		if approximate {
+			return ctx.WriteInteger(stream.TrimByMinIDLimited(minID, limit))
+		}
+		return ctx.WriteInteger(stream.TrimByMinID(minID, false))
 	}
 
 	maxLen, err := strconv.ParseInt(ctx.ArgString(idx), 10, 64)
@@ -611,12 +659,41 @@ func cmdXTRIM(ctx *Context) error {
 		return ctx.WriteError(errCountOutOfRange)
 	}
 
+	limit, err := parseTrimLimit(ctx, idx+1)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+
 	stream := getStream(ctx, key)
 	if stream == nil {
 		return ctx.WriteInteger(0)
 	}
 
+	if approximate {
+		return ctx.WriteInteger(stream.TrimLimited(maxLen, limit))
+	}
 	return ctx.WriteInteger(stream.Trim(maxLen, approximate))
+}
+
+// parseTrimLimit reads an optional trailing "LIMIT count" clause at idx.
+// LIMIT 0 disables the eviction cap, matching Redis; a negative count is a
+// client error.
+func parseTrimLimit(ctx *Context, idx int) (int64, error) {
+	if idx >= ctx.ArgCount() || strings.ToUpper(ctx.ArgString(idx)) != "LIMIT" {
+		return 0, nil
+	}
+	idx++
+	if idx >= ctx.ArgCount() {
+		return 0, ErrSyntaxError
+	}
+	limit, err := strconv.ParseInt(ctx.ArgString(idx), 10, 64)
+	if err != nil {
+		return 0, ErrNotInteger
+	}
+	if limit < 0 {
+		return 0, errCountOutOfRange
+	}
+	return limit, nil
 }
 
 func cmdXINFO(ctx *Context) error {
@@ -1033,7 +1110,7 @@ func cmdXREADGROUP(ctx *Context) error {
 					continue
 				}
 				if startMS, startSeq, valid := streamIDParts(ids[i]); valid {
-					if ms < startMS || (ms == startMS && seq < startSeq) {
+					if ms < startMS || (ms == startMS && seq <= startSeq) {
 						continue
 					}
 				}
@@ -1047,13 +1124,15 @@ func cmdXREADGROUP(ctx *Context) error {
 			}
 			for _, it := range items {
 				entryResult := []*resp.Value{resp.BulkString(it.id)}
-				fieldValues := make([]*resp.Value, 0)
 				if entry := stream.GetEntryByID(it.id); entry != nil {
+					fieldValues := make([]*resp.Value, 0, len(entry.Fields)*2)
 					for k, v := range entry.Fields {
 						fieldValues = append(fieldValues, resp.BulkString(k), resp.BulkBytes(v))
 					}
+					entryResult = append(entryResult, resp.ArrayValue(fieldValues))
+				} else {
+					entryResult = append(entryResult, resp.NullArray())
 				}
-				entryResult = append(entryResult, resp.ArrayValue(fieldValues))
 				results[i] = append(results[i], entryResult...)
 				totalEntries++
 			}
