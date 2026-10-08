@@ -51,6 +51,7 @@ func NewACL() *ACL {
 		IsDefault:  true,
 		Permissions: Permission{
 			AllowedCommands: map[string]bool{"*": true},
+			DeniedCommands:  make(map[string]bool),
 			AllowedKeys:     []string{"*"},
 			AllowedChannels: []string{"*"},
 		},
