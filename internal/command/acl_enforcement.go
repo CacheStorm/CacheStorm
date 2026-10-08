@@ -299,6 +299,13 @@ func AuthenticateACL(username, password string) (*acl.User, error) {
 	return globalACL.Authenticate(username, password)
 }
 
+// ACLUserByName resolves a username from the ACL registry for callers that
+// hold a username rather than credentials, such as a session token bound to
+// an authenticated identity.
+func ACLUserByName(username string) (*acl.User, bool) {
+	return globalACL.GetUser(username)
+}
+
 // enforceACL applies the authenticated ACL user's permissions to one command.
 //
 // It reports whether the command was refused, having already written the NOPERM

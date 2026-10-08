@@ -51,11 +51,30 @@ type HTTPServer struct {
 
 type sessionStore struct {
 	tokens map[string]time.Time // token -> expiry
+	users  map[string]string    // token -> ACL username ("" = shared-password session, default user)
 	mu     sync.RWMutex
 }
 
 func newSessionStore() *sessionStore {
-	return &sessionStore{tokens: make(map[string]time.Time)}
+	return &sessionStore{tokens: make(map[string]time.Time), users: make(map[string]string)}
+}
+
+// Bind attaches an ACL identity to a session token. Shared-password sessions
+// are never bound and keep the default-user behaviour.
+func (s *sessionStore) Bind(token, username string) {
+	s.mu.Lock()
+	if _, ok := s.tokens[token]; ok {
+		s.users[token] = username
+	}
+	s.mu.Unlock()
+}
+
+// User returns the ACL username bound to the token, or "" for a user-less
+// session or an unknown token.
+func (s *sessionStore) User(token string) string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.users[token]
 }
 
 func (s *sessionStore) Create() (string, error) {
@@ -93,6 +112,7 @@ func (s *sessionStore) Cleanup() {
 	for token, expiry := range s.tokens {
 		if now.After(expiry) {
 			delete(s.tokens, token)
+			delete(s.users, token)
 		}
 	}
 }
@@ -313,12 +333,19 @@ func (h *HTTPServer) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		// Try session token from cookie first
-		if cookie, err := r.Cookie("session_token"); err == nil {
-			if h.sessions.Valid(cookie.Value) {
-				next(w, r)
-				return
+		// Try session token from cookie first. A session created by a
+		// username login is bound to that ACL identity and runs with its
+		// command and key rules; shared-password sessions stay user-less
+		// and keep the default-user behaviour.
+		if cookie, err := r.Cookie("session_token"); err == nil && h.sessions.Valid(cookie.Value) {
+			if username := h.sessions.User(cookie.Value); username != "" {
+				if user, ok := command.ACLUserByName(username); ok {
+					next(w, r.WithContext(context.WithValue(r.Context(), aclIdentityContextKey{}, user)))
+					return
+				}
 			}
+			next(w, r)
+			return
 		}
 
 		h.writeError(w, http.StatusUnauthorized, "unauthorized")
@@ -955,10 +982,31 @@ func (h *HTTPServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 			h.writeError(w, http.StatusUnauthorized, "invalid username or password")
 			return
 		}
+
+		// Bind the session to the authenticated ACL identity so the cookie
+		// flow enforces the same per-user rules as the Bearer flow. The
+		// Bearer token stays in the response for existing clients.
+		sessionToken, err := h.sessions.Create()
+		if err != nil {
+			h.writeError(w, http.StatusInternalServerError, "failed to create session")
+			return
+		}
+		h.sessions.Bind(sessionToken, req.Username)
+		http.SetCookie(w, &http.Cookie{
+			Name:     "session_token",
+			Value:    sessionToken,
+			Path:     "/",
+			HttpOnly: true,
+			Secure:   r.TLS != nil,
+			SameSite: http.SameSiteStrictMode,
+			MaxAge:   86400, // 24 hours
+		})
+
 		h.writeJSON(w, http.StatusOK, map[string]interface{}{
 			"success":  true,
 			"username": req.Username,
 			"token":    req.Username + ":" + req.Password,
+			"session":  sessionToken,
 		})
 		return
 	}
