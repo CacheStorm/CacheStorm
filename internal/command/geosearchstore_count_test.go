@@ -106,7 +106,7 @@ func TestProofGeoSearchStoreCountLimits(t *testing.T) {
 	}
 	d2, _ := s.Get("d:cnt2")
 	if _, ok := d2.Value.(*store.GeoValue).Points["far"]; ok {
-		t.Fatalf("SECONDARY FAIL: COUNT 2 kept \"far\" (the most distant member); "+
+		t.Fatalf("SECONDARY FAIL: COUNT 2 kept \"far\" (the most distant member); " +
 			"COUNT implies nearest-first, so \"far\" must be dropped")
 	}
 	t.Log("PASS: COUNT 2 stored the two nearest members")

@@ -54,9 +54,9 @@ func mustRejectAndNotStore(t *testing.T, args ...string) {
 // which the store treats as "no expiry" — a permanent key behind +OK.
 func TestSetAndSetexRejectOverflowingExpiry(t *testing.T) {
 	cases := [][]string{
-		{"SET", "k", "v", "EXAT", "1000000000"},   // a past absolute time
+		{"SET", "k", "v", "EXAT", "1000000000"},     // a past absolute time
 		{"SET", "k", "v", "PXAT", "90000000000000"}, // ms * 1e6 overflows
-		{"SET", "k", "v", "PXAT", "1000000000"},    // a past absolute time
+		{"SET", "k", "v", "PXAT", "1000000000"},     // a past absolute time
 		{"SETEX", "k", "9223372036854775807", "v"},
 		{"SETEX", "k", "9223372037", "v"}, // one second past the bound
 		{"PSETEX", "k", "9223372036854775807", "v"},

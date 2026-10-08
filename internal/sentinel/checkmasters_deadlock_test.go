@@ -21,15 +21,15 @@ import (
 //
 // DEFECT: checkMasters opens with
 //
-//     s.mu.Lock()
-//     defer s.mu.Unlock()
+//	s.mu.Lock()
+//	defer s.mu.Unlock()
 //
 // and then, inside the unreachable branch, calls s.checkODown(master) — which
 // begins with
 //
-//     s.mu.RLock()
-//     peers := s.sentinels[master.Name]
-//     s.mu.RUnlock()
+//	s.mu.RLock()
+//	peers := s.sentinels[master.Name]
+//	s.mu.RUnlock()
 //
 // sync.RWMutex is NOT reentrant, and Go's RWMutex additionally forbids a new
 // RLock while a writer holds the lock. checkMasters already holds the exclusive

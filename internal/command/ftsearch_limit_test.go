@@ -54,9 +54,9 @@ func toStr(v interface{}) string {
 // verbatim. It passes that offset straight into search.Index.Search
 // (internal/search/search.go:177), which does
 //
-//     if offset >= len(scored) { return empty }
-//     end := offset + limit
-//     for i := offset; i < end; i++ { ... scored[i].id ... }
+//	if offset >= len(scored) { return empty }
+//	end := offset + limit
+//	for i := offset; i < end; i++ { ... scored[i].id ... }
 //
 // A negative offset fails the `offset >= len(scored)` guard (negative is never
 // >= len), reaches the loop, and indexes scored[-1] — panic: index out of
@@ -76,10 +76,10 @@ func TestProofFTSearchRejectsNegativeLimit(t *testing.T) {
 		t.Fatalf("harness: FT.CREATE returned %q (panicked=%v), want +OK", out, panicked)
 	}
 	// FT.ADD's real signature is: FT.ADD <index> <docID> <score> FIELDS <name> <value>...
-// Passing "body" in the score position made the document index the field
-// hello="world", so the query matched nothing and CONTROL 1 failed for a
-// harness reason rather than exposing the defect.
-if out, panicked := runSearchCmd(s, r, "FT.ADD", "idx", "doc1", "1.0", "FIELDS", "body", "hello world"); panicked || out != "+OK\r\n" {
+	// Passing "body" in the score position made the document index the field
+	// hello="world", so the query matched nothing and CONTROL 1 failed for a
+	// harness reason rather than exposing the defect.
+	if out, panicked := runSearchCmd(s, r, "FT.ADD", "idx", "doc1", "1.0", "FIELDS", "body", "hello world"); panicked || out != "+OK\r\n" {
 		t.Fatalf("harness: FT.ADD returned %q (panicked=%v), want +OK", out, panicked)
 	}
 
@@ -111,7 +111,10 @@ if out, panicked := runSearchCmd(s, r, "FT.ADD", "idx", "doc1", "1.0", "FIELDS",
 	t.Log("CONTROL 2 ok: a missing index errors before any search runs")
 
 	// ---- THE DEFECT: a negative LIMIT offset must not panic.
-	for _, tc := range []struct{ name string; args []string }{
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
 		{"negative offset", []string{"idx", "hello", "LIMIT", "-1", "1"}},
 		{"large negative offset", []string{"idx", "hello", "LIMIT", "-100", "5"}},
 		{"negative offset with negative limit", []string{"idx", "hello", "LIMIT", "-1", "-1"}},

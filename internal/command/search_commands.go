@@ -55,7 +55,7 @@ func cmdFTCREATE(ctx *Context) error {
 					Type: "TEXT",
 				}
 
-			// The type position is positional: it is filled exactly once per
+				// The type position is positional: it is filled exactly once per
 				// field. Without this guard the options loop kept scanning after
 				// the type was set, so a following field whose NAME happened to
 				// equal a type keyword ("tag", "text", "geo", "numeric") was

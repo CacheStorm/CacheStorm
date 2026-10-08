@@ -22,7 +22,7 @@ import (
 //
 // DEFECT: Sentinel.checkODown (line 226) evaluates
 //
-//     return downCount+1 >= s.quorum
+//	return downCount+1 >= s.quorum
 //
 // using the Sentinel-WIDE quorum (Config.Quorum, default 2) rather than the
 // master-specific one. So every master in the process is governed by one global
@@ -64,7 +64,7 @@ func TestProofMonitorQuorumIsEnforced(t *testing.T) {
 	// be false regardless of which quorum value the code consults. This proves
 	// the harness can distinguish true from false.
 	if s.checkODown(high) {
-		t.Fatalf("CONTROL 2 broken harness: m-high-quorum (quorum 4, 1 sentinel) was reported "+
+		t.Fatalf("CONTROL 2 broken harness: m-high-quorum (quorum 4, 1 sentinel) was reported " +
 			"objectively down; the harness cannot tell satisfied from unsatisfied quorums")
 	}
 	t.Log("CONTROL 2 ok: an unmet quorum is correctly reported as not-down")
@@ -73,13 +73,13 @@ func TestProofMonitorQuorumIsEnforced(t *testing.T) {
 	// The code compares 1 >= s.quorum (the global 5) and reports false,
 	// overruling the caller's explicit quorum=1.
 	if !s.checkODown(low) {
-		t.Fatalf("FAIL: master \"m-low-quorum\" was configured with quorum 1 and is served by "+
-			"exactly one sentinel, so 1 >= 1 satisfies its quorum — but checkODown reported it "+
-			"as NOT objectively down.\n"+
-			"checkODown evaluates `downCount+1 >= s.quorum` with the Sentinel-WIDE quorum from "+
-			"Config (5 here) instead of the master-specific MasterInfo.Quorum that Monitor "+
-			"stored. A repo-wide grep for `.Quorum` returns only cfg.Quorum "+
-			"(sentinel.go:97/98/111) and never MasterInfo.Quorum, so the per-master argument is "+
+		t.Fatalf("FAIL: master \"m-low-quorum\" was configured with quorum 1 and is served by " +
+			"exactly one sentinel, so 1 >= 1 satisfies its quorum — but checkODown reported it " +
+			"as NOT objectively down.\n" +
+			"checkODown evaluates `downCount+1 >= s.quorum` with the Sentinel-WIDE quorum from " +
+			"Config (5 here) instead of the master-specific MasterInfo.Quorum that Monitor " +
+			"stored. A repo-wide grep for `.Quorum` returns only cfg.Quorum " +
+			"(sentinel.go:97/98/111) and never MasterInfo.Quorum, so the per-master argument is " +
 			"dead configuration that can never influence behaviour.")
 	}
 	t.Log("PASS: the master's own quorum is honoured")

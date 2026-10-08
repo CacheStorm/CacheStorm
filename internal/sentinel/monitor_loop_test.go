@@ -52,7 +52,7 @@ func TestMonitorLoopMarksUnreachableMasterSdown(t *testing.T) {
 		ID:           "loop-test",
 		Addr:         "127.0.0.1",
 		Port:         26379,
-		Quorum:       2,               // unmet by one sentinel: stays SDown, not ODown
+		Quorum:       2, // unmet by one sentinel: stays SDown, not ODown
 		DownAfter:    50 * time.Millisecond,
 		FailoverTime: 50 * time.Millisecond,
 	})

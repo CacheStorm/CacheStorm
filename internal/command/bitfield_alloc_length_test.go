@@ -45,7 +45,9 @@ func rawLen(t *testing.T, s *store.Store, key string) int {
 // of the destination string it wrote.
 //
 // Defect: bitfieldSet sized the buffer as
-//     byteOffset + (bits+7)/8 + 1
+//
+//	byteOffset + (bits+7)/8 + 1
+//
 // The trailing "+ 1" is not part of any correct formula — the true
 // requirement is byteOffset + ceil((bitOffset + bits)/8). So every BITFIELD
 // SET leaves a phantom zero byte, and BITOP then reports a destination longer

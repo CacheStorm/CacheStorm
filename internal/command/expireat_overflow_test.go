@@ -41,10 +41,10 @@ func expireAtBytes(ss []string) [][]byte {
 // silent data loss. Out-of-range values must be rejected instead.
 func TestExpireAtRejectsOutOfRangeTimestamp(t *testing.T) {
 	seconds := []string{
-		"9223372037",       // one past the bound
-		"16725225600",      // year 2500
-		"99999999999999",  // far future
-		"-9223372037",      // one past the lower bound
+		"9223372037",          // one past the bound
+		"16725225600",         // year 2500
+		"99999999999999",      // far future
+		"-9223372037",         // one past the lower bound
 		"9223372036854775807", // MaxInt64
 	}
 	for _, ts := range seconds {
@@ -62,10 +62,10 @@ func TestExpireAtRejectsOutOfRangeTimestamp(t *testing.T) {
 
 func TestPExpireAtRejectsOutOfRangeTimestamp(t *testing.T) {
 	millis := []string{
-		"9223372036855",         // one past the bound
-		"90000000000000",        // overflows when multiplied by 1e6
-		"9223372036854775807",   // MaxInt64
-		"-9223372036855",        // one past the lower bound
+		"9223372036855",       // one past the bound
+		"90000000000000",      // overflows when multiplied by 1e6
+		"9223372036854775807", // MaxInt64
+		"-9223372036855",      // one past the lower bound
 	}
 	for _, ts := range millis {
 		s := store.NewStore()

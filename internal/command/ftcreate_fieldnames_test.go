@@ -58,9 +58,9 @@ func ftFieldNames(reply string) []string {
 // DEFECT: cmdFTCREATE's schema loop decides "this token is a modifier, not a
 // field name" with strings.HasPrefix:
 //
-//     if strings.HasPrefix(strings.ToUpper(fieldName), "ON") ||
-//        strings.HasPrefix(strings.ToUpper(fieldName), "PREFIX") ||
-//        strings.HasPrefix(strings.ToUpper(fieldName), "STOPWORDS") { break }
+//	if strings.HasPrefix(strings.ToUpper(fieldName), "ON") ||
+//	   strings.HasPrefix(strings.ToUpper(fieldName), "PREFIX") ||
+//	   strings.HasPrefix(strings.ToUpper(fieldName), "STOPWORDS") { break }
 //
 // HasPrefix("ONYX", "ON") is true, so a field named "Onyx" is treated as a
 // modifier and the loop `break`s. Every field from that point on is SILENTLY

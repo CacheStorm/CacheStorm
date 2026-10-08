@@ -44,7 +44,9 @@ func membersOf(reply string) string {
 // TestProofZRangeByScoreHonoursLimit is the round proof.
 //
 // Contract (Redis ZRANGEBYSCORE / ZREVRANGEBYSCORE):
-//     ZRANGEBYSCORE key min max [WITHSCORES] [LIMIT offset count]
+//
+//	ZRANGEBYSCORE key min max [WITHSCORES] [LIMIT offset count]
+//
 // LIMIT pages the result set: `offset` members are skipped and at most
 // `count` are returned. A negative count means "all remaining".
 //

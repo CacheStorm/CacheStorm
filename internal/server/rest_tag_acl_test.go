@@ -161,7 +161,7 @@ func TestRestTagsListFiltersCountsAndGrant(t *testing.T) {
 	// Without the +keys command grant the listing is refused even though the
 	// key patterns would allow it.
 	seedACLUser(t, "getonly", "pw")
-	w = postTagACL(t, h, "Basic "+base64Std("getonly:pw"), "GET", "/api/tags", )
+	w = postTagACL(t, h, "Basic "+base64Std("getonly:pw"), "GET", "/api/tags")
 	if w.Code != 403 || !strings.Contains(w.Body.String(), "NOPERM") {
 		t.Fatalf("tags listing without a +keys grant must be NOPERM, got status=%d body=%q", w.Code, w.Body.String())
 	}

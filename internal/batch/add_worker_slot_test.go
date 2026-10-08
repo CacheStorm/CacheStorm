@@ -72,7 +72,7 @@ func TestProofAddReleasesItsWorkerSlot(t *testing.T) {
 	select {
 	case <-ch2:
 	case <-time.After(5 * time.Second):
-		t.Fatalf("CONTROL broken harness: the batcher wedged after a single Add — the harness "+
+		t.Fatalf("CONTROL broken harness: the batcher wedged after a single Add — the harness " +
 			"cannot evaluate the defect")
 	}
 	t.Log("CONTROL 2 ok: a second Add still succeeds")

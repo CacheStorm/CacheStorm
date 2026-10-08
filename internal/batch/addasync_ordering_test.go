@@ -127,8 +127,8 @@ func TestProofSingleItemRoutingControl(t *testing.T) {
 					"dispatcher is misrouting results", r.Key, key)
 			}
 		case <-time.After(5 * time.Second):
-			t.Fatalf("CONTROL FAILED: a single sequential item never produced a callback. "+
-				"The shared processor/processLoop/resultDispatcher machinery is broken, which "+
+			t.Fatalf("CONTROL FAILED: a single sequential item never produced a callback. " +
+				"The shared processor/processLoop/resultDispatcher machinery is broken, which " +
 				"would mean the AddAsync ordering defect is not the whole story.")
 		}
 	}

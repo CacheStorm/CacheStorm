@@ -41,7 +41,7 @@ func (f *countingFactory) new() (net.Conn, error) {
 // connection is never appended at all. So p.conns holds ONLY idle connections,
 // and the capacity test
 //
-//     if len(p.conns) < p.config.MaxSize {
+//	if len(p.conns) < p.config.MaxSize {
 //
 // is really "idleCount < MaxSize" — which stays true no matter how many
 // connections are currently checked out. The pool therefore grows without
