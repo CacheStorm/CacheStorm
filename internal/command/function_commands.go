@@ -164,7 +164,20 @@ func (r *FunctionRegistry) ListLibraries(pattern string) []*Library {
 	return result
 }
 
+// CallFunction runs lib.fn with no ACL guard; use CallFunctionGuarded for a
+// script run on behalf of an ACL user.
 func (r *FunctionRegistry) CallFunction(libName string, fnName string, keys []string, args []string) (interface{}, error) {
+	return r.callFunction(libName, fnName, keys, args, nil)
+}
+
+// CallFunctionGuarded runs lib.fn with the guard applied to every redis.call /
+// redis.pcall the function makes, so keys the function touches — declared in
+// numkeys or not — are subject to the invoking user's key patterns.
+func (r *FunctionRegistry) CallFunctionGuarded(libName string, fnName string, keys []string, args []string, guard ScriptCallGuard) (interface{}, error) {
+	return r.callFunction(libName, fnName, keys, args, guard)
+}
+
+func (r *FunctionRegistry) callFunction(libName string, fnName string, keys []string, args []string, guard ScriptCallGuard) (interface{}, error) {
 	r.mu.RLock()
 	lib, libExists := r.libraries[libName]
 	if !libExists {
@@ -181,10 +194,10 @@ func (r *FunctionRegistry) CallFunction(libName string, fnName string, keys []st
 	r.mu.RUnlock()
 
 	se := NewScriptEngine(r.store)
-	L := se.CreateState(keys, args)
+	L := se.createState(keys, args, guard)
 	defer L.Close()
 
-	if err := L.DoString(code); err != nil {
+	if err := se.protected(func() error { return L.DoString(code) }); err != nil {
 		return nil, fmt.Errorf("ERR failed to load library: %v", err)
 	}
 
@@ -192,10 +205,12 @@ func (r *FunctionRegistry) CallFunction(libName string, fnName string, keys []st
 	if tbl, ok := redisTbl.(*lua.LTable); ok {
 		fn := L.GetField(tbl, fnName)
 		if luaFn, ok := fn.(*lua.LFunction); ok {
-			if err := L.CallByParam(lua.P{
-				Fn:      luaFn,
-				NRet:    1,
-				Protect: true,
+			if err := se.protected(func() error {
+				return L.CallByParam(lua.P{
+					Fn:      luaFn,
+					NRet:    1,
+					Protect: true,
+				})
 			}); err != nil {
 				return nil, fmt.Errorf("ERR %v", err)
 			}
@@ -420,7 +435,7 @@ func cmdFCALL(ctx *Context) error {
 	}
 
 	registry := GetFunctionRegistry(ctx.Store)
-	result, err := registry.CallFunction(libName, fnName, keys, args)
+	result, err := registry.CallFunctionGuarded(libName, fnName, keys, args, scriptGuard(ctx))
 	if err != nil {
 		return ctx.WriteError(err)
 	}

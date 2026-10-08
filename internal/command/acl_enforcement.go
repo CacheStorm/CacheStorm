@@ -128,11 +128,13 @@ func storeKeyAfter(args [][]byte) []string {
 // aclKeysForCommand returns the keys a command operates on, for key-pattern
 // enforcement.
 //
-// A command that is not covered here is still subject to COMMAND permission
-// enforcement; only its key-pattern check is skipped. The table below covers
-// the data commands — which is where a key-pattern ACL such as ~user:* carries
-// its security weight — plus explicit no-key entries for admin commands, so an
-// argument like "GET" in CONFIG GET is never mistaken for a key.
+// A command that is not classified here falls back to its first argument, so a
+// key-pattern ACL such as ~user:* still applies to it — an unlisted data
+// command must not become a way to read or write outside the sandbox. The
+// table covers the commands whose keys are not simply args[0] (multi-key,
+// NUMKEYS-counted, source/destination, keyword-separated) plus explicit no-key
+// entries for admin commands, so an argument like "GET" in CONFIG GET is never
+// mistaken for a key.
 func aclKeysForCommand(cmd string, args [][]byte) []string {
 	switch cmd {
 	case "EVAL", "EVALSHA":
@@ -173,6 +175,41 @@ func aclKeysForCommand(cmd string, args [][]byte) []string {
 			keys = append(keys, string(args[0]))
 		}
 		return append(keys, storeKeyAfter(args)...)
+	case "XREAD", "XREADGROUP":
+		// XREAD [COUNT n] [BLOCK ms] STREAMS key [key ...] id [id ...]
+		// XREADGROUP GROUP g c [COUNT n] [BLOCK ms] [NOACK] STREAMS key ...
+		// STREAMS is followed by an equal number of keys and IDs, keys
+		// first. An odd remainder is malformed, so return every remaining
+		// argument rather than miss a key.
+		for i, a := range args {
+			if strings.EqualFold(string(a), "STREAMS") {
+				rest := args[i+1:]
+				if len(rest)%2 != 0 {
+					return toStrings(rest)
+				}
+				return toStrings(rest[:len(rest)/2])
+			}
+		}
+		return nil
+	case "XINFO", "XGROUP":
+		// XINFO STREAM|GROUPS|CONSUMERS key, XGROUP CREATE|SETID|DESTROY
+		// key ... — both take their subcommand first, key second.
+		if len(args) >= 2 {
+			return toStrings(args[1:2])
+		}
+		return nil
+	case "FCALL", "FCALL_RO":
+		// FCALL f-name numkeys key [key ...] arg [arg ...] — the key count
+		// sits between the function name and the keys, so the function name
+		// itself is not a key.
+		if len(args) < 2 {
+			return nil
+		}
+		n := atoiSafe(args[1])
+		if n < 0 || 2+n > len(args) {
+			return nil
+		}
+		return toStrings(args[2 : 2+n])
 	}
 
 	if aclMSETCommands[cmd] {
@@ -193,6 +230,15 @@ func aclKeysForCommand(cmd string, args [][]byte) []string {
 			return toStrings(args[:1])
 		}
 		return nil
+	}
+	// Fail closed for a command the tables do not classify. Falling through
+	// with no keys let a user confined to ~user:* read and write any other
+	// key through an unlisted command — XADD was the proof (round r27). Data
+	// commands overwhelmingly take the key as their first argument, so that
+	// is the safe assumption; a command that truly takes no keys belongs in
+	// aclNoKeyCommands, which returned above.
+	if len(args) >= 1 {
+		return toStrings(args[:1])
 	}
 	return nil
 }
@@ -243,6 +289,14 @@ func aclChannelsForCommand(cmd string, args [][]byte) []string {
 var aclAdminCommands = map[string]bool{
 	"ACL":    true,
 	"CONFIG": true,
+}
+
+// AuthenticateACL resolves a username/password pair against the ACL registry
+// that backs the TCP path, so alternative entry points such as the HTTP API
+// can map a client to the same per-user identity. The errors are the ones
+// ACL.Authenticate returns (unknown user, invalid password).
+func AuthenticateACL(username, password string) (*acl.User, error) {
+	return globalACL.Authenticate(username, password)
 }
 
 // enforceACL applies the authenticated ACL user's permissions to one command.

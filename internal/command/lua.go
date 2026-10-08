@@ -33,7 +33,13 @@ func NewScriptEngine(s *store.Store) *ScriptEngine {
 	}
 }
 
+// CreateState builds a Lua state with no ACL guard: scripts run outside an
+// ACL user (the permissive default user) keep the unrestricted behaviour.
 func (e *ScriptEngine) CreateState(keys []string, args []string) *lua.LState {
+	return e.createState(keys, args, nil)
+}
+
+func (e *ScriptEngine) createState(keys []string, args []string, guard ScriptCallGuard) *lua.LState {
 	L := lua.NewState(lua.Options{
 		SkipOpenLibs: true,
 	})
@@ -89,7 +95,7 @@ func (e *ScriptEngine) CreateState(keys []string, args []string) *lua.LState {
 			}
 		}
 
-		result := e.executeCommand(L, cmd, cmdArgs)
+		result := e.executeCommand(guard, L, cmd, cmdArgs)
 		L.Push(result)
 		return 1
 	}))
@@ -107,13 +113,20 @@ func (e *ScriptEngine) CreateState(keys []string, args []string) *lua.LState {
 			cmdArgs = append(cmdArgs, L.ToString(i))
 		}
 
+		// Consult the ACL guard BEFORE the recover below is registered: a
+		// permission violation must abort the whole script and reach the
+		// client, not be turned into a string the script can swallow.
+		if err := e.checkScriptGuard(guard, cmd, cmdArgs); err != nil {
+			panic(aclScriptError{err})
+		}
+
 		defer func() {
 			if r := recover(); r != nil {
 				L.Push(lua.LString(fmt.Sprintf("err: %v", r)))
 			}
 		}()
 
-		result := e.executeCommand(L, cmd, cmdArgs)
+		result := e.executeCommand(guard, L, cmd, cmdArgs)
 		L.Push(result)
 		return 1
 	}))
@@ -160,7 +173,34 @@ func (e *ScriptEngine) CreateState(keys []string, args []string) *lua.LState {
 	return L
 }
 
-func (e *ScriptEngine) executeCommand(L *lua.LState, cmd string, args []string) lua.LValue {
+// ScriptCallGuard is consulted for every command a script invokes through
+// redis.call / redis.pcall. A non-nil error aborts the script with that error.
+type ScriptCallGuard func(cmd string, args []string) error
+
+// aclScriptError wraps a guard violation so the script boundary can tell it
+// apart from ordinary Lua errors and report it to the client instead of
+// letting redis.pcall swallow it: a permission violation aborts the script
+// regardless of pcall.
+type aclScriptError struct{ err error }
+
+func (e aclScriptError) Error() string { return e.err.Error() }
+
+func (e *ScriptEngine) checkScriptGuard(guard ScriptCallGuard, cmd string, args []string) error {
+	if guard == nil {
+		return nil
+	}
+	return guard(cmd, args)
+}
+
+func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd string, args []string) lua.LValue {
+	// ACL: every key a script touches — declared or not — must satisfy the
+	// invoking user's key patterns. enforceACL only checks what is named on
+	// the EVAL/EVALSHA line; redis.call dispatches straight to the store, so
+	// without this guard a user confined to ~user:* could read and write any
+	// other key from inside a script.
+	if err := e.checkScriptGuard(guard, cmd, args); err != nil {
+		panic(aclScriptError{err})
+	}
 	// Redis command names are case-insensitive and lowercase is the
 	// conventional Lua spelling (redis.call('get', k)). The switch below only
 	// has uppercase labels, so a lowercase name matched no arm and fell out of
@@ -968,7 +1008,18 @@ func (e *ScriptEngine) WithState(keys []string, args []string, fn func(*lua.LSta
 }
 
 func (e *ScriptEngine) Eval(script string, keys []string, args []string) (interface{}, error) {
-	L := e.CreateState(keys, args)
+	return e.eval(script, keys, args, nil)
+}
+
+// EvalGuarded runs the script with an ACL guard applied to every command the
+// script invokes through redis.call / redis.pcall. A nil guard behaves exactly
+// like Eval.
+func (e *ScriptEngine) EvalGuarded(script string, keys []string, args []string, guard ScriptCallGuard) (interface{}, error) {
+	return e.eval(script, keys, args, guard)
+}
+
+func (e *ScriptEngine) eval(script string, keys []string, args []string, guard ScriptCallGuard) (interface{}, error) {
+	L := e.createState(keys, args, guard)
 	defer L.Close()
 
 	// Enforce execution timeout to prevent infinite loops / DoS
@@ -976,7 +1027,7 @@ func (e *ScriptEngine) Eval(script string, keys []string, args []string) (interf
 	defer cancel()
 	L.SetContext(ctx)
 
-	if err := L.DoString(script); err != nil {
+	if err := e.doScriptString(L, script); err != nil {
 		if ctx.Err() != nil {
 			return nil, fmt.Errorf("ERR script timeout exceeded %.0f seconds", luaScriptTimeout.Seconds())
 		}
@@ -986,7 +1037,34 @@ func (e *ScriptEngine) Eval(script string, keys []string, args []string) (interf
 	return e.convertResult(L), nil
 }
 
+// doScriptString runs the script through protected.
+func (e *ScriptEngine) doScriptString(L *lua.LState, script string) (err error) {
+	return e.protected(func() error { return L.DoString(script) })
+}
+
+// protected runs fn and turns an ACL guard violation — raised as
+// aclScriptError to be uncatchable by redis.pcall — back into an ordinary
+// error for the command layer. Any other panic keeps the surrounding
+// behaviour.
+func (e *ScriptEngine) protected(fn func() error) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			if aclErr, ok := r.(aclScriptError); ok {
+				err = aclErr.err
+				return
+			}
+			panic(r)
+		}
+	}()
+	return fn()
+}
+
 func (e *ScriptEngine) EvalSHA(sha string, keys []string, args []string) (interface{}, error) {
+	return e.EvalSHAGuarded(sha, keys, args, nil)
+}
+
+// EvalSHAGuarded is EvalSHA with an ACL guard applied to the script's calls.
+func (e *ScriptEngine) EvalSHAGuarded(sha string, keys []string, args []string, guard ScriptCallGuard) (interface{}, error) {
 	e.mu.RLock()
 	script, exists := e.scripts[sha]
 	e.mu.RUnlock()
@@ -995,7 +1073,7 @@ func (e *ScriptEngine) EvalSHA(sha string, keys []string, args []string) (interf
 		return nil, fmt.Errorf("NOSCRIPT No matching script. Please use EVAL")
 	}
 
-	return e.Eval(script, keys, args)
+	return e.eval(script, keys, args, guard)
 }
 
 func (e *ScriptEngine) ScriptLoad(script string) string {

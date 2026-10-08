@@ -1,6 +1,7 @@
 package command
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -17,6 +18,44 @@ func RegisterScriptCommands(router *Router) {
 	router.Register(&CommandDef{Name: "EVAL", Handler: cmdEVAL})
 	router.Register(&CommandDef{Name: "EVALSHA", Handler: cmdEVALSHA})
 	router.Register(&CommandDef{Name: "SCRIPT", Handler: cmdSCRIPT})
+}
+
+// scriptGuard returns the ACL guard applied to commands invoked from inside a
+// script, or nil for a connection without an ACL user (the permissive default
+// user). It makes every key a script touches — declared in numkeys or not —
+// subject to the user's key patterns; the keys named on the EVAL/EVALSHA line
+// are already checked by enforceACL before the engine runs.
+func scriptGuard(ctx *Context) ScriptCallGuard {
+	user := ctx.ACLUser
+	if user == nil {
+		return nil
+	}
+	return func(cmd string, args []string) error {
+		upper := strings.ToUpper(cmd)
+		// Command permission: a script runs as the invoking user, so a
+		// command the user cannot run at the top level must not run from
+		// inside a script either — redis.call('get', ...) without +get, or a
+		// key-less redis.call('flushdb'), otherwise bypass the user's grants
+		// entirely. The bypass set mirrors enforceACL: a client must always
+		// be able to probe and authenticate.
+		if !aclBypassCommands[upper] && !user.CanExecuteCommand(upper) {
+			return fmt.Errorf("NOPERM script attempted to execute the '%s' command which is not allowed", upper)
+		}
+		for _, key := range aclKeysForCommand(upper, stringArgsToBytes(args)) {
+			if !user.CanAccessKey(key) {
+				return fmt.Errorf("NOPERM script attempted to use a key which is not allowed")
+			}
+		}
+		return nil
+	}
+}
+
+func stringArgsToBytes(args []string) [][]byte {
+	out := make([][]byte, len(args))
+	for i, a := range args {
+		out[i] = []byte(a)
+	}
+	return out
 }
 
 func cmdEVAL(ctx *Context) error {
@@ -53,7 +92,7 @@ func cmdEVAL(ctx *Context) error {
 		args = append(args, ctx.ArgString(i))
 	}
 
-	result, err := scriptEngine.Eval(script, keys, args)
+	result, err := scriptEngine.EvalGuarded(script, keys, args, scriptGuard(ctx))
 	if err != nil {
 		return ctx.WriteError(err)
 	}
@@ -95,7 +134,7 @@ func cmdEVALSHA(ctx *Context) error {
 		args = append(args, ctx.ArgString(i))
 	}
 
-	result, err := scriptEngine.EvalSHA(sha, keys, args)
+	result, err := scriptEngine.EvalSHAGuarded(sha, keys, args, scriptGuard(ctx))
 	if err != nil {
 		return ctx.WriteError(err)
 	}
