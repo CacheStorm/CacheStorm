@@ -52,8 +52,9 @@ func evalLua(s *store.Store, r *Router, script string, args ...string) string {
 // this switch is case-sensitive.
 //
 // Controls (must pass before AND after): the UPPERCASE spelling keeps working
-// for read, write and arithmetic; a genuinely unknown command still returns
-// nil; and EVALSHA reaches the same engine so it is fixed too.
+// for read, write and arithmetic; a genuinely unknown command fails loudly
+// with an ERR reply (silent nil until round r37); and EVALSHA reaches the same
+// engine so it is fixed too.
 func TestProofRedisCallIsCaseInsensitive(t *testing.T) {
 	s := store.NewStore()
 	r := NewRouter()
@@ -76,11 +77,14 @@ func TestProofRedisCallIsCaseInsensitive(t *testing.T) {
 	}
 	t.Log("CONTROL 1 ok: uppercase spellings all work")
 
-	// ---- CONTROL 2: a genuinely unknown command still yields nil.
-	if got := evalLua(s, r, "return redis.call('NOSUCHCOMMAND','k')"); got != "_\r\n" {
-		t.Fatalf("CONTROL 2 broken harness: unknown command = %q, want nil", got)
+	// ---- CONTROL 2: a genuinely unknown command fails loudly. Round r37
+	// changed the switch's default arm from a silent lua.LNil to an explicit
+	// ERR string, matching Redis where an unknown command called from a
+	// script is an error — the old nil contract was the silent no-op.
+	if got := evalLua(s, r, "return redis.call('NOSUCHCOMMAND','k')"); !strings.Contains(got, "ERR unknown command") {
+		t.Fatalf("CONTROL 2 broken harness: unknown command = %q, want an \"ERR unknown command\" reply", got)
 	}
-	t.Log("CONTROL 2 ok: an unknown command still yields nil")
+	t.Log("CONTROL 2 ok: an unknown command fails loudly")
 
 	// ---- THE DEFECT: lowercase is a READ. It must return the value.
 	if got := evalLua(s, r, "return redis.call('get','k')"); got != "$1\r\n8\r\n" {

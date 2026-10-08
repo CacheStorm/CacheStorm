@@ -992,7 +992,7 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 		return lua.LString("OK")
 
 	default:
-		return lua.LNil
+		return lua.LString("ERR unknown command '" + cmd + "' called from Lua script")
 	}
 }
 

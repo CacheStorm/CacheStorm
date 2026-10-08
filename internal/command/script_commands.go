@@ -32,6 +32,15 @@ func scriptGuard(ctx *Context) ScriptCallGuard {
 	}
 	return func(cmd string, args []string) error {
 		upper := strings.ToUpper(cmd)
+		// Admin-command reservation: exactly like enforceACL, server
+		// administration is refused before command permissions, so granting
+		// "+config" or "+acl" must not become a script-side privilege
+		// escalation if such a command is ever implemented in the engine.
+		// Defense in depth — executeCommand currently implements none of
+		// them, but the guard must not depend on that accident.
+		if aclAdminCommands[upper] {
+			return fmt.Errorf("NOPERM script attempted to execute the '%s' command which is not allowed", upper)
+		}
 		// Command permission: a script runs as the invoking user, so a
 		// command the user cannot run at the top level must not run from
 		// inside a script either — redis.call('get', ...) without +get, or a
