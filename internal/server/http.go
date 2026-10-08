@@ -282,9 +282,12 @@ func (h *HTTPServer) aclIdentityFromRequest(r *http.Request) (*acl.User, bool, e
 		return user, true, err
 	}
 	token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if token != "" && strings.Contains(token, ":") {
-		username, password, _ := strings.Cut(token, ":")
-		user, err := command.AuthenticateACL(username, password)
+	// Split on the LAST colon so usernames containing ':' (e.g. "a:b" with
+	// password "c") authenticate; single-colon tokens parse identically to
+	// the old first-colon split. A colon in a colon-less username's PASSWORD
+	// is the trade-off: such users authenticate via Basic or sessions.
+	if idx := strings.LastIndex(token, ":"); token != "" && idx > 0 {
+		user, err := command.AuthenticateACL(token[:idx], token[idx+1:])
 		return user, true, err
 	}
 	return nil, false, nil
