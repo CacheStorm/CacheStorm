@@ -38,6 +38,7 @@ linters:
         # broken connection.
         - (net.Conn).SetReadDeadline
         - (net.Conn).SetWriteDeadline
+        - (net.Conn).SetDeadline
         - (*net.TCPConn).SetKeepAlive
         - (*net.TCPConn).SetKeepAlivePeriod
         # Writing the embedded admin UI to the client is best-effort.
@@ -65,6 +66,10 @@ linters:
         - (*github.com/cachestorm/cachestorm/internal/resp.Writer).WriteZero
         - (*github.com/cachestorm/cachestorm/internal/resp.Writer).WriteOne
         - (*github.com/cachestorm/cachestorm/internal/command.Context).WriteOK
+        # Same best-effort rationale as the resp.Writer writes above: a
+        # disconnected client makes the refusal reply fail and there is
+        # nothing left to report to.
+        - (*github.com/cachestorm/cachestorm/internal/command.Context).WriteError
         # In-memory buffers cannot fail.
         - (*bytes.Buffer).Write
         - (*bytes.Buffer).WriteString
@@ -72,6 +77,12 @@ linters:
         - (*strings.Builder).WriteString
         - (*strings.Builder).WriteByte
     gocritic:
+      settings:
+        # Config-style structs (~96 bytes, e.g. sentinel.Config) are passed by
+        # value deliberately: copies are negligible and value semantics prevent
+        # aliasing. hugeParam's default threshold (80) flagged them.
+        hugeParam:
+          sizeThreshold: 128
       disabled-checks:
         - captLocal # `L` is the conventional gopher-lua state param name
         - dupImport

@@ -63,14 +63,14 @@ func TestPoolMaxSizeIsEnforced(t *testing.T) {
 	defer p.Close()
 
 	// ---- CONTROL 1: the pool can hand out its configured capacity.
-	held := make([]*Conn, 0, maxSize)
 	for i := 0; i < maxSize; i++ {
-		c, err := p.Get()
+		// The connection deliberately stays checked out for the whole loop:
+		// that is what drives the pool to its MaxSize.
+		_, err := p.Get()
 		if err != nil {
 			t.Fatalf("CONTROL broken harness: Get #%d failed with %v; the pool cannot even "+
 				"reach its own MaxSize", i+1, err)
 		}
-		held = append(held, c)
 	}
 	t.Logf("CONTROL 1 ok: %d concurrent Get() calls all succeeded", maxSize)
 

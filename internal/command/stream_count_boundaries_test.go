@@ -2,11 +2,12 @@ package command_test
 
 import (
 	"bytes"
+	"reflect"
+	"testing"
+
 	"github.com/cachestorm/cachestorm/internal/command"
 	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
-	"reflect"
-	"testing"
 )
 
 type auditResult struct {

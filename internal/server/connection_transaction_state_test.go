@@ -3,13 +3,14 @@ package server_test
 import (
 	"bytes"
 	"fmt"
-	"github.com/cachestorm/cachestorm/internal/command"
-	"github.com/cachestorm/cachestorm/internal/server"
-	"github.com/cachestorm/cachestorm/internal/store"
 	"net"
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/cachestorm/cachestorm/internal/command"
+	"github.com/cachestorm/cachestorm/internal/server"
+	"github.com/cachestorm/cachestorm/internal/store"
 )
 
 type auditResult struct {
@@ -17,11 +18,6 @@ type auditResult struct {
 	Want, Got any
 }
 
-func auditMust(err error) {
-	if err != nil {
-		panic(err)
-	}
-}
 func auditCheck(t *testing.T, results []auditResult) {
 	t.Helper()
 	for _, result := range results {

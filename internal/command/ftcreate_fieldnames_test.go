@@ -23,32 +23,6 @@ func ftExec(s *store.Store, r *Router, cmd string, args ...string) string {
 	return buf.String()
 }
 
-// countFields reports how many field definitions FT.INFO reports for an index.
-// FT.INFO replies "num_docs" N "fields" then a flat name/type list, so the
-// field names are the elements between "fields" and the end of the map.
-func ftFieldNames(reply string) []string {
-	parts := strings.Split(reply, "\r\n")
-	var names []string
-	inFields := false
-	// RESP flat map: key, value, key, value... Values alternate; a field entry
-	// is the token following a token that looks like a bare field name and
-	// preceding a type. Collect every odd-position token after "fields".
-	for i := 0; i < len(parts); i++ {
-		if parts[i] == "fields" {
-			inFields = true
-			continue
-		}
-		if !inFields {
-			continue
-		}
-		if parts[i] == "" {
-			continue
-		}
-		names = append(names, parts[i])
-	}
-	return names
-}
-
 // TestProofFTCreateAcceptsFieldNamesWithKeywordPrefixes is the round proof.
 //
 // CONTRACT: FT.CREATE <index> SCHEMA <field> <type> [<field> <type> ...] takes

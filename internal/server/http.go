@@ -943,7 +943,10 @@ func (h *HTTPServer) handleExecute(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *HTTPServer) handleSlowlog(w http.ResponseWriter, r *http.Request) {
-	count, _ := strconv.Atoi(r.URL.Query().Get("count"))
+	count, err := strconv.Atoi(r.URL.Query().Get("count"))
+	if err != nil {
+		count = 0
+	}
 	entries := store.GlobalSlowLog.Get(count)
 	rows := make([]map[string]interface{}, 0, len(entries))
 	for _, entry := range entries {

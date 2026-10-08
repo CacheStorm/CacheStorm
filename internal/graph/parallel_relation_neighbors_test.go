@@ -1,9 +1,10 @@
 package graph_test
 
 import (
-	"github.com/cachestorm/cachestorm/internal/graph"
 	"reflect"
 	"testing"
+
+	"github.com/cachestorm/cachestorm/internal/graph"
 )
 
 type auditResult struct {

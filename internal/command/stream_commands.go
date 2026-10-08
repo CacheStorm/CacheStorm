@@ -913,7 +913,7 @@ func cmdXGROUP(ctx *Context) error {
 		// Same raw-storage hazard as CREATE: an unparseable id would leave
 		// the group permanently silent. "$" resolves to the stream's last
 		// generated id.
-		groupStart := lastID
+		var groupStart string
 		if lastID == "$" {
 			groupStart = stream.LastID
 		} else {

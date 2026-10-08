@@ -1,9 +1,10 @@
 package search_test
 
 import (
-	"github.com/cachestorm/cachestorm/internal/search"
 	"reflect"
 	"testing"
+
+	"github.com/cachestorm/cachestorm/internal/search"
 )
 
 type auditResult struct {

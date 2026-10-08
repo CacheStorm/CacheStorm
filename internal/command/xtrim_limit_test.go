@@ -31,8 +31,7 @@ func TestXTrimLimitX(t *testing.T) {
 	seed := func(t *testing.T, key string) {
 		t.Helper()
 		for i := int64(1); i <= 10; i++ {
-			id := key + "-" + string(rune('0'+i%10))
-			id = strconvID(i)
+			id := strconvID(i)
 			if v := run("XADD", key, id, "f", "v"); v.Type != resp.TypeBulkString {
 				t.Fatalf("seed %s failed: %v", key, v)
 			}

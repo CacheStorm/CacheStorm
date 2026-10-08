@@ -336,9 +336,9 @@ func (s *Server) Start(_ context.Context) error {
 	s.sentinelCancel = sentinelCancel
 	go func() {
 		defer logger.RecoverPanic("sentinel-serve")
-		if err := command.ServeSentinel(sentinelCtx); err != nil {
-			logger.Warn().Err(err).Msg("sentinel peer listener stopped")
-		}
+		// Serve only returns when the listener dies: either a bind failure or
+		// the Accept error raised when shutdown closes it. Either way, log it.
+		logger.Warn().Err(command.ServeSentinel(sentinelCtx)).Msg("sentinel peer listener stopped")
 	}()
 
 	startupComplete = true

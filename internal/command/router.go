@@ -193,8 +193,8 @@ func (r *Router) ExecuteHTTP(ctx *Context) (interface{}, error) {
 	// open behind a requirepass deployment. requirepass unset: gate off.
 	upperCmd := strings.ToUpper(ctx.Command)
 	if r.RequirePass() != "" && !ctx.IsAuthenticated() && !noAuthCommands[upperCmd] {
-		ctx.Writer.WriteError("NOAUTH Authentication required.")
-		return nil, errors.New("NOAUTH Authentication required.")
+		ctx.Writer.WriteError("NOAUTH Authentication required")
+		return nil, errors.New("NOAUTH Authentication required")
 	}
 
 	// ACL: the HTTP path runs with the same per-user command and key rules

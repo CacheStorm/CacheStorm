@@ -228,11 +228,6 @@ func generateID() string {
 	return string(id)
 }
 
-func fastRand(n int64) int64 {
-	seed := currentTimeMillis()
-	return (seed*1103515245 + 12345) % n
-}
-
 func absInt(n int64) int64 {
 	if n < 0 {
 		return -n

@@ -7,7 +7,7 @@ import (
 
 // readValueNoPanic runs the production reader and converts a panic into a test
 // failure, so a failure names the protocol defect instead of crashing the run.
-func readValueNoPanic(t *testing.T, wire string) (v *Value, err error, panicked interface{}) {
+func readValueNoPanic(t *testing.T, wire string) (v *Value, panicked interface{}, err error) {
 	t.Helper()
 	defer func() {
 		if r := recover(); r != nil {
@@ -15,7 +15,7 @@ func readValueNoPanic(t *testing.T, wire string) (v *Value, err error, panicked 
 		}
 	}()
 	v, err = NewReader(strings.NewReader(wire)).ReadValue()
-	return v, err, nil
+	return v, panicked, err
 }
 
 // A bulk-string length is a non-negative byte count, with -1 reserved for the
@@ -23,7 +23,7 @@ func readValueNoPanic(t *testing.T, wire string) (v *Value, err error, panicked 
 // be reported as an error rather than reaching make() as a negative size.
 func TestReadBulkStringRejectsNegativeLength(t *testing.T) {
 	for _, wire := range []string{"$-2\r\n", "$-42\r\n", "$-9223372036854775808\r\n"} {
-		_, err, panicked := readValueNoPanic(t, wire)
+		_, panicked, err := readValueNoPanic(t, wire)
 		if panicked != nil {
 			t.Fatalf("ReadValue(%q) panicked: %v", wire, panicked)
 		}
@@ -36,7 +36,7 @@ func TestReadBulkStringRejectsNegativeLength(t *testing.T) {
 // Same contract for array element counts: -1 is null, anything below is invalid.
 func TestReadArrayRejectsNegativeCount(t *testing.T) {
 	for _, wire := range []string{"*-2\r\n", "*-42\r\n", "*-9223372036854775808\r\n"} {
-		_, err, panicked := readValueNoPanic(t, wire)
+		_, panicked, err := readValueNoPanic(t, wire)
 		if panicked != nil {
 			t.Fatalf("ReadValue(%q) panicked: %v", wire, panicked)
 		}
@@ -65,7 +65,7 @@ func TestReadArrayNegativeCountDoesNotConsumeElements(t *testing.T) {
 
 // Control: -1 is the one legitimate negative and must keep meaning null.
 func TestReadValueNullBulkControl(t *testing.T) {
-	v, err, panicked := readValueNoPanic(t, "$-1\r\n")
+	v, panicked, err := readValueNoPanic(t, "$-1\r\n")
 	if panicked != nil {
 		t.Fatalf("null bulk panicked: %v", panicked)
 	}
@@ -78,7 +78,7 @@ func TestReadValueNullBulkControl(t *testing.T) {
 }
 
 func TestReadValueNullArrayControl(t *testing.T) {
-	v, err, panicked := readValueNoPanic(t, "*-1\r\n")
+	v, panicked, err := readValueNoPanic(t, "*-1\r\n")
 	if panicked != nil {
 		t.Fatalf("null array panicked: %v", panicked)
 	}
@@ -92,7 +92,7 @@ func TestReadValueNullArrayControl(t *testing.T) {
 
 // Control: ordinary payloads on both fixed paths still parse.
 func TestReadValueNormalBulkControl(t *testing.T) {
-	v, err, panicked := readValueNoPanic(t, "$3\r\nfoo\r\n")
+	v, panicked, err := readValueNoPanic(t, "$3\r\nfoo\r\n")
 	if panicked != nil {
 		t.Fatalf("normal bulk panicked: %v", panicked)
 	}
@@ -105,7 +105,7 @@ func TestReadValueNormalBulkControl(t *testing.T) {
 }
 
 func TestReadValueNormalArrayControl(t *testing.T) {
-	v, err, panicked := readValueNoPanic(t, "*2\r\n$3\r\nfoo\r\n$3\r\nbar\r\n")
+	v, panicked, err := readValueNoPanic(t, "*2\r\n$3\r\nfoo\r\n$3\r\nbar\r\n")
 	if panicked != nil {
 		t.Fatalf("normal array panicked: %v", panicked)
 	}
@@ -120,7 +120,7 @@ func TestReadValueNormalArrayControl(t *testing.T) {
 // Control: the boundary values adjacent to the new guard stay valid.
 func TestReadValueBoundaryCountsControl(t *testing.T) {
 	for _, wire := range []string{"$0\r\n\r\n", "*0\r\n"} {
-		v, err, panicked := readValueNoPanic(t, wire)
+		v, panicked, err := readValueNoPanic(t, wire)
 		if panicked != nil {
 			t.Fatalf("ReadValue(%q) panicked: %v", wire, panicked)
 		}

@@ -9,7 +9,7 @@ import (
 	"github.com/cachestorm/cachestorm/internal/config"
 	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
-	"github.com/cachestorm/cachestorm/plugins/example-hooks"
+	examplehooks "github.com/cachestorm/cachestorm/plugins/example-hooks"
 )
 
 // executeCommand drives srv's real router with a Context carrying the

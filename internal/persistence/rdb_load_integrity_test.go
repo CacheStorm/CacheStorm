@@ -1,13 +1,14 @@
 package persistence_test
 
 import (
-	"github.com/cachestorm/cachestorm/internal/persistence"
-	"github.com/cachestorm/cachestorm/internal/store"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/cachestorm/cachestorm/internal/persistence"
+	"github.com/cachestorm/cachestorm/internal/store"
 )
 
 type auditResult struct {

@@ -1,9 +1,10 @@
 package cluster_test
 
 import (
-	"github.com/cachestorm/cachestorm/internal/cluster"
 	"reflect"
 	"testing"
+
+	"github.com/cachestorm/cachestorm/internal/cluster"
 )
 
 type auditResult struct {
@@ -11,11 +12,6 @@ type auditResult struct {
 	Want, Got any
 }
 
-func auditMust(err error) {
-	if err != nil {
-		panic(err)
-	}
-}
 func auditCheck(t *testing.T, results []auditResult) {
 	t.Helper()
 	for _, result := range results {

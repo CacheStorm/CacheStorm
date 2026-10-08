@@ -37,7 +37,7 @@ func httpACLEntryUser(t *testing.T, rules string) *acl.User {
 	return user
 }
 
-func runThroughExecuteHTTP(t *testing.T, router *Router, s *store.Store, user *acl.User, cmd string, args ...string) (error, string) {
+func runThroughExecuteHTTP(t *testing.T, router *Router, s *store.Store, user *acl.User, cmd string, args ...string) (string, error) {
 	t.Helper()
 	buf := &bytes.Buffer{}
 	ctx := &Context{
@@ -50,7 +50,7 @@ func runThroughExecuteHTTP(t *testing.T, router *Router, s *store.Store, user *a
 	// ExecuteHTTP returns (result, error); the observable ACL behaviour is
 	// the error plus whatever the handler wrote to ctx.Writer.
 	_, err := router.ExecuteHTTP(ctx)
-	return err, buf.String()
+	return buf.String(), err
 }
 
 func TestExecuteHTTPEnforcesACLCommandAndKeys(t *testing.T) {
@@ -61,13 +61,13 @@ func TestExecuteHTTPEnforcesACLCommandAndKeys(t *testing.T) {
 	user := httpACLEntryUser(t, "+get ~user:*")
 
 	// Key pattern: GET on a key outside ~user:* is refused, like on TCP.
-	err, written := runThroughExecuteHTTP(t, router, s, user, "GET", "other:1")
+	written, err := runThroughExecuteHTTP(t, router, s, user, "GET", "other:1")
 	if err == nil || !strings.Contains(err.Error(), "NOPERM") {
 		t.Fatalf("ExecuteHTTP must not run GET on a key outside ~user:*, err=%v written=%q", err, written)
 	}
 
 	// Command: DEL is not granted to this user.
-	err, written = runThroughExecuteHTTP(t, router, s, user, "DEL", "user:1")
+	written, err = runThroughExecuteHTTP(t, router, s, user, "DEL", "user:1")
 	if err == nil || !strings.Contains(err.Error(), "NOPERM") {
 		t.Fatalf("ExecuteHTTP must not run DEL without a +del grant, err=%v written=%q", err, written)
 	}
@@ -76,12 +76,12 @@ func TestExecuteHTTPEnforcesACLCommandAndKeys(t *testing.T) {
 	}
 
 	// Control: a granted command on an in-pattern key is served.
-	err, written = runThroughExecuteHTTP(t, router, s, user, "GET", "user:1")
+	written, err = runThroughExecuteHTTP(t, router, s, user, "GET", "user:1")
 	if err != nil || !strings.Contains(written, "mine") {
 		t.Fatalf("a granted command on an in-pattern key was restricted, err=%v written=%q", err, written)
 	}
 	// Control: a connection without an ACL user keeps the permissive default.
-	err, written = runThroughExecuteHTTP(t, router, s, nil, "GET", "other:1")
+	written, err = runThroughExecuteHTTP(t, router, s, nil, "GET", "other:1")
 	if err != nil || !strings.Contains(written, "secret") {
 		t.Fatalf("the default caller lost HTTP access, err=%v written=%q", err, written)
 	}

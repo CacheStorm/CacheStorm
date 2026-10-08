@@ -120,7 +120,7 @@ func (c *Cluster) RemoveNode(id string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.nodes, id)
-	for slot, info := range c.slots {
+	for slot, info := range &c.slots {
 		if info != nil && info.Primary != nil && info.Primary.ID == id {
 			c.slots[slot] = nil
 		}

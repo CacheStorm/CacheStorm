@@ -373,9 +373,9 @@ func (v *JSONValue) ArrAppend(path string, values []interface{}) (int, error) {
 	var length int
 	if len(parts) == 0 {
 		if arr, ok := data.([]interface{}); ok {
-			updated := append(arr, values...)
-			data = updated
-			length = len(updated)
+			arr = append(arr, values...)
+			data = arr
+			length = len(arr)
 		}
 	} else {
 		var err error
