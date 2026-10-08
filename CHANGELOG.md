@@ -27,6 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Scripts: unknown/unimplemented commands (FLUSHALL, CONFIG, typos) now fail loudly with `ERR unknown command ... called from Lua script` instead of silently returning nil (`f9448aa`)
 - Scripts: `redis.pcall` converts arguments exactly like `redis.call` — booleans no longer become empty strings through pcall (`9834d57`)
 - Functions: FUNCTION-language functions receive their declared keys and args as `function(keys, args)` parameters like Redis; previously they arrived nil and only `redis.KEYS`/`redis.ARGV` carried them (`2d89217`)
+- CI: the quality gate passes again — the repository is gofmt-clean, ~30 golangci-lint findings resolved (including a real bug the linter caught: the Lua script test helper discarded the `ReadValue` error), and a data race between test-session goroutines and global slow-log/metrics swaps is fixed (`5786821`, `fa834cd`, `6e457ad`)
+- HTTP: the unauthenticated error reply drops its trailing period — `NOAUTH Authentication required` instead of `NOAUTH Authentication required.` (`fa834cd`)
 
 ### Testing
 - ACL hardening regression suites: default-user init, key extraction shapes, script/FCALL guards and command permissions, HTTP identity and session binding, REST key/tag enforcement, requirepass gate, and the CONFIG reservation pin proving ACL/CONFIG are reserved against requirepass escalation (`0f6e3e8`)
