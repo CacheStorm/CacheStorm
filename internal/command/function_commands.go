@@ -206,11 +206,23 @@ func (r *FunctionRegistry) callFunction(libName string, fnName string, keys []st
 		fn := L.GetField(tbl, fnName)
 		if luaFn, ok := fn.(*lua.LFunction); ok {
 			if err := se.protected(func() error {
+				// Redis Functions convention: the function receives the
+				// declared keys and args as two table parameters. Zero-param
+				// library functions simply ignore them, so the older
+				// redis.KEYS/redis.ARGV convention keeps working.
+				keysTbl := L.NewTable()
+				for _, k := range keys {
+					keysTbl.Append(lua.LString(k))
+				}
+				argsTbl := L.NewTable()
+				for _, a := range args {
+					argsTbl.Append(lua.LString(a))
+				}
 				return L.CallByParam(lua.P{
 					Fn:      luaFn,
 					NRet:    1,
 					Protect: true,
-				})
+				}, keysTbl, argsTbl)
 			}); err != nil {
 				return nil, fmt.Errorf("ERR %v", err)
 			}
