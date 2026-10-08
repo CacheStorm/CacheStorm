@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
+	"errors"
 	"io"
 	"strings"
 	"sync"
@@ -182,8 +183,19 @@ func (r *Router) ExecuteHTTP(ctx *Context) (interface{}, error) {
 	if ctx.Writer == nil {
 		ctx.Writer = resp.NewWriter(io.Discard)
 	}
-	ctx.Authenticated = true // HTTP auth is handled by HTTP middleware
 	ctx.StartTime = time.Now()
+
+	// requirepass: the HTTP path enforces the same authentication gate as
+	// the TCP path. The HTTP middleware records whether a request actually
+	// authenticated (shared password, ACL identity, or session); when HTTP
+	// auth is disabled the request is anonymous, so with requirepass set
+	// only auth-exempt commands may run — the API can no longer sit wide
+	// open behind a requirepass deployment. requirepass unset: gate off.
+	upperCmd := strings.ToUpper(ctx.Command)
+	if r.RequirePass() != "" && !ctx.IsAuthenticated() && !noAuthCommands[upperCmd] {
+		ctx.Writer.WriteError("NOAUTH Authentication required.")
+		return nil, errors.New("NOAUTH Authentication required.")
+	}
 
 	// ACL: the HTTP path runs with the same per-user command and key rules
 	// as the TCP path. A caller that authenticates via ACL and sets
@@ -191,7 +203,7 @@ func (r *Router) ExecuteHTTP(ctx *Context) (interface{}, error) {
 	// ACL user keep the permissive default behaviour. The refusal reply is
 	// written to ctx.Writer and the error is returned so HTTP callers can
 	// surface it.
-	if enforceACL(ctx, strings.ToUpper(ctx.Command)) {
+	if enforceACL(ctx, upperCmd) {
 		return nil, acl.ErrPermissionDenied
 	}
 

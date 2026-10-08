@@ -265,6 +265,12 @@ func (h *HTTPServer) corsMiddleware(next http.Handler) http.Handler {
 // for the request.
 type aclIdentityContextKey struct{}
 
+// httpAuthedContextKey records that authMiddleware actually authenticated
+// this request (shared password, ACL identity, or session). With HTTP auth
+// disabled no request carries it, so ExecuteHTTP's requirepass gate can
+// refuse anonymous commands exactly like the TCP path does.
+type httpAuthedContextKey struct{}
+
 // aclIdentityFromRequest resolves per-user ACL credentials from the request:
 // HTTP Basic (username:password), or a Bearer token of the same shape as
 // issued by /api/login with a username. It reports presented=false when the
@@ -311,7 +317,7 @@ func (h *HTTPServer) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		// contain a colon is never mistaken for a username:password pair.
 		token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 		if h.config.Password != "" && token != "" && subtle.ConstantTimeCompare([]byte(token), []byte(h.config.Password)) == 1 {
-			next(w, r)
+			next(w, r.WithContext(context.WithValue(r.Context(), httpAuthedContextKey{}, true)))
 			return
 		}
 
@@ -324,11 +330,22 @@ func (h *HTTPServer) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 				h.writeError(w, http.StatusUnauthorized, "invalid username or password")
 				return
 			}
-			next(w, r.WithContext(context.WithValue(r.Context(), aclIdentityContextKey{}, user)))
+			ctx := context.WithValue(r.Context(), aclIdentityContextKey{}, user)
+			next(w, r.WithContext(context.WithValue(ctx, httpAuthedContextKey{}, true)))
 			return
 		}
 
 		if h.config.Password == "" {
+			// Authentication is disabled: the request stays anonymous. A
+			// deployment that secured the server with requirepass must not
+			// get an anonymous HTTP API just because HTTPConfig.Password is
+			// empty — refuse anonymous access to the command surface; ACL
+			// users can still authenticate via /api/login or Basic
+			// credentials.
+			if h.router.RequirePass() != "" {
+				h.writeError(w, http.StatusUnauthorized, "NOAUTH Authentication required.")
+				return
+			}
 			next(w, r)
 			return
 		}
@@ -340,11 +357,12 @@ func (h *HTTPServer) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		if cookie, err := r.Cookie("session_token"); err == nil && h.sessions.Valid(cookie.Value) {
 			if username := h.sessions.User(cookie.Value); username != "" {
 				if user, ok := command.ACLUserByName(username); ok {
-					next(w, r.WithContext(context.WithValue(r.Context(), aclIdentityContextKey{}, user)))
+					ctx := context.WithValue(r.Context(), aclIdentityContextKey{}, user)
+					next(w, r.WithContext(context.WithValue(ctx, httpAuthedContextKey{}, true)))
 					return
 				}
 			}
-			next(w, r)
+			next(w, r.WithContext(context.WithValue(r.Context(), httpAuthedContextKey{}, true)))
 			return
 		}
 
@@ -904,6 +922,11 @@ func (h *HTTPServer) handleExecute(w http.ResponseWriter, r *http.Request) {
 		ctx.ACLUser = user
 		ctx.Username = user.Name
 	}
+	// Carry whether authMiddleware actually authenticated this request
+	// (shared password, ACL identity, or session). With HTTP auth disabled
+	// the request is anonymous, so ExecuteHTTP's requirepass gate can
+	// refuse it exactly like the TCP path does.
+	ctx.Authenticated, _ = r.Context().Value(httpAuthedContextKey{}).(bool)
 
 	result, err := h.router.ExecuteHTTP(ctx)
 	if err != nil {
