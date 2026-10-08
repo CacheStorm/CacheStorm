@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cachestorm/cachestorm/internal/acl"
 	"github.com/cachestorm/cachestorm/internal/resp"
 )
 
@@ -178,10 +179,20 @@ func (r *Router) ExecuteHTTP(ctx *Context) (interface{}, error) {
 	}
 
 	// Create a capture writer to collect the response
-	ctx.Authenticated = true // HTTP auth is handled by HTTP middleware
-	ctx.StartTime = time.Now()
 	if ctx.Writer == nil {
 		ctx.Writer = resp.NewWriter(io.Discard)
+	}
+	ctx.Authenticated = true // HTTP auth is handled by HTTP middleware
+	ctx.StartTime = time.Now()
+
+	// ACL: the HTTP path runs with the same per-user command and key rules
+	// as the TCP path. A caller that authenticates via ACL and sets
+	// ctx.ACLUser must not lose those restrictions here; requests without an
+	// ACL user keep the permissive default behaviour. The refusal reply is
+	// written to ctx.Writer and the error is returned so HTTP callers can
+	// surface it.
+	if enforceACL(ctx, strings.ToUpper(ctx.Command)) {
+		return nil, acl.ErrPermissionDenied
 	}
 
 	err := cmd.Handler(ctx)

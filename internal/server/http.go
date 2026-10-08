@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/cachestorm/cachestorm/internal/acl"
 	"github.com/cachestorm/cachestorm/internal/command"
 	"github.com/cachestorm/cachestorm/internal/logger"
 	"github.com/cachestorm/cachestorm/internal/store"
@@ -240,8 +241,73 @@ func (h *HTTPServer) corsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// aclIdentityContextKey carries the ACL user that authMiddleware resolved
+// for the request.
+type aclIdentityContextKey struct{}
+
+// aclIdentityFromRequest resolves per-user ACL credentials from the request:
+// HTTP Basic (username:password), or a Bearer token of the same shape as
+// issued by /api/login with a username. It reports presented=false when the
+// request carries no ACL credentials at all; presented credentials must
+// validate, and the caller must refuse the request when they do not.
+func (h *HTTPServer) aclIdentityFromRequest(r *http.Request) (*acl.User, bool, error) {
+	if username, password, ok := r.BasicAuth(); ok {
+		user, err := command.AuthenticateACL(username, password)
+		return user, true, err
+	}
+	token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if token != "" && strings.Contains(token, ":") {
+		username, password, _ := strings.Cut(token, ":")
+		user, err := command.AuthenticateACL(username, password)
+		return user, true, err
+	}
+	return nil, false, nil
+}
+
+// restACLUser returns the ACL identity authMiddleware resolved for the
+// request, or nil for the unrestricted default user.
+func restACLUser(r *http.Request) *acl.User {
+	user, _ := r.Context().Value(aclIdentityContextKey{}).(*acl.User)
+	return user
+}
+
+// restKeyRefused reports whether the resolved identity may run command on
+// key. These REST handlers touch the store directly instead of going through
+// the router, so the per-user rules must be checked here: the identity needs
+// the command grant and a matching key pattern. A nil identity (the default
+// user) is always allowed.
+func restKeyRefused(r *http.Request, key, command string) bool {
+	user := restACLUser(r)
+	if user == nil {
+		return false
+	}
+	return !user.CanExecuteCommand(command) || !user.CanAccessKey(key)
+}
+
 func (h *HTTPServer) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Shared-password Bearer first: the default (unrestricted) identity.
+		// Checked before ACL credentials so a shared password that happens to
+		// contain a colon is never mistaken for a username:password pair.
+		token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if h.config.Password != "" && token != "" && subtle.ConstantTimeCompare([]byte(token), []byte(h.config.Password)) == 1 {
+			next(w, r)
+			return
+		}
+
+		// Per-user ACL identity: presented credentials must validate even
+		// when the shared password is unset; absent credentials fall back to
+		// the anonymous default identity when authentication is disabled and
+		// are refused when it is not.
+		if user, presented, err := h.aclIdentityFromRequest(r); presented {
+			if err != nil {
+				h.writeError(w, http.StatusUnauthorized, "invalid username or password")
+				return
+			}
+			next(w, r.WithContext(context.WithValue(r.Context(), aclIdentityContextKey{}, user)))
+			return
+		}
+
 		if h.config.Password == "" {
 			next(w, r)
 			return
@@ -253,15 +319,6 @@ func (h *HTTPServer) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 				next(w, r)
 				return
 			}
-		}
-
-		// Try Bearer token from Authorization header
-		token := r.Header.Get("Authorization")
-		token = strings.TrimPrefix(token, "Bearer ")
-
-		if token != "" && subtle.ConstantTimeCompare([]byte(token), []byte(h.config.Password)) == 1 {
-			next(w, r)
-			return
 		}
 
 		h.writeError(w, http.StatusUnauthorized, "unauthorized")
@@ -416,6 +473,15 @@ func (h *HTTPServer) handleKeys(w http.ResponseWriter, r *http.Request) {
 			pattern = "*"
 		}
 
+		// ACL: a restricted identity needs the KEYS command grant to list
+		// and only sees keys matching its patterns — the same rules the
+		// KEYS command applies on the TCP path.
+		user := restACLUser(r)
+		if user != nil && !user.CanExecuteCommand("KEYS") {
+			h.writeError(w, http.StatusForbidden, "NOPERM the 'KEYS' command is not allowed for this identity")
+			return
+		}
+
 		keys := h.store.Keys()
 
 		if pattern != "*" {
@@ -430,6 +496,9 @@ func (h *HTTPServer) handleKeys(w http.ResponseWriter, r *http.Request) {
 
 		keyData := make([]map[string]interface{}, 0)
 		for _, k := range keys {
+			if user != nil && !user.CanAccessKey(k) {
+				continue
+			}
 			entry, exists := h.store.Get(k)
 			if exists {
 				ttl := h.store.TTL(k)
@@ -467,6 +536,13 @@ func (h *HTTPServer) handleKeys(w http.ResponseWriter, r *http.Request) {
 		r.Body = http.MaxBytesReader(w, r.Body, 10*1024*1024) // 10MB limit
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			h.writeError(w, http.StatusBadRequest, "invalid JSON")
+			return
+		}
+
+		// ACL: writing through the REST API is a SET on the key, so the
+		// identity needs the command grant and a matching key pattern.
+		if restKeyRefused(r, req.Key, "SET") {
+			h.writeError(w, http.StatusForbidden, "NOPERM key '"+req.Key+"' is not allowed for this identity")
 			return
 		}
 
@@ -509,6 +585,12 @@ func (h *HTTPServer) handleKey(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case "GET":
+		// ACL: reading through the REST API is a GET on the key, so the
+		// identity needs the command grant and a matching key pattern.
+		if restKeyRefused(r, key, "GET") {
+			h.writeError(w, http.StatusForbidden, "NOPERM key '"+key+"' is not allowed for this identity")
+			return
+		}
 		entry, exists := h.store.Get(key)
 		if !exists {
 			h.writeError(w, http.StatusNotFound, "key not found")
@@ -531,6 +613,11 @@ func (h *HTTPServer) handleKey(w http.ResponseWriter, r *http.Request) {
 		})
 
 	case "DELETE":
+		// ACL: deleting through the REST API is a DEL on the key.
+		if restKeyRefused(r, key, "DEL") {
+			h.writeError(w, http.StatusForbidden, "NOPERM key '"+key+"' is not allowed for this identity")
+			return
+		}
 		deleted := h.store.Delete(key)
 		h.writeJSON(w, http.StatusOK, map[string]interface{}{
 			"deleted": deleted,
@@ -542,7 +629,7 @@ func (h *HTTPServer) handleKey(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *HTTPServer) handleTags(w http.ResponseWriter, _ *http.Request) {
+func (h *HTTPServer) handleTags(w http.ResponseWriter, r *http.Request) {
 	tagIndex := h.store.GetTagIndex()
 	if tagIndex == nil {
 		h.writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -552,17 +639,40 @@ func (h *HTTPServer) handleTags(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 
+	// ACL: tag discovery is store-wide, so it needs the KEYS command grant,
+	// and each tag's count is filtered to the keys the identity may access.
+	// Tags with no accessible keys are omitted entirely.
+	user := restACLUser(r)
+	if user != nil && !user.CanExecuteCommand("KEYS") {
+		h.writeError(w, http.StatusForbidden, "NOPERM the 'KEYS' command is not allowed for this identity")
+		return
+	}
+
 	tags := tagIndex.Tags()
 	tagInfo := make([]map[string]interface{}, 0, len(tags))
+	listed := 0
 	for _, tag := range tags {
+		count := tagIndex.Count(tag)
+		if user != nil {
+			count = 0
+			for _, key := range tagIndex.GetKeys(tag) {
+				if user.CanAccessKey(key) {
+					count++
+				}
+			}
+			if count == 0 {
+				continue
+			}
+		}
 		tagInfo = append(tagInfo, map[string]interface{}{
 			"name":  tag,
-			"count": tagIndex.Count(tag),
+			"count": count,
 		})
+		listed++
 	}
 
 	h.writeJSON(w, http.StatusOK, map[string]interface{}{
-		"count": len(tags),
+		"count": listed,
 		"tags":  tagInfo,
 	})
 }
@@ -580,8 +690,26 @@ func (h *HTTPServer) handleTag(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// ACL: tag discovery needs the KEYS command grant, and the key list is
+	// filtered to the keys the identity may access.
+	user := restACLUser(r)
+	if user != nil && !user.CanExecuteCommand("KEYS") {
+		h.writeError(w, http.StatusForbidden, "NOPERM the 'KEYS' command is not allowed for this identity")
+		return
+	}
+
 	keys := tagIndex.GetKeys(tag)
 	count := tagIndex.Count(tag)
+	if user != nil {
+		filtered := make([]string, 0, len(keys))
+		for _, key := range keys {
+			if user.CanAccessKey(key) {
+				filtered = append(filtered, key)
+			}
+		}
+		keys = filtered
+		count = len(keys)
+	}
 
 	h.writeJSON(w, http.StatusOK, map[string]interface{}{
 		"tag":   tag,
@@ -606,6 +734,24 @@ func (h *HTTPServer) handleInvalidate(w http.ResponseWriter, r *http.Request) {
 	if tagIndex == nil {
 		h.writeError(w, http.StatusNotFound, "tag not found")
 		return
+	}
+
+	// ACL: invalidating a tag drops every key carrying it — an all-or-nothing
+	// destructive operation, so the identity needs the DEL command grant and
+	// every tagged key must be within its patterns. Refusing is safer than
+	// partially dropping keys belonging to other users.
+	user := restACLUser(r)
+	if user != nil {
+		if !user.CanExecuteCommand("DEL") {
+			h.writeError(w, http.StatusForbidden, "NOPERM the 'DEL' command is not allowed for this identity")
+			return
+		}
+		for _, key := range tagIndex.GetKeys(tag) {
+			if !user.CanAccessKey(key) {
+				h.writeError(w, http.StatusForbidden, "NOPERM key '"+key+"' is not allowed for this identity")
+				return
+			}
+		}
 	}
 
 	keys := tagIndex.Invalidate(tag)
@@ -724,6 +870,13 @@ func (h *HTTPServer) handleExecute(w http.ResponseWriter, r *http.Request) {
 		Args:    args,
 		Store:   h.store,
 	}
+	// Carry the ACL identity authMiddleware resolved (HTTP Basic or a
+	// username login token) so ExecuteHTTP enforces that user's command and
+	// key rules. No identity means the permissive default user, as before.
+	if user, ok := r.Context().Value(aclIdentityContextKey{}).(*acl.User); ok && user != nil {
+		ctx.ACLUser = user
+		ctx.Username = user.Name
+	}
 
 	result, err := h.router.ExecuteHTTP(ctx)
 	if err != nil {
@@ -784,12 +937,29 @@ func (h *HTTPServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
+		Username string `json:"username"`
 		Password string `json:"password"`
 	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, 1024) // 1KB limit for login
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.writeError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+
+	// Per-user login: authenticate against the ACL registry and return a
+	// Bearer token of the "username:password" shape authMiddleware accepts.
+	// Omitting the username keeps the legacy shared-password login working.
+	if req.Username != "" {
+		if _, err := command.AuthenticateACL(req.Username, req.Password); err != nil {
+			h.writeError(w, http.StatusUnauthorized, "invalid username or password")
+			return
+		}
+		h.writeJSON(w, http.StatusOK, map[string]interface{}{
+			"success":  true,
+			"username": req.Username,
+			"token":    req.Username + ":" + req.Password,
+		})
 		return
 	}
 
