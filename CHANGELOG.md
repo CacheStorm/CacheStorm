@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - WebSocket support
 - GraphQL subscriptions
 
+### Added
+- Functions: libraries can declare functions with the Redis 7 convention — `redis.register_function(name, fn)` registers alongside the `redis.<name>` carry, and registered functions receive `(keys, args)` as parameters
+
 ### Security
 - ACL: `DeniedCommands` initialized for the default user — `ACL SETUSER default -<cmd>` no longer panics (`5475097`)
 - ACL: key-pattern enforcement fails closed for commands missing extraction tables; accurate declared-key shapes for XADD/XREAD/XREADGROUP/XINFO/XGROUP and FCALL (`3b2ee7b`)

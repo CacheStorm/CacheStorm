@@ -57,6 +57,24 @@ func GetFunctionRegistry(s *store.Store) *FunctionRegistry {
 
 const maxLibraries = 1000 // Maximum number of function libraries
 
+// redisRegisterFunctionAlias returns the Redis 7 registration entry point as
+// an alias for this engine's native redis.<name> = function carry:
+// redis.register_function(name, fn) simply declares redis.<name> = fn, so both
+// declaration conventions share one lookup path at call time.
+func redisRegisterFunctionAlias(L *lua.LState) *lua.LFunction {
+	return L.NewFunction(func(L *lua.LState) int {
+		name := L.ToString(1)
+		if name == "" {
+			return 0
+		}
+		fn := L.Get(2)
+		if tbl, ok := L.GetGlobal("redis").(*lua.LTable); ok {
+			L.SetField(tbl, name, fn)
+		}
+		return 0
+	})
+}
+
 func (r *FunctionRegistry) CreateLibrary(name string, code string, replace bool) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -85,6 +103,14 @@ func (r *FunctionRegistry) CreateLibrary(name string, code string, replace bool)
 	L := lua.NewState()
 	defer L.Close()
 
+	// Seed the registration-phase state with the Redis 7 entry point so a
+	// library calling redis.register_function(name, fn) loads: the alias
+	// converts the call into the native redis.<name> = fn carry that the
+	// enumeration below discovers.
+	redisTable := L.NewTable()
+	L.SetGlobal("redis", redisTable)
+	L.SetField(redisTable, "register_function", redisRegisterFunctionAlias(L))
+
 	if err := L.DoString(code); err != nil {
 		return fmt.Errorf("ERR failed to load library: %v", err)
 	}
@@ -95,7 +121,7 @@ func (r *FunctionRegistry) CreateLibrary(name string, code string, replace bool)
 			if strKey, ok := key.(lua.LString); ok {
 				if _, ok := value.(*lua.LFunction); ok {
 					fnName := string(strKey)
-					if !strings.HasPrefix(fnName, "_") {
+					if !strings.HasPrefix(fnName, "_") && fnName != "register_function" {
 						fnSHA := sha1.Sum([]byte(name + ":" + fnName + code))
 						function := &Function{
 							Name:      fnName,

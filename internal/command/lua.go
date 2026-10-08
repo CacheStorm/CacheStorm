@@ -67,6 +67,10 @@ func (e *ScriptEngine) createState(keys []string, args []string, guard ScriptCal
 
 	redisTable := L.NewTable()
 	L.SetGlobal("redis", redisTable)
+	// The Redis 7 registration convention: redis.register_function(name, fn)
+	// declares redis.<name> = fn, so library code using either convention
+	// resolves through the same lookup at call time.
+	L.SetField(redisTable, "register_function", redisRegisterFunctionAlias(L))
 
 	// scriptArgs converts the Lua call arguments (index 2..n) to command
 	// arguments. ONE implementation serves both redis.call and redis.pcall:
