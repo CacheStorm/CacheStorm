@@ -21,10 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - HTTP: sessions created by a username login are bound to that ACL identity and enforced on cookie flows (`e7f818a`)
 - HTTP: REST key endpoints (`/api/keys`, `/api/key/<name>`) and tag endpoints (`/api/tags`, `/api/tag/<tag>`, `/api/invalidate/<tag>`) enforce command grants and key patterns — listings filtered to accessible keys, invalidate all-or-nothing (`3c1ada9`)
 - HTTP: requirepass enforced on the whole HTTP API — `ExecuteHTTP` gate plus anonymous requests refused at the middleware boundary when auth is disabled; previously a requirepass deployment with HTTP enabled and no HTTP password served the API anonymously (`c545a3d`)
+- HTTP: username-Bearer authentication splits on the last colon, so usernames containing `:` authenticate over the Bearer flow instead of parsing as the wrong user (`563ae7b`)
 
 ### Fixed
 - Scripts: unknown/unimplemented commands (FLUSHALL, CONFIG, typos) now fail loudly with `ERR unknown command ... called from Lua script` instead of silently returning nil (`f9448aa`)
 - Scripts: `redis.pcall` converts arguments exactly like `redis.call` — booleans no longer become empty strings through pcall (`9834d57`)
+- Functions: FUNCTION-language functions receive their declared keys and args as `function(keys, args)` parameters like Redis; previously they arrived nil and only `redis.KEYS`/`redis.ARGV` carried them (`2d89217`)
 
 ### Testing
 - ACL hardening regression suites: default-user init, key extraction shapes, script/FCALL guards and command permissions, HTTP identity and session binding, REST key/tag enforcement, requirepass gate, and the CONFIG reservation pin proving ACL/CONFIG are reserved against requirepass escalation (`0f6e3e8`)
