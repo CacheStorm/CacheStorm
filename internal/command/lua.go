@@ -68,14 +68,13 @@ func (e *ScriptEngine) createState(keys []string, args []string, guard ScriptCal
 	redisTable := L.NewTable()
 	L.SetGlobal("redis", redisTable)
 
-	L.SetField(redisTable, "call", L.NewFunction(func(L *lua.LState) int {
-		n := L.GetTop()
-		if n == 0 {
-			L.Push(lua.LNil)
-			return 1
-		}
-
-		cmd := L.CheckString(1)
+	// scriptArgs converts the Lua call arguments (index 2..n) to command
+	// arguments. ONE implementation serves both redis.call and redis.pcall:
+	// strings pass through, numbers use %v, booleans become "1"/"0" — so a
+	// value produces identical arguments regardless of which binding the
+	// author picked (pcall's old bare L.ToString loop silently turned
+	// booleans into empty strings).
+	scriptArgs := func(L *lua.LState, n int) []string {
 		cmdArgs := make([]string, 0, n-1)
 		for i := 2; i <= n; i++ {
 			arg := L.Get(i)
@@ -94,6 +93,18 @@ func (e *ScriptEngine) createState(keys []string, args []string, guard ScriptCal
 				cmdArgs = append(cmdArgs, L.ToString(i))
 			}
 		}
+		return cmdArgs
+	}
+
+	L.SetField(redisTable, "call", L.NewFunction(func(L *lua.LState) int {
+		n := L.GetTop()
+		if n == 0 {
+			L.Push(lua.LNil)
+			return 1
+		}
+
+		cmd := L.CheckString(1)
+		cmdArgs := scriptArgs(L, n)
 
 		result := e.executeCommand(guard, L, cmd, cmdArgs)
 		L.Push(result)
@@ -108,10 +119,7 @@ func (e *ScriptEngine) createState(keys []string, args []string, guard ScriptCal
 		}
 
 		cmd := L.CheckString(1)
-		cmdArgs := make([]string, 0, n-1)
-		for i := 2; i <= n; i++ {
-			cmdArgs = append(cmdArgs, L.ToString(i))
-		}
+		cmdArgs := scriptArgs(L, n)
 
 		// Consult the ACL guard BEFORE the recover below is registered: a
 		// permission violation must abort the whole script and reach the
