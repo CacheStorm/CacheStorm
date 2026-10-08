@@ -13,6 +13,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - WebSocket support
 - GraphQL subscriptions
 
+### Security
+- ACL: `DeniedCommands` initialized for the default user — `ACL SETUSER default -<cmd>` no longer panics (`5475097`)
+- ACL: key-pattern enforcement fails closed for commands missing extraction tables; accurate declared-key shapes for XADD/XREAD/XREADGROUP/XINFO/XGROUP and FCALL (`3b2ee7b`)
+- ACL: script guard enforces the invoking user's key patterns AND command permissions on every `redis.call`/`redis.pcall` — violations abort the script uncatchably; FCALL/FCALL_RO covered; admin commands (ACL, CONFIG) reserved (`3b2ee7b`)
+- HTTP: `Router.ExecuteHTTP` enforces per-user ACL command and key rules; ACL identities accepted via HTTP Basic and username Bearer tokens; `/api/login` authenticates usernames (`3c1ada9`)
+- HTTP: sessions created by a username login are bound to that ACL identity and enforced on cookie flows (`e7f818a`)
+- HTTP: REST key endpoints (`/api/keys`, `/api/key/<name>`) and tag endpoints (`/api/tags`, `/api/tag/<tag>`, `/api/invalidate/<tag>`) enforce command grants and key patterns — listings filtered to accessible keys, invalidate all-or-nothing (`3c1ada9`)
+- HTTP: requirepass enforced on the whole HTTP API — `ExecuteHTTP` gate plus anonymous requests refused at the middleware boundary when auth is disabled; previously a requirepass deployment with HTTP enabled and no HTTP password served the API anonymously (`c545a3d`)
+
+### Fixed
+- Scripts: unknown/unimplemented commands (FLUSHALL, CONFIG, typos) now fail loudly with `ERR unknown command ... called from Lua script` instead of silently returning nil (`f9448aa`)
+- Scripts: `redis.pcall` converts arguments exactly like `redis.call` — booleans no longer become empty strings through pcall (`9834d57`)
+
+### Testing
+- ACL hardening regression suites: default-user init, key extraction shapes, script/FCALL guards and command permissions, HTTP identity and session binding, REST key/tag enforcement, requirepass gate, and the CONFIG reservation pin proving ACL/CONFIG are reserved against requirepass escalation (`0f6e3e8`)
+
 ## [0.2.0] - 2026-03-21
 
 ### Security
