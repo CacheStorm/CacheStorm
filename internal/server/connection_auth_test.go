@@ -26,9 +26,21 @@ func newAuthConnServer(t *testing.T, requirePass string) (net.Conn, *store.Store
 
 	clientSide, serverSide := net.Pipe()
 	conn := NewConnection(1, serverSide, s, router, nil)
-	go conn.Handle()
+	handleDone := make(chan struct{})
+	go func() {
+		defer close(handleDone)
+		conn.Handle()
+	}()
 
-	t.Cleanup(func() { _ = clientSide.Close() })
+	t.Cleanup(func() {
+		_ = clientSide.Close()
+		// Same rationale as newACLSession: the Handle goroutine's final
+		// metrics/slow-log writes must land before later tests run.
+		select {
+		case <-handleDone:
+		case <-time.After(2 * time.Second):
+		}
+	})
 	return clientSide, s
 }
 

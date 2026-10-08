@@ -45,7 +45,11 @@ func newACLSession(t *testing.T) *aclSession {
 
 	clientSide, serverSide := net.Pipe()
 	conn := NewConnection(1, serverSide, s, router, nil)
-	go conn.Handle()
+	handleDone := make(chan struct{})
+	go func() {
+		defer close(handleDone)
+		conn.Handle()
+	}()
 
 	sess := &aclSession{t: t, conn: clientSide, reps: make(chan *resp.Value, 16)}
 	go func() {
@@ -60,7 +64,17 @@ func newACLSession(t *testing.T) *aclSession {
 		}
 	}()
 
-	t.Cleanup(func() { _ = clientSide.Close() })
+	t.Cleanup(func() {
+		_ = clientSide.Close()
+		// The Handle goroutine's final command bookkeeping (SlowLog/metrics
+		// writes) must land before later tests touch those globals, or -race
+		// reports a data race against the next test's global swap.
+		select {
+		case <-handleDone:
+		case <-time.After(2 * time.Second):
+			// Stuck on a half-open pipe: leak it rather than hang the suite.
+		}
+	})
 	return sess
 }
 
