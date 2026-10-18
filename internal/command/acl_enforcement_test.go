@@ -53,14 +53,28 @@ func TestAclKeysForCommandShapes(t *testing.T) {
 		{"MSET", []string{"a", "1", "b", "2"}, []string{"a", "b"}},
 		{"MSETNX", []string{"a", "1"}, []string{"a"}},
 
-		// NUMKEYS-counted: destination then count then keys
-		{"ZUNIONSTORE", []string{"dst", "2", "a", "b"}, []string{"a", "b"}},
+		// NUMKEYS-counted: destination then count then keys.
+		// ZUNIONSTORE's args[0] is dest, the key the command WRITES, so it is
+		// part of the result. This row previously expected {"a","b"}, pinning
+		// dest out and letting a ~user:* user compute into any key.
+		{"ZUNIONSTORE", []string{"dst", "2", "a", "b"}, []string{"dst", "a", "b"}},
+		// The read-only forms take NO destination, so the count sits at args[0].
+		// Reading it from args[1] parsed a key as the count and yielded nil --
+		// no key check at all for these commands.
+		{"ZUNION", []string{"2", "a", "b"}, []string{"a", "b"}},
+		{"ZINTER", []string{"2", "a", "b"}, []string{"a", "b"}},
 		{"EVAL", []string{"script", "2", "a", "b", "arg"}, []string{"a", "b"}},
 
 		// source + destination
 		{"RENAME", []string{"a", "b"}, []string{"a", "b"}},
 		{"SMOVE", []string{"src", "dst", "m"}, []string{"src", "dst"}},
-		{"BITOP", []string{"AND", "dst", "a", "b"}, []string{"a", "b"}},
+		// BITOP: "AND" is the operation word, NOT a key. destkey (args[1]) IS a key
+		// and must be returned — it is what the command writes. This row
+		// previously expected {"a","b"}, pinning the destkey out of the result,
+		// which let a user confined to ~user:* compute into any key outside the
+		// sandbox. The value below is the corrected contract; the earlier
+		// expectation enforced the bug and killed the correct mutation.
+		{"BITOP", []string{"AND", "dst", "a", "b"}, []string{"dst", "a", "b"}},
 
 		// key plus STORE destination
 		{"SORT", []string{"k", "STORE", "out"}, []string{"k", "out"}},

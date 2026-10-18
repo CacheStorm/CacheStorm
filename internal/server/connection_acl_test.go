@@ -33,6 +33,7 @@ func newACLSession(t *testing.T) *aclSession {
 	s := store.NewStore()
 	router := command.NewRouter()
 	command.RegisterStringCommands(router)
+	command.RegisterBitmapCommands(router)
 	command.RegisterKeyCommands(router)
 	command.RegisterServerCommands(router)
 	command.RegisterListCommands(router)
@@ -42,6 +43,7 @@ func newACLSession(t *testing.T) *aclSession {
 	command.RegisterScriptCommands(router)
 	command.RegisterPubSubCommands(router)
 	command.RegisterConfigCommands(router)
+	command.RegisterGeoCommands(router)
 
 	clientSide, serverSide := net.Pipe()
 	conn := NewConnection(1, serverSide, s, router, nil)

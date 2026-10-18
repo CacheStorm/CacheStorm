@@ -115,14 +115,41 @@ func keysAfterNumkeys(args [][]byte, base int) []string {
 	return toStrings(args[base+1 : base+1+n])
 }
 
-// storeKeyAfter returns the destination that follows a STORE/any-store keyword.
-func storeKeyAfter(args [][]byte) []string {
-	for i, a := range args {
-		if strings.EqualFold(string(a), "STORE") && i+1 < len(args) {
-			return []string{string(args[i+1])}
+// sortLookupKeys returns the key patterns named by SORT's BY and GET options.
+// sortExpandPattern turns "w_*" plus an element into "w_<elem>" and
+// sortLookupValue then does ctx.Store.Get on it, so these name real keys and
+// must be permission-checked. "BY nosort" and "GET #" reference no key.
+func sortLookupKeys(args [][]byte) []string {
+	var keys []string
+	for i := 0; i+1 < len(args); i++ {
+		switch strings.ToUpper(string(args[i])) {
+		case "BY":
+			p := string(args[i+1])
+			if !strings.EqualFold(p, "nosort") {
+				keys = append(keys, p)
+			}
+		case "GET":
+			if p := string(args[i+1]); p != "#" {
+				keys = append(keys, p)
+			}
 		}
 	}
-	return nil
+	return keys
+}
+
+// storeKeyAfter returns every destination that follows a STORE/STOREDIST
+// keyword. GEORADIUSBYMEMBER and GEORADIUSSTORE accept BOTH keywords and write
+// to both, so matching only "STORE" left a STOREDIST destination unchecked --
+// a ~user:* user could write the distance set into any key.
+func storeKeyAfter(args [][]byte) []string {
+	var keys []string
+	for i, a := range args {
+		kw := strings.ToUpper(string(a))
+		if (kw == "STORE" || kw == "STOREDIST") && i+1 < len(args) {
+			keys = append(keys, string(args[i+1]))
+		}
+	}
+	return keys
 }
 
 // aclKeysForCommand returns the keys a command operates on, for key-pattern
@@ -140,22 +167,79 @@ func aclKeysForCommand(cmd string, args [][]byte) []string {
 	case "EVAL", "EVALSHA":
 		// EVAL script numkeys key [key ...]
 		return keysAfterNumkeys(args, 1)
-	case "ZUNIONSTORE", "ZINTERSTORE", "ZDIFFSTORE", "ZUNION", "ZINTER", "ZDIFF":
-		// dest numkeys key [key ...]
-		return keysAfterNumkeys(args, 1)
+	case "ZUNIONSTORE", "ZINTERSTORE", "ZDIFFSTORE":
+		// ZUNIONSTORE dest numkeys key [key ...] — args[0] IS dest, the key this
+		// command WRITES. Omitting it let a user confined to ~user:* compute
+		// into any key outside the sandbox, so dest is checked alongside the
+		// NUMKEYS-counted sources.
+		if len(args) < 1 {
+			return nil
+		}
+		keys := keysAfterNumkeys(args, 1)
+		if keys == nil {
+			// Malformed count: keep the existing contract of returning no keys
+			// rather than guessing a shape.
+			return nil
+		}
+		return append([]string{string(args[0])}, keys...)
+	case "ZUNION", "ZINTER", "ZDIFF":
+		// ZUNION numkeys key [key ...] — the READ-ONLY forms take NO
+		// destination, so the count sits at args[0]. Reading it from args[1]
+		// parsed a key as the count, atoi failed, and nil came back — leaving
+		// these commands with no key check at all.
+		return keysAfterNumkeys(args, 0)
 	case "BITOP":
 		// BITOP op destkey key [key ...]
+		// args[0] is the operation word (AND/OR/XOR/NOT), NOT a key.
+		// args[1] IS destkey — the key this command WRITES — and args[2:]
+		// are the source keys. Both sides must be permission-checked: leaving
+		// destkey out let a user confined to ~user:* compute into any key
+		// outside the sandbox.
 		if len(args) >= 3 {
-			return toStrings(args[2:])
+			return toStrings(args[1:])
 		}
 		return nil
 	case "SORT", "SORT_RO":
-		// SORT key ... [STORE destination]
+		// SORT key ... [STORE destination] [BY pattern] [GET pattern ...]
 		keys := []string{}
 		if len(args) >= 1 {
 			keys = append(keys, string(args[0]))
 		}
-		return append(keys, storeKeyAfter(args)...)
+		keys = append(keys, storeKeyAfter(args)...)
+		return append(keys, sortLookupKeys(args)...)
+	case "SINTER", "SINTERCARD", "SDIFF", "SUNION":
+		// SINTER numkeys key [key ...] — args[0] is the COUNT, not a key, so
+		// these were previously resolved as aclSingleKeyCommands and returned
+		// args[0]. A ~user:* user was then refused every call (the count never
+		// matches the pattern) while no real key was ever checked.
+		return keysAfterNumkeys(args, 0)
+	case "SDIFFSTORE", "SINTERSTORE", "SUNIONSTORE":
+		// SDIFFSTORE destination numkeys key [key ...] — args[0] is the
+		// destination this command WRITES, and the sources follow the count.
+		// These three were in aclAllArgsCommands, which checked EVERY argument
+		// including the numkeys COUNT, so a ~user:* user was blanket-refused
+		// (the count never matches the pattern).
+		if len(args) < 1 {
+			return nil
+		}
+		keys := keysAfterNumkeys(args, 1)
+		if keys == nil {
+			return nil
+		}
+		return append([]string{string(args[0])}, keys...)
+	case "GEOSEARCHSTORE":
+		// GEOSEARCHSTORE destination source <FROMMEMBER m | FROMLONLAT lon lat>
+		// ... — BOTH keys must be checked. There was no entry for this command,
+		// so it fell through to the fail-closed default and returned args[0]
+		// only: the destination. The SOURCE at args[1] was then read
+		// unchecked, letting a ~user:* user copy any geo set in the store.
+		if len(args) >= 2 {
+			return toStrings(args[:2])
+		}
+		if len(args) >= 1 {
+			return toStrings(args[:1])
+		}
+		return nil
 	case "RENAME", "RENAMENX", "SMOVE", "LMOVE", "RPOPLPUSH", "BLMOVE", "BRPOPLPUSH",
 		"BLMPOP", "COPY", "GEORADIUSBYMEMBER_RO":
 		// source destination [member ...] — BOTH sides must be permitted.
