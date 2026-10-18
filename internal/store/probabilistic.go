@@ -2,6 +2,7 @@ package store
 
 import (
 	"hash/fnv"
+	"math"
 	"sort"
 	"sync"
 )
@@ -15,8 +16,22 @@ type BloomFilter struct {
 	mu       sync.RWMutex
 }
 
+// NewBloomFilter builds a filter of `size` bits targeting the given false
+// positive rate. The optimal hash count is k = -ln(p)/ln(2)^2 * ln(2), i.e.
+// k = -log2(p): 0.01 wants ~6.6 hashes, 0.0001 wants ~13.3.
+//
+// falsePositiveRate was previously accepted and never read — k came from size
+// alone — so BF.RESERVE's documented errorRate argument was silently ignored
+// and every filter used the same 20 hashes regardless of the accuracy asked
+// for. Clamp out-of-range rates so a nonsensical argument degrades to a usable
+// filter instead of zero (which would make Exists always true) or a huge k.
 func NewBloomFilter(size uint, falsePositiveRate float64) *BloomFilter {
-	k := uint(float64(size) * 0.69 / 100)
+	p := falsePositiveRate
+	if p <= 0 || p >= 1 || math.IsNaN(p) {
+		p = 0.01
+	}
+
+	k := uint(math.Ceil(-math.Log(p) / math.Ln2))
 	if k < 1 {
 		k = 1
 	}
