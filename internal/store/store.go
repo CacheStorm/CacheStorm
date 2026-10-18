@@ -426,6 +426,20 @@ func (s *Store) Exists(key string) bool {
 		mem, _ := shard.Delete(key)
 		s.trackMemory(-mem)
 		s.DeleteVersion(key) // Clean up version to prevent memory leak
+		// Drop the tag-index mappings too. This is a removal path like every
+		// other one in Store (Get's lazy expiry, Delete, DeleteIfExpired,
+		// DeleteBatch); omitting it left a stale tag -> key entry pointing at
+		// a key that no longer existed, so TAGKEYS reported a phantom key and
+		// a later INVALIDATE <tag> CASCADE deleted a live key that had been
+		// recreated WITHOUT that tag (Set only reconciles the tags of the
+		// entry currently in the shard, which is by then the new untagged one).
+		s.tagIndex.RemoveKey(key, entry.Tags)
+		// Announce the expiry like every other reaping path. DeleteIfExpired
+		// and Get's inline lazy expiry both call fireExpire, and the store's
+		// event contract wires OnExpire to the plugin dispatchers in
+		// internal/server. Without it, a key reaped by EXISTS was removed
+		// silently, so a registered plugin never learned it had expired.
+		s.fireExpire(key, entry.Value)
 		return false
 	}
 
