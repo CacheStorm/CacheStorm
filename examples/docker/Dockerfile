@@ -8,9 +8,14 @@ RUN go mod download
 RUN go build -ldflags="-s -w" -o cachestorm ./cmd/cachestorm
 
 # Runtime image
-FROM alpine:latest
+# Pinned, not :latest, so a rebuild months from now resolves the same base.
+FROM alpine:3.19
 
 RUN apk --no-cache add ca-certificates
+
+# Non-root runtime user, same uid/gid and shape as the root Dockerfile.
+RUN addgroup -g 1000 cachestorm && \
+    adduser -u 1000 -G cachestorm -s /bin/sh -D cachestorm
 
 WORKDIR /app
 
@@ -26,7 +31,16 @@ RUN mkdir -p /data
 COPY config/cachestorm.example.yaml /etc/cachestorm/cachestorm.yaml
 ENV CACHESTORM_CONFIG=/etc/cachestorm/cachestorm.yaml
 
-EXPOSE 6379 8080
+# Hand ownership to the runtime user AFTER the config COPY, which is what
+# creates /etc/cachestorm. /data is a VOLUME mount point the process writes to
+# once privileges are dropped.
+RUN chown -R cachestorm:cachestorm /app /data /etc/cachestorm
+
+# Drop privileges. Everything above ran as root; the service does not need it.
+USER cachestorm
+
+# 6380, not the Redis-default 6379: that is what the baked config binds.
+EXPOSE 6380 8080
 
 VOLUME ["/data"]
 
