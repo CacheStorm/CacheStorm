@@ -3,6 +3,7 @@ package command
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
@@ -166,7 +167,12 @@ func cmdJSONNUMINCRBY(ctx *Context) error {
 
 	key := ctx.ArgString(0)
 	path := ctx.ArgString(1)
-	increment := parseJSONFloat(ctx.ArgString(2))
+	// Parse strictly. parseJSONFloat returns 0 for anything it cannot read, so
+	// a typo'd increment silently became "add nothing" instead of an error.
+	increment, err := strconv.ParseFloat(ctx.ArgString(2), 64)
+	if err != nil {
+		return ctx.WriteError(ErrNotFloat)
+	}
 
 	entry, exists := ctx.Store.Get(key)
 	if !exists {
@@ -193,7 +199,13 @@ func cmdJSONNUMMULTBY(ctx *Context) error {
 
 	key := ctx.ArgString(0)
 	path := ctx.ArgString(1)
-	multiplier := parseJSONFloat(ctx.ArgString(2))
+	// Parse strictly, and before touching the store. parseJSONFloat returns 0
+	// for anything it cannot read, so a typo'd multiplier silently zeroed the
+	// stored number and SetPath persisted the result.
+	multiplier, err := strconv.ParseFloat(ctx.ArgString(2), 64)
+	if err != nil {
+		return ctx.WriteError(ErrNotFloat)
+	}
 
 	entry, exists := ctx.Store.Get(key)
 	if !exists {
