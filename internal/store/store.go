@@ -269,14 +269,18 @@ func (s *Store) Set(key string, value Value, opts SetOptions) error {
 	idx := s.shardIndex(key)
 	shard := s.shards[idx]
 
+	// Conditional writes must use the same "does this key exist" rule as
+	// Store.Get: an expired key does not exist. The old raw shard.Get made a
+	// key whose TTL had lapsed but which active expiry had not yet reaped look
+	// present, so NX refused an entitled write and XX revived a dead key.
 	if opts.NX {
-		if _, exists := shard.Get(key); exists {
+		if _, exists := shard.getLive(key); exists {
 			return ErrKeyExists
 		}
 	}
 
 	if opts.XX {
-		if _, exists := shard.Get(key); !exists {
+		if _, exists := shard.getLive(key); !exists {
 			return ErrKeyNotFound
 		}
 	}

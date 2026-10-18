@@ -29,6 +29,23 @@ func (s *Shard) Get(key string) (*Entry, bool) {
 	return entry, ok
 }
 
+// getLive returns the entry for key only when it is present AND not expired.
+// Store.Get already treats an expired key as absent (and reaps it); the
+// conditional-write paths must agree with that. They used a raw map lookup, so
+// a key whose TTL had lapsed but which active expiry had not yet reaped still
+// looked present: SETNX and SET ... NX refused a write the caller was entitled
+// to make (silently dropping the value), and SET ... XX revived a key that no
+// longer existed.
+func (s *Shard) getLive(key string) (*Entry, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	entry, ok := s.data[key]
+	if !ok || entry.IsExpired() {
+		return nil, false
+	}
+	return entry, true
+}
+
 func (s *Shard) Set(key string, entry *Entry) int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
