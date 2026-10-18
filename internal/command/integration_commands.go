@@ -138,10 +138,14 @@ func cmdCIRCUITBREAKERSTATE(ctx *Context) error {
 
 	name := ctx.ArgString(0)
 
-	circuitBreakersExtMu.RLock()
-	cb, exists := circuitBreakersExt[name]
-	circuitBreakersExtMu.RUnlock()
+	// This handler MUTATES the shared breaker, so it needs the WRITE lock.
+	// An RLock protects only the map lookup: circuitBreakersExt maps names to
+	// *CircuitBreakerExt, so the pointer escapes the lock and every field
+	// touched below was being mutated with no lock held at all.
+	circuitBreakersExtMu.Lock()
+	defer circuitBreakersExtMu.Unlock()
 
+	cb, exists := circuitBreakersExt[name]
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR circuit breaker not found"))
 	}
@@ -173,10 +177,14 @@ func cmdCIRCUITBREAKERTRIP(ctx *Context) error {
 
 	name := ctx.ArgString(0)
 
-	circuitBreakersExtMu.RLock()
-	cb, exists := circuitBreakersExt[name]
-	circuitBreakersExtMu.RUnlock()
+	// This handler MUTATES the shared breaker, so it needs the WRITE lock.
+	// An RLock protects only the map lookup: circuitBreakersExt maps names to
+	// *CircuitBreakerExt, so the pointer escapes the lock and every field
+	// touched below was being mutated with no lock held at all.
+	circuitBreakersExtMu.Lock()
+	defer circuitBreakersExtMu.Unlock()
 
+	cb, exists := circuitBreakersExt[name]
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR circuit breaker not found"))
 	}
@@ -197,10 +205,14 @@ func cmdCIRCUITBREAKERRESET(ctx *Context) error {
 
 	name := ctx.ArgString(0)
 
-	circuitBreakersExtMu.RLock()
-	cb, exists := circuitBreakersExt[name]
-	circuitBreakersExtMu.RUnlock()
+	// This handler MUTATES the shared breaker, so it needs the WRITE lock.
+	// An RLock protects only the map lookup: circuitBreakersExt maps names to
+	// *CircuitBreakerExt, so the pointer escapes the lock and every field
+	// touched below was being mutated with no lock held at all.
+	circuitBreakersExtMu.Lock()
+	defer circuitBreakersExtMu.Unlock()
 
+	cb, exists := circuitBreakersExt[name]
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR circuit breaker not found"))
 	}
@@ -254,10 +266,16 @@ func cmdRATELIMITCHECK(ctx *Context) error {
 	name := ctx.ArgString(0)
 	_ = ctx.ArgString(1)
 
-	rateLimitersMu.RLock()
-	rl, exists := rateLimiters[name]
-	rateLimitersMu.RUnlock()
+	// CHECK counts this request: it READS rl.Requests[window] and then WRITES
+	// rl.Requests[window]++. rateLimiters maps names to *RateLimiterExt, so an
+	// RLock protected only the map lookup and both the counter read and the
+	// counter increment ran unlocked -- a data race on a Go map (an
+	// unrecoverable process-fatal throw) plus lost increments that could let
+	// the limiter never reach its limit.
+	rateLimitersMu.Lock()
+	defer rateLimitersMu.Unlock()
 
+	rl, exists := rateLimiters[name]
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR rate limiter not found"))
 	}
@@ -292,10 +310,16 @@ func cmdRATELIMITRESET(ctx *Context) error {
 
 	name := ctx.ArgString(0)
 
-	rateLimitersMu.RLock()
-	rl, exists := rateLimiters[name]
-	rateLimitersMu.RUnlock()
+	// CHECK counts this request: it READS rl.Requests[window] and then WRITES
+	// rl.Requests[window]++. rateLimiters maps names to *RateLimiterExt, so an
+	// RLock protected only the map lookup and both the counter read and the
+	// counter increment ran unlocked -- a data race on a Go map (an
+	// unrecoverable process-fatal throw) plus lost increments that could let
+	// the limiter never reach its limit.
+	rateLimitersMu.Lock()
+	defer rateLimitersMu.Unlock()
 
+	rl, exists := rateLimiters[name]
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR rate limiter not found"))
 	}
@@ -389,15 +413,23 @@ func cmdCACHELOCKED(ctx *Context) error {
 
 	key := ctx.ArgString(0)
 
+	// Read the expiry under the lock. cacheLocks is map[string]*CacheLock, so
+	// the RLock protected only the map lookup: the pointer escaped and
+	// cmdCACHEREFRESH could rewrite lock.ExpiresAt under the write lock while
+	// this handler was still reading it unlocked.
 	cacheLocksMu.RLock()
 	lock, exists := cacheLocks[key]
+	var expiresAt int64
+	if exists {
+		expiresAt = lock.ExpiresAt
+	}
 	cacheLocksMu.RUnlock()
 
 	if !exists {
 		return ctx.WriteInteger(0)
 	}
 
-	if time.Now().UnixMilli() >= lock.ExpiresAt {
+	if time.Now().UnixMilli() >= expiresAt {
 		return ctx.WriteInteger(0)
 	}
 
@@ -599,7 +631,12 @@ func cmdARRAYSLICE(ctx *Context) error {
 	end := int(parseInt64(ctx.ArgString(2)))
 
 	arraysMu.RLock()
-	arr, exists := arrays[name]
+	src, exists := arrays[name]
+	var arr []string
+	if exists {
+		arr = make([]string, len(src))
+		copy(arr, src)
+	}
 	arraysMu.RUnlock()
 
 	if !exists {
@@ -762,7 +799,12 @@ func cmdARRAYFLATTEN(ctx *Context) error {
 	name := ctx.ArgString(0)
 
 	arraysMu.RLock()
-	arr, exists := arrays[name]
+	src, exists := arrays[name]
+	var arr []string
+	if exists {
+		arr = make([]string, len(src))
+		copy(arr, src)
+	}
 	arraysMu.RUnlock()
 
 	if !exists {
@@ -808,8 +850,12 @@ func cmdARRAYINTERSECT(ctx *Context) error {
 	name2 := ctx.ArgString(1)
 
 	arraysMu.RLock()
-	arr1, _ := arrays[name1]
-	arr2, _ := arrays[name2]
+	src1, _ := arrays[name1]
+	src2, _ := arrays[name2]
+	arr1 := make([]string, len(src1))
+	copy(arr1, src1)
+	arr2 := make([]string, len(src2))
+	copy(arr2, src2)
 	arraysMu.RUnlock()
 
 	set2 := make(map[string]bool)
@@ -838,8 +884,12 @@ func cmdARRAYDIFF(ctx *Context) error {
 	name2 := ctx.ArgString(1)
 
 	arraysMu.RLock()
-	arr1, _ := arrays[name1]
-	arr2, _ := arrays[name2]
+	src1, _ := arrays[name1]
+	src2, _ := arrays[name2]
+	arr1 := make([]string, len(src1))
+	copy(arr1, src1)
+	arr2 := make([]string, len(src2))
+	copy(arr2, src2)
 	arraysMu.RUnlock()
 
 	set2 := make(map[string]bool)
@@ -865,8 +915,17 @@ func cmdARRAYINDEXOF(ctx *Context) error {
 	name := ctx.ArgString(0)
 	value := ctx.ArgString(1)
 
+	// Snapshot under the read lock. Copying only the slice header is not
+	// enough: a slice header is a value, but the elements live in a backing
+	// array that ARRAY.REVERSE and ARRAY.SORT mutate in place under the write
+	// lock. Iterating after RUnlock therefore raced with those writers.
 	arraysMu.RLock()
-	arr, exists := arrays[name]
+	src, exists := arrays[name]
+	var arr []string
+	if exists {
+		arr = make([]string, len(src))
+		copy(arr, src)
+	}
 	arraysMu.RUnlock()
 
 	if !exists {
@@ -891,7 +950,12 @@ func cmdARRAYLASTINDEXOF(ctx *Context) error {
 	value := ctx.ArgString(1)
 
 	arraysMu.RLock()
-	arr, exists := arrays[name]
+	src, exists := arrays[name]
+	var arr []string
+	if exists {
+		arr = make([]string, len(src))
+		copy(arr, src)
+	}
 	arraysMu.RUnlock()
 
 	if !exists {
@@ -916,7 +980,12 @@ func cmdARRAYINCLUDES(ctx *Context) error {
 	value := ctx.ArgString(1)
 
 	arraysMu.RLock()
-	arr, exists := arrays[name]
+	src, exists := arrays[name]
+	var arr []string
+	if exists {
+		arr = make([]string, len(src))
+		copy(arr, src)
+	}
 	arraysMu.RUnlock()
 
 	if !exists {
@@ -944,8 +1013,20 @@ func cmdOBJECTKEYS(ctx *Context) error {
 
 	name := ctx.ArgString(0)
 
+	// Snapshot the inner map under the read lock. Copying only the map
+	// header captures a reference, not its contents: cmdOBJECTSET writes
+	// objects[name][key] and cmdOBJECTOMIT deletes keys in place under the
+	// write lock, so reading this map after RUnlock was a data race -- and on
+	// a Go map, concurrent read and write is an unrecoverable runtime throw.
 	objectsMu.RLock()
-	obj, exists := objects[name]
+	src, exists := objects[name]
+	var obj map[string]string
+	if exists {
+		obj = make(map[string]string, len(src))
+		for k, v := range src {
+			obj[k] = v
+		}
+	}
 	objectsMu.RUnlock()
 
 	if !exists {
@@ -967,8 +1048,16 @@ func cmdOBJECTVALUES(ctx *Context) error {
 
 	name := ctx.ArgString(0)
 
+	// Snapshot under the read lock; see cmdOBJECTKEYS.
 	objectsMu.RLock()
-	obj, exists := objects[name]
+	src, exists := objects[name]
+	var obj map[string]string
+	if exists {
+		obj = make(map[string]string, len(src))
+		for k, v := range src {
+			obj[k] = v
+		}
+	}
 	objectsMu.RUnlock()
 
 	if !exists {
@@ -990,8 +1079,16 @@ func cmdOBJECTENTRIES(ctx *Context) error {
 
 	name := ctx.ArgString(0)
 
+	// Snapshot under the read lock; see cmdOBJECTKEYS.
 	objectsMu.RLock()
-	obj, exists := objects[name]
+	src, exists := objects[name]
+	var obj map[string]string
+	if exists {
+		obj = make(map[string]string, len(src))
+		for k, v := range src {
+			obj[k] = v
+		}
+	}
 	objectsMu.RUnlock()
 
 	if !exists {
@@ -1062,10 +1159,14 @@ func cmdOBJECTPICK(ctx *Context) error {
 
 	name := ctx.ArgString(0)
 
-	objectsMu.RLock()
-	obj, exists := objects[name]
-	objectsMu.RUnlock()
+	// PICK is a read-modify-write and must be atomic. Snapshotting under
+	// RLock and storing the result back under a later Lock left a window in
+	// which a concurrent OBJECT.SET could insert a field that the overwrite
+	// then discarded.
+	objectsMu.Lock()
+	defer objectsMu.Unlock()
 
+	obj, exists := objects[name]
 	if !exists {
 		return ctx.WriteArray([]*resp.Value{})
 	}
@@ -1078,9 +1179,7 @@ func cmdOBJECTPICK(ctx *Context) error {
 		}
 	}
 
-	objectsMu.Lock()
 	objects[name] = picked
-	objectsMu.Unlock()
 
 	return ctx.WriteInteger(int64(len(picked)))
 }
@@ -1124,8 +1223,13 @@ func cmdOBJECTHAS(ctx *Context) error {
 	name := ctx.ArgString(0)
 	key := ctx.ArgString(1)
 
+	// Snapshot under the read lock; see cmdOBJECTKEYS.
 	objectsMu.RLock()
-	obj, exists := objects[name]
+	src, exists := objects[name]
+	obj := make(map[string]string, len(src))
+	for k, v := range src {
+		obj[k] = v
+	}
 	objectsMu.RUnlock()
 
 	if !exists {
@@ -1147,8 +1251,13 @@ func cmdOBJECTGET(ctx *Context) error {
 	name := ctx.ArgString(0)
 	key := ctx.ArgString(1)
 
+	// Snapshot under the read lock; see cmdOBJECTKEYS.
 	objectsMu.RLock()
-	obj, exists := objects[name]
+	src, exists := objects[name]
+	obj := make(map[string]string, len(src))
+	for k, v := range src {
+		obj[k] = v
+	}
 	objectsMu.RUnlock()
 
 	if !exists {
