@@ -20,6 +20,10 @@ COPY --from=builder /build/cachestorm .
 RUN mkdir -p /data
 
 # Default config
+# The binary is started with --config /etc/cachestorm/cachestorm.yaml and exits
+# immediately if that file is absent, so it has to be baked in -- not left to a
+# volume mount. Same COPY the root Dockerfile uses.
+COPY config/cachestorm.example.yaml /etc/cachestorm/cachestorm.yaml
 ENV CACHESTORM_CONFIG=/etc/cachestorm/cachestorm.yaml
 
 EXPOSE 6379 8080
