@@ -36,23 +36,25 @@ func RegisterServerCommands(router *Router) {
 	router.Register(&CommandDef{Name: "SORT_RO", Handler: cmdSORTRO})
 	router.Register(&CommandDef{Name: "SLOWLOG", Handler: cmdSLOWLOG})
 	router.Register(&CommandDef{Name: "WAIT", Handler: cmdWAIT})
-	router.Register(&CommandDef{Name: "ROLE", Handler: cmdROLE})
 	router.Register(&CommandDef{Name: "LASTSAVE", Handler: cmdLASTSAVE})
 	router.Register(&CommandDef{Name: "LOLWUT", Handler: cmdLOLWUT})
 	router.Register(&CommandDef{Name: "SHUTDOWN", Handler: cmdSHUTDOWN})
 	router.Register(&CommandDef{Name: "SAVE", Handler: cmdSAVE})
 	router.Register(&CommandDef{Name: "BGSAVE", Handler: cmdBGSAVE})
 	router.Register(&CommandDef{Name: "BGREWRITEAOF", Handler: cmdBGREWRITEAOF})
-	router.Register(&CommandDef{Name: "SLAVEOF", Handler: cmdSLAVEOF})
-	router.Register(&CommandDef{Name: "REPLICAOF", Handler: cmdSLAVEOF})
+	// SLAVEOF and REPLICAOF used to be registered here pointing at cmdSLAVEOF,
+	// a stub that discards both arguments and replies +OK unconditionally.
+	// Router.Register is last-write-wins, so those entries only worked because
+	// RegisterReplicationCommands happens to run later in
+	// internal/server/server.go and overwrote them with the functional
+	// cmdREPLICAOF. Reorder those two lines and both commands would silently
+	// resolve to the stub and stop configuring replication, with no error at
+	// all. The functional handler owns both names; do not register them twice.
 	router.Register(&CommandDef{Name: "LATENCY", Handler: cmdLATENCY})
 	router.Register(&CommandDef{Name: "STRALGO", Handler: cmdSTRALGO})
-	router.Register(&CommandDef{Name: "MODULE", Handler: cmdMODULE})
 	router.Register(&CommandDef{Name: "ACL", Handler: cmdACL})
 	router.Register(&CommandDef{Name: "MONITOR", Handler: cmdMONITOR})
 	router.Register(&CommandDef{Name: "SWAPDB", Handler: cmdSWAPDB})
-	router.Register(&CommandDef{Name: "SYNC", Handler: cmdSYNC})
-	router.Register(&CommandDef{Name: "PSYNC", Handler: cmdPSYNC})
 	router.Register(&CommandDef{Name: "DEBUGSEGFAULT", Handler: cmdDEBUGSEGFAULT})
 }
 

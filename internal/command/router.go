@@ -6,11 +6,13 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/cachestorm/cachestorm/internal/acl"
+	"github.com/cachestorm/cachestorm/internal/logger"
 	"github.com/cachestorm/cachestorm/internal/resp"
 )
 
@@ -22,8 +24,12 @@ type CommandDef struct { //nolint:revive // Command prefix is intentional for cl
 }
 
 type Router struct {
-	mu          sync.RWMutex
-	commands    map[string]*CommandDef
+	mu       sync.RWMutex
+	commands map[string]*CommandDef
+	// duplicates records command names registered more than once. Register is
+	// last-write-wins, so a second registration silently replaced the first;
+	// six names were registered in two files at once and nothing said so.
+	duplicates  map[string]struct{}
 	requirePass string
 	postExecute func(cmd string, args [][]byte)
 }
@@ -33,10 +39,25 @@ var globalRouter *Router
 
 func NewRouter() *Router {
 	r := &Router{
-		commands: make(map[string]*CommandDef),
+		commands:   make(map[string]*CommandDef),
+		duplicates: make(map[string]struct{}),
 	}
 	globalRouter = r
 	return r
+}
+
+// DuplicateRegistrations returns the command names that were registered more
+// than once on this router. Production wiring should return an empty set.
+func (r *Router) DuplicateRegistrations() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	names := make([]string, 0, len(r.duplicates))
+	for name := range r.duplicates {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func (r *Router) SetRequirePass(password string) {
@@ -78,10 +99,37 @@ func (r *Router) PasswordHash() string {
 	return hex.EncodeToString(hash[:])
 }
 
+// Register adds a command to the router.
+//
+// Registration is REFUSED for a name that is already registered: the first
+// handler wins and the later one is discarded. Register used to be plain
+// last-write-wins with no diagnostic, and six command names ended up registered
+// in two files at once. For REPLICAOF/SLAVEOF the two handlers were not
+// equivalent — the stub cmdSLAVEOF discards both arguments and replies +OK — so
+// which one answered depended entirely on the order of the Register*Commands
+// calls in internal/server/server.go. Keeping the first handler removes that
+// dependency: a later duplicate can no longer shadow an earlier one.
+//
+// A refused duplicate is still recorded (see DuplicateRegistrations) and logged,
+// so the collision is reported rather than merely prevented. Logging happens
+// after the lock is released so a log write never blocks dispatch.
 func (r *Router) Register(def *CommandDef) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	if _, exists := r.commands[def.Name]; exists {
+		if r.duplicates == nil {
+			r.duplicates = make(map[string]struct{})
+		}
+		r.duplicates[def.Name] = struct{}{}
+		r.mu.Unlock()
+
+		logger.Warn().
+			Str("command", def.Name).
+			Msg("duplicate command registration refused: the first handler is kept; " +
+				"each command name must have exactly one registration site")
+		return
+	}
 	r.commands[def.Name] = def
+	r.mu.Unlock()
 }
 
 func (r *Router) Get(name string) (*CommandDef, bool) {
