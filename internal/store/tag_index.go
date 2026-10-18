@@ -217,7 +217,12 @@ func (ti *TagIndex) GetAllDescendants(tag string) []string {
 	defer ti.hierarchy.RUnlock()
 
 	descendants := make(map[string]struct{})
-	ti.collectDescendants(tag, descendants)
+	// The starting tag is visited but not a descendant of itself. Without
+	// this, a cyclic hierarchy reports the root among its own descendants
+	// and InvalidateCascade invalidates it twice, overwriting the first
+	// (non-empty) key set with the empty result of the second pass.
+	visited := map[string]struct{}{tag: {}}
+	ti.collectDescendants(tag, descendants, visited)
 
 	result := make([]string, 0, len(descendants))
 	for d := range descendants {
@@ -226,10 +231,24 @@ func (ti *TagIndex) GetAllDescendants(tag string) []string {
 	return result
 }
 
-func (ti *TagIndex) collectDescendants(tag string, descendants map[string]struct{}) {
+// collectDescendants walks the hierarchy below tag, recording every tag
+// reachable from tag into descendants. TAGLINK accepts any (parent, child)
+// pair without a cycle check, so `TAGLINK a b` followed by `TAGLINK b a`
+// makes the hierarchy cyclic. visited bounds the walk to one expansion per
+// tag; without it the recursion revisits a cycle forever and Go aborts the
+// whole process with an unrecoverable "fatal error: stack overflow" — a
+// remote crash from two ordinary commands.
+//
+// The caller must hold ti.hierarchy and must seed visited with the starting
+// tag.
+func (ti *TagIndex) collectDescendants(tag string, descendants, visited map[string]struct{}) {
 	for child := range ti.children[tag] {
+		if _, seen := visited[child]; seen {
+			continue
+		}
+		visited[child] = struct{}{}
 		descendants[child] = struct{}{}
-		ti.collectDescendants(child, descendants)
+		ti.collectDescendants(child, descendants, visited)
 	}
 }
 
