@@ -664,6 +664,14 @@ func cmdGEOSEARCH(ctx *Context) error {
 	var withCoord, withDist, withHash bool
 	var count int
 	var sortOrder string
+	// A centre clause (FROMMEMBER/FROMLONLAT) and an extent clause
+	// (BYRADIUS/BYBOX) are both mandatory. Without this, radius stayed at its
+	// zero value, so `dist <= radius` fabricated a match for a member sitting
+	// exactly on the centre (0 <= 0) and returned "no matches" for everything
+	// else -- a wrong answer where Redis answers with a syntax error, leaving
+	// a dropped BYRADIUS indistinguishable from a genuine empty result.
+	var hasFromLonLat bool
+	var hasExtent bool
 
 	i := 1
 	for i < ctx.ArgCount() {
@@ -687,6 +695,7 @@ func cmdGEOSEARCH(ctx *Context) error {
 				return ctx.WriteError(ErrNotFloat)
 			}
 			hasFromMember = false
+			hasFromLonLat = true
 			i += 3
 		case "BYRADIUS":
 			if i+2 >= ctx.ArgCount() {
@@ -701,6 +710,7 @@ func cmdGEOSEARCH(ctx *Context) error {
 			if !geoUnitValid(unit) {
 				return ctx.WriteError(errUnsupportedGeoUnit)
 			}
+			hasExtent = true
 			i += 3
 		case "BYBOX":
 			if i+3 >= ctx.ArgCount() {
@@ -715,6 +725,7 @@ func cmdGEOSEARCH(ctx *Context) error {
 			if !geoUnitValid(unit) {
 				return ctx.WriteError(errUnsupportedGeoUnit)
 			}
+			hasExtent = true
 			i += 4
 		case "WITHCOORD":
 			withCoord = true
@@ -745,6 +756,14 @@ func cmdGEOSEARCH(ctx *Context) error {
 		default:
 			i++
 		}
+	}
+
+	// Both clause families are mandatory; reject before evaluating anything.
+	if !hasFromMember && !hasFromLonLat {
+		return ctx.WriteError(ErrSyntaxError)
+	}
+	if !hasExtent {
+		return ctx.WriteError(ErrSyntaxError)
 	}
 
 	geo := getGeo(ctx, key)
@@ -837,6 +856,13 @@ func cmdGEOSEARCHSTORE(ctx *Context) error {
 	var storeDist bool
 	var count int
 	var sortOrder string
+	// A centre clause (FROMMEMBER/FROMLONLAT) and an extent clause
+	// (BYRADIUS/BYBOX) are both mandatory. Without this the extent stayed at
+	// its zero value, the search matched nothing, and the "nothing matched"
+	// path DELETED the destination key while replying :0 -- a call that merely
+	// omitted BYRADIUS silently destroyed data instead of being rejected.
+	var hasFromLonLat bool
+	var hasExtent bool
 
 	i := 2
 	for i < ctx.ArgCount() {
@@ -860,6 +886,7 @@ func cmdGEOSEARCHSTORE(ctx *Context) error {
 				return ctx.WriteError(ErrNotFloat)
 			}
 			hasFromMember = false
+			hasFromLonLat = true
 			i += 3
 		case "BYRADIUS":
 			if i+2 >= ctx.ArgCount() {
@@ -874,6 +901,7 @@ func cmdGEOSEARCHSTORE(ctx *Context) error {
 			if !geoUnitValid(unit) {
 				return ctx.WriteError(errUnsupportedGeoUnit)
 			}
+			hasExtent = true
 			i += 3
 		case "BYBOX":
 			if i+3 >= ctx.ArgCount() {
@@ -888,6 +916,7 @@ func cmdGEOSEARCHSTORE(ctx *Context) error {
 			if !geoUnitValid(unit) {
 				return ctx.WriteError(errUnsupportedGeoUnit)
 			}
+			hasExtent = true
 			i += 4
 		case "STOREDIST":
 			storeDist = true
@@ -912,6 +941,14 @@ func cmdGEOSEARCHSTORE(ctx *Context) error {
 		default:
 			i++
 		}
+	}
+
+	// Both clauses are mandatory; reject before touching the destination.
+	if !hasFromMember && !hasFromLonLat {
+		return ctx.WriteError(ErrSyntaxError)
+	}
+	if !hasExtent {
+		return ctx.WriteError(ErrSyntaxError)
 	}
 
 	geo := getGeo(ctx, srcKey)
