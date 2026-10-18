@@ -916,6 +916,12 @@ func cmdVECTORADD(ctx *Context) error {
 	name := ctx.ArgString(0)
 	id := ctx.ArgString(1)
 	dim := int(parseInt64(ctx.ArgString(2)))
+	// Same guard as cmdVECTORSEARCH: dim comes straight from the client and is
+	// used as a make length, so a negative value panics the handler and the
+	// per-connection recover drops the client with no reply.
+	if dim < 0 {
+		return ctx.WriteError(ErrInvalidArg)
+	}
 	data := make([]float64, dim)
 	for i := 0; i < dim && i+3 < ctx.ArgCount(); i++ {
 		data[i] = parseFloatExt([]byte(ctx.ArgString(3 + i)))
@@ -991,6 +997,13 @@ func cmdVECTORSEARCH(ctx *Context) error {
 	name := ctx.ArgString(0)
 	k := int(parseInt64(ctx.ArgString(1)))
 	dim := int(parseInt64(ctx.ArgString(2)))
+	// make rejects a negative length, and dim is taken straight from the client
+	// and used as an allocation size with nothing bounding it. Validate before
+	// the make: the negative case used to panic the handler, which the
+	// per-connection recover turned into a dropped connection with no reply.
+	if dim < 0 {
+		return ctx.WriteError(ErrInvalidArg)
+	}
 	query := make([]float64, dim)
 	for i := 0; i < dim && i+3 < ctx.ArgCount(); i++ {
 		query[i] = parseFloatExt([]byte(ctx.ArgString(3 + i)))
