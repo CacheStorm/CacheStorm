@@ -156,17 +156,31 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Resolve image tags
+        id: image_tags
+        env:
+          VERSION: ${{ steps.get_version.outputs.version }}
+        run: |
+          tags="ghcr.io/cachestorm/cachestorm:${VERSION}"
+          tags="${tags},cachestorm/cachestorm:${VERSION}"
+          # :latest tracks the newest stable release, so a pre-release must not
+          # repoint it. create-release already marks hyphenated versions via
+          # `prerelease:`; the image tags needed the same rule, otherwise an RC
+          # tag silently shipped a prerelease to everyone pulling
+          # cachestorm/cachestorm:latest on either registry.
+          case "$VERSION" in
+            *-*) ;;
+            *) tags="${tags},ghcr.io/cachestorm/cachestorm:latest,cachestorm/cachestorm:latest" ;;
+          esac
+          echo "list=${tags}" >> "${GITHUB_OUTPUT}"
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: |
-            ghcr.io/cachestorm/cachestorm:${{ steps.get_version.outputs.version }}
-            ghcr.io/cachestorm/cachestorm:latest
-            cachestorm/cachestorm:${{ steps.get_version.outputs.version }}
-            cachestorm/cachestorm:latest
+          tags: ${{ steps.image_tags.outputs.list }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
         # No continue-on-error here: this step is the release's only real gate on
