@@ -91,7 +91,15 @@ func cmdTSADD(ctx *Context) error {
 
 	key := ctx.ArgString(0)
 	timestamp := parseInt64(ctx.ArgString(1))
-	value := parseJSONFloat(ctx.ArgString(2))
+	// Parse the value strictly, and before any store access. parseJSONFloat
+	// returns 0 for anything it cannot read, so a typo'd value silently wrote a
+	// bogus zero sample and replied with the resolved timestamp as if it had
+	// been stored. The timestamp is deliberately left to parseInt64: "*" is the
+	// documented auto-timestamp sentinel here.
+	value, err := strconv.ParseFloat(ctx.ArgString(2), 64)
+	if err != nil {
+		return ctx.WriteError(ErrNotFloat)
+	}
 
 	retention := time.Duration(0)
 	labels := make(map[string]string)
@@ -155,7 +163,12 @@ func cmdTSMADD(ctx *Context) error {
 	for i := 0; i < ctx.ArgCount(); i += 3 {
 		key := ctx.ArgString(i)
 		timestamp := parseInt64(ctx.ArgString(i + 1))
-		value := parseJSONFloat(ctx.ArgString(i + 2))
+		// Strict parse, as in cmdTSADD: parseJSONFloat turned a typo'd value
+		// into 0 and wrote a bogus sample. "*" remains valid for the timestamp.
+		value, err := strconv.ParseFloat(ctx.ArgString(i+2), 64)
+		if err != nil {
+			return ctx.WriteError(ErrNotFloat)
+		}
 
 		ts, ok := tsManager.Get(key)
 		if !ok {
@@ -452,7 +465,14 @@ func cmdTSINCRBY(ctx *Context) error {
 	}
 
 	key := ctx.ArgString(0)
-	increment := parseJSONFloat(ctx.ArgString(1))
+	// Strict parse, as in cmdTSADD/cmdTSMADD: parseJSONFloat turned a typo'd
+	// increment into 0, so the counter silently froze while still replying with
+	// a success-shaped timestamp. The TIMESTAMP below stays lenient because 0
+	// is this handler's "use now" sentinel.
+	increment, err := strconv.ParseFloat(ctx.ArgString(1), 64)
+	if err != nil {
+		return ctx.WriteError(ErrNotFloat)
+	}
 
 	timestamp := int64(0)
 	for i := 2; i < ctx.ArgCount(); i++ {
@@ -497,7 +517,13 @@ func cmdTSDECRBY(ctx *Context) error {
 	}
 
 	key := ctx.ArgString(0)
-	decrement := parseJSONFloat(ctx.ArgString(1))
+	// Strict parse, mirroring cmdTSINCRBY: parseJSONFloat turned a typo'd
+	// decrement into 0, so the counter silently stayed put and still replied
+	// with a success-shaped timestamp.
+	decrement, err := strconv.ParseFloat(ctx.ArgString(1), 64)
+	if err != nil {
+		return ctx.WriteError(ErrNotFloat)
+	}
 
 	timestamp := int64(0)
 	for i := 2; i < ctx.ArgCount(); i++ {
