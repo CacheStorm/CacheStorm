@@ -13,7 +13,11 @@ scripts/
 monitoring/
 web/
 clients/
-plugins/
+# plugins/ is NOT excluded: it is first-party Go source, and
+# internal/server/server.go imports github.com/cachestorm/cachestorm/plugins/metrics.
+# Excluding it here made every image fail with
+# "no required module provides package .../plugins/metrics" — broken since the
+# metrics plugin was wired in 9809f56, long before the Go 1.26 bump.
 coverage/
 *.test
 *.prof
