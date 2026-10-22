@@ -52,3 +52,46 @@ func TestRegressionObjectFromEntriesRejectsBadArity(t *testing.T) {
 			"the pair was not stored", strings.TrimSpace(got))
 	}
 }
+
+// The two cases the case above does not reach.
+//
+// A call carrying only the name is one argument: there is no pair at all, so
+// it must be refused rather than storing an empty object and replying +OK.
+// The guard's `ArgCount() < 3` rejects it, and this pins that.
+//
+// A call carrying two complete pairs is the documented
+// "name key value [key value ...]" form: it must be accepted and BOTH pairs
+// must be stored. The case above only proves that one pair round-trips, so a
+// guard that stopped at the second pair would go unnoticed.
+//
+// Together they also act as each other's control: the multi-pair case must
+// keep working however the lower bound is written, and the name-only case
+// must keep failing however the pair parity is written.
+func TestRegressionObjectFromEntriesArityBoundaries(t *testing.T) {
+	s := store.NewStore()
+	router := NewRouter()
+	RegisterIntegrationCommands(router)
+
+	// A name with no field/value pair at all is not a valid call.
+	out := runIntegrationCmd(t, router, s, "OBJECT.FROMENTRIES", "reg_fe_name_only")
+	if !strings.HasPrefix(out, "-") {
+		t.Fatalf("FAIL: OBJECT.FROMENTRIES with a name and no pair replied %q, want an arity "+
+			"error — no pair was stored, so an empty object was written under the name and "+
+			"the client was told it had succeeded", strings.TrimSpace(out))
+	}
+
+	// Two complete pairs are valid and both must be stored.
+	out = runIntegrationCmd(t, router, s, "OBJECT.FROMENTRIES",
+		"reg_fe_two_pairs", "f1", "v1", "f2", "v2")
+	if out != "+OK\r\n" {
+		t.Fatalf("control failed: OBJECT.FROMENTRIES with two pairs replied %q, want +OK",
+			strings.TrimSpace(out))
+	}
+	for field, want := range map[string]string{"f1": "v1", "f2": "v2"} {
+		got := runIntegrationCmd(t, router, s, "OBJECT.GET", "reg_fe_two_pairs", field)
+		if !strings.Contains(got, want) {
+			t.Fatalf("control failed: OBJECT.GET of %q returned %q, want the stored value %q — "+
+				"the pair was not stored", field, strings.TrimSpace(got), want)
+		}
+	}
+}

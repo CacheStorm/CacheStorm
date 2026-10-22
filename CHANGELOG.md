@@ -41,6 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - HTTP: the unauthenticated error reply drops its trailing period — `NOAUTH Authentication required` instead of `NOAUTH Authentication required.` (`fa834cd`)
 - Version reporting: the INFO command now reports the version the binary was stamped with instead of a hardcoded `cachestorm_version:0.2.0`. The release stamped the version into the binary at link time, but only the `--version` flag read it, so every released server told clients it was 0.2.0. The build identity now lives in an `internal/version` package that both the command line and the INFO command read, so the two can never disagree
 ### Testing
+- Integration: pin the OBJECT.FROMENTRIES arity boundaries. The command takes a name and field/value pairs, so a name with no pair and a trailing dangling field are refused, and a call carrying two pairs stores both. The guard was already correct; these cases were not covered by any test.
 - ACL hardening regression suites: default-user init, key extraction shapes, script/FCALL guards and command permissions, HTTP identity and session binding, REST key/tag enforcement, requirepass gate, and the CONFIG reservation pin proving ACL/CONFIG are reserved against requirepass escalation (`0f6e3e8`)
 
 ## [0.3.1] - 2026-10-22
