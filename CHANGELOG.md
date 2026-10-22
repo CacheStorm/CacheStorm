@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Repository maintenance
+- CI: add an order-sensitivity step that runs the fast internal packages three times over, so a test whose outcome depends on what an earlier test left behind fails the gate instead of needing a manual sweep. The command package stays at -count=1: one pass under -race already takes about five minutes and three passes about twenty.
 - Added a repository review and prioritized roadmap covering verified durability, transaction, distributed runtime and SDK limitations.
 - Refreshed measured coverage and development documentation; repaired fourteen broken documentation links.
 - Archived original design prompts and the superseded GoReleaser configuration; removed an unused test backup and three unreferenced website template assets.

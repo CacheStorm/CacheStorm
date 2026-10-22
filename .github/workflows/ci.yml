@@ -57,6 +57,21 @@ jobs:
       - name: Test (race)
         run: go test -race ./internal/... -count=1
 
+      # Order sensitivity: run the fast internal packages three times over.
+      # A single pass cannot see a test whose outcome depends on what an
+      # earlier test left behind. The package-level registries -- the
+      # time-series manager, the ACL user set and the replication manager --
+      # outlive a single test, so the second pass found three tests that read
+      # state another test had written and that a first pass passed.
+      #
+      # internal/command stays at -count=1 on purpose: one pass of that
+      # package under -race already takes about 5 minutes and three passes
+      # about 20 (1193 s measured), which does not fit this job's 20-minute
+      # budget. Its order dependence is checked with the same command
+      # locally: go test -race ./internal/command/ -count=3 -timeout=45m
+      - name: Order sensitivity (count=3)
+        run: go test -race $(go list ./internal/... | grep -v '/internal/command$') -count=3
+
       - name: Govulncheck
         uses: golang/govulncheck-action@v1
         with:
