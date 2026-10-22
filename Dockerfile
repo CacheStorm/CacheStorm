@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:1.26.9-alpine AS builder
+FROM golang:1.26.10-alpine AS builder
 
 RUN apk add --no-cache git ca-certificates tzdata
 
@@ -32,7 +32,7 @@ USER cachestorm
 EXPOSE 6380 8080 7946 9090
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:8080/health || exit 1
+    CMD wget --no-verbose --tries=1 --spider http://localhost:8080/api/health || exit 1
 
 ENTRYPOINT ["cachestorm"]
 CMD ["--config", "/etc/cachestorm/cachestorm.yaml"]
