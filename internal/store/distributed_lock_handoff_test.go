@@ -99,8 +99,13 @@ func TestDistributedLockHandsOffToASecondWaiter(t *testing.T) {
 	if !dl.Unlock(key, winner.holder, winnerToken) {
 		t.Fatalf("the winner could not release the lock")
 	}
-	if dl.IsLocked(key) {
-		t.Fatalf("the lock is still held after the winner released it")
+	// The lock must no longer be held BY THE WINNER. It may already be held
+	// by the waiting waiter -- that is the hand-off this test is about -- so
+	// asserting that the lock is free races the waiter's own acquisition and
+	// failed under the CI's load. The block below already proves that the
+	// waiter takes the lock.
+	if holder, _, ok := dl.GetHolder(key); ok && holder == winner.holder {
+		t.Fatalf("the lock is still held by the winner %s after it released it", winner.holder)
 	}
 
 	select {
