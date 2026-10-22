@@ -2438,24 +2438,27 @@ func cmdAGGREGATORGET(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	aggregatorsMu.RLock()
-	defer aggregatorsMu.RUnlock()
 	a, exists := aggregators[name]
 	if !exists || len(a.Values) == 0 {
+		aggregatorsMu.RUnlock()
 		return ctx.WriteBulkString("0")
 	}
+	// The reply is built while the lock is held and written after it is
+	// released, so a slow client cannot block the registry's writers.
+	var reply *resp.Value
 	switch a.Type {
 	case "sum":
 		var sum float64
 		for _, v := range a.Values {
 			sum += v
 		}
-		return ctx.WriteBulkString(fmt.Sprintf("%.6f", sum))
+		reply = resp.BulkString(fmt.Sprintf("%.6f", sum))
 	case "avg":
 		var sum float64
 		for _, v := range a.Values {
 			sum += v
 		}
-		return ctx.WriteBulkString(fmt.Sprintf("%.6f", sum/float64(len(a.Values))))
+		reply = resp.BulkString(fmt.Sprintf("%.6f", sum/float64(len(a.Values))))
 	case "min":
 		min := a.Values[0]
 		for _, v := range a.Values {
@@ -2463,7 +2466,7 @@ func cmdAGGREGATORGET(ctx *Context) error {
 				min = v
 			}
 		}
-		return ctx.WriteBulkString(fmt.Sprintf("%.6f", min))
+		reply = resp.BulkString(fmt.Sprintf("%.6f", min))
 	case "max":
 		max := a.Values[0]
 		for _, v := range a.Values {
@@ -2471,12 +2474,15 @@ func cmdAGGREGATORGET(ctx *Context) error {
 				max = v
 			}
 		}
-		return ctx.WriteBulkString(fmt.Sprintf("%.6f", max))
+		reply = resp.BulkString(fmt.Sprintf("%.6f", max))
 	case "count":
-		return ctx.WriteInteger(int64(len(a.Values)))
+		reply = resp.IntegerValue(int64(len(a.Values)))
 	default:
+		aggregatorsMu.RUnlock()
 		return ctx.WriteError(fmt.Errorf("ERR unknown aggregator type"))
 	}
+	aggregatorsMu.RUnlock()
+	return ctx.WriteValue(reply)
 }
 
 func cmdAGGREGATORRESET(ctx *Context) error {
