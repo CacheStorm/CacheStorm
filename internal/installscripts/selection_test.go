@@ -150,6 +150,9 @@ func TestShellInstallerSelectionControl(t *testing.T) {
 func TestPowerShellInstallerSelectsTheHighestVersion(t *testing.T) {
 	pwsh, err := exec.LookPath("pwsh")
 	if err != nil {
+		if os.Getenv("CI") != "" {
+			t.Fatalf("pwsh is not available on the CI runner, so the PowerShell installer's selection would go unchecked: %v", err)
+		}
 		t.Skip("pwsh is not installed here; the PowerShell installer is exercised by the same check on the CI runners, which ship it")
 	}
 	got := runPowerShellSelection(t, pwsh, backDatedFixture)
