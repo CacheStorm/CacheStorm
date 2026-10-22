@@ -94,8 +94,11 @@ func (m *ReplicationManager) GetReplicas() []*ReplicaInfo {
 }
 
 func (m *ReplicationManager) GetReplicaCount() int {
+	// This is a method, not a command handler: it returns a value rather
+	// than writing a reply, so the lock is held for the read and released
+	// when the method returns.
 	replicaMu.RLock()
-	replicaMu.RUnlock()
+	defer replicaMu.RUnlock()
 	return len(replicas)
 }
 
