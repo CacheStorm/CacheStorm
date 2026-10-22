@@ -24,30 +24,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GraphQL subscriptions
 
 ### Added
-- Functions: libraries can declare functions with the Redis 7 convention — `redis.register_function(name, fn)` registers alongside the `redis.<name>` carry, and registered functions receive `(keys, args)` as parameters
 
 ### Security
-- ACL: `DeniedCommands` initialized for the default user — `ACL SETUSER default -<cmd>` no longer panics (`5475097`)
-- ACL: key-pattern enforcement fails closed for commands missing extraction tables; accurate declared-key shapes for XADD/XREAD/XREADGROUP/XINFO/XGROUP and FCALL (`3b2ee7b`)
-- ACL: script guard enforces the invoking user's key patterns AND command permissions on every `redis.call`/`redis.pcall` — violations abort the script uncatchably; FCALL/FCALL_RO covered; admin commands (ACL, CONFIG) reserved (`3b2ee7b`)
-- HTTP: `Router.ExecuteHTTP` enforces per-user ACL command and key rules; ACL identities accepted via HTTP Basic and username Bearer tokens; `/api/login` authenticates usernames (`3c1ada9`)
-- HTTP: sessions created by a username login are bound to that ACL identity and enforced on cookie flows (`e7f818a`)
-- HTTP: REST key endpoints (`/api/keys`, `/api/key/<name>`) and tag endpoints (`/api/tags`, `/api/tag/<tag>`, `/api/invalidate/<tag>`) enforce command grants and key patterns — listings filtered to accessible keys, invalidate all-or-nothing (`3c1ada9`)
-- HTTP: requirepass enforced on the whole HTTP API — `ExecuteHTTP` gate plus anonymous requests refused at the middleware boundary when auth is disabled; previously a requirepass deployment with HTTP enabled and no HTTP password served the API anonymously (`c545a3d`)
-- HTTP: username-Bearer authentication splits on the last colon, so usernames containing `:` authenticate over the Bearer flow instead of parsing as the wrong user (`563ae7b`)
 
 ### Fixed
-- Scripts: unknown/unimplemented commands (FLUSHALL, CONFIG, typos) now fail loudly with `ERR unknown command ... called from Lua script` instead of silently returning nil (`f9448aa`)
-- Scripts: `redis.pcall` converts arguments exactly like `redis.call` — booleans no longer become empty strings through pcall (`9834d57`)
-- Functions: FUNCTION-language functions receive their declared keys and args as `function(keys, args)` parameters like Redis; previously they arrived nil and only `redis.KEYS`/`redis.ARGV` carried them (`2d89217`)
-- CI: the quality gate passes again — the repository is gofmt-clean, ~30 golangci-lint findings resolved (including a real bug the linter caught: the Lua script test helper discarded the `ReadValue` error), and a data race between test-session goroutines and global slow-log/metrics swaps is fixed (`5786821`, `fa834cd`, `6e457ad`)
-- HTTP: the unauthenticated error reply drops its trailing period — `NOAUTH Authentication required` instead of `NOAUTH Authentication required.` (`fa834cd`)
 - Version reporting: the INFO command now reports the version the binary was stamped with instead of a hardcoded `cachestorm_version:0.2.0`. The release stamped the version into the binary at link time, but only the `--version` flag read it, so every released server told clients it was 0.2.0. The build identity now lives in an `internal/version` package that both the command line and the INFO command read, so the two can never disagree
 ### Testing
 - Testing: remove the order dependence the -count sweep found. The time-series tests shared the package-level time-series manager, so a series written by an earlier test made TS.ADD report a duplicate timestamp and a counter start from the previous value; each test now installs its own manager and restores the previous one. The HTTP ACL seeding now deletes the user before seeding it, because ACL SETUSER adds rules to an existing user and another test's grant was leaking into it.
 - Replication: make the manager accessor tests independent of the package-level state. TestManagerGetMasterOffset, TestManagerGetReplicas and TestManagerGetReplicaCount read the global manager, which the rest of the package's tests mutate, so they failed on every -count iteration after the first. Each now installs a fresh global manager for its duration and restores the previous one; their assertions are unchanged.
 - Integration: pin the OBJECT.FROMENTRIES arity boundaries. The command takes a name and field/value pairs, so a name with no pair and a trailing dangling field are refused, and a call carrying two pairs stores both. The guard was already correct; these cases were not covered by any test.
-- ACL hardening regression suites: default-user init, key extraction shapes, script/FCALL guards and command permissions, HTTP identity and session binding, REST key/tag enforcement, requirepass gate, and the CONFIG reservation pin proving ACL/CONFIG are reserved against requirepass escalation (`0f6e3e8`)
 
 ## [0.3.1] - 2026-10-22
 
@@ -77,6 +62,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Testing
 - Registry concurrency suites: every registry family in `internal/command` is now covered by a `-race` family test, including the CONNECTION and PLUGIN families whose entries no command can seed — those are covered by a hand-built in-package test that inserts the entries into the registries directly and races each reader against its family's writer
+
+## [0.3.0] - 2026-10-08
+
+### Added
+- Functions: libraries can declare functions with the Redis 7 convention — `redis.register_function(name, fn)` registers alongside the `redis.<name>` carry, and registered functions receive `(keys, args)` as parameters
+
+## [0.2.4] - 2026-10-08
+
+### Fixed
+- CI: the quality gate passes again — the repository is gofmt-clean, ~30 golangci-lint findings resolved (including a real bug the linter caught: the Lua script test helper discarded the `ReadValue` error), and a data race between test-session goroutines and global slow-log/metrics swaps is fixed (`5786821`, `fa834cd`, `6e457ad`)
+- HTTP: the unauthenticated error reply drops its trailing period — `NOAUTH Authentication required` instead of `NOAUTH Authentication required.` (`fa834cd`)
+
+## [0.2.3] - 2026-10-08
+
+### Security
+- ACL: `DeniedCommands` initialized for the default user — `ACL SETUSER default -<cmd>` no longer panics (`5475097`)
+- ACL: key-pattern enforcement fails closed for commands missing extraction tables; accurate declared-key shapes for XADD/XREAD/XREADGROUP/XINFO/XGROUP and FCALL (`3b2ee7b`)
+- ACL: script guard enforces the invoking user's key patterns AND command permissions on every `redis.call`/`redis.pcall` — violations abort the script uncatchably; FCALL/FCALL_RO covered; admin commands (ACL, CONFIG) reserved (`3b2ee7b`)
+- HTTP: `Router.ExecuteHTTP` enforces per-user ACL command and key rules; ACL identities accepted via HTTP Basic and username Bearer tokens; `/api/login` authenticates usernames (`3c1ada9`)
+- HTTP: sessions created by a username login are bound to that ACL identity and enforced on cookie flows (`e7f818a`)
+- HTTP: REST key endpoints (`/api/keys`, `/api/key/<name>`) and tag endpoints (`/api/tags`, `/api/tag/<tag>`, `/api/invalidate/<tag>`) enforce command grants and key patterns — listings filtered to accessible keys, invalidate all-or-nothing (`3c1ada9`)
+- HTTP: requirepass enforced on the whole HTTP API — `ExecuteHTTP` gate plus anonymous requests refused at the middleware boundary when auth is disabled; previously a requirepass deployment with HTTP enabled and no HTTP password served the API anonymously (`c545a3d`)
+- HTTP: username-Bearer authentication splits on the last colon, so usernames containing `:` authenticate over the Bearer flow instead of parsing as the wrong user (`563ae7b`)
+
+### Fixed
+- Scripts: unknown/unimplemented commands (FLUSHALL, CONFIG, typos) now fail loudly with `ERR unknown command ... called from Lua script` instead of silently returning nil (`f9448aa`)
+- Scripts: `redis.pcall` converts arguments exactly like `redis.call` — booleans no longer become empty strings through pcall (`9834d57`)
+- Functions: FUNCTION-language functions receive their declared keys and args as `function(keys, args)` parameters like Redis; previously they arrived nil and only `redis.KEYS`/`redis.ARGV` carried them (`2d89217`)
+
+### Testing
+- ACL hardening regression suites: default-user init, key extraction shapes, script/FCALL guards and command permissions, HTTP identity and session binding, REST key/tag enforcement, requirepass gate, and the CONFIG reservation pin proving ACL/CONFIG are reserved against requirepass escalation (`0f6e3e8`)
+
+## [0.2.2] - 2026-09-06
+
+### Fixed
+- Release: the version stamped into the release binary now reaches the server command line — the ldflags set `main.version`, which the `--version` flag read, but the ldflags path the release workflow used never reached the binary it built
+
+### Security
+- Website: vulnerable npm dependencies patched
+
+## [0.2.1] - 2026-09-06
+
+### Fixed
+- Search: `FT.CREATE` terminates on an unrecognized field-option token instead of looping forever
+- Plugins: the persistence plugin's mutex hardened against a shutdown racing an `Append`
+- Replication: data-race guards added and the canonical RDB encoding used in the emitters
+- Persistence: RDB round-trip fixes, AOF error handling and a `BGSAVE` race guard
+- Store: batch delete for tag invalidation
+- Command, store, server and cluster: golangci-lint triage to zero findings
+- Cluster: the rebalance test assertion relaxed — it depended on Go map iteration order
+- Examples and docs: the port standardised to 6380 and the CLI renamed `cachestorm-cli` throughout
+- Docs: the Docker Hub references removed and the 6379→6380 port change applied across the documentation
+
+### Added
+- Persistence: faithful AOF rewriter encodings, and real RDB encodings for Geo, JSON, Stream and TimeSeries
+- CI: the push and pull-request quality gate and the lint baseline profile
+
+### Changed
+- Website: CacheStorm's own identity messaging replaces the Redis-centric one, with light-mode support, a features comparison page and full documentation pages
 
 ## [0.2.0] - 2026-03-21
 
@@ -620,7 +664,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Commands | Description |
 |---------|------|----------|-------------|
-| 0.3.1 | 2026-10-22 | 1,606 | Registry locking, quota window enforcement, connection tracking |
+| 0.3.1 | 2026-10-22 | 1,596 | Registry locking, quota window enforcement, connection tracking |
+| 0.3.0 | 2026-10-08 | 1,596 | Redis 7 function declarations in FUNCTION libraries |
+| 0.2.4 | 2026-10-08 | 1,596 | Quality gate green: gofmt, lint findings, global-swap data race, NOAUTH reply |
+| 0.2.3 | 2026-10-08 | 1,596 | ACL and requirepass enforcement on HTTP and in scripts, function signatures |
+| 0.2.2 | 2026-09-06 | 1,600 | Release version stamping reaches the server binary |
+| 0.2.1 | 2026-09-06 | 1,600 | RDB/AOF encodings, plugin and replication race fixes, lint triage |
 | 0.1.27 | 2026-02-25 | 1,606 | Test coverage improvements (89.1%) |
 | 0.1.26 | 2026-02-22 | 1,606 | Critical bug fixes, deadlock fixes |
 | 0.1.25 | 2026-02-21 | 1,606 | Redis 7 compatibility improvements |
@@ -635,7 +684,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/cachestorm/cachestorm/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/cachestorm/cachestorm/compare/v0.3.1...HEAD
+[0.3.0]: https://github.com/cachestorm/cachestorm/compare/v0.2.4...v0.3.0
+[0.2.4]: https://github.com/cachestorm/cachestorm/compare/v0.2.3...v0.2.4
+[0.2.3]: https://github.com/cachestorm/cachestorm/compare/v0.2.2...v0.2.3
+[0.2.2]: https://github.com/cachestorm/cachestorm/compare/v0.2.1...v0.2.2
+[0.2.1]: https://github.com/cachestorm/cachestorm/compare/v0.2.0...v0.2.1
 [0.3.1]: https://github.com/cachestorm/cachestorm/compare/v0.3.0...v0.3.1
 [0.2.0]: https://github.com/cachestorm/cachestorm/compare/v0.1.27...v0.2.0
 [0.1.27]: https://github.com/cachestorm/cachestorm/compare/v0.1.26...v0.1.27
