@@ -948,6 +948,40 @@ var (
 	connectionsMu sync.RWMutex
 )
 
+// TrackConnection registers a live connection in the registry that
+// CONNECTION.INFO, CONNECTION.LIST and CONNECTION.COUNT report.
+func TrackConnection(id int64, remoteAddr string) {
+	now := time.Now().UnixMilli()
+	connectionsMu.Lock()
+	connections[id] = &ConnectionInfo{
+		ID:          id,
+		RemoteAddr:  remoteAddr,
+		ConnectedAt: now,
+		LastActive:  now,
+		Commands:    0,
+	}
+	connectionsMu.Unlock()
+}
+
+// UntrackConnection removes a connection from the registry once it is gone.
+func UntrackConnection(id int64) {
+	connectionsMu.Lock()
+	delete(connections, id)
+	connectionsMu.Unlock()
+}
+
+// BumpConnectionCommand records that a connection issued one more command.
+// The counter lives in the shared entry, so the update runs under the
+// registry write lock: CONNECTION.INFO reads it under the read lock.
+func BumpConnectionCommand(id int64) {
+	connectionsMu.Lock()
+	if c, exists := connections[id]; exists {
+		c.Commands++
+		c.LastActive = time.Now().UnixMilli()
+	}
+	connectionsMu.Unlock()
+}
+
 type ConnectionInfo struct {
 	ID          int64
 	RemoteAddr  string

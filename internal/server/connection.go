@@ -78,6 +78,10 @@ func NewConnection(id int64, conn net.Conn, s *store.Store, r *command.Router, p
 	}
 
 	cc := &countingConn{Conn: conn}
+	// Track the connection so CONNECTION.INFO, CONNECTION.LIST and
+	// CONNECTION.COUNT report the live connections.
+	command.TrackConnection(id, conn.RemoteAddr().String())
+
 	return &Connection{
 		ID:           id,
 		conn:         cc,
@@ -172,6 +176,10 @@ func (c *Connection) Handle() {
 		// the Context, which is rebuilt from scratch for the next command.
 		c.authenticated = ctx.IsAuthenticated()
 		c.aclUser = ctx.ACLUser
+
+		// Count the command against the connection so CONNECTION.INFO can
+		// report it.
+		command.BumpConnectionCommand(c.ID)
 	}
 }
 
@@ -188,6 +196,9 @@ func (c *Connection) recoverPanic() {
 }
 
 func (c *Connection) Close() {
+	// Stop reporting the connection: it is gone.
+	command.UntrackConnection(c.ID)
+
 	// Clean up PubSub subscriber to prevent resource leak
 	if c.subscriber != nil {
 		if ps := c.store.GetPubSub(); ps != nil {
