@@ -438,14 +438,16 @@ func cmdQUEUEPEEK(ctx *Context) error {
 	name := ctx.ArgString(0)
 
 	queuesMu.RLock()
-	defer queuesMu.RUnlock()
 
 	q, exists := queues[name]
 	if !exists || len(q) == 0 {
+		queuesMu.RUnlock()
 		return ctx.WriteNull()
 	}
 
-	return ctx.WriteBulkString(q[0])
+	reply := q[0]
+	queuesMu.RUnlock()
+	return ctx.WriteBulkString(reply)
 }
 
 func cmdQUEUELEN(ctx *Context) error {
@@ -456,9 +458,10 @@ func cmdQUEUELEN(ctx *Context) error {
 	name := ctx.ArgString(0)
 
 	queuesMu.RLock()
-	defer queuesMu.RUnlock()
 
-	return ctx.WriteInteger(int64(len(queues[name])))
+	reply := int64(int64(len(queues[name])))
+	queuesMu.RUnlock()
+	return ctx.WriteInteger(reply)
 }
 
 func cmdQUEUECLEAR(ctx *Context) error {
@@ -537,14 +540,16 @@ func cmdSTACKPEEK(ctx *Context) error {
 	name := ctx.ArgString(0)
 
 	stacksMu.RLock()
-	defer stacksMu.RUnlock()
 
 	s, exists := stacks[name]
 	if !exists || len(s) == 0 {
+		stacksMu.RUnlock()
 		return ctx.WriteNull()
 	}
 
-	return ctx.WriteBulkString(s[len(s)-1])
+	reply := s[len(s)-1]
+	stacksMu.RUnlock()
+	return ctx.WriteBulkString(reply)
 }
 
 func cmdSTACKLEN(ctx *Context) error {
@@ -555,9 +560,10 @@ func cmdSTACKLEN(ctx *Context) error {
 	name := ctx.ArgString(0)
 
 	stacksMu.RLock()
-	defer stacksMu.RUnlock()
 
-	return ctx.WriteInteger(int64(len(stacks[name])))
+	reply := int64(int64(len(stacks[name])))
+	stacksMu.RUnlock()
+	return ctx.WriteInteger(reply)
 }
 
 func cmdSTACKCLEAR(ctx *Context) error {

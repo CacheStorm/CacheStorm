@@ -609,14 +609,15 @@ func cmdBACKUPRESTORE(ctx *Context) error {
 
 func cmdBACKUPLIST(ctx *Context) error {
 	backupsMu.RLock()
-	defer backupsMu.RUnlock()
 
 	results := make([]*resp.Value, 0)
 	for name := range backups {
 		results = append(results, resp.BulkString(name))
 	}
 
-	return ctx.WriteArray(results)
+	reply := results
+	backupsMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdBACKUPDELETE(ctx *Context) error {

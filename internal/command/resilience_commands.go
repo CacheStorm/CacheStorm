@@ -288,17 +288,20 @@ func cmdCIRCUITXSTATUS(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	circuitsMu.RLock()
-	defer circuitsMu.RUnlock()
 	c, exists := circuits[name]
 	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR circuit not found"))
+		reply := fmt.Errorf("ERR circuit not found")
+		circuitsMu.RUnlock()
+		return ctx.WriteError(reply)
 	}
-	return ctx.WriteArray([]*resp.Value{
+	reply := []*resp.Value{
 		resp.BulkString("name"), resp.BulkString(c.Name),
 		resp.BulkString("state"), resp.BulkString(c.State),
 		resp.BulkString("failures"), resp.IntegerValue(c.Failures),
 		resp.BulkString("successes"), resp.IntegerValue(c.Successes),
-	})
+	}
+	circuitsMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdCIRCUITXMETRICS(ctx *Context) error {
@@ -307,16 +310,19 @@ func cmdCIRCUITXMETRICS(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	circuitsMu.RLock()
-	defer circuitsMu.RUnlock()
 	c, exists := circuits[name]
 	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR circuit not found"))
+		reply := fmt.Errorf("ERR circuit not found")
+		circuitsMu.RUnlock()
+		return ctx.WriteError(reply)
 	}
-	return ctx.WriteArray([]*resp.Value{
+	reply := []*resp.Value{
 		resp.BulkString("total_failures"), resp.IntegerValue(c.Failures),
 		resp.BulkString("total_successes"), resp.IntegerValue(c.Successes),
 		resp.BulkString("failure_rate"), resp.BulkString(fmt.Sprintf("%.2f", float64(c.Failures)/float64(c.Failures+c.Successes+1))),
-	})
+	}
+	circuitsMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdCIRCUITXRESET(ctx *Context) error {
@@ -461,17 +467,20 @@ func cmdRATELIMITERSTATUS(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	rateLimitersXMux.RLock()
-	defer rateLimitersXMux.RUnlock()
 	rl, exists := rateLimitersX[name]
 	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR rate limiter not found"))
+		reply := fmt.Errorf("ERR rate limiter not found")
+		rateLimitersXMux.RUnlock()
+		return ctx.WriteError(reply)
 	}
-	return ctx.WriteArray([]*resp.Value{
+	reply := []*resp.Value{
 		resp.BulkString("name"), resp.BulkString(rl.Name),
 		resp.BulkString("limit"), resp.IntegerValue(rl.Limit),
 		resp.BulkString("current"), resp.IntegerValue(int64(len(rl.Requests))),
 		resp.BulkString("strategy"), resp.BulkString(rl.Strategy),
-	})
+	}
+	rateLimitersXMux.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdRATELIMITERDELETE(ctx *Context) error {
@@ -539,16 +548,19 @@ func cmdRETRYSTATUS(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	retriesMu.RLock()
-	defer retriesMu.RUnlock()
 	r, exists := retries[name]
 	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR retry not found"))
+		reply := fmt.Errorf("ERR retry not found")
+		retriesMu.RUnlock()
+		return ctx.WriteError(reply)
 	}
-	return ctx.WriteArray([]*resp.Value{
+	reply := []*resp.Value{
 		resp.BulkString("name"), resp.BulkString(r.Name),
 		resp.BulkString("attempts"), resp.IntegerValue(int64(r.Attempts)),
 		resp.BulkString("max_retry"), resp.IntegerValue(int64(r.MaxRetry)),
-	})
+	}
+	retriesMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdRETRYDELETE(ctx *Context) error {
@@ -687,17 +699,20 @@ func cmdBULKHEADSTATUS(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	bulkheadsMu.RLock()
-	defer bulkheadsMu.RUnlock()
 	b, exists := bulkheads[name]
 	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR bulkhead not found"))
+		reply := fmt.Errorf("ERR bulkhead not found")
+		bulkheadsMu.RUnlock()
+		return ctx.WriteError(reply)
 	}
-	return ctx.WriteArray([]*resp.Value{
+	reply := []*resp.Value{
 		resp.BulkString("name"), resp.BulkString(b.Name),
 		resp.BulkString("current"), resp.IntegerValue(int64(b.Current)),
 		resp.BulkString("max"), resp.IntegerValue(int64(b.MaxConcurrent)),
 		resp.BulkString("waiting"), resp.IntegerValue(int64(b.WaitQueue)),
-	})
+	}
+	bulkheadsMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdBULKHEADDELETE(ctx *Context) error {
@@ -903,12 +918,13 @@ func cmdDIAGNOSTICRESULT(ctx *Context) error {
 
 func cmdDIAGNOSTICLIST(ctx *Context) error {
 	diagnosticsMu.RLock()
-	defer diagnosticsMu.RUnlock()
 	results := make([]*resp.Value, 0)
 	for id := range diagnostics {
 		results = append(results, resp.BulkString(id))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	diagnosticsMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -972,12 +988,13 @@ func cmdPROFILERESULT(ctx *Context) error {
 
 func cmdPROFILEXLIST(ctx *Context) error {
 	profilesX2Mu.RLock()
-	defer profilesX2Mu.RUnlock()
 	results := make([]*resp.Value, 0)
 	for id := range profilesX2 {
 		results = append(results, resp.BulkString(id))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	profilesX2Mu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdHEAPSTATS(ctx *Context) error {
@@ -1051,21 +1068,24 @@ func cmdMEMORYXSTATS(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	memoryMu.RLock()
-	defer memoryMu.RUnlock()
 	s, exists := memoryStats[name]
 	if !exists {
-		return ctx.WriteArray([]*resp.Value{
+		reply := []*resp.Value{
 			resp.BulkString("name"), resp.BulkString(name),
 			resp.BulkString("alloc"), resp.IntegerValue(0),
 			resp.BulkString("peak"), resp.IntegerValue(0),
-		})
+		}
+		memoryMu.RUnlock()
+		return ctx.WriteArray(reply)
 	}
-	return ctx.WriteArray([]*resp.Value{
+	reply := []*resp.Value{
 		resp.BulkString("name"), resp.BulkString(s.Name),
 		resp.BulkString("alloc"), resp.IntegerValue(s.Alloc),
 		resp.BulkString("peak"), resp.IntegerValue(s.Peak),
 		resp.BulkString("tracks"), resp.IntegerValue(s.Tracks),
-	})
+	}
+	memoryMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdMEMORYXTRACK(ctx *Context) error {
@@ -1147,17 +1167,20 @@ func cmdCONPOOLSTATUS(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	conPoolsMu.RLock()
-	defer conPoolsMu.RUnlock()
 	p, exists := conPools[name]
 	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR pool not found"))
+		reply := fmt.Errorf("ERR pool not found")
+		conPoolsMu.RUnlock()
+		return ctx.WriteError(reply)
 	}
-	return ctx.WriteArray([]*resp.Value{
+	reply := []*resp.Value{
 		resp.BulkString("name"), resp.BulkString(p.Name),
 		resp.BulkString("total"), resp.IntegerValue(int64(p.MaxConns)),
 		resp.BulkString("in_use"), resp.IntegerValue(int64(len(p.InUse))),
 		resp.BulkString("available"), resp.IntegerValue(int64(p.MaxConns - len(p.InUse))),
-	})
+	}
+	conPoolsMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdCONPOOLDELETE(ctx *Context) error {
@@ -1378,16 +1401,19 @@ func cmdTRANSXSTATUS(ctx *Context) error {
 	}
 	id := ctx.ArgString(0)
 	transactionsXMux.RLock()
-	defer transactionsXMux.RUnlock()
 	t, exists := transactionsX[id]
 	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR transaction not found"))
+		reply := fmt.Errorf("ERR transaction not found")
+		transactionsXMux.RUnlock()
+		return ctx.WriteError(reply)
 	}
-	return ctx.WriteArray([]*resp.Value{
+	reply := []*resp.Value{
 		resp.BulkString("id"), resp.BulkString(t.ID),
 		resp.BulkString("status"), resp.BulkString(t.Status),
 		resp.BulkString("commands"), resp.IntegerValue(int64(len(t.Commands))),
-	})
+	}
+	transactionsXMux.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -1456,18 +1482,21 @@ func cmdLOCKXSTATUS(ctx *Context) error {
 	}
 	key := ctx.ArgString(0)
 	locksXMux.RLock()
-	defer locksXMux.RUnlock()
 	l, exists := locksX[key]
 	if !exists {
-		return ctx.WriteArray([]*resp.Value{
+		reply := []*resp.Value{
 			resp.BulkString("locked"), resp.IntegerValue(0),
-		})
+		}
+		locksXMux.RUnlock()
+		return ctx.WriteArray(reply)
 	}
-	return ctx.WriteArray([]*resp.Value{
+	reply := []*resp.Value{
 		resp.BulkString("locked"), resp.IntegerValue(1),
 		resp.BulkString("holder"), resp.BulkString(l.Holder),
 		resp.BulkString("expires_at"), resp.IntegerValue(l.ExpiresAt),
-	})
+	}
+	locksXMux.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -1543,17 +1572,20 @@ func cmdSEMAPHOREXSTATUS(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	semaphoresXMux.RLock()
-	defer semaphoresXMux.RUnlock()
 	s, exists := semaphoresX[name]
 	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR semaphore not found"))
+		reply := fmt.Errorf("ERR semaphore not found")
+		semaphoresXMux.RUnlock()
+		return ctx.WriteError(reply)
 	}
-	return ctx.WriteArray([]*resp.Value{
+	reply := []*resp.Value{
 		resp.BulkString("name"), resp.BulkString(s.Name),
 		resp.BulkString("current"), resp.IntegerValue(s.Current),
 		resp.BulkString("max"), resp.IntegerValue(s.Max),
 		resp.BulkString("available"), resp.IntegerValue(s.Max - s.Current),
-	})
+	}
+	semaphoresXMux.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -1587,15 +1619,18 @@ func cmdASYNCSTATUS(ctx *Context) error {
 	}
 	id := ctx.ArgString(0)
 	asyncJobsMu.RLock()
-	defer asyncJobsMu.RUnlock()
 	j, exists := asyncJobs[id]
 	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR job not found"))
+		reply := fmt.Errorf("ERR job not found")
+		asyncJobsMu.RUnlock()
+		return ctx.WriteError(reply)
 	}
-	return ctx.WriteArray([]*resp.Value{
+	reply := []*resp.Value{
 		resp.BulkString("id"), resp.BulkString(j.ID),
 		resp.BulkString("status"), resp.BulkString(j.Status),
-	})
+	}
+	asyncJobsMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdASYNCRESULT(ctx *Context) error {
@@ -1688,15 +1723,18 @@ func cmdPROMISESTATUS(ctx *Context) error {
 	}
 	id := ctx.ArgString(0)
 	promisesMu.RLock()
-	defer promisesMu.RUnlock()
 	p, exists := promises[id]
 	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR promise not found"))
+		reply := fmt.Errorf("ERR promise not found")
+		promisesMu.RUnlock()
+		return ctx.WriteError(reply)
 	}
-	return ctx.WriteArray([]*resp.Value{
+	reply := []*resp.Value{
 		resp.BulkString("id"), resp.BulkString(p.ID),
 		resp.BulkString("status"), resp.BulkString(p.Status),
-	})
+	}
+	promisesMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdPROMISEAWAIT(ctx *Context) error {
@@ -1705,18 +1743,24 @@ func cmdPROMISEAWAIT(ctx *Context) error {
 	}
 	id := ctx.ArgString(0)
 	promisesMu.RLock()
-	defer promisesMu.RUnlock()
 	p, exists := promises[id]
 	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR promise not found"))
+		reply := fmt.Errorf("ERR promise not found")
+		promisesMu.RUnlock()
+		return ctx.WriteError(reply)
 	}
 	if p.Status == "pending" {
+		promisesMu.RUnlock()
 		return ctx.WriteNull()
 	}
 	if p.Status == "resolved" {
-		return ctx.WriteBulkString(p.Value)
+		reply := p.Value
+		promisesMu.RUnlock()
+		return ctx.WriteBulkString(reply)
 	}
-	return ctx.WriteError(errors.New(p.Error))
+	reply := errors.New(p.Error)
+	promisesMu.RUnlock()
+	return ctx.WriteError(reply)
 }
 
 var (
@@ -1761,18 +1805,24 @@ func cmdFUTUREGET(ctx *Context) error {
 	}
 	id := ctx.ArgString(0)
 	futuresMu.RLock()
-	defer futuresMu.RUnlock()
 	f, exists := futures[id]
 	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR future not found"))
+		reply := fmt.Errorf("ERR future not found")
+		futuresMu.RUnlock()
+		return ctx.WriteError(reply)
 	}
 	if f.Status == "pending" {
+		futuresMu.RUnlock()
 		return ctx.WriteNull()
 	}
 	if f.Status == "completed" {
-		return ctx.WriteBulkString(f.Value)
+		reply := f.Value
+		futuresMu.RUnlock()
+		return ctx.WriteBulkString(reply)
 	}
-	return ctx.WriteError(errors.New(f.Error))
+	reply := errors.New(f.Error)
+	futuresMu.RUnlock()
+	return ctx.WriteError(reply)
 }
 
 func cmdFUTURECANCEL(ctx *Context) error {
@@ -1927,12 +1977,14 @@ func cmdSTREAMPROCPEEK(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	streamProcsMu.RLock()
-	defer streamProcsMu.RUnlock()
 	s, exists := streamProcs[name]
 	if !exists || len(s.Data) == 0 {
+		streamProcsMu.RUnlock()
 		return ctx.WriteNull()
 	}
-	return ctx.WriteBulkString(s.Data[0])
+	reply := s.Data[0]
+	streamProcsMu.RUnlock()
+	return ctx.WriteBulkString(reply)
 }
 
 func cmdSTREAMPROCDELETE(ctx *Context) error {
@@ -2121,18 +2173,21 @@ func cmdBACKPRESSURESTATUS(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	backpressuresMu.RLock()
-	defer backpressuresMu.RUnlock()
 	b, exists := backpressures[name]
 	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR backpressure not found"))
+		reply := fmt.Errorf("ERR backpressure not found")
+		backpressuresMu.RUnlock()
+		return ctx.WriteError(reply)
 	}
-	return ctx.WriteArray([]*resp.Value{
+	reply := []*resp.Value{
 		resp.BulkString("name"), resp.BulkString(b.Name),
 		resp.BulkString("current"), resp.IntegerValue(b.Current),
 		resp.BulkString("high_water"), resp.IntegerValue(b.HighWater),
 		resp.BulkString("low_water"), resp.IntegerValue(b.LowWater),
 		resp.BulkString("paused"), resp.BulkString(fmt.Sprintf("%v", b.Paused)),
-	})
+	}
+	backpressuresMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -2315,12 +2370,14 @@ func cmdCOALESCEGET(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	coalescesMu.RLock()
-	defer coalescesMu.RUnlock()
 	c, exists := coalesces[name]
 	if !exists || len(c.Values) == 0 {
+		coalescesMu.RUnlock()
 		return ctx.WriteNull()
 	}
-	return ctx.WriteBulkString(c.Values[0])
+	reply := c.Values[0]
+	coalescesMu.RUnlock()
+	return ctx.WriteBulkString(reply)
 }
 
 func cmdCOALESCECLEAR(ctx *Context) error {
@@ -2484,16 +2541,19 @@ func cmdWINDOWXGET(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	windowsXMux.RLock()
-	defer windowsXMux.RUnlock()
 	w, exists := windowsX[name]
 	if !exists {
-		return ctx.WriteArray([]*resp.Value{})
+		reply := []*resp.Value{}
+		windowsXMux.RUnlock()
+		return ctx.WriteArray(reply)
 	}
 	results := make([]*resp.Value, len(w.Data))
 	for i, v := range w.Data {
 		results[i] = resp.BulkString(fmt.Sprintf("%.6f", v))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	windowsXMux.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdWINDOWXAGGREGATE(ctx *Context) error {
@@ -2581,10 +2641,11 @@ func cmdJOINXGET(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	joinsXMux.RLock()
-	defer joinsXMux.RUnlock()
 	j, exists := joinsX[name]
 	if !exists {
-		return ctx.WriteArray([]*resp.Value{})
+		reply := []*resp.Value{}
+		joinsXMux.RUnlock()
+		return ctx.WriteArray(reply)
 	}
 	results := make([]*resp.Value, 0)
 	for _, l := range j.Left {
@@ -2595,7 +2656,9 @@ func cmdJOINXGET(ctx *Context) error {
 			}))
 		}
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	joinsXMux.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdJOINXDELETE(ctx *Context) error {

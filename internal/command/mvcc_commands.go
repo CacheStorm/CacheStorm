@@ -461,14 +461,15 @@ func cmdSPATIALDELETE(ctx *Context) error {
 
 func cmdSPATIALLIST(ctx *Context) error {
 	spatialIndexesMu.RLock()
-	defer spatialIndexesMu.RUnlock()
 
 	results := make([]*resp.Value, 0)
 	for name := range spatialIndexes {
 		results = append(results, resp.BulkString(name))
 	}
 
-	return ctx.WriteArray(results)
+	reply := results
+	spatialIndexesMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 // haversine delegates to store.Haversine, the math-package implementation
@@ -643,14 +644,17 @@ func cmdCHAINLENGTH(ctx *Context) error {
 	name := ctx.ArgString(0)
 
 	chainsMu.RLock()
-	defer chainsMu.RUnlock()
 	chain, exists := chains[name]
 
 	if !exists {
-		return ctx.WriteInteger(0)
+		reply := int64(0)
+		chainsMu.RUnlock()
+		return ctx.WriteInteger(reply)
 	}
 
-	return ctx.WriteInteger(int64(len(chain.Blocks)))
+	reply := int64(int64(len(chain.Blocks)))
+	chainsMu.RUnlock()
+	return ctx.WriteInteger(reply)
 }
 
 func cmdCHAINLAST(ctx *Context) error {
@@ -814,14 +818,17 @@ func cmdANALYTICSAVG(ctx *Context) error {
 	name := ctx.ArgString(0)
 
 	analyticsMu.RLock()
-	defer analyticsMu.RUnlock()
 	data, exists := analytics[name]
 
 	if !exists || data.Count == 0 {
-		return ctx.WriteBulkString("0")
+		reply := "0"
+		analyticsMu.RUnlock()
+		return ctx.WriteBulkString(reply)
 	}
 
-	return ctx.WriteBulkString(fmt.Sprintf("%.2f", data.Sum/float64(data.Count)))
+	reply := fmt.Sprintf("%.2f", data.Sum/float64(data.Count))
+	analyticsMu.RUnlock()
+	return ctx.WriteBulkString(reply)
 }
 
 func cmdANALYTICSMIN(ctx *Context) error {
@@ -941,7 +948,6 @@ type ConnectionInfo struct {
 
 func cmdCONNECTIONLIST(ctx *Context) error {
 	connectionsMu.RLock()
-	defer connectionsMu.RUnlock()
 
 	results := make([]*resp.Value, 0)
 	for id, conn := range connections {
@@ -951,7 +957,9 @@ func cmdCONNECTIONLIST(ctx *Context) error {
 		)
 	}
 
-	return ctx.WriteArray(results)
+	reply := results
+	connectionsMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdCONNECTIONKILL(ctx *Context) error {
@@ -988,14 +996,14 @@ func cmdCONNECTIONINFO(ctx *Context) error {
 	id := parseInt64(ctx.ArgString(0))
 
 	connectionsMu.RLock()
-	defer connectionsMu.RUnlock()
 	conn, exists := connections[id]
 
 	if !exists {
+		connectionsMu.RUnlock()
 		return ctx.WriteNull()
 	}
 
-	return ctx.WriteArray([]*resp.Value{
+	reply := []*resp.Value{
 		resp.BulkString("id"),
 		resp.IntegerValue(conn.ID),
 		resp.BulkString("remote_addr"),
@@ -1004,7 +1012,9 @@ func cmdCONNECTIONINFO(ctx *Context) error {
 		resp.IntegerValue(conn.ConnectedAt),
 		resp.BulkString("commands"),
 		resp.IntegerValue(conn.Commands),
-	})
+	}
+	connectionsMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -1059,7 +1069,6 @@ func cmdPLUGINUNLOAD(ctx *Context) error {
 
 func cmdPLUGINLIST(ctx *Context) error {
 	pluginsMu.RLock()
-	defer pluginsMu.RUnlock()
 
 	results := make([]*resp.Value, 0)
 	for name, p := range plugins {
@@ -1069,7 +1078,9 @@ func cmdPLUGINLIST(ctx *Context) error {
 		)
 	}
 
-	return ctx.WriteArray(results)
+	reply := results
+	pluginsMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdPLUGINCALL(ctx *Context) error {
@@ -1081,18 +1092,23 @@ func cmdPLUGINCALL(ctx *Context) error {
 	fn := ctx.ArgString(1)
 
 	pluginsMu.RLock()
-	defer pluginsMu.RUnlock()
 	plugin, exists := plugins[name]
 
 	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR plugin not found"))
+		reply := fmt.Errorf("ERR plugin not found")
+		pluginsMu.RUnlock()
+		return ctx.WriteError(reply)
 	}
 
 	if !plugin.Enabled {
-		return ctx.WriteError(fmt.Errorf("ERR plugin disabled"))
+		reply := fmt.Errorf("ERR plugin disabled")
+		pluginsMu.RUnlock()
+		return ctx.WriteError(reply)
 	}
 
-	return ctx.WriteBulkString(fn + ":ok")
+	reply := fn + ":ok"
+	pluginsMu.RUnlock()
+	return ctx.WriteBulkString(reply)
 }
 
 func cmdPLUGININFO(ctx *Context) error {
@@ -1103,21 +1119,23 @@ func cmdPLUGININFO(ctx *Context) error {
 	name := ctx.ArgString(0)
 
 	pluginsMu.RLock()
-	defer pluginsMu.RUnlock()
 	plugin, exists := plugins[name]
 
 	if !exists {
+		pluginsMu.RUnlock()
 		return ctx.WriteNull()
 	}
 
-	return ctx.WriteArray([]*resp.Value{
+	reply := []*resp.Value{
 		resp.BulkString("name"),
 		resp.BulkString(plugin.Name),
 		resp.BulkString("enabled"),
 		resp.BulkString(fmt.Sprintf("%v", plugin.Enabled)),
 		resp.BulkString("loaded_at"),
 		resp.IntegerValue(plugin.LoadedAt),
-	})
+	}
+	pluginsMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -1182,17 +1200,20 @@ func cmdROLLUPGET(ctx *Context) error {
 	timestamp := parseInt64(ctx.ArgString(1))
 
 	rollupsMu.RLock()
-	defer rollupsMu.RUnlock()
 	rollup, exists := rollups[name]
 
 	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR rollup not found"))
+		reply := fmt.Errorf("ERR rollup not found")
+		rollupsMu.RUnlock()
+		return ctx.WriteError(reply)
 	}
 
 	bucket := (timestamp / rollup.Interval) * rollup.Interval
 	value := rollup.Data[bucket]
 
-	return ctx.WriteBulkString(fmt.Sprintf("%.2f", value))
+	reply := fmt.Sprintf("%.2f", value)
+	rollupsMu.RUnlock()
+	return ctx.WriteBulkString(reply)
 }
 
 func cmdROLLUPDELETE(ctx *Context) error {
@@ -1310,7 +1331,6 @@ func cmdCOOLDOWNDELETE(ctx *Context) error {
 
 func cmdCOOLDOWNLIST(ctx *Context) error {
 	cooldownsMu.RLock()
-	defer cooldownsMu.RUnlock()
 
 	results := make([]*resp.Value, 0)
 	for key, cd := range cooldowns {
@@ -1320,7 +1340,9 @@ func cmdCOOLDOWNLIST(ctx *Context) error {
 		)
 	}
 
-	return ctx.WriteArray(results)
+	reply := results
+	cooldownsMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (

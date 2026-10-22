@@ -463,12 +463,13 @@ func cmdIDEMPOTENCYDELETE(ctx *Context) error {
 
 func cmdIDEMPOTENCYLIST(ctx *Context) error {
 	idempotencyKeysMu.RLock()
-	defer idempotencyKeysMu.RUnlock()
 	results := make([]*resp.Value, 0)
 	for key := range idempotencyKeys {
 		results = append(results, resp.BulkString(key))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	idempotencyKeysMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -600,12 +601,13 @@ func cmdEXPERIMENTRESULTS(ctx *Context) error {
 
 func cmdEXPERIMENTLIST(ctx *Context) error {
 	experimentsMu.RLock()
-	defer experimentsMu.RUnlock()
 	results := make([]*resp.Value, 0)
 	for name := range experiments {
 		results = append(results, resp.BulkString(name))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	experimentsMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -691,7 +693,6 @@ func cmdROLLOUTPERCENTAGE(ctx *Context) error {
 
 func cmdROLLOUTLIST(ctx *Context) error {
 	rolloutsMu.RLock()
-	defer rolloutsMu.RUnlock()
 	results := make([]*resp.Value, 0)
 	for name, ro := range rollouts {
 		results = append(results, resp.ArrayValue([]*resp.Value{
@@ -699,7 +700,9 @@ func cmdROLLOUTLIST(ctx *Context) error {
 			resp.BulkString("percentage"), resp.IntegerValue(ro.Percentage),
 		}))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	rolloutsMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -744,12 +747,13 @@ func cmdSCHEMADELETE(ctx *Context) error {
 
 func cmdSCHEMALIST(ctx *Context) error {
 	schemasMu.RLock()
-	defer schemasMu.RUnlock()
 	results := make([]*resp.Value, 0)
 	for name := range schemas {
 		results = append(results, resp.BulkString(name))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	schemasMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -848,12 +852,13 @@ func cmdPIPELINEDELETE(ctx *Context) error {
 
 func cmdPIPELINELIST(ctx *Context) error {
 	pipelinesMu.RLock()
-	defer pipelinesMu.RUnlock()
 	results := make([]*resp.Value, 0)
 	for name := range pipelines {
 		results = append(results, resp.BulkString(name))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	pipelinesMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -893,7 +898,6 @@ func cmdNOTIFYSEND(ctx *Context) error {
 
 func cmdNOTIFYLIST(ctx *Context) error {
 	notificationsMu.RLock()
-	defer notificationsMu.RUnlock()
 	results := make([]*resp.Value, 0)
 	for name, n := range notifications {
 		results = append(results, resp.ArrayValue([]*resp.Value{
@@ -901,7 +905,9 @@ func cmdNOTIFYLIST(ctx *Context) error {
 			resp.BulkString("type"), resp.BulkString(n.Type),
 		}))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	notificationsMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdNOTIFYDELETE(ctx *Context) error {
@@ -1004,7 +1010,6 @@ func cmdALERTRESOLVE(ctx *Context) error {
 
 func cmdALERTLIST(ctx *Context) error {
 	alertsMu.RLock()
-	defer alertsMu.RUnlock()
 	results := make([]*resp.Value, 0)
 	for name, a := range alerts {
 		results = append(results, resp.ArrayValue([]*resp.Value{
@@ -1012,7 +1017,9 @@ func cmdALERTLIST(ctx *Context) error {
 			resp.BulkString("status"), resp.BulkString(a.Status),
 		}))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	alertsMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdALERTHISTORY(ctx *Context) error {
@@ -1341,12 +1348,13 @@ func cmdTRACEGET(ctx *Context) error {
 
 func cmdTRACELIST(ctx *Context) error {
 	tracesMu.RLock()
-	defer tracesMu.RUnlock()
 	results := make([]*resp.Value, 0)
 	for id := range traces {
 		results = append(results, resp.BulkString(id))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	tracesMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -1528,7 +1536,6 @@ func cmdAPIKEYREVOKE(ctx *Context) error {
 
 func cmdAPIKEYLIST(ctx *Context) error {
 	apiKeysMu.RLock()
-	defer apiKeysMu.RUnlock()
 	results := make([]*resp.Value, 0)
 	for key, ak := range apiKeys {
 		results = append(results, resp.ArrayValue([]*resp.Value{
@@ -1537,7 +1544,9 @@ func cmdAPIKEYLIST(ctx *Context) error {
 			resp.BulkString("active"), resp.BulkString(fmt.Sprintf("%v", ak.Active)),
 		}))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	apiKeysMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdAPIKEYUSAGE(ctx *Context) error {
@@ -1858,12 +1867,13 @@ func cmdTENANTGET(ctx *Context) error {
 
 func cmdTENANTLIST(ctx *Context) error {
 	tenantsMu.RLock()
-	defer tenantsMu.RUnlock()
 	results := make([]*resp.Value, 0)
 	for id := range tenants {
 		results = append(results, resp.BulkString(id))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	tenantsMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdTENANTCONFIG(ctx *Context) error {
@@ -1968,12 +1978,13 @@ func cmdLEASEGET(ctx *Context) error {
 
 func cmdLEASELIST(ctx *Context) error {
 	leasesMu.RLock()
-	defer leasesMu.RUnlock()
 	results := make([]*resp.Value, 0)
 	for id := range leases {
 		results = append(results, resp.BulkString(id))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	leasesMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -2140,18 +2151,23 @@ func cmdBLOOMXCHECK(ctx *Context) error {
 	name := ctx.ArgString(0)
 	item := ctx.ArgString(1)
 	bloomXMux.RLock()
-	defer bloomXMux.RUnlock()
 	f, exists := bloomX[name]
 	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR bloom filter not found"))
+		reply := fmt.Errorf("ERR bloom filter not found")
+		bloomXMux.RUnlock()
+		return ctx.WriteError(reply)
 	}
 	for i := 0; i < f.Hashes; i++ {
 		idx := bloomHash(item, i, f.Size)
 		if !f.Bits[idx] {
-			return ctx.WriteInteger(0)
+			reply := int64(0)
+			bloomXMux.RUnlock()
+			return ctx.WriteInteger(reply)
 		}
 	}
-	return ctx.WriteInteger(1)
+	reply := int64(1)
+	bloomXMux.RUnlock()
+	return ctx.WriteInteger(reply)
 }
 
 func bloomHash(item string, seed, size int) int {

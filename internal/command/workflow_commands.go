@@ -664,14 +664,16 @@ func cmdCHAINEDGET(ctx *Context) error {
 	path := ctx.ArgString(1)
 
 	chainedDataMu.RLock()
-	defer chainedDataMu.RUnlock()
 
 	if root, exists := chainedData[rootKey]; exists {
 		if val, ok := root[path]; ok {
-			return ctx.WriteBulkString(val)
+			reply := val
+			chainedDataMu.RUnlock()
+			return ctx.WriteBulkString(reply)
 		}
 	}
 
+	chainedDataMu.RUnlock()
 	return ctx.WriteNull()
 }
 

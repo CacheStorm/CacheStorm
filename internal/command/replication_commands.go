@@ -85,17 +85,17 @@ func (m *ReplicationManager) GetMasterPort() int {
 
 func (m *ReplicationManager) GetReplicas() []*ReplicaInfo {
 	replicaMu.RLock()
-	defer replicaMu.RUnlock()
 	result := make([]*ReplicaInfo, 0, len(replicas))
 	for _, r := range replicas {
 		result = append(result, r)
 	}
+	replicaMu.RUnlock()
 	return result
 }
 
 func (m *ReplicationManager) GetReplicaCount() int {
 	replicaMu.RLock()
-	defer replicaMu.RUnlock()
+	replicaMu.RUnlock()
 	return len(replicas)
 }
 

@@ -549,14 +549,15 @@ func cmdHISTOGRAMINFO(ctx *Context) error {
 	key := ctx.ArgString(0)
 
 	histogramsMu.RLock()
-	defer histogramsMu.RUnlock()
 	h, exists := histograms[key]
 
 	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR histogram not found"))
+		reply := fmt.Errorf("ERR histogram not found")
+		histogramsMu.RUnlock()
+		return ctx.WriteError(reply)
 	}
 
-	return ctx.WriteArray([]*resp.Value{
+	reply := []*resp.Value{
 		resp.BulkString("min"),
 		resp.BulkString(strconv.FormatFloat(h.Min, 'f', -1, 64)),
 		resp.BulkString("max"),
@@ -567,5 +568,7 @@ func cmdHISTOGRAMINFO(ctx *Context) error {
 		resp.IntegerValue(h.Count),
 		resp.BulkString("mean"),
 		resp.BulkString(strconv.FormatFloat(h.Mean(), 'f', -1, 64)),
-	})
+	}
+	histogramsMu.RUnlock()
+	return ctx.WriteArray(reply)
 }

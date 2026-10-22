@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 ### Fixed
+- Internals: the registry readers release the registry's read lock before writing their reply. The lock used to be held for the whole handler, so the release was deferred to the return and the lock was still held while the reply went to the client — a client that read slowly blocked every writer of that registry. The reply's values are now read under the lock and the reply is written after it is released
 - Installers: the one-click scripts now choose the release to install by VERSION instead of by publish date. The GitHub API's latest-release endpoint answers with the most recently PUBLISHED release, so a version published late (a back-dated release) was installed in place of the newest one; both `install.sh` and `install.ps1` now pick the highest stable version from the releases list and ignore drafts and pre-releases
 - Version reporting: the INFO command now reports the version the binary was stamped with instead of a hardcoded `cachestorm_version:0.2.0`. The release stamped the version into the binary at link time, but only the `--version` flag read it, so every released server told clients it was 0.2.0. The build identity now lives in an `internal/version` package that both the command line and the INFO command read, so the two can never disagree
 ### Testing

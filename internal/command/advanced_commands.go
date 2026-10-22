@@ -218,14 +218,15 @@ func cmdACTORLEN(ctx *Context) error {
 
 func cmdACTORLIST(ctx *Context) error {
 	actorsMu.RLock()
-	defer actorsMu.RUnlock()
 
 	results := make([]*resp.Value, 0, len(actors))
 	for id := range actors {
 		results = append(results, resp.BulkString(id))
 	}
 
-	return ctx.WriteArray(results)
+	reply := results
+	actorsMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdACTORCLEAR(ctx *Context) error {
@@ -479,14 +480,15 @@ func cmdDAGDELETE(ctx *Context) error {
 
 func cmdDAGLIST(ctx *Context) error {
 	dagsMu.RLock()
-	defer dagsMu.RUnlock()
 
 	results := make([]*resp.Value, 0, len(dags))
 	for name := range dags {
 		results = append(results, resp.BulkString(name))
 	}
 
-	return ctx.WriteArray(results)
+	reply := results
+	dagsMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdPARALLELEXEC(ctx *Context) error {
@@ -703,14 +705,16 @@ func cmdSECRETGET(ctx *Context) error {
 	key := ctx.ArgString(0)
 
 	secretsMu.RLock()
-	defer secretsMu.RUnlock()
 
 	secret, exists := secrets[key]
 	if !exists {
+		secretsMu.RUnlock()
 		return ctx.WriteNull()
 	}
 
-	return ctx.WriteBulkString(secret.Value)
+	reply := secret.Value
+	secretsMu.RUnlock()
+	return ctx.WriteBulkString(reply)
 }
 
 func cmdSECRETDELETE(ctx *Context) error {
@@ -733,7 +737,6 @@ func cmdSECRETDELETE(ctx *Context) error {
 
 func cmdSECRETLIST(ctx *Context) error {
 	secretsMu.RLock()
-	defer secretsMu.RUnlock()
 
 	keys := make([]string, 0, len(secrets))
 	for k := range secrets {
@@ -745,7 +748,9 @@ func cmdSECRETLIST(ctx *Context) error {
 		results[i] = resp.BulkString(k)
 	}
 
-	return ctx.WriteArray(results)
+	reply := results
+	secretsMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdSECRETROTATE(ctx *Context) error {
@@ -779,19 +784,21 @@ func cmdSECRETVERSION(ctx *Context) error {
 	key := ctx.ArgString(0)
 
 	secretsMu.RLock()
-	defer secretsMu.RUnlock()
 
 	secret, exists := secrets[key]
 	if !exists {
+		secretsMu.RUnlock()
 		return ctx.WriteNull()
 	}
 
-	return ctx.WriteArray([]*resp.Value{
+	reply := []*resp.Value{
 		resp.BulkString("version"),
 		resp.IntegerValue(secret.Version),
 		resp.BulkString("updated_at"),
 		resp.IntegerValue(secret.UpdatedAt),
-	})
+	}
+	secretsMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -829,14 +836,16 @@ func cmdCONFIGGET(ctx *Context) error {
 	key := ctx.ArgString(1)
 
 	configsMu.RLock()
-	defer configsMu.RUnlock()
 
 	if nsConfig, exists := configs[ns]; exists {
 		if value, ok := nsConfig[key]; ok {
-			return ctx.WriteBulkString(value)
+			reply := value
+			configsMu.RUnlock()
+			return ctx.WriteBulkString(reply)
 		}
 	}
 
+	configsMu.RUnlock()
 	return ctx.WriteNull()
 }
 
@@ -868,7 +877,6 @@ func cmdCONFIGLIST(ctx *Context) error {
 	}
 
 	configsMu.RLock()
-	defer configsMu.RUnlock()
 
 	results := make([]*resp.Value, 0)
 
@@ -889,7 +897,9 @@ func cmdCONFIGLIST(ctx *Context) error {
 		}
 	}
 
-	return ctx.WriteArray(results)
+	reply := results
+	configsMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdCONFIGNAMESPACE(ctx *Context) error {
@@ -948,11 +958,12 @@ func cmdCONFIGEXPORT(ctx *Context) error {
 	ns := ctx.ArgString(0)
 
 	configsMu.RLock()
-	defer configsMu.RUnlock()
 
 	nsConfig, exists := configs[ns]
 	if !exists {
-		return ctx.WriteArray([]*resp.Value{})
+		reply := []*resp.Value{}
+		configsMu.RUnlock()
+		return ctx.WriteArray(reply)
 	}
 
 	results := make([]*resp.Value, 0)
@@ -960,7 +971,9 @@ func cmdCONFIGEXPORT(ctx *Context) error {
 		results = append(results, resp.BulkString(k), resp.BulkString(v))
 	}
 
-	return ctx.WriteArray(results)
+	reply := results
+	configsMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -1016,25 +1029,32 @@ func cmdTRIESEARCH(ctx *Context) error {
 	word := ctx.ArgString(1)
 
 	triesMu.RLock()
-	defer triesMu.RUnlock()
 
 	trie, exists := tries[name]
 	if !exists {
-		return ctx.WriteInteger(0)
+		reply := int64(0)
+		triesMu.RUnlock()
+		return ctx.WriteInteger(reply)
 	}
 
 	node := trie.Root
 	for _, c := range word {
 		if _, exists := node.Children[c]; !exists {
-			return ctx.WriteInteger(0)
+			reply := int64(0)
+			triesMu.RUnlock()
+			return ctx.WriteInteger(reply)
 		}
 		node = node.Children[c]
 	}
 
 	if node.IsEnd {
-		return ctx.WriteInteger(1)
+		reply := int64(1)
+		triesMu.RUnlock()
+		return ctx.WriteInteger(reply)
 	}
-	return ctx.WriteInteger(0)
+	reply := int64(0)
+	triesMu.RUnlock()
+	return ctx.WriteInteger(reply)
 }
 
 func cmdTRIEPREFIX(ctx *Context) error {
@@ -1046,22 +1066,27 @@ func cmdTRIEPREFIX(ctx *Context) error {
 	prefix := ctx.ArgString(1)
 
 	triesMu.RLock()
-	defer triesMu.RUnlock()
 
 	trie, exists := tries[name]
 	if !exists {
-		return ctx.WriteInteger(0)
+		reply := int64(0)
+		triesMu.RUnlock()
+		return ctx.WriteInteger(reply)
 	}
 
 	node := trie.Root
 	for _, c := range prefix {
 		if _, exists := node.Children[c]; !exists {
-			return ctx.WriteInteger(0)
+			reply := int64(0)
+			triesMu.RUnlock()
+			return ctx.WriteInteger(reply)
 		}
 		node = node.Children[c]
 	}
 
-	return ctx.WriteInteger(1)
+	reply := int64(1)
+	triesMu.RUnlock()
+	return ctx.WriteInteger(reply)
 }
 
 func cmdTRIEDELETE(ctx *Context) error {
@@ -1092,17 +1117,20 @@ func cmdTRIEAUTOCOMPLETE(ctx *Context) error {
 	prefix := ctx.ArgString(1)
 
 	triesMu.RLock()
-	defer triesMu.RUnlock()
 
 	trie, exists := tries[name]
 	if !exists {
-		return ctx.WriteArray([]*resp.Value{})
+		reply := []*resp.Value{}
+		triesMu.RUnlock()
+		return ctx.WriteArray(reply)
 	}
 
 	node := trie.Root
 	for _, c := range prefix {
 		if _, exists := node.Children[c]; !exists {
-			return ctx.WriteArray([]*resp.Value{})
+			reply := []*resp.Value{}
+			triesMu.RUnlock()
+			return ctx.WriteArray(reply)
 		}
 		node = node.Children[c]
 	}
@@ -1115,7 +1143,9 @@ func cmdTRIEAUTOCOMPLETE(ctx *Context) error {
 		respResults[i] = resp.BulkString(w)
 	}
 
-	return ctx.WriteArray(respResults)
+	reply := respResults
+	triesMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func collectWords(node *TrieNode, prefix string, results *[]string) {
@@ -1196,21 +1226,25 @@ func cmdRINGGET(ctx *Context) error {
 	key := ctx.ArgString(1)
 
 	ringsMu.RLock()
-	defer ringsMu.RUnlock()
 	ring, exists := rings[name]
 
 	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR ring not found"))
+		reply := fmt.Errorf("ERR ring not found")
+		ringsMu.RUnlock()
+		return ctx.WriteError(reply)
 	}
 
 	if len(ring.Nodes) == 0 {
+		ringsMu.RUnlock()
 		return ctx.WriteNull()
 	}
 
 	hash := hashKey(key)
 	idx := hash % uint64(len(ring.Nodes))
 
-	return ctx.WriteBulkString(ring.Nodes[idx])
+	reply := ring.Nodes[idx]
+	ringsMu.RUnlock()
+	return ctx.WriteBulkString(reply)
 }
 
 func hashKey(s string) uint64 {
@@ -1229,11 +1263,12 @@ func cmdRINGNODES(ctx *Context) error {
 	name := ctx.ArgString(0)
 
 	ringsMu.RLock()
-	defer ringsMu.RUnlock()
 	ring, exists := rings[name]
 
 	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR ring not found"))
+		reply := fmt.Errorf("ERR ring not found")
+		ringsMu.RUnlock()
+		return ctx.WriteError(reply)
 	}
 
 	results := make([]*resp.Value, len(ring.Nodes))
@@ -1241,7 +1276,9 @@ func cmdRINGNODES(ctx *Context) error {
 		results[i] = resp.BulkString(n)
 	}
 
-	return ctx.WriteArray(results)
+	reply := results
+	ringsMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdRINGREMOVE(ctx *Context) error {

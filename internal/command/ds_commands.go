@@ -176,14 +176,17 @@ func cmdPQLEN(ctx *Context) error {
 	name := ctx.ArgString(0)
 
 	priorityQueuesMu.RLock()
-	defer priorityQueuesMu.RUnlock()
 	pq, exists := priorityQueues[name]
 
 	if !exists {
-		return ctx.WriteInteger(0)
+		reply := int64(0)
+		priorityQueuesMu.RUnlock()
+		return ctx.WriteInteger(reply)
 	}
 
-	return ctx.WriteInteger(int64(pq.Len()))
+	reply := int64(int64(pq.Len()))
+	priorityQueuesMu.RUnlock()
+	return ctx.WriteInteger(reply)
 }
 
 func cmdPQCLEAR(ctx *Context) error {
@@ -693,11 +696,13 @@ func cmdDEBOUNCEGET(ctx *Context) error {
 	key := ctx.ArgString(0)
 
 	debounceMu.RLock()
-	defer debounceMu.RUnlock()
 
 	if value, exists := debounceValues[key]; exists {
-		return ctx.WriteBulkString(value)
+		reply := value
+		debounceMu.RUnlock()
+		return ctx.WriteBulkString(reply)
 	}
+	debounceMu.RUnlock()
 	return ctx.WriteNull()
 }
 

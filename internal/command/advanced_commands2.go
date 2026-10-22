@@ -267,12 +267,13 @@ func cmdFILTERAPPLY(ctx *Context) error {
 
 func cmdFILTERLIST(ctx *Context) error {
 	filtersMu.RLock()
-	defer filtersMu.RUnlock()
 	results := make([]*resp.Value, 0)
 	for name := range filters {
 		results = append(results, resp.BulkString(name))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	filtersMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -323,12 +324,13 @@ func cmdTRANSFORMAPPLY(ctx *Context) error {
 
 func cmdTRANSFORMLIST(ctx *Context) error {
 	transformsMu.RLock()
-	defer transformsMu.RUnlock()
 	results := make([]*resp.Value, 0)
 	for name := range transforms {
 		results = append(results, resp.BulkString(name))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	transformsMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -379,12 +381,13 @@ func cmdENRICHAPPLY(ctx *Context) error {
 
 func cmdENRICHLIST(ctx *Context) error {
 	enrichersMu.RLock()
-	defer enrichersMu.RUnlock()
 	results := make([]*resp.Value, 0)
 	for name := range enrichers {
 		results = append(results, resp.BulkString(name))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	enrichersMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -435,12 +438,13 @@ func cmdVALIDATECHECK(ctx *Context) error {
 
 func cmdVALIDATELIST(ctx *Context) error {
 	validatorsMu.RLock()
-	defer validatorsMu.RUnlock()
 	results := make([]*resp.Value, 0)
 	for name := range validators {
 		results = append(results, resp.BulkString(name))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	validatorsMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -501,26 +505,30 @@ func cmdJOBXSTATUS(ctx *Context) error {
 	}
 	id := ctx.ArgString(0)
 	jobsXMux.RLock()
-	defer jobsXMux.RUnlock()
 	job, exists := jobsX[id]
 	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR job not found"))
+		reply := fmt.Errorf("ERR job not found")
+		jobsXMux.RUnlock()
+		return ctx.WriteError(reply)
 	}
-	return ctx.WriteArray([]*resp.Value{
+	reply := []*resp.Value{
 		resp.BulkString("id"), resp.BulkString(job.ID),
 		resp.BulkString("name"), resp.BulkString(job.Name),
 		resp.BulkString("status"), resp.BulkString(job.Status),
-	})
+	}
+	jobsXMux.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdJOBXLIST(ctx *Context) error {
 	jobsXMux.RLock()
-	defer jobsXMux.RUnlock()
 	results := make([]*resp.Value, 0)
 	for id := range jobsX {
 		results = append(results, resp.BulkString(id))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	jobsXMux.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -594,7 +602,6 @@ func cmdSTAGEPREV(ctx *Context) error {
 
 func cmdSTAGELIST(ctx *Context) error {
 	stagesMu.RLock()
-	defer stagesMu.RUnlock()
 	results := make([]*resp.Value, 0)
 	for name, stage := range stages {
 		results = append(results, resp.ArrayValue([]*resp.Value{
@@ -603,7 +610,9 @@ func cmdSTAGELIST(ctx *Context) error {
 			resp.BulkString("total"), resp.IntegerValue(int64(stage.Total)),
 		}))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	stagesMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -659,23 +668,26 @@ func cmdCONTEXTGET(ctx *Context) error {
 	name := ctx.ArgString(0)
 	key := ctx.ArgString(1)
 	contextsMu.RLock()
-	defer contextsMu.RUnlock()
 	if c, exists := contexts[name]; exists {
 		if val, ok := c[key]; ok {
-			return ctx.WriteBulkString(val)
+			reply := val
+			contextsMu.RUnlock()
+			return ctx.WriteBulkString(reply)
 		}
 	}
+	contextsMu.RUnlock()
 	return ctx.WriteNull()
 }
 
 func cmdCONTEXTLIST(ctx *Context) error {
 	contextsMu.RLock()
-	defer contextsMu.RUnlock()
 	results := make([]*resp.Value, 0)
 	for name := range contexts {
 		results = append(results, resp.BulkString(name))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	contextsMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -726,12 +738,13 @@ func cmdRULEEVAL(ctx *Context) error {
 
 func cmdRULELIST(ctx *Context) error {
 	rulesMu.RLock()
-	defer rulesMu.RUnlock()
 	results := make([]*resp.Value, 0)
 	for name := range rules {
 		results = append(results, resp.BulkString(name))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	rulesMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -776,12 +789,13 @@ func cmdPOLICYCHECK(ctx *Context) error {
 
 func cmdPOLICYLIST(ctx *Context) error {
 	policiesMu.RLock()
-	defer policiesMu.RUnlock()
 	results := make([]*resp.Value, 0)
 	for name := range policies {
 		results = append(results, resp.BulkString(name))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	policiesMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -831,14 +845,17 @@ func cmdPERMITCHECK(ctx *Context) error {
 	resource := ctx.ArgString(1)
 	action := ctx.ArgString(2)
 	permitsMu.RLock()
-	defer permitsMu.RUnlock()
 	key := user + ":" + resource + ":" + action
 	if p, exists := permits[user]; exists {
 		if p[key] {
-			return ctx.WriteInteger(1)
+			reply := int64(1)
+			permitsMu.RUnlock()
+			return ctx.WriteInteger(reply)
 		}
 	}
-	return ctx.WriteInteger(0)
+	reply := int64(0)
+	permitsMu.RUnlock()
+	return ctx.WriteInteger(reply)
 }
 
 func cmdPERMITLIST(ctx *Context) error {
@@ -847,14 +864,15 @@ func cmdPERMITLIST(ctx *Context) error {
 	}
 	user := ctx.ArgString(0)
 	permitsMu.RLock()
-	defer permitsMu.RUnlock()
 	results := make([]*resp.Value, 0)
 	if p, exists := permits[user]; exists {
 		for k := range p {
 			results = append(results, resp.BulkString(k))
 		}
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	permitsMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -908,22 +926,24 @@ func cmdGRANTCHECK(ctx *Context) error {
 	resource := ctx.ArgString(1)
 	action := ctx.ArgString(2)
 	grantsMu.RLock()
-	defer grantsMu.RUnlock()
 	for _, g := range grants {
 		if g.User == user && g.Resource == resource {
 			for _, a := range g.Actions {
 				if a == action || a == "*" {
-					return ctx.WriteInteger(1)
+					reply := int64(1)
+					grantsMu.RUnlock()
+					return ctx.WriteInteger(reply)
 				}
 			}
 		}
 	}
-	return ctx.WriteInteger(0)
+	reply := int64(0)
+	grantsMu.RUnlock()
+	return ctx.WriteInteger(reply)
 }
 
 func cmdGRANTLIST(ctx *Context) error {
 	grantsMu.RLock()
-	defer grantsMu.RUnlock()
 	results := make([]*resp.Value, 0)
 	for id, g := range grants {
 		results = append(results, resp.ArrayValue([]*resp.Value{
@@ -932,7 +952,9 @@ func cmdGRANTLIST(ctx *Context) error {
 			resp.BulkString("resource"), resp.BulkString(g.Resource),
 		}))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	grantsMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -986,12 +1008,13 @@ func cmdCHAINXEXECUTE(ctx *Context) error {
 
 func cmdCHAINXLIST(ctx *Context) error {
 	chainsXMux.RLock()
-	defer chainsXMux.RUnlock()
 	results := make([]*resp.Value, 0)
 	for name := range chainsX {
 		results = append(results, resp.BulkString(name))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	chainsXMux.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -1047,12 +1070,13 @@ func cmdTASKXRUN(ctx *Context) error {
 
 func cmdTASKXLIST(ctx *Context) error {
 	tasksXMux.RLock()
-	defer tasksXMux.RUnlock()
 	results := make([]*resp.Value, 0)
 	for id := range tasksX {
 		results = append(results, resp.BulkString(id))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	tasksXMux.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -1120,12 +1144,13 @@ func cmdTIMERSTATUS(ctx *Context) error {
 
 func cmdTIMERLIST(ctx *Context) error {
 	timersMu.RLock()
-	defer timersMu.RUnlock()
 	results := make([]*resp.Value, 0)
 	for id := range timers {
 		results = append(results, resp.BulkString(id))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	timersMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -1194,7 +1219,6 @@ func cmdCOUNTERX2GET(ctx *Context) error {
 
 func cmdCOUNTERX2LIST(ctx *Context) error {
 	countersX3Mu.RLock()
-	defer countersX3Mu.RUnlock()
 	results := make([]*resp.Value, 0)
 	for name, val := range countersX3 {
 		results = append(results, resp.ArrayValue([]*resp.Value{
@@ -1202,7 +1226,9 @@ func cmdCOUNTERX2LIST(ctx *Context) error {
 			resp.BulkString("value"), resp.IntegerValue(val),
 		}))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	countersX3Mu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -1265,14 +1291,15 @@ func cmdLEVELGET(ctx *Context) error {
 
 func cmdLEVELLIST(ctx *Context) error {
 	levelsMu.RLock()
-	defer levelsMu.RUnlock()
 	results := make([]*resp.Value, 0)
 	for name := range levels {
 		if len(name) > 8 && name[len(name)-8:] != "_current" {
 			results = append(results, resp.BulkString(name))
 		}
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	levelsMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -1320,17 +1347,20 @@ func cmdRECORDGET(ctx *Context) error {
 	}
 	id := ctx.ArgString(0)
 	recordsMu.RLock()
-	defer recordsMu.RUnlock()
 	r, exists := records[id]
 	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR record not found"))
+		reply := fmt.Errorf("ERR record not found")
+		recordsMu.RUnlock()
+		return ctx.WriteError(reply)
 	}
 	results := make([]*resp.Value, 0)
 	results = append(results, resp.BulkString("id"), resp.BulkString(r.ID), resp.BulkString("name"), resp.BulkString(r.Name))
 	for k, v := range r.Fields {
 		results = append(results, resp.BulkString(k), resp.BulkString(v))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	recordsMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdRECORDDELETE(ctx *Context) error {
@@ -1390,17 +1420,20 @@ func cmdENTITYGET(ctx *Context) error {
 	}
 	id := ctx.ArgString(0)
 	entitiesMu.RLock()
-	defer entitiesMu.RUnlock()
 	e, exists := entities[id]
 	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR entity not found"))
+		reply := fmt.Errorf("ERR entity not found")
+		entitiesMu.RUnlock()
+		return ctx.WriteError(reply)
 	}
 	results := make([]*resp.Value, 0)
 	results = append(results, resp.BulkString("id"), resp.BulkString(e.ID), resp.BulkString("type"), resp.BulkString(e.Type))
 	for k, v := range e.Attributes {
 		results = append(results, resp.BulkString(k), resp.BulkString(v))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	entitiesMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdENTITYSET(ctx *Context) error {
@@ -1421,12 +1454,13 @@ func cmdENTITYSET(ctx *Context) error {
 
 func cmdENTITYLIST(ctx *Context) error {
 	entitiesMu.RLock()
-	defer entitiesMu.RUnlock()
 	results := make([]*resp.Value, 0)
 	for id := range entities {
 		results = append(results, resp.BulkString(id))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	entitiesMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -1491,12 +1525,13 @@ func cmdRELATIONGET(ctx *Context) error {
 
 func cmdRELATIONLIST(ctx *Context) error {
 	relationsMu.RLock()
-	defer relationsMu.RUnlock()
 	results := make([]*resp.Value, 0)
 	for id := range relations {
 		results = append(results, resp.BulkString(id))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	relationsMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -1560,12 +1595,13 @@ func cmdCONNECTIONXSTATUS(ctx *Context) error {
 
 func cmdCONNECTIONXLIST(ctx *Context) error {
 	connectionsXMux.RLock()
-	defer connectionsXMux.RUnlock()
 	results := make([]*resp.Value, 0)
 	for id := range connectionsX {
 		results = append(results, resp.BulkString(id))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	connectionsXMux.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -1656,17 +1692,20 @@ func cmdPOOLXSTATUS(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	poolsXMux.RLock()
-	defer poolsXMux.RUnlock()
 	pool, exists := poolsX[name]
 	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR pool not found"))
+		reply := fmt.Errorf("ERR pool not found")
+		poolsXMux.RUnlock()
+		return ctx.WriteError(reply)
 	}
-	return ctx.WriteArray([]*resp.Value{
+	reply := []*resp.Value{
 		resp.BulkString("name"), resp.BulkString(pool.Name),
 		resp.BulkString("size"), resp.IntegerValue(int64(pool.Size)),
 		resp.BulkString("available"), resp.IntegerValue(int64(len(pool.Available))),
 		resp.BulkString("in_use"), resp.IntegerValue(int64(len(pool.InUse))),
-	})
+	}
+	poolsXMux.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -1712,12 +1751,14 @@ func cmdBUFFERXREAD(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	buffersXMux.RLock()
-	defer buffersXMux.RUnlock()
 	b, exists := buffersX[name]
 	if !exists {
+		buffersXMux.RUnlock()
 		return ctx.WriteNull()
 	}
-	return ctx.WriteBulkString(string(b.Data))
+	reply := string(b.Data)
+	buffersXMux.RUnlock()
+	return ctx.WriteBulkString(reply)
 }
 
 func cmdBUFFERXDELETE(ctx *Context) error {
@@ -1776,16 +1817,19 @@ func cmdSTREAMXREAD(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	streamsXMux.RLock()
-	defer streamsXMux.RUnlock()
 	s, exists := streamsX[name]
 	if !exists {
-		return ctx.WriteArray([]*resp.Value{})
+		reply := []*resp.Value{}
+		streamsXMux.RUnlock()
+		return ctx.WriteArray(reply)
 	}
 	results := make([]*resp.Value, len(s.Data))
 	for i, d := range s.Data {
 		results[i] = resp.BulkString(d)
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	streamsXMux.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdSTREAMXDELETE(ctx *Context) error {
@@ -1870,12 +1914,13 @@ func cmdEVENTXSUBSCRIBE(ctx *Context) error {
 
 func cmdEVENTXLIST(ctx *Context) error {
 	eventsXMux.RLock()
-	defer eventsXMux.RUnlock()
 	results := make([]*resp.Value, 0)
 	for name := range eventsX {
 		results = append(results, resp.BulkString(name))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	eventsXMux.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -1937,12 +1982,13 @@ func cmdHOOKTRIGGER(ctx *Context) error {
 
 func cmdHOOKLIST(ctx *Context) error {
 	hooksMu.RLock()
-	defer hooksMu.RUnlock()
 	results := make([]*resp.Value, 0)
 	for id := range hooks {
 		results = append(results, resp.BulkString(id))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	hooksMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -1999,12 +2045,13 @@ func cmdMIDDLEWAREEXECUTE(ctx *Context) error {
 
 func cmdMIDDLEWARELIST(ctx *Context) error {
 	middlewaresMu.RLock()
-	defer middlewaresMu.RUnlock()
 	results := make([]*resp.Value, 0)
 	for id := range middlewares {
 		results = append(results, resp.BulkString(id))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	middlewaresMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -2056,12 +2103,13 @@ func cmdINTERCEPTORCHECK(ctx *Context) error {
 
 func cmdINTERCEPTORLIST(ctx *Context) error {
 	interceptorsMu.RLock()
-	defer interceptorsMu.RUnlock()
 	results := make([]*resp.Value, 0)
 	for id := range interceptors {
 		results = append(results, resp.BulkString(id))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	interceptorsMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -2112,12 +2160,13 @@ func cmdGUARDCHECK(ctx *Context) error {
 
 func cmdGUARDLIST(ctx *Context) error {
 	guardsMu.RLock()
-	defer guardsMu.RUnlock()
 	results := make([]*resp.Value, 0)
 	for id := range guards {
 		results = append(results, resp.BulkString(id))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	guardsMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -2169,12 +2218,13 @@ func cmdPROXYROUTE(ctx *Context) error {
 
 func cmdPROXYLIST(ctx *Context) error {
 	proxiesMu.RLock()
-	defer proxiesMu.RUnlock()
 	results := make([]*resp.Value, 0)
 	for id := range proxies {
 		results = append(results, resp.BulkString(id))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	proxiesMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -2219,12 +2269,14 @@ func cmdCACHEXGET(ctx *Context) error {
 	name := ctx.ArgString(0)
 	key := ctx.ArgString(1)
 	cachesXMux.RLock()
-	defer cachesXMux.RUnlock()
 	if c, exists := cachesX[name]; exists {
 		if val, ok := c.Data[key]; ok {
-			return ctx.WriteBulkString(val)
+			reply := val
+			cachesXMux.RUnlock()
+			return ctx.WriteBulkString(reply)
 		}
 	}
+	cachesXMux.RUnlock()
 	return ctx.WriteNull()
 }
 
@@ -2246,12 +2298,13 @@ func cmdCACHEXSET(ctx *Context) error {
 
 func cmdCACHEXLIST(ctx *Context) error {
 	cachesXMux.RLock()
-	defer cachesXMux.RUnlock()
 	results := make([]*resp.Value, 0)
 	for name := range cachesX {
 		results = append(results, resp.BulkString(name))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	cachesXMux.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -2312,23 +2365,26 @@ func cmdSTOREXGET(ctx *Context) error {
 	name := ctx.ArgString(0)
 	key := ctx.ArgString(1)
 	storesXMux.RLock()
-	defer storesXMux.RUnlock()
 	if s, exists := storesX[name]; exists {
 		if val, ok := s.Data[key]; ok {
-			return ctx.WriteBulkString(val)
+			reply := val
+			storesXMux.RUnlock()
+			return ctx.WriteBulkString(reply)
 		}
 	}
+	storesXMux.RUnlock()
 	return ctx.WriteNull()
 }
 
 func cmdSTOREXLIST(ctx *Context) error {
 	storesXMux.RLock()
-	defer storesXMux.RUnlock()
 	results := make([]*resp.Value, 0)
 	for name := range storesX {
 		results = append(results, resp.BulkString(name))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	storesXMux.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -2389,10 +2445,11 @@ func cmdINDEXSEARCH(ctx *Context) error {
 	name := ctx.ArgString(0)
 	key := ctx.ArgString(1)
 	indexesMu.RLock()
-	defer indexesMu.RUnlock()
 	idx, exists := indexes[name]
 	if !exists {
-		return ctx.WriteArray([]*resp.Value{})
+		reply := []*resp.Value{}
+		indexesMu.RUnlock()
+		return ctx.WriteArray(reply)
 	}
 	results := make([]*resp.Value, 0)
 	if ids, ok := idx.Entries[key]; ok {
@@ -2400,17 +2457,20 @@ func cmdINDEXSEARCH(ctx *Context) error {
 			results = append(results, resp.BulkString(id))
 		}
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	indexesMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdINDEXLIST(ctx *Context) error {
 	indexesMu.RLock()
-	defer indexesMu.RUnlock()
 	results := make([]*resp.Value, 0)
 	for name := range indexes {
 		results = append(results, resp.BulkString(name))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	indexesMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -2454,12 +2514,13 @@ func cmdQUERYEXECUTE(ctx *Context) error {
 
 func cmdQUERYLIST(ctx *Context) error {
 	queriesMu.RLock()
-	defer queriesMu.RUnlock()
 	results := make([]*resp.Value, 0)
 	for name := range queries {
 		results = append(results, resp.BulkString(name))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	queriesMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -2509,12 +2570,13 @@ func cmdVIEWGET(ctx *Context) error {
 
 func cmdVIEWLIST(ctx *Context) error {
 	viewsMu.RLock()
-	defer viewsMu.RUnlock()
 	results := make([]*resp.Value, 0)
 	for name := range views {
 		results = append(results, resp.BulkString(name))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	viewsMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -2565,12 +2627,13 @@ func cmdREPORTGENERATE(ctx *Context) error {
 
 func cmdREPORTLIST(ctx *Context) error {
 	reportsMu.RLock()
-	defer reportsMu.RUnlock()
 	results := make([]*resp.Value, 0)
 	for id := range reports {
 		results = append(results, resp.BulkString(id))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	reportsMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -2660,12 +2723,13 @@ func cmdAUDITXSEARCH(ctx *Context) error {
 
 func cmdAUDITXLIST(ctx *Context) error {
 	auditsXMux.RLock()
-	defer auditsXMux.RUnlock()
 	results := make([]*resp.Value, 0)
 	for name := range auditsX {
 		results = append(results, resp.BulkString(name))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	auditsXMux.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -2712,15 +2776,20 @@ func cmdTOKENVALIDATE(ctx *Context) error {
 	}
 	id := ctx.ArgString(0)
 	tokensMu.RLock()
-	defer tokensMu.RUnlock()
 	token, exists := tokens[id]
 	if !exists {
-		return ctx.WriteInteger(0)
+		reply := int64(0)
+		tokensMu.RUnlock()
+		return ctx.WriteInteger(reply)
 	}
 	if time.Now().UnixMilli() > token.ExpiresAt {
-		return ctx.WriteInteger(0)
+		reply := int64(0)
+		tokensMu.RUnlock()
+		return ctx.WriteInteger(reply)
 	}
-	return ctx.WriteInteger(1)
+	reply := int64(1)
+	tokensMu.RUnlock()
+	return ctx.WriteInteger(reply)
 }
 
 func cmdTOKENREFRESH(ctx *Context) error {
@@ -2740,12 +2809,13 @@ func cmdTOKENREFRESH(ctx *Context) error {
 
 func cmdTOKENLIST(ctx *Context) error {
 	tokensMu.RLock()
-	defer tokensMu.RUnlock()
 	results := make([]*resp.Value, 0)
 	for id := range tokens {
 		results = append(results, resp.BulkString(id))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	tokensMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -2824,12 +2894,13 @@ func cmdSESSIONXSET(ctx *Context) error {
 
 func cmdSESSIONXLIST(ctx *Context) error {
 	sessionsXMux.RLock()
-	defer sessionsXMux.RUnlock()
 	results := make([]*resp.Value, 0)
 	for id := range sessionsX {
 		results = append(results, resp.BulkString(id))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	sessionsXMux.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -2875,17 +2946,20 @@ func cmdPROFILEGET(ctx *Context) error {
 	}
 	id := ctx.ArgString(0)
 	profilesMu.RLock()
-	defer profilesMu.RUnlock()
 	profile, exists := profiles[id]
 	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR profile not found"))
+		reply := fmt.Errorf("ERR profile not found")
+		profilesMu.RUnlock()
+		return ctx.WriteError(reply)
 	}
 	results := make([]*resp.Value, 0)
 	results = append(results, resp.BulkString("id"), resp.BulkString(profile.ID), resp.BulkString("user"), resp.BulkString(profile.User))
 	for k, v := range profile.Attributes {
 		results = append(results, resp.BulkString(k), resp.BulkString(v))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	profilesMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdPROFILESET(ctx *Context) error {
@@ -2906,12 +2980,13 @@ func cmdPROFILESET(ctx *Context) error {
 
 func cmdPROFILELIST(ctx *Context) error {
 	profilesMu.RLock()
-	defer profilesMu.RUnlock()
 	results := make([]*resp.Value, 0)
 	for id := range profiles {
 		results = append(results, resp.BulkString(id))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	profilesMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -2973,10 +3048,11 @@ func cmdROLEXCHECK(ctx *Context) error {
 
 func cmdROLEXLIST(ctx *Context) error {
 	rolesXMux.RLock()
-	defer rolesXMux.RUnlock()
 	results := make([]*resp.Value, 0)
 	for id := range rolesX {
 		results = append(results, resp.BulkString(id))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	rolesXMux.RUnlock()
+	return ctx.WriteArray(reply)
 }

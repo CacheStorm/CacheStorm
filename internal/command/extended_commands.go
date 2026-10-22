@@ -271,10 +271,11 @@ func cmdMSGQUEUEDEADLETTER(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	msgQueuesMu.RLock()
-	defer msgQueuesMu.RUnlock()
 	queue, exists := msgQueues[name]
 	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR queue not found"))
+		reply := fmt.Errorf("ERR queue not found")
+		msgQueuesMu.RUnlock()
+		return ctx.WriteError(reply)
 	}
 	results := make([]*resp.Value, 0)
 	for _, msg := range queue.DeadLetters {
@@ -284,7 +285,9 @@ func cmdMSGQUEUEDEADLETTER(ctx *Context) error {
 			resp.BulkString("retries"), resp.IntegerValue(int64(msg.Retries)),
 		}))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	msgQueuesMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdMSGQUEUEREQUEUE(ctx *Context) error {
@@ -333,18 +336,21 @@ func cmdMSGQUEUESTATS(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	msgQueuesMu.RLock()
-	defer msgQueuesMu.RUnlock()
 	queue, exists := msgQueues[name]
 	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR queue not found"))
+		reply := fmt.Errorf("ERR queue not found")
+		msgQueuesMu.RUnlock()
+		return ctx.WriteError(reply)
 	}
-	return ctx.WriteArray([]*resp.Value{
+	reply := []*resp.Value{
 		resp.BulkString("name"), resp.BulkString(queue.Name),
 		resp.BulkString("pending"), resp.IntegerValue(int64(len(queue.Messages))),
 		resp.BulkString("processing"), resp.IntegerValue(int64(len(queue.AckWait))),
 		resp.BulkString("dead_letters"), resp.IntegerValue(int64(len(queue.DeadLetters))),
 		resp.BulkString("max_retries"), resp.IntegerValue(int64(queue.MaxRetries)),
-	})
+	}
+	msgQueuesMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdMSGQUEUEDELETE(ctx *Context) error {
@@ -435,10 +441,11 @@ func cmdSERVICEDISCOVER(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	servicesMu.RLock()
-	defer servicesMu.RUnlock()
 	instances, exists := services[name]
 	if !exists {
-		return ctx.WriteArray([]*resp.Value{})
+		reply := []*resp.Value{}
+		servicesMu.RUnlock()
+		return ctx.WriteArray(reply)
 	}
 	results := make([]*resp.Value, 0)
 	for _, inst := range instances {
@@ -451,7 +458,9 @@ func cmdSERVICEDISCOVER(ctx *Context) error {
 			}))
 		}
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	servicesMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdSERVICEHEARTBEAT(ctx *Context) error {
@@ -473,12 +482,13 @@ func cmdSERVICEHEARTBEAT(ctx *Context) error {
 
 func cmdSERVICELIST(ctx *Context) error {
 	servicesMu.RLock()
-	defer servicesMu.RUnlock()
 	results := make([]*resp.Value, 0)
 	for name := range services {
 		results = append(results, resp.BulkString(name))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	servicesMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdSERVICEHEALTHY(ctx *Context) error {
@@ -487,10 +497,11 @@ func cmdSERVICEHEALTHY(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	servicesMu.RLock()
-	defer servicesMu.RUnlock()
 	instances, exists := services[name]
 	if !exists {
-		return ctx.WriteArray([]*resp.Value{})
+		reply := []*resp.Value{}
+		servicesMu.RUnlock()
+		return ctx.WriteArray(reply)
 	}
 	results := make([]*resp.Value, 0)
 	for _, inst := range instances {
@@ -498,7 +509,9 @@ func cmdSERVICEHEALTHY(ctx *Context) error {
 			results = append(results, resp.BulkString(inst.ID))
 		}
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	servicesMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdSERVICEWEIGHT(ctx *Context) error {
@@ -640,18 +653,21 @@ func cmdHEALTHXSTATUS(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	healthChecksXMux.RLock()
-	defer healthChecksXMux.RUnlock()
 	check, exists := healthChecksX[name]
 	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR health check not found"))
+		reply := fmt.Errorf("ERR health check not found")
+		healthChecksXMux.RUnlock()
+		return ctx.WriteError(reply)
 	}
-	return ctx.WriteArray([]*resp.Value{
+	reply := []*resp.Value{
 		resp.BulkString("name"), resp.BulkString(check.Name),
 		resp.BulkString("target"), resp.BulkString(check.Target),
 		resp.BulkString("type"), resp.BulkString(check.Type),
 		resp.BulkString("status"), resp.BulkString(check.Status),
 		resp.BulkString("last_check"), resp.IntegerValue(check.LastCheck),
-	})
+	}
+	healthChecksXMux.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdHEALTHXHISTORY(ctx *Context) error {
@@ -688,7 +704,6 @@ func cmdHEALTHXHISTORY(ctx *Context) error {
 
 func cmdHEALTHXLIST(ctx *Context) error {
 	healthChecksXMux.RLock()
-	defer healthChecksXMux.RUnlock()
 	results := make([]*resp.Value, 0)
 	for name, check := range healthChecksX {
 		results = append(results, resp.ArrayValue([]*resp.Value{
@@ -696,7 +711,9 @@ func cmdHEALTHXLIST(ctx *Context) error {
 			resp.BulkString("status"), resp.BulkString(check.Status),
 		}))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	healthChecksXMux.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -759,7 +776,6 @@ func cmdCRONREMOVE(ctx *Context) error {
 
 func cmdCRONLIST(ctx *Context) error {
 	cronJobsMu.RLock()
-	defer cronJobsMu.RUnlock()
 	results := make([]*resp.Value, 0)
 	for name, job := range cronJobs {
 		results = append(results, resp.ArrayValue([]*resp.Value{
@@ -769,7 +785,9 @@ func cmdCRONLIST(ctx *Context) error {
 			resp.BulkString("paused"), resp.BulkString(fmt.Sprintf("%v", job.Paused)),
 		}))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	cronJobsMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdCRONTRIGGER(ctx *Context) error {
@@ -851,10 +869,11 @@ func cmdCRONHISTORY(ctx *Context) error {
 		limit = int(parseInt64(ctx.ArgString(1)))
 	}
 	cronJobsMu.RLock()
-	defer cronJobsMu.RUnlock()
 	job, exists := cronJobs[name]
 	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR cron job not found"))
+		reply := fmt.Errorf("ERR cron job not found")
+		cronJobsMu.RUnlock()
+		return ctx.WriteError(reply)
 	}
 	results := make([]*resp.Value, 0)
 	start := len(job.History) - limit
@@ -869,7 +888,9 @@ func cmdCRONHISTORY(ctx *Context) error {
 			resp.BulkString("output"), resp.BulkString(r.Output),
 		}))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	cronJobsMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -1528,26 +1549,30 @@ func cmdTOPICSUBSCRIBERS(ctx *Context) error {
 	}
 	topic := ctx.ArgString(0)
 	topicMu.RLock()
-	defer topicMu.RUnlock()
 	subs, exists := topicSubs[topic]
 	if !exists {
-		return ctx.WriteArray([]*resp.Value{})
+		reply := []*resp.Value{}
+		topicMu.RUnlock()
+		return ctx.WriteArray(reply)
 	}
 	results := make([]*resp.Value, 0)
 	for clientID := range subs {
 		results = append(results, resp.BulkString(clientID))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	topicMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdTOPICLIST(ctx *Context) error {
 	topicMu.RLock()
-	defer topicMu.RUnlock()
 	results := make([]*resp.Value, 0)
 	for topic := range topicSubs {
 		results = append(results, resp.BulkString(topic))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	topicMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdTOPICHISTORY(ctx *Context) error {
@@ -1560,10 +1585,11 @@ func cmdTOPICHISTORY(ctx *Context) error {
 		limit = int(parseInt64(ctx.ArgString(1)))
 	}
 	topicMu.RLock()
-	defer topicMu.RUnlock()
 	hist, exists := topicHist[topic]
 	if !exists {
-		return ctx.WriteArray([]*resp.Value{})
+		reply := []*resp.Value{}
+		topicMu.RUnlock()
+		return ctx.WriteArray(reply)
 	}
 	start := len(hist) - limit
 	if start < 0 {
@@ -1578,7 +1604,9 @@ func cmdTOPICHISTORY(ctx *Context) error {
 			resp.BulkString("timestamp"), resp.IntegerValue(msg.Timestamp),
 		}))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	topicMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -1646,32 +1674,37 @@ func cmdWSBROADCAST(ctx *Context) error {
 	}
 	room := ctx.ArgString(0)
 	wsMu.RLock()
-	defer wsMu.RUnlock()
 	members, exists := wsRooms[room]
 	if !exists {
-		return ctx.WriteInteger(0)
+		reply := int64(0)
+		wsMu.RUnlock()
+		return ctx.WriteInteger(reply)
 	}
-	return ctx.WriteInteger(int64(len(members)))
+	reply := int64(int64(len(members)))
+	wsMu.RUnlock()
+	return ctx.WriteInteger(reply)
 }
 
 func cmdWSLIST(ctx *Context) error {
 	wsMu.RLock()
-	defer wsMu.RUnlock()
 	results := make([]*resp.Value, 0)
 	for id := range wsConns {
 		results = append(results, resp.BulkString(id))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	wsMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdWSROOMS(ctx *Context) error {
 	wsMu.RLock()
-	defer wsMu.RUnlock()
 	results := make([]*resp.Value, 0)
 	for room := range wsRooms {
 		results = append(results, resp.BulkString(room))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	wsMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdWSJOIN(ctx *Context) error {
@@ -1839,16 +1872,19 @@ func cmdLEADERHISTORY(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	leadersMu.RLock()
-	defer leadersMu.RUnlock()
 	election, exists := leaders[name]
 	if !exists {
-		return ctx.WriteArray([]*resp.Value{})
+		reply := []*resp.Value{}
+		leadersMu.RUnlock()
+		return ctx.WriteArray(reply)
 	}
 	results := make([]*resp.Value, 0)
 	for _, leader := range election.History {
 		results = append(results, resp.BulkString(leader))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	leadersMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -1894,11 +1930,12 @@ func cmdMEMOINVALIDATE(ctx *Context) error {
 
 func cmdMEMOSTATS(ctx *Context) error {
 	memoMu.RLock()
-	defer memoMu.RUnlock()
-	return ctx.WriteArray([]*resp.Value{
+	reply := []*resp.Value{
 		resp.BulkString("entries"), resp.IntegerValue(int64(len(memoCache))),
 		resp.BulkString("sets"), resp.IntegerValue(memoStats["sets"]),
-	})
+	}
+	memoMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdMEMOCLEAR(ctx *Context) error {
@@ -1980,17 +2017,20 @@ func cmdSENTINELXSTATUS(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	sentinelsXMux.RLock()
-	defer sentinelsXMux.RUnlock()
 	watch, exists := sentinelsX[name]
 	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR sentinel not found"))
+		reply := fmt.Errorf("ERR sentinel not found")
+		sentinelsXMux.RUnlock()
+		return ctx.WriteError(reply)
 	}
-	return ctx.WriteArray([]*resp.Value{
+	reply := []*resp.Value{
 		resp.BulkString("name"), resp.BulkString(watch.Name),
 		resp.BulkString("target"), resp.BulkString(watch.Target),
 		resp.BulkString("threshold"), resp.IntegerValue(watch.Threshold),
 		resp.BulkString("status"), resp.BulkString(watch.Status),
-	})
+	}
+	sentinelsXMux.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdSENTINELXALERTS(ctx *Context) error {
@@ -2084,7 +2124,6 @@ func cmdBACKUPXRESTORE(ctx *Context) error {
 
 func cmdBACKUPXLIST(ctx *Context) error {
 	backupsXMux.RLock()
-	defer backupsXMux.RUnlock()
 	results := make([]*resp.Value, 0)
 	for id, backup := range backupsX {
 		results = append(results, resp.ArrayValue([]*resp.Value{
@@ -2094,7 +2133,9 @@ func cmdBACKUPXLIST(ctx *Context) error {
 			resp.BulkString("created_at"), resp.IntegerValue(backup.CreatedAt),
 		}))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	backupsXMux.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdBACKUPXDELETE(ctx *Context) error {
