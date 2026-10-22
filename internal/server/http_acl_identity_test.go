@@ -40,6 +40,12 @@ func aclIdentityServer(t *testing.T) (*HTTPServer, *store.Store) {
 func seedACLUser(t *testing.T, username, password string, extraRules ...string) {
 	t.Helper()
 	sess := newACLSession(t)
+	// ACL SETUSER adds rules to an existing user, so a user another test
+	// seeded keeps the grants it was given there: rest_tag_acl_test.go
+	// grants "+del" to "web", which made this test's refusal of DEL pass
+	// for the wrong reason. Delete the user first so the seeding starts
+	// from nothing.
+	sess.do("ACL", "DELUSER", username)
 	args := []string{"ACL", "SETUSER", username, ">" + password, "on", "-@all", "+get", "~user:*"}
 	args = append(args, extraRules...)
 	if v := sess.do(args...); !aclIsOK(v) {

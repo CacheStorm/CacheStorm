@@ -51,9 +51,22 @@ func runTSValue(t *testing.T, router *Router, args ...string) string {
 // swapping the manager.
 var tsValueStore = store.NewStore()
 
+// withFreshTSManager gives the test its own time-series manager. The TS
+// handlers share the package-level tsManager, so a series written by an
+// earlier test (or by an earlier -count iteration) is still there: TS.ADD
+// then reports a duplicate timestamp, and a counter starts from the value
+// the previous iteration left. The previous manager is restored afterwards.
+func withFreshTSManager(t *testing.T) {
+	t.Helper()
+	previous := tsManager
+	tsManager = store.NewTimeSeriesManager()
+	t.Cleanup(func() { tsManager = previous })
+}
+
 // A non-numeric value must be rejected and must NOT leave a sample behind.
 // Before the fix TS.ADD replied ":1000" and stored a zero sample.
 func TestTSAddRejectsNonNumericValue(t *testing.T) {
+	withFreshTSManager(t)
 	router := newTSValueRouter()
 
 	reply := runTSValue(t, router, "TS.ADD", "ts:add:garbage", "1000", "abc")
@@ -72,6 +85,7 @@ func TestTSAddRejectsNonNumericValue(t *testing.T) {
 
 // TS.MADD feeds the same parser and must reject rather than store 0.
 func TestTSMAddRejectsNonNumericValue(t *testing.T) {
+	withFreshTSManager(t)
 	router := newTSValueRouter()
 
 	reply := runTSValue(t, router, "TS.MADD", "ts:madd:garbage", "1000", "zzz")
@@ -88,6 +102,7 @@ func TestTSMAddRejectsNonNumericValue(t *testing.T) {
 // (round 8's BLOCK policy), so reusing one key would fail on the policy, not
 // on the value parsing this test is about.
 func TestTSAddAcceptsValidValues(t *testing.T) {
+	withFreshTSManager(t)
 	for _, tc := range []struct{ name, value, want string }{
 		{name: "positive", value: "5", want: "5"},
 		{name: "negative", value: "-2", want: "-2"},
@@ -110,6 +125,7 @@ func TestTSAddAcceptsValidValues(t *testing.T) {
 // The timestamp keeps its "*" auto-timestamp sentinel. parseInt64("*") is 0,
 // so the timestamp must stay unvalidated even though the value is now strict.
 func TestTSAddKeepsAutoTimestamp(t *testing.T) {
+	withFreshTSManager(t)
 	router := newTSValueRouter()
 
 	// This series name is unique to this test. tsManager is a package global
