@@ -205,19 +205,37 @@ EOF
 install_binary() {
     echo -e "${YELLOW}Installing CacheStorm binary...${NC}"
 
-    # Get latest release URL
-    LATEST_URL="https://api.github.com/repos/${REPO}/releases/latest"
-
+    # Pick the release to install by VERSION. The API's latest-release
+    # endpoint answers with the most recently published release, so a
+    # version published late would be installed in place of the newest
+    # one.
     echo -e "${BLUE}Fetching latest release...${NC}"
 
+    RELEASES_URL="https://api.github.com/repos/${REPO}/releases?per_page=100"
     if command_exists curl; then
-        DOWNLOAD_URL=$(curl -s "$LATEST_URL" | grep "browser_download_url.*${PLATFORM}_${ARCH}" | cut -d '"' -f 4)
+        RELEASES_JSON=$(curl -s "$RELEASES_URL")
     elif command_exists wget; then
-        DOWNLOAD_URL=$(wget -qO- "$LATEST_URL" | grep "browser_download_url.*${PLATFORM}_${ARCH}" | cut -d '"' -f 4)
+        RELEASES_JSON=$(wget -qO- "$RELEASES_URL")
     else
         echo -e "${RED}Error: curl or wget is required${NC}"
         exit 1
     fi
+
+    RELEASE_TAG=$(select_latest_release_tag "$RELEASES_JSON")
+    if [ -z "$RELEASE_TAG" ]; then
+        echo -e "${RED}Error: No stable release found for ${REPO}${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}Latest release: $RELEASE_TAG${NC}"
+
+    RELEASE_URL="https://api.github.com/repos/${REPO}/releases/tags/${RELEASE_TAG}"
+    if command_exists curl; then
+        RELEASE_JSON=$(curl -s "$RELEASE_URL")
+    else
+        RELEASE_JSON=$(wget -qO- "$RELEASE_URL")
+    fi
+
+    DOWNLOAD_URL=$(printf '%s' "$RELEASE_JSON" | grep "browser_download_url.*${PLATFORM}_${ARCH}" | cut -d '"' -f 4 || true)
 
     if [ -z "$DOWNLOAD_URL" ]; then
         echo -e "${RED}Error: Could not find release for ${PLATFORM}/${ARCH}${NC}"
@@ -482,6 +500,80 @@ show_help() {
     echo "  help       Show this help message"
     echo ""
 }
+
+# ---------------------------------------------------------------------------
+# Release selection
+#
+# The download target is chosen by VERSION, not by publish date. The
+# GitHub API's latest-release endpoint answers with the most recently
+# PUBLISHED release, so a version that is published late — a back-dated
+# release — would be installed in place of the newest one.
+# ---------------------------------------------------------------------------
+
+# version_is_newer <a> <b>
+#   Succeeds when version a is higher than version b. A leading "v" and
+#   any pre-release suffix are ignored, so only the numeric core compares.
+version_is_newer() {
+    local a="${1#v}" b="${2#v}"
+    a="${a%%-*}" b="${b%%-*}"
+    local a_major a_minor a_patch b_major b_minor b_patch
+    a_major="${a%%.*}"; a="${a#*.}"; a_minor="${a%%.*}"; a_patch="${a#*.}"
+    b_major="${b%%.*}"; b="${b#*.}"; b_minor="${b%%.*}"; b_patch="${b#*.}"
+    a_major="${a_major:-0}"; a_minor="${a_minor:-0}"; a_patch="${a_patch:-0}"
+    b_major="${b_major:-0}"; b_minor="${b_minor:-0}"; b_patch="${b_patch:-0}"
+    [ "$a_major" -gt "$b_major" ] && return 0
+    [ "$a_major" -lt "$b_major" ] && return 1
+    [ "$a_minor" -gt "$b_minor" ] && return 0
+    [ "$a_minor" -lt "$b_minor" ] && return 1
+    [ "$a_patch" -gt "$b_patch" ] && return 0
+    return 1
+}
+
+# select_latest_release_tag <releases.json>
+#   Prints the tag of the highest stable release in the JSON array the
+#   GitHub releases API returns. Drafts and pre-releases are ignored.
+#   No jq is required: the array is read with awk, which every system
+#   running this script has.
+select_latest_release_tag() {
+    local best="" candidate
+    while IFS= read -r candidate; do
+        [ -z "$candidate" ] && continue
+        if [ -z "$best" ] || version_is_newer "$candidate" "$best"; then
+            best="$candidate"
+        fi
+    done < <(printf '%s' "$1" | awk '
+        {
+            opens = gsub(/\{/, "{", $0)
+            closes = gsub(/\}/, "}", $0)
+            if (depth == 0 && opens > 0) { tag = ""; draft = 0; prerelease = 0; inobject = 1 }
+            if (match($0, /"tag_name"[ \t]*:[ \t]*"[^"]*"/)) {
+                t = substr($0, RSTART, RLENGTH)
+                sub(/^.*:[ \t]*"/, "", t); sub(/"$/, "", t)
+                tag = t
+            }
+            if (match($0, /"draft"[ \t]*:[ \t]*(true|false)/)) {
+                d = substr($0, RSTART, RLENGTH); draft = (d ~ /true/) ? 1 : 0
+            }
+            if (match($0, /"prerelease"[ \t]*:[ \t]*(true|false)/)) {
+                p = substr($0, RSTART, RLENGTH); prerelease = (p ~ /true/) ? 1 : 0
+            }
+            depth += opens - closes
+            if (depth == 0 && inobject) {
+                if (tag != "" && !draft && !prerelease) print tag
+                inobject = 0
+            }
+        }')
+    printf '%s' "$best"
+}
+
+# Test hook: with CACHESTORM_TEST_SELECT_LATEST set to a file holding a
+# releases JSON document, print the release the installer would choose and
+# exit. The installer is piped into a shell, so this is the only way the
+# selection can be exercised without running an install.
+if [ -n "${CACHESTORM_TEST_SELECT_LATEST:-}" ]; then
+    select_latest_release_tag "$(cat "$CACHESTORM_TEST_SELECT_LATEST")"
+    exit 0
+fi
 
 # Main installation logic
 main() {

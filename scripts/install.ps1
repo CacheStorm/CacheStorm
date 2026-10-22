@@ -8,7 +8,13 @@ param(
     [ValidateSet("auto", "docker", "binary", "source", "uninstall", "help")]
     [string]$Method = "auto",
 
-    [switch]$Yes
+    [switch]$Yes,
+
+    # Test hook: with -SelectOnly <file>, print the release the installer
+    # would choose for a releases JSON document and exit. The installer is
+    # piped into PowerShell, so this is the only way the selection can be
+    # exercised without running an install.
+    [string]$SelectOnly = ""
 )
 
 # Error handling
@@ -229,11 +235,22 @@ function Install-Binary() {
 
     Write-Info "Detected platform: $platform/$arch"
 
-    # Get latest release
-    Write-Info "Fetching latest release..."
+          # Pick the release to install by VERSION. The API's latest-release
+      # endpoint answers with the most recently published release, so a
+      # version published late would be installed in place of the newest
+      # one.
+      Write-Info "Fetching latest release..."
 
-    try {
-        $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/latest"
+      try {
+          $releases = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases?per_page=100"
+          $tag = Select-LatestReleaseTag -Releases $releases
+          if (-not $tag) {
+              Write-Error "No stable release found for $Repo"
+              exit 1
+          }
+          Write-Info "Latest release: $tag"
+
+          $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/tags/$tag"
         $asset = $release.assets | Where-Object { $_.name -like "*${platform}_${arch}*.zip" -or $_.name -like "*${platform}*${arch}*.zip" } | Select-Object -First 1
 
         if (-not $asset) {
@@ -540,6 +557,42 @@ function Test-Installation() {
     }
 
     Write-Output ""
+}
+
+# Select-LatestReleaseTag picks the release to install by VERSION. The
+# GitHub API's latest-release endpoint answers with the most recently
+# PUBLISHED release, so a version that is published late - a back-dated
+# release - would be installed in place of the newest one.
+function Select-LatestReleaseTag {
+    param([object[]]$Releases)
+
+    $best = $null
+    foreach ($release in $Releases) {
+        if ($release.draft -or $release.prerelease -or -not $release.tag_name) { continue }
+
+        $version = $null
+        try {
+            $version = [version]($release.tag_name -replace '^v', '')
+        }
+        catch {
+            continue
+        }
+
+        if ($null -eq $best -or $version -gt $best.Version) {
+            $best = [pscustomobject]@{ Version = $version; Tag = $release.tag_name }
+        }
+    }
+
+    if ($null -eq $best) { return "" }
+    return $best.Tag
+}
+
+# Test hook: with -SelectOnly <file>, print the release the installer would
+# choose for a releases JSON document and exit.
+if ($SelectOnly) {
+    $releases = Get-Content -Raw $SelectOnly | ConvertFrom-Json
+    Select-LatestReleaseTag -Releases $releases
+    exit 0
 }
 
 # Main

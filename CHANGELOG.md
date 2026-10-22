@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 ### Fixed
+- Installers: the one-click scripts now choose the release to install by VERSION instead of by publish date. The GitHub API's latest-release endpoint answers with the most recently PUBLISHED release, so a version published late (a back-dated release) was installed in place of the newest one; both `install.sh` and `install.ps1` now pick the highest stable version from the releases list and ignore drafts and pre-releases
 - Version reporting: the INFO command now reports the version the binary was stamped with instead of a hardcoded `cachestorm_version:0.2.0`. The release stamped the version into the binary at link time, but only the `--version` flag read it, so every released server told clients it was 0.2.0. The build identity now lives in an `internal/version` package that both the command line and the INFO command read, so the two can never disagree
 ### Testing
 - Testing: remove the order dependence the -count sweep found. The time-series tests shared the package-level time-series manager, so a series written by an earlier test made TS.ADD report a duplicate timestamp and a counter start from the previous value; each test now installs its own manager and restores the previous one. The HTTP ACL seeding now deletes the user before seeding it, because ACL SETUSER adds rules to an existing user and another test's grant was leaking into it.
