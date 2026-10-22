@@ -85,10 +85,7 @@ linters:
           sizeThreshold: 128
       disabled-checks:
         - captLocal # `L` is the conventional gopher-lua state param name
-        - dupImport
         - ifElseChain
-        - octalLiteral
-        - whyNoLint
         - wrapperFunc
       # diagnostics + performance only: the style/opinionated/experimental
       # tags emitted ~100 findings of pure style churn (triage 2026-09-04).
