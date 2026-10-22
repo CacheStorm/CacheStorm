@@ -206,8 +206,8 @@ func cmdMODELSTATUS(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	mlModelsMx.RLock()
+	defer mlModelsMx.RUnlock()
 	m, exists := mlModels[name]
-	mlModelsMx.RUnlock()
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR model not found"))
 	}
@@ -466,8 +466,8 @@ func cmdTENSORGET(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	tensorsMx.RLock()
+	defer tensorsMx.RUnlock()
 	t, exists := tensors[name]
-	tensorsMx.RUnlock()
 	if !exists {
 		return ctx.WriteNull()
 	}
@@ -764,8 +764,8 @@ func cmdCLUSTERCENTROIDS(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	clusterMLsMx.RLock()
+	defer clusterMLsMx.RUnlock()
 	c, exists := clusterMLs[name]
-	clusterMLsMx.RUnlock()
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR cluster not found"))
 	}
@@ -1006,8 +1006,8 @@ func cmdDATASETGET(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	datasetsMx.RLock()
+	defer datasetsMx.RUnlock()
 	d, exists := datasets[name]
-	datasetsMx.RUnlock()
 	if !exists {
 		return ctx.WriteNull()
 	}

@@ -577,11 +577,11 @@ func cmdCHAINADD(ctx *Context) error {
 	name := ctx.ArgString(0)
 	data := ctx.ArgString(1)
 
-	chainsMu.RLock()
+	chainsMu.Lock()
 	chain, exists := chains[name]
-	chainsMu.RUnlock()
 
 	if !exists {
+		chainsMu.Unlock()
 		return ctx.WriteError(fmt.Errorf("ERR chain not found"))
 	}
 
@@ -605,6 +605,7 @@ func cmdCHAINADD(ctx *Context) error {
 
 	chain.Blocks = append(chain.Blocks, block)
 
+	chainsMu.Unlock()
 	return ctx.WriteInteger(index)
 }
 
@@ -693,8 +694,8 @@ func cmdCHAINLENGTH(ctx *Context) error {
 	name := ctx.ArgString(0)
 
 	chainsMu.RLock()
+	defer chainsMu.RUnlock()
 	chain, exists := chains[name]
-	chainsMu.RUnlock()
 
 	if !exists {
 		return ctx.WriteInteger(0)
@@ -864,8 +865,8 @@ func cmdANALYTICSAVG(ctx *Context) error {
 	name := ctx.ArgString(0)
 
 	analyticsMu.RLock()
+	defer analyticsMu.RUnlock()
 	data, exists := analytics[name]
-	analyticsMu.RUnlock()
 
 	if !exists || data.Count == 0 {
 		return ctx.WriteBulkString("0")
@@ -1004,8 +1005,8 @@ func cmdCONNECTIONINFO(ctx *Context) error {
 	id := parseInt64(ctx.ArgString(0))
 
 	connectionsMu.RLock()
+	defer connectionsMu.RUnlock()
 	conn, exists := connections[id]
-	connectionsMu.RUnlock()
 
 	if !exists {
 		return ctx.WriteNull()
@@ -1097,8 +1098,8 @@ func cmdPLUGINCALL(ctx *Context) error {
 	fn := ctx.ArgString(1)
 
 	pluginsMu.RLock()
+	defer pluginsMu.RUnlock()
 	plugin, exists := plugins[name]
-	pluginsMu.RUnlock()
 
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR plugin not found"))
@@ -1119,8 +1120,8 @@ func cmdPLUGININFO(ctx *Context) error {
 	name := ctx.ArgString(0)
 
 	pluginsMu.RLock()
+	defer pluginsMu.RUnlock()
 	plugin, exists := plugins[name]
-	pluginsMu.RUnlock()
 
 	if !exists {
 		return ctx.WriteNull()
@@ -1175,9 +1176,9 @@ func cmdROLLUPADD(ctx *Context) error {
 	timestamp := parseInt64(ctx.ArgString(1))
 	value := parseFloatExt([]byte(ctx.ArgString(2)))
 
-	rollupsMu.RLock()
+	rollupsMu.Lock()
 	rollup, exists := rollups[name]
-	rollupsMu.RUnlock()
+	defer rollupsMu.Unlock()
 
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR rollup not found"))
@@ -1198,8 +1199,8 @@ func cmdROLLUPGET(ctx *Context) error {
 	timestamp := parseInt64(ctx.ArgString(1))
 
 	rollupsMu.RLock()
+	defer rollupsMu.RUnlock()
 	rollup, exists := rollups[name]
-	rollupsMu.RUnlock()
 
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR rollup not found"))
@@ -1349,6 +1350,31 @@ type Quota struct {
 	Limit   int64
 	Used    int64
 	ResetAt int64
+	// WindowMs is the length of the counting window QUOTA.SET asked for.
+	// The window has to travel with the record: without it an expired window
+	// cannot be rolled forward correctly.
+	WindowMs int64
+}
+
+// rollQuotaWindow starts a new counting window when the current one has
+// expired. The window boundary moves forward by the configured window, the
+// same way the QUOTAX family in more_commands.go rolls its Period over.
+//
+// Before the fix the boundary was derived from the limit (Limit*1000), and
+// QUOTA.USE did not move it at all: it reset the counter but left ResetAt in
+// the past, so every later use started a fresh counter and the limit was
+// never enforced again once the first window had elapsed.
+func rollQuotaWindow(q *Quota, now int64) {
+	if now < q.ResetAt {
+		return
+	}
+	if q.WindowMs <= 0 {
+		// A quota without a window never rolls over: the limit applies for
+		// the lifetime of the quota instead of being reset on every use.
+		return
+	}
+	q.Used = 0
+	q.ResetAt = now + q.WindowMs
 }
 
 func cmdQUOTASET(ctx *Context) error {
@@ -1362,10 +1388,11 @@ func cmdQUOTASET(ctx *Context) error {
 
 	quotasMu.Lock()
 	quotas[key] = &Quota{
-		Key:     key,
-		Limit:   limit,
-		Used:    0,
-		ResetAt: time.Now().UnixMilli() + windowMs,
+		Key:      key,
+		Limit:    limit,
+		Used:     0,
+		ResetAt:  time.Now().UnixMilli() + windowMs,
+		WindowMs: windowMs,
 	}
 	quotasMu.Unlock()
 
@@ -1379,31 +1406,34 @@ func cmdQUOTACHECK(ctx *Context) error {
 
 	key := ctx.ArgString(0)
 
-	quotasMu.RLock()
+	// The rollover rewrites the record, so the read-modify-write runs under
+	// the write lock, the same way the QUOTAX family in more_commands.go
+	// rolls its Period over. The reply is written after the lock is released.
+	quotasMu.Lock()
 	quota, exists := quotas[key]
-	quotasMu.RUnlock()
-
 	if !exists {
+		quotasMu.Unlock()
 		return ctx.WriteError(fmt.Errorf("ERR quota not found"))
 	}
 
 	now := time.Now().UnixMilli()
-	if now >= quota.ResetAt {
-		quota.Used = 0
-		quota.ResetAt = now + (quota.ResetAt - (now - quota.Limit*1000))
-	}
+	rollQuotaWindow(quota, now)
 
-	remaining := quota.Limit - quota.Used
+	limit := quota.Limit
+	used := quota.Used
+	remaining := limit - used
+	resetAt := quota.ResetAt
+	quotasMu.Unlock()
 
 	return ctx.WriteArray([]*resp.Value{
 		resp.BulkString("limit"),
-		resp.IntegerValue(quota.Limit),
+		resp.IntegerValue(limit),
 		resp.BulkString("used"),
-		resp.IntegerValue(quota.Used),
+		resp.IntegerValue(used),
 		resp.BulkString("remaining"),
 		resp.IntegerValue(remaining),
 		resp.BulkString("reset_at"),
-		resp.IntegerValue(quota.ResetAt),
+		resp.IntegerValue(resetAt),
 	})
 }
 
@@ -1415,24 +1445,29 @@ func cmdQUOTAUSE(ctx *Context) error {
 	key := ctx.ArgString(0)
 	amount := parseInt64(ctx.ArgString(1))
 
-	quotasMu.RLock()
+	// The counter and the window boundary are read and written together, so
+	// the whole read-modify-write runs under the write lock: two concurrent
+	// uses must not both read the same counter, and a rollover must not be
+	// applied twice.
+	quotasMu.Lock()
 	quota, exists := quotas[key]
-	quotasMu.RUnlock()
-
 	if !exists {
+		quotasMu.Unlock()
 		return ctx.WriteError(fmt.Errorf("ERR quota not found"))
 	}
 
 	now := time.Now().UnixMilli()
-	if now >= quota.ResetAt {
-		quota.Used = 0
-	}
+	rollQuotaWindow(quota, now)
 
-	if quota.Used+amount > quota.Limit {
+	allowed := quota.Used+amount <= quota.Limit
+	if allowed {
+		quota.Used += amount
+	}
+	quotasMu.Unlock()
+
+	if !allowed {
 		return ctx.WriteInteger(0)
 	}
-
-	quota.Used += amount
 	return ctx.WriteInteger(1)
 }
 
@@ -1443,15 +1478,19 @@ func cmdQUOTARESET(ctx *Context) error {
 
 	key := ctx.ArgString(0)
 
-	quotasMu.RLock()
+	// Take the write lock for the whole read-modify-write. The lock used to
+	// be released right after the lookup, so quota.Used was zeroed with no
+	// lock at all while QUOTA.USE updated it under the write lock: a data
+	// race, and a reset that a concurrent use could undo.
+	quotasMu.Lock()
 	quota, exists := quotas[key]
-	quotasMu.RUnlock()
-
 	if !exists {
+		quotasMu.Unlock()
 		return ctx.WriteInteger(0)
 	}
 
 	quota.Used = 0
+	quotasMu.Unlock()
 	return ctx.WriteInteger(1)
 }
 
@@ -1474,9 +1513,10 @@ func cmdQUOTADELETE(ctx *Context) error {
 }
 
 func cmdQUOTALIST(ctx *Context) error {
-	quotasMu.RLock()
-	defer quotasMu.RUnlock()
-
+	// Take the write lock so every quota field this handler reports is read
+	// under the same lock that writes it. The reply is built under the lock
+	// and written after it is released.
+	quotasMu.Lock()
 	results := make([]*resp.Value, 0)
 	for key, quota := range quotas {
 		results = append(results,
@@ -1485,6 +1525,7 @@ func cmdQUOTALIST(ctx *Context) error {
 			resp.IntegerValue(quota.Used),
 		)
 	}
+	quotasMu.Unlock()
 
 	return ctx.WriteArray(results)
 }
