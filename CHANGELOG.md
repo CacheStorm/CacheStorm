@@ -32,6 +32,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Functions: FUNCTION-language functions receive their declared keys and args as `function(keys, args)` parameters like Redis; previously they arrived nil and only `redis.KEYS`/`redis.ARGV` carried them (`2d89217`)
 - CI: the quality gate passes again — the repository is gofmt-clean, ~30 golangci-lint findings resolved (including a real bug the linter caught: the Lua script test helper discarded the `ReadValue` error), and a data race between test-session goroutines and global slow-log/metrics swaps is fixed (`5786821`, `fa834cd`, `6e457ad`)
 - HTTP: the unauthenticated error reply drops its trailing period — `NOAUTH Authentication required` instead of `NOAUTH Authentication required.` (`fa834cd`)
+### Testing
+- ACL hardening regression suites: default-user init, key extraction shapes, script/FCALL guards and command permissions, HTTP identity and session binding, REST key/tag enforcement, requirepass gate, and the CONFIG reservation pin proving ACL/CONFIG are reserved against requirepass escalation (`0f6e3e8`)
+
+## [0.3.1] - 2026-10-22
+
+### Fixed
 - Quota: `QUOTA.USE`/`QUOTA.CHECK` roll the counting window forward by the configured window. The window length is now kept on the quota record: `QUOTA.USE` reset the counter on expiry but never moved the window boundary, so every later use started a fresh counter and the limit stopped being enforced after the first window; `QUOTA.CHECK` derived the boundary from the limit instead of the window. The rollover also runs under the write lock now, so concurrent uses cannot lose a count
 - Quota: the `QUOTAX.*` family enforces its limit when the period carries no usable length. A zero or non-numeric period reaches the handler as a zero-length window, and a zero-length window is over the moment the clock moves on, so the rollover reset the counter on every check and the limit was never enforced. Such a quota now keeps its counter for the lifetime of the quota — the same rule the `QUOTA.*` family uses
 - Quota: `QUOTAX.USAGE` reads the counter under the quota lock. The handler released the read lock right after the lookup and only then read `q.Used`/`q.Limit`, so the read raced with the write `QUOTAX.CHECK` performs under the write lock; the values are now snapshotted while the lock is held
@@ -53,9 +59,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Registry reads: `BUFFERX.READ`, `STREAMX.READ`, `ROLLUP.GET`, `JOBX.STATUS`, `LOCKX.STATUS` and `TRANSX.STATUS` hold the registry read lock across the entry read, and `ROLLUP.ADD` mutates the entry under the registry write lock — the same unlocked-read and unlocked-write defect as the other registry families, proven per family with the race detector. The `CONNECTIONX`, `SESSIONX`, `SECRET`, `TRIE`, `SHUFFLE` and `PARTITIONX` families were proven clean and are unchanged
 - Registry reads: `CONNECTION.INFO`, `PLUGIN.INFO` and `PLUGIN.CALL` hold the registry read lock across the entry read. Each released the lock right after the lookup and then read the entry's fields with no lock at all, which was safe only because every current writer publishes a fresh entry instead of updating the one a reader holds. A regression test now mutates a seeded entry in place under the registry write lock and races each reader against it, so the required locking is enforced rather than assumed
 - Connection tracking: the server now registers every live connection in the `connections` registry, counts the commands that connection issues and removes it when the connection closes, so `CONNECTION.INFO`, `CONNECTION.LIST` and `CONNECTION.COUNT` report the real connections instead of an empty set. The counter lives in the shared entry, so the update runs under the registry write lock while the readers hold the read lock
+- Toolchain: the Go toolchain is pinned at 1.26.10 everywhere — the module's `go` directive, the CI and release workflows and the three builder images — which clears GO-2026-6809 (crypto/x509 distrusting compromised intermediate certificates, fixed in go1.26.10) and keeps the release and image builds above the module's toolchain floor
 
 ### Testing
-- ACL hardening regression suites: default-user init, key extraction shapes, script/FCALL guards and command permissions, HTTP identity and session binding, REST key/tag enforcement, requirepass gate, and the CONFIG reservation pin proving ACL/CONFIG are reserved against requirepass escalation (`0f6e3e8`)
 - Registry concurrency suites: every registry family in `internal/command` is now covered by a `-race` family test, including the CONNECTION and PLUGIN families whose entries no command can seed — those are covered by a hand-built in-package test that inserts the entries into the registries directly and races each reader against its family's writer
 
 ## [0.2.0] - 2026-03-21
@@ -600,6 +606,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Commands | Description |
 |---------|------|----------|-------------|
+| 0.3.1 | 2026-10-22 | 1,606 | Registry locking, quota window enforcement, connection tracking |
 | 0.1.27 | 2026-02-25 | 1,606 | Test coverage improvements (89.1%) |
 | 0.1.26 | 2026-02-22 | 1,606 | Critical bug fixes, deadlock fixes |
 | 0.1.25 | 2026-02-21 | 1,606 | Redis 7 compatibility improvements |
@@ -615,6 +622,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 [Unreleased]: https://github.com/cachestorm/cachestorm/compare/v0.2.0...HEAD
+[0.3.1]: https://github.com/cachestorm/cachestorm/compare/v0.3.0...v0.3.1
 [0.2.0]: https://github.com/cachestorm/cachestorm/compare/v0.1.27...v0.2.0
 [0.1.27]: https://github.com/cachestorm/cachestorm/compare/v0.1.26...v0.1.27
 [0.1.26]: https://github.com/cachestorm/cachestorm/compare/v0.1.25...v0.1.26
