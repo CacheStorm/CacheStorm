@@ -76,7 +76,7 @@ func TestSentinelIsMasterDownReportsTheNamedMaster(t *testing.T) {
 	// SDown and upmaster to settle on OK.
 	deadline := time.Now().Add(10 * time.Second)
 	var downSettled, upSettled bool
-	for time.Now().Before(deadline) && !(downSettled && upSettled) {
+	for time.Now().Before(deadline) && (!downSettled || !upSettled) {
 		downSettled, upSettled = false, false
 		for _, m := range GetSentinel().Masters() {
 			flags := strings.Join(m.Flags, ",")

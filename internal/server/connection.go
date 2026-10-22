@@ -91,7 +91,7 @@ type deadlineWriterConn struct {
 }
 
 func (d *deadlineWriterConn) Write(b []byte) (int, error) {
-	_ = d.Conn.SetWriteDeadline(time.Now().Add(*d.timeout))
+	_ = d.SetWriteDeadline(time.Now().Add(*d.timeout))
 	return d.Conn.Write(b)
 }
 

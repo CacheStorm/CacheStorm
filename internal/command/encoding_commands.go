@@ -230,8 +230,8 @@ func urlDecode(s string) (string, error) {
 	i := 0
 
 	for i < len(s) {
-		switch {
-		case s[i] == '%':
+		switch s[i] {
+		case '%':
 			// A percent-escape must be followed by exactly two hex digits.
 			// Decoding anything else silently produced a WRONG BYTE: hexToByte
 			// had no else branch, so an invalid digit contributed nothing
@@ -247,7 +247,7 @@ func urlDecode(s string) (string, error) {
 			}
 			result.WriteByte(val)
 			i += 3
-		case s[i] == '+':
+		case '+':
 			result.WriteByte(' ')
 			i++
 		default:
