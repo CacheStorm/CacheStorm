@@ -14,6 +14,7 @@ import (
 	"github.com/cachestorm/cachestorm/internal/acl"
 	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
+	"github.com/cachestorm/cachestorm/internal/version"
 )
 
 var globalACL = acl.NewACL()
@@ -328,7 +329,7 @@ func cmdINFO(ctx *Context) error {
 	var sb strings.Builder
 
 	sb.WriteString("# Server\r\n")
-	sb.WriteString("cachestorm_version:0.2.0\r\n")
+	sb.WriteString("cachestorm_version:" + version.Version + "\r\n")
 	sb.WriteString("arch_bits:64\r\n")
 	sb.WriteString("tcp_port:")
 	sb.WriteString(strconv.Itoa(globalConfig.port))

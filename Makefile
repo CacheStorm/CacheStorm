@@ -12,7 +12,7 @@ DOCKER_IMAGE := cachestorm/cachestorm
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 GO_VERSION := $(shell go version | cut -d ' ' -f 3)
 BUILD_TIME := $(shell date -u '+%Y-%m-%d_%H:%M:%S')
-LDFLAGS := -ldflags "-s -w -X main.version=$(VERSION) -X main.buildTime=$(BUILD_TIME)"
+LDFLAGS := -ldflags "-s -w -X github.com/cachestorm/cachestorm/internal/version.Version=$(VERSION) -X github.com/cachestorm/cachestorm/internal/version.BuildTime=$(BUILD_TIME)"
 
 ## help: Show this help message
 help:

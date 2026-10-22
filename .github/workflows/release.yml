@@ -89,7 +89,7 @@ jobs:
           if [ "$GOOS" = "windows" ]; then
             OUTPUT="${OUTPUT}.exe"
           fi
-          go build -ldflags="-s -w -X main.version=$VERSION" -o $OUTPUT ./cmd/cachestorm
+          go build -ldflags="-s -w -X github.com/cachestorm/cachestorm/internal/version.Version=$VERSION" -o $OUTPUT ./cmd/cachestorm
 
       - name: Create archive
         run: |

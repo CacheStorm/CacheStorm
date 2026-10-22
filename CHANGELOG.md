@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Functions: FUNCTION-language functions receive their declared keys and args as `function(keys, args)` parameters like Redis; previously they arrived nil and only `redis.KEYS`/`redis.ARGV` carried them (`2d89217`)
 - CI: the quality gate passes again — the repository is gofmt-clean, ~30 golangci-lint findings resolved (including a real bug the linter caught: the Lua script test helper discarded the `ReadValue` error), and a data race between test-session goroutines and global slow-log/metrics swaps is fixed (`5786821`, `fa834cd`, `6e457ad`)
 - HTTP: the unauthenticated error reply drops its trailing period — `NOAUTH Authentication required` instead of `NOAUTH Authentication required.` (`fa834cd`)
+- Version reporting: the INFO command now reports the version the binary was stamped with instead of a hardcoded `cachestorm_version:0.2.0`. The release stamped the version into the binary at link time, but only the `--version` flag read it, so every released server told clients it was 0.2.0. The build identity now lives in an `internal/version` package that both the command line and the INFO command read, so the two can never disagree
 ### Testing
 - ACL hardening regression suites: default-user init, key extraction shapes, script/FCALL guards and command permissions, HTTP identity and session binding, REST key/tag enforcement, requirepass gate, and the CONFIG reservation pin proving ACL/CONFIG are reserved against requirepass escalation (`0f6e3e8`)
 

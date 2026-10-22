@@ -12,14 +12,10 @@ import (
 	"github.com/cachestorm/cachestorm/internal/config"
 	"github.com/cachestorm/cachestorm/internal/logger"
 	"github.com/cachestorm/cachestorm/internal/server"
+	"github.com/cachestorm/cachestorm/internal/version"
 )
 
-// Injected at link time via -ldflags "-X main.version=... -X main.buildTime=..."
-// (Makefile LDFLAGS and release.yml build step); defaults apply to plain `go build`.
 var (
-	version   = "dev"
-	buildTime = "unknown"
-
 	configPath  = flag.String("config", "", "path to config file")
 	bind        = flag.String("bind", "", "bind address")
 	port        = flag.Int("port", 0, "server port")
@@ -30,7 +26,7 @@ func main() {
 	flag.Parse()
 
 	if *showVersion {
-		fmt.Printf("cachestorm %s (built %s)\n", version, buildTime)
+		fmt.Printf("cachestorm %s (built %s)\n", version.Version, version.BuildTime)
 		return
 	}
 
