@@ -12,6 +12,27 @@ import (
 	"github.com/cachestorm/cachestorm/internal/store"
 )
 
+// withFreshGlobalManager installs a fresh manager as the package-level
+// singleton for the duration of the test and restores the previous one
+// afterwards.
+//
+// The three tests below read GetManager(), and the rest of the package's
+// tests mutate that manager: they add replicas and advance the master
+// offset. They therefore only passed on the first -count iteration and
+// failed on every later one. Their assertions are unchanged -- they still
+// read the global -- but they now read a global that nothing else has
+// touched.
+//
+// The manager is built with the shared newTestManager helper so its field
+// initialisation matches every other test in the package.
+func withFreshGlobalManager(t *testing.T) *Manager {
+	t.Helper()
+	previous := globalManager
+	globalManager = newTestManager(&config.ReplicationConfig{}, store.NewStore())
+	t.Cleanup(func() { globalManager = previous })
+	return globalManager
+}
+
 func TestGenerateReplicaID(t *testing.T) {
 	id1 := generateReplicaID()
 	time.Sleep(time.Nanosecond)
@@ -54,7 +75,7 @@ func TestManagerGetReplicaID(t *testing.T) {
 }
 
 func TestManagerGetMasterOffset(t *testing.T) {
-	m := GetManager()
+	m := withFreshGlobalManager(t)
 	if m == nil {
 		t.Fatal("expected manager")
 	}
@@ -66,7 +87,7 @@ func TestManagerGetMasterOffset(t *testing.T) {
 }
 
 func TestManagerGetReplicas(t *testing.T) {
-	m := GetManager()
+	m := withFreshGlobalManager(t)
 	if m == nil {
 		t.Fatal("expected manager")
 	}
@@ -78,7 +99,7 @@ func TestManagerGetReplicas(t *testing.T) {
 }
 
 func TestManagerGetReplicaCount(t *testing.T) {
-	m := GetManager()
+	m := withFreshGlobalManager(t)
 	if m == nil {
 		t.Fatal("expected manager")
 	}
