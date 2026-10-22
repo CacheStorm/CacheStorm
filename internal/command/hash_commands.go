@@ -107,13 +107,15 @@ func cmdHGET(ctx *Context) error {
 	}
 
 	hash.RLock()
-	defer hash.RUnlock()
 	value, exists := hash.Fields[field]
 	if !exists {
+		hash.RUnlock()
 		return ctx.WriteNullBulkString()
 	}
 
-	return ctx.WriteBulkBytes(value)
+	reply := value
+	hash.RUnlock()
+	return ctx.WriteBulkBytes(reply)
 }
 
 func cmdHMSET(ctx *Context) error {
@@ -158,7 +160,6 @@ func cmdHMGET(ctx *Context) error {
 	}
 
 	hash.RLock()
-	defer hash.RUnlock()
 	for i := 1; i < ctx.ArgCount(); i++ {
 		field := ctx.ArgString(i)
 		value, exists := hash.Fields[field]
@@ -169,7 +170,9 @@ func cmdHMGET(ctx *Context) error {
 		}
 	}
 
-	return ctx.WriteArray(results)
+	reply := results
+	hash.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdHGETALL(ctx *Context) error {
@@ -187,13 +190,14 @@ func cmdHGETALL(ctx *Context) error {
 	}
 
 	hash.RLock()
-	defer hash.RUnlock()
 	results := make([]*resp.Value, 0, len(hash.Fields)*2)
 	for field, value := range hash.Fields {
 		results = append(results, resp.BulkString(field), resp.BulkBytes(value))
 	}
 
-	return ctx.WriteArray(results)
+	reply := results
+	hash.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdHDEL(ctx *Context) error {
@@ -247,11 +251,14 @@ func cmdHEXISTS(ctx *Context) error {
 	}
 
 	hash.RLock()
-	defer hash.RUnlock()
 	if _, exists := hash.Fields[field]; exists {
-		return ctx.WriteInteger(1)
+		reply := int64(1)
+		hash.RUnlock()
+		return ctx.WriteInteger(reply)
 	}
-	return ctx.WriteInteger(0)
+	reply := int64(0)
+	hash.RUnlock()
+	return ctx.WriteInteger(reply)
 }
 
 func cmdHLEN(ctx *Context) error {
@@ -269,8 +276,9 @@ func cmdHLEN(ctx *Context) error {
 	}
 
 	hash.RLock()
-	defer hash.RUnlock()
-	return ctx.WriteInteger(int64(len(hash.Fields)))
+	reply := int64(int64(len(hash.Fields)))
+	hash.RUnlock()
+	return ctx.WriteInteger(reply)
 }
 
 func cmdHKEYS(ctx *Context) error {
@@ -288,13 +296,14 @@ func cmdHKEYS(ctx *Context) error {
 	}
 
 	hash.RLock()
-	defer hash.RUnlock()
 	keys := make([]*resp.Value, 0, len(hash.Fields))
 	for field := range hash.Fields {
 		keys = append(keys, resp.BulkString(field))
 	}
 
-	return ctx.WriteArray(keys)
+	reply := keys
+	hash.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdHVALS(ctx *Context) error {
@@ -312,13 +321,14 @@ func cmdHVALS(ctx *Context) error {
 	}
 
 	hash.RLock()
-	defer hash.RUnlock()
 	vals := make([]*resp.Value, 0, len(hash.Fields))
 	for _, value := range hash.Fields {
 		vals = append(vals, resp.BulkBytes(value))
 	}
 
-	return ctx.WriteArray(vals)
+	reply := vals
+	hash.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdHINCRBY(ctx *Context) error {
@@ -466,13 +476,16 @@ func cmdHSTRLEN(ctx *Context) error {
 	}
 
 	hash.RLock()
-	defer hash.RUnlock()
 	value, exists := hash.Fields[field]
 	if !exists {
-		return ctx.WriteInteger(0)
+		reply := int64(0)
+		hash.RUnlock()
+		return ctx.WriteInteger(reply)
 	}
 
-	return ctx.WriteInteger(int64(len(value)))
+	reply := int64(int64(len(value)))
+	hash.RUnlock()
+	return ctx.WriteInteger(reply)
 }
 
 func cmdHSCAN(ctx *Context) error {
@@ -530,7 +543,6 @@ func cmdHSCAN(ctx *Context) error {
 	}
 
 	hash.RLock()
-	defer hash.RUnlock()
 	fields := make([]string, 0, len(hash.Fields))
 	for field := range hash.Fields {
 		if matchPattern(field, pattern) {
@@ -559,10 +571,12 @@ func cmdHSCAN(ctx *Context) error {
 		result = append(result, resp.BulkString(field), resp.BulkBytes(hash.Fields[field]))
 	}
 
-	return ctx.WriteArray([]*resp.Value{
+	reply := []*resp.Value{
 		resp.BulkString(strconv.Itoa(nextCursor)),
 		resp.ArrayValue(result),
-	})
+	}
+	hash.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdHRANDFIELD(ctx *Context) error {
@@ -624,7 +638,6 @@ func cmdHRANDFIELD(ctx *Context) error {
 	}
 
 	hash.RLock()
-	defer hash.RUnlock()
 	// A negative count is supported (see the branch below) but its magnitude
 	// is caller-controlled: bound the pre-allocation (append grows as needed)
 	// and cap the loop so an absurd magnitude cannot overflow the capacity
@@ -661,7 +674,9 @@ func cmdHRANDFIELD(ctx *Context) error {
 		}
 	}
 
-	return ctx.WriteArray(result)
+	reply := result
+	hash.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdHGETDEL(ctx *Context) error {
@@ -831,13 +846,15 @@ func cmdHGETEX(ctx *Context) error {
 	}
 
 	hash.RLock()
-	defer hash.RUnlock()
 	if len(fields) == 1 {
 		value, exists := hash.Fields[fields[0]]
 		if !exists {
+			hash.RUnlock()
 			return ctx.WriteNullBulkString()
 		}
-		return ctx.WriteBulkBytes(value)
+		reply := value
+		hash.RUnlock()
+		return ctx.WriteBulkBytes(reply)
 	}
 
 	results := make([]*resp.Value, 0, len(fields))
@@ -848,5 +865,7 @@ func cmdHGETEX(ctx *Context) error {
 			results = append(results, resp.NullValue())
 		}
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	hash.RUnlock()
+	return ctx.WriteArray(reply)
 }

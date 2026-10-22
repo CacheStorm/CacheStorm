@@ -271,8 +271,9 @@ func cmdZCARD(ctx *Context) error {
 	}
 
 	zset.RLock()
-	defer zset.RUnlock()
-	return ctx.WriteInteger(int64(len(zset.Members)))
+	reply := int64(int64(len(zset.Members)))
+	zset.RUnlock()
+	return ctx.WriteInteger(reply)
 }
 
 func cmdZCOUNT(ctx *Context) error {
@@ -299,8 +300,9 @@ func cmdZCOUNT(ctx *Context) error {
 	}
 
 	zset.RLock()
-	defer zset.RUnlock()
-	return ctx.WriteInteger(int64(zset.Count(minScore, maxScore)))
+	reply := int64(int64(zset.Count(minScore, maxScore)))
+	zset.RUnlock()
+	return ctx.WriteInteger(reply)
 }
 
 func cmdZINCRBY(ctx *Context) error {
@@ -425,14 +427,15 @@ func cmdZRANGE(ctx *Context) error {
 	}
 
 	zset.RLock()
-	defer zset.RUnlock()
 
 	var entries []store.SortedEntry
 
 	if byScore {
 		minScore, minExclusive, maxScore, maxExclusive, err := parseScoreRange(startStr, stopStr)
 		if err != nil {
-			return ctx.WriteError(err)
+			reply := err
+			zset.RUnlock()
+			return ctx.WriteError(reply)
 		}
 		entries = zset.GetByScoreRange(minScore, minExclusive, maxScore, maxExclusive, rev)
 		entries = applyLimit(entries, offset, count)
@@ -443,11 +446,15 @@ func cmdZRANGE(ctx *Context) error {
 	} else {
 		start, err := strconv.Atoi(startStr)
 		if err != nil {
-			return ctx.WriteError(ErrNotInteger)
+			reply := ErrNotInteger
+			zset.RUnlock()
+			return ctx.WriteError(reply)
 		}
 		stop, err := strconv.Atoi(stopStr)
 		if err != nil {
-			return ctx.WriteError(ErrNotInteger)
+			reply := ErrNotInteger
+			zset.RUnlock()
+			return ctx.WriteError(reply)
 		}
 		entries = zset.GetSortedRange(start, stop, false, rev)
 	}
@@ -460,7 +467,9 @@ func cmdZRANGE(ctx *Context) error {
 		}
 	}
 
-	return ctx.WriteArray(results)
+	reply := results
+	zset.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func parseScoreRange(minStr, maxStr string) (min float64, minExclusive bool, max float64, maxExclusive bool, err error) {

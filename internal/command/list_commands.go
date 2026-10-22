@@ -281,11 +281,12 @@ func cmdLRANGE(ctx *Context) error {
 	}
 
 	list.RLock()
-	defer list.RUnlock()
 
 	length := len(list.Elements)
 	if length == 0 {
-		return ctx.WriteArray([]*resp.Value{})
+		reply := []*resp.Value{}
+		list.RUnlock()
+		return ctx.WriteArray(reply)
 	}
 
 	if start < 0 {
@@ -302,7 +303,9 @@ func cmdLRANGE(ctx *Context) error {
 		stop = length - 1
 	}
 	if start > stop {
-		return ctx.WriteArray([]*resp.Value{})
+		reply := []*resp.Value{}
+		list.RUnlock()
+		return ctx.WriteArray(reply)
 	}
 
 	results := make([]*resp.Value, 0, stop-start+1)
@@ -310,7 +313,9 @@ func cmdLRANGE(ctx *Context) error {
 		results = append(results, resp.BulkBytes(list.Elements[i]))
 	}
 
-	return ctx.WriteArray(results)
+	reply := results
+	list.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdLINDEX(ctx *Context) error {
@@ -333,17 +338,19 @@ func cmdLINDEX(ctx *Context) error {
 	}
 
 	list.RLock()
-	defer list.RUnlock()
 
 	length := len(list.Elements)
 	if index < 0 {
 		index = length + index
 	}
 	if index < 0 || index >= length {
+		list.RUnlock()
 		return ctx.WriteNullBulkString()
 	}
 
-	return ctx.WriteBulkBytes(list.Elements[index])
+	reply := list.Elements[index]
+	list.RUnlock()
+	return ctx.WriteBulkBytes(reply)
 }
 
 func cmdLSET(ctx *Context) error {
@@ -1029,7 +1036,6 @@ func cmdLPOS(ctx *Context) error {
 	}
 
 	list.RLock()
-	defer list.RUnlock()
 
 	absRank := rank
 	if rank < 0 {
@@ -1055,9 +1061,13 @@ func cmdLPOS(ctx *Context) error {
 								result = append(result, resp.IntegerValue(int64(j)))
 							}
 						}
-						return ctx.WriteArray(result)
+						reply := result
+						list.RUnlock()
+						return ctx.WriteArray(reply)
 					}
-					return ctx.WriteInteger(int64(i))
+					reply := int64(int64(i))
+					list.RUnlock()
+					return ctx.WriteInteger(reply)
 				}
 			}
 		}
@@ -1080,17 +1090,24 @@ func cmdLPOS(ctx *Context) error {
 								result = append(result, resp.IntegerValue(int64(j)))
 							}
 						}
-						return ctx.WriteArray(result)
+						reply := result
+						list.RUnlock()
+						return ctx.WriteArray(reply)
 					}
-					return ctx.WriteInteger(int64(i))
+					reply := int64(int64(i))
+					list.RUnlock()
+					return ctx.WriteInteger(reply)
 				}
 			}
 		}
 	}
 
 	if count > 0 {
-		return ctx.WriteArray([]*resp.Value{})
+		reply := []*resp.Value{}
+		list.RUnlock()
+		return ctx.WriteArray(reply)
 	}
+	list.RUnlock()
 	return ctx.WriteNull()
 }
 

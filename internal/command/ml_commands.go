@@ -188,7 +188,6 @@ func cmdMODELDELETE(ctx *Context) error {
 
 func cmdMODELLIST(ctx *Context) error {
 	mlModelsMx.RLock()
-	defer mlModelsMx.RUnlock()
 	results := make([]*resp.Value, 0)
 	for name, m := range mlModels {
 		results = append(results, resp.ArrayValue([]*resp.Value{
@@ -197,7 +196,9 @@ func cmdMODELLIST(ctx *Context) error {
 			resp.BulkString("status"), resp.BulkString(m.Status),
 		}))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	mlModelsMx.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdMODELSTATUS(ctx *Context) error {
@@ -206,17 +207,20 @@ func cmdMODELSTATUS(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	mlModelsMx.RLock()
-	defer mlModelsMx.RUnlock()
 	m, exists := mlModels[name]
 	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR model not found"))
+		reply := fmt.Errorf("ERR model not found")
+		mlModelsMx.RUnlock()
+		return ctx.WriteError(reply)
 	}
-	return ctx.WriteArray([]*resp.Value{
+	reply := []*resp.Value{
 		resp.BulkString("name"), resp.BulkString(m.Name),
 		resp.BulkString("type"), resp.BulkString(m.Type),
 		resp.BulkString("status"), resp.BulkString(m.Status),
 		resp.BulkString("features"), resp.IntegerValue(int64(len(m.Features))),
-	})
+	}
+	mlModelsMx.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 var (
@@ -247,16 +251,19 @@ func cmdFEATUREGET(ctx *Context) error {
 	entity := ctx.ArgString(0)
 	key := ctx.ArgString(1)
 	featuresMx.RLock()
-	defer featuresMx.RUnlock()
 	e, exists := features[entity]
 	if !exists {
+		featuresMx.RUnlock()
 		return ctx.WriteNull()
 	}
 	val, exists := e[key]
 	if !exists {
+		featuresMx.RUnlock()
 		return ctx.WriteNull()
 	}
-	return ctx.WriteBulkString(fmt.Sprintf("%.6f", val))
+	reply := fmt.Sprintf("%.6f", val)
+	featuresMx.RUnlock()
+	return ctx.WriteBulkString(reply)
 }
 
 func cmdFEATUREDEL(ctx *Context) error {
@@ -381,7 +388,6 @@ func cmdEMBEDDINGSEARCH(ctx *Context) error {
 	_ = ctx.ArgString(0)
 	k := parseInt64(ctx.ArgString(1))
 	embeddingsMx.RLock()
-	defer embeddingsMx.RUnlock()
 	results := make([]*resp.Value, 0)
 	count := int64(0)
 	for id := range embeddings {
@@ -391,7 +397,9 @@ func cmdEMBEDDINGSEARCH(ctx *Context) error {
 		results = append(results, resp.BulkString(id))
 		count++
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	embeddingsMx.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdEMBEDDINGSIMILAR(ctx *Context) error {
@@ -466,9 +474,9 @@ func cmdTENSORGET(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	tensorsMx.RLock()
-	defer tensorsMx.RUnlock()
 	t, exists := tensors[name]
 	if !exists {
+		tensorsMx.RUnlock()
 		return ctx.WriteNull()
 	}
 	shape := make([]*resp.Value, len(t.Shape))
@@ -479,10 +487,12 @@ func cmdTENSORGET(ctx *Context) error {
 	for i, d := range t.Data {
 		data[i] = resp.BulkString(fmt.Sprintf("%.6f", d))
 	}
-	return ctx.WriteArray([]*resp.Value{
+	reply := []*resp.Value{
 		resp.BulkString("shape"), resp.ArrayValue(shape),
 		resp.BulkString("data"), resp.ArrayValue(data),
-	})
+	}
+	tensorsMx.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdTENSORADD(ctx *Context) error {
@@ -764,10 +774,11 @@ func cmdCLUSTERCENTROIDS(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	clusterMLsMx.RLock()
-	defer clusterMLsMx.RUnlock()
 	c, exists := clusterMLs[name]
 	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR cluster not found"))
+		reply := fmt.Errorf("ERR cluster not found")
+		clusterMLsMx.RUnlock()
+		return ctx.WriteError(reply)
 	}
 	results := make([]*resp.Value, 0)
 	for i, centroid := range c.Centroids {
@@ -779,7 +790,9 @@ func cmdCLUSTERCENTROIDS(ctx *Context) error {
 			resp.IntegerValue(int64(i)), resp.ArrayValue(pts),
 		}))
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	clusterMLsMx.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdCLUSTERMLDELETE(ctx *Context) error {
@@ -1006,16 +1019,18 @@ func cmdDATASETGET(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	datasetsMx.RLock()
-	defer datasetsMx.RUnlock()
 	d, exists := datasets[name]
 	if !exists {
+		datasetsMx.RUnlock()
 		return ctx.WriteNull()
 	}
 	results := make([]*resp.Value, len(d.Data))
 	for i, item := range d.Data {
 		results[i] = resp.BulkString(item)
 	}
-	return ctx.WriteArray(results)
+	reply := results
+	datasetsMx.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdDATASETSPLIT(ctx *Context) error {

@@ -153,13 +153,14 @@ func cmdSMEMBERS(ctx *Context) error {
 	}
 
 	set.RLock()
-	defer set.RUnlock()
 	members := make([]*resp.Value, 0, len(set.Members))
 	for member := range set.Members {
 		members = append(members, resp.BulkString(member))
 	}
 
-	return ctx.WriteArray(members)
+	reply := members
+	set.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdSISMEMBER(ctx *Context) error {
@@ -179,11 +180,14 @@ func cmdSISMEMBER(ctx *Context) error {
 	}
 
 	set.RLock()
-	defer set.RUnlock()
 	if _, exists := set.Members[member]; exists {
-		return ctx.WriteInteger(1)
+		reply := int64(1)
+		set.RUnlock()
+		return ctx.WriteInteger(reply)
 	}
-	return ctx.WriteInteger(0)
+	reply := int64(0)
+	set.RUnlock()
+	return ctx.WriteInteger(reply)
 }
 
 func cmdSCARD(ctx *Context) error {
@@ -201,8 +205,9 @@ func cmdSCARD(ctx *Context) error {
 	}
 
 	set.RLock()
-	defer set.RUnlock()
-	return ctx.WriteInteger(int64(len(set.Members)))
+	reply := int64(int64(len(set.Members)))
+	set.RUnlock()
+	return ctx.WriteInteger(reply)
 }
 
 func cmdSPOP(ctx *Context) error {
