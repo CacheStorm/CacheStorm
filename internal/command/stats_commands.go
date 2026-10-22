@@ -453,11 +453,14 @@ func cmdHISTOGRAMADD(ctx *Context) error {
 
 	key := ctx.ArgString(0)
 
-	histogramsMu.RLock()
+	// The histogram is mutated under the registry write lock. The readers
+	// (HISTOGRAM.INFO) read its fields under the registry read lock, so the
+	// two must exclude each other: adding to the histogram with no lock at
+	// all raced with every reader of the same histogram.
+	histogramsMu.Lock()
 	h, exists := histograms[key]
-	histogramsMu.RUnlock()
-
 	if !exists {
+		histogramsMu.Unlock()
 		return ctx.WriteError(fmt.Errorf("ERR histogram not found"))
 	}
 
@@ -470,6 +473,7 @@ func cmdHISTOGRAMADD(ctx *Context) error {
 		h.Add(v)
 		count++
 	}
+	histogramsMu.Unlock()
 
 	return ctx.WriteInteger(int64(count))
 }
@@ -523,16 +527,17 @@ func cmdHISTOGRAMRESET(ctx *Context) error {
 
 	key := ctx.ArgString(0)
 
-	histogramsMu.RLock()
+	histogramsMu.Lock()
 	h, exists := histograms[key]
-	histogramsMu.RUnlock()
 
 	if !exists {
+		histogramsMu.Unlock()
 		return ctx.WriteError(fmt.Errorf("ERR histogram not found"))
 	}
 
 	h.Reset()
 
+	histogramsMu.Unlock()
 	return ctx.WriteOK()
 }
 
@@ -544,8 +549,8 @@ func cmdHISTOGRAMINFO(ctx *Context) error {
 	key := ctx.ArgString(0)
 
 	histogramsMu.RLock()
+	defer histogramsMu.RUnlock()
 	h, exists := histograms[key]
-	histogramsMu.RUnlock()
 
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR histogram not found"))

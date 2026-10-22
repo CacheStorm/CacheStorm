@@ -1160,19 +1160,25 @@ func cmdRINGADD(ctx *Context) error {
 	name := ctx.ArgString(0)
 	node := ctx.ArgString(1)
 
-	ringsMu.RLock()
+	// The ring is looked up and mutated under a single write lock. Looking it
+	// up under the read lock and mutating it after a separate write lock
+	// left a window in which a RING.CREATE could replace the ring: the
+	// append was then applied to the detached instance, so the node was
+	// silently lost and the reply described a ring that was no longer live.
+	ringsMu.Lock()
 	ring, exists := rings[name]
-	ringsMu.RUnlock()
-
 	if !exists {
+		ringsMu.Unlock()
 		return ctx.WriteError(fmt.Errorf("ERR ring not found"))
 	}
 
-	ringsMu.Lock()
 	ring.Nodes = append(ring.Nodes, node)
+	// The size is read while the write lock is still held: reading it after
+	// the unlock raced with a concurrent RING.ADD.
+	size := len(ring.Nodes)
 	ringsMu.Unlock()
 
-	return ctx.WriteInteger(int64(len(ring.Nodes)))
+	return ctx.WriteInteger(int64(size))
 }
 
 func cmdRINGGET(ctx *Context) error {
@@ -1184,8 +1190,8 @@ func cmdRINGGET(ctx *Context) error {
 	key := ctx.ArgString(1)
 
 	ringsMu.RLock()
+	defer ringsMu.RUnlock()
 	ring, exists := rings[name]
-	ringsMu.RUnlock()
 
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR ring not found"))
@@ -1217,8 +1223,8 @@ func cmdRINGNODES(ctx *Context) error {
 	name := ctx.ArgString(0)
 
 	ringsMu.RLock()
+	defer ringsMu.RUnlock()
 	ring, exists := rings[name]
-	ringsMu.RUnlock()
 
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR ring not found"))
@@ -1240,15 +1246,16 @@ func cmdRINGREMOVE(ctx *Context) error {
 	name := ctx.ArgString(0)
 	node := ctx.ArgString(1)
 
-	ringsMu.RLock()
+	// The ring is looked up and mutated under a single write lock, for the
+	// same reason as RING.ADD: a RING.CREATE in the window between the
+	// lookup and the mutation replaced the ring, and the removal was then
+	// applied to the detached instance.
+	ringsMu.Lock()
 	ring, exists := rings[name]
-	ringsMu.RUnlock()
-
 	if !exists {
+		ringsMu.Unlock()
 		return ctx.WriteInteger(0)
 	}
-
-	ringsMu.Lock()
 	defer ringsMu.Unlock()
 
 	for i, n := range ring.Nodes {

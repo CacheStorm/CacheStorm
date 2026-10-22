@@ -288,8 +288,8 @@ func cmdCIRCUITXSTATUS(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	circuitsMu.RLock()
+	defer circuitsMu.RUnlock()
 	c, exists := circuits[name]
-	circuitsMu.RUnlock()
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR circuit not found"))
 	}
@@ -307,8 +307,8 @@ func cmdCIRCUITXMETRICS(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	circuitsMu.RLock()
+	defer circuitsMu.RUnlock()
 	c, exists := circuits[name]
-	circuitsMu.RUnlock()
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR circuit not found"))
 	}
@@ -461,8 +461,8 @@ func cmdRATELIMITERSTATUS(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	rateLimitersXMux.RLock()
+	defer rateLimitersXMux.RUnlock()
 	rl, exists := rateLimitersX[name]
-	rateLimitersXMux.RUnlock()
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR rate limiter not found"))
 	}
@@ -539,8 +539,8 @@ func cmdRETRYSTATUS(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	retriesMu.RLock()
+	defer retriesMu.RUnlock()
 	r, exists := retries[name]
-	retriesMu.RUnlock()
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR retry not found"))
 	}
@@ -687,8 +687,8 @@ func cmdBULKHEADSTATUS(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	bulkheadsMu.RLock()
+	defer bulkheadsMu.RUnlock()
 	b, exists := bulkheads[name]
-	bulkheadsMu.RUnlock()
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR bulkhead not found"))
 	}
@@ -1051,8 +1051,8 @@ func cmdMEMORYXSTATS(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	memoryMu.RLock()
+	defer memoryMu.RUnlock()
 	s, exists := memoryStats[name]
-	memoryMu.RUnlock()
 	if !exists {
 		return ctx.WriteArray([]*resp.Value{
 			resp.BulkString("name"), resp.BulkString(name),
@@ -1147,8 +1147,8 @@ func cmdCONPOOLSTATUS(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	conPoolsMu.RLock()
+	defer conPoolsMu.RUnlock()
 	p, exists := conPools[name]
-	conPoolsMu.RUnlock()
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR pool not found"))
 	}
@@ -1378,8 +1378,8 @@ func cmdTRANSXSTATUS(ctx *Context) error {
 	}
 	id := ctx.ArgString(0)
 	transactionsXMux.RLock()
+	defer transactionsXMux.RUnlock()
 	t, exists := transactionsX[id]
-	transactionsXMux.RUnlock()
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR transaction not found"))
 	}
@@ -1456,8 +1456,8 @@ func cmdLOCKXSTATUS(ctx *Context) error {
 	}
 	key := ctx.ArgString(0)
 	locksXMux.RLock()
+	defer locksXMux.RUnlock()
 	l, exists := locksX[key]
-	locksXMux.RUnlock()
 	if !exists {
 		return ctx.WriteArray([]*resp.Value{
 			resp.BulkString("locked"), resp.IntegerValue(0),
@@ -1543,8 +1543,8 @@ func cmdSEMAPHOREXSTATUS(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	semaphoresXMux.RLock()
+	defer semaphoresXMux.RUnlock()
 	s, exists := semaphoresX[name]
-	semaphoresXMux.RUnlock()
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR semaphore not found"))
 	}
@@ -1587,8 +1587,8 @@ func cmdASYNCSTATUS(ctx *Context) error {
 	}
 	id := ctx.ArgString(0)
 	asyncJobsMu.RLock()
+	defer asyncJobsMu.RUnlock()
 	j, exists := asyncJobs[id]
-	asyncJobsMu.RUnlock()
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR job not found"))
 	}
@@ -1688,8 +1688,8 @@ func cmdPROMISESTATUS(ctx *Context) error {
 	}
 	id := ctx.ArgString(0)
 	promisesMu.RLock()
+	defer promisesMu.RUnlock()
 	p, exists := promises[id]
-	promisesMu.RUnlock()
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR promise not found"))
 	}
@@ -1705,8 +1705,8 @@ func cmdPROMISEAWAIT(ctx *Context) error {
 	}
 	id := ctx.ArgString(0)
 	promisesMu.RLock()
+	defer promisesMu.RUnlock()
 	p, exists := promises[id]
-	promisesMu.RUnlock()
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR promise not found"))
 	}
@@ -1761,8 +1761,8 @@ func cmdFUTUREGET(ctx *Context) error {
 	}
 	id := ctx.ArgString(0)
 	futuresMu.RLock()
+	defer futuresMu.RUnlock()
 	f, exists := futures[id]
-	futuresMu.RUnlock()
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR future not found"))
 	}
@@ -1927,8 +1927,8 @@ func cmdSTREAMPROCPEEK(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	streamProcsMu.RLock()
+	defer streamProcsMu.RUnlock()
 	s, exists := streamProcs[name]
-	streamProcsMu.RUnlock()
 	if !exists || len(s.Data) == 0 {
 		return ctx.WriteNull()
 	}
@@ -2121,8 +2121,8 @@ func cmdBACKPRESSURESTATUS(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	backpressuresMu.RLock()
+	defer backpressuresMu.RUnlock()
 	b, exists := backpressures[name]
-	backpressuresMu.RUnlock()
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR backpressure not found"))
 	}
@@ -2315,8 +2315,8 @@ func cmdCOALESCEGET(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	coalescesMu.RLock()
+	defer coalescesMu.RUnlock()
 	c, exists := coalesces[name]
-	coalescesMu.RUnlock()
 	if !exists || len(c.Values) == 0 {
 		return ctx.WriteNull()
 	}
@@ -2381,8 +2381,8 @@ func cmdAGGREGATORGET(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	aggregatorsMu.RLock()
+	defer aggregatorsMu.RUnlock()
 	a, exists := aggregators[name]
-	aggregatorsMu.RUnlock()
 	if !exists || len(a.Values) == 0 {
 		return ctx.WriteBulkString("0")
 	}
@@ -2484,8 +2484,8 @@ func cmdWINDOWXGET(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	windowsXMux.RLock()
+	defer windowsXMux.RUnlock()
 	w, exists := windowsX[name]
-	windowsXMux.RUnlock()
 	if !exists {
 		return ctx.WriteArray([]*resp.Value{})
 	}
@@ -2575,8 +2575,8 @@ func cmdJOINXGET(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	joinsXMux.RLock()
+	defer joinsXMux.RUnlock()
 	j, exists := joinsX[name]
-	joinsXMux.RUnlock()
 	if !exists {
 		return ctx.WriteArray([]*resp.Value{})
 	}

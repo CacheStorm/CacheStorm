@@ -258,17 +258,26 @@ func cmdSLIDINGSTATS(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
+	// Read the window under the read lock. The lock used to be released right
+	// after the lookup, so the Entries slice was read with no lock at all
+	// while SLIDING.CHECK replaced it under the write lock.
 	slidingWindowsMu.RLock()
 	sw, exists := slidingWindows[name]
-	slidingWindowsMu.RUnlock()
 	if !exists {
+		slidingWindowsMu.RUnlock()
 		return ctx.WriteError(fmt.Errorf("ERR sliding window not found"))
 	}
+	swName := sw.Name
+	swLimit := sw.Limit
+	swWindow := sw.Window
+	swCurrent := int64(len(sw.Entries))
+	slidingWindowsMu.RUnlock()
+
 	return ctx.WriteArray([]*resp.Value{
-		resp.BulkString("name"), resp.BulkString(sw.Name),
-		resp.BulkString("limit"), resp.IntegerValue(sw.Limit),
-		resp.BulkString("window_ms"), resp.IntegerValue(sw.Window),
-		resp.BulkString("current"), resp.IntegerValue(int64(len(sw.Entries))),
+		resp.BulkString("name"), resp.BulkString(swName),
+		resp.BulkString("limit"), resp.IntegerValue(swLimit),
+		resp.BulkString("window_ms"), resp.IntegerValue(swWindow),
+		resp.BulkString("current"), resp.IntegerValue(swCurrent),
 	})
 }
 
@@ -561,10 +570,17 @@ func cmdEXPERIMENTRESULTS(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
+	// Iterate the assignments map while holding the read lock. The lock used
+	// to be released right after the lookup, so the map was iterated with no
+	// lock at all while EXPERIMENT.ASSIGN wrote it under the write lock.
+	// Concurrent map iteration and map write is a FATAL Go runtime error
+	// ("fatal error: concurrent map iteration and map write"): it cannot be
+	// recovered and it terminates the whole server process, not just this
+	// connection.
 	experimentsMu.RLock()
 	exp, exists := experiments[name]
-	experimentsMu.RUnlock()
 	if !exists {
+		experimentsMu.RUnlock()
 		return ctx.WriteError(fmt.Errorf("ERR experiment not found"))
 	}
 	results := make([]*resp.Value, 0)
@@ -578,6 +594,7 @@ func cmdEXPERIMENTRESULTS(ctx *Context) error {
 		}
 		results = append(results, resp.BulkString("variant_"+v), resp.IntegerValue(int64(count)))
 	}
+	experimentsMu.RUnlock()
 	return ctx.WriteArray(results)
 }
 
@@ -793,16 +810,25 @@ func cmdPIPELINESTATUS(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
+	// Read the pipeline under the read lock. The lock used to be released
+	// right after the lookup, so the Status string and the Stages slice were
+	// read with no lock at all while PIPELINE.ADDSTAGE and PIPELINE.EXECUTE
+	// wrote them under the write lock.
 	pipelinesMu.RLock()
 	pipe, exists := pipelines[name]
-	pipelinesMu.RUnlock()
 	if !exists {
+		pipelinesMu.RUnlock()
 		return ctx.WriteError(fmt.Errorf("ERR pipeline not found"))
 	}
+	pipeName := pipe.Name
+	pipeStatus := pipe.Status
+	pipeStages := int64(len(pipe.Stages))
+	pipelinesMu.RUnlock()
+
 	return ctx.WriteArray([]*resp.Value{
-		resp.BulkString("name"), resp.BulkString(pipe.Name),
-		resp.BulkString("status"), resp.BulkString(pipe.Status),
-		resp.BulkString("stages"), resp.IntegerValue(int64(len(pipe.Stages))),
+		resp.BulkString("name"), resp.BulkString(pipeName),
+		resp.BulkString("status"), resp.BulkString(pipeStatus),
+		resp.BulkString("stages"), resp.IntegerValue(pipeStages),
 	})
 }
 
@@ -994,18 +1020,29 @@ func cmdALERTHISTORY(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
+	// Read the alert under the read lock. The lock used to be released right
+	// after the lookup, so the alert's Status string was read with no lock at
+	// all while ALERT.TRIGGER/ACKNOWLEDGE/RESOLVE rewrote it under the write
+	// lock.
 	alertsMu.RLock()
 	alert, exists := alerts[name]
-	alertsMu.RUnlock()
 	if !exists {
+		alertsMu.RUnlock()
 		return ctx.WriteError(fmt.Errorf("ERR alert not found"))
 	}
+	alertID := alert.ID
+	alertName := alert.Name
+	alertMessage := alert.Message
+	alertStatus := alert.Status
+	alertCreatedAt := alert.CreatedAt
+	alertsMu.RUnlock()
+
 	return ctx.WriteArray([]*resp.Value{
-		resp.BulkString("id"), resp.BulkString(alert.ID),
-		resp.BulkString("name"), resp.BulkString(alert.Name),
-		resp.BulkString("message"), resp.BulkString(alert.Message),
-		resp.BulkString("status"), resp.BulkString(alert.Status),
-		resp.BulkString("created_at"), resp.IntegerValue(alert.CreatedAt),
+		resp.BulkString("id"), resp.BulkString(alertID),
+		resp.BulkString("name"), resp.BulkString(alertName),
+		resp.BulkString("message"), resp.BulkString(alertMessage),
+		resp.BulkString("status"), resp.BulkString(alertStatus),
+		resp.BulkString("created_at"), resp.IntegerValue(alertCreatedAt),
 	})
 }
 
@@ -1144,13 +1181,18 @@ func cmdGAUGEGET(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
+	// Read the value under the read lock. The lock used to be released right
+	// after the lookup, so g.Value was read with no lock at all while
+	// GAUGE.SET/GAUGE.INCR/GAUGE.DECR updated it under the write lock.
 	gaugesMu.RLock()
 	g, exists := gauges[name]
-	gaugesMu.RUnlock()
 	if !exists {
+		gaugesMu.RUnlock()
 		return ctx.WriteBulkString("0")
 	}
-	return ctx.WriteBulkString(fmt.Sprintf("%.6f", g.Value))
+	value := g.Value
+	gaugesMu.RUnlock()
+	return ctx.WriteBulkString(fmt.Sprintf("%.6f", value))
 }
 
 func cmdGAUGEINCR(ctx *Context) error {
@@ -1277,14 +1319,23 @@ func cmdTRACEGET(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	id := ctx.ArgString(0)
+	// Read the trace under the read lock. The lock used to be released right
+	// after the lookup, so the Status string and the Spans slice were read
+	// with no lock at all while TRACE.SPAN and TRACE.END wrote them under
+	// the write lock.
 	tracesMu.RLock()
 	trace, exists := traces[id]
-	tracesMu.RUnlock()
 	if !exists {
+		tracesMu.RUnlock()
 		return ctx.WriteError(fmt.Errorf("ERR trace not found"))
 	}
+	traceID := trace.ID
+	traceStatus := trace.Status
+	traceSpans := int64(len(trace.Spans))
+	tracesMu.RUnlock()
+
 	results := make([]*resp.Value, 0)
-	results = append(results, resp.BulkString("id"), resp.BulkString(trace.ID), resp.BulkString("status"), resp.BulkString(trace.Status), resp.BulkString("spans"), resp.IntegerValue(int64(len(trace.Spans))))
+	results = append(results, resp.BulkString("id"), resp.BulkString(traceID), resp.BulkString("status"), resp.BulkString(traceStatus), resp.BulkString("spans"), resp.IntegerValue(traceSpans))
 	return ctx.WriteArray(results)
 }
 
@@ -1494,13 +1545,18 @@ func cmdAPIKEYUSAGE(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	key := ctx.ArgString(0)
+	// Read the counter under the read lock. The lock used to be released right
+	// after the lookup, so ak.Usage was read with no lock at all while
+	// APIKEY.VALIDATE incremented it under the write lock.
 	apiKeysMu.RLock()
 	ak, exists := apiKeys[key]
-	apiKeysMu.RUnlock()
 	if !exists {
+		apiKeysMu.RUnlock()
 		return ctx.WriteError(fmt.Errorf("ERR api key not found"))
 	}
-	return ctx.WriteInteger(ak.Usage)
+	usage := ak.Usage
+	apiKeysMu.RUnlock()
+	return ctx.WriteInteger(usage)
 }
 
 var (
@@ -1514,6 +1570,26 @@ type QuotaX struct {
 	Used    int64
 	Period  int64
 	ResetAt int64
+}
+
+// rollQuotaXWindow starts a new counting window when the current one has
+// expired, the same way the QUOTA family in mvcc_commands.go rolls its window
+// over.
+//
+// A quota without a usable period never rolls over. A zero-length window is
+// over the moment the clock moves on, so rolling it over reset the counter on
+// every check and the limit was never enforced: "0" and a non-numeric period
+// both reach the handler as a zero-length window. Without a window the limit
+// applies for the lifetime of the quota instead.
+func rollQuotaXWindow(q *QuotaX, now int64) {
+	if now <= q.ResetAt {
+		return
+	}
+	if q.Period <= 0 {
+		return
+	}
+	q.Used = 0
+	q.ResetAt = now + q.Period
 }
 
 func cmdQUOTAXCREATE(ctx *Context) error {
@@ -1542,10 +1618,7 @@ func cmdQUOTAXCHECK(ctx *Context) error {
 		return ctx.WriteError(fmt.Errorf("ERR quota not found"))
 	}
 	now := time.Now().UnixMilli()
-	if now > q.ResetAt {
-		q.Used = 0
-		q.ResetAt = now + q.Period
-	}
+	rollQuotaXWindow(q, now)
 	if q.Used+amount > q.Limit {
 		return ctx.WriteArray([]*resp.Value{
 			resp.IntegerValue(0),
@@ -1566,14 +1639,20 @@ func cmdQUOTAXUSAGE(ctx *Context) error {
 	name := ctx.ArgString(0)
 	quotasXMux.RLock()
 	q, exists := quotasX[name]
-	quotasXMux.RUnlock()
 	if !exists {
+		quotasXMux.RUnlock()
 		return ctx.WriteError(fmt.Errorf("ERR quota not found"))
 	}
+	// Snapshot the values while the lock is held: cmdQUOTAXCHECK writes q.Used
+	// under the write lock, so reading the fields after the lock was released
+	// raced with that write.
+	used := q.Used
+	limit := q.Limit
+	quotasXMux.RUnlock()
 	return ctx.WriteArray([]*resp.Value{
-		resp.BulkString("used"), resp.IntegerValue(q.Used),
-		resp.BulkString("limit"), resp.IntegerValue(q.Limit),
-		resp.BulkString("remaining"), resp.IntegerValue(q.Limit - q.Used),
+		resp.BulkString("used"), resp.IntegerValue(used),
+		resp.BulkString("limit"), resp.IntegerValue(limit),
+		resp.BulkString("remaining"), resp.IntegerValue(limit - used),
 	})
 }
 
@@ -1652,21 +1731,29 @@ func cmdMETERGET(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
+	// Sum the records under the read lock. The lock used to be released right
+	// after the lookup, so the Records slice was walked with no lock at all
+	// while METER.RECORD appended to it under the write lock.
 	metersMu.RLock()
 	m, exists := meters[name]
-	metersMu.RUnlock()
 	if !exists {
+		metersMu.RUnlock()
 		return ctx.WriteError(fmt.Errorf("ERR meter not found"))
 	}
+	meterName := m.Name
+	meterUnit := m.Unit
 	var total int64
 	for _, v := range m.Records {
 		total += v
 	}
+	count := int64(len(m.Records))
+	metersMu.RUnlock()
+
 	return ctx.WriteArray([]*resp.Value{
-		resp.BulkString("name"), resp.BulkString(m.Name),
-		resp.BulkString("unit"), resp.BulkString(m.Unit),
+		resp.BulkString("name"), resp.BulkString(meterName),
+		resp.BulkString("unit"), resp.BulkString(meterUnit),
 		resp.BulkString("total"), resp.IntegerValue(total),
-		resp.BulkString("count"), resp.IntegerValue(int64(len(m.Records))),
+		resp.BulkString("count"), resp.IntegerValue(count),
 	})
 }
 
@@ -1675,20 +1762,27 @@ func cmdMETERBILLING(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
+	// Sum the records under the read lock. The lock used to be released right
+	// after the lookup, so the Records slice was walked with no lock at all
+	// while METER.RECORD appended to it under the write lock.
 	metersMu.RLock()
 	m, exists := meters[name]
-	metersMu.RUnlock()
 	if !exists {
+		metersMu.RUnlock()
 		return ctx.WriteError(fmt.Errorf("ERR meter not found"))
 	}
+	meterName := m.Name
+	meterUnit := m.Unit
 	var total int64
 	for _, v := range m.Records {
 		total += v
 	}
+	metersMu.RUnlock()
+
 	return ctx.WriteArray([]*resp.Value{
-		resp.BulkString("meter"), resp.BulkString(m.Name),
+		resp.BulkString("meter"), resp.BulkString(meterName),
 		resp.BulkString("usage"), resp.IntegerValue(total),
-		resp.BulkString("unit"), resp.BulkString(m.Unit),
+		resp.BulkString("unit"), resp.BulkString(meterUnit),
 	})
 }
 
@@ -1851,16 +1945,24 @@ func cmdLEASEGET(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	id := ctx.ArgString(0)
+	// Read the lease under the read lock. The lock used to be released right
+	// after the lookup, so the lease's expiry was read with no lock at all
+	// while LEASE.RENEW wrote it under the write lock.
 	leasesMu.RLock()
 	lease, exists := leases[id]
-	leasesMu.RUnlock()
 	if !exists {
+		leasesMu.RUnlock()
 		return ctx.WriteNull()
 	}
+	leaseID := lease.ID
+	leaseHolder := lease.Holder
+	leaseExpiresAt := lease.ExpiresAt
+	leasesMu.RUnlock()
+
 	return ctx.WriteArray([]*resp.Value{
-		resp.BulkString("id"), resp.BulkString(lease.ID),
-		resp.BulkString("holder"), resp.BulkString(lease.Holder),
-		resp.BulkString("expires_at"), resp.IntegerValue(lease.ExpiresAt),
+		resp.BulkString("id"), resp.BulkString(leaseID),
+		resp.BulkString("holder"), resp.BulkString(leaseHolder),
+		resp.BulkString("expires_at"), resp.IntegerValue(leaseExpiresAt),
 	})
 }
 
@@ -1927,10 +2029,20 @@ func cmdHEAPPEEK(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
+	// Read the heap under the read lock. The lock used to be released right
+	// after the lookup, so the Data slice was read with no lock at all while
+	// HEAP.PUSH grew it and HEAP.POP shifted its elements in place under the
+	// write lock: a data race, and a reader that sized the slice from a
+	// header the writer had already replaced could index past the end of the
+	// backing array.
 	heapsMu.RLock()
 	h, exists := heaps[name]
-	heapsMu.RUnlock()
-	if !exists || len(h.Data) == 0 {
+	if !exists {
+		heapsMu.RUnlock()
+		return ctx.WriteNull()
+	}
+	if len(h.Data) == 0 {
+		heapsMu.RUnlock()
 		return ctx.WriteNull()
 	}
 	minIdx := 0
@@ -1939,7 +2051,9 @@ func cmdHEAPPEEK(ctx *Context) error {
 			minIdx = i
 		}
 	}
-	return ctx.WriteInteger(h.Data[minIdx])
+	min := h.Data[minIdx]
+	heapsMu.RUnlock()
+	return ctx.WriteInteger(min)
 }
 
 func cmdHEAPSIZE(ctx *Context) error {
@@ -1947,13 +2061,18 @@ func cmdHEAPSIZE(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
+	// Read the size under the read lock. The lock used to be released right
+	// after the lookup, so len(h.Data) was read with no lock at all while
+	// HEAP.PUSH replaced that slice header under the write lock.
 	heapsMu.RLock()
 	h, exists := heaps[name]
-	heapsMu.RUnlock()
 	if !exists {
+		heapsMu.RUnlock()
 		return ctx.WriteInteger(0)
 	}
-	return ctx.WriteInteger(int64(len(h.Data)))
+	size := len(h.Data)
+	heapsMu.RUnlock()
+	return ctx.WriteInteger(int64(size))
 }
 
 func cmdHEAPDELETE(ctx *Context) error {
@@ -2130,10 +2249,13 @@ func cmdSKETCHQUERY(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	item := ctx.ArgString(1)
+	// Read the counter cells under the read lock. The lock used to be
+	// released right after the lookup, so the cells were read with no lock at
+	// all while SKETCH.UPDATE incremented them in place under the write lock.
 	sketchesMu.RLock()
 	s, exists := sketches[name]
-	sketchesMu.RUnlock()
 	if !exists {
+		sketchesMu.RUnlock()
 		return ctx.WriteError(fmt.Errorf("ERR sketch not found"))
 	}
 	min := int64(-1)
@@ -2143,6 +2265,7 @@ func cmdSKETCHQUERY(ctx *Context) error {
 			min = s.Counts[i][idx]
 		}
 	}
+	sketchesMu.RUnlock()
 	return ctx.WriteInteger(min)
 }
 
@@ -2239,15 +2362,22 @@ func cmdRINGBUFFERSIZE(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
+	// Read the buffer under the read lock. The lock used to be released right
+	// after the lookup, so the Size and Count fields were read with no lock at
+	// all while RINGBUFFER.WRITE mutated them under the write lock.
 	ringBuffersMu.RLock()
 	rb, exists := ringBuffers[name]
-	ringBuffersMu.RUnlock()
 	if !exists {
+		ringBuffersMu.RUnlock()
 		return ctx.WriteError(fmt.Errorf("ERR ring buffer not found"))
 	}
+	rbSize := rb.Size
+	rbCount := rb.Count
+	ringBuffersMu.RUnlock()
+
 	return ctx.WriteArray([]*resp.Value{
-		resp.BulkString("size"), resp.IntegerValue(int64(rb.Size)),
-		resp.BulkString("count"), resp.IntegerValue(int64(rb.Count)),
+		resp.BulkString("size"), resp.IntegerValue(int64(rbSize)),
+		resp.BulkString("count"), resp.IntegerValue(int64(rbCount)),
 	})
 }
 
@@ -2312,14 +2442,23 @@ func cmdWINDOWGET(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
+	// Copy the values while the read lock is held. The lock used to be
+	// released right after the lookup, so the window's Data slice was read
+	// with no lock at all while WINDOW.ADD grew and trimmed it under the
+	// write lock: a data race, and a reply sized from a header the writer
+	// had already replaced did not match the window it came from.
 	windowsMu.RLock()
 	w, exists := windows[name]
-	windowsMu.RUnlock()
 	if !exists {
+		windowsMu.RUnlock()
 		return ctx.WriteArray([]*resp.Value{})
 	}
-	results := make([]*resp.Value, len(w.Data))
-	for i, v := range w.Data {
+	data := make([]float64, len(w.Data))
+	copy(data, w.Data)
+	windowsMu.RUnlock()
+
+	results := make([]*resp.Value, len(data))
+	for i, v := range data {
 		results[i] = resp.BulkString(fmt.Sprintf("%.6f", v))
 	}
 	return ctx.WriteArray(results)
@@ -2331,36 +2470,47 @@ func cmdWINDOWAGGREGATE(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	aggType := ctx.ArgString(1)
+	// Copy the values while the read lock is held. The lock used to be
+	// released right after the lookup, so the window's Data slice was read
+	// with no lock at all — including indexing element 0 for the min and max
+	// aggregations — while WINDOW.ADD grew and trimmed that slice under the
+	// write lock.
 	windowsMu.RLock()
 	w, exists := windows[name]
+	if !exists {
+		windowsMu.RUnlock()
+		return ctx.WriteBulkString("0")
+	}
+	data := make([]float64, len(w.Data))
+	copy(data, w.Data)
 	windowsMu.RUnlock()
-	if !exists || len(w.Data) == 0 {
+	if len(data) == 0 {
 		return ctx.WriteBulkString("0")
 	}
 	switch aggType {
 	case "sum":
 		var sum float64
-		for _, v := range w.Data {
+		for _, v := range data {
 			sum += v
 		}
 		return ctx.WriteBulkString(fmt.Sprintf("%.6f", sum))
 	case "avg":
 		var sum float64
-		for _, v := range w.Data {
+		for _, v := range data {
 			sum += v
 		}
-		return ctx.WriteBulkString(fmt.Sprintf("%.6f", sum/float64(len(w.Data))))
+		return ctx.WriteBulkString(fmt.Sprintf("%.6f", sum/float64(len(data))))
 	case "min":
-		min := w.Data[0]
-		for _, v := range w.Data {
+		min := data[0]
+		for _, v := range data {
 			if v < min {
 				min = v
 			}
 		}
 		return ctx.WriteBulkString(fmt.Sprintf("%.6f", min))
 	case "max":
-		max := w.Data[0]
-		for _, v := range w.Data {
+		max := data[0]
+		for _, v := range data {
 			if v > max {
 				max = v
 			}
@@ -2432,13 +2582,21 @@ func cmdFREQCOUNT(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	item := ctx.ArgString(1)
+	// Read the counter while holding the read lock. The lock used to be
+	// released right after the lookup, so the map was read with no lock at all
+	// while FREQ.ADD wrote it under the write lock. Concurrent map read and
+	// map write is a FATAL Go runtime error ("fatal error: concurrent map
+	// read and map write"): it cannot be recovered and it terminates the
+	// whole server process, not just this connection.
 	freqsMu.RLock()
 	f, exists := freqs[name]
-	freqsMu.RUnlock()
 	if !exists {
+		freqsMu.RUnlock()
 		return ctx.WriteInteger(0)
 	}
-	return ctx.WriteInteger(f.Items[item])
+	count := f.Items[item]
+	freqsMu.RUnlock()
+	return ctx.WriteInteger(count)
 }
 
 func cmdFREQTOP(ctx *Context) error {
@@ -2548,14 +2706,25 @@ func cmdPARTITIONGET(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	idx := int(parseInt64(ctx.ArgString(1)))
+	// Copy the partition's values under the read lock. The lock used to be
+	// released right after the lookup, so the slice was walked with no lock at
+	// all while PARTITION.ADD appended to it under the write lock.
 	partitionsMu.RLock()
 	p, exists := partitions[name]
-	partitionsMu.RUnlock()
-	if !exists || idx < 0 || idx >= p.Count {
+	if !exists {
+		partitionsMu.RUnlock()
 		return ctx.WriteArray([]*resp.Value{})
 	}
-	results := make([]*resp.Value, len(p.Data[idx]))
-	for i, v := range p.Data[idx] {
+	if idx < 0 || idx >= p.Count {
+		partitionsMu.RUnlock()
+		return ctx.WriteArray([]*resp.Value{})
+	}
+	values := make([]string, len(p.Data[idx]))
+	copy(values, p.Data[idx])
+	partitionsMu.RUnlock()
+
+	results := make([]*resp.Value, len(values))
+	for i, v := range values {
 		results[i] = resp.BulkString(v)
 	}
 	return ctx.WriteArray(results)
@@ -2566,17 +2735,27 @@ func cmdPARTITIONLIST(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
+	// Read the counts under the read lock. The lock used to be released right
+	// after the lookup, so every partition's slice length was read with no
+	// lock at all while PARTITION.ADD appended to those slices under the
+	// write lock.
 	partitionsMu.RLock()
 	p, exists := partitions[name]
-	partitionsMu.RUnlock()
 	if !exists {
+		partitionsMu.RUnlock()
 		return ctx.WriteArray([]*resp.Value{})
 	}
+	counts := make([]int, p.Count)
+	for i := 0; i < p.Count; i++ {
+		counts[i] = len(p.Data[i])
+	}
+	partitionsMu.RUnlock()
+
 	results := make([]*resp.Value, 0)
 	for i := 0; i < p.Count; i++ {
 		results = append(results, resp.ArrayValue([]*resp.Value{
 			resp.BulkString("partition"), resp.IntegerValue(int64(i)),
-			resp.BulkString("count"), resp.IntegerValue(int64(len(p.Data[i]))),
+			resp.BulkString("count"), resp.IntegerValue(int64(counts[i])),
 		}))
 	}
 	return ctx.WriteArray(results)

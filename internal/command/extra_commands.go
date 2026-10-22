@@ -361,8 +361,8 @@ func cmdANTIENTROPYDIFF(ctx *Context) error {
 	name := ctx.ArgString(0)
 	version := parseInt64(ctx.ArgString(1))
 	antiEntropyMu.RLock()
+	defer antiEntropyMu.RUnlock()
 	state, exists := antiEntropy[name]
-	antiEntropyMu.RUnlock()
 	if !exists {
 		return ctx.WriteArray([]*resp.Value{resp.BulkString("sync_needed"), resp.IntegerValue(1)})
 	}
@@ -397,8 +397,8 @@ func cmdANTIENTROPYSTATUS(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	antiEntropyMu.RLock()
+	defer antiEntropyMu.RUnlock()
 	state, exists := antiEntropy[name]
-	antiEntropyMu.RUnlock()
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR not found"))
 	}
@@ -565,8 +565,8 @@ func cmdCRDTLWWGET(ctx *Context) error {
 	}
 	key := ctx.ArgString(0)
 	crdtLWWMu.RLock()
+	defer crdtLWWMu.RUnlock()
 	entry, exists := crdtLWW[key]
-	crdtLWWMu.RUnlock()
 	if !exists {
 		return ctx.WriteNull()
 	}
@@ -676,10 +676,14 @@ func cmdCRDTPNCOUNTERGET(ctx *Context) error {
 	name := ctx.ArgString(0)
 	crdtPNCounterMu.RLock()
 	counter, exists := crdtPNCounter[name]
-	crdtPNCounterMu.RUnlock()
 	if !exists {
+		crdtPNCounterMu.RUnlock()
 		return ctx.WriteInteger(0)
 	}
+	// Sum the counters under the read lock. The lock used to be released
+	// right after the lookup, so the maps were iterated with no lock at all
+	// while CRDT.PNCounter.INCR/DECR wrote them under the write lock:
+	// concurrent map iteration and map write is a FATAL Go runtime error.
 	var pTotal, nTotal int64
 	for _, v := range counter.P {
 		pTotal += v
@@ -687,6 +691,7 @@ func cmdCRDTPNCOUNTERGET(ctx *Context) error {
 	for _, v := range counter.N {
 		nTotal += v
 	}
+	crdtPNCounterMu.RUnlock()
 	return ctx.WriteInteger(pTotal - nTotal)
 }
 
@@ -835,11 +840,16 @@ func cmdMERKLEVERIFY(ctx *Context) error {
 	hash := ctx.ArgString(1)
 	merkleTreesMu.RLock()
 	tree, exists := merkleTrees[name]
-	merkleTreesMu.RUnlock()
 	if !exists {
+		merkleTreesMu.RUnlock()
 		return ctx.WriteInteger(0)
 	}
+	// Read the node under the read lock. The lock used to be released right
+	// after the lookup, so the map was read with no lock at all while
+	// MERKLE.ADD wrote it under the write lock: concurrent map read and map
+	// write is a FATAL Go runtime error.
 	_, ok := tree.Nodes[hash]
+	merkleTreesMu.RUnlock()
 	if ok {
 		return ctx.WriteInteger(1)
 	}
@@ -854,11 +864,17 @@ func cmdMERKLEPROOF(ctx *Context) error {
 	hash := ctx.ArgString(1)
 	merkleTreesMu.RLock()
 	tree, exists := merkleTrees[name]
-	merkleTreesMu.RUnlock()
 	if !exists {
+		merkleTreesMu.RUnlock()
 		return ctx.WriteError(fmt.Errorf("ERR tree not found"))
 	}
-	if data, ok := tree.Nodes[hash]; ok {
+	// Read the node under the read lock. The lock used to be released right
+	// after the lookup, so the map was read with no lock at all while
+	// MERKLE.ADD wrote it under the write lock: concurrent map read and map
+	// write is a FATAL Go runtime error.
+	data, ok := tree.Nodes[hash]
+	merkleTreesMu.RUnlock()
+	if ok {
 		return ctx.WriteArray([]*resp.Value{
 			resp.BulkString("hash"), resp.BulkString(hash),
 			resp.BulkString("data"), resp.BulkString(data),
@@ -979,8 +995,8 @@ func cmdRAFTCOMMIT(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	raftStateMu.RLock()
+	defer raftStateMu.RUnlock()
 	s, exists := raftState[name]
-	raftStateMu.RUnlock()
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR raft not found"))
 	}
@@ -1187,8 +1203,8 @@ func cmdBATCHSTATUS(ctx *Context) error {
 	}
 	id := ctx.ArgString(0)
 	batchesMu.RLock()
+	defer batchesMu.RUnlock()
 	batch, exists := batches[id]
-	batchesMu.RUnlock()
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR batch not found"))
 	}
@@ -1519,8 +1535,8 @@ func cmdGATEWAYMETRICS(ctx *Context) error {
 	}
 	id := ctx.ArgString(0)
 	gatewaysMu.RLock()
+	defer gatewaysMu.RUnlock()
 	gw, exists := gateways[id]
-	gatewaysMu.RUnlock()
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR gateway not found"))
 	}
@@ -1923,8 +1939,8 @@ func cmdGHOSTREAD(ctx *Context) error {
 	}
 	id := ctx.ArgString(0)
 	ghostsMu.RLock()
+	defer ghostsMu.RUnlock()
 	g, exists := ghosts[id]
-	ghostsMu.RUnlock()
 	if !exists {
 		return ctx.WriteArray([]*resp.Value{})
 	}
@@ -2009,8 +2025,8 @@ func cmdPROBERESULTS(ctx *Context) error {
 	}
 	id := ctx.ArgString(0)
 	probesMu.RLock()
+	defer probesMu.RUnlock()
 	p, exists := probes[id]
-	probesMu.RUnlock()
 	if !exists {
 		return ctx.WriteArray([]*resp.Value{})
 	}
@@ -2091,8 +2107,8 @@ func cmdCANARYSTATUS(ctx *Context) error {
 	}
 	id := ctx.ArgString(0)
 	canariesMu.RLock()
+	defer canariesMu.RUnlock()
 	c, exists := canaries[id]
-	canariesMu.RUnlock()
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR canary not found"))
 	}
@@ -2162,8 +2178,8 @@ func cmdRAGESTATS(ctx *Context) error {
 	}
 	id := ctx.ArgString(0)
 	rageTestsMu.RLock()
+	defer rageTestsMu.RUnlock()
 	r, exists := rageTests[id]
-	rageTestsMu.RUnlock()
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR test not found"))
 	}
@@ -2238,12 +2254,18 @@ func cmdGRIDGET(ctx *Context) error {
 	y := ctx.ArgString(2)
 	gridsMu.RLock()
 	g, exists := grids[name]
-	gridsMu.RUnlock()
 	if !exists {
+		gridsMu.RUnlock()
 		return ctx.WriteNull()
 	}
 	key := x + "," + y
-	if val, ok := g.Data[key]; ok {
+	// Read the cell under the read lock. The lock used to be released right
+	// after the lookup, so the map was read with no lock at all while
+	// GRID.SET wrote it under the write lock: concurrent map read and map
+	// write is a FATAL Go runtime error.
+	val, ok := g.Data[key]
+	gridsMu.RUnlock()
+	if ok {
 		return ctx.WriteBulkString(val)
 	}
 	return ctx.WriteNull()
@@ -2270,10 +2292,14 @@ func cmdGRIDQUERY(ctx *Context) error {
 	name := ctx.ArgString(0)
 	gridsMu.RLock()
 	g, exists := grids[name]
-	gridsMu.RUnlock()
 	if !exists {
+		gridsMu.RUnlock()
 		return ctx.WriteArray([]*resp.Value{})
 	}
+	// Iterate the cells under the read lock. The lock used to be released
+	// right after the lookup, so the map was iterated with no lock at all
+	// while GRID.SET wrote it under the write lock: concurrent map iteration
+	// and map write is a FATAL Go runtime error.
 	results := make([]*resp.Value, 0)
 	for k, v := range g.Data {
 		results = append(results, resp.ArrayValue([]*resp.Value{
@@ -2281,6 +2307,7 @@ func cmdGRIDQUERY(ctx *Context) error {
 			resp.BulkString("value"), resp.BulkString(v),
 		}))
 	}
+	gridsMu.RUnlock()
 	return ctx.WriteArray(results)
 }
 
@@ -2341,8 +2368,8 @@ func cmdTAPEREAD(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	tapesMu.RLock()
+	defer tapesMu.RUnlock()
 	t, exists := tapes[name]
-	tapesMu.RUnlock()
 	if !exists || len(t.Data) == 0 {
 		return ctx.WriteNull()
 	}
@@ -2566,8 +2593,8 @@ func cmdBEACONCHECK(ctx *Context) error {
 	}
 	id := ctx.ArgString(0)
 	beaconsMu.RLock()
+	defer beaconsMu.RUnlock()
 	b, exists := beacons[id]
-	beaconsMu.RUnlock()
 	if !exists {
 		return ctx.WriteInteger(0)
 	}

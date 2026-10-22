@@ -501,8 +501,8 @@ func cmdJOBXSTATUS(ctx *Context) error {
 	}
 	id := ctx.ArgString(0)
 	jobsXMux.RLock()
+	defer jobsXMux.RUnlock()
 	job, exists := jobsX[id]
-	jobsXMux.RUnlock()
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR job not found"))
 	}
@@ -1320,8 +1320,8 @@ func cmdRECORDGET(ctx *Context) error {
 	}
 	id := ctx.ArgString(0)
 	recordsMu.RLock()
+	defer recordsMu.RUnlock()
 	r, exists := records[id]
-	recordsMu.RUnlock()
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR record not found"))
 	}
@@ -1390,8 +1390,8 @@ func cmdENTITYGET(ctx *Context) error {
 	}
 	id := ctx.ArgString(0)
 	entitiesMu.RLock()
+	defer entitiesMu.RUnlock()
 	e, exists := entities[id]
-	entitiesMu.RUnlock()
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR entity not found"))
 	}
@@ -1656,8 +1656,8 @@ func cmdPOOLXSTATUS(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	poolsXMux.RLock()
+	defer poolsXMux.RUnlock()
 	pool, exists := poolsX[name]
-	poolsXMux.RUnlock()
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR pool not found"))
 	}
@@ -1712,8 +1712,8 @@ func cmdBUFFERXREAD(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	buffersXMux.RLock()
+	defer buffersXMux.RUnlock()
 	b, exists := buffersX[name]
-	buffersXMux.RUnlock()
 	if !exists {
 		return ctx.WriteNull()
 	}
@@ -1776,8 +1776,8 @@ func cmdSTREAMXREAD(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	streamsXMux.RLock()
+	defer streamsXMux.RUnlock()
 	s, exists := streamsX[name]
-	streamsXMux.RUnlock()
 	if !exists {
 		return ctx.WriteArray([]*resp.Value{})
 	}
@@ -2389,8 +2389,8 @@ func cmdINDEXSEARCH(ctx *Context) error {
 	name := ctx.ArgString(0)
 	key := ctx.ArgString(1)
 	indexesMu.RLock()
+	defer indexesMu.RUnlock()
 	idx, exists := indexes[name]
-	indexesMu.RUnlock()
 	if !exists {
 		return ctx.WriteArray([]*resp.Value{})
 	}
@@ -2712,8 +2712,8 @@ func cmdTOKENVALIDATE(ctx *Context) error {
 	}
 	id := ctx.ArgString(0)
 	tokensMu.RLock()
+	defer tokensMu.RUnlock()
 	token, exists := tokens[id]
-	tokensMu.RUnlock()
 	if !exists {
 		return ctx.WriteInteger(0)
 	}
@@ -2875,8 +2875,8 @@ func cmdPROFILEGET(ctx *Context) error {
 	}
 	id := ctx.ArgString(0)
 	profilesMu.RLock()
+	defer profilesMu.RUnlock()
 	profile, exists := profiles[id]
-	profilesMu.RUnlock()
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR profile not found"))
 	}

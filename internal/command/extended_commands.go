@@ -271,8 +271,8 @@ func cmdMSGQUEUEDEADLETTER(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	msgQueuesMu.RLock()
+	defer msgQueuesMu.RUnlock()
 	queue, exists := msgQueues[name]
-	msgQueuesMu.RUnlock()
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR queue not found"))
 	}
@@ -333,8 +333,8 @@ func cmdMSGQUEUESTATS(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	msgQueuesMu.RLock()
+	defer msgQueuesMu.RUnlock()
 	queue, exists := msgQueues[name]
-	msgQueuesMu.RUnlock()
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR queue not found"))
 	}
@@ -640,8 +640,8 @@ func cmdHEALTHXSTATUS(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	healthChecksXMux.RLock()
+	defer healthChecksXMux.RUnlock()
 	check, exists := healthChecksX[name]
-	healthChecksXMux.RUnlock()
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR health check not found"))
 	}
@@ -851,8 +851,8 @@ func cmdCRONHISTORY(ctx *Context) error {
 		limit = int(parseInt64(ctx.ArgString(1)))
 	}
 	cronJobsMu.RLock()
+	defer cronJobsMu.RUnlock()
 	job, exists := cronJobs[name]
-	cronJobsMu.RUnlock()
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR cron job not found"))
 	}
@@ -1215,10 +1215,15 @@ func cmdDOCFIND(ctx *Context) error {
 	name := ctx.ArgString(0)
 	docStoresMu.RLock()
 	store, exists := docStores[name]
-	docStoresMu.RUnlock()
 	if !exists {
+		docStoresMu.RUnlock()
 		return ctx.WriteArray([]*resp.Value{})
 	}
+	// Read the index and the documents under the read lock. The lock used to
+	// be released right after the lookup, so the maps were read and
+	// iterated with no lock at all while DOC.INSERT wrote them under the
+	// write lock: concurrent map iteration and map write is a FATAL Go
+	// runtime error.
 	var filterField, filterValue string
 	if ctx.ArgCount() >= 3 {
 		filterField = ctx.ArgString(1)
@@ -1248,6 +1253,7 @@ func cmdDOCFIND(ctx *Context) error {
 			results = append(results, resp.ArrayValue(docResult))
 		}
 	}
+	docStoresMu.RUnlock()
 	return ctx.WriteArray(results)
 }
 
@@ -1260,10 +1266,14 @@ func cmdDOCFINDONE(ctx *Context) error {
 	value := ctx.ArgString(2)
 	docStoresMu.RLock()
 	store, exists := docStores[name]
-	docStoresMu.RUnlock()
 	if !exists {
+		docStoresMu.RUnlock()
 		return ctx.WriteNull()
 	}
+	// Read the index and the document under the read lock. The lock used to
+	// be released right after the lookup, so the maps were read with no lock
+	// at all while DOC.INSERT wrote them under the write lock: concurrent map
+	// read and map write is a FATAL Go runtime error.
 	if idx, ok := store.Indexes[field]; ok {
 		if ids, ok2 := idx[value]; ok2 && len(ids) > 0 {
 			if doc, ok3 := store.Docs[ids[0]]; ok3 {
@@ -1271,10 +1281,12 @@ func cmdDOCFINDONE(ctx *Context) error {
 				for k, v := range doc {
 					results = append(results, resp.BulkString(k), resp.BulkString(v))
 				}
+				docStoresMu.RUnlock()
 				return ctx.WriteArray(results)
 			}
 		}
 	}
+	docStoresMu.RUnlock()
 	return ctx.WriteNull()
 }
 
@@ -1326,11 +1338,16 @@ func cmdDOCCOUNT(ctx *Context) error {
 	name := ctx.ArgString(0)
 	docStoresMu.RLock()
 	store, exists := docStores[name]
-	docStoresMu.RUnlock()
 	if !exists {
+		docStoresMu.RUnlock()
 		return ctx.WriteInteger(0)
 	}
-	return ctx.WriteInteger(int64(len(store.Docs)))
+	// Count the documents under the read lock. The lock used to be released
+	// right after the lookup, so the map was read with no lock at all while
+	// DOC.INSERT wrote it under the write lock.
+	count := int64(len(store.Docs))
+	docStoresMu.RUnlock()
+	return ctx.WriteInteger(count)
 }
 
 func docDOCDISTINCT(ctx *Context) error {
@@ -1362,13 +1379,19 @@ func cmdDOCAGGREGATE(ctx *Context) error {
 	aggType := ctx.ArgString(1)
 	docStoresMu.RLock()
 	store, exists := docStores[name]
-	docStoresMu.RUnlock()
 	if !exists {
+		docStoresMu.RUnlock()
 		return ctx.WriteInteger(0)
 	}
+	// Aggregate under the read lock. The lock used to be released right after
+	// the lookup, so the documents map was iterated with no lock at all while
+	// DOC.INSERT wrote it under the write lock: concurrent map iteration and
+	// map write is a FATAL Go runtime error.
 	switch aggType {
 	case "count":
-		return ctx.WriteInteger(int64(len(store.Docs)))
+		count := int64(len(store.Docs))
+		docStoresMu.RUnlock()
+		return ctx.WriteInteger(count)
 	case "fields":
 		fields := make(map[string]bool)
 		for _, doc := range store.Docs {
@@ -1376,12 +1399,14 @@ func cmdDOCAGGREGATE(ctx *Context) error {
 				fields[field] = true
 			}
 		}
+		docStoresMu.RUnlock()
 		results := make([]*resp.Value, 0)
 		for field := range fields {
 			results = append(results, resp.BulkString(field))
 		}
 		return ctx.WriteArray(results)
 	default:
+		docStoresMu.RUnlock()
 		return ctx.WriteError(fmt.Errorf("ERR unknown aggregation type"))
 	}
 }
@@ -1808,8 +1833,8 @@ func cmdLEADERHISTORY(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	leadersMu.RLock()
+	defer leadersMu.RUnlock()
 	election, exists := leaders[name]
-	leadersMu.RUnlock()
 	if !exists {
 		return ctx.WriteArray([]*resp.Value{})
 	}
@@ -1949,8 +1974,8 @@ func cmdSENTINELXSTATUS(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	sentinelsXMux.RLock()
+	defer sentinelsXMux.RUnlock()
 	watch, exists := sentinelsX[name]
-	sentinelsXMux.RUnlock()
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR sentinel not found"))
 	}

@@ -97,20 +97,21 @@ func cmdPQPUSH(ctx *Context) error {
 	value := ctx.ArgString(1)
 	priority := parseInt64(ctx.ArgString(2))
 
-	priorityQueuesMu.RLock()
+	// The queue is mutated under the registry write lock. The reader
+	// (PQ.LEN) reads it under the registry read lock, and PriorityQueue's
+	// Len() is deliberately lock-free, so the registry lock is the only lock
+	// the two can share to order the read against the push.
+	priorityQueuesMu.Lock()
 	pq, exists := priorityQueues[name]
-	priorityQueuesMu.RUnlock()
-
 	if !exists {
-		priorityQueuesMu.Lock()
-		priorityQueues[name] = store.NewPriorityQueue()
-		pq = priorityQueues[name]
-		priorityQueuesMu.Unlock()
+		pq = store.NewPriorityQueue()
+		priorityQueues[name] = pq
 	}
-
 	pq.PushItem(value, priority)
+	size := pq.Len()
+	priorityQueuesMu.Unlock()
 
-	return ctx.WriteInteger(int64(pq.Len()))
+	return ctx.WriteInteger(int64(size))
 }
 
 func cmdPQPOP(ctx *Context) error {
@@ -120,19 +121,21 @@ func cmdPQPOP(ctx *Context) error {
 
 	name := ctx.ArgString(0)
 
-	priorityQueuesMu.RLock()
+	priorityQueuesMu.Lock()
 	pq, exists := priorityQueues[name]
-	priorityQueuesMu.RUnlock()
 
 	if !exists {
+		priorityQueuesMu.Unlock()
 		return ctx.WriteNull()
 	}
 
 	value, priority, ok := pq.PopItem()
 	if !ok {
+		priorityQueuesMu.Unlock()
 		return ctx.WriteNull()
 	}
 
+	priorityQueuesMu.Unlock()
 	return ctx.WriteArray([]*resp.Value{
 		resp.BulkString(value),
 		resp.IntegerValue(priority),
@@ -173,8 +176,8 @@ func cmdPQLEN(ctx *Context) error {
 	name := ctx.ArgString(0)
 
 	priorityQueuesMu.RLock()
+	defer priorityQueuesMu.RUnlock()
 	pq, exists := priorityQueues[name]
-	priorityQueuesMu.RUnlock()
 
 	if !exists {
 		return ctx.WriteInteger(0)
@@ -190,15 +193,16 @@ func cmdPQCLEAR(ctx *Context) error {
 
 	name := ctx.ArgString(0)
 
-	priorityQueuesMu.RLock()
+	priorityQueuesMu.Lock()
 	pq, exists := priorityQueues[name]
-	priorityQueuesMu.RUnlock()
 
 	if !exists {
+		priorityQueuesMu.Unlock()
 		return ctx.WriteOK()
 	}
 
 	pq.Clear()
+	priorityQueuesMu.Unlock()
 	return ctx.WriteOK()
 }
 
