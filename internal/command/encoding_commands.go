@@ -1,6 +1,7 @@
 package command
 
 import (
+	"errors"
 	"fmt"
 	"math/rand"
 	"strings"
@@ -9,6 +10,10 @@ import (
 
 	"github.com/cachestorm/cachestorm/internal/resp"
 )
+
+// errInvalidPercentEncoding is returned for a '%' that is not followed by
+// exactly two hex digits, matching Redis' "invalid percent-encoding" reply.
+var errInvalidPercentEncoding = errors.New("ERR invalid percent-encoding")
 
 var encodingRandMu sync.Mutex
 var encodingRand = rand.New(rand.NewSource(time.Now().UnixNano()))
@@ -225,15 +230,27 @@ func urlDecode(s string) (string, error) {
 	i := 0
 
 	for i < len(s) {
-		if s[i] == '%' && i+2 < len(s) {
-			hex := s[i+1 : i+3]
-			val := hexToByte(hex)
+		switch {
+		case s[i] == '%':
+			// A percent-escape must be followed by exactly two hex digits.
+			// Decoding anything else silently produced a WRONG BYTE: hexToByte
+			// had no else branch, so an invalid digit contributed nothing
+			// while still shifting the accumulator — "%zz" yielded a NUL
+			// byte and "%4z" yielded '@'. The error return below had always
+			// been dead code, so this path was never actually reported.
+			if i+3 > len(s) {
+				return "", errInvalidPercentEncoding
+			}
+			val, ok := hexToByte(s[i+1 : i+3])
+			if !ok {
+				return "", errInvalidPercentEncoding
+			}
 			result.WriteByte(val)
 			i += 3
-		} else if s[i] == '+' {
+		case s[i] == '+':
 			result.WriteByte(' ')
 			i++
-		} else {
+		default:
 			result.WriteByte(s[i])
 			i++
 		}
@@ -242,19 +259,28 @@ func urlDecode(s string) (string, error) {
 	return result.String(), nil
 }
 
-func hexToByte(hex string) byte {
-	var result byte
-	for _, c := range hex {
-		result <<= 4
-		if c >= '0' && c <= '9' {
-			result |= byte(c - '0')
-		} else if c >= 'A' && c <= 'F' {
-			result |= byte(c - 'A' + 10)
-		} else if c >= 'a' && c <= 'f' {
-			result |= byte(c - 'a' + 10)
-		}
+// hexToByte converts exactly two hex digits to a byte and reports whether both
+// digits were valid.
+func hexToByte(hex string) (byte, bool) {
+	if len(hex) != 2 {
+		return 0, false
 	}
-	return result
+	var result byte
+	for i := 0; i < 2; i++ {
+		var digit byte
+		switch c := hex[i]; {
+		case c >= '0' && c <= '9':
+			digit = byte(c - '0')
+		case c >= 'A' && c <= 'F':
+			digit = byte(c - 'A' + 10)
+		case c >= 'a' && c <= 'f':
+			digit = byte(c - 'a' + 10)
+		default:
+			return 0, false
+		}
+		result = result<<4 | digit
+	}
+	return result, true
 }
 
 func cmdXMLENCODE(ctx *Context) error {
@@ -622,7 +648,13 @@ func isValidUUID(s string) bool {
 				return false
 			}
 		} else {
-			if c != '-' && (c < '0' || c > '9') && (c < 'a' || c > 'f') && (c < 'A' || c > 'F') {
+			// Every non-separator position must be a hex digit. The four
+			// separator positions are already enforced above, so a '-' can
+			// never legitimately appear here: excusing it let malformed
+			// strings such as "-2345678-e89b-12d3-a456-426614174000" validate,
+			// and UUID.VERSION then read that '-' as the version nibble and
+			// returned a nonsense version instead of an error.
+			if (c < '0' || c > '9') && (c < 'a' || c > 'f') && (c < 'A' || c > 'F') {
 				return false
 			}
 		}
@@ -642,8 +674,16 @@ func cmdUUIDVERSION(ctx *Context) error {
 		return ctx.WriteError(fmt.Errorf("ERR invalid UUID"))
 	}
 
-	version := uuid[14]
-	return ctx.WriteInteger(int64(version - '0'))
+	// uuid[14] is the version NIBBLE, so it is one hex digit. Subtracting '0'
+	// only works for '0'-'9'; a letter nibble ('a'-'f', 'A'-'F') must decode to
+	// 10..15, not to its ASCII offset (49..54 / 17..22). For 'a'-'f' and
+	// 'A'-'F' alike, c&0x0f yields 1..6, so +9 gives 10..15.
+	c := uuid[14]
+	version := int64(c - '0')
+	if c >= 'a' || c >= 'A' {
+		version = int64(c&0x0f) + 9
+	}
+	return ctx.WriteInteger(version)
 }
 
 func cmdULIDGEN(ctx *Context) error {

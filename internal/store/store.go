@@ -3,6 +3,7 @@ package store
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"sync"
 	"time"
@@ -302,11 +303,11 @@ func (s *Store) Set(key string, value Value, opts SetOptions) error {
 		// modifications (APPEND, SETRANGE, INCR family) must not reset or
 		// drop the key's TTL.
 		if prev, exists := shard.Get(key); exists {
-			entry.ExpiresAt = prev.ExpiresAt
+			entry.ExpiresAt.Store(prev.ExpiresAt.Load())
 		}
 	} else if opts.TTL > 0 {
 		entry.SetTTL(opts.TTL)
-		s.scheduleExpiry(key, entry.ExpiresAt)
+		s.scheduleExpiry(key, entry.ExpiresAt.Load())
 	}
 	if len(opts.Tags) > 0 {
 		entry.Tags = opts.Tags
@@ -339,7 +340,7 @@ func (s *Store) SetEntry(key string, entry *Entry) {
 
 	s.trackMemory(shard.Set(key, entry))
 	s.IncrementVersion(key)
-	s.scheduleExpiry(key, entry.ExpiresAt)
+	s.scheduleExpiry(key, entry.ExpiresAt.Load())
 }
 
 func (s *Store) Delete(key string) bool {
@@ -466,8 +467,27 @@ func (s *Store) TTL(key string) time.Duration {
 	return entry.TTL()
 }
 
+// nowNSPlus returns time.Now().UnixNano() + d, SATURATING at the int64 bounds
+// instead of wrapping.
+//
+//	time.Time.UnixNano is undefined outside 1678..2262, so a TTL longer than
+//	the ~236 years of headroom int64 nanoseconds actually have produced a
+//	NEGATIVE expiry instant. Entry.IsExpired then reported the key as already
+//	expired and it was silently deleted behind a :1 reply -- and the command
+//	layer deliberately accepts TTLs up to maxExpireAtSeconds (292 years).
+func nowNSPlus(d int64) int64 {
+	now := time.Now().UnixNano()
+	if d > 0 && now > math.MaxInt64-d {
+		return math.MaxInt64
+	}
+	if d < 0 && now < math.MinInt64-d {
+		return math.MinInt64
+	}
+	return now + d
+}
+
 func (s *Store) SetTTL(key string, ttl time.Duration) bool {
-	expiresAt := time.Now().Add(ttl).UnixNano()
+	expiresAt := nowNSPlus(int64(ttl))
 	if !s.shards[s.shardIndex(key)].updateExpiry(key, expiresAt) {
 		return false
 	}
@@ -502,11 +522,11 @@ func (s *Store) GetTTL(key string) time.Duration {
 		return -2 * time.Second
 	}
 
-	if entry.ExpiresAt == 0 {
+	if entry.ExpiresAt.Load() == 0 {
 		return -1 * time.Second
 	}
 
-	remaining := time.Duration(entry.ExpiresAt - time.Now().UnixNano())
+	remaining := time.Duration(entry.ExpiresAt.Load() - time.Now().UnixNano())
 	if remaining < 0 {
 		return -2 * time.Second
 	}
@@ -567,7 +587,7 @@ func (s *Store) getLiveEntry(key string) *Entry {
 	if entry == nil {
 		return nil
 	}
-	if entry.ExpiresAt > 0 && entry.ExpiresAt <= time.Now().UnixNano() {
+	if expiresAt := entry.ExpiresAt.Load(); expiresAt > 0 && expiresAt <= time.Now().UnixNano() {
 		return nil
 	}
 	return entry

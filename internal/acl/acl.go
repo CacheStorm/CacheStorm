@@ -345,6 +345,27 @@ func (u *User) ToACLString() string {
 
 func ParseACLRule(rule string, user *User) error {
 	parts := strings.Fields(rule)
+
+	// Validate the WHOLE rule before mutating anything. Applying token by token
+	// and bailing out mid-way left the user half-configured: `ACL SETUSER bob
+	// on >pw +get -@dangerous` would enable bob and grant GET, then fail — the
+	// operator saw an error but the earlier tokens had already taken effect.
+	//
+	// The check that matters here is the command category. Only @all is
+	// implemented, and Redis ACL accepts +@category / -@category for whole
+	// command groups. Those tokens used to fall through the switch and be
+	// discarded, so `ACL SETUSER bob +@all -@dangerous` returned +OK while
+	// leaving FLUSHALL, CONFIG and SHUTDOWN permitted — an operator who wrote
+	// the rule believed those commands were revoked. Ignoring a grant merely
+	// under-permits; ignoring a deny OVER-permits, so unknown categories fail
+	// closed instead of being silently dropped.
+	for _, part := range parts {
+		if len(part) > 2 && (part[0] == '+' || part[0] == '-') && part[1] == '@' && part[2:] != "all" {
+			return errors.New("ERR unsupported command category '" + part[2:] +
+				"': only @all is supported")
+		}
+	}
+
 	for _, part := range parts {
 		switch {
 		case part == "on":
@@ -358,20 +379,15 @@ func ParseACLRule(rule string, user *User) error {
 		case strings.HasPrefix(part, "+"):
 			cmd := part[1:]
 			if strings.HasPrefix(cmd, "@") {
-				cmd = cmd[1:]
-				if cmd == "all" {
-					user.AllowCommand("*")
-				}
+				// Validated above: every @category reaching here is "all".
+				user.AllowCommand("*")
 			} else {
 				user.AllowCommand(cmd)
 			}
 		case strings.HasPrefix(part, "-"):
 			cmd := part[1:]
 			if strings.HasPrefix(cmd, "@") {
-				cmd = cmd[1:]
-				if cmd == "all" {
-					user.DenyCommand("*")
-				}
+				user.DenyCommand("*")
 			} else {
 				user.DenyCommand(cmd)
 			}

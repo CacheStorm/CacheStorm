@@ -159,8 +159,8 @@ func TestAOFNoTTLStaysPermanentControl(t *testing.T) {
 	if !ok {
 		t.Fatal("control: key \"forever\" missing after rewrite+replay")
 	}
-	if entry.ExpiresAt != 0 {
-		t.Fatalf("control: ExpiresAt = %d, want 0 — a key with no TTL must not gain one", entry.ExpiresAt)
+	if entry.ExpiresAt.Load() != 0 {
+		t.Fatalf("control: ExpiresAt = %d, want 0 — a key with no TTL must not gain one", entry.ExpiresAt.Load())
 	}
 }
 

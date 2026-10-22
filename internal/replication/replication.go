@@ -412,8 +412,14 @@ func (m *Manager) UpdateReplicaOffset(id string, offset int64) {
 }
 
 func (m *Manager) PropagateCommand(cmd []byte) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	// The WRITE lock is required: this method mutates the shared replBacklog,
+	// each replica's bufio.Writer, and replica.Offset. An RLock only excluded
+	// other readers, so two concurrent propagations wrote the same backlog
+	// bytes and raced on the same Offset (whose ++ is a non-atomic
+	// read-modify-write, losing updates and desynchronising the reported
+	// replication offset).
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	newIdx := m.replBacklogIdx.Add(1)
 	idx := int(newIdx) % len(m.replBacklog)

@@ -310,7 +310,7 @@ func TestCmdSETEX_Success(t *testing.T) {
 	if string(entry.Value.(*store.StringValue).Data) != "val" {
 		t.Error("wrong value")
 	}
-	if entry.ExpiresAt == 0 {
+	if entry.ExpiresAt.Load() == 0 {
 		t.Error("expected TTL to be set")
 	}
 }

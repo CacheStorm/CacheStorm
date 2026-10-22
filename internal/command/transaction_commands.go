@@ -290,6 +290,15 @@ func executeQueuedCommand(ctx *Context, qc queuedCommand) *resp.Value {
 			if err != nil {
 				return resp.ErrorValue("ERR value is not an integer")
 			}
+			// Bound the TTL before multiplying, exactly as the top-level
+			// cmdEXPIRE handler does. Without the guard the multiplication
+			// overflows int64 nanoseconds and wraps to the wrong sign, so
+			// Store.SetTTL stores an expiry in the PAST and the key is
+			// silently DELETED behind a :1 reply. Redis answers
+			// "ERR invalid expire time in 'expire'".
+			if seconds == 0 || seconds > maxExpireAtSeconds || seconds < -maxExpireAtSeconds {
+				return resp.ErrorValue("ERR invalid expire time")
+			}
 			if _, exists := ctx.Store.Get(key); exists {
 				ctx.Store.SetTTL(key, time.Duration(seconds)*time.Second)
 				return resp.IntegerValue(1)
@@ -303,6 +312,10 @@ func executeQueuedCommand(ctx *Context, qc queuedCommand) *resp.Value {
 			ms, err := parseInt(qc.args[1])
 			if err != nil {
 				return resp.ErrorValue("ERR value is not an integer")
+			}
+			// See EXPIRE: ms * 1e6 overflows int64 nanoseconds the same way.
+			if ms == 0 || ms > maxExpireAtMillis || ms < -maxExpireAtMillis {
+				return resp.ErrorValue("ERR invalid expire time")
 			}
 			if _, exists := ctx.Store.Get(key); exists {
 				ctx.Store.SetTTL(key, time.Duration(ms)*time.Millisecond)
@@ -442,6 +455,14 @@ func executeQueuedCommand(ctx *Context, qc queuedCommand) *resp.Value {
 			seconds, err := parseInt(qc.args[1])
 			if err != nil {
 				return resp.ErrorValue("ERR value is not an integer")
+			}
+			// Bound the TTL before multiplying, exactly as the top-level
+			// cmdSETEX handler does. Without the guard the multiplication
+			// overflows int64 nanoseconds and wraps NEGATIVE, which Store.Set
+			// reads as "no expiry" -- leaving a PERMANENT key behind an OK
+			// reply. Redis answers "ERR invalid expire time in 'setex'".
+			if seconds == 0 || seconds > maxExpireAtSeconds || seconds < -maxExpireAtSeconds {
+				return resp.ErrorValue("ERR invalid expire time")
 			}
 			value := qc.args[2]
 			ctx.Store.Set(key, &store.StringValue{Data: value}, store.SetOptions{TTL: time.Duration(seconds) * time.Second})

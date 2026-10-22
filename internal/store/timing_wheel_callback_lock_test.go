@@ -14,7 +14,7 @@ func TestTimingWheelFarFutureCallbacksReleaseSchedulingLock(t *testing.T) {
 			for _, key := range []string{"callback", "persisted", "rescheduled"} {
 				e := NewEntry(&StringValue{Data: []byte("v")})
 				if key == "rescheduled" {
-					e.ExpiresAt = math.MaxInt64
+					e.ExpiresAt.Store(math.MaxInt64)
 				}
 				s.SetEntry(key, e)
 			}
@@ -24,7 +24,7 @@ func TestTimingWheelFarFutureCallbacksReleaseSchedulingLock(t *testing.T) {
 			for i := 0; i < count; i++ {
 				key := fmt.Sprintf("expired:%d", i)
 				e := NewEntry(&StringValue{Data: []byte("v")})
-				e.ExpiresAt = 1
+				e.ExpiresAt.Store(1)
 				s.SetEntry(key, e)
 				s.expiry.farFuture.keys[key] = 1
 			}

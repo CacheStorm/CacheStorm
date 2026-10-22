@@ -201,6 +201,10 @@ func (f *FailoverManager) completeFailover() {
 	}
 
 	for _, slot := range f.failedSlots {
+		// f.failedSlots is []uint16 (0..65535) but c.slots is [NumSlots]*SlotInfo.
+		if int(slot) >= NumSlots {
+			continue
+		}
 		f.cluster.slots[slot] = &SlotInfo{Primary: newPrimary}
 	}
 
@@ -297,6 +301,12 @@ func (m *SlotMigrator) Complete() error {
 
 	source := m.cluster.nodes[m.source]
 	for _, slot := range m.slots {
+		// m.slots is []uint16 (0..65535) but c.slots is [NumSlots]*SlotInfo (16384).
+		// Validate before the read below AND the write further down, which index
+		// c.slots with this same value.
+		if int(slot) >= NumSlots {
+			return fmt.Errorf("slot %d out of range (max %d)", slot, NumSlots-1)
+		}
 		info := m.cluster.slots[slot]
 		if info == nil || info.Primary == nil || info.Primary.ID != m.source {
 			return fmt.Errorf("slot %d not owned by source", slot)

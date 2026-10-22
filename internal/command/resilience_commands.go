@@ -2541,6 +2541,12 @@ func cmdJOINXCREATE(ctx *Context) error {
 	if ctx.ArgCount() < 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
+	// JoinX stores only Name/Left/Right; there is nowhere to record a join
+	// type or condition. Accepting those arguments and replying +OK would
+	// report success for configuration that is silently dropped.
+	if ctx.ArgCount() > 1 {
+		return ctx.WriteError(fmt.Errorf("ERR JOINX.CREATE does not support type or condition arguments"))
+	}
 	name := ctx.ArgString(0)
 	joinsXMux.Lock()
 	joinsX[name] = &JoinX{Name: name, Left: make([]string, 0), Right: make([]string, 0)}
@@ -2726,7 +2732,9 @@ func cmdPARTITIONXREBALANCE(ctx *Context) error {
 	if ctx.ArgCount() < 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
-	_ = ctx.ArgString(0)
-	_ = ctx.ArgString(1)
-	return ctx.WriteOK()
+	// Not implemented. PARTITIONX.ADD keeps values only: the key selects an
+	// index via hashString(key) % Count and is then discarded, so entries
+	// cannot be re-hashed onto a different partition count. Returning +OK here
+	// reported success for work that never happened.
+	return ctx.WriteError(fmt.Errorf("ERR PARTITIONX.REBALANCE is not implemented"))
 }

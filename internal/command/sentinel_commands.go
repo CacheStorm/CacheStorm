@@ -356,7 +356,12 @@ func handleSentinelIsMasterDown(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
-	name := ctx.ArgString(0)
+	// The name is the first argument AFTER the subcommand, so it is ArgString(1).
+	// Reading ArgString(0) took the subcommand slot — always the literal
+	// "ISMASTERDOWN" — so the lookup never matched a real master and the command
+	// reported every master as up. The ArgCount guard above already assumes the
+	// Redis shape <name> <epoch>.
+	name := ctx.ArgString(1)
 	master, ok := globalSentinel.GetMaster(name)
 	if !ok {
 		return ctx.WriteArray([]*resp.Value{

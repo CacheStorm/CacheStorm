@@ -239,12 +239,20 @@ func (s *Sentinel) isReachable(addr string, port int) bool {
 	return true
 }
 
+// checkODown evaluates the objectively-down verdict for master.
+//
+// The read lock must be held across the WHOLE check: checkODownLocked reads
+// peer.LastSeen and master.Quorum on live pointers, and recordPeer/gossipSentinels
+// write peer.LastSeen from the gossip goroutine. Releasing the lock before
+// delegating (as this did) left those reads unguarded and racing the writer.
+//
+// checkMasters calls checkODownLocked directly because it ALREADY holds the
+// write lock; it must keep doing so -- taking RLock here would deadlock.
 func (s *Sentinel) checkODown(master *MasterInfo) bool {
 	s.mu.RLock()
-	peers := s.sentinels[master.Name]
-	s.mu.RUnlock()
+	defer s.mu.RUnlock()
 
-	return s.checkODownLocked(master, peers)
+	return s.checkODownLocked(master, s.sentinels[master.Name])
 }
 
 // checkODownLocked is the lock-free core of checkODown. checkMasters already
@@ -336,8 +344,14 @@ func (s *Sentinel) startFailover(name string, master *MasterInfo) {
 		Int("new_port", bestReplica.Port).
 		Msg("Failover completed")
 
-	if s.onFailover != nil {
-		s.onFailover(name, bestReplica.Addr, bestReplica.Port)
+	// onFailover is a shared two-word func value: read it under the mutex, but
+	// invoke it OUTSIDE the lock so a callback that calls back into Sentinel
+	// cannot deadlock.
+	s.mu.RLock()
+	onFailover := s.onFailover
+	s.mu.RUnlock()
+	if onFailover != nil {
+		onFailover(name, bestReplica.Addr, bestReplica.Port)
 	}
 }
 
@@ -705,7 +719,9 @@ func (s *Sentinel) Reset(pattern string) int {
 }
 
 func (s *Sentinel) OnFailover(fn func(master string, newAddr string, newPort int)) {
+	s.mu.Lock()
 	s.onFailover = fn
+	s.mu.Unlock()
 }
 
 func (s *Sentinel) Info() map[string]interface{} {

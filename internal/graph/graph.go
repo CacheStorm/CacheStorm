@@ -87,7 +87,12 @@ func (g *Graph) DeleteNode(id uint64) bool {
 			newNodes = append(newNodes, n)
 		}
 	}
-	g.NodeLabel[node.Label] = newNodes
+	// Info() counts labels as len(NodeLabel), so an emptied label must lose its key.
+	if len(newNodes) == 0 {
+		delete(g.NodeLabel, node.Label)
+	} else {
+		g.NodeLabel[node.Label] = newNodes
+	}
 
 	for edgeID, edge := range g.Edges {
 		if edge.From == id || edge.To == id {
@@ -156,7 +161,13 @@ func (g *Graph) deleteEdgeLocked(id uint64) bool {
 			newEdges = append(newEdges, e)
 		}
 	}
-	g.EdgeLabel[edge.Relation] = newEdges
+	// Same rule as NodeLabel: an emptied relation must lose its key so Info()
+	// stops counting a relation that no edge carries.
+	if len(newEdges) == 0 {
+		delete(g.EdgeLabel, edge.Relation)
+	} else {
+		g.EdgeLabel[edge.Relation] = newEdges
+	}
 
 	neighbors := g.Adjacency[edge.From]
 	for i, neighbor := range neighbors {

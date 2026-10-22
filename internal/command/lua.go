@@ -307,7 +307,11 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 			return lua.LNil
 		}
 		if hv, ok := entry.Value.(*store.HashValue); ok {
-			if val, ok := hv.Fields[args[1]]; ok {
+			// cmdHSET/cmdHDEL mutate Fields under the hash write lock.
+			hv.RLock()
+			val, found := hv.Fields[args[1]]
+			hv.RUnlock()
+			if found {
 				return lua.LString(string(val))
 			}
 		}
@@ -343,10 +347,20 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 			return lua.LNil
 		}
 		if hv, ok := entry.Value.(*store.HashValue); ok {
-			tbl := L.NewTable()
+			// Snapshot under the read lock, then build the table after
+			// releasing it. HSET/HDEL mutate Fields under the write lock,
+			// and a map iteration concurrent with a map write is a fatal
+			// runtime error ("concurrent map iteration and map write").
+			hv.RLock()
+			pairs := make([][2][]byte, 0, len(hv.Fields))
 			for k, v := range hv.Fields {
-				tbl.Append(lua.LString(k))
-				tbl.Append(lua.LString(string(v)))
+				pairs = append(pairs, [2][]byte{[]byte(k), v})
+			}
+			hv.RUnlock()
+			tbl := L.NewTable()
+			for _, p := range pairs {
+				tbl.Append(lua.LString(string(p[0])))
+				tbl.Append(lua.LString(string(p[1])))
 			}
 			return tbl
 		}
@@ -470,7 +484,11 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 			return lua.LNumber(0)
 		}
 		if sv, ok := entry.Value.(*store.SetValue); ok {
-			if _, ok := sv.Members[args[1]]; ok {
+			// cmdSADD/cmdSREM/cmdSMOVE mutate Members under the set write lock.
+			sv.RLock()
+			_, found := sv.Members[args[1]]
+			sv.RUnlock()
+			if found {
 				return lua.LNumber(1)
 			}
 		}
@@ -485,7 +503,10 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 			return lua.LNumber(0)
 		}
 		if sv, ok := entry.Value.(*store.SetValue); ok {
-			return lua.LNumber(len(sv.Members))
+			sv.RLock()
+			n := len(sv.Members)
+			sv.RUnlock()
+			return lua.LNumber(n)
 		}
 		return lua.LNumber(0)
 
@@ -557,7 +578,10 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 			return lua.LNumber(0)
 		}
 		if hv, ok := entry.Value.(*store.HashValue); ok {
-			if _, ok := hv.Fields[args[1]]; ok {
+			hv.RLock()
+			_, found := hv.Fields[args[1]]
+			hv.RUnlock()
+			if found {
 				return lua.LNumber(1)
 			}
 		}
@@ -594,7 +618,10 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 			return lua.LNumber(0)
 		}
 		if hv, ok := entry.Value.(*store.HashValue); ok {
-			return lua.LNumber(len(hv.Fields))
+			hv.RLock()
+			n := len(hv.Fields)
+			hv.RUnlock()
+			return lua.LNumber(n)
 		}
 		return lua.LNumber(0)
 
@@ -607,7 +634,12 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 			return lua.LNumber(0)
 		}
 		if lv, ok := entry.Value.(*store.ListValue); ok {
-			return lua.LNumber(len(lv.Elements))
+			// cmdRPUSH/cmdLPUSH/cmdLPOP mutate Elements under the list
+			// write lock, so even the length must be read under it.
+			lv.RLock()
+			n := len(lv.Elements)
+			lv.RUnlock()
+			return lua.LNumber(n)
 		}
 		return lua.LNumber(0)
 
@@ -625,6 +657,13 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 			return lua.LNil
 		}
 		if lv, ok := entry.Value.(*store.ListValue); ok {
+			// Copy the requested window out under the read lock, then build
+			// the Lua table after releasing it. Copying (rather than keeping
+			// a sub-slice) matters: cmdLPOP can shift the backing array in
+			// place, which would otherwise corrupt a sub-slice held across
+			// the unlock. No Store call happens here, so holding the lock
+			// across the copy cannot self-deadlock.
+			lv.RLock()
 			length := len(lv.Elements)
 			if start < 0 {
 				start = length + start
@@ -638,11 +677,15 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 			if stop >= length {
 				stop = length - 1
 			}
-			tbl := L.NewTable()
+			var window [][]byte
 			if start <= stop {
-				for i := start; i <= stop; i++ {
-					tbl.Append(lua.LString(string(lv.Elements[i])))
-				}
+				window = append([][]byte(nil), lv.Elements[start:stop+1]...)
+			}
+			lv.RUnlock()
+
+			tbl := L.NewTable()
+			for _, el := range window {
+				tbl.Append(lua.LString(string(el)))
 			}
 			return tbl
 		}
@@ -664,12 +707,16 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 		} else {
 			zset = entry.Value.(*store.SortedSetValue)
 		}
-		if _, exists := zset.Members[args[2]]; !exists {
-			zset.Members[args[2]] = score
-			return lua.LNumber(1)
-		}
+		// cmdZADD mutates Members under zset.Lock(); an unguarded write here
+		// races it, and concurrent map writes can abort the process.
+		zset.Lock()
+		_, already := zset.Members[args[2]]
 		zset.Members[args[2]] = score
-		return lua.LNumber(0)
+		zset.Unlock()
+		if already {
+			return lua.LNumber(0)
+		}
+		return lua.LNumber(1)
 
 	case "ZSCORE":
 		if len(args) < 2 {
@@ -680,7 +727,11 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 			return lua.LNil
 		}
 		if zset, ok := entry.Value.(*store.SortedSetValue); ok {
-			if score, ok := zset.Members[args[1]]; ok {
+			// cmdZADD/cmdZREM mutate Members under the zset write lock.
+			zset.RLock()
+			score, found := zset.Members[args[1]]
+			zset.RUnlock()
+			if found {
 				return lua.LNumber(score)
 			}
 		}
@@ -708,8 +759,15 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 			return lua.LNumber(0)
 		}
 		if zset, ok := entry.Value.(*store.SortedSetValue); ok {
-			if _, ok := zset.Members[args[1]]; ok {
+			// cmdZREM deletes from Members under zset.Lock(); deleting here
+			// without it races that write.
+			zset.Lock()
+			_, present := zset.Members[args[1]]
+			if present {
 				delete(zset.Members, args[1])
+			}
+			zset.Unlock()
+			if present {
 				return lua.LNumber(1)
 			}
 		}
@@ -754,8 +812,14 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 			return L.NewTable()
 		}
 		if hv, ok := entry.Value.(*store.HashValue); ok {
-			tbl := L.NewTable()
+			hv.RLock()
+			keys := make([]string, 0, len(hv.Fields))
 			for k := range hv.Fields {
+				keys = append(keys, k)
+			}
+			hv.RUnlock()
+			tbl := L.NewTable()
+			for _, k := range keys {
 				tbl.Append(lua.LString(k))
 			}
 			return tbl
@@ -771,8 +835,14 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 			return L.NewTable()
 		}
 		if hv, ok := entry.Value.(*store.HashValue); ok {
-			tbl := L.NewTable()
+			hv.RLock()
+			vals := make([][]byte, 0, len(hv.Fields))
 			for _, v := range hv.Fields {
+				vals = append(vals, v)
+			}
+			hv.RUnlock()
+			tbl := L.NewTable()
+			for _, v := range vals {
 				tbl.Append(lua.LString(string(v)))
 			}
 			return tbl
@@ -788,8 +858,14 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 			return L.NewTable()
 		}
 		if sv, ok := entry.Value.(*store.SetValue); ok {
-			tbl := L.NewTable()
+			sv.RLock()
+			members := make([]string, 0, len(sv.Members))
 			for member := range sv.Members {
+				members = append(members, member)
+			}
+			sv.RUnlock()
+			tbl := L.NewTable()
+			for _, member := range members {
 				tbl.Append(lua.LString(member))
 			}
 			return tbl
@@ -805,6 +881,9 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 			return lua.LNumber(0)
 		}
 		if sv, ok := entry.Value.(*store.SetValue); ok {
+			// cmdSADD/cmdSREM/cmdSMOVE mutate Members under set.Lock();
+			// deleting here without it races those writes.
+			sv.Lock()
 			removed := 0
 			for i := 1; i < len(args); i++ {
 				if _, ok := sv.Members[args[i]]; ok {
@@ -812,6 +891,7 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 					removed++
 				}
 			}
+			sv.Unlock()
 			return lua.LNumber(removed)
 		}
 		return lua.LNumber(0)
@@ -829,11 +909,19 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 			if err != nil {
 				return lua.LNil
 			}
+			// Length and the element read must come from one locked view.
+			lv.RLock()
+			length := len(lv.Elements)
 			if idx < 0 {
-				idx = len(lv.Elements) + idx
+				idx = length + idx
 			}
-			if idx >= 0 && idx < len(lv.Elements) {
-				return lua.LString(string(lv.Elements[idx]))
+			var val []byte
+			if idx >= 0 && idx < length {
+				val = lv.Elements[idx]
+			}
+			lv.RUnlock()
+			if val != nil {
+				return lua.LString(string(val))
 			}
 		}
 		return lua.LNil
@@ -974,6 +1062,10 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 			return tbl
 		}
 		if hv, ok := entry.Value.(*store.HashValue); ok {
+			// cmdHSET/cmdHDEL mutate Fields under the hash write lock. The
+			// lock spans the whole lookup loop: no Store call happens inside,
+			// so it cannot self-deadlock.
+			hv.RLock()
 			for i := 1; i < len(args); i++ {
 				if val, ok := hv.Fields[args[i]]; ok {
 					tbl.Append(lua.LString(string(val)))
@@ -981,6 +1073,7 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 					tbl.Append(lua.LNil)
 				}
 			}
+			hv.RUnlock()
 		}
 		return tbl
 
@@ -995,9 +1088,14 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 		} else {
 			hv = entry.Value.(*store.HashValue)
 		}
+		// cmdHSET mutates Fields under hash.Lock(); writing here without it
+		// races that. The lock is released before the store.Set below, which
+		// itself takes the value lock and would otherwise self-deadlock.
+		hv.Lock()
 		for i := 1; i+1 < len(args); i += 2 {
 			hv.Fields[args[i]] = []byte(args[i+1])
 		}
+		hv.Unlock()
 		if !exists {
 			e.store.Set(args[0], hv, store.SetOptions{})
 		}

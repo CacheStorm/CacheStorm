@@ -2,6 +2,7 @@ package command
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -43,6 +44,16 @@ func cmdTSCREATE(ctx *Context) error {
 			i++
 			if i < ctx.ArgCount() {
 				ms := parseInt64(ctx.ArgString(i))
+				// Bound RETENTION before multiplying: ms * 1e6 overflows int64
+				// nanoseconds and wraps NEGATIVE, and every trim site in
+				// internal/store/timeseries.go gates on `if v.Retention > 0`, so a
+				// wrapped-negative retention silently disables trimming forever
+				// (unbounded growth). maxExpireAtMillis is MaxInt64/time.Millisecond,
+				// the largest value whose product still fits in int64. Redis also
+				// rejects a negative retention.
+				if ms < 0 || ms > maxExpireAtMillis {
+					return ctx.WriteError(errInvalidExpireTime)
+				}
 				retention = time.Duration(ms) * time.Millisecond
 			}
 		case "LABELS":
@@ -68,8 +79,8 @@ func cmdTSDEL(ctx *Context) error {
 	}
 
 	key := ctx.ArgString(0)
-	from := parseInt64(ctx.ArgString(1))
-	to := parseInt64(ctx.ArgString(2))
+	from := parseTSBound(ctx.ArgString(1))
+	to := parseTSBound(ctx.ArgString(2))
 
 	ts, ok := tsManager.Get(key)
 	if !ok {
@@ -112,6 +123,16 @@ func cmdTSADD(ctx *Context) error {
 			i++
 			if i < ctx.ArgCount() {
 				ms := parseInt64(ctx.ArgString(i))
+				// Bound RETENTION before multiplying: ms * 1e6 overflows int64
+				// nanoseconds and wraps NEGATIVE, and every trim site in
+				// internal/store/timeseries.go gates on `if v.Retention > 0`, so a
+				// wrapped-negative retention silently disables trimming forever
+				// (unbounded growth). maxExpireAtMillis is MaxInt64/time.Millisecond,
+				// the largest value whose product still fits in int64. Redis also
+				// rejects a negative retention.
+				if ms < 0 || ms > maxExpireAtMillis {
+					return ctx.WriteError(errInvalidExpireTime)
+				}
 				retention = time.Duration(ms) * time.Millisecond
 			}
 		case "LABELS":
@@ -194,8 +215,8 @@ func cmdTSRANGE(ctx *Context) error {
 	}
 
 	key := ctx.ArgString(0)
-	from := parseInt64(ctx.ArgString(1))
-	to := parseInt64(ctx.ArgString(2))
+	from := parseTSBound(ctx.ArgString(1))
+	to := parseTSBound(ctx.ArgString(2))
 
 	count := 0
 	aggType := ""
@@ -255,8 +276,8 @@ func cmdTSREVRANGE(ctx *Context) error {
 	}
 
 	key := ctx.ArgString(0)
-	from := parseInt64(ctx.ArgString(1))
-	to := parseInt64(ctx.ArgString(2))
+	from := parseTSBound(ctx.ArgString(1))
+	to := parseTSBound(ctx.ArgString(2))
 
 	count := 0
 	aggType := ""
@@ -425,6 +446,16 @@ func cmdTSALTER(ctx *Context) error {
 				if err != nil {
 					ms = 0
 				}
+				// Bound RETENTION before multiplying: ms * 1e6 overflows int64
+				// nanoseconds and wraps NEGATIVE, and every trim site in
+				// internal/store/timeseries.go gates on `if v.Retention > 0`, so a
+				// wrapped-negative retention silently disables trimming forever
+				// (unbounded growth). maxExpireAtMillis is MaxInt64/time.Millisecond,
+				// the largest value whose product still fits in int64. Redis also
+				// rejects a negative retention.
+				if ms < 0 || ms > maxExpireAtMillis {
+					return ctx.WriteError(errInvalidExpireTime)
+				}
 				retention = time.Duration(ms) * time.Millisecond
 				clearRetention = err == nil && ms == 0
 			}
@@ -560,6 +591,21 @@ func cmdTSDECRBY(ctx *Context) error {
 
 	_, result := ts.AddWithPolicy(timestamp, newValue, store.DuplicateLast)
 	return ctx.WriteInteger(result)
+}
+
+// parseTSBound parses a TS range endpoint. Redis defines "-" as the minimum
+// possible timestamp and "+" as the maximum. parseInt64 cannot express those:
+// it returns 0 for any non-numeric input, so "-" and "+" were silently
+// reinterpreted as the literal instant 0, collapsing `TS.RANGE key - +` to
+// Range(0, 0) and matching nothing.
+func parseTSBound(s string) int64 {
+	switch s {
+	case "-":
+		return math.MinInt64
+	case "+":
+		return math.MaxInt64
+	}
+	return parseInt64(s)
 }
 
 func parseInt64(s string) int64 {

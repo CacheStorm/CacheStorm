@@ -193,10 +193,15 @@ func (v *SetValue) Clone() Value {
 type Entry struct {
 	Value       Value
 	Tags        []string
-	ExpiresAt   int64
 	CreatedAt   int64
 	LastAccess  atomic.Int64
 	AccessCount atomic.Uint64
+	// ExpiresAt is atomic because Entry has no lock of its own and Shard.Get
+	// hands out a live pointer, releasing the shard lock on return -- so a
+	// reader holding that pointer is outside the shard lock while
+	// updateExpiry writes this field inside it. It sits beside LastAccess and
+	// AccessCount, which were converted for the same reason.
+	ExpiresAt atomic.Int64
 }
 
 func NewEntry(value Value) *Entry {
@@ -210,10 +215,10 @@ func NewEntry(value Value) *Entry {
 }
 
 func (e *Entry) IsExpired() bool {
-	if e.ExpiresAt == 0 {
-		return false
+	if expiresAt := e.ExpiresAt.Load(); expiresAt != 0 {
+		return time.Now().UnixNano() > expiresAt
 	}
-	return time.Now().UnixNano() > e.ExpiresAt
+	return false
 }
 
 func (e *Entry) MemoryUsage() int64 {
@@ -231,18 +236,19 @@ func (e *Entry) Touch() {
 }
 
 func (e *Entry) SetTTL(ttl time.Duration) {
-	e.ExpiresAt = time.Now().Add(ttl).UnixNano()
+	e.ExpiresAt.Store(time.Now().Add(ttl).UnixNano())
 }
 
 func (e *Entry) SetExpiresAt(expiresAt int64) {
-	e.ExpiresAt = expiresAt
+	e.ExpiresAt.Store(expiresAt)
 }
 
 func (e *Entry) TTL() time.Duration {
-	if e.ExpiresAt == 0 {
+	expiresAt := e.ExpiresAt.Load()
+	if expiresAt == 0 {
 		return -1
 	}
-	remaining := time.Until(time.Unix(0, e.ExpiresAt))
+	remaining := time.Until(time.Unix(0, expiresAt))
 	if remaining < 0 {
 		return -2
 	}

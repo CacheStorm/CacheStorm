@@ -14,7 +14,7 @@ func TestSlowLogAddIfSlowRecordsSlowCommands(t *testing.T) {
 	sl := NewSlowLog(10)
 	sl.SetThreshold(10 * time.Millisecond)
 
-	sl.AddIfSlow(50*time.Millisecond, "GET", [][]byte{[]byte("key")}, "127.0.0.1")
+	sl.AddIfSlow(50*time.Millisecond, "GET", [][]byte{[]byte("key")}, "127.0.0.1", "")
 
 	if sl.Len() != 1 {
 		t.Fatalf("expected slow command recorded, got %d entries", sl.Len())
@@ -29,7 +29,7 @@ func TestSlowLogAddIfSlowSkipsFastCommands(t *testing.T) {
 	sl := NewSlowLog(10)
 	sl.SetThreshold(10 * time.Millisecond)
 
-	sl.AddIfSlow(1*time.Microsecond, "GET", [][]byte{[]byte("key")}, "127.0.0.1")
+	sl.AddIfSlow(1*time.Microsecond, "GET", [][]byte{[]byte("key")}, "127.0.0.1", "")
 
 	if sl.Len() != 0 {
 		t.Fatalf("expected fast command skipped, got %d entries", sl.Len())
@@ -39,14 +39,14 @@ func TestSlowLogAddIfSlowSkipsFastCommands(t *testing.T) {
 func TestSlowLogSetThreshold(t *testing.T) {
 	sl := NewSlowLog(10)
 	sl.SetThreshold(10 * time.Millisecond)
-	sl.AddIfSlow(1*time.Microsecond, "GET", nil, "127.0.0.1")
+	sl.AddIfSlow(1*time.Microsecond, "GET", nil, "127.0.0.1", "")
 	if sl.Len() != 0 {
 		t.Fatalf("expected below-threshold command skipped, got %d entries", sl.Len())
 	}
 
 	// Threshold 0 records everything (SLOWLOG.CONFIG THRESHOLD 0 semantics).
 	sl.SetThreshold(0)
-	sl.AddIfSlow(1*time.Microsecond, "SET", [][]byte{[]byte("k"), []byte("v")}, "127.0.0.1")
+	sl.AddIfSlow(1*time.Microsecond, "SET", [][]byte{[]byte("k"), []byte("v")}, "127.0.0.1", "")
 	if sl.Len() != 1 {
 		t.Fatalf("expected threshold 0 to record everything, got %d entries", sl.Len())
 	}
@@ -59,13 +59,13 @@ func TestSlowLogSetThreshold(t *testing.T) {
 func TestSlowLogSetEnabled(t *testing.T) {
 	sl := NewSlowLog(10)
 	sl.SetEnabled(false)
-	sl.AddIfSlow(time.Hour, "GET", nil, "127.0.0.1")
+	sl.AddIfSlow(time.Hour, "GET", nil, "127.0.0.1", "")
 	if sl.Len() != 0 {
 		t.Fatalf("expected disabled slow log to skip recording, got %d entries", sl.Len())
 	}
 
 	sl.SetEnabled(true)
-	sl.AddIfSlow(time.Hour, "GET", nil, "127.0.0.1")
+	sl.AddIfSlow(time.Hour, "GET", nil, "127.0.0.1", "")
 	if sl.Len() != 1 {
 		t.Fatalf("expected re-enabled slow log to record, got %d entries", sl.Len())
 	}

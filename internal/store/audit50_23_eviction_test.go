@@ -41,7 +41,7 @@ func TestAudit50R23X(t *testing.T) {
 	}
 	s.Set(key, &StringValue{Data: []byte("v")}, SetOptions{})
 	entry, _ := s.GetShard(key).Get(key)
-	entry.ExpiresAt = 1<<63 - 1
+	entry.ExpiresAt.Store(1<<63 - 1)
 	mt := NewMemoryTracker(1000, 80, 90)
 	control := NewEvictionController(EvictionAllKeysRandom, 1000, s, mt, 1)
 	control.rnd = rand.New(rand.NewSource(1))

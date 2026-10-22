@@ -24,13 +24,13 @@ func TestHIncrByFloatRejectsInputBeforeCreation(t *testing.T) {
 			}
 			runHashAuditX(t, s, "HSET", "existing", "f", "2", "keep", "v")
 			before, _ := s.Get("existing")
-			before.ExpiresAt = math.MaxInt64
+			before.ExpiresAt.Store(math.MaxInt64)
 			for _, field := range []string{"f", "absent"} {
 				if got := runHashAuditX(t, s, "HINCRBYFLOAT", "existing", field, increment); !strings.HasPrefix(got, "-ERR") {
 					t.Fatal("existing-key rejected input")
 				}
 				after, _ := s.Get("existing")
-				if before != after || after.ExpiresAt != math.MaxInt64 {
+				if before != after || after.ExpiresAt.Load() != math.MaxInt64 {
 					t.Fatal("rejected increment changed metadata")
 				}
 				if got := runHashAuditX(t, s, "HMGET", "existing", "f", "keep", "absent"); got != "*3\r\n$1\r\n2\r\n$1\r\nv\r\n$-1\r\n" {

@@ -1289,11 +1289,16 @@ func TestDeep2_ServerWaitAOF(t *testing.T) {
 
 func TestDeep2_ServerShutdown(t *testing.T) {
 	s := store.NewStore()
-	ctx := discardCtx("SHUTDOWN", bytesArgs(), s)
+	ctx, buf := bufCtx("SHUTDOWN", bytesArgs(), s)
 	err := cmdSHUTDOWN(ctx)
-	// SHUTDOWN is expected to return an error
-	if err == nil {
-		t.Fatal("expected SHUTDOWN error")
+	// SHUTDOWN replies +OK itself, so returning nil is what keeps the command
+	// to a single reply. Returning an error made the connection loop write a
+	// second, stray -SHUTDOWN reply that desynchronized the pipelined stream.
+	if err != nil {
+		t.Fatalf("SHUTDOWN returned %v, want nil so only one reply is written", err)
+	}
+	if got := buf.String(); got != "+OK\r\n" {
+		t.Fatalf("SHUTDOWN wrote %q, want a single +OK", got)
 	}
 }
 

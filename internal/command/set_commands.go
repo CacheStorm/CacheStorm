@@ -695,12 +695,17 @@ func cmdSSCAN(ctx *Context) error {
 		})
 	}
 
+	// SADD/SREM/SMOVE mutate Members under the set's write lock, so the
+	// snapshot must be taken under the matching read lock. Iterating the map
+	// unlocked raced every locked writer on the same key.
+	set.RLock()
 	members := make([]string, 0, len(set.Members))
 	for member := range set.Members {
 		if matchPattern(member, pattern) {
 			members = append(members, member)
 		}
 	}
+	set.RUnlock()
 
 	start := cursor
 	if start >= len(members) {

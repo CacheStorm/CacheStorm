@@ -43,7 +43,10 @@ type Connection struct {
 	authenticated bool
 	// aclUser is the ACL user resolved by AUTH, carried the same way: it must
 	// outlive the per-command Context for permissions to persist.
-	aclUser     *acl.User
+	aclUser *acl.User
+	// clientName is set by CLIENT SETNAME and carried back onto the next
+	// command's Context, the same way aclUser is.
+	clientName  string
 	transaction *command.Transaction
 }
 
@@ -69,6 +72,29 @@ func (c *countingConn) Write(b []byte) (int, error) {
 	return n, err
 }
 
+// deadlineWriterConn re-arms the socket write deadline immediately before each
+// write, instead of latching one deadline for a whole command.
+//
+// Handle() arms a write deadline before router.Execute, but blocking commands
+// (BLPOP, BRPOPLPUSH, XREAD BLOCK ...) wait inside Execute for as long as the
+// client asked. A deadline armed before the block expires while the command is
+// still running, so the reply of a completed, successful command was dropped and
+// the client disconnected having received nothing. Refreshing per write still
+// bounds each individual write against a stalled peer — it just no longer
+// charges the command's own execution time against the reply's deadline.
+type deadlineWriterConn struct {
+	net.Conn
+	// timeout points at Connection.writeTimeout rather than copying it: the
+	// accept path (server.go) assigns the configured timeout after
+	// NewConnection has returned, so a copy would pin the default forever.
+	timeout *time.Duration
+}
+
+func (d *deadlineWriterConn) Write(b []byte) (int, error) {
+	_ = d.Conn.SetWriteDeadline(time.Now().Add(*d.timeout))
+	return d.Conn.Write(b)
+}
+
 func NewConnection(id int64, conn net.Conn, s *store.Store, r *command.Router, pm *plugin.Manager) *Connection {
 	// Keep-alive needs the raw TCP connection: Handle()'s type assertion
 	// would miss the counting wrapper installed below.
@@ -78,11 +104,7 @@ func NewConnection(id int64, conn net.Conn, s *store.Store, r *command.Router, p
 	}
 
 	cc := &countingConn{Conn: conn}
-	// Track the connection so CONNECTION.INFO, CONNECTION.LIST and
-	// CONNECTION.COUNT report the live connections.
-	command.TrackConnection(id, conn.RemoteAddr().String())
-
-	return &Connection{
+	c := &Connection{
 		ID:           id,
 		conn:         cc,
 		reader:       resp.NewReader(bufio.NewReader(cc)),
@@ -96,6 +118,17 @@ func NewConnection(id int64, conn net.Conn, s *store.Store, r *command.Router, p
 		writeTimeout: defaultWriteTimeout,
 		transaction:  command.NewTransaction(),
 	}
+	// Keep-alive was set on the raw TCP connection above, before this wrapper,
+	// so the deadline refresh sits between the byte counters and the socket.
+	// The wrapper reads Connection.writeTimeout live, so the configured timeout
+	// the accept path assigns later is honoured on every write.
+	cc.Conn = &deadlineWriterConn{Conn: conn, timeout: &c.writeTimeout}
+
+	// Track the connection so CONNECTION.INFO, CONNECTION.LIST and
+	// CONNECTION.COUNT report the live connections.
+	command.TrackConnection(id, conn.RemoteAddr().String())
+
+	return c
 }
 
 func (c *Connection) Handle() {
@@ -135,6 +168,7 @@ func (c *Connection) Handle() {
 		// Auth state lives on the connection; the Context is per-command.
 		ctx.SetAuthenticated(c.authenticated)
 		ctx.ACLUser = c.aclUser
+		ctx.ClientName = c.clientName
 
 		if cmd == "QUIT" {
 			c.conn.SetWriteDeadline(time.Now().Add(c.writeTimeout))
@@ -159,7 +193,7 @@ func (c *Connection) Handle() {
 		}
 		elapsed := time.Since(ctx.StartTime)
 		store.GlobalMetrics.RecordCommand(cmd, elapsed.Nanoseconds())
-		store.GlobalSlowLog.AddIfSlow(elapsed, cmd, ctx.Args, ctx.RemoteAddr)
+		store.GlobalSlowLog.AddIfSlow(elapsed, cmd, ctx.Args, ctx.RemoteAddr, ctx.ClientName)
 		if writeCommands[strings.ToUpper(cmd)] {
 			store.GlobalMetrics.RecordWrite()
 		} else {
@@ -176,6 +210,7 @@ func (c *Connection) Handle() {
 		// the Context, which is rebuilt from scratch for the next command.
 		c.authenticated = ctx.IsAuthenticated()
 		c.aclUser = ctx.ACLUser
+		c.clientName = ctx.ClientName
 
 		// Count the command against the connection so CONNECTION.INFO can
 		// report it.
@@ -198,7 +233,6 @@ func (c *Connection) recoverPanic() {
 func (c *Connection) Close() {
 	// Stop reporting the connection: it is gone.
 	command.UntrackConnection(c.ID)
-
 	// Clean up PubSub subscriber to prevent resource leak
 	if c.subscriber != nil {
 		if ps := c.store.GetPubSub(); ps != nil {

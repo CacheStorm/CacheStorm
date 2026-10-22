@@ -421,7 +421,12 @@ func cmdBITFIELD(ctx *Context) error {
 			if i+2 >= ctx.ArgCount() {
 				return ctx.WriteError(ErrSyntaxError)
 			}
-			encoding := ctx.ArgString(i + 1)
+			// BITFIELD encodings are case-insensitive: parseEncoding() accepts
+			// "i8", "I8", "u8", "U8" alike. The helpers below decide signed vs
+			// unsigned with strings.HasPrefix(encoding, "i"), which is only
+			// correct on a normalised string -- otherwise "I8" silently reads
+			// and saturates as UNSIGNED. Lower-case once, here.
+			encoding := strings.ToLower(ctx.ArgString(i + 1))
 			offset, err := strconv.ParseInt(ctx.ArgString(i+2), 10, 64)
 			if err != nil {
 				return ctx.WriteError(ErrNotInteger)
@@ -438,7 +443,12 @@ func cmdBITFIELD(ctx *Context) error {
 			if i+3 >= ctx.ArgCount() {
 				return ctx.WriteError(ErrSyntaxError)
 			}
-			encoding := ctx.ArgString(i + 1)
+			// BITFIELD encodings are case-insensitive: parseEncoding() accepts
+			// "i8", "I8", "u8", "U8" alike. The helpers below decide signed vs
+			// unsigned with strings.HasPrefix(encoding, "i"), which is only
+			// correct on a normalised string -- otherwise "I8" silently reads
+			// and saturates as UNSIGNED. Lower-case once, here.
+			encoding := strings.ToLower(ctx.ArgString(i + 1))
 			offset, err := strconv.ParseInt(ctx.ArgString(i+2), 10, 64)
 			if err != nil {
 				return ctx.WriteError(ErrNotInteger)
@@ -459,7 +469,12 @@ func cmdBITFIELD(ctx *Context) error {
 			if i+3 >= ctx.ArgCount() {
 				return ctx.WriteError(ErrSyntaxError)
 			}
-			encoding := ctx.ArgString(i + 1)
+			// BITFIELD encodings are case-insensitive: parseEncoding() accepts
+			// "i8", "I8", "u8", "U8" alike. The helpers below decide signed vs
+			// unsigned with strings.HasPrefix(encoding, "i"), which is only
+			// correct on a normalised string -- otherwise "I8" silently reads
+			// and saturates as UNSIGNED. Lower-case once, here.
+			encoding := strings.ToLower(ctx.ArgString(i + 1))
 			offset, err := strconv.ParseInt(ctx.ArgString(i+2), 10, 64)
 			if err != nil {
 				return ctx.WriteError(ErrNotInteger)

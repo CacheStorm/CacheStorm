@@ -25,22 +25,54 @@ import (
 	"github.com/cachestorm/cachestorm/plugins/metrics"
 )
 
-// writeCommands lists commands that mutate state and should be persisted to AOF
+// writeCommands lists commands that mutate state and should be persisted to AOF.
+//
+// This gate decides durability, so a command that mutates data but is missing
+// here is silently NOT appended: the AOF still holds the older command that
+// created the value, and replaying it on restart RESURRECTS data the client
+// already changed or deleted. Every registered command below was checked
+// against the router; the list covers the core data-structure commands plus the
+// scripting and JSON/time-series writers, because those mutate through their
+// own handlers rather than the string/hash/list/set/zset paths.
+//
+// Over-inclusion is safe (replaying a read is a no-op) while under-inclusion
+// loses data, so ambiguous writers (SORT without STORE) are deliberately listed.
 var writeCommands = map[string]bool{
 	"SET": true, "SETNX": true, "SETEX": true, "PSETEX": true, "MSET": true, "MSETNX": true,
 	"APPEND": true, "INCR": true, "DECR": true, "INCRBY": true, "DECRBY": true, "INCRBYFLOAT": true,
+	"GETDEL": true, "GETSET": true, "GETEX": true, "SETRANGE": true,
 	"DEL": true, "UNLINK": true, "RENAME": true, "RENAMENX": true, "EXPIRE": true, "EXPIREAT": true,
 	"PEXPIRE": true, "PEXPIREAT": true, "PERSIST": true,
+	"COPY": true, "MOVE": true, "MIGRATE": true, "RESTORE": true, "SORT": true,
+	"FLUSHALL": true, "FLUSHDB": true, "SWAPDB": true,
 	"HSET": true, "HSETNX": true, "HMSET": true, "HDEL": true, "HINCRBY": true, "HINCRBYFLOAT": true,
+	"HGETDEL": true, "HGETEX": true,
 	"LPUSH": true, "RPUSH": true, "LPOP": true, "RPOP": true, "LSET": true, "LREM": true,
 	"LTRIM": true, "LINSERT": true, "RPOPLPUSH": true, "LMOVE": true,
+	"LPUSHX": true, "RPUSHX": true, "LMPUSH": true, "LMPOP": true,
+	"BLPOP": true, "BRPOP": true, "BRPOPLPUSH": true, "BLMOVE": true, "BLMPOP": true,
 	"SADD": true, "SREM": true, "SPOP": true, "SMOVE": true,
+	"SDIFFSTORE": true, "SINTERSTORE": true, "SUNIONSTORE": true,
 	"ZADD": true, "ZREM": true, "ZINCRBY": true, "ZRANGESTORE": true,
+	"ZPOPMIN": true, "ZPOPMAX": true, "ZMPOP": true,
+	"ZDIFFSTORE": true, "ZINTERSTORE": true, "ZUNIONSTORE": true,
+	"ZREMRANGEBYSCORE": true, "ZREMRANGEBYRANK": true, "ZREMRANGEBYLEX": true,
+	"BZPOPMIN": true, "BZPOPMAX": true,
 	"XADD": true, "XDEL": true, "XTRIM": true,
+	"XACK": true, "XCLAIM": true, "XAUTOCLAIM": true, "XGROUP": true, "XSETID": true,
 	"PFADD": true, "PFMERGE": true,
 	"SETBIT": true, "BITOP": true, "BITFIELD": true,
-	"GEOADD": true, "GEORADIUS": true,
+	"GEOADD": true, "GEORADIUS": true, "GEOSEARCHSTORE": true,
+	"ADDTAG": true, "REMTAG": true, "TAGLINK": true, "TAGUNLINK": true,
 	"SETTAG": true, "INVALIDATE": true,
+	// Scripting mutates through redis.call inside the handler, so the script is
+	// the only replayable record of the effect.
+	"EVAL": true, "EVALSHA": true, "FCALL": true,
+	"JSON.SET": true, "JSON.DEL": true, "JSON.MSET": true,
+	"JSON.NUMINCRBY": true, "JSON.NUMMULTBY": true,
+	"JSON.ARRAPPEND": true, "JSON.STRAPPEND": true,
+	"TS.ADD": true, "TS.CREATE": true, "TS.DEL": true, "TS.ALTER": true,
+	"TS.INCRBY": true, "TS.DECRBY": true, "TS.MADD": true,
 }
 
 type Server struct {
@@ -236,6 +268,18 @@ func New(cfg *config.Config) (*Server, error) {
 			}
 		})
 	}
+
+	// Give SAVE/BGSAVE something real to do. They used to stamp a timestamp and
+	// reply +OK while performing no I/O, so a client treating SAVE as a
+	// durability barrier got a guarantee the server never kept. s.aof is read
+	// through the pointer at call time, so this is correct whether or not AOF is
+	// configured; when it is not, the hook reports that instead of pretending.
+	command.SetSaveHook(func() error {
+		if s.aof == nil {
+			return errors.New("ERR persistence is not configured")
+		}
+		return s.aof.Flush()
+	})
 
 	return s, nil
 }

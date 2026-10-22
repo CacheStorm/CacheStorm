@@ -236,10 +236,11 @@ func TestMultiGetPartialError(t *testing.T) {
 	}
 }
 
-// Cover resultDispatcher with invalid channel type in pending map (lines 222-226).
-// We manually store a non-channel value and then push a result that triggers
-// the type assertion failure path.
-func TestResultDispatcherInvalidChannelType(t *testing.T) {
+// Cover resultDispatcher's drop path for a result nobody is waiting for.
+// pending is now a typed map of per-key waiter queues, so a non-channel value
+// is unrepresentable; the equivalent guarantee is that an unclaimed result is
+// discarded without leaving a stale pending entry behind.
+func TestResultDispatcherDropsUnclaimedResult(t *testing.T) {
 	processor := &mockProcessor{}
 	b := NewBatcher(BatchConfig{
 		MaxSize:    100,
@@ -247,19 +248,18 @@ func TestResultDispatcherInvalidChannelType(t *testing.T) {
 		MaxWorkers: 4,
 	}, processor)
 
-	// Manually inject an invalid (non-channel) value into the pending map
-	b.pending.Store("badkey", "not-a-channel")
-
-	// Push a result for "badkey" into the results channel.
-	// The resultDispatcher should hit the !validCh branch and delete the key.
-	b.results <- BatchResult{Key: "badkey", Value: []byte("val")}
+	// Push a result for a key that has no registered waiter.
+	b.results <- BatchResult{Key: "unclaimed-key", Value: []byte("val")}
 
 	// Give the dispatcher time to process it
 	time.Sleep(100 * time.Millisecond)
 
-	// Verify the invalid entry was cleaned up
-	if _, ok := b.pending.Load("badkey"); ok {
-		t.Error("expected pending entry for badkey to be deleted")
+	// Verify no pending entry was created and none was left behind
+	b.pendingMu.Lock()
+	_, ok := b.pending["unclaimed-key"]
+	b.pendingMu.Unlock()
+	if ok {
+		t.Error("expected no pending entry for an unclaimed result")
 	}
 
 	b.Close()
@@ -381,7 +381,7 @@ func TestResultDispatcherStopDuringSend(t *testing.T) {
 
 	// Create a channel that's already full (buffer 0, nobody reading)
 	blockedCh := make(chan BatchResult)
-	b.pending.Store("blocked-key", blockedCh)
+	b.register("blocked-key", blockedCh)
 
 	// Push a result for that key; the dispatcher will try to send on blockedCh
 	// but it's blocked because nobody is reading. Then closing will trigger stopCh.

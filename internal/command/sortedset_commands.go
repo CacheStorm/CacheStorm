@@ -144,7 +144,12 @@ func cmdZADD(ctx *Context) error {
 	scores := make([]float64, scoreMemberCount/2)
 	for j := i; j < ctx.ArgCount(); j += 2 {
 		score, err := strconv.ParseFloat(ctx.ArgString(j), 64)
-		if err != nil || math.IsNaN(score) {
+		// Redis accepts only finite scores. "inf"/"-inf" parse successfully in
+		// Go (out-of-range literals like "1e400" already fail with ErrRange),
+		// but storing a non-finite score breaks score-ordered iteration and
+		// makes GT/LT comparisons degenerate. cmdZINCRBY already refuses a
+		// non-finite result for the same reason.
+		if err != nil || math.IsNaN(score) || math.IsInf(score, 0) {
 			return ctx.WriteError(ErrNotFloat)
 		}
 		scores[(j-scoreStart)/2] = score
@@ -209,6 +214,12 @@ func cmdZADD(ctx *Context) error {
 				return ctx.WriteBulkString(strconv.FormatFloat(score, 'f', -1, 64))
 			}
 			newScore := currentScore + score
+			// Mirror cmdZINCRBY: an increment that overflows to ±Inf (or NaN)
+			// must be refused, not stored. Persisting +Inf makes ZSCORE report
+			// +Inf and makes score-ordered iteration and GT/LT degenerate.
+			if math.IsNaN(newScore) || math.IsInf(newScore, 0) {
+				return ctx.WriteError(ErrFloatOverflow)
+			}
 			zset.Members[member] = newScore
 			return ctx.WriteBulkString(strconv.FormatFloat(newScore, 'f', -1, 64))
 		}
@@ -823,7 +834,12 @@ func cmdZREVRANK(ctx *Context) error {
 		return ctx.WriteNull()
 	}
 
+	// SortedSetValue does not self-lock: the caller must hold the value lock.
+	// Rank() ranges v.Members, so without this an unlocked read races a
+	// concurrent ZADD/ZREM -- and a map read racing a map write is fatal.
+	zset.RLock()
 	rank := zset.Rank(member, true)
+	zset.RUnlock()
 	if rank == -1 {
 		return ctx.WriteNull()
 	}
@@ -1047,6 +1063,12 @@ func cmdZSCAN(ctx *Context) error {
 			if err != nil {
 				return ctx.WriteError(ErrNotInteger)
 			}
+			// COUNT is a work-size hint. A non-positive one flows into
+			// end = start + count and then into make() as a negative
+			// capacity, which panics. SSCAN already rejected this; mirror it.
+			if count <= 0 {
+				return ctx.WriteError(ErrInvalidArg)
+			}
 		case "MATCH":
 			i++
 			if i >= ctx.ArgCount() {
@@ -1069,7 +1091,10 @@ func cmdZSCAN(ctx *Context) error {
 		})
 	}
 
+	// See cmdZRANDMEMBER: the read lock spans the GetSortedRange call only.
+	zset.RLock()
 	entries := zset.GetSortedRange(0, -1, true, false)
+	zset.RUnlock()
 
 	members := make([]store.SortedEntry, 0, len(entries))
 	for _, entry := range entries {
@@ -1135,8 +1160,12 @@ func cmdZPOPMIN(ctx *Context) error {
 		return ctx.WriteArray([]*resp.Value{})
 	}
 
+	// GetSortedRange ranges Members and Remove deletes from it; neither takes
+	// the lock, so this handler must. ZPOPMIN mutates, hence the write lock.
+	zset.Lock()
 	entries := zset.GetSortedRange(0, count-1, true, false)
 	if len(entries) == 0 {
+		zset.Unlock()
 		return ctx.WriteArray([]*resp.Value{})
 	}
 
@@ -1145,6 +1174,7 @@ func cmdZPOPMIN(ctx *Context) error {
 		result = append(result, resp.BulkString(entry.Member), resp.BulkString(strconv.FormatFloat(entry.Score, 'f', -1, 64)))
 		zset.Remove(entry.Member)
 	}
+	zset.Unlock()
 
 	return ctx.WriteArray(result)
 }
@@ -1179,8 +1209,11 @@ func cmdZPOPMAX(ctx *Context) error {
 		return ctx.WriteArray([]*resp.Value{})
 	}
 
+	// See cmdZPOPMIN: read + remove of Members needs the write lock.
+	zset.Lock()
 	entries := zset.GetSortedRange(0, count-1, true, true)
 	if len(entries) == 0 {
+		zset.Unlock()
 		return ctx.WriteArray([]*resp.Value{})
 	}
 
@@ -1190,6 +1223,7 @@ func cmdZPOPMAX(ctx *Context) error {
 		result = append(result, resp.BulkString(entry.Member), resp.BulkString(strconv.FormatFloat(entry.Score, 'f', -1, 64)))
 		zset.Remove(entry.Member)
 	}
+	zset.Unlock()
 
 	return ctx.WriteArray(result)
 }
@@ -1235,7 +1269,11 @@ func cmdZRANDMEMBER(ctx *Context) error {
 		return ctx.WriteNullBulkString()
 	}
 
+	// GetSortedRange ranges Members without locking; only the returned slice is
+	// used afterwards, so the read lock spans the call alone.
+	zset.RLock()
 	entries := zset.GetSortedRange(0, -1, true, false)
+	zset.RUnlock()
 	if len(entries) == 0 {
 		if countProvided {
 			return ctx.WriteArray([]*resp.Value{})
@@ -1308,7 +1346,11 @@ func cmdZMSCORE(ctx *Context) error {
 			result = append(result, resp.NullValue())
 			continue
 		}
+		// Same contract: GetScore() is a bare v.Members read. Locked after the
+		// nil check, because the nil path returns before any value is touched.
+		zset.RLock()
 		score, exists := zset.GetScore(member)
+		zset.RUnlock()
 		if !exists {
 			result = append(result, resp.NullValue())
 		} else {
@@ -1530,9 +1572,11 @@ func cmdZDIFFSTORE(ctx *Context) error {
 	}
 
 	result := make(map[string]float64)
+	firstZset.RLock()
 	for member, score := range firstZset.Members {
 		result[member] = score
 	}
+	firstZset.RUnlock()
 
 	for i := 1; i < numKeys; i++ {
 		key := ctx.ArgString(2 + i)
@@ -1541,9 +1585,11 @@ func cmdZDIFFSTORE(ctx *Context) error {
 			return ctx.WriteError(err)
 		}
 		if zset != nil {
+			zset.RLock()
 			for member := range zset.Members {
 				delete(result, member)
 			}
+			zset.RUnlock()
 		}
 	}
 
@@ -1557,7 +1603,9 @@ func cmdZDIFFSTORE(ctx *Context) error {
 		return ctx.WriteError(err)
 	}
 
+	destZset.Lock()
 	destZset.Members = result
+	destZset.Unlock()
 	return ctx.WriteInteger(int64(len(result)))
 }
 

@@ -56,12 +56,12 @@ func TestBlockingMovePreservesDataOnTypeError(t *testing.T) {
 			}
 			runCmd(t, s, r, "RPUSH", "same", "x")
 			entry, _ := s.Get("same")
-			entry.ExpiresAt = math.MaxInt64
+			entry.ExpiresAt.Store(math.MaxInt64)
 			if got := move("same", "same"); got != "$1\r\nx\r\n" {
 				t.Fatalf("same-key move: %q", got)
 			}
 			after, _ := s.Get("same")
-			if after != entry || after.ExpiresAt != math.MaxInt64 {
+			if after != entry || after.ExpiresAt.Load() != math.MaxInt64 {
 				t.Fatal("same-key entry or expiration changed")
 			}
 		})

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -371,35 +370,55 @@ func (g *Gossip) sendPingToAll() {
 	}
 }
 
-func (g *Gossip) sendMessage(addr string, msg *GossipMessage) {
+// sendMessage writes one gossip message to addr and returns the reply, or nil if
+// the peer could not be reached or answered with something unparseable.
+//
+// The reply is handled here rather than being fed back through handleMessage:
+// it is a direct answer to a message this node just sent to this exact address,
+// whereas validateSender deliberately admits only nodes we already know — which
+// is precisely the set we have not learned yet. Routing the reply through that
+// gate dropped the meet acknowledgement, so the node issuing CLUSTER MEET never
+// learned the node it met. Node fields are still validated by
+// updateNodeFromInfo before anything reaches the cluster.
+func (g *Gossip) sendMessage(addr string, msg *GossipMessage) *GossipMessage {
 	conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
 	if err != nil {
-		return
+		return nil
 	}
 	defer conn.Close()
 
 	data, err := json.Marshal(msg)
 	if err != nil {
-		return
+		return nil
 	}
 	if _, err := conn.Write(data); err != nil {
-		return
+		return nil
 	}
 	if _, err := conn.Write([]byte("\n")); err != nil {
-		return
+		return nil
 	}
 
 	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 	reader := bufio.NewReader(conn)
 	line, err := reader.ReadString('\n')
 	if err != nil {
-		return
+		return nil
 	}
 
 	var response GossipMessage
-	if err := json.Unmarshal([]byte(strings.TrimSpace(line)), &response); err == nil {
-		g.handleMessage(&response)
+	if err := json.Unmarshal([]byte(strings.TrimSpace(line)), &response); err != nil {
+		return nil
 	}
+
+	g.updateNodeFromInfo(response.Nodes)
+
+	g.mu.Lock()
+	if peer, ok := g.peers[response.SenderID]; ok {
+		peer.lastPong = time.Now()
+	}
+	g.mu.Unlock()
+
+	return &response
 }
 
 func (g *Gossip) checkFailedNodes() {
@@ -443,15 +462,21 @@ func (g *Gossip) Meet(addr string, port int) error {
 	}
 
 	peerAddr := fmt.Sprintf("%s:%d", addr, port)
-	g.sendMessage(peerAddr, msg)
-
-	g.mu.Lock()
-	g.peers[addr+":"+strconv.Itoa(port)] = &gossipPeer{
-		addr:     addr,
-		port:     port,
-		lastPing: time.Now(),
+	// sendMessage adopts the node the peer reports and registers it in g.peers
+	// under its node ID — the identity validateSender and the lastPong update
+	// look peers up by. Registering by address here made the peer unreachable
+	// to both, so every later ping/pong from it was discarded.
+	if g.sendMessage(peerAddr, msg) == nil {
+		// Unreachable right now: keep the address so sendPingToAll keeps
+		// retrying it. Once the peer answers, its node ID replaces this entry.
+		g.mu.Lock()
+		g.peers[peerAddr] = &gossipPeer{
+			addr:     addr,
+			port:     port,
+			lastPing: time.Now(),
+		}
+		g.mu.Unlock()
 	}
-	g.mu.Unlock()
 
 	return nil
 }

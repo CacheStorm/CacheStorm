@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
@@ -224,16 +225,20 @@ func cmdConfigSet(ctx *Context) error {
 		case "slowlog-log-slower-than":
 			if v, err := strconv.ParseInt(value, 10, 64); err == nil {
 				c.slowlogLogSlowerThan = v
-				globalSlowLog.mu.Lock()
-				globalSlowLog.slowLogSl = v
-				globalSlowLog.mu.Unlock()
+				// Apply to the recorder the request path actually appends to
+				// (store.GlobalSlowLog). Writing command.globalSlowLog instead
+				// left the live threshold unchanged, so lowering it at runtime
+				// looked successful via CONFIG GET but recorded nothing.
+				// The parameter is in microseconds, as in Redis.
+				if v < 0 {
+					v = 0
+				}
+				store.GlobalSlowLog.SetThreshold(time.Duration(v) * time.Microsecond)
 			}
 		case "slowlog-max-len":
 			if v, err := strconv.Atoi(value); err == nil {
 				c.slowlogMaxLen = v
-				globalSlowLog.mu.Lock()
-				globalSlowLog.maxLen = v
-				globalSlowLog.mu.Unlock()
+				store.GlobalSlowLog.SetMaxSize(v)
 			}
 		case "loglevel":
 			c.logLevel = value

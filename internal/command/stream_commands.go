@@ -292,7 +292,16 @@ func cmdXRANGE(ctx *Context) error {
 	count := int64(0)
 
 	for i := 3; i < ctx.ArgCount(); i++ {
-		if strings.ToUpper(ctx.ArgString(i)) == "COUNT" && i+1 < ctx.ArgCount() {
+		if strings.ToUpper(ctx.ArgString(i)) == "COUNT" {
+			// A COUNT with no value must be reported, not dropped. Folding the
+			// bounds check into the outer condition (`... && i+1 < ArgCount()`)
+			// made a dangling COUNT fall through silently: count stayed 0, and
+			// GetRange treats 0 as "no limit", so `XRANGE k - + COUNT` returned
+			// the WHOLE stream while the client believed it was constraining
+			// the result. cmdXAUTOCLAIM already errors here; this matches it.
+			if i+1 >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
 			var err error
 			count, err = strconv.ParseInt(ctx.ArgString(i+1), 10, 64)
 			if err != nil {
@@ -735,6 +744,9 @@ func cmdXINFO(ctx *Context) error {
 				}))
 			}
 
+			// StreamValue.CreateGroup/DestroyGroup write Groups under
+			// v.mu.Lock(); ranging it here unlocked is a fatal map race.
+			stream.RLock()
 			groupResults := make([]*resp.Value, 0)
 			for name, group := range stream.Groups {
 				consumerResults := make([]*resp.Value, 0)
@@ -752,6 +764,7 @@ func cmdXINFO(ctx *Context) error {
 					resp.BulkString("consumers"), resp.ArrayValue(consumerResults),
 				}))
 			}
+			stream.RUnlock()
 
 			return ctx.WriteArray([]*resp.Value{
 				resp.BulkString("length"), resp.IntegerValue(stream.Len()),
@@ -760,12 +773,19 @@ func cmdXINFO(ctx *Context) error {
 			})
 		}
 
+		// Read the group count under the lock, then release it: the
+		// stream.Len() calls below take v.mu.RLock() themselves, and RWMutex
+		// is not reentrant.
+		stream.RLock()
+		groupCount := int64(len(stream.Groups))
+		stream.RUnlock()
+
 		return ctx.WriteArray([]*resp.Value{
 			resp.BulkString("length"), resp.IntegerValue(stream.Len()),
 			resp.BulkString("radix-tree-keys"), resp.IntegerValue(stream.Len()),
 			resp.BulkString("radix-tree-nodes"), resp.IntegerValue(stream.Len() + 1),
 			resp.BulkString("last-generated-id"), resp.BulkString(stream.LastID),
-			resp.BulkString("groups"), resp.IntegerValue(int64(len(stream.Groups))),
+			resp.BulkString("groups"), resp.IntegerValue(groupCount),
 		})
 
 	case "GROUPS":
@@ -779,6 +799,8 @@ func cmdXINFO(ctx *Context) error {
 			return ctx.WriteError(ErrNoGroup)
 		}
 
+		// stream.Groups is written under v.mu by CreateGroup/DestroyGroup.
+		stream.RLock()
 		results := make([]*resp.Value, 0)
 		for name, group := range stream.Groups {
 			results = append(results, resp.ArrayValue([]*resp.Value{
@@ -788,6 +810,7 @@ func cmdXINFO(ctx *Context) error {
 				resp.BulkString("last-delivered-id"), resp.BulkString(group.LastID),
 			}))
 		}
+		stream.RUnlock()
 		return ctx.WriteArray(results)
 
 	case "CONSUMERS":
@@ -809,6 +832,9 @@ func cmdXINFO(ctx *Context) error {
 			return ctx.WriteError(ErrNoGroup)
 		}
 
+		// group.Consumers is written by CREATECONSUMER / DESTCONSUMER under
+		// the stream lock; ranging it unlocked is a fatal map race.
+		stream.RLock()
 		results := make([]*resp.Value, 0)
 		for name, c := range group.Consumers {
 			results = append(results, resp.ArrayValue([]*resp.Value{
@@ -817,6 +843,7 @@ func cmdXINFO(ctx *Context) error {
 				resp.BulkString("idle"), resp.IntegerValue(time.Now().UnixMilli() - c.SeenTime),
 			}))
 		}
+		stream.RUnlock()
 		return ctx.WriteArray(results)
 
 	case "HELP":
@@ -952,17 +979,28 @@ func cmdXGROUP(ctx *Context) error {
 			return ctx.WriteError(ErrNoGroup)
 		}
 
+		// These maps are read and mutated here, and XINFO CONSUMERS ranges
+		// group.Consumers. Hold the stream lock across the whole read-delete
+		// so the pair cannot interleave. GetGroup above released the lock
+		// before returning the group, so it must be re-taken here.
 		var pending int64
-		if c, exists := group.Consumers[consumerName]; exists {
-			pending = c.Pending
-			// Redis purges the deleted consumer's pending entries from the
-			// group PEL: they become unclaimable, not orphaned under a ghost.
-			for id, p := range group.Pending {
-				if p.Consumer == consumerName {
-					delete(group.Pending, id)
+		stream.RLock()
+		_, exists := group.Consumers[consumerName]
+		stream.RUnlock()
+		if exists {
+			stream.Lock()
+			if c, ok := group.Consumers[consumerName]; ok {
+				pending = c.Pending
+				// Redis purges the deleted consumer's pending entries from the
+				// group PEL: they become unclaimable, not orphaned under a ghost.
+				for id, p := range group.Pending {
+					if p.Consumer == consumerName {
+						delete(group.Pending, id)
+					}
 				}
+				delete(group.Consumers, consumerName)
 			}
-			delete(group.Consumers, consumerName)
+			stream.Unlock()
 		}
 
 		return ctx.WriteInteger(pending)
@@ -986,11 +1024,16 @@ func cmdXGROUP(ctx *Context) error {
 			return ctx.WriteError(ErrNoGroup)
 		}
 
+		// Check-then-create on group.Consumers must be atomic: XINFO CONSUMERS
+		// ranges that map, and a concurrent CREATECONSUMER would otherwise
+		// both see "missing" and insert into the same map unlocked.
+		stream.Lock()
 		created := int64(0)
 		if _, exists := group.Consumers[consumerName]; !exists {
 			group.GetOrCreateConsumer(consumerName)
 			created = 1
 		}
+		stream.Unlock()
 
 		return ctx.WriteInteger(created)
 

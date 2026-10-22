@@ -2,6 +2,7 @@ package command
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -16,6 +17,38 @@ var (
 	cuckooFilters   = make(map[string]*store.CuckooFilter)
 	probabilisticMu sync.RWMutex
 )
+
+// probabilisticMaxBytes bounds the memory one probabilistic structure may
+// occupy. The probabilistic structures are held outside the store's own
+// value accounting, so the store's MaxValueSize ceiling does not cover them;
+// without a bound of their own a single command could ask for an allocation
+// the process cannot satisfy.
+const probabilisticMaxBytes = 512 * 1024 * 1024
+
+// parseProbabilisticSize parses a size argument for a probabilistic
+// structure. The size must be a positive integer.
+//
+// The shared parseInt64 helper returns 0 for any input it cannot read, so a
+// typo'd size was indistinguishable from a legitimate zero — and zero is
+// exactly the value these structures cannot survive. A zero-width bloom
+// filter divides by its zero modulus in store.BloomFilter.Add, a zero-width
+// count-min sketch divides by its zero modulus in store.CountMinSketch.Add,
+// and a negative top-k makes store.TopK.List allocate with a negative
+// capacity. A negative size was worse still: it became a huge uint and the
+// constructor allocated an impossible slice and panicked.
+//
+// The name is used in the error reply so the client can tell which argument
+// was wrong.
+func parseProbabilisticSize(arg, name string) (int64, error) {
+	size, err := strconv.ParseInt(arg, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("ERR %s is not an integer or out of range", name)
+	}
+	if size <= 0 {
+		return 0, fmt.Errorf("ERR %s must be positive", name)
+	}
+	return size, nil
+}
 
 func RegisterProbabilisticCommands(router *Router) {
 	router.Register(&CommandDef{Name: "BF.ADD", Handler: cmdBFADD})
@@ -122,15 +155,32 @@ func cmdBFRESERVE(ctx *Context) error {
 	}
 
 	key := ctx.ArgString(0)
-	capacity := int(parseInt64(ctx.ArgString(1)))
+	capacity, err := parseProbabilisticSize(ctx.ArgString(1), "capacity")
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	// The filter is capacity*10 bits, and a bool bit occupies a byte, so the
+	// bit array must stay inside the memory ceiling. Dividing the ceiling
+	// BEFORE multiplying also keeps the product from overflowing int64: an
+	// overflowed product became a negative int, then a huge uint, and the
+	// constructor allocated an impossible slice and panicked.
+	if capacity > probabilisticMaxBytes/10 {
+		return ctx.WriteError(fmt.Errorf("ERR capacity is too large"))
+	}
 	errorRate := 0.01
 
 	if ctx.ArgCount() >= 3 {
 		errorRate = parseJSONFloat(ctx.ArgString(2))
 	}
 
+	// Build the filter BEFORE taking the lock. The constructor can panic on
+	// an impossible allocation, and a panic inside the locked section
+	// strands the global mutex: every later probabilistic command in the
+	// server then blocks forever.
+	bf := store.NewBloomFilter(uint(capacity*10), errorRate)
+
 	probabilisticMu.Lock()
-	bloomFilters[key] = store.NewBloomFilter(uint(capacity*10), errorRate)
+	bloomFilters[key] = bf
 	probabilisticMu.Unlock()
 
 	return ctx.WriteOK()
@@ -292,22 +342,35 @@ func cmdCFRESERVE(ctx *Context) error {
 	}
 
 	key := ctx.ArgString(0)
-	capacity := int(parseInt64(ctx.ArgString(1)))
-	if capacity <= 0 {
-		return ctx.WriteError(fmt.Errorf("ERR capacity must be positive"))
+	capacity, err := parseProbabilisticSize(ctx.ArgString(1), "capacity")
+	if err != nil {
+		return ctx.WriteError(err)
 	}
-	bucketSize := uint(2)
+	bucketSize := int64(2)
 
 	if ctx.ArgCount() >= 3 {
-		size := parseInt64(ctx.ArgString(2))
-		if size <= 0 {
-			return ctx.WriteError(fmt.Errorf("ERR bucket size must be positive"))
+		size, err := parseProbabilisticSize(ctx.ArgString(2), "bucket size")
+		if err != nil {
+			return ctx.WriteError(err)
 		}
-		bucketSize = uint(size)
+		bucketSize = size
+	}
+	// The filter is capacity buckets of bucketSize bytes each. Bound the
+	// product so the allocation stays inside the memory ceiling, and compute
+	// it without overflowing: an overflowed product became a huge uint and
+	// the constructor allocated an impossible slice and panicked.
+	if bucketSize > probabilisticMaxBytes/capacity {
+		return ctx.WriteError(fmt.Errorf("ERR capacity and bucket size are too large"))
 	}
 
+	// Build the filter BEFORE taking the lock. The constructor can panic on
+	// an impossible allocation, and a panic inside the locked section
+	// strands the global mutex: every later probabilistic command in the
+	// server then blocks forever.
+	cf := store.NewCuckooFilter(uint(capacity), uint(bucketSize))
+
 	probabilisticMu.Lock()
-	cuckooFilters[key] = store.NewCuckooFilter(uint(capacity), bucketSize)
+	cuckooFilters[key] = cf
 	probabilisticMu.Unlock()
 
 	return ctx.WriteOK()
@@ -400,11 +463,29 @@ func cmdCMSINIT(ctx *Context) error {
 	}
 
 	key := ctx.ArgString(0)
-	depth := int(parseInt64(ctx.ArgString(1)))
-	width := int(parseInt64(ctx.ArgString(2)))
+	depth, err := parseProbabilisticSize(ctx.ArgString(1), "depth")
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	width, err := parseProbabilisticSize(ctx.ArgString(2), "width")
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	// The sketch is depth*width counters of 8 bytes each. Bound the product
+	// so the allocation stays inside the memory ceiling, and compute it
+	// without overflowing: an overflowed product would become a huge uint
+	// and the constructor would allocate an impossible slice and panic.
+	if depth > probabilisticMaxBytes/8/width {
+		return ctx.WriteError(fmt.Errorf("ERR depth and width are too large"))
+	}
+
+	// Build the sketch BEFORE taking the lock: a panic inside the locked
+	// section would strand the global mutex and block every later
+	// probabilistic command forever.
+	cms := store.NewCountMinSketch(uint(depth), uint(width))
 
 	probabilisticMu.Lock()
-	countMinSketch[key] = store.NewCountMinSketch(uint(depth), uint(width))
+	countMinSketch[key] = cms
 	probabilisticMu.Unlock()
 
 	return ctx.WriteOK()
@@ -543,10 +624,19 @@ func cmdTOPKRESERVE(ctx *Context) error {
 	}
 
 	key := ctx.ArgString(0)
-	k := int(parseInt64(ctx.ArgString(1)))
+	k, err := parseProbabilisticSize(ctx.ArgString(1), "topk")
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	// The top-k keeps at most k items, and each retained item costs a map
+	// entry plus a string header. Bound k so the retained set stays inside
+	// the memory ceiling.
+	if k > probabilisticMaxBytes/64 {
+		return ctx.WriteError(fmt.Errorf("ERR topk is too large"))
+	}
 
 	probabilisticMu.Lock()
-	topK[key] = store.NewTopK(k)
+	topK[key] = store.NewTopK(int(k))
 	probabilisticMu.Unlock()
 
 	return ctx.WriteOK()

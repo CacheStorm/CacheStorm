@@ -1250,7 +1250,7 @@ func TestStore_SetEntry_KeyTooLarge(t *testing.T) {
 func TestStore_Exists_Expired(t *testing.T) {
 	s := NewStore()
 	entry := NewEntry(&StringValue{Data: []byte("val")})
-	entry.ExpiresAt = time.Now().Add(-time.Second).UnixNano()
+	entry.ExpiresAt.Store(time.Now().Add(-time.Second).UnixNano())
 	s.shards[s.shardIndex("expkey")].Set("expkey", entry)
 
 	if s.Exists("expkey") {
@@ -1270,7 +1270,7 @@ func TestStore_GetTTL_NoExpiry(t *testing.T) {
 func TestStore_GetTTL_Expired(t *testing.T) {
 	s := NewStore()
 	entry := NewEntry(&StringValue{Data: []byte("val")})
-	entry.ExpiresAt = time.Now().Add(-time.Second).UnixNano()
+	entry.ExpiresAt.Store(time.Now().Add(-time.Second).UnixNano())
 	s.shards[s.shardIndex("expired")].Set("expired", entry)
 
 	ttl := s.GetTTL("expired")
@@ -2565,7 +2565,7 @@ func TestStore_SetWithTags(t *testing.T) {
 func TestStore_GetExpired(t *testing.T) {
 	s := NewStore()
 	entry := NewEntry(&StringValue{Data: []byte("val")})
-	entry.ExpiresAt = time.Now().Add(-time.Second).UnixNano()
+	entry.ExpiresAt.Store(time.Now().Add(-time.Second).UnixNano())
 	idx := s.shardIndex("expkey")
 	s.shards[idx].Set("expkey", entry)
 
@@ -3326,8 +3326,7 @@ func TestStore_SetWithEvictionRetry(t *testing.T) {
 func TestStore_GetTTL_ExpiredDirect(t *testing.T) {
 	s := NewStore()
 	entry := NewEntry(&StringValue{Data: []byte("val")})
-	entry.ExpiresAt = time.Now().Add(-time.Hour).UnixNano()
-
+	entry.ExpiresAt.Store(time.Now().Add(-time.Hour).UnixNano())
 	idx := s.shardIndex("ttlexp")
 	s.shards[idx].Set("ttlexp", entry)
 
@@ -3530,7 +3529,7 @@ func TestStore_GetTTL_JustExpired(t *testing.T) {
 	// Actually, we need ExpiresAt > 0 and ExpiresAt in the past after the IsExpired check
 	// The remaining < 0 check is for the case where time passes between checks
 	// Let's set a very close expiry
-	entry.ExpiresAt = time.Now().Add(1 * time.Nanosecond).UnixNano()
+	entry.ExpiresAt.Store(time.Now().Add(1 * time.Nanosecond).UnixNano())
 	idx := s.shardIndex("justexp")
 	s.shards[idx].Set("justexp", entry)
 	time.Sleep(time.Millisecond)
@@ -3668,8 +3667,7 @@ func TestStore_GetTTL_RemainingNegative(t *testing.T) {
 	s := NewStore()
 	entry := NewEntry(&StringValue{Data: []byte("val")})
 	// ExpiresAt is in the past but positive (not 0) and entry is not yet cleaned
-	entry.ExpiresAt = time.Now().Add(-100 * time.Millisecond).UnixNano()
-
+	entry.ExpiresAt.Store(time.Now().Add(-100 * time.Millisecond).UnixNano())
 	idx := s.shardIndex("negttl")
 	s.shards[idx].Set("negttl", entry)
 

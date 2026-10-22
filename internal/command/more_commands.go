@@ -2343,16 +2343,36 @@ func cmdRINGBUFFERREAD(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
+	// Snapshot the buffer while holding the read lock. The lock was released
+	// right after the map lookup, so the RingBuffer's mutable fields were then
+	// read with no lock at all while RINGBUFFER.WRITE mutated them under the
+	// write lock. Two consequences, both proven by the race detector:
+	//
+	//   - a data race on rb.Count and rb.Head, and
+	//   - a crash. The results slice was sized from the rb.Count read at
+	//     allocation time, but the loop condition re-read rb.Count, which a
+	//     concurrent writer could grow in between, so the loop indexed past
+	//     the end of the slice ("index out of range" panic).
+	//
+	// Copying the elements under the lock makes the read a consistent
+	// snapshot, so the returned count and the returned elements always agree.
 	ringBuffersMu.RLock()
 	rb, exists := ringBuffers[name]
-	ringBuffersMu.RUnlock()
 	if !exists || rb.Count == 0 {
+		ringBuffersMu.RUnlock()
 		return ctx.WriteArray([]*resp.Value{})
 	}
-	results := make([]*resp.Value, rb.Count)
-	tail := (rb.Head - rb.Count + rb.Size) % rb.Size
-	for i := 0; i < rb.Count; i++ {
-		results[i] = resp.BulkString(rb.Data[(tail+i)%rb.Size])
+	count := rb.Count
+	tail := (rb.Head - count + rb.Size) % rb.Size
+	values := make([]string, count)
+	for i := 0; i < count; i++ {
+		values[i] = rb.Data[(tail+i)%rb.Size]
+	}
+	ringBuffersMu.RUnlock()
+
+	results := make([]*resp.Value, len(values))
+	for i, v := range values {
+		results[i] = resp.BulkString(v)
 	}
 	return ctx.WriteArray(results)
 }
@@ -2608,10 +2628,16 @@ func cmdFREQTOP(ctx *Context) error {
 	if ctx.ArgCount() >= 2 {
 		k = int(parseInt64(ctx.ArgString(1)))
 	}
+	// Iterate the counter's map while holding the read lock. The lock used to
+	// be released right after the lookup, so the map was iterated with no lock
+	// at all while FREQ.ADD wrote it under the write lock. Concurrent map
+	// iteration and map write is a FATAL Go runtime error ("fatal error:
+	// concurrent map iteration and map write"): it cannot be recovered and it
+	// terminates the whole server process, not just this connection.
 	freqsMu.RLock()
 	f, exists := freqs[name]
-	freqsMu.RUnlock()
 	if !exists {
+		freqsMu.RUnlock()
 		return ctx.WriteArray([]*resp.Value{})
 	}
 	type kv struct {
@@ -2622,6 +2648,8 @@ func cmdFREQTOP(ctx *Context) error {
 	for k, v := range f.Items {
 		items = append(items, kv{k, v})
 	}
+	freqsMu.RUnlock()
+
 	for i := 0; i < len(items)-1; i++ {
 		for j := i + 1; j < len(items); j++ {
 			if items[j].Value > items[i].Value {

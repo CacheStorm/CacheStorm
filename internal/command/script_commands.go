@@ -4,14 +4,45 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
+	"github.com/cachestorm/cachestorm/internal/store"
 )
 
-var scriptEngine *ScriptEngine
+var (
+	scriptEngine   *ScriptEngine
+	scriptEngineMu sync.RWMutex
+)
 
 func InitScriptEngine(s *ScriptEngine) {
+	scriptEngineMu.Lock()
 	scriptEngine = s
+	scriptEngineMu.Unlock()
+}
+
+// getScriptEngine returns the shared engine, building it on first use.
+//
+// scriptEngine is a package-level pointer, so it needs its own guard: ScriptEngine
+// locks its `scripts` map internally (lua.go), but that says nothing about the
+// pointer deciding *which* engine exists. Without this, two connections issuing
+// their first EVAL against a cold server both observe nil, both construct an
+// engine, and both write the pointer -- and each script then runs against
+// whichever engine it happened to read, possibly bound to another Store.
+func getScriptEngine(s *store.Store) *ScriptEngine {
+	scriptEngineMu.RLock()
+	e := scriptEngine
+	scriptEngineMu.RUnlock()
+	if e != nil {
+		return e
+	}
+
+	scriptEngineMu.Lock()
+	defer scriptEngineMu.Unlock()
+	if scriptEngine == nil {
+		scriptEngine = NewScriptEngine(s)
+	}
+	return scriptEngine
 }
 
 func RegisterScriptCommands(router *Router) {
@@ -72,9 +103,7 @@ func cmdEVAL(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
-	if scriptEngine == nil {
-		scriptEngine = NewScriptEngine(ctx.Store)
-	}
+	engine := getScriptEngine(ctx.Store)
 
 	script := ctx.ArgString(0)
 	numKeys, err := strconv.Atoi(ctx.ArgString(1))
@@ -101,7 +130,7 @@ func cmdEVAL(ctx *Context) error {
 		args = append(args, ctx.ArgString(i))
 	}
 
-	result, err := scriptEngine.EvalGuarded(script, keys, args, scriptGuard(ctx))
+	result, err := engine.EvalGuarded(script, keys, args, scriptGuard(ctx))
 	if err != nil {
 		return ctx.WriteError(err)
 	}
@@ -114,9 +143,7 @@ func cmdEVALSHA(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
-	if scriptEngine == nil {
-		scriptEngine = NewScriptEngine(ctx.Store)
-	}
+	engine := getScriptEngine(ctx.Store)
 
 	sha := ctx.ArgString(0)
 	numKeys, err := strconv.Atoi(ctx.ArgString(1))
@@ -143,7 +170,7 @@ func cmdEVALSHA(ctx *Context) error {
 		args = append(args, ctx.ArgString(i))
 	}
 
-	result, err := scriptEngine.EvalSHAGuarded(sha, keys, args, scriptGuard(ctx))
+	result, err := engine.EvalSHAGuarded(sha, keys, args, scriptGuard(ctx))
 	if err != nil {
 		return ctx.WriteError(err)
 	}
@@ -156,9 +183,7 @@ func cmdSCRIPT(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
-	if scriptEngine == nil {
-		scriptEngine = NewScriptEngine(ctx.Store)
-	}
+	engine := getScriptEngine(ctx.Store)
 
 	subCmd := strings.ToUpper(ctx.ArgString(0))
 
@@ -168,7 +193,7 @@ func cmdSCRIPT(ctx *Context) error {
 			return ctx.WriteError(ErrWrongArgCount)
 		}
 		script := ctx.ArgString(1)
-		sha := scriptEngine.ScriptLoad(script)
+		sha := engine.ScriptLoad(script)
 		return ctx.WriteBulkString(sha)
 
 	case "EXISTS":
@@ -178,7 +203,7 @@ func cmdSCRIPT(ctx *Context) error {
 		results := make([]*resp.Value, ctx.ArgCount()-1)
 		for i := 1; i < ctx.ArgCount(); i++ {
 			sha := ctx.ArgString(i)
-			if scriptEngine.ScriptExists(sha) {
+			if engine.ScriptExists(sha) {
 				results[i-1] = resp.IntegerValue(1)
 			} else {
 				results[i-1] = resp.IntegerValue(0)
@@ -187,7 +212,7 @@ func cmdSCRIPT(ctx *Context) error {
 		return ctx.WriteArray(results)
 
 	case "FLUSH":
-		scriptEngine.ScriptFlush()
+		engine.ScriptFlush()
 		return ctx.WriteOK()
 
 	case "DEBUG":

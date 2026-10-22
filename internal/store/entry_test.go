@@ -28,7 +28,7 @@ func TestEntryIsExpired(t *testing.T) {
 		t.Error("new entry should not be expired")
 	}
 
-	entry.ExpiresAt = time.Now().Add(-1 * time.Second).UnixNano()
+	entry.ExpiresAt.Store(time.Now().Add(-1 * time.Second).UnixNano())
 	if !entry.IsExpired() {
 		t.Error("entry should be expired")
 	}
@@ -39,7 +39,7 @@ func TestEntrySetTTL(t *testing.T) {
 
 	entry.SetTTL(10 * time.Second)
 
-	if entry.ExpiresAt == 0 {
+	if entry.ExpiresAt.Load() == 0 {
 		t.Error("expected ExpiresAt to be set")
 	}
 

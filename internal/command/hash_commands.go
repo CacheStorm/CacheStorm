@@ -501,6 +501,12 @@ func cmdHSCAN(ctx *Context) error {
 			if err != nil {
 				return ctx.WriteError(ErrNotInteger)
 			}
+			// COUNT is a work-size hint. A non-positive one flows into
+			// end = start + count and then into make() as a negative
+			// capacity, which panics. SSCAN already rejected this; mirror it.
+			if count <= 0 {
+				return ctx.WriteError(ErrInvalidArg)
+			}
 		case "MATCH":
 			i++
 			if i >= ctx.ArgCount() {
@@ -766,6 +772,14 @@ func cmdHGETEX(ctx *Context) error {
 			if err != nil {
 				return ctx.WriteError(ErrNotInteger)
 			}
+			// Bound the TTL before multiplying: sec * 1e9 overflows int64
+			// nanoseconds and wraps NEGATIVE, which Store.SetTTL turns into
+			// an expiry instant in the PAST -- the hash is born expired and
+			// its data is reaped on the next read behind a success reply.
+			// EXAT below already guards the same argument; EX must too.
+			if sec <= 0 || sec > maxExpireAtSeconds {
+				return ctx.WriteError(errInvalidExpireTime)
+			}
 			ctx.Store.SetTTL(key, time.Duration(sec)*time.Second)
 		case "PX":
 			i++
@@ -775,6 +789,10 @@ func cmdHGETEX(ctx *Context) error {
 			ms, err := strconv.ParseInt(ctx.ArgString(i), 10, 64)
 			if err != nil {
 				return ctx.WriteError(ErrNotInteger)
+			}
+			// See EX: ms * 1e6 overflows int64 nanoseconds the same way.
+			if ms <= 0 || ms > maxExpireAtMillis {
+				return ctx.WriteError(errInvalidExpireTime)
 			}
 			ctx.Store.SetTTL(key, time.Duration(ms)*time.Millisecond)
 		case "PERSIST":

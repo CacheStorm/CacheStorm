@@ -1140,6 +1140,13 @@ func cmdLMPOP(ctx *Context) error {
 		}
 	}
 
+	// A pop COUNT is a hard element count and must be at least 1. Without
+	// this guard it reaches make() as a slice capacity: a negative count
+	// panics, and 0 silently pops nothing. ZMPOP/BZMPOP already enforce it.
+	if count < 1 {
+		return ctx.WriteError(ErrInvalidArg)
+	}
+
 	for _, key := range keys {
 		list, err := getList(ctx, key)
 		if err != nil {
@@ -1230,6 +1237,14 @@ func cmdBLMPOP(ctx *Context) error {
 			idx++
 		}
 	}
+
+	// A pop COUNT is a hard element count and must be at least 1. Without
+	// this guard it reaches make() as a slice capacity: a negative count
+	// panics, and 0 silently pops nothing. ZMPOP/BZMPOP already enforce it.
+	if count < 1 {
+		return ctx.WriteError(ErrInvalidArg)
+	}
+
 	for _, key := range keys {
 		list, err := getList(ctx, key)
 		if err != nil {

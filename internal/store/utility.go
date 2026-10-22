@@ -51,7 +51,12 @@ func (rl *RateLimiter) Allow(key string, tokens int) (bool, int, time.Time) {
 	now := time.Now()
 	elapsed := now.Sub(entry.LastRefill)
 
-	if elapsed >= entry.Interval {
+	// The refill arithmetic divides by the interval, so a limiter created
+	// with a non-positive interval cannot be refilled at all. Skip the refill
+	// rather than divide by zero: the command layer refuses such a
+	// configuration up front, but the store must not panic if one is ever
+	// installed here directly.
+	if entry.Interval > 0 && elapsed >= entry.Interval {
 		tokensToAdd := int(elapsed/entry.Interval) * entry.RefillRate
 		entry.Tokens += tokensToAdd
 		if entry.Tokens > entry.MaxTokens {
@@ -126,7 +131,22 @@ func NewDistributedLock() *DistributedLock {
 	}
 }
 
-func (dl *DistributedLock) TryLock(key, holder, token string, ttl time.Duration) bool {
+// acquire takes the lock for holder when it is free, or renews it when the
+// same holder/token already holds it. It reports whether the lock was
+// acquired.
+//
+// When the lock is held by someone else AND ch is non-nil, ch is registered as
+// a waiter for key before returning false, so that a later release can hand
+// the lock over.
+//
+// The acquisition attempt and that registration happen under a single hold of
+// dl.mu. That is what makes the handoff safe: Unlock collects the waiters to
+// signal under the same lock, so a caller that has just lost the race is
+// either already back on the queue — and will be signalled — or has not lost
+// the race at all. Splitting the two into separate critical sections left a
+// window in which a release could slip past a waiter that had not registered
+// yet, stranding it until its timeout even though the lock was free.
+func (dl *DistributedLock) acquire(key, holder, token string, ttl time.Duration, ch chan struct{}) bool {
 	dl.mu.Lock()
 	defer dl.mu.Unlock()
 
@@ -147,36 +167,71 @@ func (dl *DistributedLock) TryLock(key, holder, token string, ttl time.Duration)
 		return true
 	}
 
+	if ch != nil {
+		dl.addWaiterLocked(key, ch)
+	}
 	return false
 }
 
+// addWaiterLocked registers ch as a waiter for key. Registering the same
+// channel twice is a no-op, so a waiter that lost the race and re-registers
+// does not appear twice in the queue.
+//
+// The caller must hold dl.mu.
+func (dl *DistributedLock) addWaiterLocked(key string, ch chan struct{}) {
+	waiters := dl.waitQueue[key]
+	for _, w := range waiters {
+		if w == ch {
+			return
+		}
+	}
+	dl.waitQueue[key] = append(waiters, ch)
+}
+
+// removeWaiter unregisters ch from key's wait queue. The caller must hold
+// dl.mu.
+func (dl *DistributedLock) removeWaiter(key string, ch chan struct{}) {
+	dl.mu.Lock()
+	defer dl.mu.Unlock()
+
+	waiters := dl.waitQueue[key]
+	for i, w := range waiters {
+		if w == ch {
+			waiters = append(waiters[:i], waiters[i+1:]...)
+			break
+		}
+	}
+	if len(waiters) == 0 {
+		delete(dl.waitQueue, key)
+		return
+	}
+	dl.waitQueue[key] = waiters
+}
+
+func (dl *DistributedLock) TryLock(key, holder, token string, ttl time.Duration) bool {
+	return dl.acquire(key, holder, token, ttl, nil)
+}
+
 func (dl *DistributedLock) Lock(key, holder, token string, ttl time.Duration, timeout time.Duration) bool {
-	// Try immediate acquire
-	if dl.TryLock(key, holder, token, ttl) {
+	if timeout == 0 {
+		// No waiting allowed: a single immediate attempt.
+		return dl.TryLock(key, holder, token, ttl)
+	}
+
+	// The channel this caller waits on. It is registered as a waiter for key
+	// by the first acquire below.
+	ch := make(chan struct{}, 1)
+
+	// Take the lock if it is free. If it is held, the same call registers ch
+	// as a waiter, so a release happening right afterwards cannot slip past
+	// this caller unnoticed.
+	if dl.acquire(key, holder, token, ttl, ch) {
 		return true
 	}
 
-	if timeout == 0 {
-		return false
-	}
-
-	// Register as waiter
-	ch := make(chan struct{}, 1)
-	dl.mu.Lock()
-	dl.waitQueue[key] = append(dl.waitQueue[key], ch)
-	dl.mu.Unlock()
-
-	defer func() {
-		dl.mu.Lock()
-		waiters := dl.waitQueue[key]
-		for i, w := range waiters {
-			if w == ch {
-				dl.waitQueue[key] = append(waiters[:i], waiters[i+1:]...)
-				break
-			}
-		}
-		dl.mu.Unlock()
-	}()
+	// Leave the queue once we stop waiting, so a later release does not
+	// signal a channel nobody reads.
+	defer dl.removeWaiter(key, ch)
 
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
@@ -184,10 +239,13 @@ func (dl *DistributedLock) Lock(key, holder, token string, ttl time.Duration, ti
 	for {
 		select {
 		case <-ch:
-			if dl.TryLock(key, holder, token, ttl) {
+			// A release woke us: the lock may be free now. Take it. If
+			// another waiter won the race, acquire puts us back on the
+			// queue, so the NEXT release reaches us instead of stranding
+			// us until the timeout expires.
+			if dl.acquire(key, holder, token, ttl, ch) {
 				return true
 			}
-			// Another waiter grabbed it — re-register and wait
 		case <-timer.C:
 			return false
 		}
@@ -205,9 +263,18 @@ func (dl *DistributedLock) Unlock(key, holder, token string) bool {
 
 	if lock.Holder == holder && lock.Token == token {
 		delete(dl.Locks, key)
-		// Wake all waiters for this key
+		// Wake the waiters so they can re-check whether the lock is now
+		// free.
+		//
+		// The wait queue is deliberately NOT cleared here. A waiter stays
+		// registered from the moment it starts waiting until it acquires
+		// the lock or gives up, so the queue is the set of callers that
+		// must still be told about a release. Clearing it orphaned every
+		// waiter that lost the race for the released lock: it was removed
+		// from the queue, so no later release ever signalled it, and it
+		// reported failure only when its timeout expired — although the
+		// lock had been free for that whole time.
 		waiters := dl.waitQueue[key]
-		delete(dl.waitQueue, key)
 		dl.mu.Unlock()
 
 		for _, ch := range waiters {
@@ -413,6 +480,45 @@ func NewSnowflakeIDGenerator(nodeID int64) *SnowflakeIDGenerator {
 	return &SnowflakeIDGenerator{
 		nodeID: nodeID,
 	}
+}
+
+// snowflakeGenerators holds one generator per node ID. The sequence counter
+// that keeps IDs unique within a single millisecond lives in the generator,
+// so a generator must be REUSED for the IDs it mints to be distinct.
+var (
+	snowflakeMu         sync.Mutex
+	snowflakeGenerators = make(map[int64]*SnowflakeIDGenerator)
+)
+
+// GetSnowflakeIDGenerator returns the process-wide generator for nodeID,
+// creating it on first use.
+//
+// The generator carries the intra-millisecond sequence counter, so callers
+// MUST reuse the returned generator instead of constructing a new one per ID.
+// A fresh generator starts its sequence at zero, so every ID it mints within
+// one millisecond carries the same sequence and the same millisecond — two
+// such IDs are byte-identical, which defeats the whole point of a snowflake
+// ID. That is what happened in the SNOWFLAKE.NEXT command, which built a new
+// generator on every call.
+func GetSnowflakeIDGenerator(nodeID int64) *SnowflakeIDGenerator {
+	snowflakeMu.Lock()
+	defer snowflakeMu.Unlock()
+
+	// Normalize the key the same way NewSnowflakeIDGenerator normalizes the
+	// node: an out-of-range node ID becomes 0. Two different invalid node IDs
+	// would otherwise get separate generators that share the same effective
+	// node bits, each with its own sequence counter, and would mint duplicate
+	// IDs for the same millisecond.
+	if nodeID < 0 || nodeID > nodeMax {
+		nodeID = 0
+	}
+
+	if gen, exists := snowflakeGenerators[nodeID]; exists {
+		return gen
+	}
+	gen := NewSnowflakeIDGenerator(nodeID)
+	snowflakeGenerators[nodeID] = gen
+	return gen
 }
 
 func (s *SnowflakeIDGenerator) Next() int64 {

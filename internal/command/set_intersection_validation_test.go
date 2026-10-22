@@ -31,7 +31,7 @@ func TestSetIntersectionValidatesEverySource(t *testing.T) {
 			for _, keys := range [][]string{{"src", "missing", "bad"}, {"missing", "src", "bad"}, {"src", "bad", "missing"}, {"missing", "bad", "src"}} {
 				runSetAuditX(t, s, "SADD", "dest", "keep")
 				before, _ := s.Get("dest")
-				before.ExpiresAt = math.MaxInt64
+				before.ExpiresAt.Store(math.MaxInt64)
 				for repeat := 0; repeat < 2; repeat++ {
 					got := call(keys...)
 					t.Logf("%v EXPECTED: WRONGTYPE ACTUAL: %q", keys, got)
@@ -39,7 +39,7 @@ func TestSetIntersectionValidatesEverySource(t *testing.T) {
 						t.Fatal("later input type not checked")
 					}
 					after, exists := s.Get("dest")
-					if !exists || after != before || after.ExpiresAt != math.MaxInt64 {
+					if !exists || after != before || after.ExpiresAt.Load() != math.MaxInt64 {
 						t.Fatal("rejected intersection changed destination metadata")
 					}
 					if got := runSetAuditX(t, s, "SISMEMBER", "dest", "keep"); got != ":1\r\n" {

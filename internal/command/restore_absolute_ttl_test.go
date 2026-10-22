@@ -78,14 +78,14 @@ func TestRestoreFutureAbsoluteTimestampIsNotExtended(t *testing.T) {
 	if !ok {
 		t.Fatal("setup: the key vanished entirely")
 	}
-	if entry.ExpiresAt == 0 {
+	if entry.ExpiresAt.Load() == 0 {
 		t.Fatal("setup: the key has no expiry, so this test proves nothing")
 	}
 	// Allow 2s of slack for clock granularity, but nothing like the ~94 years
 	// a relative reading would produce.
 	limit := time.UnixMilli(future).Add(2 * time.Second).UnixNano()
-	if entry.ExpiresAt > limit {
-		t.Fatalf("ExpiresAt = %d, want <= %d (the absolute timestamp passed in, plus slack)", entry.ExpiresAt, limit)
+	if entry.ExpiresAt.Load() > limit {
+		t.Fatalf("ExpiresAt = %d, want <= %d (the absolute timestamp passed in, plus slack)", entry.ExpiresAt.Load(), limit)
 	}
 }
 
@@ -113,8 +113,8 @@ func TestRestoreZeroTtlIsPermanentControl(t *testing.T) {
 	if !ok {
 		t.Fatal("control: the key is missing")
 	}
-	if entry.ExpiresAt != 0 {
-		t.Fatalf("control: ExpiresAt = %d, want 0 — ttl 0 means no expiry", entry.ExpiresAt)
+	if entry.ExpiresAt.Load() != 0 {
+		t.Fatalf("control: ExpiresAt = %d, want 0 — ttl 0 means no expiry", entry.ExpiresAt.Load())
 	}
 }
 

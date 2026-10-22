@@ -31,11 +31,20 @@ type BatchConfig struct {
 }
 
 type Batcher struct {
-	config     BatchConfig
-	processor  Processor
-	items      chan BatchItem
-	results    chan BatchResult
-	pending    sync.Map
+	config    BatchConfig
+	processor Processor
+	items     chan BatchItem
+	results   chan BatchResult
+	// pending maps a key to the FIFO queue of waiters registered for it.
+	// It must hold more than one channel per key: Batcher.Add and AddAsync
+	// may be called concurrently for the same key, and a single-slot map made
+	// the second Store displace the first. resultDispatcher then delivered
+	// only one result, so the displaced waiter blocked forever on its channel
+	// -- losing the caller's BatchResult AND leaking its workerPool slot,
+	// which permanently shrinks the batcher's concurrency until every later
+	// Add blocks. pendingMu guards the map and the per-key queues.
+	pendingMu  sync.Mutex
+	pending    map[string][]chan BatchResult
 	stopCh     chan struct{}
 	wg         sync.WaitGroup
 	flushCh    chan struct{}
@@ -59,6 +68,7 @@ func NewBatcher(config BatchConfig, processor Processor) *Batcher {
 		processor:  processor,
 		items:      make(chan BatchItem, config.MaxSize*2),
 		results:    make(chan BatchResult, config.MaxSize*2),
+		pending:    make(map[string][]chan BatchResult),
 		stopCh:     make(chan struct{}),
 		flushCh:    make(chan struct{}, 1),
 		workerPool: make(chan struct{}, config.MaxWorkers),
@@ -85,7 +95,7 @@ func (b *Batcher) Add(item BatchItem) <-chan BatchResult {
 	callerCh := make(chan BatchResult, 1)
 	pendingCh := make(chan BatchResult, 1)
 
-	b.pending.Store(item.Key, pendingCh)
+	b.register(item.Key, pendingCh)
 	b.items <- item
 	b.count.Add(1)
 
@@ -143,7 +153,7 @@ func (b *Batcher) AddAsync(item BatchItem, callback func(BatchResult)) {
 	// workerPool slot — so drops accumulated until AddAsync deadlocked.
 	// Batcher.Add already orders it this way (Store, then publish).
 	resultCh := make(chan BatchResult, 1)
-	b.pending.Store(item.Key, resultCh)
+	b.register(item.Key, resultCh)
 
 	b.items <- item
 	b.count.Add(1)
@@ -168,6 +178,38 @@ func (b *Batcher) AddAsync(item BatchItem, callback func(BatchResult)) {
 		result := <-resultCh
 		callback(result)
 	}()
+}
+
+// register appends ch to the waiter queue for key. Multiple registrations for
+// the same key must coexist: Add and AddAsync are concurrent-safe entry points,
+// and the last writer must not displace an earlier caller still waiting for its
+// own result.
+func (b *Batcher) register(key string, ch chan BatchResult) {
+	b.pendingMu.Lock()
+	b.pending[key] = append(b.pending[key], ch)
+	b.pendingMu.Unlock()
+}
+
+// takeWaiter removes and returns the next waiter registered for key, in
+// registration order. Results for a key are produced in the order the items
+// were submitted, so popping the head delivers them in that same order.
+// Reports false when no waiter remains.
+func (b *Batcher) takeWaiter(key string) (chan BatchResult, bool) {
+	b.pendingMu.Lock()
+	defer b.pendingMu.Unlock()
+
+	queue := b.pending[key]
+	if len(queue) == 0 {
+		delete(b.pending, key)
+		return nil, false
+	}
+	ch := queue[0]
+	if len(queue) == 1 {
+		delete(b.pending, key)
+	} else {
+		b.pending[key] = queue[1:]
+	}
+	return ch, true
 }
 
 func (b *Batcher) processLoop() {
@@ -234,18 +276,17 @@ func (b *Batcher) resultDispatcher() {
 		case <-b.stopCh:
 			return
 		case result := <-b.results:
-			if ch, ok := b.pending.Load(result.Key); ok {
-				resCh, validCh := ch.(chan BatchResult)
-				if !validCh {
-					b.pending.Delete(result.Key)
-					continue
-				}
-				select {
-				case resCh <- result:
-					b.pending.Delete(result.Key)
-				case <-b.stopCh:
-					return
-				}
+			resCh, ok := b.takeWaiter(result.Key)
+			if !ok {
+				// No caller is waiting for this result (it was already
+				// delivered, or the caller closed its channel). Drop it
+				// rather than discarding an unrelated key's waiter.
+				continue
+			}
+			select {
+			case resCh <- result:
+			case <-b.stopCh:
+				return
 			}
 		}
 	}

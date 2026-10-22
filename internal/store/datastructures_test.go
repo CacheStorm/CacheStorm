@@ -327,8 +327,8 @@ func TestEntrySetExpiresAt(t *testing.T) {
 	expiresAt := time.Now().Add(10 * time.Second).UnixNano()
 	entry.SetExpiresAt(expiresAt)
 
-	if entry.ExpiresAt != expiresAt {
-		t.Errorf("expected ExpiresAt %d, got %d", expiresAt, entry.ExpiresAt)
+	if entry.ExpiresAt.Load() != expiresAt {
+		t.Errorf("expected ExpiresAt %d, got %d", expiresAt, entry.ExpiresAt.Load())
 	}
 }
 

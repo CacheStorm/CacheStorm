@@ -96,7 +96,7 @@ func (s *Shard) updateExpiry(key string, expiresAt int64) bool {
 	if !exists || entry.IsExpired() {
 		return false
 	}
-	entry.ExpiresAt = expiresAt
+	entry.ExpiresAt.Store(expiresAt)
 	return true
 }
 

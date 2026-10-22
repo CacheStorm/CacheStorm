@@ -90,6 +90,13 @@ func cmdSET(ctx *Context) error {
 			if sec <= 0 {
 				return ctx.WriteError(ErrInvalidArg)
 			}
+			// Bound the TTL before multiplying: sec * 1e9 overflows int64
+			// nanoseconds and wraps NEGATIVE, which Store.Set reads as "no
+			// expiry" -- the key becomes permanently live behind an +OK reply.
+			// EXAT below already guards the same argument; EX must too.
+			if sec > maxExpireAtSeconds || sec < -maxExpireAtSeconds {
+				return ctx.WriteError(errInvalidExpireTime)
+			}
 			opts.TTL = time.Duration(sec) * time.Second
 		case "PX":
 			i++
@@ -102,6 +109,10 @@ func cmdSET(ctx *Context) error {
 			}
 			if ms <= 0 {
 				return ctx.WriteError(ErrInvalidArg)
+			}
+			// See EX: ms * 1e6 overflows int64 nanoseconds the same way.
+			if ms > maxExpireAtMillis || ms < -maxExpireAtMillis {
+				return ctx.WriteError(errInvalidExpireTime)
 			}
 			opts.TTL = time.Duration(ms) * time.Millisecond
 		case "EXAT":

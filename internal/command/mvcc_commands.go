@@ -471,67 +471,16 @@ func cmdSPATIALLIST(ctx *Context) error {
 	return ctx.WriteArray(results)
 }
 
+// haversine delegates to store.Haversine, the math-package implementation
+// this repo already ships and that GEODIST/GEOSEARCH use. The previous local
+// copy reimplemented sin/cos/atan/sqrt as truncated series, which made
+// co-located points return NaN (sqrt's Newton iteration divides 0/0 at a == 0),
+// lost ~0.6 km on NYC->LA, and diverged to ~-1e+60 km across 180 degrees of
+// longitude because the Maclaurin atan series does not converge for |y/x| > 1.
+//
+// Argument orders differ: this helper takes lat-first, store.Haversine lon-first.
 func haversine(lat1, lon1, lat2, lon2 float64) float64 {
-	const R = 6371
-
-	dLat := (lat2 - lat1) * 0.01745329252
-	dLon := (lon2 - lon1) * 0.01745329252
-
-	lat1Rad := lat1 * 0.01745329252
-	lat2Rad := lat2 * 0.01745329252
-
-	a := sin(dLat/2)*sin(dLat/2) + cos(lat1Rad)*cos(lat2Rad)*sin(dLon/2)*sin(dLon/2)
-	c := 2 * atan2(sqrt(a), sqrt(1-a))
-
-	return R * c
-}
-
-func sin(x float64) float64 {
-	result := x
-	term := x
-	for i := 1; i < 10; i++ {
-		term *= -x * x / float64(2*i*(2*i+1))
-		result += term
-	}
-	return result
-}
-
-func cos(x float64) float64 {
-	return sin(x + 1.57079632679)
-}
-
-func sqrt(x float64) float64 {
-	if x < 0 {
-		return 0
-	}
-	z := x
-	for i := 0; i < 10; i++ {
-		z = (z + x/z) / 2
-	}
-	return z
-}
-
-func atan2(y, x float64) float64 {
-	if x == 0 {
-		if y > 0 {
-			return 1.57079632679
-		} else if y < 0 {
-			return -1.57079632679
-		}
-		return 0
-	}
-	return atan(y / x)
-}
-
-func atan(x float64) float64 {
-	result := x
-	term := x
-	x2 := x * x
-	for i := 1; i < 10; i++ {
-		term *= -x2
-		result += term / float64(2*i+1)
-	}
-	return result
+	return store.Haversine(lon1, lat1, lon2, lat2)
 }
 
 var (

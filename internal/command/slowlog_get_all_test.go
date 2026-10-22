@@ -3,19 +3,21 @@ package command
 import (
 	"bytes"
 	"testing"
+	"time"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
 )
 
 func TestSlowlogGetAllX(t *testing.T) {
-	previous := globalSlowLog
-	globalSlowLog = &SlowLog{
-		entries:   make([]SlowLogEntry, 0),
-		maxLen:    100,
-		slowLogSl: 0,
-	}
-	t.Cleanup(func() { globalSlowLog = previous })
+	// SLOWLOG reads store.GlobalSlowLog — the recorder the request path
+	// actually appends to (internal/server/connection.go). It used to read a
+	// command-package SlowLog that nothing in production ever wrote to, so
+	// this test was seeding an orphan and passing for the wrong reason.
+	store.GlobalSlowLog.Clear()
+	store.GlobalSlowLog.SetEnabled(true)
+	store.GlobalSlowLog.SetThreshold(0)
+	t.Cleanup(func() { store.GlobalSlowLog.Clear() })
 
 	router := NewRouter()
 	RegisterServerCommands(router)
@@ -45,7 +47,7 @@ func TestSlowlogGetAllX(t *testing.T) {
 	}
 
 	for i := 0; i < 12; i++ {
-		globalSlowLog.Add("GET", []string{"k"}, 1, "127.0.0.1:0", 1)
+		store.GlobalSlowLog.Add(time.Microsecond, "GET", [][]byte{[]byte("k")}, "127.0.0.1:0")
 	}
 
 	if v := run("SLOWLOG", "LEN"); v.Type != resp.TypeInteger || v.Int != 12 {
@@ -83,12 +85,18 @@ func TestSlowlogGetAllX(t *testing.T) {
 		t.Log("PASS GET 0: empty")
 	}
 
+	// Newest-first ordering. Do NOT assert a fixed id: store.GlobalSlowLog numbers
+	// entries from a monotonic sequence that Clear() does not reset, so the base
+	// depends on how many entries earlier tests in this binary recorded. What
+	// matters is that SLOWLOG GET 1 returns the most recently recorded entry,
+	// so take that entry's id from the recorder instead of hardcoding it.
+	newestID := store.GlobalSlowLog.Entries[len(store.GlobalSlowLog.Entries)-1].ID
 	newest := run("SLOWLOG", "GET", "1")
 	if newest.Type != resp.TypeArray || len(newest.Array) != 1 ||
-		newest.Array[0].Array[0].Type != resp.TypeInteger || newest.Array[0].Array[0].Int != 11 {
-		t.Errorf("FAIL newest-first control: got %v, want latest id 11 first", newest)
+		newest.Array[0].Array[0].Type != resp.TypeInteger || newest.Array[0].Array[0].Int != newestID {
+		t.Errorf("FAIL newest-first control: got %v, want latest id %d first", newest, newestID)
 	} else {
-		t.Log("PASS newest-first control: id 11 first")
+		t.Logf("PASS newest-first control: id %d first", newestID)
 	}
 
 	if v := run("SLOWLOG", "RESET"); v.Type != resp.TypeSimpleString || v.Str != "OK" {

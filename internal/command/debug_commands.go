@@ -207,7 +207,16 @@ func cmdMemoryUsage(ctx *Context) error {
 
 	for i := 2; i < ctx.ArgCount(); i++ {
 		arg := strings.ToUpper(ctx.ArgString(i))
-		if arg == "SAMPLES" && i+1 < ctx.ArgCount() {
+		if arg == "SAMPLES" {
+			// A SAMPLES with no value must be reported, not dropped. Folding the
+			// bounds check into the outer condition (`... && i+1 < ArgCount()`)
+			// made a trailing SAMPLES fall through silently, so the client got a
+			// byte count and success while the documented option was ignored.
+			// This was the last handler still using the shape that cmdXRANGE's
+			// COUNT was fixed for in round 12.
+			if i+1 >= ctx.ArgCount() {
+				return ctx.WriteError(ErrSyntaxError)
+			}
 			var err error
 			samples, err = strconv.Atoi(ctx.ArgString(i + 1))
 			if err != nil {

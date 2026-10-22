@@ -452,38 +452,54 @@ func TestAllowCommandRemovesFromDenied(t *testing.T) {
 }
 
 // Cover ParseACLRule: -@<non-all> (prefix - with @somegroup, not "all")
+//
+// This used to assert that -@read was silently accepted. That was the defect:
+// only @all is implemented, so a `-@category` revocation was discarded while
+// ACL SETUSER still replied +OK, leaving the category's commands permitted.
+// Ignoring a deny OVER-permits, so the category must be reported instead.
 func TestParseACLRuleDenyNonAllGroup(t *testing.T) {
 	user := &User{Permissions: Permission{
 		AllowedCommands: map[string]bool{"*": true},
 		DeniedCommands:  make(map[string]bool),
 	}}
 
-	// -@read is not "all", so it should not set DeniedCommands["*"]
 	err := ParseACLRule("-@read", user)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err == nil {
+		t.Fatal("expected an error for the unsupported category @read, got nil — " +
+			"silently dropping a -@category leaves the commands it was meant to revoke permitted")
 	}
 
+	// The rule is rejected before anything is applied, so the user's grants are
+	// untouched by the failed SETUSER.
 	if _, ok := user.Permissions.DeniedCommands["*"]; ok {
-		t.Error("should not deny * for -@read")
+		t.Error("a rejected rule must not mutate the user")
+	}
+	if !user.CanExecuteCommand("GET") {
+		t.Error("a rejected rule must leave the pre-existing +@all grant intact")
 	}
 }
 
 // Cover ParseACLRule: +@<non-all> (prefix + with @somegroup, not "all")
+//
+// Same reasoning as the deny case: +@read is not implemented, so it must be
+// reported rather than silently dropped.
 func TestParseACLRuleAllowNonAllGroup(t *testing.T) {
 	user := &User{Permissions: Permission{
 		AllowedCommands: make(map[string]bool),
 		DeniedCommands:  make(map[string]bool),
 	}}
 
-	err := ParseACLRule("+@read", user)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err := ParseACLRule("+@read", user); err == nil {
+		t.Fatal("expected an error for the unsupported category @read, got nil — " +
+			"an operator is told the grant applied when it did not")
 	}
 
-	// +@read where "read" != "all" should not set AllowedCommands["*"]
+	// Nothing may have been granted by the rejected rule.
 	if _, ok := user.Permissions.AllowedCommands["*"]; ok {
-		t.Error("should not allow * for +@read")
+		t.Error("a rejected rule must not grant *")
+	}
+	if user.CanExecuteCommand("GET") {
+		t.Error("a rejected rule must not grant any command")
 	}
 }
 

@@ -139,8 +139,12 @@ func cmdSLOWLOGCONFIG(ctx *Context) error {
 		store.GlobalSlowLog.SetThreshold(time.Duration(ms) * time.Millisecond)
 		return ctx.WriteOK()
 	case "MAXLEN":
-		maxLen := int(parseInt64(value))
-		store.GlobalSlowLog.MaxSize = maxLen
+		// Go through SetMaxSize rather than assigning the field: AddIfSlow reads
+		// MaxSize under sl.mu inside addLocked on every recorded command, so a
+		// bare write here races that read. SetMaxSize locks and also trims
+		// immediately so the new cap takes effect at once -- the same treatment
+		// CONFIG SET slowlog-max-len already gets.
+		store.GlobalSlowLog.SetMaxSize(int(parseInt64(value)))
 		return ctx.WriteOK()
 	default:
 		return ctx.WriteError(fmt.Errorf("ERR unknown slowlog setting"))
@@ -257,7 +261,7 @@ func cmdHEALTHCHECK(ctx *Context) error {
 		resp.BulkString("timestamp"),
 		resp.BulkString(time.Now().UTC().Format(time.RFC3339)),
 		resp.BulkString("uptime_seconds"),
-		resp.IntegerValue(int64(time.Since(store.GlobalMetrics.StartTime).Seconds())),
+		resp.IntegerValue(int64(store.GlobalMetrics.Uptime().Seconds())),
 	})
 }
 

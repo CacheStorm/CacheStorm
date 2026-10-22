@@ -41,6 +41,10 @@ type Context struct {
 	// connection. nil means the connection is running as the permissive default
 	// user, which is how Redis treats unauthenticated clients.
 	ACLUser *acl.User
+
+	// ClientName is set by CLIENT SETNAME. A fresh Context is built per command,
+	// so the connection carries it back (see internal/server/connection.go).
+	ClientName string
 }
 
 func NewContext(cmd string, args [][]byte, s *store.Store, w *resp.Writer) *Context {

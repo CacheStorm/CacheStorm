@@ -168,6 +168,17 @@ func (m *Metrics) RecordBytesOut(n int64) {
 	m.TotalBytesOut.Add(n)
 }
 
+// Uptime returns the time since the last reset.
+//
+// StartTime is a plain time.Time -- a multi-word struct -- so it must be read
+// under m.mu: Metrics.Reset writes it under the lock, and any caller reading the
+// field directly (as cmdHEALTHCHECK did) races that write.
+func (m *Metrics) Uptime() time.Duration {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return time.Since(m.StartTime)
+}
+
 func (m *Metrics) Snapshot() map[string]interface{} {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -252,12 +263,13 @@ type SlowLog struct {
 }
 
 type SlowLogEntry struct {
-	ID        int64
-	Timestamp time.Time
-	Duration  time.Duration
-	Command   string
-	Args      [][]byte
-	ClientIP  string
+	ID         int64
+	Timestamp  time.Time
+	Duration   time.Duration
+	Command    string
+	Args       [][]byte
+	ClientIP   string
+	ClientName string
 }
 
 // defaultSlowLogThreshold matches the shipped slowlog config default and the
@@ -280,18 +292,18 @@ func NewSlowLog(maxSize int) *SlowLog {
 func (sl *SlowLog) Add(duration time.Duration, cmd string, args [][]byte, clientIP string) {
 	sl.mu.Lock()
 	defer sl.mu.Unlock()
-	sl.addLocked(duration, cmd, args, clientIP)
+	sl.addLocked(duration, cmd, args, clientIP, "")
 }
 
 // AddIfSlow records the command only when recording is enabled and its
 // duration reached the configured threshold. Safe for concurrent use.
-func (sl *SlowLog) AddIfSlow(duration time.Duration, cmd string, args [][]byte, clientIP string) {
+func (sl *SlowLog) AddIfSlow(duration time.Duration, cmd string, args [][]byte, clientIP, clientName string) {
 	sl.mu.Lock()
 	defer sl.mu.Unlock()
 	if !sl.enabled || duration < sl.threshold {
 		return
 	}
-	sl.addLocked(duration, cmd, args, clientIP)
+	sl.addLocked(duration, cmd, args, clientIP, clientName)
 }
 
 // SetThreshold sets the minimum command duration AddIfSlow records.
@@ -308,18 +320,35 @@ func (sl *SlowLog) SetEnabled(enabled bool) {
 	sl.enabled = enabled
 }
 
-func (sl *SlowLog) addLocked(duration time.Duration, cmd string, args [][]byte, clientIP string) {
+// SetMaxSize changes how many entries the recorder retains, trimming the
+// oldest immediately so the new cap takes effect at once. CONFIG SET
+// slowlog-max-len uses this; without it the runtime cap could only be applied
+// to an object the request path never read.
+func (sl *SlowLog) SetMaxSize(n int) {
+	sl.mu.Lock()
+	defer sl.mu.Unlock()
+	if n <= 0 {
+		n = 1
+	}
+	sl.MaxSize = n
+	if len(sl.Entries) > n {
+		sl.Entries = sl.Entries[len(sl.Entries)-n:]
+	}
+}
+
+func (sl *SlowLog) addLocked(duration time.Duration, cmd string, args [][]byte, clientIP, clientName string) {
 	args = slices.Clone(args)
 	for i := range args {
 		args[i] = slices.Clone(args[i])
 	}
 	entry := SlowLogEntry{
-		ID:        sl.sequence.Add(1),
-		Timestamp: time.Now(),
-		Duration:  duration,
-		Command:   cmd,
-		Args:      args,
-		ClientIP:  clientIP,
+		ID:         sl.sequence.Add(1),
+		Timestamp:  time.Now(),
+		Duration:   duration,
+		Command:    cmd,
+		Args:       args,
+		ClientIP:   clientIP,
+		ClientName: clientName,
 	}
 
 	sl.Entries = append(sl.Entries, entry)

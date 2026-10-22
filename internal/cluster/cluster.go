@@ -140,8 +140,21 @@ func (c *Cluster) NodeCount() int {
 func (c *Cluster) AssignSlots(slots []SlotRange) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.self.Slots = slots
+	// SlotRange.Start/End are uint16 (0..65535) but c.slots is [NumSlots]*SlotInfo
+	// (NumSlots = 16384). An out-of-range bound indexes past the array and panics;
+	// worse, because the loop counter `i` is itself uint16, an End of MaxUint16
+	// would wrap it back to 0 and spin forever rather than even panic. Filter the
+	// unusable ranges out first so c.self.Slots and the slot map stay consistent.
+	valid := make([]SlotRange, 0, len(slots))
 	for _, sr := range slots {
+		if sr.Start > sr.End || int(sr.Start) >= NumSlots || int(sr.End) >= NumSlots {
+			continue
+		}
+		valid = append(valid, sr)
+	}
+	c.self.Slots = valid
+
+	for _, sr := range valid {
 		for i := sr.Start; i <= sr.End; i++ {
 			c.slots[i] = &SlotInfo{Primary: c.self}
 		}
@@ -149,6 +162,11 @@ func (c *Cluster) AssignSlots(slots []SlotRange) {
 }
 
 func (c *Cluster) GetSlotOwner(slot uint16) *Node {
+	// slot is uint16 (0..65535) but c.slots is [NumSlots]*SlotInfo (16384), so an
+	// out-of-range slot would index past the array and panic.
+	if int(slot) >= NumSlots {
+		return nil
+	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	if c.slots[slot] == nil {

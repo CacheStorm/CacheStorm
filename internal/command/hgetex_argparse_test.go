@@ -96,7 +96,7 @@ func TestHGetExArgumentParsing(t *testing.T) {
 			if !ok {
 				t.Fatal("hash key vanished")
 			}
-			hasExpiry := entry.ExpiresAt != 0
+			hasExpiry := entry.ExpiresAt.Load() != 0
 			if hasExpiry != tc.wantExpiry {
 				t.Errorf("HGETEX %v expiry applied = %v, want %v", tc.args, hasExpiry, tc.wantExpiry)
 			}

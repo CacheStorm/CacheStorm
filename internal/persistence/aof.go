@@ -334,7 +334,7 @@ func (rw *AOFRewriter) writeEntry(w *bufio.Writer, key string, entry interface{}
 		if err := rw.writeValueCommands(w, key, v.Value); err != nil {
 			return err
 		}
-		return rw.writeExpiry(w, key, v.ExpiresAt)
+		return rw.writeExpiry(w, key, v.ExpiresAt.Load())
 	case store.Value:
 		return rw.writeValueCommands(w, key, v)
 	case string:

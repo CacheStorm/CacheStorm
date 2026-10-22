@@ -820,7 +820,10 @@ func cmdARRAYFLATTEN(ctx *Context) error {
 }
 
 func cmdARRAYMERGE(ctx *Context) error {
-	if ctx.ArgCount() < 3 {
+	// Only ArgString(0) and ArgString(1) are read; a third argument was never
+	// consumed, so requiring one made the merge unreachable on its own
+	// two-argument contract (ARRAY.INCLUDES and friends guard with < 2).
+	if ctx.ArgCount() < 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
@@ -1104,7 +1107,14 @@ func cmdOBJECTENTRIES(ctx *Context) error {
 }
 
 func cmdOBJECTFROMENTRIES(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
+	// OBJECT.FROMENTRIES takes a name followed by field/value PAIRS. The old
+	// guard was `< 2`, which let a name plus a single dangling field through:
+	// the pair loop below then never ran, an empty object was still stored under
+	// that name, and the command replied +OK. The same gap silently dropped a
+	// trailing odd field name (`obj f1 v1 f2` reported success and discarded
+	// f2). Require at least one complete pair and an even number of arguments
+	// after the name, matching the sibling writer cmdOBJECTSET's `< 3`.
+	if ctx.ArgCount() < 3 || (ctx.ArgCount()-1)%2 != 0 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
@@ -1124,7 +1134,8 @@ func cmdOBJECTFROMENTRIES(ctx *Context) error {
 }
 
 func cmdOBJECTMERGE(ctx *Context) error {
-	if ctx.ArgCount() < 3 {
+	// Only ArgString(0) and ArgString(1) are read; see cmdARRAYMERGE.
+	if ctx.ArgCount() < 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 

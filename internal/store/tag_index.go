@@ -21,8 +21,13 @@ func newTagShard() *tagShard {
 }
 
 type TagIndex struct {
-	shards       [TagShards]*tagShard
-	hierarchy    sync.RWMutex
+	shards    [TagShards]*tagShard
+	hierarchy sync.RWMutex
+	// hookMu guards onInvalidate. It is separate from hierarchy because the
+	// callback is invoked on the hot path and must be callable from a store
+	// callback that itself calls back into the store -- so it is never held
+	// while the callback runs.
+	hookMu       sync.RWMutex
 	children     map[string]map[string]struct{}
 	parents      map[string]string
 	onInvalidate func(tag string, keys []string)
@@ -131,13 +136,20 @@ func (ti *TagIndex) GetKeys(tag string) []string {
 // from the index. The callback runs outside the shard lock so the consumer
 // may call back into the store safely.
 func (ti *TagIndex) SetOnInvalidate(fn func(tag string, keys []string)) {
+	ti.hookMu.Lock()
 	ti.onInvalidate = fn
+	ti.hookMu.Unlock()
 }
 
 func (ti *TagIndex) Invalidate(tag string) []string {
 	keys := ti.invalidate(tag)
-	if ti.onInvalidate != nil {
-		ti.onInvalidate(tag, keys)
+	// Read the callback under the lock, but invoke it outside it: the callback
+	// runs store code that may call back into the tag index.
+	ti.hookMu.RLock()
+	onInvalidate := ti.onInvalidate
+	ti.hookMu.RUnlock()
+	if onInvalidate != nil {
+		onInvalidate(tag, keys)
 	}
 	return keys
 }

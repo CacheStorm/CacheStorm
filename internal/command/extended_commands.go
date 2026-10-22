@@ -1182,7 +1182,10 @@ type DocStore struct {
 }
 
 func cmdDOCINSERT(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
+	// name, id, then field/value PAIRS. Without this, `DOC.INSERT s d` stored an
+	// empty phantom document and returned its id, and `DOC.INSERT s d f1 v1 f2`
+	// silently dropped f2 -- both while reporting success.
+	if ctx.ArgCount() < 4 || (ctx.ArgCount()-2)%2 != 0 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
@@ -1291,7 +1294,10 @@ func cmdDOCFINDONE(ctx *Context) error {
 }
 
 func cmdDOCUPDATE(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
+	// name, id, then optional field/value PAIRS. The pair count must be even:
+	// `DOC.UPDATE s id dangling` applied nothing yet still replied +OK, so the
+	// caller was told an update happened when none did.
+	if ctx.ArgCount() < 2 || (ctx.ArgCount()-2)%2 != 0 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)

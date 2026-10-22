@@ -35,6 +35,28 @@ func RegisterUtilityCommands(router *Router) {
 	router.Register(&CommandDef{Name: "SNOWFLAKE.PARSE", Handler: cmdSNOWFLAKEPARSE})
 }
 
+// parseRateLimitDuration parses a duration argument expressed in
+// milliseconds. The value must be a positive integer.
+//
+// The shared parseInt64 helper returns 0 for any input it cannot read, so a
+// typo'd argument was indistinguishable from a legitimate zero. Zero is
+// exactly the value a rate limiter cannot survive: the refill arithmetic in
+// store.RateLimiter.Allow computes elapsed/Interval, so a zero interval makes
+// the next RL.ALLOW divide by zero and panic.
+//
+// A negative interval is refused for the same reason it is not usable: it
+// makes every refill subtract instead of add.
+func parseRateLimitDuration(arg, name string) (int64, error) {
+	ms, err := strconv.ParseInt(arg, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("ERR %s is not an integer or out of range", name)
+	}
+	if ms <= 0 {
+		return 0, fmt.Errorf("ERR %s must be positive", name)
+	}
+	return ms, nil
+}
+
 func cmdRLCREATE(ctx *Context) error {
 	if ctx.ArgCount() < 4 {
 		return ctx.WriteError(ErrWrongArgCount)
@@ -43,7 +65,10 @@ func cmdRLCREATE(ctx *Context) error {
 	key := ctx.ArgString(0)
 	maxTokens := parseInt64(ctx.ArgString(1))
 	refillRate := parseInt64(ctx.ArgString(2))
-	intervalMs := parseInt64(ctx.ArgString(3))
+	intervalMs, err := parseRateLimitDuration(ctx.ArgString(3), "intervalMs")
+	if err != nil {
+		return ctx.WriteError(err)
+	}
 
 	store.GlobalRateLimiter.Create(key, int(maxTokens), int(refillRate), time.Duration(intervalMs)*time.Millisecond)
 
@@ -342,7 +367,12 @@ func cmdSNOWFLAKENEXT(ctx *Context) error {
 		nodeID = parseInt64(ctx.ArgString(0))
 	}
 
-	gen := store.NewSnowflakeIDGenerator(nodeID)
+	// The generator carries the intra-millisecond sequence counter that makes
+	// the IDs unique. It used to be constructed here on every call, so each
+	// call started a fresh sequence at zero and two SNOWFLAKE.NEXT replies
+	// landing in the same millisecond returned byte-identical IDs. Reuse the
+	// process-wide generator so the sequence keeps advancing.
+	gen := store.GetSnowflakeIDGenerator(nodeID)
 	id := gen.Next()
 
 	return ctx.WriteBulkString(strconv.FormatInt(id, 10))

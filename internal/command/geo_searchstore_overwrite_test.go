@@ -85,7 +85,7 @@ func TestGeoSearchStoreReplacesDestination(t *testing.T) {
 			if point, ok := geo.Get("Catania"); !ok || point.Lon != 15.087269 || point.Lat != 37.502669 {
 				t.Errorf("Catania missing or changed: %+v", point)
 			}
-			if entry.ExpiresAt != 0 {
+			if entry.ExpiresAt.Load() != 0 {
 				t.Error("overwrite retained destination TTL")
 			}
 			if dest != src {

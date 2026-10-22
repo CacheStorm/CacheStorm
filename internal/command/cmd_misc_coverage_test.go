@@ -515,14 +515,17 @@ func TestCmdLOLWUT(t *testing.T) {
 
 func TestCmdSHUTDOWN(t *testing.T) {
 	s := store.NewStore()
-	ctx := discardCtx("SHUTDOWN", bytesArgs(), s)
+	ctx, buf := bufCtx("SHUTDOWN", bytesArgs(), s)
 	err := cmdSHUTDOWN(ctx)
-	// SHUTDOWN always returns an error("SHUTDOWN") by design
-	if err == nil {
-		t.Fatal("expected SHUTDOWN error")
+	// SHUTDOWN writes its own +OK reply, so it must return nil. Returning an
+	// error made the connection loop emit a SECOND reply (-SHUTDOWN) for this
+	// one command, which desynchronized every pipelined reply after it.
+	// router.go states the same invariant for the ACL path.
+	if err != nil {
+		t.Fatalf("SHUTDOWN returned %v, want nil so only one reply is written", err)
 	}
-	if err.Error() != "SHUTDOWN" {
-		t.Fatalf("expected SHUTDOWN error, got %v", err)
+	if got := buf.String(); got != "+OK\r\n" {
+		t.Fatalf("SHUTDOWN wrote %q, want a single +OK", got)
 	}
 }
 

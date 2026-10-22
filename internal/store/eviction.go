@@ -254,7 +254,7 @@ func (ec *EvictionController) sampleVolatileKeys() []candidate {
 
 		shard.mu.RLock()
 		for key, entry := range shard.data {
-			if entry.ExpiresAt > 0 {
+			if entry.ExpiresAt.Load() > 0 {
 				candidates = append(candidates, candidate{
 					key:        key,
 					lastAccess: entry.LastAccess.Load(),

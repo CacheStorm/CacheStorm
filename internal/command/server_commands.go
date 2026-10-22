@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cachestorm/cachestorm/internal/acl"
@@ -390,6 +391,15 @@ func cmdEXPIRE(ctx *Context) error {
 	if err != nil {
 		return ctx.WriteError(ErrNotInteger)
 	}
+	// Bound the TTL BEFORE multiplying. time.Duration is int64 nanoseconds, so
+	// sec * 1e9 overflows for large values and wraps to a duration with the
+	// WRONG SIGN: EXPIRE key 9223372036854775807 became -1s, which Store.SetTTL
+	// stores as "already expired" and the key is silently DELETED behind a :1
+	// reply. Redis rejects an out-of-range TTL, and rejects 0 as well. The
+	// sibling setters (cmdEXPIREAT/cmdPEXPIREAT/cmdSETEX) already guard this.
+	if sec == 0 || sec > maxExpireAtSeconds || sec < -maxExpireAtSeconds {
+		return ctx.WriteError(errInvalidExpireTime)
+	}
 	cond, err := parseExpireCondition(ctx, 2)
 	if err != nil {
 		return ctx.WriteError(err)
@@ -414,6 +424,11 @@ func cmdPEXPIRE(ctx *Context) error {
 	ms, err := strconv.ParseInt(ctx.ArgString(1), 10, 64)
 	if err != nil {
 		return ctx.WriteError(ErrNotInteger)
+	}
+	// See cmdEXPIRE: bound before multiplying, or ms * 1e6 overflows int64
+	// nanoseconds and wraps to the wrong sign, deleting the key outright.
+	if ms == 0 || ms > maxExpireAtMillis || ms < -maxExpireAtMillis {
+		return ctx.WriteError(errInvalidExpireTime)
 	}
 	cond, err := parseExpireCondition(ctx, 2)
 	if err != nil {
@@ -585,10 +600,10 @@ func cmdPEXPIRETIME(ctx *Context) error {
 	if !exists {
 		return ctx.WriteInteger(-2)
 	}
-	if entry.ExpiresAt == 0 {
+	if entry.ExpiresAt.Load() == 0 {
 		return ctx.WriteInteger(-1)
 	}
-	return ctx.WriteInteger(entry.ExpiresAt / 1e6)
+	return ctx.WriteInteger(entry.ExpiresAt.Load() / 1e6)
 }
 
 func cmdEXPIRETIME(ctx *Context) error {
@@ -600,10 +615,10 @@ func cmdEXPIRETIME(ctx *Context) error {
 	if !exists {
 		return ctx.WriteInteger(-2)
 	}
-	if entry.ExpiresAt == 0 {
+	if entry.ExpiresAt.Load() == 0 {
 		return ctx.WriteInteger(-1)
 	}
-	return ctx.WriteInteger(entry.ExpiresAt / 1e9)
+	return ctx.WriteInteger(entry.ExpiresAt.Load() / 1e9)
 }
 
 func cmdPERSIST(ctx *Context) error {
@@ -767,33 +782,48 @@ func cmdDUMP(ctx *Context) error {
 	var dump strings.Builder
 	dump.WriteString("CACHSTORM001")
 	dump.WriteByte(byte(entry.Value.Type()))
-	fmt.Fprintf(&dump, "%d", entry.ExpiresAt)
+	fmt.Fprintf(&dump, "%d", entry.ExpiresAt.Load())
 	dump.WriteString(":")
 
+	// Every arm below reads a collection the command handlers mutate under the
+	// value's write lock (HSET/HDEL, RPUSH/LPOP, SADD/SREM, ZADD/ZREM). A map
+	// iteration or a slice read concurrent with a write is undefined behaviour
+	// and, for maps, a fatal runtime error ("concurrent map iteration and map
+	// write") that kills the process. Serialize under the matching read lock.
+	// No Store call happens inside these arms, so holding RLock across the
+	// writes to the strings.Builder cannot self-deadlock.
 	switch v := entry.Value.(type) {
 	case *store.StringValue:
 		dump.Write(v.Data)
 	case *store.HashValue:
+		v.RLock()
 		for k, val := range v.Fields {
 			dump.WriteString(k)
 			dump.WriteByte('=')
 			dump.Write(val)
 			dump.WriteByte('&')
 		}
+		v.RUnlock()
 	case *store.ListValue:
+		v.RLock()
 		for _, el := range v.Elements {
 			dump.Write(el)
 			dump.WriteByte(',')
 		}
+		v.RUnlock()
 	case *store.SetValue:
+		v.RLock()
 		for k := range v.Members {
 			dump.WriteString(k)
 			dump.WriteByte(',')
 		}
+		v.RUnlock()
 	case *store.SortedSetValue:
+		v.RLock()
 		for _, se := range v.GetSortedRange(0, -1, true, false) {
 			fmt.Fprintf(&dump, "%s:%f,", se.Member, se.Score)
 		}
+		v.RUnlock()
 	}
 
 	return ctx.WriteBulkString(dump.String())
@@ -941,7 +971,7 @@ func cmdCOPY(ctx *Context) error {
 
 	clonedValue := entry.Value.Clone()
 	newEntry := store.NewEntry(clonedValue)
-	newEntry.ExpiresAt = entry.ExpiresAt
+	newEntry.ExpiresAt.Store(entry.ExpiresAt.Load())
 	newEntry.Tags = make([]string, len(entry.Tags))
 	copy(newEntry.Tags, entry.Tags)
 
@@ -1016,6 +1046,12 @@ func cmdSCAN(ctx *Context) error {
 			count, err = strconv.Atoi(ctx.ArgString(i))
 			if err != nil {
 				return ctx.WriteError(ErrNotInteger)
+			}
+			// COUNT is a work-size hint. A non-positive one flows into
+			// end = start + count and then into make() as a negative
+			// capacity, which panics. SSCAN already rejected this; mirror it.
+			if count <= 0 {
+				return ctx.WriteError(ErrInvalidArg)
 			}
 		case "MATCH":
 			i++
@@ -1196,9 +1232,21 @@ func cmdCLIENT(ctx *Context) error {
 		if ctx.ArgCount() != 2 {
 			return ctx.WriteError(ErrWrongArgCount)
 		}
+		// Redis stores the name for this connection and echoes it from GETNAME.
+		// This was a stub that replied +OK and discarded the value, so a named
+		// client still reported no name -- and SLOWLOG GET element 6 could never
+		// carry one. CLIENT SETNAME with an empty argument clears the name.
+		if ctx.ArgString(1) == "" {
+			ctx.ClientName = ""
+		} else {
+			ctx.ClientName = ctx.ArgString(1)
+		}
 		return ctx.WriteOK()
 	case "GETNAME":
-		return ctx.WriteNullBulkString()
+		if ctx.ClientName == "" {
+			return ctx.WriteNullBulkString()
+		}
+		return ctx.WriteBulkString(ctx.ClientName)
 	case "ID":
 		return ctx.WriteInteger(ctx.ClientID)
 	case "KILL":
@@ -1327,7 +1375,10 @@ func sortLookupValue(ctx *Context, pattern, elem string) (string, bool) {
 		if !ok {
 			return "", false
 		}
+		// cmdHSET mutates Fields under the hash write lock.
+		hv.RLock()
 		v, ok := hv.Fields[field]
+		hv.RUnlock()
 		if !ok {
 			return "", false
 		}
@@ -1438,14 +1489,22 @@ func doSort(ctx *Context, readOnly bool) error {
 	var elements []string
 
 	switch v := entry.Value.(type) {
+	// The command handlers mutate these collections under the value write
+	// lock (cmdRPUSH/cmdLPOP, cmdSADD/cmdSREM), so the copy must be taken
+	// under the matching read lock. No Store call happens inside these arms,
+	// so holding RLock across the copy cannot self-deadlock.
 	case *store.ListValue:
+		v.RLock()
 		for _, elem := range v.Elements {
 			elements = append(elements, string(elem))
 		}
+		v.RUnlock()
 	case *store.SetValue:
+		v.RLock()
 		for member := range v.Members {
 			elements = append(elements, member)
 		}
+		v.RUnlock()
 	case *store.SortedSetValue:
 		entries := v.GetSortedRange(0, -1, false, false)
 		for _, e := range entries {
@@ -1609,7 +1668,39 @@ func doSort(ctx *Context, readOnly bool) error {
 	return ctx.WriteArray(result)
 }
 
-var lastSaveTime int64
+// lastSaveTime is the Unix second of the most recent SAVE/BGSAVE, reported by
+// LASTSAVE. It is touched by three command handlers (LASTSAVE reads it and
+// lazily initialises it; SAVE and BGSAVE write it), so it must be atomic -- it
+// was a bare int64, and one client's SAVE raced another's LASTSAVE.
+var lastSaveTime atomic.Int64
+
+// saveHook performs the real persistence work behind SAVE and BGSAVE. The
+// composition root installs it during New() -- before the listener starts --
+// pointing at the configured AOF flush, so SAVE is an actual durability barrier.
+//
+// Without it both handlers only stamped lastSaveTime and replied +OK: a client
+// that issued SAVE as a durability barrier got a false guarantee, and with
+// aof_sync "no" the buffered AOF was never moved to disk at all (Append syncs
+// only for AOFAlways and the background syncLoop runs only for
+// AOFEverySecond). nil means persistence is not configured, and SAVE then says
+// so instead of claiming a success it did not perform.
+//
+// Startup-only, exactly like ConfigureSentinel: installed once before traffic.
+var saveHook func() error
+
+// SetSaveHook installs the durability action SAVE and BGSAVE invoke.
+func SetSaveHook(fn func() error) {
+	saveHook = fn
+}
+
+// runSaveHook executes the installed durability action, reporting plainly when
+// there is nothing configured to persist to.
+func runSaveHook() error {
+	if saveHook == nil {
+		return errors.New("ERR persistence is not configured")
+	}
+	return saveHook()
+}
 
 type SlowLogEntry struct {
 	ID        int64
@@ -1706,25 +1797,50 @@ func cmdSLOWLOG(ctx *Context) error {
 			}
 		}
 
-		entries := globalSlowLog.Get(count)
+		// Read the recorder that production actually writes to. This handler
+		// used to read command.globalSlowLog, a second SlowLog type that
+		// nothing in production ever appended to (internal/server/
+		// connection.go records into store.GlobalSlowLog), so SLOWLOG GET
+		// and LEN always reported zero and RESET cleared nothing.
+		//
+		// store.SlowLog.Get treats n <= 0 as "all entries", but SLOWLOG's
+		// documented contract is the opposite for 0: a count of -1 means all
+		// entries, while 0 means "at most count entries", i.e. an empty
+		// array. Normalise here so delegating does not silently change it.
+		var entries []store.SlowLogEntry
+		switch {
+		case count == 0:
+			entries = nil
+		case count < 0:
+			entries = store.GlobalSlowLog.Get(-1)
+		default:
+			entries = store.GlobalSlowLog.Get(count)
+		}
 		results := make([]*resp.Value, 0, len(entries))
 		for _, entry := range entries {
+			args := make([]*resp.Value, 0, len(entry.Args)+1)
+			args = append(args, resp.BulkString(entry.Command))
+			for _, a := range entry.Args {
+				args = append(args, resp.BulkBytes(a))
+			}
 			results = append(results, resp.ArrayValue([]*resp.Value{
 				resp.IntegerValue(entry.ID),
-				resp.IntegerValue(entry.StartTime),
-				resp.IntegerValue(entry.Duration),
-				resp.ArrayValue([]*resp.Value{
-					resp.BulkString(entry.Command),
-				}),
+				// Redis reports field 2 as a Unix timestamp in SECONDS while
+				// field 3 is in MICROSECONDS. Emitting UnixMicro() here
+				// inflated the timestamp by 1e6, so a client rendering it as
+				// a wall-clock date landed ~50,000 years in the future.
+				resp.IntegerValue(entry.Timestamp.Unix()),
+				resp.IntegerValue(entry.Duration.Microseconds()),
+				resp.ArrayValue(args),
 				resp.BulkString(entry.ClientIP),
-				resp.BulkString(strconv.FormatInt(entry.ClientID, 10)),
+				resp.BulkString(entry.ClientName),
 			}))
 		}
 		return ctx.WriteArray(results)
 	case "LEN":
-		return ctx.WriteInteger(int64(globalSlowLog.Len()))
+		return ctx.WriteInteger(int64(store.GlobalSlowLog.Len()))
 	case "RESET":
-		globalSlowLog.Reset()
+		store.GlobalSlowLog.Clear()
 		return ctx.WriteOK()
 	default:
 		return ctx.WriteError(errors.New("ERR unknown subcommand '" + subCmd + "'"))
@@ -1753,10 +1869,10 @@ func cmdWAIT(ctx *Context) error {
 }
 
 func cmdLASTSAVE(ctx *Context) error {
-	if lastSaveTime == 0 {
-		lastSaveTime = time.Now().Unix()
+	if lastSaveTime.Load() == 0 {
+		lastSaveTime.Store(time.Now().Unix())
 	}
-	return ctx.WriteInteger(lastSaveTime)
+	return ctx.WriteInteger(lastSaveTime.Load())
 }
 
 func cmdLOLWUT(ctx *Context) error {
@@ -1805,17 +1921,36 @@ func cmdSHUTDOWN(ctx *Context) error {
 	}
 
 	_ = save
-	ctx.WriteOK()
-	return errors.New("SHUTDOWN")
+	// Return the write's own error, not a sentinel. Returning errors.New("SHUTDOWN")
+	// here made the connection loop write a SECOND reply for this one command:
+	// +OK followed by a stray -SHUTDOWN. A client that pipelines SHUTDOWN with
+	// the next command read that stray error as the reply to its next command
+	// and the response stream desynchronized from there on. router.go states the
+	// same invariant for the ACL path — a handler that has already replied must
+	// return nil.
+	return ctx.WriteOK()
 }
 
 func cmdSAVE(ctx *Context) error {
-	lastSaveTime = time.Now().Unix()
+	// SAVE is the explicit durability barrier, so it must actually persist
+	// before reporting success. Stamping the timestamp and replying +OK while
+	// doing no I/O gave clients a guarantee the server had not kept, and
+	// lastSaveTime then recorded a save that never happened.
+	if err := runSaveHook(); err != nil {
+		return ctx.WriteError(err)
+	}
+	lastSaveTime.Store(time.Now().Unix())
 	return ctx.WriteOK()
 }
 
 func cmdBGSAVE(ctx *Context) error {
-	lastSaveTime = time.Now().Unix()
+	// BGSAVE is the background form of the same barrier. The configured flush
+	// is cheap and idempotent, so it runs inline: reporting "started" without a
+	// guaranteed write would reintroduce the same false guarantee.
+	if err := runSaveHook(); err != nil {
+		return ctx.WriteError(err)
+	}
+	lastSaveTime.Store(time.Now().Unix())
 	return ctx.WriteSimpleString("Background saving started")
 }
 

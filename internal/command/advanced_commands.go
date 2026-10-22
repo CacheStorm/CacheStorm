@@ -910,7 +910,13 @@ func cmdCONFIGNAMESPACE(ctx *Context) error {
 }
 
 func cmdCONFIGIMPORT(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
+	// The loop below consumes key/value pairs from index 1, so ns alone or
+	// ns+key imports nothing. Requiring a complete pair stops the command
+	// from accepting a call that creates an empty namespace and reports 0.
+	// The parity check matters too: `CONFIG.IMPORT ns k1 v1 k2` stored k1=v1,
+	// silently discarded k2 and still answered :1, so the caller was told its
+	// whole call had been applied when one setting never existed.
+	if ctx.ArgCount() < 3 || (ctx.ArgCount()-1)%2 != 0 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 

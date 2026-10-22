@@ -173,7 +173,7 @@ func (w *RDBWriter) writeEntry(f io.Writer, key string, entry *store.Entry) erro
 		if err := w.writeByte(f, 0xFC); err != nil {
 			return err
 		}
-		expiresAt := time.Unix(0, entry.ExpiresAt).UnixMilli()
+		expiresAt := time.Unix(0, entry.ExpiresAt.Load()).UnixMilli()
 		if err := binary.Write(f, binary.LittleEndian, expiresAt); err != nil {
 			return err
 		}
