@@ -1,120 +1,72 @@
 # CacheStorm Examples
 
-This directory contains working examples for CacheStorm in multiple languages.
+These examples exercise the repository clients. Known client and module limitations are recorded in the [project review](../docs/PROJECT_REVIEW.md); the examples do not establish full Redis compatibility.
 
-## Quick Start
+## Start the server
 
-### 1. Start CacheStorm Server
+From the repository root:
 
-**Using Docker (Recommended):**
 ```bash
-cd docker
-docker-compose -f docker-compose.simple.yml up -d
+go run ./cmd/cachestorm --config config/cachestorm.example.yaml
 ```
 
-**Or using the one-click installer:**
-```bash
-# Linux/macOS
-curl -fsSL https://raw.githubusercontent.com/cachestorm/cachestorm/main/scripts/install.sh | bash
+Alternatively, from the `examples/` directory:
 
-# Windows
-irm https://raw.githubusercontent.com/cachestorm/cachestorm/main/scripts/install.ps1 | iex
+```bash
+docker compose -f docker/docker-compose.simple.yml up -d --build
 ```
 
-### 2. Run Examples
+The default RESP port is 6380. Check it with `redis-cli -p 6380 PING` if Redis CLI is installed. The admin UI is served on port 8080.
 
-#### Go Example
+## Go
+
+From `examples/`:
+
 ```bash
 cd go
 go mod tidy
 go run main.go
 ```
 
-#### Python Example
+Use the root project's Go toolchain requirement. Each Go example is a separate module; its existing Go 1.22 metadata is stale relative to the root module and currently fails a readonly build. Run `go mod tidy` in an example before building it. The Go client's Pub/Sub receive operation is not implemented, so examples requiring message delivery need the SDK work in the roadmap.
+
+## Python
+
+From `examples/`:
+
 ```bash
 cd python
 pip install -r requirements.txt
 python demo.py
 ```
 
-#### TypeScript Example
+The requirements file installs a published client package. To exercise the checked-out client instead, run with `PYTHONPATH=../../clients/python python demo.py` in the same directory. The repository Python client currently has confirmed non-ASCII/binary encoding and async initialization defects; use these examples with that limitation in mind.
+
+## TypeScript
+
+From `examples/`, build the local package before running the demo:
+
 ```bash
-cd typescript
+cd ../clients/typescript
+npm install
+npm run build
+cd ../../examples/typescript
 npm install
 npm run demo
 ```
 
-## What's Demonstrated
+The TypeScript example references the repository client through a local file dependency. Its pipeline currently returns success without sending commands, and the protocol decoder does not correctly handle fragmented responses. Pub/Sub transport is also unfinished.
 
-Each example demonstrates:
+## Other examples
 
-1. **Connection** - Connecting to CacheStorm server
-2. **String Operations** - SET, GET, INCR, expiration
-3. **Hash Operations** - HSET, HGET, HGETALL
-4. **List Operations** - LPUSH, LRANGE, LPOP
-5. **Set Operations** - SADD, SMEMBERS, SISMEMBER
-6. **Sorted Set Operations** - ZADD, ZRANGE
-7. **CacheStorm Tags** - Unique tag-based invalidation feature
-8. **Pipeline** - Batch command execution
-9. **Pub/Sub** - Real-time messaging
-10. **Cleanup** - Proper resource management
+`analytics/`, `chat/`, `e-commerce/` and `realtime/` contain additional Go programs. They share the Go module and SDK limitations above and are not included in the root test command.
 
-## Docker Examples
+The root [Compose file](../docker-compose.yml) has optional `monitoring` and `gui` profiles. The production monitoring authentication setup still needs reconciliation with the server configuration.
 
-### Simple Setup
-```bash
-cd docker
-docker-compose -f docker-compose.simple.yml up -d
-```
+## References
 
-### With Monitoring (Prometheus + Grafana)
-```bash
-cd ../..  # Root directory
-docker-compose --profile monitoring up -d
-```
-
-### With GUI (Redis Insight)
-```bash
-cd ../..  # Root directory
-docker-compose --profile gui up -d
-```
-
-## SDK Features
-
-All examples showcase:
-
-- ✅ Full Redis protocol compatibility
-- ✅ Connection pooling
-- ✅ Pipeline support
-- ✅ Pub/Sub support
-- ✅ Automatic reconnection
-- ✅ Type-safe APIs (Go/TypeScript)
-- ✅ CacheStorm-specific features (tags, invalidation)
-- ✅ Both sync and async APIs (Python)
-
-## Troubleshooting
-
-### Connection Refused
-Make sure CacheStorm is running:
-```bash
-docker ps | grep cachestorm
-# or
-cachestorm-cli -p 6380 PING
-```
-
-### Port Already in Use
-Change the port mapping in docker-compose:
-```yaml
-ports:
-  - "6380:6380"  # Use 6380 on host
-```
-
-Then update examples to use port 6380.
-
-## More Information
-
-- [Main Documentation](../docs/)
-- [Command Reference](../docs/commands.md)
-- [Go SDK](../clients/go/README.md)
-- [TypeScript SDK](../clients/typescript/README.md)
-- [Python SDK](../clients/python/README.md)
+- [Documentation](../docs/README.md)
+- [Command reference](../docs/commands.md)
+- [Go client](../clients/go/README.md)
+- [Python client](../clients/python/README.md)
+- [TypeScript client](../clients/typescript/README.md)

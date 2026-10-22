@@ -43,7 +43,7 @@ async function main(): Promise<void> {
     } catch (error) {
       printError(`Failed to connect: ${error}`);
       console.log('\n  Make sure CacheStorm is running:');
-      console.log('    docker run -d -p 6379:6379 cachestorm/cachestorm:latest');
+      console.log('    docker run -d -p 6380:6380 ghcr.io/cachestorm/cachestorm:latest');
       return;
     }
 

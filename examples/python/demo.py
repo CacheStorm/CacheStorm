@@ -51,7 +51,7 @@ def demo_sync():
         except ConnectionError as e:
             print_error(f"Failed to connect: {e}")
             print("\n  Make sure CacheStorm is running:")
-            print("    docker run -d -p 6379:6379 cachestorm/cachestorm:latest")
+            print("    docker run -d -p 6380:6380 ghcr.io/cachestorm/cachestorm:latest")
             return
 
         # String operations

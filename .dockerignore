@@ -30,3 +30,12 @@ coverage/
 .idea/
 CLAUDE.md
 AGENTS.md
+.temp_files/
+.wrongstack/
+.claude/
+website/
+node_modules/
+**/__pycache__/
+*.bak
+.venv/
+.pytest_cache/

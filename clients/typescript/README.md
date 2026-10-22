@@ -4,6 +4,8 @@ Official TypeScript/JavaScript client for CacheStorm - High-Performance Redis-Co
 
 ## Features
 
+Current limitations: pipelines return success without sending commands; fragmented RESP replies, byte lengths and server errors are handled incorrectly; Pub/Sub transport is unfinished. See the [verified review and roadmap](../../docs/PROJECT_REVIEW.md) before using these paths.
+
 - Full TypeScript support with type definitions
 - Promise-based API
 - Connection pooling
@@ -108,4 +110,4 @@ await client.set('key', 'value', { namespace: 'tenant1' });
 
 ## API Reference
 
-See [API Documentation](./docs/api.md) for complete reference.
+See the [client implementation](./src/client.ts) for the available API and the [project review](../../docs/PROJECT_REVIEW.md) for current limitations.

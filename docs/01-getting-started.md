@@ -220,6 +220,6 @@ curl http://localhost:8080/api/metrics
 ## Next Steps
 
 - [Configuration](./02-configuration.md) - Configure CacheStorm for your needs
-- [Commands Reference](./04-commands.md) - Learn all available commands
-- [Tag-Based Invalidation](./05-tags.md) - Master the killer feature
+- [Commands Reference](./commands.md) - Learn the available commands
+- [Tag-Based Invalidation](./commands.md#tag-based-invalidation-commands) - Tag commands and invalidation
 - [Admin UI](./08-admin-ui.md) - Explore the web interface

@@ -4,6 +4,8 @@ Official Go client for CacheStorm - High-Performance Redis-Compatible Database.
 
 ## Features
 
+Current limitations: Pub/Sub message reception is not implemented, pipelines execute commands sequentially, and a command after `Close` can panic. See the [verified review and roadmap](../../docs/PROJECT_REVIEW.md) before relying on these behaviors.
+
 - Full Redis protocol compatibility
 - Connection pooling
 - Pipeline support
@@ -102,4 +104,4 @@ taggedKeys, err := client.TagKeys(ctx, "user")
 
 ## API Reference
 
-See [API Documentation](./docs/api.md) for complete reference.
+See the [client implementation](./client.go) for the available API and the [project review](../../docs/PROJECT_REVIEW.md) for current limitations.

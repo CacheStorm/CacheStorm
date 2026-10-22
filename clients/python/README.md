@@ -4,7 +4,9 @@ Official Python client for CacheStorm - High-Performance Redis-Compatible Databa
 
 ## Features
 
-- Full Redis protocol compatibility
+Current limitations: binary and non-ASCII command encoding is incorrect, and the async client's default connection path fails during initialization. Packaging and supported Python versions are not defined in this repository. See the [verified review and roadmap](../../docs/PROJECT_REVIEW.md).
+
+- Redis protocol client with known encoding limitations
 - Connection pooling
 - Pipeline support
 - Pub/Sub support
@@ -119,4 +121,4 @@ client.set('key', 'value', namespace='tenant1')
 
 ## API Reference
 
-See [API Documentation](./docs/api.md) for complete reference.
+See the [client implementation](./cachestorm/client.py) for the available API and the [project review](../../docs/PROJECT_REVIEW.md) for current limitations.

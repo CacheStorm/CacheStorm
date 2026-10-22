@@ -1066,6 +1066,125 @@ TAGTTL tag
 
 ---
 
+## Graph Commands
+
+Graph commands operate on a named property graph: labeled nodes connected by
+directed, typed edges.
+
+> **Not implemented:** `GRAPH.QUERY` is registered but returns an empty result
+> set for every query — the query engine is not implemented. Use the commands
+> below to read and write graphs.
+
+### GRAPH.CREATE
+Create a graph. Returns the existing graph if the name is already in use.
+
+```
+GRAPH.CREATE graphName
+```
+
+---
+
+### GRAPH.LIST
+List all graph names.
+
+```
+GRAPH.LIST
+```
+
+---
+
+### GRAPH.DELETE
+Delete a graph and all of its nodes and edges.
+
+```
+GRAPH.DELETE graphName
+```
+
+---
+
+### GRAPH.INFO
+Report a graph's name and its node, edge, label, and relation counts.
+
+```
+GRAPH.INFO graphName
+```
+
+---
+
+### GRAPH.ADDNODE
+Add a labeled node with optional properties. Returns the new node ID.
+
+```
+GRAPH.ADDNODE graphName label [key value ...]
+```
+
+---
+
+### GRAPH.GETNODE
+Get a node by ID, or nil if it does not exist.
+
+```
+GRAPH.GETNODE graphName nodeID
+```
+
+---
+
+### GRAPH.DELNODE
+Delete a node and every edge incident to it. Returns 1 on success, 0 if the
+node does not exist.
+
+```
+GRAPH.DELNODE graphName nodeID
+```
+
+---
+
+### GRAPH.ADDEDGE
+Add a directed edge between two existing nodes. Returns the new edge ID, or an
+error if either node does not exist.
+
+```
+GRAPH.ADDEDGE graphName fromID toID relation [key value ...]
+```
+
+---
+
+### GRAPH.GETEDGE
+Get an edge by ID, or nil if it does not exist.
+
+```
+GRAPH.GETEDGE graphName edgeID
+```
+
+---
+
+### GRAPH.DELEDGE
+Delete an edge. Returns 1 on success, 0 if the edge does not exist.
+
+```
+GRAPH.DELEDGE graphName edgeID
+```
+
+---
+
+### GRAPH.NEIGHBORS
+List the nodes reachable from a node, optionally filtered by edge relation.
+
+```
+GRAPH.NEIGHBORS graphName nodeID [relation]
+```
+
+---
+
+### GRAPH.QUERY
+Not implemented. Returns an empty result set for every query.
+
+```
+GRAPH.QUERY graphName query
+```
+
+---
+
 ## Pub/Sub Commands
 
 ### SUBSCRIBE

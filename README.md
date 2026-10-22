@@ -57,10 +57,10 @@ A high-performance in-memory data store written in Go. **1,600+ commands**, 256-
 | Module | Commands | Description |
 |--------|----------|-------------|
 | **Core Redis** | 289 | Full Redis compatibility |
-| **JSON** | 30+ | JSON document operations |
-| **Time Series** | 40+ | Time-series data |
-| **Search** | 50+ | Full-text search |
-| **Graph** | 30+ | Graph database operations |
+| **JSON** | 14 | JSON document operations |
+| **Time Series** | 12 | Time-series data |
+| **Search** | 12 | Full-text search |
+| **Graph** | 12 | Graph database operations (`GRAPH.QUERY` not implemented) |
 | **Probabilistic** | 20+ | Bloom/Cuckoo filters, Count-Min Sketch |
 | **Distributed** | 100+ | Clustering, replication, failover |
 | **Caching** | 50+ | Cache warming, invalidation |
@@ -375,7 +375,7 @@ See [COVERAGE_REPORT.md](./COVERAGE_REPORT.md) for detailed coverage information
 ### Quick Start with Docker
 ```bash
 # Pull and run
-docker run -d -p 6380:6380 -p 8080:8080 --name cachestorm cachestorm/cachestorm:latest
+docker run -d -p 6380:6380 -p 8080:8080 --name cachestorm ghcr.io/cachestorm/cachestorm:latest
 ```
 
 ### Docker Compose (Full Stack)
@@ -408,14 +408,14 @@ docker run -d \
   -p 6380:6380 \
   -p 8080:8080 \
   -v cachestorm-data:/data \
-  cachestorm/cachestorm:latest
+  ghcr.io/cachestorm/cachestorm:latest
 
 # With custom config
 docker run -d \
   --name cachestorm \
   -p 6380:6380 \
   -v $(pwd)/config:/etc/cachestorm \
-  cachestorm/cachestorm:latest \
+  ghcr.io/cachestorm/cachestorm:latest \
   --config /etc/cachestorm/cachestorm.yaml
 ```
 
@@ -425,7 +425,7 @@ docker run -d \
 version: '3.8'
 services:
   cachestorm:
-    image: cachestorm/cachestorm:latest
+    image: ghcr.io/cachestorm/cachestorm:latest
     ports:
       - "6380:6380"
       - "8080:8080"

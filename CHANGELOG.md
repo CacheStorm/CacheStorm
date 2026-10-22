@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Repository maintenance
+- Added a repository review and prioritized roadmap covering verified durability, transaction, distributed runtime and SDK limitations.
+- Refreshed measured coverage and development documentation; repaired fourteen broken documentation links.
+- Archived original design prompts and the superseded GoReleaser configuration; removed an unused test backup and three unreferenced website template assets.
+- Excluded generated Python/Node files and local audit/tooling artifacts from version control or Docker build context as appropriate.
+- Corrected the root Docker image healthcheck to use `/api/health`.
+
 ### Planned
 - Cloud-native commands (object storage, queues, topics)
 - GraphQL API

@@ -67,11 +67,19 @@ core.*
 *.tmp
 .tmp/
 
-.wrongstack/
-!/.wrongstack/
-/.wrongstack/*
-!/.wrongstack/project.json
-
 # Agent tooling state
 .temp_files/
 .wrongstack/
+.claude/settings.local.json
+
+node_modules/
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+*.bak
+/config.yaml
+!/.wrongstack/
+/.wrongstack/*
+!/.wrongstack/project.json
