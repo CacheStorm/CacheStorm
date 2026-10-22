@@ -15,6 +15,16 @@ import (
 	"github.com/cachestorm/cachestorm/internal/store"
 )
 
+// setMasterConn publishes a master connection the way the production code
+// does. m.masterConn is guarded by m.mu, so a test must not assign it
+// directly: an unlocked assignment races the background sync goroutine,
+// which reads the field under the lock.
+func setMasterConn(m *Manager, conn net.Conn) {
+	m.mu.Lock()
+	m.masterConn = conn
+	m.mu.Unlock()
+}
+
 // newTestManager creates a fresh Manager instance for isolated testing,
 // bypassing the sync.Once singleton.
 func newTestManager(cfg *config.ReplicationConfig, s *store.Store) *Manager {
@@ -120,7 +130,7 @@ func TestSyncWithMaster_HandshakeError(t *testing.T) {
 	}, store.NewStore())
 
 	server, client := net.Pipe()
-	m.masterConn = client
+	setMasterConn(m, client)
 
 	// Close server immediately so writes to client fail
 	server.Close()
@@ -139,7 +149,7 @@ func TestSyncWithMaster_ReadsLines(t *testing.T) {
 	}, store.NewStore())
 
 	server, client := net.Pipe()
-	m.masterConn = client
+	setMasterConn(m, client)
 
 	go func() {
 		// Consume the handshake from the client side
@@ -174,7 +184,7 @@ func TestSyncWithMaster_StopChannel(t *testing.T) {
 	}, store.NewStore())
 
 	server, client := net.Pipe()
-	m.masterConn = client
+	setMasterConn(m, client)
 
 	// Pre-close stopCh so the for-loop's select immediately takes the stopCh case
 	close(m.stopCh)
@@ -206,7 +216,7 @@ func TestSyncWithMaster_NonEOFReadError(t *testing.T) {
 	}, store.NewStore())
 
 	server, client := net.Pipe()
-	m.masterConn = client
+	setMasterConn(m, client)
 
 	go func() {
 		// Consume handshake data from server side
@@ -545,7 +555,7 @@ func TestReplicaOf_NoOneWithMasterConn(t *testing.T) {
 
 	// Set a fake master connection
 	server, client := net.Pipe()
-	m.masterConn = client
+	setMasterConn(m, client)
 
 	err := m.ReplicaOf("no", 1)
 	if err != nil {
@@ -678,9 +688,10 @@ func TestConnectToMaster_Success(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Clean up
+	// Clean up. m.stopCh is read by the running sync goroutine, so it must
+	// not be replaced: the manager's own channel is still open here, and
+	// closing it is what tells the goroutine to stop.
 	m.stopped.Store(false)
-	m.stopCh = make(chan struct{})
 	close(m.stopCh)
 	if m.masterConn != nil {
 		m.masterConn.Close()
@@ -721,7 +732,7 @@ func TestStop_WithMasterConn(t *testing.T) {
 	m := newTestManager(&config.ReplicationConfig{Role: "replica"}, store.NewStore())
 
 	server, client := net.Pipe()
-	m.masterConn = client
+	setMasterConn(m, client)
 
 	m.Stop()
 	if !m.stopped.Load() {
@@ -762,7 +773,7 @@ func TestGetMasterLinkStatus_Up(t *testing.T) {
 	m := newTestManager(&config.ReplicationConfig{Role: "replica"}, store.NewStore())
 
 	server, client := net.Pipe()
-	m.masterConn = client
+	setMasterConn(m, client)
 
 	status := m.getMasterLinkStatus()
 	if status != "up" {
@@ -1039,7 +1050,7 @@ func TestSyncWithMaster_FullResyncFlow(t *testing.T) {
 	}, store.NewStore())
 
 	server, client := net.Pipe()
-	m.masterConn = client
+	setMasterConn(m, client)
 
 	go func() {
 		// Consume handshake data
@@ -1120,7 +1131,7 @@ func TestSendHandshake_Success(t *testing.T) {
 
 func TestStop_NilMasterConn(t *testing.T) {
 	m := newTestManager(&config.ReplicationConfig{Role: "master"}, store.NewStore())
-	m.masterConn = nil
+	setMasterConn(m, nil)
 	m.Stop()
 	// Should not panic
 }
