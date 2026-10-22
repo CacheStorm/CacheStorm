@@ -7,6 +7,6 @@ go 1.26.10
 // older 1.22 floor the go command refuses to load the module at all
 // ("module ../.. requires go >= 1.26.10").
 
-require github.com/cachestorm/cachestorm v0.1.27
+require github.com/cachestorm/cachestorm v0.3.1
 
 replace github.com/cachestorm/cachestorm => ../..
