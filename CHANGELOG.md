@@ -247,11 +247,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Removed temporary files (*.exe~, *.tmp)
 - Removed .claude/ directory
 
-### Release
-
-**Not published**
-- This version was never tagged or published: no `v0.1.27` tag exists on the remote and no GitHub release was created for it. Its link therefore names the commit that carried the work (`72a0bd2`) rather than a tag that does not exist
-
 ## [0.1.29] - 2026-02-25
 
 ### Changed
@@ -687,7 +682,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | 0.2.3 | 2026-10-08 | 1,596 | ACL and requirepass enforcement on HTTP and in scripts, function signatures |
 | 0.2.2 | 2026-09-06 | 1,600 | Release version stamping reaches the server binary |
 | 0.2.1 | 2026-09-06 | 1,600 | RDB/AOF encodings, plugin and replication race fixes, lint triage |
-| 0.1.27 | 2026-02-25 | 1,600 | Test coverage improvements (89.1%); never tagged or published |
+| 0.1.27 | 2026-02-25 | 1,600 | Test coverage improvements (89.1%) |
 | 0.1.29 | 2026-02-25 | 1,600 | GoReleaser removed from the release path; native Go build matrix |
 | 0.1.28 | 2026-02-25 | 1,600 | RDB round-trip test skipped on Linux pending the encoding fixes |
 | 0.1.26 | 2026-02-22 | 1,600 | Critical bug fixes, deadlock fixes |
@@ -711,9 +706,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [0.2.1]: https://github.com/cachestorm/cachestorm/compare/v0.2.0...v0.2.1
 [0.3.1]: https://github.com/cachestorm/cachestorm/compare/v0.3.0...v0.3.1
 [0.2.0]: https://github.com/cachestorm/cachestorm/compare/v0.1.29...v0.2.0
-[0.1.27]: https://github.com/cachestorm/cachestorm/compare/v0.1.26...72a0bd2728772b04d4025a6211e76c5056ef9100
+[0.1.27]: https://github.com/cachestorm/cachestorm/compare/v0.1.26...v0.1.27
 [0.1.29]: https://github.com/cachestorm/cachestorm/compare/v0.1.28...v0.1.29
-[0.1.28]: https://github.com/cachestorm/cachestorm/compare/72a0bd2728772b04d4025a6211e76c5056ef9100...v0.1.28
+[0.1.28]: https://github.com/cachestorm/cachestorm/compare/v0.1.27...v0.1.28
 [0.1.26]: https://github.com/cachestorm/cachestorm/compare/v0.1.25...v0.1.26
 [0.1.25]: https://github.com/cachestorm/cachestorm/compare/v0.1.24...v0.1.25
 [0.1.24]: https://github.com/cachestorm/cachestorm/compare/v0.1.23...v0.1.24
