@@ -152,3 +152,54 @@ func TestSlowReplicaWriteDoesNotBlockTheManager(t *testing.T) {
 		t.Fatal("the propagation did not finish")
 	}
 }
+
+// TestReplicaOfDoesNotHoldTheManagerLockWhileClosingTheMasterConnection
+// covers the last place in this package where the manager's lock was held
+// across I/O. ReplicaOf("no", 1) promotes the node to master and closes the
+// master connection, and the close happened while m.mu was held: a slow
+// close blocked every other operation on the manager.
+func TestReplicaOfDoesNotHoldTheManagerLockWhileClosingTheMasterConnection(t *testing.T) {
+	m := newTestManager(&config.ReplicationConfig{Role: "replica"}, store.NewStore())
+
+	conn := newBlockingConn()
+	t.Cleanup(conn.unblock)
+	setMasterConn(m, conn)
+
+	done := make(chan error, 1)
+	go func() { done <- m.ReplicaOf("no", 1) }()
+
+	select {
+	case <-conn.closing:
+	case <-time.After(3 * time.Second):
+		t.Fatal("ReplicaOf never reached the connection close")
+	}
+
+	acquired := make(chan struct{})
+	go func() {
+		m.mu.Lock()
+		m.mu.Unlock()
+		close(acquired)
+	}()
+
+	select {
+	case <-acquired:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the manager's lock was still held while the master connection was closed: " +
+			"the lock must be released before the connection is closed")
+	}
+
+	conn.unblock()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("ReplicaOf returned an error: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("ReplicaOf did not finish")
+	}
+
+	// The control: the promotion still happened.
+	if role := m.GetRole(); role != RoleMaster {
+		t.Fatalf("the role after promoting to master = %v, want %v", role, RoleMaster)
+	}
+}

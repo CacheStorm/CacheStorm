@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 ### Fixed
+- Internals: promoting a replica to master closes the master connection outside the replication manager's lock. The close was performed while the lock was held, so a slow close blocked every other operation on the manager; the role change moved out of the lock too, so its callback can no longer deadlock against it
 - Internals: the replication backlog is a byte-indexed ring. The write used a command counter as a byte offset with no wraparound, so a command straddling the end of the buffer was silently truncated. INFO now reports the offset of the oldest byte still in the backlog instead of repeating the master's offset
 - Internals: the replication manager writes to a replica outside its own lock, serialising the writes with a per-replica lock. The write to a replica's socket was performed while the manager's write lock was held, so one slow replica stalled every other operation on the manager
 - Internals: the replication manager closes a replica's connection outside its lock. The close was performed while the manager's write lock was held, so a slow close blocked every other operation on the manager

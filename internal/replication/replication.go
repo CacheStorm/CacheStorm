@@ -548,23 +548,33 @@ func (m *Manager) OnRoleChange(fn func(Role)) {
 }
 
 func (m *Manager) ReplicaOf(host string, port int) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	if host == "no" && port == 1 {
-		m.SetRole(RoleMaster)
-		if m.masterConn != nil {
-			m.masterConn.Close()
-			m.masterConn = nil
-		}
+		// The lock covers the state change only. The connection is closed
+		// after it is released: a close is I/O, and the manager's lock is its
+		// only serialisation point, so closing under it would block every
+		// other operation on the manager. The role change moves out of the
+		// lock for the same reason: its callback may use the manager, and
+		// calling it under the lock could deadlock.
+		m.mu.Lock()
+		conn := m.masterConn
+		m.masterConn = nil
 		m.cfg.MasterHost = ""
 		m.cfg.MasterPort = 0
+		m.mu.Unlock()
+
+		m.SetRole(RoleMaster)
+		if conn != nil {
+			conn.Close()
+		}
 		logger.Info().Msg("promoted to master")
 		return nil
 	}
 
+	m.mu.Lock()
 	m.cfg.MasterHost = host
 	m.cfg.MasterPort = port
+	m.mu.Unlock()
+
 	m.SetRole(RoleReplica)
 
 	go func() {
