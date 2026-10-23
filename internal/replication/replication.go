@@ -45,6 +45,22 @@ type Replica struct {
 	ConnectedAt  time.Time
 	Writer       *bufio.Writer
 	Capabilities map[string]bool
+	// writeMu serialises the writes to this replica's Writer. It lets the
+	// manager write to a replica without holding the manager's own lock, so
+	// one slow replica cannot stall every other operation on the manager.
+	writeMu sync.Mutex
+}
+
+// propagate writes cmd to the replica and flushes it. The replica's own lock
+// serialises the writes to its bufio.Writer, so two concurrent propagations
+// cannot interleave bytes in one replica's stream.
+func (r *Replica) propagate(cmd []byte) error {
+	r.writeMu.Lock()
+	defer r.writeMu.Unlock()
+	if _, err := r.Writer.Write(cmd); err != nil {
+		return err
+	}
+	return r.Writer.Flush()
 }
 
 type Manager struct {
@@ -431,25 +447,34 @@ func (m *Manager) PropagateCommand(cmd []byte) {
 	// bytes and raced on the same Offset (whose ++ is a non-atomic
 	// read-modify-write, losing updates and desynchronising the reported
 	// replication offset).
+	// The backlog is shared state, so it is written under the manager's write
+	// lock, which is what serialises concurrent propagations.
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	newIdx := m.replBacklogIdx.Add(1)
 	idx := int(newIdx) % len(m.replBacklog)
 	copy(m.replBacklog[idx:], cmd)
 
-	for id, replica := range m.replicas {
+	// The replicas are snapshotted under the lock and written to outside it:
+	// a slow replica must not block the manager. Each replica's writer is
+	// serialised by the replica's own lock, so the manager's lock is not
+	// needed for the writes.
+	targets := make([]*Replica, 0, len(m.replicas))
+	for _, replica := range m.replicas {
 		if replica.State == StateConnected && replica.Writer != nil {
-			if _, err := replica.Writer.Write(cmd); err != nil {
-				logger.Error().Err(err).Str("replica", id).Msg("failed to write to replica")
-				continue
-			}
-			if err := replica.Writer.Flush(); err != nil {
-				logger.Error().Err(err).Str("replica", id).Msg("failed to flush replica writer")
-				continue
-			}
-			replica.Offset++
+			targets = append(targets, replica)
 		}
+	}
+	m.mu.Unlock()
+
+	for _, replica := range targets {
+		if err := replica.propagate(cmd); err != nil {
+			logger.Error().Err(err).Str("replica", replica.ID).Msg("failed to write to replica")
+			continue
+		}
+		m.mu.Lock()
+		replica.Offset++
+		m.mu.Unlock()
 	}
 }
 
