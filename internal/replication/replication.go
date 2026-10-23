@@ -51,6 +51,29 @@ type Replica struct {
 	writeMu sync.Mutex
 }
 
+// replBacklogFirstByteOffset is the offset of the oldest byte still in the
+// backlog. It used to report the same value as the master's offset, which
+// claimed the backlog was empty.
+func (m *Manager) replBacklogFirstByteOffset() int64 {
+	written := m.replBacklogIdx.Load()
+	size := int64(len(m.replBacklog))
+	if written <= size {
+		return 0
+	}
+	return written - size
+}
+
+// backlogRing returns a copy of the backlog's ring bytes, in ring order. It
+// exists so the ring's contents can be inspected: a byte-indexed ring cannot
+// be verified by looking at the counter alone.
+func (m *Manager) backlogRing() []byte {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]byte, len(m.replBacklog))
+	copy(out, m.replBacklog)
+	return out
+}
+
 // propagate writes cmd to the replica and flushes it. The replica's own lock
 // serialises the writes to its bufio.Writer, so two concurrent propagations
 // cannot interleave bytes in one replica's stream.
@@ -194,7 +217,7 @@ func (m *Manager) GetInfo() string {
 		fmt.Fprintf(&sb, "master_repl_offset:%d\r\n", m.replBacklogIdx.Load())
 		sb.WriteString("repl_backlog_active:1\r\n")
 		sb.WriteString("repl_backlog_size:1048576\r\n")
-		fmt.Fprintf(&sb, "repl_backlog_first_byte_offset:%d\r\n", m.replBacklogIdx.Load())
+		fmt.Fprintf(&sb, "repl_backlog_first_byte_offset:%d\r\n", m.replBacklogFirstByteOffset())
 	} else {
 		sb.WriteString("# Replication\r\n")
 		sb.WriteString("role:slave\r\n")
@@ -451,9 +474,29 @@ func (m *Manager) PropagateCommand(cmd []byte) {
 	// lock, which is what serialises concurrent propagations.
 	m.mu.Lock()
 
-	newIdx := m.replBacklogIdx.Add(1)
-	idx := int(newIdx) % len(m.replBacklog)
-	copy(m.replBacklog[idx:], cmd)
+	// The backlog is a BYTE-indexed ring: replBacklogIdx counts the bytes
+	// ever written, so the next write position is
+	// replBacklogIdx % len(replBacklog) and the number of valid bytes is
+	// min(replBacklogIdx, len(replBacklog)). It used to count COMMANDS and
+	// use that as a byte offset, so the bytes of a command were placed at
+	// the wrong position and a command straddling the end of the buffer was
+	// silently truncated.
+	start := m.replBacklogIdx.Load()
+	size := len(m.replBacklog)
+
+	// A command longer than the whole backlog cannot be stored, so the ring
+	// keeps the most recent bytes of it.
+	data := cmd
+	if len(data) > size {
+		data = data[len(data)-size:]
+	}
+	pos := int(start % int64(size))
+	written := copy(m.replBacklog[pos:], data)
+	if written < len(data) {
+		// The command continues at the start of the ring.
+		copy(m.replBacklog, data[written:])
+	}
+	m.replBacklogIdx.Store(start + int64(len(cmd)))
 
 	// The replicas are snapshotted under the lock and written to outside it:
 	// a slow replica must not block the manager. Each replica's writer is
