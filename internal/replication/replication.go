@@ -110,10 +110,16 @@ func (m *Manager) Stop() {
 	m.mu.Lock()
 	conn := m.masterConn
 	m.masterConn = nil
+	// The connections are collected under the lock and closed outside it: a
+	// close is I/O, and the manager's lock is its only serialisation point.
+	replicaConns := make([]net.Conn, 0, len(m.replicas))
 	for _, r := range m.replicas {
-		r.Conn.Close()
+		replicaConns = append(replicaConns, r.Conn)
 	}
 	m.mu.Unlock()
+	for _, replicaConn := range replicaConns {
+		replicaConn.Close()
+	}
 	if conn != nil {
 		conn.Close()
 	}
@@ -392,11 +398,18 @@ func (m *Manager) AddReplica(conn net.Conn, ip string, port int, capabilities ma
 
 func (m *Manager) RemoveReplica(id string) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if replica, ok := m.replicas[id]; ok {
-		replica.Conn.Close()
+	replica, ok := m.replicas[id]
+	if ok {
 		delete(m.replicas, id)
+	}
+	m.mu.Unlock()
+
+	// The connection is closed outside the lock: a close is I/O, and the
+	// manager's lock is its only serialisation point, so closing under it
+	// would block every other operation on the manager for as long as the
+	// close took.
+	if ok {
+		replica.Conn.Close()
 		logger.Info().Str("id", id).Msg("replica disconnected")
 	}
 }
