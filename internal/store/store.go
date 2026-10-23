@@ -689,6 +689,15 @@ func (s *Store) SetOpsRLock() { s.setOpsMu.RLock() }
 // SetOpsRUnlock releases the shared set-operations lock.
 func (s *Store) SetOpsRUnlock() { s.setOpsMu.RUnlock() }
 
+// SetOpsLock takes the set-operations lock exclusively. It is the write side
+// of SetOpsRLock: MoveSetMember uses it so a multi-set read can never observe
+// a move half-applied. It is exported so a check can tell whether a reader
+// still holds the shared lock: while a reader holds it, this call blocks.
+func (s *Store) SetOpsLock() { s.setOpsMu.Lock() }
+
+// SetOpsUnlock releases the set-operations lock taken by SetOpsLock.
+func (s *Store) SetOpsUnlock() { s.setOpsMu.Unlock() }
+
 func (s *Store) GetTagIndex() *TagIndex {
 	return s.tagIndex
 }

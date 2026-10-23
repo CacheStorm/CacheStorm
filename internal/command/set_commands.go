@@ -371,7 +371,6 @@ func cmdSUNION(ctx *Context) error {
 	// exclusively, so this multi-set snapshot can never observe the move
 	// half-applied.
 	ctx.Store.SetOpsRLock()
-	defer ctx.Store.SetOpsRUnlock()
 
 	// Resolve every source set, then lock them all simultaneously in
 	// deterministic key order. Holding every lock at once makes the union
@@ -386,7 +385,9 @@ func cmdSUNION(ctx *Context) error {
 		key := ctx.ArgString(i)
 		set, err := getSetOrEmpty(ctx, key)
 		if err != nil {
-			return ctx.WriteError(err)
+			replyErr := err
+			ctx.Store.SetOpsRUnlock()
+			return ctx.WriteError(replyErr)
 		}
 		sets = append(sets, keyedSet{key: key, set: set})
 	}
@@ -412,7 +413,9 @@ func cmdSUNION(ctx *Context) error {
 		members = append(members, resp.BulkString(member))
 	}
 
-	return ctx.WriteArray(members)
+	reply := members
+	ctx.Store.SetOpsRUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdSINTER(ctx *Context) error {
@@ -424,10 +427,11 @@ func cmdSINTER(ctx *Context) error {
 	// exclusively, so this multi-set read can never observe the move
 	// half-applied.
 	ctx.Store.SetOpsRLock()
-	defer ctx.Store.SetOpsRUnlock()
 	firstSet, err := getSetOrEmpty(ctx, ctx.ArgString(0))
 	if err != nil {
-		return ctx.WriteError(err)
+		replyErr := err
+		ctx.Store.SetOpsRUnlock()
+		return ctx.WriteError(replyErr)
 	}
 
 	firstSet.RLock()
@@ -440,7 +444,9 @@ func cmdSINTER(ctx *Context) error {
 	for i := 1; i < ctx.ArgCount(); i++ {
 		set, err := getSet(ctx, ctx.ArgString(i))
 		if err != nil {
-			return ctx.WriteError(err)
+			replyErr := err
+			ctx.Store.SetOpsRUnlock()
+			return ctx.WriteError(replyErr)
 		}
 		if set == nil {
 			clear(result)
@@ -461,7 +467,9 @@ func cmdSINTER(ctx *Context) error {
 		members = append(members, resp.BulkString(member))
 	}
 
-	return ctx.WriteArray(members)
+	reply := members
+	ctx.Store.SetOpsRUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdSDIFF(ctx *Context) error {
@@ -473,10 +481,11 @@ func cmdSDIFF(ctx *Context) error {
 	// exclusively, so this multi-set read can never observe the move
 	// half-applied.
 	ctx.Store.SetOpsRLock()
-	defer ctx.Store.SetOpsRUnlock()
 	firstSet, err := getSetOrEmpty(ctx, ctx.ArgString(0))
 	if err != nil {
-		return ctx.WriteError(err)
+		replyErr := err
+		ctx.Store.SetOpsRUnlock()
+		return ctx.WriteError(replyErr)
 	}
 
 	result := make(map[string]struct{})
@@ -489,7 +498,9 @@ func cmdSDIFF(ctx *Context) error {
 	for i := 1; i < ctx.ArgCount(); i++ {
 		set, err := getSetOrEmpty(ctx, ctx.ArgString(i))
 		if err != nil {
-			return ctx.WriteError(err)
+			replyErr := err
+			ctx.Store.SetOpsRUnlock()
+			return ctx.WriteError(replyErr)
 		}
 		set.RLock()
 		for member := range set.Members {
@@ -503,7 +514,9 @@ func cmdSDIFF(ctx *Context) error {
 		members = append(members, resp.BulkString(member))
 	}
 
-	return ctx.WriteArray(members)
+	reply := members
+	ctx.Store.SetOpsRUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdSUNIONSTORE(ctx *Context) error {
@@ -515,14 +528,15 @@ func cmdSUNIONSTORE(ctx *Context) error {
 	// exclusively, so this multi-set read can never observe the move
 	// half-applied.
 	ctx.Store.SetOpsRLock()
-	defer ctx.Store.SetOpsRUnlock()
 	dstKey := ctx.ArgString(0)
 	result := make(map[string]struct{})
 
 	for i := 1; i < ctx.ArgCount(); i++ {
 		set, err := getSetOrEmpty(ctx, ctx.ArgString(i))
 		if err != nil {
-			return ctx.WriteError(err)
+			replyErr := err
+			ctx.Store.SetOpsRUnlock()
+			return ctx.WriteError(replyErr)
 		}
 		set.RLock()
 		for member := range set.Members {
@@ -533,15 +547,21 @@ func cmdSUNIONSTORE(ctx *Context) error {
 
 	if len(result) == 0 {
 		ctx.Store.Delete(dstKey)
-		return ctx.WriteInteger(0)
+		reply := int64(0)
+		ctx.Store.SetOpsRUnlock()
+		return ctx.WriteInteger(reply)
 	}
 
 	dstSet := &store.SetValue{Members: result}
 	if err := ctx.Store.Set(dstKey, dstSet, store.SetOptions{}); err != nil {
-		return ctx.WriteError(err)
+		replyErr := err
+		ctx.Store.SetOpsRUnlock()
+		return ctx.WriteError(replyErr)
 	}
 
-	return ctx.WriteInteger(int64(len(result)))
+	reply := int64(int64(len(result)))
+	ctx.Store.SetOpsRUnlock()
+	return ctx.WriteInteger(reply)
 }
 
 func cmdSINTERSTORE(ctx *Context) error {
@@ -553,12 +573,13 @@ func cmdSINTERSTORE(ctx *Context) error {
 	// exclusively, so this multi-set read can never observe the move
 	// half-applied.
 	ctx.Store.SetOpsRLock()
-	defer ctx.Store.SetOpsRUnlock()
 	dstKey := ctx.ArgString(0)
 
 	firstSet, err := getSetOrEmpty(ctx, ctx.ArgString(1))
 	if err != nil {
-		return ctx.WriteError(err)
+		replyErr := err
+		ctx.Store.SetOpsRUnlock()
+		return ctx.WriteError(replyErr)
 	}
 
 	result := make(map[string]struct{})
@@ -571,7 +592,9 @@ func cmdSINTERSTORE(ctx *Context) error {
 	for i := 2; i < ctx.ArgCount(); i++ {
 		set, err := getSet(ctx, ctx.ArgString(i))
 		if err != nil {
-			return ctx.WriteError(err)
+			replyErr := err
+			ctx.Store.SetOpsRUnlock()
+			return ctx.WriteError(replyErr)
 		}
 		if set == nil {
 			clear(result)
@@ -589,15 +612,21 @@ func cmdSINTERSTORE(ctx *Context) error {
 
 	if len(result) == 0 {
 		ctx.Store.Delete(dstKey)
-		return ctx.WriteInteger(0)
+		reply := int64(0)
+		ctx.Store.SetOpsRUnlock()
+		return ctx.WriteInteger(reply)
 	}
 
 	dstSet := &store.SetValue{Members: result}
 	if err := ctx.Store.Set(dstKey, dstSet, store.SetOptions{}); err != nil {
-		return ctx.WriteError(err)
+		replyErr := err
+		ctx.Store.SetOpsRUnlock()
+		return ctx.WriteError(replyErr)
 	}
 
-	return ctx.WriteInteger(int64(len(result)))
+	reply := int64(int64(len(result)))
+	ctx.Store.SetOpsRUnlock()
+	return ctx.WriteInteger(reply)
 }
 
 func cmdSDIFFSTORE(ctx *Context) error {
@@ -609,12 +638,13 @@ func cmdSDIFFSTORE(ctx *Context) error {
 	// exclusively, so this multi-set read can never observe the move
 	// half-applied.
 	ctx.Store.SetOpsRLock()
-	defer ctx.Store.SetOpsRUnlock()
 	dstKey := ctx.ArgString(0)
 
 	firstSet, err := getSetOrEmpty(ctx, ctx.ArgString(1))
 	if err != nil {
-		return ctx.WriteError(err)
+		replyErr := err
+		ctx.Store.SetOpsRUnlock()
+		return ctx.WriteError(replyErr)
 	}
 
 	result := make(map[string]struct{})
@@ -627,7 +657,9 @@ func cmdSDIFFSTORE(ctx *Context) error {
 	for i := 2; i < ctx.ArgCount(); i++ {
 		set, err := getSetOrEmpty(ctx, ctx.ArgString(i))
 		if err != nil {
-			return ctx.WriteError(err)
+			replyErr := err
+			ctx.Store.SetOpsRUnlock()
+			return ctx.WriteError(replyErr)
 		}
 		set.RLock()
 		for member := range set.Members {
@@ -638,15 +670,21 @@ func cmdSDIFFSTORE(ctx *Context) error {
 
 	if len(result) == 0 {
 		ctx.Store.Delete(dstKey)
-		return ctx.WriteInteger(0)
+		reply := int64(0)
+		ctx.Store.SetOpsRUnlock()
+		return ctx.WriteInteger(reply)
 	}
 
 	dstSet := &store.SetValue{Members: result}
 	if err := ctx.Store.Set(dstKey, dstSet, store.SetOptions{}); err != nil {
-		return ctx.WriteError(err)
+		replyErr := err
+		ctx.Store.SetOpsRUnlock()
+		return ctx.WriteError(replyErr)
 	}
 
-	return ctx.WriteInteger(int64(len(result)))
+	reply := int64(int64(len(result)))
+	ctx.Store.SetOpsRUnlock()
+	return ctx.WriteInteger(reply)
 }
 
 func cmdSSCAN(ctx *Context) error {
@@ -747,7 +785,6 @@ func cmdSINTERCARD(ctx *Context) error {
 	// exclusively, so this multi-set read can never observe the move
 	// half-applied.
 	ctx.Store.SetOpsRLock()
-	defer ctx.Store.SetOpsRUnlock()
 	// Redis grammar: SINTERCARD numkeys key [key ...] [LIMIT limit].
 	// The FIRST argument is a COUNT of how many keys follow, not a key. This
 	// handler used to set numKeys from ctx.ArgCount() and read its first set
@@ -756,37 +793,53 @@ func cmdSINTERCARD(ctx *Context) error {
 	// well-formed call answered 0.
 	numKeys, err := strconv.Atoi(ctx.ArgString(0))
 	if err != nil {
-		return ctx.WriteError(ErrNotInteger)
+		replyErr := ErrNotInteger
+		ctx.Store.SetOpsRUnlock()
+		return ctx.WriteError(replyErr)
 	}
 	// numkeys is a key COUNT and must be at least 1.
 	if numKeys < 1 {
-		return ctx.WriteError(ErrInvalidArg)
+		replyErr := ErrInvalidArg
+		ctx.Store.SetOpsRUnlock()
+		return ctx.WriteError(replyErr)
 	}
 	if ctx.ArgCount() < 1+numKeys {
-		return ctx.WriteError(ErrWrongArgCount)
+		replyErr := ErrWrongArgCount
+		ctx.Store.SetOpsRUnlock()
+		return ctx.WriteError(replyErr)
 	}
 
 	limit := -1
 	optIdx := 1 + numKeys
 	if ctx.ArgCount() > optIdx {
 		if strings.ToUpper(ctx.ArgString(optIdx)) != "LIMIT" {
-			return ctx.WriteError(ErrSyntaxError)
+			replyErr := ErrSyntaxError
+			ctx.Store.SetOpsRUnlock()
+			return ctx.WriteError(replyErr)
 		}
 		if ctx.ArgCount() != optIdx+2 {
-			return ctx.WriteError(ErrSyntaxError)
+			replyErr := ErrSyntaxError
+			ctx.Store.SetOpsRUnlock()
+			return ctx.WriteError(replyErr)
 		}
 		limit, err = strconv.Atoi(ctx.ArgString(optIdx + 1))
 		if err != nil {
-			return ctx.WriteError(ErrNotInteger)
+			replyErr := ErrNotInteger
+			ctx.Store.SetOpsRUnlock()
+			return ctx.WriteError(replyErr)
 		}
 		if limit < 0 {
-			return ctx.WriteError(ErrInvalidArg)
+			replyErr := ErrInvalidArg
+			ctx.Store.SetOpsRUnlock()
+			return ctx.WriteError(replyErr)
 		}
 	}
 
 	firstSet, err := getSetOrEmpty(ctx, ctx.ArgString(1))
 	if err != nil {
-		return ctx.WriteError(err)
+		replyErr := err
+		ctx.Store.SetOpsRUnlock()
+		return ctx.WriteError(replyErr)
 	}
 
 	firstSet.RLock()
@@ -799,7 +852,9 @@ func cmdSINTERCARD(ctx *Context) error {
 	for i := 2; i < 1+numKeys; i++ {
 		set, err := getSet(ctx, ctx.ArgString(i))
 		if err != nil {
-			return ctx.WriteError(err)
+			replyErr := err
+			ctx.Store.SetOpsRUnlock()
+			return ctx.WriteError(replyErr)
 		}
 		if set == nil {
 			clear(result)
@@ -820,7 +875,9 @@ func cmdSINTERCARD(ctx *Context) error {
 		count = limit
 	}
 
-	return ctx.WriteInteger(int64(count))
+	reply := int64(int64(count))
+	ctx.Store.SetOpsRUnlock()
+	return ctx.WriteInteger(reply)
 }
 
 func cmdSMISMEMBER(ctx *Context) error {

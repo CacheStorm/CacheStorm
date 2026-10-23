@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 ### Fixed
+- Internals: the multi-set operations release the store's set-operations lock before writing their reply. The release was deferred to the return, so the lock was still held while the reply went to the client and a concurrent member move could not proceed
 - Internals: the set, hash, list, sorted-set and ML readers release the store entry's read lock before writing their reply. The release was deferred to the return, so the lock was still held while the reply went to the client — a client that read slowly blocked every writer of that entry
 - Internals: the last registry reader that held its read lock across the reply releases it first. `AGGREGATOR.GET` builds its reply under the lock and writes it after the release, like the other readers
 - Internals: the registry readers release the registry's read lock before writing their reply. The lock used to be held for the whole handler, so the release was deferred to the return and the lock was still held while the reply went to the client — a client that read slowly blocked every writer of that registry. The reply's values are now read under the lock and the reply is written after it is released
