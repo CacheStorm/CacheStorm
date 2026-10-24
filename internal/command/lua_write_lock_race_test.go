@@ -213,10 +213,10 @@ func TestLuaWriteControlsUncontended(t *testing.T) {
 		t.Fatalf("CONTROL FAIL: Lua SREM two members returned %q, want :2", out)
 	}
 
-	// HMSET's status reply is converted to a Lua string by redis.call, so the
-	// script returns it as a bulk string rather than a +OK status.
-	if out := luaWriteEval(t, s, router, "return redis.call('HMSET', redis.KEYS[1], 'lua', 'v')", "h"); out != "$2\r\nOK\r\n" {
-		t.Fatalf("CONTROL FAIL: Lua HMSET returned %q, want the OK status as a bulk string", out)
+	// HMSET's status reply reaches Lua as {ok='OK'}, which the script returns
+	// as a +OK status, as in Redis.
+	if out := luaWriteEval(t, s, router, "return redis.call('HMSET', redis.KEYS[1], 'lua', 'v')", "h"); out != "+OK\r\n" {
+		t.Fatalf("CONTROL FAIL: Lua HMSET returned %q, want +OK", out)
 	}
 	if out := luaWriteRun(t, s, router, "HGET", "h", "lua"); out != "$1\r\nv\r\n" {
 		t.Fatalf("CONTROL FAIL: HGET after Lua HMSET = %q, want v", out)
@@ -226,7 +226,7 @@ func TestLuaWriteControlsUncontended(t *testing.T) {
 	// the branch that calls store.Set after releasing the value lock.
 	fresh := store.NewStore()
 	freshRouter := luaWriteRouter(t, fresh)
-	if out := luaWriteEval(t, fresh, freshRouter, "return redis.call('HMSET', redis.KEYS[1], 'a', '1')", "newhash"); out != "$2\r\nOK\r\n" {
+	if out := luaWriteEval(t, fresh, freshRouter, "return redis.call('HMSET', redis.KEYS[1], 'a', '1')", "newhash"); out != "+OK\r\n" {
 		t.Fatalf("CONTROL FAIL: Lua HMSET creating a key returned %q", out)
 	}
 	if out := luaWriteRun(t, fresh, freshRouter, "HGET", "newhash", "a"); out != "$1\r\n1\r\n" {

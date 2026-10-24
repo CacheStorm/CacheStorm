@@ -23,6 +23,9 @@ func aclScriptSetup(t *testing.T) (*store.Store, *Router) {
 	router := NewRouter()
 	RegisterServerCommands(router)
 	RegisterScriptCommands(router)
+	// redis.call dispatches through the router, so the commands the scripts
+	// call must be registered on it.
+	RegisterStringCommands(router)
 	return s, router
 }
 

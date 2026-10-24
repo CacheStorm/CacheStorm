@@ -164,7 +164,7 @@ func storeKeyAfter(args [][]byte) []string {
 // mistaken for a key.
 func aclKeysForCommand(cmd string, args [][]byte) []string {
 	switch cmd {
-	case "EVAL", "EVALSHA":
+	case "EVAL", "EVALSHA", "EVAL_RO", "EVALSHA_RO":
 		// EVAL script numkeys key [key ...]
 		return keysAfterNumkeys(args, 1)
 	case "ZUNIONSTORE", "ZINTERSTORE", "ZDIFFSTORE":
