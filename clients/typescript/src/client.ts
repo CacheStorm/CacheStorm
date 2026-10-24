@@ -3,22 +3,49 @@ import * as net from 'net';
 import {
   CacheStormClientOptions,
   SetOptions,
-  GetOptions,
   Message,
   Command,
 } from './types';
 import { Pipeline } from './pipeline';
 import { PubSub } from './pubsub';
+import { RespDecoder, RespValue, ReplyError, ProtocolError, encodeCommand, buffersToStrings } from './resp';
+
+export type PushHandler = (reply: RespValue) => void;
+
+const PUSH_KINDS = new Set(['message', 'pmessage', 'subscribe', 'psubscribe', 'unsubscribe', 'punsubscribe']);
+
+interface PendingRequest {
+  command?: Command;
+  resolve: Function;
+  reject: Function;
+  timer?: ReturnType<typeof setTimeout>;
+  settled?: boolean;
+  returnBuffers?: boolean;
+}
 
 export class CacheStormClient extends EventEmitter {
   private socket: net.Socket | null = null;
   private options: Required<CacheStormClientOptions>;
   private connected = false;
-  private commandQueue: Array<{ command: Command; resolve: Function; reject: Function }> = [];
-  private currentCommand: { command: Command; resolve: Function; reject: Function } | null = null;
+  private pending: PendingRequest[] = [];
+  private decoder = new RespDecoder({ returnBuffers: true });
+  private pushHandler: PushHandler | null = null;
+
+  private get currentCommand(): PendingRequest | null {
+    return this.pending[0] ?? null;
+  }
+
+  private set currentCommand(request: PendingRequest | null) {
+    if (request) this.pending.push(request);
+  }
 
   constructor(options: CacheStormClientOptions = {}) {
     super();
+    for (const unsupported of ['pool', 'retry']) {
+      if ((options as Record<string, unknown>)[unsupported] !== undefined) {
+        throw new Error(`CacheStormClient option "${unsupported}" is not implemented`);
+      }
+    }
     this.options = {
       host: options.host ?? 'localhost',
       port: options.port ?? 6379,
@@ -26,50 +53,100 @@ export class CacheStormClient extends EventEmitter {
       database: options.database ?? 0,
       connectTimeout: options.connectTimeout ?? 10000,
       commandTimeout: options.commandTimeout ?? 5000,
-      pool: options.pool ?? {},
-      retry: options.retry ?? {},
     };
   }
 
   async connect(): Promise<void> {
     return new Promise((resolve, reject) => {
+      let settled = false;
       const timeout = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        socket.destroy();
         reject(new Error('Connection timeout'));
       }, this.options.connectTimeout);
 
-      this.socket = net.createConnection({
+      this.decoder.reset();
+      const socket = net.createConnection({
         host: this.options.host,
         port: this.options.port,
       });
+      this.socket = socket;
+      socket.setNoDelay(true);
 
-      this.socket.on('connect', () => {
-        clearTimeout(timeout);
+      socket.on('connect', () => {
+        if (settled) return;
         this.connected = true;
-        this.emit('connect');
-        resolve();
+        this.handshake().then(
+          () => {
+            clearTimeout(timeout);
+            if (settled) return;
+            settled = true;
+            this.emit('connect');
+            resolve();
+          },
+          (err: Error) => {
+            clearTimeout(timeout);
+            if (settled) return;
+            settled = true;
+            this.connected = false;
+            socket.destroy();
+            reject(err);
+          }
+        );
       });
 
-      this.socket.on('error', (err) => {
+      socket.on('error', (err) => {
         clearTimeout(timeout);
-        this.emit('error', err);
-        reject(err);
+        this.failPending(err);
+        if (this.listenerCount('error') > 0) this.emit('error', err);
+        if (!settled) {
+          settled = true;
+          reject(err);
+        }
       });
 
-      this.socket.on('data', (data) => {
+      socket.on('data', (data) => {
         this.handleResponse(data);
       });
 
-      this.socket.on('close', () => {
+      socket.on('close', () => {
+        clearTimeout(timeout);
         this.connected = false;
+        if (this.socket === socket) this.socket = null;
+        this.decoder.reset();
+        this.failPending(new Error('Connection closed'));
         this.emit('close');
+        if (!settled) {
+          settled = true;
+          reject(new Error('Connection closed'));
+        }
       });
     });
   }
 
+  private async handshake(): Promise<void> {
+    if (this.options.password) {
+      await this.sendCommand(['AUTH', this.options.password]);
+    }
+    if (this.options.database) {
+      await this.sendCommand(['SELECT', this.options.database]);
+    }
+  }
+
+  get commandTimeout(): number {
+    return this.options.commandTimeout;
+  }
+
   async quit(): Promise<void> {
     if (!this.connected) return;
-    await this.sendCommand(['QUIT']);
-    this.socket?.end();
+    const socket = this.socket;
+    try {
+      await this.sendCommand(['QUIT']);
+    } catch {
+    } finally {
+      socket?.end();
+    }
   }
 
   async ping(message?: string): Promise<string> {
@@ -84,6 +161,9 @@ export class CacheStormClient extends EventEmitter {
     if (options?.PX) args.push('PX', options.PX);
     if (options?.NX) args.push('NX');
     if (options?.XX) args.push('XX');
+    if ((options as Record<string, unknown> | undefined)?.namespace !== undefined) {
+      throw new Error('SET option "namespace" is not implemented');
+    }
     if (options?.TAGS) {
       args.push('TAGS');
       args.push(...options.TAGS);
@@ -96,8 +176,12 @@ export class CacheStormClient extends EventEmitter {
     return this.set(key, value, { TAGS: tags });
   }
 
-  async get(key: string, options?: GetOptions): Promise<string | null> {
+  async get(key: string): Promise<string | null> {
     return this.sendCommand(['GET', key]) as Promise<string | null>;
+  }
+
+  async getBuffer(key: string): Promise<Buffer | null> {
+    return this.sendCommands([['GET', key]], { returnBuffers: true })[0] as Promise<Buffer | null>;
   }
 
   async del(...keys: string[]): Promise<number> {
@@ -142,8 +226,12 @@ export class CacheStormClient extends EventEmitter {
   }
 
   async hgetall(key: string): Promise<Record<string, string>> {
-    const result = await this.sendCommand(['HGETALL', key]) as string[];
+    const result = await this.sendCommand(['HGETALL', key]);
     const obj: Record<string, string> = {};
+    if (result === null) return obj;
+    if (!Array.isArray(result) || result.length % 2 !== 0) {
+      throw new ProtocolError('HGETALL expected an array of field/value pairs');
+    }
     for (let i = 0; i < result.length; i += 2) {
       obj[result[i]] = result[i + 1];
     }
@@ -242,6 +330,11 @@ export class CacheStormClient extends EventEmitter {
     return new PubSub(this, chs, callback);
   }
 
+  psubscribe(patterns: string | string[], callback?: (message: Message) => void): PubSub {
+    const pts = Array.isArray(patterns) ? patterns : [patterns];
+    return new PubSub(this, [], callback, pts);
+  }
+
   async publish(channel: string, message: string): Promise<number> {
     return this.sendCommand(['PUBLISH', channel, message]) as Promise<number>;
   }
@@ -251,80 +344,101 @@ export class CacheStormClient extends EventEmitter {
     return new Pipeline(this);
   }
 
-  // Internal methods
+  sendCommands(commands: Command[], options: { returnBuffers?: boolean } = {}): Promise<unknown>[] {
+    if (!this.connected || !this.socket) {
+      return commands.map(() => Promise.reject(new Error('Not connected')));
+    }
+    if (commands.length === 0) return [];
+
+    const promises = commands.map(command => this.enqueue(command, options.returnBuffers ?? false));
+    this.socket.write(Buffer.concat(commands.map(command => this.encodeResp(command))));
+    return promises;
+  }
+
   private async sendCommand(command: Command): Promise<unknown> {
-    if (!this.connected) {
+    return this.sendCommands([command])[0];
+  }
+
+  writeUnqueued(command: Command): void {
+    if (!this.connected || !this.socket) {
       throw new Error('Not connected');
     }
+    this.socket.write(this.encodeResp(command));
+  }
 
+  setPushHandler(handler: PushHandler | null): void {
+    this.pushHandler = handler;
+  }
+
+  private enqueue(command: Command, returnBuffers: boolean): Promise<unknown> {
     return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
+      const request: PendingRequest = { command, resolve, reject, returnBuffers };
+      request.timer = setTimeout(() => {
+        if (request.settled) return;
+        request.settled = true;
         reject(new Error('Command timeout'));
       }, this.options.commandTimeout);
-
-      this.commandQueue.push({
-        command,
-        resolve: (result: unknown) => {
-          clearTimeout(timeout);
-          resolve(result);
-        },
-        reject: (err: Error) => {
-          clearTimeout(timeout);
-          reject(err);
-        },
-      });
-
-      this.processQueue();
+      this.pending.push(request);
     });
-  }
-
-  private processQueue(): void {
-    if (this.currentCommand || this.commandQueue.length === 0) {
-      return;
-    }
-
-    this.currentCommand = this.commandQueue.shift()!;
-    this.writeCommand(this.currentCommand.command);
-  }
-
-  private writeCommand(command: Command): void {
-    if (!this.socket) return;
-
-    // Simple RESP encoding (simplified)
-    const encoded = this.encodeResp(command);
-    this.socket.write(encoded);
   }
 
   private encodeResp(command: Command): Buffer {
-    // Simplified RESP encoding
-    const parts = command.map(arg => {
-      const str = arg.toString();
-      return `$${str.length}\r\n${str}\r\n`;
-    });
-
-    return Buffer.from(`*${command.length}\r\n${parts.join('')}`);
+    return encodeCommand(command);
   }
 
   private handleResponse(data: Buffer): void {
-    // Simplified response handling
-    const response = data.toString().trim();
+    let replies: RespValue[];
+    try {
+      replies = this.decoder.feed(data);
+    } catch (err) {
+      this.decoder.reset();
+      this.failPending(err as Error);
+      this.socket?.destroy();
+      return;
+    }
+    for (const reply of replies) {
+      this.dispatch(reply);
+    }
+  }
 
-    if (this.currentCommand) {
-      const { resolve } = this.currentCommand;
-      this.currentCommand = null;
-
-      if (response.startsWith('+')) {
-        resolve(response.slice(1));
-      } else if (response.startsWith('-')) {
-        // Error
-      } else if (response.startsWith('$')) {
-        // Bulk string
-        resolve(response.split('\r\n')[1] ?? null);
-      } else {
-        resolve(response);
+  private dispatch(raw: RespValue): void {
+    if (this.pushHandler) {
+      const text = buffersToStrings(raw);
+      if (Array.isArray(text) && typeof text[0] === 'string' && PUSH_KINDS.has(text[0].toLowerCase())) {
+        this.pushHandler(text);
+        return;
       }
+      if (this.pending.length === 0) {
+        this.pushHandler(text);
+        return;
+      }
+    }
+    const request = this.pending.shift();
+    if (!request) {
+      const err = new ProtocolError('Received a reply with no pending request');
+      if (this.listenerCount('error') > 0) this.emit('error', err);
+      this.socket?.destroy();
+      return;
+    }
+    if (request.settled) return;
+    request.settled = true;
+    if (request.timer) clearTimeout(request.timer);
+    const reply = request.returnBuffers ? raw : buffersToStrings(raw);
+    if (reply instanceof ReplyError) {
+      request.reject(reply);
+    } else {
+      request.resolve(reply);
+    }
+  }
 
-      this.processQueue();
+  private failPending(err: Error): void {
+    const requests = this.pending;
+    this.pending = [];
+    for (const request of requests) {
+      if (request.settled) continue;
+      request.settled = true;
+      if (request.timer) clearTimeout(request.timer);
+      request.reject(err);
     }
   }
 

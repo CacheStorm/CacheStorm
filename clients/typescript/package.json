@@ -6,8 +6,9 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
-    "test": "jest",
-    "lint": "eslint src/**/*.ts",
+    "typecheck": "tsc --noEmit",
+    "pretest": "tsc -p tsconfig.test.json",
+    "test": "node --test --test-force-exit --test-timeout=10000 build-test/test/resp.test.js build-test/test/client.test.js build-test/test/connection.test.js",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
@@ -18,10 +19,16 @@
     "typescript"
   ],
   "author": "CacheStorm Team",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "devDependencies": {
     "@types/node": "^20.0.0",
-    "typescript": "^5.0.0"
+    "typescript": "^5.9.3"
   },
-  "dependencies": {}
+  "dependencies": {},
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
 }

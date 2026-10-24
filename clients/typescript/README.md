@@ -4,15 +4,15 @@ Official TypeScript/JavaScript client for CacheStorm - High-Performance Redis-Co
 
 ## Features
 
-Current limitations: pipelines return success without sending commands; fragmented RESP replies, byte lengths and server errors are handled incorrectly; Pub/Sub transport is unfinished. See the [verified review and roadmap](../../docs/PROJECT_REVIEW.md) before using these paths.
-
 - Full TypeScript support with type definitions
-- Promise-based API
-- Connection pooling
-- Pipeline support
-- Pub/Sub support
-- Automatic reconnection
+- Promise-based API over a single pipelined connection
+- AUTH and SELECT on connect (`password`, `database` options)
+- Pipeline support (one write, replies in order)
+- Pub/Sub on a dedicated connection (SUBSCRIBE, PSUBSCRIBE)
+- Binary-safe reads with `getBuffer`
 - CacheStorm-specific features (tags, invalidation)
+
+Not implemented: connection pooling, automatic retry/reconnection and namespaces. The `pool`, `retry` and `namespace` options throw instead of being silently ignored. Bulk replies are decoded as UTF-8 strings except through `getBuffer`, and integers are returned as JavaScript numbers. See the [verified review and roadmap](../../docs/PROJECT_REVIEW.md).
 
 ## Installation
 
@@ -50,22 +50,14 @@ await client.quit();
 
 ## Advanced Usage
 
-### Connection Pool
+### Authentication and database
 
 ```typescript
-const client = new CacheStormClient({
-  host: 'localhost',
-  port: 6380,
-  pool: {
-    min: 5,
-    max: 20,
-  },
-  retry: {
-    maxRetries: 3,
-    retryDelay: 100,
-  },
-});
+const client = new CacheStormClient({ host: 'localhost', port: 6380, password: 'secret', database: 2 });
+await client.connect();
 ```
+
+`connect()` rejects if AUTH or SELECT fails.
 
 ### Pipeline
 
@@ -78,19 +70,23 @@ pipeline.get('key1');
 const results = await pipeline.exec();
 ```
 
+If any reply is a server error, `exec()` rejects with `PipelineError`; its `results` array holds every reply, with errors as `ReplyError`.
+
 ### Pub/Sub
 
 ```typescript
-const subscriber = client.duplicate();
-await subscriber.connect();
-
-await subscriber.subscribe('channel', (message) => {
-  console.log('Received:', message);
+const subscription = client.subscribe('channel', (message) => {
+  console.log('Received:', message.channel, message.payload);
 });
+await subscription.subscribe();
+await subscription.psubscribe('news.*');
 
-// Publish
 await client.publish('channel', 'Hello!');
+
+await subscription.quit();
 ```
+
+The subscription opens its own connection; the original client stays usable for regular commands.
 
 ### CacheStorm-Specific Features
 
@@ -103,9 +99,6 @@ await client.invalidate('user');
 
 // Get keys by tag
 const keys = await client.tagKeys('user');
-
-// Namespace support
-await client.set('key', 'value', { namespace: 'tenant1' });
 ```
 
 ## API Reference

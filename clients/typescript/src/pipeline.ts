@@ -81,13 +81,29 @@ export class Pipeline {
   }
 
   exec(): Promise<unknown[]> {
-    // Execute all commands in pipeline
-    // This is a simplified implementation
-    return Promise.all(
-      this.commands.map(cmd => {
-        // In real implementation, send all at once
-        return Promise.resolve('OK');
-      })
-    );
+    const commands = this.commands;
+    this.commands = [];
+    return Promise.allSettled(this.client.sendCommands(commands)).then(outcomes => {
+      const results = outcomes.map(outcome =>
+        outcome.status === 'fulfilled' ? outcome.value : outcome.reason
+      );
+      const failure = outcomes.find(outcome => outcome.status === 'rejected');
+      if (failure) {
+        throw new PipelineError((failure as PromiseRejectedResult).reason, results);
+      }
+      return results;
+    });
+  }
+}
+
+export class PipelineError extends Error {
+  readonly cause: unknown;
+  readonly results: unknown[];
+
+  constructor(cause: unknown, results: unknown[]) {
+    super(cause instanceof Error ? cause.message : String(cause));
+    this.name = 'PipelineError';
+    this.cause = cause;
+    this.results = results;
   }
 }
