@@ -100,14 +100,15 @@ func TestHIncrByFloatOverflowRejected(t *testing.T) {
 	s := store.NewStore()
 	router := newFloatRouter(s)
 
-	// First increment on a fresh field lands exactly on 1e308 (legal).
-	first := runCmd(t, s, router, "HINCRBYFLOAT", "h", "fld", "1e308")
+	// HINCRBYFLOAT adds at long double precision as Redis does, so the
+	// overflow point is the long double maximum (~1.19e4932), not 1e308.
+	first := runCmd(t, s, router, "HINCRBYFLOAT", "h", "fld", "1e4932")
 	if strings.Contains(first, "Inf") || strings.Contains(first, "NaN") {
 		t.Fatalf("first HINCRBYFLOAT must succeed, got %q", first)
 	}
 
 	// The second overflows: must be rejected, field unchanged.
-	reply := runCmd(t, s, router, "HINCRBYFLOAT", "h", "fld", "1e308")
+	reply := runCmd(t, s, router, "HINCRBYFLOAT", "h", "fld", "1e4932")
 	if !strings.Contains(reply, "NaN or Infinity") {
 		t.Fatalf("overflowing HINCRBYFLOAT must be rejected, got %q", reply)
 	}

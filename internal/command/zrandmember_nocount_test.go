@@ -41,7 +41,7 @@ func TestZRandMemberNoCountShape(t *testing.T) {
 	})
 
 	t.Run("count_on_missing_key_is_empty_array", func(t *testing.T) {
-		got := run("ZRANDMEMBER", "nosuch", "COUNT", "2")
+		got := run("ZRANDMEMBER", "nosuch", "2")
 		if got.Type != resp.TypeArray || len(got.Array) != 0 {
 			t.Fatalf("COUNT on missing key replied %v, want an empty array", got)
 		}
@@ -55,14 +55,14 @@ func TestZRandMemberNoCountShape(t *testing.T) {
 	})
 
 	t.Run("count_zero_empty_array_control", func(t *testing.T) {
-		got := run("ZRANDMEMBER", "z", "COUNT", "0")
+		got := run("ZRANDMEMBER", "z", "0")
 		if got.Type != resp.TypeArray || len(got.Array) != 0 {
 			t.Fatalf("count 0 replied %v, want an empty array", got)
 		}
 	})
 
 	t.Run("negative_count_cycles_control", func(t *testing.T) {
-		got := run("ZRANDMEMBER", "z", "COUNT", "-2")
+		got := run("ZRANDMEMBER", "z", "-2")
 		if got.Type != resp.TypeArray || len(got.Array) != 2 {
 			t.Fatalf("count -2 delivered %v, want 2 elements", got)
 		}

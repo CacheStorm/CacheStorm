@@ -39,7 +39,7 @@ func TestLPosRankZeroRejected(t *testing.T) {
 
 	runCmd(t, s, r, "RPUSH", "k", "a", "b", "c")
 	reply := runCmd(t, s, r, "LPOS", "k", "a", "RANK", "0")
-	if !strings.Contains(reply, "RANK should not be 0") {
+	if !strings.Contains(reply, "RANK can't be zero") {
 		t.Fatalf("LPOS RANK 0 must be rejected with an error, got %q", reply)
 	}
 }

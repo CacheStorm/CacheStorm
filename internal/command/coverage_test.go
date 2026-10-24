@@ -13052,17 +13052,20 @@ func TestParseScoreRange(t *testing.T) {
 }
 
 func TestParseLexRange(t *testing.T) {
-	min, minEx, max, maxEx := parseLexRange("[a", "[z")
-	if min != "a" || minEx || max != "z" || maxEx {
-		t.Errorf("parseLexRange failed: %s, %v, %s, %v", min, minEx, max, maxEx)
+	r, err := parseZLexRange("[a", "[z")
+	if err != nil || r.min.val != "a" || r.min.ex || r.max.val != "z" || r.max.ex {
+		t.Errorf("parseZLexRange failed: %+v, %v", r, err)
 	}
-	min2, minEx2, max2, maxEx2 := parseLexRange("(a", "(z")
-	if min2 != "a" || !minEx2 || max2 != "z" || !maxEx2 {
-		t.Errorf("parseLexRange exclusive failed: %s, %v, %s, %v", min2, minEx2, max2, maxEx2)
+	r2, err := parseZLexRange("(a", "(z")
+	if err != nil || r2.min.val != "a" || !r2.min.ex || r2.max.val != "z" || !r2.max.ex {
+		t.Errorf("parseZLexRange exclusive failed: %+v, %v", r2, err)
 	}
-	min3, _, max3, _ := parseLexRange("-", "+")
-	if min3 != "" || max3 != "" {
-		t.Errorf("parseLexRange unbounded failed: %s, %s", min3, max3)
+	r3, err := parseZLexRange("-", "+")
+	if err != nil || r3.min.inf != -1 || r3.max.inf != 1 {
+		t.Errorf("parseZLexRange unbounded failed: %+v, %v", r3, err)
+	}
+	if _, err := parseZLexRange("a", "+"); err == nil {
+		t.Error("parseZLexRange accepted a bound without [ or (")
 	}
 }
 

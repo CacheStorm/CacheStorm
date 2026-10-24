@@ -76,7 +76,8 @@ func TestZIncrByInsideMultiOverflowAborts(t *testing.T) {
 	router := newZSetTxRouter(s)
 	tx := NewTransaction()
 
-	if reply := runCmd(t, s, router, "ZADD", "z", "1e308", "m"); reply == "" {
+	// inf + -inf is NaN, the one result Redis refuses.
+	if reply := runCmd(t, s, router, "ZADD", "z", "inf", "m"); reply == "" {
 		t.Fatal("ZADD setup failed")
 	}
 	before := runCmd(t, s, router, "ZSCORE", "z", "m")
@@ -84,14 +85,14 @@ func TestZIncrByInsideMultiOverflowAborts(t *testing.T) {
 	multiCtx, _ := mkTxContext(tx, "MULTI", nil, s)
 	_ = router.Execute(multiCtx)
 
-	incrCtx, _ := mkTxContext(tx, "ZINCRBY", [][]byte{[]byte("z"), []byte("1e308"), []byte("m")}, s)
+	incrCtx, _ := mkTxContext(tx, "ZINCRBY", [][]byte{[]byte("z"), []byte("-inf"), []byte("m")}, s)
 	_ = router.Execute(incrCtx)
 
 	execCtx, execBuf := mkTxContext(tx, "EXEC", nil, s)
 	_ = router.Execute(execCtx)
 
-	if !strings.Contains(execBuf.String(), "would produce NaN") {
-		t.Fatalf("overflowing ZINCRBY replay must error inside the array, got %q", execBuf.String())
+	if !strings.Contains(execBuf.String(), "resulting score is not a number") {
+		t.Fatalf("NaN-producing ZINCRBY replay must error inside the array, got %q", execBuf.String())
 	}
 	if after := runCmd(t, s, router, "ZSCORE", "z", "m"); after != before {
 		t.Fatalf("aborted increment must leave the score unchanged, got %q, want %q", after, before)

@@ -196,12 +196,19 @@ func TestScanPositiveCountControls(t *testing.T) {
 		t.Fatalf("FAIL control: SCAN with no COUNT returned %v, want [cursor, keys]", v)
 	}
 
-	// A positive COUNT smaller than the collection must still page, not error.
+	// A small collection comes back whole with cursor 0, like a Redis
+	// listpack; a large one pages on a positive COUNT.
 	v = scanCountMustNotPanic(t, s, router, "HSCAN", "h", "0", "COUNT", "2")
+	if got := len(v.Array[1].Array); got != 8 || string(v.Array[0].Bulk) != "0" {
+		t.Fatalf("FAIL control: HSCAN COUNT 2 over 4 fields returned %d elements, cursor %q; want 8, \"0\"", got, v.Array[0].Bulk)
+	}
+	large := store.NewStore()
+	scanCountSeedHash(t, large, router, 200)
+	v = scanCountMustNotPanic(t, large, router, "HSCAN", "h", "0", "COUNT", "2")
 	if got := len(v.Array[1].Array); got != 4 {
 		t.Fatalf("FAIL control: HSCAN COUNT 2 returned %d elements, want 4 (2 field/value pairs)", got)
 	}
 	if string(v.Array[0].Bulk) == "0" {
-		t.Fatalf("FAIL control: HSCAN COUNT 2 over 4 fields should return a non-zero cursor, got 0")
+		t.Fatalf("FAIL control: HSCAN COUNT 2 over 200 fields should return a non-zero cursor, got 0")
 	}
 }

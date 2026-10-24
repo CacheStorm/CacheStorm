@@ -12,7 +12,7 @@ import (
 	"github.com/cachestorm/cachestorm/internal/store"
 )
 
-var errLPosRankZero = errors.New("ERR RANK should not be 0")
+var errListNoSuchKey = errors.New("ERR no such key")
 
 func RegisterListCommands(router *Router) {
 	router.Register(&CommandDef{Name: "LPUSH", Handler: cmdLPUSH})
@@ -70,26 +70,49 @@ func getList(ctx *Context, key string) (*store.ListValue, error) {
 	return list, nil
 }
 
-func cmdLPUSH(ctx *Context) error {
+// listPush implements LPUSH and RPUSH. A missing key is created already
+// holding the elements, so a blocked client is never woken by an empty list.
+func listPush(ctx *Context, left bool) error {
 	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 
 	key := ctx.ArgString(0)
-	list, err := getOrCreateList(ctx, key)
+	list, err := getList(ctx, key)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
 
-	list.Lock()
 	argCount := ctx.ArgCount() - 1
-	newElements := make([][]byte, argCount+len(list.Elements))
-	// LPUSH inserts in reverse order (last arg ends up at head), matching Redis behavior
-	for i := 0; i < argCount; i++ {
-		newElements[i] = ctx.Arg(argCount - i)
+	if list == nil {
+		elements := make([][]byte, argCount)
+		for i := 0; i < argCount; i++ {
+			if left {
+				// LPUSH inserts in reverse order: the last argument ends up at the head.
+				elements[i] = ctx.Arg(argCount - i)
+			} else {
+				elements[i] = ctx.Arg(i + 1)
+			}
+		}
+		if err := ctx.Store.Set(key, &store.ListValue{Elements: elements}, store.SetOptions{}); err != nil {
+			return ctx.WriteError(err)
+		}
+		return ctx.WriteInteger(int64(argCount))
 	}
-	copy(newElements[argCount:], list.Elements)
-	list.Elements = newElements
+
+	list.Lock()
+	if left {
+		newElements := make([][]byte, argCount+len(list.Elements))
+		for i := 0; i < argCount; i++ {
+			newElements[i] = ctx.Arg(argCount - i)
+		}
+		copy(newElements[argCount:], list.Elements)
+		list.Elements = newElements
+	} else {
+		for i := 1; i <= argCount; i++ {
+			list.Elements = append(list.Elements, ctx.Arg(i))
+		}
+	}
 	length := int64(len(list.Elements))
 	list.Unlock()
 
@@ -97,32 +120,17 @@ func cmdLPUSH(ctx *Context) error {
 	return ctx.WriteInteger(length)
 }
 
+func cmdLPUSH(ctx *Context) error {
+	return listPush(ctx, true)
+}
+
 func cmdRPUSH(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	key := ctx.ArgString(0)
-	list, err := getOrCreateList(ctx, key)
-	if err != nil {
-		return ctx.WriteError(err)
-	}
-
-	list.Lock()
-	for i := 1; i < ctx.ArgCount(); i++ {
-		value := ctx.Arg(i)
-		list.Elements = append(list.Elements, value)
-	}
-	length := int64(len(list.Elements))
-	list.Unlock()
-
-	ctx.Store.KeyNotifier().NotifyKey(key)
-	return ctx.WriteInteger(length)
+	return listPush(ctx, false)
 }
 
 func cmdLPUSHX(ctx *Context) error {
 	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 
 	key := ctx.ArgString(0)
@@ -145,12 +153,13 @@ func cmdLPUSHX(ctx *Context) error {
 	length := int64(len(list.Elements))
 	list.Unlock()
 
+	ctx.Store.KeyNotifier().NotifyKey(key)
 	return ctx.WriteInteger(length)
 }
 
 func cmdRPUSHX(ctx *Context) error {
 	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 
 	key := ctx.ArgString(0)
@@ -170,12 +179,24 @@ func cmdRPUSHX(ctx *Context) error {
 	length := int64(len(list.Elements))
 	list.Unlock()
 
+	ctx.Store.KeyNotifier().NotifyKey(key)
 	return ctx.WriteInteger(length)
 }
 
-func cmdLPOP(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
+// listPopGeneric implements LPOP and RPOP with the optional count.
+func listPopGeneric(ctx *Context, left bool) error {
+	n := ctx.ArgCount()
+	if n < 1 || n > 2 {
+		return ctx.WriteError(arityError(ctx.Command))
+	}
+
+	hasCount := n == 2
+	count := 1
+	if hasCount {
+		var err error
+		if count, err = parsePositiveCount(ctx.ArgString(1)); err != nil {
+			return ctx.WriteError(err)
+		}
 	}
 
 	key := ctx.ArgString(0)
@@ -184,16 +205,37 @@ func cmdLPOP(ctx *Context) error {
 		return ctx.WriteError(err)
 	}
 	if list == nil {
+		if hasCount {
+			return ctx.WriteNullArray()
+		}
 		return ctx.WriteNullBulkString()
+	}
+	if hasCount && count == 0 {
+		return ctx.WriteArray([]*resp.Value{})
 	}
 
 	list.Lock()
 	if len(list.Elements) == 0 {
 		list.Unlock()
+		if hasCount {
+			return ctx.WriteNullArray()
+		}
 		return ctx.WriteNullBulkString()
 	}
-	value := list.Elements[0]
-	list.Elements = list.Elements[1:]
+	if count > len(list.Elements) {
+		count = len(list.Elements)
+	}
+	popped := make([][]byte, count)
+	if left {
+		copy(popped, list.Elements[:count])
+		list.Elements = list.Elements[count:]
+	} else {
+		last := len(list.Elements) - 1
+		for i := 0; i < count; i++ {
+			popped[i] = list.Elements[last-i]
+		}
+		list.Elements = list.Elements[:len(list.Elements)-count]
+	}
 	empty := len(list.Elements) == 0
 	list.Unlock()
 
@@ -201,44 +243,27 @@ func cmdLPOP(ctx *Context) error {
 		ctx.Store.Delete(key)
 	}
 
-	return ctx.WriteBulkBytes(value)
+	if !hasCount {
+		return ctx.WriteBulkBytes(popped[0])
+	}
+	items := make([]*resp.Value, len(popped))
+	for i, v := range popped {
+		items[i] = resp.BulkBytes(v)
+	}
+	return ctx.WriteArray(items)
+}
+
+func cmdLPOP(ctx *Context) error {
+	return listPopGeneric(ctx, true)
 }
 
 func cmdRPOP(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	key := ctx.ArgString(0)
-	list, err := getList(ctx, key)
-	if err != nil {
-		return ctx.WriteError(err)
-	}
-	if list == nil {
-		return ctx.WriteNullBulkString()
-	}
-
-	list.Lock()
-	if len(list.Elements) == 0 {
-		list.Unlock()
-		return ctx.WriteNullBulkString()
-	}
-	idx := len(list.Elements) - 1
-	value := list.Elements[idx]
-	list.Elements = list.Elements[:idx]
-	empty := len(list.Elements) == 0
-	list.Unlock()
-
-	if empty {
-		ctx.Store.Delete(key)
-	}
-
-	return ctx.WriteBulkBytes(value)
+	return listPopGeneric(ctx, false)
 }
 
 func cmdLLEN(ctx *Context) error {
 	if ctx.ArgCount() != 1 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 
 	key := ctx.ArgString(0)
@@ -259,7 +284,7 @@ func cmdLLEN(ctx *Context) error {
 
 func cmdLRANGE(ctx *Context) error {
 	if ctx.ArgCount() != 3 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 
 	key := ctx.ArgString(0)
@@ -320,7 +345,7 @@ func cmdLRANGE(ctx *Context) error {
 
 func cmdLINDEX(ctx *Context) error {
 	if ctx.ArgCount() != 2 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 
 	key := ctx.ArgString(0)
@@ -355,7 +380,7 @@ func cmdLINDEX(ctx *Context) error {
 
 func cmdLSET(ctx *Context) error {
 	if ctx.ArgCount() != 3 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 
 	key := ctx.ArgString(0)
@@ -370,7 +395,7 @@ func cmdLSET(ctx *Context) error {
 		return ctx.WriteError(err)
 	}
 	if list == nil {
-		return ctx.WriteError(store.ErrKeyNotFound)
+		return ctx.WriteError(errListNoSuchKey)
 	}
 
 	list.Lock()
@@ -390,7 +415,7 @@ func cmdLSET(ctx *Context) error {
 
 func cmdLREM(ctx *Context) error {
 	if ctx.ArgCount() != 3 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 
 	key := ctx.ArgString(0)
@@ -460,7 +485,7 @@ func cmdLREM(ctx *Context) error {
 
 func cmdLINSERT(ctx *Context) error {
 	if ctx.ArgCount() != 4 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 
 	key := ctx.ArgString(0)
@@ -513,7 +538,7 @@ func cmdLINSERT(ctx *Context) error {
 
 func cmdLTRIM(ctx *Context) error {
 	if ctx.ArgCount() != 3 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 
 	key := ctx.ArgString(0)
@@ -568,57 +593,28 @@ func cmdLTRIM(ctx *Context) error {
 
 func cmdRPOPLPUSH(ctx *Context) error {
 	if ctx.ArgCount() != 2 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 
-	srcKey := ctx.ArgString(0)
-	dstKey := ctx.ArgString(1)
-
-	srcList, err := getList(ctx, srcKey)
+	value, ok, err := tryListMove(ctx, ctx.ArgString(0), ctx.ArgString(1), "RIGHT", "LEFT")
 	if err != nil {
 		return ctx.WriteError(err)
 	}
-	if srcList == nil || len(srcList.Elements) == 0 {
+	if !ok {
 		return ctx.WriteNullBulkString()
 	}
-	dstList, err := getOrCreateList(ctx, dstKey)
-	if err != nil {
-		return ctx.WriteError(err)
-	}
-
-	idx := len(srcList.Elements) - 1
-	value := srcList.Elements[idx]
-	srcList.Elements = srcList.Elements[:idx]
-
-	if len(srcList.Elements) == 0 && srcKey != dstKey {
-		ctx.Store.Delete(srcKey)
-	}
-
-	newElements := make([][]byte, 1+len(dstList.Elements))
-	newElements[0] = value
-	copy(newElements[1:], dstList.Elements)
-	dstList.Elements = newElements
-
 	return ctx.WriteBulkBytes(value)
 }
 
 func cmdLMOVE(ctx *Context) error {
 	if ctx.ArgCount() != 4 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 
-	srcKey := ctx.ArgString(0)
-	dstKey := ctx.ArgString(1)
 	whereFrom := strings.ToUpper(ctx.ArgString(2))
 	whereTo := strings.ToUpper(ctx.ArgString(3))
 
-	// Both directions are syntax, so validate them BEFORE touching any state.
-	// The whereTo check used to live in a switch at the very end of the
-	// handler, by which time the element had already been popped off the
-	// source (deleting the key when it emptied) and the destination key had
-	// already been created — so a client typo destroyed a list element behind
-	// an "ERR syntax error" reply. The sibling cmdBLMOVE already validated
-	// both up front.
+	// Both directions are syntax, so validate them before touching any state.
 	if whereFrom != "LEFT" && whereFrom != "RIGHT" {
 		return ctx.WriteError(ErrSyntaxError)
 	}
@@ -626,16 +622,144 @@ func cmdLMOVE(ctx *Context) error {
 		return ctx.WriteError(ErrSyntaxError)
 	}
 
-	srcList, err := getList(ctx, srcKey)
+	value, ok, err := tryListMove(ctx, ctx.ArgString(0), ctx.ArgString(1), whereFrom, whereTo)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
-	if srcList == nil || len(srcList.Elements) == 0 {
+	if !ok {
 		return ctx.WriteNullBulkString()
 	}
-	dstList, err := getOrCreateList(ctx, dstKey)
+	return ctx.WriteBulkBytes(value)
+}
+
+func cmdBLMOVE(ctx *Context) error {
+	if ctx.ArgCount() != 5 {
+		return ctx.WriteError(arityError(ctx.Command))
+	}
+
+	srcKey := ctx.ArgString(0)
+	dstKey := ctx.ArgString(1)
+	whereFrom := strings.ToUpper(ctx.ArgString(2))
+	whereTo := strings.ToUpper(ctx.ArgString(3))
+	if whereFrom != "LEFT" && whereFrom != "RIGHT" {
+		return ctx.WriteError(ErrSyntaxError)
+	}
+	if whereTo != "LEFT" && whereTo != "RIGHT" {
+		return ctx.WriteError(ErrSyntaxError)
+	}
+	timeout, err := parseBlockTimeout(ctx.ArgString(4))
 	if err != nil {
 		return ctx.WriteError(err)
+	}
+	return blockingListMove(ctx, srcKey, dstKey, whereFrom, whereTo, timeout)
+}
+
+// blockingListMove is the shared body of BLMOVE and BRPOPLPUSH. A timeout
+// replies with a null array, as Redis does.
+func blockingListMove(ctx *Context, srcKey, dstKey, whereFrom, whereTo string, timeout time.Duration) error {
+	value, ok, err := tryListMove(ctx, srcKey, dstKey, whereFrom, whereTo)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	if ok {
+		return ctx.WriteBulkBytes(value)
+	}
+	var moveErr error
+	waitSrc := func(keys []string, d time.Duration) (string, bool) { return srcKey, ctx.waitForKey(srcKey, d) }
+	moved := blockOnKeys(ctx, []string{srcKey}, timeout, waitSrc, func(string) bool {
+		value, ok, moveErr = tryListMove(ctx, srcKey, dstKey, whereFrom, whereTo)
+		return ok || moveErr != nil
+	})
+	if moveErr != nil {
+		return ctx.WriteError(moveErr)
+	}
+	if !moved {
+		return ctx.WriteNullArray()
+	}
+	return ctx.WriteBulkBytes(value)
+}
+
+var (
+	errTimeoutNotFloat   = errors.New("ERR timeout is not a float or out of range")
+	errTimeoutNegative   = errors.New("ERR timeout is negative")
+	errTimeoutOutOfRange = errors.New("ERR timeout is out of range")
+)
+
+// blockForever is the wait used for a zero timeout, which Redis treats as
+// "block until data arrives".
+const blockForever = time.Duration(1) << 62
+
+// parseBlockTimeout parses a blocking command's timeout in seconds the way
+// Redis' getTimeoutFromObjectOrReply does: fractional seconds are rounded up
+// to whole milliseconds and 0 waits without a deadline.
+func parseBlockTimeout(arg string) (time.Duration, error) {
+	sec, err := strconv.ParseFloat(cHexFloat(arg), 64)
+	if (err != nil && !errors.Is(err, strconv.ErrRange)) || math.IsNaN(sec) {
+		return 0, errTimeoutNotFloat
+	}
+	ms := sec * 1000
+	if ms > math.MaxInt64 {
+		return 0, errTimeoutOutOfRange
+	}
+	tval := math.Ceil(ms)
+	if tval < 0 {
+		return 0, errTimeoutNegative
+	}
+	if tval == 0 {
+		return blockForever, nil
+	}
+	if tval > float64(math.MaxInt64-time.Now().UnixMilli()) {
+		return 0, errTimeoutOutOfRange
+	}
+	if tval > float64(blockForever/time.Millisecond) {
+		return blockForever, nil
+	}
+	return time.Duration(tval) * time.Millisecond, nil
+}
+
+// pushToList adds value at the head (left) or tail of the list at key,
+// creating the list when the key is missing.
+func pushToList(ctx *Context, key string, value []byte, left bool) error {
+	list, err := getList(ctx, key)
+	if err != nil {
+		return err
+	}
+	if list == nil {
+		return ctx.Store.Set(key, &store.ListValue{Elements: [][]byte{value}}, store.SetOptions{})
+	}
+	list.Lock()
+	if left {
+		newEl := make([][]byte, 1+len(list.Elements))
+		newEl[0] = value
+		copy(newEl[1:], list.Elements)
+		list.Elements = newEl
+	} else {
+		list.Elements = append(list.Elements, value)
+	}
+	list.Unlock()
+	ctx.Store.KeyNotifier().NotifyKey(key)
+	return nil
+}
+
+// tryListMove moves one element from srcKey to dstKey. It reports false
+// when the source is missing or empty, and WRONGTYPE for either key before
+// anything is popped.
+func tryListMove(ctx *Context, srcKey, dstKey, whereFrom, whereTo string) ([]byte, bool, error) {
+	srcList, err := getList(ctx, srcKey)
+	if err != nil {
+		return nil, false, err
+	}
+	if srcList == nil {
+		return nil, false, nil
+	}
+	if _, err := getList(ctx, dstKey); err != nil {
+		return nil, false, err
+	}
+
+	srcList.Lock()
+	if len(srcList.Elements) == 0 {
+		srcList.Unlock()
+		return nil, false, nil
 	}
 
 	var value []byte
@@ -647,151 +771,99 @@ func cmdLMOVE(ctx *Context) error {
 		srcList.Elements = srcList.Elements[:len(srcList.Elements)-1]
 	}
 
-	if len(srcList.Elements) == 0 && srcKey != dstKey {
-		ctx.Store.Delete(srcKey)
-	}
-
-	if whereTo == "LEFT" {
-		newElements := make([][]byte, 1+len(dstList.Elements))
-		newElements[0] = value
-		copy(newElements[1:], dstList.Elements)
-		dstList.Elements = newElements
-	} else {
-		dstList.Elements = append(dstList.Elements, value)
-	}
-
-	return ctx.WriteBulkBytes(value)
-}
-
-func cmdBLMOVE(ctx *Context) error {
-	if ctx.ArgCount() < 5 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	srcKey := ctx.ArgString(0)
-	dstKey := ctx.ArgString(1)
-	whereFrom := strings.ToUpper(ctx.ArgString(2))
-	whereTo := strings.ToUpper(ctx.ArgString(3))
-	timeout, err := parseBlockTimeout(ctx.ArgString(4))
-	if err != nil {
-		return ctx.WriteError(err)
-	}
-
-	if whereFrom != "LEFT" && whereFrom != "RIGHT" {
-		return ctx.WriteError(ErrSyntaxError)
-	}
-	if whereTo != "LEFT" && whereTo != "RIGHT" {
-		return ctx.WriteError(ErrSyntaxError)
-	}
-
-	// Try immediate move
-	if value, ok, err := tryListMove(ctx, srcKey, dstKey, whereFrom, whereTo); err != nil {
-		return ctx.WriteError(err)
-	} else if ok {
-		return ctx.WriteBulkBytes(value)
-	}
-
-	dur := timeout
-
-	for {
-		if !ctx.waitForKey(srcKey, dur) {
-			return ctx.WriteNull()
+	if srcKey == dstKey {
+		// Rotating a list in place: push back under the same lock.
+		if whereTo == "LEFT" {
+			newEl := make([][]byte, 1+len(srcList.Elements))
+			newEl[0] = value
+			copy(newEl[1:], srcList.Elements)
+			srcList.Elements = newEl
+		} else {
+			srcList.Elements = append(srcList.Elements, value)
 		}
-		if value, ok, err := tryListMove(ctx, srcKey, dstKey, whereFrom, whereTo); err != nil {
-			return ctx.WriteError(err)
-		} else if ok {
-			return ctx.WriteBulkBytes(value)
-		}
-	}
-}
-
-var (
-	errTimeoutNotFloat = errors.New("ERR timeout is not a float or out of range")
-	errTimeoutNegative = errors.New("ERR timeout is negative")
-)
-
-// blockForever is the wait used for a zero timeout, which Redis treats as
-// "block until data arrives".
-const blockForever = time.Duration(1) << 62
-
-// parseBlockTimeout parses a blocking command's timeout in seconds. Redis
-// accepts fractional seconds and treats 0 as an unbounded wait.
-func parseBlockTimeout(arg string) (time.Duration, error) {
-	sec, err := strconv.ParseFloat(arg, 64)
-	if err != nil || math.IsNaN(sec) || math.IsInf(sec, 0) {
-		return 0, errTimeoutNotFloat
-	}
-	if sec < 0 {
-		return 0, errTimeoutNegative
-	}
-	if sec == 0 || sec > float64(blockForever/time.Second) {
-		return blockForever, nil
-	}
-	return time.Duration(sec * float64(time.Second)), nil
-}
-
-func tryListMove(ctx *Context, srcKey, dstKey, whereFrom, whereTo string) ([]byte, bool, error) {
-	srcList, err := getList(ctx, srcKey)
-	if err != nil {
-		return nil, false, err
-	}
-	if srcList == nil {
-		return nil, false, nil
-	}
-
-	srcList.RLock()
-	sourceEmpty := len(srcList.Elements) == 0
-	srcList.RUnlock()
-	if sourceEmpty {
-		return nil, false, nil
-	}
-
-	dstList, err := getOrCreateList(ctx, dstKey)
-	if err != nil {
-		return nil, false, err
-	}
-
-	srcList.Lock()
-	if len(srcList.Elements) == 0 {
 		srcList.Unlock()
-		return nil, false, nil
+		return value, true, nil
 	}
 
-	var value []byte
-	switch whereFrom {
-	case "LEFT":
-		value = srcList.Elements[0]
-		srcList.Elements = srcList.Elements[1:]
-	case "RIGHT":
-		value = srcList.Elements[len(srcList.Elements)-1]
-		srcList.Elements = srcList.Elements[:len(srcList.Elements)-1]
-	}
 	srcEmpty := len(srcList.Elements) == 0
 	srcList.Unlock()
-
-	if srcEmpty && srcKey != dstKey {
+	if srcEmpty {
 		ctx.Store.Delete(srcKey)
 	}
 
-	dstList.Lock()
-	switch whereTo {
-	case "LEFT":
-		newEl := make([][]byte, 1+len(dstList.Elements))
-		newEl[0] = value
-		copy(newEl[1:], dstList.Elements)
-		dstList.Elements = newEl
-	case "RIGHT":
-		dstList.Elements = append(dstList.Elements, value)
+	if err := pushToList(ctx, dstKey, value, whereTo == "LEFT"); err != nil {
+		return nil, false, err
 	}
-	dstList.Unlock()
-
-	ctx.Store.KeyNotifier().NotifyKey(dstKey)
 	return value, true, nil
 }
 
-func cmdBLPOP(ctx *Context) error {
+// listPopFirst pops one element from the first non-empty list among keys.
+// A key of another type met before it is a WRONGTYPE error, as Redis checks
+// the keys of BLPOP/BRPOP in order before blocking.
+func listPopFirst(ctx *Context, keys []string, left bool) (string, []byte, error) {
+	for _, key := range keys {
+		list, err := getList(ctx, key)
+		if err != nil {
+			return "", nil, err
+		}
+		if list == nil {
+			continue
+		}
+		list.Lock()
+		if len(list.Elements) == 0 {
+			list.Unlock()
+			continue
+		}
+		var value []byte
+		if left {
+			value = list.Elements[0]
+			list.Elements = list.Elements[1:]
+		} else {
+			idx := len(list.Elements) - 1
+			value = list.Elements[idx]
+			list.Elements = list.Elements[:idx]
+		}
+		isEmpty := len(list.Elements) == 0
+		list.Unlock()
+		if isEmpty {
+			ctx.Store.Delete(key)
+		}
+		return key, value, nil
+	}
+	return "", nil, nil
+}
+
+// blockOnKeys waits on keys and calls try with each notified key until try
+// succeeds, the timeout expires or the client goes away; it reports whether
+// try succeeded. try takes the value's lock itself, so nothing is read
+// before the lock. The deadline is kept across retries.
+func blockOnKeys(ctx *Context, keys []string, timeout time.Duration, wait func([]string, time.Duration) (string, bool), try func(key string) bool) bool {
+	var deadline time.Time
+	if timeout < blockForever {
+		deadline = time.Now().Add(timeout)
+	}
+	for {
+		remaining := blockForever
+		if !deadline.IsZero() {
+			remaining = time.Until(deadline)
+			if remaining <= 0 {
+				return false
+			}
+		}
+		key, ok := wait(keys, remaining)
+		if !ok {
+			return false
+		}
+		if try(key) {
+			return true
+		}
+	}
+}
+
+// blockingListPop is the shared body of BLPOP and BRPOP.
+func blockingListPop(ctx *Context, left bool) error {
 	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 
 	keys := make([]string, 0, ctx.ArgCount()-1)
@@ -803,232 +875,98 @@ func cmdBLPOP(ctx *Context) error {
 		return ctx.WriteError(err)
 	}
 
-	// Try immediate pop first
-	if key, value, ok := tryLPop(ctx, keys); ok {
-		return ctx.WriteArray([]*resp.Value{
-			resp.BulkString(key),
-			resp.BulkBytes(value),
-		})
+	key, value, err := listPopFirst(ctx, keys, left)
+	if err != nil {
+		return ctx.WriteError(err)
 	}
-
-	// Block until notified or timeout
-	deadline := timeout
-
-	for {
-		notifiedKey, notified := ctx.waitForKeys(keys, deadline)
-		if !notified {
+	if value == nil {
+		popped := blockOnKeys(ctx, keys, timeout, ctx.waitForKeys, func(k string) bool {
+			var popErr error
+			key, value, popErr = listPopFirst(ctx, []string{k}, left)
+			return popErr == nil && value != nil
+		})
+		if !popped {
 			return ctx.WriteNullArray()
 		}
-
-		// A key was notified — try to pop from it
-		list, err := getList(ctx, notifiedKey)
-		if err != nil {
-			return ctx.WriteError(err)
-		}
-		if list != nil && len(list.Elements) > 0 {
-			list.Lock()
-			if len(list.Elements) > 0 {
-				value := list.Elements[0]
-				list.Elements = list.Elements[1:]
-				isEmpty := len(list.Elements) == 0
-				list.Unlock()
-				if isEmpty {
-					ctx.Store.Delete(notifiedKey)
-				}
-				return ctx.WriteArray([]*resp.Value{
-					resp.BulkString(notifiedKey),
-					resp.BulkBytes(value),
-				})
-			}
-			list.Unlock()
-		}
-		// Someone else grabbed it — retry
 	}
+	return ctx.WriteArray([]*resp.Value{
+		resp.BulkString(key),
+		resp.BulkBytes(value),
+	})
 }
 
-func tryLPop(ctx *Context, keys []string) (string, []byte, bool) {
-	for _, key := range keys {
-		list, err := getList(ctx, key)
-		if err != nil || list == nil || len(list.Elements) == 0 {
-			continue
-		}
-		list.Lock()
-		if len(list.Elements) > 0 {
-			value := list.Elements[0]
-			list.Elements = list.Elements[1:]
-			isEmpty := len(list.Elements) == 0
-			list.Unlock()
-			if isEmpty {
-				ctx.Store.Delete(key)
-			}
-			return key, value, true
-		}
-		list.Unlock()
-	}
-	return "", nil, false
+func cmdBLPOP(ctx *Context) error {
+	return blockingListPop(ctx, true)
 }
 
 func cmdBRPOP(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	keys := make([]string, 0, ctx.ArgCount()-1)
-	for i := 0; i < ctx.ArgCount()-1; i++ {
-		keys = append(keys, ctx.ArgString(i))
-	}
-	timeout, err := parseBlockTimeout(ctx.ArgString(ctx.ArgCount() - 1))
-	if err != nil {
-		return ctx.WriteError(err)
-	}
-
-	// Try immediate pop first
-	if key, value, ok := tryRPop(ctx, keys); ok {
-		return ctx.WriteArray([]*resp.Value{
-			resp.BulkString(key),
-			resp.BulkBytes(value),
-		})
-	}
-
-	deadline := timeout
-
-	for {
-		notifiedKey, notified := ctx.waitForKeys(keys, deadline)
-		if !notified {
-			return ctx.WriteNullArray()
-		}
-
-		list, err := getList(ctx, notifiedKey)
-		if err != nil {
-			return ctx.WriteError(err)
-		}
-		if list != nil && len(list.Elements) > 0 {
-			list.Lock()
-			if len(list.Elements) > 0 {
-				idx := len(list.Elements) - 1
-				value := list.Elements[idx]
-				list.Elements = list.Elements[:idx]
-				isEmpty := len(list.Elements) == 0
-				list.Unlock()
-				if isEmpty {
-					ctx.Store.Delete(notifiedKey)
-				}
-				return ctx.WriteArray([]*resp.Value{
-					resp.BulkString(notifiedKey),
-					resp.BulkBytes(value),
-				})
-			}
-			list.Unlock()
-		}
-	}
-}
-
-func tryRPop(ctx *Context, keys []string) (string, []byte, bool) {
-	for _, key := range keys {
-		list, err := getList(ctx, key)
-		if err != nil || list == nil || len(list.Elements) == 0 {
-			continue
-		}
-		list.Lock()
-		if len(list.Elements) > 0 {
-			idx := len(list.Elements) - 1
-			value := list.Elements[idx]
-			list.Elements = list.Elements[:idx]
-			isEmpty := len(list.Elements) == 0
-			list.Unlock()
-			if isEmpty {
-				ctx.Store.Delete(key)
-			}
-			return key, value, true
-		}
-		list.Unlock()
-	}
-	return "", nil, false
+	return blockingListPop(ctx, false)
 }
 
 func cmdBRPOPLPUSH(ctx *Context) error {
 	if ctx.ArgCount() != 3 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 
-	srcKey := ctx.ArgString(0)
-	dstKey := ctx.ArgString(1)
 	timeout, err := parseBlockTimeout(ctx.ArgString(2))
 	if err != nil {
 		return ctx.WriteError(err)
 	}
-
-	// BRPOPLPUSH is RPOP src + LPUSH dst
-	if value, ok, err := tryListMove(ctx, srcKey, dstKey, "RIGHT", "LEFT"); err != nil {
-		return ctx.WriteError(err)
-	} else if ok {
-		return ctx.WriteBulkBytes(value)
-	}
-
-	dur := timeout
-
-	for {
-		if !ctx.waitForKey(srcKey, dur) {
-			return ctx.WriteNull()
-		}
-		if value, ok, err := tryListMove(ctx, srcKey, dstKey, "RIGHT", "LEFT"); err != nil {
-			return ctx.WriteError(err)
-		} else if ok {
-			return ctx.WriteBulkBytes(value)
-		}
-	}
+	return blockingListMove(ctx, ctx.ArgString(0), ctx.ArgString(1), "RIGHT", "LEFT", timeout)
 }
 
+var (
+	errLPosRankZero = errors.New("ERR RANK can't be zero: use 1 to start from the first match, 2 from the second ... or use negative to start from the end of the list")
+	errLPosCount    = errors.New("ERR COUNT can't be negative")
+	errLPosMaxlen   = errors.New("ERR MAXLEN can't be negative")
+	errLPosRank     = errors.New("ERR value is out of range, value must between -9223372036854775807 and 9223372036854775807")
+)
+
 func cmdLPOS(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
+	n := ctx.ArgCount()
+	if n < 2 {
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 
 	key := ctx.ArgString(0)
 	element := ctx.Arg(1)
 
-	rank := 1
-	count := 0
-	countSpecified := false
-	maxlen := 0
-
-	for i := 2; i < ctx.ArgCount(); i++ {
-		arg := strings.ToUpper(ctx.ArgString(i))
-		switch arg {
-		case "RANK":
+	var rank int64 = 1
+	var count int64 = -1
+	var maxlen int64
+	for i := 2; i < n; i++ {
+		opt := strings.ToUpper(ctx.ArgString(i))
+		more := i+1 < n
+		switch {
+		case opt == "RANK" && more:
 			i++
-			if i >= ctx.ArgCount() {
-				return ctx.WriteError(ErrSyntaxError)
-			}
-			var err error
-			rank, err = strconv.Atoi(ctx.ArgString(i))
+			v, err := strconv.ParseInt(ctx.ArgString(i), 10, 64)
 			if err != nil {
 				return ctx.WriteError(ErrNotInteger)
 			}
-			if rank == 0 {
+			if v == math.MinInt64 {
+				return ctx.WriteError(errLPosRank)
+			}
+			if v == 0 {
 				return ctx.WriteError(errLPosRankZero)
 			}
-		case "COUNT":
+			rank = v
+		case opt == "COUNT" && more:
 			i++
-			if i >= ctx.ArgCount() {
-				return ctx.WriteError(ErrSyntaxError)
+			v, err := strconv.ParseInt(ctx.ArgString(i), 10, 64)
+			if err != nil || v < 0 {
+				return ctx.WriteError(errLPosCount)
 			}
-			var err error
-			count, err = strconv.Atoi(ctx.ArgString(i))
-			if err != nil {
-				return ctx.WriteError(ErrNotInteger)
-			}
-			countSpecified = true
-		case "MAXLEN":
+			count = v
+		case opt == "MAXLEN" && more:
 			i++
-			if i >= ctx.ArgCount() {
-				return ctx.WriteError(ErrSyntaxError)
+			v, err := strconv.ParseInt(ctx.ArgString(i), 10, 64)
+			if err != nil || v < 0 {
+				return ctx.WriteError(errLPosMaxlen)
 			}
-			var err error
-			maxlen, err = strconv.Atoi(ctx.ArgString(i))
-			if err != nil {
-				return ctx.WriteError(ErrNotInteger)
-			}
+			maxlen = v
+		default:
+			return ctx.WriteError(ErrSyntaxError)
 		}
 	}
 
@@ -1037,86 +975,57 @@ func cmdLPOS(ctx *Context) error {
 		return ctx.WriteError(err)
 	}
 	if list == nil {
+		if count != -1 {
+			return ctx.WriteArray([]*resp.Value{})
+		}
 		return ctx.WriteNull()
 	}
 
+	fromTail := rank < 0
+	if fromTail {
+		rank = -rank
+	}
+
 	list.RLock()
-
-	absRank := rank
-	if rank < 0 {
-		absRank = -rank
-	}
-
-	found := 0
-	searchLen := len(list.Elements)
-	if maxlen > 0 && maxlen < searchLen {
-		searchLen = maxlen
-	}
-
-	if rank > 0 {
-		for i := 0; i < searchLen && found < absRank; i++ {
-			if bytes.Equal(list.Elements[i], element) {
-				found++
-				if found == absRank {
-					if countSpecified {
-						result := make([]*resp.Value, 0)
-						result = append(result, resp.IntegerValue(int64(i)))
-						for j := i + 1; j < searchLen && (count == 0 || len(result) < count); j++ {
-							if bytes.Equal(list.Elements[j], element) {
-								result = append(result, resp.IntegerValue(int64(j)))
-							}
-						}
-						reply := result
-						list.RUnlock()
-						return ctx.WriteArray(reply)
-					}
-					reply := int64(int64(i))
-					list.RUnlock()
-					return ctx.WriteInteger(reply)
-				}
-			}
+	length := int64(len(list.Elements))
+	var matches []int64
+	var seen int64
+	for idx := int64(0); idx < length && (maxlen == 0 || idx < maxlen); idx++ {
+		pos := idx
+		if fromTail {
+			pos = length - 1 - idx
 		}
-	} else {
-		// MAXLEN caps comparisons in the search direction: a tail search
-		// compares the LAST maxlen elements, not the first.
-		tailStart := 0
-		if maxlen > 0 && maxlen < len(list.Elements) {
-			tailStart = len(list.Elements) - maxlen
+		if !bytes.Equal(list.Elements[pos], element) {
+			continue
 		}
-		for i := len(list.Elements) - 1; i >= tailStart && found < absRank; i-- {
-			if bytes.Equal(list.Elements[i], element) {
-				found++
-				if found == absRank {
-					if countSpecified {
-						result := make([]*resp.Value, 0)
-						result = append(result, resp.IntegerValue(int64(i)))
-						for j := i - 1; j >= tailStart && (count == 0 || len(result) < count); j-- {
-							if bytes.Equal(list.Elements[j], element) {
-								result = append(result, resp.IntegerValue(int64(j)))
-							}
-						}
-						reply := result
-						list.RUnlock()
-						return ctx.WriteArray(reply)
-					}
-					reply := int64(int64(i))
-					list.RUnlock()
-					return ctx.WriteInteger(reply)
-				}
-			}
+		seen++
+		if seen < rank {
+			continue
 		}
-	}
-
-	if count > 0 {
-		reply := []*resp.Value{}
-		list.RUnlock()
-		return ctx.WriteArray(reply)
+		matches = append(matches, pos)
+		if count == -1 || (count > 0 && int64(len(matches)) >= count) {
+			break
+		}
 	}
 	list.RUnlock()
-	return ctx.WriteNull()
+
+	if count == -1 {
+		if len(matches) == 0 {
+			return ctx.WriteNull()
+		}
+		return ctx.WriteInteger(matches[0])
+	}
+	items := make([]*resp.Value, len(matches))
+	for i, m := range matches {
+		items[i] = resp.IntegerValue(m)
+	}
+	return ctx.WriteArray(items)
 }
 
 func cmdLMPOP(ctx *Context) error {
+	if ctx.ArgCount() < 3 {
+		return ctx.WriteError(arityError(ctx.Command))
+	}
 	keys, dir, count, err := parseListMPop(ctx, 0)
 	if err != nil {
 		return ctx.WriteError(err)
@@ -1132,52 +1041,50 @@ func cmdLMPOP(ctx *Context) error {
 }
 
 // parseListMPop parses the "numkeys key [key ...] LEFT|RIGHT [COUNT count]"
-// tail shared by LMPOP and BLMPOP, starting at argument index from.
+// tail shared by LMPOP and BLMPOP, starting at argument index from, with
+// Redis' error replies.
 func parseListMPop(ctx *Context, from int) ([]string, string, int, error) {
-	if ctx.ArgCount() < from+3 {
-		return nil, "", 0, ErrWrongArgCount
+	n := ctx.ArgCount()
+	if n < from+1 {
+		return nil, "", 0, arityError(ctx.Command)
 	}
-	numKeys, err := strconv.Atoi(ctx.ArgString(from))
-	if err != nil {
-		return nil, "", 0, ErrNotInteger
+	numKeys, err := strconv.ParseInt(ctx.ArgString(from), 10, 64)
+	if err != nil || numKeys < 1 {
+		return nil, "", 0, errNumKeysPositive
 	}
-	// numkeys is a key COUNT and must be at least 1; a negative value would
-	// otherwise reach make() as a negative length.
-	if numKeys < 1 {
-		return nil, "", 0, ErrInvalidArg
-	}
-	if ctx.ArgCount() < from+1+numKeys+1 {
-		return nil, "", 0, ErrWrongArgCount
+	whereIdx := int64(from) + numKeys + 1
+	if whereIdx >= int64(n) {
+		return nil, "", 0, ErrSyntaxError
 	}
 
 	keys := make([]string, numKeys)
-	for i := 0; i < numKeys; i++ {
+	for i := range keys {
 		keys[i] = ctx.ArgString(from + 1 + i)
 	}
 
-	i := from + 1 + numKeys
-	dir := strings.ToUpper(ctx.ArgString(i))
+	dir := strings.ToUpper(ctx.ArgString(int(whereIdx)))
 	if dir != "LEFT" && dir != "RIGHT" {
 		return nil, "", 0, ErrSyntaxError
 	}
-	i++
 
-	count := 1
-	if i < ctx.ArgCount() {
-		if strings.ToUpper(ctx.ArgString(i)) != "COUNT" || i+2 != ctx.ArgCount() {
-			return nil, "", 0, ErrSyntaxError
+	count := -1
+	for j := int(whereIdx) + 1; j < n; j++ {
+		if count == -1 && strings.EqualFold(ctx.ArgString(j), "COUNT") && j+1 < n {
+			v, err := strconv.ParseInt(ctx.ArgString(j+1), 10, 64)
+			if err != nil || v < 1 {
+				return nil, "", 0, errPopCountPositive
+			}
+			if v > math.MaxInt32 {
+				v = math.MaxInt32
+			}
+			count = int(v)
+			j++
+			continue
 		}
-		count, err = strconv.Atoi(ctx.ArgString(i + 1))
-		if err != nil {
-			return nil, "", 0, ErrNotInteger
-		}
+		return nil, "", 0, ErrSyntaxError
 	}
-
-	// A pop COUNT is a hard element count and must be at least 1. Without
-	// this guard it reaches make() as a slice capacity: a negative count
-	// panics, and 0 silently pops nothing. ZMPOP/BZMPOP already enforce it.
-	if count < 1 {
-		return nil, "", 0, ErrInvalidArg
+	if count == -1 {
+		count = 1
 	}
 	return keys, dir, count, nil
 }
@@ -1225,7 +1132,7 @@ func tryListMPop(ctx *Context, keys []string, dir string, count int) (*resp.Valu
 
 func cmdLMPUSH(ctx *Context) error {
 	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 
 	key := ctx.ArgString(0)
@@ -1239,16 +1146,21 @@ func cmdLMPUSH(ctx *Context) error {
 		return ctx.WriteError(err)
 	}
 
+	list.Lock()
 	newElements := make([][]byte, len(elements)+len(list.Elements))
 	copy(newElements, elements)
 	copy(newElements[len(elements):], list.Elements)
 	list.Elements = newElements
-	return ctx.WriteInteger(int64(len(list.Elements)))
+	length := int64(len(list.Elements))
+	list.Unlock()
+
+	ctx.Store.KeyNotifier().NotifyKey(key)
+	return ctx.WriteInteger(length)
 }
 
 func cmdBLMPOP(ctx *Context) error {
 	if ctx.ArgCount() < 4 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 	timeout, err := parseBlockTimeout(ctx.ArgString(0))
 	if err != nil {
@@ -1259,16 +1171,19 @@ func cmdBLMPOP(ctx *Context) error {
 		return ctx.WriteError(err)
 	}
 
-	for {
-		reply, err := tryListMPop(ctx, keys, dir, count)
-		if err != nil {
-			return ctx.WriteError(err)
-		}
-		if reply != nil {
-			return ctx.WriteValue(reply)
-		}
-		if _, notified := ctx.waitForKeys(keys, timeout); !notified {
+	reply, err := tryListMPop(ctx, keys, dir, count)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	if reply == nil {
+		popped := blockOnKeys(ctx, keys, timeout, ctx.waitForKeys, func(k string) bool {
+			var popErr error
+			reply, popErr = tryListMPop(ctx, []string{k}, dir, count)
+			return popErr == nil && reply != nil
+		})
+		if !popped {
 			return ctx.WriteNullArray()
 		}
 	}
+	return ctx.WriteValue(reply)
 }
