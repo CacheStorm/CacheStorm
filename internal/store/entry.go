@@ -117,6 +117,95 @@ type ListValue struct {
 	Elements [][]byte
 	mu       sync.RWMutex
 	dead     bool
+	// backing and head let PushFront prepend in amortised O(1): Elements is
+	// backing[head:] with free slots before head. Code that reassigns
+	// Elements directly simply invalidates the headroom (PushFront checks
+	// that Elements still starts at backing[head]) and the next PushFront
+	// reallocates.
+	backing [][]byte
+	head    int
+}
+
+// PushFront prepends items so that items[0] becomes the new head. Prepending
+// to a plain slice copies the whole list each time, which made a list built
+// by LPUSH quadratic; the headroom kept before Elements makes it amortised
+// constant. The caller holds the value's lock.
+func (v *ListValue) PushFront(items ...[]byte) {
+	n := len(items)
+	if n == 0 {
+		return
+	}
+	if v.head >= n && v.headroomValid() {
+		v.head -= n
+		copy(v.backing[v.head:], items)
+		v.Elements = v.backing[v.head : v.head+n+len(v.Elements)]
+		return
+	}
+	size := n + len(v.Elements)
+	room := size
+	if room < 8 {
+		room = 8
+	}
+	buf := make([][]byte, room+size, room+size+size/2+8)
+	copy(buf[room:], items)
+	copy(buf[room+n:], v.Elements)
+	v.backing = buf
+	v.head = room
+	v.Elements = buf[room : room+size]
+}
+
+// headroomValid reports whether Elements still starts at backing[head], so
+// the slots before it are free to reuse.
+func (v *ListValue) headroomValid() bool {
+	if v.backing == nil || len(v.Elements) == 0 || v.head >= len(v.backing) {
+		return false
+	}
+	return &v.backing[v.head] == &v.Elements[0] && cap(v.backing)-v.head == cap(v.Elements)
+}
+
+// PopFront removes and returns up to n elements from the head. The vacated
+// slots are cleared so the popped values can be collected, and they become
+// headroom for later PushFront calls. The caller holds the value's lock.
+func (v *ListValue) PopFront(n int) [][]byte {
+	if n > len(v.Elements) {
+		n = len(v.Elements)
+	}
+	if n <= 0 {
+		return nil
+	}
+	out := make([][]byte, n)
+	copy(out, v.Elements[:n])
+	valid := v.headroomValid()
+	clear(v.Elements[:n])
+	v.Elements = v.Elements[n:]
+	if valid {
+		v.head += n
+	} else {
+		v.backing, v.head = nil, 0
+	}
+	if len(v.Elements) == 0 {
+		// Start over so an emptied queue does not pin its old array.
+		v.Elements, v.backing, v.head = v.Elements[:0:0], nil, 0
+	}
+	return out
+}
+
+// PopBack removes and returns up to n elements from the tail, last element
+// first. The vacated slots are cleared. The caller holds the value's lock.
+func (v *ListValue) PopBack(n int) [][]byte {
+	if n > len(v.Elements) {
+		n = len(v.Elements)
+	}
+	if n <= 0 {
+		return nil
+	}
+	out := make([][]byte, n)
+	for i := 0; i < n; i++ {
+		out[i] = v.Elements[len(v.Elements)-1-i]
+	}
+	clear(v.Elements[len(v.Elements)-n:])
+	v.Elements = v.Elements[:len(v.Elements)-n]
+	return out
 }
 
 func (v *ListValue) Lock()    { v.mu.Lock() }

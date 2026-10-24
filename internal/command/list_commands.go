@@ -83,12 +83,11 @@ func listPush(ctx *Context, left bool) error {
 	}
 
 	if left {
-		newElements := make([][]byte, argCount+len(list.Elements))
+		items := make([][]byte, argCount)
 		for i := 0; i < argCount; i++ {
-			newElements[i] = ctx.Arg(argCount - i)
+			items[i] = ctx.Arg(argCount - i)
 		}
-		copy(newElements[argCount:], list.Elements)
-		list.Elements = newElements
+		list.PushFront(items...)
 	} else {
 		for i := 1; i <= argCount; i++ {
 			list.Elements = append(list.Elements, ctx.Arg(i))
@@ -124,12 +123,11 @@ func cmdLPUSHX(ctx *Context) error {
 	}
 
 	argCount := ctx.ArgCount() - 1
-	newElements := make([][]byte, argCount+len(list.Elements))
+	items := make([][]byte, argCount)
 	for i := 0; i < argCount; i++ {
-		newElements[i] = ctx.Arg(argCount - i)
+		items[i] = ctx.Arg(argCount - i)
 	}
-	copy(newElements[argCount:], list.Elements)
-	list.Elements = newElements
+	list.PushFront(items...)
 	length := int64(len(list.Elements))
 	list.Unlock()
 
@@ -204,16 +202,11 @@ func listPopGeneric(ctx *Context, left bool) error {
 	if count > len(list.Elements) {
 		count = len(list.Elements)
 	}
-	popped := make([][]byte, count)
+	var popped [][]byte
 	if left {
-		copy(popped, list.Elements[:count])
-		list.Elements = list.Elements[count:]
+		popped = list.PopFront(count)
 	} else {
-		last := len(list.Elements) - 1
-		for i := 0; i < count; i++ {
-			popped[i] = list.Elements[last-i]
-		}
-		list.Elements = list.Elements[:len(list.Elements)-count]
+		popped = list.PopBack(count)
 	}
 	empty := len(list.Elements) == 0
 	list.Unlock()
@@ -701,10 +694,7 @@ func pushToList(ctx *Context, key string, value []byte, left bool) error {
 		return err
 	}
 	if left {
-		newEl := make([][]byte, 1+len(list.Elements))
-		newEl[0] = value
-		copy(newEl[1:], list.Elements)
-		list.Elements = newEl
+		list.PushFront(value)
 	} else {
 		list.Elements = append(list.Elements, value)
 	}
@@ -738,20 +728,15 @@ func tryListMove(ctx *Context, srcKey, dstKey, whereFrom, whereTo string) ([]byt
 
 	var value []byte
 	if whereFrom == "LEFT" {
-		value = srcList.Elements[0]
-		srcList.Elements = srcList.Elements[1:]
+		value = srcList.PopFront(1)[0]
 	} else {
-		value = srcList.Elements[len(srcList.Elements)-1]
-		srcList.Elements = srcList.Elements[:len(srcList.Elements)-1]
+		value = srcList.PopBack(1)[0]
 	}
 
 	if srcKey == dstKey {
 		// Rotating a list in place: push back under the same lock.
 		if whereTo == "LEFT" {
-			newEl := make([][]byte, 1+len(srcList.Elements))
-			newEl[0] = value
-			copy(newEl[1:], srcList.Elements)
-			srcList.Elements = newEl
+			srcList.PushFront(value)
 		} else {
 			srcList.Elements = append(srcList.Elements, value)
 		}
@@ -789,12 +774,9 @@ func listPopFirst(ctx *Context, keys []string, left bool) (string, []byte, error
 		}
 		var value []byte
 		if left {
-			value = list.Elements[0]
-			list.Elements = list.Elements[1:]
+			value = list.PopFront(1)[0]
 		} else {
-			idx := len(list.Elements) - 1
-			value = list.Elements[idx]
-			list.Elements = list.Elements[:idx]
+			value = list.PopBack(1)[0]
 		}
 		isEmpty := len(list.Elements) == 0
 		list.Unlock()
@@ -1081,11 +1063,9 @@ func tryListMPop(ctx *Context, keys []string, dir string, count int) (*resp.Valu
 		for i := 0; i < count && len(list.Elements) > 0; i++ {
 			var value []byte
 			if dir == "LEFT" {
-				value = list.Elements[0]
-				list.Elements = list.Elements[1:]
+				value = list.PopFront(1)[0]
 			} else {
-				value = list.Elements[len(list.Elements)-1]
-				list.Elements = list.Elements[:len(list.Elements)-1]
+				value = list.PopBack(1)[0]
 			}
 			elements = append(elements, resp.BulkBytes(value))
 		}
@@ -1118,10 +1098,7 @@ func cmdLMPUSH(ctx *Context) error {
 		return ctx.WriteError(err)
 	}
 
-	newElements := make([][]byte, len(elements)+len(list.Elements))
-	copy(newElements, elements)
-	copy(newElements[len(elements):], list.Elements)
-	list.Elements = newElements
+	list.PushFront(elements...)
 	length := int64(len(list.Elements))
 	list.Unlock()
 
