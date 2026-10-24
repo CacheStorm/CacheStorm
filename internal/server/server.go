@@ -509,7 +509,9 @@ func (s *Server) acceptLoop() {
 		maxConns := int64(s.cfg.Server.MaxConnections)
 		if maxConns > 0 && s.connCount.Load() >= maxConns {
 			_ = conn.SetWriteDeadline(time.Now().Add(time.Second))
-			_, _ = conn.Write([]byte("-ERR max number of clients reached\r\n"))
+			if _, err := conn.Write([]byte("-ERR max number of clients reached\r\n")); err != nil {
+				logger.Debug().Err(err).Msg("refused connection closed before the error was sent")
+			}
 			conn.Close()
 			continue
 		}
