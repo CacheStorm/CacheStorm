@@ -84,8 +84,9 @@ func TestUnsubscribeMembershipAndDeliveryControl(t *testing.T) {
 	}
 	select {
 	case msg := <-subB.Channel():
-		if string(msg) != "hello" {
-			t.Fatalf("B received %q, want %q", msg, "hello")
+		want := "*3\r\n$7\r\nmessage\r\n$6\r\nshared\r\n$5\r\nhello\r\n"
+		if string(msg) != want {
+			t.Fatalf("B received %q, want %q", msg, want)
 		}
 	default:
 		t.Fatal("B received no message")

@@ -814,10 +814,10 @@ func TestSubscriberSend_Closed(t *testing.T) {
 func TestSubscriberSend_Full(t *testing.T) {
 	sub := NewSubscriber(1)
 	// Fill the channel
-	for i := 0; i < 256; i++ {
+	for i := 0; i < cap(sub.ch); i++ {
 		sub.Send([]byte("test"))
 	}
-	// Next send should drop
+	// Next send overflows: the subscriber is marked for disconnection
 	ok := sub.Send([]byte("overflow"))
 	if ok {
 		t.Fatal("expected false for full channel")
@@ -825,16 +825,19 @@ func TestSubscriberSend_Full(t *testing.T) {
 	if sub.DropCount() != 1 {
 		t.Fatalf("expected drop count 1, got %d", sub.DropCount())
 	}
+	if !sub.IsOverflowed() {
+		t.Fatal("expected subscriber marked overflowed")
+	}
 }
 
 func TestPubSub_SubscribeChannelNameLimits(t *testing.T) {
 	ps := NewPubSub()
 	sub := NewSubscriber(1)
 
-	// Empty channel name should be skipped
+	// Redis accepts the empty channel name
 	n := ps.Subscribe(sub, "")
-	if n != 0 {
-		t.Fatalf("expected 0 subscribed for empty channel, got %d", n)
+	if n != 1 {
+		t.Fatalf("expected 1 subscribed for empty channel, got %d", n)
 	}
 
 	// Channel name too long
