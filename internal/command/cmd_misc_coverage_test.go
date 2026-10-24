@@ -119,15 +119,6 @@ func TestCmdCOMMAND_Unknown(t *testing.T) {
 	}
 }
 
-func TestCmdINFO(t *testing.T) {
-	s := store.NewStore()
-	// InitReplicationManager removed — singleton already initialized by other tests
-	ctx := discardCtx("INFO", bytesArgs(), s)
-	err := cmdINFO(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
 
 func TestCmdDBSIZE(t *testing.T) {
 	s := store.NewStore()
@@ -464,36 +455,8 @@ func TestCmdSLOWLOG_RESET(t *testing.T) {
 	}
 }
 
-func TestCmdWAIT_Success(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("WAIT", bytesArgs("0", "0"), s)
-	err := cmdWAIT(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
 
-func TestCmdROLE_NoRepl(t *testing.T) {
-	s := store.NewStore()
-	oldMgr := replManager
-	replManager = nil
-	defer func() { replManager = oldMgr }()
-	ctx := discardCtx("ROLE", bytesArgs(), s)
-	err := cmdROLE(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
 
-func TestCmdROLE_WithRepl(t *testing.T) {
-	s := store.NewStore()
-	// InitReplicationManager removed — singleton already initialized by other tests
-	ctx := discardCtx("ROLE", bytesArgs(), s)
-	err := cmdROLE(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
 
 func TestCmdLASTSAVE(t *testing.T) {
 	s := store.NewStore()
@@ -1757,84 +1720,10 @@ func TestCmdREACTIVETRIGGER_Success(t *testing.T) {
 // REPLICATION COMMANDS
 // =============================================================================
 
-func TestCmdREPLCONF_Subcommands(t *testing.T) {
-	s := store.NewStore()
-	InitReplicationManager(s)
-	clientID := int64(99900)
 
-	// LISTENING-PORT
-	ctx := discardCtx("REPLCONF", bytesArgs("LISTENING-PORT", "6380"), s)
-	ctx.ClientID = clientID
-	ctx.RemoteAddr = "127.0.0.1:12345"
-	if err := cmdREPLCONF(ctx); err != nil {
-		t.Fatalf("LISTENING-PORT: %v", err)
-	}
 
-	// IP-ADDRESS (reuses same clientID)
-	ctx2 := discardCtx("REPLCONF", bytesArgs("IP-ADDRESS", "10.0.0.1"), s)
-	ctx2.ClientID = clientID
-	if err := cmdREPLCONF(ctx2); err != nil {
-		t.Fatalf("IP-ADDRESS: %v", err)
-	}
 
-	// CAPA (reuses same clientID)
-	ctx3 := discardCtx("REPLCONF", bytesArgs("CAPA", "eof", "psync2"), s)
-	ctx3.ClientID = clientID
-	ctx3.RemoteAddr = "127.0.0.1:12345"
-	if err := cmdREPLCONF(ctx3); err != nil {
-		t.Fatalf("CAPA: %v", err)
-	}
 
-	// ACK
-	ctx4 := discardCtx("REPLCONF", bytesArgs("ACK", "0"), s)
-	ctx4.ClientID = clientID
-	if err := cmdREPLCONF(ctx4); err != nil {
-		t.Fatalf("ACK: %v", err)
-	}
-
-	// Clean up global state to avoid interfering with other tests
-	replManager.RemoveReplica(clientID)
-}
-
-func TestCmdSYNC_Success(t *testing.T) {
-	s := store.NewStore()
-	// InitReplicationManager removed — singleton already initialized by other tests
-	ctx := discardCtx("SYNC", bytesArgs(), s)
-	err := cmdSYNC(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdPSYNC_FullResync(t *testing.T) {
-	s := store.NewStore()
-	// InitReplicationManager removed — singleton already initialized by other tests
-	ctx := discardCtx("PSYNC", bytesArgs("?", "-1"), s)
-	err := cmdPSYNC(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdREPLICAOF_NoOne(t *testing.T) {
-	s := store.NewStore()
-	// InitReplicationManager removed — singleton already initialized by other tests
-	ctx := discardCtx("REPLICAOF", bytesArgs("NO", "ONE"), s)
-	err := cmdREPLICAOF(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdREPLICAOF_Host(t *testing.T) {
-	s := store.NewStore()
-	// InitReplicationManager removed — singleton already initialized by other tests
-	ctx := discardCtx("REPLICAOF", bytesArgs("127.0.0.1", "6379"), s)
-	err := cmdREPLICAOF(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
 
 // =============================================================================
 // MONITORING COMMANDS
@@ -1979,86 +1868,14 @@ func TestCmdHEALTHREADINESS(t *testing.T) {
 // CLUSTER COMMANDS
 // =============================================================================
 
-func TestCmdCLUSTER_INFO(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("CLUSTER", bytesArgs("INFO"), s)
-	err := cmdCLUSTER(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
 
-func TestCmdCLUSTER_NODES(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("CLUSTER", bytesArgs("NODES"), s)
-	err := cmdCLUSTER(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
 
-func TestCmdCLUSTER_SLOTS(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("CLUSTER", bytesArgs("SLOTS"), s)
-	err := cmdCLUSTER(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
 
-func TestCmdCLUSTER_MYID(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("CLUSTER", bytesArgs("MYID"), s)
-	err := cmdCLUSTER(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
 
-func TestCmdCLUSTER_RESET(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("CLUSTER", bytesArgs("RESET"), s)
-	err := cmdCLUSTER(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
 
-func TestCmdCLUSTER_FAILOVER(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("CLUSTER", bytesArgs("FAILOVER"), s)
-	err := cmdCLUSTER(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
 
-func TestCmdCLUSTERINFO_Direct(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("CLUSTERINFO", bytesArgs(), s)
-	err := cmdCLUSTERINFO(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
 
-func TestCmdCLUSTERNODES_Direct(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("CLUSTERNODES", bytesArgs(), s)
-	err := cmdCLUSTERNODES(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
 
-func TestCmdCLUSTERSLOTS_Direct(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("CLUSTERSLOTS", bytesArgs(), s)
-	err := cmdCLUSTERSLOTS(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
 
 func TestCmdMIGRATE_Success(t *testing.T) {
 	s := store.NewStore()
@@ -2070,32 +1887,8 @@ func TestCmdMIGRATE_Success(t *testing.T) {
 	}
 }
 
-func TestCmdASKING(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("ASKING", bytesArgs(), s)
-	err := cmdASKING(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
 
-func TestCmdREADONLY(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("READONLY", bytesArgs(), s)
-	err := cmdREADONLY(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
 
-func TestCmdREADWRITE(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("READWRITE", bytesArgs(), s)
-	err := cmdREADWRITE(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
 
 // =============================================================================
 // SCHEDULER COMMANDS (jobs, circuits, sessions)

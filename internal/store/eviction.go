@@ -122,6 +122,9 @@ func (ec *EvictionController) evictOne() bool {
 	if entry != nil && onEvict != nil {
 		onEvict(key, entry)
 	}
+	if entry != nil {
+		ec.store.fireEvictKey(key)
+	}
 	return true
 }
 

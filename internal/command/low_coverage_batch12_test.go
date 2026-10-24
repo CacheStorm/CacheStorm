@@ -339,35 +339,6 @@ func TestLowCoverageBatch12_LuaCommands(t *testing.T) {
 	})
 }
 
-func TestLowCoverageBatch12_ReplicationCommands(t *testing.T) {
-	s := store.NewStore()
-	router := NewRouter()
-	RegisterReplicationCommands(router)
-
-	t.Run("REPLICAOF with host", func(t *testing.T) {
-		_ = runHandler(t, router, "REPLICAOF", [][]byte{[]byte("192.168.1.1"), []byte("6379")}, s)
-	})
-
-	t.Run("REPLICAOF NO ONE", func(t *testing.T) {
-		_ = runHandler(t, router, "REPLICAOF", [][]byte{[]byte("NO"), []byte("ONE")}, s)
-	})
-
-	t.Run("SYNC", func(t *testing.T) {
-		_ = runHandler(t, router, "SYNC", [][]byte{}, s)
-	})
-
-	t.Run("PSYNC", func(t *testing.T) {
-		_ = runHandler(t, router, "PSYNC", [][]byte{[]byte("?"), []byte("-1")}, s)
-	})
-
-	t.Run("WAIT", func(t *testing.T) {
-		_ = runHandler(t, router, "WAIT", [][]byte{[]byte("1"), []byte("1000")}, s)
-	})
-
-	t.Run("INFO replication", func(t *testing.T) {
-		_ = runHandler(t, router, "INFO", [][]byte{[]byte("replication")}, s)
-	})
-}
 
 func TestLowCoverageBatch12_DataStructuresCommands(t *testing.T) {
 	s := store.NewStore()

@@ -136,6 +136,18 @@ type ReplicationConfig struct {
 	ReplicaAnnouncePort int    `yaml:"replica_announce_port"`
 	ReadOnly            bool   `yaml:"read_only" default:"true"`
 	ReplTimeout         int    `yaml:"repl_timeout" default:"60"`
+	// BacklogSize is the size in bytes of the replication backlog a
+	// reconnecting replica can resume from (repl-backlog-size).
+	BacklogSize int `yaml:"backlog_size" default:"1048576"`
+	// ReplicaBufferLimit is the most bytes queued for one replica before it
+	// is disconnected (client-output-buffer-limit replica).
+	ReplicaBufferLimit int `yaml:"replica_buffer_limit" default:"67108864"`
+}
+
+// IsReplica reports whether the configuration starts the server as a
+// replica.
+func (c *ReplicationConfig) IsReplica() bool {
+	return c.Role == "replica" || c.Role == "slave"
 }
 
 type PluginsConfig struct {

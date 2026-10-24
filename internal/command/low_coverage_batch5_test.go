@@ -77,28 +77,6 @@ func TestMVCCCommandsLowCoverageBatch5(t *testing.T) {
 	}
 }
 
-func TestReplicationCommandsBatch5(t *testing.T) {
-	s := store.NewStore()
-	router := NewRouter()
-	RegisterReplicationCommands(router)
-
-	tests := []struct {
-		name string
-		cmd  string
-		args [][]byte
-	}{
-		{"ROLE", "ROLE", nil},
-		{"REPLICAOF host port", "REPLICAOF", [][]byte{[]byte("127.0.0.1"), []byte("6379")}},
-		{"REPLICAOF no one", "REPLICAOF", [][]byte{[]byte("NO"), []byte("ONE")}},
-		{"REPLICAOF no args", "REPLICAOF", nil},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			runCommandTest(t, router, s, tt.cmd, tt.args)
-		})
-	}
-}
 
 func TestResilienceCommandsLowCoverageBatch5(t *testing.T) {
 	s := store.NewStore()

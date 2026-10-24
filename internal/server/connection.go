@@ -69,6 +69,14 @@ type Connection struct {
 	// with dbs nil the connection only ever uses store.
 	dbs *store.Databases
 	db  int
+
+	// srv is the server the connection belongs to; nil for a connection
+	// built on its own (tests).
+	srv *Server
+	// replConf is what REPLCONF announced on this connection.
+	replConf command.ReplicaConf
+	// handler serves the connection once a command (PSYNC) took it over.
+	handler command.ConnHandler
 }
 
 // countingConn wraps a connection and feeds the global byte counters so the
@@ -202,6 +210,11 @@ func (c *Connection) Handle() {
 		cmd = command.CanonicalName(cmd)
 		c.lastCmd = cmd
 
+		if c.handler != nil {
+			c.handler.Command(cmd, args)
+			continue
+		}
+
 		if c.runCommand(cmd, args) {
 			return
 		}
@@ -252,6 +265,7 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 		ctx.SetAuthenticated(c.authenticated)
 		ctx.ACLUser = c.aclUser
 		ctx.ClientName = c.clientName
+		ctx.ReplConf = &c.replConf
 
 		if cmd == "QUIT" {
 			c.conn.SetWriteDeadline(time.Now().Add(c.writeTimeout))
@@ -270,7 +284,14 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 		if blockingCommands[strings.ToUpper(cmd)] {
 			ctx.Done, stopWatch = c.watchDisconnect()
 		}
-		err := c.router.Execute(ctx)
+		var err error
+		if c.srv != nil && c.srv.refuseOnReplica(ctx) {
+			err = nil
+		} else {
+			release := c.srv.holdGate(ctx)
+			err = c.router.Execute(ctx)
+			release()
+		}
 		if stopWatch != nil {
 			stopWatch()
 		}
@@ -308,6 +329,11 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 		c.aclUser = ctx.ACLUser
 		c.clientName = ctx.ClientName
 
+		if ctx.Handoff != nil {
+			_ = c.writer.Flush()
+			c.handler = ctx.Handoff(c.conn)
+		}
+
 		// Count the command against the connection so CONNECTION.INFO can
 		// report it.
 		command.BumpConnectionCommand(c.ID)
@@ -320,7 +346,7 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 var blockingCommands = map[string]bool{
 	"BLPOP": true, "BRPOP": true, "BLMOVE": true, "BRPOPLPUSH": true, "BLMPOP": true,
 	"BZPOPMIN": true, "BZPOPMAX": true, "BZMPOP": true,
-	"XREAD": true, "XREADGROUP": true,
+	"XREAD": true, "XREADGROUP": true, "WAIT": true,
 }
 
 // watchDisconnect reports the client going away while a blocking command
@@ -385,6 +411,9 @@ func (c *Connection) Close() {
 		c.subscriber = nil
 	}
 	c.conn.Close()
+	if c.handler != nil {
+		c.handler.Closed()
+	}
 	c.stopDelivery()
 	logger.Debug().
 		Int64("conn_id", c.ID).

@@ -35,6 +35,13 @@ type Router struct {
 	// postExec receives the commands an EXEC ran, so the transaction is
 	// persisted as one unit instead of command by command.
 	postExec func(cmds []ExecutedCommand)
+	// persisted reports whether a command is recorded in the AOF and the
+	// replication stream; script effects are filtered through it.
+	persisted func(cmd string, args [][]byte) bool
+	// port is the TCP port the server listens on, for INFO.
+	port int
+	// replInfo renders the INFO replication section.
+	replInfo func() string
 }
 
 // commandSpec is the arity, flags and key positions Redis reports for one of
@@ -230,6 +237,85 @@ func (r *Router) SetPostExec(fn func(cmds []ExecutedCommand)) {
 	r.postExec = fn
 }
 
+// SetPersistFilter installs the predicate that decides which commands are
+// recorded in the AOF and the replication stream.
+func (r *Router) SetPersistFilter(fn func(cmd string, args [][]byte) bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.persisted = fn
+}
+
+// Persisted reports whether cmd is recorded in the AOF and the replication
+// stream. Without a filter every command counts as recorded.
+func (r *Router) Persisted(cmd string, args [][]byte) bool {
+	r.mu.RLock()
+	fn := r.persisted
+	r.mu.RUnlock()
+	if fn == nil {
+		return true
+	}
+	return fn(cmd, args)
+}
+
+// SetPort records the TCP port the server listens on, reported by INFO.
+func (r *Router) SetPort(port int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.port = port
+}
+
+// Port returns the port recorded by SetPort.
+func (r *Router) Port() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.port
+}
+
+// SetReplicationInfo installs the renderer of the INFO replication section.
+func (r *Router) SetReplicationInfo(fn func() string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.replInfo = fn
+}
+
+func (r *Router) replicationInfo() func() string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.replInfo
+}
+
+func (r *Router) postExecuteHook() func(db int, cmd string, args [][]byte) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.postExecute
+}
+
+// record hands what a command executed to the persistence hooks: its
+// override when the handler set one, nothing when it answered with an error,
+// itself otherwise.
+func (r *Router) record(ctx *Context, db int, errsBefore int64) {
+	if cmds, ok := ctx.Propagation(); ok {
+		switch len(cmds) {
+		case 0:
+		case 1:
+			if hook := r.postExecuteHook(); hook != nil {
+				hook(cmds[0].DB, cmds[0].Name, cmds[0].Args)
+			}
+		default:
+			if hook := r.postExecHook(); hook != nil {
+				hook(cmds)
+			}
+		}
+		return
+	}
+	if ctx.Writer != nil && ctx.Writer.Errors() > errsBefore {
+		return
+	}
+	if hook := r.postExecuteHook(); hook != nil {
+		hook(db, ctx.Command, ctx.Args)
+	}
+}
+
 func (r *Router) postExecHook() func(cmds []ExecutedCommand) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -296,15 +382,16 @@ func (r *Router) Execute(ctx *Context) error {
 
 	ctx.StartTime = time.Now()
 	db := ctx.DB
+	errsBefore := ctx.Writer.Errors()
 	err := cmd.Handler(ctx)
 	ctx.passWakeup()
 	reaccountWrittenKeys(ctx)
 	touchWrittenKeys(ctx)
 	signalWrittenKeys(ctx)
 
-	// Post-execute hook (AOF persistence)
-	if err == nil && r.postExecute != nil {
-		r.postExecute(db, ctx.Command, ctx.Args)
+	// Post-execute hook (AOF persistence and replication)
+	if err == nil {
+		r.record(ctx, db, errsBefore)
 	}
 
 	return err
@@ -384,6 +471,7 @@ func (r *Router) ExecuteHTTP(ctx *Context) (interface{}, error) {
 	}
 
 	db := ctx.DB
+	errsBefore := ctx.Writer.Errors()
 	err := cmd.Handler(ctx)
 	ctx.passWakeup()
 	reaccountWrittenKeys(ctx)
@@ -393,10 +481,8 @@ func (r *Router) ExecuteHTTP(ctx *Context) (interface{}, error) {
 		return nil, err
 	}
 
-	// Post-execute hook (AOF persistence)
-	if r.postExecute != nil {
-		r.postExecute(db, ctx.Command, ctx.Args)
-	}
+	// Post-execute hook (AOF persistence and replication)
+	r.record(ctx, db, errsBefore)
 
 	// Return a simple acknowledgement - the actual response was written to the RESP writer
 	return "OK", nil

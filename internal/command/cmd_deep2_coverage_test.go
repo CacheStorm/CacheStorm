@@ -1130,21 +1130,7 @@ func TestDeep2_ServerSlowlog(t *testing.T) {
 	}
 }
 
-func TestDeep2_ServerWait(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("WAIT", bytesArgs("0", "0"), s)
-	if err := cmdWAIT(ctx); err != nil {
-		t.Fatal(err)
-	}
-}
 
-func TestDeep2_ServerRole(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("ROLE", bytesArgs(), s)
-	if err := cmdROLE(ctx); err != nil {
-		t.Fatal(err)
-	}
-}
 
 func TestDeep2_ServerLastsave(t *testing.T) {
 	s := store.NewStore()
@@ -1254,21 +1240,7 @@ func TestDeep2_ServerSwapDB(t *testing.T) {
 	}
 }
 
-func TestDeep2_ServerSync(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("SYNC", bytesArgs(), s)
-	if err := cmdSYNC(ctx); err != nil {
-		t.Fatal(err)
-	}
-}
 
-func TestDeep2_ServerPSync(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("PSYNC", bytesArgs("?", "-1"), s)
-	if err := cmdPSYNC(ctx); err != nil {
-		t.Fatal(err)
-	}
-}
 
 func TestDeep2_ServerMove(t *testing.T) {
 	s := store.NewStore()

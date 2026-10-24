@@ -43,12 +43,20 @@ type scriptRun struct {
 	// refused for memory only before its first write, so it is never left
 	// half applied.
 	wrote bool
+	// parent is the context of the EVAL/FCALL itself. The writes the script
+	// performs are recorded on it, so the AOF and the replicas receive the
+	// script's effects rather than the script.
+	parent *Context
 }
 
 func newScriptRun(ctx *Context, e *ScriptEngine, name, chunk string, readOnly bool) *scriptRun {
 	sc := *ctx
 	sc.InExec = true
+	sc.propagate = nil
+	sc.propagateSet = false
+	ctx.PropagateAs()
 	return &scriptRun{
+		parent:   ctx,
 		ctx:      &sc,
 		router:   ctx.router,
 		engine:   e,
@@ -182,7 +190,13 @@ func (r *scriptRun) call(L *lua.LState) (lua.LValue, bool) {
 	for i, a := range argv[1:] {
 		args[i] = []byte(a)
 	}
-	reply := executeQueuedCommand(r.ctx, queuedCommand{cmd: name, args: args})
+	if r.ctx.ReplicaReadOnly && (commandHasFlag(name, "write") || r.router.Persisted(name, args)) {
+		return luaErrTable(L, "READONLY You can't write against a read only replica."), true
+	}
+	reply, recorded := runQueuedCommand(r.ctx, queuedCommand{cmd: name, args: args})
+	if len(recorded) > 0 {
+		r.parent.propagate = append(r.parent.propagate, recorded...)
+	}
 	if reply.Type != resp.TypeError && commandHasFlag(name, "write") {
 		r.wrote = true
 	}

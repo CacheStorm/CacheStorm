@@ -6,9 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cachestorm/cachestorm/internal/cluster"
 	"github.com/cachestorm/cachestorm/internal/module"
-	"github.com/cachestorm/cachestorm/internal/persistence"
 	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/sentinel"
 	"github.com/cachestorm/cachestorm/internal/store"
@@ -1349,30 +1347,6 @@ func TestTrieCommands(t *testing.T) {
 	}
 }
 
-func TestReplicationCommands(t *testing.T) {
-	s := store.NewStore()
-	router := NewRouter()
-	RegisterReplicationCommands(router)
-
-	tests := []struct {
-		name string
-		cmd  string
-		args [][]byte
-	}{
-		{"REPLCONF", "REPLCONF", [][]byte{[]byte("listening-port"), []byte("6379")}},
-		{"SYNC", "SYNC", nil},
-		{"PSYNC", "PSYNC", [][]byte{[]byte("abc123"), []byte("0")}},
-		{"ROLE", "ROLE", nil},
-		{"REPLICAOF", "REPLICAOF", [][]byte{[]byte("NO"), []byte("ONE")}},
-		{"SLAVEOF", "SLAVEOF", [][]byte{[]byte("NO"), []byte("ONE")}},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			runCommandTest(t, router, s, tt.cmd, tt.args)
-		})
-	}
-}
 
 func TestSentinelCommands(t *testing.T) {
 	s := store.NewStore()
@@ -3414,27 +3388,6 @@ func TestModuleCommandsExtendedCoverage(t *testing.T) {
 	}
 }
 
-func TestReplicationCommandsExtendedCoverage(t *testing.T) {
-	s := store.NewStore()
-	router := NewRouter()
-	RegisterReplicationCommands(router)
-
-	tests := []struct {
-		name string
-		cmd  string
-		args [][]byte
-	}{
-		{"REPLICAOF", "REPLICAOF", [][]byte{[]byte("127.0.0.1"), []byte("6379")}},
-		{"REPLICAOF NO ONE", "REPLICAOF", [][]byte{[]byte("NO"), []byte("ONE")}},
-		{"INFO replication", "INFO", [][]byte{[]byte("replication")}},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			runCommandTest(t, router, s, tt.cmd, tt.args)
-		})
-	}
-}
 
 func TestSentinelCommandsExtendedCoverage(t *testing.T) {
 	s := store.NewStore()
@@ -10424,26 +10377,6 @@ func TestClientCommandsCoverage(t *testing.T) {
 	}
 }
 
-func TestReplicationCommandsCoverage(t *testing.T) {
-	s := store.NewStore()
-	router := NewRouter()
-	RegisterReplicationCommands(router)
-
-	tests := []struct {
-		name string
-		cmd  string
-		args [][]byte
-	}{
-		{"REPLICAOF", "REPLICAOF", [][]byte{[]byte("localhost"), []byte("6379")}},
-		{"INFO.REPLICATION", "INFO.REPLICATION", [][]byte{}},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			runCommandTest(t, router, s, tt.cmd, tt.args)
-		})
-	}
-}
 
 func TestServerCommandsExtraCoverage(t *testing.T) {
 	s := store.NewStore()
@@ -12457,27 +12390,6 @@ func TestClusterCommands2(t *testing.T) {
 	}
 }
 
-func TestReplicationCommands2(t *testing.T) {
-	s := store.NewStore()
-	router := NewRouter()
-	RegisterReplicationCommands(router)
-
-	tests := []struct {
-		name string
-		cmd  string
-		args [][]byte
-	}{
-		{"INFO replication", "INFO", [][]byte{[]byte("replication")}},
-		{"ROLE", "ROLE", [][]byte{}},
-		{"REPLICAOF", "REPLICAOF", [][]byte{[]byte("127.0.0.1"), []byte("6379")}},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			runCommandTest(t, router, s, tt.cmd, tt.args)
-		})
-	}
-}
 
 func TestGetClientTracking(t *testing.T) {
 	info := GetClientTracking(123)
@@ -12515,104 +12427,7 @@ func TestRouterExecuteMethod(t *testing.T) {
 	}
 }
 
-func TestReplicationManager(t *testing.T) {
-	s := store.NewStore()
-	InitReplicationManager(s)
 
-	mgr := GetReplicationManager()
-	if mgr == nil {
-		t.Skip("GetReplicationManager returned nil — singleton already initialized by another test")
-	}
-
-	t.Run("GetRole", func(t *testing.T) {
-		role := mgr.GetRole()
-		// Accept any valid role since singleton may have been initialized with different config
-		if role != "master" && role != "replica" {
-			t.Errorf("GetRole = %s, want master or replica", role)
-		}
-	})
-
-	t.Run("GetReplicaID", func(t *testing.T) {
-		id := mgr.GetReplicaID()
-		if id == "" {
-			t.Error("GetReplicaID returned empty string")
-		}
-	})
-
-	t.Run("GetMasterOffset", func(t *testing.T) {
-		offset := mgr.GetMasterOffset()
-		_ = offset
-	})
-
-	t.Run("GetMasterHost", func(t *testing.T) {
-		host := mgr.GetMasterHost()
-		_ = host
-	})
-
-	t.Run("GetMasterPort", func(t *testing.T) {
-		port := mgr.GetMasterPort()
-		_ = port
-	})
-
-	t.Run("GetReplicas", func(t *testing.T) {
-		replicas := mgr.GetReplicas()
-		if replicas == nil {
-			t.Error("GetReplicas returned nil")
-		}
-	})
-
-	t.Run("GetReplicaCount", func(t *testing.T) {
-		count := mgr.GetReplicaCount()
-		if count < 0 {
-			t.Error("GetReplicaCount returned negative")
-		}
-	})
-
-	t.Run("AddReplica", func(t *testing.T) {
-		before := mgr.GetReplicaCount()
-		mgr.AddReplica(99, "127.0.0.1", 6380, map[string]bool{"eof": true})
-		after := mgr.GetReplicaCount()
-		if after != before+1 {
-			t.Errorf("GetReplicaCount = %d, want %d", after, before+1)
-		}
-	})
-
-	t.Run("UpdateReplicaAck", func(t *testing.T) {
-		mgr.UpdateReplicaAck(99, 100)
-	})
-
-	t.Run("RemoveReplica", func(t *testing.T) {
-		before := mgr.GetReplicaCount()
-		mgr.RemoveReplica(99)
-		after := mgr.GetReplicaCount()
-		if after != before-1 {
-			t.Errorf("GetReplicaCount = %d, want %d", after, before-1)
-		}
-	})
-
-	t.Run("ReplicaOf", func(t *testing.T) {
-		mgr.ReplicaOf("127.0.0.1", 6379)
-		if mgr.GetRole() != "slave" {
-			t.Errorf("GetRole = %s, want slave", mgr.GetRole())
-		}
-		mgr.ReplicaOf("no", 1)
-		if mgr.GetRole() != "master" {
-			t.Errorf("GetRole = %s, want master", mgr.GetRole())
-		}
-	})
-
-	t.Run("GetInfo", func(t *testing.T) {
-		info := mgr.GetInfo()
-		if info == "" {
-			t.Error("GetInfo returned empty string")
-		}
-	})
-}
-
-func TestInitCluster(t *testing.T) {
-	c := cluster.New("node1", "127.0.0.1", 7000, 7001, nil)
-	InitCluster(c)
-}
 
 func TestInitScriptEngine(t *testing.T) {
 	s := store.NewStore()
@@ -13176,13 +12991,6 @@ func TestCheckClusterRouting(t *testing.T) {
 	runCommandTest(t, router, s, "CLUSTER", [][]byte{[]byte("SLOTS")})
 }
 
-func TestMapToValue(t *testing.T) {
-	m := map[string]interface{}{"key": "value"}
-	v := mapToValue(m)
-	if v == nil {
-		t.Error("mapToValue returned nil")
-	}
-}
 
 func TestStartStopSentinel(t *testing.T) {
 	cfg := sentinel.Config{}
@@ -13250,36 +13058,6 @@ func TestRegisterModuleFunc(t *testing.T) {
 	_ = RegisterModule
 }
 
-func TestReplicationRDBFunctions(t *testing.T) {
-	s := store.NewStore()
-
-	t.Run("GenerateRDB", func(t *testing.T) {
-		data := generateRDB(s)
-		if len(data) == 0 {
-			t.Error("generateRDB should return data")
-		}
-	})
-
-	t.Run("WriteRDBLength", func(t *testing.T) {
-		var buf bytes.Buffer
-		if err := persistence.WriteRDBLength(&buf, len("test")); err != nil {
-			t.Fatalf("WriteRDBLength: %v", err)
-		}
-		buf.WriteString("test")
-		// Lengths < 64 encode as 1 length byte + raw data.
-		if got := buf.String(); got != "\x04test" {
-			t.Errorf("encoded = %q, want %q", got, "\x04test")
-		}
-	})
-
-	t.Run("WriteUint64LE", func(t *testing.T) {
-		var buf bytes.Buffer
-		writeUint64LE(&buf, 12345)
-		if buf.Len() != 8 {
-			t.Errorf("writeUint64LE wrote %d bytes, want 8", buf.Len())
-		}
-	})
-}
 
 func TestExecuteQueuedCommand(t *testing.T) {
 	s := store.NewStore()
@@ -13302,18 +13080,6 @@ func TestExecuteQueuedCommand(t *testing.T) {
 	// For SET, it may return nil or a success message
 }
 
-func TestCheckClusterRoutingCmd(t *testing.T) {
-	s := store.NewStore()
-	c := cluster.New("node1", "127.0.0.1", 7000, 7001, nil)
-	InitCluster(c)
-
-	buf := &bytes.Buffer{}
-	w := resp.NewWriter(buf)
-	ctx := NewContext("GET", [][]byte{[]byte("key")}, s, w)
-
-	result := checkClusterRouting(ctx, "GET")
-	_ = result
-}
 
 func TestHandleSentinelCommands3(t *testing.T) {
 	s := store.NewStore()
@@ -13328,18 +13094,6 @@ func TestHandleSentinelCommands3(t *testing.T) {
 	runCommandTest(t, router, s, "SENTINEL", [][]byte{[]byte("IS-MASTER-DOWN-BY-ADDR"), []byte("127.0.0.1"), []byte("6379")})
 }
 
-func TestMapToValue2(t *testing.T) {
-	// Test mapToValue with various inputs
-	m := map[string]interface{}{
-		"key1": "value1",
-		"key2": 123,
-		"key3": true,
-	}
-	v := mapToValue(m)
-	if v == nil {
-		t.Error("mapToValue returned nil")
-	}
-}
 
 func TestSyncRWMutexMethods(t *testing.T) {
 	// Test syncRWMutex methods in event_commands.go

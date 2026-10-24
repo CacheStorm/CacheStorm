@@ -451,3 +451,10 @@ func enforceACL(ctx *Context, upperCmd string) bool {
 	}
 	return false
 }
+
+// CommandKeys returns the keys cmd names in args, the same ones the ACL key
+// checks inspect. A command the tables do not classify reports its first
+// argument.
+func CommandKeys(cmd string, args [][]byte) []string {
+	return aclKeysForCommand(CanonicalName(cmd), args)
+}

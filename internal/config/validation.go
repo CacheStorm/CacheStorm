@@ -73,6 +73,16 @@ func Validate(cfg *Config) error {
 		return fmt.Errorf("node_name is required when cluster is enabled")
 	}
 
+	switch cfg.Replication.Role {
+	case "", "master":
+	case "replica", "slave":
+		if cfg.Replication.MasterHost == "" || cfg.Replication.MasterPort < 1 || cfg.Replication.MasterPort > 65535 {
+			return fmt.Errorf("replication.master_host and replication.master_port are required when replication.role is %s", cfg.Replication.Role)
+		}
+	default:
+		return fmt.Errorf("invalid replication role: %s", cfg.Replication.Role)
+	}
+
 	// Validate bind address
 	if cfg.Server.Bind != "" && cfg.Server.Bind != "0.0.0.0" {
 		if net.ParseIP(cfg.Server.Bind) == nil {

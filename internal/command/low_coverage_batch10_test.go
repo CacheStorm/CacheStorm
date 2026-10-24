@@ -347,31 +347,6 @@ func TestLowCoverageBatch10_SketchCommands(t *testing.T) {
 	})
 }
 
-func TestLowCoverageBatch10_ReplicationCommands(t *testing.T) {
-	s := store.NewStore()
-	router := NewRouter()
-	RegisterReplicationCommands(router)
-
-	t.Run("REPLICAOF", func(t *testing.T) {
-		_ = runHandler(t, router, "REPLICAOF", [][]byte{[]byte("127.0.0.1"), []byte("6379")}, s)
-	})
-
-	t.Run("REPLICAOF NO ONE", func(t *testing.T) {
-		_ = runHandler(t, router, "REPLICAOF", [][]byte{[]byte("NO"), []byte("ONE")}, s)
-	})
-
-	t.Run("SYNC", func(t *testing.T) {
-		_ = runHandler(t, router, "SYNC", [][]byte{}, s)
-	})
-
-	t.Run("PSYNC", func(t *testing.T) {
-		_ = runHandler(t, router, "PSYNC", [][]byte{[]byte("0"), []byte("0")}, s)
-	})
-
-	t.Run("WAIT", func(t *testing.T) {
-		_ = runHandler(t, router, "WAIT", [][]byte{[]byte("1"), []byte("1000")}, s)
-	})
-}
 
 func TestLowCoverageBatch10_MonitoringCommands(t *testing.T) {
 	s := store.NewStore()

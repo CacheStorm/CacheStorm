@@ -898,3 +898,52 @@ func SyncPolicyFromString(s string) AOFSyncPolicy {
 		return AOFEverySecond
 	}
 }
+
+// multiDBAdapter lets a MultiDBSource serve as an AOFRewriter source.
+type multiDBAdapter struct {
+	MultiDBSource
+}
+
+func (a multiDBAdapter) GetAll() map[string]interface{} {
+	out := make(map[string]interface{})
+	for _, entries := range a.DatabaseEntries() {
+		for k, v := range entries {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+// WriteSnapshot writes every key of src as the command stream an AOF rewrite
+// produces: typed write commands, PEXPIREAT for keys with a TTL and a SELECT
+// before each non-empty database other than 0, ending in database 0.
+func WriteSnapshot(w io.Writer, src MultiDBSource) error {
+	rw := &AOFRewriter{store: multiDBAdapter{src}}
+	bw := bufio.NewWriterSize(w, 64*1024)
+	if err := rw.writeAll(bw); err != nil {
+		return err
+	}
+	return bw.Flush()
+}
+
+// Rewrite replaces the file with a rewrite of src and continues appending
+// after it, in database 0. The caller must keep other appends out while it
+// runs: an append made during the rewrite is dropped.
+func (w *AOFWriter) Rewrite(src MultiDBSource) error {
+	if !w.config.Enabled {
+		return nil
+	}
+	wasRunning := w.running.Load()
+	if wasRunning {
+		w.Stop()
+	}
+	path := filepath.Join(w.config.DataDir, w.config.Filename)
+	err := NewAOFRewriter(w.config, multiDBAdapter{src}).Rewrite(path)
+	w.SetCurrentDB(0)
+	if wasRunning {
+		if startErr := w.Start(); startErr != nil && err == nil {
+			err = startErr
+		}
+	}
+	return err
+}

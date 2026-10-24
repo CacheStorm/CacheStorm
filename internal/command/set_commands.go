@@ -213,6 +213,7 @@ func cmdSPOP(ctx *Context) error {
 		return ctx.WriteError(err)
 	}
 	if set == nil {
+		ctx.PropagateAs()
 		if !withCount {
 			return ctx.WriteNullBulkString()
 		}
@@ -227,36 +228,59 @@ func cmdSPOP(ctx *Context) error {
 			if isEmpty {
 				deleteIfEmpty(ctx, key, set)
 			}
+			propagateSREM(ctx, key, member)
 			return ctx.WriteBulkString(member)
 		}
 		set.Unlock()
+		ctx.PropagateAs()
 		return ctx.WriteNullBulkString()
 	}
 
 	if count >= len(set.Members) {
 		members := make([]*resp.Value, 0, len(set.Members))
+		popped := make([]string, 0, len(set.Members))
 		for member := range set.Members {
 			members = append(members, resp.BulkString(member))
+			popped = append(popped, member)
 		}
 		set.ClearMembers()
 		set.Unlock()
 		deleteIfEmpty(ctx, key, set)
+		propagateSREM(ctx, key, popped...)
 		return ctx.WriteArray(members)
 	}
 
 	members := make([]*resp.Value, 0, count)
+	popped := make([]string, 0, count)
 	i := 0
 	for member := range set.Members {
 		if i >= count {
 			break
 		}
 		members = append(members, resp.BulkString(member))
+		popped = append(popped, member)
 		set.RemoveMember(member)
 		i++
 	}
 	set.Unlock()
 
+	propagateSREM(ctx, key, popped...)
 	return ctx.WriteArray(members)
+}
+
+// propagateSREM records an SPOP as the SREM of the members it popped: SPOP
+// picks members at random, so replaying it would remove different ones.
+func propagateSREM(ctx *Context, key string, members ...string) {
+	if len(members) == 0 {
+		ctx.PropagateAs()
+		return
+	}
+	args := make([][]byte, 0, len(members)+1)
+	args = append(args, []byte(key))
+	for _, m := range members {
+		args = append(args, []byte(m))
+	}
+	ctx.PropagateAs(ExecutedCommand{Name: "SREM", Args: args, DB: ctx.DB})
 }
 
 func cmdSRANDMEMBER(ctx *Context) error {

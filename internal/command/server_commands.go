@@ -38,7 +38,6 @@ func RegisterServerCommands(router *Router) {
 	router.Register(&CommandDef{Name: "SORT", Handler: cmdSORT})
 	router.Register(&CommandDef{Name: "SORT_RO", Handler: cmdSORTRO})
 	router.Register(&CommandDef{Name: "SLOWLOG", Handler: cmdSLOWLOG})
-	router.Register(&CommandDef{Name: "WAIT", Handler: cmdWAIT})
 	router.Register(&CommandDef{Name: "LASTSAVE", Handler: cmdLASTSAVE})
 	router.Register(&CommandDef{Name: "LOLWUT", Handler: cmdLOLWUT})
 	router.Register(&CommandDef{Name: "SHUTDOWN", Handler: cmdSHUTDOWN})
@@ -332,26 +331,55 @@ func cmdCommandGetKeys(ctx *Context) error {
 }
 
 func cmdINFO(ctx *Context) error {
+	r := ctx.dispatcher()
+	sections := make(map[string]bool)
+	for i := 0; i < ctx.ArgCount(); i++ {
+		switch name := strings.ToLower(ctx.ArgString(i)); name {
+		case "all", "everything", "default":
+		default:
+			sections[name] = true
+		}
+	}
+	want := func(name string) bool {
+		return len(sections) == 0 || sections[name]
+	}
+
+	port := globalConfig.port
+	if r != nil && r.Port() > 0 {
+		port = r.Port()
+	}
+
 	var sb strings.Builder
+	if want("server") {
+		sb.WriteString("# Server\r\n")
+		sb.WriteString("cachestorm_version:" + version.Version + "\r\n")
+		sb.WriteString("arch_bits:64\r\n")
+		sb.WriteString("tcp_port:")
+		sb.WriteString(strconv.Itoa(port))
+		sb.WriteString("\r\n")
+		sb.WriteString("\r\n")
+	}
 
-	sb.WriteString("# Server\r\n")
-	sb.WriteString("cachestorm_version:" + version.Version + "\r\n")
-	sb.WriteString("arch_bits:64\r\n")
-	sb.WriteString("tcp_port:")
-	sb.WriteString(strconv.Itoa(globalConfig.port))
-	sb.WriteString("\r\n")
-	sb.WriteString("\r\n")
+	if want("memory") {
+		sb.WriteString("# Memory\r\n")
+		sb.WriteString("used_memory:")
+		sb.WriteString(strconv.FormatInt(ctx.Store.MemUsage(), 10))
+		sb.WriteString("\r\n")
+		sb.WriteString("\r\n")
+	}
 
-	sb.WriteString("# Memory\r\n")
-	sb.WriteString("used_memory:")
-	sb.WriteString(strconv.FormatInt(ctx.Store.MemUsage(), 10))
-	sb.WriteString("\r\n")
-	sb.WriteString("\r\n")
+	if want("keyspace") {
+		sb.WriteString(keyspaceInfo(ctx))
+	}
 
-	sb.WriteString(keyspaceInfo(ctx))
-
-	if replMgr := GetReplicationManager(); replMgr != nil {
-		sb.WriteString(replMgr.GetInfo())
+	if want("replication") {
+		if r != nil {
+			if fn := r.replicationInfo(); fn != nil {
+				sb.WriteString(fn())
+				return ctx.WriteBulkString(sb.String())
+			}
+		}
+		sb.WriteString("# Replication\r\nrole:master\r\nconnected_slaves:0\r\n")
 	}
 
 	return ctx.WriteBulkString(sb.String())
@@ -1716,27 +1744,6 @@ func cmdSLOWLOG(ctx *Context) error {
 	default:
 		return ctx.WriteError(errors.New("ERR unknown subcommand '" + subCmd + "'"))
 	}
-}
-
-func cmdWAIT(ctx *Context) error {
-	if ctx.ArgCount() != 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	numReplicas, err := strconv.Atoi(ctx.ArgString(0))
-	if err != nil {
-		return ctx.WriteError(ErrNotInteger)
-	}
-
-	timeout, err := strconv.Atoi(ctx.ArgString(1))
-	if err != nil {
-		return ctx.WriteError(ErrNotInteger)
-	}
-
-	_ = numReplicas
-	_ = timeout
-
-	return ctx.WriteInteger(1)
 }
 
 func cmdLASTSAVE(ctx *Context) error {

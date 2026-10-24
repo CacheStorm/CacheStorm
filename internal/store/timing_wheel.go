@@ -259,6 +259,8 @@ func (tw *TimingWheel) expireKey(key string) {
 	// schedule (the key was deleted, rescheduled, or PERSISTed after it was
 	// queued) must never remove a live key. Active expirations count as
 	// expirations, not client misses.
+	release := tw.store.expiryGuard(key)
+	defer release()
 	if tw.store.DeleteIfExpired(key) {
 		GlobalMetrics.RecordExpiration()
 	}

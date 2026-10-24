@@ -60,6 +60,35 @@ type HTTPServer struct {
 	// (resolved per request, so it follows a SWAPDB), and commands run
 	// through it can reach the others (FLUSHALL, MOVE, SWAPDB).
 	dbs *store.Databases
+	// srv, when set, is the server the API belongs to: its writes take the
+	// write gate, are refused on a read-only replica, and are recorded in the
+	// AOF and the replication stream.
+	srv *Server
+}
+
+// restWrite runs a write of the REST API, which changes the store directly,
+// under the write gate, and records cmds, its equivalent in commands, in the
+// AOF and the replication stream. It reports false, after answering, when a
+// read-only replica refuses it.
+func (h *HTTPServer) restWrite(w http.ResponseWriter, keys []string, apply func() []command.ExecutedCommand) bool {
+	if h.srv == nil {
+		apply()
+		return true
+	}
+	if h.srv.repl.ReadOnly() {
+		h.writeError(w, http.StatusForbidden, readOnlyReplicaError)
+		return false
+	}
+	var hold *gateHold
+	if len(keys) == 1 {
+		hold = h.srv.gate.acquireKey(keys[0])
+	} else {
+		hold = &gateHold{g: &h.srv.gate, exclusive: true}
+		hold.lock()
+	}
+	defer hold.unlock()
+	h.srv.recordWrites(apply())
+	return true
 }
 
 type sessionStore struct {
@@ -644,8 +673,17 @@ func (h *HTTPServer) handleKeys(w http.ResponseWriter, r *http.Request) {
 		}
 
 		opts := store.SetOptions{TTL: req.TTL, Tags: req.Tags}
-		if err := h.db0().Set(req.Key, value, opts); err != nil {
-			h.writeError(w, http.StatusInternalServerError, err.Error())
+		var setErr error
+		if !h.restWrite(w, []string{req.Key}, func() []command.ExecutedCommand {
+			if setErr = h.db0().Set(req.Key, value, opts); setErr != nil {
+				return nil
+			}
+			return restSetCommands(req.Key, req.Type, req.Value, req.TTL, req.Tags)
+		}) {
+			return
+		}
+		if setErr != nil {
+			h.writeError(w, http.StatusInternalServerError, setErr.Error())
 			return
 		}
 
@@ -701,7 +739,15 @@ func (h *HTTPServer) handleKey(w http.ResponseWriter, r *http.Request) {
 			h.writeError(w, http.StatusForbidden, "NOPERM key '"+key+"' is not allowed for this identity")
 			return
 		}
-		deleted := h.db0().Delete(key)
+		var deleted bool
+		if !h.restWrite(w, []string{key}, func() []command.ExecutedCommand {
+			if deleted = h.db0().Delete(key); deleted {
+				return []command.ExecutedCommand{{Name: "DEL", Args: [][]byte{[]byte(key)}}}
+			}
+			return nil
+		}) {
+			return
+		}
 		h.writeJSON(w, http.StatusOK, map[string]interface{}{
 			"deleted": deleted,
 			"key":     key,
@@ -837,13 +883,20 @@ func (h *HTTPServer) handleInvalidate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	keys := tagIndex.Invalidate(tag)
-
+	var keys []string
 	deletedCount := 0
-	for _, key := range keys {
-		if h.db0().Delete(key) {
-			deletedCount++
+	if !h.restWrite(w, nil, func() []command.ExecutedCommand {
+		keys = tagIndex.Invalidate(tag)
+		var dels []command.ExecutedCommand
+		for _, key := range keys {
+			if h.db0().Delete(key) {
+				deletedCount++
+				dels = append(dels, command.ExecutedCommand{Name: "DEL", Args: [][]byte{[]byte(key)}})
+			}
 		}
+		return dels
+	}) {
+		return
 	}
 
 	h.writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -854,46 +907,11 @@ func (h *HTTPServer) handleInvalidate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *HTTPServer) handleCluster(w http.ResponseWriter, _ *http.Request) {
-	h.writeJSON(w, http.StatusOK, map[string]interface{}{
-		"state":          "ok",
-		"slots_assigned": 16384,
-		"slots_ok":       16384,
-		"known_nodes":    1,
-		"size":           1,
-		"current_epoch":  1,
-		"nodes": []map[string]interface{}{
-			{
-				"id":        "node-1",
-				"addr":      "127.0.0.1:6380",
-				"role":      "master",
-				"slots":     "0-16383",
-				"connected": true,
-			},
-		},
-	})
+	h.writeError(w, http.StatusNotImplemented, errClusterUnsupported.Error())
 }
 
-func (h *HTTPServer) handleClusterJoin(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" {
-		h.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
-	}
-
-	var req struct {
-		Host string `json:"host"`
-		Port int    `json:"port"`
-	}
-
-	r.Body = http.MaxBytesReader(w, r.Body, 1024) // 1KB limit
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeError(w, http.StatusBadRequest, "invalid JSON")
-		return
-	}
-
-	h.writeJSON(w, http.StatusOK, map[string]interface{}{
-		"result":  "OK",
-		"message": fmt.Sprintf("Joining cluster at %s:%d", req.Host, req.Port),
-	})
+func (h *HTTPServer) handleClusterJoin(w http.ResponseWriter, _ *http.Request) {
+	h.writeError(w, http.StatusNotImplemented, errClusterUnsupported.Error())
 }
 
 // httpDangerousCommands are blocked from execution via the HTTP API
@@ -967,7 +985,16 @@ func (h *HTTPServer) handleExecute(w http.ResponseWriter, r *http.Request) {
 	// refuse it exactly like the TCP path does.
 	ctx.Authenticated, _ = r.Context().Value(httpAuthedContextKey{}).(bool)
 
+	if h.srv != nil && h.srv.repl.ReadOnly() {
+		ctx.ReplicaReadOnly = true
+		if replicaRefuses(upperCmd, args) {
+			h.writeError(w, http.StatusForbidden, readOnlyReplicaError)
+			return
+		}
+	}
+	release := h.srv.holdGate(ctx)
 	result, err := h.router.ExecuteHTTP(ctx)
+	release()
 	if err != nil {
 		h.writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -1901,3 +1928,36 @@ const adminUIHTML = `<!DOCTYPE html>
 </body>
 </html>
 `
+
+// restSetCommands is the REST key write as commands, for the AOF and the
+// replicas: the value of the requested type, its tags and its TTL.
+func restSetCommands(key, typ, value string, ttl time.Duration, tags []string) []command.ExecutedCommand {
+	b := func(parts ...string) [][]byte {
+		out := make([][]byte, len(parts))
+		for i, p := range parts {
+			out[i] = []byte(p)
+		}
+		return out
+	}
+	var cmds []command.ExecutedCommand
+	switch strings.ToLower(typ) {
+	case "list":
+		cmds = append(cmds, command.ExecutedCommand{Name: "DEL", Args: b(key)},
+			command.ExecutedCommand{Name: "RPUSH", Args: b(key, value)})
+	case "set":
+		cmds = append(cmds, command.ExecutedCommand{Name: "DEL", Args: b(key)},
+			command.ExecutedCommand{Name: "SADD", Args: b(key, value)})
+	case "hash":
+		cmds = append(cmds, command.ExecutedCommand{Name: "DEL", Args: b(key)},
+			command.ExecutedCommand{Name: "HSET", Args: b(key, "value", value)})
+	default:
+		cmds = append(cmds, command.ExecutedCommand{Name: "SET", Args: b(key, value)})
+	}
+	if len(tags) > 0 {
+		cmds = append(cmds, command.ExecutedCommand{Name: "ADDTAG", Args: b(append([]string{key}, tags...)...)})
+	}
+	if ttl > 0 {
+		cmds = append(cmds, command.ExecutedCommand{Name: "PEXPIRE", Args: b(key, strconv.FormatInt(ttl.Milliseconds(), 10))})
+	}
+	return cmds
+}

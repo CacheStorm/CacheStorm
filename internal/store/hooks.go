@@ -9,6 +9,19 @@ type StoreHooks struct {
 	OnEvict         func(key string, value interface{})
 	OnExpire        func(key string, value interface{})
 	OnTagInvalidate func(tag string, keys []string)
+
+	// OnExpireLocked is called while the shard lock of the expired key is
+	// still held, so whatever it records is ordered before any later write to
+	// the key. It must not call back into the store. Replication uses it to
+	// stream the expiry as a DEL in the order the master applied it.
+	OnExpireLocked func(s *Store, key string)
+	// OnEvictKey is called after a key was evicted, with the store it was
+	// evicted from.
+	OnEvictKey func(s *Store, key string)
+	// ExpiryGuard, when set, wraps every active expiration: it is called
+	// before the key is checked and removed, and the function it returns is
+	// called afterwards.
+	ExpiryGuard func(s *Store, key string) func()
 }
 
 // SetHooks installs the event callbacks. Call before the store serves
@@ -45,4 +58,32 @@ func (s *Store) fireTagInvalidate(tag string, keys []string) {
 	if h != nil {
 		h(tag, keys)
 	}
+}
+
+func (s *Store) fireExpireLocked(key string) {
+	s.hooksMu.RLock()
+	h := s.hooks.OnExpireLocked
+	s.hooksMu.RUnlock()
+	if h != nil {
+		h(s, key)
+	}
+}
+
+func (s *Store) fireEvictKey(key string) {
+	s.hooksMu.RLock()
+	h := s.hooks.OnEvictKey
+	s.hooksMu.RUnlock()
+	if h != nil {
+		h(s, key)
+	}
+}
+
+func (s *Store) expiryGuard(key string) func() {
+	s.hooksMu.RLock()
+	h := s.hooks.ExpiryGuard
+	s.hooksMu.RUnlock()
+	if h == nil {
+		return func() {}
+	}
+	return h(s, key)
 }

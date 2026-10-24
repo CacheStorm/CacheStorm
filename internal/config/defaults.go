@@ -33,6 +33,13 @@ func Default() *Config {
 			BindPort: 7946,
 			Replicas: 1,
 		},
+		Replication: ReplicationConfig{
+			Role:               "master",
+			ReadOnly:           true,
+			ReplTimeout:        60,
+			BacklogSize:        1 << 20,
+			ReplicaBufferLimit: 64 << 20,
+		},
 		Persistence: PersistenceConfig{
 			AOF:              true,
 			AOFSync:          "everysec",

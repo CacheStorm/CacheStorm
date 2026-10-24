@@ -2,6 +2,7 @@ package command
 
 import (
 	"errors"
+	"net"
 	"sync/atomic"
 	"time"
 
@@ -65,11 +66,66 @@ type Context struct {
 	// Router.Execute so EXEC runs its queue through the same handlers.
 	router *Router
 
+	// BeforeWait and AfterWait, when set, bracket the time a blocking
+	// command waits for data, so the connection can release the write
+	// ordering locks it holds while nothing is being written.
+	BeforeWait func()
+	AfterWait  func()
+
+	// ReplicaReadOnly is set when the command runs on a read-only replica:
+	// a script may run, but every write it attempts is refused.
+	ReplicaReadOnly bool
+
+	// ReplConf holds what REPLCONF told this connection; it belongs to the
+	// connection and outlives the per-command Context.
+	ReplConf *ReplicaConf
+
+	// Handoff is set by PSYNC/SYNC: once the command returns, the connection
+	// hands its socket to it and passes every later command to the handler it
+	// returns instead of the router.
+	Handoff func(conn net.Conn) ConnHandler
+
+	// propagate replaces what the command records in the AOF and the
+	// replication stream when propagateSet is true; an empty list records
+	// nothing.
+	propagate    []ExecutedCommand
+	propagateSet bool
+
 	// DB is the index of the selected database, the one Store is.
 	DB int
 	// DBs holds every database, so SELECT, MOVE, COPY ... DB, SWAPDB and
 	// FLUSHALL can reach the others. nil means Store is the only database.
 	DBs *store.Databases
+}
+
+// ReplicaConf is the replica information a connection announced with
+// REPLCONF before PSYNC.
+type ReplicaConf struct {
+	ListeningPort int
+	IP            string
+	Capa          []string
+}
+
+// ConnHandler serves a connection that was handed off by a command.
+type ConnHandler interface {
+	// Command handles one command read from the connection; it writes any
+	// reply itself.
+	Command(cmd string, args [][]byte)
+	// Closed is called once the connection is closed.
+	Closed()
+}
+
+// PropagateAs makes the command record cmds, instead of itself, in the AOF
+// and the replication stream. With no cmds nothing is recorded.
+func (ctx *Context) PropagateAs(cmds ...ExecutedCommand) {
+	ctx.propagate = append(ctx.propagate[:0:0], cmds...)
+	ctx.propagateSet = true
+}
+
+// Propagation returns what the command records, and whether it overrode its
+// own name and arguments.
+func (ctx *Context) Propagation() ([]ExecutedCommand, bool) {
+	return ctx.propagate, ctx.propagateSet
 }
 
 func NewContext(cmd string, args [][]byte, s *store.Store, w *resp.Writer) *Context {
@@ -156,6 +212,10 @@ func (ctx *Context) waitForKeysReady(keys []string, timeout time.Duration, ready
 		return "", false
 	}
 	var notified bool
+	if ctx.BeforeWait != nil {
+		ctx.BeforeWait()
+		defer ctx.AfterWait()
+	}
 	key, ok := ctx.Store.KeyNotifier().WaitForKeysOpts(keys, timeout, store.WaitOptions{
 		Cancel:   ctx.Done,
 		Ready:    ready,
@@ -181,6 +241,10 @@ func (ctx *Context) waitForKeysReady(keys []string, timeout time.Duration, ready
 func (ctx *Context) waitForStreamKeys(keys []string, timeout time.Duration, ready func(string) bool) (string, bool) {
 	if ctx.InExec {
 		return "", false
+	}
+	if ctx.BeforeWait != nil {
+		ctx.BeforeWait()
+		defer ctx.AfterWait()
 	}
 	return ctx.Store.KeyNotifier().WaitForKeysOpts(keys, timeout, store.WaitOptions{
 		Cancel: ctx.Done,

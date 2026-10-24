@@ -15,6 +15,14 @@ type Writer struct {
 	// client cannot parse them, so a writer encodes null as a null bulk
 	// string and a map as a flat key/value array until a client opts in.
 	resp3 bool
+	// errors counts the error replies written, so a caller can tell whether
+	// a command answered with an error.
+	errors int64
+}
+
+// Errors returns how many error replies the writer has written.
+func (w *Writer) Errors() int64 {
+	return w.errors
 }
 
 // SetRESP3 switches the writer between RESP2 (the default) and RESP3
@@ -83,6 +91,7 @@ func (w *Writer) WriteSimpleString(s string) error {
 }
 
 func (w *Writer) WriteError(s string) error {
+	w.errors++
 	if err := w.wr.WriteByte(byte(TypeError)); err != nil {
 		return err
 	}

@@ -183,6 +183,7 @@ func (s *Store) DeleteIfExpired(key string) bool {
 		return false
 	}
 	mem := shard.deleteLocked(key, entry)
+	s.fireExpireLocked(key)
 	shard.mu.Unlock()
 
 	s.trackMemory(-mem)
@@ -190,6 +191,24 @@ func (s *Store) DeleteIfExpired(key string) bool {
 	s.TouchKey(key)
 	s.fireExpire(key, entry.Value)
 	return true
+}
+
+// reapExpired removes entry from shard if it is still the entry stored under
+// key, announcing the expiry under the shard lock. It reports false when the
+// key was replaced or removed in the meantime.
+func (s *Store) reapExpired(shard *Shard, key string, entry *Entry) (int64, bool) {
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
+	cur, ok := shard.data[key]
+	if !ok {
+		return 0, true
+	}
+	if cur != entry {
+		return 0, false
+	}
+	mem := shard.deleteLocked(key, cur)
+	s.fireExpireLocked(key)
+	return mem, true
 }
 
 func (s *Store) KeyNotifier() *KeyNotifier {
@@ -325,7 +344,10 @@ func (s *Store) Get(key string) (*Entry, bool) {
 	}
 
 	if entry.IsExpired() {
-		mem, _ := shard.Delete(key)
+		mem, reaped := s.reapExpired(shard, key, entry)
+		if !reaped {
+			return s.Get(key)
+		}
 		s.trackMemory(-mem)
 		s.DeleteVersion(key) // Clean up version to prevent memory leak
 		s.tagIndex.RemoveKey(key, entry.Tags)
@@ -471,6 +493,9 @@ func (s *Store) GetOrCreate(key string, create func() Value) (Value, bool, error
 		cur.Touch()
 		GlobalMetrics.RecordHit()
 		return cur.Value, false, nil
+	}
+	if cur, ok := shard.data[key]; ok && cur.IsExpired() {
+		s.fireExpireLocked(key)
 	}
 	delta, old := shard.setLocked(key, NewEntry(value))
 	shard.mu.Unlock()
@@ -656,7 +681,10 @@ func (s *Store) Exists(key string) bool {
 	}
 
 	if entry.IsExpired() {
-		mem, _ := shard.Delete(key)
+		mem, reaped := s.reapExpired(shard, key, entry)
+		if !reaped {
+			return s.Exists(key)
+		}
 		s.trackMemory(-mem)
 		s.DeleteVersion(key) // Clean up version to prevent memory leak
 		// Drop the tag-index mappings too. This is a removal path like every

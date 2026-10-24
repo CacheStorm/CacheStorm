@@ -274,3 +274,8 @@ func touchWrittenKeys(ctx *Context) {
 	}
 	ctx.Store.TouchKeys(aclKeysForCommand(ctx.Command, ctx.Args))
 }
+
+// IsWriteCommand reports whether Redis flags cmd as a write command.
+func IsWriteCommand(cmd string) bool {
+	return isWriteCommand(CanonicalName(cmd))
+}

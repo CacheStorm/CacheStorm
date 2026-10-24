@@ -34,32 +34,6 @@ func TestConfigCommandsLowCoverage(t *testing.T) {
 	}
 }
 
-func TestReplicationCommandsLowCoverage(t *testing.T) {
-	s := store.NewStore()
-	router := NewRouter()
-	RegisterReplicationCommands(router)
-
-	tests := []struct {
-		name string
-		cmd  string
-		args [][]byte
-	}{
-		{"REPLCONF no args", "REPLCONF", nil},
-		{"REPLCONF listening-port", "REPLCONF", [][]byte{[]byte("listening-port"), []byte("6379")}},
-		{"REPLCONF ip-address", "REPLCONF", [][]byte{[]byte("ip-address"), []byte("127.0.0.1")}},
-		{"REPLCONF capa", "REPLCONF", [][]byte{[]byte("capa"), []byte("psync2")}},
-		{"REPLCONF ack", "REPLCONF", [][]byte{[]byte("ack"), []byte("100")}},
-		{"REPLCONF getack", "REPLCONF", [][]byte{[]byte("getack"), []byte("*")}},
-		{"PSYNC no args", "PSYNC", nil},
-		{"PSYNC replid", "PSYNC", [][]byte{[]byte("?"), []byte("-1")}},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			runCommandTest(t, router, s, tt.cmd, tt.args)
-		})
-	}
-}
 
 func TestUtilityCommandsLowCoverage(t *testing.T) {
 	s := store.NewStore()

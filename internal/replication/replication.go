@@ -1,23 +1,34 @@
+// Package replication implements master-replica replication between
+// CacheStorm servers with Redis semantics: a replica connects to its master's
+// RESP port, authenticates, announces itself with REPLCONF and asks for the
+// stream with PSYNC. The master answers +FULLRESYNC with a snapshot (the
+// command stream an AOF rewrite produces, sent as one bulk payload) followed
+// by every write it executes, or +CONTINUE with what the replica missed when
+// the replica's position is still in the backlog.
+//
+// The Manager owns both sides. As a master it encodes the writes the router
+// reports into the stream, keeps the backlog and feeds each attached replica
+// through a bounded queue drained by the replica's own goroutine. As a
+// replica it runs the master link: handshake, full or partial resync,
+// applying the stream through the router, acknowledging the offset every
+// second and reconnecting with backoff when the link drops.
 package replication
 
 import (
-	"bufio"
-	"encoding/binary"
-	"fmt"
+	"crypto/rand"
+	"encoding/hex"
 	"io"
-	"net"
 	"strconv"
-	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
-	"github.com/cachestorm/cachestorm/internal/config"
+	"github.com/cachestorm/cachestorm/internal/command"
 	"github.com/cachestorm/cachestorm/internal/logger"
-	"github.com/cachestorm/cachestorm/internal/persistence"
+	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
 )
 
+// Role is the replication role of a server.
 type Role int
 
 const (
@@ -25,649 +36,476 @@ const (
 	RoleReplica
 )
 
-type ReplicaState int
-
-const (
-	StateConnecting ReplicaState = iota
-	StateSyncing
-	StateConnected
-	StateDisconnected
-)
-
-type Replica struct {
-	ID           string
-	Conn         net.Conn
-	IP           string
-	Port         int
-	State        ReplicaState
-	Offset       int64
-	LastAckTime  time.Time
-	ConnectedAt  time.Time
-	Writer       *bufio.Writer
-	Capabilities map[string]bool
-	// writeMu serialises the writes to this replica's Writer. It lets the
-	// manager write to a replica without holding the manager's own lock, so
-	// one slow replica cannot stall every other operation on the manager.
-	writeMu sync.Mutex
-}
-
-// replBacklogFirstByteOffset is the offset of the oldest byte still in the
-// backlog. It used to report the same value as the master's offset, which
-// claimed the backlog was empty.
-func (m *Manager) replBacklogFirstByteOffset() int64 {
-	written := m.replBacklogIdx.Load()
-	size := int64(len(m.replBacklog))
-	if written <= size {
-		return 0
+func (r Role) String() string {
+	if r == RoleReplica {
+		return "slave"
 	}
-	return written - size
+	return "master"
 }
 
-// backlogRing returns a copy of the backlog's ring bytes, in ring order. It
-// exists so the ring's contents can be inspected: a byte-indexed ring cannot
-// be verified by looking at the counter alone.
-func (m *Manager) backlogRing() []byte {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	out := make([]byte, len(m.replBacklog))
-	copy(out, m.replBacklog)
-	return out
+// Host is what the Manager needs from the server it runs in.
+type Host interface {
+	// LockWrites blocks every write, from clients and from the master link,
+	// until UnlockWrites. A write that is running finishes first, together
+	// with its propagation.
+	LockWrites()
+	UnlockWrites()
+	// AfterFullSync runs, with writes locked, once a full resync has loaded
+	// the master's dataset; the server rewrites its AOF from it.
+	AfterFullSync() error
+	// ListeningPort is the port a replica announces to its master.
+	ListeningPort() int
 }
 
-// propagate writes cmd to the replica and flushes it. The replica's own lock
-// serialises the writes to its bufio.Writer, so two concurrent propagations
-// cannot interleave bytes in one replica's stream.
-func (r *Replica) propagate(cmd []byte) error {
-	r.writeMu.Lock()
-	defer r.writeMu.Unlock()
-	if _, err := r.Writer.Write(cmd); err != nil {
-		return err
+// Config tunes the Manager. Zero values take the defaults.
+type Config struct {
+	// MasterAuth is the password sent with AUTH to the master, and
+	// MasterUser the ACL user it authenticates as (empty: default user).
+	MasterAuth string
+	MasterUser string
+	// ReadOnly makes a replica refuse writes from its clients.
+	ReadOnly bool
+	// Timeout is how long a link may stay silent before it is dropped.
+	Timeout time.Duration
+	// BacklogSize is the size of the backlog partial resyncs are served from.
+	BacklogSize int
+	// ReplicaBufferLimit is the most bytes queued for one replica; a replica
+	// that falls further behind is disconnected.
+	ReplicaBufferLimit int
+	// PingPeriod is how often a master pings its replicas through the stream.
+	PingPeriod time.Duration
+	// AckPeriod is how often a replica acknowledges its offset.
+	AckPeriod time.Duration
+	// MaxBackoff caps the delay between two connection attempts.
+	MaxBackoff time.Duration
+	// AnnounceIP and AnnouncePort override what a replica tells its master.
+	AnnounceIP   string
+	AnnouncePort int
+}
+
+func (c *Config) applyDefaults() {
+	if c.Timeout <= 0 {
+		c.Timeout = 60 * time.Second
 	}
-	return r.Writer.Flush()
+	if c.BacklogSize <= 0 {
+		c.BacklogSize = 1 << 20
+	}
+	if c.ReplicaBufferLimit <= 0 {
+		c.ReplicaBufferLimit = 64 << 20
+	}
+	if c.PingPeriod <= 0 {
+		c.PingPeriod = 10 * time.Second
+	}
+	if c.AckPeriod <= 0 {
+		c.AckPeriod = time.Second
+	}
+	if c.MaxBackoff <= 0 {
+		c.MaxBackoff = time.Second
+	}
 }
 
+// Manager is the replication state of one server.
 type Manager struct {
-	mu             sync.RWMutex
-	cfg            *config.ReplicationConfig
-	store          *store.Store
-	role           atomic.Int32
-	masterConn     net.Conn
-	masterOffset   atomic.Int64
-	masterID       string
-	replicas       map[string]*Replica
-	replicaID      string
-	replBacklog    []byte
-	replBacklogIdx atomic.Int64
-	stopCh         chan struct{}
-	wg             sync.WaitGroup
-	onRoleChange   atomic.Value // func(Role); accessed atomically — SetRole fires from under m.mu (ReplicaOf), so locking here would self-deadlock
-	stopped        atomic.Bool
+	cfg    Config
+	host   Host
+	router *command.Router
+	dbs    *store.Databases
+
+	mu sync.Mutex
+	// role is RoleMaster or RoleReplica.
+	role Role
+	// replid is the id of the stream this server holds; replid2 the id it
+	// held before its last promotion, valid up to secondOffset.
+	replid       string
+	replid2      string
+	secondOffset int64
+	// offset counts the bytes of the stream so far.
+	offset int64
+	// backlog is a ring of the last len(backlog) stream bytes; byte p of the
+	// stream sits at backlog[p%len]. histLen is how many are valid. It is
+	// nil until a replica first attaches.
+	backlog []byte
+	histLen int64
+	// streamDB is the database the stream is in, -1 when unknown, so the
+	// next command is preceded by a SELECT.
+	streamDB int
+	replicas map[*replica]struct{}
+
+	// Replica side: the master to follow and the state of the link. linkDB
+	// and linkTx are the master client's selected database and transaction,
+	// kept across reconnections so a partial resync continues exactly.
+	masterHost     string
+	masterPort     int
+	link           *link
+	linkState      string
+	linkDB         int
+	linkTx         *command.Transaction
+	lastIO         time.Time
+	linkDownSince  time.Time
+	syncInProgress bool
+	// cached reports whether replid/offset describe the data this server
+	// holds, so a PSYNC can ask to continue from them.
+	cached bool
+
+	ackMu sync.Mutex
+	ackCh chan struct{}
+
+	stopCh  chan struct{}
+	stopped bool
+	wg      sync.WaitGroup
 }
 
-var globalManager *Manager
-var managerOnce sync.Once
-
-func GetManager() *Manager {
-	return globalManager
-}
-
-func InitManager(cfg *config.ReplicationConfig, s *store.Store) *Manager {
-	managerOnce.Do(func() {
-		globalManager = &Manager{
-			cfg:         cfg,
-			store:       s,
-			replicas:    make(map[string]*Replica),
-			replBacklog: make([]byte, 1024*1024),
-			replicaID:   generateReplicaID(),
-			stopCh:      make(chan struct{}),
-		}
-		if cfg.Role == "replica" || cfg.Role == "slave" {
-			globalManager.role.Store(int32(RoleReplica))
-		} else {
-			globalManager.role.Store(int32(RoleMaster))
-		}
-	})
-	return globalManager
-}
-
-func generateReplicaID() string {
-	return fmt.Sprintf("%x", time.Now().UnixNano())
-}
-
-func (m *Manager) Start() error {
-	if m.GetRole() == RoleReplica {
-		return m.connectToMaster()
+// New builds a Manager for a server that starts as a master.
+func New(cfg Config, host Host, router *command.Router, dbs *store.Databases) *Manager {
+	cfg.applyDefaults()
+	return &Manager{
+		cfg:          cfg,
+		host:         host,
+		router:       router,
+		dbs:          dbs,
+		role:         RoleMaster,
+		replid:       NewReplID(),
+		replid2:      zeroReplID,
+		secondOffset: -1,
+		streamDB:     -1,
+		replicas:     make(map[*replica]struct{}),
+		linkState:    "connect",
+		linkTx:       command.NewTransaction(),
+		cached:       true,
+		ackCh:        make(chan struct{}),
+		stopCh:       make(chan struct{}),
 	}
-	return nil
 }
 
+const zeroReplID = "0000000000000000000000000000000000000000"
+
+// NewReplID returns a random 40-character replication id.
+func NewReplID() string {
+	var b [20]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return strconv.FormatInt(time.Now().UnixNano(), 16)
+	}
+	return hex.EncodeToString(b[:])
+}
+
+// Start runs the master's replica pinger.
+func (m *Manager) Start() {
+	m.wg.Add(1)
+	go m.pingLoop()
+}
+
+// Stop disconnects every replica, stops the master link and waits for the
+// Manager's goroutines.
 func (m *Manager) Stop() {
-	if m.stopped.Swap(true) {
+	m.mu.Lock()
+	if m.stopped {
+		m.mu.Unlock()
 		return
 	}
+	m.stopped = true
 	close(m.stopCh)
-	m.mu.Lock()
-	conn := m.masterConn
-	m.masterConn = nil
-	// The connections are collected under the lock and closed outside it: a
-	// close is I/O, and the manager's lock is its only serialisation point.
-	replicaConns := make([]net.Conn, 0, len(m.replicas))
-	for _, r := range m.replicas {
-		replicaConns = append(replicaConns, r.Conn)
-	}
+	l := m.link
+	m.link = nil
+	replicas := m.detachAllLocked()
 	m.mu.Unlock()
-	for _, replicaConn := range replicaConns {
-		replicaConn.Close()
+	for _, r := range replicas {
+		r.close()
 	}
-	if conn != nil {
-		conn.Close()
+	if l != nil {
+		l.stopAndWait()
 	}
 	m.wg.Wait()
 }
 
-func (m *Manager) GetRole() Role {
-	return Role(m.role.Load())
-}
-
-func (m *Manager) GetReplicaID() string {
-	return m.replicaID
-}
-
-func (m *Manager) GetMasterOffset() int64 {
-	return m.masterOffset.Load()
-}
-
-func (m *Manager) GetReplicas() []*Replica {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	result := make([]*Replica, 0, len(m.replicas))
-	for _, r := range m.replicas {
-		result = append(result, r)
-	}
-	return result
-}
-
-func (m *Manager) GetReplicaCount() int {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return len(m.replicas)
-}
-
-func (m *Manager) GetInfo() string {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	var sb strings.Builder
-	role := m.GetRole()
-
-	if role == RoleMaster {
-		sb.WriteString("# Replication\r\n")
-		sb.WriteString("role:master\r\n")
-		fmt.Fprintf(&sb, "connected_replicas:%d\r\n", len(m.replicas))
-
-		i := 0
-		for _, r := range m.replicas {
-			if r.State == StateConnected {
-				fmt.Fprintf(&sb, "slave%d:ip=%s,port=%d,state=online,offset=%d,lag=%d\r\n",
-					i, r.IP, r.Port, r.Offset, int(time.Since(r.LastAckTime).Seconds()))
-				i++
-			}
-		}
-		fmt.Fprintf(&sb, "master_replid:%s\r\n", m.replicaID)
-		fmt.Fprintf(&sb, "master_repl_offset:%d\r\n", m.replBacklogIdx.Load())
-		sb.WriteString("repl_backlog_active:1\r\n")
-		sb.WriteString("repl_backlog_size:1048576\r\n")
-		fmt.Fprintf(&sb, "repl_backlog_first_byte_offset:%d\r\n", m.replBacklogFirstByteOffset())
-	} else {
-		sb.WriteString("# Replication\r\n")
-		sb.WriteString("role:slave\r\n")
-		fmt.Fprintf(&sb, "master_host:%s\r\n", m.cfg.MasterHost)
-		fmt.Fprintf(&sb, "master_port:%d\r\n", m.cfg.MasterPort)
-		fmt.Fprintf(&sb, "master_link_status:%s\r\n", m.getMasterLinkStatus())
-		fmt.Fprintf(&sb, "master_last_io_seconds_ago:%d\r\n", m.getSecondsSinceMasterIO())
-		fmt.Fprintf(&sb, "master_sync_in_progress:%d\r\n", m.getSyncInProgress())
-		fmt.Fprintf(&sb, "slave_repl_offset:%d\r\n", m.masterOffset.Load())
-		sb.WriteString("slave_priority:100\r\n")
-		fmt.Fprintf(&sb, "slave_read_only:%d\r\n", boolToInt(m.cfg.ReadOnly))
-	}
-
-	return sb.String()
-}
-
-func (m *Manager) connectToMaster() error {
-	// Snapshot the target under the lock: a concurrent ReplicaOf may
-	// reconfigure or clear the master at any time (previously these reads
-	// raced ReplicaOf's mu-held writes).
-	m.mu.RLock()
-	host, port := m.cfg.MasterHost, m.cfg.MasterPort
-	m.mu.RUnlock()
-
-	if host == "" || port == 0 {
-		return fmt.Errorf("master host/port not configured")
-	}
-
-	addr := net.JoinHostPort(host, strconv.Itoa(port))
-	conn, err := net.DialTimeout("tcp", addr, 10*time.Second)
-	if err != nil {
-		logger.Error().Err(err).Msg("failed to connect to master")
-		return err
-	}
-
+// Role returns the current role.
+func (m *Manager) Role() Role {
 	m.mu.Lock()
-	// The dial is slow; the master may have been reconfigured or cleared
-	// while it was in flight. Publishing the connection then would leak a
-	// stale link to a master this node has already left.
-	if m.cfg.MasterHost != host || m.cfg.MasterPort != port || m.masterConn != nil {
-		conn.Close()
-		m.mu.Unlock()
-		return fmt.Errorf("master reconfigured during connect")
-	}
-	m.masterConn = conn
-	m.mu.Unlock()
-
-	logger.Info().Str("addr", addr).Msg("connected to master")
-
-	m.wg.Add(1)
-	go m.syncWithMaster()
-
-	return nil
+	defer m.mu.Unlock()
+	return m.role
 }
 
-func (m *Manager) syncWithMaster() {
+// ReadOnly reports whether client writes must be refused: the server is a
+// read-only replica.
+func (m *Manager) ReadOnly() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.role == RoleReplica && m.cfg.ReadOnly
+}
+
+// ReplID returns the current replication id and offset.
+func (m *Manager) ReplID() (string, int64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.replid, m.offset
+}
+
+// Feed records a write a client executed in database db.
+func (m *Manager) Feed(db int, name string, args [][]byte) {
+	m.feed([]command.ExecutedCommand{{Name: name, Args: args, DB: db}}, false)
+}
+
+// FeedTransaction records the writes an EXEC (or a script) executed, as one
+// MULTI ... EXEC block.
+func (m *Manager) FeedTransaction(cmds []command.ExecutedCommand) {
+	if len(cmds) == 0 {
+		return
+	}
+	m.feed(cmds, true)
+}
+
+// FeedDelete records the removal of key from store s, for an expiry or an
+// eviction. It is called with the key's shard lock held, so it only touches
+// the Manager's own state.
+func (m *Manager) FeedDelete(s *store.Store, key string) {
+	db := m.dbIndex(s)
+	if db < 0 {
+		return
+	}
+	m.feed([]command.ExecutedCommand{{Name: "DEL", Args: [][]byte{[]byte(key)}, DB: db}}, false)
+}
+
+func (m *Manager) dbIndex(s *store.Store) int {
+	for i := 0; i < m.dbs.Count(); i++ {
+		if m.dbs.Existing(i) == s {
+			return i
+		}
+	}
+	return -1
+}
+
+func (m *Manager) feed(cmds []command.ExecutedCommand, tx bool) {
+	m.mu.Lock()
+	if m.role != RoleMaster || m.backlog == nil || m.stopped {
+		m.mu.Unlock()
+		return
+	}
+	var buf []byte
+	if tx {
+		buf = appendCommand(buf, "MULTI", nil)
+	}
+	for _, c := range cmds {
+		if c.DB != m.streamDB {
+			buf = appendCommand(buf, "SELECT", [][]byte{strconv.AppendInt(nil, int64(c.DB), 10)})
+			m.streamDB = c.DB
+		}
+		buf = appendCommand(buf, c.Name, c.Args)
+	}
+	if tx {
+		buf = appendCommand(buf, "EXEC", nil)
+	}
+	dropped := m.appendLocked(buf)
+	m.mu.Unlock()
+	for _, r := range dropped {
+		r.close()
+	}
+}
+
+// feedRaw appends already encoded bytes to the stream of a master.
+func (m *Manager) feedRaw(b []byte) {
+	m.mu.Lock()
+	if m.role != RoleMaster || m.backlog == nil || m.stopped {
+		m.mu.Unlock()
+		return
+	}
+	dropped := m.appendLocked(b)
+	m.mu.Unlock()
+	for _, r := range dropped {
+		r.close()
+	}
+}
+
+// appendLocked adds b to the stream: the offset, the backlog and the queue
+// of every attached replica. It returns the replicas whose queue overflowed;
+// the caller closes them once the lock is released.
+func (m *Manager) appendLocked(b []byte) []*replica {
+	if len(b) == 0 {
+		return nil
+	}
+	if m.backlog != nil {
+		size := int64(len(m.backlog))
+		data := b
+		start := m.offset
+		if int64(len(data)) > size {
+			start += int64(len(data)) - size
+			data = data[int64(len(data))-size:]
+		}
+		pos := start % size
+		n := copy(m.backlog[pos:], data)
+		copy(m.backlog, data[n:])
+		m.histLen += int64(len(b))
+		if m.histLen > size {
+			m.histLen = size
+		}
+	}
+	m.offset += int64(len(b))
+	var dropped []*replica
+	for r := range m.replicas {
+		if !r.enqueue(b, m.cfg.ReplicaBufferLimit) {
+			delete(m.replicas, r)
+			dropped = append(dropped, r)
+		}
+	}
+	if len(dropped) > 0 {
+		for _, r := range dropped {
+			logger.Warn().Str("replica", r.addr).
+				Int("limit", m.cfg.ReplicaBufferLimit).
+				Msg("disconnecting replica: output buffer limit reached")
+		}
+	}
+	return dropped
+}
+
+// createBacklogLocked starts a backlog at the current offset, if there is
+// none.
+func (m *Manager) createBacklogLocked() {
+	if m.backlog != nil {
+		return
+	}
+	m.backlog = make([]byte, m.cfg.BacklogSize)
+	m.histLen = 0
+}
+
+// backlogFromLocked returns the stream bytes from position from to the end,
+// and whether the backlog still holds them.
+func (m *Manager) backlogFromLocked(from int64) ([]byte, bool) {
+	if m.backlog == nil || from > m.offset || from < m.offset-m.histLen {
+		return nil, false
+	}
+	n := m.offset - from
+	out := make([]byte, n)
+	size := int64(len(m.backlog))
+	pos := from % size
+	c := copy(out, m.backlog[pos:])
+	copy(out[c:], m.backlog)
+	return out, true
+}
+
+// detachAllLocked removes every replica and returns them for closing.
+func (m *Manager) detachAllLocked() []*replica {
+	out := make([]*replica, 0, len(m.replicas))
+	for r := range m.replicas {
+		out = append(out, r)
+		delete(m.replicas, r)
+	}
+	return out
+}
+
+func (m *Manager) pingLoop() {
 	defer m.wg.Done()
-
-	// Snapshot the connection once: ReplicaOf may clear m.masterConn
-	// concurrently (previously these reads raced that mu-held write).
-	m.mu.RLock()
-	conn := m.masterConn
-	m.mu.RUnlock()
-	if conn == nil {
-		return
-	}
-	defer conn.Close()
-	defer logger.RecoverPanic("replication-sync")
-
-	reader := bufio.NewReader(conn)
-	writer := bufio.NewWriter(conn)
-
-	if err := m.sendHandshake(writer); err != nil {
-		logger.Error().Err(err).Msg("handshake failed")
-		return
-	}
-
+	t := time.NewTicker(m.cfg.PingPeriod)
+	defer t.Stop()
+	ping := encodeCommand("PING")
 	for {
 		select {
 		case <-m.stopCh:
 			return
-		default:
-		}
-
-		line, err := reader.ReadString('\n')
-		if err != nil {
-			if err != io.EOF {
-				logger.Error().Err(err).Msg("read from master failed")
-			}
-			return
-		}
-
-		line = strings.TrimSpace(line)
-		m.handleMasterResponse(line, reader)
-	}
-}
-
-func (m *Manager) sendHandshake(writer *bufio.Writer) error {
-	if _, err := writer.WriteString("*1\r\n$4\r\nPING\r\n"); err != nil {
-		return err
-	}
-	if err := writer.Flush(); err != nil {
-		return err
-	}
-
-	port := strconv.Itoa(m.cfg.ReplicaAnnouncePort)
-	if _, err := fmt.Fprintf(writer, "*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$%d\r\n%s\r\n",
-		len(port), port); err != nil {
-		return err
-	}
-	if err := writer.Flush(); err != nil {
-		return err
-	}
-
-	if _, err := writer.WriteString("*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n"); err != nil {
-		return err
-	}
-	if err := writer.Flush(); err != nil {
-		return err
-	}
-
-	psyncCmd := fmt.Sprintf("*3\r\n$5\r\nPSYNC\r\n$40\r\n%s\r\n$2\r\n%d\r\n",
-		strings.Repeat("?", 40), -1)
-	if _, err := writer.WriteString(psyncCmd); err != nil {
-		return err
-	}
-	if err := writer.Flush(); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (m *Manager) handleMasterResponse(line string, reader *bufio.Reader) {
-	if strings.HasPrefix(line, "+FULLRESYNC") {
-		parts := strings.Fields(line[11:])
-		if len(parts) >= 2 {
+		case <-t.C:
 			m.mu.Lock()
-			m.masterID = parts[0]
-			if offset, err := strconv.ParseInt(parts[1], 10, 64); err == nil {
-				m.masterOffset.Store(offset)
-			}
+			n := len(m.replicas)
 			m.mu.Unlock()
-			logger.Info().Str("master_id", parts[0]).Msg("full sync started")
-		}
-		m.receiveRDB(reader)
-	} else if strings.HasPrefix(line, "+CONTINUE") {
-		logger.Info().Msg("partial sync continued")
-	} else if strings.HasPrefix(line, "$") {
-		length, err := strconv.Atoi(line[1:])
-		if err != nil {
-			logger.Error().Err(err).Str("line", line).Msg("invalid bulk length in replication stream")
-		} else if length > 0 {
-			buf := make([]byte, length)
-			if _, err := io.ReadFull(reader, buf); err == nil {
-				m.processWriteCommand(buf)
+			if n > 0 {
+				m.feedRaw(ping)
 			}
 		}
 	}
-
-	m.masterOffset.Add(1)
 }
 
-func (m *Manager) receiveRDB(reader *bufio.Reader) {
-	line, err := reader.ReadString('\n')
-	if err != nil {
-		return
-	}
-	line = strings.TrimSpace(line)
-
-	if strings.HasPrefix(line, "$") {
-		length, err := strconv.ParseInt(line[1:], 10, 64)
-		if err != nil {
-			logger.Error().Err(err).Str("line", line).Msg("invalid RDB length")
-			return
-		}
-		if length > 0 {
-			buf := make([]byte, length)
-			if _, err := io.ReadFull(reader, buf); err != nil {
-				logger.Error().Err(err).Msg("failed to read RDB data")
-				return
-			}
-			logger.Info().Int64("size", length).Msg("RDB received, syncing complete")
-		}
-	}
+// notifyAck wakes the WAIT callers.
+func (m *Manager) notifyAck() {
+	m.ackMu.Lock()
+	close(m.ackCh)
+	m.ackCh = make(chan struct{})
+	m.ackMu.Unlock()
 }
 
-func (m *Manager) processWriteCommand(data []byte) {
+func (m *Manager) ackChan() <-chan struct{} {
+	m.ackMu.Lock()
+	defer m.ackMu.Unlock()
+	return m.ackCh
 }
 
-func (m *Manager) AddReplica(conn net.Conn, ip string, port int, capabilities map[string]bool) *Replica {
+// ackedReplicas counts the online replicas that acknowledged offset.
+func (m *Manager) ackedReplicas(offset int64) int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
-	replica := &Replica{
-		ID:           generateReplicaID(),
-		Conn:         conn,
-		IP:           ip,
-		Port:         port,
-		State:        StateConnected,
-		ConnectedAt:  time.Now(),
-		LastAckTime:  time.Now(),
-		Writer:       bufio.NewWriter(conn),
-		Capabilities: capabilities,
+	n := 0
+	for r := range m.replicas {
+		if r.online() && r.ackOffset.Load() >= offset {
+			n++
+		}
 	}
-
-	m.replicas[replica.ID] = replica
-
-	logger.Info().
-		Str("id", replica.ID).
-		Str("ip", ip).
-		Int("port", port).
-		Msg("replica connected")
-
-	return replica
+	return n
 }
 
-func (m *Manager) RemoveReplica(id string) {
+// Wait blocks until numReplicas replicas acknowledged every write made
+// before the call, timeout passes (0 waits forever) or done is closed, and
+// returns how many did.
+func (m *Manager) Wait(numReplicas int, timeout time.Duration, done <-chan struct{}) int {
 	m.mu.Lock()
-	replica, ok := m.replicas[id]
-	if ok {
-		delete(m.replicas, id)
-	}
+	target := m.offset
 	m.mu.Unlock()
-
-	// The connection is closed outside the lock: a close is I/O, and the
-	// manager's lock is its only serialisation point, so closing under it
-	// would block every other operation on the manager for as long as the
-	// close took.
-	if ok {
-		replica.Conn.Close()
-		logger.Info().Str("id", id).Msg("replica disconnected")
+	if n := m.ackedReplicas(target); n >= numReplicas {
+		return n
+	}
+	m.feedRaw(encodeCommand("REPLCONF", "GETACK", "*"))
+	var expire <-chan time.Time
+	if timeout > 0 {
+		t := time.NewTimer(timeout)
+		defer t.Stop()
+		expire = t.C
+	}
+	for {
+		ch := m.ackChan()
+		n := m.ackedReplicas(target)
+		if n >= numReplicas {
+			return n
+		}
+		select {
+		case <-ch:
+		case <-expire:
+			return m.ackedReplicas(target)
+		case <-done:
+			return m.ackedReplicas(target)
+		case <-m.stopCh:
+			return m.ackedReplicas(target)
+		}
 	}
 }
 
-func (m *Manager) UpdateReplicaOffset(id string, offset int64) {
+// State is the part of a replica's replication state that survives a
+// restart, so the replica can continue from its master's backlog.
+type State struct {
+	ReplID string
+	Offset int64
+	DB     int
+}
+
+// SavedState returns the state to persist next to the data at shutdown, and
+// false when there is nothing safe to persist: the server is not a synced
+// replica, or the master link stopped in the middle of a transaction.
+func (m *Manager) SavedState() (State, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
-	if replica, ok := m.replicas[id]; ok {
-		replica.Offset = offset
-		replica.LastAckTime = time.Now()
+	if m.role != RoleReplica || !m.cached || m.linkTx.IsActive() {
+		return State{}, false
 	}
+	return State{ReplID: m.replid, Offset: m.offset, DB: m.linkDB}, true
 }
 
-func (m *Manager) PropagateCommand(cmd []byte) {
-	// The WRITE lock is required: this method mutates the shared replBacklog,
-	// each replica's bufio.Writer, and replica.Offset. An RLock only excluded
-	// other readers, so two concurrent propagations wrote the same backlog
-	// bytes and raced on the same Offset (whose ++ is a non-atomic
-	// read-modify-write, losing updates and desynchronising the reported
-	// replication offset).
-	// The backlog is shared state, so it is written under the manager's write
-	// lock, which is what serialises concurrent propagations.
+// RestoreState adopts a state saved by SavedState for the dataset the server
+// loaded, so the next PSYNC asks to continue from it.
+func (m *Manager) RestoreState(st State) {
 	m.mu.Lock()
-
-	// The backlog is a BYTE-indexed ring: replBacklogIdx counts the bytes
-	// ever written, so the next write position is
-	// replBacklogIdx % len(replBacklog) and the number of valid bytes is
-	// min(replBacklogIdx, len(replBacklog)). It used to count COMMANDS and
-	// use that as a byte offset, so the bytes of a command were placed at
-	// the wrong position and a command straddling the end of the buffer was
-	// silently truncated.
-	start := m.replBacklogIdx.Load()
-	size := len(m.replBacklog)
-
-	// A command longer than the whole backlog cannot be stored, so the ring
-	// keeps the most recent bytes of it.
-	data := cmd
-	if len(data) > size {
-		data = data[len(data)-size:]
-	}
-	pos := int(start % int64(size))
-	written := copy(m.replBacklog[pos:], data)
-	if written < len(data) {
-		// The command continues at the start of the ring.
-		copy(m.replBacklog, data[written:])
-	}
-	m.replBacklogIdx.Store(start + int64(len(cmd)))
-
-	// The replicas are snapshotted under the lock and written to outside it:
-	// a slow replica must not block the manager. Each replica's writer is
-	// serialised by the replica's own lock, so the manager's lock is not
-	// needed for the writes.
-	targets := make([]*Replica, 0, len(m.replicas))
-	for _, replica := range m.replicas {
-		if replica.State == StateConnected && replica.Writer != nil {
-			targets = append(targets, replica)
-		}
-	}
-	m.mu.Unlock()
-
-	for _, replica := range targets {
-		if err := replica.propagate(cmd); err != nil {
-			logger.Error().Err(err).Str("replica", replica.ID).Msg("failed to write to replica")
-			continue
-		}
-		m.mu.Lock()
-		replica.Offset++
-		m.mu.Unlock()
-	}
+	defer m.mu.Unlock()
+	m.replid = st.ReplID
+	m.offset = st.Offset
+	m.linkDB = st.DB
+	m.replid2 = zeroReplID
+	m.secondOffset = -1
+	m.cached = true
 }
 
-func (m *Manager) getMasterLinkStatus() string {
-	if m.masterConn == nil {
-		return "down"
-	}
-	return "up"
-}
-
-func (m *Manager) getSecondsSinceMasterIO() int {
-	return 0
-}
-
-func (m *Manager) getSyncInProgress() int {
-	return 0
-}
-
-func (m *Manager) SetRole(role Role) {
-	m.role.Store(int32(role))
-	if fn, ok := m.onRoleChange.Load().(func(Role)); ok && fn != nil {
-		fn(role)
-	}
-}
-
-func (m *Manager) OnRoleChange(fn func(Role)) {
-	m.onRoleChange.Store(fn)
-}
-
-func (m *Manager) ReplicaOf(host string, port int) error {
-	if host == "no" && port == 1 {
-		// The lock covers the state change only. The connection is closed
-		// after it is released: a close is I/O, and the manager's lock is its
-		// only serialisation point, so closing under it would block every
-		// other operation on the manager. The role change moves out of the
-		// lock for the same reason: its callback may use the manager, and
-		// calling it under the lock could deadlock.
-		m.mu.Lock()
-		conn := m.masterConn
-		m.masterConn = nil
-		m.cfg.MasterHost = ""
-		m.cfg.MasterPort = 0
-		m.mu.Unlock()
-
-		m.SetRole(RoleMaster)
-		if conn != nil {
-			conn.Close()
-		}
-		logger.Info().Msg("promoted to master")
-		return nil
-	}
-
-	m.mu.Lock()
-	m.cfg.MasterHost = host
-	m.cfg.MasterPort = port
-	m.mu.Unlock()
-
-	m.SetRole(RoleReplica)
-
-	go func() {
-		if err := m.connectToMaster(); err != nil {
-			logger.Error().Err(err).Msg("failed to connect to new master")
-		}
-	}()
-
-	return nil
-}
-
-func boolToInt(b bool) int {
-	if b {
-		return 1
-	}
-	return 0
-}
-
-type SyncWriter struct {
-	writer io.Writer
-}
-
-func NewSyncWriter(w io.Writer) *SyncWriter {
-	return &SyncWriter{writer: w}
-}
-
-func (w *SyncWriter) WriteRDBHeader() error {
-	if _, err := w.writer.Write([]byte("REDIS0011")); err != nil {
-		return err
-	}
-	if _, err := w.writer.Write([]byte{0xFE}); err != nil {
-		return err
-	}
-	return persistence.WriteRDBLength(w.writer, 0)
-}
-
-func (w *SyncWriter) WriteDatabaseSelect(db int) error {
-	if _, err := w.writer.Write([]byte{0xFE}); err != nil {
-		return err
-	}
-	return persistence.WriteRDBLength(w.writer, db)
-}
-
-func (w *SyncWriter) WriteKeyValuePair(key string, value interface{}, ttl time.Duration, expireAt int64) error {
-	if ttl > 0 {
-		if err := w.writeByte(0xFC); err != nil {
-			return err
-		}
-		var exp [8]byte
-		binary.LittleEndian.PutUint64(exp[:], uint64(expireAt))
-		if _, err := w.writer.Write(exp[:]); err != nil {
-			return err
-		}
-	}
-	// Value type: string. The key length uses the canonical RDB length
-	// encoding so entries parse symmetrically with persistence.RDBReader
-	// (a raw byte(len) misparses for lengths >= 64).
-	if err := w.writeByte(0x00); err != nil {
-		return err
-	}
-	if err := persistence.WriteRDBLength(w.writer, len(key)); err != nil {
-		return err
-	}
-	if _, err := w.writer.Write([]byte(key)); err != nil {
-		return err
-	}
-
-	switch v := value.(type) {
-	case string:
-		return w.writeStringValue(v)
-	case []byte:
-		return w.writeStringValue(string(v))
-	}
-	return nil
-}
-
-// writeStringValue writes a string value using the canonical RDB length
-// encoding (replaces the former RESP-style "$" + 4-byte raw length, which
-// the RDB reader could not parse for any length).
-func (w *SyncWriter) writeStringValue(s string) error {
-	if err := persistence.WriteRDBLength(w.writer, len(s)); err != nil {
-		return err
-	}
-	_, err := w.writer.Write([]byte(s))
-	return err
-}
-
-func (w *SyncWriter) writeByte(b byte) error {
-	_, err := w.writer.Write([]byte{b})
-	return err
-}
-
-func (w *SyncWriter) WriteEnd() error {
-	_, err := w.writer.Write([]byte{0xFF})
-	return err
+// discardWriter is a reply writer for commands whose replies nobody reads.
+func discardWriter() *resp.Writer {
+	return resp.NewWriter(io.Discard)
 }

@@ -219,12 +219,9 @@ func cmdEXEC(ctx *Context) error {
 	executed := make([]ExecutedCommand, 0, len(queued))
 
 	for _, qc := range queued {
-		db := ctx.DB
-		result := executeQueuedCommand(ctx, qc)
+		result, recorded := runQueuedCommand(ctx, qc)
 		results = append(results, result)
-		if result.Type != resp.TypeError {
-			executed = append(executed, ExecutedCommand{Name: qc.cmd, Args: qc.args, DB: db})
-		}
+		executed = append(executed, recorded...)
 	}
 
 	if r := ctx.dispatcher(); r != nil && len(executed) > 0 {
@@ -267,13 +264,37 @@ func cmdUNWATCH(ctx *Context) error {
 // and returns the reply it wrote. The handler is the one a standalone call
 // uses, so a command behaves the same inside and outside a transaction.
 func executeQueuedCommand(ctx *Context, qc queuedCommand) *resp.Value {
+	v, _ := runQueuedCommand(ctx, qc)
+	return v
+}
+
+// runQueuedCommand runs one queued command like executeQueuedCommand and also
+// returns what it records in the AOF and the replication stream: nothing for
+// an error reply, the handler's override when it set one, the command itself
+// (when the router records it) otherwise.
+func runQueuedCommand(ctx *Context, qc queuedCommand) (*resp.Value, []ExecutedCommand) {
+	db := ctx.DB
+	v, sub := execQueued(ctx, qc)
+	if v.Type == resp.TypeError || sub == nil {
+		return v, nil
+	}
+	if cmds, ok := sub.Propagation(); ok {
+		return v, cmds
+	}
+	if r := ctx.dispatcher(); r != nil && !r.Persisted(qc.cmd, qc.args) {
+		return v, nil
+	}
+	return v, []ExecutedCommand{{Name: qc.cmd, Args: qc.args, DB: db}}
+}
+
+func execQueued(ctx *Context, qc queuedCommand) (*resp.Value, *Context) {
 	r := ctx.dispatcher()
 	if r == nil {
-		return resp.ErrorValue(ErrUnknownCommand.Error())
+		return resp.ErrorValue(ErrUnknownCommand.Error()), nil
 	}
 	def, ok := r.Get(qc.cmd)
 	if !ok {
-		return resp.ErrorValue("ERR unknown command '" + qc.cmd + "'")
+		return resp.ErrorValue("ERR unknown command '" + qc.cmd + "'"), nil
 	}
 
 	var output bytes.Buffer
@@ -283,6 +304,8 @@ func executeQueuedCommand(ctx *Context, qc queuedCommand) *resp.Value {
 	sub.Writer = resp.NewWriter(&output)
 	sub.InExec = true
 	sub.StartTime = time.Now()
+	sub.propagate = nil
+	sub.propagateSet = false
 
 	err := def.Handler(&sub)
 	reaccountWrittenKeys(&sub)
@@ -300,10 +323,10 @@ func executeQueuedCommand(ctx *Context, qc queuedCommand) *resp.Value {
 	ctx.Subscriber = sub.Subscriber
 
 	if err != nil {
-		return resp.ErrorValue(err.Error())
+		return resp.ErrorValue(err.Error()), &sub
 	}
 	if err := sub.Writer.Flush(); err != nil {
-		return resp.ErrorValue(err.Error())
+		return resp.ErrorValue(err.Error()), &sub
 	}
 
 	reader := resp.NewReader(&output)
@@ -314,17 +337,17 @@ func executeQueuedCommand(ctx *Context, qc queuedCommand) *resp.Value {
 			break
 		}
 		if err != nil {
-			return resp.ErrorValue("ERR " + err.Error())
+			return resp.ErrorValue("ERR " + err.Error()), &sub
 		}
 		values = append(values, v)
 	}
 	switch len(values) {
 	case 0:
-		return resp.NullBulkString()
+		return resp.NullBulkString(), &sub
 	case 1:
-		return values[0]
+		return values[0], &sub
 	default:
-		return resp.ArrayValue(values)
+		return resp.ArrayValue(values), &sub
 	}
 }
 

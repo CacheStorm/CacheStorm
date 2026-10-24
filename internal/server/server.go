@@ -20,6 +20,7 @@ import (
 	"github.com/cachestorm/cachestorm/internal/logger"
 	"github.com/cachestorm/cachestorm/internal/persistence"
 	"github.com/cachestorm/cachestorm/internal/plugin"
+	"github.com/cachestorm/cachestorm/internal/replication"
 	"github.com/cachestorm/cachestorm/internal/sentinel"
 	"github.com/cachestorm/cachestorm/internal/store"
 	"github.com/cachestorm/cachestorm/plugins/metrics"
@@ -118,9 +119,17 @@ type Server struct {
 	sentinelCancel context.CancelFunc
 	// dbs holds the numbered databases; database 0 starts out as store.
 	dbs *store.Databases
+	// repl is the replication state: master side and master link.
+	repl *replication.Manager
+	// gate orders every write with its propagation to the AOF and the
+	// replicas, and lets a full resync snapshot the data between writes.
+	gate writeGate
 }
 
 func New(cfg *config.Config) (*Server, error) {
+	if cfg.Cluster.Enabled {
+		return nil, errClusterUnsupported
+	}
 	s := &Server{
 		cfg:    cfg,
 		store:  store.NewStore(),
@@ -144,11 +153,7 @@ func New(cfg *config.Config) (*Server, error) {
 
 	// Bridge the store's lifecycle events (eviction, expiry, tag
 	// invalidation) to the registered plugin consumers.
-	s.store.SetHooks(store.StoreHooks{
-		OnEvict:         s.pluginMgr.RunEvictHooks,
-		OnExpire:        s.pluginMgr.RunExpireHooks,
-		OnTagInvalidate: s.pluginMgr.RunTagInvalidateHooks,
-	})
+	s.store.SetHooks(s.storeHooks())
 
 	// Slow log: honor the configured enabled flag, threshold, and size.
 	store.GlobalSlowLog.SetEnabled(cfg.Plugins.SlowLog.Enabled)
@@ -194,7 +199,6 @@ func New(cfg *config.Config) (*Server, error) {
 	command.RegisterScriptCommands(s.router)
 	command.RegisterDebugCommands(s.router)
 	command.RegisterCacheCommands(s.router)
-	command.RegisterReplicationCommands(s.router)
 	command.RegisterFunctionCommands(s.router)
 	command.RegisterModuleCommands(s.router)
 	command.RegisterSentinelCommands(s.router)
@@ -241,7 +245,7 @@ func New(cfg *config.Config) (*Server, error) {
 	// its Pub/Sub hub, memory tracker and hooks, configured above.
 	s.dbs = store.NewDatabases(s.store, cfg.Server.Databases)
 
-	command.InitReplicationManager(s.store)
+	s.newReplication(cfg)
 
 	if cfg.Server.RequirePass != "" {
 		s.router.SetRequirePass(cfg.Server.RequirePass)
@@ -270,6 +274,7 @@ func New(cfg *config.Config) (*Server, error) {
 		s.httpServer = NewHTTPServer(s.store, s.router, httpCfg)
 		s.httpServer.dbs = s.dbs
 		s.httpServer.connCount = func() int64 { return s.connCount.Load() }
+		s.httpServer.srv = s
 	}
 
 	// Configure AOF persistence
@@ -318,31 +323,48 @@ func New(cfg *config.Config) (*Server, error) {
 			}
 		}
 
-		// Set post-execute hook on router to persist write commands
-		s.router.SetPostExecuteDB(func(db int, cmd string, args [][]byte) {
-			upperCmd := strings.ToUpper(cmd)
-			if persistedCommand(upperCmd, args) {
-				if err := s.aof.AppendDB(db, upperCmd, args); err != nil {
-					logger.Error().Err(err).Str("cmd", cmd).Msg("AOF append failed")
-				}
-			}
-		})
+		s.loadReplicationState(dataDir)
+	}
 
-		// EXEC runs its queue outside the per-command hook; its writes are
-		// persisted here as one MULTI ... EXEC block.
-		s.router.SetPostExec(func(cmds []command.ExecutedCommand) {
-			writes := make([]persistence.Command, 0, len(cmds))
-			for _, c := range cmds {
-				upperCmd := strings.ToUpper(c.Name)
-				if persistedCommand(upperCmd, c.Args) {
-					writes = append(writes, persistence.Command{Name: upperCmd, Args: c.Args, DB: c.DB})
-				}
+	// Every write the router executes goes to the AOF, when it is enabled,
+	// and to the replication stream.
+	s.router.SetPostExecuteDB(func(db int, cmd string, args [][]byte) {
+		upperCmd := strings.ToUpper(cmd)
+		if !persistedCommand(upperCmd, args) {
+			return
+		}
+		if s.aof != nil {
+			if err := s.aof.AppendDB(db, upperCmd, args); err != nil {
+				logger.Error().Err(err).Str("cmd", cmd).Msg("AOF append failed")
 			}
-			if err := s.aof.AppendTransaction(writes); err != nil {
+		}
+		s.repl.Feed(db, upperCmd, args)
+	})
+
+	// EXEC runs its queue outside the per-command hook; its writes are
+	// recorded here as one MULTI ... EXEC block, as are a script's effects.
+	s.router.SetPostExec(func(cmds []command.ExecutedCommand) {
+		writes := make([]command.ExecutedCommand, 0, len(cmds))
+		for _, c := range cmds {
+			upperCmd := strings.ToUpper(c.Name)
+			if persistedCommand(upperCmd, c.Args) {
+				writes = append(writes, command.ExecutedCommand{Name: upperCmd, Args: c.Args, DB: c.DB})
+			}
+		}
+		if len(writes) == 0 {
+			return
+		}
+		if s.aof != nil {
+			aofWrites := make([]persistence.Command, len(writes))
+			for i, c := range writes {
+				aofWrites[i] = persistence.Command{Name: c.Name, Args: c.Args, DB: c.DB}
+			}
+			if err := s.aof.AppendTransaction(aofWrites); err != nil {
 				logger.Error().Err(err).Msg("AOF transaction append failed")
 			}
-		})
-	}
+		}
+		s.repl.FeedTransaction(writes)
+	})
 
 	// Give SAVE/BGSAVE something real to do. They used to stamp a timestamp and
 	// reply +OK while performing no I/O, so a client treating SAVE as a
@@ -413,9 +435,19 @@ func (s *Server) Start(_ context.Context) error {
 	}
 
 	s.listener = listener
+	s.router.SetPort(s.ListeningPort())
 
 	// Active expiration: remove expired keys without requiring reads.
 	s.dbs.StartExpiry()
+
+	s.repl.Start()
+	if rc := s.cfg.Replication; rc.IsReplica() {
+		if err := s.repl.ReplicaOf(rc.MasterHost, rc.MasterPort); err != nil {
+			listener.Close()
+			s.repl.Stop()
+			return fmt.Errorf("replication: %w", err)
+		}
+	}
 
 	go s.acceptLoop()
 
@@ -556,6 +588,7 @@ func (s *Server) acceptLoop() {
 		store.GlobalMetrics.RecordConnection()
 		c := NewConnection(connID, conn, s.store, s.router, s.pluginMgr)
 		c.dbs = s.dbs
+		c.srv = s
 
 		// Apply configured timeouts
 		if rt := s.cfg.Server.ReadTimeoutDuration(); rt > 0 {
@@ -607,6 +640,10 @@ func (s *Server) Stop(ctx context.Context) error {
 		s.listener.Close()
 	}
 	logger.Info().Msg("stopped accepting new connections")
+
+	// 1a. Stop replication: the master link and every attached replica, so
+	// no write arrives from the master while the server drains.
+	s.repl.Stop()
 
 	// 1b. Stop the Sentinel monitor and gossip loops. Stop joins both via
 	// wg.Wait, so they cannot outlive the server.
@@ -688,6 +725,8 @@ func (s *Server) Stop(ctx context.Context) error {
 	// 5. Stop AOF writer (flush remaining data)
 	if s.aof != nil {
 		s.aof.Stop()
+		// A replica records where in its master's stream the AOF ends.
+		s.saveReplicationState()
 	}
 
 	logger.Info().Msg("CacheStorm server stopped")

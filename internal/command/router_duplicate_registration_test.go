@@ -53,7 +53,6 @@ func registerEveryFamily(router *Router) {
 	RegisterScriptCommands(router)
 	RegisterDebugCommands(router)
 	RegisterCacheCommands(router)
-	RegisterReplicationCommands(router)
 	RegisterFunctionCommands(router)
 	RegisterModuleCommands(router)
 	RegisterSentinelCommands(router)

@@ -124,78 +124,8 @@ func TestWorkflowCommandsExecutionFullCoverage(t *testing.T) {
 	}
 }
 
-func TestReplicationCommandsFullCoverage(t *testing.T) {
-	s := store.NewStore()
-	router := NewRouter()
-	RegisterReplicationCommands(router)
 
-	tests := []struct {
-		name string
-		cmd  string
-		args [][]byte
-	}{
-		{"REPLICAOF", "REPLICAOF", [][]byte{[]byte("127.0.0.1"), []byte("6379")}},
-		{"REPLICAOF no one", "REPLICAOF", [][]byte{[]byte("NO"), []byte("ONE")}},
-		{"REPLICAOF no args", "REPLICAOF", nil},
-		{"ROLE", "ROLE", nil},
-		{"SLAVEOF", "SLAVEOF", [][]byte{[]byte("127.0.0.1"), []byte("6379")}},
-		{"SLAVEOF no one", "SLAVEOF", [][]byte{[]byte("NO"), []byte("ONE")}},
-		{"SLAVEOF no args", "SLAVEOF", nil},
-	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			runCommandTest(t, router, s, tt.cmd, tt.args)
-		})
-	}
-}
-
-func TestReplicationCommandsSyncFullCoverage(t *testing.T) {
-	s := store.NewStore()
-	router := NewRouter()
-	RegisterReplicationCommands(router)
-
-	tests := []struct {
-		name string
-		cmd  string
-		args [][]byte
-	}{
-		{"SYNC", "SYNC", nil},
-		{"PSYNC", "PSYNC", [][]byte{[]byte("?"), []byte("-1")}},
-		{"PSYNC no args", "PSYNC", nil},
-		{"WAIT", "WAIT", [][]byte{[]byte("1"), []byte("1000")}},
-		{"WAIT no args", "WAIT", nil},
-		{"WAITAOF", "WAITAOF", [][]byte{[]byte("1"), []byte("1000")}},
-		{"WAITAOF no args", "WAITAOF", nil},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			runCommandTest(t, router, s, tt.cmd, tt.args)
-		})
-	}
-}
-
-func TestReplicationCommandsInfoFullCoverage(t *testing.T) {
-	s := store.NewStore()
-	router := NewRouter()
-	RegisterReplicationCommands(router)
-
-	tests := []struct {
-		name string
-		cmd  string
-		args [][]byte
-	}{
-		{"INFO REPLICATION", "INFO", [][]byte{[]byte("REPLICATION")}},
-		{"INFO no args", "INFO", nil},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			runCommandTest(t, router, s, tt.cmd, tt.args)
-		})
-	}
-}
 
 func TestFunctionCommandsFullCoverage(t *testing.T) {
 	s := store.NewStore()
