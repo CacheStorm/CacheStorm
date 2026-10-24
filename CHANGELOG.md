@@ -24,12 +24,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GraphQL subscriptions
 
 ### Added
+- Configuration: `CACHESTORM_REQUIREPASS`, `CACHESTORM_HTTP_PASSWORD` and `CACHESTORM_DATA_DIR` override the config file, so a container can take its secrets from the environment instead of a baked-in file
+- CI: jobs for the Python, TypeScript and Go clients, the five example modules, the Redis compatibility harness and a Docker image smoke test (`scripts/docker-smoke.sh`)
 - Compatibility: a differential test harness in `tests/compat/` runs the same command sequences against Redis 7.4 (in Docker) and CacheStorm and compares every reply and the resulting keyspace. It is behind the `compat` build tag; `tests/compat/REPORT.md` holds the latest results
 - Command metadata: the arity, flags and key positions of every Redis 7.4 command, generated from Redis' own COMMAND reply by `tools/cmdspecgen`
 
 ### Security
+- Authentication: only AUTH, HELLO, QUIT and RESET run before a requirepass client authenticates, the commands Redis flags `no_auth`. PING and COMMAND were exempt too, so an unauthenticated client could probe the server
 
 ### Fixed
+- Docker: images are built on alpine 3.22 (3.19 is end of life) and stamped with the release version, so INFO and `--version` report it instead of `dev`; console logs are written without colour codes when the output is not a terminal
 - Pub/Sub: published messages are delivered to subscribers. PUBLISH counted the receivers and queued the bare payload, but nothing ever wrote the queue to the subscriber's socket, so no client received a message. Each subscribed connection now has a delivery goroutine that writes `message`/`pmessage`/`smessage` frames, serialised with the connection's replies; a subscriber whose queue overflows is disconnected, as Redis does for its pub/sub output buffer limit, instead of silently losing messages
 - Pub/Sub: subscribe and unsubscribe acks are bulk strings and carry the client's total subscription count; UNSUBSCRIBE and PUNSUBSCRIBE with no arguments ack every channel they leave; SSUBSCRIBE, SUNSUBSCRIBE and SPUBLISH work on a separate shard-channel namespace instead of being stubs; a subscribed RESP2 client may only run the subscription commands, PING, QUIT and RESET; pattern matching follows Redis' glob rules including `[a-z]` classes and escapes
 - Commands: command names are case-insensitive. The router looked names up exactly as sent, so `set k v` or `GeT k` was an unknown command and clients that send lower-case names (go-redis, ioredis and others) could not run anything

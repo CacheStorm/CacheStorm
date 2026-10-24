@@ -10,10 +10,15 @@ RUN go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o cachestorm ./cmd/cachestorm
+# The release passes the tag so INFO and --version report it; a local build
+# reports "dev".
+ARG VERSION=dev
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -ldflags="-s -w -X github.com/cachestorm/cachestorm/internal/version.Version=${VERSION}" \
+    -o cachestorm ./cmd/cachestorm
 
 # Final stage
-FROM alpine:3.19
+FROM alpine:3.22
 
 RUN apk add --no-cache ca-certificates tzdata
 

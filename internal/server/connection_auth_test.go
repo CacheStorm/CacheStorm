@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -185,13 +186,20 @@ func TestNoRequirePassNeedsNoAuthControl(t *testing.T) {
 	}
 }
 
-// PING is in noAuthCommands and must stay reachable before authenticating.
-func TestPingBypassesAuthControl(t *testing.T) {
+// PING is not a no_auth command in Redis: before AUTH it is refused like any
+// other command, and after AUTH it answers.
+func TestPingRequiresAuth(t *testing.T) {
 	c, _ := newAuthConnServer(t, "s3cret")
 	r := bufio.NewReader(c)
 
 	authSend(c, "PING")
-	if got := authRecv(t, c, r); got.Type == resp.TypeError {
-		t.Fatalf("PING before AUTH returned %q, want +PONG", got.Err)
+	if got := authRecv(t, c, r); got.Type != resp.TypeError || !strings.HasPrefix(got.Err, "NOAUTH") {
+		t.Fatalf("PING before AUTH returned %#v, want NOAUTH", got)
+	}
+	authSend(c, "AUTH", "s3cret")
+	authRecv(t, c, r)
+	authSend(c, "PING")
+	if got := authRecv(t, c, r); got.Type != resp.TypeSimpleString || got.Str != "PONG" {
+		t.Fatalf("PING after AUTH returned %#v, want +PONG", got)
 	}
 }

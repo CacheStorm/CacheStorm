@@ -9,7 +9,7 @@ RUN go build -ldflags="-s -w" -o cachestorm ./cmd/cachestorm
 
 # Runtime image
 # Pinned, not :latest, so a rebuild months from now resolves the same base.
-FROM alpine:3.19
+FROM alpine:3.22
 
 RUN apk --no-cache add ca-certificates
 

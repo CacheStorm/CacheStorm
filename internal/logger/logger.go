@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mattn/go-isatty"
 	"github.com/rs/zerolog"
 )
 
@@ -31,18 +32,22 @@ func Init(level, format, output string) {
 		lvl = zerolog.InfoLevel
 	}
 
-	var writer io.Writer = os.Stdout
+	out := os.Stdout
 	switch strings.ToLower(output) {
 	case "stderr":
-		writer = os.Stderr
+		out = os.Stderr
 	case "stdout":
-		writer = os.Stdout
+		out = os.Stdout
 	}
 
+	var writer io.Writer = out
 	if strings.EqualFold(format, "console") {
+		// Colour codes only make sense on a terminal; in a container or a
+		// log file they arrive as literal escape sequences.
 		writer = zerolog.ConsoleWriter{
-			Out:        writer,
+			Out:        out,
 			TimeFormat: time.RFC3339,
+			NoColor:    !isatty.IsTerminal(out.Fd()) && !isatty.IsCygwinTerminal(out.Fd()),
 		}
 	}
 

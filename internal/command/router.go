@@ -193,14 +193,14 @@ func CanonicalName(name string) string {
 	return name
 }
 
-// Commands that are allowed before authentication
+// Commands that are allowed before authentication: the ones Redis flags
+// no_auth. PING and COMMAND used to be exempt as well, so a client with no
+// password could probe a requirepass server.
 var noAuthCommands = map[string]bool{
-	"AUTH":    true,
-	"HELLO":   true,
-	"PING":    true,
-	"QUIT":    true,
-	"RESET":   true,
-	"COMMAND": true,
+	"AUTH":  true,
+	"HELLO": true,
+	"QUIT":  true,
+	"RESET": true,
 }
 
 func (r *Router) SetPostExecute(fn func(cmd string, args [][]byte)) {

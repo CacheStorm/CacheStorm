@@ -189,6 +189,17 @@ func (c *Config) applyEnvOverrides() {
 	if v := os.Getenv("CACHESTORM_LOG_LEVEL"); v != "" {
 		c.Logging.Level = v
 	}
+	// Secrets and the data directory come from the environment in container
+	// deployments, so they need not be baked into the image's config file.
+	if v := os.Getenv("CACHESTORM_REQUIREPASS"); v != "" {
+		c.Server.RequirePass = v
+	}
+	if v := os.Getenv("CACHESTORM_HTTP_PASSWORD"); v != "" {
+		c.HTTP.Password = v
+	}
+	if v := os.Getenv("CACHESTORM_DATA_DIR"); v != "" {
+		c.Persistence.DataDir = v
+	}
 }
 
 func (c *ServerConfig) ReadTimeoutDuration() time.Duration {

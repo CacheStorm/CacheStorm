@@ -172,6 +172,8 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.image_tags.outputs.list }}
+          build-args: |
+            VERSION=${{ steps.get_version.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
         # No continue-on-error here: this step is the release's only real gate on

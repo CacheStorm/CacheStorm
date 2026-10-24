@@ -168,3 +168,14 @@ jobs:
         with:
           name: redis-compat-report
           path: ${{ runner.temp }}/compat-report.md
+
+  # Builds the root image and checks it as it ships: unprivileged user,
+  # healthy, requirepass from the environment enforced, version stamped.
+  docker-smoke:
+    name: Docker image smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and check the image
+        run: scripts/docker-smoke.sh
