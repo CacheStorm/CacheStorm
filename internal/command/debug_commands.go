@@ -98,22 +98,98 @@ func cmdDebugObject(ctx *Context) error {
 	return ctx.WriteSimpleString(sb.String())
 }
 
+// Redis 7.4's default thresholds for its compact encodings.
+const (
+	encMaxListpackEntries = 128
+	encMaxListpackValue   = 64
+	encMaxIntsetEntries   = 512
+	encMaxListpackBytes   = 8192
+	encMaxEmbstrLen       = 44
+)
+
+// getEncoding reports the encoding Redis would use for v under its default
+// configuration. CacheStorm has one representation per type; the name is
+// derived from the value's current size and contents, so unlike Redis, whose
+// conversions are one-way, a collection that grew and shrank again reports
+// its compact encoding.
 func getEncoding(v store.Value) string {
-	switch v.(type) {
+	switch val := v.(type) {
 	case *store.StringValue:
-		return "embstr"
+		if _, ok := parseRedisInt(val.Data); ok {
+			return "int"
+		}
+		if len(val.Data) <= encMaxEmbstrLen {
+			return "embstr"
+		}
+		return "raw"
 	case *store.HashValue:
-		return "hashtable"
+		val.RLock()
+		defer val.RUnlock()
+		if len(val.Fields) > encMaxListpackEntries {
+			return "hashtable"
+		}
+		for f, x := range val.Fields {
+			if len(f) > encMaxListpackValue || len(x) > encMaxListpackValue {
+				return "hashtable"
+			}
+		}
+		return "listpack"
 	case *store.ListValue:
+		val.RLock()
+		defer val.RUnlock()
+		total := 0
+		for _, el := range val.Elements {
+			total += len(el) + 2
+		}
+		if total <= encMaxListpackBytes {
+			return "listpack"
+		}
 		return "quicklist"
 	case *store.SetValue:
-		return "hashtable"
+		val.RLock()
+		defer val.RUnlock()
+		if len(val.Members) <= encMaxIntsetEntries {
+			allInts := true
+			for m := range val.Members {
+				if _, ok := parseRedisInt([]byte(m)); !ok {
+					allInts = false
+					break
+				}
+			}
+			if allInts {
+				return "intset"
+			}
+		}
+		if len(val.Members) > encMaxListpackEntries {
+			return "hashtable"
+		}
+		for m := range val.Members {
+			if len(m) > encMaxListpackValue {
+				return "hashtable"
+			}
+		}
+		return "listpack"
 	case *store.SortedSetValue:
-		return "skiplist"
+		val.RLock()
+		defer val.RUnlock()
+		if len(val.Members) > encMaxListpackEntries {
+			return "skiplist"
+		}
+		for m := range val.Members {
+			if len(m) > encMaxListpackValue {
+				return "skiplist"
+			}
+		}
+		return "listpack"
+	case *store.StreamValue:
+		return "stream"
 	default:
 		return "raw"
 	}
 }
+
+var errObjectFreqNoLFU = errors.New("ERR An LFU maxmemory policy is not selected, access frequency not tracked. " + //nolint:staticcheck // Redis reply text
+	"Please note that when switching between policies at runtime LRU and LFU data will take some time to adjust.")
 
 func cmdOBJECT(ctx *Context) error {
 	if ctx.ArgCount() < 2 {
@@ -136,16 +212,19 @@ func cmdOBJECT(ctx *Context) error {
 
 	switch subCmd {
 	case "ENCODING":
-		return ctx.WriteSimpleString(getEncoding(entry.Value))
+		return ctx.WriteBulkString(getEncoding(entry.Value))
 	case "IDLETIME":
 		idleSeconds := int64(time.Since(time.Unix(0, entry.LastAccess.Load())).Seconds())
 		return ctx.WriteInteger(idleSeconds)
 	case "FREQ":
+		if !ctx.Store.UsesLFU() {
+			return ctx.WriteError(errObjectFreqNoLFU)
+		}
 		return ctx.WriteInteger(int64(entry.AccessCount.Load()))
 	case "REFCOUNT":
 		return ctx.WriteInteger(1)
 	default:
-		return ctx.WriteError(fmt.Errorf("ERR unknown OBJECT subcommand '%s'", subCmd))
+		return ctx.WriteError(fmt.Errorf("ERR unknown subcommand '%s'. Try OBJECT HELP.", ctx.ArgString(0)))
 	}
 }
 

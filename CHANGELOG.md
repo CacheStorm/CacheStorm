@@ -43,6 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Authentication: only AUTH, HELLO, QUIT and RESET run before a requirepass client authenticates, the commands Redis flags `no_auth`. PING and COMMAND were exempt too, so an unauthenticated client could probe the server
 
 ### Fixed
+- OBJECT ENCODING replies with a bulk string and names the encoding Redis would use under its default thresholds (int/embstr/raw, listpack/quicklist, listpack/intset/hashtable, listpack/skiplist); it reported embstr, hashtable, quicklist or skiplist whatever the value. OBJECT FREQ requires an LFU policy and unknown subcommands get Redis' error
 - PING with more than one argument is an arity error, and CLIENT SETNAME refuses names with spaces or control characters, as in Redis
 - maxmemory bounds collections that grow in place. Memory was charged only when a value was first stored, so pushing 10 MB into one list against a 1 MB limit was tracked as about 1 KB and never refused. Collections keep their size incrementally (sizing is O(1) instead of walking the collection), every write re-charges the keys it touched, and commands Redis flags `denyoom` get `-OOM command not allowed when used memory > 'maxmemory'.` while over the limit, after eviction under an eviction policy. In MULTI an OOM refusal discards the transaction, and scripts are refused before their first write
 - ACL key checks cover the real keys of LMPOP, ZMPOP, ZINTERCARD, BLMPOP, BZMPOP, BZPOPMIN and BZPOPMAX; numeric arguments were taken for keys and the real keys went unchecked

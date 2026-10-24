@@ -19,6 +19,12 @@ const (
 	EvictionAllKeysRandom
 )
 
+// UsesLFU reports whether the store evicts by access frequency, the only
+// policy under which Redis tracks OBJECT FREQ.
+func (s *Store) UsesLFU() bool {
+	return s.evictor != nil && s.evictor.policy == EvictionAllKeysLFU
+}
+
 type EvictionController struct {
 	policy     EvictionPolicy
 	maxMemory  int64

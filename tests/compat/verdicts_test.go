@@ -30,12 +30,9 @@ const (
 )
 
 var verdicts = map[string]Verdict{
-	"strings/set-exat-pxat-past":       {SevEdge, bug, "SET EXAT/PXAT with a past (or far-future) timestamp is rejected; Redis accepts and expires immediately"},
-	"keys/expiretime":                  {SevEdge, bug, "EXPIREAT/PEXPIREAT with a year-3021 timestamp rejected as 'invalid expire time'"},
-	"misc/object-encoding-strings":     {SevEdge, bug, "OBJECT ENCODING replies simple string instead of bulk; int/raw encodings not reported (encoding names partly intentional)"},
-	"misc/object-encoding-collections": {SevEdge, intent, "internal encodings differ (quicklist/hashtable/skiplist vs listpack/intset); reply is simple string instead of bulk"},
-	"misc/object-misc":                 {SevEdge, intent, "OBJECT FREQ allowed under CacheStorm's default eviction policy; unknown-subcommand text differs"},
-	"lua/redis-call-errors":            {SevCritical, bug, "KEYS nil; redis.call errors are returned as bulk strings instead of raising, so scripts continue after a failed write; error texts differ"},
+	"strings/set-exat-pxat-past": {SevEdge, bug, "expiry instants after the year 2262 are capped (expiry is stored as int64 nanoseconds), so TTL reports the capped instant"},
+	"keys/expiretime":            {SevEdge, bug, "expiry instants after the year 2262 are capped (expiry is stored as int64 nanoseconds), so EXPIRETIME/PEXPIRETIME/TTL report the capped instant"},
+	"lua/redis-call-errors":      {SevEdge, intent, "compile errors carry gopher-lua's parser message (\"near 'error': parse error\") instead of Lua 5.1's"},
 }
 
 var arityAccepts = map[string]string{}
