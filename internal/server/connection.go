@@ -161,12 +161,21 @@ func (c *Connection) Handle() {
 		} else {
 			c.conn.SetReadDeadline(time.Now().Add(c.readTimeout))
 		}
-		cmd, args, err := c.reader.ReadCommand()
+		cmd, args, err := c.reader.ReadClientCommand()
 		if err != nil {
 			if err == io.EOF || isClosedError(err) {
 				return
 			}
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				return
+			}
+			if isProtocolError(err) {
+				// Redis tells the client why before it drops the connection.
+				c.writeMu.Lock()
+				c.conn.SetWriteDeadline(time.Now().Add(c.writeTimeout))
+				c.writer.WriteError("ERR Protocol error: " + err.Error())
+				c.writeMu.Unlock()
+				logger.Debug().Err(err).Int64("conn_id", c.ID).Msg("protocol error")
 				return
 			}
 			logger.Error().Err(err).Int64("conn_id", c.ID).Msg("read error")
@@ -351,6 +360,17 @@ func (c *Connection) Close() {
 
 func (c *Connection) RemoteAddr() string {
 	return c.conn.RemoteAddr().String()
+}
+
+// isProtocolError reports whether a read failed because the client sent
+// bytes that are not a valid command, as opposed to an I/O failure.
+func isProtocolError(err error) bool {
+	switch err {
+	case resp.ErrInvalidFormat, resp.ErrInvalidType, resp.ErrLineTooLong,
+		resp.ErrUnbalancedQuote, resp.ErrBulkStringTooBig, resp.ErrArrayTooLarge:
+		return true
+	}
+	return false
 }
 
 func isClosedError(err error) bool {

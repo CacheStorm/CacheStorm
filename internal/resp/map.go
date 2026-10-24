@@ -14,6 +14,12 @@ func (r *Reader) readMap() (*Value, error) {
 	if count > MaxArrayElements {
 		return nil, ErrArrayTooLarge
 	}
+	if r.depth >= MaxNestingDepth {
+		return nil, ErrInvalidFormat
+	}
+	r.depth++
+	defer func() { r.depth-- }()
+
 	values := make(map[string]*Value)
 	for i := uint64(0); i < count; i++ {
 		key, err := r.ReadValue()

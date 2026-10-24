@@ -7,6 +7,9 @@ import (
 	"testing/iotest"
 )
 
+// A command whose elements are not all bulk strings is a protocol error. The
+// connection is closed after one, as in Redis, so the reader does not try to
+// resynchronise the stream behind it.
 func TestReadCommandRejectsNonBulkElements(t *testing.T) {
 	for name, element := range map[string]string{
 		"integer":     ":42\r\n",
@@ -28,10 +31,6 @@ func TestReadCommandRejectsNonBulkElements(t *testing.T) {
 				cmd, args, err := r.ReadCommand()
 				if err != ErrInvalidFormat || cmd != "" || args != nil {
 					t.Fatalf("ReadCommand(%q): got command=%q args=%q error=%v, want empty command, nil args, ErrInvalidFormat", wire, cmd, args, err)
-				}
-				cmd, args, err = r.ReadCommand()
-				if err != nil || cmd != "PING" || len(args) != 0 {
-					t.Fatalf("following command: got command=%q args=%q error=%v, want PING", cmd, args, err)
 				}
 			})
 		}

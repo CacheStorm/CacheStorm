@@ -118,7 +118,6 @@ var verdicts = map[string]Verdict{
 	"misc/object-misc":                         {SevEdge, intent, "OBJECT FREQ allowed under CacheStorm's default eviction policy; unknown-subcommand text differs"},
 	"misc/unknown-command":                     {SevEdge, bug, "unknown-command error text lacks \"with args beginning with\""},
 	"misc/case-insensitive":                    {SevCritical, bug, "lowercase/mixed-case command names are rejected as unknown (router lookup is case-sensitive); breaks clients that send lowercase (e.g. go-redis, ioredis)"},
-	"misc/inline-commands":                     {SevCommon, bug, "inline protocol (e.g. `echo PING | nc`) closes the connection ('invalid RESP type')"},
 	"misc/client-setname":                      {SevEdge, bug, "CLIENT SETNAME accepts names with spaces"},
 	"misc/hello-2":                             {SevCommon, bug, "HELLO not implemented (clients that negotiate protocol on connect fall back or fail)"},
 	"lua/return-types":                         {SevCommon, bug, "Lua->RESP conversion: {ok=..}/{err=..}/status_reply/error_reply become arrays, false becomes :0, floats not truncated, nil holes not truncated"},

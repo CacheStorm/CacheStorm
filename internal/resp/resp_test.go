@@ -229,13 +229,15 @@ func TestReadArrayInvalidCount(t *testing.T) {
 	}
 }
 
+// Redis skips a multibulk header with a count of zero or less and reads
+// the next command.
 func TestReadCommandNullArray(t *testing.T) {
-	input := "*-1\r\n"
+	input := "*-1\r\n*1\r\n$4\r\nPING\r\n"
 	r := NewReader(bytes.NewReader([]byte(input)))
 
-	_, _, err := r.ReadCommand()
-	if err != ErrInvalidFormat {
-		t.Errorf("expected ErrInvalidFormat, got %v", err)
+	cmd, _, err := r.ReadCommand()
+	if err != nil || cmd != "PING" {
+		t.Errorf("expected the header to be skipped and PING read, got %q %v", cmd, err)
 	}
 }
 
@@ -249,13 +251,15 @@ func TestReadCommandNotArray(t *testing.T) {
 	}
 }
 
+// Redis skips a multibulk header with a count of zero or less and reads
+// the next command.
 func TestReadCommandEmptyArray(t *testing.T) {
-	input := "*0\r\n"
+	input := "*0\r\n*1\r\n$4\r\nPING\r\n"
 	r := NewReader(bytes.NewReader([]byte(input)))
 
-	_, _, err := r.ReadCommand()
-	if err != ErrInvalidFormat {
-		t.Errorf("expected ErrInvalidFormat, got %v", err)
+	cmd, _, err := r.ReadCommand()
+	if err != nil || cmd != "PING" {
+		t.Errorf("expected the header to be skipped and PING read, got %q %v", cmd, err)
 	}
 }
 
