@@ -35,14 +35,10 @@ var verdicts = map[string]Verdict{
 	"misc/object-encoding-strings":     {SevEdge, bug, "OBJECT ENCODING replies simple string instead of bulk; int/raw encodings not reported (encoding names partly intentional)"},
 	"misc/object-encoding-collections": {SevEdge, intent, "internal encodings differ (quicklist/hashtable/skiplist vs listpack/intset); reply is simple string instead of bulk"},
 	"misc/object-misc":                 {SevEdge, intent, "OBJECT FREQ allowed under CacheStorm's default eviction policy; unknown-subcommand text differs"},
-	"misc/client-setname":              {SevEdge, bug, "CLIENT SETNAME accepts names with spaces"},
-	"misc/hello-2":                     {SevCommon, bug, "HELLO not implemented (clients that negotiate protocol on connect fall back or fail)"},
 	"lua/redis-call-errors":            {SevCritical, bug, "KEYS nil; redis.call errors are returned as bulk strings instead of raising, so scripts continue after a failed write; error texts differ"},
 }
 
-var arityAccepts = map[string]string{
-	"arity/PING-2": "PING a b accepted (returns 'a')",
-}
+var arityAccepts = map[string]string{}
 
 func verdictFor(name string) Verdict {
 	if v, ok := verdicts[name]; ok {

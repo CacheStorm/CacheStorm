@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GraphQL subscriptions
 
 ### Added
+- HELLO: `HELLO 2` with the AUTH and SETNAME options answers with the server map, and `HELLO 3` replies `NOPROTO` so clients that try RESP3 first (go-redis v9 and others) fall back to RESP2; HELLO was an unknown command
 - Scripting: EVAL_RO, EVALSHA_RO, `#!lua flags=no-writes`, the `cjson`, `bit` and `cmsgpack` libraries, `redis.sha1hex`/`setresp`/`set_repl`; FUNCTION LOAD with the `#!lua name=` header, FCALL/FCALL_RO by function name and FUNCTION LIST/STATS/DELETE/FLUSH/KILL/DUMP/RESTORE; scripts cached only by EVAL are capped at 500, as in Redis 7.4
 - Databases: 16 real numbered databases (`server.databases`). SELECT is per connection and validates the range; FLUSHDB clears only the current database and FLUSHALL all of them; MOVE, SWAPDB and COPY ... DB work across databases and keep TTLs; INFO keyspace lists every non-empty database. Pub/Sub and the memory limit stay global. SELECT used to reply OK and change nothing, so every database number shared one keyspace and `FLUSHDB` in db 1 wiped db 0
 - Persistence: the AOF records database switches, including inside MULTI/EXEC blocks, and replay restores every key into its own database
@@ -41,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Authentication: only AUTH, HELLO, QUIT and RESET run before a requirepass client authenticates, the commands Redis flags `no_auth`. PING and COMMAND were exempt too, so an unauthenticated client could probe the server
 
 ### Fixed
+- PING with more than one argument is an arity error, and CLIENT SETNAME refuses names with spaces or control characters, as in Redis
 - maxmemory bounds collections that grow in place. Memory was charged only when a value was first stored, so pushing 10 MB into one list against a 1 MB limit was tracked as about 1 KB and never refused. Collections keep their size incrementally (sizing is O(1) instead of walking the collection), every write re-charges the keys it touched, and commands Redis flags `denyoom` get `-OOM command not allowed when used memory > 'maxmemory'.` while over the limit, after eviction under an eviction policy. In MULTI an OOM refusal discards the transaction, and scripts are refused before their first write
 - ACL key checks cover the real keys of LMPOP, ZMPOP, ZINTERCARD, BLMPOP, BZMPOP, BZPOPMIN and BZPOPMAX; numeric arguments were taken for keys and the real keys went unchecked
 - Sentinel: the Sentinel role is opt-in (`sentinel.enabled`). Every server ran the Sentinel loops and opened an unauthenticated peer listener on port 26379, so a second server on the same host logged a bind failure; the Sentinel singleton is now set up under a lock

@@ -59,6 +59,7 @@ func RegisterServerCommands(router *Router) {
 	router.Register(&CommandDef{Name: "MONITOR", Handler: cmdMONITOR})
 	router.Register(&CommandDef{Name: "SWAPDB", Handler: cmdSWAPDB})
 	router.Register(&CommandDef{Name: "DEBUGSEGFAULT", Handler: cmdDEBUGSEGFAULT})
+	RegisterHelloCommands(router)
 }
 
 func RegisterClientCommands(router *Router) {
@@ -90,6 +91,9 @@ func RegisterKeyCommands(router *Router) {
 }
 
 func cmdPING(ctx *Context) error {
+	if ctx.ArgCount() > 1 {
+		return ctx.WriteError(arityError("PING"))
+	}
 	if ctx.ArgCount() == 0 {
 		return ctx.WriteSimpleString("PONG")
 	}
@@ -1104,11 +1108,10 @@ func cmdCLIENT(ctx *Context) error {
 		// This was a stub that replied +OK and discarded the value, so a named
 		// client still reported no name -- and SLOWLOG GET element 6 could never
 		// carry one. CLIENT SETNAME with an empty argument clears the name.
-		if ctx.ArgString(1) == "" {
-			ctx.ClientName = ""
-		} else {
-			ctx.ClientName = ctx.ArgString(1)
+		if !validClientName(ctx.ArgString(1)) {
+			return ctx.WriteError(errClientNameChars)
 		}
+		ctx.ClientName = ctx.ArgString(1)
 		return ctx.WriteOK()
 	case "GETNAME":
 		if ctx.ClientName == "" {
