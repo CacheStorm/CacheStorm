@@ -33,6 +33,8 @@ Durum: **bu incelemede tamamlandı**.
 
 ## M1 Veri güvenliği ve transaction
 
+Durum (25 Ekim 2026): **tamamlandı.** EXEC kuyruğu kayıtlı handler'larla çalışıyor (F22), başarılı EXEC AOF'a tek `MULTI ... EXEC` bloğu olarak yazılıyor ve yarım blok replay'de atlanıyor (F20). Yarım kalmış AOF kuyruğu kırpılıyor, bozuk AOF başlangıcı durduruyor. Transaction ve Lua script'leri artık diğer istemcilerden izole: okuyucular yarım uygulanmış bir bloğu göremiyor. Gerçek 16 veritabanı ve veritabanı başına WATCH uygulandı.
+
 Öncelik: **P0**. Tahmin: **5–10 iş günü**.
 
 1. F20 için EXEC sonuçlarını ve AOF kaydını tek işlem sınırına bağla. Kuyruğu yalnızca uygulayıp EXEC'i kaydetmemek, başarılı yazmaları kaybettiriyor.
@@ -46,6 +48,8 @@ Durum: **bu incelemede tamamlandı**.
 
 ## M2 Redis sözleşmeleri ve komut envanteri
 
+Durum (25 Ekim 2026): **büyük ölçüde tamamlandı.** `tests/compat` Redis 7.4'e karşı 340 vakada farkları ölçüyor: 337 eşleşiyor, kalan 3 fark [raporda](tests/compat/REPORT.md). Komut metadata'sı (arity, bayraklar, anahtar konumları) Redis'in kendi COMMAND çıktısından `tools/cmdspecgen` ile üretiliyor ve router, ACL anahtar çıkarımı, OOM kontrolü bu tabloyu kullanıyor. RESP2 varsayılan; HELLO 2 destekleniyor, RESP3 `NOPROTO` ile reddediliyor. Açık: RESP3, 2262 sonrası expiry anları, gopher-lua hata metinleri.
+
 Öncelik: **P1**. Tahmin: **5–10 iş günü**. M1 ile ortak komut yürütme tasarımını kullanır.
 
 1. Hedef Redis sürümünü ve desteklenen protokol alt kümesini açıkça seç. `tam`, `kısmi`, `desteklenmiyor` ve `CacheStorm uzantısı` ayrımlarını komut/alt komut bazında tut.
@@ -58,6 +62,8 @@ Durum: **bu incelemede tamamlandı**.
 Çıkış ölçütü: uyumluluk raporu hedef sürümü, test edilen komut sayısını, başarısız ve atlanan vakaları birlikte gösterir. Kaynağı olmayan “%99 uyum” iddiası yerine bu rapor kullanılır.
 
 ## M3 SDK doğruluğu ve dağıtımı
+
+Durum (25 Ekim 2026): **tamamlandı.** F23–F27 düzeltildi ve kalıcı testlere alındı (Python 80, TypeScript 32, Go 16 test). Python `pyproject.toml` ile wheel/sdist üretiyor; TypeScript gerçek devDependency'ler ve lockfile kullanıyor. Ayrıca go-redis v9, redis-py 5 ve ioredis 5 `scripts/client-smoke.sh` ile CI'da sınanıyor. Açık: otomatik yeniden bağlanma, paketlerin npm/PyPI'ye yayımlanması.
 
 Öncelik: **P1**. Tahmin: **8–15 iş günü**. Bağımsız codec işleri M1 sürerken başlayabilir.
 
@@ -73,6 +79,8 @@ Python için `pyproject.toml`, desteklenen Python sürümleri, wheel/sdist ve ku
 Çıkış ölçütü: F23–F27 geçer ve kalıcı testlere alınmıştır; yerel olarak paketlenen SDK üç dilde de yeni açılan, auth açık sunucuya bağlanıp SET/GET, hata, pipeline ve ilan edilen Pub/Sub senaryosunu tamamlar.
 
 ## M4 CI ve yayın güvenilirliği
+
+Durum (25 Ekim 2026): **tamamlandı.** CI; Python, TypeScript ve Go istemcilerini, beş örnek modülü (readonly), Redis uyumluluk düzeneğini (ratchet modunda), gerçek istemci duman testini ve Docker imaj duman testini (non-root, sağlık, requirepass, protected mode, sürüm) çalıştırıyor. Release imajı sürüm damgasıyla ve alpine 3.22 üzerinde üretiliyor; release action'ı Node 16'dan çıkarıldı.
 
 Öncelik: **P1**. Tahmin: **3–5 iş günü**; M2/M3 ile kademeli uygulanır.
 
@@ -101,6 +109,8 @@ Durum (25 Ekim 2026): 1. ve 3. maddeler tamamlandı (tek sahip `internal/replica
 
 ## M6 Operasyon, performans ve kapsam daraltma
 
+Durum (25 Ekim 2026): **kısmen tamamlandı.** `maxmemory` artık yerinde büyüyen koleksiyonlar için de çalışıyor ve `denyoom` komutları sınırı aşınca OOM alıyor. Performans ölçümleri yöntemleriyle [docs/BENCHMARKS.md](docs/BENCHMARKS.md) içinde. Protected mode, sentinel'in isteğe bağlı olması, ortam değişkeniyle parola, kapanışta hızlı drain ve accept backoff eklendi. Açık: `internal/command` içindeki uzantı komutlarının çekirdek/opsiyonel ayrımı, RDB snapshot'ının sunucuya bağlanması.
+
 Öncelik: **P2**. Tahmin: **5–10 iş günü**; ölçüm sonuçlarına göre bölünür.
 
 - `config/example.yaml` ile geçerli şemayı birleştir; önce Makefile ve installer referanslarını taşı. Yoksayılan `plugins.stats`, HTTP CORS/rate ayarları, buffer/keepalive ve snapshot ayarlarını uygula ya da şemadan/belgeden kaldır.
@@ -114,4 +124,10 @@ Durum (25 Ekim 2026): 1. ve 3. maddeler tamamlandı (tek sahip `internal/replica
 
 ## Bir sonraki somut değişiklik
 
-İlk uygulama PR'ı F20 ve F22'yi ele almalı: başarılı transaction yazmalarını replay sonrasında korumak ve EXEC'in komutları ortak yürütme yolundan geçirmesi. Dağıtık çalışma ve yeni komut sayısını artırmak bu veri güvenliği işinin önüne geçmemeli.
+M1–M4 tamamlandı; replikasyon çalışıyor. Sıradaki işler:
+
+1. RDB snapshot'ını (SAVE/BGSAVE ve başlangıçta yükleme) sunucuya bağlamak; tam senkron için fork'suz anlık görüntünün yazma duraklamasını ölçüp azaltmak.
+2. Expiry'yi milisaniye olarak saklayıp 2262 sınırını kaldırmak.
+3. Sentinel ile otomatik failover'ı gerçek süreçlerle doğrulamak.
+4. RESP3 (HELLO 3, push mesajları, map/set/double tipleri).
+5. Pipeline'lı yazmalarda yazma kapısının maliyetini düşürmek (Redis'in %40–85'i).

@@ -1,6 +1,6 @@
 # CacheStorm Documentation
 
-Start with the installation and configuration guides. The [project review](./PROJECT_REVIEW.md) records verified limitations and the [roadmap](../ROADMAP.md) defines the next milestones.
+Start with the installation and configuration guides. The [project review](./PROJECT_REVIEW.md) records verified limitations, the [roadmap](../ROADMAP.md) defines the next milestones, [benchmarks](./BENCHMARKS.md) records measured throughput, and the [compatibility report](../tests/compat/REPORT.md) lists the measured differences from Redis 7.4.
 
 ## Guides
 

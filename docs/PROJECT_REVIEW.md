@@ -4,6 +4,32 @@
 
 Öncelikli eksik, komut sayısı veya birim test yüzdesi değil, parçaların sunucu üzerinde aynı garantileri vermesidir. Testler başarılı olduğu halde AOF transaction kaydı, EXEC komut desteği, cluster/replika bağlantıları ve SDK davranışları için sekiz açık sorun yeniden üretildi. İki ek bakım sorunu bu çalışmada düzeltildi. Uygulama sırası [yol haritasında](../ROADMAP.md).
 
+## 25 Ekim 2026 güncellemesi: üretime hazırlık çalışması
+
+20 Ekim incelemesindeki F20 ve F22–F27 düzeltildi ve kalıcı testlere alındı; F21'in replikasyon tarafı uygulandı, cluster açıkça desteklenmiyor. Bu çalışma sırasında Redis 7.4'e karşı farksal bir uyumluluk düzeneği (`tests/compat`) kuruldu ve aşağıdaki ek sorunlar **çalıştırılarak kanıtlandı, ardından düzeltildi**. Her biri için regresyon testi var.
+
+| Bulgu | Etki | Kanıt ve düzeltme |
+|---|---|---|
+| Komut adları büyük/küçük harfe duyarlı | go-redis, ioredis gibi küçük harf gönderen istemciler hiçbir komut çalıştıramıyordu | Router ve kayıt noktası adı normalize ediyor |
+| RESP3 null (`_`) ve map (`%`) RESP2 istemcilere gönderiliyordu | 150 handler'ın null yanıtı RESP2 istemcilerde protokol hatası | Writer varsayılan olarak RESP2 kodluyor |
+| Pub/Sub mesajları aboneye hiç ulaşmıyordu | PUBLISH alıcı sayıyor ama hiçbir istemci mesaj almıyordu | Bağlantı başına teslim goroutine'i, taşma halinde bağlantı kesme |
+| İç içe dizi girdisi stack overflow ile süreci çökertiyordu | Kimliği doğrulanmamış herhangi bir istemci sunucuyu düşürebiliyordu | Komut okuma düz ve sınırlı; satır 64 KiB, iç içelik 128 ile sınırlı |
+| Eşzamanlı push/pop'ta liste elemanları kayboluyordu | 20.000 push'ta %1–4 kayıp; hash/set/zset'te aynı desen | Boşalan değer yalnızca hâlâ aynı ve boşsa siliniyor; ilk oluşturma atomik |
+| `maxmemory` yerinde büyüyen koleksiyonları saymıyordu | 1 MB limitle tek listeye 10 MB yazıldı, takip edilen ~1 KB | Koleksiyon boyutu artımlı tutuluyor, her yazmada yeniden hesaplanıyor, `denyoom` komutları OOM alıyor |
+| EXEC ve Lua script'leri izole değildi | Okuyucu, 1.000 transaction'da 700 kez yarım uygulanmış durum gördü | Her komut yazma kapısını paylaşımlı, EXEC/script özel alıyor |
+| SELECT sessizce OK dönüyordu | 16 veritabanı tek keyspace paylaşıyordu, `FLUSHDB` diğerlerini siliyordu | Gerçek veritabanları, AOF'ta SELECT, veritabanı başına WATCH |
+| `BLPOP key 0` hemen dönüyor, uyandırma kaybolabiliyordu | Kuyruk işçileri boşa dönüyor ya da bir işi süresiz kaçırıyordu | Redis zaman aşımı anlamı, kayıttan sonra yeniden kontrol, FIFO sıra, kopan istemcinin bırakılması |
+| LPUSH her çağrıda listeyi kopyalıyordu | LPUSH saniyede ~1.600 istek (diğer komutlar ~55.000) | Başta boşluk bırakan amorti O(1) ekleme |
+| Varsayılan kurulum ağda parolasız açıktı | RESP, HTTP API ve pprof tüm arayüzlerde kimliksiz | Protected mode; parolasızken yalnızca loopback |
+| Auth açıkken PING ve COMMAND kimliksiz çalışıyordu | Parolasız istemci sunucuyu yoklayabiliyordu | Yalnızca Redis'in `no_auth` komutları muaf |
+| Yönetim arayüzü sürümsüz CDN script'leri yüklüyordu | CDN değişikliği parolayı tutan konsolda kod çalıştırabilirdi | Sürüm sabitlendi ve SRI eklendi |
+| Bozuk AOF ile "boş başla" | Veri kaybolmuş gibi görünüyor, dosyanın arkasına yazılmaya devam ediliyordu | Yarım kuyruk kırpılıyor, bozuk dosya başlangıcı durduruyor |
+| Kapanışta her boştaki istemci 10 sn bekletiyordu | Her kapanış en az 10 sn sürüyordu | Bağlantılar drain moduna alınıp hemen uyandırılıyor |
+
+Uyumluluk ölçümü 307 vakada 138 eşleşmeden 340 vakada 337 eşleşmeye çıktı. go-redis v9, redis-py 5 ve ioredis 5 parola korumalı sunucuya karşı CI'da çalışıyor. Ölçülen performans [BENCHMARKS.md](BENCHMARKS.md) içinde.
+
+Bilinen sınırlar: RESP3 desteklenmiyor (HELLO 3 `NOPROTO` döner); cluster modu yok; tam senkron fork'suz anlık görüntü alırken yazmaları duraklatır; 2262 sonrası expiry anları kırpılır; bellek muhasebesi Go heap'i değil eleman tahminlerini sayar; otomatik failover gerçek süreçlerle doğrulanmadı; TypeScript ve Python paketleri yayımlanmadı.
+
 ## Kapsam ve yöntem
 
 Tüm takip edilen dosyalar yapı, dosya türü, kullanım referansları ve bakım rolü bakımından envantere alındı. Sunucu başlangıç/kapanışı, router, transaction, RESP, store/TTL/eviction/tag, persistence, cluster, replication, Sentinel, ACL/HTTP, plugin/module, SDK, test, CI/release, config/installer ve web dokümantasyonu incelendi. Kritik davranışlara mevcut araçlarla küçük, ağdan bağımsız kanıtlar yazıldı.
