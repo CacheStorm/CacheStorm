@@ -224,7 +224,7 @@ func cmdOBJECT(ctx *Context) error {
 	case "REFCOUNT":
 		return ctx.WriteInteger(1)
 	default:
-		return ctx.WriteError(fmt.Errorf("ERR unknown subcommand '%s'. Try OBJECT HELP.", ctx.ArgString(0)))
+		return ctx.Writer.WriteError("ERR unknown subcommand '" + ctx.ArgString(0) + "'. Try OBJECT HELP.")
 	}
 }
 
