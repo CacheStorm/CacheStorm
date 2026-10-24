@@ -223,7 +223,11 @@ func New(cfg *config.Config) (*Server, error) {
 		if bind == "" {
 			bind = cfg.Server.Bind
 		}
-		window, _ := time.ParseDuration(cfg.HTTP.RateWindow)
+		// An unparsable window falls back to the one-minute default.
+		window, err := time.ParseDuration(cfg.HTTP.RateWindow)
+		if err != nil {
+			window = 0
+		}
 		httpCfg := &HTTPConfig{
 			Enabled:    cfg.HTTP.Enabled,
 			Bind:       bind,
