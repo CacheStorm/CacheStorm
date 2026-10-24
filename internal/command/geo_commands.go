@@ -31,18 +31,15 @@ func RegisterGeoCommands(router *Router) {
 	router.Register(&CommandDef{Name: "GEOSEARCHSTORE", Handler: cmdGEOSEARCHSTORE})
 }
 
-func getOrCreateGeo(ctx *Context, key string) *store.GeoValue {
-	entry, exists := ctx.Store.Get(key)
-	if !exists {
-		geo := store.NewGeoValue()
-		ctx.Store.Set(key, geo, store.SetOptions{})
-		return geo
+func getOrCreateGeo(ctx *Context, key string) (*store.GeoValue, error) {
+	v, _, err := ctx.Store.GetOrCreate(key, func() store.Value { return store.NewGeoValue() })
+	if err != nil {
+		return nil, err
 	}
-
-	if geo, ok := entry.Value.(*store.GeoValue); ok {
-		return geo
+	if geo, ok := v.(*store.GeoValue); ok {
+		return geo, nil
 	}
-	return nil
+	return nil, store.ErrWrongType
 }
 
 func getGeo(ctx *Context, key string) *store.GeoValue {
@@ -100,9 +97,9 @@ options:
 		}
 	}
 
-	geo := getOrCreateGeo(ctx, key)
-	if geo == nil {
-		return ctx.WriteError(store.ErrWrongType)
+	geo, err := getOrCreateGeo(ctx, key)
+	if err != nil {
+		return ctx.WriteError(err)
 	}
 
 	added := 0

@@ -308,8 +308,21 @@ func cmdXADD(ctx *Context) error {
 		return ctx.WriteError(err)
 	}
 	if created {
-		if err := ctx.Store.Set(key, stream, store.SetOptions{}); err != nil {
+		// Install the new stream only if the key is still missing: a plain
+		// Set let two concurrent creators both store one, the second
+		// replacing the first and its entry.
+		v, installed, err := ctx.Store.GetOrCreate(key, func() store.Value { return stream })
+		if err != nil {
 			return ctx.WriteError(err)
+		}
+		if !installed {
+			existing, ok := v.(*store.StreamValue)
+			if !ok {
+				return ctx.WriteError(store.ErrWrongType)
+			}
+			if entry, err = existing.XAdd(a.id, pairs, a.trim, uint64(time.Now().UnixMilli())); err != nil {
+				return ctx.WriteError(err)
+			}
 		}
 	}
 	if !a.id.IDGiven || !a.id.SeqGiven {
@@ -988,9 +1001,13 @@ func cmdXGROUP(ctx *Context) error {
 			}
 		}
 		if stream == nil {
-			stream = store.NewStreamValue(0)
-			if err := ctx.Store.Set(key, stream, store.SetOptions{}); err != nil {
+			v, _, err := ctx.Store.GetOrCreate(key, func() store.Value { return store.NewStreamValue(0) })
+			if err != nil {
 				return ctx.WriteError(err)
+			}
+			var ok bool
+			if stream, ok = v.(*store.StreamValue); !ok {
+				return ctx.WriteError(store.ErrWrongType)
 			}
 		}
 		if !stream.CreateGroupAt(groupName, id, useLast, entriesRead) {
