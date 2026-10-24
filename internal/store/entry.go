@@ -63,12 +63,21 @@ func (v *StringValue) Clone() Value {
 type HashValue struct {
 	Fields map[string][]byte
 	mu     sync.RWMutex
+	dead   bool
 }
 
 func (v *HashValue) Lock()    { v.mu.Lock() }
 func (v *HashValue) Unlock()  { v.mu.Unlock() }
 func (v *HashValue) RLock()   { v.mu.RLock() }
 func (v *HashValue) RUnlock() { v.mu.RUnlock() }
+
+// IsDead reports whether DeleteIfEmpty removed this value from the keyspace.
+// A dead value is empty and detached: writers must not add to it. The caller
+// holds the value's lock.
+func (v *HashValue) IsDead() bool { return v.dead }
+
+func (v *HashValue) emptyLocked() bool { return len(v.Fields) == 0 }
+func (v *HashValue) markDeadLocked()   { v.dead = true }
 
 func (v *HashValue) Type() DataType { return DataTypeHash }
 func (v *HashValue) SizeOf() int64 {
@@ -107,12 +116,21 @@ func (v *HashValue) Clone() Value {
 type ListValue struct {
 	Elements [][]byte
 	mu       sync.RWMutex
+	dead     bool
 }
 
 func (v *ListValue) Lock()    { v.mu.Lock() }
 func (v *ListValue) Unlock()  { v.mu.Unlock() }
 func (v *ListValue) RLock()   { v.mu.RLock() }
 func (v *ListValue) RUnlock() { v.mu.RUnlock() }
+
+// IsDead reports whether DeleteIfEmpty removed this value from the keyspace.
+// A dead value is empty and detached: writers must not add to it. The caller
+// holds the value's lock.
+func (v *ListValue) IsDead() bool { return v.dead }
+
+func (v *ListValue) emptyLocked() bool { return len(v.Elements) == 0 }
+func (v *ListValue) markDeadLocked()   { v.dead = true }
 
 func (v *ListValue) Type() DataType { return DataTypeList }
 func (v *ListValue) SizeOf() int64 {
@@ -151,12 +169,21 @@ func (v *ListValue) Clone() Value {
 type SetValue struct {
 	Members map[string]struct{}
 	mu      sync.RWMutex
+	dead    bool
 }
 
 func (v *SetValue) Lock()    { v.mu.Lock() }
 func (v *SetValue) Unlock()  { v.mu.Unlock() }
 func (v *SetValue) RLock()   { v.mu.RLock() }
 func (v *SetValue) RUnlock() { v.mu.RUnlock() }
+
+// IsDead reports whether DeleteIfEmpty removed this value from the keyspace.
+// A dead value is empty and detached: writers must not add to it. The caller
+// holds the value's lock.
+func (v *SetValue) IsDead() bool { return v.dead }
+
+func (v *SetValue) emptyLocked() bool { return len(v.Members) == 0 }
+func (v *SetValue) markDeadLocked()   { v.dead = true }
 
 func (v *SetValue) Type() DataType { return DataTypeSet }
 func (v *SetValue) SizeOf() int64 {

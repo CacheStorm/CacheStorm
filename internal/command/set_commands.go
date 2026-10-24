@@ -36,24 +36,6 @@ func RegisterSetCommands(router *Router) {
 	router.Register(&CommandDef{Name: "SSCAN", Handler: cmdSSCAN})
 }
 
-func getOrCreateSet(ctx *Context, key string) (*store.SetValue, error) {
-	entry, exists := ctx.Store.Get(key)
-	if !exists {
-		set := &store.SetValue{Members: make(map[string]struct{})}
-		if err := ctx.Store.Set(key, set, store.SetOptions{}); err != nil {
-			return nil, err
-		}
-		return set, nil
-	}
-
-	set, ok := entry.Value.(*store.SetValue)
-	if !ok {
-		return nil, store.ErrWrongType
-	}
-
-	return set, nil
-}
-
 func getSet(ctx *Context, key string) (*store.SetValue, error) {
 	entry, exists := ctx.Store.Get(key)
 	if !exists {
@@ -85,12 +67,11 @@ func cmdSADD(ctx *Context) error {
 	}
 
 	key := ctx.ArgString(0)
-	set, err := getOrCreateSet(ctx, key)
+	set, err := lockOrCreateSet(ctx, key)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
 
-	set.Lock()
 	defer set.Unlock()
 	added := 0
 	for i := 1; i < ctx.ArgCount(); i++ {
@@ -110,7 +91,7 @@ func cmdSREM(ctx *Context) error {
 	}
 
 	key := ctx.ArgString(0)
-	set, err := getSet(ctx, key)
+	set, err := lockSet(ctx, key)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
@@ -118,7 +99,6 @@ func cmdSREM(ctx *Context) error {
 		return ctx.WriteInteger(0)
 	}
 
-	set.Lock()
 	removed := 0
 	for i := 1; i < ctx.ArgCount(); i++ {
 		member := ctx.ArgString(i)
@@ -132,7 +112,7 @@ func cmdSREM(ctx *Context) error {
 	set.Unlock()
 
 	if isEmpty {
-		ctx.Store.Delete(key)
+		deleteIfEmpty(ctx, key, set)
 	}
 
 	return ctx.WriteInteger(int64(removed))
@@ -228,7 +208,7 @@ func cmdSPOP(ctx *Context) error {
 		}
 	}
 
-	set, err := getSet(ctx, key)
+	set, err := lockSet(ctx, key)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
@@ -239,14 +219,13 @@ func cmdSPOP(ctx *Context) error {
 		return ctx.WriteArray([]*resp.Value{})
 	}
 
-	set.Lock()
 	if !withCount {
 		for member := range set.Members {
 			delete(set.Members, member)
 			isEmpty := len(set.Members) == 0
 			set.Unlock()
 			if isEmpty {
-				ctx.Store.Delete(key)
+				deleteIfEmpty(ctx, key, set)
 			}
 			return ctx.WriteBulkString(member)
 		}
@@ -259,8 +238,9 @@ func cmdSPOP(ctx *Context) error {
 		for member := range set.Members {
 			members = append(members, resp.BulkString(member))
 		}
+		set.Members = make(map[string]struct{})
 		set.Unlock()
-		ctx.Store.Delete(key)
+		deleteIfEmpty(ctx, key, set)
 		return ctx.WriteArray(members)
 	}
 

@@ -40,22 +40,6 @@ func RegisterListCommands(router *Router) {
 	router.Register(&CommandDef{Name: "BLMPOP", Handler: cmdBLMPOP})
 }
 
-func getOrCreateList(ctx *Context, key string) (*store.ListValue, error) {
-	entry, exists := ctx.Store.Get(key)
-	if !exists {
-		list := &store.ListValue{Elements: make([][]byte, 0)}
-		ctx.Store.Set(key, list, store.SetOptions{})
-		return list, nil
-	}
-
-	list, ok := entry.Value.(*store.ListValue)
-	if !ok {
-		return nil, store.ErrWrongType
-	}
-
-	return list, nil
-}
-
 func getList(ctx *Context, key string) (*store.ListValue, error) {
 	entry, exists := ctx.Store.Get(key)
 	if !exists {
@@ -78,13 +62,8 @@ func listPush(ctx *Context, left bool) error {
 	}
 
 	key := ctx.ArgString(0)
-	list, err := getList(ctx, key)
-	if err != nil {
-		return ctx.WriteError(err)
-	}
-
 	argCount := ctx.ArgCount() - 1
-	if list == nil {
+	list, created, err := lockOrInstall(ctx, key, func() *store.ListValue {
 		elements := make([][]byte, argCount)
 		for i := 0; i < argCount; i++ {
 			if left {
@@ -94,13 +73,15 @@ func listPush(ctx *Context, left bool) error {
 				elements[i] = ctx.Arg(i + 1)
 			}
 		}
-		if err := ctx.Store.Set(key, &store.ListValue{Elements: elements}, store.SetOptions{}); err != nil {
-			return ctx.WriteError(err)
-		}
+		return &store.ListValue{Elements: elements}
+	})
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	if created {
 		return ctx.WriteInteger(int64(argCount))
 	}
 
-	list.Lock()
 	if left {
 		newElements := make([][]byte, argCount+len(list.Elements))
 		for i := 0; i < argCount; i++ {
@@ -134,7 +115,7 @@ func cmdLPUSHX(ctx *Context) error {
 	}
 
 	key := ctx.ArgString(0)
-	list, err := getList(ctx, key)
+	list, err := lockList(ctx, key)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
@@ -142,7 +123,6 @@ func cmdLPUSHX(ctx *Context) error {
 		return ctx.WriteInteger(0)
 	}
 
-	list.Lock()
 	argCount := ctx.ArgCount() - 1
 	newElements := make([][]byte, argCount+len(list.Elements))
 	for i := 0; i < argCount; i++ {
@@ -163,7 +143,7 @@ func cmdRPUSHX(ctx *Context) error {
 	}
 
 	key := ctx.ArgString(0)
-	list, err := getList(ctx, key)
+	list, err := lockList(ctx, key)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
@@ -171,7 +151,6 @@ func cmdRPUSHX(ctx *Context) error {
 		return ctx.WriteInteger(0)
 	}
 
-	list.Lock()
 	for i := 1; i < ctx.ArgCount(); i++ {
 		value := ctx.Arg(i)
 		list.Elements = append(list.Elements, value)
@@ -200,7 +179,7 @@ func listPopGeneric(ctx *Context, left bool) error {
 	}
 
 	key := ctx.ArgString(0)
-	list, err := getList(ctx, key)
+	list, err := lockList(ctx, key)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
@@ -211,10 +190,10 @@ func listPopGeneric(ctx *Context, left bool) error {
 		return ctx.WriteNullBulkString()
 	}
 	if hasCount && count == 0 {
+		list.Unlock()
 		return ctx.WriteArray([]*resp.Value{})
 	}
 
-	list.Lock()
 	if len(list.Elements) == 0 {
 		list.Unlock()
 		if hasCount {
@@ -240,7 +219,7 @@ func listPopGeneric(ctx *Context, left bool) error {
 	list.Unlock()
 
 	if empty {
-		ctx.Store.Delete(key)
+		deleteIfEmpty(ctx, key, list)
 	}
 
 	if !hasCount {
@@ -390,7 +369,7 @@ func cmdLSET(ctx *Context) error {
 	}
 	value := ctx.Arg(2)
 
-	list, err := getList(ctx, key)
+	list, err := lockList(ctx, key)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
@@ -398,7 +377,6 @@ func cmdLSET(ctx *Context) error {
 		return ctx.WriteError(errListNoSuchKey)
 	}
 
-	list.Lock()
 	length := len(list.Elements)
 	if index < 0 {
 		index = length + index
@@ -425,15 +403,13 @@ func cmdLREM(ctx *Context) error {
 	}
 	value := ctx.Arg(2)
 
-	list, err := getList(ctx, key)
+	list, err := lockList(ctx, key)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
 	if list == nil {
 		return ctx.WriteInteger(0)
 	}
-
-	list.Lock()
 
 	removed := 0
 	newElements := make([][]byte, 0, len(list.Elements))
@@ -477,7 +453,7 @@ func cmdLREM(ctx *Context) error {
 	list.Unlock()
 
 	if empty {
-		ctx.Store.Delete(key)
+		deleteIfEmpty(ctx, key, list)
 	}
 
 	return ctx.WriteInteger(int64(removed))
@@ -497,7 +473,7 @@ func cmdLINSERT(ctx *Context) error {
 		return ctx.WriteError(ErrSyntaxError)
 	}
 
-	list, err := getList(ctx, key)
+	list, err := lockList(ctx, key)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
@@ -505,7 +481,6 @@ func cmdLINSERT(ctx *Context) error {
 		return ctx.WriteInteger(0)
 	}
 
-	list.Lock()
 	defer list.Unlock()
 
 	pivotIdx := -1
@@ -551,7 +526,7 @@ func cmdLTRIM(ctx *Context) error {
 		return ctx.WriteError(ErrNotInteger)
 	}
 
-	list, err := getList(ctx, key)
+	list, err := lockList(ctx, key)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
@@ -559,7 +534,6 @@ func cmdLTRIM(ctx *Context) error {
 		return ctx.WriteOK()
 	}
 
-	list.Lock()
 	length := len(list.Elements)
 	if length == 0 {
 		list.Unlock()
@@ -582,7 +556,7 @@ func cmdLTRIM(ctx *Context) error {
 	if start > stop || start >= length {
 		list.Elements = make([][]byte, 0)
 		list.Unlock()
-		ctx.Store.Delete(key)
+		deleteIfEmpty(ctx, key, list)
 		return ctx.WriteOK()
 	}
 
@@ -720,14 +694,12 @@ func parseBlockTimeout(arg string) (time.Duration, error) {
 // pushToList adds value at the head (left) or tail of the list at key,
 // creating the list when the key is missing.
 func pushToList(ctx *Context, key string, value []byte, left bool) error {
-	list, err := getList(ctx, key)
-	if err != nil {
+	list, created, err := lockOrInstall(ctx, key, func() *store.ListValue {
+		return &store.ListValue{Elements: [][]byte{value}}
+	})
+	if err != nil || created {
 		return err
 	}
-	if list == nil {
-		return ctx.Store.Set(key, &store.ListValue{Elements: [][]byte{value}}, store.SetOptions{})
-	}
-	list.Lock()
 	if left {
 		newEl := make([][]byte, 1+len(list.Elements))
 		newEl[0] = value
@@ -756,7 +728,9 @@ func tryListMove(ctx *Context, srcKey, dstKey, whereFrom, whereTo string) ([]byt
 		return nil, false, err
 	}
 
-	srcList.Lock()
+	if srcList, err = lockList(ctx, srcKey); err != nil || srcList == nil {
+		return nil, false, err
+	}
 	if len(srcList.Elements) == 0 {
 		srcList.Unlock()
 		return nil, false, nil
@@ -788,7 +762,7 @@ func tryListMove(ctx *Context, srcKey, dstKey, whereFrom, whereTo string) ([]byt
 	srcEmpty := len(srcList.Elements) == 0
 	srcList.Unlock()
 	if srcEmpty {
-		ctx.Store.Delete(srcKey)
+		deleteIfEmpty(ctx, srcKey, srcList)
 	}
 
 	if err := pushToList(ctx, dstKey, value, whereTo == "LEFT"); err != nil {
@@ -802,14 +776,13 @@ func tryListMove(ctx *Context, srcKey, dstKey, whereFrom, whereTo string) ([]byt
 // the keys of BLPOP/BRPOP in order before blocking.
 func listPopFirst(ctx *Context, keys []string, left bool) (string, []byte, error) {
 	for _, key := range keys {
-		list, err := getList(ctx, key)
+		list, err := lockList(ctx, key)
 		if err != nil {
 			return "", nil, err
 		}
 		if list == nil {
 			continue
 		}
-		list.Lock()
 		if len(list.Elements) == 0 {
 			list.Unlock()
 			continue
@@ -826,7 +799,7 @@ func listPopFirst(ctx *Context, keys []string, left bool) (string, []byte, error
 		isEmpty := len(list.Elements) == 0
 		list.Unlock()
 		if isEmpty {
-			ctx.Store.Delete(key)
+			deleteIfEmpty(ctx, key, list)
 		}
 		return key, value, nil
 	}
@@ -1093,14 +1066,13 @@ func parseListMPop(ctx *Context, from int) ([]string, string, int, error) {
 // keys. It returns nil when every list is empty.
 func tryListMPop(ctx *Context, keys []string, dir string, count int) (*resp.Value, error) {
 	for _, key := range keys {
-		list, err := getList(ctx, key)
+		list, err := lockList(ctx, key)
 		if err != nil {
 			return nil, err
 		}
 		if list == nil {
 			continue
 		}
-		list.Lock()
 		if len(list.Elements) == 0 {
 			list.Unlock()
 			continue
@@ -1120,7 +1092,7 @@ func tryListMPop(ctx *Context, keys []string, dir string, count int) (*resp.Valu
 		isEmpty := len(list.Elements) == 0
 		list.Unlock()
 		if isEmpty {
-			ctx.Store.Delete(key)
+			deleteIfEmpty(ctx, key, list)
 		}
 		return resp.ArrayValue([]*resp.Value{
 			resp.BulkString(key),
@@ -1141,12 +1113,11 @@ func cmdLMPUSH(ctx *Context) error {
 		elements = append(elements, ctx.Arg(i))
 	}
 
-	list, err := getOrCreateList(ctx, key)
+	list, err := lockOrCreateList(ctx, key)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
 
-	list.Lock()
 	newElements := make([][]byte, len(elements)+len(list.Elements))
 	copy(newElements, elements)
 	copy(newElements[len(elements):], list.Elements)

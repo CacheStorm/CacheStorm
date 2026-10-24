@@ -49,11 +49,18 @@ func (s *Shard) getLive(key string) (*Entry, bool) {
 func (s *Shard) Set(key string, entry *Entry) int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	delta, _ := s.setLocked(key, entry)
+	return delta
+}
 
+// setLocked installs entry under key and returns the memory delta and the
+// entry it replaced, if any. The caller holds s.mu.
+func (s *Shard) setLocked(key string, entry *Entry) (int64, *Entry) {
 	keyOverhead := int64(len(key)) + 16 // key string + map entry overhead
 
 	oldMem := int64(0)
-	if old, exists := s.data[key]; exists {
+	old, exists := s.data[key]
+	if exists {
 		oldMem = old.MemoryUsage() + keyOverhead
 		s.memUsage -= oldMem
 	} else {
@@ -64,7 +71,17 @@ func (s *Shard) Set(key string, entry *Entry) int64 {
 	s.memUsage += newMem
 	s.data[key] = entry
 
-	return newMem - oldMem
+	return newMem - oldMem, old
+}
+
+// deleteLocked removes key and returns the bytes freed. The caller holds s.mu
+// and has checked that the key is present.
+func (s *Shard) deleteLocked(key string, entry *Entry) int64 {
+	mem := entry.MemoryUsage() + int64(len(key)) + 16
+	s.memUsage -= mem
+	s.keyCount--
+	delete(s.data, key)
+	return mem
 }
 
 func (s *Shard) Delete(key string) (int64, bool) {
@@ -76,13 +93,7 @@ func (s *Shard) Delete(key string) (int64, bool) {
 		return 0, false
 	}
 
-	keyOverhead := int64(len(key)) + 16
-	mem := entry.MemoryUsage() + keyOverhead
-	s.memUsage -= mem
-	s.keyCount--
-	delete(s.data, key)
-
-	return mem, true
+	return s.deleteLocked(key, entry), true
 }
 
 // updateExpiry sets a key's absolute expiry under the shard lock so active

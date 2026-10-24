@@ -314,7 +314,9 @@ func (s *Store) Get(key string) (*Entry, bool) {
 	return entry, true
 }
 
-func (s *Store) Set(key string, value Value, opts SetOptions) error {
+// admit validates a write of value under key and enforces maxmemory,
+// evicting first when needed. It takes no shard lock of its own key.
+func (s *Store) admit(key string, value Value) error {
 	// Validate key
 	if len(key) == 0 {
 		return ErrInvalidKey
@@ -347,6 +349,13 @@ func (s *Store) Set(key string, value Value, opts SetOptions) error {
 				return ErrMemoryLimit
 			}
 		}
+	}
+	return nil
+}
+
+func (s *Store) Set(key string, value Value, opts SetOptions) error {
+	if err := s.admit(key, value); err != nil {
+		return err
 	}
 
 	idx := s.shardIndex(key)
@@ -397,11 +406,99 @@ func (s *Store) Set(key string, value Value, opts SetOptions) error {
 	}
 
 	s.trackMemory(shard.Set(key, entry))
+	s.published(key, value)
+	return nil
+}
+
+// published records that value was just installed under key: the version a
+// WATCH observes moves, and a blocked client is woken unless the value is an
+// empty collection (see emptyCollection).
+func (s *Store) published(key string, value Value) {
 	s.IncrementVersion(key)
 	if !emptyCollection(value) {
 		s.keyNotifier.NotifyKey(key)
 	}
-	return nil
+}
+
+// GetOrCreate returns the live value stored at key, or installs create() there
+// when the key is absent (an expired entry counts as absent), reporting
+// whether it created the value. Lookup and installation happen under the
+// shard lock, so two concurrent creators can never both install a value and
+// have the second overwrite the first's writes. Creation has the same
+// validation, maxmemory enforcement, accounting and WATCH/notification effects
+// as Set. The existing value is returned whatever its type: the caller checks.
+func (s *Store) GetOrCreate(key string, create func() Value) (Value, bool, error) {
+	if entry, ok := s.Get(key); ok {
+		return entry.Value, false, nil
+	}
+	value := create()
+	if err := s.admit(key, value); err != nil {
+		return nil, false, err
+	}
+
+	shard := s.shards[s.shardIndex(key)]
+	shard.mu.Lock()
+	if cur, ok := shard.data[key]; ok && !cur.IsExpired() {
+		shard.mu.Unlock()
+		cur.Touch()
+		GlobalMetrics.RecordHit()
+		return cur.Value, false, nil
+	}
+	delta, old := shard.setLocked(key, NewEntry(value))
+	shard.mu.Unlock()
+
+	s.trackMemory(delta)
+	if old != nil {
+		// The replaced entry had expired: reap it like Get's lazy expiry.
+		s.tagIndex.RemoveKey(key, old.Tags)
+		s.fireExpire(key, old.Value)
+	}
+	s.published(key, value)
+	return value, true, nil
+}
+
+// collection is a value that is removed from the keyspace when emptied.
+type collection interface {
+	Lock()
+	Unlock()
+	emptyLocked() bool
+	markDeadLocked()
+}
+
+// DeleteIfEmpty removes key only while it still holds exactly v and v is
+// empty, then marks v dead, with Delete's bookkeeping. The commands that
+// empty a collection call it after releasing the value's lock: a plain Delete
+// there raced a writer that had already looked up v, deleting the elements it
+// added in between or leaving it to write into a value no longer stored.
+// Writers that find v dead look the key up again. Reports whether the key
+// was removed.
+func (s *Store) DeleteIfEmpty(key string, v Value) bool {
+	c, ok := v.(collection)
+	if !ok {
+		return false
+	}
+	shard := s.shards[s.shardIndex(key)]
+	shard.mu.Lock()
+	entry, exists := shard.data[key]
+	if !exists || entry.Value != v {
+		shard.mu.Unlock()
+		return false
+	}
+	c.Lock()
+	if !c.emptyLocked() {
+		c.Unlock()
+		shard.mu.Unlock()
+		return false
+	}
+	c.markDeadLocked()
+	c.Unlock()
+	mem := shard.deleteLocked(key, entry)
+	shard.mu.Unlock()
+
+	s.trackMemory(-mem)
+	s.tagIndex.RemoveKey(key, entry.Tags)
+	s.TouchKey(key)
+	return true
 }
 
 // emptyCollection reports a list or sorted set stored before its first
@@ -724,75 +821,85 @@ func (s *Store) MoveSetMember(srcKey, dstKey, member string) (bool, error) {
 	s.setOpsMu.Lock()
 	defer s.setOpsMu.Unlock()
 
-	srcEntry := s.getLiveEntry(srcKey)
-	if srcEntry == nil {
-		return false, nil
-	}
-	srcSet, ok := srcEntry.Value.(*SetValue)
-	if !ok {
-		return false, ErrWrongType
-	}
-
-	var dstSet *SetValue
-	if dstEntry := s.getLiveEntry(dstKey); dstEntry != nil {
-		v, ok := dstEntry.Value.(*SetValue)
+	for {
+		srcEntry := s.getLiveEntry(srcKey)
+		if srcEntry == nil {
+			return false, nil
+		}
+		srcSet, ok := srcEntry.Value.(*SetValue)
 		if !ok {
 			return false, ErrWrongType
 		}
-		dstSet = v
-	}
+		if dstEntry := s.getLiveEntry(dstKey); dstEntry != nil {
+			if _, ok := dstEntry.Value.(*SetValue); !ok {
+				return false, ErrWrongType
+			}
+		}
 
-	// Same key: nothing to move; report membership like Redis does.
-	if srcKey == dstKey {
 		srcSet.Lock()
+		dead := srcSet.dead
 		_, exists := srcSet.Members[member]
 		srcSet.Unlock()
-		return exists, nil
-	}
+		if dead {
+			continue
+		}
+		// Same key: nothing to move; report membership like Redis does.
+		if !exists || srcKey == dstKey {
+			return exists, nil
+		}
 
-	// Per-set value locks in deterministic key order so concurrent
-	// single-key operations on both sets serializes with the move.
-	first, second := srcSet, dstSet
-	if dstKey < srcKey {
-		if second != nil {
+		// The destination is created before any value lock is taken: the
+		// shard lock may only be acquired with no value lock held.
+		v, created, err := s.GetOrCreate(dstKey, func() Value {
+			return &SetValue{Members: make(map[string]struct{})}
+		})
+		if err != nil {
+			return false, err
+		}
+		dstSet, ok := v.(*SetValue)
+		if !ok {
+			return false, ErrWrongType
+		}
+
+		// Per-set value locks in deterministic key order so concurrent
+		// single-key operations on both sets serialize with the move.
+		first, second := srcSet, dstSet
+		if dstKey < srcKey {
 			first, second = second, first
 		}
-	}
-	first.Lock()
-	if second != nil {
+		first.Lock()
 		second.Lock()
-	}
-
-	if _, exists := srcSet.Members[member]; !exists {
-		if second != nil {
+		unlock := func() {
 			second.Unlock()
+			first.Unlock()
 		}
-		first.Unlock()
-		return false, nil
-	}
+		if srcSet.dead || dstSet.dead {
+			unlock()
+			if created {
+				s.DeleteIfEmpty(dstKey, dstSet)
+			}
+			continue
+		}
+		if _, exists := srcSet.Members[member]; !exists {
+			unlock()
+			if created {
+				s.DeleteIfEmpty(dstKey, dstSet)
+			}
+			return false, nil
+		}
 
-	// Destination first: while both locks are held the member may be
-	// visible in both sets, never in neither.
-	if dstSet == nil {
-		dstSet = &SetValue{Members: map[string]struct{}{member: {}}}
-		s.Set(dstKey, dstSet, SetOptions{})
-	} else {
+		// While both locks are held the member may be visible in both sets,
+		// never in neither.
 		dstSet.Members[member] = struct{}{}
-	}
-	delete(srcSet.Members, member)
-	srcEmptied := len(srcSet.Members) == 0
+		delete(srcSet.Members, member)
+		srcEmptied := len(srcSet.Members) == 0
+		unlock()
 
-	if second != nil {
-		second.Unlock()
+		if srcEmptied {
+			s.DeleteIfEmpty(srcKey, srcSet)
+		}
+		return true, nil
 	}
-	first.Unlock()
-
-	// The emptiness snapshot was taken under both locks; the delete only
-	// performs bookkeeping (tracker, tags, versions) and cannot race.
-	if srcEmptied {
-		s.Delete(srcKey)
-	}
-	return true, nil
 }
 
 // SetOpsRLock takes the shared set-operations lock. Multi-key set reads

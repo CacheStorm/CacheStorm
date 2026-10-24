@@ -67,22 +67,6 @@ func RegisterSortedSetCommands(router *Router) {
 	router.Register(&CommandDef{Name: "ZREVRANGEBYLEX", Handler: cmdZREVRANGEBYLEX})
 }
 
-func getOrCreateSortedSet(ctx *Context, key string) (*store.SortedSetValue, error) {
-	entry, exists := ctx.Store.Get(key)
-	if !exists {
-		zset := &store.SortedSetValue{Members: make(map[string]float64)}
-		ctx.Store.Set(key, zset, store.SetOptions{})
-		return zset, nil
-	}
-
-	zset, ok := entry.Value.(*store.SortedSetValue)
-	if !ok {
-		return nil, store.ErrWrongType
-	}
-
-	return zset, nil
-}
-
 func getSortedSet(ctx *Context, key string) (*store.SortedSetValue, error) {
 	entry, exists := ctx.Store.Get(key)
 	if !exists {
@@ -447,25 +431,25 @@ flags:
 		scores[j] = score
 	}
 
-	zset, err := getSortedSet(ctx, key)
+	var zset *store.SortedSetValue
+	var err error
+	if xx {
+		zset, err = lockSortedSet(ctx, key)
+	} else {
+		zset, err = lockOrCreateSortedSet(ctx, key)
+	}
 	if err != nil {
 		return ctx.WriteError(err)
 	}
 	if zset == nil {
-		if xx {
-			if incr {
-				return ctx.WriteNullBulkString()
-			}
-			return ctx.WriteInteger(0)
+		if incr {
+			return ctx.WriteNullBulkString()
 		}
-		if zset, err = getOrCreateSortedSet(ctx, key); err != nil {
-			return ctx.WriteError(err)
-		}
+		return ctx.WriteInteger(0)
 	}
 
 	added, updated, processed := 0, 0, 0
 	var lastScore float64
-	zset.Lock()
 	for j := 0; j < pairs; j++ {
 		score := scores[j]
 		member := ctx.ArgString(i + 2*j + 1)
@@ -478,6 +462,7 @@ flags:
 				score += cur
 				if math.IsNaN(score) {
 					zset.Unlock()
+					deleteIfEmpty(ctx, key, zset)
 					return ctx.WriteError(errZNaNScore)
 				}
 			}
@@ -497,7 +482,11 @@ flags:
 			lastScore = score
 		}
 	}
+	empty := len(zset.Members) == 0
 	zset.Unlock()
+	if empty {
+		deleteIfEmpty(ctx, key, zset)
+	}
 
 	if added+updated > 0 {
 		ctx.Store.KeyNotifier().NotifyKey(key)
@@ -575,12 +564,11 @@ func cmdZINCRBY(ctx *Context) error {
 	}
 	member := ctx.ArgString(2)
 
-	zset, err := getOrCreateSortedSet(ctx, key)
+	zset, err := lockOrCreateSortedSet(ctx, key)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
 
-	zset.Lock()
 	newScore := incr
 	if cur, exists := zset.Members[member]; exists {
 		newScore = cur + incr
@@ -589,7 +577,7 @@ func cmdZINCRBY(ctx *Context) error {
 		empty := len(zset.Members) == 0
 		zset.Unlock()
 		if empty {
-			ctx.Store.Delete(key)
+			deleteIfEmpty(ctx, key, zset)
 		}
 		return ctx.WriteError(errZNaNScore)
 	}
@@ -842,7 +830,7 @@ func cmdZREM(ctx *Context) error {
 	}
 
 	key := ctx.ArgString(0)
-	zset, err := getSortedSet(ctx, key)
+	zset, err := lockSortedSet(ctx, key)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
@@ -850,7 +838,6 @@ func cmdZREM(ctx *Context) error {
 		return ctx.WriteInteger(0)
 	}
 
-	zset.Lock()
 	removed := 0
 	for i := 1; i < ctx.ArgCount(); i++ {
 		member := ctx.ArgString(i)
@@ -863,7 +850,7 @@ func cmdZREM(ctx *Context) error {
 	zset.Unlock()
 
 	if isEmpty {
-		ctx.Store.Delete(key)
+		deleteIfEmpty(ctx, key, zset)
 	}
 	return ctx.WriteInteger(int64(removed))
 }
@@ -871,7 +858,7 @@ func cmdZREM(ctx *Context) error {
 // zremRange removes the members selected by pick from the zset at key and
 // deletes the key once it is empty.
 func zremRange(ctx *Context, key string, pick func(all []store.SortedEntry) []store.SortedEntry) error {
-	zset, err := getSortedSet(ctx, key)
+	zset, err := lockSortedSet(ctx, key)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
@@ -879,7 +866,6 @@ func zremRange(ctx *Context, key string, pick func(all []store.SortedEntry) []st
 		return ctx.WriteInteger(0)
 	}
 
-	zset.Lock()
 	victims := pick(zset.GetAllEntries())
 	for _, e := range victims {
 		delete(zset.Members, e.Member)
@@ -888,7 +874,7 @@ func zremRange(ctx *Context, key string, pick func(all []store.SortedEntry) []st
 	zset.Unlock()
 
 	if isEmpty {
-		ctx.Store.Delete(key)
+		deleteIfEmpty(ctx, key, zset)
 	}
 	return ctx.WriteInteger(int64(len(victims)))
 }
@@ -1085,11 +1071,14 @@ func parsePositiveCount(arg string) (int, error) {
 	return int(v), nil
 }
 
-// zpopFrom pops up to count lowest (or highest) members from zset under its
-// lock, deleting key when the set empties. It returns nil when the set was
-// already empty.
-func zpopFrom(ctx *Context, key string, zset *store.SortedSetValue, count int, max bool) []store.SortedEntry {
-	zset.Lock()
+// zpopFrom pops up to count lowest (or highest) members from the zset at key
+// under its lock, deleting key when the set empties. It returns nil when the
+// set is missing or empty.
+func zpopFrom(ctx *Context, key string, count int, max bool) []store.SortedEntry {
+	zset, err := lockSortedSet(ctx, key)
+	if err != nil || zset == nil {
+		return nil
+	}
 	if len(zset.Members) == 0 {
 		zset.Unlock()
 		return nil
@@ -1108,7 +1097,7 @@ func zpopFrom(ctx *Context, key string, zset *store.SortedSetValue, count int, m
 	zset.Unlock()
 
 	if isEmpty {
-		ctx.Store.Delete(key)
+		deleteIfEmpty(ctx, key, zset)
 	}
 	return all
 }
@@ -1124,7 +1113,7 @@ func zpopFirst(ctx *Context, keys []string, count int, max bool) (string, []stor
 		if zset == nil {
 			continue
 		}
-		if popped := zpopFrom(ctx, key, zset, count, max); len(popped) > 0 {
+		if popped := zpopFrom(ctx, key, count, max); len(popped) > 0 {
 			return key, popped, nil
 		}
 	}
@@ -1155,7 +1144,7 @@ func zpopMinMax(ctx *Context, max bool) error {
 	if zset == nil || count == 0 {
 		return ctx.WriteArray([]*resp.Value{})
 	}
-	return ctx.WriteArray(zEntriesReply(zpopFrom(ctx, key, zset, count, max), true))
+	return ctx.WriteArray(zEntriesReply(zpopFrom(ctx, key, count, max), true))
 }
 
 func cmdZPOPMIN(ctx *Context) error {

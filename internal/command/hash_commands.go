@@ -34,24 +34,6 @@ func RegisterHashCommands(router *Router) {
 	router.Register(&CommandDef{Name: "HGETEX", Handler: cmdHGETEX})
 }
 
-func getOrCreateHash(ctx *Context, key string) (*store.HashValue, error) {
-	entry, exists := ctx.Store.Get(key)
-	if !exists {
-		hash := &store.HashValue{Fields: make(map[string][]byte)}
-		if err := ctx.Store.Set(key, hash, store.SetOptions{}); err != nil {
-			return nil, err
-		}
-		return hash, nil
-	}
-
-	hash, ok := entry.Value.(*store.HashValue)
-	if !ok {
-		return nil, store.ErrWrongType
-	}
-
-	return hash, nil
-}
-
 func getHash(ctx *Context, key string) (*store.HashValue, error) {
 	entry, exists := ctx.Store.Get(key)
 	if !exists {
@@ -72,12 +54,11 @@ func cmdHSET(ctx *Context) error {
 	}
 
 	key := ctx.ArgString(0)
-	hash, err := getOrCreateHash(ctx, key)
+	hash, err := lockOrCreateHash(ctx, key)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
 
-	hash.Lock()
 	defer hash.Unlock()
 
 	added := 0
@@ -127,12 +108,11 @@ func cmdHMSET(ctx *Context) error {
 	}
 
 	key := ctx.ArgString(0)
-	hash, err := getOrCreateHash(ctx, key)
+	hash, err := lockOrCreateHash(ctx, key)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
 
-	hash.Lock()
 	defer hash.Unlock()
 	for i := 1; i < ctx.ArgCount(); i += 2 {
 		field := ctx.ArgString(i)
@@ -209,7 +189,7 @@ func cmdHDEL(ctx *Context) error {
 	}
 
 	key := ctx.ArgString(0)
-	hash, err := getHash(ctx, key)
+	hash, err := lockHash(ctx, key)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
@@ -217,7 +197,6 @@ func cmdHDEL(ctx *Context) error {
 		return ctx.WriteInteger(0)
 	}
 
-	hash.Lock()
 	deleted := 0
 	for i := 1; i < ctx.ArgCount(); i++ {
 		field := ctx.ArgString(i)
@@ -231,7 +210,7 @@ func cmdHDEL(ctx *Context) error {
 	hash.Unlock()
 
 	if isEmpty {
-		ctx.Store.Delete(key)
+		deleteIfEmpty(ctx, key, hash)
 	}
 
 	return ctx.WriteInteger(int64(deleted))
@@ -352,12 +331,11 @@ func cmdHINCRBY(ctx *Context) error {
 		return ctx.WriteError(ErrNotInteger)
 	}
 
-	hash, err := getOrCreateHash(ctx, key)
+	hash, err := lockOrCreateHash(ctx, key)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
 
-	hash.Lock()
 	newVal := incr
 	if current, exists := hash.Fields[field]; exists {
 		newVal, err = computeIntIncr(current, incr)
@@ -365,7 +343,7 @@ func cmdHINCRBY(ctx *Context) error {
 			empty := len(hash.Fields) == 0
 			hash.Unlock()
 			if empty {
-				ctx.Store.Delete(key)
+				deleteIfEmpty(ctx, key, hash)
 			}
 			if err == ErrNotInteger {
 				err = errHashNotInteger
@@ -448,18 +426,17 @@ func cmdHINCRBYFLOAT(ctx *Context) error {
 		return ctx.WriteError(errHashIncrNaNOrInf)
 	}
 
-	hash, err := getOrCreateHash(ctx, key)
+	hash, err := lockOrCreateHash(ctx, key)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
 
-	hash.Lock()
 	sum := new(big.Float).SetPrec(longDoublePrec).SetMode(big.ToNearestEven)
 	fail := func(e error) error {
 		empty := len(hash.Fields) == 0
 		hash.Unlock()
 		if empty {
-			ctx.Store.Delete(key)
+			deleteIfEmpty(ctx, key, hash)
 		}
 		return ctx.WriteError(e)
 	}
@@ -493,12 +470,11 @@ func cmdHSETNX(ctx *Context) error {
 	field := ctx.ArgString(1)
 	value := ctx.Arg(2)
 
-	hash, err := getOrCreateHash(ctx, key)
+	hash, err := lockOrCreateHash(ctx, key)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
 
-	hash.Lock()
 	defer hash.Unlock()
 	if _, exists := hash.Fields[field]; exists {
 		return ctx.WriteInteger(0)
@@ -671,7 +647,7 @@ func cmdHGETDEL(ctx *Context) error {
 		fields = append(fields, ctx.ArgString(i))
 	}
 
-	hash, err := getHash(ctx, key)
+	hash, err := lockHash(ctx, key)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
@@ -686,7 +662,6 @@ func cmdHGETDEL(ctx *Context) error {
 		return ctx.WriteArray(results)
 	}
 
-	hash.Lock()
 	if len(fields) == 1 {
 		value, exists := hash.Fields[fields[0]]
 		if !exists {
@@ -697,7 +672,7 @@ func cmdHGETDEL(ctx *Context) error {
 		isEmpty := len(hash.Fields) == 0
 		hash.Unlock()
 		if isEmpty {
-			ctx.Store.Delete(key)
+			deleteIfEmpty(ctx, key, hash)
 		}
 		return ctx.WriteBulkBytes(value)
 	}
@@ -714,7 +689,7 @@ func cmdHGETDEL(ctx *Context) error {
 	isEmpty := len(hash.Fields) == 0
 	hash.Unlock()
 	if isEmpty {
-		ctx.Store.Delete(key)
+		deleteIfEmpty(ctx, key, hash)
 	}
 	return ctx.WriteArray(results)
 }

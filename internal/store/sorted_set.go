@@ -9,12 +9,20 @@ import (
 type SortedSetValue struct {
 	Members map[string]float64
 	mu      sync.RWMutex
+	dead    bool
 }
 
 func (v *SortedSetValue) Lock()    { v.mu.Lock() }
 func (v *SortedSetValue) Unlock()  { v.mu.Unlock() }
 func (v *SortedSetValue) RLock()   { v.mu.RLock() }
 func (v *SortedSetValue) RUnlock() { v.mu.RUnlock() }
+
+// IsDead reports whether DeleteIfEmpty removed this value from the keyspace
+// (see ListValue.IsDead). The caller holds the value's lock.
+func (v *SortedSetValue) IsDead() bool { return v.dead }
+
+func (v *SortedSetValue) emptyLocked() bool { return len(v.Members) == 0 }
+func (v *SortedSetValue) markDeadLocked()   { v.dead = true }
 
 func (v *SortedSetValue) Type() DataType { return DataTypeSortedSet }
 func (v *SortedSetValue) SizeOf() int64 {

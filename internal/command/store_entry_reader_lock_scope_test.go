@@ -33,9 +33,9 @@ func TestStoreEntryReaderReleasesTheEntryLockBeforeWritingTheReply(t *testing.T)
 
 	// The hash the reader locks.
 	lookup, _ := bufCtx("HGET", bytesArgs("scope-hash", "field"), s)
-	hash, err := getOrCreateHash(lookup, "scope-hash")
-	if err != nil {
-		t.Fatalf("getOrCreateHash: %v", err)
+	hash, err := getHash(lookup, "scope-hash")
+	if err != nil || hash == nil {
+		t.Fatalf("getHash: %v", err)
 	}
 
 	writer := &blockingWriter{entered: make(chan struct{}), release: make(chan struct{})}
