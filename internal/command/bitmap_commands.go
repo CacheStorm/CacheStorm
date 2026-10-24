@@ -71,6 +71,17 @@ func getBitmap(ctx *Context, key string) *BitmapValue {
 	}
 }
 
+// bitmapWrongType reports whether key holds a value that is not a string, so
+// the bitmap readers reply WRONGTYPE instead of treating it as empty.
+func bitmapWrongType(ctx *Context, key string) bool {
+	entry, exists := ctx.Store.Get(key)
+	if !exists {
+		return false
+	}
+	_, ok := stringValueOf(entry.Value)
+	return !ok
+}
+
 func cmdSETBIT(ctx *Context) error {
 	if ctx.ArgCount() != 3 {
 		return ctx.WriteError(ErrWrongArgCount)
@@ -134,6 +145,9 @@ func cmdGETBIT(ctx *Context) error {
 		return ctx.WriteError(errors.New("ERR bit offset is not an integer or out of range"))
 	}
 
+	if bitmapWrongType(ctx, key) {
+		return ctx.WriteError(store.ErrWrongType)
+	}
 	bm := getBitmap(ctx, key)
 	if bm == nil {
 		return ctx.WriteInteger(0)
@@ -175,6 +189,9 @@ func cmdBITCOUNT(ctx *Context) error {
 		}
 	}
 
+	if bitmapWrongType(ctx, key) {
+		return ctx.WriteError(store.ErrWrongType)
+	}
 	bm := getBitmap(ctx, key)
 	if bm == nil {
 		return ctx.WriteInteger(0)
@@ -241,6 +258,9 @@ func cmdBITPOS(ctx *Context) error {
 		endGiven = true
 	}
 
+	if bitmapWrongType(ctx, key) {
+		return ctx.WriteError(store.ErrWrongType)
+	}
 	bm := getBitmap(ctx, key)
 	if bm == nil {
 		return ctx.WriteInteger(-1)
@@ -320,6 +340,11 @@ func cmdBITOP(ctx *Context) error {
 	// the combining loop below, but that switch is only reached from the
 	// i > 0 iterations (i == 0 copies and continues), so the branch was
 	// unreachable and NOT silently stored an unmodified copy of the source.
+	for _, k := range srcKeys {
+		if bitmapWrongType(ctx, k) {
+			return ctx.WriteError(store.ErrWrongType)
+		}
+	}
 	if op == "NOT" {
 		if len(srcKeys) != 1 {
 			return ctx.WriteError(errors.New("ERR BITOP NOT must be called with a single source key"))

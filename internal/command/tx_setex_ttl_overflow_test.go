@@ -87,7 +87,6 @@ func TestTxSetexRejectsOverflowingTTL(t *testing.T) {
 
 	for _, ttl := range []string{
 		"9223372036854775807", // MaxInt64
-		"9223372037",          // just past maxExpireAtSeconds
 		"-9223372036854775808",
 	} {
 		s := store.NewStore()
@@ -127,6 +126,17 @@ func TestTxSetexControlsUncontended(t *testing.T) {
 	}
 	if ttl := txSetexExec(t, s2, router, "TTL", "k"); ttl != ":99\r\n" && ttl != ":100\r\n" {
 		t.Fatalf("CONTROL FAIL: TTL after SETEX 100 = %q, want 99 or 100", ttl)
+	}
+
+	// Redis accepts a TTL past the int64-nanosecond horizon (its clock is in
+	// milliseconds); the key must keep a far-future expiry, not become
+	// permanent or expire at once.
+	s4 := store.NewStore()
+	if got := txSetexBlock(t, s4, router, "9223372037", "v"); !strings.Contains(got, "OK") {
+		t.Fatalf("EXEC after transactional SETEX 9223372037 = %q, want an OK entry", got)
+	}
+	if ttl := txSetexExec(t, s4, router, "TTL", "k"); strings.HasPrefix(ttl, ":-") {
+		t.Fatalf("TTL after transactional SETEX 9223372037 = %q, want a far-future expiry", ttl)
 	}
 
 	// A plain SET inside MULTI still stores the value.

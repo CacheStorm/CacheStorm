@@ -103,13 +103,17 @@ func TestSetExControlsUncontended(t *testing.T) {
 		}
 	}
 
-	for _, c := range []struct{ opt, name string }{
-		{"EXAT", "EXAT"}, {"PXAT", "PXAT"},
-	} {
-		s := store.NewStore()
-		if out := setExExec(t, s, router, "SET", "k", "v", c.opt, "9223372036854775807"); !strings.HasPrefix(out, "-") {
-			t.Fatalf("CONTROL FAIL: SET %s MaxInt64 = %q, want an error", c.name, out)
-		}
+	// EXAT MaxInt64 overflows Redis' millisecond conversion; PXAT MaxInt64
+	// does not, so Redis stores the key with a far-future expiry.
+	sx := store.NewStore()
+	if out := setExExec(t, sx, router, "SET", "k", "v", "EXAT", "9223372036854775807"); out != "-ERR invalid expire time in 'set' command\r\n" {
+		t.Fatalf("CONTROL FAIL: SET EXAT MaxInt64 = %q, want the invalid expire time error", out)
+	}
+	if out := setExExec(t, sx, router, "SET", "k", "v", "PXAT", "9223372036854775807"); out != "+OK\r\n" {
+		t.Fatalf("CONTROL FAIL: SET PXAT MaxInt64 = %q, want +OK", out)
+	}
+	if got := setExExec(t, sx, router, "TTL", "k"); strings.HasPrefix(got, ":-") {
+		t.Fatalf("CONTROL FAIL: TTL after SET PXAT MaxInt64 = %q, want a far-future expiry", got)
 	}
 
 	s := store.NewStore()

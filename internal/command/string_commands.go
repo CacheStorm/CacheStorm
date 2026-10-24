@@ -3,6 +3,7 @@ package command
 import (
 	"errors"
 	"math"
+	"math/big"
 	"strconv"
 	"strings"
 	"time"
@@ -71,142 +72,77 @@ func cmdSET(ctx *Context) error {
 	key := ctx.ArgString(0)
 	value := ctx.Arg(1)
 
-	opts := store.SetOptions{}
-	args := ctx.Args[2:]
-	getOldValue := false
-
-	for i := 0; i < len(args); i++ {
-		arg := string(args[i])
-		switch arg {
-		case "EX":
-			i++
-			if i >= len(args) {
-				return ctx.WriteError(ErrSyntaxError)
-			}
-			sec, err := strconv.ParseInt(string(args[i]), 10, 64)
-			if err != nil {
-				return ctx.WriteError(ErrNotInteger)
-			}
-			if sec <= 0 {
-				return ctx.WriteError(ErrInvalidArg)
-			}
-			// Bound the TTL before multiplying: sec * 1e9 overflows int64
-			// nanoseconds and wraps NEGATIVE, which Store.Set reads as "no
-			// expiry" -- the key becomes permanently live behind an +OK reply.
-			// EXAT below already guards the same argument; EX must too.
-			if sec > maxExpireAtSeconds || sec < -maxExpireAtSeconds {
-				return ctx.WriteError(errInvalidExpireTime)
-			}
-			opts.TTL = time.Duration(sec) * time.Second
-		case "PX":
-			i++
-			if i >= len(args) {
-				return ctx.WriteError(ErrSyntaxError)
-			}
-			ms, err := strconv.ParseInt(string(args[i]), 10, 64)
-			if err != nil {
-				return ctx.WriteError(ErrNotInteger)
-			}
-			if ms <= 0 {
-				return ctx.WriteError(ErrInvalidArg)
-			}
-			// See EX: ms * 1e6 overflows int64 nanoseconds the same way.
-			if ms > maxExpireAtMillis || ms < -maxExpireAtMillis {
-				return ctx.WriteError(errInvalidExpireTime)
-			}
-			opts.TTL = time.Duration(ms) * time.Millisecond
-		case "EXAT":
-			i++
-			if i >= len(args) {
-				return ctx.WriteError(ErrSyntaxError)
-			}
-			ts, err := strconv.ParseInt(string(args[i]), 10, 64)
-			if err != nil {
-				return ctx.WriteError(ErrNotInteger)
-			}
-			// Bound the input before the nanosecond conversion, and reject a
-			// time that is not in the future: Store.Set treats a non-positive
-			// TTL as "no expiry", which would silently make the key permanent.
-			if ts > maxExpireAtSeconds || ts < -maxExpireAtSeconds {
-				return ctx.WriteError(errInvalidExpireTime)
-			}
-			opts.TTL = time.Until(time.Unix(ts, 0))
-			if opts.TTL <= 0 {
-				return ctx.WriteError(errInvalidExpireTime)
-			}
-		case "PXAT":
-			i++
-			if i >= len(args) {
-				return ctx.WriteError(ErrSyntaxError)
-			}
-			ts, err := strconv.ParseInt(string(args[i]), 10, 64)
-			if err != nil {
-				return ctx.WriteError(ErrNotInteger)
-			}
-			// The conversion multiplies by 1e6, so bound the input before it
-			// overflows, then reject a time that is not in the future:
-			// Store.Set treats a non-positive TTL as "no expiry", which would
-			// silently make the key permanent.
-			if ts > maxExpireAtMillis || ts < -maxExpireAtMillis {
-				return ctx.WriteError(errInvalidExpireTime)
-			}
-			opts.TTL = time.Until(time.Unix(0, ts*int64(time.Millisecond)))
-			if opts.TTL <= 0 {
-				return ctx.WriteError(errInvalidExpireTime)
-			}
-		case "NX":
-			opts.NX = true
-		case "XX":
-			opts.XX = true
-		case "KEEPTTL":
-			opts.KeepTTL = true
-		case "GET":
-			getOldValue = true
-		default:
-			return ctx.WriteError(ErrSyntaxError)
+	flags, expireArg, err := parseStringOptions(ctx.Args[2:], true)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	var whenMs int64
+	if expireArg != nil {
+		if whenMs, err = stringOptionsExpireMs(flags, expireArg, "set"); err != nil {
+			return ctx.WriteError(err)
 		}
 	}
+	return setGeneric(ctx, key, value, flags, expireArg != nil, whenMs)
+}
 
-	if opts.NX && opts.XX {
-		return ctx.WriteError(ErrSyntaxError)
-	}
-
-	if getOldValue {
-		entry, exists := ctx.Store.Get(key)
-		if exists {
-			old, ok := stringValueOf(entry.Value)
+// setGeneric is Redis' setGenericCommand: with GET the old value (which must
+// be a string) is the reply whether or not the write happens, an NX/XX abort
+// otherwise replies nil, and an expire instant that already passed deletes the
+// key instead of storing it.
+func setGeneric(ctx *Context, key string, value []byte, flags int, hasExpire bool, whenMs int64) error {
+	var old []byte
+	oldFound := false
+	if flags&strOptGET != 0 {
+		if entry, exists := ctx.Store.Get(key); exists {
+			data, ok := stringValueOf(entry.Value)
 			if !ok {
 				return ctx.WriteError(store.ErrWrongType)
 			}
-			oldValue := make([]byte, len(old))
-			copy(oldValue, old)
-
-			err := ctx.Store.Set(key, &store.StringValue{Data: value}, opts)
-			if err != nil {
-				return ctx.WriteError(err)
-			}
-			return ctx.WriteBulkBytes(oldValue)
+			old = make([]byte, len(data))
+			copy(old, data)
+			oldFound = true
 		}
-
-		err := ctx.Store.Set(key, &store.StringValue{Data: value}, opts)
-		if err != nil {
-			return ctx.WriteError(err)
+	}
+	reply := func() error {
+		if flags&strOptGET == 0 {
+			return ctx.WriteOK()
+		}
+		if oldFound {
+			return ctx.WriteBulkBytes(old)
 		}
 		return ctx.WriteNullBulkString()
 	}
-
-	err := ctx.Store.Set(key, &store.StringValue{Data: value}, opts)
-	if err != nil {
-		if errors.Is(err, store.ErrKeyExists) {
-			return ctx.WriteNull()
+	abort := func() error {
+		if flags&strOptGET != 0 {
+			return reply()
 		}
-		if errors.Is(err, store.ErrKeyNotFound) {
-			return ctx.WriteNull()
+		return ctx.WriteNull()
+	}
+
+	if hasExpire && whenMs <= time.Now().UnixMilli() {
+		found := ctx.Store.Exists(key)
+		if (flags&strOptNX != 0 && found) || (flags&strOptXX != 0 && !found) {
+			return abort()
+		}
+		ctx.Store.Delete(key)
+		return reply()
+	}
+
+	opts := store.SetOptions{
+		NX:      flags&strOptNX != 0,
+		XX:      flags&strOptXX != 0,
+		KeepTTL: flags&strOptKEEPTTL != 0,
+	}
+	if hasExpire {
+		opts.TTL = expireMsToTTL(whenMs)
+	}
+	if err := ctx.Store.Set(key, &store.StringValue{Data: value}, opts); err != nil {
+		if errors.Is(err, store.ErrKeyExists) || errors.Is(err, store.ErrKeyNotFound) {
+			return abort()
 		}
 		return ctx.WriteError(err)
 	}
-
-	return ctx.WriteOK()
+	return reply()
 }
 
 func cmdGET(ctx *Context) error {
@@ -260,7 +196,7 @@ func cmdEXISTS(ctx *Context) error {
 
 func cmdMSET(ctx *Context) error {
 	if ctx.ArgCount() < 2 || ctx.ArgCount()%2 != 0 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError("mset"))
 	}
 
 	// MSET is atomic ("all given keys are set at once"): validate every pair
@@ -270,7 +206,7 @@ func cmdMSET(ctx *Context) error {
 	var estimated int64
 	for i := 0; i < ctx.ArgCount(); i += 2 {
 		k := ctx.ArgString(i)
-		if len(k) == 0 || len(k) > store.MaxKeySize || strings.ContainsRune(k, 0) {
+		if len(k) == 0 || len(k) > store.MaxKeySize {
 			return ctx.WriteError(store.ErrInvalidKey)
 		}
 		if len(ctx.Arg(i+1)) > store.MaxValueSize {
@@ -327,8 +263,8 @@ func cmdINCRBY(ctx *Context) error {
 	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
-	incr, err := strconv.ParseInt(ctx.ArgString(1), 10, 64)
-	if err != nil {
+	incr, ok := parseRedisInt(ctx.Arg(1))
+	if !ok {
 		return ctx.WriteError(ErrNotInteger)
 	}
 	return incrBy(ctx, incr)
@@ -338,12 +274,17 @@ func cmdDECRBY(ctx *Context) error {
 	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
-	decr, err := strconv.ParseInt(ctx.ArgString(1), 10, 64)
-	if err != nil {
+	decr, ok := parseRedisInt(ctx.Arg(1))
+	if !ok {
 		return ctx.WriteError(ErrNotInteger)
+	}
+	if decr == math.MinInt64 {
+		return ctx.WriteError(errDecrementOverflow)
 	}
 	return incrBy(ctx, -decr)
 }
+
+var errDecrementOverflow = errors.New("ERR decrement would overflow")
 
 func incrBy(ctx *Context, incr int64) error {
 	if ctx.ArgCount() < 1 {
@@ -358,10 +299,14 @@ func incrBy(ctx *Context, incr int64) error {
 		if !ok {
 			return ctx.WriteError(store.ErrWrongType)
 		}
-		newVal, err := computeIntIncr(data, incr)
-		if err != nil {
-			return ctx.WriteError(err)
+		cur, ok := parseRedisInt(data)
+		if !ok {
+			return ctx.WriteError(ErrNotInteger)
 		}
+		if (incr > 0 && cur > math.MaxInt64-incr) || (incr < 0 && cur < math.MinInt64-incr) {
+			return ctx.WriteError(ErrOverflow)
+		}
+		newVal := cur + incr
 		if err := ctx.Store.Set(key, &store.StringValue{Data: []byte(strconv.FormatInt(newVal, 10))}, store.SetOptions{KeepTTL: true}); err != nil {
 			return ctx.WriteError(err)
 		}
@@ -397,7 +342,7 @@ func cmdAPPEND(ctx *Context) error {
 	}
 
 	if int64(len(newData)) > store.MaxValueSize {
-		return ctx.WriteError(store.ErrValueTooLarge)
+		return ctx.WriteError(errStringTooLong)
 	}
 
 	if err := ctx.Store.Set(key, &store.StringValue{Data: newData}, store.SetOptions{KeepTTL: true}); err != nil {
@@ -431,14 +376,20 @@ func cmdGETRANGE(ctx *Context) error {
 	}
 
 	key := ctx.ArgString(0)
-	start, err := strconv.Atoi(ctx.ArgString(1))
-	if err != nil {
+	start64, ok := parseRedisInt(ctx.Arg(1))
+	if !ok {
 		return ctx.WriteError(ErrNotInteger)
 	}
-	end, err := strconv.Atoi(ctx.ArgString(2))
-	if err != nil {
+	end64, ok := parseRedisInt(ctx.Arg(2))
+	if !ok {
 		return ctx.WriteError(ErrNotInteger)
 	}
+	if start64 < 0 && end64 < 0 && start64 > end64 {
+		start64, end64 = 1, 0
+	}
+	start64 = max(min(start64, math.MaxInt32), math.MinInt32)
+	end64 = max(min(end64, math.MaxInt32), math.MinInt32)
+	start, end := int(start64), int(end64)
 
 	entry, exists := ctx.Store.Get(key)
 	if !exists {
@@ -477,45 +428,44 @@ func cmdGETRANGE(ctx *Context) error {
 	return ctx.WriteBulkBytes(data[start : end+1])
 }
 
+var errStringTooLong = errors.New("ERR string exceeds maximum allowed size (proto-max-bulk-len)")
+
 func cmdSETRANGE(ctx *Context) error {
 	if ctx.ArgCount() != 3 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
 	key := ctx.ArgString(0)
-	offset, err := strconv.Atoi(ctx.ArgString(1))
-	if err != nil {
+	offset, ok := parseRedisInt(ctx.Arg(1))
+	if !ok {
 		return ctx.WriteError(ErrNotInteger)
 	}
 	if offset < 0 {
-		return ctx.WriteError(ErrInvalidArg)
+		return ctx.WriteError(errors.New("ERR offset is out of range"))
 	}
 	value := ctx.Arg(2)
 
-	// Prevent massive memory allocation via large offset
-	newLen := int64(offset) + int64(len(value))
-	if newLen > store.MaxValueSize {
-		return ctx.WriteError(store.ErrValueTooLarge)
-	}
-
 	entry, exists := ctx.Store.Get(key)
-	var data []byte
-	if !exists {
-		data = []byte{}
-	} else {
-		cur, ok := stringValueOf(entry.Value)
+	var cur []byte
+	if exists {
+		data, ok := stringValueOf(entry.Value)
 		if !ok {
 			return ctx.WriteError(store.ErrWrongType)
 		}
-		data = cur
+		cur = data
+	}
+	// Writing nothing changes nothing: Redis replies with the current length
+	// and does not create a missing key.
+	if len(value) == 0 {
+		return ctx.WriteInteger(int64(len(cur)))
+	}
+	if offset > store.MaxValueSize-int64(len(value)) {
+		return ctx.WriteError(errStringTooLong)
 	}
 
-	if int(newLen) > len(data) {
-		newData := make([]byte, int(newLen))
-		copy(newData, data)
-		data = newData
-	}
-
+	newLen := max(int(offset)+len(value), len(cur))
+	data := make([]byte, newLen)
+	copy(data, cur)
 	copy(data[offset:], value)
 	if err := ctx.Store.Set(key, &store.StringValue{Data: data}, store.SetOptions{KeepTTL: true}); err != nil {
 		return ctx.WriteError(err)
@@ -543,62 +493,27 @@ func cmdSETNX(ctx *Context) error {
 }
 
 func cmdSETEX(ctx *Context) error {
-	if ctx.ArgCount() != 3 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	key := ctx.ArgString(0)
-	sec, err := strconv.ParseInt(ctx.ArgString(1), 10, 64)
-	if err != nil {
-		return ctx.WriteError(ErrNotInteger)
-	}
-	if sec <= 0 {
-		return ctx.WriteError(errInvalidExpireTime)
-	}
-	// The duration multiplication overflows for larger values, which would
-	// yield a non-positive TTL that Store.Set reads as "no expiry" — a silent
-	// permanent key behind a success reply.
-	if sec > maxExpireAtSeconds {
-		return ctx.WriteError(errInvalidExpireTime)
-	}
-	value := ctx.Arg(2)
-
-	if err := ctx.Store.Set(key, &store.StringValue{Data: value}, store.SetOptions{TTL: time.Duration(sec) * time.Second}); err != nil {
-		return ctx.WriteError(err)
-	}
-	return ctx.WriteOK()
+	return setExpireGeneric(ctx, true, "setex")
 }
 
 func cmdPSETEX(ctx *Context) error {
+	return setExpireGeneric(ctx, false, "psetex")
+}
+
+func setExpireGeneric(ctx *Context, seconds bool, cmd string) error {
 	if ctx.ArgCount() != 3 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
-
-	key := ctx.ArgString(0)
-	ms, err := strconv.ParseInt(ctx.ArgString(1), 10, 64)
+	whenMs, err := stringExpireMs(ctx.Arg(1), seconds, true, cmd)
 	if err != nil {
-		return ctx.WriteError(ErrNotInteger)
-	}
-	if ms <= 0 {
-		return ctx.WriteError(errInvalidExpireTime)
-	}
-	// The duration multiplication overflows for larger values, which would
-	// yield a non-positive TTL that Store.Set reads as "no expiry" — a silent
-	// permanent key behind a success reply.
-	if ms > maxExpireAtMillis {
-		return ctx.WriteError(errInvalidExpireTime)
-	}
-	value := ctx.Arg(2)
-
-	if err := ctx.Store.Set(key, &store.StringValue{Data: value}, store.SetOptions{TTL: time.Duration(ms) * time.Millisecond}); err != nil {
 		return ctx.WriteError(err)
 	}
-	return ctx.WriteOK()
+	return setGeneric(ctx, ctx.ArgString(0), ctx.Arg(2), 0, true, whenMs)
 }
 
 func cmdMSETNX(ctx *Context) error {
 	if ctx.ArgCount() < 2 || ctx.ArgCount()%2 != 0 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError("msetnx"))
 	}
 
 	// MSETNX is atomic ("all given keys are set at once"): validate every
@@ -608,7 +523,7 @@ func cmdMSETNX(ctx *Context) error {
 	var estimated int64
 	for i := 0; i < ctx.ArgCount(); i += 2 {
 		k := ctx.ArgString(i)
-		if len(k) == 0 || len(k) > store.MaxKeySize || strings.ContainsRune(k, 0) {
+		if len(k) == 0 || len(k) > store.MaxKeySize {
 			return ctx.WriteError(store.ErrInvalidKey)
 		}
 		if len(ctx.Arg(i+1)) > store.MaxValueSize {
@@ -696,81 +611,36 @@ func cmdGETEX(ctx *Context) error {
 	}
 
 	key := ctx.ArgString(0)
+	flags, expireArg, err := parseStringOptions(ctx.Args[1:], false)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+
 	entry, exists := ctx.Store.Get(key)
 	if !exists {
 		return ctx.WriteNullBulkString()
 	}
-
 	data, ok := stringValueOf(entry.Value)
 	if !ok {
 		return ctx.WriteError(store.ErrWrongType)
+	}
+	var whenMs int64
+	if expireArg != nil {
+		if whenMs, err = stringOptionsExpireMs(flags, expireArg, "getex"); err != nil {
+			return ctx.WriteError(err)
+		}
 	}
 
 	result := make([]byte, len(data))
 	copy(result, data)
 
-	if ctx.ArgCount() > 1 {
-		for i := 1; i < ctx.ArgCount(); i++ {
-			arg := strings.ToUpper(ctx.ArgString(i))
-			switch arg {
-			case "EX":
-				i++
-				if i >= ctx.ArgCount() {
-					return ctx.WriteError(ErrSyntaxError)
-				}
-				sec, err := strconv.ParseInt(ctx.ArgString(i), 10, 64)
-				if err != nil {
-					return ctx.WriteError(ErrNotInteger)
-				}
-				if sec <= 0 || sec > maxExpireAtSeconds {
-					return ctx.WriteError(errInvalidExpireTime)
-				}
-				ctx.Store.SetTTL(key, time.Duration(sec)*time.Second)
-			case "PX":
-				i++
-				if i >= ctx.ArgCount() {
-					return ctx.WriteError(ErrSyntaxError)
-				}
-				ms, err := strconv.ParseInt(ctx.ArgString(i), 10, 64)
-				if err != nil {
-					return ctx.WriteError(ErrNotInteger)
-				}
-				if ms <= 0 || ms > maxExpireAtMillis {
-					return ctx.WriteError(errInvalidExpireTime)
-				}
-				ctx.Store.SetTTL(key, time.Duration(ms)*time.Millisecond)
-			case "EXAT":
-				i++
-				if i >= ctx.ArgCount() {
-					return ctx.WriteError(ErrSyntaxError)
-				}
-				ts, err := strconv.ParseInt(ctx.ArgString(i), 10, 64)
-				if err != nil {
-					return ctx.WriteError(ErrNotInteger)
-				}
-				if ts > maxExpireAtSeconds || ts < -maxExpireAtSeconds {
-					return ctx.WriteError(errInvalidExpireTime)
-				}
-				ctx.Store.SetExpiresAt(key, time.Unix(ts, 0).UnixNano())
-			case "PXAT":
-				i++
-				if i >= ctx.ArgCount() {
-					return ctx.WriteError(ErrSyntaxError)
-				}
-				ts, err := strconv.ParseInt(ctx.ArgString(i), 10, 64)
-				if err != nil {
-					return ctx.WriteError(ErrNotInteger)
-				}
-				if ts > maxExpireAtMillis || ts < -maxExpireAtMillis {
-					return ctx.WriteError(errInvalidExpireTime)
-				}
-				ctx.Store.SetExpiresAt(key, ts*int64(time.Millisecond))
-			case "PERSIST":
-				ctx.Store.Persist(key)
-			default:
-				return ctx.WriteError(ErrSyntaxError)
-			}
-		}
+	switch {
+	case expireArg != nil && whenMs <= time.Now().UnixMilli():
+		ctx.Store.Delete(key)
+	case expireArg != nil:
+		ctx.Store.SetExpiresAt(key, expireMsToNs(whenMs))
+	case flags&strOptPERSIST != 0:
+		ctx.Store.Persist(key)
 	}
 
 	return ctx.WriteBulkBytes(result)
@@ -782,44 +652,97 @@ func cmdINCRBYFLOAT(ctx *Context) error {
 	}
 
 	key := ctx.ArgString(0)
-	incr, err := strconv.ParseFloat(ctx.ArgString(1), 64)
-	if err != nil {
-		return ctx.WriteError(ErrInvalidArg)
-	}
-	// A NaN/Inf increment can only produce a NaN/Inf result — reject it
-	// instead of poisoning the key.
-	if math.IsNaN(incr) || math.IsInf(incr, 0) {
-		return ctx.WriteError(ErrFloatOverflow)
-	}
-
 	entry, exists := ctx.Store.Get(key)
-	if !exists {
-		result := strconv.FormatFloat(incr, 'f', -1, 64)
-		if err := ctx.Store.Set(key, &store.StringValue{Data: []byte(result)}, store.SetOptions{}); err != nil {
-			return ctx.WriteError(err)
+	current := new(big.Float).SetPrec(longDoublePrec)
+	if exists {
+		data, ok := stringValueOf(entry.Value)
+		if !ok {
+			return ctx.WriteError(store.ErrWrongType)
 		}
-		return ctx.WriteBulkString(result)
+		if current, ok = parseLongDouble(data); !ok {
+			return ctx.WriteError(ErrNotFloat)
+		}
 	}
-
-	data, ok := stringValueOf(entry.Value)
+	incr, ok := parseLongDouble(ctx.Arg(1))
 	if !ok {
-		return ctx.WriteError(store.ErrWrongType)
+		return ctx.WriteError(ErrNotFloat)
 	}
 
-	current, err := strconv.ParseFloat(string(data), 64)
-	if err != nil {
-		return ctx.WriteError(ErrInvalidArg)
-	}
-
-	result := current + incr
-	if math.IsNaN(result) || math.IsInf(result, 0) {
+	formatted, ok := addLongDouble(current, incr)
+	if !ok {
 		return ctx.WriteError(ErrFloatOverflow)
 	}
-	formatted := strconv.FormatFloat(result, 'f', -1, 64)
-	if err := ctx.Store.Set(key, &store.StringValue{Data: []byte(formatted)}, store.SetOptions{KeepTTL: true}); err != nil {
+	opts := store.SetOptions{KeepTTL: true}
+	if err := ctx.Store.Set(key, &store.StringValue{Data: []byte(formatted)}, opts); err != nil {
 		return ctx.WriteError(err)
 	}
 	return ctx.WriteBulkString(formatted)
+}
+
+// Redis computes INCRBYFLOAT in C long double, which on x86-64 is the x87
+// 80-bit format: a 64-bit mantissa and a binary exponent of at most 16383.
+// big.Float at 64 bits with round-to-nearest-even reproduces its parsing and
+// addition exactly, so results such as 0.1+0.2 come out as Redis prints them.
+const (
+	longDoublePrec   = 64
+	longDoubleMaxExp = 16384  // MantExp of LDBL_MAX
+	longDoubleMinExp = -16444 // MantExp of the smallest subnormal
+)
+
+// parseLongDouble mirrors Redis' string2ld (strtold): no leading space, no
+// trailing garbage, NaN rejected, and out-of-range values rejected.
+func parseLongDouble(b []byte) (*big.Float, bool) {
+	if len(b) == 0 || len(b) >= 5*1024 {
+		return nil, false
+	}
+	switch b[0] {
+	case ' ', '\t', '\n', '\v', '\f', '\r':
+		return nil, false
+	}
+	s := string(b)
+	body := strings.ToLower(strings.TrimLeft(s, "+-"))
+	if len(s)-len(body) > 1 {
+		return nil, false
+	}
+	if body == "inf" || body == "infinity" {
+		return new(big.Float).SetInf(s[0] == '-'), true
+	}
+	if strings.ContainsRune(body, '_') || strings.HasPrefix(body, "0b") || strings.HasPrefix(body, "0o") || strings.HasPrefix(body, "nan") {
+		return nil, false
+	}
+	f, _, err := big.ParseFloat(s, 0, longDoublePrec, big.ToNearestEven)
+	if err != nil || f.IsInf() {
+		return nil, false
+	}
+	if f.Sign() != 0 {
+		if exp := f.MantExp(nil); exp > longDoubleMaxExp || exp < longDoubleMinExp {
+			return nil, false
+		}
+	}
+	return f, true
+}
+
+// addLongDouble adds two long doubles and formats the sum the way Redis'
+// ld2string(LD_STR_HUMAN) does: "%.17Lf" with trailing zeros (and a bare
+// trailing dot) removed, and "-0" printed as "0". It reports false when the
+// sum is NaN or infinite.
+func addLongDouble(x, y *big.Float) (string, bool) {
+	if x.IsInf() || y.IsInf() {
+		return "", false
+	}
+	sum := new(big.Float).SetPrec(longDoublePrec).SetMode(big.ToNearestEven).Add(x, y)
+	if sum.Sign() != 0 && sum.MantExp(nil) > longDoubleMaxExp {
+		return "", false
+	}
+	out := sum.Text('f', 17)
+	if strings.IndexByte(out, '.') >= 0 {
+		out = strings.TrimRight(out, "0")
+		out = strings.TrimSuffix(out, ".")
+	}
+	if out == "-0" {
+		out = "0"
+	}
+	return out, true
 }
 
 func cmdLCS(ctx *Context) error {

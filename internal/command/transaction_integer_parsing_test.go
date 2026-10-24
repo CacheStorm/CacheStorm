@@ -50,7 +50,6 @@ func TestTransactionIntegerParsingRejectsInvalidInput(t *testing.T) {
 		{"9223372036854775807", 9223372036854775807},
 		{"-9223372036854775808", -9223372036854775808},
 		{"0", 0},
-		{"+1", 1},
 	} {
 		_, run := transactionIntegerSessionX(t)
 		run("SET", "key", "0")
@@ -61,7 +60,7 @@ func TestTransactionIntegerParsingRejectsInvalidInput(t *testing.T) {
 			t.Fatalf("boundary %s: %+v", tc.amount, got)
 		}
 	}
-	for _, bad := range []string{"", "-", "9223372036854775808", "18446744073709551616", "-9223372036854775809", "abc"} {
+	for _, bad := range []string{"", "-", "9223372036854775808", "18446744073709551616", "-9223372036854775809", "abc", "+1", "01", "-0", " 1"} {
 		t.Run(bad, func(t *testing.T) {
 			s, run := transactionIntegerSessionX(t)
 			run("SET", "key", "7")

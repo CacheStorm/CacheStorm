@@ -52,15 +52,15 @@ func TestIncrByFloatInfRejected(t *testing.T) {
 	s := store.NewStore()
 	router := newFloatRouter(s)
 
-	if err := s.Set("f", &store.StringValue{Data: []byte("1e308")}, store.SetOptions{}); err != nil {
+	if err := s.Set("f", &store.StringValue{Data: []byte("1e4932")}, store.SetOptions{}); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 
-	reply := runCmd(t, s, router, "INCRBYFLOAT", "f", "1e308")
+	reply := runCmd(t, s, router, "INCRBYFLOAT", "f", "1e4932")
 	if !strings.Contains(reply, "NaN or Infinity") {
 		t.Fatalf("overflowing INCRBYFLOAT must be rejected, got %q", reply)
 	}
-	if got := storedStr(t, s, "f"); got != "1e308" {
+	if got := storedStr(t, s, "f"); got != "1e4932" {
 		t.Fatalf("rejected INCRBYFLOAT must leave the value unchanged, got %q", got)
 	}
 }
@@ -74,7 +74,8 @@ func TestIncrByFloatNaNIncrementRejected(t *testing.T) {
 	}
 
 	reply := runCmd(t, s, router, "INCRBYFLOAT", "n", "NaN")
-	if !strings.Contains(reply, "NaN or Infinity") {
+	// strtold rejects NaN, so Redis reports it as an invalid float.
+	if reply != "-ERR value is not a valid float\r\n" {
 		t.Fatalf("NaN increment must be rejected, got %q", reply)
 	}
 	if got := storedStr(t, s, "n"); got != "0" {

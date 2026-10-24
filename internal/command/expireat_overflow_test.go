@@ -35,47 +35,59 @@ func expireAtBytes(ss []string) [][]byte {
 	return out
 }
 
-// An absolute expiry is stored as a Unix nanosecond timestamp. Converting a
-// timestamp outside the int64 nanosecond range overflows into a PAST instant,
-// which expired the key immediately while the command reported success —
-// silent data loss. Out-of-range values must be rejected instead.
-func TestExpireAtRejectsOutOfRangeTimestamp(t *testing.T) {
-	seconds := []string{
-		"9223372037",          // one past the bound
-		"16725225600",         // year 2500
-		"99999999999999",      // far future
-		"-9223372037",         // one past the lower bound
-		"9223372036854775807", // MaxInt64
-	}
-	for _, ts := range seconds {
+// An absolute expiry is stored as a Unix nanosecond timestamp, which ends in
+// 2262. Converting a later timestamp used to overflow into a PAST instant and
+// expire the key immediately while the command reported success. Redis accepts
+// any timestamp whose millisecond value fits in an int64, so these must reply
+// 1 and leave the key alive with a far-future expiry; only a value that
+// overflows Redis' own millisecond conversion is an error, and a timestamp in
+// the past deletes the key.
+func TestExpireAtFarFutureTimestampKeepsKey(t *testing.T) {
+	for _, c := range []struct {
+		cmd, ts string
+	}{
+		{"EXPIREAT", "9223372037"},
+		{"EXPIREAT", "16725225600"},
+		{"EXPIREAT", "99999999999999"},
+		{"PEXPIREAT", "9223372036855"},
+		{"PEXPIREAT", "90000000000000"},
+		{"PEXPIREAT", "9223372036854775807"},
+	} {
 		s := store.NewStore()
 		expireAtRun(t, s, "SET", "k", "v")
 
-		if v := expireAtRun(t, s, "EXPIREAT", "k", ts); v.Type != resp.TypeError {
-			t.Fatalf("EXPIREAT k %s returned type %v, want an error (out of nanosecond range)", ts, v.Type)
+		if v := expireAtRun(t, s, c.cmd, "k", c.ts); v.Type != resp.TypeInteger || v.Int != 1 {
+			t.Fatalf("%s k %s = %+v, want :1", c.cmd, c.ts, v)
 		}
 		if n := expireAtRun(t, s, "EXISTS", "k").Int; n != 1 {
-			t.Fatalf("EXPIREAT k %s destroyed the key (EXISTS=%d) — a rejected expiry must never delete data", ts, n)
+			t.Fatalf("%s k %s destroyed the key (EXISTS=%d)", c.cmd, c.ts, n)
+		}
+		if ttl := expireAtRun(t, s, "TTL", "k").Int; ttl <= 0 {
+			t.Fatalf("%s k %s left TTL %d, want a far-future expiry", c.cmd, c.ts, ttl)
 		}
 	}
 }
 
-func TestPExpireAtRejectsOutOfRangeTimestamp(t *testing.T) {
-	millis := []string{
-		"9223372036855",       // one past the bound
-		"90000000000000",      // overflows when multiplied by 1e6
-		"9223372036854775807", // MaxInt64
-		"-9223372036855",      // one past the lower bound
+func TestExpireAtOverflowAndPastTimestamps(t *testing.T) {
+	s := store.NewStore()
+	expireAtRun(t, s, "SET", "k", "v")
+	if v := expireAtRun(t, s, "EXPIREAT", "k", "9223372036854775807"); v.Type != resp.TypeError || v.Err != "ERR invalid expire time in 'expireat' command" {
+		t.Fatalf("EXPIREAT MaxInt64 = %+v, want the invalid expire time error", v)
 	}
-	for _, ts := range millis {
-		s := store.NewStore()
+	if n := expireAtRun(t, s, "EXISTS", "k").Int; n != 1 {
+		t.Fatal("a rejected EXPIREAT must not delete the key")
+	}
+	for _, c := range []struct{ cmd, ts string }{
+		{"EXPIREAT", "-9223372037"},
+		{"PEXPIREAT", "-9223372036855"},
+		{"EXPIREAT", "1"},
+	} {
 		expireAtRun(t, s, "SET", "k", "v")
-
-		if v := expireAtRun(t, s, "PEXPIREAT", "k", ts); v.Type != resp.TypeError {
-			t.Fatalf("PEXPIREAT k %s returned type %v, want an error (out of nanosecond range)", ts, v.Type)
+		if v := expireAtRun(t, s, c.cmd, "k", c.ts); v.Type != resp.TypeInteger || v.Int != 1 {
+			t.Fatalf("%s k %s = %+v, want :1", c.cmd, c.ts, v)
 		}
-		if n := expireAtRun(t, s, "EXISTS", "k").Int; n != 1 {
-			t.Fatalf("PEXPIREAT k %s destroyed the key (EXISTS=%d)", ts, n)
+		if n := expireAtRun(t, s, "EXISTS", "k").Int; n != 0 {
+			t.Fatalf("%s k %s in the past left the key alive", c.cmd, c.ts)
 		}
 	}
 }

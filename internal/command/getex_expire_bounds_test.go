@@ -55,9 +55,18 @@ func TestGetexExpireBoundsX(t *testing.T) {
 	checkBounds("EX max int64", "EX", "9223372036854775807")
 	checkBounds("PX max int64", "PX", "9223372036854775807")
 	checkBounds("EXAT max int64", "EXAT", "9223372036854775807")
-	checkBounds("PXAT max int64", "PXAT", "9223372036854775807")
 	checkBounds("EX negative", "EX", "-5")
 	checkBounds("PX negative", "PX", "-3")
+
+	// Redis accepts PXAT MaxInt64 (it fits its millisecond clock); the key
+	// must survive with a far-future expiry rather than wrap into the past.
+	seed("k")
+	if v := run("GETEX", "k", "PXAT", "9223372036854775807"); v.Type != resp.TypeBulkString || string(v.Bulk) != "v" {
+		t.Errorf("FAIL PXAT max int64: got %v", v)
+	}
+	if got := run("TTL", "k"); got.Type != resp.TypeInteger || got.Int <= 0 {
+		t.Errorf("FAIL PXAT max int64 TTL: got %v, want a far-future expiry", got)
+	}
 
 	seed("k")
 	if v := run("GETEX", "k"); v.Type != resp.TypeBulkString || string(v.Bulk) != "v" {
