@@ -91,6 +91,10 @@ type Context struct {
 	propagate    []ExecutedCommand
 	propagateSet bool
 
+	// wakeAfter, while EXEC runs its queue, collects the wakeups of blocked
+	// clients its commands trigger, delivered once the queue has run.
+	wakeAfter *[]func()
+
 	// DB is the index of the selected database, the one Store is.
 	DB int
 	// DBs holds every database, so SELECT, MOVE, COPY ... DB, SWAPDB and

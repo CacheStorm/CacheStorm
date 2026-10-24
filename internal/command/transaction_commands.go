@@ -218,10 +218,16 @@ func cmdEXEC(ctx *Context) error {
 	results := make([]*resp.Value, 0, len(queued))
 	executed := make([]ExecutedCommand, 0, len(queued))
 
+	var wakes []func()
+	ctx.wakeAfter = &wakes
 	for _, qc := range queued {
 		result, recorded := runQueuedCommand(ctx, qc)
 		results = append(results, result)
 		executed = append(executed, recorded...)
+	}
+	ctx.wakeAfter = nil
+	for _, wake := range wakes {
+		wake()
 	}
 
 	if r := ctx.dispatcher(); r != nil && len(executed) > 0 {
@@ -309,7 +315,16 @@ func execQueued(ctx *Context, qc queuedCommand) (*resp.Value, *Context) {
 
 	err := def.Handler(&sub)
 	reaccountWrittenKeys(&sub)
-	signalWrittenKeys(&sub)
+	if ctx.wakeAfter != nil {
+		// Blocked clients are served once the whole transaction ran, so none
+		// of them observes it half applied.
+		st, name, args := sub.Store, sub.Command, sub.Args
+		*ctx.wakeAfter = append(*ctx.wakeAfter, func() {
+			signalWrittenKeys(&Context{Store: st, Command: name, Args: args})
+		})
+	} else {
+		signalWrittenKeys(&sub)
+	}
 	touchWrittenKeys(&sub)
 
 	// SELECT inside the transaction switches the database for the commands
