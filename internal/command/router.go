@@ -281,6 +281,7 @@ func (r *Router) Execute(ctx *Context) error {
 	ctx.StartTime = time.Now()
 	db := ctx.DB
 	err := cmd.Handler(ctx)
+	ctx.passWakeup()
 	touchWrittenKeys(ctx)
 
 	// Post-execute hook (AOF persistence)
@@ -359,6 +360,7 @@ func (r *Router) ExecuteHTTP(ctx *Context) (interface{}, error) {
 
 	db := ctx.DB
 	err := cmd.Handler(ctx)
+	ctx.passWakeup()
 	touchWrittenKeys(ctx)
 	if err != nil {
 		return nil, err

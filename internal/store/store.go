@@ -398,8 +398,29 @@ func (s *Store) Set(key string, value Value, opts SetOptions) error {
 
 	s.trackMemory(shard.Set(key, entry))
 	s.IncrementVersion(key)
-	s.keyNotifier.NotifyKey(key)
+	if !emptyCollection(value) {
+		s.keyNotifier.NotifyKey(key)
+	}
 	return nil
+}
+
+// emptyCollection reports a list or sorted set stored before its first
+// element: the push commands create the value empty and then add to it. A
+// blocked pop woken for the empty value finds nothing, and the wakeup the
+// push sends once the element is in would then reach the next waiter in
+// line instead, so creation does not notify; the push does.
+func emptyCollection(value Value) bool {
+	switch v := value.(type) {
+	case *ListValue:
+		v.RLock()
+		defer v.RUnlock()
+		return len(v.Elements) == 0
+	case *SortedSetValue:
+		v.RLock()
+		defer v.RUnlock()
+		return len(v.Members) == 0
+	}
+	return false
 }
 
 func (s *Store) SetEntry(key string, entry *Entry) {

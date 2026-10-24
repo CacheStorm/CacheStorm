@@ -55,6 +55,12 @@ type Context struct {
 	// away, so a blocking command can stop waiting for it.
 	Done <-chan struct{}
 
+	// passKey and passReady record the key a blocking pop was woken for,
+	// so the wakeup can be passed to the next waiter (see passWakeup).
+	passKey   string
+	passReady func(string) bool
+	passOwner bool
+
 	// router is the router dispatching this command, recorded by
 	// Router.Execute so EXEC runs its queue through the same handlers.
 	router *Router
@@ -105,8 +111,13 @@ func (ctx *Context) dispatcher() *Router {
 // the window between the caller's failed pop and its registration as a waiter.
 func (ctx *Context) waitForKeys(keys []string, timeout time.Duration) (string, bool) {
 	return ctx.waitForKeysReady(keys, timeout, ctx.holdsType(func(v store.Value) bool {
-		_, ok := v.(*store.ListValue)
-		return ok
+		l, ok := v.(*store.ListValue)
+		if !ok {
+			return false
+		}
+		l.RLock()
+		defer l.RUnlock()
+		return len(l.Elements) > 0
 	}))
 }
 
@@ -119,14 +130,20 @@ func (ctx *Context) waitForKey(key string, timeout time.Duration) bool {
 // waitForZSetKeys is waitForKeys for sorted-set keys.
 func (ctx *Context) waitForZSetKeys(keys []string, timeout time.Duration) (string, bool) {
 	return ctx.waitForKeysReady(keys, timeout, ctx.holdsType(func(v store.Value) bool {
-		_, ok := v.(*store.SortedSetValue)
-		return ok
+		z, ok := v.(*store.SortedSetValue)
+		if !ok {
+			return false
+		}
+		z.RLock()
+		defer z.RUnlock()
+		return len(z.Members) > 0
 	}))
 }
 
-// holdsType builds a readiness check that a key holds a value of the type the
-// caller pops from. A key of another type is never ready, so a wrong-type key
-// cannot turn the caller's retry loop into a busy spin.
+// holdsType builds a readiness check that a key holds data the caller can
+// pop: a value of the right type that is not empty. A key of another type, or
+// a collection created empty a moment before its first element is added, is
+// never ready, so neither can turn the caller's retry loop into a busy spin.
 func (ctx *Context) holdsType(match func(store.Value) bool) func(string) bool {
 	return func(key string) bool {
 		entry, ok := ctx.Store.Get(key)
@@ -138,7 +155,33 @@ func (ctx *Context) waitForKeysReady(keys []string, timeout time.Duration, ready
 	if ctx.InExec {
 		return "", false
 	}
-	return ctx.Store.KeyNotifier().WaitForKeysCancel(keys, timeout, ctx.Done, ready)
+	var notified bool
+	key, ok := ctx.Store.KeyNotifier().WaitForKeysOpts(keys, timeout, store.WaitOptions{
+		Cancel:   ctx.Done,
+		Ready:    ready,
+		Consume:  true,
+		Notified: &notified,
+		// A command that waits again after a wakeup found nothing to take
+		// keeps its place at the head of the queue.
+		Front: ctx.passKey != "",
+	})
+	if ok {
+		// Only the oldest blocked consumer is woken by a write; once this
+		// command has taken its share, Router.Execute hands the key on to
+		// the next one if data is left.
+		ctx.passKey, ctx.passReady = key, ready
+		ctx.passOwner = ctx.passOwner || notified
+	}
+	return key, ok
+}
+
+// passWakeup hands a consumed key's wakeup to the next blocked client.
+func (ctx *Context) passWakeup() {
+	if ctx.passKey == "" {
+		return
+	}
+	ctx.Store.KeyNotifier().Pass(ctx.passKey, ctx.passReady, ctx.passOwner)
+	ctx.passKey, ctx.passReady, ctx.passOwner = "", nil, false
 }
 
 // waitForStreamKeys is waitForKeys for streams. A stream that exists may hold

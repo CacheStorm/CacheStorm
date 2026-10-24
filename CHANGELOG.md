@@ -39,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Authentication: only AUTH, HELLO, QUIT and RESET run before a requirepass client authenticates, the commands Redis flags `no_auth`. PING and COMMAND were exempt too, so an unauthenticated client could probe the server
 
 ### Fixed
+- Blocking commands: blocked list and sorted-set pops are served first come first served, as in Redis. A write woke every waiter and the fastest goroutine took the element; now it wakes the oldest consumer, which passes the wakeup on once it has taken its share, a woken consumer that finds the data gone keeps its place in the queue, and creating an empty list or sorted set before the first element is added no longer sends a wakeup for it
 - Transactions: WATCH is per database and sees every change to a watched key: in-place writes such as HSET and LPUSH, EXPIRE/PERSIST, DEL, expiry, FLUSHDB/FLUSHALL, MOVE and SWAPDB, a missing key being created and a key deleted and recreated. An aborted EXEC replies with a null array. SELECT inside MULTI applies to the commands queued after it, and Lua scripts run in the caller's database with a script-local SELECT
 - Unknown commands reply with Redis' text, `ERR unknown command 'x', with args beginning with: ...`
 - SET accepts `NX GET`, rejects `EX`+`PX` and `KEEPTTL` with an expiry, parses options case-insensitively, reports `invalid expire time in 'set' command`, and treats EXAT/PXAT in the past as a delete; SETEX/PSETEX/GETEX follow the same rules
