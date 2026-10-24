@@ -1206,10 +1206,10 @@ func TestStore_SetValidation(t *testing.T) {
 		t.Fatalf("expected ErrKeyTooLarge, got %v", err)
 	}
 
-	// Key with null byte
-	err = s.Set("key\x00with\x00null", &StringValue{Data: []byte("val")}, SetOptions{})
-	if err != ErrInvalidKey {
-		t.Fatalf("expected ErrInvalidKey, got %v", err)
+	// Keys are binary safe, as in Redis: NUL, CR and LF are ordinary bytes.
+	err = s.Set("key\x00with\r\nnull", &StringValue{Data: []byte("val")}, SetOptions{})
+	if err != nil {
+		t.Fatalf("expected a binary key to be accepted, got %v", err)
 	}
 
 	// NX when key exists

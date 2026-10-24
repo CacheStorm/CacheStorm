@@ -67,7 +67,6 @@ func TestExpireRejectsOverflowingTTL(t *testing.T) {
 		{"EXPIRE", "9223372036854775807", "EXPIRE MaxInt64"},
 		{"EXPIRE", "-9223372036854775808", "EXPIRE MinInt64"},
 		{"PEXPIRE", "9223372036854775807", "PEXPIRE MaxInt64"},
-		{"PEXPIRE", "-9223372036854775808", "PEXPIRE MinInt64"},
 	} {
 		s := expireTTLSeed(t, router)
 		out := expireTTLExec(t, s, router, c.cmd, "k", c.arg)
@@ -82,23 +81,24 @@ func TestExpireRejectsOverflowingTTL(t *testing.T) {
 	}
 }
 
-// TestExpireRejectsZeroTTL: Redis rejects a zero TTL outright. CacheStorm
-// applied it, and its own expiry path treats 0 as "already expired".
-func TestExpireRejectsZeroTTL(t *testing.T) {
+// TestExpireZeroOrPastTTLDeletesKey: Redis 7 treats a TTL of zero, or one so
+// negative that it lands in the past (PEXPIRE MinInt64 does not overflow, the
+// sum with the current time is simply negative), as "expire now": it replies
+// 1 and deletes the key.
+func TestExpireZeroOrPastTTLDeletesKey(t *testing.T) {
 	router := expireTTLRouter()
 
-	for _, c := range []struct{ cmd, name string }{
-		{"EXPIRE", "EXPIRE 0"},
-		{"PEXPIRE", "PEXPIRE 0"},
+	for _, c := range []struct{ cmd, arg, name string }{
+		{"EXPIRE", "0", "EXPIRE 0"},
+		{"PEXPIRE", "0", "PEXPIRE 0"},
+		{"PEXPIRE", "-9223372036854775808", "PEXPIRE MinInt64"},
 	} {
 		s := expireTTLSeed(t, router)
-		out := expireTTLExec(t, s, router, c.cmd, "k", "0")
-		if !strings.HasPrefix(out, "-") {
-			t.Fatalf("%s: replied %q, want \"ERR invalid expire time\"; "+
-				"a zero TTL must be rejected, not applied", c.name, out)
+		if out := expireTTLExec(t, s, router, c.cmd, "k", c.arg); out != ":1\r\n" {
+			t.Fatalf("%s: replied %q, want :1", c.name, out)
 		}
-		if ex := expireTTLExec(t, s, router, "EXISTS", "k"); ex != ":1\r\n" {
-			t.Fatalf("%s: replied an error but the key was DELETED (EXISTS = %q)", c.name, ex)
+		if ex := expireTTLExec(t, s, router, "EXISTS", "k"); ex != ":0\r\n" {
+			t.Fatalf("%s: key survived (EXISTS = %q)", c.name, ex)
 		}
 	}
 }

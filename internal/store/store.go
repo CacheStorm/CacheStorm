@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"strings"
 	"sync"
 	"time"
 
@@ -236,9 +235,6 @@ func (s *Store) Set(key string, value Value, opts SetOptions) error {
 	}
 	if len(key) > MaxKeySize {
 		return ErrKeyTooLarge
-	}
-	if strings.ContainsRune(key, 0) {
-		return ErrInvalidKey
 	}
 
 	// Validate value size
@@ -503,10 +499,12 @@ func (s *Store) SetExpiresAt(key string, expiresAt int64) bool {
 	return true
 }
 
+// Persist removes the key's expiry. It reports true only when the key exists
+// and had an expiry to remove, which is what PERSIST replies.
 func (s *Store) Persist(key string) bool {
 	// ExpiresAt 0 clears the expiry; any stale wheel schedule for this key
 	// later fires as a no-op (expireKey only removes actually-expired keys).
-	return s.shards[s.shardIndex(key)].updateExpiry(key, 0)
+	return s.shards[s.shardIndex(key)].clearExpiry(key)
 }
 
 func (s *Store) GetTTL(key string) time.Duration {

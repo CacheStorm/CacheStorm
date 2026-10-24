@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"sort"
 	"strconv"
@@ -382,67 +383,19 @@ func cmdTIME(ctx *Context) error {
 }
 
 func cmdEXPIRE(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	key := ctx.ArgString(0)
-	sec, err := strconv.ParseInt(ctx.ArgString(1), 10, 64)
-	if err != nil {
-		return ctx.WriteError(ErrNotInteger)
-	}
-	// Bound the TTL BEFORE multiplying. time.Duration is int64 nanoseconds, so
-	// sec * 1e9 overflows for large values and wraps to a duration with the
-	// WRONG SIGN: EXPIRE key 9223372036854775807 became -1s, which Store.SetTTL
-	// stores as "already expired" and the key is silently DELETED behind a :1
-	// reply. Redis rejects an out-of-range TTL, and rejects 0 as well. The
-	// sibling setters (cmdEXPIREAT/cmdPEXPIREAT/cmdSETEX) already guard this.
-	if sec == 0 || sec > maxExpireAtSeconds || sec < -maxExpireAtSeconds {
-		return ctx.WriteError(errInvalidExpireTime)
-	}
-	cond, err := parseExpireCondition(ctx, 2)
-	if err != nil {
-		return ctx.WriteError(err)
-	}
-
-	newTTL := time.Duration(sec) * time.Second
-	if !expireConditionAllows(ctx.Store.TTL(key), newTTL, cond) {
-		return ctx.WriteInteger(0)
-	}
-	if ctx.Store.SetTTL(key, newTTL) {
-		return ctx.WriteInteger(1)
-	}
-	return ctx.WriteInteger(0)
+	return expireGeneric(ctx, time.Now().UnixMilli(), true, "expire")
 }
 
 func cmdPEXPIRE(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
+	return expireGeneric(ctx, time.Now().UnixMilli(), false, "pexpire")
+}
 
-	key := ctx.ArgString(0)
-	ms, err := strconv.ParseInt(ctx.ArgString(1), 10, 64)
-	if err != nil {
-		return ctx.WriteError(ErrNotInteger)
-	}
-	// See cmdEXPIRE: bound before multiplying, or ms * 1e6 overflows int64
-	// nanoseconds and wraps to the wrong sign, deleting the key outright.
-	if ms == 0 || ms > maxExpireAtMillis || ms < -maxExpireAtMillis {
-		return ctx.WriteError(errInvalidExpireTime)
-	}
-	cond, err := parseExpireCondition(ctx, 2)
-	if err != nil {
-		return ctx.WriteError(err)
-	}
+func cmdEXPIREAT(ctx *Context) error {
+	return expireGeneric(ctx, 0, true, "expireat")
+}
 
-	newTTL := time.Duration(ms) * time.Millisecond
-	if !expireConditionAllows(ctx.Store.TTL(key), newTTL, cond) {
-		return ctx.WriteInteger(0)
-	}
-	if ctx.Store.SetTTL(key, newTTL) {
-		return ctx.WriteInteger(1)
-	}
-	return ctx.WriteInteger(0)
+func cmdPEXPIREAT(ctx *Context) error {
+	return expireGeneric(ctx, 0, false, "pexpireat")
 }
 
 // An absolute expiry is stored as a Unix nanosecond timestamp, so the input
@@ -457,106 +410,94 @@ const (
 
 var errInvalidExpireTime = errors.New("ERR invalid expire time")
 
-type expireCondition int
-
 const (
-	expireCondNone expireCondition = iota
-	expireCondNX
-	expireCondXX
-	expireCondGT
-	expireCondLT
+	expireFlagNX = 1 << iota
+	expireFlagXX
+	expireFlagGT
+	expireFlagLT
 )
 
-func parseExpireCondition(ctx *Context, start int) (expireCondition, error) {
-	cond := expireCondNone
-	for i := start; i < ctx.ArgCount(); i++ {
-		var next expireCondition
-		switch strings.ToUpper(ctx.ArgString(i)) {
+// parseExpireFlags is Redis' parseExtendedExpireArgumentsOrReply.
+func parseExpireFlags(args [][]byte) (int, error) {
+	flags := 0
+	for _, a := range args {
+		switch strings.ToUpper(string(a)) {
 		case "NX":
-			next = expireCondNX
+			flags |= expireFlagNX
 		case "XX":
-			next = expireCondXX
+			flags |= expireFlagXX
 		case "GT":
-			next = expireCondGT
+			flags |= expireFlagGT
 		case "LT":
-			next = expireCondLT
+			flags |= expireFlagLT
 		default:
-			return cond, ErrSyntaxError
+			return 0, errors.New("ERR Unsupported option " + string(a))
 		}
-		if cond != expireCondNone {
-			return cond, ErrSyntaxError
-		}
-		cond = next
 	}
-	return cond, nil
+	if flags&expireFlagNX != 0 && flags&(expireFlagXX|expireFlagGT|expireFlagLT) != 0 {
+		return 0, errors.New("ERR NX and XX, GT or LT options at the same time are not compatible")
+	}
+	if flags&expireFlagGT != 0 && flags&expireFlagLT != 0 {
+		return 0, errors.New("ERR GT and LT options at the same time are not compatible")
+	}
+	return flags, nil
 }
 
-func expireConditionAllows(current time.Duration, newTTL time.Duration, cond expireCondition) bool {
-	volatile := current > 0
-	switch cond {
-	case expireCondNX:
-		return !volatile
-	case expireCondXX:
-		return volatile
-	case expireCondGT:
-		return volatile && newTTL > current
-	case expireCondLT:
-		return !volatile || newTTL < current
-	}
-	return true
-}
-
-func cmdEXPIREAT(ctx *Context) error {
+// expireGeneric is Redis' expireGenericCommand: the instant is computed in
+// milliseconds with overflow checks, NX/XX/GT/LT compare it against the
+// current expiry (no expiry counts as infinite), and an instant that is not
+// in the future deletes the key.
+func expireGeneric(ctx *Context, basetimeMs int64, seconds bool, cmd string) error {
 	if ctx.ArgCount() < 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
-
 	key := ctx.ArgString(0)
-	ts, err := strconv.ParseInt(ctx.ArgString(1), 10, 64)
-	if err != nil {
-		return ctx.WriteError(ErrNotInteger)
-	}
-	if ts > maxExpireAtSeconds || ts < -maxExpireAtSeconds {
-		return ctx.WriteError(errInvalidExpireTime)
-	}
-	cond, err := parseExpireCondition(ctx, 2)
+	flags, err := parseExpireFlags(ctx.Args[2:])
 	if err != nil {
 		return ctx.WriteError(err)
 	}
+	when, ok := parseRedisInt(ctx.Arg(1))
+	if !ok {
+		return ctx.WriteError(ErrNotInteger)
+	}
+	if seconds {
+		if when > math.MaxInt64/1000 || when < math.MinInt64/1000 {
+			return ctx.WriteError(errInvalidExpireIn(cmd))
+		}
+		when *= 1000
+	}
+	if when > math.MaxInt64-basetimeMs {
+		return ctx.WriteError(errInvalidExpireIn(cmd))
+	}
+	when += basetimeMs
 
-	expiresAt := time.Unix(ts, 0).UnixNano()
-	if !expireConditionAllows(ctx.Store.TTL(key), time.Until(time.Unix(0, expiresAt)), cond) {
+	entry, exists := ctx.Store.Get(key)
+	if !exists {
 		return ctx.WriteInteger(0)
 	}
-	if ctx.Store.SetExpiresAt(key, expiresAt) {
+	if flags != 0 {
+		currentNs := entry.ExpiresAt.Load()
+		volatile := currentNs != 0
+		current := currentNs / int64(time.Millisecond)
+		if flags&expireFlagNX != 0 && volatile {
+			return ctx.WriteInteger(0)
+		}
+		if flags&expireFlagXX != 0 && !volatile {
+			return ctx.WriteInteger(0)
+		}
+		if flags&expireFlagGT != 0 && (!volatile || when <= current) {
+			return ctx.WriteInteger(0)
+		}
+		if flags&expireFlagLT != 0 && volatile && when >= current {
+			return ctx.WriteInteger(0)
+		}
+	}
+
+	if when <= time.Now().UnixMilli() {
+		ctx.Store.Delete(key)
 		return ctx.WriteInteger(1)
 	}
-	return ctx.WriteInteger(0)
-}
-
-func cmdPEXPIREAT(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	key := ctx.ArgString(0)
-	ts, err := strconv.ParseInt(ctx.ArgString(1), 10, 64)
-	if err != nil {
-		return ctx.WriteError(ErrNotInteger)
-	}
-	if ts > maxExpireAtMillis || ts < -maxExpireAtMillis {
-		return ctx.WriteError(errInvalidExpireTime)
-	}
-	cond, err := parseExpireCondition(ctx, 2)
-	if err != nil {
-		return ctx.WriteError(err)
-	}
-
-	expiresAt := time.Unix(0, ts*int64(time.Millisecond)).UnixNano()
-	if !expireConditionAllows(ctx.Store.TTL(key), time.Until(time.Unix(0, expiresAt)), cond) {
-		return ctx.WriteInteger(0)
-	}
-	if ctx.Store.SetExpiresAt(key, expiresAt) {
+	if ctx.Store.SetExpiresAt(key, expireMsToNs(when)) {
 		return ctx.WriteInteger(1)
 	}
 	return ctx.WriteInteger(0)
@@ -574,7 +515,8 @@ func cmdTTL(ctx *Context) error {
 	if ttl < 0 {
 		return ctx.WriteInteger(int64(ttl))
 	}
-	return ctx.WriteInteger(int64(ttl / time.Second))
+	// Redis rounds the remaining milliseconds to the nearest second.
+	return ctx.WriteInteger((int64(ttl/time.Millisecond) + 500) / 1000)
 }
 
 func cmdPTTL(ctx *Context) error {
@@ -644,6 +586,8 @@ func cmdTYPE(ctx *Context) error {
 	return ctx.WriteSimpleString(dt.String())
 }
 
+var errNoSuchKey = errors.New("ERR no such key")
+
 func cmdRENAME(ctx *Context) error {
 	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(ErrWrongArgCount)
@@ -654,7 +598,10 @@ func cmdRENAME(ctx *Context) error {
 
 	entry, exists := ctx.Store.Get(oldKey)
 	if !exists {
-		return ctx.WriteError(store.ErrKeyNotFound)
+		return ctx.WriteError(errNoSuchKey)
+	}
+	if len(newKey) > store.MaxKeySize {
+		return ctx.WriteError(store.ErrKeyTooLarge)
 	}
 
 	ctx.Store.Delete(oldKey)
@@ -673,7 +620,10 @@ func cmdRENAMENX(ctx *Context) error {
 
 	entry, exists := ctx.Store.Get(oldKey)
 	if !exists {
-		return ctx.WriteError(store.ErrKeyNotFound)
+		return ctx.WriteError(errNoSuchKey)
+	}
+	if len(newKey) > store.MaxKeySize {
+		return ctx.WriteError(store.ErrKeyTooLarge)
 	}
 
 	if ctx.Store.Exists(newKey) {
@@ -694,15 +644,14 @@ func cmdKEYS(ctx *Context) error {
 	const maxKeysResult = 100000 // Safety cap to prevent OOM on large databases
 
 	pattern := ctx.ArgString(0)
-	keys := ctx.Store.Keys()
-
 	matched := make([]*resp.Value, 0)
-	for _, key := range keys {
-		if matchPattern(key, pattern) {
-			matched = append(matched, resp.BulkString(key))
-			if len(matched) >= maxKeysResult {
-				break
-			}
+	for key, entry := range ctx.Store.GetAll() {
+		if entry.IsExpired() || !matchPattern(key, pattern) {
+			continue
+		}
+		matched = append(matched, resp.BulkString(key))
+		if len(matched) >= maxKeysResult {
+			break
 		}
 	}
 
@@ -719,36 +668,10 @@ func cmdRANDOMKEY(ctx *Context) error {
 	return ctx.WriteBulkString(keys[idx])
 }
 
+// matchPattern is Redis' glob matcher (stringmatchlen): *, ?, [abc], [a-z],
+// [^a] and backslash escapes.
 func matchPattern(s, pattern string) bool {
-	if pattern == "*" {
-		return true
-	}
-
-	si, pi := 0, 0
-	starIdx, match := -1, 0
-
-	for si < len(s) {
-		if pi < len(pattern) && (pattern[pi] == '?' || pattern[pi] == s[si]) {
-			si++
-			pi++
-		} else if pi < len(pattern) && pattern[pi] == '*' {
-			starIdx = pi
-			match = si
-			pi++
-		} else if starIdx != -1 {
-			pi = starIdx + 1
-			match++
-			si = match
-		} else {
-			return false
-		}
-	}
-
-	for pi < len(pattern) && pattern[pi] == '*' {
-		pi++
-	}
-
-	return pi == len(pattern)
+	return store.MatchPattern(s, pattern)
 }
 
 func cmdTOUCH(ctx *Context) error {
@@ -1020,83 +943,97 @@ func cmdAUTH(ctx *Context) error {
 	return ctx.WriteOK()
 }
 
+// SCAN walks the keyspace in the order of a 63-bit hash of each key, and the
+// cursor is one more than the hash where the next call resumes. A key that is
+// present for the whole iteration is therefore returned regardless of what is
+// added or removed in between, which an index into an unordered key list
+// could not guarantee.
 func cmdSCAN(ctx *Context) error {
 	if ctx.ArgCount() < 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
-	cursor64, err := strconv.ParseInt(ctx.ArgString(0), 10, 64)
-	if err != nil || cursor64 < 0 {
-		return ctx.WriteError(ErrNotInteger)
+	cursor, err := strconv.ParseUint(ctx.ArgString(0), 10, 64)
+	if err != nil {
+		return ctx.WriteError(errors.New("ERR invalid cursor"))
 	}
-	cursor := int(cursor64)
 
 	count := 10
-	pattern := "*"
-	match := ""
-
+	pattern := ""
+	typeName := ""
 	for i := 1; i < ctx.ArgCount(); i++ {
 		arg := strings.ToUpper(ctx.ArgString(i))
+		if i+1 >= ctx.ArgCount() {
+			return ctx.WriteError(ErrSyntaxError)
+		}
 		switch arg {
 		case "COUNT":
 			i++
-			if i >= ctx.ArgCount() {
-				return ctx.WriteError(ErrSyntaxError)
-			}
-			count, err = strconv.Atoi(ctx.ArgString(i))
-			if err != nil {
+			n, ok := parseRedisInt(ctx.Arg(i))
+			if !ok {
 				return ctx.WriteError(ErrNotInteger)
 			}
-			// COUNT is a work-size hint. A non-positive one flows into
-			// end = start + count and then into make() as a negative
-			// capacity, which panics. SSCAN already rejected this; mirror it.
-			if count <= 0 {
-				return ctx.WriteError(ErrInvalidArg)
-			}
-		case "MATCH":
-			i++
-			if i >= ctx.ArgCount() {
+			if n < 1 {
 				return ctx.WriteError(ErrSyntaxError)
 			}
+			count = int(min(n, 1<<30))
+		case "MATCH":
+			i++
 			pattern = ctx.ArgString(i)
+		case "TYPE":
+			i++
+			typeName = strings.ToLower(ctx.ArgString(i))
 		default:
 			return ctx.WriteError(ErrSyntaxError)
 		}
 	}
 
-	keys := ctx.Store.Keys()
-
-	filtered := make([]string, 0)
-	for _, key := range keys {
-		if matchPattern(key, pattern) {
-			filtered = append(filtered, key)
+	type scanKey struct {
+		hash  uint64
+		key   string
+		entry *store.Entry
+	}
+	var start uint64
+	if cursor > 0 {
+		start = cursor - 1
+	}
+	candidates := make([]scanKey, 0)
+	for key, entry := range ctx.Store.GetAll() {
+		if h := scanHash(key); h >= start && !entry.IsExpired() {
+			candidates = append(candidates, scanKey{h, key, entry})
 		}
 	}
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].hash != candidates[j].hash {
+			return candidates[i].hash < candidates[j].hash
+		}
+		return candidates[i].key < candidates[j].key
+	})
 
-	start := cursor
-	if start >= len(filtered) {
-		start = 0
+	// Take count keys, then the rest of the last key's hash bucket so that a
+	// resumed scan never splits keys that share a hash.
+	end := min(count, len(candidates))
+	for end > 0 && end < len(candidates) && candidates[end].hash == candidates[end-1].hash {
+		end++
+	}
+	next := uint64(0)
+	if end < len(candidates) {
+		next = candidates[end].hash + 1
 	}
 
-	end := start + count
-	if end > len(filtered) {
-		end = len(filtered)
+	result := make([]*resp.Value, 0, end)
+	for _, c := range candidates[:end] {
+		if pattern != "" && !matchPattern(c.key, pattern) {
+			continue
+		}
+		if typeName != "" && redisTypeName(c.entry.Value) != typeName {
+			continue
+		}
+		result = append(result, resp.BulkString(c.key))
 	}
-
-	nextCursor := 0
-	if end < len(filtered) {
-		nextCursor = end
-	}
-
-	result := make([]*resp.Value, 0, end-start)
-	for i := start; i < end; i++ {
-		result = append(result, resp.BulkString(filtered[i]))
-	}
-
-	_ = match
 
 	return ctx.WriteArray([]*resp.Value{
-		resp.BulkString(strconv.Itoa(nextCursor)),
+		resp.BulkString(strconv.FormatUint(next, 10)),
 		resp.ArrayValue(result),
 	})
 }

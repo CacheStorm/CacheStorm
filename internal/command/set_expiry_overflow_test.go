@@ -49,21 +49,47 @@ func mustRejectAndNotStore(t *testing.T, args ...string) {
 	}
 }
 
-// SET's EXAT/PXAT and SETEX/PSETEX multiply the supplied value into a
-// time.Duration. An unrepresentable value wraps to a non-positive duration,
-// which the store treats as "no expiry" — a permanent key behind +OK.
+// SET's EXAT/PXAT and SETEX/PSETEX used to multiply the supplied value into a
+// time.Duration, and an unrepresentable value wrapped to a non-positive
+// duration, which the store treats as "no expiry" — a permanent key behind
+// +OK. Redis only rejects a value whose millisecond instant overflows int64;
+// a past absolute time replies +OK without storing the key, and a far-future
+// one stores the key with an expiry.
 func TestSetAndSetexRejectOverflowingExpiry(t *testing.T) {
-	cases := [][]string{
-		{"SET", "k", "v", "EXAT", "1000000000"},     // a past absolute time
-		{"SET", "k", "v", "PXAT", "90000000000000"}, // ms * 1e6 overflows
-		{"SET", "k", "v", "PXAT", "1000000000"},     // a past absolute time
+	for _, args := range [][]string{
 		{"SETEX", "k", "9223372036854775807", "v"},
-		{"SETEX", "k", "9223372037", "v"}, // one second past the bound
 		{"PSETEX", "k", "9223372036854775807", "v"},
-		{"PSETEX", "k", "9223372036855", "v"}, // one millisecond past the bound
-	}
-	for _, args := range cases {
+		{"SET", "k", "v", "EX", "9223372036854775807"},
+		{"SET", "k", "v", "PX", "9223372036854775807"},
+	} {
 		mustRejectAndNotStore(t, args...)
+	}
+
+	for _, args := range [][]string{
+		{"SET", "k", "v", "EXAT", "1000000000"},
+		{"SET", "k", "v", "PXAT", "1000000000"},
+	} {
+		s := store.NewStore()
+		if v := expiryOverflowRun(t, s, args...); v.Type != resp.TypeSimpleString || v.Str != "OK" {
+			t.Fatalf("%v = %+v, want +OK", args, v)
+		}
+		if n := expiryOverflowRun(t, s, "EXISTS", "k").Int; n != 0 {
+			t.Fatalf("%v with a past time stored the key", args)
+		}
+	}
+
+	for _, args := range [][]string{
+		{"SET", "k", "v", "PXAT", "90000000000000"},
+		{"SETEX", "k", "9223372037", "v"},
+		{"PSETEX", "k", "9223372036855", "v"},
+	} {
+		s := store.NewStore()
+		if v := expiryOverflowRun(t, s, args...); v.Type != resp.TypeSimpleString || v.Str != "OK" {
+			t.Fatalf("%v = %+v, want +OK", args, v)
+		}
+		if ttl := expiryOverflowRun(t, s, "TTL", "k").Int; ttl <= 0 {
+			t.Fatalf("%v left TTL %d, want a far-future expiry", args, ttl)
+		}
 	}
 }
 

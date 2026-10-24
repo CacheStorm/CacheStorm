@@ -100,6 +100,19 @@ func (s *Shard) updateExpiry(key string, expiresAt int64) bool {
 	return true
 }
 
+// clearExpiry removes a live key's expiry and reports whether it had one.
+func (s *Shard) clearExpiry(key string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	entry, exists := s.data[key]
+	if !exists || entry.IsExpired() || entry.ExpiresAt.Load() == 0 {
+		return false
+	}
+	entry.ExpiresAt.Store(0)
+	return true
+}
+
 func (s *Shard) Exists(key string) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
