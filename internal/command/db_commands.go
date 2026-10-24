@@ -249,6 +249,25 @@ func isWriteCommand(cmd string) bool {
 // named, so a WATCH on any of them aborts the watcher's EXEC. Handlers that
 // modify a value in place never pass through Store.Set, so this is what makes
 // every write visible to WATCH.
+// signalWrittenKeys wakes clients blocked on the keys a write command named,
+// as Redis' signalKeyAsReady does. The push commands notify on their own, but
+// other writers that can fill a list or sorted set (LMOVE and RPOPLPUSH into
+// a new destination, SORT ... STORE, ZUNIONSTORE, RESTORE, ...) did not, so a
+// client blocked on the destination slept through the data. A write with no
+// client blocked anywhere costs one atomic load.
+func signalWrittenKeys(ctx *Context) {
+	if ctx.Store == nil || !isWriteCommand(ctx.Command) {
+		return
+	}
+	kn := ctx.Store.KeyNotifier()
+	if !kn.HasWaiters() {
+		return
+	}
+	for _, key := range aclKeysForCommand(ctx.Command, ctx.Args) {
+		kn.NotifyKey(key)
+	}
+}
+
 func touchWrittenKeys(ctx *Context) {
 	if ctx.Store == nil || !ctx.Store.HasWatchedKeys() || !isWriteCommand(ctx.Command) {
 		return

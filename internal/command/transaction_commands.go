@@ -285,6 +285,7 @@ func executeQueuedCommand(ctx *Context, qc queuedCommand) *resp.Value {
 	sub.StartTime = time.Now()
 
 	err := def.Handler(&sub)
+	signalWrittenKeys(&sub)
 	touchWrittenKeys(&sub)
 
 	// SELECT inside the transaction switches the database for the commands

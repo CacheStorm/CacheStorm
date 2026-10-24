@@ -283,6 +283,7 @@ func (r *Router) Execute(ctx *Context) error {
 	err := cmd.Handler(ctx)
 	ctx.passWakeup()
 	touchWrittenKeys(ctx)
+	signalWrittenKeys(ctx)
 
 	// Post-execute hook (AOF persistence)
 	if err == nil && r.postExecute != nil {
@@ -362,6 +363,7 @@ func (r *Router) ExecuteHTTP(ctx *Context) (interface{}, error) {
 	err := cmd.Handler(ctx)
 	ctx.passWakeup()
 	touchWrittenKeys(ctx)
+	signalWrittenKeys(ctx)
 	if err != nil {
 		return nil, err
 	}

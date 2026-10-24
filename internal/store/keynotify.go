@@ -2,6 +2,7 @@ package store
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -27,6 +28,14 @@ type KeyNotifier struct {
 	// later waiter overtake it. A token older than inflightGrace is ignored,
 	// so a consumer that never passes cannot stall the key.
 	inflight map[string]inflightToken
+	// registered counts waiters across all keys, so a write can skip the
+	// notifier entirely when nobody is blocked.
+	registered atomic.Int64
+}
+
+// HasWaiters reports whether any client is blocked on any key.
+func (kn *KeyNotifier) HasWaiters() bool {
+	return kn.registered.Load() > 0
 }
 
 type inflightToken struct {
@@ -135,6 +144,7 @@ func (kn *KeyNotifier) WaitForKeysOpts(keys []string, timeout time.Duration, opt
 	if opts.Consume {
 		kn.consumers[ch] = true
 	}
+	kn.registered.Add(1)
 	kn.mu.Unlock()
 
 	woken := func() (string, bool) {
@@ -158,6 +168,7 @@ func (kn *KeyNotifier) WaitForKeysOpts(keys []string, timeout time.Duration, opt
 		delete(kn.consumers, ch)
 		delete(kn.wakeHooks, ch)
 		delete(kn.woken, ch)
+		kn.registered.Add(-1)
 		kn.mu.Unlock()
 		// A consumer that was woken but is leaving without the data (it
 		// timed out or its client went away at the same moment) passes the

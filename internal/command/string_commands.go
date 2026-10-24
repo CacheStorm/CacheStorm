@@ -659,11 +659,11 @@ func cmdINCRBYFLOAT(ctx *Context) error {
 		if !ok {
 			return ctx.WriteError(store.ErrWrongType)
 		}
-		if current, ok = parseLongDouble(data); !ok {
+		if current, ok = parseIncrByFloatArg(data); !ok {
 			return ctx.WriteError(ErrNotFloat)
 		}
 	}
-	incr, ok := parseLongDouble(ctx.Arg(1))
+	incr, ok := parseIncrByFloatArg(ctx.Arg(1))
 	if !ok {
 		return ctx.WriteError(ErrNotFloat)
 	}
@@ -681,17 +681,14 @@ func cmdINCRBYFLOAT(ctx *Context) error {
 
 // Redis computes INCRBYFLOAT in C long double, which on x86-64 is the x87
 // 80-bit format: a 64-bit mantissa and a binary exponent of at most 16383.
-// big.Float at 64 bits with round-to-nearest-even reproduces its parsing and
-// addition exactly, so results such as 0.1+0.2 come out as Redis prints them.
-const (
-	longDoublePrec   = 64
-	longDoubleMaxExp = 16384  // MantExp of LDBL_MAX
-	longDoubleMinExp = -16444 // MantExp of the smallest subnormal
-)
+// big.Float at 64 bits with round-to-nearest-even (longDoublePrec and the
+// exponent bounds in hash_commands.go) reproduces its parsing and addition
+// exactly, so results such as 0.1+0.2 come out as Redis prints them.
 
-// parseLongDouble mirrors Redis' string2ld (strtold): no leading space, no
-// trailing garbage, NaN rejected, and out-of-range values rejected.
-func parseLongDouble(b []byte) (*big.Float, bool) {
+// parseIncrByFloatArg mirrors Redis' string2ld (strtold) as INCRBYFLOAT
+// applies it: no leading space, no trailing garbage, NaN rejected, and
+// out-of-range values rejected.
+func parseIncrByFloatArg(b []byte) (*big.Float, bool) {
 	if len(b) == 0 || len(b) >= 5*1024 {
 		return nil, false
 	}
