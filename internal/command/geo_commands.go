@@ -399,13 +399,13 @@ func cmdGEORADIUS(ctx *Context) error {
 		for _, r := range results {
 			switch unit {
 			case "m":
-				destZset.Members[r.member] = r.dist * 1000
+				destZset.Add(r.member, r.dist*1000)
 			case "km":
-				destZset.Members[r.member] = r.dist
+				destZset.Add(r.member, r.dist)
 			case "mi":
-				destZset.Members[r.member] = r.dist * 0.621371
+				destZset.Add(r.member, r.dist*0.621371)
 			case "ft":
-				destZset.Members[r.member] = r.dist * 3280.84
+				destZset.Add(r.member, r.dist*3280.84)
 			}
 		}
 		ctx.Store.Set(storeDistKey, destZset, store.SetOptions{})
@@ -598,13 +598,13 @@ func cmdGEORADIUSBYMEMBER(ctx *Context) error {
 		for _, r := range results {
 			switch unit {
 			case "m":
-				destZset.Members[r.member] = r.dist * 1000
+				destZset.Add(r.member, r.dist*1000)
 			case "km":
-				destZset.Members[r.member] = r.dist
+				destZset.Add(r.member, r.dist)
 			case "mi":
-				destZset.Members[r.member] = r.dist * 0.621371
+				destZset.Add(r.member, r.dist*0.621371)
 			case "ft":
-				destZset.Members[r.member] = r.dist * 3280.84
+				destZset.Add(r.member, r.dist*3280.84)
 			}
 		}
 		ctx.Store.Set(storeDistKey, destZset, store.SetOptions{})
@@ -1014,13 +1014,13 @@ func cmdGEOSEARCHSTORE(ctx *Context) error {
 		for _, m := range matches {
 			switch unit {
 			case "m":
-				destZset.Members[m.member] = m.dist * 1000
+				destZset.Add(m.member, m.dist*1000)
 			case "mi":
-				destZset.Members[m.member] = m.dist * 0.621371
+				destZset.Add(m.member, m.dist*0.621371)
 			case "ft":
-				destZset.Members[m.member] = m.dist * 3280.84
+				destZset.Add(m.member, m.dist*3280.84)
 			default:
-				destZset.Members[m.member] = m.dist
+				destZset.Add(m.member, m.dist)
 			}
 		}
 		destValue = destZset

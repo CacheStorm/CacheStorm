@@ -77,7 +77,7 @@ func cmdSADD(ctx *Context) error {
 	for i := 1; i < ctx.ArgCount(); i++ {
 		member := ctx.ArgString(i)
 		if _, exists := set.Members[member]; !exists {
-			set.Members[member] = struct{}{}
+			set.AddMember(member)
 			added++
 		}
 	}
@@ -103,7 +103,7 @@ func cmdSREM(ctx *Context) error {
 	for i := 1; i < ctx.ArgCount(); i++ {
 		member := ctx.ArgString(i)
 		if _, exists := set.Members[member]; exists {
-			delete(set.Members, member)
+			set.RemoveMember(member)
 			removed++
 		}
 	}
@@ -221,7 +221,7 @@ func cmdSPOP(ctx *Context) error {
 
 	if !withCount {
 		for member := range set.Members {
-			delete(set.Members, member)
+			set.RemoveMember(member)
 			isEmpty := len(set.Members) == 0
 			set.Unlock()
 			if isEmpty {
@@ -238,7 +238,7 @@ func cmdSPOP(ctx *Context) error {
 		for member := range set.Members {
 			members = append(members, resp.BulkString(member))
 		}
-		set.Members = make(map[string]struct{})
+		set.ClearMembers()
 		set.Unlock()
 		deleteIfEmpty(ctx, key, set)
 		return ctx.WriteArray(members)
@@ -251,7 +251,7 @@ func cmdSPOP(ctx *Context) error {
 			break
 		}
 		members = append(members, resp.BulkString(member))
-		delete(set.Members, member)
+		set.RemoveMember(member)
 		i++
 	}
 	set.Unlock()

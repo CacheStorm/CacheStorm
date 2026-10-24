@@ -285,6 +285,7 @@ func executeQueuedCommand(ctx *Context, qc queuedCommand) *resp.Value {
 	sub.StartTime = time.Now()
 
 	err := def.Handler(&sub)
+	reaccountWrittenKeys(&sub)
 	signalWrittenKeys(&sub)
 	touchWrittenKeys(&sub)
 

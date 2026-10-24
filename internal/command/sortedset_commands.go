@@ -373,7 +373,7 @@ func storeSortedSet(ctx *Context, dst string, entries []store.SortedEntry) error
 	}
 	z := &store.SortedSetValue{Members: make(map[string]float64, len(entries))}
 	for _, e := range entries {
-		z.Members[e.Member] = e.Score
+		z.Add(e.Member, e.Score)
 	}
 	return ctx.Store.Set(dst, z, store.SetOptions{})
 }
@@ -472,11 +472,11 @@ flags:
 			processed++
 			lastScore = score
 			if score != cur {
-				zset.Members[member] = score
+				zset.Add(member, score)
 				updated++
 			}
 		} else if !xx {
-			zset.Members[member] = score
+			zset.Add(member, score)
 			added++
 			processed++
 			lastScore = score
@@ -581,7 +581,7 @@ func cmdZINCRBY(ctx *Context) error {
 		}
 		return ctx.WriteError(errZNaNScore)
 	}
-	zset.Members[member] = newScore
+	zset.Add(member, newScore)
 	zset.Unlock()
 
 	ctx.Store.KeyNotifier().NotifyKey(key)
@@ -842,7 +842,7 @@ func cmdZREM(ctx *Context) error {
 	for i := 1; i < ctx.ArgCount(); i++ {
 		member := ctx.ArgString(i)
 		if _, exists := zset.Members[member]; exists {
-			delete(zset.Members, member)
+			zset.Remove(member)
 			removed++
 		}
 	}
@@ -868,7 +868,7 @@ func zremRange(ctx *Context, key string, pick func(all []store.SortedEntry) []st
 
 	victims := pick(zset.GetAllEntries())
 	for _, e := range victims {
-		delete(zset.Members, e.Member)
+		zset.Remove(e.Member)
 	}
 	isEmpty := len(zset.Members) == 0
 	zset.Unlock()
@@ -1091,7 +1091,7 @@ func zpopFrom(ctx *Context, key string, count int, max bool) []store.SortedEntry
 		all = all[:count]
 	}
 	for _, e := range all {
-		delete(zset.Members, e.Member)
+		zset.Remove(e.Member)
 	}
 	isEmpty := len(zset.Members) == 0
 	zset.Unlock()

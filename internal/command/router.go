@@ -272,6 +272,22 @@ func (r *Router) Execute(ctx *Context) error {
 		return nil
 	}
 
+	// maxmemory: Redis refuses a command that may grow memory while used
+	// memory is over the limit, before running or queueing it; a refused
+	// command discards the transaction it was sent in, and an EXEC whose
+	// transaction queued one is refused as a whole.
+	if overMemoryFor(ctx, ctx.Command) {
+		if ctx.Transaction != nil && ctx.Transaction.IsActive() {
+			ctx.Transaction.Abort()
+		}
+		return ctx.Writer.WriteError(errOOM.Error())
+	}
+	if ctx.Command == "EXEC" && ctx.Transaction != nil && ctx.Transaction.IsActive() && execDeniedForMemory(ctx) {
+		ctx.Transaction.Clear()
+		ctx.Transaction.ClearWatch()
+		return ctx.Writer.WriteError(errExecAbortOOM.Error())
+	}
+
 	// MULTI queues commands for atomic execution at EXEC.
 	if ctx.Transaction != nil && ctx.Transaction.IsActive() && !isTransactionControl(ctx.Command) {
 		ctx.Transaction.Queue(ctx.Command, ctx.Args)
@@ -282,6 +298,7 @@ func (r *Router) Execute(ctx *Context) error {
 	db := ctx.DB
 	err := cmd.Handler(ctx)
 	ctx.passWakeup()
+	reaccountWrittenKeys(ctx)
 	touchWrittenKeys(ctx)
 	signalWrittenKeys(ctx)
 
@@ -318,7 +335,9 @@ func (r *Router) ExecuteSilent(ctx *Context) error {
 	}
 	ctx.Authenticated = true
 	ctx.StartTime = time.Now()
-	return cmd.Handler(ctx)
+	err := cmd.Handler(ctx)
+	reaccountWrittenKeys(ctx)
+	return err
 }
 
 // ExecuteHTTP runs a command from the HTTP API with auth enforcement and post-execute hooks.
@@ -359,9 +378,15 @@ func (r *Router) ExecuteHTTP(ctx *Context) (interface{}, error) {
 		return nil, acl.ErrPermissionDenied
 	}
 
+	if overMemoryFor(ctx, ctx.Command) {
+		ctx.Writer.WriteError(errOOM.Error())
+		return nil, errOOM
+	}
+
 	db := ctx.DB
 	err := cmd.Handler(ctx)
 	ctx.passWakeup()
+	reaccountWrittenKeys(ctx)
 	touchWrittenKeys(ctx)
 	signalWrittenKeys(ctx)
 	if err != nil {

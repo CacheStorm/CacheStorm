@@ -89,9 +89,11 @@ func listPush(ctx *Context, left bool) error {
 		}
 		list.PushFront(items...)
 	} else {
-		for i := 1; i <= argCount; i++ {
-			list.Elements = append(list.Elements, ctx.Arg(i))
+		items := make([][]byte, argCount)
+		for i := 0; i < argCount; i++ {
+			items[i] = ctx.Arg(i + 1)
 		}
+		list.PushBack(items...)
 	}
 	length := int64(len(list.Elements))
 	list.Unlock()
@@ -149,10 +151,11 @@ func cmdRPUSHX(ctx *Context) error {
 		return ctx.WriteInteger(0)
 	}
 
+	items := make([][]byte, 0, ctx.ArgCount()-1)
 	for i := 1; i < ctx.ArgCount(); i++ {
-		value := ctx.Arg(i)
-		list.Elements = append(list.Elements, value)
+		items = append(items, ctx.Arg(i))
 	}
+	list.PushBack(items...)
 	length := int64(len(list.Elements))
 	list.Unlock()
 
@@ -379,7 +382,7 @@ func cmdLSET(ctx *Context) error {
 		return ctx.WriteError(ErrIndexOutOfRange)
 	}
 
-	list.Elements[index] = value
+	list.SetAt(index, value)
 	list.Unlock()
 	return ctx.WriteOK()
 }
@@ -441,7 +444,7 @@ func cmdLREM(ctx *Context) error {
 		newElements = kept
 	}
 
-	list.Elements = newElements
+	list.ReplaceElements(newElements)
 	empty := len(list.Elements) == 0
 	list.Unlock()
 
@@ -500,7 +503,7 @@ func cmdLINSERT(ctx *Context) error {
 		newElements = append(newElements, list.Elements[pivotIdx+1:]...)
 	}
 
-	list.Elements = newElements
+	list.ReplaceElements(newElements)
 	return ctx.WriteInteger(int64(len(list.Elements)))
 }
 
@@ -547,13 +550,13 @@ func cmdLTRIM(ctx *Context) error {
 		stop = length - 1
 	}
 	if start > stop || start >= length {
-		list.Elements = make([][]byte, 0)
+		list.ReplaceElements(make([][]byte, 0))
 		list.Unlock()
 		deleteIfEmpty(ctx, key, list)
 		return ctx.WriteOK()
 	}
 
-	list.Elements = list.Elements[start : stop+1]
+	list.Trim(start, stop)
 	list.Unlock()
 	return ctx.WriteOK()
 }
@@ -696,7 +699,7 @@ func pushToList(ctx *Context, key string, value []byte, left bool) error {
 	if left {
 		list.PushFront(value)
 	} else {
-		list.Elements = append(list.Elements, value)
+		list.PushBack(value)
 	}
 	list.Unlock()
 	ctx.Store.KeyNotifier().NotifyKey(key)
@@ -738,7 +741,7 @@ func tryListMove(ctx *Context, srcKey, dstKey, whereFrom, whereTo string) ([]byt
 		if whereTo == "LEFT" {
 			srcList.PushFront(value)
 		} else {
-			srcList.Elements = append(srcList.Elements, value)
+			srcList.PushBack(value)
 		}
 		srcList.Unlock()
 		return value, true, nil

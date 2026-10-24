@@ -68,7 +68,7 @@ func cmdHSET(ctx *Context) error {
 		if _, exists := hash.Fields[field]; !exists {
 			added++
 		}
-		hash.Fields[field] = value
+		hash.SetField(field, value)
 	}
 
 	return ctx.WriteInteger(int64(added))
@@ -117,7 +117,7 @@ func cmdHMSET(ctx *Context) error {
 	for i := 1; i < ctx.ArgCount(); i += 2 {
 		field := ctx.ArgString(i)
 		value := ctx.Arg(i + 1)
-		hash.Fields[field] = value
+		hash.SetField(field, value)
 	}
 
 	return ctx.WriteOK()
@@ -201,7 +201,7 @@ func cmdHDEL(ctx *Context) error {
 	for i := 1; i < ctx.ArgCount(); i++ {
 		field := ctx.ArgString(i)
 		if _, exists := hash.Fields[field]; exists {
-			delete(hash.Fields, field)
+			hash.DeleteField(field)
 			deleted++
 		}
 	}
@@ -351,7 +351,7 @@ func cmdHINCRBY(ctx *Context) error {
 			return ctx.WriteError(err)
 		}
 	}
-	hash.Fields[field] = []byte(strconv.FormatInt(newVal, 10))
+	hash.SetField(field, []byte(strconv.FormatInt(newVal, 10)))
 	hash.Unlock()
 	return ctx.WriteInteger(newVal)
 }
@@ -456,7 +456,7 @@ func cmdHINCRBYFLOAT(ctx *Context) error {
 		return fail(ErrFloatOverflow)
 	}
 	result := formatLongDoubleHuman(sum)
-	hash.Fields[field] = []byte(result)
+	hash.SetField(field, []byte(result))
 	hash.Unlock()
 	return ctx.WriteBulkString(result)
 }
@@ -480,7 +480,7 @@ func cmdHSETNX(ctx *Context) error {
 		return ctx.WriteInteger(0)
 	}
 
-	hash.Fields[field] = value
+	hash.SetField(field, value)
 	return ctx.WriteInteger(1)
 }
 
@@ -668,7 +668,7 @@ func cmdHGETDEL(ctx *Context) error {
 			hash.Unlock()
 			return ctx.WriteNullBulkString()
 		}
-		delete(hash.Fields, fields[0])
+		hash.DeleteField(fields[0])
 		isEmpty := len(hash.Fields) == 0
 		hash.Unlock()
 		if isEmpty {
@@ -681,7 +681,7 @@ func cmdHGETDEL(ctx *Context) error {
 	for _, field := range fields {
 		if value, exists := hash.Fields[field]; exists {
 			results = append(results, resp.BulkBytes(value))
-			delete(hash.Fields, field)
+			hash.DeleteField(field)
 		} else {
 			results = append(results, resp.NullValue())
 		}

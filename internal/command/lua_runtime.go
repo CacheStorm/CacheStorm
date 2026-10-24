@@ -39,6 +39,10 @@ type scriptRun struct {
 	// aclErr records an ACL refusal. It aborts the script with that error
 	// even when the script caught the Lua error with pcall.
 	aclErr error
+	// wrote records that the script ran a write. Like Redis, a script is
+	// refused for memory only before its first write, so it is never left
+	// half applied.
+	wrote bool
 }
 
 func newScriptRun(ctx *Context, e *ScriptEngine, name, chunk string, readOnly bool) *scriptRun {
@@ -170,11 +174,18 @@ func (r *scriptRun) call(L *lua.LState) (lua.LValue, bool) {
 		return luaErrTable(L, "ERR Write commands are not allowed from read-only scripts."), true
 	}
 
+	if !r.wrote && overMemoryFor(r.ctx, name) {
+		return luaErrTable(L, errOOM.Error()), true
+	}
+
 	args := make([][]byte, len(argv)-1)
 	for i, a := range argv[1:] {
 		args[i] = []byte(a)
 	}
 	reply := executeQueuedCommand(r.ctx, queuedCommand{cmd: name, args: args})
+	if reply.Type != resp.TypeError && commandHasFlag(name, "write") {
+		r.wrote = true
+	}
 	if reply.Type == resp.TypeError {
 		return luaErrTable(L, reply.Err), true
 	}

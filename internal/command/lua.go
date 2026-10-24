@@ -369,8 +369,9 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 			}
 		}
 		hv.Lock()
-		hv.Fields[args[1]] = []byte(args[2])
+		hv.SetField(args[1], []byte(args[2]))
 		hv.Unlock()
+		e.store.Reaccount(args[0])
 		return lua.LNumber(1)
 
 	case "HGETALL":
@@ -418,9 +419,10 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 			}
 		}
 		lv.Lock()
-		lv.Elements = append([][]byte{[]byte(args[1])}, lv.Elements...)
+		lv.PushFront([]byte(args[1]))
 		n := len(lv.Elements)
 		lv.Unlock()
+		e.store.Reaccount(args[0])
 		return lua.LNumber(n)
 
 	case "RPUSH":
@@ -440,9 +442,10 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 			}
 		}
 		lv.Lock()
-		lv.Elements = append(lv.Elements, []byte(args[1]))
+		lv.PushBack([]byte(args[1]))
 		n := len(lv.Elements)
 		lv.Unlock()
+		e.store.Reaccount(args[0])
 		return lua.LNumber(n)
 
 	case "LPOP":
@@ -456,9 +459,9 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 		if lv, ok := entry.Value.(*store.ListValue); ok {
 			lv.Lock()
 			if len(lv.Elements) > 0 {
-				val := lv.Elements[0]
-				lv.Elements = lv.Elements[1:]
+				val := lv.PopFront(1)[0]
 				lv.Unlock()
+				e.store.Reaccount(args[0])
 				return lua.LString(string(val))
 			}
 			lv.Unlock()
@@ -476,9 +479,9 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 		if lv, ok := entry.Value.(*store.ListValue); ok {
 			lv.Lock()
 			if len(lv.Elements) > 0 {
-				val := lv.Elements[len(lv.Elements)-1]
-				lv.Elements = lv.Elements[:len(lv.Elements)-1]
+				val := lv.PopBack(1)[0]
 				lv.Unlock()
+				e.store.Reaccount(args[0])
 				return lua.LString(string(val))
 			}
 			lv.Unlock()
@@ -503,8 +506,9 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 		}
 		sv.Lock()
 		if _, ok := sv.Members[args[1]]; !ok {
-			sv.Members[args[1]] = struct{}{}
+			sv.AddMember(args[1])
 			sv.Unlock()
+			e.store.Reaccount(args[0])
 			return lua.LNumber(1)
 		}
 		sv.Unlock()
@@ -635,7 +639,7 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 			deleted := 0
 			for i := 1; i < len(args); i++ {
 				if _, ok := hv.Fields[args[i]]; ok {
-					delete(hv.Fields, args[i])
+					hv.DeleteField(args[i])
 					deleted++
 				}
 			}
@@ -746,8 +750,9 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 		// races it, and concurrent map writes can abort the process.
 		zset.Lock()
 		_, already := zset.Members[args[2]]
-		zset.Members[args[2]] = score
+		zset.Add(args[2], score)
 		zset.Unlock()
+		e.store.Reaccount(args[0])
 		if already {
 			return lua.LNumber(0)
 		}
@@ -799,7 +804,7 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 			zset.Lock()
 			_, present := zset.Members[args[1]]
 			if present {
-				delete(zset.Members, args[1])
+				zset.Remove(args[1])
 			}
 			zset.Unlock()
 			if present {
@@ -925,7 +930,7 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 			removed := 0
 			for i := 1; i < len(args); i++ {
 				if _, ok := sv.Members[args[i]]; ok {
-					delete(sv.Members, args[i])
+					sv.RemoveMember(args[i])
 					removed++
 				}
 			}
@@ -1131,11 +1136,13 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 		// itself takes the value lock and would otherwise self-deadlock.
 		hv.Lock()
 		for i := 1; i+1 < len(args); i += 2 {
-			hv.Fields[args[i]] = []byte(args[i+1])
+			hv.SetField(args[i], []byte(args[i+1]))
 		}
 		hv.Unlock()
 		if !exists {
 			e.store.Set(args[0], hv, store.SetOptions{})
+		} else {
+			e.store.Reaccount(args[0])
 		}
 		return lua.LString("OK")
 

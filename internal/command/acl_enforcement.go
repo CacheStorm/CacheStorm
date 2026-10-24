@@ -240,8 +240,24 @@ func aclKeysForCommand(cmd string, args [][]byte) []string {
 			return toStrings(args[:1])
 		}
 		return nil
+	case "LMPOP", "ZMPOP", "ZINTERCARD":
+		// LMPOP numkeys key [key ...] LEFT|RIGHT [COUNT n]: the count sits
+		// at args[0]. These fell through to the args[0] default, so the count
+		// was checked as a key and the real keys never were.
+		return keysAfterNumkeys(args, 0)
+	case "BLMPOP", "BZMPOP":
+		// BLMPOP timeout numkeys key [key ...] ...: BLMPOP was treated as
+		// "source destination" and returned the timeout and the count.
+		return keysAfterNumkeys(args, 1)
+	case "BLPOP", "BRPOP", "BZPOPMIN", "BZPOPMAX":
+		// BLPOP key [key ...] timeout: every argument but the timeout.
+		// BZPOPMIN/BZPOPMAX checked only their first key.
+		if len(args) >= 2 {
+			return toStrings(args[:len(args)-1])
+		}
+		return toStrings(args)
 	case "RENAME", "RENAMENX", "SMOVE", "LMOVE", "RPOPLPUSH", "BLMOVE", "BRPOPLPUSH",
-		"BLMPOP", "COPY", "GEORADIUSBYMEMBER_RO":
+		"COPY", "GEORADIUSBYMEMBER_RO":
 		// source destination [member ...] — BOTH sides must be permitted.
 		// Omitting the destination lets a user move a key out of the
 		// key-pattern they are confined to.
