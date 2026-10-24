@@ -435,30 +435,9 @@ func (s *Server) Start(_ context.Context) error {
 		s.startMetricsServer()
 	}
 
-	// Launch the Sentinel monitor and gossip loops so monitored masters are
-	// actually health-checked. The singleton itself is built lazily on the first
-	// SENTINEL command (see command.EnsureSentinel); starting here is safe and
-	// cheap because Start on an empty Sentinel just runs the two loops, and
-	// checkMasters iterates zero masters. Stop() calls command.StopSentinel to
-	// join them, so they do not outlive the server.
-	if err := command.StartSentinel(); err != nil {
-		logger.Warn().Err(err).Msg("sentinel not started")
+	if s.cfg.Sentinel.Enabled {
+		s.startSentinel()
 	}
-
-	// Listen for Sentinel peer traffic (SENTINEL MONITOR, PING, INFO from other
-	// sentinels) on the configured sentinel port. Serve blocks, so it runs on its
-	// own goroutine and closes its listener when this context is cancelled in
-	// Stop(). A bind failure is logged rather than fatal: the data server is
-	// fully functional without peer gossip, and a port clash (another instance
-	// on the same host) must not stop it from starting.
-	sentinelCtx, sentinelCancel := context.WithCancel(context.Background())
-	s.sentinelCancel = sentinelCancel
-	go func() {
-		defer logger.RecoverPanic("sentinel-serve")
-		// Serve only returns when the listener dies: either a bind failure or
-		// the Accept error raised when shutdown closes it. Either way, log it.
-		logger.Warn().Err(command.ServeSentinel(sentinelCtx)).Msg("sentinel peer listener stopped")
-	}()
 
 	startupComplete = true
 	return nil
@@ -597,6 +576,26 @@ func (s *Server) acceptLoop() {
 			c.Handle()
 		}()
 	}
+}
+
+// startSentinel launches the Sentinel monitor and gossip loops and listens for
+// Sentinel peer traffic (SENTINEL MONITOR, PING, INFO from other sentinels) on
+// the configured sentinel port. Serve blocks, so it runs on its own goroutine
+// and closes its listener when its context is cancelled in Stop(). A bind
+// failure is logged rather than fatal: the data server works without peer
+// gossip.
+func (s *Server) startSentinel() {
+	if err := command.StartSentinel(); err != nil {
+		logger.Warn().Err(err).Msg("sentinel not started")
+	}
+	sentinelCtx, sentinelCancel := context.WithCancel(context.Background())
+	s.sentinelCancel = sentinelCancel
+	go func() {
+		defer logger.RecoverPanic("sentinel-serve")
+		// Serve only returns when the listener dies: either a bind failure or
+		// the Accept error raised when shutdown closes it. Either way, log it.
+		logger.Warn().Err(command.ServeSentinel(sentinelCtx)).Msg("sentinel peer listener stopped")
+	}()
 }
 
 func (s *Server) Stop(ctx context.Context) error {

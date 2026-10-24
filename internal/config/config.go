@@ -25,6 +25,10 @@ type Config struct {
 // command.EnsureSentinel. Durations are strings so YAML can carry "30s"; use
 // the DownAfterDuration/FailoverTimeDuration accessors to read them.
 type SentinelConfig struct {
+	// Enabled starts the Sentinel monitor and its peer listener. Sentinel is a
+	// separate role, as in Redis; a data server does not open the sentinel
+	// port unless asked to.
+	Enabled      bool   `yaml:"enabled" default:"false"`
 	ID           string `yaml:"id" default:"sentinel-1"`
 	Addr         string `yaml:"addr" default:"127.0.0.1"`
 	Port         int    `yaml:"port" default:"26379"`

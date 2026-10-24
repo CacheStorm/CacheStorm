@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
@@ -17,16 +18,23 @@ import (
 // shutdown.
 func ServeSentinel(ctx context.Context) error {
 	s := EnsureSentinel()
-	port := sentinelConfig.Port
+	port := SentinelConfigTemplate().Port
 	if port <= 0 {
 		return fmt.Errorf("sentinel port not configured")
 	}
 	return s.Serve(ctx, port)
 }
 
-var globalSentinel *sentinel.Sentinel
+// sentinelMu guards globalSentinel and sentinelConfig: the server configures
+// them at startup while connection goroutines may already run SENTINEL.
+var (
+	sentinelMu     sync.Mutex
+	globalSentinel *sentinel.Sentinel
+)
 
 func InitSentinel(cfg sentinel.Config) {
+	sentinelMu.Lock()
+	defer sentinelMu.Unlock()
 	globalSentinel = sentinel.New(cfg)
 }
 
@@ -45,12 +53,16 @@ var sentinelConfig = sentinel.Config{
 // sentinel constructed from now on. It does not replace an already-constructed
 // singleton; call it during startup, before the first SENTINEL command.
 func ConfigureSentinel(cfg sentinel.Config) {
+	sentinelMu.Lock()
+	defer sentinelMu.Unlock()
 	sentinelConfig = cfg
 }
 
 // SentinelConfigTemplate returns a copy of the configuration EnsureSentinel
 // currently holds, so callers can inspect what would be built.
 func SentinelConfigTemplate() sentinel.Config {
+	sentinelMu.Lock()
+	defer sentinelMu.Unlock()
 	return sentinelConfig
 }
 
@@ -66,6 +78,8 @@ func SentinelConfigTemplate() sentinel.Config {
 // and gossip loops, so building a Server does not silently begin dialling
 // masters from every instance.
 func EnsureSentinel() *sentinel.Sentinel {
+	sentinelMu.Lock()
+	defer sentinelMu.Unlock()
 	if globalSentinel == nil {
 		globalSentinel = sentinel.New(sentinelConfig)
 	}
@@ -73,6 +87,8 @@ func EnsureSentinel() *sentinel.Sentinel {
 }
 
 func GetSentinel() *sentinel.Sentinel {
+	sentinelMu.Lock()
+	defer sentinelMu.Unlock()
 	return globalSentinel
 }
 
@@ -119,7 +135,7 @@ func cmdSENTINEL(ctx *Context) error {
 }
 
 func handleSentinelMasters(ctx *Context) error {
-	masters := globalSentinel.Masters()
+	masters := GetSentinel().Masters()
 	result := make([]*resp.Value, 0, len(masters))
 
 	for _, m := range masters {
@@ -158,7 +174,7 @@ func handleSentinelMaster(ctx *Context) error {
 	}
 
 	name := ctx.ArgString(1)
-	master, ok := globalSentinel.GetMaster(name)
+	master, ok := GetSentinel().GetMaster(name)
 	if !ok {
 		return ctx.WriteError(fmt.Errorf("ERR no such master '%s'", name))
 	}
@@ -197,7 +213,7 @@ func handleSentinelReplicas(ctx *Context) error {
 	}
 
 	name := ctx.ArgString(1)
-	master, ok := globalSentinel.GetMaster(name)
+	master, ok := GetSentinel().GetMaster(name)
 	if !ok {
 		return ctx.WriteError(fmt.Errorf("ERR no such master '%s'", name))
 	}
@@ -225,7 +241,7 @@ func handleSentinelGetMaster(ctx *Context) error {
 	}
 
 	name := ctx.ArgString(1)
-	addr, port, err := globalSentinel.GetMasterAddr(name)
+	addr, port, err := GetSentinel().GetMasterAddr(name)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
@@ -252,7 +268,7 @@ func handleSentinelMonitor(ctx *Context) error {
 		return ctx.WriteError(ErrNotInteger)
 	}
 
-	if err := globalSentinel.Monitor(name, addr, port, quorum); err != nil {
+	if err := GetSentinel().Monitor(name, addr, port, quorum); err != nil {
 		return ctx.WriteError(err)
 	}
 
@@ -265,7 +281,7 @@ func handleSentinelRemove(ctx *Context) error {
 	}
 
 	name := ctx.ArgString(1)
-	if err := globalSentinel.Remove(name); err != nil {
+	if err := GetSentinel().Remove(name); err != nil {
 		return ctx.WriteError(err)
 	}
 
@@ -281,7 +297,7 @@ func handleSentinelSet(ctx *Context) error {
 	option := strings.ToLower(ctx.ArgString(2))
 	value := ctx.ArgString(3)
 
-	_, ok := globalSentinel.GetMaster(name)
+	_, ok := GetSentinel().GetMaster(name)
 	if !ok {
 		return ctx.WriteError(fmt.Errorf("ERR no such master '%s'", name))
 	}
@@ -304,7 +320,7 @@ func handleSentinelReset(ctx *Context) error {
 	}
 
 	pattern := ctx.ArgString(1)
-	count := globalSentinel.Reset(pattern)
+	count := GetSentinel().Reset(pattern)
 
 	return ctx.WriteInteger(int64(count))
 }
@@ -315,7 +331,7 @@ func handleSentinelFailover(ctx *Context) error {
 	}
 
 	name := ctx.ArgString(1)
-	if err := globalSentinel.Failover(name); err != nil {
+	if err := GetSentinel().Failover(name); err != nil {
 		return ctx.WriteError(err)
 	}
 
@@ -328,7 +344,7 @@ func handleSentinelCKQuorum(ctx *Context) error {
 	}
 
 	name := ctx.ArgString(1)
-	count, err := globalSentinel.CKQUORUM(name)
+	count, err := GetSentinel().CKQUORUM(name)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
@@ -337,7 +353,7 @@ func handleSentinelCKQuorum(ctx *Context) error {
 }
 
 func handleSentinelInfo(ctx *Context) error {
-	info := globalSentinel.Info()
+	info := GetSentinel().Info()
 
 	var sb strings.Builder
 	sb.WriteString("# Sentinel\r\n")
@@ -362,7 +378,7 @@ func handleSentinelIsMasterDown(ctx *Context) error {
 	// reported every master as up. The ArgCount guard above already assumes the
 	// Redis shape <name> <epoch>.
 	name := ctx.ArgString(1)
-	master, ok := globalSentinel.GetMaster(name)
+	master, ok := GetSentinel().GetMaster(name)
 	if !ok {
 		return ctx.WriteArray([]*resp.Value{
 			resp.IntegerValue(0),
@@ -385,16 +401,15 @@ func RegisterSentinelCommands(router *Router) {
 	router.Register(&CommandDef{Name: "SENTINEL", Handler: cmdSENTINEL})
 }
 
+// StartSentinel builds the Sentinel if needed and starts its monitor and
+// gossip loops.
 func StartSentinel() error {
-	if globalSentinel == nil {
-		return fmt.Errorf("sentinel not initialized")
-	}
-	return globalSentinel.Start()
+	return EnsureSentinel().Start()
 }
 
 func StopSentinel() {
-	if globalSentinel != nil {
-		globalSentinel.Stop()
+	if s := GetSentinel(); s != nil {
+		s.Stop()
 	}
 }
 

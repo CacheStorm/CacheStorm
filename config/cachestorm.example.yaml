@@ -132,3 +132,13 @@ plugins:
     enabled: true
     threshold: "10ms"
     max_entries: 128
+
+# Sentinel role: monitor masters and listen for sentinel peers. A data server
+# leaves this off; enable it on the instances that act as sentinels.
+sentinel:
+  enabled: false
+  addr: "127.0.0.1"
+  port: 26379
+  quorum: 2
+  down_after: "30s"
+  failover_time: "3m"
