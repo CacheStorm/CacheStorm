@@ -86,7 +86,7 @@ func persistedCommand(cmd string, args [][]byte) bool {
 	if writeCommands[cmd] {
 		return true
 	}
-	if len(args) == 0 {
+	if len(args) == 0 || (cmd != "SCRIPT" && cmd != "FUNCTION") {
 		return false
 	}
 	sub := strings.ToUpper(string(args[0]))

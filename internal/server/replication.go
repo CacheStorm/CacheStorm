@@ -3,7 +3,6 @@ package server
 import (
 	"encoding/json"
 	"errors"
-	"hash/fnv"
 	"net"
 	"os"
 	"path/filepath"
@@ -49,6 +48,9 @@ type gateHold struct {
 	g         *writeGate
 	exclusive bool
 	stripes   []int
+	// inline backs stripes for the common case of a command with few keys,
+	// so acquiring the gate does not allocate.
+	inline [4]int
 }
 
 // exclusiveWrites are writes that reach keys they do not name, or several
@@ -57,14 +59,32 @@ var exclusiveWrites = map[string]bool{
 	"EXEC": true, "EVAL": true, "EVALSHA": true, "FCALL": true,
 	"FLUSHALL": true, "FLUSHDB": true, "SWAPDB": true, "MOVE": true,
 	"SCRIPT": true, "FUNCTION": true, "MIGRATE": true,
+	// Read-only scripts take the gate exclusively too: a script is atomic in
+	// Redis, so it must not see a write land between two of its reads.
+	"EVAL_RO": true, "EVALSHA_RO": true, "FCALL_RO": true,
 	"INVALIDATE": true, "ADDTAG": true, "REMTAG": true, "TAGLINK": true,
 	"TAGUNLINK": true, "SETTAG": true,
 }
 
+// stripeOf hashes key with FNV-1a without allocating a hasher.
+// ungatedCommands run without the gate. They do not read the keyspace, and
+// they either wait (WAIT for replica acks) or take the gate themselves
+// (PSYNC/SYNC snapshot the data with it held exclusively; REPLICAOF loads a
+// snapshot the same way), so holding it shared around them would deadlock or
+// stall every transaction behind them.
+var ungatedCommands = map[string]bool{
+	"PSYNC": true, "SYNC": true, "REPLCONF": true, "REPLICAOF": true,
+	"SLAVEOF": true, "WAIT": true, "WAITAOF": true, "ROLE": true,
+	"QUIT": true, "RESET": true, "AUTH": true, "HELLO": true,
+}
+
 func stripeOf(key string) int {
-	h := fnv.New32a()
-	_, _ = h.Write([]byte(key))
-	return int(h.Sum32() % gateStripes)
+	h := uint32(2166136261)
+	for i := 0; i < len(key); i++ {
+		h ^= uint32(key[i])
+		h *= 16777619
+	}
+	return int(h % gateStripes)
 }
 
 // acquire takes the gate for cmd.
@@ -77,23 +97,33 @@ func (g *writeGate) acquire(cmd string, args [][]byte) *gateHold {
 		if len(keys) == 0 {
 			h.exclusive = true
 		} else {
-			seen := make(map[int]bool, len(keys))
+			h.stripes = h.inline[:0]
 			for _, k := range keys {
-				if s := stripeOf(k); !seen[s] {
-					seen[s] = true
-					h.stripes = append(h.stripes, s)
-				}
+				h.stripes = appendStripe(h.stripes, stripeOf(k))
 			}
-			sort.Ints(h.stripes)
 		}
 	}
 	h.lock()
 	return h
 }
 
+// appendStripe inserts stripe into the sorted, duplicate-free list. Locking
+// the stripes in ascending order keeps two multi-key writes from deadlocking.
+func appendStripe(stripes []int, stripe int) []int {
+	i := sort.SearchInts(stripes, stripe)
+	if i < len(stripes) && stripes[i] == stripe {
+		return stripes
+	}
+	stripes = append(stripes, 0)
+	copy(stripes[i+1:], stripes[i:])
+	stripes[i] = stripe
+	return stripes
+}
+
 // acquireKey takes the gate for a write of key alone.
 func (g *writeGate) acquireKey(key string) *gateHold {
-	h := &gateHold{g: g, stripes: []int{stripeOf(key)}}
+	h := &gateHold{g: g}
+	h.stripes = append(h.inline[:0], stripeOf(key))
 	h.lock()
 	return h
 }
@@ -299,16 +329,28 @@ func (s *Server) refuseOnReplica(ctx *command.Context) bool {
 }
 
 // holdGate takes the write gate for the command ctx is about to run and
-// returns its release. A blocking command releases it while it waits.
+// returns its release. A write holds the stripes of its keys, EXEC and the
+// scripts hold the whole gate, and every other command holds it shared, so
+// no command observes a transaction or a script half applied. A blocking
+// command releases it while it waits.
 func (s *Server) holdGate(ctx *command.Context) func() {
-	if s == nil || !gated(ctx.Command, ctx.Args) {
+	if s == nil {
 		return func() {}
 	}
 	if ctx.Command != "EXEC" && ctx.Transaction != nil && ctx.Transaction.IsActive() {
 		// Inside MULTI the command is only queued; EXEC runs it.
 		return func() {}
 	}
-	h := s.gate.acquire(ctx.Command, ctx.Args)
+	if ungatedCommands[ctx.Command] {
+		return func() {}
+	}
+	var h *gateHold
+	if gated(ctx.Command, ctx.Args) || exclusiveWrites[ctx.Command] {
+		h = s.gate.acquire(ctx.Command, ctx.Args)
+	} else {
+		h = &gateHold{g: &s.gate}
+		h.lock()
+	}
 	ctx.BeforeWait = h.unlock
 	ctx.AfterWait = h.lock
 	return h.unlock

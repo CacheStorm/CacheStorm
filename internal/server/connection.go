@@ -2,6 +2,7 @@ package server
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -28,6 +29,8 @@ const (
 
 type Connection struct {
 	ID int64
+	// sink holds replies while a command runs; see replySink.
+	sink *replySink
 	// draining is set when the server shuts down: the connection finishes the
 	// command it is running and then closes instead of reading another.
 	draining     atomic.Bool
@@ -124,6 +127,45 @@ func (d *deadlineWriterConn) Write(b []byte) (int, error) {
 	return d.Conn.Write(b)
 }
 
+// replySink sits between the connection's buffered writers and the socket.
+// While held it keeps output in memory, so a command never writes to the
+// socket while it holds the server's write gate: a client that reads its
+// replies slowly would otherwise keep the gate, and with it every other
+// client, waiting on the socket. Releasing it writes what it kept, in order;
+// a write made while it is not held first drains what it kept.
+type replySink struct {
+	conn net.Conn
+	held bool
+	buf  bytes.Buffer
+}
+
+// maxHeldReplies bounds how much pipelined output is kept before it is
+// written, so a long pipeline does not grow the buffer without limit.
+const maxHeldReplies = 64 << 10
+
+func (s *replySink) Write(p []byte) (int, error) {
+	if s.held {
+		return s.buf.Write(p)
+	}
+	if err := s.release(); err != nil {
+		return 0, err
+	}
+	return s.conn.Write(p)
+}
+
+func (s *replySink) hold() { s.held = true }
+
+// release writes the kept output to the socket and stops holding.
+func (s *replySink) release() error {
+	s.held = false
+	if s.buf.Len() == 0 {
+		return nil
+	}
+	_, err := s.conn.Write(s.buf.Bytes())
+	s.buf.Reset()
+	return err
+}
+
 func NewConnection(id int64, conn net.Conn, s *store.Store, r *command.Router, pm *plugin.Manager) *Connection {
 	// Keep-alive needs the raw TCP connection: Handle()'s type assertion
 	// would miss the counting wrapper installed below.
@@ -134,12 +176,14 @@ func NewConnection(id int64, conn net.Conn, s *store.Store, r *command.Router, p
 
 	cc := &countingConn{Conn: conn}
 	br := bufio.NewReader(cc)
+	sink := &replySink{conn: cc}
 	c := &Connection{
 		ID:           id,
 		conn:         cc,
 		bufReader:    br,
 		reader:       resp.NewReader(br),
-		writer:       resp.NewWriter(bufio.NewWriter(cc)),
+		sink:         sink,
+		writer:       resp.NewWriter(bufio.NewWriterSize(sink, 16<<10)),
 		store:        s,
 		router:       r,
 		plugins:      pm,
@@ -187,6 +231,15 @@ func (c *Connection) Handle() {
 		}
 		cmd, args, err := c.reader.ReadClientCommand()
 		if err != nil {
+			// Replies kept for a pipeline go out before the connection
+			// reports the error or closes.
+			c.writeMu.Lock()
+			if ferr := c.writer.Flush(); ferr == nil {
+				if rerr := c.sink.release(); rerr != nil {
+					logger.Debug().Err(rerr).Int64("conn_id", c.ID).Msg("pending replies not delivered")
+				}
+			}
+			c.writeMu.Unlock()
 			if err == io.EOF || isClosedError(err) {
 				return
 			}
@@ -285,6 +338,7 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 			ctx.Done, stopWatch = c.watchDisconnect()
 		}
 		var err error
+		c.sink.hold()
 		if c.srv != nil && c.srv.refuseOnReplica(ctx) {
 			err = nil
 		} else {
@@ -331,12 +385,26 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 
 		if ctx.Handoff != nil {
 			_ = c.writer.Flush()
+			if err := c.sink.release(); err != nil {
+				return true
+			}
 			c.handler = ctx.Handoff(c.conn)
 		}
 
 		// Count the command against the connection so CONNECTION.INFO can
 		// report it.
 		command.BumpConnectionCommand(c.ID)
+
+		// Replies go out once the pipeline the client sent has been served,
+		// so a pipeline of N commands costs one socket write instead of N.
+		if err := c.writer.Flush(); err != nil {
+			return true
+		}
+		if c.bufReader.Buffered() == 0 || c.sink.buf.Len() >= maxHeldReplies || c.subscriber != nil {
+			if err := c.sink.release(); err != nil {
+				return true
+			}
+		}
 	}
 	return false
 }
@@ -506,7 +574,7 @@ func (c *Connection) startDelivery(sub *store.Subscriber) {
 	if c.deliveryDone != nil {
 		return
 	}
-	c.pushBuf = bufio.NewWriter(c.conn)
+	c.pushBuf = bufio.NewWriter(c.sink)
 	stop := make(chan struct{})
 	done := make(chan struct{})
 	c.deliveryStop, c.deliveryDone = stop, done
