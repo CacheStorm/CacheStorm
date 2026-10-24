@@ -611,7 +611,7 @@ parse:
 				wait = remaining
 			}
 		}
-		if _, notified := ctx.waitForKeysReady(keys, wait, ready); !notified {
+		if _, notified := ctx.waitForStreamKeys(keys, wait, ready); !notified {
 			if streamClientGone(ctx) {
 				return ctx.WriteNullArray()
 			}

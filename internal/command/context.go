@@ -175,6 +175,19 @@ func (ctx *Context) waitForKeysReady(keys []string, timeout time.Duration, ready
 	return key, ok
 }
 
+// waitForStreamKeys blocks like waitForKeysReady but as an observer: a stream
+// entry is not consumed by reading it, so every blocked reader is woken by
+// a write instead of only the oldest one.
+func (ctx *Context) waitForStreamKeys(keys []string, timeout time.Duration, ready func(string) bool) (string, bool) {
+	if ctx.InExec {
+		return "", false
+	}
+	return ctx.Store.KeyNotifier().WaitForKeysOpts(keys, timeout, store.WaitOptions{
+		Cancel: ctx.Done,
+		Ready:  ready,
+	})
+}
+
 // passWakeup hands a consumed key's wakeup to the next blocked client.
 func (ctx *Context) passWakeup() {
 	if ctx.passKey == "" {
