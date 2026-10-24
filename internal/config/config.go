@@ -69,16 +69,24 @@ type ServerConfig struct {
 	ReadBufferSize  int    `yaml:"read_buffer_size" default:"4096"`
 	WriteBufferSize int    `yaml:"write_buffer_size" default:"4096"`
 	RequirePass     string `yaml:"requirepass"`
-	TLSCertFile     string `yaml:"tls_cert_file"`
-	TLSKeyFile      string `yaml:"tls_key_file"`
+	// ProtectedMode refuses clients that do not connect over loopback while
+	// no password is set, as Redis' protected-mode does, so a server started
+	// with the defaults is not an open database on every interface.
+	ProtectedMode bool   `yaml:"protected_mode" default:"true"`
+	TLSCertFile   string `yaml:"tls_cert_file"`
+	TLSKeyFile    string `yaml:"tls_key_file"`
 }
 
 type HTTPConfig struct {
-	Enabled    bool   `yaml:"enabled" default:"true"`
+	Enabled bool `yaml:"enabled" default:"true"`
+	// Bind is the address the HTTP API listens on; empty means the same
+	// address as the RESP listener (server.bind).
+	Bind       string `yaml:"bind"`
 	Port       int    `yaml:"port" default:"8080"`
 	Password   string `yaml:"password"`
 	RateLimit  int    `yaml:"rate_limit" default:"100"`
 	RateWindow string `yaml:"rate_window" default:"1m"`
+	CORSOrigin string `yaml:"cors_origin"`
 }
 
 type MemoryConfig struct {
@@ -199,6 +207,11 @@ func (c *Config) applyEnvOverrides() {
 	}
 	if v := os.Getenv("CACHESTORM_DATA_DIR"); v != "" {
 		c.Persistence.DataDir = v
+	}
+	if v := os.Getenv("CACHESTORM_PROTECTED_MODE"); v != "" {
+		if on, err := strconv.ParseBool(v); err == nil {
+			c.Server.ProtectedMode = on
+		}
 	}
 }
 

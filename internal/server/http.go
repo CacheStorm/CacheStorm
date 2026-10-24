@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/pprof"
 	"strconv"
@@ -30,9 +31,17 @@ func pprofTrace(w http.ResponseWriter, r *http.Request)   { pprof.Trace(w, r) }
 
 type HTTPConfig struct {
 	Enabled    bool   `yaml:"enabled" default:"true"`
+	Bind       string `yaml:"bind"`
 	Port       int    `yaml:"port" default:"8080"`
 	Password   string `yaml:"password"`
 	CORSOrigin string `yaml:"cors_origin"` // empty or "*" = allow all, specific origin for production
+	// RateLimit requests per RateWindow are allowed per client IP; zero
+	// values fall back to 100 per minute.
+	RateLimit  int
+	RateWindow time.Duration
+	// Protected refuses requests from non-loopback clients while neither
+	// the HTTP password nor requirepass is set.
+	Protected bool
 }
 
 type HTTPServer struct {
@@ -124,6 +133,16 @@ type rateLimiter struct {
 	window   time.Duration
 }
 
+func rateLimitOrDefault(limit int, window time.Duration) (int, time.Duration) {
+	if limit <= 0 {
+		limit = 100
+	}
+	if window <= 0 {
+		window = time.Minute
+	}
+	return limit, window
+}
+
 func newRateLimiter(limit int, window time.Duration) *rateLimiter {
 	return &rateLimiter{
 		requests: make(map[string][]time.Time),
@@ -186,7 +205,7 @@ func NewHTTPServer(s *store.Store, router *command.Router, cfg *HTTPConfig) *HTT
 		started:     time.Now(),
 		config:      cfg,
 		sessions:    newSessionStore(),
-		rateLimiter: newRateLimiter(100, time.Minute), // 100 req/min per IP
+		rateLimiter: newRateLimiter(rateLimitOrDefault(cfg.RateLimit, cfg.RateWindow)),
 	}
 
 	mux := http.NewServeMux()
@@ -217,7 +236,7 @@ func NewHTTPServer(s *store.Store, router *command.Router, cfg *HTTPConfig) *HTT
 	mux.HandleFunc("/", h.handleStatic)
 
 	h.server = &http.Server{
-		Addr:              ":" + strconv.Itoa(cfg.Port),
+		Addr:              net.JoinHostPort(cfg.Bind, strconv.Itoa(cfg.Port)),
 		Handler:           h.corsMiddleware(mux),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
@@ -339,6 +358,10 @@ func (h *HTTPServer) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		}
 
 		if h.config.Password == "" {
+			if h.config.Protected && h.router.RequirePass() == "" && !isLoopbackAddr(r.RemoteAddr) {
+				h.writeError(w, http.StatusForbidden, protectedModeMessage)
+				return
+			}
 			// Authentication is disabled: the request stays anonymous. A
 			// deployment that secured the server with requirepass must not
 			// get an anonymous HTTP API just because HTTPConfig.Password is

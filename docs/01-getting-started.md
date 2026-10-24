@@ -34,7 +34,10 @@ go build -o cachestorm ./cmd/cachestorm
 
 ```bash
 docker build -t cachestorm .
-docker run -d -p 6380:6380 -p 8080:8080 cachestorm
+# Without a password the server only serves loopback clients (protected
+# mode), so a container started without one refuses every client outside it.
+docker run -d -p 6380:6380 -p 127.0.0.1:8080:8080 \
+  -e CACHESTORM_REQUIREPASS='a-strong-password' cachestorm
 ```
 
 ### Using Docker Compose

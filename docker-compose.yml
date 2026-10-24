@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   cachestorm:
     build: .
@@ -12,7 +10,8 @@ services:
       - cachestorm-data:/data
       - ./config:/etc/cachestorm:ro
     environment:
-      - CACHESTORM_CONFIG=/etc/cachestorm/cachestorm.yaml
+      - CACHESTORM_CONFIG=/etc/cachestorm/cachestorm.example.yaml
+      - CACHESTORM_REQUIREPASS=${CACHESTORM_REQUIREPASS:?set CACHESTORM_REQUIREPASS to the password clients must AUTH with}
     deploy:
       resources:
         limits:

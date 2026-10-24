@@ -9,9 +9,19 @@ import (
 	"strings"
 )
 
+// PlaceholderPassword is the password written in the production config
+// template.
+const PlaceholderPassword = "CHANGE_ME_TO_A_STRONG_PASSWORD"
+
 func Validate(cfg *Config) error {
 	if cfg.Server.Port < 1 || cfg.Server.Port > 65535 {
 		return fmt.Errorf("invalid server port: %d", cfg.Server.Port)
+	}
+
+	// The production template ships this placeholder; running with it would
+	// publish a password anyone can read in the repository.
+	if cfg.Server.RequirePass == PlaceholderPassword || cfg.HTTP.Password == PlaceholderPassword {
+		return fmt.Errorf("replace the placeholder password %q before starting", PlaceholderPassword)
 	}
 
 	if cfg.Server.MaxConnections < 0 {

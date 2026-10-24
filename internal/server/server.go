@@ -219,10 +219,20 @@ func New(cfg *config.Config) (*Server, error) {
 	}
 
 	if cfg.HTTP.Enabled {
+		bind := cfg.HTTP.Bind
+		if bind == "" {
+			bind = cfg.Server.Bind
+		}
+		window, _ := time.ParseDuration(cfg.HTTP.RateWindow)
 		httpCfg := &HTTPConfig{
-			Enabled:  cfg.HTTP.Enabled,
-			Port:     cfg.HTTP.Port,
-			Password: cfg.HTTP.Password,
+			Enabled:    cfg.HTTP.Enabled,
+			Bind:       bind,
+			Port:       cfg.HTTP.Port,
+			Password:   cfg.HTTP.Password,
+			CORSOrigin: cfg.HTTP.CORSOrigin,
+			RateLimit:  cfg.HTTP.RateLimit,
+			RateWindow: window,
+			Protected:  cfg.Server.ProtectedMode,
 		}
 		s.httpServer = NewHTTPServer(s.store, s.router, httpCfg)
 		s.httpServer.connCount = func() int64 { return s.connCount.Load() }
@@ -510,6 +520,15 @@ func (s *Server) acceptLoop() {
 		if maxConns > 0 && s.connCount.Load() >= maxConns {
 			_ = conn.SetWriteDeadline(time.Now().Add(time.Second))
 			if _, err := conn.Write([]byte("-ERR max number of clients reached\r\n")); err != nil {
+				logger.Debug().Err(err).Msg("refused connection closed before the error was sent")
+			}
+			conn.Close()
+			continue
+		}
+
+		if s.cfg.Server.ProtectedMode && s.router.RequirePass() == "" && !isLoopbackAddr(conn.RemoteAddr().String()) {
+			_ = conn.SetWriteDeadline(time.Now().Add(time.Second))
+			if _, err := conn.Write([]byte("-DENIED " + protectedModeMessage + "\r\n")); err != nil {
 				logger.Debug().Err(err).Msg("refused connection closed before the error was sent")
 			}
 			conn.Close()

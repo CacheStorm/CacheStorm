@@ -188,7 +188,10 @@ go install github.com/cachestorm/cachestorm@latest
 ```bash
 # Build from the included Dockerfile
 docker build -t cachestorm .
-docker run -d -p 6380:6380 -p 8080:8080 cachestorm
+# Without a password the server only serves loopback clients (protected
+# mode), so a container started without one refuses every client outside it.
+docker run -d -p 6380:6380 -p 127.0.0.1:8080:8080 \
+  -e CACHESTORM_REQUIREPASS='a-strong-password' cachestorm
 ```
 
 #### Using Docker Compose
@@ -375,7 +378,10 @@ See [COVERAGE_REPORT.md](./COVERAGE_REPORT.md) for detailed coverage information
 ### Quick Start with Docker
 ```bash
 # Pull and run
-docker run -d -p 6380:6380 -p 8080:8080 --name cachestorm ghcr.io/cachestorm/cachestorm:latest
+# Without a password the server only serves loopback clients (protected
+# mode), so a container started without one refuses every client outside it.
+docker run -d -p 6380:6380 -p 127.0.0.1:8080:8080 --name cachestorm \
+  -e CACHESTORM_REQUIREPASS='a-strong-password' ghcr.io/cachestorm/cachestorm:latest
 ```
 
 ### Docker Compose (Full Stack)
@@ -384,7 +390,8 @@ docker run -d -p 6380:6380 -p 8080:8080 --name cachestorm ghcr.io/cachestorm/cac
 git clone https://github.com/CacheStorm/CacheStorm
 cd cachestorm
 
-# Basic setup
+# Basic setup (the compose file requires the password)
+export CACHESTORM_REQUIREPASS='a-strong-password'
 docker-compose up -d
 
 # With monitoring (Prometheus + Grafana)
@@ -406,7 +413,8 @@ docker build -t cachestorm .
 docker run -d \
   --name cachestorm \
   -p 6380:6380 \
-  -p 8080:8080 \
+  -p 127.0.0.1:8080:8080 \
+  -e CACHESTORM_REQUIREPASS='a-strong-password' \
   -v cachestorm-data:/data \
   ghcr.io/cachestorm/cachestorm:latest
 

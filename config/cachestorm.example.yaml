@@ -25,7 +25,14 @@ server:
 
   # Authentication password (empty = no auth required)
   # Clients must AUTH before running commands when set
+  # (CACHESTORM_REQUIREPASS overrides this value)
   requirepass: ""
+
+  # Protected mode: while no password is set, only clients connecting over
+  # loopback are served; others get a DENIED error. Set a password instead
+  # of disabling this unless the network is trusted.
+  # (CACHESTORM_PROTECTED_MODE=false overrides this value)
+  protected_mode: true
 
   # TLS Configuration (empty = plaintext)
   # tls_cert_file: "/etc/cachestorm/tls/server.crt"

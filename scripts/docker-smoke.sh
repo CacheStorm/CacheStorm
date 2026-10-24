@@ -91,4 +91,24 @@ case "$out" in
 	*) fail "authenticated session replied: $out" ;;
 esac
 
+# Without a password the server is in protected mode: a client that is not
+# on the container's loopback (the host, through the port mapping) is denied.
+docker rm -f "$NAME" >/dev/null
+docker run -d --name "$NAME" -p 127.0.0.1::6380 "$IMAGE" >/dev/null
+port="$(docker port "$NAME" 6380/tcp | head -1 | sed 's/.*://')"
+for _ in $(seq 1 30); do
+	out="$(resp "PING" 2>/dev/null || true)"
+	[ -n "$out" ] && break
+	sleep 1
+done
+case "$out" in
+	-DENIED*) echo "ok: protected mode denies a remote client without a password" ;;
+	*) fail "passwordless server answered a remote client: $out" ;;
+esac
+out="$(docker exec "$NAME" wget -qO- http://127.0.0.1:8080/api/health)"
+case "$out" in
+	*healthy*|*ok*|*status*) echo "ok: loopback health check still served" ;;
+	*) fail "health endpoint: $out" ;;
+esac
+
 echo "docker smoke test passed"

@@ -9,11 +9,14 @@ func Default() *Config {
 			TCPKeepAlive:    300,
 			ReadBufferSize:  4096,
 			WriteBufferSize: 4096,
+			ProtectedMode:   true,
 		},
 		HTTP: HTTPConfig{
-			Enabled:  true,
-			Port:     8080,
-			Password: "",
+			Enabled:    true,
+			Port:       8080,
+			Password:   "",
+			RateLimit:  100,
+			RateWindow: "1m",
 		},
 		Memory: MemoryConfig{
 			MaxMemory:      "0",

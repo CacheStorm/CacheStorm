@@ -1,5 +1,4 @@
 # Simple Docker Compose - Just CacheStorm
-version: '3.8'
 
 services:
   cachestorm:
@@ -14,9 +13,10 @@ services:
       - cachestorm-demo-data:/data
     environment:
       - CACHESTORM_MAX_MEMORY=512mb
+      - CACHESTORM_REQUIREPASS=${CACHESTORM_REQUIREPASS:?set CACHESTORM_REQUIREPASS to the password clients must AUTH with}
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/api/health"]
       interval: 10s
       timeout: 3s
       retries: 3
