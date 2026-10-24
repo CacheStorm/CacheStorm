@@ -83,3 +83,6 @@ __pycache__/
 !/.wrongstack/
 /.wrongstack/*
 !/.wrongstack/project.json
+
+# Agent worktrees
+.claude/worktrees/

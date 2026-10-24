@@ -140,7 +140,7 @@ jobs:
         run: |
           for dir in examples/go examples/chat examples/analytics examples/e-commerce examples/realtime; do
             echo "::group::$dir"
-            (cd "$dir" && go build -mod=readonly ./... && go vet -mod=readonly ./...)
+            (cd "$dir" && go build -mod=readonly -o /dev/null ./... && go vet -mod=readonly ./...)
             echo "::endgroup::"
           done
 
