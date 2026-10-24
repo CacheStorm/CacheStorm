@@ -64,6 +64,7 @@ type HashValue struct {
 	Fields map[string][]byte
 	mu     sync.RWMutex
 	dead   bool
+	size   sizeCounter
 }
 
 func (v *HashValue) Lock()    { v.mu.Lock() }
@@ -81,13 +82,45 @@ func (v *HashValue) markDeadLocked()   { v.dead = true }
 
 func (v *HashValue) Type() DataType { return DataTypeHash }
 func (v *HashValue) SizeOf() int64 {
+	if n, ok := v.size.load(); ok {
+		return hashBaseSize + n
+	}
 	v.mu.RLock()
 	defer v.mu.RUnlock()
-	var size int64 = 48
+	var n int64
 	for k, val := range v.Fields {
-		size += int64(len(k)) + int64(len(val)) + 80
+		n += hashFieldSize(k, val)
 	}
-	return size
+	v.size.set(n)
+	return hashBaseSize + n
+}
+
+// SetField stores val under field and reports whether the field is new. The
+// caller holds the value's write lock.
+func (v *HashValue) SetField(field string, val []byte) bool {
+	if v.Fields == nil {
+		v.Fields = make(map[string][]byte)
+	}
+	old, exists := v.Fields[field]
+	v.Fields[field] = val
+	if exists {
+		v.size.add(int64(len(val)) - int64(len(old)))
+	} else {
+		v.size.add(hashFieldSize(field, val))
+	}
+	return !exists
+}
+
+// DeleteField removes field and reports whether it existed. The caller holds
+// the value's write lock.
+func (v *HashValue) DeleteField(field string) bool {
+	old, exists := v.Fields[field]
+	if !exists {
+		return false
+	}
+	delete(v.Fields, field)
+	v.size.add(-hashFieldSize(field, old))
+	return true
 }
 func (v *HashValue) String() string {
 	v.mu.RLock()
@@ -124,6 +157,7 @@ type ListValue struct {
 	// reallocates.
 	backing [][]byte
 	head    int
+	size    sizeCounter
 }
 
 // PushFront prepends items so that items[0] becomes the new head. Prepending
@@ -135,6 +169,7 @@ func (v *ListValue) PushFront(items ...[]byte) {
 	if n == 0 {
 		return
 	}
+	v.size.add(sumListElems(items))
 	if v.head >= n && v.headroomValid() {
 		v.head -= n
 		copy(v.backing[v.head:], items)
@@ -175,6 +210,7 @@ func (v *ListValue) PopFront(n int) [][]byte {
 	}
 	out := make([][]byte, n)
 	copy(out, v.Elements[:n])
+	v.size.add(-sumListElems(out))
 	valid := v.headroomValid()
 	clear(v.Elements[:n])
 	v.Elements = v.Elements[n:]
@@ -203,6 +239,7 @@ func (v *ListValue) PopBack(n int) [][]byte {
 	for i := 0; i < n; i++ {
 		out[i] = v.Elements[len(v.Elements)-1-i]
 	}
+	v.size.add(-sumListElems(out))
 	clear(v.Elements[len(v.Elements)-n:])
 	v.Elements = v.Elements[:len(v.Elements)-n]
 	return out
@@ -223,13 +260,56 @@ func (v *ListValue) markDeadLocked()   { v.dead = true }
 
 func (v *ListValue) Type() DataType { return DataTypeList }
 func (v *ListValue) SizeOf() int64 {
+	if n, ok := v.size.load(); ok {
+		return listBaseSize + n
+	}
 	v.mu.RLock()
 	defer v.mu.RUnlock()
-	var size int64 = 24
-	for _, el := range v.Elements {
-		size += int64(len(el)) + 24
+	n := sumListElems(v.Elements)
+	v.size.set(n)
+	return listBaseSize + n
+}
+
+func sumListElems(elems [][]byte) int64 {
+	var n int64
+	for _, el := range elems {
+		n += listElemSize(el)
 	}
-	return size
+	return n
+}
+
+// PushBack appends items. The caller holds the value's write lock.
+func (v *ListValue) PushBack(items ...[]byte) {
+	v.Elements = append(v.Elements, items...)
+	v.size.add(sumListElems(items))
+}
+
+// SetAt replaces the element at index i, which must be in range. The caller
+// holds the value's write lock.
+func (v *ListValue) SetAt(i int, el []byte) {
+	old := v.Elements[i]
+	v.Elements[i] = el
+	v.size.add(int64(len(el)) - int64(len(old)))
+}
+
+// Trim keeps only the elements in [start, stop], which must be valid indexes
+// with start <= stop, as LTRIM does. It costs O(removed elements). The caller
+// holds the value's write lock.
+func (v *ListValue) Trim(start, stop int) {
+	removed := sumListElems(v.Elements[:start]) + sumListElems(v.Elements[stop+1:])
+	clear(v.Elements[:start])
+	clear(v.Elements[stop+1:])
+	v.Elements = v.Elements[start : stop+1]
+	v.size.add(-removed)
+}
+
+// ReplaceElements installs elems as the whole list, for the commands that
+// rebuild it (LINSERT, LREM, LTRIM, ...). Recounting the size is O(len(elems)),
+// which those commands already pay to build elems. The caller holds the
+// value's write lock.
+func (v *ListValue) ReplaceElements(elems [][]byte) {
+	v.Elements = elems
+	v.size.set(sumListElems(elems))
 }
 func (v *ListValue) String() string {
 	v.mu.RLock()
@@ -259,6 +339,7 @@ type SetValue struct {
 	Members map[string]struct{}
 	mu      sync.RWMutex
 	dead    bool
+	size    sizeCounter
 }
 
 func (v *SetValue) Lock()    { v.mu.Lock() }
@@ -276,13 +357,48 @@ func (v *SetValue) markDeadLocked()   { v.dead = true }
 
 func (v *SetValue) Type() DataType { return DataTypeSet }
 func (v *SetValue) SizeOf() int64 {
+	if n, ok := v.size.load(); ok {
+		return setBaseSize + n
+	}
 	v.mu.RLock()
 	defer v.mu.RUnlock()
-	var size int64 = 48
+	var n int64
 	for k := range v.Members {
-		size += int64(len(k)) + 48
+		n += setMemberSize(k)
 	}
-	return size
+	v.size.set(n)
+	return setBaseSize + n
+}
+
+// AddMember adds member and reports whether it is new. The caller holds the
+// value's write lock.
+func (v *SetValue) AddMember(member string) bool {
+	if v.Members == nil {
+		v.Members = make(map[string]struct{})
+	}
+	if _, exists := v.Members[member]; exists {
+		return false
+	}
+	v.Members[member] = struct{}{}
+	v.size.add(setMemberSize(member))
+	return true
+}
+
+// RemoveMember removes member and reports whether it was present. The caller
+// holds the value's write lock.
+func (v *SetValue) RemoveMember(member string) bool {
+	if _, exists := v.Members[member]; !exists {
+		return false
+	}
+	delete(v.Members, member)
+	v.size.add(-setMemberSize(member))
+	return true
+}
+
+// ClearMembers empties the set. The caller holds the value's write lock.
+func (v *SetValue) ClearMembers() {
+	v.Members = make(map[string]struct{})
+	v.size.set(0)
 }
 func (v *SetValue) String() string {
 	v.mu.RLock()
@@ -318,6 +434,10 @@ type Entry struct {
 	// updateExpiry writes this field inside it. It sits beside LastAccess and
 	// AccessCount, which were converted for the same reason.
 	ExpiresAt atomic.Int64
+	// accounted is the footprint (MemoryUsage plus key overhead) the shard
+	// last charged for this entry. Removal credits exactly this much, and
+	// Store.Reaccount charges the difference after an in-place change.
+	accounted atomic.Int64
 }
 
 func NewEntry(value Value) *Entry {
@@ -328,6 +448,16 @@ func NewEntry(value Value) *Entry {
 	}
 	e.LastAccess.Store(now)
 	return e
+}
+
+// rehome returns a new entry for the same value with the same metadata, to
+// be installed under another key.
+func (e *Entry) rehome() *Entry {
+	n := &Entry{Value: e.Value, Tags: e.Tags, CreatedAt: e.CreatedAt}
+	n.LastAccess.Store(e.LastAccess.Load())
+	n.AccessCount.Store(e.AccessCount.Load())
+	n.ExpiresAt.Store(e.ExpiresAt.Load())
+	return n
 }
 
 func (e *Entry) IsExpired() bool {

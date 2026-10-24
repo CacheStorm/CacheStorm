@@ -94,6 +94,38 @@ func (s *Store) trackMemory(delta int64) {
 	}
 }
 
+// Reaccount charges the memory a key's value gained or lost in place since
+// it was last accounted. Set and Delete account whole values; the commands
+// that modify a collection in place (RPUSH, HSET, SADD, ZADD, XADD, ...) run
+// this afterwards for the keys they wrote. It is O(1): collections keep their
+// size up to date as they change.
+func (s *Store) Reaccount(keys ...string) {
+	for _, key := range keys {
+		s.trackMemory(s.shards[s.shardIndex(key)].reaccount(key))
+	}
+}
+
+// CheckWriteMemory enforces maxmemory before a command that may grow memory,
+// as Redis does for commands flagged denyoom: when used memory is over the
+// limit it evicts per the policy and refuses with ErrMemoryLimit if that does
+// not bring usage back under the limit. Store.Set only sees new values, so
+// without this a collection could grow in place without bound.
+func (s *Store) CheckWriteMemory() error {
+	mt := s.memTracker
+	if mt == nil || mt.Max() <= 0 || mt.Usage() <= mt.Max() {
+		return nil
+	}
+	if s.evictor != nil && s.evictor.policy != EvictionNoEviction {
+		if err := s.evictor.CheckAndEvict(); err != nil {
+			logger.Warn().Err(err).Msg("eviction attempt failed")
+		}
+	}
+	if mt.Usage() > mt.Max() {
+		return ErrMemoryLimit
+	}
+	return nil
+}
+
 func (s *Store) MemoryTracker() *MemoryTracker {
 	return s.memTracker
 }
@@ -150,11 +182,7 @@ func (s *Store) DeleteIfExpired(key string) bool {
 		shard.mu.Unlock()
 		return false
 	}
-	keyOverhead := int64(len(key)) + 16
-	mem := entry.MemoryUsage() + keyOverhead
-	shard.memUsage -= mem
-	shard.keyCount--
-	delete(shard.data, key)
+	mem := shard.deleteLocked(key, entry)
 	shard.mu.Unlock()
 
 	s.trackMemory(-mem)
@@ -529,6 +557,12 @@ func (s *Store) SetEntry(key string, entry *Entry) {
 	idx := s.shardIndex(key)
 	shard := s.shards[idx]
 
+	// RENAME and MOVE hand over the entry still stored under the old key (or
+	// in the other database). Installing a wrapper of its own keeps each
+	// key's accounted footprint separate, so removing the old key credits
+	// what was charged for it rather than what the new key was charged.
+	entry = entry.rehome()
+
 	// Reconcile tag membership: a key being replaced (RENAME/COPY over an
 	// existing key) must drop its old mappings before the entry's own tags
 	// are added. RemoveKey with no tags sweeps every tag, so mappings left by
@@ -587,12 +621,7 @@ func (s *Store) DeleteBatch(keys []string) int {
 			if !exists {
 				continue
 			}
-			keyOverhead := int64(len(key)) + 16
-			mem := entry.MemoryUsage() + keyOverhead
-			shard.memUsage -= mem
-			freed += mem
-			shard.keyCount--
-			delete(shard.data, key)
+			freed += shard.deleteLocked(key, entry)
 			s.touchLocked(key)
 			if len(entry.Tags) > 0 {
 				untag = append(untag, struct {
@@ -890,8 +919,8 @@ func (s *Store) MoveSetMember(srcKey, dstKey, member string) (bool, error) {
 
 		// While both locks are held the member may be visible in both sets,
 		// never in neither.
-		dstSet.Members[member] = struct{}{}
-		delete(srcSet.Members, member)
+		dstSet.AddMember(member)
+		srcSet.RemoveMember(member)
 		srcEmptied := len(srcSet.Members) == 0
 		unlock()
 

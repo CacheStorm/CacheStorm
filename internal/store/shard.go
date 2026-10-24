@@ -53,21 +53,28 @@ func (s *Shard) Set(key string, entry *Entry) int64 {
 	return delta
 }
 
+// footprint is what the shard charges for entry under key: the entry's
+// memory usage plus the key and map-slot overhead.
+func footprint(key string, entry *Entry) int64 {
+	return entry.MemoryUsage() + int64(len(key)) + 16
+}
+
 // setLocked installs entry under key and returns the memory delta and the
 // entry it replaced, if any. The caller holds s.mu.
 func (s *Shard) setLocked(key string, entry *Entry) (int64, *Entry) {
-	keyOverhead := int64(len(key)) + 16 // key string + map entry overhead
-
 	oldMem := int64(0)
 	old, exists := s.data[key]
 	if exists {
-		oldMem = old.MemoryUsage() + keyOverhead
+		// Credit what was charged for the old entry, not its current size:
+		// in-place changes since the last reaccounting were never charged.
+		oldMem = old.accounted.Load()
 		s.memUsage -= oldMem
 	} else {
 		s.keyCount++
 	}
 
-	newMem := entry.MemoryUsage() + keyOverhead
+	newMem := footprint(key, entry)
+	entry.accounted.Store(newMem)
 	s.memUsage += newMem
 	s.data[key] = entry
 
@@ -77,11 +84,36 @@ func (s *Shard) setLocked(key string, entry *Entry) (int64, *Entry) {
 // deleteLocked removes key and returns the bytes freed. The caller holds s.mu
 // and has checked that the key is present.
 func (s *Shard) deleteLocked(key string, entry *Entry) int64 {
-	mem := entry.MemoryUsage() + int64(len(key)) + 16
+	mem := entry.accounted.Load()
 	s.memUsage -= mem
 	s.keyCount--
 	delete(s.data, key)
 	return mem
+}
+
+// reaccount charges the change in key's footprint since it was last
+// accounted, for a value modified in place, and returns the delta. SizeOf
+// is O(1) for every collection, so this is cheap enough to run after every
+// write. The common no-change case only takes the read lock.
+func (s *Shard) reaccount(key string) int64 {
+	s.mu.RLock()
+	entry, ok := s.data[key]
+	same := ok && footprint(key, entry) == entry.accounted.Load()
+	s.mu.RUnlock()
+	if !ok || same {
+		return 0
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry, ok = s.data[key]
+	if !ok {
+		return 0
+	}
+	cur := footprint(key, entry)
+	delta := cur - entry.accounted.Swap(cur)
+	s.memUsage += delta
+	return delta
 }
 
 func (s *Shard) Delete(key string) (int64, bool) {

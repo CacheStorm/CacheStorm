@@ -322,6 +322,7 @@ type StreamValue struct {
 	Groups       map[string]*ConsumerGroup
 	nodeCount    int
 	nodeLive     int
+	size         sizeCounter
 }
 
 func (v *StreamValue) Lock()    { v.mu.Lock() }
@@ -339,23 +340,17 @@ func NewStreamValue(maxLen int64) *StreamValue {
 
 func (v *StreamValue) Type() DataType { return DataTypeStream }
 func (v *StreamValue) SizeOf() int64 {
+	if n, ok := v.size.load(); ok {
+		return streamBaseSize + n
+	}
 	v.mu.RLock()
 	defer v.mu.RUnlock()
-
-	var size int64 = 48
+	var n int64
 	for _, entry := range v.Entries {
-		size += int64(len(entry.ID)) + 32
-		if entry.Pairs != nil {
-			for _, p := range entry.Pairs {
-				size += int64(len(p.Name)) + int64(len(p.Value)) + 80
-			}
-			continue
-		}
-		for k, val := range entry.Fields {
-			size += int64(len(k)) + int64(len(val)) + 80
-		}
+		n += streamEntrySize(entry)
 	}
-	return size
+	v.size.set(n)
+	return streamBaseSize + n
 }
 func (v *StreamValue) String() string {
 	v.mu.RLock()
@@ -466,6 +461,7 @@ func (v *StreamValue) appendLocked(id StreamID, pairs []StreamField) *StreamEntr
 	}
 	v.placeEntry(tail, entry)
 	v.Entries = append(v.Entries, entry)
+	v.size.add(streamEntrySize(entry))
 	v.LastID = entry.ID
 	v.Length = int64(len(v.Entries))
 	v.EntriesAdded++
@@ -684,6 +680,7 @@ func (v *StreamValue) DeleteIDs(ids []StreamID) int64 {
 			continue
 		}
 		v.dropEntryNode(v.Entries[i])
+		v.size.add(-streamEntrySize(v.Entries[i]))
 		copy(v.Entries[i:], v.Entries[i+1:])
 		v.Entries[len(v.Entries)-1] = nil
 		v.Entries = v.Entries[:len(v.Entries)-1]
@@ -725,6 +722,7 @@ func (v *StreamValue) TrimStream(args StreamTrimArgs) int64 {
 func (v *StreamValue) removeHeadLocked(n int) {
 	for i := 0; i < n; i++ {
 		v.dropEntryNode(v.Entries[i])
+		v.size.add(-streamEntrySize(v.Entries[i]))
 		v.Entries[i] = nil
 	}
 	v.Entries = v.Entries[n:]

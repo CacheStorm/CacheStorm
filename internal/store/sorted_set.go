@@ -10,6 +10,7 @@ type SortedSetValue struct {
 	Members map[string]float64
 	mu      sync.RWMutex
 	dead    bool
+	size    sizeCounter
 }
 
 func (v *SortedSetValue) Lock()    { v.mu.Lock() }
@@ -26,13 +27,17 @@ func (v *SortedSetValue) markDeadLocked()   { v.dead = true }
 
 func (v *SortedSetValue) Type() DataType { return DataTypeSortedSet }
 func (v *SortedSetValue) SizeOf() int64 {
+	if n, ok := v.size.load(); ok {
+		return zsetBaseSize + n
+	}
 	v.mu.RLock()
 	defer v.mu.RUnlock()
-	var size int64 = 48
+	var n int64
 	for k := range v.Members {
-		size += int64(len(k)) + 16 + 80
+		n += zsetMemberSize(k)
 	}
-	return size
+	v.size.set(n)
+	return zsetBaseSize + n
 }
 func (v *SortedSetValue) String() string {
 	v.mu.RLock()
@@ -174,7 +179,7 @@ func (v *SortedSetValue) RemoveRangeByRank(start, stop int) int {
 
 	removed := 0
 	for i := start; i <= stop; i++ {
-		delete(v.Members, entries[i].Member)
+		v.Remove(entries[i].Member)
 		removed++
 	}
 	return removed
@@ -184,7 +189,7 @@ func (v *SortedSetValue) RemoveRangeByScore(minScore, maxScore float64) int {
 	removed := 0
 	for member, score := range v.Members {
 		if score >= minScore && score <= maxScore {
-			delete(v.Members, member)
+			v.Remove(member)
 			removed++
 		}
 	}
@@ -194,6 +199,7 @@ func (v *SortedSetValue) RemoveRangeByScore(minScore, maxScore float64) int {
 func (v *SortedSetValue) Remove(member string) bool {
 	if _, exists := v.Members[member]; exists {
 		delete(v.Members, member)
+		v.size.add(-zsetMemberSize(member))
 		return true
 	}
 	return false
@@ -205,8 +211,14 @@ func (v *SortedSetValue) GetScore(member string) (float64, bool) {
 }
 
 func (v *SortedSetValue) Add(member string, score float64) bool {
+	if v.Members == nil {
+		v.Members = make(map[string]float64)
+	}
 	_, exists := v.Members[member]
 	v.Members[member] = score
+	if !exists {
+		v.size.add(zsetMemberSize(member))
+	}
 	return !exists
 }
 
@@ -264,7 +276,7 @@ func (v *SortedSetValue) RemoveRangeByLex(min, max string) int {
 	removed := 0
 	for member := range v.Members {
 		if lexCompare(member, min, max) {
-			delete(v.Members, member)
+			v.Remove(member)
 			removed++
 		}
 	}
