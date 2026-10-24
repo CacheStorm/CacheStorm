@@ -6,6 +6,7 @@ func Default() *Config {
 			Bind:            "0.0.0.0",
 			Port:            6380,
 			MaxConnections:  10000,
+			Databases:       16,
 			TCPKeepAlive:    300,
 			ReadBufferSize:  4096,
 			WriteBufferSize: 4096,

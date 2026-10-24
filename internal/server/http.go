@@ -56,6 +56,10 @@ type HTTPServer struct {
 	sessions    *sessionStore
 	rateLimiter *rateLimiter
 	ready       atomic.Bool
+	// dbs, when set, holds every database: the API serves database 0 of it
+	// (resolved per request, so it follows a SWAPDB), and commands run
+	// through it can reach the others (FLUSHALL, MOVE, SWAPDB).
+	dbs *store.Databases
 }
 
 type sessionStore struct {
@@ -193,6 +197,14 @@ func (rl *rateLimiter) Cleanup() {
 			delete(rl.requests, ip)
 		}
 	}
+}
+
+// db0 returns the database the HTTP API serves: database 0.
+func (h *HTTPServer) db0() *store.Store {
+	if h.dbs != nil {
+		return h.dbs.DB(0)
+	}
+	return h.store
 }
 
 func NewHTTPServer(s *store.Store, router *command.Router, cfg *HTTPConfig) *HTTPServer {
@@ -435,7 +447,7 @@ func (h *HTTPServer) handleReady(w http.ResponseWriter, _ *http.Request) {
 	h.writeJSON(w, http.StatusOK, map[string]interface{}{
 		"status": "ready",
 		"uptime": time.Since(h.started).String(),
-		"keys":   h.store.KeyCount(),
+		"keys":   h.db0().KeyCount(),
 	})
 }
 
@@ -475,14 +487,14 @@ func (h *HTTPServer) handleInfo(w http.ResponseWriter, _ *http.Request) {
 		"server": map[string]interface{}{
 			"version":    "0.2.2",
 			"uptime":     time.Since(h.started).String(),
-			"keys":       h.store.KeyCount(),
-			"memory":     h.store.MemUsage(),
+			"keys":       h.db0().KeyCount(),
+			"memory":     h.db0().MemUsage(),
 			"started_at": h.started,
 		},
 		"store": map[string]interface{}{
 			"shards":   store.NumShards,
-			"keys":     h.store.KeyCount(),
-			"mem_used": h.store.MemUsage(),
+			"keys":     h.db0().KeyCount(),
+			"mem_used": h.db0().MemUsage(),
 		},
 	}
 	h.writeJSON(w, http.StatusOK, info)
@@ -491,8 +503,8 @@ func (h *HTTPServer) handleInfo(w http.ResponseWriter, _ *http.Request) {
 func (h *HTTPServer) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 
-	keys := h.store.KeyCount()
-	mem := h.store.MemUsage()
+	keys := h.db0().KeyCount()
+	mem := h.db0().MemUsage()
 	uptime := time.Since(h.started).Seconds()
 
 	var connCount int64
@@ -502,7 +514,7 @@ func (h *HTTPServer) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 
 	var memMax int64
 	var memPressure float64
-	if mt := h.store.MemoryTracker(); mt != nil {
+	if mt := h.db0().MemoryTracker(); mt != nil {
 		memMax = mt.Max()
 		memPressure = mt.PressurePercent()
 	}
@@ -553,7 +565,7 @@ func (h *HTTPServer) handleKeys(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		keys := h.store.Keys()
+		keys := h.db0().Keys()
 
 		if pattern != "*" {
 			filtered := make([]string, 0)
@@ -570,9 +582,9 @@ func (h *HTTPServer) handleKeys(w http.ResponseWriter, r *http.Request) {
 			if user != nil && !user.CanAccessKey(k) {
 				continue
 			}
-			entry, exists := h.store.Get(k)
+			entry, exists := h.db0().Get(k)
 			if exists {
-				ttl := h.store.TTL(k)
+				ttl := h.db0().TTL(k)
 				ttlStr := "-1"
 				if ttl > 0 {
 					ttlStr = ttl.String()
@@ -632,7 +644,7 @@ func (h *HTTPServer) handleKeys(w http.ResponseWriter, r *http.Request) {
 		}
 
 		opts := store.SetOptions{TTL: req.TTL, Tags: req.Tags}
-		if err := h.store.Set(req.Key, value, opts); err != nil {
+		if err := h.db0().Set(req.Key, value, opts); err != nil {
 			h.writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -662,13 +674,13 @@ func (h *HTTPServer) handleKey(w http.ResponseWriter, r *http.Request) {
 			h.writeError(w, http.StatusForbidden, "NOPERM key '"+key+"' is not allowed for this identity")
 			return
 		}
-		entry, exists := h.store.Get(key)
+		entry, exists := h.db0().Get(key)
 		if !exists {
 			h.writeError(w, http.StatusNotFound, "key not found")
 			return
 		}
 
-		ttl := h.store.TTL(key)
+		ttl := h.db0().TTL(key)
 		ttlStr := "-1"
 		if ttl > 0 {
 			ttlStr = ttl.String()
@@ -689,7 +701,7 @@ func (h *HTTPServer) handleKey(w http.ResponseWriter, r *http.Request) {
 			h.writeError(w, http.StatusForbidden, "NOPERM key '"+key+"' is not allowed for this identity")
 			return
 		}
-		deleted := h.store.Delete(key)
+		deleted := h.db0().Delete(key)
 		h.writeJSON(w, http.StatusOK, map[string]interface{}{
 			"deleted": deleted,
 			"key":     key,
@@ -701,7 +713,7 @@ func (h *HTTPServer) handleKey(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *HTTPServer) handleTags(w http.ResponseWriter, r *http.Request) {
-	tagIndex := h.store.GetTagIndex()
+	tagIndex := h.db0().GetTagIndex()
 	if tagIndex == nil {
 		h.writeJSON(w, http.StatusOK, map[string]interface{}{
 			"count": 0,
@@ -755,7 +767,7 @@ func (h *HTTPServer) handleTag(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tagIndex := h.store.GetTagIndex()
+	tagIndex := h.db0().GetTagIndex()
 	if tagIndex == nil {
 		h.writeError(w, http.StatusNotFound, "tag not found")
 		return
@@ -801,7 +813,7 @@ func (h *HTTPServer) handleInvalidate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tagIndex := h.store.GetTagIndex()
+	tagIndex := h.db0().GetTagIndex()
 	if tagIndex == nil {
 		h.writeError(w, http.StatusNotFound, "tag not found")
 		return
@@ -829,7 +841,7 @@ func (h *HTTPServer) handleInvalidate(w http.ResponseWriter, r *http.Request) {
 
 	deletedCount := 0
 	for _, key := range keys {
-		if h.store.Delete(key) {
+		if h.db0().Delete(key) {
 			deletedCount++
 		}
 	}
@@ -939,7 +951,8 @@ func (h *HTTPServer) handleExecute(w http.ResponseWriter, r *http.Request) {
 	ctx := &command.Context{
 		Command: upperCmd,
 		Args:    args,
-		Store:   h.store,
+		Store:   h.db0(),
+		DBs:     h.dbs,
 	}
 	// Carry the ACL identity authMiddleware resolved (HTTP Basic or a
 	// username login token) so ExecuteHTTP enforces that user's command and
@@ -993,15 +1006,15 @@ func (h *HTTPServer) handleSlowlog(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *HTTPServer) handleStats(w http.ResponseWriter, _ *http.Request) {
-	tagIndex := h.store.GetTagIndex()
+	tagIndex := h.db0().GetTagIndex()
 	tagCount := 0
 	if tagIndex != nil {
 		tagCount = len(tagIndex.Tags())
 	}
 
 	h.writeJSON(w, http.StatusOK, map[string]interface{}{
-		"keys":       h.store.KeyCount(),
-		"memory":     h.store.MemUsage(),
+		"keys":       h.db0().KeyCount(),
+		"memory":     h.db0().MemUsage(),
 		"tags":       tagCount,
 		"uptime":     time.Since(h.started).String(),
 		"shards":     store.NumShards,

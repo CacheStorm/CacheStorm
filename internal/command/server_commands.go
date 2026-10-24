@@ -344,31 +344,13 @@ func cmdINFO(ctx *Context) error {
 	sb.WriteString("\r\n")
 	sb.WriteString("\r\n")
 
-	sb.WriteString("# Keyspace\r\n")
-	sb.WriteString("db0:keys=")
-	sb.WriteString(strconv.FormatInt(ctx.Store.KeyCount(), 10))
-	sb.WriteString(",expires=0\r\n")
-	sb.WriteString("\r\n")
+	sb.WriteString(keyspaceInfo(ctx))
 
 	if replMgr := GetReplicationManager(); replMgr != nil {
 		sb.WriteString(replMgr.GetInfo())
 	}
 
 	return ctx.WriteBulkString(sb.String())
-}
-
-func cmdDBSIZE(ctx *Context) error {
-	return ctx.WriteInteger(ctx.Store.KeyCount())
-}
-
-func cmdFLUSHDB(ctx *Context) error {
-	ctx.Store.Flush()
-	return ctx.WriteOK()
-}
-
-func cmdFLUSHALL(ctx *Context) error {
-	ctx.Store.Flush()
-	return ctx.WriteOK()
 }
 
 func cmdTIME(ctx *Context) error {
@@ -849,57 +831,6 @@ func cmdRESTORE(ctx *Context) error {
 	}
 
 	return ctx.WriteOK()
-}
-
-func cmdCOPY(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	srcKey := ctx.ArgString(0)
-	dstKey := ctx.ArgString(1)
-
-	replace := false
-	dstDB := 0
-
-	for i := 2; i < ctx.ArgCount(); i++ {
-		arg := strings.ToUpper(ctx.ArgString(i))
-		switch arg {
-		case "REPLACE":
-			replace = true
-		case "DB":
-			i++
-			if i >= ctx.ArgCount() {
-				return ctx.WriteError(ErrSyntaxError)
-			}
-			var err error
-			dstDB, err = strconv.Atoi(ctx.ArgString(i))
-			if err != nil {
-				return ctx.WriteError(ErrNotInteger)
-			}
-			_ = dstDB
-		}
-	}
-
-	entry, exists := ctx.Store.Get(srcKey)
-	if !exists {
-		return ctx.WriteInteger(0)
-	}
-
-	if !replace {
-		if _, exists := ctx.Store.Get(dstKey); exists {
-			return ctx.WriteInteger(0)
-		}
-	}
-
-	clonedValue := entry.Value.Clone()
-	newEntry := store.NewEntry(clonedValue)
-	newEntry.ExpiresAt.Store(entry.ExpiresAt.Load())
-	newEntry.Tags = make([]string, len(entry.Tags))
-	copy(newEntry.Tags, entry.Tags)
-
-	ctx.Store.SetEntry(dstKey, newEntry)
-	return ctx.WriteInteger(1)
 }
 
 func cmdAUTH(ctx *Context) error {
@@ -2215,36 +2146,8 @@ func cmdMONITOR(ctx *Context) error {
 	return ctx.WriteOK()
 }
 
-func cmdSWAPDB(ctx *Context) error {
-	if ctx.ArgCount() != 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	_, err1 := strconv.Atoi(ctx.ArgString(0))
-	_, err2 := strconv.Atoi(ctx.ArgString(1))
-
-	if err1 != nil || err2 != nil {
-		return ctx.WriteError(ErrNotInteger)
-	}
-
-	return ctx.WriteOK()
-}
-
 func cmdDEBUGSEGFAULT(ctx *Context) error {
 	return ctx.WriteError(errors.New("ERR SEGFAULT not allowed"))
-}
-
-func cmdMOVE(ctx *Context) error {
-	if ctx.ArgCount() != 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	key := ctx.ArgString(0)
-	_ = ctx.ArgString(1)
-	_, exists := ctx.Store.Get(key)
-	if !exists {
-		return ctx.WriteInteger(0)
-	}
-	return ctx.WriteInteger(1)
 }
 
 func cmdWAITAOF(ctx *Context) error {

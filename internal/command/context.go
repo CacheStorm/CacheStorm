@@ -58,6 +58,12 @@ type Context struct {
 	// router is the router dispatching this command, recorded by
 	// Router.Execute so EXEC runs its queue through the same handlers.
 	router *Router
+
+	// DB is the index of the selected database, the one Store is.
+	DB int
+	// DBs holds every database, so SELECT, MOVE, COPY ... DB, SWAPDB and
+	// FLUSHALL can reach the others. nil means Store is the only database.
+	DBs *store.Databases
 }
 
 func NewContext(cmd string, args [][]byte, s *store.Store, w *resp.Writer) *Context {

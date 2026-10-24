@@ -27,6 +27,9 @@ func Validate(cfg *Config) error {
 	if cfg.Server.MaxConnections < 0 {
 		return fmt.Errorf("max_connections cannot be negative")
 	}
+	if cfg.Server.Databases < 0 || cfg.Server.Databases > 1<<20 {
+		return fmt.Errorf("invalid databases: %d", cfg.Server.Databases)
+	}
 	maxMemory, err := ParseMemorySize(cfg.Memory.MaxMemory)
 	if err != nil || maxMemory < 0 {
 		return fmt.Errorf("invalid max_memory: %s", cfg.Memory.MaxMemory)

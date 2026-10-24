@@ -23,6 +23,11 @@ func (w *Writer) SetRESP3(on bool) {
 	w.resp3 = on
 }
 
+// IsRESP3 reports whether the writer uses the RESP3 encodings.
+func (w *Writer) IsRESP3() bool {
+	return w.resp3
+}
+
 func NewWriter(wr io.Writer) *Writer {
 	return &Writer{wr: bufio.NewWriter(wr)}
 }

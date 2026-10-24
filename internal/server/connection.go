@@ -41,6 +41,7 @@ type Connection struct {
 	namespace    string
 	createdAt    time.Time
 	lastCmd      string
+	rawCmd       string
 	readTimeout  time.Duration
 	writeTimeout time.Duration
 	subscriber   *store.Subscriber // PubSub subscriber, persists across commands
@@ -63,6 +64,11 @@ type Connection struct {
 	deliveryStop chan struct{}
 	deliveryDone chan struct{}
 	stopOnce     sync.Once
+
+	// dbs and db are the databases and the one this connection selected;
+	// with dbs nil the connection only ever uses store.
+	dbs *store.Databases
+	db  int
 }
 
 // countingConn wraps a connection and feeds the global byte counters so the
@@ -192,6 +198,7 @@ func (c *Connection) Handle() {
 			return
 		}
 
+		c.rawCmd = cmd
 		cmd = command.CanonicalName(cmd)
 		c.lastCmd = cmd
 
@@ -224,7 +231,15 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 			}
 		}
 
-		ctx := command.NewContextWithClient(cmd, args, c.store, c.writer, c.ID, c.conn.RemoteAddr().String())
+		st := c.store
+		if c.dbs != nil {
+			if db := c.dbs.DB(c.db); db != nil {
+				st = db
+			}
+		}
+		ctx := command.NewContextWithClient(cmd, args, st, c.writer, c.ID, c.conn.RemoteAddr().String())
+		ctx.DB = c.db
+		ctx.DBs = c.dbs
 		if c.transaction == nil {
 			c.transaction = ctx.Transaction
 		}
@@ -262,7 +277,7 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 		if err != nil {
 			store.GlobalMetrics.RecordError()
 			if err == command.ErrUnknownCommand {
-				c.writer.WriteError("ERR unknown command '" + cmd + "'")
+				c.writer.WriteError(unknownCommandError(c.rawCmd, cmd, args))
 			} else {
 				c.writer.WriteError(err.Error())
 			}
@@ -286,6 +301,10 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 		// Carry auth state back onto the connection: AUTH sets the flag on
 		// the Context, which is rebuilt from scratch for the next command.
 		c.authenticated = ctx.IsAuthenticated()
+		if c.dbs == nil && ctx.DBs != nil {
+			c.dbs = ctx.DBs
+		}
+		c.db = ctx.DB
 		c.aclUser = ctx.ACLUser
 		c.clientName = ctx.ClientName
 
@@ -352,6 +371,10 @@ func (c *Connection) recoverPanic() {
 func (c *Connection) Close() {
 	// Stop reporting the connection: it is gone.
 	command.UntrackConnection(c.ID)
+	// Release the connection's WATCH registrations.
+	if c.transaction != nil {
+		c.transaction.ClearWatch()
+	}
 	// Clean up PubSub subscriber to prevent resource leak
 	if c.subscriber != nil {
 		if ps := c.store.GetPubSub(); ps != nil {
@@ -546,4 +569,36 @@ func (c *Connection) stopDelivery() {
 		close(c.deliveryStop)
 		<-c.deliveryDone
 	})
+}
+
+// unknownCommandError is the Redis reply for a command the server does not
+// know: the name as the client sent it and the start of its arguments.
+func unknownCommandError(raw, canonical string, args [][]byte) string {
+	name := raw
+	if name == "" {
+		name = canonical
+	}
+	if len(name) > 128 {
+		name = name[:128]
+	}
+	var sb strings.Builder
+	for _, a := range args {
+		if sb.Len() >= 128 {
+			break
+		}
+		room := 128 - sb.Len()
+		if len(a) > room {
+			a = a[:room]
+		}
+		sb.WriteByte('\'')
+		sb.Write(a)
+		sb.WriteString("' ")
+	}
+	msg := "ERR unknown command '" + name + "', with args beginning with: " + sb.String()
+	return strings.Map(func(r rune) rune {
+		if r == '\r' || r == '\n' {
+			return ' '
+		}
+		return r
+	}, msg)
 }

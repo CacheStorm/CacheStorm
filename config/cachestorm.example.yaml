@@ -12,6 +12,9 @@ server:
   # Maximum simultaneous connections
   max_connections: 10000
 
+  # Number of logical databases (SELECT 0 .. databases-1)
+  databases: 16
+
   # TCP keepalive in seconds
   tcp_keepalive: 300
 

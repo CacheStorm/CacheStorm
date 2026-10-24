@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cachestorm/cachestorm/internal/logger"
@@ -46,6 +47,8 @@ type Store struct {
 	pubsub       *PubSub
 	keyNotifier  *KeyNotifier
 	versions     map[string]int64
+	watchRefs    map[string]int
+	watching     atomic.Int64
 	versionMu    sync.RWMutex
 	memTracker   *MemoryTracker
 	evictor      *EvictionController
@@ -63,6 +66,7 @@ func NewStore() *Store {
 		pubsub:      NewPubSub(),
 		keyNotifier: NewKeyNotifier(),
 		versions:    make(map[string]int64),
+		watchRefs:   make(map[string]int),
 	}
 	s.expiry = NewTimingWheel(s)
 	for i := 0; i < NumShards; i++ {
@@ -155,8 +159,7 @@ func (s *Store) DeleteIfExpired(key string) bool {
 
 	s.trackMemory(-mem)
 	s.tagIndex.RemoveKey(key, entry.Tags)
-	s.IncrementVersion(key)
-	s.DeleteVersion(key)
+	s.TouchKey(key)
 	s.fireExpire(key, entry.Value)
 	return true
 }
@@ -165,22 +168,105 @@ func (s *Store) KeyNotifier() *KeyNotifier {
 	return s.keyNotifier
 }
 
+// versionStamp numbers every modification of a watched key. It is shared by
+// all stores, so a stamp is never reused: a key that is deleted and recreated
+// can never return to the version a WATCH recorded.
+var versionStamp atomic.Int64
+
+// GetVersion returns the modification stamp of a watched key: 0 until the key
+// is modified while watched.
 func (s *Store) GetVersion(key string) int64 {
 	s.versionMu.RLock()
 	defer s.versionMu.RUnlock()
 	return s.versions[key]
 }
 
-func (s *Store) IncrementVersion(key string) {
+// WatchKey registers a WATCH on key and returns its current version. Only
+// watched keys carry a version, so the map is bounded by the open watches.
+func (s *Store) WatchKey(key string) int64 {
 	s.versionMu.Lock()
 	defer s.versionMu.Unlock()
-	s.versions[key]++
+	if s.watchRefs[key] == 0 {
+		s.watching.Add(1)
+	}
+	s.watchRefs[key]++
+	return s.versions[key]
 }
 
-func (s *Store) DeleteVersion(key string) {
+// UnwatchKey drops one WATCH registration taken by WatchKey.
+func (s *Store) UnwatchKey(key string) {
 	s.versionMu.Lock()
 	defer s.versionMu.Unlock()
-	delete(s.versions, key)
+	n, ok := s.watchRefs[key]
+	if !ok {
+		return
+	}
+	if n <= 1 {
+		delete(s.watchRefs, key)
+		delete(s.versions, key)
+		s.watching.Add(-1)
+		return
+	}
+	s.watchRefs[key] = n - 1
+}
+
+// HasWatchedKeys reports whether any client watches a key of this store.
+func (s *Store) HasWatchedKeys() bool {
+	return s.watching.Load() > 0
+}
+
+// touchLocked bumps key's version if it is watched. Caller holds versionMu.
+func (s *Store) touchLocked(key string) {
+	if s.watchRefs[key] > 0 {
+		s.versions[key] = versionStamp.Add(1)
+	}
+}
+
+// TouchKey records a modification of key, aborting every transaction that
+// watches it.
+func (s *Store) TouchKey(key string) {
+	if s.watching.Load() == 0 {
+		return
+	}
+	s.versionMu.Lock()
+	s.touchLocked(key)
+	s.versionMu.Unlock()
+}
+
+// TouchKeys is TouchKey for several keys.
+func (s *Store) TouchKeys(keys []string) {
+	if s.watching.Load() == 0 || len(keys) == 0 {
+		return
+	}
+	s.versionMu.Lock()
+	for _, k := range keys {
+		s.touchLocked(k)
+	}
+	s.versionMu.Unlock()
+}
+
+// TouchAllWatched bumps every watched key of this store, the effect a
+// database swap has on watchers.
+func (s *Store) TouchAllWatched() {
+	if s.watching.Load() == 0 {
+		return
+	}
+	s.versionMu.Lock()
+	for k := range s.watchRefs {
+		s.versions[k] = versionStamp.Add(1)
+	}
+	s.versionMu.Unlock()
+}
+
+// IncrementVersion records a modification of key (see TouchKey).
+func (s *Store) IncrementVersion(key string) {
+	s.TouchKey(key)
+}
+
+// DeleteVersion records the removal of key. A deletion is a modification, so
+// a watcher of the key must see its version change.
+func (s *Store) DeleteVersion(key string) {
+	s.TouchKey(key)
 }
 
 func (s *Store) shardIndex(key string) uint32 {
@@ -352,8 +438,7 @@ func (s *Store) Delete(key string) bool {
 	mem, deleted := shard.Delete(key)
 	if deleted {
 		s.trackMemory(-mem)
-		s.IncrementVersion(key)
-		s.DeleteVersion(key)
+		s.TouchKey(key)
 	}
 	return deleted
 }
@@ -390,7 +475,7 @@ func (s *Store) DeleteBatch(keys []string) int {
 			freed += mem
 			shard.keyCount--
 			delete(shard.data, key)
-			delete(s.versions, key)
+			s.touchLocked(key)
 			if len(entry.Tags) > 0 {
 				untag = append(untag, struct {
 					key  string
@@ -487,6 +572,7 @@ func (s *Store) SetTTL(key string, ttl time.Duration) bool {
 	if !s.shards[s.shardIndex(key)].updateExpiry(key, expiresAt) {
 		return false
 	}
+	s.TouchKey(key)
 	s.scheduleExpiry(key, expiresAt)
 	return true
 }
@@ -495,6 +581,7 @@ func (s *Store) SetExpiresAt(key string, expiresAt int64) bool {
 	if !s.shards[s.shardIndex(key)].updateExpiry(key, expiresAt) {
 		return false
 	}
+	s.TouchKey(key)
 	s.scheduleExpiry(key, expiresAt)
 	return true
 }
@@ -504,7 +591,11 @@ func (s *Store) SetExpiresAt(key string, expiresAt int64) bool {
 func (s *Store) Persist(key string) bool {
 	// ExpiresAt 0 clears the expiry; any stale wheel schedule for this key
 	// later fires as a no-op (expireKey only removes actually-expired keys).
-	return s.shards[s.shardIndex(key)].clearExpiry(key)
+	if !s.shards[s.shardIndex(key)].clearExpiry(key) {
+		return false
+	}
+	s.TouchKey(key)
+	return true
 }
 
 func (s *Store) GetTTL(key string) time.Duration {
@@ -558,6 +649,15 @@ func (s *Store) Keys() []string {
 
 func (s *Store) Flush() {
 	keyCount := s.KeyCount()
+	if s.watching.Load() > 0 {
+		s.versionMu.Lock()
+		for k := range s.watchRefs {
+			if s.shards[s.shardIndex(k)].Exists(k) {
+				s.touchLocked(k)
+			}
+		}
+		s.versionMu.Unlock()
+	}
 	freed := int64(0)
 	for i := 0; i < NumShards; i++ {
 		freed += s.shards[i].Flush()
@@ -566,10 +666,6 @@ func (s *Store) Flush() {
 		s.tagIndex.invalidate(tag)
 	}
 	s.trackMemory(-freed)
-	// Clear version map to prevent memory leak
-	s.versionMu.Lock()
-	s.versions = make(map[string]int64)
-	s.versionMu.Unlock()
 	logger.Info().Int64("flushed_keys", keyCount).Msg("store flushed")
 }
 

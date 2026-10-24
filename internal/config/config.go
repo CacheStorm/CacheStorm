@@ -63,6 +63,7 @@ type ServerConfig struct {
 	Bind            string `yaml:"bind" default:"0.0.0.0"`
 	Port            int    `yaml:"port" default:"6380"`
 	MaxConnections  int    `yaml:"max_connections" default:"10000"`
+	Databases       int    `yaml:"databases" default:"16"`
 	TCPKeepAlive    int    `yaml:"tcp_keepalive" default:"300"`
 	ReadTimeout     string `yaml:"read_timeout" default:"0"`
 	WriteTimeout    string `yaml:"write_timeout" default:"0"`

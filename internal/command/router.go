@@ -31,7 +31,7 @@ type Router struct {
 	// six names were registered in two files at once and nothing said so.
 	duplicates  map[string]struct{}
 	requirePass string
-	postExecute func(cmd string, args [][]byte)
+	postExecute func(db int, cmd string, args [][]byte)
 	// postExec receives the commands an EXEC ran, so the transaction is
 	// persisted as one unit instead of command by command.
 	postExec func(cmds []ExecutedCommand)
@@ -68,10 +68,12 @@ func checkArity(cmd string, args int) bool {
 	return n >= -spec.Arity
 }
 
-// ExecutedCommand is one command an EXEC ran without an error reply.
+// ExecutedCommand is one command an EXEC ran without an error reply, with
+// the database it ran in.
 type ExecutedCommand struct {
 	Name string
 	Args [][]byte
+	DB   int
 }
 
 // globalRouter is set during NewRouter() for access from command handlers (e.g. AUTH)
@@ -204,6 +206,16 @@ var noAuthCommands = map[string]bool{
 }
 
 func (r *Router) SetPostExecute(fn func(cmd string, args [][]byte)) {
+	if fn == nil {
+		r.SetPostExecuteDB(nil)
+		return
+	}
+	r.SetPostExecuteDB(func(_ int, cmd string, args [][]byte) { fn(cmd, args) })
+}
+
+// SetPostExecuteDB installs the per-command hook with the index of the
+// database the command ran in, which the AOF needs to record SELECTs.
+func (r *Router) SetPostExecuteDB(fn func(db int, cmd string, args [][]byte)) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.postExecute = fn
@@ -267,11 +279,13 @@ func (r *Router) Execute(ctx *Context) error {
 	}
 
 	ctx.StartTime = time.Now()
+	db := ctx.DB
 	err := cmd.Handler(ctx)
+	touchWrittenKeys(ctx)
 
 	// Post-execute hook (AOF persistence)
 	if err == nil && r.postExecute != nil {
-		r.postExecute(ctx.Command, ctx.Args)
+		r.postExecute(db, ctx.Command, ctx.Args)
 	}
 
 	return err
@@ -343,14 +357,16 @@ func (r *Router) ExecuteHTTP(ctx *Context) (interface{}, error) {
 		return nil, acl.ErrPermissionDenied
 	}
 
+	db := ctx.DB
 	err := cmd.Handler(ctx)
+	touchWrittenKeys(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	// Post-execute hook (AOF persistence)
 	if r.postExecute != nil {
-		r.postExecute(ctx.Command, ctx.Args)
+		r.postExecute(db, ctx.Command, ctx.Args)
 	}
 
 	// Return a simple acknowledgement - the actual response was written to the RESP writer

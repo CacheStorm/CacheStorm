@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GraphQL subscriptions
 
 ### Added
+- Databases: 16 real numbered databases (`server.databases`). SELECT is per connection and validates the range; FLUSHDB clears only the current database and FLUSHALL all of them; MOVE, SWAPDB and COPY ... DB work across databases and keep TTLs; INFO keyspace lists every non-empty database. Pub/Sub and the memory limit stay global. SELECT used to reply OK and change nothing, so every database number shared one keyspace and `FLUSHDB` in db 1 wiped db 0
+- Persistence: the AOF records database switches, including inside MULTI/EXEC blocks, and replay restores every key into its own database
 - Configuration: `CACHESTORM_REQUIREPASS`, `CACHESTORM_HTTP_PASSWORD` and `CACHESTORM_DATA_DIR` override the config file, so a container can take its secrets from the environment instead of a baked-in file
 - CI: jobs for the Python, TypeScript and Go clients, the five example modules, the Redis compatibility harness and a Docker image smoke test (`scripts/docker-smoke.sh`)
 - Compatibility: a differential test harness in `tests/compat/` runs the same command sequences against Redis 7.4 (in Docker) and CacheStorm and compares every reply and the resulting keyspace. It is behind the `compat` build tag; `tests/compat/REPORT.md` holds the latest results
@@ -37,6 +39,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Authentication: only AUTH, HELLO, QUIT and RESET run before a requirepass client authenticates, the commands Redis flags `no_auth`. PING and COMMAND were exempt too, so an unauthenticated client could probe the server
 
 ### Fixed
+- Transactions: WATCH is per database and sees every change to a watched key: in-place writes such as HSET and LPUSH, EXPIRE/PERSIST, DEL, expiry, FLUSHDB/FLUSHALL, MOVE and SWAPDB, a missing key being created and a key deleted and recreated. An aborted EXEC replies with a null array. SELECT inside MULTI applies to the commands queued after it, and Lua scripts run in the caller's database with a script-local SELECT
+- Unknown commands reply with Redis' text, `ERR unknown command 'x', with args beginning with: ...`
 - SET accepts `NX GET`, rejects `EX`+`PX` and `KEEPTTL` with an expiry, parses options case-insensitively, reports `invalid expire time in 'set' command`, and treats EXAT/PXAT in the past as a delete; SETEX/PSETEX/GETEX follow the same rules
 - INCRBYFLOAT computes at long double precision and prints like Redis (`0.1`+`0.2` = `0.3`, `-0` = `0`); invalid input reports `ERR value is not a valid float`. INCR/INCRBY/DECRBY reject non-canonical integers (`01`, `+1`) and `DECRBY k -9223372036854775808` reports `decrement would overflow`
 - SETRANGE with an empty value no longer creates a key or writes into the stored value in place, and uses Redis' error texts; MSET/MSETNX arity errors name the command; keys containing NUL, CR or LF are accepted
