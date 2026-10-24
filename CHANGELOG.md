@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GraphQL subscriptions
 
 ### Added
+- Client compatibility: `scripts/client-smoke.sh` runs go-redis v9, redis-py 5 and ioredis 5 against a password-protected server (AUTH, SELECT, pipelines, MULTI, Pub/Sub, EVAL, BLPOP, SCAN, streams), and CI runs it on every change
 - HELLO: `HELLO 2` with the AUTH and SETNAME options answers with the server map, and `HELLO 3` replies `NOPROTO` so clients that try RESP3 first (go-redis v9 and others) fall back to RESP2; HELLO was an unknown command
 - Scripting: EVAL_RO, EVALSHA_RO, `#!lua flags=no-writes`, the `cjson`, `bit` and `cmsgpack` libraries, `redis.sha1hex`/`setresp`/`set_repl`; FUNCTION LOAD with the `#!lua name=` header, FCALL/FCALL_RO by function name and FUNCTION LIST/STATS/DELETE/FLUSH/KILL/DUMP/RESTORE; scripts cached only by EVAL are capped at 500, as in Redis 7.4
 - Databases: 16 real numbered databases (`server.databases`). SELECT is per connection and validates the range; FLUSHDB clears only the current database and FLUSHALL all of them; MOVE, SWAPDB and COPY ... DB work across databases and keep TTLs; INFO keyspace lists every non-empty database. Pub/Sub and the memory limit stay global. SELECT used to reply OK and change nothing, so every database number shared one keyspace and `FLUSHDB` in db 1 wiped db 0

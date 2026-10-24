@@ -1,0 +1,7 @@
+{
+  "name": "cachestorm-client-smoke",
+  "private": true,
+  "dependencies": {
+    "ioredis": "5.4.2"
+  }
+}
