@@ -224,7 +224,7 @@ func TestWriteError(t *testing.T) {
 
 func TestWriteNull(t *testing.T) {
 	var buf bytes.Buffer
-	w := NewWriter(&buf)
+	w := newRESP3Writer(&buf)
 
 	if err := w.WriteNull(); err != nil {
 		t.Fatalf("unexpected error: %v", err)

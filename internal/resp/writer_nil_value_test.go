@@ -36,7 +36,7 @@ func TestWriterRejectsNilValueTrees(t *testing.T) {
 		} {
 			t.Run(mode+"/"+name, func(t *testing.T) {
 				var output bytes.Buffer
-				if err := write(NewWriter(&output), input); err != ErrInvalidType {
+				if err := write(newRESP3Writer(&output), input); err != ErrInvalidType {
 					t.Fatalf("invalid value: got %v, want ErrInvalidType", err)
 				}
 			})
@@ -51,7 +51,7 @@ func TestWriterRejectsNilValueTrees(t *testing.T) {
 		} {
 			t.Run(mode+"/"+name, func(t *testing.T) {
 				var output bytes.Buffer
-				w := NewWriter(&output)
+				w := newRESP3Writer(&output)
 				if err := write(w, input); err != nil {
 					t.Fatal(err)
 				}

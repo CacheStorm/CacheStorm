@@ -42,10 +42,14 @@ func (r *Reader) readMap() (*Value, error) {
 }
 
 func (w *Writer) writeMapNoFlush(values map[string]*Value) error {
-	if err := w.wr.WriteByte(byte(TypeMap)); err != nil {
+	header, n := TypeMap, len(values)
+	if !w.resp3 {
+		header, n = TypeArray, 2*len(values)
+	}
+	if err := w.wr.WriteByte(byte(header)); err != nil {
 		return err
 	}
-	if _, err := w.wr.WriteString(strconv.Itoa(len(values))); err != nil {
+	if _, err := w.wr.WriteString(strconv.Itoa(n)); err != nil {
 		return err
 	}
 	if _, err := w.wr.WriteString("\r\n"); err != nil {

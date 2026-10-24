@@ -48,7 +48,7 @@ func TestMapValueRoundTrip(t *testing.T) {
 		for _, tt := range cases {
 			t.Run(mode+"/"+tt.name, func(t *testing.T) {
 				var output bytes.Buffer
-				w := NewWriter(&output)
+				w := newRESP3Writer(&output)
 				if err := write(w, tt.input); err != nil {
 					t.Fatalf("write: %v", err)
 				}
@@ -82,7 +82,7 @@ func TestMapValueRoundTrip(t *testing.T) {
 			})
 		}
 		for _, input := range []*Value{ordinary, large} {
-			w := NewWriter(mapErrorWriter{})
+			w := newRESP3Writer(mapErrorWriter{})
 			err := write(w, input)
 			if err == nil {
 				err = w.Flush()
@@ -93,7 +93,7 @@ func TestMapValueRoundTrip(t *testing.T) {
 		}
 		for _, child := range []*Value{nil, {Type: Type(255)}} {
 			var output bytes.Buffer
-			if err := write(NewWriter(&output), MapValue(map[string]*Value{"bad": child})); err != ErrInvalidType {
+			if err := write(newRESP3Writer(&output), MapValue(map[string]*Value{"bad": child})); err != ErrInvalidType {
 				t.Fatalf("%s invalid child: expected ErrInvalidType, got %v", mode, err)
 			}
 		}
@@ -111,7 +111,7 @@ func TestReadMapWireFormat(t *testing.T) {
 		t.Fatalf("following frame: value=%v error=%v", v, err)
 	}
 	var output bytes.Buffer
-	if err := NewWriter(&output).WriteValue(MapValue(map[string]*Value{"key": IntegerValue(7)})); err != nil {
+	if err := newRESP3Writer(&output).WriteValue(MapValue(map[string]*Value{"key": IntegerValue(7)})); err != nil {
 		t.Fatal(err)
 	}
 	if output.String() != "%1\r\n$3\r\nkey\r\n:7\r\n" {

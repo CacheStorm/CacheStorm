@@ -11,6 +11,16 @@ var errorLineReplacer = strings.NewReplacer("\r", " ", "\n", " ")
 
 type Writer struct {
 	wr *bufio.Writer
+	// resp3 selects the RESP3 encodings for null and map replies. A RESP2
+	// client cannot parse them, so a writer encodes null as a null bulk
+	// string and a map as a flat key/value array until a client opts in.
+	resp3 bool
+}
+
+// SetRESP3 switches the writer between RESP2 (the default) and RESP3
+// encodings for null and map replies.
+func (w *Writer) SetRESP3(on bool) {
+	w.resp3 = on
 }
 
 func NewWriter(wr io.Writer) *Writer {
@@ -127,6 +137,9 @@ func (w *Writer) WriteNullBulkString() error {
 }
 
 func (w *Writer) WriteNull() error {
+	if !w.resp3 {
+		return w.WriteNullBulkString()
+	}
 	if err := w.wr.WriteByte(byte(TypeNull)); err != nil {
 		return err
 	}
@@ -216,6 +229,11 @@ func (w *Writer) WriteValueNoFlush(v *Value) error {
 	case TypeMap:
 		return w.writeMapNoFlush(v.Map)
 	case TypeNull:
+		if !w.resp3 {
+			w.wr.WriteByte(byte(TypeBulkString))
+			_, err := w.wr.WriteString("-1\r\n")
+			return err
+		}
 		w.wr.WriteByte(byte(TypeNull))
 		_, err := w.wr.WriteString("\r\n")
 		return err

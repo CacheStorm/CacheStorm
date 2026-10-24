@@ -101,7 +101,7 @@ func TestWriteValueNullArray(t *testing.T) {
 
 func TestWriteValueNull(t *testing.T) {
 	var buf bytes.Buffer
-	w := NewWriter(&buf)
+	w := newRESP3Writer(&buf)
 
 	v := NullValue()
 	if err := w.WriteValue(v); err != nil {
@@ -484,7 +484,7 @@ func TestWriteValueNoFlushNullArray(t *testing.T) {
 
 func TestWriteValueNoFlushNull(t *testing.T) {
 	var buf bytes.Buffer
-	w := NewWriter(&buf)
+	w := newRESP3Writer(&buf)
 
 	v := NullValue()
 	if err := w.WriteValueNoFlush(v); err != nil {
