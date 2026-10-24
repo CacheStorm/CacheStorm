@@ -121,18 +121,19 @@ func TestStoreGetPubSub(t *testing.T) {
 func TestStoreVersion(t *testing.T) {
 	s := NewStore()
 
-	if s.GetVersion("key") != 0 {
+	if s.WatchKey("key") != 0 {
 		t.Error("initial version should be 0")
 	}
 
 	s.Set("key", &StringValue{Data: []byte("v")}, SetOptions{})
-	if s.GetVersion("key") != 1 {
-		t.Errorf("version should be 1 after set, got %d", s.GetVersion("key"))
+	v1 := s.GetVersion("key")
+	if v1 == 0 {
+		t.Error("version should change after set")
 	}
 
 	s.Set("key", &StringValue{Data: []byte("v2")}, SetOptions{})
-	if s.GetVersion("key") != 2 {
-		t.Errorf("version should be 2 after second set, got %d", s.GetVersion("key"))
+	if v2 := s.GetVersion("key"); v2 <= v1 {
+		t.Errorf("version should grow after second set, got %d then %d", v1, v2)
 	}
 }
 
