@@ -15,7 +15,13 @@ func TestHIncrByFloatRejectsInputBeforeCreation(t *testing.T) {
 			for repeat := 0; repeat < 2; repeat++ {
 				got := runHashAuditX(t, s, "HINCRBYFLOAT", "missing", "f", increment)
 				t.Logf("EXPECTED: error and no key ACTUAL: %q", got)
-				if !strings.HasPrefix(got, "-ERR increment would produce NaN or Infinity") {
+				// Redis 7.4: NaN is not a valid float; an infinite increment is
+				// refused with "value is NaN or Infinity".
+				want := "-ERR value is NaN or Infinity"
+				if increment == "NaN" {
+					want = "-ERR value is not a valid float"
+				}
+				if !strings.HasPrefix(got, want) {
 					t.Fatal("non-finite increment not rejected")
 				}
 				if _, ok := s.Get("missing"); ok {
@@ -55,11 +61,20 @@ func TestHIncrByFloatRejectsInputBeforeCreation(t *testing.T) {
 	if got := runHashAuditX(t, s, "HGET", "valid", "f"); got != "$1\r\n1\r\n" {
 		t.Fatal("valid result not stored")
 	}
+	// Redis adds at long double precision, so 1e308+1e308 does not overflow:
+	// it replies the exact 309-digit sum, which later increments read back.
 	runHashAuditX(t, s, "HSET", "overflow", "f", "1e308")
-	if got := runHashAuditX(t, s, "HINCRBYFLOAT", "overflow", "f", "1e308"); !strings.Contains(got, "NaN or Infinity") {
-		t.Fatal("finite result overflow no longer rejected")
+	if got := runHashAuditX(t, s, "HINCRBYFLOAT", "overflow", "f", "1e308"); !strings.HasPrefix(got, "$309\r\n19999999999999999999") {
+		t.Fatalf("long double sum beyond double range: %q", got)
 	}
-	if got := runHashAuditX(t, s, "HGET", "overflow", "f"); got != "$5\r\n1e308\r\n" {
+	if got := runHashAuditX(t, s, "HINCRBYFLOAT", "overflow", "f", "0"); !strings.HasPrefix(got, "$309\r\n19999999999999999999") {
+		t.Fatalf("stored long double value not re-read: %q", got)
+	}
+	runHashAuditX(t, s, "HSET", "overflow", "g", "1e4932")
+	if got := runHashAuditX(t, s, "HINCRBYFLOAT", "overflow", "g", "1e4932"); !strings.Contains(got, "NaN or Infinity") {
+		t.Fatalf("long double overflow not rejected: %q", got)
+	}
+	if got := runHashAuditX(t, s, "HGET", "overflow", "g"); got != "$6\r\n1e4932\r\n" {
 		t.Fatal("overflow changed existing value")
 	}
 }

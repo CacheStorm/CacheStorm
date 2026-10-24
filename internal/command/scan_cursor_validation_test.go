@@ -2,6 +2,7 @@ package command
 
 import (
 	"bytes"
+	"fmt"
 	"testing"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
@@ -110,33 +111,58 @@ func TestScanVariantsValidCursorControls(t *testing.T) {
 	}
 }
 
-// Control: COUNT paging still terminates, a past-the-end cursor still restarts
-// from the head, and a non-numeric cursor is still an error.
+// Control: COUNT paging terminates and visits every field exactly once, a
+// small hash comes back whole, and a non-numeric cursor is still an error.
 func TestScanPagingAndErrorControls(t *testing.T) {
-	hash := store.NewStore()
+	// A small hash comes back whole with cursor 0, like a Redis listpack.
+	small := store.NewStore()
 	for _, f := range []string{"f1", "f2", "f3"} {
-		scanCursorRun(t, hash, "HSET", "h", f, "v")
+		scanCursorRun(t, small, "HSET", "h", f, "v")
+	}
+	if v := scanCursorRun(t, small, "HSCAN", "h", "0", "COUNT", "2"); len(v.Array[1].Array) != 6 || string(v.Array[0].Bulk) != "0" {
+		t.Fatalf("small hash: got %d elements and cursor %q, want 6 and \"0\"", len(v.Array[1].Array), v.Array[0].Bulk)
 	}
 
+	// A large one pages: COUNT 2 returns two pairs and a cursor, and the
+	// cursor loop visits every field exactly once.
+	hash := store.NewStore()
+	const fields = 300
+	for i := 0; i < fields; i++ {
+		scanCursorRun(t, hash, "HSET", "h", fmt.Sprintf("f%d", i), "v")
+	}
 	first := scanCursorRun(t, hash, "HSCAN", "h", "0", "COUNT", "2")
 	if len(first.Array[1].Array) != 4 {
 		t.Fatalf("first page returned %d elements, want 4 (2 field/value pairs)", len(first.Array[1].Array))
 	}
-	cursor := string(first.Array[0].Bulk)
-	if cursor == "0" {
+	if string(first.Array[0].Bulk) == "0" {
 		t.Fatal("expected a non-zero next cursor after a partial page")
 	}
-
-	second := scanCursorRun(t, hash, "HSCAN", "h", cursor, "COUNT", "2")
-	if len(second.Array[1].Array) != 2 {
-		t.Fatalf("second page returned %d elements, want 2 (the remaining 1 pair)", len(second.Array[1].Array))
+	seen := map[string]int{}
+	cursor := "0"
+	for rounds := 0; ; rounds++ {
+		if rounds > fields {
+			t.Fatal("cursor loop did not terminate")
+		}
+		v := scanCursorRun(t, hash, "HSCAN", "h", cursor, "COUNT", "7")
+		for i := 0; i < len(v.Array[1].Array); i += 2 {
+			seen[string(v.Array[1].Array[i].Bulk)]++
+		}
+		cursor = string(v.Array[0].Bulk)
+		if cursor == "0" {
+			break
+		}
 	}
-	if string(second.Array[0].Bulk) != "0" {
-		t.Fatalf("final cursor = %q, want \"0\"", second.Array[0].Bulk)
+	if len(seen) != fields {
+		t.Fatalf("full scan saw %d distinct fields, want %d", len(seen), fields)
+	}
+	for f, n := range seen {
+		if n != 1 {
+			t.Fatalf("field %s returned %d times", f, n)
+		}
 	}
 
-	if v := scanCursorRun(t, hash, "HSCAN", "h", "99", "COUNT", "2"); len(v.Array[1].Array) != 4 {
-		t.Fatalf("past-the-end cursor returned %d elements, want 4", len(v.Array[1].Array))
+	if v := scanCursorRun(t, hash, "HSCAN", "h", "18446744073709551615", "COUNT", "2"); string(v.Array[0].Bulk) != "0" {
+		t.Fatalf("last-position cursor returned cursor %q, want \"0\"", v.Array[0].Bulk)
 	}
 	if v := scanCursorRun(t, hash, "HSCAN", "h", "abc"); v.Type != resp.TypeError {
 		t.Fatalf("non-numeric cursor returned type %v, want an error", v.Type)

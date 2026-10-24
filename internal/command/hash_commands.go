@@ -1,7 +1,10 @@
 package command
 
 import (
+	"errors"
 	"math"
+	"math/big"
+	"math/rand"
 	"strconv"
 	"strings"
 	"time"
@@ -65,7 +68,7 @@ func getHash(ctx *Context, key string) (*store.HashValue, error) {
 
 func cmdHSET(ctx *Context) error {
 	if ctx.ArgCount() < 2 || ctx.ArgCount()%2 == 0 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 
 	key := ctx.ArgString(0)
@@ -92,7 +95,7 @@ func cmdHSET(ctx *Context) error {
 
 func cmdHGET(ctx *Context) error {
 	if ctx.ArgCount() != 2 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 
 	key := ctx.ArgString(0)
@@ -120,7 +123,7 @@ func cmdHGET(ctx *Context) error {
 
 func cmdHMSET(ctx *Context) error {
 	if ctx.ArgCount() < 3 || ctx.ArgCount()%2 == 0 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 
 	key := ctx.ArgString(0)
@@ -142,7 +145,7 @@ func cmdHMSET(ctx *Context) error {
 
 func cmdHMGET(ctx *Context) error {
 	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 
 	key := ctx.ArgString(0)
@@ -177,7 +180,7 @@ func cmdHMGET(ctx *Context) error {
 
 func cmdHGETALL(ctx *Context) error {
 	if ctx.ArgCount() != 1 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 
 	key := ctx.ArgString(0)
@@ -202,7 +205,7 @@ func cmdHGETALL(ctx *Context) error {
 
 func cmdHDEL(ctx *Context) error {
 	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 
 	key := ctx.ArgString(0)
@@ -236,7 +239,7 @@ func cmdHDEL(ctx *Context) error {
 
 func cmdHEXISTS(ctx *Context) error {
 	if ctx.ArgCount() != 2 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 
 	key := ctx.ArgString(0)
@@ -263,7 +266,7 @@ func cmdHEXISTS(ctx *Context) error {
 
 func cmdHLEN(ctx *Context) error {
 	if ctx.ArgCount() != 1 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 
 	key := ctx.ArgString(0)
@@ -283,7 +286,7 @@ func cmdHLEN(ctx *Context) error {
 
 func cmdHKEYS(ctx *Context) error {
 	if ctx.ArgCount() != 1 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 
 	key := ctx.ArgString(0)
@@ -308,7 +311,7 @@ func cmdHKEYS(ctx *Context) error {
 
 func cmdHVALS(ctx *Context) error {
 	if ctx.ArgCount() != 1 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 
 	key := ctx.ArgString(0)
@@ -331,9 +334,15 @@ func cmdHVALS(ctx *Context) error {
 	return ctx.WriteArray(reply)
 }
 
+var (
+	errHashNotInteger   = errors.New("ERR hash value is not an integer")
+	errHashNotFloat     = errors.New("ERR hash value is not a float")
+	errHashIncrNaNOrInf = errors.New("ERR value is NaN or Infinity")
+)
+
 func cmdHINCRBY(ctx *Context) error {
 	if ctx.ArgCount() != 3 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 
 	key := ctx.ArgString(0)
@@ -349,34 +358,94 @@ func cmdHINCRBY(ctx *Context) error {
 	}
 
 	hash.Lock()
-	defer hash.Unlock()
-	var newVal int64
+	newVal := incr
 	if current, exists := hash.Fields[field]; exists {
 		newVal, err = computeIntIncr(current, incr)
 		if err != nil {
+			empty := len(hash.Fields) == 0
+			hash.Unlock()
+			if empty {
+				ctx.Store.Delete(key)
+			}
+			if err == ErrNotInteger {
+				err = errHashNotInteger
+			}
 			return ctx.WriteError(err)
 		}
-	} else {
-		newVal = incr
 	}
-
 	hash.Fields[field] = []byte(strconv.FormatInt(newVal, 10))
+	hash.Unlock()
 	return ctx.WriteInteger(newVal)
+}
+
+// longDoublePrec is the mantissa width of the x87 long double Redis uses
+// for HINCRBYFLOAT and INCRBYFLOAT.
+const longDoublePrec = 64
+
+// parseLongDouble parses a number the way Redis' string2ld does, at long
+// double precision. Infinities are returned as such; NaN and malformed input
+// are refused.
+func parseLongDouble(s string) (*big.Float, bool) {
+	s = cHexFloat(s)
+	f, err := strconv.ParseFloat(s, 64)
+	rangeErr := errors.Is(err, strconv.ErrRange)
+	if (err != nil && !rangeErr) || math.IsNaN(f) {
+		return nil, false
+	}
+	if math.IsInf(f, 0) && !rangeErr {
+		return new(big.Float).SetInf(f < 0), true
+	}
+	v, _, err := big.ParseFloat(s, 0, longDoublePrec, big.ToNearestEven)
+	if err != nil {
+		if rangeErr {
+			return nil, false
+		}
+		return new(big.Float).SetPrec(longDoublePrec).SetFloat64(f), true
+	}
+	if rangeErr {
+		// Beyond double range: accept what a long double still holds.
+		exp := v.MantExp(nil)
+		if v.Sign() != 0 && (exp > longDoubleMaxExp || exp < longDoubleMinExp) {
+			return nil, false
+		}
+	}
+	return v, true
+}
+
+// The binary exponent range of an x87 long double (as reported by
+// big.Float.MantExp, mantissa in [0.5, 1)).
+const (
+	longDoubleMaxExp = 16384
+	longDoubleMinExp = -16444
+)
+
+// formatLongDoubleHuman renders v like Redis' ld2string in LD_STR_HUMAN
+// mode: "%.17Lf" with trailing zeroes (and a bare point) removed.
+func formatLongDoubleHuman(v *big.Float) string {
+	s := v.Text('f', 17)
+	if strings.Contains(s, ".") {
+		s = strings.TrimRight(s, "0")
+		s = strings.TrimSuffix(s, ".")
+	}
+	if s == "-0" {
+		s = "0"
+	}
+	return s
 }
 
 func cmdHINCRBYFLOAT(ctx *Context) error {
 	if ctx.ArgCount() != 3 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 
 	key := ctx.ArgString(0)
 	field := ctx.ArgString(1)
-	incr, err := strconv.ParseFloat(ctx.ArgString(2), 64)
-	if err != nil {
-		return ctx.WriteError(ErrInvalidArg)
+	incr, ok := parseLongDouble(ctx.ArgString(2))
+	if !ok {
+		return ctx.WriteError(ErrNotFloat)
 	}
-	if math.IsNaN(incr) || math.IsInf(incr, 0) {
-		return ctx.WriteError(ErrFloatOverflow)
+	if incr.IsInf() {
+		return ctx.WriteError(errHashIncrNaNOrInf)
 	}
 
 	hash, err := getOrCreateHash(ctx, key)
@@ -385,29 +454,39 @@ func cmdHINCRBYFLOAT(ctx *Context) error {
 	}
 
 	hash.Lock()
-	defer hash.Unlock()
-	var newVal float64
-	if current, exists := hash.Fields[field]; exists {
-		currentFloat, err := strconv.ParseFloat(string(current), 64)
-		if err != nil {
-			return ctx.WriteError(ErrInvalidArg)
+	sum := new(big.Float).SetPrec(longDoublePrec).SetMode(big.ToNearestEven)
+	fail := func(e error) error {
+		empty := len(hash.Fields) == 0
+		hash.Unlock()
+		if empty {
+			ctx.Store.Delete(key)
 		}
-		newVal = currentFloat + incr
+		return ctx.WriteError(e)
+	}
+	if current, exists := hash.Fields[field]; exists {
+		cur, ok := parseLongDouble(string(current))
+		if !ok {
+			return fail(errHashNotFloat)
+		}
+		if cur.IsInf() {
+			return fail(ErrFloatOverflow)
+		}
+		sum.Add(cur, incr)
 	} else {
-		newVal = incr
+		sum.Set(incr)
 	}
-
-	if math.IsNaN(newVal) || math.IsInf(newVal, 0) {
-		return ctx.WriteError(ErrFloatOverflow)
+	if sum.Sign() != 0 && sum.MantExp(nil) > longDoubleMaxExp {
+		return fail(ErrFloatOverflow)
 	}
-	result := strconv.FormatFloat(newVal, 'f', -1, 64)
+	result := formatLongDoubleHuman(sum)
 	hash.Fields[field] = []byte(result)
+	hash.Unlock()
 	return ctx.WriteBulkString(result)
 }
 
 func cmdHSETNX(ctx *Context) error {
 	if ctx.ArgCount() != 3 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 
 	key := ctx.ArgString(0)
@@ -431,7 +510,7 @@ func cmdHSETNX(ctx *Context) error {
 
 func cmdHSTRLEN(ctx *Context) error {
 	if ctx.ArgCount() != 2 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 
 	key := ctx.ArgString(0)
@@ -460,198 +539,130 @@ func cmdHSTRLEN(ctx *Context) error {
 
 func cmdHSCAN(ctx *Context) error {
 	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 
-	key := ctx.ArgString(0)
-	cursor, err := strconv.Atoi(ctx.ArgString(1))
-	if err != nil || cursor < 0 {
-		return ctx.WriteError(ErrNotInteger)
+	cursor, err := parseCollectionScanCursor(ctx.ArgString(1))
+	if err != nil {
+		return ctx.WriteError(err)
 	}
 
-	count := 10
-	pattern := "*"
-
-	for i := 2; i < ctx.ArgCount(); i++ {
-		arg := strings.ToUpper(ctx.ArgString(i))
-		switch arg {
-		case "COUNT":
-			i++
-			if i >= ctx.ArgCount() {
-				return ctx.WriteError(ErrSyntaxError)
-			}
-			count, err = strconv.Atoi(ctx.ArgString(i))
-			if err != nil {
-				return ctx.WriteError(ErrNotInteger)
-			}
-			// COUNT is a work-size hint. A non-positive one flows into
-			// end = start + count and then into make() as a negative
-			// capacity, which panics. SSCAN already rejected this; mirror it.
-			if count <= 0 {
-				return ctx.WriteError(ErrInvalidArg)
-			}
-		case "MATCH":
-			i++
-			if i >= ctx.ArgCount() {
-				return ctx.WriteError(ErrSyntaxError)
-			}
-			pattern = ctx.ArgString(i)
-		default:
-			return ctx.WriteError(ErrSyntaxError)
-		}
-	}
-
-	hash, err := getHash(ctx, key)
+	hash, err := getHash(ctx, ctx.ArgString(0))
 	if err != nil {
 		return ctx.WriteError(err)
 	}
 	if hash == nil {
-		return ctx.WriteArray([]*resp.Value{
-			resp.BulkString("0"),
-			resp.ArrayValue([]*resp.Value{}),
-		})
+		return writeEmptyCollectionScan(ctx)
+	}
+
+	opts, err := parseCollectionScanOptions(ctx, 2, true)
+	if err != nil {
+		return ctx.WriteError(err)
 	}
 
 	hash.RLock()
-	fields := make([]string, 0, len(hash.Fields))
-	for field := range hash.Fields {
-		if matchPattern(field, pattern) {
-			fields = append(fields, field)
+	fields, next := collectionScanPage(len(hash.Fields), cursor, opts.count, func(emit func(string)) {
+		for f := range hash.Fields {
+			emit(f)
+		}
+	})
+	items := make([]*resp.Value, 0, len(fields)*2)
+	for _, f := range fields {
+		if opts.match && !matchPattern(f, opts.pattern) {
+			continue
+		}
+		items = append(items, resp.BulkString(f))
+		if !opts.noValues {
+			items = append(items, resp.BulkBytes(hash.Fields[f]))
 		}
 	}
-
-	start := cursor
-	if start >= len(fields) {
-		start = 0
-	}
-
-	end := start + count
-	if end > len(fields) {
-		end = len(fields)
-	}
-
-	nextCursor := 0
-	if end < len(fields) {
-		nextCursor = end
-	}
-
-	result := make([]*resp.Value, 0, (end-start)*2)
-	for i := start; i < end; i++ {
-		field := fields[i]
-		result = append(result, resp.BulkString(field), resp.BulkBytes(hash.Fields[field]))
-	}
-
-	reply := []*resp.Value{
-		resp.BulkString(strconv.Itoa(nextCursor)),
-		resp.ArrayValue(result),
-	}
 	hash.RUnlock()
-	return ctx.WriteArray(reply)
+
+	return writeCollectionScanReply(ctx, next, items)
 }
 
 func cmdHRANDFIELD(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
+	n := ctx.ArgCount()
+	if n < 1 {
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 
 	key := ctx.ArgString(0)
-	count := 1
-	countProvided := false
-	withValues := false
-
-	for i := 1; i < ctx.ArgCount(); i++ {
-		arg := strings.ToUpper(ctx.ArgString(i))
-		switch arg {
-		case "WITHVALUES":
-			withValues = true
-		default:
-			countProvided = true
-			var err error
-			count, err = strconv.Atoi(ctx.ArgString(i))
-			if err != nil {
-				return ctx.WriteError(ErrNotInteger)
+	if n == 1 {
+		hash, err := getHash(ctx, key)
+		if err != nil {
+			return ctx.WriteError(err)
+		}
+		if hash == nil {
+			return ctx.WriteNullBulkString()
+		}
+		hash.RLock()
+		var picked string
+		found := false
+		if len(hash.Fields) > 0 {
+			idx := rand.Intn(len(hash.Fields))
+			for f := range hash.Fields {
+				if idx == 0 {
+					picked, found = f, true
+					break
+				}
+				idx--
 			}
 		}
+		hash.RUnlock()
+		if !found {
+			return ctx.WriteNullBulkString()
+		}
+		return ctx.WriteBulkString(picked)
+	}
+
+	count, err := parseRandCount(ctx.ArgString(1))
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	if n > 3 || (n == 3 && !strings.EqualFold(ctx.ArgString(2), "WITHVALUES")) {
+		return ctx.WriteError(ErrSyntaxError)
+	}
+	withValues := n == 3
+	if withValues && (count < -math.MaxInt64/2 || count > math.MaxInt64/2) {
+		return ctx.WriteError(errValueOutOfRange)
 	}
 
 	hash, err := getHash(ctx, key)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
-	if hash == nil {
-		if countProvided {
-			// The count form replies an empty array even for a missing key.
-			return ctx.WriteArray([]*resp.Value{})
-		}
-		return ctx.WriteNullBulkString()
+	if hash == nil || count == 0 {
+		return ctx.WriteArray([]*resp.Value{})
 	}
 
 	hash.RLock()
 	fields := make([]string, 0, len(hash.Fields))
-	for f := range hash.Fields {
+	values := make([][]byte, 0, len(hash.Fields))
+	for f, v := range hash.Fields {
 		fields = append(fields, f)
+		values = append(values, v)
 	}
 	hash.RUnlock()
 
-	if len(fields) == 0 {
-		if countProvided {
-			return ctx.WriteArray([]*resp.Value{})
-		}
-		return ctx.WriteNullBulkString()
+	picked := pickRandom(len(fields), count)
+	size := len(picked)
+	if withValues {
+		size *= 2
 	}
-	if count == 0 {
-		return ctx.WriteArray([]*resp.Value{})
-	}
-
-	if !countProvided && !withValues {
-		return ctx.WriteBulkString(fields[0])
-	}
-
-	hash.RLock()
-	// A negative count is supported (see the branch below) but its magnitude
-	// is caller-controlled: bound the pre-allocation (append grows as needed)
-	// and cap the loop so an absurd magnitude cannot overflow the capacity
-	// math or run for years.
-	capacity := count * 2
-	if capacity < 0 {
-		capacity = -capacity
-	}
-	if capacity > 8192 {
-		capacity = 8192
-	}
-	result := make([]*resp.Value, 0, capacity)
-	if count > 0 {
-		for i := 0; i < count && i < len(fields); i++ {
-			field := fields[i]
-			result = append(result, resp.BulkString(field))
-			if withValues {
-				result = append(result, resp.BulkBytes(hash.Fields[field]))
-			}
-		}
-	} else {
-		limit := -count
-		if limit < 0 {
-			limit = 0
-		} else if limit > 1000000 {
-			limit = 1000000
-		}
-		for i := 0; i < limit; i++ {
-			field := fields[i%len(fields)]
-			result = append(result, resp.BulkString(field))
-			if withValues {
-				result = append(result, resp.BulkBytes(hash.Fields[field]))
-			}
+	result := make([]*resp.Value, 0, size)
+	for _, idx := range picked {
+		result = append(result, resp.BulkString(fields[idx]))
+		if withValues {
+			result = append(result, resp.BulkBytes(values[idx]))
 		}
 	}
-
-	reply := result
-	hash.RUnlock()
-	return ctx.WriteArray(reply)
+	return ctx.WriteArray(result)
 }
 
 func cmdHGETDEL(ctx *Context) error {
 	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 
 	key := ctx.ArgString(0)
@@ -710,7 +721,7 @@ func cmdHGETDEL(ctx *Context) error {
 
 func cmdHGETEX(ctx *Context) error {
 	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 
 	key := ctx.ArgString(0)

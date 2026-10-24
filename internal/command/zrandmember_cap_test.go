@@ -37,7 +37,7 @@ func TestZRandMemberCapacityBounds(t *testing.T) {
 
 	seed()
 	t.Run("overflow_count_must_not_crash", func(t *testing.T) {
-		got := run("ZRANDMEMBER", "z", "COUNT", "-5000000000000000000")
+		got := run("ZRANDMEMBER", "z", "-5000000000000000000")
 		if got.Type != resp.TypeArray {
 			t.Fatalf("overflow count replied %v, want an array", got)
 		}
@@ -47,42 +47,42 @@ func TestZRandMemberCapacityBounds(t *testing.T) {
 	})
 
 	t.Run("negative_count_cycles_with_repeats", func(t *testing.T) {
-		got := run("ZRANDMEMBER", "z", "COUNT", "-7")
+		got := run("ZRANDMEMBER", "z", "-7")
 		if got.Type != resp.TypeArray || len(got.Array) != 7 {
 			t.Fatalf("count -7 delivered %v, want 7 elements", got)
 		}
 	})
 
 	t.Run("positive_count_unique", func(t *testing.T) {
-		got := run("ZRANDMEMBER", "z", "COUNT", "3")
+		got := run("ZRANDMEMBER", "z", "3")
 		if got.Type != resp.TypeArray || len(got.Array) != 3 {
 			t.Fatalf("count 3 delivered %v, want 3 elements", got)
 		}
 	})
 
 	t.Run("zero_count_empty_array", func(t *testing.T) {
-		got := run("ZRANDMEMBER", "z", "COUNT", "0")
+		got := run("ZRANDMEMBER", "z", "0")
 		if got.Type != resp.TypeArray || len(got.Array) != 0 {
 			t.Fatalf("count 0 delivered %v, want an empty array", got)
 		}
 	})
 
 	t.Run("withscores_pairs", func(t *testing.T) {
-		got := run("ZRANDMEMBER", "z", "COUNT", "-4", "WITHSCORES")
+		got := run("ZRANDMEMBER", "z", "-4", "WITHSCORES")
 		if got.Type != resp.TypeArray || len(got.Array) != 8 {
 			t.Fatalf("WITHSCORES -4 delivered %d elements, want 8 (pairs)", len(got.Array))
 		}
 	})
 
 	t.Run("missing_key_negative_null", func(t *testing.T) {
-		got := run("ZRANDMEMBER", "nosuch", "COUNT", "-3")
+		got := run("ZRANDMEMBER", "nosuch", "-3")
 		if got.Type != resp.TypeArray || len(got.Array) != 0 {
 			t.Fatalf("missing key with count replied %v, want an empty array (Redis count-form shape)", got)
 		}
 	})
 
 	t.Run("missing_key_zero_empty", func(t *testing.T) {
-		got := run("ZRANDMEMBER", "nosuch", "COUNT", "0")
+		got := run("ZRANDMEMBER", "nosuch", "0")
 		if got.Type != resp.TypeArray || len(got.Array) != 0 {
 			t.Fatalf("missing key count 0 replied %v, want an empty array", got)
 		}
@@ -98,19 +98,17 @@ func TestZRandMemberCapacityBounds(t *testing.T) {
 	t.Run("empty_set_negative", func(t *testing.T) {
 		run("ZADD", "empty", "1", "x")
 		run("ZREM", "empty", "x")
-		got := run("ZRANDMEMBER", "empty", "COUNT", "-3")
+		got := run("ZRANDMEMBER", "empty", "-3")
 		if got.Type != resp.TypeArray || len(got.Array) != 0 {
 			t.Fatalf("empty set with count replied %v, want an empty array (Redis count-form shape)", got)
 		}
 	})
 
-	t.Run("minint64_count_negates_to_itself_keeps_empty_reply", func(t *testing.T) {
-		got := run("ZRANDMEMBER", "z", "COUNT", "-9223372036854775808")
-		if got.Type != resp.TypeArray {
-			t.Fatalf("MinInt64 count replied %v, want an array", got)
-		}
-		if len(got.Array) != 0 {
-			t.Fatalf("MinInt64 count delivered %d elements, want 0 (negation overflow skips the loop)", len(got.Array))
+	t.Run("minint64_count_out_of_range", func(t *testing.T) {
+		// Redis accepts counts in [-LONG_MAX, LONG_MAX] only.
+		got := run("ZRANDMEMBER", "z", "-9223372036854775808")
+		if got.Type != resp.TypeError || got.Err != "ERR value is out of range, value must between -9223372036854775807 and 9223372036854775807" {
+			t.Fatalf("MinInt64 count replied %v, want the out-of-range error", got)
 		}
 	})
 }

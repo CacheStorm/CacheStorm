@@ -42,7 +42,7 @@ func TestBlockingMovePreservesDataOnTypeError(t *testing.T) {
 			if _, exists := s.Get("unused"); exists {
 				t.Fatal("created destination after source type error")
 			}
-			if got := move("missing", "unused"); got != "$-1\r\n" {
+			if got := move("missing", "unused"); got != "*-1\r\n" { // Redis 7.4 times out with a null array
 				t.Fatalf("missing source: %q", got)
 			}
 			if got := move("src", "dst"); got != "$1\r\nb\r\n" {

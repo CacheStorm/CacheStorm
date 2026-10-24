@@ -7,12 +7,10 @@ import (
 	"github.com/cachestorm/cachestorm/internal/store"
 )
 
-// Regression: cmdZINCRBY computed current+incr with unchecked float
-// arithmetic, and strconv.ParseFloat accepted "NaN"/"Inf" as the increment —
-// an overflowing increment stored +Inf as the member's score (and a literal
-// NaN/Inf increment poisoned a fresh member directly), returned to the
-// client as score text. Redis rejects with "ERR increment would produce NaN
-// or Infinity" and leaves the score unchanged.
+// ZINCRBY follows Redis 7.4: an increment that overflows yields inf, an
+// infinite increment is accepted, a NaN increment is "not a valid float",
+// and only a NaN result (inf + -inf) is refused with "resulting score is not
+// a number (NaN)", leaving the score unchanged.
 
 func newZSetRouter(s *store.Store) *Router {
 	router := NewRouter()
@@ -24,17 +22,12 @@ func TestZIncrByAtMaxFloatOverflows(t *testing.T) {
 	s := store.NewStore()
 	router := newZSetRouter(s)
 
-	if reply := runCmd(t, s, router, "ZADD", "z", "1e308", "m"); reply == "" {
-		t.Fatal("ZADD setup failed")
+	runCmd(t, s, router, "ZADD", "z", "1e308", "m")
+	if reply := runCmd(t, s, router, "ZINCRBY", "z", "1e308", "m"); reply != "$3\r\ninf\r\n" {
+		t.Fatalf("overflowing ZINCRBY must reach inf, got %q", reply)
 	}
-	before := runCmd(t, s, router, "ZSCORE", "z", "m")
-
-	reply := runCmd(t, s, router, "ZINCRBY", "z", "1e308", "m")
-	if !strings.Contains(reply, "would produce NaN") {
-		t.Fatalf("overflowing ZINCRBY must be rejected, got %q", reply)
-	}
-	if after := runCmd(t, s, router, "ZSCORE", "z", "m"); after != before {
-		t.Fatalf("failed ZINCRBY must leave the score unchanged, got %q, want %q", after, before)
+	if got := runCmd(t, s, router, "ZSCORE", "z", "m"); got != "$3\r\ninf\r\n" {
+		t.Fatalf("ZSCORE after overflow, got %q", got)
 	}
 }
 
@@ -42,29 +35,27 @@ func TestZIncrByNaNIncrementRejected(t *testing.T) {
 	s := store.NewStore()
 	router := newZSetRouter(s)
 
-	if reply := runCmd(t, s, router, "ZADD", "z", "1", "m"); reply == "" {
-		t.Fatal("ZADD setup failed")
-	}
-
-	reply := runCmd(t, s, router, "ZINCRBY", "z", "NaN", "m")
-	if !strings.Contains(reply, "would produce NaN") {
+	runCmd(t, s, router, "ZADD", "z", "1", "m")
+	if reply := runCmd(t, s, router, "ZINCRBY", "z", "NaN", "m"); reply != "-ERR value is not a valid float\r\n" {
 		t.Fatalf("NaN increment must be rejected, got %q", reply)
 	}
-	if got := runCmd(t, s, router, "ZSCORE", "z", "m"); !strings.Contains(got, "1") {
+	if got := runCmd(t, s, router, "ZSCORE", "z", "m"); got != "$1\r\n1\r\n" {
 		t.Fatalf("failed ZINCRBY must leave the score unchanged, got %q", got)
 	}
 }
 
-func TestZIncrByFreshMemberInfRejected(t *testing.T) {
+func TestZIncrByNaNResultRejected(t *testing.T) {
 	s := store.NewStore()
 	router := newZSetRouter(s)
 
-	reply := runCmd(t, s, router, "ZINCRBY", "z", "Inf", "fresh")
-	if !strings.Contains(reply, "would produce NaN") {
-		t.Fatalf("Inf increment on a fresh member must be rejected, got %q", reply)
+	if reply := runCmd(t, s, router, "ZINCRBY", "z", "Inf", "fresh"); reply != "$3\r\ninf\r\n" {
+		t.Fatalf("Inf increment on a fresh member, got %q", reply)
 	}
-	if got := runCmd(t, s, router, "ZSCORE", "z", "fresh"); strings.Contains(got, "Inf") {
-		t.Fatalf("rejected ZINCRBY must not create the member, got %q", got)
+	if reply := runCmd(t, s, router, "ZINCRBY", "z", "-inf", "fresh"); reply != "-ERR resulting score is not a number (NaN)\r\n" {
+		t.Fatalf("inf + -inf must be rejected, got %q", reply)
+	}
+	if got := runCmd(t, s, router, "ZSCORE", "z", "fresh"); got != "$3\r\ninf\r\n" {
+		t.Fatalf("rejected ZINCRBY must leave the score unchanged, got %q", got)
 	}
 }
 

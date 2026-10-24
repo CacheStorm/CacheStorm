@@ -81,7 +81,7 @@ func getSetOrEmpty(ctx *Context, key string) (*store.SetValue, error) {
 
 func cmdSADD(ctx *Context) error {
 	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 
 	key := ctx.ArgString(0)
@@ -106,7 +106,7 @@ func cmdSADD(ctx *Context) error {
 
 func cmdSREM(ctx *Context) error {
 	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 
 	key := ctx.ArgString(0)
@@ -140,7 +140,7 @@ func cmdSREM(ctx *Context) error {
 
 func cmdSMEMBERS(ctx *Context) error {
 	if ctx.ArgCount() != 1 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 
 	key := ctx.ArgString(0)
@@ -165,7 +165,7 @@ func cmdSMEMBERS(ctx *Context) error {
 
 func cmdSISMEMBER(ctx *Context) error {
 	if ctx.ArgCount() != 2 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 
 	key := ctx.ArgString(0)
@@ -192,7 +192,7 @@ func cmdSISMEMBER(ctx *Context) error {
 
 func cmdSCARD(ctx *Context) error {
 	if ctx.ArgCount() != 1 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 
 	key := ctx.ArgString(0)
@@ -212,20 +212,19 @@ func cmdSCARD(ctx *Context) error {
 
 func cmdSPOP(ctx *Context) error {
 	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 
+	if ctx.ArgCount() > 2 {
+		return ctx.WriteError(ErrSyntaxError)
+	}
 	key := ctx.ArgString(0)
 	count := 1
-	withCount := ctx.ArgCount() >= 2
+	withCount := ctx.ArgCount() == 2
 	if withCount {
 		var err error
-		count, err = strconv.Atoi(ctx.ArgString(1))
-		if err != nil {
-			return ctx.WriteError(ErrNotInteger)
-		}
-		if count < 0 {
-			return ctx.WriteError(errCountOutOfRange)
+		if count, err = parsePositiveCount(ctx.ArgString(1)); err != nil {
+			return ctx.WriteError(err)
 		}
 	}
 
@@ -281,20 +280,22 @@ func cmdSPOP(ctx *Context) error {
 }
 
 func cmdSRANDMEMBER(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
+	n := ctx.ArgCount()
+	if n < 1 {
+		return ctx.WriteError(arityError(ctx.Command))
+	}
+	if n > 2 {
+		return ctx.WriteError(ErrSyntaxError)
 	}
 
 	key := ctx.ArgString(0)
-	count := 1
-	withCount := false
-	if ctx.ArgCount() >= 2 {
+	withCount := n == 2
+	var count int64 = 1
+	if withCount {
 		var err error
-		count, err = strconv.Atoi(ctx.ArgString(1))
-		if err != nil {
-			return ctx.WriteError(ErrNotInteger)
+		if count, err = parseRandCount(ctx.ArgString(1)); err != nil {
+			return ctx.WriteError(err)
 		}
-		withCount = true
 	}
 
 	set, err := getSet(ctx, key)
@@ -316,39 +317,23 @@ func cmdSRANDMEMBER(ctx *Context) error {
 	set.RUnlock()
 
 	if !withCount {
-		idx := 0
-		if len(members) > 1 {
-			idx = rand.Intn(len(members))
+		if len(members) == 0 {
+			return ctx.WriteNullBulkString()
 		}
-		return ctx.WriteBulkString(members[idx])
+		return ctx.WriteBulkString(members[rand.Intn(len(members))])
 	}
 
-	if count < 0 {
-		// Redis: a negative count returns exactly |count| elements chosen at
-		// random, with repetition allowed.
-		n := -count
-		result := make([]*resp.Value, 0, n)
-		for i := 0; i < n && len(members) > 0; i++ {
-			result = append(result, resp.BulkString(members[rand.Intn(len(members))]))
-		}
-		return ctx.WriteArray(result)
+	picked := pickRandom(len(members), count)
+	result := make([]*resp.Value, len(picked))
+	for i, idx := range picked {
+		result[i] = resp.BulkString(members[idx])
 	}
-
-	if count > len(members) {
-		count = len(members)
-	}
-
-	result := make([]*resp.Value, 0, count)
-	for i := 0; i < count && i < len(members); i++ {
-		result = append(result, resp.BulkString(members[i]))
-	}
-
 	return ctx.WriteArray(result)
 }
 
 func cmdSMOVE(ctx *Context) error {
 	if ctx.ArgCount() != 3 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 
 	moved, err := ctx.Store.MoveSetMember(ctx.ArgString(0), ctx.ArgString(1), ctx.ArgString(2))
@@ -364,7 +349,7 @@ func cmdSMOVE(ctx *Context) error {
 
 func cmdSUNION(ctx *Context) error {
 	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 
 	// The shared set-operations lock: a concurrent MoveSetMember takes it
@@ -420,7 +405,7 @@ func cmdSUNION(ctx *Context) error {
 
 func cmdSINTER(ctx *Context) error {
 	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 
 	// The shared set-operations lock: a concurrent MoveSetMember takes it
@@ -474,7 +459,7 @@ func cmdSINTER(ctx *Context) error {
 
 func cmdSDIFF(ctx *Context) error {
 	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 
 	// The shared set-operations lock: a concurrent MoveSetMember takes it
@@ -521,7 +506,7 @@ func cmdSDIFF(ctx *Context) error {
 
 func cmdSUNIONSTORE(ctx *Context) error {
 	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 
 	// The shared set-operations lock: a concurrent MoveSetMember takes it
@@ -566,7 +551,7 @@ func cmdSUNIONSTORE(ctx *Context) error {
 
 func cmdSINTERSTORE(ctx *Context) error {
 	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 
 	// The shared set-operations lock: a concurrent MoveSetMember takes it
@@ -631,7 +616,7 @@ func cmdSINTERSTORE(ctx *Context) error {
 
 func cmdSDIFFSTORE(ctx *Context) error {
 	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 
 	// The shared set-operations lock: a concurrent MoveSetMember takes it
@@ -689,200 +674,138 @@ func cmdSDIFFSTORE(ctx *Context) error {
 
 func cmdSSCAN(ctx *Context) error {
 	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 
-	key := ctx.ArgString(0)
-	cursor, err := strconv.Atoi(ctx.ArgString(1))
-	if err != nil || cursor < 0 {
-		return ctx.WriteError(ErrNotInteger)
+	cursor, err := parseCollectionScanCursor(ctx.ArgString(1))
+	if err != nil {
+		return ctx.WriteError(err)
 	}
 
-	count := 10
-	pattern := "*"
-
-	for i := 2; i < ctx.ArgCount(); i++ {
-		arg := strings.ToUpper(ctx.ArgString(i))
-		switch arg {
-		case "COUNT":
-			i++
-			if i >= ctx.ArgCount() {
-				return ctx.WriteError(ErrSyntaxError)
-			}
-			count, err = strconv.Atoi(ctx.ArgString(i))
-			if err != nil {
-				return ctx.WriteError(ErrNotInteger)
-			}
-			if count <= 0 {
-				return ctx.WriteError(ErrInvalidArg)
-			}
-		case "MATCH":
-			i++
-			if i >= ctx.ArgCount() {
-				return ctx.WriteError(ErrSyntaxError)
-			}
-			pattern = ctx.ArgString(i)
-		default:
-			return ctx.WriteError(ErrSyntaxError)
-		}
-	}
-
-	set, err := getSet(ctx, key)
+	set, err := getSet(ctx, ctx.ArgString(0))
 	if err != nil {
 		return ctx.WriteError(err)
 	}
 	if set == nil {
-		return ctx.WriteArray([]*resp.Value{
-			resp.BulkString("0"),
-			resp.ArrayValue([]*resp.Value{}),
-		})
+		return writeEmptyCollectionScan(ctx)
 	}
 
-	// SADD/SREM/SMOVE mutate Members under the set's write lock, so the
-	// snapshot must be taken under the matching read lock. Iterating the map
-	// unlocked raced every locked writer on the same key.
-	set.RLock()
-	members := make([]string, 0, len(set.Members))
-	for member := range set.Members {
-		if matchPattern(member, pattern) {
-			members = append(members, member)
-		}
+	opts, err := parseCollectionScanOptions(ctx, 2, false)
+	if err != nil {
+		return ctx.WriteError(err)
 	}
+
+	// SADD/SREM/SMOVE mutate Members under the set's write lock, so the page
+	// is selected under the matching read lock.
+	set.RLock()
+	members, next := collectionScanPage(len(set.Members), cursor, opts.count, func(emit func(string)) {
+		for m := range set.Members {
+			emit(m)
+		}
+	})
 	set.RUnlock()
 
-	start := cursor
-	if start >= len(members) {
-		start = 0
+	items := make([]*resp.Value, 0, len(members))
+	for _, m := range members {
+		if opts.match && !matchPattern(m, opts.pattern) {
+			continue
+		}
+		items = append(items, resp.BulkString(m))
 	}
-
-	end := len(members)
-	if count < end-start {
-		end = start + count
-	}
-
-	nextCursor := 0
-	if end < len(members) {
-		nextCursor = end
-	}
-
-	result := make([]*resp.Value, 0, end-start)
-	for i := start; i < end; i++ {
-		result = append(result, resp.BulkString(members[i]))
-	}
-
-	return ctx.WriteArray([]*resp.Value{
-		resp.BulkString(strconv.Itoa(nextCursor)),
-		resp.ArrayValue(result),
-	})
+	return writeCollectionScanReply(ctx, next, items)
 }
 
+var errSetTooManyKeys = errors.New("ERR Number of keys can't be greater than number of args")
+
 func cmdSINTERCARD(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
+	n := ctx.ArgCount()
+	if n < 2 {
+		return ctx.WriteError(arityError(ctx.Command))
+	}
+
+	// Redis grammar: SINTERCARD numkeys key [key ...] [LIMIT limit].
+	numKeys, err := strconv.ParseInt(ctx.ArgString(0), 10, 64)
+	if err != nil || numKeys < 1 {
+		return ctx.WriteError(errNumKeysPositive)
+	}
+	if numKeys > int64(n-1) {
+		return ctx.WriteError(errSetTooManyKeys)
+	}
+
+	var limit int64
+	for j := 1 + int(numKeys); j < n; j++ {
+		if strings.EqualFold(ctx.ArgString(j), "LIMIT") && j+1 < n {
+			v, err := strconv.ParseInt(ctx.ArgString(j+1), 10, 64)
+			if err != nil || v < 0 {
+				return ctx.WriteError(errLimitNegative)
+			}
+			limit = v
+			j++
+			continue
+		}
+		return ctx.WriteError(ErrSyntaxError)
 	}
 
 	// The shared set-operations lock: a concurrent MoveSetMember takes it
 	// exclusively, so this multi-set read can never observe the move
 	// half-applied.
 	ctx.Store.SetOpsRLock()
-	// Redis grammar: SINTERCARD numkeys key [key ...] [LIMIT limit].
-	// The FIRST argument is a COUNT of how many keys follow, not a key. This
-	// handler used to set numKeys from ctx.ArgCount() and read its first set
-	// from ctx.ArgString(0) — i.e. it looked up a set named after the numkeys
-	// token ("2"), got an empty one, and intersected from there, so EVERY
-	// well-formed call answered 0.
-	numKeys, err := strconv.Atoi(ctx.ArgString(0))
-	if err != nil {
-		replyErr := ErrNotInteger
-		ctx.Store.SetOpsRUnlock()
-		return ctx.WriteError(replyErr)
-	}
-	// numkeys is a key COUNT and must be at least 1.
-	if numKeys < 1 {
-		replyErr := ErrInvalidArg
-		ctx.Store.SetOpsRUnlock()
-		return ctx.WriteError(replyErr)
-	}
-	if ctx.ArgCount() < 1+numKeys {
-		replyErr := ErrWrongArgCount
-		ctx.Store.SetOpsRUnlock()
-		return ctx.WriteError(replyErr)
-	}
-
-	limit := -1
-	optIdx := 1 + numKeys
-	if ctx.ArgCount() > optIdx {
-		if strings.ToUpper(ctx.ArgString(optIdx)) != "LIMIT" {
-			replyErr := ErrSyntaxError
-			ctx.Store.SetOpsRUnlock()
-			return ctx.WriteError(replyErr)
-		}
-		if ctx.ArgCount() != optIdx+2 {
-			replyErr := ErrSyntaxError
-			ctx.Store.SetOpsRUnlock()
-			return ctx.WriteError(replyErr)
-		}
-		limit, err = strconv.Atoi(ctx.ArgString(optIdx + 1))
-		if err != nil {
-			replyErr := ErrNotInteger
-			ctx.Store.SetOpsRUnlock()
-			return ctx.WriteError(replyErr)
-		}
-		if limit < 0 {
-			replyErr := ErrInvalidArg
-			ctx.Store.SetOpsRUnlock()
-			return ctx.WriteError(replyErr)
-		}
-	}
-
-	firstSet, err := getSetOrEmpty(ctx, ctx.ArgString(1))
-	if err != nil {
-		replyErr := err
-		ctx.Store.SetOpsRUnlock()
-		return ctx.WriteError(replyErr)
-	}
-
-	firstSet.RLock()
-	result := make(map[string]struct{})
-	for member := range firstSet.Members {
-		result[member] = struct{}{}
-	}
-	firstSet.RUnlock()
-
-	for i := 2; i < 1+numKeys; i++ {
+	sets := make([]*store.SetValue, 0, numKeys)
+	missing := false
+	for i := 1; i <= int(numKeys); i++ {
 		set, err := getSet(ctx, ctx.ArgString(i))
 		if err != nil {
-			replyErr := err
 			ctx.Store.SetOpsRUnlock()
-			return ctx.WriteError(replyErr)
+			return ctx.WriteError(err)
 		}
 		if set == nil {
-			clear(result)
+			missing = true
 			continue
 		}
+		sets = append(sets, set)
+	}
 
-		set.RLock()
-		for member := range result {
-			if _, exists := set.Members[member]; !exists {
-				delete(result, member)
+	count := int64(0)
+	if !missing {
+		// Start from the smallest set and filter it through the others, one
+		// lock at a time.
+		smallest, smallestLen := 0, -1
+		for i, s := range sets {
+			s.RLock()
+			size := len(s.Members)
+			s.RUnlock()
+			if smallestLen < 0 || size < smallestLen {
+				smallest, smallestLen = i, size
 			}
 		}
-		set.RUnlock()
+		sets[0], sets[smallest] = sets[smallest], sets[0]
+		sets[0].RLock()
+		result := make(map[string]struct{}, len(sets[0].Members))
+		for m := range sets[0].Members {
+			result[m] = struct{}{}
+		}
+		sets[0].RUnlock()
+		for _, s := range sets[1:] {
+			s.RLock()
+			for m := range result {
+				if _, ok := s.Members[m]; !ok {
+					delete(result, m)
+				}
+			}
+			s.RUnlock()
+		}
+		count = int64(len(result))
+		if limit > 0 && count > limit {
+			count = limit
+		}
 	}
-
-	count := len(result)
-	if limit > 0 && count > limit {
-		count = limit
-	}
-
-	reply := int64(int64(count))
 	ctx.Store.SetOpsRUnlock()
-	return ctx.WriteInteger(reply)
+	return ctx.WriteInteger(count)
 }
 
 func cmdSMISMEMBER(ctx *Context) error {
 	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 
 	key := ctx.ArgString(0)
