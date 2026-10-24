@@ -71,10 +71,10 @@ func TestProofPcallErrorContractPreserved(t *testing.T) {
 	viaCall := parityEval(t, s, "return redis.call('nosuchcommand')")
 	viaPcall := parityEval(t, s, "return redis.pcall('nosuchcommand')")
 
-	if !strings.Contains(viaCall, "unknown command") {
+	if !strings.Contains(strings.ToLower(viaCall), "unknown redis command") {
 		t.Fatalf("control failed: call must surface the unknown-command error, got %q", viaCall)
 	}
-	if !strings.Contains(viaPcall, "unknown command") {
+	if !strings.Contains(strings.ToLower(viaPcall), "unknown redis command") {
 		t.Fatalf("control failed: pcall must surface the unknown-command error, got %q", viaPcall)
 	}
 }

@@ -1,6 +1,7 @@
 package command
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -48,6 +49,8 @@ func getScriptEngine(s *store.Store) *ScriptEngine {
 func RegisterScriptCommands(router *Router) {
 	router.Register(&CommandDef{Name: "EVAL", Handler: cmdEVAL})
 	router.Register(&CommandDef{Name: "EVALSHA", Handler: cmdEVALSHA})
+	router.Register(&CommandDef{Name: "EVAL_RO", Handler: cmdEVALRO})
+	router.Register(&CommandDef{Name: "EVALSHA_RO", Handler: cmdEVALSHARO})
 	router.Register(&CommandDef{Name: "SCRIPT", Handler: cmdSCRIPT})
 }
 
@@ -98,85 +101,73 @@ func stringArgsToBytes(args []string) [][]byte {
 	return out
 }
 
-func cmdEVAL(ctx *Context) error {
+// scriptKeysAndArgs splits the arguments after the script/SHA of an EVAL,
+// EVALSHA or FCALL call into keys and args, validating numkeys like Redis.
+func scriptKeysAndArgs(ctx *Context) ([]string, []string, error) {
 	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return nil, nil, ErrWrongArgCount
 	}
-
-	engine := getScriptEngine(ctx.Store)
-
-	script := ctx.ArgString(0)
-	numKeys, err := strconv.Atoi(ctx.ArgString(1))
+	numKeys, err := strconv.ParseInt(ctx.ArgString(1), 10, 64)
 	if err != nil {
-		return ctx.WriteError(ErrNotInteger)
+		return nil, nil, ErrNotInteger
 	}
-	// numkeys is a key COUNT: a negative value would reach make() as a
-	// negative length. Zero is legal (a script with no keys).
 	if numKeys < 0 {
-		return ctx.WriteError(ErrInvalidArg)
+		return nil, nil, errors.New("ERR Number of keys can't be negative")
 	}
-
-	if ctx.ArgCount() < 2+numKeys {
-		return ctx.WriteError(ErrWrongArgCount)
+	if numKeys > int64(ctx.ArgCount()-2) {
+		return nil, nil, errors.New("ERR Number of keys can't be greater than number of args")
 	}
-
-	keys := make([]string, numKeys)
-	for i := 0; i < numKeys; i++ {
+	n := int(numKeys)
+	keys := make([]string, n)
+	for i := 0; i < n; i++ {
 		keys[i] = ctx.ArgString(2 + i)
 	}
-
-	args := make([]string, 0)
-	for i := 2 + numKeys; i < ctx.ArgCount(); i++ {
+	args := make([]string, 0, ctx.ArgCount()-2-n)
+	for i := 2 + n; i < ctx.ArgCount(); i++ {
 		args = append(args, ctx.ArgString(i))
 	}
+	return keys, args, nil
+}
 
-	result, err := scriptEngineFor(ctx, engine).EvalGuarded(script, keys, args, scriptGuard(ctx))
+func cmdEVAL(ctx *Context) error {
+	return evalScript(ctx, false)
+}
+
+func cmdEVALRO(ctx *Context) error {
+	return evalScript(ctx, true)
+}
+
+func evalScript(ctx *Context, readOnly bool) error {
+	keys, args, err := scriptKeysAndArgs(ctx)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
-
-	return writeLuaResult(ctx, result)
+	engine := getScriptEngine(ctx.Store)
+	return ctx.WriteValue(engine.runScript(ctx, ctx.ArgString(0), keys, args, readOnly))
 }
 
 func cmdEVALSHA(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
+	return evalSHAScript(ctx, false)
+}
 
-	engine := getScriptEngine(ctx.Store)
+func cmdEVALSHARO(ctx *Context) error {
+	return evalSHAScript(ctx, true)
+}
 
-	sha := ctx.ArgString(0)
-	numKeys, err := strconv.Atoi(ctx.ArgString(1))
-	if err != nil {
-		return ctx.WriteError(ErrNotInteger)
-	}
-	// numkeys is a key COUNT: a negative value would reach make() as a
-	// negative length. Zero is legal (a script with no keys).
-	if numKeys < 0 {
-		return ctx.WriteError(ErrInvalidArg)
-	}
-
-	if ctx.ArgCount() < 2+numKeys {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	keys := make([]string, numKeys)
-	for i := 0; i < numKeys; i++ {
-		keys[i] = ctx.ArgString(2 + i)
-	}
-
-	args := make([]string, 0)
-	for i := 2 + numKeys; i < ctx.ArgCount(); i++ {
-		args = append(args, ctx.ArgString(i))
-	}
-
-	result, err := scriptEngineFor(ctx, engine).evalSHAFrom(engine, sha, keys, args, scriptGuard(ctx))
+func evalSHAScript(ctx *Context, readOnly bool) error {
+	keys, args, err := scriptKeysAndArgs(ctx)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
-
-	return writeLuaResult(ctx, result)
+	engine := getScriptEngine(ctx.Store)
+	script, ok := engine.lookupScript(ctx.ArgString(0))
+	if !ok {
+		return ctx.WriteError(errNoScript)
+	}
+	return ctx.WriteValue(engine.runScript(ctx, script, keys, args, readOnly))
 }
+
+var errNoScript = replyError("NOSCRIPT No matching script. Please use EVAL.")
 
 func cmdSCRIPT(ctx *Context) error {
 	if ctx.ArgCount() < 1 {
@@ -186,24 +177,28 @@ func cmdSCRIPT(ctx *Context) error {
 	engine := getScriptEngine(ctx.Store)
 
 	subCmd := strings.ToUpper(ctx.ArgString(0))
+	wrongArgs := func() error {
+		return ctx.WriteError(errors.New("ERR wrong number of arguments for 'script|" + strings.ToLower(subCmd) + "' command"))
+	}
 
 	switch subCmd {
 	case "LOAD":
-		if ctx.ArgCount() < 2 {
-			return ctx.WriteError(ErrWrongArgCount)
+		if ctx.ArgCount() != 2 {
+			return wrongArgs()
 		}
 		script := ctx.ArgString(1)
-		sha := engine.ScriptLoad(script)
-		return ctx.WriteBulkString(sha)
+		if msg := engine.compileScript(script); msg != "" {
+			return ctx.WriteError(errors.New(msg))
+		}
+		return ctx.WriteBulkString(engine.ScriptLoad(script))
 
 	case "EXISTS":
 		if ctx.ArgCount() < 2 {
-			return ctx.WriteError(ErrWrongArgCount)
+			return wrongArgs()
 		}
 		results := make([]*resp.Value, ctx.ArgCount()-1)
 		for i := 1; i < ctx.ArgCount(); i++ {
-			sha := ctx.ArgString(i)
-			if engine.ScriptExists(sha) {
+			if _, ok := engine.lookupScript(ctx.ArgString(i)); ok {
 				results[i-1] = resp.IntegerValue(1)
 			} else {
 				results[i-1] = resp.IntegerValue(0)
@@ -212,17 +207,35 @@ func cmdSCRIPT(ctx *Context) error {
 		return ctx.WriteArray(results)
 
 	case "FLUSH":
+		if ctx.ArgCount() > 2 {
+			return wrongArgs()
+		}
+		if ctx.ArgCount() == 2 {
+			if mode := strings.ToUpper(ctx.ArgString(1)); mode != "SYNC" && mode != "ASYNC" {
+				return ctx.WriteError(errors.New("ERR SCRIPT FLUSH only support SYNC|ASYNC option"))
+			}
+		}
 		engine.ScriptFlush()
 		return ctx.WriteOK()
 
 	case "DEBUG":
-		return ctx.WriteOK()
+		if ctx.ArgCount() != 2 {
+			return wrongArgs()
+		}
+		switch strings.ToUpper(ctx.ArgString(1)) {
+		case "YES", "SYNC", "NO":
+			return ctx.WriteOK()
+		}
+		return ctx.WriteError(errors.New("ERR Use SCRIPT DEBUG YES/SYNC/NO"))
 
 	case "KILL":
-		return ctx.WriteOK()
+		if ctx.ArgCount() != 1 {
+			return wrongArgs()
+		}
+		return ctx.WriteError(replyError("NOTBUSY No scripts in execution right now."))
 
 	default:
-		return ctx.WriteError(ErrUnknownCommand)
+		return ctx.WriteError(replyError("ERR unknown subcommand '" + ctx.ArgString(0) + "'. Try SCRIPT HELP."))
 	}
 }
 

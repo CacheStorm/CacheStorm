@@ -184,8 +184,8 @@ func TestLuaScalarControlsUncontended(t *testing.T) {
 		{"return redis.call('HLEN', redis.KEYS[1])", "h", "", ":1\r\n"},
 		{"return redis.call('SISMEMBER', redis.KEYS[1], redis.ARGV[1])", "st", "m1", ":1\r\n"},
 		{"return redis.call('SCARD', redis.KEYS[1])", "st", "", ":1\r\n"},
-		// ZSCORE's Lua binding returns an INTEGER reply, not a bulk string.
-		{"return redis.call('ZSCORE', redis.KEYS[1], redis.ARGV[1])", "z", "zm1", ":5\r\n"},
+		// ZSCORE replies with a bulk string, which the script returns as is.
+		{"return redis.call('ZSCORE', redis.KEYS[1], redis.ARGV[1])", "z", "zm1", "$1\r\n5\r\n"},
 	}
 	for _, c := range cases {
 		args := []string{c.script, "1", c.key}

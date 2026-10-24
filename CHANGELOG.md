@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GraphQL subscriptions
 
 ### Added
+- Scripting: EVAL_RO, EVALSHA_RO, `#!lua flags=no-writes`, the `cjson`, `bit` and `cmsgpack` libraries, `redis.sha1hex`/`setresp`/`set_repl`; FUNCTION LOAD with the `#!lua name=` header, FCALL/FCALL_RO by function name and FUNCTION LIST/STATS/DELETE/FLUSH/KILL/DUMP/RESTORE; scripts cached only by EVAL are capped at 500, as in Redis 7.4
 - Databases: 16 real numbered databases (`server.databases`). SELECT is per connection and validates the range; FLUSHDB clears only the current database and FLUSHALL all of them; MOVE, SWAPDB and COPY ... DB work across databases and keep TTLs; INFO keyspace lists every non-empty database. Pub/Sub and the memory limit stay global. SELECT used to reply OK and change nothing, so every database number shared one keyspace and `FLUSHDB` in db 1 wiped db 0
 - Persistence: the AOF records database switches, including inside MULTI/EXEC blocks, and replay restores every key into its own database
 - Configuration: `CACHESTORM_REQUIREPASS`, `CACHESTORM_HTTP_PASSWORD` and `CACHESTORM_DATA_DIR` override the config file, so a container can take its secrets from the environment instead of a baked-in file
@@ -39,6 +40,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Authentication: only AUTH, HELLO, QUIT and RESET run before a requirepass client authenticates, the commands Redis flags `no_auth`. PING and COMMAND were exempt too, so an unauthenticated client could probe the server
 
 ### Fixed
+- Lua: scripts get `KEYS` and `ARGV` globals (they only had `redis.KEYS`/`redis.ARGV`, so nearly every real script failed) and `redis.call`/`redis.pcall` reach every command through the normal handlers with arity, noscript and ACL checks, instead of a switch that knew a few dozen commands. Replies and return values convert like Redis (`{ok=}`/`{err=}`, false as nil, float truncation, arrays ending at the first nil); `redis.call` raises on an error reply while `redis.pcall` returns it; errors carry Redis' `script: <sha>, on @user_script:N.` suffix. Scripts run in a read-only global sandbox
+- Lua: SCRIPT LOAD and FUNCTION LOAD are persisted to the AOF, so EVALSHA and FCALL writes survive a restart; they were lost because the script they named was never recorded
 - Blocking commands: blocked list and sorted-set pops are served first come first served, as in Redis. A write woke every waiter and the fastest goroutine took the element; now it wakes the oldest consumer, which passes the wakeup on once it has taken its share, a woken consumer that finds the data gone keeps its place in the queue, and creating an empty list or sorted set before the first element is added no longer sends a wakeup for it
 - Transactions: WATCH is per database and sees every change to a watched key: in-place writes such as HSET and LPUSH, EXPIRE/PERSIST, DEL, expiry, FLUSHDB/FLUSHALL, MOVE and SWAPDB, a missing key being created and a key deleted and recreated. An aborted EXEC replies with a null array. SELECT inside MULTI applies to the commands queued after it, and Lua scripts run in the caller's database with a script-local SELECT
 - Unknown commands reply with Redis' text, `ERR unknown command 'x', with args beginning with: ...`

@@ -65,7 +65,7 @@ func TestProofUnimplementedCommandFromScriptIsAnError(t *testing.T) {
 		"return redis.call('nosuchcommand')",
 	} {
 		reply := scriptNoopEval(t, s, nil, script)
-		if !strings.Contains(reply, "unknown command") {
+		if !strings.Contains(strings.ToLower(reply), "unknown redis command") && !strings.Contains(reply, "not allowed from script") {
 			t.Fatalf("FAIL: script command must fail loudly like Redis, got silent reply %q for %q", reply, script)
 		}
 	}

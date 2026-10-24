@@ -28,6 +28,9 @@ func fcallACLSetup(t *testing.T) (*store.Store, *Router) {
 	router := NewRouter()
 	RegisterServerCommands(router)
 	RegisterFunctionCommands(router)
+	// redis.call dispatches through the router, so the commands the
+	// functions call must be registered on it.
+	RegisterStringCommands(router)
 	return s, router
 }
 

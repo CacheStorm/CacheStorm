@@ -72,19 +72,12 @@ var verdicts = map[string]Verdict{
 	"streams/xpending-extended-shape":  {SevCommon, bug, "same XREADGROUP flattened-entry shape bug"},
 	"wrongtype/XRANGE":                 {SevEdge, bug, "XRANGE on a string key returns empty array instead of WRONGTYPE"},
 	"wrongtype/XLEN":                   {SevEdge, bug, "XLEN on a string key returns 0 instead of WRONGTYPE"},
-	"pubsub/publish-from-lua":          {SevCritical, bug, "PUBLISH unavailable inside Lua; message never delivered"},
 	"misc/object-encoding-strings":     {SevEdge, bug, "OBJECT ENCODING replies simple string instead of bulk; int/raw encodings not reported (encoding names partly intentional)"},
 	"misc/object-encoding-collections": {SevEdge, intent, "internal encodings differ (quicklist/hashtable/skiplist vs listpack/intset); reply is simple string instead of bulk"},
 	"misc/object-misc":                 {SevEdge, intent, "OBJECT FREQ allowed under CacheStorm's default eviction policy; unknown-subcommand text differs"},
 	"misc/client-setname":              {SevEdge, bug, "CLIENT SETNAME accepts names with spaces"},
 	"misc/hello-2":                     {SevCommon, bug, "HELLO not implemented (clients that negotiate protocol on connect fall back or fail)"},
-	"lua/return-types":                 {SevCommon, bug, "Lua->RESP conversion: {ok=..}/{err=..}/status_reply/error_reply become arrays, false becomes :0, floats not truncated, nil holes not truncated"},
-	"lua/redis-call-types":             {SevCritical, bug, "KEYS/ARGV not populated (KEYS[1] -> 'attempt to index nil'); status replies to Lua are strings not tables; missing key is nil not false; PING unavailable"},
 	"lua/redis-call-errors":            {SevCritical, bug, "KEYS nil; redis.call errors are returned as bulk strings instead of raising, so scripts continue after a failed write; error texts differ"},
-	"lua/keys-argv":                    {SevCritical, bug, "KEYS/ARGV tables not populated"},
-	"lua/evalsha":                      {SevCritical, bug, "EVALSHA script cannot read ARGV; NOSCRIPT text lacks trailing period"},
-	"lua/lua-writes-state":             {SevCritical, bug, "script using KEYS fails, so no writes happen"},
-	"lua/lua-float-int-conv":           {SevCommon, bug, "ARGV nil; INCRBYFLOAT and many commands unavailable to redis.call; cjson missing"},
 }
 
 var arityAccepts = map[string]string{

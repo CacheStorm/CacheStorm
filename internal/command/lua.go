@@ -27,12 +27,43 @@ type ScriptEngine struct {
 	// dbs, set on the per-call engine of a script (scriptEngineFor), lets
 	// SELECT inside the script switch that script's database.
 	dbs *store.Databases
+	// evalOrder lists, oldest first, the cached scripts that only EVAL put in
+	// the cache. Like Redis 7.4, at most maxEvalScripts of them are kept;
+	// SCRIPT LOAD pins a script.
+	evalOrder []string
+	evalOnly  map[string]bool
 }
+
+// maxEvalScripts is Redis 7.4's cap on scripts cached by EVAL alone.
+const maxEvalScripts = 500
 
 func NewScriptEngine(s *store.Store) *ScriptEngine {
 	return &ScriptEngine{
-		scripts: make(map[string]string),
-		store:   s,
+		scripts:  make(map[string]string),
+		store:    s,
+		evalOnly: make(map[string]bool),
+	}
+}
+
+// cacheEvalScript adds a script run by EVAL to the cache, evicting the
+// oldest EVAL-only script beyond maxEvalScripts.
+func (e *ScriptEngine) cacheEvalScript(script string) {
+	sha := ScriptSHA(script)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if _, ok := e.scripts[sha]; ok {
+		return
+	}
+	e.scripts[sha] = script
+	e.evalOnly[sha] = true
+	e.evalOrder = append(e.evalOrder, sha)
+	for len(e.evalOnly) > maxEvalScripts && len(e.evalOrder) > 0 {
+		oldest := e.evalOrder[0]
+		e.evalOrder = e.evalOrder[1:]
+		if e.evalOnly[oldest] {
+			delete(e.evalOnly, oldest)
+			delete(e.scripts, oldest)
+		}
 	}
 }
 
@@ -43,6 +74,14 @@ func (e *ScriptEngine) CreateState(keys []string, args []string) *lua.LState {
 }
 
 func (e *ScriptEngine) createState(keys []string, args []string, guard ScriptCallGuard) *lua.LState {
+	return e.newState(keys, args, guard, nil)
+}
+
+// newState builds the sandboxed Lua state for one script run. With a
+// scriptRun, redis.call / redis.pcall dispatch through the router with Redis
+// reply and error semantics; without one they use the engine's built-in
+// command subset (the Go API: Eval, EvalSHA, CreateState).
+func (e *ScriptEngine) newState(keys []string, args []string, guard ScriptCallGuard, run *scriptRun) *lua.LState {
 	L := lua.NewState(lua.Options{
 		SkipOpenLibs: true,
 	})
@@ -68,13 +107,47 @@ func (e *ScriptEngine) createState(keys []string, args []string, guard ScriptCal
 	L.SetGlobal("loadfile", lua.LNil)
 	L.SetGlobal("require", lua.LNil)
 
+	openRedisLibs(L)
+
 	redisTable := L.NewTable()
 	L.SetGlobal("redis", redisTable)
-	// The Redis 7 registration convention: redis.register_function(name, fn)
-	// declares redis.<name> = fn, so library code using either convention
-	// resolves through the same lookup at call time.
-	L.SetField(redisTable, "register_function", redisRegisterFunctionAlias(L))
+	if run == nil || run.chunk == luaChunkFunction {
+		// The Redis 7 registration convention: redis.register_function(name,
+		// fn) declares redis.<name> = fn, so library code using either
+		// convention resolves through the same lookup at call time.
+		L.SetField(redisTable, "register_function", redisRegisterFunctionAlias(L))
+	}
+	installRedisHelpers(L, redisTable)
 
+	if run != nil {
+		shapeScriptGlobals(L)
+		L.SetField(redisTable, "call", L.NewFunction(run.luaCallFunc(true)))
+		L.SetField(redisTable, "pcall", L.NewFunction(run.luaCallFunc(false)))
+	} else {
+		e.installLegacyCall(L, redisTable, guard)
+	}
+
+	keysTable := L.CreateTable(len(keys), 0)
+	for _, k := range keys {
+		keysTable.Append(lua.LString(k))
+	}
+	argvTable := L.CreateTable(len(args), 0)
+	for _, a := range args {
+		argvTable.Append(lua.LString(a))
+	}
+	L.SetGlobal("KEYS", keysTable)
+	L.SetGlobal("ARGV", argvTable)
+	// redis.KEYS / redis.ARGV are this engine's original spelling; they stay
+	// as aliases of the Redis globals.
+	L.SetField(redisTable, "KEYS", keysTable)
+	L.SetField(redisTable, "ARGV", argvTable)
+
+	return L
+}
+
+// installLegacyCall installs redis.call / redis.pcall over the engine's
+// built-in command subset, which reports command errors as strings.
+func (e *ScriptEngine) installLegacyCall(L *lua.LState, redisTable *lua.LTable, guard ScriptCallGuard) {
 	// scriptArgs converts the Lua call arguments (index 2..n) to command
 	// arguments. ONE implementation serves both redis.call and redis.pcall:
 	// strings pass through, numbers use %v, booleans become "1"/"0" — so a
@@ -145,47 +218,6 @@ func (e *ScriptEngine) createState(keys []string, args []string, guard ScriptCal
 		L.Push(result)
 		return 1
 	}))
-
-	L.SetField(redisTable, "error_reply", L.NewFunction(func(L *lua.LState) int {
-		msg := L.CheckString(1)
-		tbl := L.NewTable()
-		L.SetField(tbl, "err", lua.LString(msg))
-		L.Push(tbl)
-		return 1
-	}))
-
-	L.SetField(redisTable, "status_reply", L.NewFunction(func(L *lua.LState) int {
-		msg := L.CheckString(1)
-		tbl := L.NewTable()
-		L.SetField(tbl, "ok", lua.LString(msg))
-		L.Push(tbl)
-		return 1
-	}))
-
-	L.SetField(redisTable, "log", L.NewFunction(func(L *lua.LState) int {
-		n := L.GetTop()
-		if n < 2 {
-			return 0
-		}
-		level := L.CheckString(1)
-		msg := L.CheckString(2)
-		fmt.Printf("[%s] %s\n", level, msg)
-		return 0
-	}))
-
-	keysTable := L.NewTable()
-	for i, k := range keys {
-		L.SetTable(keysTable, lua.LNumber(i+1), lua.LString(k))
-	}
-	L.SetField(redisTable, "KEYS", keysTable)
-
-	argvTable := L.NewTable()
-	for i, a := range args {
-		L.SetTable(argvTable, lua.LNumber(i+1), lua.LString(a))
-	}
-	L.SetField(redisTable, "ARGV", argvTable)
-
-	return L
 }
 
 // ScriptCallGuard is consulted for every command a script invokes through
@@ -1196,6 +1228,7 @@ func (e *ScriptEngine) ScriptLoad(script string) string {
 	sha := ScriptSHA(script)
 	e.mu.Lock()
 	e.scripts[sha] = script
+	delete(e.evalOnly, sha)
 	e.mu.Unlock()
 	return sha
 }
@@ -1210,6 +1243,8 @@ func (e *ScriptEngine) ScriptExists(sha string) bool {
 func (e *ScriptEngine) ScriptFlush() {
 	e.mu.Lock()
 	e.scripts = make(map[string]string)
+	e.evalOnly = make(map[string]bool)
+	e.evalOrder = nil
 	e.mu.Unlock()
 }
 
