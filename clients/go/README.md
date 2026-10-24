@@ -4,7 +4,7 @@ Official Go client for CacheStorm - High-Performance Redis-Compatible Database.
 
 ## Features
 
-Current limitations: Pub/Sub message reception is not implemented, pipelines execute commands sequentially, and a command after `Close` can panic. See the [verified review and roadmap](../../docs/PROJECT_REVIEW.md) before relying on these behaviors.
+Behavior notes: commands after `Close` return `ErrClosed`; server error replies are returned as `RedisError`; pipelines send all queued commands in one write on one connection; Pub/Sub uses a dedicated connection. `MinIdleConns` and `MaxRetries` are accepted but not used (commands are never retried). The CacheStorm server currently confirms `SUBSCRIBE` but does not deliver published messages, so `ReceiveMessage` against CacheStorm blocks until its context ends. See the [verified review and roadmap](../../docs/PROJECT_REVIEW.md).
 
 - Full Redis protocol compatibility
 - Connection pooling
