@@ -1,6 +1,6 @@
 # CacheStorm Commands Reference
 
-CacheStorm implements **1,596 commands** across 50+ modules, providing ~99% Redis compatibility with extensive extensions.
+CacheStorm registers about 1,600 commands across 50+ modules: the Redis 7.4 command set plus CacheStorm extensions. Compatibility with Redis is measured by the differential harness in `tests/compat`.
 
 Every command name in this reference is verified against the registered command
 set: 1,596 documented, 0 phantoms, 0 missing.

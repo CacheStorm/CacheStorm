@@ -4,12 +4,12 @@ This file provides guidance for AI agents working on the CacheStorm codecodebase
 
 ## Project Overview
 
-CacheStorm is a high-performance, Redis-compatible in-memory database written in Go with 1,578+ commands across 48+ modules.
+CacheStorm is a high-performance, Redis-compatible in-memory database written in Go with about 1,600 commands across 50+ modules.
 
 ## Goal
 
-- **100% Redis compatibility** - Currently at ~99%
-- **1,500+ commands** - Currently at **1,578 commands**
+- **Redis 7.4 compatibility** - measured by `tests/compat` (differential harness against real Redis; `COMPAT_RATCHET=1` gates CI)
+- **Commands** - about 1,600 registered (Redis 7.4 set plus extensions)
 - **100% test coverage and 100% success rate** - Currently at **16.3% coverage, 100% pass rate**
 
 ## Build Commands

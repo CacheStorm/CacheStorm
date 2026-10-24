@@ -21,7 +21,7 @@
 
 ---
 
-A high-performance in-memory data store written in Go. **1,600+ commands**, 256-shard lock-free architecture, built-in HTTP API, enterprise security, and full observability — in a single binary.
+A high-performance in-memory data store written in Go. **about 1,600 commands**, 256-shard lock-free architecture, built-in HTTP API, enterprise security, and full observability — in a single binary.
 
 **Test Coverage: 90-99%** across 18 internal packages (core store: 99.2%). 100% test success rate. Works with any RESP-compatible client.
 
@@ -772,23 +772,27 @@ CacheStorm provides official SDKs for popular programming languages:
 | Language | Package | Installation | Documentation |
 |----------|---------|--------------|---------------|
 | **Go** | `github.com/cachestorm/cachestorm/clients/go` | `go get github.com/cachestorm/cachestorm/clients/go` | [Go SDK](./clients/go/README.md) |
-| **TypeScript** | `@cachestorm/client` | `npm install @cachestorm/client` | [TypeScript SDK](./clients/typescript/README.md) |
-| **Python** | `cachestorm` | `pip install cachestorm` | [Python SDK](./clients/python/README.md) |
+| **TypeScript** | `@cachestorm/client` | from source: `cd clients/typescript && npm ci && npm run build` | [TypeScript SDK](./clients/typescript/README.md) |
+| **Python** | `cachestorm` | from source: `pip install ./clients/python` | [Python SDK](./clients/python/README.md) |
+
+The TypeScript and Python packages are not published to npm or PyPI yet.
 
 ### SDK Features
 
-All official SDKs support:
-- ✅ Full Redis protocol compatibility
-- ✅ Connection pooling
-- ✅ Pipeline support
-- ✅ Pub/Sub support
-- ✅ Automatic reconnection
-- ✅ Type-safe APIs
-- ✅ CacheStorm-specific features (tags, invalidation)
+| | Go | TypeScript | Python |
+|---|---|---|---|
+| RESP2, binary-safe values | ✅ | ✅ | ✅ |
+| Pipelines (one write, replies in order) | ✅ | ✅ | ✅ |
+| Pub/Sub on a dedicated connection | ✅ | ✅ | ✅ |
+| Connection pool | ✅ | — | ✅ |
+| AUTH / SELECT on connect | ✅ | ✅ | ✅ |
+| Automatic reconnection | — | — | — |
+
+Each SDK's README lists its limitations.
 
 ### Using Any Redis Client
 
-Since CacheStorm is ~99% Redis compatible, you can use any existing Redis client:
+CacheStorm speaks RESP2, so existing Redis clients work. Compatibility is measured, not estimated: `tests/compat` runs the same command sequences against Redis 7.4 and CacheStorm and compares every reply; [its report](tests/compat/REPORT.md) lists the known differences.
 
 ```python
 # Python with redis-py
@@ -820,7 +824,7 @@ cachestorm/
 │   ├── batch/             # Batch processing
 │   ├── buffer/            # Buffer management
 │   ├── cluster/           # Clustering
-│   ├── command/           # Command handlers (1,606 commands)
+│   ├── command/           # Command handlers (about 1,600 commands)
 │   ├── config/            # Configuration management
 │   ├── graph/             # Graph operations
 │   ├── logger/            # Logging (100% coverage)
@@ -850,7 +854,7 @@ cachestorm/
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
 
 ---
 
