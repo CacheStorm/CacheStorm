@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -501,10 +502,17 @@ func (rw *AOFRewriter) writeEntry(w *bufio.Writer, key string, entry interface{}
 }
 
 // writeStreamGroups re-emits a stream's consumer groups as XGROUP CREATE so a
-// rewrite preserves them. Each group is created at its current read position
-// (LastID); pending entries are runtime state and are not replayed.
+// rewrite preserves them, at their read position and logical read counter.
+// Consumers come back with XGROUP CREATECONSUMER and pending entries with
+// XCLAIM ... FORCE, the way Redis rewrites them.
 func (rw *AOFRewriter) writeStreamGroups(w *bufio.Writer, key string, sv *store.StreamValue) error {
-	for name, group := range sv.Groups {
+	names := make([]string, 0, len(sv.Groups))
+	for name := range sv.Groups {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		group := sv.Groups[name]
 		if group == nil {
 			continue
 		}
@@ -512,7 +520,51 @@ func (rw *AOFRewriter) writeStreamGroups(w *bufio.Writer, key string, sv *store.
 		if lastID == "" {
 			lastID = "0-0"
 		}
-		if err := rw.writeCommand(w, "XGROUP", "CREATE", key, name, lastID, "MKSTREAM"); err != nil {
+		args := []string{"CREATE", key, name, lastID, "MKSTREAM"}
+		if group.EntriesRead != store.EntriesReadInvalid {
+			args = append(args, "ENTRIESREAD", strconv.FormatInt(group.EntriesRead, 10))
+		}
+		if err := rw.writeCommand(w, "XGROUP", args...); err != nil {
+			return err
+		}
+		if err := rw.writeStreamConsumers(w, key, name, group); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// writeStreamConsumers re-emits a group's consumers and pending entries. The
+// caller holds the stream's read lock, which excludes every group writer.
+func (rw *AOFRewriter) writeStreamConsumers(w *bufio.Writer, key, name string, group *store.ConsumerGroup) error {
+	consumers := make([]string, 0, len(group.Consumers))
+	for consumer := range group.Consumers {
+		consumers = append(consumers, consumer)
+	}
+	sort.Strings(consumers)
+	for _, consumer := range consumers {
+		if err := rw.writeCommand(w, "XGROUP", "CREATECONSUMER", key, name, consumer); err != nil {
+			return err
+		}
+	}
+	type pendingRow struct {
+		id store.StreamID
+		p  *store.PendingEntry
+	}
+	rows := make([]pendingRow, 0, len(group.Pending))
+	for _, p := range group.Pending {
+		id, err := store.ParseStreamID(p.ID, 0)
+		if err != nil {
+			continue
+		}
+		rows = append(rows, pendingRow{id, p})
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].id.Less(rows[j].id) })
+	for _, r := range rows {
+		if err := rw.writeCommand(w, "XCLAIM", key, name, r.p.Consumer, "0", r.p.ID,
+			"TIME", strconv.FormatInt(r.p.DeliveryTS, 10),
+			"RETRYCOUNT", strconv.FormatInt(r.p.Deliveries, 10),
+			"JUSTID", "FORCE"); err != nil {
 			return err
 		}
 	}
@@ -636,10 +688,11 @@ func (rw *AOFRewriter) writeValueCommands(w *bufio.Writer, key string, value sto
 			}
 		}
 		for _, entry := range vt.Entries {
-			args := make([]string, 0, len(entry.Fields)*2+2)
+			pairs := entry.FieldPairs()
+			args := make([]string, 0, len(pairs)*2+2)
 			args = append(args, key, entry.ID)
-			for k, val := range entry.Fields {
-				args = append(args, k, string(val))
+			for _, p := range pairs {
+				args = append(args, p.Name, string(p.Value))
 			}
 			if err := rw.writeCommand(w, "XADD", args...); err != nil {
 				return err
@@ -647,6 +700,9 @@ func (rw *AOFRewriter) writeValueCommands(w *bufio.Writer, key string, value sto
 		}
 		if vt.LastID != "" {
 			args := []string{key, vt.LastID}
+			if vt.EntriesAdded > int64(len(vt.Entries)) {
+				args = append(args, "ENTRIESADDED", strconv.FormatInt(vt.EntriesAdded, 10))
+			}
 			if vt.MaxDeletedID != "" {
 				args = append(args, "MAXDELETEDID", vt.MaxDeletedID)
 			}

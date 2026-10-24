@@ -54,11 +54,20 @@ func TestXAddRejectsMalformedID(t *testing.T) {
 	s := store.NewStore()
 	router := newStreamRouter(s)
 
-	for _, bad := range []string{"notanid", "123", "1-2-3"} {
+	for _, bad := range []string{"notanid", "1-2-3", "-1", "1-", "+"} {
 		reply := runCmd(t, s, router, "XADD", "k", bad, "f", "v")
 		if !strings.Contains(reply, "Invalid stream ID") {
 			t.Fatalf("XADD with malformed ID %q must be rejected, got %q", bad, reply)
 		}
+	}
+}
+
+// A bare millisecond ID is valid in Redis and takes sequence 0.
+func TestXAddBareMillisecondID(t *testing.T) {
+	s := store.NewStore()
+	router := newStreamRouter(s)
+	if reply := runCmd(t, s, router, "XADD", "k", "123", "f", "v"); !strings.Contains(reply, "123-0") {
+		t.Fatalf("XADD k 123 = %q, want 123-0", reply)
 	}
 }
 

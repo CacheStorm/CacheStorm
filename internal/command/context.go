@@ -184,16 +184,6 @@ func (ctx *Context) passWakeup() {
 	ctx.passKey, ctx.passReady, ctx.passOwner = "", nil, false
 }
 
-// waitForStreamKeys is waitForKeys for streams. A stream that exists may hold
-// no entry the reader wants, so existence is not readiness and only a write
-// notification wakes the reader.
-func (ctx *Context) waitForStreamKeys(keys []string, timeout time.Duration) (string, bool) {
-	if ctx.InExec {
-		return "", false
-	}
-	return ctx.Store.KeyNotifier().WaitForKeysCancel(keys, timeout, ctx.Done, nil)
-}
-
 func (ctx *Context) IsAuthenticated() bool {
 	return ctx.Authenticated
 }

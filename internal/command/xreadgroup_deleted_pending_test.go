@@ -40,8 +40,8 @@ func TestXReadGroupDeletedPendingX(t *testing.T) {
 	delivered := run("XREADGROUP", "GROUP", "grp", "consumer", "STREAMS", "s", ">")
 	if delivered.Type != resp.TypeArray || len(delivered.Array) != 1 ||
 		len(delivered.Array[0].Array) != 2 ||
-		len(delivered.Array[0].Array[1].Array) != 4 {
-		t.Fatalf("FAIL delivery control: expected [key, [id, fields, id, fields]], got %v", delivered)
+		len(delivered.Array[0].Array[1].Array) != 2 {
+		t.Fatalf("FAIL delivery control: expected [key, [[id, fields], [id, fields]]], got %v", delivered)
 	}
 	t.Log("PASS delivery control: both entries delivered")
 	if deleted := run("XDEL", "s", "1-0"); deleted.Type != resp.TypeInteger || deleted.Int != 1 {
@@ -53,21 +53,21 @@ func TestXReadGroupDeletedPendingX(t *testing.T) {
 		t.Fatalf("FAIL history: expected one stream, got %v", history)
 	}
 	entries := history.Array[0].Array[1].Array
-	if len(entries) != 4 {
-		t.Fatalf("FAIL history: expected flat [id, fields, id, fields], got %v", history)
+	if len(entries) != 2 || len(entries[0].Array) != 2 || len(entries[1].Array) != 2 {
+		t.Fatalf("FAIL history: expected [[id, fields], [id, fields]], got %v", history)
 	}
-	if entries[0].Type != resp.TypeBulkString || string(entries[0].Bulk) != "1-0" {
-		t.Fatalf("FAIL history: expected deleted pending id 1-0, got %v", entries[0])
+	if string(entries[0].Array[0].Bulk) != "1-0" {
+		t.Fatalf("FAIL history: expected deleted pending id 1-0, got %v", entries[0].Array[0])
 	}
-	if entries[1].Type != resp.TypeArray || !entries[1].IsNull {
-		t.Errorf("FAIL deleted-pending payload: expected null, got %v", entries[1])
+	if entries[0].Array[1].Type != resp.TypeArray || !entries[0].Array[1].IsNull {
+		t.Errorf("FAIL deleted-pending payload: expected null, got %v", entries[0].Array[1])
 	} else {
 		t.Log("PASS deleted-pending payload: null")
 	}
-	if entries[2].Type != resp.TypeBulkString || string(entries[2].Bulk) != "2-0" {
-		t.Fatalf("FAIL history: expected alive pending id 2-0, got %v", entries[2])
+	if string(entries[1].Array[0].Bulk) != "2-0" {
+		t.Fatalf("FAIL history: expected alive pending id 2-0, got %v", entries[1].Array[0])
 	}
-	payload := entries[3]
+	payload := entries[1].Array[1]
 	if payload.Type != resp.TypeArray || payload.IsNull || len(payload.Array) != 2 ||
 		string(payload.Array[0].Bulk) != "g" || string(payload.Array[1].Bulk) != "w" {
 		t.Errorf("FAIL alive-pending control: expected [g w], got %v", payload)

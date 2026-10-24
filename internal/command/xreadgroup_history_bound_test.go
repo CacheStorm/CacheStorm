@@ -38,7 +38,7 @@ func TestXReadGroupHistoryBoundX(t *testing.T) {
 	}
 	delivered := run("XREADGROUP", "GROUP", "grp", "consumer", "STREAMS", "s", ">")
 	if delivered.Type != resp.TypeArray || len(delivered.Array) != 1 ||
-		len(delivered.Array[0].Array[1].Array) != 6 {
+		len(delivered.Array[0].Array[1].Array) != 3 {
 		t.Fatalf("FAIL delivery control: expected all three entries, got %v", delivered)
 	}
 	t.Log("PASS delivery control: all three entries delivered")
@@ -47,9 +47,9 @@ func TestXReadGroupHistoryBoundX(t *testing.T) {
 		t.Fatalf("FAIL history 5-0: expected one stream, got %v", history)
 	}
 	entries := history.Array[0].Array[1].Array
-	if len(entries) != 4 {
-		t.Errorf("FAIL history 5-0: expected exactly entries above 5-0 (4 flat elements), got %v", history)
-	} else if string(entries[0].Bulk) != "6-0" {
+	if len(entries) != 2 {
+		t.Errorf("FAIL history 5-0: expected exactly the 2 entries above 5-0, got %v", history)
+	} else if string(entries[0].Array[0].Bulk) != "6-0" {
 		t.Errorf("FAIL history 5-0: expected first entry 6-0, got %v", entries[0])
 	} else {
 		t.Log("PASS history 5-0: exclusive bound")
@@ -59,14 +59,14 @@ func TestXReadGroupHistoryBoundX(t *testing.T) {
 		t.Fatalf("FAIL history 6-0: expected one stream, got %v", history)
 	}
 	entries = history.Array[0].Array[1].Array
-	if len(entries) != 2 || string(entries[0].Bulk) != "7-0" {
-		t.Errorf("FAIL history 6-0: expected exactly 7-0 (2 flat elements), got %v", history)
+	if len(entries) != 1 || string(entries[0].Array[0].Bulk) != "7-0" {
+		t.Errorf("FAIL history 6-0: expected exactly 7-0, got %v", history)
 	} else {
 		t.Log("PASS history 6-0: exclusive bound")
 	}
 	history = run("XREADGROUP", "GROUP", "grp", "consumer", "STREAMS", "s", "0")
 	if history.Type != resp.TypeArray || len(history.Array) != 1 ||
-		len(history.Array[0].Array[1].Array) != 6 {
+		len(history.Array[0].Array[1].Array) != 3 {
 		t.Fatalf("FAIL history 0 control: expected all three pending entries, got %v", history)
 	}
 	t.Log("PASS history 0 control: all three pending entries")

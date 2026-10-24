@@ -125,13 +125,10 @@ func TestXAutoClaimDeletedEntries(t *testing.T) {
 		}
 	})
 
-	t.Run("missing stream control", func(t *testing.T) {
+	t.Run("missing stream is NOGROUP", func(t *testing.T) {
 		got := run("XAUTOCLAIM", "nosuch", "g", "c2", "0", "0-0")
-		if got.Type != resp.TypeArray || len(got.Array) != 3 {
-			t.Fatalf("missing-stream reply has %d elements, want 3", len(got.Array))
-		}
-		if string(got.Array[0].Bulk) != "0-0" {
-			t.Errorf("missing-stream cursor %q, want 0-0", got.Array[0].Bulk)
+		if got.Type != resp.TypeError || got.Err != "NOGROUP No such key 'nosuch' or consumer group 'g'" {
+			t.Fatalf("missing-stream reply %v %q, want the Redis NOGROUP error", got.Type, got.Err)
 		}
 	})
 }

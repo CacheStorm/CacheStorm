@@ -97,7 +97,7 @@ func TestXTRIMValidMaxlenControls(t *testing.T) {
 }
 
 // Control: XTRIM against a missing stream returns 0, and the approximate "~"
-// form is unaffected.
+// form keeps a stream that fits in one node, as Redis does.
 func TestXTRIMOtherPathsControls(t *testing.T) {
 	s := store.NewStore()
 	if r := xtrimRun(t, s, "XTRIM", "nostream", "MAXLEN", "5"); r.Type != resp.TypeInteger || r.Int != 0 {
@@ -108,7 +108,7 @@ func TestXTRIMOtherPathsControls(t *testing.T) {
 	if r := xtrimRun(t, s2, "XTRIM", "st", "MAXLEN", "~", "2"); r.Type != resp.TypeInteger {
 		t.Fatalf("XTRIM st MAXLEN ~ 2 returned type %v, want an integer", r.Type)
 	}
-	if n := xtrimRun(t, s2, "XLEN", "st").Int; n != 2 {
-		t.Fatalf("XLEN after approximate XTRIM = %d, want 2", n)
+	if n := xtrimRun(t, s2, "XLEN", "st").Int; n != 4 {
+		t.Fatalf("XLEN after approximate XTRIM = %d, want 4", n)
 	}
 }

@@ -45,29 +45,43 @@ func TestXAddTrimLimitX(t *testing.T) {
 			t.Logf("PASS %s: XLEN=%d in [%d,%d]", label, value.Int, min, max)
 		}
 	}
+	// Redis trims "~" by whole listpack nodes (100 entries each by
+	// default), so an 11-entry stream sits in one node and is never trimmed.
 	seed(t, "k1")
 	if id := run("XADD", "k1", "MAXLEN", "~", "2", "LIMIT", "3", "*", "f", "v"); id.Type != resp.TypeBulkString || id.IsNull {
 		t.Errorf("FAIL maxlen limit add: got %v", id)
 	}
-	checkLenBounds(t, "maxlen limit", "k1", 8, 11)
+	checkLenBounds(t, "maxlen limit", "k1", 11, 11)
 	seed(t, "k2")
 	if id := run("XADD", "k2", "MAXLEN", "~", "2", "*", "f", "v"); id.Type != resp.TypeBulkString {
 		t.Errorf("FAIL approx no-limit add: got %v", id)
 	}
-	checkLenBounds(t, "approx no-limit control", "k2", 2, 2)
+	checkLenBounds(t, "approx single node kept", "k2", 11, 11)
 	seed(t, "k3")
-	if id := run("XADD", "k3", "MAXLEN", "~", "2", "LIMIT", "0", "*", "f", "v"); id.Type != resp.TypeBulkString {
+	if id := run("XADD", "k3", "MAXLEN", "~", "0", "LIMIT", "0", "*", "f", "v"); id.Type != resp.TypeBulkString {
 		t.Errorf("FAIL limit-zero add: got %v", id)
 	}
-	checkLenBounds(t, "limit-zero uncapped control", "k3", 2, 2)
+	checkLenBounds(t, "whole node removable", "k3", 0, 0)
 	seed(t, "k4")
-	if id := run("XADD", "k4", "MAXLEN", "=", "2", "LIMIT", "1", "*", "f", "v"); id.Type != resp.TypeBulkString {
-		t.Errorf("FAIL exact with limit add: got %v", id)
+	if v := run("XADD", "k4", "MAXLEN", "=", "2", "LIMIT", "1", "*", "f", "v"); v.Type != resp.TypeError {
+		t.Errorf("FAIL exact with limit must be a syntax error, got %v", v)
 	}
-	checkLenBounds(t, "exact ignores limit control", "k4", 2, 2)
+	checkLenBounds(t, "rejected add leaves stream", "k4", 10, 10)
 	seed(t, "k5")
 	if id := run("XADD", "k5", "MINID", "~", "8-0", "LIMIT", "2", "*", "f", "v"); id.Type != resp.TypeBulkString || id.IsNull {
 		t.Errorf("FAIL minid limit add: got %v", id)
 	}
-	checkLenBounds(t, "minid limit", "k5", 9, 11)
+	checkLenBounds(t, "minid limit", "k5", 11, 11)
+
+	for i := int64(1); i <= 250; i++ {
+		run("XADD", "big", strconvID(i), "f", "v")
+	}
+	if v := run("XADD", "big", "MAXLEN", "~", "10", "LIMIT", "100", "*", "f", "v"); v.Type != resp.TypeBulkString {
+		t.Fatalf("XADD big: %v", v)
+	}
+	checkLenBounds(t, "limit stops after one node", "big", 151, 151)
+	if v := run("XADD", "big", "MAXLEN", "~", "10", "*", "f", "v"); v.Type != resp.TypeBulkString {
+		t.Fatalf("XADD big: %v", v)
+	}
+	checkLenBounds(t, "default limit drops full nodes", "big", 52, 52)
 }
