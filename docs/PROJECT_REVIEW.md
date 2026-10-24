@@ -36,7 +36,7 @@ Yerel lint sonuçları: `internal/command/encoding_commands.go:233` için QF1002
 
 ### F20 Transaction yazmaları yeniden yüklemede kayboluyor
 
-**Yüksek öncelik, açık.** AOF `always` modundayken normal SET ve MULTI/SET/EXEC çalıştırıldı. EXEC başarı döndü ve transaction anahtarı bellekte oluştu. Aynı AOF yeni bir sunucuya yüklendiğinde normal SET geri geldi, transaction anahtarı gelmedi.
+**Yüksek öncelik, düzeltildi (24 Ekim 2026).** AOF `always` modundayken normal SET ve MULTI/SET/EXEC çalıştırıldı. EXEC başarı döndü ve transaction anahtarı bellekte oluştu. Aynı AOF yeni bir sunucuya yüklendiğinde normal SET geri geldi, transaction anahtarı gelmedi.
 
 Sebep: [Router.Execute](../internal/command/router.go) kuyruklanan komut için persistence hook'una ulaşmıyor. [cmdEXEC](../internal/command/transaction_commands.go) ayrı dispatcher kullanıyor; [sunucunun writeCommands kapısı](../internal/server/server.go) EXEC'i kaydetmiyor. Başarılı transaction'ın veri güvenliği garantisi eksik.
 
@@ -48,37 +48,37 @@ Sebep: [Router.Execute](../internal/command/router.go) kuyruklanan komut için p
 
 ### F22 Desteklenen komut EXEC içinde çalışmıyor
 
-**Yüksek öncelik, açık.** HGETALL tek başına beklenen field/value sonucunu verdi. Aynı komut MULTI içinde QUEUED kabul edildi; EXEC çalışınca `ERR command not supported in transaction` döndü.
+**Yüksek öncelik, düzeltildi (24 Ekim 2026).** HGETALL tek başına beklenen field/value sonucunu verdi. Aynı komut MULTI içinde QUEUED kabul edildi; EXEC çalışınca `ERR command not supported in transaction` döndü.
 
 [executeQueuedCommand](../internal/command/transaction_commands.go) kayıtlı handler'lar yerine kısmi bir switch tutuyor. Normal komut yürütme, transaction ve scripting farklı davranış kaynaklarına sahip. Komut paritesi ayrıca sınanmalı.
 
 ### F23 Python codec binary veriyi ve UTF-8 uzunluklarını bozuyor
 
-**Yüksek öncelik, açık.** ASCII kontrolü geçti. `ş` iki byte taşırken RESP başlığı bir byte bildirdi. `ff00` binary girdisi yeniden encode edilirken `efbfbd00` oldu.
+**Yüksek öncelik, düzeltildi (24 Ekim 2026).** ASCII kontrolü geçti. `ş` iki byte taşırken RESP başlığı bir byte bildirdi. `ff00` binary girdisi yeniden encode edilirken `efbfbd00` oldu.
 
 [encode_resp](../clients/python/cachestorm/protocol.py) karakter sayısını byte uzunluğu yerine kullanıyor ve binary veriyi UTF-8 replacement ile dönüştürüyor. Türkçe metin, emoji veya genel binary veri için protokol ve içerik korunmuyor.
 
 ### F24 TypeScript pipeline komut göndermeden başarı bildiriyor
 
-**Yüksek öncelik, açık.** Aynı istemcinin normal GET çağrısı fake transport'a yazıp değer döndürdü. Pipeline SET/GET ise transport'a sıfır kez yazdı ve `['OK', 'value']` yerine `['OK', 'OK']` döndürdü.
+**Yüksek öncelik, düzeltildi (24 Ekim 2026).** Aynı istemcinin normal GET çağrısı fake transport'a yazıp değer döndürdü. Pipeline SET/GET ise transport'a sıfır kez yazdı ve `['OK', 'value']` yerine `['OK', 'OK']` döndürdü.
 
 [Pipeline.exec](../clients/typescript/src/pipeline.ts) doğrudan `Promise.resolve('OK')` üretiyor. Sonuç, gönderilen işlemin başarısını temsil etmiyor.
 
 ### F25 TypeScript decoder TCP parçalarını RESP mesajı sanıyor
 
-**Yüksek öncelik, açık.** Tek parçalı `hello` yanıtı doğru okundu. Aynı yanıt iki parçaya ayrılınca `he` tamamlanmış sonuç sayıldı. `:42` sayı yerine metin kaldı; hata yanıtı bekleyen isteği tamamlamadı. UTF-8 encode uzunluğu da yanlış.
+**Yüksek öncelik, düzeltildi (24 Ekim 2026).** Tek parçalı `hello` yanıtı doğru okundu. Aynı yanıt iki parçaya ayrılınca `he` tamamlanmış sonuç sayıldı. `:42` sayı yerine metin kaldı; hata yanıtı bekleyen isteği tamamlamadı. UTF-8 encode uzunluğu da yanlış.
 
 [handleResponse ve encodeResp](../clients/typescript/src/client.ts) birikimli framing ve byte tabanlı codec yerine string işlemleri kullanıyor. Sorun ağ zamanlamasından bağımsız olarak doğrudan callback girdileriyle gösterildi.
 
 ### F26 Python async istemcisi varsayılan haliyle bağlanamıyor
 
-**Yüksek öncelik, açık.** Ağ kullanmayan fake bağlantı üzerinde normal constructor sonrası `connect`, `socket_connect_timeout` alanı yok hatası verdi. Eksik alan enjekte edilen kontrol istemcisi aynı fake bağlantıyı kurabildi.
+**Yüksek öncelik, düzeltildi (24 Ekim 2026).** Ağ kullanmayan fake bağlantı üzerinde normal constructor sonrası `connect`, `socket_connect_timeout` alanı yok hatası verdi. Eksik alan enjekte edilen kontrol istemcisi aynı fake bağlantıyı kurabildi.
 
 [AsyncCacheStormClient](../clients/python/cachestorm/client.py) bağlantı fonksiyonunda constructor'ın tanımlamadığı bir alanı okuyor.
 
 ### F27 Go istemcisi Close sonrasında komutta panikliyor
 
-**Orta öncelik, açık.** Tekrarlanan Close kontrolü başarılı. Ardından Ping, herhangi bir soket açmadan nil pointer paniğine düştü.
+**Orta öncelik, düzeltildi (24 Ekim 2026).** Tekrarlanan Close kontrolü başarılı. Ardından Ping, herhangi bir soket açmadan nil pointer paniğine düştü.
 
 [pool.Get ve Client.Do](../clients/go/client.go), kapatılmış kanaldan gelen nil bağlantıyı kontrol etmeden kullanıyor. Kapanmış istemci hatası dönmesi gerekirken süreç seviyesinde panik oluşabiliyor.
 
@@ -146,7 +146,7 @@ Taşınan dokuz dosyanın SHA-256 değerleri taşımadan önce ve sonra karşıl
 
 ## Kanıtları tekrar çalıştırma
 
-Kanıtlar `.temp_files/` altında yerel olarak korunur; Git tarafından izlenmez. F20–F27 bilinen sorunları gösterdiği için **1 ile çıkmaları beklenir**. Bunlar normal test paketine bilerek başarısız test olarak eklenmedi. F28 ve F29 düzeltme sonrası 0 ile çıkar. Kalıcı regresyonlar, runtime düzeltmeleriyle birlikte eklenmeli.
+Kanıtlar `.temp_files/` altında yerel olarak korunur; Git tarafından izlenmez. 24 Ekim 2026 düzeltmelerinden sonra F20 ve F22–F27 **0 ile çıkar**; F21 açık olduğu için 1 ile çıkmaya devam eder. Kalıcı regresyonlar `internal/server/aof_transaction_test.go`, `internal/command/exec_dispatch_test.go` ve SDK test klasörlerindedir. Bunlar normal test paketine bilerek başarısız test olarak eklenmedi. F28 ve F29 düzeltme sonrası 0 ile çıkar. Kalıcı regresyonlar, runtime düzeltmeleriyle birlikte eklenmeli.
 
 ```bash
 go test -overlay .temp_files/project_review_2026_10_20/runtime_overlay.json ./internal/server -run '^TestProjectReviewAOFTransactionX$' -count=1 -v
