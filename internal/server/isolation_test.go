@@ -208,3 +208,30 @@ func TestAppendStripeKeepsSortedUnique(t *testing.T) {
 		t.Fatalf("stripes %v", s)
 	}
 }
+
+// A pipeline that ends with QUIT gets every reply before the connection
+// closes; the replies kept for the pipeline used to be dropped.
+func TestPipelineEndingInQuitDeliversAllReplies(t *testing.T) {
+	addr := isolationServer(t)
+	c, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if _, err := c.Write([]byte(isoFrame("SET", "k", "v") + isoFrame("GET", "k") + isoFrame("QUIT"))); err != nil {
+		t.Fatal(err)
+	}
+	_ = c.SetReadDeadline(time.Now().Add(5 * time.Second))
+	var got strings.Builder
+	buf := make([]byte, 256)
+	for {
+		n, err := c.Read(buf)
+		got.Write(buf[:n])
+		if err != nil {
+			break
+		}
+	}
+	if got.String() != "+OK\r\n$1\r\nv\r\n+OK\r\n" {
+		t.Fatalf("replies %q", got.String())
+	}
+}

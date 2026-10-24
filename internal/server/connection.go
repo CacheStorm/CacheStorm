@@ -269,6 +269,15 @@ func (c *Connection) Handle() {
 		}
 
 		if c.runCommand(cmd, args) {
+			// QUIT, a handoff or a write error ends the connection; replies
+			// kept for the pipeline before it still go out.
+			c.writeMu.Lock()
+			if err := c.writer.Flush(); err == nil {
+				if err := c.sink.release(); err != nil {
+					logger.Debug().Err(err).Int64("conn_id", c.ID).Msg("pending replies not delivered")
+				}
+			}
+			c.writeMu.Unlock()
 			return
 		}
 	}
