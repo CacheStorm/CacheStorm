@@ -725,8 +725,8 @@ func TestHandleClusterJoinGETMethod(t *testing.T) {
 
 	h.handleClusterJoin(w, req)
 
-	if w.Code != http.StatusMethodNotAllowed {
-		t.Errorf("expected 405, got %d", w.Code)
+	if w.Code != http.StatusNotImplemented {
+		t.Errorf("expected 501, got %d", w.Code)
 	}
 }
 
@@ -2299,8 +2299,8 @@ func TestHandleClusterJoinPartialJSON(t *testing.T) {
 
 	h.handleClusterJoin(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", w.Code)
+	if w.Code != http.StatusNotImplemented {
+		t.Errorf("expected 501, got %d", w.Code)
 	}
 }
 

@@ -234,6 +234,9 @@ func (m *Manager) Info() string {
 	}
 	fmt.Fprintf(&sb, "repl_backlog_first_byte_offset:%d\r\n", first)
 	fmt.Fprintf(&sb, "repl_backlog_histlen:%d\r\n", m.histLen)
+	fmt.Fprintf(&sb, "sync_full:%d\r\n", m.syncFull)
+	fmt.Fprintf(&sb, "sync_partial_ok:%d\r\n", m.syncPartialOK)
+	fmt.Fprintf(&sb, "sync_partial_err:%d\r\n", m.syncPartialErr)
 	return sb.String()
 }
 

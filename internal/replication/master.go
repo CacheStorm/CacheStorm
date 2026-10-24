@@ -176,7 +176,12 @@ func (m *Manager) attach(conn net.Conn, conf *command.ReplicaConf, req syncReque
 		return r
 	}
 	if !req.legacy {
-		if data, ok := m.continuableLocked(req); ok {
+		data, ok := m.continuableLocked(req)
+		if !ok && req.replid != "?" {
+			m.syncPartialErr++
+		}
+		if ok {
+			m.syncPartialOK++
 			r.state = stateOnline
 			r.pending = append([]byte("+CONTINUE "+m.replid+"\r\n"), data...)
 			r.ackOffset.Store(req.offset - 1)
@@ -193,6 +198,7 @@ func (m *Manager) attach(conn net.Conn, conf *command.ReplicaConf, req syncReque
 		}
 	}
 	r.state = stateWaitBgsave
+	m.syncFull++
 	m.mu.Unlock()
 
 	m.wg.Add(1)

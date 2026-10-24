@@ -147,6 +147,11 @@ type Manager struct {
 	// holds, so a PSYNC can ask to continue from them.
 	cached bool
 
+	// Resynchronization counters, as INFO reports them.
+	syncFull       int64
+	syncPartialOK  int64
+	syncPartialErr int64
+
 	ackMu sync.Mutex
 	ackCh chan struct{}
 
@@ -215,6 +220,25 @@ func (m *Manager) Stop() {
 		l.stopAndWait()
 	}
 	m.wg.Wait()
+}
+
+// DisconnectReplicas closes the connection of every attached replica; each
+// reconnects and resynchronizes.
+func (m *Manager) DisconnectReplicas() {
+	m.mu.Lock()
+	replicas := m.detachAllLocked()
+	m.mu.Unlock()
+	for _, r := range replicas {
+		r.close()
+	}
+}
+
+// SyncStats returns how many full resynchronizations this server served, and
+// how many partial resynchronization requests it accepted and refused.
+func (m *Manager) SyncStats() (full, partialOK, partialErr int64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.syncFull, m.syncPartialOK, m.syncPartialErr
 }
 
 // Role returns the current role.
@@ -500,6 +524,7 @@ func (m *Manager) RestoreState(st State) {
 	m.replid = st.ReplID
 	m.offset = st.Offset
 	m.linkDB = st.DB
+	m.streamDB = st.DB
 	m.replid2 = zeroReplID
 	m.secondOffset = -1
 	m.cached = true

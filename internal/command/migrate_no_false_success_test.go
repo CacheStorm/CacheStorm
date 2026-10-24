@@ -135,15 +135,15 @@ func TestMigrateBadTimeoutControl(t *testing.T) {
 	}
 }
 
-// Control: the neighbouring cluster handshake commands still reply +OK — only
-// MIGRATE is being changed.
-func TestClusterHandshakeCommandsStillOkControl(t *testing.T) {
+// Control: the cluster handshake commands answer like a Redis instance
+// without cluster support; only MIGRATE is a real command here.
+func TestClusterHandshakeCommandsDisabledControl(t *testing.T) {
 	s := store.NewStore()
 
 	for _, cmd := range []string{"ASKING", "READONLY", "READWRITE"} {
 		got := migrateRun(t, s, cmd)
-		if got.Type != resp.TypeSimpleString || got.Str != "OK" {
-			t.Fatalf("control: %s returned type %v %q, want +OK", cmd, got.Type, got.Str)
+		if got.Type != resp.TypeError || got.Err != "ERR This instance has cluster support disabled" {
+			t.Fatalf("control: %s returned type %v %q, want the cluster-disabled error", cmd, got.Type, got.Err)
 		}
 	}
 }

@@ -304,8 +304,8 @@ func TestHTTPServerCluster(t *testing.T) {
 
 	h.handleCluster(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Errorf("expected status 200, got %d", w.Code)
+	if w.Code != http.StatusNotImplemented {
+		t.Errorf("expected status 501 (cluster mode is not supported), got %d", w.Code)
 	}
 }
 
@@ -319,8 +319,8 @@ func TestHTTPServerClusterJoin(t *testing.T) {
 
 	h.handleClusterJoin(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Errorf("expected status 200, got %d", w.Code)
+	if w.Code != http.StatusNotImplemented {
+		t.Errorf("expected status 501 (cluster mode is not supported), got %d", w.Code)
 	}
 }
 

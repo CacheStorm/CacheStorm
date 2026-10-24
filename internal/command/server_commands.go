@@ -893,11 +893,14 @@ func cmdAUTH(ctx *Context) error {
 
 	password := ctx.ArgString(0)
 
-	if globalRouter == nil || globalRouter.RequirePass() == "" {
+	// The router dispatching this command holds the password: several
+	// servers can share a process, each with its own router.
+	r := ctx.dispatcher()
+	if r == nil || r.RequirePass() == "" {
 		return ctx.Writer.WriteError("ERR Client sent AUTH, but no password is set. Did you mean ACL SETUSER with >password?")
 	}
 
-	if !globalRouter.ValidatePassword(password) {
+	if !r.ValidatePassword(password) {
 		ctx.SetAuthenticated(false)
 		return ctx.Writer.WriteError("WRONGPASS invalid username-password pair or user is disabled.")
 	}
