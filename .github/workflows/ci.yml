@@ -76,3 +76,95 @@ jobs:
         uses: golang/govulncheck-action@v1
         with:
           go-version-input: ${{ env.GO_VERSION }}
+
+  # The Python, TypeScript and example modules are outside ./internal/..., so
+  # the quality gate never built or tested them and every SDK defect found in
+  # the 2026-10-20 review shipped with a green CI.
+  sdk-python:
+    name: Python client
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        python-version: ['3.9', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Test
+        working-directory: clients/python
+        run: python -B -m unittest discover -s tests -t . -v
+      - name: Build wheel and sdist
+        working-directory: clients/python
+        run: |
+          python -m pip install --upgrade build
+          python -m build
+
+  sdk-typescript:
+    name: TypeScript client
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        node-version: ['20', '22']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+          cache-dependency-path: clients/typescript/package-lock.json
+      - working-directory: clients/typescript
+        run: npm ci
+      - working-directory: clients/typescript
+        run: npm run typecheck
+      - working-directory: clients/typescript
+        run: npm test
+      - working-directory: clients/typescript
+        run: npm run build
+
+  sdk-go-and-examples:
+    name: Go client and examples
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: Test the Go client
+        run: go test -race ./clients/... -count=1
+      - name: Build and vet the example modules
+        run: |
+          for dir in examples/go examples/chat examples/analytics examples/e-commerce examples/realtime; do
+            echo "::group::$dir"
+            (cd "$dir" && go build -mod=readonly ./... && go vet -mod=readonly ./...)
+            echo "::endgroup::"
+          done
+
+  # Differential compatibility gate against real Redis. Known differences are
+  # listed in tests/compat/verdicts_test.go and only logged; a new difference,
+  # or a listed one that now matches Redis, fails the job.
+  redis-compat:
+    name: Redis compatibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: Compare against redis:7.4-alpine
+        env:
+          COMPAT_RATCHET: '1'
+          COMPAT_OUT: ${{ runner.temp }}/compat-report.md
+        run: go test -tags compat -count=1 -v -timeout 15m ./tests/compat/
+      - name: Upload the report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: redis-compat-report
+          path: ${{ runner.temp }}/compat-report.md

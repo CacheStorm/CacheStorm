@@ -893,6 +893,11 @@ func TestCompat(t *testing.T) {
 	t.Logf("redis %s at %s, cachestorm at %s", ver, redisAddr, csAddr)
 
 	filter := os.Getenv("COMPAT_FILTER")
+	// COMPAT_RATCHET turns the run into a regression gate: a failing case
+	// that has an entry in verdicts is a known difference and is only logged,
+	// while a new failure, or a known one that now passes and should leave
+	// the table, fails the run.
+	ratchet := os.Getenv("COMPAT_RATCHET") != ""
 	var results []CaseResult
 	for _, cc := range corpus() {
 		full := cc.Group + "/" + cc.Name
@@ -903,14 +908,24 @@ func TestCompat(t *testing.T) {
 		t.Run(full, func(t *testing.T) {
 			r := runCase(redis, cs, cc)
 			results = append(results, r)
+			known := verdictFor(full).Sev != 0
+			_, listed := verdicts[full]
+			_, listedArity := arityAccepts[full]
+			report := t.Errorf
+			if ratchet && known {
+				report = t.Logf
+			}
+			if r.Pass() && ratchet && (listed || listedArity) {
+				t.Errorf("%s now matches Redis: remove its entry from verdicts", full)
+			}
 			if !r.Pass() {
 				for _, s := range r.Steps {
 					if !s.Match {
-						t.Errorf("%s\n  redis:  %s\n  cstorm: %s", stepString(s.Step), s.Redis.Display(), s.CS.Display())
+						report("%s\n  redis:  %s\n  cstorm: %s", stepString(s.Step), s.Redis.Display(), s.CS.Display())
 					}
 				}
 				if !r.StateMatch {
-					t.Errorf("state differs\n--- redis\n%s--- cachestorm\n%s", r.StateRedis, r.StateCS)
+					report("state differs\n--- redis\n%s--- cachestorm\n%s", r.StateRedis, r.StateCS)
 				}
 			}
 		})
