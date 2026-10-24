@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-
 )
 
 // ErrClusterDisabled is the reply of a Redis instance running without
@@ -88,4 +87,3 @@ func cmdMIGRATE(ctx *Context) error {
 	_ = entry
 	return ctx.WriteError(fmt.Errorf("ERR MIGRATE is not supported by this server (destination %s:%s db %s)", host, port, destinationDB))
 }
-

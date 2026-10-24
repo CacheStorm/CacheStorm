@@ -62,7 +62,7 @@ A high-performance in-memory data store written in Go. **about 1,600 commands**,
 | **Search** | 12 | Full-text search |
 | **Graph** | 12 | Graph database operations (`GRAPH.QUERY` not implemented) |
 | **Probabilistic** | 20+ | Bloom/Cuckoo filters, Count-Min Sketch |
-| **Distributed** | 100+ | Clustering, replication, failover |
+| **Distributed** | 100+ | Master-replica replication (cluster mode is not supported) |
 | **Caching** | 50+ | Cache warming, invalidation |
 | **Scheduling** | 40+ | Jobs, cron, timers |
 | **Messaging** | 60+ | Pub/Sub, queues, streams |
@@ -87,9 +87,8 @@ A high-performance in-memory data store written in Go. **about 1,600 commands**,
 - **Lua Scripting**: Full EVAL/EVALSHA/SCRIPT support
 - **Transactions**: MULTI/EXEC/DISCARD/WATCH support
 - **Pub/Sub**: Subscribe, Publish, Pattern Subscribe, Sharded Pub/Sub (Redis 7)
-- **Clustering**: Gossip-based cluster with hash slot routing
 - **Persistence**: AOF with everysec/always sync policies, auto-replay on startup
-- **Replication**: Master-Slave replication with Sentinel support
+- **Replication**: Redis-style master-replica replication (`REPLICAOF`, PSYNC full and partial resync, read-only replicas, `WAIT`). Cluster mode is not supported in this release: `cluster.enabled: true` fails at startup
 - **Memory Management**: Configurable maxmemory with LRU/LFU/Random eviction + OOM rejection
 - **Access Control**: ACL support with per-command authentication enforcement
 - **Graceful Shutdown**: Connection draining with configurable timeout
@@ -720,14 +719,17 @@ persistence:
   data_dir: "/var/lib/cachestorm"
 
 replication:
-  role: "master"               # master or slave
+  role: "master"               # master, or replica to follow master_host:master_port
   master_host: ""
   master_port: 6380
+  master_auth: ""              # the master's requirepass
+  read_only: true              # replicas refuse client writes
+  repl_timeout: 60             # seconds of silence before a link is dropped
+  backlog_size: 1048576        # bytes kept for partial resynchronization
+  replica_buffer_limit: 67108864  # bytes queued per replica before it is dropped
 
 cluster:
-  enabled: false
-  node_name: ""
-  seeds: []
+  enabled: false               # cluster mode is not supported; true fails at startup
 
 logging:
   level: "info"
@@ -823,7 +825,7 @@ cachestorm/
 │   ├── acl/               # Access control lists
 │   ├── batch/             # Batch processing
 │   ├── buffer/            # Buffer management
-│   ├── cluster/           # Clustering
+│   ├── cluster/           # Cluster library (not wired: cluster mode is unsupported)
 │   ├── command/           # Command handlers (about 1,600 commands)
 │   ├── config/            # Configuration management
 │   ├── graph/             # Graph operations
@@ -832,7 +834,7 @@ cachestorm/
 │   ├── persistence/       # AOF/RDB persistence
 │   ├── plugin/            # Plugin system
 │   ├── pool/              # Connection pooling
-│   ├── replication/       # Master-slave replication
+│   ├── replication/       # Master-replica replication (PSYNC, backlog, master link)
 │   ├── resp/              # RESP protocol
 │   ├── search/            # Search functionality
 │   ├── sentinel/          # Redis Sentinel

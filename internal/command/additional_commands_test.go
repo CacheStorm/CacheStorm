@@ -124,9 +124,6 @@ func TestWorkflowCommandsExecutionFullCoverage(t *testing.T) {
 	}
 }
 
-
-
-
 func TestFunctionCommandsFullCoverage(t *testing.T) {
 	s := store.NewStore()
 	router := NewRouter()

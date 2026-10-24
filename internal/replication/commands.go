@@ -169,7 +169,8 @@ func (m *Manager) cmdWAIT(ctx *command.Context) error {
 		return ctx.WriteError(errors.New("ERR timeout is negative"))
 	}
 	if m.Role() == RoleReplica {
-		return ctx.WriteError(errors.New("ERR WAIT cannot be used with replica instances. Please also note that since Redis 4.0 if a replica is configured to be writable (which is not the default) writes to replicas are just local and are not propagated."))
+		_ = ctx.Writer.WriteError("ERR WAIT cannot be used with replica instances. Please also note that since Redis 4.0 if a replica is configured to be writable (which is not the default) writes to replicas are just local and are not propagated.")
+		return nil
 	}
 	if ctx.InExec {
 		m.mu.Lock()

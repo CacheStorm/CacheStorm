@@ -339,7 +339,6 @@ func TestLowCoverageBatch12_LuaCommands(t *testing.T) {
 	})
 }
 
-
 func TestLowCoverageBatch12_DataStructuresCommands(t *testing.T) {
 	s := store.NewStore()
 	router := NewRouter()

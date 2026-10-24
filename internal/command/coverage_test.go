@@ -1347,7 +1347,6 @@ func TestTrieCommands(t *testing.T) {
 	}
 }
 
-
 func TestSentinelCommands(t *testing.T) {
 	s := store.NewStore()
 	router := NewRouter()
@@ -3387,7 +3386,6 @@ func TestModuleCommandsExtendedCoverage(t *testing.T) {
 		})
 	}
 }
-
 
 func TestSentinelCommandsExtendedCoverage(t *testing.T) {
 	s := store.NewStore()
@@ -10377,7 +10375,6 @@ func TestClientCommandsCoverage(t *testing.T) {
 	}
 }
 
-
 func TestServerCommandsExtraCoverage(t *testing.T) {
 	s := store.NewStore()
 	router := NewRouter()
@@ -12390,7 +12387,6 @@ func TestClusterCommands2(t *testing.T) {
 	}
 }
 
-
 func TestGetClientTracking(t *testing.T) {
 	info := GetClientTracking(123)
 	if info == nil {
@@ -12426,8 +12422,6 @@ func TestRouterExecuteMethod(t *testing.T) {
 		t.Errorf("Expected ErrUnknownCommand, got: %v", err)
 	}
 }
-
-
 
 func TestInitScriptEngine(t *testing.T) {
 	s := store.NewStore()
@@ -12991,7 +12985,6 @@ func TestCheckClusterRouting(t *testing.T) {
 	runCommandTest(t, router, s, "CLUSTER", [][]byte{[]byte("SLOTS")})
 }
 
-
 func TestStartStopSentinel(t *testing.T) {
 	cfg := sentinel.Config{}
 	InitSentinel(cfg)
@@ -13058,7 +13051,6 @@ func TestRegisterModuleFunc(t *testing.T) {
 	_ = RegisterModule
 }
 
-
 func TestExecuteQueuedCommand(t *testing.T) {
 	s := store.NewStore()
 	router := NewRouter()
@@ -13080,7 +13072,6 @@ func TestExecuteQueuedCommand(t *testing.T) {
 	// For SET, it may return nil or a success message
 }
 
-
 func TestHandleSentinelCommands3(t *testing.T) {
 	s := store.NewStore()
 	router := NewRouter()
@@ -13093,7 +13084,6 @@ func TestHandleSentinelCommands3(t *testing.T) {
 	runCommandTest(t, router, s, "SENTINEL", [][]byte{[]byte("GET-MASTER-ADDR-BY-NAME"), []byte("mymaster")})
 	runCommandTest(t, router, s, "SENTINEL", [][]byte{[]byte("IS-MASTER-DOWN-BY-ADDR"), []byte("127.0.0.1"), []byte("6379")})
 }
-
 
 func TestSyncRWMutexMethods(t *testing.T) {
 	// Test syncRWMutex methods in event_commands.go

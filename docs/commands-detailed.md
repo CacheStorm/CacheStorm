@@ -1500,6 +1500,11 @@ QUIT
 
 ## Cluster Commands
 
+Cluster mode is not supported in this release: every CLUSTER subcommand,
+ASKING, READONLY and READWRITE answer
+`ERR This instance has cluster support disabled`, as a Redis server started
+without `cluster-enabled` does. The descriptions below are Redis's.
+
 ### CLUSTER INFO
 Provides info about Redis Cluster node state.
 

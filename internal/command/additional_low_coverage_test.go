@@ -34,7 +34,6 @@ func TestConfigCommandsLowCoverage(t *testing.T) {
 	}
 }
 
-
 func TestUtilityCommandsLowCoverage(t *testing.T) {
 	s := store.NewStore()
 	router := NewRouter()

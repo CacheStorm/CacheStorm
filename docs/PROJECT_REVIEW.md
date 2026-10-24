@@ -42,7 +42,7 @@ Sebep: [Router.Execute](../internal/command/router.go) kuyruklanan komut için p
 
 ### F21 Cluster ve replika ayarları çalışma durumuna bağlanmıyor
 
-**Yüksek öncelik, açık.** `cluster.enabled=true` ve `replication.role=replica` ile sunucu oluşturuldu. PING başarılı, router kayıtları sağlam; buna karşılık komut katmanındaki rol `master`, CLUSTER HEALTH sonucu `ERR cluster not initialized`.
+**Yüksek öncelik, replikasyon tarafı düzeltildi (25 Ekim 2026); cluster desteklenmiyor.** Replikasyonun tek sahibi artık sunucu başına `internal/replication.Manager`; komut katmanındaki taklit yönetici silindi. `replication.*` ayarları ve `REPLICAOF` gerçek PSYNC tam/kısmi senkronizasyon, salt-okunur replika, WAIT ve INFO replication sağlıyor; iki ve üç sunuculu uçtan uca testler `internal/server/replication_*_test.go` altında, iki süreçli doğrulama `scripts/replication-smoke.sh` içinde. `cluster.enabled=true` artık başlangıçta açık hata veriyor ve CLUSTER komutları cluster desteği kapalı bir Redis gibi yanıt veriyor. Özgün bulgu: `cluster.enabled=true` ve `replication.role=replica` ile sunucu oluşturuldu. PING başarılı, router kayıtları sağlam; buna karşılık komut katmanındaki rol `master`, CLUSTER HEALTH sonucu `ERR cluster not initialized`.
 
 [Server.New/Start](../internal/server/server.go), [command replication manager](../internal/command/replication_commands.go), ayrı [replication.Manager](../internal/replication/replication.go) ve [InitCluster](../internal/command/cluster_commands.go) birlikte incelendi: production başlangıcı cluster/gossip veya ayrı replication manager yaşam döngüsünü bağlamıyor. Deterministik kanıt New sonrasındaki durumu gösteriyor; Start'taki bağlantı eksikliği kaynakta kontrol edildi. Gerçek ağda failover testi yapılmadı.
 

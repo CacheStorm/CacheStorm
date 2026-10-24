@@ -77,7 +77,6 @@ func TestMVCCCommandsLowCoverageBatch5(t *testing.T) {
 	}
 }
 
-
 func TestResilienceCommandsLowCoverageBatch5(t *testing.T) {
 	s := store.NewStore()
 	router := NewRouter()

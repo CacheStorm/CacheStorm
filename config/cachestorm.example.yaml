@@ -82,22 +82,16 @@ persistence:
 
 # Replication
 replication:
-  # Role: master or slave
+  # Role: master, or replica (follows master_host:master_port)
   role: "master"
   # master_host: ""
   # master_port: 6380
   # master_auth: ""
   read_only: true
 
-# Cluster Configuration
+# Cluster mode is not supported in this release; enabled: true fails at startup.
 cluster:
   enabled: false
-  # node_name: "node1"
-  bind_addr: "0.0.0.0"
-  bind_port: 7946
-  # seeds:
-  #   - "node1:7946"
-  #   - "node2:7946"
 
 # Logging Configuration
 logging:

@@ -20,6 +20,7 @@ import (
 	"io"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cachestorm/cachestorm/internal/command"
@@ -130,6 +131,10 @@ type Manager struct {
 	// next command is preceded by a SELECT.
 	streamDB int
 	replicas map[*replica]struct{}
+	// feeding is true while the server is a master with a backlog, the only
+	// state in which writes enter the stream. It lets the write path skip
+	// the Manager's lock on a server that never had a replica.
+	feeding atomic.Bool
 
 	// Replica side: the master to follow and the state of the link. linkDB
 	// and linkTx are the master client's selected database and transaction,
@@ -281,6 +286,9 @@ func (m *Manager) FeedTransaction(cmds []command.ExecutedCommand) {
 // eviction. It is called with the key's shard lock held, so it only touches
 // the Manager's own state.
 func (m *Manager) FeedDelete(s *store.Store, key string) {
+	if !m.feeding.Load() {
+		return
+	}
 	db := m.dbIndex(s)
 	if db < 0 {
 		return
@@ -298,6 +306,9 @@ func (m *Manager) dbIndex(s *store.Store) int {
 }
 
 func (m *Manager) feed(cmds []command.ExecutedCommand, tx bool) {
+	if !m.feeding.Load() {
+		return
+	}
 	m.mu.Lock()
 	if m.role != RoleMaster || m.backlog == nil || m.stopped {
 		m.mu.Unlock()
@@ -382,11 +393,11 @@ func (m *Manager) appendLocked(b []byte) []*replica {
 // createBacklogLocked starts a backlog at the current offset, if there is
 // none.
 func (m *Manager) createBacklogLocked() {
-	if m.backlog != nil {
-		return
+	if m.backlog == nil {
+		m.backlog = make([]byte, m.cfg.BacklogSize)
+		m.histLen = 0
 	}
-	m.backlog = make([]byte, m.cfg.BacklogSize)
-	m.histLen = 0
+	m.feeding.Store(m.role == RoleMaster)
 }
 
 // backlogFromLocked returns the stream bytes from position from to the end,

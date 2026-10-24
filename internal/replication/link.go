@@ -110,6 +110,7 @@ func (m *Manager) ReplicaOf(host string, port int) error {
 		m.cached = true
 	}
 	m.role = RoleReplica
+	m.feeding.Store(false)
 	m.masterHost, m.masterPort = host, port
 	m.linkState = linkConnect
 	m.linkDownSince = time.Now()
@@ -158,6 +159,7 @@ func (m *Manager) Promote() {
 	m.secondOffset = m.offset + 1
 	m.replid = NewReplID()
 	m.role = RoleMaster
+	m.feeding.Store(m.backlog != nil)
 	m.streamDB = m.linkDB
 	m.masterHost, m.masterPort = "", 0
 	m.linkState = linkConnect

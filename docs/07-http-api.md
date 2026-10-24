@@ -341,59 +341,8 @@ Response:
 
 ## Cluster
 
-### Get Cluster Info
-
-```http
-GET /api/cluster
-```
-
-Response:
-```json
-{
-  "state": "ok",
-  "slots_assigned": 16384,
-  "slots_ok": 16384,
-  "known_nodes": 3,
-  "size": 3,
-  "current_epoch": 1,
-  "nodes": [
-    {
-      "id": "node-1",
-      "addr": "10.0.0.1:6380",
-      "role": "master",
-      "slots": "0-5461",
-      "connected": true
-    },
-    {
-      "id": "node-2",
-      "addr": "10.0.0.2:6380",
-      "role": "master",
-      "slots": "5462-10922",
-      "connected": true
-    }
-  ]
-}
-```
-
-### Join Cluster
-
-```http
-POST /api/cluster/join
-Content-Type: application/json
-
-{
-  "host": "10.0.0.1",
-  "port": 7946
-}
-```
-
-Response:
-```json
-{
-  "result": "OK",
-  "message": "Joining cluster at 10.0.0.1:7946"
-}
-```
+Cluster mode is not supported in this release. `GET /api/cluster` and
+`POST /api/cluster/join` answer `501 Not Implemented`.
 
 ---
 

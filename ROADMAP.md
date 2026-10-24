@@ -89,6 +89,8 @@ Python için `pyproject.toml`, desteklenen Python sürümleri, wheel/sdist ve ku
 
 Öncelik: **P2**, dağıtık kullanım hedefleniyorsa **P0 ürün engeli**. Tahmin: **15–30 iş günü**, tasarıma göre yeniden değerlendirilir.
 
+Durum (25 Ekim 2026): 1. ve 3. maddeler tamamlandı (tek sahip `internal/replication.Manager`; iki/üç sunuculu uçtan uca testler ve `scripts/replication-smoke.sh`). Cluster bu sürümde desteklenmiyor: `cluster.enabled=true` başlangıçta hata veriyor, CLUSTER komutları "cluster support disabled" döndürüyor (2. ve 4. maddelerin "desteklenmiyor hatası" seçeneği). 5. madde ve Sentinel ile otomatik failover açık.
+
 1. F21 için command katmanındaki replication manager ile `internal/replication.Manager` arasındaki sahipliği birleştir. Config, Start, Stop ve rol değişimleri aynı örneğe ulaşsın.
 2. Cluster, gossip, hash-slot routing ve failover yaşam döngülerini Server'a bağla. Etkinleştirilen ama başlatılamayan özellik açık hata versin.
 3. REPLICAOF/SYNC/PSYNC/backlog/ACK ve yazma yayılımını iki gerçek süreç üzerinde doğrula. Replica read-only, yeniden bağlantı ve ilk senkronizasyonu sınayan testler ekle.

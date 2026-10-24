@@ -119,7 +119,6 @@ func TestCmdCOMMAND_Unknown(t *testing.T) {
 	}
 }
 
-
 func TestCmdDBSIZE(t *testing.T) {
 	s := store.NewStore()
 	ctx := discardCtx("DBSIZE", bytesArgs(), s)
@@ -454,9 +453,6 @@ func TestCmdSLOWLOG_RESET(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
-
-
-
 
 func TestCmdLASTSAVE(t *testing.T) {
 	s := store.NewStore()
@@ -1720,11 +1716,6 @@ func TestCmdREACTIVETRIGGER_Success(t *testing.T) {
 // REPLICATION COMMANDS
 // =============================================================================
 
-
-
-
-
-
 // =============================================================================
 // MONITORING COMMANDS
 // =============================================================================
@@ -1868,15 +1859,6 @@ func TestCmdHEALTHREADINESS(t *testing.T) {
 // CLUSTER COMMANDS
 // =============================================================================
 
-
-
-
-
-
-
-
-
-
 func TestCmdMIGRATE_Success(t *testing.T) {
 	s := store.NewStore()
 	s.Set("migkey", &store.StringValue{Data: []byte("v")}, store.SetOptions{})
@@ -1886,9 +1868,6 @@ func TestCmdMIGRATE_Success(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
-
-
-
 
 // =============================================================================
 // SCHEDULER COMMANDS (jobs, circuits, sessions)

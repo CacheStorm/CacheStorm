@@ -13,9 +13,9 @@ import (
 
 // Limits applied to what a peer sends over a replication link.
 const (
-	maxLineLen  = 64 * 1024
-	maxArgs     = 1024 * 1024
-	maxBulkLen  = 512 * 1024 * 1024
+	maxLineLen = 64 * 1024
+	maxArgs    = 1024 * 1024
+	maxBulkLen = 512 * 1024 * 1024
 )
 
 var errProtocol = errors.New("replication protocol error")

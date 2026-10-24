@@ -1130,8 +1130,6 @@ func TestDeep2_ServerSlowlog(t *testing.T) {
 	}
 }
 
-
-
 func TestDeep2_ServerLastsave(t *testing.T) {
 	s := store.NewStore()
 	ctx := discardCtx("LASTSAVE", bytesArgs(), s)
@@ -1239,8 +1237,6 @@ func TestDeep2_ServerSwapDB(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-
-
 
 func TestDeep2_ServerMove(t *testing.T) {
 	s := store.NewStore()

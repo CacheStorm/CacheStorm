@@ -347,7 +347,6 @@ func TestLowCoverageBatch10_SketchCommands(t *testing.T) {
 	})
 }
 
-
 func TestLowCoverageBatch10_MonitoringCommands(t *testing.T) {
 	s := store.NewStore()
 	router := NewRouter()

@@ -44,18 +44,22 @@ namespaces:
     default_ttl: "1h"
     max_memory: "512mb"
 
-# Cluster Configuration
+# Cluster mode is not supported in this release: cluster.enabled: true makes
+# startup fail, and CLUSTER commands answer
+# "ERR This instance has cluster support disabled".
 cluster:
-  enabled: false                # Enable clustering
-  node_name: ""                 # Unique node name (auto-generated if empty)
-  bind_addr: "0.0.0.0"          # Cluster bind address
-  bind_port: 7946               # Cluster gossip port
-  advertise_addr: ""            # Advertise address (auto-detected if empty)
-  advertise_port: 0             # Advertise port
-  seeds: []                     # Seed nodes to join
-    # - "node1:7946"
-    # - "node2:7946"
-  replicas: 1                   # Number of replicas per shard
+  enabled: false
+
+# Replication Configuration (master-replica, Redis semantics)
+replication:
+  role: "master"                # master, or replica (alias: slave)
+  master_host: ""               # required for a replica
+  master_port: 0                # required for a replica
+  master_auth: ""               # password sent with AUTH to the master
+  read_only: true               # a replica refuses client writes with -READONLY
+  repl_timeout: 60              # seconds of silence before a link is dropped
+  backlog_size: 1048576         # bytes kept for partial resynchronization
+  replica_buffer_limit: 67108864 # bytes queued per replica before it is dropped
 
 # Persistence Configuration
 persistence:
@@ -214,19 +218,23 @@ plugins:
     threshold: "5ms"
 ```
 
-### Cluster
+### Replica
+
+A replica connects to its master's RESP port, loads a full copy of its
+data, then applies every write the master executes. With AOF enabled a
+replica persists what it applies and, after a clean restart, continues from
+the master's backlog instead of resynchronizing everything.
+`REPLICAOF host port` and `REPLICAOF NO ONE` change the role at runtime.
 
 ```yaml
 server:
-  port: 6380
+  port: 6381
 
-cluster:
-  enabled: true
-  bind_port: 7946
-  seeds:
-    - "10.0.0.1:7946"
-    - "10.0.0.2:7946"
-  replicas: 2
+replication:
+  role: replica
+  master_host: "10.0.0.1"
+  master_port: 6380
+  master_auth: "the-masters-requirepass"
 
 persistence:
   enabled: true
