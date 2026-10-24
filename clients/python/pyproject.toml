@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cachestorm"
+version = "0.1.27"
+description = "Python client for CacheStorm, a Redis-compatible in-memory database"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "Apache-2.0" }
+
+[tool.setuptools]
+packages = ["cachestorm"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

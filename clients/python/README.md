@@ -4,9 +4,9 @@ Official Python client for CacheStorm - High-Performance Redis-Compatible Databa
 
 ## Features
 
-Current limitations: binary and non-ASCII command encoding is incorrect, and the async client's default connection path fails during initialization. Packaging and supported Python versions are not defined in this repository. See the [verified review and roadmap](../../docs/PROJECT_REVIEW.md).
+Requires Python 3.9+. See the [verified review and roadmap](../../docs/PROJECT_REVIEW.md) for remaining limitations.
 
-- Redis protocol client with known encoding limitations
+- Binary-safe RESP protocol client (UTF-8 strings, raw bytes)
 - Connection pooling
 - Pipeline support
 - Pub/Sub support
@@ -16,12 +16,12 @@ Current limitations: binary and non-ASCII command encoding is incorrect, and the
 
 ## Installation
 
+The client is not published to a package index. Install it from a local checkout or from git:
+
 ```bash
-pip install cachestorm
+pip install ./clients/python
 # or
-poetry add cachestorm
-# or
-conda install -c conda-forge cachestorm
+pip install "git+https://github.com/CacheStorm/CacheStorm.git#subdirectory=clients/python"
 ```
 
 ## Quick Start
@@ -114,11 +114,23 @@ client.invalidate('user')
 
 # Get keys by tag
 keys = client.tag_keys('user')
-
-# Namespace support
-client.set('key', 'value', namespace='tenant1')
 ```
+
+## Known Limitations
+
+- Pub/Sub does not reconnect. If its connection drops, the listener stops; create a new `PubSub` and subscribe again. Send failures raise `ConnectionError`.
+- Pipelines and Pub/Sub use the connection pool, not the client's own socket. Pooled connections run `AUTH`/`SELECT` with the client's `password`/`db` when created and are health-checked on checkout.
+- Only RESP2 replies are supported.
 
 ## API Reference
 
 See the [client implementation](./cachestorm/client.py) for the available API and the [project review](../../docs/PROJECT_REVIEW.md) for current limitations.
+
+## Running Tests
+
+```bash
+cd clients/python
+python3 -m unittest discover -s tests -v
+# or
+pytest
+```

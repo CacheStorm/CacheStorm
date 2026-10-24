@@ -5,11 +5,17 @@ import threading
 from typing import Any, Dict, List, Optional, Union, Callable
 from contextlib import contextmanager
 
-from .exceptions import ConnectionError, TimeoutError, ResponseError
+from .exceptions import (
+    CacheStormError,
+    ConnectionError,
+    InvalidResponse,
+    ResponseError,
+    TimeoutError,
+)
 from .pool import ConnectionPool
 from .pipeline import Pipeline
 from .pubsub import PubSub
-from .protocol import encode_resp, decode_resp
+from .protocol import encode_resp, decode_resp, IncompleteResponse
 
 
 class CacheStormClient:
@@ -32,6 +38,7 @@ class CacheStormClient:
         self.socket_timeout = socket_timeout
         self.socket_connect_timeout = socket_connect_timeout
         self._sock: Optional[socket.socket] = None
+        self._buffer = b""
         self._lock = threading.Lock()
 
         if connection_pool:
@@ -43,6 +50,9 @@ class CacheStormClient:
                 password=password,
                 db=db,
                 max_connections=10,
+                min_connections=0,
+                socket_timeout=socket_timeout,
+                socket_connect_timeout=socket_connect_timeout,
             )
 
     def connect(self) -> None:
@@ -54,6 +64,7 @@ class CacheStormClient:
                     timeout=self.socket_connect_timeout,
                 )
                 self._sock.settimeout(self.socket_timeout)
+                self._buffer = b""
 
                 if self.password:
                     self.execute_command("AUTH", self.password)
@@ -62,10 +73,15 @@ class CacheStormClient:
                     self.execute_command("SELECT", self.db)
 
             except socket.error as e:
+                self.close()
                 raise ConnectionError(f"Failed to connect: {e}")
+            except BaseException:
+                self.close()
+                raise
 
     def close(self) -> None:
         """Close the connection."""
+        self._buffer = b""
         if self._sock:
             try:
                 self._sock.close()
@@ -83,46 +99,43 @@ class CacheStormClient:
 
     def execute_command(self, *args) -> Any:
         """Execute a command."""
+        data = encode_resp(list(args))
         self.connect()
 
         with self._lock:
             try:
-                # Send command
-                data = encode_resp(list(args))
                 self._sock.sendall(data)
-
-                # Receive response
-                response = self._read_response()
-                return response
+                return self._read_response()
 
             except socket.timeout:
+                self.close()
                 raise TimeoutError("Command timed out")
             except socket.error as e:
                 self.close()
                 raise ConnectionError(f"Socket error: {e}")
 
     def _read_response(self) -> Any:
-        """Read response from server."""
-        buffer = b""
+        """Read one reply, keeping any bytes that follow it for the next one."""
         while True:
-            try:
-                chunk = self._sock.recv(4096)
-                if not chunk:
-                    break
-                buffer += chunk
-
-                # Try to decode
+            if self._buffer:
                 try:
-                    response, _ = decode_resp(buffer)
+                    response, consumed = decode_resp(self._buffer, raise_errors=False)
+                except IncompleteResponse:
+                    pass
+                except InvalidResponse:
+                    self.close()
+                    raise
+                else:
+                    self._buffer = self._buffer[consumed:]
+                    if isinstance(response, ResponseError):
+                        raise response
                     return response
-                except ValueError:
-                    # Need more data
-                    continue
 
-            except socket.error:
-                break
-
-        return None
+            chunk = self._sock.recv(4096)
+            if not chunk:
+                self.close()
+                raise ConnectionError("Connection closed by server")
+            self._buffer += chunk
 
     # String commands
     def set(
@@ -310,14 +323,17 @@ class AsyncCacheStormClient:
         password: Optional[str] = None,
         db: int = 0,
         socket_timeout: float = 5.0,
+        socket_connect_timeout: float = 5.0,
     ):
         self.host = host
         self.port = port
         self.password = password
         self.db = db
         self.socket_timeout = socket_timeout
+        self.socket_connect_timeout = socket_connect_timeout
         self._reader = None
         self._writer = None
+        self._buffer = b""
 
     async def connect(self) -> None:
         """Connect to the server."""
@@ -328,6 +344,7 @@ class AsyncCacheStormClient:
                 asyncio.open_connection(self.host, self.port),
                 timeout=self.socket_connect_timeout,
             )
+            self._buffer = b""
 
             if self.password:
                 await self.execute_command("AUTH", self.password)
@@ -336,59 +353,75 @@ class AsyncCacheStormClient:
                 await self.execute_command("SELECT", self.db)
 
         except asyncio.TimeoutError:
+            await self.close()
             raise TimeoutError("Connection timed out")
+        except CacheStormError:
+            await self.close()
+            raise
         except Exception as e:
+            await self.close()
             raise ConnectionError(f"Failed to connect: {e}")
 
     async def close(self) -> None:
         """Close the connection."""
+        self._buffer = b""
         if self._writer:
-            self._writer.close()
-            await self._writer.wait_closed()
+            writer = self._writer
+            self._reader = None
+            self._writer = None
+            try:
+                writer.close()
+                await writer.wait_closed()
+            except OSError:
+                pass
 
     async def execute_command(self, *args) -> Any:
         """Execute a command."""
         import asyncio
 
+        data = encode_resp(list(args))
+
         if not self._writer:
             await self.connect()
 
         try:
-            # Send command
-            data = encode_resp(list(args))
             self._writer.write(data)
             await self._writer.drain()
 
-            # Receive response
-            response = await asyncio.wait_for(
+            return await asyncio.wait_for(
                 self._read_response(),
                 timeout=self.socket_timeout,
             )
-            return response
 
         except asyncio.TimeoutError:
+            await self.close()
             raise TimeoutError("Command timed out")
+        except OSError as e:
+            await self.close()
+            raise ConnectionError(f"Socket error: {e}")
 
     async def _read_response(self) -> Any:
-        """Read response from server."""
-        buffer = b""
+        """Read one reply, keeping any bytes that follow it for the next one."""
         while True:
-            try:
-                chunk = await self._reader.read(4096)
-                if not chunk:
-                    break
-                buffer += chunk
-
+            if self._buffer:
                 try:
-                    response, consumed = decode_resp(buffer)
+                    response, consumed = decode_resp(self._buffer, raise_errors=False)
+                except IncompleteResponse:
+                    pass
+                except InvalidResponse:
+                    await self.close()
+                    raise
+                else:
+                    self._buffer = self._buffer[consumed:]
+                    if isinstance(response, ResponseError):
+                        raise response
                     return response
-                except ValueError:
-                    continue
 
-            except Exception:
-                break
-
-        return None
+            chunk = await self._reader.read(4096)
+            if not chunk:
+                await self.close()
+                raise ConnectionError("Connection closed by server")
+            self._buffer += chunk
 
     # Async versions of commands
     async def set(self, name: str, value: Union[str, bytes, int], **kwargs) -> bool:

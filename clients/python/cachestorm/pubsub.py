@@ -5,8 +5,14 @@ import threading
 import queue
 from typing import Callable, Optional, Dict, Set, Any
 
-from .exceptions import ConnectionError
-from .protocol import encode_resp, decode_resp
+from .exceptions import ConnectionError, InvalidResponse
+
+
+def _to_str(value: Any) -> Any:
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value
+from .protocol import IncompleteResponse, encode_resp, decode_resp
 
 
 class PubSub:
@@ -87,11 +93,11 @@ class PubSub:
     def _send_command(self, cmd: list):
         """Send command to server."""
         if self._conn:
+            data = encode_resp(cmd)
             try:
-                data = encode_resp(cmd)
                 self._conn.sendall(data)
-            except socket.error:
-                pass
+            except socket.error as e:
+                raise ConnectionError(f"Failed to send {cmd[0]}: {e}")
 
     def listen(self, timeout: Optional[float] = None):
         """Listen for messages (blocking generator)."""
@@ -102,7 +108,7 @@ class PubSub:
 
         start_time = time.time()
 
-        while self._running:
+        while self._running or not self._message_queue.empty():
             try:
                 # Use timeout to allow checking _running periodically
                 wait_time = 0.1 if timeout is None else max(0.1, timeout / 10)
@@ -152,11 +158,15 @@ class PubSub:
             # Get dedicated connection
             self._conn = self.connection_pool.get_connection()
 
-            # Send initial subscriptions
-            if self.channels:
-                self._send_command(["SUBSCRIBE"] + list(self.channels))
-            if self.patterns:
-                self._send_command(["PSUBSCRIBE"] + list(self.patterns))
+            try:
+                if self.channels:
+                    self._send_command(["SUBSCRIBE"] + list(self.channels))
+                if self.patterns:
+                    self._send_command(["PSUBSCRIBE"] + list(self.patterns))
+            except BaseException:
+                self._running = False
+                self._drop_connection()
+                raise
 
             # Start listener thread
             self._thread = threading.Thread(target=self._listener_loop, daemon=True)
@@ -177,19 +187,17 @@ class PubSub:
                 # Try to parse messages
                 while buffer:
                     try:
-                        response, consumed = decode_resp(buffer)
-                        buffer = buffer[consumed:]
-
-                        # Parse pub/sub message
-                        message = self._parse_message(response)
-                        if message:
-                            self._message_queue.put(message)
-
-                    except ValueError:
-                        # Need more data
+                        response, consumed = decode_resp(buffer, raise_errors=False)
+                    except IncompleteResponse:
                         break
-                    except Exception:
+                    except InvalidResponse:
+                        self._running = False
                         break
+                    buffer = buffer[consumed:]
+
+                    message = self._parse_message(response)
+                    if message:
+                        self._message_queue.put(message)
 
             except socket.timeout:
                 continue
@@ -203,6 +211,7 @@ class PubSub:
         if not isinstance(response, list) or len(response) < 3:
             return None
 
+        response = [_to_str(item) for item in response[:-1]] + [response[-1]]
         msg_type = response[0]
 
         if msg_type == "message":
@@ -211,7 +220,7 @@ class PubSub:
                 "channel": response[1],
                 "data": response[2],
             }
-        elif msg_type == "pmessage":
+        elif msg_type == "pmessage" and len(response) >= 4:
             return {
                 "type": "pmessage",
                 "pattern": response[1],
@@ -252,16 +261,27 @@ class PubSub:
         if self._thread:
             self._thread.join(timeout=1.0)
 
-        self.unsubscribe()
-        self.punsubscribe()
+        try:
+            self.unsubscribe()
+            self.punsubscribe()
+        except ConnectionError:
+            pass
 
-        if self._conn:
-            try:
-                self._conn.close()
-            except Exception:
-                pass
-            finally:
-                self._conn = None
+        self._drop_connection()
+
+    def _drop_connection(self):
+        """Close the dedicated connection and give its pool slot back."""
+        conn, self._conn = self._conn, None
+        if conn is None:
+            return
+        discard = getattr(self.connection_pool, "discard_connection", None)
+        if discard is not None:
+            discard(conn)
+            return
+        try:
+            conn.close()
+        except Exception:
+            pass
 
     def __enter__(self):
         return self

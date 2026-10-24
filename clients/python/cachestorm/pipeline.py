@@ -3,8 +3,8 @@
 import socket
 from typing import List, Any, Optional
 
-from .exceptions import ConnectionError, TimeoutError
-from .protocol import encode_resp, decode_resp
+from .exceptions import ConnectionError, ResponseError, TimeoutError
+from .protocol import IncompleteResponse, encode_resp, decode_resp
 
 
 class Pipeline:
@@ -133,55 +133,57 @@ class Pipeline:
         self.commands.append(["EXISTS"] + list(names))
         return self
 
-    def execute(self) -> List[Any]:
-        """Execute all commands in the pipeline."""
+    def execute(self, raise_on_error: bool = True) -> List[Any]:
+        """Execute all commands in the pipeline.
+
+        All replies are read before anything is raised. Error replies are
+        kept in position as ResponseError instances; with raise_on_error
+        the first one is raised once every reply has been read.
+        """
         if not self.commands:
             return []
 
-        # Get connection from pool
+        payload = b"".join(encode_resp(cmd) for cmd in self.commands)
+
         conn = self.connection_pool.get_connection()
+        reusable = False
 
         try:
-            # Send all commands
-            for cmd in self.commands:
-                data = encode_resp(cmd)
-                conn.sendall(data)
+            conn.sendall(payload)
 
-            # Read all responses
-            results = []
+            results: List[Any] = []
             buffer = b""
 
-            for _ in self.commands:
-                while True:
-                    try:
-                        chunk = conn.recv(4096)
-                        if not chunk:
-                            break
-                        buffer += chunk
-
-                        try:
-                            response, consumed = decode_resp(buffer)
-                            results.append(response)
-                            buffer = buffer[consumed:]
-                            break
-                        except ValueError:
-                            # Need more data
-                            continue
-                    except socket.error:
-                        break
-
-            # Pad results if needed
             while len(results) < len(self.commands):
-                results.append(None)
+                try:
+                    response, consumed = decode_resp(buffer, raise_errors=False)
+                except IncompleteResponse:
+                    chunk = conn.recv(4096)
+                    if not chunk:
+                        raise ConnectionError("Connection closed by server")
+                    buffer += chunk
+                    continue
+                buffer = buffer[consumed:]
+                results.append(response)
 
-            return results
+            reusable = not buffer
 
         except socket.timeout:
             raise TimeoutError("Pipeline execution timed out")
         except socket.error as e:
             raise ConnectionError(f"Socket error: {e}")
         finally:
-            self.connection_pool.release_connection(conn)
+            if reusable:
+                self.connection_pool.release_connection(conn)
+            else:
+                self.connection_pool.discard_connection(conn)
+
+        if raise_on_error:
+            for result in results:
+                if isinstance(result, ResponseError):
+                    raise result
+
+        return results
 
     def reset(self):
         """Clear the pipeline."""
