@@ -75,8 +75,8 @@ func TestXGroupIDValidation(t *testing.T) {
 		if got.Type != resp.TypeArray {
 			t.Fatalf("read after partial-id create replied %v, want the new 6-0", got.Type)
 		}
-		if string(got.Array[0].Array[1].Array[0].Bulk) != "6-0" {
-			t.Fatalf("delivered %q, want 6-0", got.Array[0].Array[1].Array[0].Bulk)
+		if string(got.Array[0].Array[1].Array[0].Array[0].Bulk) != "6-0" {
+			t.Fatalf("delivered %q, want 6-0", got.Array[0].Array[1].Array[0].Array[0].Bulk)
 		}
 	})
 
@@ -92,8 +92,8 @@ func TestXGroupIDValidation(t *testing.T) {
 		if got.Type != resp.TypeArray {
 			t.Fatalf("read after SETID replied %v, want entries after 2-0", got.Type)
 		}
-		if string(got.Array[0].Array[1].Array[0].Bulk) != "3-0" {
-			t.Fatalf("delivered %q, want 3-0", got.Array[0].Array[1].Array[0].Bulk)
+		if string(got.Array[0].Array[1].Array[0].Array[0].Bulk) != "3-0" {
+			t.Fatalf("delivered %q, want 3-0", got.Array[0].Array[1].Array[0].Array[0].Bulk)
 		}
 	})
 
@@ -115,8 +115,8 @@ func TestXGroupIDValidation(t *testing.T) {
 		if got.Type != resp.TypeArray {
 			t.Fatalf("read after $-create: %v", got.Type)
 		}
-		if string(got.Array[0].Array[1].Array[0].Bulk) != "9-0" {
-			t.Fatalf("delivered %q, want 9-0", got.Array[0].Array[1].Array[0].Bulk)
+		if string(got.Array[0].Array[1].Array[0].Array[0].Bulk) != "9-0" {
+			t.Fatalf("delivered %q, want 9-0", got.Array[0].Array[1].Array[0].Array[0].Bulk)
 		}
 	})
 }

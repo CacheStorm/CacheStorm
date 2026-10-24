@@ -33,24 +33,40 @@ func TestXSetIdMaxDeletedIDFloor(t *testing.T) {
 
 	run("XADD", "s", "1-0", "f", "v")
 
-	t.Run("xsetid_with_maxdeletedid_accepted", func(t *testing.T) {
+	t.Run("maxdeletedid_above_the_id_rejected", func(t *testing.T) {
 		got := run("XSETID", "s", "1-0", "MAXDELETEDID", "7-0")
+		if got.Type != resp.TypeError || got.Err != "ERR The ID specified in XSETID is smaller than the provided max_deleted_entry_id" {
+			t.Fatalf("XSETID 1-0 MAXDELETEDID 7-0 replied %v, want the Redis error", got)
+		}
+	})
+
+	t.Run("xsetid_with_maxdeletedid_accepted", func(t *testing.T) {
+		got := run("XSETID", "s", "7-0", "MAXDELETEDID", "5-0")
 		if got.Type != resp.TypeSimpleString {
 			t.Fatalf("XSETID with MAXDELETEDID replied %v, want OK", got)
 		}
 	})
 
-	t.Run("xadd_below_the_floor_rejected", func(t *testing.T) {
-		got := run("XADD", "s", "5-0", "f", "v")
+	t.Run("xadd_at_the_new_top_rejected", func(t *testing.T) {
+		got := run("XADD", "s", "7-0", "f", "v")
 		if got.Type != resp.TypeError {
-			t.Fatalf("XADD 5-0 below the 7-0 deleted floor succeeded with %v, want an error", got)
+			t.Fatalf("XADD 7-0 at the 7-0 top succeeded with %v, want an error", got)
 		}
 	})
 
-	t.Run("xadd_above_the_floor_succeeds", func(t *testing.T) {
+	t.Run("xadd_above_the_top_succeeds", func(t *testing.T) {
 		got := run("XADD", "s", "8-0", "f", "v")
 		if got.Type != resp.TypeBulkString {
-			t.Fatalf("XADD 8-0 above the floor replied %v, want the id", got)
+			t.Fatalf("XADD 8-0 above the top replied %v, want the id", got)
+		}
+	})
+
+	t.Run("xsetid_below_max_deleted_rejected", func(t *testing.T) {
+		run("XADD", "d", "5-0", "f", "v")
+		run("XDEL", "d", "5-0")
+		got := run("XSETID", "d", "4-0")
+		if got.Type != resp.TypeError || got.Err != "ERR The ID specified in XSETID is smaller than current max_deleted_entry_id" {
+			t.Fatalf("XSETID below the max deleted id replied %v, want the Redis error", got)
 		}
 	})
 

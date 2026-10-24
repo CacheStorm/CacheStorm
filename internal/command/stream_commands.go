@@ -2,8 +2,8 @@ package command
 
 import (
 	"errors"
+	"fmt"
 	"math"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -13,8 +13,11 @@ import (
 )
 
 var (
-	ErrBusyGroup = errors.New("BUSYGROUP Consumer Group name already exists")
-	ErrNoGroup   = errors.New("NOGROUP No such key")
+	ErrBusyGroup = streamReplyError("BUSYGROUP Consumer Group name already exists")
+	ErrNoGroup   = streamReplyError("NOGROUP No such key")
+
+	errStreamNoSuchKey   = streamReplyError("ERR no such key")
+	errXGroupKeyRequired = streamReplyError("ERR The XGROUP subcommand requires the key to exist. Note that for CREATE you may want to use the MKSTREAM option to create an empty stream automatically.")
 )
 
 func RegisterStreamCommands(router *Router) {
@@ -35,1769 +38,1322 @@ func RegisterStreamCommands(router *Router) {
 	router.Register(&CommandDef{Name: "XSETID", Handler: cmdXSETID})
 }
 
-func getOrCreateStream(ctx *Context, key string, maxLen int64) *store.StreamValue {
+// streamReplyError carries a Redis error reply verbatim, trailing
+// punctuation included, since clients match these texts.
+type streamReplyError string
+
+func (e streamReplyError) Error() string { return string(e) }
+
+func streamReplyErrorf(format string, args ...interface{}) error {
+	return streamReplyError(fmt.Sprintf(format, args...))
+}
+
+func errNoGroupFor(key, group string) error {
+	return streamReplyErrorf("NOGROUP No such key '%s' or consumer group '%s'", key, group)
+}
+
+func errNoReadGroup(key, group string) error {
+	return streamReplyErrorf("NOGROUP No such key '%s' or consumer group '%s' in XREADGROUP with GROUP option", key, group)
+}
+
+func errNoConsumerGroup(group, key string) error {
+	return streamReplyErrorf("NOGROUP No such consumer group '%s' for key name '%s'", group, key)
+}
+
+func errSubcommandSyntax(sub, cmd string) error {
+	return streamReplyErrorf("ERR unknown subcommand or wrong number of arguments for '%s'. Try %s HELP.", sub, cmd)
+}
+
+func errUnknownSubcommand(sub, cmd string) error {
+	return streamReplyErrorf("ERR unknown subcommand '%s'. Try %s HELP.", sub, cmd)
+}
+
+// lookupStream returns the stream at key, nil when the key is missing, and
+// WRONGTYPE when it holds another type.
+func lookupStream(ctx *Context, key string) (*store.StreamValue, error) {
 	entry, exists := ctx.Store.Get(key)
 	if !exists {
-		stream := store.NewStreamValue(maxLen)
-		ctx.Store.Set(key, stream, store.SetOptions{})
-		return stream
+		return nil, nil
 	}
-
-	if stream, ok := entry.Value.(*store.StreamValue); ok {
-		return stream
+	stream, ok := entry.Value.(*store.StreamValue)
+	if !ok {
+		return nil, store.ErrWrongType
 	}
-	return nil
+	return stream, nil
 }
 
 func getStream(ctx *Context, key string) *store.StreamValue {
-	entry, exists := ctx.Store.Get(key)
-	if !exists {
+	stream, err := lookupStream(ctx, key)
+	if err != nil {
 		return nil
 	}
-
-	if stream, ok := entry.Value.(*store.StreamValue); ok {
-		return stream
-	}
-	return nil
+	return stream
 }
 
+// parseStreamLL parses an integer argument the way Redis does: no sign
+// other than a leading minus, no surrounding spaces.
+func parseStreamLL(s string) (int64, bool) {
+	if s == "" || s[0] == '+' {
+		return 0, false
+	}
+	v, err := strconv.ParseInt(s, 10, 64)
+	return v, err == nil
+}
+
+func parseStrictStreamID(s string) (store.StreamID, error) {
+	return store.ParseStreamID(s, 0)
+}
+
+func streamEntryValue(e *store.StreamEntry) *resp.Value {
+	pairs := e.FieldPairs()
+	fields := make([]*resp.Value, 0, len(pairs)*2)
+	for _, p := range pairs {
+		fields = append(fields, resp.BulkString(p.Name), resp.BulkBytes(nonNilBytes(p.Value)))
+	}
+	return resp.ArrayValue([]*resp.Value{resp.BulkString(e.ID), resp.ArrayValue(fields)})
+}
+
+func nonNilBytes(b []byte) []byte {
+	if b == nil {
+		return []byte{}
+	}
+	return b
+}
+
+func streamEntriesValue(entries []*store.StreamEntry) *resp.Value {
+	out := make([]*resp.Value, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, streamEntryValue(e))
+	}
+	return resp.ArrayValue(out)
+}
+
+func streamItemsValue(items []store.StreamGroupItem, justID bool) *resp.Value {
+	out := make([]*resp.Value, 0, len(items))
+	for _, it := range items {
+		switch {
+		case justID:
+			out = append(out, resp.BulkString(it.ID.String()))
+		case it.Entry == nil:
+			out = append(out, resp.ArrayValue([]*resp.Value{resp.BulkString(it.ID.String()), resp.NullArray()}))
+		default:
+			out = append(out, streamEntryValue(it.Entry))
+		}
+	}
+	return resp.ArrayValue(out)
+}
+
+// generateStreamID returns the ID XADD * would assign after lastID.
 func generateStreamID(lastID string) string {
-	now := time.Now().UnixMilli()
-
-	if lastID == "" || lastID == "0-0" {
-		return strconv.FormatInt(now, 10) + "-0"
+	last, err := store.ParseStreamID(lastID, 0)
+	if err != nil {
+		last = store.StreamID{}
 	}
-
-	parts := strings.Split(lastID, "-")
-	if len(parts) != 2 {
-		return strconv.FormatInt(now, 10) + "-0"
+	now := uint64(time.Now().UnixMilli())
+	if now > last.Ms {
+		return store.StreamID{Ms: now}.String()
 	}
-
-	ms, err1 := strconv.ParseInt(parts[0], 10, 64)
-	seq, err2 := strconv.ParseInt(parts[1], 10, 64)
-
-	if err1 != nil || err2 != nil {
-		return strconv.FormatInt(now, 10) + "-0"
-	}
-
-	if ms == now {
-		return strconv.FormatInt(now, 10) + "-" + strconv.FormatInt(seq+1, 10)
-	}
-
-	if now > ms {
-		return strconv.FormatInt(now, 10) + "-0"
-	}
-
-	return strconv.FormatInt(ms, 10) + "-" + strconv.FormatInt(seq+1, 10)
+	next, _ := last.Next()
+	return next.String()
 }
 
-// normalizeStreamBound expands a partial stream ID for range bounds: a bare
-// millisecond becomes ms-0 (start) or ms-maxseq (end); "-" and "+" map to
-// the extremes. Malformed IDs are rejected.
-func normalizeStreamBound(bound string, isEnd bool) (string, error) {
-	switch bound {
-	case "-":
-		return "0-0", nil
-	case "+":
-		return "9223372036854775807-9223372036854775807", nil
-	}
-	parts := strings.Split(bound, "-")
-	switch len(parts) {
-	case 1:
-		ms, err := strconv.ParseInt(parts[0], 10, 64)
-		if err != nil {
-			return "", errors.New("ERR Invalid stream ID specified as stream command argument")
-		}
-		if isEnd {
-			return strconv.FormatInt(ms, 10) + "-9223372036854775807", nil
-		}
-		return strconv.FormatInt(ms, 10) + "-0", nil
-	case 2:
-		if _, err1 := strconv.ParseInt(parts[0], 10, 64); err1 != nil {
-			return "", errors.New("ERR Invalid stream ID specified as stream command argument")
-		}
-		if _, err2 := strconv.ParseInt(parts[1], 10, 64); err2 != nil {
-			return "", errors.New("ERR Invalid stream ID specified as stream command argument")
-		}
-		return bound, nil
-	default:
-		return "", errors.New("ERR Invalid stream ID specified as stream command argument")
-	}
+type addTrimArgs struct {
+	trim       store.StreamTrimArgs
+	noMkStream bool
+	id         store.StreamAddArgs
 }
 
-func streamIDParts(id string) (int64, int64, bool) {
-	parts := strings.SplitN(id, "-", 2)
-	if len(parts) != 2 {
-		return 0, 0, false
+// parseAddTrimArgs parses the options shared by XADD and XTRIM, starting
+// after the key. For XADD it stops at the ID and returns its index.
+func parseAddTrimArgs(ctx *Context, xadd bool) (addTrimArgs, int, error) {
+	var a addTrimArgs
+	argc := ctx.ArgCount()
+	limitGiven := false
+	i := 1
+loop:
+	for ; i < argc; i++ {
+		moreargs := argc - 1 - i
+		opt := ctx.ArgString(i)
+		switch {
+		case xadd && opt == "*":
+			break loop
+		case strings.EqualFold(opt, "MAXLEN") && moreargs > 0, strings.EqualFold(opt, "MINID") && moreargs > 0:
+			if a.trim.Strategy != store.StreamTrimNone {
+				return a, 0, streamReplyError("ERR syntax error, MAXLEN and MINID options at the same time are not compatible")
+			}
+			a.trim.Approx = false
+			next := ctx.ArgString(i + 1)
+			if moreargs >= 2 && next == "~" {
+				a.trim.Approx = true
+				i++
+			} else if moreargs >= 2 && next == "=" {
+				i++
+			}
+			if strings.EqualFold(opt, "MAXLEN") {
+				n, ok := parseStreamLL(ctx.ArgString(i + 1))
+				if !ok {
+					return a, 0, ErrNotInteger
+				}
+				if n < 0 {
+					return a, 0, streamReplyError("ERR The MAXLEN argument must be >= 0.")
+				}
+				a.trim.Strategy = store.StreamTrimMaxLen
+				a.trim.MaxLen = n
+			} else {
+				id, err := parseStrictStreamID(ctx.ArgString(i + 1))
+				if err != nil {
+					return a, 0, err
+				}
+				a.trim.Strategy = store.StreamTrimMinID
+				a.trim.MinID = id
+			}
+			i++
+		case strings.EqualFold(opt, "LIMIT") && moreargs > 0:
+			n, ok := parseStreamLL(ctx.ArgString(i + 1))
+			if !ok {
+				return a, 0, ErrNotInteger
+			}
+			if n < 0 {
+				return a, 0, streamReplyError("ERR The LIMIT argument must be >= 0.")
+			}
+			a.trim.Limit = n
+			limitGiven = true
+			i++
+		case xadd && strings.EqualFold(opt, "NOMKSTREAM"):
+			a.noMkStream = true
+		case xadd:
+			id, err := parseXAddID(opt)
+			if err != nil {
+				return a, 0, err
+			}
+			a.id = id
+			break loop
+		default:
+			return a, 0, ErrSyntaxError
+		}
 	}
-	ms, err1 := strconv.ParseInt(parts[0], 10, 64)
-	seq, err2 := strconv.ParseInt(parts[1], 10, 64)
-	if err1 != nil || err2 != nil {
-		return 0, 0, false
+	if a.trim.Limit != 0 && a.trim.Strategy == store.StreamTrimNone {
+		return a, 0, streamReplyError("ERR syntax error, LIMIT cannot be used without specifying a trimming strategy")
 	}
-	return ms, seq, true
+	if !xadd && a.trim.Strategy == store.StreamTrimNone {
+		return a, 0, streamReplyError("ERR syntax error, XTRIM must be called with a trimming strategy")
+	}
+	if limitGiven {
+		if !a.trim.Approx {
+			return a, 0, streamReplyError("ERR syntax error, LIMIT cannot be used without the special ~ option")
+		}
+	} else if a.trim.Approx {
+		a.trim.Limit = 10000
+	}
+	return a, i, nil
+}
+
+// parseXAddID parses "*", "<ms>-*", "<ms>" or "<ms>-<seq>".
+func parseXAddID(s string) (store.StreamAddArgs, error) {
+	if s == "*" {
+		return store.StreamAddArgs{}, nil
+	}
+	if strings.HasSuffix(s, "-*") {
+		id, err := store.ParseStreamID(s[:len(s)-2], 0)
+		if err != nil || strings.Contains(s[:len(s)-2], "-") {
+			return store.StreamAddArgs{}, store.ErrStreamInvalidID
+		}
+		return store.StreamAddArgs{ID: id, IDGiven: true}, nil
+	}
+	id, err := store.ParseStreamID(s, 0)
+	if err != nil {
+		return store.StreamAddArgs{}, err
+	}
+	return store.StreamAddArgs{ID: id, IDGiven: true, SeqGiven: true}, nil
 }
 
 func cmdXADD(ctx *Context) error {
 	if ctx.ArgCount() < 4 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError("xadd"))
 	}
-
 	key := ctx.ArgString(0)
-
-	maxLen := int64(0)
-	trimLimit := int64(0)
-	minID := ""
-	approximate := false
-	trimStrategy := ""
-	nomkstream := false
-	argIdx := 1
-
-loop:
-	for argIdx < ctx.ArgCount() {
-		arg := strings.ToUpper(ctx.ArgString(argIdx))
-		switch arg {
-		case "MAXLEN":
-			trimStrategy = "MAXLEN"
-			argIdx++
-			if argIdx < ctx.ArgCount() && strings.ToUpper(ctx.ArgString(argIdx)) == "~" {
-				approximate = true
-				argIdx++
-			}
-			if argIdx < ctx.ArgCount() && strings.ToUpper(ctx.ArgString(argIdx)) == "=" {
-				argIdx++
-			}
-			if argIdx < ctx.ArgCount() {
-				var err error
-				maxLen, err = strconv.ParseInt(ctx.ArgString(argIdx), 10, 64)
-				if err != nil {
-					return ctx.WriteError(ErrNotInteger)
-				}
-				argIdx++
-			}
-		case "MINID":
-			trimStrategy = "MINID"
-			argIdx++
-			if argIdx < ctx.ArgCount() && strings.ToUpper(ctx.ArgString(argIdx)) == "~" {
-				approximate = true
-				argIdx++
-			}
-			if argIdx < ctx.ArgCount() && strings.ToUpper(ctx.ArgString(argIdx)) == "=" {
-				argIdx++
-			}
-			if argIdx < ctx.ArgCount() {
-				minID = ctx.ArgString(argIdx)
-				argIdx++
-			}
-		case "NOMKSTREAM":
-			nomkstream = true
-			argIdx++
-		case "LIMIT":
-			argIdx++
-			if argIdx >= ctx.ArgCount() {
-				return ctx.WriteError(ErrSyntaxError)
-			}
-			var err error
-			trimLimit, err = strconv.ParseInt(ctx.ArgString(argIdx), 10, 64)
-			if err != nil {
-				return ctx.WriteError(ErrNotInteger)
-			}
-			if trimLimit < 0 {
-				return ctx.WriteError(errCountOutOfRange)
-			}
-			argIdx++
-		default:
-			break loop
-		}
-	}
-
-	if argIdx >= ctx.ArgCount() {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	id := ctx.ArgString(argIdx)
-	argIdx++
-
-	if (argIdx-ctx.ArgCount())%2 != 0 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	fields := make(map[string][]byte)
-	for i := argIdx; i < ctx.ArgCount(); i += 2 {
-		fields[ctx.ArgString(i)] = ctx.Arg(i + 1)
-	}
-
-	if nomkstream {
-		if _, exists := ctx.Store.Get(key); !exists {
-			return ctx.WriteNull()
-		}
-	}
-
-	stream := getOrCreateStream(ctx, key, maxLen)
-	if stream == nil {
-		return ctx.WriteError(store.ErrWrongType)
-	}
-
-	if id == "*" {
-		id = generateStreamID(stream.LastID)
-	}
-
-	entry, err := stream.Add(id, fields)
+	a, idIdx, err := parseAddTrimArgs(ctx, true)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
-
-	if trimStrategy == "MINID" && minID != "" {
-		if approximate {
-			stream.TrimByMinIDLimited(minID, trimLimit)
-		} else {
-			stream.TrimByMinID(minID, false)
-		}
-	} else if trimStrategy == "MAXLEN" && maxLen > 0 {
-		if approximate {
-			stream.TrimLimited(maxLen, trimLimit)
-		} else {
-			stream.Trim(maxLen, approximate)
-		}
+	fieldPos := idIdx + 1
+	n := ctx.ArgCount() - fieldPos
+	if n < 2 || n%2 == 1 {
+		return ctx.WriteError(arityError("xadd"))
+	}
+	if a.id.IDGiven && a.id.SeqGiven && a.id.ID.IsZero() {
+		return ctx.WriteError(store.ErrStreamIDZero)
 	}
 
-	_ = entry
-	_ = approximate
+	pairs := make([]store.StreamField, 0, n/2)
+	for i := fieldPos; i < ctx.ArgCount(); i += 2 {
+		pairs = append(pairs, store.StreamField{Name: ctx.ArgString(i), Value: ctx.Arg(i + 1)})
+	}
+
+	stream, err := lookupStream(ctx, key)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	created := false
+	if stream == nil {
+		if a.noMkStream {
+			return ctx.WriteNull()
+		}
+		stream = store.NewStreamValue(0)
+		created = true
+	}
+
+	entry, err := stream.XAdd(a.id, pairs, a.trim, uint64(time.Now().UnixMilli()))
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	if created {
+		if err := ctx.Store.Set(key, stream, store.SetOptions{}); err != nil {
+			return ctx.WriteError(err)
+		}
+	}
+	if !a.id.IDGiven || !a.id.SeqGiven {
+		ctx.Args[idIdx] = []byte(entry.ID)
+	}
 	ctx.Store.KeyNotifier().NotifyKey(key)
-	return ctx.WriteBulkString(id)
+	return ctx.WriteBulkString(entry.ID)
 }
 
 func cmdXLEN(ctx *Context) error {
 	if ctx.ArgCount() != 1 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError("xlen"))
 	}
-
-	key := ctx.ArgString(0)
-	stream := getStream(ctx, key)
+	stream, err := lookupStream(ctx, ctx.ArgString(0))
+	if err != nil {
+		return ctx.WriteError(err)
+	}
 	if stream == nil {
 		return ctx.WriteInteger(0)
 	}
-
 	return ctx.WriteInteger(stream.Len())
 }
 
-func cmdXRANGE(ctx *Context) error {
-	if ctx.ArgCount() < 3 {
-		return ctx.WriteError(ErrWrongArgCount)
+func cmdXRANGE(ctx *Context) error    { return xrangeGeneric(ctx, false) }
+func cmdXREVRANGE(ctx *Context) error { return xrangeGeneric(ctx, true) }
+
+func xrangeGeneric(ctx *Context, rev bool) error {
+	name := "xrange"
+	if rev {
+		name = "xrevrange"
 	}
-
-	key := ctx.ArgString(0)
-	start := ctx.ArgString(1)
-	end := ctx.ArgString(2)
-	count := int64(0)
-
-	for i := 3; i < ctx.ArgCount(); i++ {
-		if strings.ToUpper(ctx.ArgString(i)) == "COUNT" {
-			// A COUNT with no value must be reported, not dropped. Folding the
-			// bounds check into the outer condition (`... && i+1 < ArgCount()`)
-			// made a dangling COUNT fall through silently: count stayed 0, and
-			// GetRange treats 0 as "no limit", so `XRANGE k - + COUNT` returned
-			// the WHOLE stream while the client believed it was constraining
-			// the result. cmdXAUTOCLAIM already errors here; this matches it.
-			if i+1 >= ctx.ArgCount() {
-				return ctx.WriteError(ErrSyntaxError)
-			}
-			var err error
-			count, err = strconv.ParseInt(ctx.ArgString(i+1), 10, 64)
-			if err != nil {
+	if ctx.ArgCount() < 3 {
+		return ctx.WriteError(arityError(name))
+	}
+	startArg, endArg := ctx.ArgString(1), ctx.ArgString(2)
+	if rev {
+		startArg, endArg = endArg, startArg
+	}
+	start, err := store.ParseStreamInterval(startArg, false)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	end, err := store.ParseStreamInterval(endArg, true)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	count := int64(-1)
+	for j := 3; j < ctx.ArgCount(); j++ {
+		if strings.EqualFold(ctx.ArgString(j), "COUNT") && j+1 < ctx.ArgCount() {
+			n, ok := parseStreamLL(ctx.ArgString(j + 1))
+			if !ok {
 				return ctx.WriteError(ErrNotInteger)
 			}
-			i++
+			if n < 0 {
+				n = 0
+			}
+			count = n
+			j++
+			continue
 		}
+		return ctx.WriteError(ErrSyntaxError)
 	}
 
-	stream := getStream(ctx, key)
+	stream, err := lookupStream(ctx, ctx.ArgString(0))
+	if err != nil {
+		return ctx.WriteError(err)
+	}
 	if stream == nil {
 		return ctx.WriteArray([]*resp.Value{})
 	}
-
-	if start == "-" {
-		start = "0-0"
+	if count == 0 {
+		return ctx.WriteNullArray()
 	}
-	if end == "+" {
-		end = "9223372036854775807-9223372036854775807"
+	if count < 0 {
+		count = 0
 	}
-
-	start, err := normalizeStreamBound(start, false)
-	if err != nil {
-		return ctx.WriteError(err)
-	}
-	end, err = normalizeStreamBound(end, true)
-	if err != nil {
-		return ctx.WriteError(err)
-	}
-
-	entries := stream.GetRange(start, end, count)
-
-	results := make([]*resp.Value, 0, len(entries))
-	for _, entry := range entries {
-		fields := make([]*resp.Value, 0, len(entry.Fields)*2)
-		for k, v := range entry.Fields {
-			fields = append(fields, resp.BulkString(k), resp.BulkBytes(v))
-		}
-		results = append(results, resp.ArrayValue([]*resp.Value{
-			resp.BulkString(entry.ID),
-			resp.ArrayValue(fields),
-		}))
-	}
-
-	return ctx.WriteArray(results)
+	return ctx.WriteValue(streamEntriesValue(stream.Range(start, end, count, rev)))
 }
 
-func cmdXREVRANGE(ctx *Context) error {
-	if ctx.ArgCount() < 3 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	key := ctx.ArgString(0)
-	end := ctx.ArgString(1)
-	start := ctx.ArgString(2)
-
-	count := int64(0)
-	for i := 3; i < ctx.ArgCount(); i++ {
-		arg := strings.ToUpper(ctx.ArgString(i))
-		if arg == "COUNT" {
-			i++
-			if i >= ctx.ArgCount() {
-				return ctx.WriteError(ErrSyntaxError)
-			}
-			var err error
-			count, err = strconv.ParseInt(ctx.ArgString(i), 10, 64)
-			if err != nil {
-				return ctx.WriteError(ErrNotInteger)
-			}
-		}
-	}
-
-	stream := getStream(ctx, key)
-	if stream == nil {
-		return ctx.WriteArray([]*resp.Value{})
-	}
-
-	start, err := normalizeStreamBound(start, false)
-	if err != nil {
-		return ctx.WriteError(err)
-	}
-	end, err = normalizeStreamBound(end, true)
-	if err != nil {
-		return ctx.WriteError(err)
-	}
-
-	entries := stream.GetRange(start, end, 0)
-	if count > 0 && int64(len(entries)) > count {
-		entries = entries[int64(len(entries))-count:]
-	}
-
-	results := make([]*resp.Value, 0, len(entries))
-	for i := len(entries) - 1; i >= 0; i-- {
-		entry := entries[i]
-		fields := make([]*resp.Value, 0, len(entry.Fields)*2)
-		for k, v := range entry.Fields {
-			fields = append(fields, resp.BulkString(k), resp.BulkBytes(v))
-		}
-		results = append(results, resp.ArrayValue([]*resp.Value{
-			resp.BulkString(entry.ID),
-			resp.ArrayValue(fields),
-		}))
-	}
-
-	return ctx.WriteArray(results)
+type xreadSpec struct {
+	key     string
+	gt      store.StreamID
+	newOnly bool
 }
 
-func cmdXREAD(ctx *Context) error {
-	if ctx.ArgCount() < 3 {
-		return ctx.WriteError(ErrWrongArgCount)
+func cmdXREAD(ctx *Context) error      { return xreadGeneric(ctx, false) }
+func cmdXREADGROUP(ctx *Context) error { return xreadGeneric(ctx, true) }
+
+func xreadGeneric(ctx *Context, xreadgroup bool) error {
+	name := "xread"
+	symbol := "$"
+	if xreadgroup {
+		name = "xreadgroup"
+		symbol = ">"
 	}
-
+	argc := ctx.ArgCount()
+	timeout := int64(-1)
 	count := int64(0)
-	block := int64(0)
-	blockSpecified := false
-	streamsIdx := -1
+	streamsArg := -1
+	streamsCount := 0
+	noack := false
+	groupName, consumerName := "", ""
+	haveGroup := false
 
-	// Args exclude the command name, so options start at index 0; parsing
-	// from 1 silently ignored every option the client sent first (COUNT,
-	// BLOCK, unknown tokens alike).
-	for i := 0; i < ctx.ArgCount(); i++ {
-		arg := strings.ToUpper(ctx.ArgString(i))
-		switch arg {
-		case "COUNT":
+parse:
+	for i := 0; i < argc; i++ {
+		moreargs := argc - i - 1
+		o := ctx.ArgString(i)
+		switch {
+		case strings.EqualFold(o, "BLOCK") && moreargs > 0:
 			i++
-			if i >= ctx.ArgCount() {
-				return ctx.WriteError(ErrSyntaxError)
+			t, ok := parseStreamLL(ctx.ArgString(i))
+			if !ok {
+				return ctx.WriteError(streamReplyError("ERR timeout is not an integer or out of range"))
 			}
-			var err error
-			count, err = strconv.ParseInt(ctx.ArgString(i), 10, 64)
-			if err != nil {
+			if t < 0 {
+				return ctx.WriteError(streamReplyError("ERR timeout is negative"))
+			}
+			timeout = t
+		case strings.EqualFold(o, "COUNT") && moreargs > 0:
+			i++
+			n, ok := parseStreamLL(ctx.ArgString(i))
+			if !ok {
 				return ctx.WriteError(ErrNotInteger)
 			}
-		case "BLOCK":
-			i++
-			if i >= ctx.ArgCount() {
-				return ctx.WriteError(ErrSyntaxError)
+			if n < 0 {
+				n = 0
 			}
-			var err error
-			block, err = strconv.ParseInt(ctx.ArgString(i), 10, 64)
-			if err != nil {
-				return ctx.WriteError(ErrNotInteger)
+			count = n
+		case strings.EqualFold(o, "STREAMS") && moreargs > 0:
+			streamsArg = i + 1
+			n := argc - streamsArg
+			if n%2 != 0 {
+				return ctx.WriteError(streamReplyErrorf("ERR Unbalanced '%s' list of streams: for each stream key an ID or '%s' must be specified.", name, symbol))
 			}
-			// A negative timeout is a client error; silently treating it as
-			// non-blocking would hide the mistake.
-			if block < 0 {
-				return ctx.WriteError(errCountOutOfRange)
+			streamsCount = n / 2
+			break parse
+		case strings.EqualFold(o, "GROUP") && moreargs >= 2:
+			if !xreadgroup {
+				return ctx.WriteError(streamReplyError("ERR The GROUP option is only supported by XREADGROUP. You called XREAD instead."))
 			}
-			blockSpecified = true
-		case "STREAMS":
-			streamsIdx = i + 1
-			i = ctx.ArgCount()
+			groupName, consumerName = ctx.ArgString(i+1), ctx.ArgString(i+2)
+			haveGroup = true
+			i += 2
+		case strings.EqualFold(o, "NOACK"):
+			if !xreadgroup {
+				return ctx.WriteError(streamReplyError("ERR The NOACK option is only supported by XREADGROUP. You called XREAD instead."))
+			}
+			noack = true
 		default:
 			return ctx.WriteError(ErrSyntaxError)
 		}
 	}
-
-	if streamsIdx < 0 {
+	if streamsArg < 0 {
 		return ctx.WriteError(ErrSyntaxError)
 	}
-
-	remaining := ctx.ArgCount() - streamsIdx
-	if remaining < 2 || remaining%2 != 0 {
-		return ctx.WriteError(ErrWrongArgCount)
+	if xreadgroup && !haveGroup {
+		return ctx.WriteError(streamReplyError("ERR Missing GROUP option for XREADGROUP"))
 	}
 
-	numStreams := remaining / 2
-	keys := make([]string, numStreams)
-	ids := make([]string, numStreams)
-
-	for i := 0; i < numStreams; i++ {
-		keys[i] = ctx.ArgString(streamsIdx + i)
-		ids[i] = ctx.ArgString(streamsIdx + numStreams + i)
-	}
-
-	// Resolve "$" IDs to current last ID before blocking
-	for i, id := range ids {
-		if id == "$" {
-			stream := getStream(ctx, keys[i])
-			if stream != nil {
-				ids[i] = stream.LastID
-			} else {
-				ids[i] = "0-0"
-			}
-		}
-	}
-
-	// Normalize and validate IDs: GetRange cannot parse partial ("2") or
-	// malformed IDs and would silently return an empty read instead of
-	// delivering everything after the boundary or reporting the error.
-	for i, id := range ids {
-		norm, err := normalizeStreamBound(id, false)
+	specs := make([]xreadSpec, streamsCount)
+	keys := make([]string, streamsCount)
+	for i := 0; i < streamsCount; i++ {
+		key := ctx.ArgString(streamsArg + i)
+		idArg := ctx.ArgString(streamsArg + streamsCount + i)
+		keys[i] = key
+		specs[i].key = key
+		stream, err := lookupStream(ctx, key)
 		if err != nil {
 			return ctx.WriteError(err)
 		}
-		ids[i] = norm
+		if xreadgroup && (stream == nil || !stream.HasGroup(groupName)) {
+			return ctx.WriteError(errNoReadGroup(key, groupName))
+		}
+		switch idArg {
+		case "$":
+			if xreadgroup {
+				return ctx.WriteError(streamReplyError("ERR The $ ID is meaningless in the context of XREADGROUP: you want to read the history of this consumer by specifying a proper ID, or use the > ID to get new messages. The $ ID would just return an empty result set."))
+			}
+			if stream != nil {
+				specs[i].gt = stream.LastGeneratedID()
+			}
+		case ">":
+			if !xreadgroup {
+				return ctx.WriteError(streamReplyError("ERR The > ID can be specified only when calling XREADGROUP using the GROUP <group> <consumer> option."))
+			}
+			specs[i].newOnly = true
+		case "+":
+			if xreadgroup {
+				return ctx.WriteError(streamReplyError("ERR The + ID is meaningless in the context of XREADGROUP: you want to read the history of this consumer by specifying a proper ID, or use the > ID to get new messages. The + ID would just return an empty result set."))
+			}
+			if stream != nil {
+				if last, ok := stream.LastEntryID(); ok {
+					specs[i].gt, _ = last.Prev()
+				} else {
+					specs[i].gt = stream.LastGeneratedID()
+				}
+			}
+		default:
+			id, err := parseStrictStreamID(idArg)
+			if err != nil {
+				return ctx.WriteError(err)
+			}
+			specs[i].gt = id
+		}
 	}
 
-	// Try immediate read
-	results := xreadStreams(ctx, keys, ids, count)
+	serve := func() ([]*resp.Value, error) {
+		results := make([]*resp.Value, 0, len(specs))
+		now := time.Now().UnixMilli()
+		for _, sp := range specs {
+			stream, err := lookupStream(ctx, sp.key)
+			if err != nil {
+				return nil, err
+			}
+			if !xreadgroup {
+				if stream == nil {
+					continue
+				}
+				entries := stream.After(sp.gt, count)
+				if len(entries) == 0 {
+					continue
+				}
+				results = append(results, resp.ArrayValue([]*resp.Value{resp.BulkString(sp.key), streamEntriesValue(entries)}))
+				continue
+			}
+			if stream == nil {
+				return nil, errNoReadGroup(sp.key, groupName)
+			}
+			items, served, ok := stream.ReadGroup(groupName, consumerName, !sp.newOnly, sp.gt, count, noack, now)
+			if !ok {
+				return nil, errNoReadGroup(sp.key, groupName)
+			}
+			if served {
+				results = append(results, resp.ArrayValue([]*resp.Value{resp.BulkString(sp.key), streamItemsValue(items, false)}))
+			}
+		}
+		return results, nil
+	}
+
+	results, err := serve()
+	if err != nil {
+		return ctx.WriteError(err)
+	}
 	if len(results) > 0 {
 		return ctx.WriteArray(results)
 	}
-
-	// If no BLOCK, return null
-	if !blockSpecified {
-		return ctx.WriteNull()
+	if timeout < 0 {
+		return ctx.WriteNullArray()
 	}
 
-	// Block until notified or timeout. BLOCK 0 blocks indefinitely, so it
-	// gets a deadline far enough out that only arriving data can return
-	// before it.
-	dur := time.Duration(block) * time.Millisecond
-	if block == 0 {
-		dur = time.Duration(1) << 62
+	ready := func(key string) bool {
+		stream, err := lookupStream(ctx, key)
+		if err != nil {
+			return false
+		}
+		for _, sp := range specs {
+			if sp.key != key {
+				continue
+			}
+			if xreadgroup {
+				if stream == nil {
+					return true
+				}
+				hasNew, exists := stream.GroupHasNew(groupName)
+				if !exists || hasNew {
+					return true
+				}
+				continue
+			}
+			if stream == nil {
+				continue
+			}
+			if last, ok := stream.LastEntryID(); ok && sp.gt.Less(last) {
+				return true
+			}
+		}
+		return false
 	}
-	deadline := time.Now().Add(dur)
-	const maxRetries = 100
 
-	for attempt := 0; attempt < maxRetries; attempt++ {
-		remaining := time.Until(deadline)
-		if remaining <= 0 {
-			return ctx.WriteNull()
+	if ctx.InExec {
+		return ctx.WriteNullArray()
+	}
+	// A blocked XREADGROUP must fail once its key or group disappears, and
+	// a deletion sends no write notification, so it rechecks periodically.
+	const groupRecheck = 100 * time.Millisecond
+	deadline := time.Now().Add(time.Duration(timeout) * time.Millisecond)
+	for {
+		wait := time.Duration(1) << 62
+		if xreadgroup {
+			wait = groupRecheck
 		}
-		_, notified := ctx.waitForStreamKeys(keys, remaining)
-		if !notified {
-			return ctx.WriteNull()
+		if timeout > 0 {
+			remaining := time.Until(deadline)
+			if remaining <= 0 {
+				return ctx.WriteNullArray()
+			}
+			if remaining < wait {
+				wait = remaining
+			}
 		}
-
-		results = xreadStreams(ctx, keys, ids, count)
+		if _, notified := ctx.waitForKeysReady(keys, wait, ready); !notified {
+			if streamClientGone(ctx) {
+				return ctx.WriteNullArray()
+			}
+			if xreadgroup {
+				for _, sp := range specs {
+					stream, err := lookupStream(ctx, sp.key)
+					if err != nil {
+						return ctx.WriteError(err)
+					}
+					if stream == nil || !stream.HasGroup(groupName) {
+						return ctx.WriteError(errNoReadGroup(sp.key, groupName))
+					}
+				}
+			}
+			continue
+		}
+		results, err := serve()
+		if err != nil {
+			return ctx.WriteError(err)
+		}
 		if len(results) > 0 {
 			return ctx.WriteArray(results)
 		}
 	}
-	return ctx.WriteNull()
 }
 
-func xreadStreams(ctx *Context, keys, ids []string, count int64) []*resp.Value {
-	results := make([]*resp.Value, 0, len(keys))
-
-	for i, key := range keys {
-		stream := getStream(ctx, key)
-		if stream == nil {
-			continue
-		}
-
-		readCount := count
-		if count > 0 && count < math.MaxInt64 && stream.GetEntryByID(ids[i]) != nil {
-			readCount++
-		}
-		entries := stream.GetRange(ids[i], "+", readCount)
-		if len(entries) == 0 {
-			continue
-		}
-
-		entryResults := make([]*resp.Value, 0, len(entries))
-		for _, entry := range entries {
-			if entry.ID == ids[i] {
-				continue
-			}
-			fields := make([]*resp.Value, 0, len(entry.Fields)*2)
-			for k, v := range entry.Fields {
-				fields = append(fields, resp.BulkString(k), resp.BulkBytes(v))
-			}
-			entryResults = append(entryResults, resp.ArrayValue([]*resp.Value{
-				resp.BulkString(entry.ID),
-				resp.ArrayValue(fields),
-			}))
-			if count > 0 && int64(len(entryResults)) >= count {
-				break
-			}
-		}
-
-		if len(entryResults) > 0 {
-			results = append(results, resp.ArrayValue([]*resp.Value{
-				resp.BulkString(key),
-				resp.ArrayValue(entryResults),
-			}))
-		}
+func streamClientGone(ctx *Context) bool {
+	if ctx.Done == nil {
+		return false
 	}
-	return results
+	select {
+	case <-ctx.Done:
+		return true
+	default:
+		return false
+	}
 }
 
 func cmdXDEL(ctx *Context) error {
 	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError("xdel"))
 	}
-
-	key := ctx.ArgString(0)
-	stream := getStream(ctx, key)
+	stream, err := lookupStream(ctx, ctx.ArgString(0))
+	if err != nil {
+		return ctx.WriteError(err)
+	}
 	if stream == nil {
 		return ctx.WriteInteger(0)
 	}
-
-	ids := make([]string, 0, ctx.ArgCount()-1)
+	ids := make([]store.StreamID, 0, ctx.ArgCount()-1)
 	for i := 1; i < ctx.ArgCount(); i++ {
-		ids = append(ids, ctx.ArgString(i))
+		id, err := parseStrictStreamID(ctx.ArgString(i))
+		if err != nil {
+			return ctx.WriteError(err)
+		}
+		ids = append(ids, id)
 	}
-
-	deleted := stream.Delete(ids...)
-	return ctx.WriteInteger(deleted)
+	return ctx.WriteInteger(stream.DeleteIDs(ids))
 }
 
 func cmdXTRIM(ctx *Context) error {
 	if ctx.ArgCount() < 3 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError("xtrim"))
 	}
-
-	key := ctx.ArgString(0)
-
-	trimStrategy := strings.ToUpper(ctx.ArgString(1))
-	if trimStrategy != "MAXLEN" && trimStrategy != "MINID" {
-		return ctx.WriteError(ErrSyntaxError)
-	}
-
-	approximate := false
-	idx := 2
-
-	if ctx.ArgCount() > idx && strings.ToUpper(ctx.ArgString(idx)) == "~" {
-		approximate = true
-		idx++
-	}
-
-	if ctx.ArgCount() > idx && strings.ToUpper(ctx.ArgString(idx)) == "=" {
-		idx++
-	}
-
-	if idx >= ctx.ArgCount() {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	if trimStrategy == "MINID" {
-		minID, err := normalizeStreamBound(ctx.ArgString(idx), false)
-		if err != nil {
-			return ctx.WriteError(err)
-		}
-		idx++
-
-		limit, err := parseTrimLimit(ctx, idx)
-		if err != nil {
-			return ctx.WriteError(err)
-		}
-
-		stream := getStream(ctx, key)
-		if stream == nil {
-			return ctx.WriteInteger(0)
-		}
-
-		if approximate {
-			return ctx.WriteInteger(stream.TrimByMinIDLimited(minID, limit))
-		}
-		return ctx.WriteInteger(stream.TrimByMinID(minID, false))
-	}
-
-	maxLen, err := strconv.ParseInt(ctx.ArgString(idx), 10, 64)
-	if err != nil {
-		return ctx.WriteError(ErrNotInteger)
-	}
-	// MAXLEN is a count of entries to keep. A negative count is a client
-	// error: StreamValue.Trim would otherwise compute remove = Length-maxLen,
-	// overshoot the entry count, and slice v.Entries[remove:] out of range.
-	if maxLen < 0 {
-		return ctx.WriteError(errCountOutOfRange)
-	}
-
-	limit, err := parseTrimLimit(ctx, idx+1)
+	a, _, err := parseAddTrimArgs(ctx, false)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
-
-	stream := getStream(ctx, key)
+	stream, err := lookupStream(ctx, ctx.ArgString(0))
+	if err != nil {
+		return ctx.WriteError(err)
+	}
 	if stream == nil {
 		return ctx.WriteInteger(0)
 	}
-
-	if approximate {
-		return ctx.WriteInteger(stream.TrimLimited(maxLen, limit))
-	}
-	return ctx.WriteInteger(stream.Trim(maxLen, approximate))
+	return ctx.WriteInteger(stream.TrimStream(a.trim))
 }
 
-// parseTrimLimit reads an optional trailing "LIMIT count" clause at idx.
-// LIMIT 0 disables the eviction cap, matching Redis; a negative count is a
-// client error.
-func parseTrimLimit(ctx *Context, idx int) (int64, error) {
-	if idx >= ctx.ArgCount() || strings.ToUpper(ctx.ArgString(idx)) != "LIMIT" {
-		return 0, nil
+const xinfoHelp = `XINFO <subcommand> [<arg> [value] [opt] ...]. Subcommands are:
+CONSUMERS <key> <groupname>
+    Show consumers of <groupname>.
+GROUPS <key>
+    Show the stream consumer groups.
+STREAM <key> [FULL [COUNT <count>]
+    Show information about the stream.
+HELP
+    Print this help.`
+
+const xgroupHelp = `XGROUP <subcommand> [<arg> [value] [opt] ...]. Subcommands are:
+CREATE <key> <groupname> <id|$> [option]
+    Create a new consumer group. Options are:
+    * MKSTREAM
+      Create the empty stream if it does not exist.
+    * ENTRIESREAD entries_read
+      Set the group's entries_read counter (internal use).
+CREATECONSUMER <key> <groupname> <consumer>
+    Create a new consumer in the specified group.
+DELCONSUMER <key> <groupname> <consumer>
+    Remove the specified consumer.
+DESTROY <key> <groupname>
+    Remove the specified group.
+SETID <key> <groupname> <id|$> [ENTRIESREAD entries_read]
+    Set the current group ID and entries_read counter.
+HELP
+    Print this help.`
+
+func helpReply(text string) []*resp.Value {
+	lines := strings.Split(text, "\n")
+	out := make([]*resp.Value, 0, len(lines))
+	for _, l := range lines {
+		out = append(out, resp.SimpleString(l))
 	}
-	idx++
-	if idx >= ctx.ArgCount() {
-		return 0, ErrSyntaxError
+	return out
+}
+
+// checkSubcommandArity enforces the Redis arity of a container subcommand;
+// arity counts the command and subcommand names, negative is a minimum.
+func checkSubcommandArity(ctx *Context, cmd, sub string, arity int) bool {
+	n := ctx.ArgCount() + 1
+	if (arity >= 0 && n != arity) || (arity < 0 && n < -arity) {
+		_ = ctx.WriteError(errors.New("ERR wrong number of arguments for '" + cmd + "|" + strings.ToLower(sub) + "' command"))
+		return false
 	}
-	limit, err := strconv.ParseInt(ctx.ArgString(idx), 10, 64)
-	if err != nil {
-		return 0, ErrNotInteger
-	}
-	if limit < 0 {
-		return 0, errCountOutOfRange
-	}
-	return limit, nil
+	return true
 }
 
 func cmdXINFO(ctx *Context) error {
 	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError("xinfo"))
 	}
+	sub := ctx.ArgString(0)
+	arities := map[string]int{"STREAM": -3, "GROUPS": 3, "CONSUMERS": 4, "HELP": 2}
+	arity, known := arities[strings.ToUpper(sub)]
+	if !known {
+		return ctx.WriteError(errUnknownSubcommand(sub, "XINFO"))
+	}
+	if !checkSubcommandArity(ctx, "xinfo", sub, arity) {
+		return nil
+	}
+	if strings.EqualFold(sub, "HELP") {
+		return ctx.WriteArray(helpReply(xinfoHelp))
+	}
+	key := ctx.ArgString(1)
+	stream, err := lookupStream(ctx, key)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	if stream == nil {
+		return ctx.WriteError(errStreamNoSuchKey)
+	}
+	now := time.Now().UnixMilli()
 
-	subCmd := strings.ToUpper(ctx.ArgString(0))
-
-	switch subCmd {
-	case "STREAM":
-		if ctx.ArgCount() < 2 {
-			return ctx.WriteError(ErrWrongArgCount)
+	switch strings.ToUpper(sub) {
+	case "CONSUMERS":
+		group := ctx.ArgString(2)
+		consumers, ok := stream.ConsumersInfo(group)
+		if !ok {
+			return ctx.WriteError(errNoConsumerGroup(group, key))
 		}
-		key := ctx.ArgString(1)
-		stream := getStream(ctx, key)
-		if stream == nil {
-			return ctx.WriteError(store.ErrKeyNotFound)
-		}
-
-		full := false
-		for i := 2; i < ctx.ArgCount(); i++ {
-			if strings.ToUpper(ctx.ArgString(i)) == "FULL" {
-				full = true
+		out := make([]*resp.Value, 0, len(consumers))
+		for _, c := range consumers {
+			idle := now - c.SeenTime
+			if idle < 0 {
+				idle = 0
 			}
-		}
-
-		if full {
-			entries := stream.GetRange("-", "+", 0)
-			entryResults := make([]*resp.Value, 0, len(entries))
-			for _, e := range entries {
-				fieldValues := make([]*resp.Value, 0)
-				for k, v := range e.Fields {
-					fieldValues = append(fieldValues, resp.BulkString(k), resp.BulkBytes(v))
+			inactive := int64(-1)
+			if c.ActiveTime >= 0 {
+				inactive = now - c.ActiveTime
+				if inactive < 0 {
+					inactive = 0
 				}
-				entryResults = append(entryResults, resp.ArrayValue([]*resp.Value{
-					resp.BulkString(e.ID),
-					resp.ArrayValue(fieldValues),
-				}))
 			}
-
-			// StreamValue.CreateGroup/DestroyGroup write Groups under
-			// v.mu.Lock(); ranging it here unlocked is a fatal map race.
-			stream.RLock()
-			groupResults := make([]*resp.Value, 0)
-			for name, group := range stream.Groups {
-				consumerResults := make([]*resp.Value, 0)
-				for cname, c := range group.Consumers {
-					consumerResults = append(consumerResults, resp.ArrayValue([]*resp.Value{
-						resp.BulkString("name"), resp.BulkString(cname),
-						resp.BulkString("seen-time"), resp.IntegerValue(c.SeenTime),
-						resp.BulkString("pel-count"), resp.IntegerValue(c.Pending),
-					}))
-				}
-				groupResults = append(groupResults, resp.ArrayValue([]*resp.Value{
-					resp.BulkString("name"), resp.BulkString(name),
-					resp.BulkString("last-delivered-id"), resp.BulkString(group.LastID),
-					resp.BulkString("pel-count"), resp.IntegerValue(int64(len(group.Pending))),
-					resp.BulkString("consumers"), resp.ArrayValue(consumerResults),
-				}))
-			}
-			stream.RUnlock()
-
-			return ctx.WriteArray([]*resp.Value{
-				resp.BulkString("length"), resp.IntegerValue(stream.Len()),
-				resp.BulkString("entries"), resp.ArrayValue(entryResults),
-				resp.BulkString("groups"), resp.ArrayValue(groupResults),
-			})
+			out = append(out, resp.ArrayValue([]*resp.Value{
+				resp.BulkString("name"), resp.BulkString(c.Name),
+				resp.BulkString("pending"), resp.IntegerValue(c.Pending),
+				resp.BulkString("idle"), resp.IntegerValue(idle),
+				resp.BulkString("inactive"), resp.IntegerValue(inactive),
+			}))
 		}
-
-		// Read the group count under the lock, then release it: the
-		// stream.Len() calls below take v.mu.RLock() themselves, and RWMutex
-		// is not reentrant.
-		stream.RLock()
-		groupCount := int64(len(stream.Groups))
-		stream.RUnlock()
-
-		return ctx.WriteArray([]*resp.Value{
-			resp.BulkString("length"), resp.IntegerValue(stream.Len()),
-			resp.BulkString("radix-tree-keys"), resp.IntegerValue(stream.Len()),
-			resp.BulkString("radix-tree-nodes"), resp.IntegerValue(stream.Len() + 1),
-			resp.BulkString("last-generated-id"), resp.BulkString(stream.LastID),
-			resp.BulkString("groups"), resp.IntegerValue(groupCount),
-		})
+		return ctx.WriteArray(out)
 
 	case "GROUPS":
-		if ctx.ArgCount() < 2 {
-			return ctx.WriteError(ErrWrongArgCount)
-		}
-		key := ctx.ArgString(1)
-		stream := getStream(ctx, key)
-		if stream == nil {
-			// Redis raises NOGROUP rather than an empty listing here.
-			return ctx.WriteError(ErrNoGroup)
-		}
-
-		// stream.Groups is written under v.mu by CreateGroup/DestroyGroup.
-		stream.RLock()
-		results := make([]*resp.Value, 0)
-		for name, group := range stream.Groups {
-			results = append(results, resp.ArrayValue([]*resp.Value{
-				resp.BulkString("name"), resp.BulkString(name),
-				resp.BulkString("consumers"), resp.IntegerValue(int64(len(group.Consumers))),
-				resp.BulkString("pending"), resp.IntegerValue(int64(len(group.Pending))),
-				resp.BulkString("last-delivered-id"), resp.BulkString(group.LastID),
+		groups := stream.GroupsInfo()
+		out := make([]*resp.Value, 0, len(groups))
+		for _, g := range groups {
+			out = append(out, resp.ArrayValue([]*resp.Value{
+				resp.BulkString("name"), resp.BulkString(g.Name),
+				resp.BulkString("consumers"), resp.IntegerValue(g.Consumers),
+				resp.BulkString("pending"), resp.IntegerValue(g.Pending),
+				resp.BulkString("last-delivered-id"), resp.BulkString(g.LastID),
+				resp.BulkString("entries-read"), entriesReadValue(g.EntriesRead),
+				resp.BulkString("lag"), lagValue(g),
 			}))
 		}
-		stream.RUnlock()
-		return ctx.WriteArray(results)
-
-	case "CONSUMERS":
-		if ctx.ArgCount() < 3 {
-			return ctx.WriteError(ErrWrongArgCount)
-		}
-		key := ctx.ArgString(1)
-		groupName := ctx.ArgString(2)
-
-		stream := getStream(ctx, key)
-		if stream == nil {
-			// Redis raises NOGROUP rather than an empty listing here.
-			return ctx.WriteError(ErrNoGroup)
-		}
-
-		group := stream.GetGroup(groupName)
-		if group == nil {
-			// Redis raises NOGROUP rather than an empty listing here.
-			return ctx.WriteError(ErrNoGroup)
-		}
-
-		// group.Consumers is written by CREATECONSUMER / DESTCONSUMER under
-		// the stream lock; ranging it unlocked is a fatal map race.
-		stream.RLock()
-		results := make([]*resp.Value, 0)
-		for name, c := range group.Consumers {
-			results = append(results, resp.ArrayValue([]*resp.Value{
-				resp.BulkString("name"), resp.BulkString(name),
-				resp.BulkString("pending"), resp.IntegerValue(c.Pending),
-				resp.BulkString("idle"), resp.IntegerValue(time.Now().UnixMilli() - c.SeenTime),
-			}))
-		}
-		stream.RUnlock()
-		return ctx.WriteArray(results)
-
-	case "HELP":
-		return ctx.WriteArray([]*resp.Value{
-			resp.BulkString("XINFO STREAM <key> [FULL]"),
-			resp.BulkString("XINFO GROUPS <key>"),
-			resp.BulkString("XINFO CONSUMERS <key> <group>"),
-		})
-
-	default:
-		return ctx.WriteError(ErrUnknownCommand)
+		return ctx.WriteArray(out)
 	}
+
+	full := false
+	count := int64(10)
+	if ctx.ArgCount() > 2 {
+		if !strings.EqualFold(ctx.ArgString(2), "FULL") {
+			return ctx.WriteError(errSubcommandSyntax(sub, "XINFO"))
+		}
+		full = true
+		if ctx.ArgCount() > 3 {
+			if ctx.ArgCount() != 5 || !strings.EqualFold(ctx.ArgString(3), "COUNT") {
+				return ctx.WriteError(errSubcommandSyntax(sub, "XINFO"))
+			}
+			n, ok := parseStreamLL(ctx.ArgString(4))
+			if !ok {
+				return ctx.WriteError(ErrNotInteger)
+			}
+			if n < 0 {
+				n = 0
+			}
+			count = n
+		}
+	}
+	info := stream.Info(full, count)
+	nodes := info.Nodes
+	radixNodes := int64(1)
+	switch {
+	case nodes == 1:
+		radixNodes = 2
+	case nodes > 1:
+		radixNodes = int64(2*nodes + 2)
+	}
+	out := []*resp.Value{
+		resp.BulkString("length"), resp.IntegerValue(info.Length),
+		resp.BulkString("radix-tree-keys"), resp.IntegerValue(int64(nodes)),
+		resp.BulkString("radix-tree-nodes"), resp.IntegerValue(radixNodes),
+		resp.BulkString("last-generated-id"), resp.BulkString(info.LastID),
+		resp.BulkString("max-deleted-entry-id"), resp.BulkString(info.MaxDeletedID),
+		resp.BulkString("entries-added"), resp.IntegerValue(info.EntriesAdded),
+		resp.BulkString("recorded-first-entry-id"), resp.BulkString(info.FirstID),
+	}
+	if !full {
+		edge := func(e *store.StreamEntry) *resp.Value {
+			if e == nil {
+				return resp.NullBulkString()
+			}
+			return streamEntryValue(e)
+		}
+		out = append(out,
+			resp.BulkString("groups"), resp.IntegerValue(int64(info.Groups)),
+			resp.BulkString("first-entry"), edge(info.First),
+			resp.BulkString("last-entry"), edge(info.Last),
+		)
+		return ctx.WriteArray(out)
+	}
+	groups := make([]*resp.Value, 0, len(info.GroupInfos))
+	for _, g := range info.GroupInfos {
+		pel := make([]*resp.Value, 0, len(g.PEL))
+		for _, p := range g.PEL {
+			pel = append(pel, resp.ArrayValue([]*resp.Value{
+				resp.BulkString(p.ID), resp.BulkString(p.Consumer),
+				resp.IntegerValue(p.DeliveryTS), resp.IntegerValue(p.Deliveries),
+			}))
+		}
+		consumers := make([]*resp.Value, 0, len(g.ConsumerSet))
+		for _, c := range g.ConsumerSet {
+			cpel := make([]*resp.Value, 0, len(c.PEL))
+			for _, p := range c.PEL {
+				cpel = append(cpel, resp.ArrayValue([]*resp.Value{
+					resp.BulkString(p.ID), resp.IntegerValue(p.DeliveryTS), resp.IntegerValue(p.Deliveries),
+				}))
+			}
+			consumers = append(consumers, resp.ArrayValue([]*resp.Value{
+				resp.BulkString("name"), resp.BulkString(c.Name),
+				resp.BulkString("seen-time"), resp.IntegerValue(c.SeenTime),
+				resp.BulkString("active-time"), resp.IntegerValue(c.ActiveTime),
+				resp.BulkString("pel-count"), resp.IntegerValue(c.Pending),
+				resp.BulkString("pending"), resp.ArrayValue(cpel),
+			}))
+		}
+		groups = append(groups, resp.ArrayValue([]*resp.Value{
+			resp.BulkString("name"), resp.BulkString(g.Name),
+			resp.BulkString("last-delivered-id"), resp.BulkString(g.LastID),
+			resp.BulkString("entries-read"), entriesReadValue(g.EntriesRead),
+			resp.BulkString("lag"), lagValue(g),
+			resp.BulkString("pel-count"), resp.IntegerValue(g.Pending),
+			resp.BulkString("pending"), resp.ArrayValue(pel),
+			resp.BulkString("consumers"), resp.ArrayValue(consumers),
+		}))
+	}
+	out = append(out,
+		resp.BulkString("entries"), streamEntriesValue(info.Entries),
+		resp.BulkString("groups"), resp.ArrayValue(groups),
+	)
+	return ctx.WriteArray(out)
+}
+
+func entriesReadValue(n int64) *resp.Value {
+	if n == store.EntriesReadInvalid {
+		return resp.NullBulkString()
+	}
+	return resp.IntegerValue(n)
+}
+
+func lagValue(g store.StreamGroupInfo) *resp.Value {
+	if !g.LagValid {
+		return resp.NullBulkString()
+	}
+	return resp.IntegerValue(g.Lag)
 }
 
 func cmdXGROUP(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
+	if ctx.ArgCount() < 1 {
+		return ctx.WriteError(arityError("xgroup"))
+	}
+	sub := ctx.ArgString(0)
+	arities := map[string]int{"CREATE": -5, "SETID": -5, "DESTROY": 4, "CREATECONSUMER": 5, "DELCONSUMER": 5, "HELP": 2}
+	upper := strings.ToUpper(sub)
+	arity, known := arities[upper]
+	if !known {
+		return ctx.WriteError(errUnknownSubcommand(sub, "XGROUP"))
+	}
+	if !checkSubcommandArity(ctx, "xgroup", sub, arity) {
+		return nil
+	}
+	if upper == "HELP" {
+		return ctx.WriteArray(helpReply(xgroupHelp))
 	}
 
-	subCmd := strings.ToUpper(ctx.ArgString(0))
+	argc := ctx.ArgCount() + 1
+	mkstream := false
+	entriesRead := store.EntriesReadInvalid
+	for i := 4; i < ctx.ArgCount(); {
+		opt := ctx.ArgString(i)
+		switch {
+		case upper == "CREATE" && strings.EqualFold(opt, "MKSTREAM"):
+			mkstream = true
+			i++
+		case (upper == "CREATE" || upper == "SETID") && strings.EqualFold(opt, "ENTRIESREAD") && i+1 < ctx.ArgCount():
+			n, ok := parseStreamLL(ctx.ArgString(i + 1))
+			if !ok {
+				return ctx.WriteError(ErrNotInteger)
+			}
+			if n < 0 && n != store.EntriesReadInvalid {
+				return ctx.WriteError(streamReplyError("ERR value for ENTRIESREAD must be positive or -1"))
+			}
+			entriesRead = n
+			i += 2
+		default:
+			return ctx.WriteError(errSubcommandSyntax(sub, "XGROUP"))
+		}
+	}
 
-	switch subCmd {
+	key := ctx.ArgString(1)
+	groupName := ctx.ArgString(2)
+	stream, err := lookupStream(ctx, key)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	if stream == nil && !mkstream {
+		return ctx.WriteError(errXGroupKeyRequired)
+	}
+	if stream != nil && (upper == "SETID" || upper == "CREATECONSUMER" || upper == "DELCONSUMER") && !stream.HasGroup(groupName) {
+		return ctx.WriteError(errNoConsumerGroup(groupName, key))
+	}
+
+	switch upper {
 	case "CREATE":
-		if ctx.ArgCount() < 4 {
-			return ctx.WriteError(ErrWrongArgCount)
+		if argc > 8 {
+			return ctx.WriteError(errSubcommandSyntax(sub, "XGROUP"))
 		}
-
-		key := ctx.ArgString(1)
-		groupName := ctx.ArgString(2)
-		lastID := ctx.ArgString(3)
-
-		stream := getStream(ctx, key)
+		idArg := ctx.ArgString(3)
+		var id store.StreamID
+		useLast := idArg == "$"
+		if !useLast {
+			id, err = parseStrictStreamID(idArg)
+			if err != nil {
+				return ctx.WriteError(err)
+			}
+		}
 		if stream == nil {
-			if ctx.ArgCount() > 4 && strings.ToUpper(ctx.ArgString(4)) == "MKSTREAM" {
-				stream = getOrCreateStream(ctx, key, 0)
-				if stream == nil {
-					return ctx.WriteError(store.ErrWrongType)
-				}
-			} else {
-				return ctx.WriteError(store.ErrKeyNotFound)
+			stream = store.NewStreamValue(0)
+			if err := ctx.Store.Set(key, stream, store.SetOptions{}); err != nil {
+				return ctx.WriteError(err)
 			}
 		}
-
-		// A malformed or partial id would be stored raw and break every
-		// later read of this group; "$" is resolved inside CreateGroup.
-		groupStart := lastID
-		if lastID != "$" {
-			var nerr error
-			groupStart, nerr = normalizeStreamBound(lastID, false)
-			if nerr != nil {
-				return ctx.WriteError(nerr)
-			}
-		}
-
-		err := stream.CreateGroup(groupName, groupStart)
-		if err != nil {
+		if !stream.CreateGroupAt(groupName, id, useLast, entriesRead) {
 			return ctx.WriteError(ErrBusyGroup)
 		}
+		return ctx.WriteOK()
 
+	case "SETID":
+		if argc != 5 && argc != 7 {
+			return ctx.WriteError(errSubcommandSyntax(sub, "XGROUP"))
+		}
+		idArg := ctx.ArgString(3)
+		var id store.StreamID
+		useLast := idArg == "$"
+		if !useLast {
+			id, err = store.ParseStreamRangeID(idArg, 0)
+			if err != nil {
+				return ctx.WriteError(err)
+			}
+		}
+		if !stream.SetGroupID(groupName, id, useLast, entriesRead) {
+			return ctx.WriteError(errNoConsumerGroup(groupName, key))
+		}
 		return ctx.WriteOK()
 
 	case "DESTROY":
-		if ctx.ArgCount() < 3 {
-			return ctx.WriteError(ErrWrongArgCount)
-		}
-
-		key := ctx.ArgString(1)
-		groupName := ctx.ArgString(2)
-
-		stream := getStream(ctx, key)
-		if stream == nil {
-			return ctx.WriteInteger(0)
-		}
-
 		if stream.DestroyGroup(groupName) {
+			ctx.Store.KeyNotifier().NotifyKey(key)
 			return ctx.WriteInteger(1)
 		}
 		return ctx.WriteInteger(0)
 
-	case "SETID":
-		if ctx.ArgCount() < 4 {
-			return ctx.WriteError(ErrWrongArgCount)
-		}
-
-		key := ctx.ArgString(1)
-		groupName := ctx.ArgString(2)
-		lastID := ctx.ArgString(3)
-
-		stream := getStream(ctx, key)
-		if stream == nil {
-			return ctx.WriteError(store.ErrKeyNotFound)
-		}
-
-		// Same raw-storage hazard as CREATE: an unparseable id would leave
-		// the group permanently silent. "$" resolves to the stream's last
-		// generated id.
-		var groupStart string
-		if lastID == "$" {
-			groupStart = stream.LastID
-		} else {
-			var nerr error
-			groupStart, nerr = normalizeStreamBound(lastID, false)
-			if nerr != nil {
-				return ctx.WriteError(nerr)
-			}
-		}
-
-		if !stream.SetGroupLastID(groupName, groupStart) {
-			return ctx.WriteError(ErrNoGroup)
-		}
-
-		return ctx.WriteOK()
-
-	case "DELCONSUMER":
-		if ctx.ArgCount() < 4 {
-			return ctx.WriteError(ErrWrongArgCount)
-		}
-
-		key := ctx.ArgString(1)
-		groupName := ctx.ArgString(2)
-		consumerName := ctx.ArgString(3)
-
-		stream := getStream(ctx, key)
-		if stream == nil {
-			// Redis raises NOGROUP for the key-requiring XGROUP subcommands
-			// instead of a zero count (family-consistent with SETID and
-			// CREATECONSUMER).
-			return ctx.WriteError(ErrNoGroup)
-		}
-
-		group := stream.GetGroup(groupName)
-		if group == nil {
-			return ctx.WriteError(ErrNoGroup)
-		}
-
-		// These maps are read and mutated here, and XINFO CONSUMERS ranges
-		// group.Consumers. Hold the stream lock across the whole read-delete
-		// so the pair cannot interleave. GetGroup above released the lock
-		// before returning the group, so it must be re-taken here.
-		var pending int64
-		stream.RLock()
-		_, exists := group.Consumers[consumerName]
-		stream.RUnlock()
-		if exists {
-			stream.Lock()
-			if c, ok := group.Consumers[consumerName]; ok {
-				pending = c.Pending
-				// Redis purges the deleted consumer's pending entries from the
-				// group PEL: they become unclaimable, not orphaned under a ghost.
-				for id, p := range group.Pending {
-					if p.Consumer == consumerName {
-						delete(group.Pending, id)
-					}
-				}
-				delete(group.Consumers, consumerName)
-			}
-			stream.Unlock()
-		}
-
-		return ctx.WriteInteger(pending)
-
 	case "CREATECONSUMER":
-		if ctx.ArgCount() < 4 {
-			return ctx.WriteError(ErrWrongArgCount)
+		created, ok := stream.CreateConsumer(groupName, ctx.ArgString(3), time.Now().UnixMilli())
+		if !ok {
+			return ctx.WriteError(errNoConsumerGroup(groupName, key))
 		}
-
-		key := ctx.ArgString(1)
-		groupName := ctx.ArgString(2)
-		consumerName := ctx.ArgString(3)
-
-		stream := getStream(ctx, key)
-		if stream == nil {
-			return ctx.WriteError(ErrNoGroup)
+		if created {
+			return ctx.WriteInteger(1)
 		}
-
-		group := stream.GetGroup(groupName)
-		if group == nil {
-			return ctx.WriteError(ErrNoGroup)
-		}
-
-		// Check-then-create on group.Consumers must be atomic: XINFO CONSUMERS
-		// ranges that map, and a concurrent CREATECONSUMER would otherwise
-		// both see "missing" and insert into the same map unlocked.
-		stream.Lock()
-		created := int64(0)
-		if _, exists := group.Consumers[consumerName]; !exists {
-			group.GetOrCreateConsumer(consumerName)
-			created = 1
-		}
-		stream.Unlock()
-
-		return ctx.WriteInteger(created)
+		return ctx.WriteInteger(0)
 
 	default:
-		return ctx.WriteError(ErrUnknownCommand)
-	}
-}
-
-func cmdXREADGROUP(ctx *Context) error {
-	if ctx.ArgCount() < 6 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	var groupName, consumerName string
-	var count int64 = 0
-	var block int64 = 0
-	var streamsIdx int
-	var noack bool
-
-	i := 0
-	for i < ctx.ArgCount() {
-		arg := strings.ToUpper(ctx.ArgString(i))
-		switch arg {
-		case "GROUP":
-			if i+2 >= ctx.ArgCount() {
-				return ctx.WriteError(ErrSyntaxError)
-			}
-			groupName = ctx.ArgString(i + 1)
-			consumerName = ctx.ArgString(i + 2)
-			i += 3
-		case "COUNT":
-			if i+1 >= ctx.ArgCount() {
-				return ctx.WriteError(ErrSyntaxError)
-			}
-			var err error
-			count, err = strconv.ParseInt(ctx.ArgString(i+1), 10, 64)
-			if err != nil {
-				return ctx.WriteError(ErrNotInteger)
-			}
-			i += 2
-		case "BLOCK":
-			if i+1 >= ctx.ArgCount() {
-				return ctx.WriteError(ErrSyntaxError)
-			}
-			var err error
-			block, err = strconv.ParseInt(ctx.ArgString(i+1), 10, 64)
-			if err != nil {
-				return ctx.WriteError(ErrNotInteger)
-			}
-			i += 2
-		case "STREAMS":
-			streamsIdx = i + 1
-			i = ctx.ArgCount()
-		case "NOACK":
-			noack = true
-			i++
-		default:
-			i++
+		pending, ok := stream.DeleteConsumer(groupName, ctx.ArgString(3))
+		if !ok {
+			return ctx.WriteError(errNoConsumerGroup(groupName, key))
 		}
+		return ctx.WriteInteger(pending)
 	}
-
-	if groupName == "" || consumerName == "" || streamsIdx == 0 {
-		return ctx.WriteError(ErrSyntaxError)
-	}
-
-	remaining := ctx.ArgCount() - streamsIdx
-	if remaining < 2 || remaining%2 != 0 {
-		return ctx.WriteError(ErrSyntaxError)
-	}
-
-	numStreams := remaining / 2
-	keys := make([]string, numStreams)
-	ids := make([]string, numStreams)
-
-	for i := 0; i < numStreams; i++ {
-		keys[i] = ctx.ArgString(streamsIdx + i)
-		ids[i] = ctx.ArgString(streamsIdx + numStreams + i)
-	}
-
-	results := make([][]*resp.Value, numStreams)
-	totalEntries := int64(0)
-
-	for i, key := range keys {
-		stream := getStream(ctx, key)
-		// A stream that does not exist has no consumer group either, so this
-		// is the same condition as the missing-group arm below and must be
-		// answered the same way. It used to `continue`, handing the caller an
-		// empty reply that reads as "no new messages" — three lines below, the
-		// missing GROUP returned NOGROUP, so one condition had two opposite
-		// answers in the same loop.
-		if stream == nil {
-			return ctx.WriteError(ErrNoGroup)
-		}
-
-		group := stream.GetGroup(groupName)
-		if group == nil {
-			return ctx.WriteError(ErrNoGroup)
-		}
-
-		consumer := group.GetOrCreateConsumer(consumerName)
-		consumer.SeenTime = time.Now().UnixMilli()
-
-		if ids[i] != ">" {
-			pending := group.GetPending("-", "+", 0)
-			type pelItem struct {
-				id  string
-				ms  int64
-				seq int64
-			}
-			items := make([]pelItem, 0)
-			for _, p := range pending {
-				if p.Consumer != consumerName {
-					continue
-				}
-				ms, seq, ok := streamIDParts(p.ID)
-				if !ok {
-					continue
-				}
-				if startMS, startSeq, valid := streamIDParts(ids[i]); valid {
-					if ms < startMS || (ms == startMS && seq <= startSeq) {
-						continue
-					}
-				}
-				items = append(items, pelItem{p.ID, ms, seq})
-			}
-			sort.Slice(items, func(a, b int) bool {
-				return items[a].ms < items[b].ms || (items[a].ms == items[b].ms && items[a].seq < items[b].seq)
-			})
-			if count > 0 && int64(len(items)) > count {
-				items = items[:count]
-			}
-			for _, it := range items {
-				entryResult := []*resp.Value{resp.BulkString(it.id)}
-				if entry := stream.GetEntryByID(it.id); entry != nil {
-					fieldValues := make([]*resp.Value, 0, len(entry.Fields)*2)
-					for k, v := range entry.Fields {
-						fieldValues = append(fieldValues, resp.BulkString(k), resp.BulkBytes(v))
-					}
-					entryResult = append(entryResult, resp.ArrayValue(fieldValues))
-				} else {
-					entryResult = append(entryResult, resp.NullArray())
-				}
-				results[i] = append(results[i], entryResult...)
-				totalEntries++
-			}
-			continue
-		}
-
-		var startID string
-		if ids[i] == ">" {
-			startID = group.LastID
-			if startID == "0-0" || startID == "0" {
-				startID = "-"
-			}
-		} else {
-			startID = ids[i]
-		}
-
-		readCount := count
-		if ids[i] == ">" && startID != "-" && readCount > 0 {
-			readCount++
-		}
-
-		entries := stream.GetRange(startID, "+", readCount)
-		var lastDelivered string
-		for _, entry := range entries {
-			if ids[i] == ">" {
-				if startID != "-" && entry.ID == startID {
-					continue
-				}
-				if !noack {
-					group.AddPending(entry.ID, consumerName)
-				}
-				lastDelivered = entry.ID
-			}
-
-			entryResult := []*resp.Value{
-				resp.BulkString(entry.ID),
-			}
-			fieldValues := make([]*resp.Value, 0, len(entry.Fields)*2)
-			for k, v := range entry.Fields {
-				fieldValues = append(fieldValues, resp.BulkString(k), resp.BulkBytes(v))
-			}
-			entryResult = append(entryResult, resp.ArrayValue(fieldValues))
-			results[i] = append(results[i], entryResult...)
-			totalEntries++
-		}
-
-		if ids[i] == ">" && lastDelivered != "" {
-			stream.SetGroupLastID(groupName, lastDelivered)
-		}
-	}
-
-	if totalEntries == 0 && block > 0 && len(ids) > 0 && ids[0] == ">" {
-		dur := time.Duration(block) * time.Millisecond
-
-		for {
-			_, notified := ctx.waitForStreamKeys(keys, dur)
-			if !notified {
-				break
-			}
-
-			for i, key := range keys {
-				stream := getStream(ctx, key)
-				if stream == nil {
-					continue
-				}
-
-				group := stream.GetGroup(groupName)
-				if group == nil {
-					continue
-				}
-
-				startID := group.LastID
-				if startID == "0-0" || startID == "0" {
-					startID = "-"
-				}
-
-				readCount := count
-				if startID != "-" && readCount > 0 {
-					readCount++
-				}
-
-				entries := stream.GetRange(startID, "+", readCount)
-				var lastDelivered string
-				for _, entry := range entries {
-					if startID != "-" && entry.ID == startID {
-						continue
-					}
-					if !noack {
-						group.AddPending(entry.ID, consumerName)
-					}
-					lastDelivered = entry.ID
-
-					entryResult := []*resp.Value{resp.BulkString(entry.ID)}
-					fieldValues := make([]*resp.Value, 0)
-					for k, v := range entry.Fields {
-						fieldValues = append(fieldValues, resp.BulkString(k), resp.BulkBytes(v))
-					}
-					entryResult = append(entryResult, resp.ArrayValue(fieldValues))
-					results[i] = append(results[i], entryResult...)
-					totalEntries++
-				}
-
-				if lastDelivered != "" {
-					stream.SetGroupLastID(groupName, lastDelivered)
-				}
-			}
-
-			if totalEntries > 0 {
-				break
-			}
-		}
-	}
-
-	if totalEntries == 0 {
-		return ctx.WriteNull()
-	}
-
-	finalResults := make([]*resp.Value, numStreams)
-	for i := range keys {
-		if len(results[i]) > 0 {
-			finalResults[i] = resp.ArrayValue([]*resp.Value{
-				resp.BulkString(keys[i]),
-				resp.ArrayValue(results[i]),
-			})
-		}
-	}
-
-	return ctx.WriteArray(finalResults)
 }
 
 func cmdXACK(ctx *Context) error {
 	if ctx.ArgCount() < 3 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError("xack"))
 	}
-
-	key := ctx.ArgString(0)
+	stream, err := lookupStream(ctx, ctx.ArgString(0))
+	if err != nil {
+		return ctx.WriteError(err)
+	}
 	groupName := ctx.ArgString(1)
-	entryIDs := make([]string, 0, ctx.ArgCount()-2)
+	if stream == nil || !stream.HasGroup(groupName) {
+		return ctx.WriteInteger(0)
+	}
+	ids := make([]store.StreamID, 0, ctx.ArgCount()-2)
 	for i := 2; i < ctx.ArgCount(); i++ {
-		entryIDs = append(entryIDs, ctx.ArgString(i))
-	}
-
-	stream := getStream(ctx, key)
-	if stream == nil {
-		return ctx.WriteInteger(0)
-	}
-
-	group := stream.GetGroup(groupName)
-	if group == nil {
-		// Redis counts a missing group as "nothing acknowledged", not an error.
-		return ctx.WriteInteger(0)
-	}
-
-	acked := int64(0)
-	for _, id := range entryIDs {
-		if group.Ack(id) {
-			acked++
+		id, err := parseStrictStreamID(ctx.ArgString(i))
+		if err != nil {
+			return ctx.WriteError(err)
 		}
+		ids = append(ids, id)
 	}
-
+	acked, _ := stream.AckIDs(groupName, ids)
 	return ctx.WriteInteger(acked)
 }
 
 func cmdXPENDING(ctx *Context) error {
 	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError("xpending"))
 	}
-
-	key := ctx.ArgString(0)
-	groupName := ctx.ArgString(1)
-
-	stream := getStream(ctx, key)
-	if stream == nil {
-		return ctx.WriteArray([]*resp.Value{})
+	argc := ctx.ArgCount() + 1
+	justInfo := argc == 3
+	if argc != 3 && (argc < 6 || argc > 9) {
+		return ctx.WriteError(ErrSyntaxError)
 	}
+	key, groupName := ctx.ArgString(0), ctx.ArgString(1)
 
-	group := stream.GetGroup(groupName)
-	if group == nil {
-		return ctx.WriteError(ErrNoGroup)
-	}
-
-	if ctx.ArgCount() > 2 {
-		// Redis requires the full <start> <end> <count> triple for the
-		// detail form.
-		if ctx.ArgCount() < 5 {
-			return ctx.WriteError(ErrWrongArgCount)
+	var start, end store.StreamID
+	var count, minIdle int64
+	consumer := ""
+	byConsumer := false
+	if argc >= 6 {
+		startIdx := 2
+		if strings.EqualFold(ctx.ArgString(2), "IDLE") {
+			n, ok := parseStreamLL(ctx.ArgString(3))
+			if !ok {
+				return ctx.WriteError(ErrNotInteger)
+			}
+			minIdle = n
+			if argc < 8 {
+				return ctx.WriteError(ErrSyntaxError)
+			}
+			startIdx += 2
 		}
-
-		start, err := normalizeStreamBound(ctx.ArgString(2), false)
-		if err != nil {
-			return ctx.WriteError(err)
-		}
-		end, err := normalizeStreamBound(ctx.ArgString(3), true)
-		if err != nil {
-			return ctx.WriteError(err)
-		}
-		count, err := strconv.ParseInt(ctx.ArgString(4), 10, 64)
-		if err != nil {
+		n, ok := parseStreamLL(ctx.ArgString(startIdx + 2))
+		if !ok {
 			return ctx.WriteError(ErrNotInteger)
 		}
-		if count <= 0 {
-			return ctx.WriteError(ErrSyntaxError)
+		if n < 0 {
+			n = 0
 		}
-		consumer := ""
-		if ctx.ArgCount() > 5 {
-			consumer = ctx.ArgString(5)
+		count = n
+		var err error
+		if start, err = store.ParseStreamInterval(ctx.ArgString(startIdx), false); err != nil {
+			return ctx.WriteError(err)
 		}
+		if end, err = store.ParseStreamInterval(ctx.ArgString(startIdx+1), true); err != nil {
+			return ctx.WriteError(err)
+		}
+		if startIdx+3 < ctx.ArgCount() {
+			consumer = ctx.ArgString(startIdx + 3)
+			byConsumer = true
+		}
+	}
 
-		// GetPending's own bounds compare lexicographically, so fetch the
-		// whole PEL and range/filter numerically: variable-width IDs sort
-		// wrong as strings ("10-0" < "9-0").
-		pending := group.GetPending("-", "+", 0)
-		now := time.Now().UnixMilli()
-		startMS, startSeq, hasStart := streamIDParts(start)
-		endMS, endSeq, hasEnd := streamIDParts(end)
-		type pendingRow struct {
-			id         string
-			consumer   string
-			idle       int64
-			deliveries int64
-			ms, seq    int64
+	stream, err := lookupStream(ctx, key)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	if stream == nil || !stream.HasGroup(groupName) {
+		return ctx.WriteError(errNoGroupFor(key, groupName))
+	}
+
+	if justInfo {
+		summary, ok := stream.PendingSummary(groupName)
+		if !ok {
+			return ctx.WriteError(errNoGroupFor(key, groupName))
 		}
-		rows := make([]pendingRow, 0, len(pending))
-		for _, p := range pending {
-			ms, seq, ok := streamIDParts(p.ID)
-			if !ok {
-				continue
-			}
-			if hasStart && (ms < startMS || (ms == startMS && seq < startSeq)) {
-				continue
-			}
-			if hasEnd && (ms > endMS || (ms == endMS && seq > endSeq)) {
-				continue
-			}
-			if consumer != "" && p.Consumer != consumer {
-				continue
-			}
-			rows = append(rows, pendingRow{
-				id:         p.ID,
-				consumer:   p.Consumer,
-				idle:       now - p.DeliveryTS,
-				deliveries: p.Deliveries,
-				ms:         ms,
-				seq:        seq,
+		if summary.Count == 0 {
+			return ctx.WriteArray([]*resp.Value{
+				resp.IntegerValue(0), resp.NullBulkString(), resp.NullBulkString(), resp.NullArray(),
 			})
 		}
-		sort.Slice(rows, func(i, j int) bool {
-			if rows[i].ms != rows[j].ms {
-				return rows[i].ms < rows[j].ms
-			}
-			return rows[i].seq < rows[j].seq
-		})
-		if int64(len(rows)) > count {
-			rows = rows[:count]
-		}
-
-		results := make([]*resp.Value, 0, len(rows))
-		for _, r := range rows {
-			results = append(results, resp.ArrayValue([]*resp.Value{
-				resp.BulkString(r.id),
-				resp.BulkString(r.consumer),
-				resp.IntegerValue(r.idle),
-				resp.IntegerValue(r.deliveries),
+		consumers := make([]*resp.Value, 0, len(summary.Consumers))
+		for _, c := range summary.Consumers {
+			consumers = append(consumers, resp.ArrayValue([]*resp.Value{
+				resp.BulkString(c.Name), resp.BulkString(strconv.FormatInt(c.Count, 10)),
 			}))
 		}
-		return ctx.WriteArray(results)
+		return ctx.WriteArray([]*resp.Value{
+			resp.IntegerValue(summary.Count),
+			resp.BulkString(summary.Min),
+			resp.BulkString(summary.Max),
+			resp.ArrayValue(consumers),
+		})
 	}
 
-	pendingCount := group.GetPendingCount()
-	firstID, lastID := group.GetFirstLastID()
-	consumers := group.GetAllConsumers()
-
-	if pendingCount == 0 {
-		// Redis short-circuits here and answers with an EMPTY array: an empty
-		// PEL has no smallest/greatest ID to report, so the 4-element summary
-		// shape does not exist. Building it with null placeholders told a
-		// client reading element [1] of a 4-element reply that its ID was null.
-		return ctx.WriteArray([]*resp.Value{})
+	now := time.Now().UnixMilli()
+	rows, ok := stream.PendingRange(groupName, start, end, count, minIdle, consumer, byConsumer, now)
+	if !ok {
+		return ctx.WriteError(errNoGroupFor(key, groupName))
 	}
-
-	consumerResults := make([]*resp.Value, 0, len(consumers))
-	for _, c := range consumers {
-		cPending := group.GetConsumerPending(c)
-		consumerResults = append(consumerResults, resp.ArrayValue([]*resp.Value{
-			resp.BulkString(c),
-			resp.IntegerValue(cPending),
+	out := make([]*resp.Value, 0, len(rows))
+	for _, r := range rows {
+		idle := now - r.DeliveryTS
+		if idle < 0 {
+			idle = 0
+		}
+		out = append(out, resp.ArrayValue([]*resp.Value{
+			resp.BulkString(r.ID), resp.BulkString(r.Consumer),
+			resp.IntegerValue(idle), resp.IntegerValue(r.Deliveries),
 		}))
 	}
-
-	return ctx.WriteArray([]*resp.Value{
-		resp.IntegerValue(pendingCount),
-		resp.BulkString(firstID),
-		resp.BulkString(lastID),
-		resp.ArrayValue(consumerResults),
-	})
+	return ctx.WriteArray(out)
 }
 
 func cmdXCLAIM(ctx *Context) error {
 	if ctx.ArgCount() < 5 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError("xclaim"))
 	}
-
-	key := ctx.ArgString(0)
-	groupName := ctx.ArgString(1)
-	consumerName := ctx.ArgString(2)
-	minIdleTime, err := strconv.ParseInt(ctx.ArgString(3), 10, 64)
+	key, groupName, consumerName := ctx.ArgString(0), ctx.ArgString(1), ctx.ArgString(2)
+	stream, err := lookupStream(ctx, key)
 	if err != nil {
-		return ctx.WriteError(ErrNotInteger)
+		return ctx.WriteError(err)
+	}
+	if stream == nil || !stream.HasGroup(groupName) {
+		return ctx.WriteError(errNoGroupFor(key, groupName))
+	}
+	minIdle, ok := parseStreamLL(ctx.ArgString(3))
+	if !ok {
+		return ctx.WriteError(streamReplyError("ERR Invalid min-idle-time argument for XCLAIM"))
+	}
+	if minIdle < 0 {
+		minIdle = 0
 	}
 
-	var entryIDs []string
-	var retryCount int64
-	var setRetry bool
-	var force bool
-	var justid bool
-	var idleMS int64
-	var setIdle bool
-	var timeMS int64
-	var setTime bool
+	j := 4
+	ids := make([]store.StreamID, 0, ctx.ArgCount()-4)
+	for ; j < ctx.ArgCount(); j++ {
+		id, err := parseStrictStreamID(ctx.ArgString(j))
+		if err != nil {
+			break
+		}
+		ids = append(ids, id)
+	}
 
-	i := 4
-	for i < ctx.ArgCount() {
-		arg := strings.ToUpper(ctx.ArgString(i))
-		switch arg {
-		case "IDLE", "TIME", "RETRYCOUNT":
-			if i+1 >= ctx.ArgCount() {
-				return ctx.WriteError(ErrSyntaxError)
+	now := time.Now().UnixMilli()
+	args := store.StreamClaimArgs{MinIdle: minIdle, DeliveryTS: -1, RetryCount: -1}
+	for ; j < ctx.ArgCount(); j++ {
+		moreargs := ctx.ArgCount() - 1 - j
+		opt := ctx.ArgString(j)
+		switch {
+		case strings.EqualFold(opt, "FORCE"):
+			args.Force = true
+		case strings.EqualFold(opt, "JUSTID"):
+			args.JustID = true
+		case strings.EqualFold(opt, "IDLE") && moreargs > 0:
+			j++
+			n, ok := parseStreamLL(ctx.ArgString(j))
+			if !ok {
+				return ctx.WriteError(streamReplyError("ERR Invalid IDLE option argument for XCLAIM"))
 			}
-			value, err := strconv.ParseInt(ctx.ArgString(i+1), 10, 64)
+			args.DeliveryTS = now - n
+		case strings.EqualFold(opt, "TIME") && moreargs > 0:
+			j++
+			n, ok := parseStreamLL(ctx.ArgString(j))
+			if !ok {
+				return ctx.WriteError(streamReplyError("ERR Invalid TIME option argument for XCLAIM"))
+			}
+			args.DeliveryTS = n
+		case strings.EqualFold(opt, "RETRYCOUNT") && moreargs > 0:
+			j++
+			n, ok := parseStreamLL(ctx.ArgString(j))
+			if !ok {
+				return ctx.WriteError(streamReplyError("ERR Invalid RETRYCOUNT option argument for XCLAIM"))
+			}
+			args.RetryCount = n
+		case strings.EqualFold(opt, "LASTID") && moreargs > 0:
+			j++
+			id, err := parseStrictStreamID(ctx.ArgString(j))
 			if err != nil {
-				return ctx.WriteError(ErrSyntaxError)
+				return ctx.WriteError(err)
 			}
-			switch arg {
-			case "RETRYCOUNT":
-				retryCount = value
-				setRetry = true
-			case "IDLE":
-				idleMS = value
-				setIdle = true
-			case "TIME":
-				timeMS = value
-				setTime = true
-			}
-			i += 2
-		case "FORCE":
-			force = true
-			i++
-		case "JUSTID":
-			justid = true
-			i++
+			args.LastID = id
 		default:
-			entryIDs = append(entryIDs, ctx.ArgString(i))
-			i++
+			return ctx.WriteError(streamReplyErrorf("ERR Unrecognized XCLAIM option '%s'", opt))
 		}
 	}
-
-	if len(entryIDs) == 0 {
-		return ctx.WriteError(ErrSyntaxError)
+	if args.DeliveryTS == -1 {
+		args.DeliveryTS = now
 	}
 
-	stream := getStream(ctx, key)
-	if stream == nil {
-		return ctx.WriteArray([]*resp.Value{})
+	items, ok := stream.ClaimIDs(groupName, consumerName, ids, args, now)
+	if !ok {
+		return ctx.WriteError(errNoGroupFor(key, groupName))
 	}
-
-	group := stream.GetGroup(groupName)
-	if group == nil {
-		return ctx.WriteError(ErrNoGroup)
-	}
-
-	if force {
-		filtered := make([]string, 0, len(entryIDs))
-		for _, id := range entryIDs {
-			if stream.GetEntryByID(id) != nil {
-				filtered = append(filtered, id)
-			}
-		}
-		entryIDs = filtered
-	}
-
-	claimed := group.ClaimWithOptions(entryIDs, consumerName, store.ClaimOptions{
-		MinIdleTime: minIdleTime,
-		JustID:      justid,
-		Force:       force,
-		RetryCount:  retryCount,
-		SetRetry:    setRetry,
-		IdleMS:      idleMS,
-		SetIdle:     setIdle,
-		TimeMS:      timeMS,
-		SetTime:     setTime,
-	})
-
-	results := make([]*resp.Value, 0, len(claimed))
-	for _, id := range claimed {
-		if justid {
-			results = append(results, resp.BulkString(id))
-		} else {
-			entry := stream.GetEntryByID(id)
-			if entry != nil {
-				entryResult := []*resp.Value{resp.BulkString(entry.ID)}
-				fieldValues := make([]*resp.Value, 0)
-				for k, v := range entry.Fields {
-					fieldValues = append(fieldValues, resp.BulkString(k), resp.BulkBytes(v))
-				}
-				entryResult = append(entryResult, resp.ArrayValue(fieldValues))
-				results = append(results, resp.ArrayValue(entryResult))
-			}
-		}
-	}
-
-	return ctx.WriteArray(results)
+	return ctx.WriteValue(streamItemsValue(items, args.JustID))
 }
 
 func cmdXAUTOCLAIM(ctx *Context) error {
 	if ctx.ArgCount() < 5 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError("xautoclaim"))
 	}
-
-	key := ctx.ArgString(0)
-	groupName := ctx.ArgString(1)
-	consumerName := ctx.ArgString(2)
-	minIdleTime, err := strconv.ParseInt(ctx.ArgString(3), 10, 64)
-	if err != nil {
-		return ctx.WriteError(ErrNotInteger)
+	key, groupName, consumerName := ctx.ArgString(0), ctx.ArgString(1), ctx.ArgString(2)
+	minIdle, ok := parseStreamLL(ctx.ArgString(3))
+	if !ok {
+		return ctx.WriteError(streamReplyError("ERR Invalid min-idle-time argument for XAUTOCLAIM"))
 	}
-	start := ctx.ArgString(4)
-
-	var count int64 = 100
-	var justid bool
-
-	i := 5
-	for i < ctx.ArgCount() {
-		arg := strings.ToUpper(ctx.ArgString(i))
-		switch arg {
-		case "COUNT":
-			if i+1 >= ctx.ArgCount() {
-				return ctx.WriteError(ErrSyntaxError)
-			}
-			count, err = strconv.ParseInt(ctx.ArgString(i+1), 10, 64)
-			if err != nil {
-				return ctx.WriteError(ErrNotInteger)
-			}
-			i += 2
-		case "JUSTID":
-			justid = true
-			i++
-		default:
-			i++
-		}
+	if minIdle < 0 {
+		minIdle = 0
 	}
-
-	stream := getStream(ctx, key)
-	if stream == nil {
-		return ctx.WriteArray([]*resp.Value{
-			resp.BulkString("0-0"),
-			resp.ArrayValue([]*resp.Value{}),
-			resp.ArrayValue([]*resp.Value{}),
-		})
-	}
-
-	group := stream.GetGroup(groupName)
-	if group == nil {
-		return ctx.WriteError(ErrNoGroup)
-	}
-
-	now := time.Now().UnixMilli()
-
-	// GetPending's own bounds compare lexicographically, so normalize the
-	// start and scan the whole PEL numerically: variable-width IDs sort wrong
-	// as strings ("10-0" < "9-0").
-	startNorm, err := normalizeStreamBound(start, false)
+	start, err := store.ParseStreamInterval(ctx.ArgString(4), false)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
-	startMS, startSeq, hasStart := streamIDParts(startNorm)
-	pending := group.GetPending("-", "+", 0)
-	type pendingRef struct {
-		id         string
-		ms, seq    int64
-		deliveryTS int64
-	}
-	refs := make([]pendingRef, 0, len(pending))
-	for _, p := range pending {
-		ms, seq, ok := streamIDParts(p.ID)
-		if !ok {
-			continue
-		}
-		if hasStart && (ms < startMS || (ms == startMS && seq < startSeq)) {
-			continue
-		}
-		refs = append(refs, pendingRef{id: p.ID, ms: ms, seq: seq, deliveryTS: p.DeliveryTS})
-	}
-	sort.Slice(refs, func(i, j int) bool {
-		if refs[i].ms != refs[j].ms {
-			return refs[i].ms < refs[j].ms
-		}
-		return refs[i].seq < refs[j].seq
-	})
-
-	var candidates []string
-	var deletedIDs []string
-	for _, ref := range refs {
-		// A PEL entry whose stream entry was removed by XDEL is stale: it
-		// must leave the PEL and be reported, or it leaks to every future
-		// consumer.
-		if stream.GetEntryByID(ref.id) == nil {
-			group.Ack(ref.id)
-			deletedIDs = append(deletedIDs, ref.id)
-			continue
-		}
-		if now-ref.deliveryTS < minIdleTime {
-			continue
-		}
-		candidates = append(candidates, ref.id)
-		if len(candidates) >= int(count) {
-			break
-		}
-	}
-
-	claimed := group.ClaimWithOptions(candidates, consumerName, store.ClaimOptions{JustID: justid})
-
-	nextCursor := "0-0"
-	if len(candidates) >= int(count) {
-		nextCursor = candidates[len(candidates)-1]
-	}
-
-	var results []*resp.Value
-	if justid {
-		results = make([]*resp.Value, 0, len(claimed))
-		for _, id := range claimed {
-			results = append(results, resp.BulkString(id))
-		}
-	} else {
-		results = make([]*resp.Value, 0, len(claimed))
-		for _, id := range claimed {
-			entry := stream.GetEntryByID(id)
-			if entry != nil {
-				entryResult := []*resp.Value{resp.BulkString(entry.ID)}
-				fieldValues := make([]*resp.Value, 0)
-				for k, v := range entry.Fields {
-					fieldValues = append(fieldValues, resp.BulkString(k), resp.BulkBytes(v))
-				}
-				entryResult = append(entryResult, resp.ArrayValue(fieldValues))
-				results = append(results, resp.ArrayValue(entryResult))
+	count := int64(100)
+	justID := false
+	for j := 5; j < ctx.ArgCount(); j++ {
+		moreargs := ctx.ArgCount() - 1 - j
+		opt := ctx.ArgString(j)
+		switch {
+		case strings.EqualFold(opt, "COUNT") && moreargs > 0:
+			n, ok := parseStreamLL(ctx.ArgString(j + 1))
+			if !ok || n < 1 || n > math.MaxInt64/16 {
+				return ctx.WriteError(streamReplyError("ERR COUNT must be > 0"))
 			}
+			count = n
+			j++
+		case strings.EqualFold(opt, "JUSTID"):
+			justID = true
+		default:
+			return ctx.WriteError(ErrSyntaxError)
 		}
 	}
 
-	deletedVals := make([]*resp.Value, 0, len(deletedIDs))
-	for _, id := range deletedIDs {
-		deletedVals = append(deletedVals, resp.BulkString(id))
+	stream, err := lookupStream(ctx, key)
+	if err != nil {
+		return ctx.WriteError(err)
 	}
-
+	if stream == nil || !stream.HasGroup(groupName) {
+		return ctx.WriteError(errNoGroupFor(key, groupName))
+	}
+	next, items, deleted, ok := stream.AutoClaim(groupName, consumerName, start, minIdle, count, justID, time.Now().UnixMilli())
+	if !ok {
+		return ctx.WriteError(errNoGroupFor(key, groupName))
+	}
+	deletedVals := make([]*resp.Value, 0, len(deleted))
+	for _, id := range deleted {
+		deletedVals = append(deletedVals, resp.BulkString(id.String()))
+	}
 	return ctx.WriteArray([]*resp.Value{
-		resp.BulkString(nextCursor),
-		resp.ArrayValue(results),
+		resp.BulkString(next.String()),
+		streamItemsValue(items, justID),
 		resp.ArrayValue(deletedVals),
 	})
 }
 
 func cmdXSETID(ctx *Context) error {
 	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError("xsetid"))
 	}
-
-	key := ctx.ArgString(0)
-
-	stream := getStream(ctx, key)
-	if stream == nil {
-		return ctx.WriteError(store.ErrKeyNotFound)
-	}
-
-	// A malformed or partial ID here would corrupt every later XADD: the
-	// monotonicity guard compares parsed IDs and silently passes anything it
-	// cannot parse.
-	lastID, err := normalizeStreamBound(ctx.ArgString(1), false)
+	id, err := parseStrictStreamID(ctx.ArgString(1))
 	if err != nil {
 		return ctx.WriteError(err)
 	}
-
-	entriesAdded := int64(0)
-	maxDeletedID := ""
-	i := 2
-	for i < ctx.ArgCount() {
-		arg := strings.ToUpper(ctx.ArgString(i))
-		switch arg {
-		case "ENTRIESADDED":
-			if i+1 >= ctx.ArgCount() {
-				return ctx.WriteError(ErrSyntaxError)
-			}
-			entriesAdded, err = strconv.ParseInt(ctx.ArgString(i+1), 10, 64)
-			if err != nil {
+	entriesAdded := int64(-1)
+	var maxDeleted store.StreamID
+	for i := 2; i < ctx.ArgCount(); {
+		moreargs := ctx.ArgCount() - 1 - i
+		opt := ctx.ArgString(i)
+		switch {
+		case strings.EqualFold(opt, "ENTRIESADDED") && moreargs > 0:
+			n, ok := parseStreamLL(ctx.ArgString(i + 1))
+			if !ok {
 				return ctx.WriteError(ErrNotInteger)
 			}
-			i += 2
-		case "MAXDELETEDID":
-			if i+1 >= ctx.ArgCount() {
-				return ctx.WriteError(ErrSyntaxError)
+			if n < 0 {
+				return ctx.WriteError(streamReplyError("ERR entries_added must be positive"))
 			}
-			maxDeletedID, err = normalizeStreamBound(ctx.ArgString(i+1), true)
+			entriesAdded = n
+			i += 2
+		case strings.EqualFold(opt, "MAXDELETEDID") && moreargs > 0:
+			md, err := parseStrictStreamID(ctx.ArgString(i + 1))
 			if err != nil {
 				return ctx.WriteError(err)
 			}
+			if id.Less(md) {
+				return ctx.WriteError(streamReplyError("ERR The ID specified in XSETID is smaller than the provided max_deleted_entry_id"))
+			}
+			maxDeleted = md
 			i += 2
 		default:
 			return ctx.WriteError(ErrSyntaxError)
 		}
 	}
-
-	// The new last ID must not go backwards past the stream's top item.
-	if top := stream.LastID; top != "" {
-		topMS, topSeq, topOK := streamIDParts(top)
-		newMS, newSeq, newOK := streamIDParts(lastID)
-		if topOK && newOK && (newMS < topMS || (newMS == topMS && newSeq < topSeq)) {
-			return ctx.WriteError(errors.New("ERR The ID specified in XSETID is smaller than the target stream top item"))
-		}
+	stream, err := lookupStream(ctx, ctx.ArgString(0))
+	if err != nil {
+		return ctx.WriteError(err)
 	}
-
-	// ENTRIESADDED remains untracked (no counter exists). MAXDELETEDID is
-	// consumed: it sets the deleted-ID floor that XADD enforces.
-	_ = entriesAdded
-	stream.MaxDeletedID = maxDeletedID
-
-	stream.SetLastID(lastID)
+	if stream == nil {
+		return ctx.WriteError(errStreamNoSuchKey)
+	}
+	if err := stream.SetID(id, entriesAdded, maxDeleted); err != nil {
+		return ctx.WriteError(err)
+	}
 	return ctx.WriteOK()
 }

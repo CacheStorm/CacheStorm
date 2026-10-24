@@ -54,7 +54,8 @@ func TestXTrimMinID(t *testing.T) {
 	}{
 		{"MINID trims older entries", []string{"XTRIM", "s", "MINID", "2-0"}, 1, []string{"2-0", "3-0"}, false},
 		{"MINID with = form", []string{"XTRIM", "s", "MINID", "=", "2-0"}, 1, []string{"2-0", "3-0"}, false},
-		{"MINID with ~ form trims exactly", []string{"XTRIM", "s", "MINID", "~", "2-0"}, 1, []string{"2-0", "3-0"}, false},
+		{"MINID with ~ form keeps a partial node", []string{"XTRIM", "s", "MINID", "~", "2-0"}, 0, []string{"1-0", "2-0", "3-0"}, false},
+		{"MINID with ~ form drops a whole node", []string{"XTRIM", "s", "MINID", "~", "4-0"}, 3, nil, false},
 		{"MINID with partial id", []string{"XTRIM", "s", "MINID", "2"}, 1, []string{"2-0", "3-0"}, false},
 		{"MINID newer than everything", []string{"XTRIM", "s", "MINID", "9-0"}, 3, nil, false},
 		{"MAXLEN control", []string{"XTRIM", "s", "MAXLEN", "2"}, 1, []string{"2-0", "3-0"}, false},

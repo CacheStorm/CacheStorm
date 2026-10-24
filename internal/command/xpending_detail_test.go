@@ -133,9 +133,11 @@ func TestXPendingDetail(t *testing.T) {
 		}
 	})
 
-	t.Run("non-positive count is an error", func(t *testing.T) {
-		if got := run("XPENDING", "s", "g", "-", "+", "0"); got.Type != resp.TypeError {
-			t.Fatalf("XPENDING with count 0 replied %v, want an error", got.Type)
+	t.Run("non-positive count yields no rows", func(t *testing.T) {
+		for _, n := range []string{"0", "-1"} {
+			if got := run("XPENDING", "s", "g", "-", "+", n); got.Type != resp.TypeArray || len(got.Array) != 0 {
+				t.Fatalf("XPENDING with count %s replied %v, want an empty array", n, got)
+			}
 		}
 	})
 

@@ -26,38 +26,11 @@ func execPend(s *store.Store, r *Router, cmd string, args ...string) string {
 	return buf.String()
 }
 
-// TestProofXPendingSummaryEmptyPEL is the round proof.
-//
-// Contract (Redis XPENDING summary form): XPENDING key group returns either the
-// 4-element summary [count, smallest-ID, greatest-ID, [[consumer, count]...]]
-// when there ARE pending entries, or an EMPTY ARRAY when there are none. Redis
-// short-circuits on an empty PEL before building the summary — an empty PEL has
-// no smallest/greatest ID to report, and a client that reads element [1] would
-// otherwise be handed a null it must special-case.
-//
-// Defect: cmdXPENDING's summary branch handled the empty case by building the
-// 4-element shape anyway, substituting two resp.NullValue() placeholders:
-//
-//	if pendingCount == 0 {
-//	    return ctx.WriteArray([]*resp.Value{
-//	        resp.IntegerValue(0), resp.NullValue(), resp.NullValue(),
-//	        resp.ArrayValue([]*resp.Value{}),
-//	    })
-//	}
-//
-// so `XPENDING S g` on a group with nothing pending answered
-// "*4 :0 _ _ *0" instead of "*0".
-//
-// IN-REPO BASIS: the sibling detail form in the same handler already returns a
-// bare empty array for "nothing in range" (ctx.WriteArray(results) where
-// results is empty), and the handler's own missing-stream path
-// (ctx.WriteArray([]*resp.Value{})) does the same — so the empty-array reply
-// is the established shape in this very function. Only the summary branch
-// deviated.
-//
-// Controls (must pass before AND after): the summary form with actual pending
-// entries still returns the full 4-element shape with real IDs; the DETAIL form
-// still returns its rows; a missing group still errors.
+// TestProofXPendingSummaryEmptyPEL pins the Redis 7.4 summary form of
+// XPENDING: [count, smallest-ID, greatest-ID, [[consumer, count]...]] when
+// entries are pending, and [0, nil, nil, nil-array] when none are (verified
+// against redis:7.4: "*4\r\n:0\r\n$-1\r\n$-1\r\n*-1\r\n"). An earlier
+// version of this test expected an empty array, which is not what Redis sends.
 func TestProofXPendingSummaryEmptyPEL(t *testing.T) {
 	s := store.NewStore()
 	r := NewRouter()
@@ -107,17 +80,12 @@ func TestProofXPendingSummaryEmptyPEL(t *testing.T) {
 		t.Fatalf("setup broken: after XACK the detail form should report no rows, got %q", got)
 	}
 
-	// ---- THE DEFECT: with an empty PEL the summary must be an EMPTY ARRAY.
+	const emptySummary = "*4\r\n:0\r\n$-1\r\n$-1\r\n*-1\r\n"
 	got = execPend(s, r, "XPENDING", "S", "g")
-	if got != "*0\r\n" {
-		t.Fatalf("FAIL: XPENDING S g on a group whose PEL is empty returned %q, want \"*0\\r\\n\". "+
-			"The summary branch builds the 4-element shape unconditionally and substitutes "+
-			"nulls for the smallest/greatest IDs; Redis returns an empty array because an empty "+
-			"PEL has no IDs to report, and a client reading element [1] of a 4-element reply "+
-			"would be handed a null it never expects.",
-			bytes.TrimSpace([]byte(got)))
+	if got != emptySummary {
+		t.Fatalf("FAIL: XPENDING S g on a group whose PEL is empty returned %q, want %q", got, emptySummary)
 	}
-	t.Log("PASS: an empty PEL now answers with an empty array")
+	t.Log("PASS: an empty PEL answers with the zero summary")
 
 	// ---- SECONDARY: the same must hold for a group that was created but
 	// NEVER read from, which is the most common way to reach an empty PEL.
@@ -125,9 +93,8 @@ func TestProofXPendingSummaryEmptyPEL(t *testing.T) {
 	if got := execPend(s, r, "XGROUP", "CREATE", "T", "fresh", "0"); got != "+OK\r\n" {
 		t.Fatalf("SECONDARY setup: XGROUP CREATE = %q", got)
 	}
-	if got := execPend(s, r, "XPENDING", "T", "fresh"); got != "*0\r\n" {
-		t.Fatalf("SECONDARY FAIL: XPENDING on a never-read group = %q, want \"*0\\r\\n\" — "+
-			"a freshly created group is the commonest empty-PEL case", bytes.TrimSpace([]byte(got)))
+	if got := execPend(s, r, "XPENDING", "T", "fresh"); got != emptySummary {
+		t.Fatalf("SECONDARY FAIL: XPENDING on a never-read group = %q, want %q", got, emptySummary)
 	}
-	t.Log("PASS: a never-read group reports an empty array")
+	t.Log("PASS: a never-read group reports the zero summary")
 }

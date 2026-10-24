@@ -49,8 +49,10 @@ func TestXReadGroupPelRead(t *testing.T) {
 			if entries == nil || entries.Type != resp.TypeArray {
 				continue
 			}
-			for i := 0; i+1 < len(entries.Array); i += 2 {
-				ids = append(ids, string(entries.Array[i].Bulk))
+			for _, entry := range entries.Array {
+				if entry != nil && len(entry.Array) == 2 {
+					ids = append(ids, string(entry.Array[0].Bulk))
+				}
 			}
 		}
 		return ids

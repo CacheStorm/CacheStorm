@@ -79,8 +79,16 @@ func TestXTrimLimitX(t *testing.T) {
 	}
 	checkLenBounds(t, "minid limit", "k4", 8, 10)
 	seed(t, "k5")
-	checkInt(t, "limit-zero disables cap", run("XTRIM", "k5", "MAXLEN", "~", "2", "LIMIT", "0"), 8)
-	checkLenBounds(t, "limit-zero disables cap", "k5", 2, 2)
+	// One 10-entry node: "~" only drops whole nodes, so MAXLEN ~ 2 keeps
+	// it, and MAXLEN ~ 0 can drop it even with the LIMIT cap disabled.
+	checkInt(t, "limit-zero keeps partial node", run("XTRIM", "k5", "MAXLEN", "~", "2", "LIMIT", "0"), 0)
+	checkLenBounds(t, "limit-zero keeps partial node", "k5", 10, 10)
+	checkInt(t, "limit-zero drops whole node", run("XTRIM", "k5", "MAXLEN", "~", "0", "LIMIT", "0"), 10)
+	checkLenBounds(t, "limit-zero drops whole node", "k5", 0, 0)
+	seed(t, "k6")
+	if v := run("XTRIM", "k6", "MAXLEN", "2", "LIMIT", "3"); v.Type != resp.TypeError {
+		t.Errorf("FAIL LIMIT without ~ must be a syntax error, got %v", v)
+	}
 	checkInt(t, "missing stream control", run("XTRIM", "missing", "MAXLEN", "~", "2", "LIMIT", "3"), 0)
 }
 
