@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Command metadata: the arity, flags and key positions of every Redis 7.4 command, generated from Redis' own COMMAND reply by `tools/cmdspecgen`
 
 ### Security
+- Admin UI: the embedded console loads Tailwind and Alpine.js pinned to exact versions with subresource integrity hashes. It pulled `alpinejs@3.x.x` and an unversioned Tailwind script, so a change on the CDN would have run in a page that holds the server's password
 - Protected mode: while no password is set, the RESP listener and the HTTP API serve only loopback clients; others get Redis' `DENIED` explanation. The defaults bound both to every interface with no authentication, so a server started as shipped was an open database, Lua runtime and pprof endpoint for anyone on the network. Set `server.requirepass` / `CACHESTORM_REQUIREPASS`, or turn it off explicitly with `server.protected_mode: false` / `CACHESTORM_PROTECTED_MODE=false`. **Upgrade note:** a container started without a password now refuses clients from outside the container
 - Configuration: startup refuses the placeholder password the production template ships with
 - Docker Compose: the compose files require `CACHESTORM_REQUIREPASS`, and the demo compose file's healthcheck uses `/api/health` (it polled `/health`, a 404, so the container never became healthy)
@@ -40,6 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Authentication: only AUTH, HELLO, QUIT and RESET run before a requirepass client authenticates, the commands Redis flags `no_auth`. PING and COMMAND were exempt too, so an unauthenticated client could probe the server
 
 ### Fixed
+- HTTP API: the `/api/keys` pattern uses Redis' glob rules like KEYS; it only understood a leading or trailing `*`
 - Lists: LPUSH, LPUSHX, LMPUSH and moves to the head of a list are amortised O(1). Every prepend copied the whole list, so building a list with LPUSH was quadratic: 362 requests per second at a p50 of 129 ms in redis-benchmark's LPUSH test, against about 45,000 for SET. Pops clear the vacated slots so popped values can be garbage-collected instead of staying referenced by the list's backing array
 - **Data loss:** concurrent writes and pops on one list, hash, set or sorted set lost data; under concurrent RPUSH/LPOP 1–4% of pushed elements disappeared. A pop that emptied the value deleted the key after releasing the value lock, taking elements pushed in between with it, and a writer holding the old value then wrote to an orphan. An emptied key is now deleted only while it still holds the same empty value, and writers retry if the value was deleted under them
 - **Data loss:** concurrent first writes to a missing key (LPUSH/RPUSH/LMPUSH, the HSET family, SADD, ZADD/ZINCRBY, XADD, XGROUP CREATE MKSTREAM, GEOADD) could overwrite each other's new value; creation is now atomic. SMOVE into a missing destination no longer creates it while holding set locks (a possible deadlock), SPOP with a count at least the set's size empties the set before deleting it, and GEOADD reports OOM instead of dropping the write

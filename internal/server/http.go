@@ -1121,27 +1121,10 @@ func (h *HTTPServer) handleStatic(w http.ResponseWriter, r *http.Request) {
 	h.writeError(w, http.StatusNotFound, "not found")
 }
 
+// matchPattern applies Redis' glob rules (the KEYS matcher), so the REST
+// key listing filters exactly like KEYS on the RESP port.
 func matchPattern(s, pattern string) bool {
-	if pattern == "*" {
-		return true
-	}
-
-	if strings.HasPrefix(pattern, "*") && strings.HasSuffix(pattern, "*") {
-		middle := pattern[1 : len(pattern)-1]
-		return strings.Contains(s, middle)
-	}
-
-	if strings.HasPrefix(pattern, "*") {
-		suffix := pattern[1:]
-		return strings.HasSuffix(s, suffix)
-	}
-
-	if strings.HasSuffix(pattern, "*") {
-		prefix := pattern[:len(pattern)-1]
-		return strings.HasPrefix(s, prefix)
-	}
-
-	return s == pattern
+	return store.MatchPattern(s, pattern)
 }
 
 const adminUIHTML = `<!DOCTYPE html>
@@ -1150,8 +1133,8 @@ const adminUIHTML = `<!DOCTYPE html>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CacheStorm Admin</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script src="https://cdn.tailwindcss.com/3.4.17" integrity="sha384-igm5BeiBt36UU4gqwWS7imYmelpTsZlQ45FZf+XBn9MuJbn4nQr7yx1yFydocC/K" crossorigin="anonymous"></script>
+    <script defer src="https://unpkg.com/alpinejs@3.14.9/dist/cdn.min.js" integrity="sha384-9Ax3MmS9AClxJyd5/zafcXXjxmwFhZCdsT6HJoJjarvCaAkJlk5QDzjLJm+Wdx5F" crossorigin="anonymous"></script>
     <style>
         [x-cloak] { display: none !important; }
         .sidebar-item.active { background-color: rgb(30 58 138); }

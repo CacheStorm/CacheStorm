@@ -723,6 +723,10 @@ func TestMatchPattern(t *testing.T) {
 		{"key1", "*1", true},
 		{"key1", "*key*", true},
 		{"key1", "*foo*", false},
+		{"key1", "key[0-9]", true},
+		{"keyA", "key[0-9]", false},
+		{"k*y1", "k\\*y1", true},
+		{"kxy1", "k\\*y1", false},
 	}
 
 	for _, tt := range tests {
@@ -1223,5 +1227,19 @@ func TestConnectionHandleMultipleCommands(t *testing.T) {
 	case <-done:
 	case <-time.After(200 * time.Millisecond):
 		conn.Close()
+	}
+}
+
+// The admin UI loads its scripts from public CDNs; they must be pinned to an
+// exact version with a subresource integrity hash, or a change on the CDN
+// would run arbitrary code in a console that holds the server's password.
+func TestAdminUIPinsExternalScripts(t *testing.T) {
+	for _, line := range strings.Split(adminUIHTML, "\n") {
+		if !strings.Contains(line, "<script src=") && !strings.Contains(line, "<script defer src=") {
+			continue
+		}
+		if !strings.Contains(line, `integrity="sha384-`) || strings.Contains(line, ".x.x") {
+			t.Fatalf("unpinned external script: %s", strings.TrimSpace(line))
+		}
 	}
 }
