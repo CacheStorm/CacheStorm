@@ -75,6 +75,29 @@ var writeCommands = map[string]bool{
 	"TS.INCRBY": true, "TS.DECRBY": true, "TS.MADD": true,
 }
 
+// persistedCommand reports whether cmd is appended to the AOF. Besides the
+// writeCommands, that is the SCRIPT and FUNCTION subcommands that change the
+// script cache or the function libraries: EVALSHA and FCALL are persisted as
+// themselves, so they replay only if the script or library they name is
+// restored before them (and a flush must be replayed so a later failed call
+// stays failed).
+func persistedCommand(cmd string, args [][]byte) bool {
+	if writeCommands[cmd] {
+		return true
+	}
+	if len(args) == 0 {
+		return false
+	}
+	sub := strings.ToUpper(string(args[0]))
+	switch cmd {
+	case "SCRIPT":
+		return sub == "LOAD" || sub == "FLUSH"
+	case "FUNCTION":
+		return sub == "LOAD" || sub == "CREATE" || sub == "DELETE" || sub == "FLUSH" || sub == "RESTORE"
+	}
+	return false
+}
+
 type Server struct {
 	cfg           *config.Config
 	listener      net.Listener
@@ -274,7 +297,7 @@ func New(cfg *config.Config) (*Server, error) {
 		// Set post-execute hook on router to persist write commands
 		s.router.SetPostExecute(func(cmd string, args [][]byte) {
 			upperCmd := strings.ToUpper(cmd)
-			if writeCommands[upperCmd] {
+			if persistedCommand(upperCmd, args) {
 				if err := s.aof.Append(upperCmd, args); err != nil {
 					logger.Error().Err(err).Str("cmd", cmd).Msg("AOF append failed")
 				}
@@ -287,7 +310,7 @@ func New(cfg *config.Config) (*Server, error) {
 			writes := make([]persistence.Command, 0, len(cmds))
 			for _, c := range cmds {
 				upperCmd := strings.ToUpper(c.Name)
-				if writeCommands[upperCmd] {
+				if persistedCommand(upperCmd, c.Args) {
 					writes = append(writes, persistence.Command{Name: upperCmd, Args: c.Args})
 				}
 			}
