@@ -81,7 +81,7 @@ func TestRateLimiterRejectsNonPositiveInterval(t *testing.T) {
 			if getPanic != nil {
 				t.Fatalf("RL.GET panicked: %v", getPanic)
 			}
-			if !strings.HasPrefix(getReply, "_") {
+			if !strings.HasPrefix(getReply, "$-1") {
 				t.Fatalf("RL.CREATE with a %s stored a rate limiter for %q (RL.GET replied "+
 					"%q); the unusable limiter must not be kept", tc.name, key, getReply)
 			}

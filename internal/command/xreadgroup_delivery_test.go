@@ -99,7 +99,7 @@ func TestXReadGroupDeliveryBookkeeping(t *testing.T) {
 		wantIDs(entryIDs(got), "1-0", "2-0")
 	}
 
-	if got := run("XREADGROUP", "GROUP", "g", "c", "STREAMS", "s", ">"); got == nil || got.Type != resp.TypeNull {
+	if got := run("XREADGROUP", "GROUP", "g", "c", "STREAMS", "s", ">"); got == nil || (!got.IsNull && got.Type != resp.TypeNull) {
 		t.Errorf("second > re-delivered %v; entries already delivered must not be re-sent", entryIDs(got))
 	}
 
@@ -151,7 +151,7 @@ func TestXReadGroupDeliveryBookkeeping(t *testing.T) {
 		if elapsed := time.Since(start); elapsed > 5*time.Second {
 			t.Errorf("BLOCK 100 returned after %v — BLOCK is scaled in seconds, not milliseconds", elapsed)
 		}
-		if v == nil || v.Type != resp.TypeNull {
+		if v == nil || (!v.IsNull && v.Type != resp.TypeNull) {
 			t.Errorf("BLOCK with no new entries replied %v, want null", v)
 		}
 	case <-time.After(8 * time.Second):

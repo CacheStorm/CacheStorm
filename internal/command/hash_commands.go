@@ -364,36 +364,6 @@ func cmdHINCRBY(ctx *Context) error {
 	return ctx.WriteInteger(newVal)
 }
 
-// respHIncrBy is the transaction-replay form of HINCRBY: it mirrors
-// cmdHINCRBY's semantics but returns the RESP value for the EXEC array.
-func respHIncrBy(ctx *Context, qc queuedCommand, incr int64) *resp.Value {
-	if len(qc.args) < 2 {
-		return resp.ErrorValue("ERR wrong number of arguments")
-	}
-	key := string(qc.args[0])
-	field := string(qc.args[1])
-
-	hash, err := getOrCreateHash(ctx, key)
-	if err != nil {
-		return resp.ErrorValue(err.Error())
-	}
-
-	hash.Lock()
-	defer hash.Unlock()
-	var newVal int64
-	if current, exists := hash.Fields[field]; exists {
-		newVal, err = computeIntIncr(current, incr)
-		if err != nil {
-			return resp.ErrorValue(err.Error())
-		}
-	} else {
-		newVal = incr
-	}
-
-	hash.Fields[field] = []byte(strconv.FormatInt(newVal, 10))
-	return resp.IntegerValue(newVal)
-}
-
 func cmdHINCRBYFLOAT(ctx *Context) error {
 	if ctx.ArgCount() != 3 {
 		return ctx.WriteError(ErrWrongArgCount)

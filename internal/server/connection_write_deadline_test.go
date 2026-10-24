@@ -72,7 +72,7 @@ func TestBlockingCommandReplySurvivesWriteDeadline(t *testing.T) {
 
 	// Control: a command that returns immediately is unaffected, both before and
 	// after the fix, so a broken harness cannot masquerade as the defect.
-	dlSend(t, c, "BLPOP", "ctlkey", "0")
+	dlSend(t, c, "BLPOP", "ctlkey", "0.01")
 	if v, err := resp.NewReader(r).ReadValue(); err != nil {
 		t.Fatalf("control failed: immediate BLPOP returned no value: %v", err)
 	} else if !v.IsNull {

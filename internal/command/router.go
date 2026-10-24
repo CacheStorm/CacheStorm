@@ -32,6 +32,46 @@ type Router struct {
 	duplicates  map[string]struct{}
 	requirePass string
 	postExecute func(cmd string, args [][]byte)
+	// postExec receives the commands an EXEC ran, so the transaction is
+	// persisted as one unit instead of command by command.
+	postExec func(cmds []ExecutedCommand)
+}
+
+// commandSpec is the arity, flags and key positions Redis reports for one of
+// its commands (see redis_command_specs.go).
+type commandSpec struct {
+	Arity    int
+	Flags    []string
+	FirstKey int
+	LastKey  int
+	KeyStep  int
+}
+
+// arityError is the Redis reply for a call with the wrong number of
+// arguments.
+func arityError(cmd string) error {
+	return errors.New("ERR wrong number of arguments for '" + strings.ToLower(cmd) + "' command")
+}
+
+// checkArity reports whether args fits the Redis arity of cmd. The arity
+// counts the command name; a negative arity is a minimum. Commands Redis does
+// not have are not checked here.
+func checkArity(cmd string, args int) bool {
+	spec, ok := redisCommandSpecs[cmd]
+	if !ok {
+		return true
+	}
+	n := args + 1
+	if spec.Arity >= 0 {
+		return n == spec.Arity
+	}
+	return n >= -spec.Arity
+}
+
+// ExecutedCommand is one command an EXEC ran without an error reply.
+type ExecutedCommand struct {
+	Name string
+	Args [][]byte
 }
 
 // globalRouter is set during NewRouter() for access from command handlers (e.g. AUTH)
@@ -114,6 +154,7 @@ func (r *Router) PasswordHash() string {
 // so the collision is reported rather than merely prevented. Logging happens
 // after the lock is released so a log write never blocks dispatch.
 func (r *Router) Register(def *CommandDef) {
+	def.Name = CanonicalName(def.Name)
 	r.mu.Lock()
 	if _, exists := r.commands[def.Name]; exists {
 		if r.duplicates == nil {
@@ -133,10 +174,23 @@ func (r *Router) Register(def *CommandDef) {
 }
 
 func (r *Router) Get(name string) (*CommandDef, bool) {
+	name = CanonicalName(name)
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	cmd, ok := r.commands[name]
 	return cmd, ok
+}
+
+// CanonicalName upper-cases an ASCII command name. Redis command names are
+// case-insensitive and many clients send them in lower case. A name that is
+// already upper case is returned as is, without allocating.
+func CanonicalName(name string) string {
+	for i := 0; i < len(name); i++ {
+		if c := name[i]; c >= 'a' && c <= 'z' {
+			return strings.ToUpper(name)
+		}
+	}
+	return name
 }
 
 // Commands that are allowed before authentication
@@ -155,10 +209,40 @@ func (r *Router) SetPostExecute(fn func(cmd string, args [][]byte)) {
 	r.postExecute = fn
 }
 
+// SetPostExec installs the hook that receives the commands a successful EXEC
+// ran. The router's per-command hook never sees them, so without this hook a
+// transaction's writes are not persisted.
+func (r *Router) SetPostExec(fn func(cmds []ExecutedCommand)) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.postExec = fn
+}
+
+func (r *Router) postExecHook() func(cmds []ExecutedCommand) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.postExec
+}
+
 func (r *Router) Execute(ctx *Context) error {
+	ctx.router = r
+	ctx.Command = CanonicalName(ctx.Command)
 	cmd, ok := r.Get(ctx.Command)
 	if !ok {
+		// Redis refuses to run a transaction once a command failed to queue.
+		if ctx.Transaction != nil && ctx.Transaction.IsActive() {
+			ctx.Transaction.Abort()
+		}
 		return ErrUnknownCommand
+	}
+
+	// Redis rejects a call with the wrong number of arguments before running
+	// or queueing it, and a transaction that queued one is discarded at EXEC.
+	if !checkArity(ctx.Command, len(ctx.Args)) {
+		if ctx.Transaction != nil && ctx.Transaction.IsActive() {
+			ctx.Transaction.Abort()
+		}
+		return ctx.Writer.WriteError(arityError(ctx.Command).Error())
 	}
 
 	// Enforce authentication if requirepass is set
@@ -207,6 +291,8 @@ func isTransactionControl(cmd string) bool {
 // ExecuteSilent runs a command without auth checks or post-execute hooks.
 // Used for AOF replay where Writer may be nil — creates a discard writer.
 func (r *Router) ExecuteSilent(ctx *Context) error {
+	ctx.router = r
+	ctx.Command = CanonicalName(ctx.Command)
 	cmd, ok := r.Get(ctx.Command)
 	if !ok {
 		return ErrUnknownCommand
@@ -222,6 +308,8 @@ func (r *Router) ExecuteSilent(ctx *Context) error {
 // ExecuteHTTP runs a command from the HTTP API with auth enforcement and post-execute hooks.
 // Returns the result as an interface{} suitable for JSON serialization.
 func (r *Router) ExecuteHTTP(ctx *Context) (interface{}, error) {
+	ctx.router = r
+	ctx.Command = CanonicalName(ctx.Command)
 	cmd, ok := r.Get(ctx.Command)
 	if !ok {
 		return nil, ErrUnknownCommand

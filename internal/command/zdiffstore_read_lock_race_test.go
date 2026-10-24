@@ -129,7 +129,7 @@ func TestZDIFFStoreControlsUncontended(t *testing.T) {
 		t.Fatalf("CONTROL FAIL: ZSCORE dst a = %q, want 1", got)
 	}
 	// ZSCORE on an absent member replies with a RESP null (`_`).
-	if got := runStoreCommand(t, s, router, "ZSCORE", "dst", "b"); got != "_\r\n" {
+	if got := runStoreCommand(t, s, router, "ZSCORE", "dst", "b"); got != "$-1\r\n" {
 		t.Fatalf("CONTROL FAIL: ZSCORE dst b = %q, want a RESP null (b is in other)", got)
 	}
 

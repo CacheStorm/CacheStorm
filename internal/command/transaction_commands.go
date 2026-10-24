@@ -4,13 +4,13 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"strconv"
 	"sync"
 	"time"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
-	"github.com/cachestorm/cachestorm/internal/store"
 )
 
 var (
@@ -18,12 +18,14 @@ var (
 	ErrDiscardWithoutMulti = errors.New("ERR DISCARD without MULTI")
 	ErrWatchInMulti        = errors.New("ERR WATCH inside MULTI is not allowed")
 	ErrMultiNested         = errors.New("ERR MULTI calls can not be nested")
+	ErrExecAbort           = errors.New("EXECABORT Transaction discarded because of previous errors.") //nolint:staticcheck // Redis reply text, clients match it verbatim
 )
 
 type Transaction struct {
 	mu          sync.Mutex
 	queued      []queuedCommand
 	active      bool
+	aborted     bool
 	watchedKeys map[string]int64
 }
 
@@ -63,6 +65,21 @@ func (t *Transaction) Clear() {
 	defer t.mu.Unlock()
 	t.queued = t.queued[:0]
 	t.active = false
+	t.aborted = false
+}
+
+// Abort marks the open transaction so EXEC discards it, the Redis behaviour
+// after a command failed to queue.
+func (t *Transaction) Abort() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.aborted = true
+}
+
+func (t *Transaction) IsAborted() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.aborted
 }
 
 func (t *Transaction) ClearWatch() {
@@ -81,6 +98,7 @@ func (t *Transaction) Start() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.active = true
+	t.aborted = false
 	t.queued = t.queued[:0]
 }
 
@@ -131,6 +149,12 @@ func cmdEXEC(ctx *Context) error {
 		return ctx.WriteError(ErrExecWithoutMulti)
 	}
 
+	if ctx.Transaction.IsAborted() {
+		ctx.Transaction.Clear()
+		ctx.Transaction.ClearWatch()
+		return ctx.WriteError(ErrExecAbort)
+	}
+
 	if ctx.Transaction.HasWatchedKeys() {
 		if !ctx.Transaction.CheckWatchedVersions(ctx.Store.GetVersion) {
 			ctx.Transaction.Clear()
@@ -148,10 +172,20 @@ func cmdEXEC(ctx *Context) error {
 	}
 
 	results := make([]*resp.Value, 0, len(queued))
+	executed := make([]ExecutedCommand, 0, len(queued))
 
 	for _, qc := range queued {
 		result := executeQueuedCommand(ctx, qc)
 		results = append(results, result)
+		if result.Type != resp.TypeError {
+			executed = append(executed, ExecutedCommand{Name: qc.cmd, Args: qc.args})
+		}
+	}
+
+	if r := ctx.dispatcher(); r != nil && len(executed) > 0 {
+		if hook := r.postExecHook(); hook != nil {
+			hook(executed)
+		}
 	}
 
 	return ctx.WriteArray(results)
@@ -186,702 +220,60 @@ func cmdUNWATCH(ctx *Context) error {
 	return ctx.WriteOK()
 }
 
+// executeQueuedCommand runs one queued command through its registered handler
+// and returns the reply it wrote. The handler is the one a standalone call
+// uses, so a command behaves the same inside and outside a transaction.
 func executeQueuedCommand(ctx *Context, qc queuedCommand) *resp.Value {
-	switch qc.cmd {
-	case "SET":
-		var output bytes.Buffer
-		replayCtx := *ctx
-		replayCtx.Command = qc.cmd
-		replayCtx.Args = qc.args
-		replayCtx.Writer = resp.NewWriter(&output)
-		if err := cmdSET(&replayCtx); err != nil {
-			return resp.ErrorValue(err.Error())
+	r := ctx.dispatcher()
+	if r == nil {
+		return resp.ErrorValue(ErrUnknownCommand.Error())
+	}
+	def, ok := r.Get(qc.cmd)
+	if !ok {
+		return resp.ErrorValue("ERR unknown command '" + qc.cmd + "'")
+	}
+
+	var output bytes.Buffer
+	sub := *ctx
+	sub.Command = qc.cmd
+	sub.Args = qc.args
+	sub.Writer = resp.NewWriter(&output)
+	sub.InExec = true
+	sub.StartTime = time.Now()
+
+	err := def.Handler(&sub)
+
+	ctx.Authenticated = sub.Authenticated
+	ctx.ACLUser = sub.ACLUser
+	ctx.ClientName = sub.ClientName
+	ctx.Subscriber = sub.Subscriber
+
+	if err != nil {
+		return resp.ErrorValue(err.Error())
+	}
+	if err := sub.Writer.Flush(); err != nil {
+		return resp.ErrorValue(err.Error())
+	}
+
+	reader := resp.NewReader(&output)
+	var values []*resp.Value
+	for {
+		v, err := reader.ReadValue()
+		if err == io.EOF {
+			break
 		}
-		result, err := resp.NewReader(&output).ReadValue()
 		if err != nil {
-			return resp.ErrorValue(err.Error())
+			return resp.ErrorValue("ERR " + err.Error())
 		}
-		return result
-	case "GET":
-		if len(qc.args) >= 1 {
-			key := string(qc.args[0])
-			entry, exists := ctx.Store.Get(key)
-			if !exists {
-				return resp.NullBulkString()
-			}
-			// Accept every representation of the Redis string type, exactly as
-			// cmdGET does, and report a genuinely non-string key as WRONGTYPE.
-			// This case used to fall through to NullBulkString whenever the
-			// *store.StringValue assertion failed, so a transaction reported a
-			// wrong-type key as ABSENT — and silently dropped bitmap bits.
-			data, ok := stringValueOf(entry.Value)
-			if !ok {
-				return resp.ErrorValue(store.ErrWrongType.Error())
-			}
-			return resp.BulkBytes(data)
-		}
-		return resp.ErrorValue("ERR wrong number of arguments")
-	case "DEL":
-		if len(qc.args) >= 1 {
-			deleted := int64(0)
-			for _, arg := range qc.args {
-				if ctx.Store.Delete(string(arg)) {
-					deleted++
-				}
-			}
-			return resp.IntegerValue(deleted)
-		}
-		return resp.ErrorValue("ERR wrong number of arguments")
-	case "UNLINK":
-		if len(qc.args) >= 1 {
-			deleted := int64(0)
-			for _, arg := range qc.args {
-				if ctx.Store.Delete(string(arg)) {
-					deleted++
-				}
-			}
-			return resp.IntegerValue(deleted)
-		}
-		return resp.ErrorValue("ERR wrong number of arguments")
-	case "INCR":
-		return respIncrBy(ctx, qc, 1)
-	case "HINCRBY":
-		if len(qc.args) < 3 {
-			return resp.ErrorValue("ERR wrong number of arguments")
-		}
-		incr, err := parseInt(qc.args[2])
-		if err != nil {
-			return resp.ErrorValue("ERR value is not an integer")
-		}
-		return respHIncrBy(ctx, qc, incr)
-	case "ZINCRBY":
-		if len(qc.args) < 3 {
-			return resp.ErrorValue("ERR wrong number of arguments")
-		}
-		incr, err := strconv.ParseFloat(string(qc.args[1]), 64)
-		if err != nil {
-			return resp.ErrorValue("ERR value is not a valid float")
-		}
-		return respZIncrBy(ctx, qc, incr)
-	case "DECR":
-		return respIncrBy(ctx, qc, -1)
-	case "INCRBY":
-		if len(qc.args) < 2 {
-			return resp.ErrorValue("ERR wrong number of arguments")
-		}
-		incr, err := parseInt(qc.args[1])
-		if err != nil {
-			return resp.ErrorValue("ERR value is not an integer")
-		}
-		return respIncrBy(ctx, qc, incr)
-	case "DECRBY":
-		if len(qc.args) < 2 {
-			return resp.ErrorValue("ERR wrong number of arguments")
-		}
-		decr, err := parseInt(qc.args[1])
-		if err != nil {
-			return resp.ErrorValue("ERR value is not an integer")
-		}
-		return respIncrBy(ctx, qc, -decr)
-	case "EXPIRE":
-		if len(qc.args) >= 2 {
-			key := string(qc.args[0])
-			seconds, err := parseInt(qc.args[1])
-			if err != nil {
-				return resp.ErrorValue("ERR value is not an integer")
-			}
-			// Bound the TTL before multiplying, exactly as the top-level
-			// cmdEXPIRE handler does. Without the guard the multiplication
-			// overflows int64 nanoseconds and wraps to the wrong sign, so
-			// Store.SetTTL stores an expiry in the PAST and the key is
-			// silently DELETED behind a :1 reply. Redis answers
-			// "ERR invalid expire time in 'expire'".
-			if seconds == 0 || seconds > maxExpireAtSeconds || seconds < -maxExpireAtSeconds {
-				return resp.ErrorValue("ERR invalid expire time")
-			}
-			if _, exists := ctx.Store.Get(key); exists {
-				ctx.Store.SetTTL(key, time.Duration(seconds)*time.Second)
-				return resp.IntegerValue(1)
-			}
-			return resp.IntegerValue(0)
-		}
-		return resp.ErrorValue("ERR wrong number of arguments")
-	case "PEXPIRE":
-		if len(qc.args) >= 2 {
-			key := string(qc.args[0])
-			ms, err := parseInt(qc.args[1])
-			if err != nil {
-				return resp.ErrorValue("ERR value is not an integer")
-			}
-			// See EXPIRE: ms * 1e6 overflows int64 nanoseconds the same way.
-			if ms == 0 || ms > maxExpireAtMillis || ms < -maxExpireAtMillis {
-				return resp.ErrorValue("ERR invalid expire time")
-			}
-			if _, exists := ctx.Store.Get(key); exists {
-				ctx.Store.SetTTL(key, time.Duration(ms)*time.Millisecond)
-				return resp.IntegerValue(1)
-			}
-			return resp.IntegerValue(0)
-		}
-		return resp.ErrorValue("ERR wrong number of arguments")
-	case "TTL":
-		if len(qc.args) >= 1 {
-			key := string(qc.args[0])
-			ttl := ctx.Store.GetTTL(key)
-			if ttl == -2*time.Second {
-				return resp.IntegerValue(-2)
-			}
-			if ttl == -1*time.Second {
-				return resp.IntegerValue(-1)
-			}
-			return resp.IntegerValue(int64(ttl / time.Second))
-		}
-		return resp.ErrorValue("ERR wrong number of arguments")
-	case "PTTL":
-		if len(qc.args) >= 1 {
-			key := string(qc.args[0])
-			ttl := ctx.Store.GetTTL(key)
-			if ttl == -2*time.Second {
-				return resp.IntegerValue(-2)
-			}
-			if ttl == -1*time.Second {
-				return resp.IntegerValue(-1)
-			}
-			return resp.IntegerValue(int64(ttl / time.Millisecond))
-		}
-		return resp.ErrorValue("ERR wrong number of arguments")
-	case "PERSIST":
-		if len(qc.args) >= 1 {
-			key := string(qc.args[0])
-			if _, exists := ctx.Store.Get(key); exists {
-				if ctx.Store.GetTTL(key) > 0 {
-					ctx.Store.Persist(key)
-					return resp.IntegerValue(1)
-				}
-				return resp.IntegerValue(0)
-			}
-			return resp.IntegerValue(0)
-		}
-		return resp.ErrorValue("ERR wrong number of arguments")
-	case "TYPE":
-		if len(qc.args) >= 1 {
-			key := string(qc.args[0])
-			if entry, exists := ctx.Store.Get(key); exists {
-				return resp.SimpleString(entry.Value.Type().String())
-			}
-			return resp.SimpleString("none")
-		}
-		return resp.ErrorValue("ERR wrong number of arguments")
-	case "EXISTS":
-		count := int64(0)
-		for _, arg := range qc.args {
-			if _, exists := ctx.Store.Get(string(arg)); exists {
-				count++
-			}
-		}
-		return resp.IntegerValue(count)
-	case "APPEND":
-		if len(qc.args) >= 2 {
-			key := string(qc.args[0])
-			value := qc.args[1]
-			if entry, exists := ctx.Store.Get(key); exists {
-				if sv, ok := entry.Value.(*store.StringValue); ok {
-					newData := make([]byte, 0, len(sv.Data)+len(value))
-					newData = append(newData, sv.Data...)
-					newData = append(newData, value...)
-					ctx.Store.Set(key, &store.StringValue{Data: newData}, store.SetOptions{})
-					return resp.IntegerValue(int64(len(newData)))
-				}
-				return resp.ErrorValue("WRONGTYPE Operation against a key holding the wrong kind of value")
-			}
-			ctx.Store.Set(key, &store.StringValue{Data: value}, store.SetOptions{})
-			return resp.IntegerValue(int64(len(value)))
-		}
-		return resp.ErrorValue("ERR wrong number of arguments")
-	case "STRLEN":
-		if len(qc.args) >= 1 {
-			key := string(qc.args[0])
-			if entry, exists := ctx.Store.Get(key); exists {
-				if sv, ok := entry.Value.(*store.StringValue); ok {
-					return resp.IntegerValue(int64(len(sv.Data)))
-				}
-				return resp.ErrorValue("WRONGTYPE Operation against a key holding the wrong kind of value")
-			}
-			return resp.IntegerValue(0)
-		}
-		return resp.ErrorValue("ERR wrong number of arguments")
-	case "MSET":
-		if len(qc.args) >= 2 && len(qc.args)%2 == 0 {
-			for i := 0; i < len(qc.args); i += 2 {
-				key := string(qc.args[i])
-				value := qc.args[i+1]
-				ctx.Store.Set(key, &store.StringValue{Data: value}, store.SetOptions{})
-			}
-			return resp.SimpleString("OK")
-		}
-		return resp.ErrorValue("ERR wrong number of arguments")
-	case "MGET":
-		if len(qc.args) >= 1 {
-			results := make([]*resp.Value, len(qc.args))
-			for i, arg := range qc.args {
-				key := string(arg)
-				if entry, exists := ctx.Store.Get(key); exists {
-					if sv, ok := entry.Value.(*store.StringValue); ok {
-						results[i] = resp.BulkBytes(sv.Data)
-					} else {
-						results[i] = resp.NullValue()
-					}
-				} else {
-					results[i] = resp.NullValue()
-				}
-			}
-			return resp.ArrayValue(results)
-		}
-		return resp.ErrorValue("ERR wrong number of arguments")
-	case "SETNX":
-		if len(qc.args) >= 2 {
-			key := string(qc.args[0])
-			value := qc.args[1]
-			if _, exists := ctx.Store.Get(key); !exists {
-				ctx.Store.Set(key, &store.StringValue{Data: value}, store.SetOptions{})
-				return resp.IntegerValue(1)
-			}
-			return resp.IntegerValue(0)
-		}
-		return resp.ErrorValue("ERR wrong number of arguments")
-	case "SETEX":
-		if len(qc.args) >= 3 {
-			key := string(qc.args[0])
-			seconds, err := parseInt(qc.args[1])
-			if err != nil {
-				return resp.ErrorValue("ERR value is not an integer")
-			}
-			// Bound the TTL before multiplying, exactly as the top-level
-			// cmdSETEX handler does. Without the guard the multiplication
-			// overflows int64 nanoseconds and wraps NEGATIVE, which Store.Set
-			// reads as "no expiry" -- leaving a PERMANENT key behind an OK
-			// reply. Redis answers "ERR invalid expire time in 'setex'".
-			if seconds == 0 || seconds > maxExpireAtSeconds || seconds < -maxExpireAtSeconds {
-				return resp.ErrorValue("ERR invalid expire time")
-			}
-			value := qc.args[2]
-			ctx.Store.Set(key, &store.StringValue{Data: value}, store.SetOptions{TTL: time.Duration(seconds) * time.Second})
-			return resp.SimpleString("OK")
-		}
-		return resp.ErrorValue("ERR wrong number of arguments")
-	case "GETSET":
-		if len(qc.args) >= 2 {
-			key := string(qc.args[0])
-			value := qc.args[1]
-			var oldValue []byte
-			if entry, exists := ctx.Store.Get(key); exists {
-				if sv, ok := entry.Value.(*store.StringValue); ok {
-					oldValue = sv.Data
-				} else {
-					return resp.ErrorValue("WRONGTYPE Operation against a key holding the wrong kind of value")
-				}
-			}
-			ctx.Store.Set(key, &store.StringValue{Data: value}, store.SetOptions{})
-			if oldValue != nil {
-				return resp.BulkBytes(oldValue)
-			}
-			return resp.NullBulkString()
-		}
-		return resp.ErrorValue("ERR wrong number of arguments")
-	case "RENAME":
-		if len(qc.args) >= 2 {
-			oldKey := string(qc.args[0])
-			newKey := string(qc.args[1])
-			entry, exists := ctx.Store.Get(oldKey)
-			if !exists {
-				return resp.ErrorValue("ERR no such key")
-			}
-			ctx.Store.Delete(oldKey)
-			ctx.Store.SetEntry(newKey, entry)
-			return resp.SimpleString("OK")
-		}
-		return resp.ErrorValue("ERR wrong number of arguments")
-	case "RENAMENX":
-		if len(qc.args) >= 2 {
-			oldKey := string(qc.args[0])
-			newKey := string(qc.args[1])
-			entry, exists := ctx.Store.Get(oldKey)
-			if !exists {
-				return resp.ErrorValue("ERR no such key")
-			}
-			if _, exists := ctx.Store.Get(newKey); exists {
-				return resp.IntegerValue(0)
-			}
-			ctx.Store.Delete(oldKey)
-			ctx.Store.SetEntry(newKey, entry)
-			return resp.IntegerValue(1)
-		}
-		return resp.ErrorValue("ERR wrong number of arguments")
-	case "HSET":
-		if len(qc.args) >= 3 && len(qc.args)%2 == 1 {
-			key := string(qc.args[0])
-			added := 0
-			for i := 1; i < len(qc.args); i += 2 {
-				field := string(qc.args[i])
-				value := qc.args[i+1]
-				if entry, exists := ctx.Store.Get(key); exists {
-					if hv, ok := entry.Value.(*store.HashValue); ok {
-						hv.Lock()
-						if _, exists := hv.Fields[field]; !exists {
-							added++
-						}
-						hv.Fields[field] = value
-						hv.Unlock()
-					} else {
-						return resp.ErrorValue("WRONGTYPE Operation against a key holding the wrong kind of value")
-					}
-				} else {
-					hv := &store.HashValue{Fields: make(map[string][]byte)}
-					hv.Fields[field] = value
-					ctx.Store.Set(key, hv, store.SetOptions{})
-					added++
-				}
-			}
-			return resp.IntegerValue(int64(added))
-		}
-		return resp.ErrorValue("ERR wrong number of arguments")
-	case "HGET":
-		if len(qc.args) >= 2 {
-			if entry, exists := ctx.Store.Get(string(qc.args[0])); exists {
-				if hv, ok := entry.Value.(*store.HashValue); ok {
-					hv.RLock()
-					val, exists := hv.Fields[string(qc.args[1])]
-					hv.RUnlock()
-					if exists {
-						return resp.BulkBytes(val)
-					}
-					return resp.NullBulkString()
-				}
-				return resp.ErrorValue("WRONGTYPE Operation against a key holding the wrong kind of value")
-			}
-			return resp.NullBulkString()
-		}
-		return resp.ErrorValue("ERR wrong number of arguments")
-	case "HDEL":
-		if len(qc.args) >= 2 {
-			key := string(qc.args[0])
-			deleted := int64(0)
-			if entry, exists := ctx.Store.Get(key); exists {
-				if hv, ok := entry.Value.(*store.HashValue); ok {
-					hv.Lock()
-					for _, arg := range qc.args[1:] {
-						field := string(arg)
-						if _, exists := hv.Fields[field]; exists {
-							delete(hv.Fields, field)
-							deleted++
-						}
-					}
-					hv.Unlock()
-				} else {
-					return resp.ErrorValue("WRONGTYPE Operation against a key holding the wrong kind of value")
-				}
-			}
-			return resp.IntegerValue(deleted)
-		}
-		return resp.ErrorValue("ERR wrong number of arguments")
-	case "HEXISTS":
-		if len(qc.args) >= 2 {
-			if entry, exists := ctx.Store.Get(string(qc.args[0])); exists {
-				if hv, ok := entry.Value.(*store.HashValue); ok {
-					hv.RLock()
-					_, exists := hv.Fields[string(qc.args[1])]
-					hv.RUnlock()
-					if exists {
-						return resp.IntegerValue(1)
-					}
-				}
-			}
-			return resp.IntegerValue(0)
-		}
-		return resp.ErrorValue("ERR wrong number of arguments")
-	case "HLEN":
-		if len(qc.args) >= 1 {
-			key := string(qc.args[0])
-			if entry, exists := ctx.Store.Get(key); exists {
-				if hv, ok := entry.Value.(*store.HashValue); ok {
-					hv.RLock()
-					len := len(hv.Fields)
-					hv.RUnlock()
-					return resp.IntegerValue(int64(len))
-				}
-				return resp.ErrorValue("WRONGTYPE Operation against a key holding the wrong kind of value")
-			}
-			return resp.IntegerValue(0)
-		}
-		return resp.ErrorValue("ERR wrong number of arguments")
-	case "LPUSH", "RPUSH":
-		if len(qc.args) >= 2 {
-			key := string(qc.args[0])
-			var list *store.ListValue
-			if entry, exists := ctx.Store.Get(key); exists {
-				if lv, ok := entry.Value.(*store.ListValue); ok {
-					list = lv
-				} else {
-					return resp.ErrorValue("WRONGTYPE Operation against a key holding the wrong kind of value")
-				}
-			} else {
-				list = &store.ListValue{Elements: make([][]byte, 0)}
-				ctx.Store.Set(key, list, store.SetOptions{})
-			}
-			list.Lock()
-			for _, arg := range qc.args[1:] {
-				if qc.cmd == "LPUSH" {
-					list.Elements = append([][]byte{arg}, list.Elements...)
-				} else {
-					list.Elements = append(list.Elements, arg)
-				}
-			}
-			len := len(list.Elements)
-			list.Unlock()
-			return resp.IntegerValue(int64(len))
-		}
-		return resp.ErrorValue("ERR wrong number of arguments")
-	case "LPOP", "RPOP":
-		if len(qc.args) >= 1 {
-			key := string(qc.args[0])
-			if entry, exists := ctx.Store.Get(key); exists {
-				if lv, ok := entry.Value.(*store.ListValue); ok {
-					lv.Lock()
-					if len(lv.Elements) == 0 {
-						lv.Unlock()
-						return resp.NullBulkString()
-					}
-					var val []byte
-					if qc.cmd == "LPOP" {
-						val = lv.Elements[0]
-						lv.Elements = lv.Elements[1:]
-					} else {
-						val = lv.Elements[len(lv.Elements)-1]
-						lv.Elements = lv.Elements[:len(lv.Elements)-1]
-					}
-					if len(lv.Elements) == 0 {
-						ctx.Store.Delete(key)
-					}
-					lv.Unlock()
-					return resp.BulkBytes(val)
-				}
-				return resp.ErrorValue("WRONGTYPE Operation against a key holding the wrong kind of value")
-			}
-			return resp.NullBulkString()
-		}
-		return resp.ErrorValue("ERR wrong number of arguments")
-	case "LLEN":
-		if len(qc.args) >= 1 {
-			key := string(qc.args[0])
-			if entry, exists := ctx.Store.Get(key); exists {
-				if lv, ok := entry.Value.(*store.ListValue); ok {
-					lv.RLock()
-					len := len(lv.Elements)
-					lv.RUnlock()
-					return resp.IntegerValue(int64(len))
-				}
-				return resp.ErrorValue("WRONGTYPE Operation against a key holding the wrong kind of value")
-			}
-			return resp.IntegerValue(0)
-		}
-		return resp.ErrorValue("ERR wrong number of arguments")
-	case "SADD":
-		if len(qc.args) >= 2 {
-			key := string(qc.args[0])
-			var set *store.SetValue
-			if entry, exists := ctx.Store.Get(key); exists {
-				if sv, ok := entry.Value.(*store.SetValue); ok {
-					set = sv
-				} else {
-					return resp.ErrorValue("WRONGTYPE Operation against a key holding the wrong kind of value")
-				}
-			} else {
-				set = &store.SetValue{Members: make(map[string]struct{})}
-				ctx.Store.Set(key, set, store.SetOptions{})
-			}
-			set.Lock()
-			added := 0
-			for _, arg := range qc.args[1:] {
-				member := string(arg)
-				if _, exists := set.Members[member]; !exists {
-					set.Members[member] = struct{}{}
-					added++
-				}
-			}
-			set.Unlock()
-			return resp.IntegerValue(int64(added))
-		}
-		return resp.ErrorValue("ERR wrong number of arguments")
-	case "SREM":
-		if len(qc.args) >= 2 {
-			key := string(qc.args[0])
-			removed := int64(0)
-			if entry, exists := ctx.Store.Get(key); exists {
-				if sv, ok := entry.Value.(*store.SetValue); ok {
-					sv.Lock()
-					for _, arg := range qc.args[1:] {
-						member := string(arg)
-						if _, exists := sv.Members[member]; exists {
-							delete(sv.Members, member)
-							removed++
-						}
-					}
-					sv.Unlock()
-				} else {
-					return resp.ErrorValue("WRONGTYPE Operation against a key holding the wrong kind of value")
-				}
-			}
-			return resp.IntegerValue(removed)
-		}
-		return resp.ErrorValue("ERR wrong number of arguments")
-	case "SCARD":
-		if len(qc.args) >= 1 {
-			key := string(qc.args[0])
-			if entry, exists := ctx.Store.Get(key); exists {
-				if sv, ok := entry.Value.(*store.SetValue); ok {
-					sv.RLock()
-					len := len(sv.Members)
-					sv.RUnlock()
-					return resp.IntegerValue(int64(len))
-				}
-				return resp.ErrorValue("WRONGTYPE Operation against a key holding the wrong kind of value")
-			}
-			return resp.IntegerValue(0)
-		}
-		return resp.ErrorValue("ERR wrong number of arguments")
-	case "SISMEMBER":
-		if len(qc.args) >= 2 {
-			if entry, exists := ctx.Store.Get(string(qc.args[0])); exists {
-				if sv, ok := entry.Value.(*store.SetValue); ok {
-					sv.RLock()
-					_, exists := sv.Members[string(qc.args[1])]
-					sv.RUnlock()
-					if exists {
-						return resp.IntegerValue(1)
-					}
-				}
-			}
-			return resp.IntegerValue(0)
-		}
-		return resp.ErrorValue("ERR wrong number of arguments")
-	case "ZADD":
-		if len(qc.args) >= 3 {
-			key := string(qc.args[0])
-			var zset *store.SortedSetValue
-			if entry, exists := ctx.Store.Get(key); exists {
-				if zv, ok := entry.Value.(*store.SortedSetValue); ok {
-					zset = zv
-				} else {
-					return resp.ErrorValue("WRONGTYPE Operation against a key holding the wrong kind of value")
-				}
-			} else {
-				zset = &store.SortedSetValue{Members: make(map[string]float64)}
-				ctx.Store.Set(key, zset, store.SetOptions{})
-			}
-			zset.Lock()
-			added := 0
-			for i := 1; i < len(qc.args); i += 2 {
-				if i+1 >= len(qc.args) {
-					break
-				}
-				score, err := parseFloat(qc.args[i])
-				if err != nil {
-					zset.Unlock()
-					return resp.ErrorValue("ERR value is not a valid float")
-				}
-				member := string(qc.args[i+1])
-				if _, exists := zset.Members[member]; !exists {
-					added++
-				}
-				zset.Members[member] = score
-			}
-			zset.Unlock()
-			return resp.IntegerValue(int64(added))
-		}
-		return resp.ErrorValue("ERR wrong number of arguments")
-	case "ZREM":
-		if len(qc.args) >= 2 {
-			key := string(qc.args[0])
-			removed := int64(0)
-			if entry, exists := ctx.Store.Get(key); exists {
-				if zv, ok := entry.Value.(*store.SortedSetValue); ok {
-					zv.Lock()
-					for _, arg := range qc.args[1:] {
-						member := string(arg)
-						if _, exists := zv.Members[member]; exists {
-							delete(zv.Members, member)
-							removed++
-						}
-					}
-					zv.Unlock()
-				} else {
-					return resp.ErrorValue("WRONGTYPE Operation against a key holding the wrong kind of value")
-				}
-			}
-			return resp.IntegerValue(removed)
-		}
-		return resp.ErrorValue("ERR wrong number of arguments")
-	case "ZCARD":
-		if len(qc.args) >= 1 {
-			key := string(qc.args[0])
-			if entry, exists := ctx.Store.Get(key); exists {
-				if zv, ok := entry.Value.(*store.SortedSetValue); ok {
-					zv.RLock()
-					len := len(zv.Members)
-					zv.RUnlock()
-					return resp.IntegerValue(int64(len))
-				}
-				return resp.ErrorValue("WRONGTYPE Operation against a key holding the wrong kind of value")
-			}
-			return resp.IntegerValue(0)
-		}
-		return resp.ErrorValue("ERR wrong number of arguments")
-	case "ZSCORE":
-		if len(qc.args) >= 2 {
-			if entry, exists := ctx.Store.Get(string(qc.args[0])); exists {
-				if zv, ok := entry.Value.(*store.SortedSetValue); ok {
-					zv.RLock()
-					score, exists := zv.Members[string(qc.args[1])]
-					zv.RUnlock()
-					if exists {
-						return resp.BulkString(float64ToString(score))
-					}
-				}
-			}
-			return resp.NullBulkString()
-		}
-		return resp.ErrorValue("ERR wrong number of arguments")
-	case "PING":
-		return resp.SimpleString("PONG")
-	case "ECHO":
-		if len(qc.args) >= 1 {
-			return resp.BulkBytes(qc.args[0])
-		}
-		return resp.SimpleString("")
-	case "DBSIZE":
-		return resp.IntegerValue(ctx.Store.KeyCount())
-	case "FLUSHDB":
-		ctx.Store.Flush()
-		return resp.SimpleString("OK")
-	case "MSETNX":
-		// Same all-or-nothing semantics as the live command: set every key
-		// only when none exists, otherwise set nothing and reply 0.
-		if len(qc.args) >= 2 && len(qc.args)%2 == 0 {
-			for i := 0; i < len(qc.args); i += 2 {
-				if ctx.Store.Exists(string(qc.args[i])) {
-					return resp.IntegerValue(0)
-				}
-			}
-			for i := 0; i < len(qc.args); i += 2 {
-				key := string(qc.args[i])
-				value := qc.args[i+1]
-				ctx.Store.Set(key, &store.StringValue{Data: value}, store.SetOptions{})
-			}
-			return resp.IntegerValue(1)
-		}
-		return resp.ErrorValue("ERR wrong number of arguments")
+		values = append(values, v)
+	}
+	switch len(values) {
+	case 0:
+		return resp.NullBulkString()
+	case 1:
+		return values[0]
 	default:
-		return resp.ErrorValue("ERR command not supported in transaction")
+		return resp.ArrayValue(values)
 	}
 }
 
@@ -936,34 +328,6 @@ func computeIntIncr(current []byte, incr int64) (int64, error) {
 		return 0, ErrOverflow
 	}
 	return parsed + incr, nil
-}
-
-// respIncrBy applies incr to the queued command's key and returns the RESP
-// reply, mirroring the interactive incrBy semantics (reject wrong type,
-// non-integer values, and boundary overflows instead of wrapping).
-func respIncrBy(ctx *Context, qc queuedCommand, incr int64) *resp.Value {
-	if len(qc.args) < 1 {
-		return resp.ErrorValue("ERR wrong number of arguments")
-	}
-	key := string(qc.args[0])
-	if entry, exists := ctx.Store.Get(key); exists {
-		sv, ok := entry.Value.(*store.StringValue)
-		if !ok {
-			return resp.ErrorValue(store.ErrWrongType.Error())
-		}
-		newVal, err := computeIntIncr(sv.Data, incr)
-		if err != nil {
-			return resp.ErrorValue(err.Error())
-		}
-		if err := ctx.Store.Set(key, &store.StringValue{Data: []byte(strconv.FormatInt(newVal, 10))}, store.SetOptions{KeepTTL: true}); err != nil {
-			return resp.ErrorValue(err.Error())
-		}
-		return resp.IntegerValue(newVal)
-	}
-	if err := ctx.Store.Set(key, &store.StringValue{Data: []byte(strconv.FormatInt(incr, 10))}, store.SetOptions{}); err != nil {
-		return resp.ErrorValue(err.Error())
-	}
-	return resp.IntegerValue(incr)
 }
 
 func parseInt(data []byte) (int64, error) {

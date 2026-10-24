@@ -153,30 +153,38 @@ func (w *AOFWriter) Append(cmd string, args [][]byte) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	w.writerBuf = w.writerBuf[:0]
-	w.writerBuf = append(w.writerBuf, '*')
-	w.writerBuf = strconv.AppendInt(w.writerBuf, int64(len(args)+1), 10)
-	w.writerBuf = append(w.writerBuf, '\r', '\n', '$')
-	w.writerBuf = strconv.AppendInt(w.writerBuf, int64(len(cmd)), 10)
-	w.writerBuf = append(w.writerBuf, '\r', '\n')
-	w.writerBuf = append(w.writerBuf, cmd...)
-	w.writerBuf = append(w.writerBuf, '\r', '\n')
+	w.writerBuf = appendCommand(w.writerBuf[:0], cmd, args)
+	return w.writeLocked(1)
+}
 
-	for _, arg := range args {
-		w.writerBuf = append(w.writerBuf, '$')
-		w.writerBuf = strconv.AppendInt(w.writerBuf, int64(len(arg)), 10)
-		w.writerBuf = append(w.writerBuf, '\r', '\n')
-		w.writerBuf = append(w.writerBuf, arg...)
-		w.writerBuf = append(w.writerBuf, '\r', '\n')
+// AppendTransaction records the commands an EXEC ran as one MULTI ... EXEC
+// block, written and synced together. Replay applies the block only when its
+// EXEC marker is present, so a crash in the middle of the write cannot leave
+// half a transaction behind.
+func (w *AOFWriter) AppendTransaction(cmds []Command) error {
+	if !w.config.Enabled || !w.running.Load() || len(cmds) == 0 {
+		return nil
 	}
 
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	w.writerBuf = appendCommand(w.writerBuf[:0], "MULTI", nil)
+	for _, c := range cmds {
+		w.writerBuf = appendCommand(w.writerBuf, c.Name, c.Args)
+	}
+	w.writerBuf = appendCommand(w.writerBuf, "EXEC", nil)
+	return w.writeLocked(int64(len(cmds)))
+}
+
+func (w *AOFWriter) writeLocked(commands int64) error {
 	n, err := w.writer.Write(w.writerBuf)
 	if err != nil {
 		return fmt.Errorf("failed to write to AOF: %v", err)
 	}
 
 	w.size.Add(int64(n))
-	w.dirty.Add(1)
+	w.dirty.Add(commands)
 
 	if w.config.SyncPolicy == AOFAlways {
 		if err := w.writer.Flush(); err != nil {
@@ -188,6 +196,25 @@ func (w *AOFWriter) Append(cmd string, args [][]byte) error {
 	}
 
 	return nil
+}
+
+func appendCommand(buf []byte, cmd string, args [][]byte) []byte {
+	buf = append(buf, '*')
+	buf = strconv.AppendInt(buf, int64(len(args)+1), 10)
+	buf = append(buf, '\r', '\n', '$')
+	buf = strconv.AppendInt(buf, int64(len(cmd)), 10)
+	buf = append(buf, '\r', '\n')
+	buf = append(buf, cmd...)
+	buf = append(buf, '\r', '\n')
+
+	for _, arg := range args {
+		buf = append(buf, '$')
+		buf = strconv.AppendInt(buf, int64(len(arg)), 10)
+		buf = append(buf, '\r', '\n')
+		buf = append(buf, arg...)
+		buf = append(buf, '\r', '\n')
+	}
+	return buf
 }
 
 func (w *AOFWriter) Size() int64 {
@@ -226,35 +253,59 @@ type Command struct {
 }
 
 func (r *AOFReader) Load(path string) ([]Command, error) {
+	commands, _, err := r.LoadValid(path)
+	return commands, err
+}
+
+// countingReader counts the bytes read through it.
+type countingReader struct {
+	r io.Reader
+	n int64
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n += int64(n)
+	return n, err
+}
+
+// LoadValid reads every complete command and returns, with them, the length
+// of the file prefix those commands occupy. A file whose tail was cut short by
+// a crash loads up to the last complete command and reports a valid length
+// shorter than the file; the caller truncates the file there so the next
+// append does not land after the torn bytes. Bytes that do not parse as a
+// command anywhere before the tail are corruption and return an error.
+func (r *AOFReader) LoadValid(path string) ([]Command, int64, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open AOF file: %v", err)
+		return nil, 0, fmt.Errorf("failed to open AOF file: %v", err)
 	}
 	defer f.Close()
 
 	var commands []Command
-	reader := resp.NewReader(bufio.NewReader(f))
+	counter := &countingReader{r: f}
+	br := bufio.NewReader(counter)
+	reader := resp.NewReader(br)
+	var valid int64
 
 	for {
 		cmd, args, err := reader.ReadCommand()
 		if err != nil {
-			if err == io.EOF {
+			if err == io.EOF || err == io.ErrUnexpectedEOF || strings.Contains(err.Error(), "EOF") {
 				break
 			}
-			if strings.Contains(err.Error(), "EOF") {
-				break
-			}
-			return nil, fmt.Errorf("failed to read command: %v", err)
+			return nil, valid, fmt.Errorf("failed to read command at offset %d: %v", valid, err)
 		}
 
 		commands = append(commands, Command{
 			Name: cmd,
 			Args: args,
 		})
+		valid = counter.n - int64(br.Buffered())
 	}
 
 	logger.Info().Int("commands", len(commands)).Msg("AOF loaded")
-	return commands, nil
+	return commands, valid, nil
 }
 
 type AOFRewriter struct {

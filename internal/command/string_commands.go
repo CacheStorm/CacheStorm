@@ -553,7 +553,7 @@ func cmdSETEX(ctx *Context) error {
 		return ctx.WriteError(ErrNotInteger)
 	}
 	if sec <= 0 {
-		return ctx.WriteError(ErrInvalidArg)
+		return ctx.WriteError(errInvalidExpireTime)
 	}
 	// The duration multiplication overflows for larger values, which would
 	// yield a non-positive TTL that Store.Set reads as "no expiry" — a silent
@@ -563,7 +563,9 @@ func cmdSETEX(ctx *Context) error {
 	}
 	value := ctx.Arg(2)
 
-	ctx.Store.Set(key, &store.StringValue{Data: value}, store.SetOptions{TTL: time.Duration(sec) * time.Second})
+	if err := ctx.Store.Set(key, &store.StringValue{Data: value}, store.SetOptions{TTL: time.Duration(sec) * time.Second}); err != nil {
+		return ctx.WriteError(err)
+	}
 	return ctx.WriteOK()
 }
 
@@ -578,7 +580,7 @@ func cmdPSETEX(ctx *Context) error {
 		return ctx.WriteError(ErrNotInteger)
 	}
 	if ms <= 0 {
-		return ctx.WriteError(ErrInvalidArg)
+		return ctx.WriteError(errInvalidExpireTime)
 	}
 	// The duration multiplication overflows for larger values, which would
 	// yield a non-positive TTL that Store.Set reads as "no expiry" — a silent
@@ -588,7 +590,9 @@ func cmdPSETEX(ctx *Context) error {
 	}
 	value := ctx.Arg(2)
 
-	ctx.Store.Set(key, &store.StringValue{Data: value}, store.SetOptions{TTL: time.Duration(ms) * time.Millisecond})
+	if err := ctx.Store.Set(key, &store.StringValue{Data: value}, store.SetOptions{TTL: time.Duration(ms) * time.Millisecond}); err != nil {
+		return ctx.WriteError(err)
+	}
 	return ctx.WriteOK()
 }
 

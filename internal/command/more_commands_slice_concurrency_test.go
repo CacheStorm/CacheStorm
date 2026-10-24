@@ -99,7 +99,7 @@ func TestHeapPeekIsSafeWhileHeapMutatorsWrite(t *testing.T) {
 					return
 				}
 				reply := buf.String()
-				if !strings.HasPrefix(reply, ":") && !strings.HasPrefix(reply, "_") {
+				if !strings.HasPrefix(reply, ":") && !strings.HasPrefix(reply, "$-1") {
 					t.Errorf("HEAP.PEEK: expected an integer or null reply, got %q", reply)
 					return
 				}

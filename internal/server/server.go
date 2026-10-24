@@ -245,14 +245,27 @@ func New(cfg *config.Config) (*Server, error) {
 		}
 		s.aof = persistence.NewAOFWriter(aofCfg)
 
-		// Load existing AOF data
+		// Load existing AOF data. A torn tail left by a crash is cut off so
+		// the next append does not land after it; anything else that fails to
+		// parse is corruption, and starting empty would hide the loss while
+		// new writes went on being appended to the unreadable file.
 		aofPath := filepath.Join(dataDir, "appendonly.aof")
-		if _, err := os.Stat(aofPath); err == nil {
+		if info, err := os.Stat(aofPath); err == nil {
 			reader := persistence.NewAOFReader()
-			commands, err := reader.Load(aofPath)
+			commands, valid, err := reader.LoadValid(aofPath)
 			if err != nil {
-				logger.Warn().Err(err).Msg("failed to load AOF, starting fresh")
-			} else if len(commands) > 0 {
+				return nil, fmt.Errorf("AOF %s is corrupt: %w", aofPath, err)
+			}
+			if valid < info.Size() {
+				logger.Warn().
+					Int64("size", info.Size()).
+					Int64("valid", valid).
+					Msg("AOF ends with an incomplete command, truncating it")
+				if err := os.Truncate(aofPath, valid); err != nil {
+					return nil, fmt.Errorf("truncate AOF %s: %w", aofPath, err)
+				}
+			}
+			if len(commands) > 0 {
 				s.replayAOF(commands)
 				logger.Info().Int("commands", len(commands)).Msg("AOF data restored")
 			}
@@ -265,6 +278,21 @@ func New(cfg *config.Config) (*Server, error) {
 				if err := s.aof.Append(upperCmd, args); err != nil {
 					logger.Error().Err(err).Str("cmd", cmd).Msg("AOF append failed")
 				}
+			}
+		})
+
+		// EXEC runs its queue outside the per-command hook; its writes are
+		// persisted here as one MULTI ... EXEC block.
+		s.router.SetPostExec(func(cmds []command.ExecutedCommand) {
+			writes := make([]persistence.Command, 0, len(cmds))
+			for _, c := range cmds {
+				upperCmd := strings.ToUpper(c.Name)
+				if writeCommands[upperCmd] {
+					writes = append(writes, persistence.Command{Name: upperCmd, Args: c.Args})
+				}
+			}
+			if err := s.aof.AppendTransaction(writes); err != nil {
+				logger.Error().Err(err).Msg("AOF transaction append failed")
 			}
 		})
 	}
@@ -589,7 +617,7 @@ func (s *Server) Store() *store.Store {
 func (s *Server) replayAOF(commands []persistence.Command) {
 	replayed := 0
 	failed := 0
-	for _, cmd := range commands {
+	apply := func(cmd persistence.Command) {
 		ctx := command.NewContext(cmd.Name, cmd.Args, s.store, nil)
 		if err := s.router.ExecuteSilent(ctx); err != nil {
 			failed++
@@ -599,6 +627,36 @@ func (s *Server) replayAOF(commands []persistence.Command) {
 		} else {
 			replayed++
 		}
+	}
+
+	// A MULTI ... EXEC block is applied only once its EXEC marker is read, so
+	// a transaction the crash cut short is dropped as a whole.
+	var pending []persistence.Command
+	inTx := false
+	for _, cmd := range commands {
+		switch strings.ToUpper(cmd.Name) {
+		case "MULTI":
+			pending = pending[:0]
+			inTx = true
+			continue
+		case "EXEC":
+			for _, c := range pending {
+				apply(c)
+			}
+			pending = pending[:0]
+			inTx = false
+			continue
+		}
+		if inTx {
+			pending = append(pending, cmd)
+			continue
+		}
+		apply(cmd)
+	}
+	if inTx {
+		logger.Warn().
+			Int("commands", len(pending)).
+			Msg("AOF ends inside a transaction, discarding the incomplete transaction")
 	}
 	if failed > 0 {
 		logger.Warn().

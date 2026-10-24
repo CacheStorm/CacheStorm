@@ -60,6 +60,17 @@ func TestPsyncNeverPromisesBacklogItCannotServe(t *testing.T) {
 	}
 }
 
+// PSYNC takes a replid and an offset; Redis rejects a call without both.
+func TestPsyncRequiresReplidAndOffset(t *testing.T) {
+	s := store.NewStore()
+	InitReplicationManager(s)
+	for _, args := range [][]string{{"PSYNC"}, {"PSYNC", "0000000000000000000000000000000000000000"}} {
+		if got := psyncReply(t, s, args...); got.Type != resp.TypeError {
+			t.Fatalf("%v returned %v %q, want an arity error", args, got.Type, got.Str)
+		}
+	}
+}
+
 // Any replid/offset combination must full-resync, including ones that used to
 // be parsed only to be discarded.
 func TestPsyncAlwaysFullResyncs(t *testing.T) {
@@ -75,8 +86,6 @@ func TestPsyncAlwaysFullResyncs(t *testing.T) {
 		{"matching replid, negative offset", []string{"PSYNC", replID, "-1"}},
 		{"matching replid, large offset", []string{"PSYNC", replID, "999999"}},
 		{"non-numeric offset", []string{"PSYNC", replID, "not-a-number"}},
-		{"no args", []string{"PSYNC"}},
-		{"replid only", []string{"PSYNC", replID}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := psyncReply(t, s, tc.args...)

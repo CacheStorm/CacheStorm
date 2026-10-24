@@ -57,7 +57,7 @@ func TestMigrateNeverReportsSuccessWithoutMigrating(t *testing.T) {
 	s := store.NewStore()
 	migrateRun(t, s, "SET", "k", "v")
 
-	got := migrateRun(t, s, "MIGRATE", "127.0.0.1", "6379", "k", "0")
+	got := migrateRun(t, s, "MIGRATE", "127.0.0.1", "6379", "k", "0", "1000")
 
 	if got.Type == resp.TypeSimpleString && got.Str == "OK" {
 		if migrateExists(t, s, "k") == 1 {
@@ -76,7 +76,7 @@ func TestMigrateRefusalLeavesKeyIntact(t *testing.T) {
 	s := store.NewStore()
 	migrateRun(t, s, "SET", "k", "v")
 
-	migrateRun(t, s, "MIGRATE", "127.0.0.1", "6379", "k", "0")
+	migrateRun(t, s, "MIGRATE", "127.0.0.1", "6379", "k", "0", "1000")
 
 	if n := migrateExists(t, s, "k"); n != 1 {
 		t.Fatalf("EXISTS = %d, want 1: a MIGRATE that transfers nothing must not drop the key", n)
@@ -92,7 +92,7 @@ func TestMigrateCopyOptionStillRefuses(t *testing.T) {
 	s := store.NewStore()
 	migrateRun(t, s, "SET", "k", "v")
 
-	got := migrateRun(t, s, "MIGRATE", "127.0.0.1", "6379", "k", "0", "COPY")
+	got := migrateRun(t, s, "MIGRATE", "127.0.0.1", "6379", "k", "0", "1000", "COPY")
 	if got.Type == resp.TypeSimpleString && got.Str == "OK" {
 		t.Fatalf("MIGRATE ... COPY replied +%s, want an error", got.Str)
 	}
@@ -106,7 +106,7 @@ func TestMigrateCopyOptionStillRefuses(t *testing.T) {
 func TestMigrateMissingKeyReturnsNokeyControl(t *testing.T) {
 	s := store.NewStore()
 
-	got := migrateRun(t, s, "MIGRATE", "127.0.0.1", "6379", "absent", "0")
+	got := migrateRun(t, s, "MIGRATE", "127.0.0.1", "6379", "absent", "0", "1000")
 	if got.Type != resp.TypeBulkString || string(got.Bulk) != "NOKEY" {
 		t.Fatalf("control: MIGRATE on a missing key returned type %v %q, want bulk \"NOKEY\"", got.Type, got.Bulk)
 	}

@@ -198,7 +198,7 @@ func TestLuaScalarControlsUncontended(t *testing.T) {
 	}
 
 	// Boundary: a missing field is a Lua nil, not an error.
-	if got := luaScalarRun(t, s, router, "EVAL", "return redis.call('HGET', redis.KEYS[1], 'nope')", "1", "h"); got != "_\r\n" {
+	if got := luaScalarRun(t, s, router, "EVAL", "return redis.call('HGET', redis.KEYS[1], 'nope')", "1", "h"); got != "$-1\r\n" {
 		t.Fatalf("HGET of a missing field = %q, want a null reply", got)
 	}
 	if got := luaScalarRun(t, s, router, "EVAL", "return redis.call('SISMEMBER', redis.KEYS[1], 'nope')", "1", "st"); got != ":0\r\n" {

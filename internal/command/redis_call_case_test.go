@@ -119,7 +119,7 @@ func TestProofRedisCallIsCaseInsensitive(t *testing.T) {
 		t.Fatalf("FAIL: redis.call('del','d') returned %q, want \":1\\r\\n\" — before the fix the key "+
 			"survived a 'del' the script believed it performed", bytes.TrimSpace([]byte(got)))
 	}
-	if survived := evalLua(s, r, "return redis.call('GET','d')"); survived != "_\r\n" {
+	if survived := evalLua(s, r, "return redis.call('GET','d')"); survived != "$-1\r\n" {
 		t.Fatalf("FAIL: key 'd' still exists after redis.call('del','d') (GET returned %q)", survived)
 	}
 	t.Log("PASS: lowercase 'del' removes the key")

@@ -3,7 +3,7 @@ package command
 import (
 	"bytes"
 	"errors"
-	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -672,9 +672,9 @@ func cmdBLMOVE(ctx *Context) error {
 	dstKey := ctx.ArgString(1)
 	whereFrom := strings.ToUpper(ctx.ArgString(2))
 	whereTo := strings.ToUpper(ctx.ArgString(3))
-	timeout, err := strconv.Atoi(ctx.ArgString(4))
+	timeout, err := parseBlockTimeout(ctx.ArgString(4))
 	if err != nil {
-		return ctx.WriteError(ErrNotInteger)
+		return ctx.WriteError(err)
 	}
 
 	if whereFrom != "LEFT" && whereFrom != "RIGHT" {
@@ -691,15 +691,10 @@ func cmdBLMOVE(ctx *Context) error {
 		return ctx.WriteBulkBytes(value)
 	}
 
-	if timeout == 0 {
-		return ctx.WriteNull()
-	}
-
-	notifier := ctx.Store.KeyNotifier()
-	dur := time.Duration(timeout) * time.Second
+	dur := timeout
 
 	for {
-		if !notifier.WaitForKey(srcKey, dur) {
+		if !ctx.waitForKey(srcKey, dur) {
 			return ctx.WriteNull()
 		}
 		if value, ok, err := tryListMove(ctx, srcKey, dstKey, whereFrom, whereTo); err != nil {
@@ -708,6 +703,31 @@ func cmdBLMOVE(ctx *Context) error {
 			return ctx.WriteBulkBytes(value)
 		}
 	}
+}
+
+var (
+	errTimeoutNotFloat = errors.New("ERR timeout is not a float or out of range")
+	errTimeoutNegative = errors.New("ERR timeout is negative")
+)
+
+// blockForever is the wait used for a zero timeout, which Redis treats as
+// "block until data arrives".
+const blockForever = time.Duration(1) << 62
+
+// parseBlockTimeout parses a blocking command's timeout in seconds. Redis
+// accepts fractional seconds and treats 0 as an unbounded wait.
+func parseBlockTimeout(arg string) (time.Duration, error) {
+	sec, err := strconv.ParseFloat(arg, 64)
+	if err != nil || math.IsNaN(sec) || math.IsInf(sec, 0) {
+		return 0, errTimeoutNotFloat
+	}
+	if sec < 0 {
+		return 0, errTimeoutNegative
+	}
+	if sec == 0 || sec > float64(blockForever/time.Second) {
+		return blockForever, nil
+	}
+	return time.Duration(sec * float64(time.Second)), nil
 }
 
 func tryListMove(ctx *Context, srcKey, dstKey, whereFrom, whereTo string) ([]byte, bool, error) {
@@ -778,9 +798,9 @@ func cmdBLPOP(ctx *Context) error {
 	for i := 0; i < ctx.ArgCount()-1; i++ {
 		keys = append(keys, ctx.ArgString(i))
 	}
-	timeout, err := strconv.Atoi(ctx.ArgString(ctx.ArgCount() - 1))
+	timeout, err := parseBlockTimeout(ctx.ArgString(ctx.ArgCount() - 1))
 	if err != nil {
-		return ctx.WriteError(ErrNotInteger)
+		return ctx.WriteError(err)
 	}
 
 	// Try immediate pop first
@@ -791,18 +811,13 @@ func cmdBLPOP(ctx *Context) error {
 		})
 	}
 
-	if timeout == 0 {
-		return ctx.WriteNull()
-	}
-
 	// Block until notified or timeout
-	deadline := time.Duration(timeout) * time.Second
-	notifier := ctx.Store.KeyNotifier()
+	deadline := timeout
 
 	for {
-		notifiedKey, notified := notifier.WaitForKeys(keys, deadline)
+		notifiedKey, notified := ctx.waitForKeys(keys, deadline)
 		if !notified {
-			return ctx.WriteNull()
+			return ctx.WriteNullArray()
 		}
 
 		// A key was notified — try to pop from it
@@ -862,9 +877,9 @@ func cmdBRPOP(ctx *Context) error {
 	for i := 0; i < ctx.ArgCount()-1; i++ {
 		keys = append(keys, ctx.ArgString(i))
 	}
-	timeout, err := strconv.Atoi(ctx.ArgString(ctx.ArgCount() - 1))
+	timeout, err := parseBlockTimeout(ctx.ArgString(ctx.ArgCount() - 1))
 	if err != nil {
-		return ctx.WriteError(ErrNotInteger)
+		return ctx.WriteError(err)
 	}
 
 	// Try immediate pop first
@@ -875,17 +890,12 @@ func cmdBRPOP(ctx *Context) error {
 		})
 	}
 
-	if timeout == 0 {
-		return ctx.WriteNull()
-	}
-
-	deadline := time.Duration(timeout) * time.Second
-	notifier := ctx.Store.KeyNotifier()
+	deadline := timeout
 
 	for {
-		notifiedKey, notified := notifier.WaitForKeys(keys, deadline)
+		notifiedKey, notified := ctx.waitForKeys(keys, deadline)
 		if !notified {
-			return ctx.WriteNull()
+			return ctx.WriteNullArray()
 		}
 
 		list, err := getList(ctx, notifiedKey)
@@ -943,9 +953,9 @@ func cmdBRPOPLPUSH(ctx *Context) error {
 
 	srcKey := ctx.ArgString(0)
 	dstKey := ctx.ArgString(1)
-	timeout, err := strconv.Atoi(ctx.ArgString(2))
+	timeout, err := parseBlockTimeout(ctx.ArgString(2))
 	if err != nil {
-		return ctx.WriteError(ErrNotInteger)
+		return ctx.WriteError(err)
 	}
 
 	// BRPOPLPUSH is RPOP src + LPUSH dst
@@ -955,15 +965,10 @@ func cmdBRPOPLPUSH(ctx *Context) error {
 		return ctx.WriteBulkBytes(value)
 	}
 
-	if timeout == 0 {
-		return ctx.WriteNull()
-	}
-
-	notifier := ctx.Store.KeyNotifier()
-	dur := time.Duration(timeout) * time.Second
+	dur := timeout
 
 	for {
-		if !notifier.WaitForKey(srcKey, dur) {
+		if !ctx.waitForKey(srcKey, dur) {
 			return ctx.WriteNull()
 		}
 		if value, ok, err := tryListMove(ctx, srcKey, dstKey, "RIGHT", "LEFT"); err != nil {
@@ -1112,48 +1117,59 @@ func cmdLPOS(ctx *Context) error {
 }
 
 func cmdLMPOP(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	numKeys, err := strconv.Atoi(ctx.ArgString(0))
+	keys, dir, count, err := parseListMPop(ctx, 0)
 	if err != nil {
-		return ctx.WriteError(ErrNotInteger)
+		return ctx.WriteError(err)
+	}
+	reply, err := tryListMPop(ctx, keys, dir, count)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	if reply == nil {
+		return ctx.WriteNullArray()
+	}
+	return ctx.WriteValue(reply)
+}
+
+// parseListMPop parses the "numkeys key [key ...] LEFT|RIGHT [COUNT count]"
+// tail shared by LMPOP and BLMPOP, starting at argument index from.
+func parseListMPop(ctx *Context, from int) ([]string, string, int, error) {
+	if ctx.ArgCount() < from+3 {
+		return nil, "", 0, ErrWrongArgCount
+	}
+	numKeys, err := strconv.Atoi(ctx.ArgString(from))
+	if err != nil {
+		return nil, "", 0, ErrNotInteger
 	}
 	// numkeys is a key COUNT and must be at least 1; a negative value would
 	// otherwise reach make() as a negative length.
 	if numKeys < 1 {
-		return ctx.WriteError(ErrInvalidArg)
+		return nil, "", 0, ErrInvalidArg
 	}
-
-	if ctx.ArgCount() < 1+numKeys {
-		return ctx.WriteError(ErrWrongArgCount)
+	if ctx.ArgCount() < from+1+numKeys+1 {
+		return nil, "", 0, ErrWrongArgCount
 	}
 
 	keys := make([]string, numKeys)
 	for i := 0; i < numKeys; i++ {
-		keys[i] = ctx.ArgString(1 + i)
+		keys[i] = ctx.ArgString(from + 1 + i)
 	}
 
-	dir := "LEFT"
-	count := 1
+	i := from + 1 + numKeys
+	dir := strings.ToUpper(ctx.ArgString(i))
+	if dir != "LEFT" && dir != "RIGHT" {
+		return nil, "", 0, ErrSyntaxError
+	}
+	i++
 
-	for i := 1 + numKeys; i < ctx.ArgCount(); i++ {
-		arg := strings.ToUpper(ctx.ArgString(i))
-		switch arg {
-		case "LEFT":
-			dir = "LEFT"
-		case "RIGHT":
-			dir = "RIGHT"
-		case "COUNT":
-			i++
-			if i >= ctx.ArgCount() {
-				return ctx.WriteError(ErrSyntaxError)
-			}
-			count, err = strconv.Atoi(ctx.ArgString(i))
-			if err != nil {
-				return ctx.WriteError(ErrNotInteger)
-			}
+	count := 1
+	if i < ctx.ArgCount() {
+		if strings.ToUpper(ctx.ArgString(i)) != "COUNT" || i+2 != ctx.ArgCount() {
+			return nil, "", 0, ErrSyntaxError
+		}
+		count, err = strconv.Atoi(ctx.ArgString(i + 1))
+		if err != nil {
+			return nil, "", 0, ErrNotInteger
 		}
 	}
 
@@ -1161,38 +1177,50 @@ func cmdLMPOP(ctx *Context) error {
 	// this guard it reaches make() as a slice capacity: a negative count
 	// panics, and 0 silently pops nothing. ZMPOP/BZMPOP already enforce it.
 	if count < 1 {
-		return ctx.WriteError(ErrInvalidArg)
+		return nil, "", 0, ErrInvalidArg
 	}
+	return keys, dir, count, nil
+}
 
+// tryListMPop pops up to count elements from the first non-empty list among
+// keys. It returns nil when every list is empty.
+func tryListMPop(ctx *Context, keys []string, dir string, count int) (*resp.Value, error) {
 	for _, key := range keys {
 		list, err := getList(ctx, key)
 		if err != nil {
-			return ctx.WriteError(err)
+			return nil, err
 		}
-		if list != nil && len(list.Elements) > 0 {
-			elements := make([]*resp.Value, 0, count)
-			for i := 0; i < count && len(list.Elements) > 0; i++ {
-				var value []byte
-				if dir == "LEFT" {
-					value = list.Elements[0]
-					list.Elements = list.Elements[1:]
-				} else {
-					value = list.Elements[len(list.Elements)-1]
-					list.Elements = list.Elements[:len(list.Elements)-1]
-				}
-				elements = append(elements, resp.BulkBytes(value))
-			}
-			if len(list.Elements) == 0 {
-				ctx.Store.Delete(key)
-			}
-			return ctx.WriteArray([]*resp.Value{
-				resp.BulkString(key),
-				resp.ArrayValue(elements),
-			})
+		if list == nil {
+			continue
 		}
+		list.Lock()
+		if len(list.Elements) == 0 {
+			list.Unlock()
+			continue
+		}
+		elements := make([]*resp.Value, 0, min(count, len(list.Elements)))
+		for i := 0; i < count && len(list.Elements) > 0; i++ {
+			var value []byte
+			if dir == "LEFT" {
+				value = list.Elements[0]
+				list.Elements = list.Elements[1:]
+			} else {
+				value = list.Elements[len(list.Elements)-1]
+				list.Elements = list.Elements[:len(list.Elements)-1]
+			}
+			elements = append(elements, resp.BulkBytes(value))
+		}
+		isEmpty := len(list.Elements) == 0
+		list.Unlock()
+		if isEmpty {
+			ctx.Store.Delete(key)
+		}
+		return resp.ArrayValue([]*resp.Value{
+			resp.BulkString(key),
+			resp.ArrayValue(elements),
+		}), nil
 	}
-
-	return ctx.WriteNull()
+	return nil, nil
 }
 
 func cmdLMPUSH(ctx *Context) error {
@@ -1219,76 +1247,28 @@ func cmdLMPUSH(ctx *Context) error {
 }
 
 func cmdBLMPOP(ctx *Context) error {
-	if ctx.ArgCount() < 3 {
+	if ctx.ArgCount() < 4 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
-	timeout := parseFloatExt([]byte(ctx.ArgString(0)))
-	if ctx.ArgCount() < 3 || ctx.ArgString(1) != "1" {
-		return ctx.WriteError(fmt.Errorf("ERR syntax error"))
+	timeout, err := parseBlockTimeout(ctx.ArgString(0))
+	if err != nil {
+		return ctx.WriteError(err)
 	}
-	numKeys := int(parseInt64(ctx.ArgString(2)))
-	// numkeys is a key COUNT and must be at least 1; a negative value would
-	// otherwise reach make() as a negative length.
-	if numKeys < 1 {
-		return ctx.WriteError(ErrInvalidArg)
-	}
-	if ctx.ArgCount() < 3+numKeys+2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	keys := make([]string, numKeys)
-	for i := 0; i < numKeys; i++ {
-		keys[i] = ctx.ArgString(3 + i)
-	}
-	idx := 3 + numKeys
-	dir := "LEFT"
-	count := 1
-	for idx < ctx.ArgCount() {
-		arg := strings.ToUpper(ctx.ArgString(idx))
-		if arg == "LEFT" || arg == "RIGHT" {
-			dir = arg
-			idx++
-		} else if arg == "COUNT" && idx+1 < ctx.ArgCount() {
-			count = int(parseInt64(ctx.ArgString(idx + 1)))
-			idx += 2
-		} else {
-			idx++
-		}
+	keys, dir, count, err := parseListMPop(ctx, 1)
+	if err != nil {
+		return ctx.WriteError(err)
 	}
 
-	// A pop COUNT is a hard element count and must be at least 1. Without
-	// this guard it reaches make() as a slice capacity: a negative count
-	// panics, and 0 silently pops nothing. ZMPOP/BZMPOP already enforce it.
-	if count < 1 {
-		return ctx.WriteError(ErrInvalidArg)
-	}
-
-	for _, key := range keys {
-		list, err := getList(ctx, key)
+	for {
+		reply, err := tryListMPop(ctx, keys, dir, count)
 		if err != nil {
 			return ctx.WriteError(err)
 		}
-		if list != nil && len(list.Elements) > 0 {
-			elements := make([]*resp.Value, 0, count)
-			for i := 0; i < count && len(list.Elements) > 0; i++ {
-				var value []byte
-				if dir == "LEFT" {
-					value = list.Elements[0]
-					list.Elements = list.Elements[1:]
-				} else {
-					value = list.Elements[len(list.Elements)-1]
-					list.Elements = list.Elements[:len(list.Elements)-1]
-				}
-				elements = append(elements, resp.BulkBytes(value))
-			}
-			if len(list.Elements) == 0 {
-				ctx.Store.Delete(key)
-			}
-			return ctx.WriteArray([]*resp.Value{
-				resp.BulkString(key),
-				resp.ArrayValue(elements),
-			})
+		if reply != nil {
+			return ctx.WriteValue(reply)
+		}
+		if _, notified := ctx.waitForKeys(keys, timeout); !notified {
+			return ctx.WriteNullArray()
 		}
 	}
-	_ = timeout
-	return ctx.WriteNull()
 }

@@ -23,7 +23,7 @@ func TestXAddNomkstreamDoesNotCreateMissingStream(t *testing.T) {
 	router := newNomkstreamRouter(s)
 
 	reply := runCmd(t, s, router, "XADD", "k", "NOMKSTREAM", "*", "f", "v")
-	if !strings.Contains(reply, "_") {
+	if !strings.Contains(reply, "$-1") {
 		t.Fatalf("NOMKSTREAM on a missing key must return null, got %q", reply)
 	}
 	if got := runCmd(t, s, router, "XLEN", "k"); strings.Contains(got, ":1") {

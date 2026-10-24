@@ -50,7 +50,7 @@ func TestNumKeysRejectsNegativeValue(t *testing.T) {
 		{"EVAL", nil, []string{"EVAL", "return 1", "-1"}},
 		{"EVALSHA", nil, []string{"EVALSHA", "0000000000000000000000000000000000000000", "-1"}},
 		{"LMPOP", [][]string{{"RPUSH", "mylist", "a", "b", "c"}}, []string{"LMPOP", "-1", "mylist", "LEFT"}},
-		{"BLMPOP", [][]string{{"RPUSH", "mylist", "a", "b", "c"}}, []string{"BLMPOP", "0", "1", "-1", "mylist", "LEFT"}},
+		{"BLMPOP", [][]string{{"RPUSH", "mylist", "a", "b", "c"}}, []string{"BLMPOP", "0.01", "-1", "mylist", "LEFT"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := store.NewStore()

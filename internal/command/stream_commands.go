@@ -514,7 +514,6 @@ func cmdXREAD(ctx *Context) error {
 	// Block until notified or timeout. BLOCK 0 blocks indefinitely, so it
 	// gets a deadline far enough out that only arriving data can return
 	// before it.
-	notifier := ctx.Store.KeyNotifier()
 	dur := time.Duration(block) * time.Millisecond
 	if block == 0 {
 		dur = time.Duration(1) << 62
@@ -527,7 +526,7 @@ func cmdXREAD(ctx *Context) error {
 		if remaining <= 0 {
 			return ctx.WriteNull()
 		}
-		_, notified := notifier.WaitForKeys(keys, remaining)
+		_, notified := ctx.waitForStreamKeys(keys, remaining)
 		if !notified {
 			return ctx.WriteNull()
 		}
@@ -1228,11 +1227,10 @@ func cmdXREADGROUP(ctx *Context) error {
 	}
 
 	if totalEntries == 0 && block > 0 && len(ids) > 0 && ids[0] == ">" {
-		notifier := ctx.Store.KeyNotifier()
 		dur := time.Duration(block) * time.Millisecond
 
 		for {
-			_, notified := notifier.WaitForKeys(keys, dur)
+			_, notified := ctx.waitForStreamKeys(keys, dur)
 			if !notified {
 				break
 			}

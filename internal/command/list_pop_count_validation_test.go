@@ -112,7 +112,7 @@ func TestListPopCommandsRejectNonPositiveCount(t *testing.T) {
 		}
 
 		// BLMPOP takes a leading timeout; arg index 2 is the numkeys token.
-		listCountRejects(t, s, router, "BLMPOP", "0", "1", "1", "l", "LEFT", "COUNT", count)
+		listCountRejects(t, s, router, "BLMPOP", "0.01", "1", "l", "LEFT", "COUNT", count)
 		if got := listCountMustNotPanic(t, s, router, "LLEN", "l").Int; got != 3 {
 			t.Fatalf("FAIL: LLEN after rejected BLMPOP COUNT %s = %d, want 3", count, got)
 		}

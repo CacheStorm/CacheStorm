@@ -2939,7 +2939,7 @@ func TestListCommandsExtendedCoverage(t *testing.T) {
 		{"LPOS MAXLEN", "LPOS", [][]byte{[]byte("list1"), []byte("a"), []byte("MAXLEN"), []byte("3")}},
 		{"LMPOP", "LMPOP", [][]byte{[]byte("1"), []byte("list1"), []byte("LEFT"), []byte("COUNT"), []byte("1")}},
 		{"LMPUSH", "LMPUSH", [][]byte{[]byte("list1"), []byte("LEFT"), []byte("x"), []byte("y")}},
-		{"BLMPOP timeout", "BLMPOP", [][]byte{[]byte("0"), []byte("1"), []byte("list1"), []byte("LEFT"), []byte("COUNT"), []byte("1")}},
+		{"BLMPOP timeout", "BLMPOP", [][]byte{[]byte("0.01"), []byte("1"), []byte("list1"), []byte("LEFT"), []byte("COUNT"), []byte("1")}},
 		{"LMOVE", "LMOVE", [][]byte{[]byte("list1"), []byte("list2"), []byte("LEFT"), []byte("RIGHT")}},
 		{"LPOP count", "LPOP", [][]byte{[]byte("list1"), []byte("2")}},
 		{"RPOP count", "RPOP", [][]byte{[]byte("list1"), []byte("2")}},
@@ -3011,9 +3011,9 @@ func TestSortedSetCommandsExtendedCoverage(t *testing.T) {
 		{"ZPOPMIN count", "ZPOPMIN", [][]byte{[]byte("zset1"), []byte("2")}},
 		{"ZPOPMAX count", "ZPOPMAX", [][]byte{[]byte("zset1"), []byte("2")}},
 		{"ZMPOP", "ZMPOP", [][]byte{[]byte("1"), []byte("zset1"), []byte("MIN"), []byte("COUNT"), []byte("1")}},
-		{"BZPOPMIN", "BZPOPMIN", [][]byte{[]byte("zset1"), []byte("0")}},
-		{"BZPOPMAX", "BZPOPMAX", [][]byte{[]byte("zset1"), []byte("0")}},
-		{"BZMPOP", "BZMPOP", [][]byte{[]byte("0"), []byte("1"), []byte("zset1"), []byte("MIN")}},
+		{"BZPOPMIN", "BZPOPMIN", [][]byte{[]byte("zset1"), []byte("0.01")}},
+		{"BZPOPMAX", "BZPOPMAX", [][]byte{[]byte("zset1"), []byte("0.01")}},
+		{"BZMPOP", "BZMPOP", [][]byte{[]byte("0.01"), []byte("1"), []byte("zset1"), []byte("MIN")}},
 	}
 
 	for _, tt := range tests {

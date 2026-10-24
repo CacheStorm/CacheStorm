@@ -2483,12 +2483,10 @@ func TestNewServerWithCorruptAOF(t *testing.T) {
 		},
 	}
 
-	s, err := New(cfg)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if s == nil {
-		t.Fatal("expected server even with corrupt AOF")
+	// Starting empty on a corrupt AOF hides the loss while new writes are
+	// appended after bytes no later load can read, so startup must refuse.
+	if _, err := New(cfg); err == nil {
+		t.Fatal("expected New to refuse a corrupt AOF")
 	}
 }
 

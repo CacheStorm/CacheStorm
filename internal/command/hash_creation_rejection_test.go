@@ -87,8 +87,11 @@ func TestHashCreationReportsStoreRejection(t *testing.T) {
 	}
 	s = store.NewStore()
 	s.ConfigureMemory(1, store.EvictionNoEviction, 70, 85, 5)
-	ctx := NewContext("HINCRBY", nil, s, resp.NewWriter(&bytes.Buffer{}))
-	value := respHIncrBy(ctx, queuedCommand{args: [][]byte{[]byte("missing"), []byte("f"), []byte("1")}}, 1)
+	router := NewRouter()
+	RegisterHashCommands(router)
+	ctx := NewContext("EXEC", nil, s, resp.NewWriter(&bytes.Buffer{}))
+	ctx.router = router
+	value := executeQueuedCommand(ctx, queuedCommand{cmd: "HINCRBY", args: [][]byte{[]byte("missing"), []byte("f"), []byte("1")}})
 	if value.Type != resp.TypeError || !strings.HasPrefix(value.Err, "OOM") {
 		t.Fatalf("replay rejection: %#v", value)
 	}

@@ -119,7 +119,7 @@ func TestXReadGroupPelRead(t *testing.T) {
 	}
 
 	// > with nothing new still answers null (control).
-	if got := run("XREADGROUP", "GROUP", "g", "c", "STREAMS", "s", ">"); got.Type != resp.TypeNull {
+	if got := run("XREADGROUP", "GROUP", "g", "c", "STREAMS", "s", ">"); !got.IsNull && got.Type != resp.TypeNull {
 		t.Fatalf("> with nothing new replied %v, want null", got)
 	}
 }

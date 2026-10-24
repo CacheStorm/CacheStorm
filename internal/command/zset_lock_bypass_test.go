@@ -128,7 +128,7 @@ func TestZLockControls(t *testing.T) {
 	if out := runZlock(t, s, r, "ZREVRANK", "k", "c"); out != ":0\r\n" {
 		t.Fatalf("CONTROL FAIL: ZREVRANK k c = %q, want :0", out)
 	}
-	if out := runZlock(t, s, r, "ZREVRANK", "k", "zz"); out != "_\r\n" {
+	if out := runZlock(t, s, r, "ZREVRANK", "k", "zz"); out != "$-1\r\n" {
 		t.Fatalf("CONTROL FAIL: ZREVRANK k zz = %q, want null", out)
 	}
 	t.Log("CONTROL PASS: ZREVRANK and ZMSCORE return correct rank and score")

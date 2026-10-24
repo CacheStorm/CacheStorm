@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
@@ -337,33 +336,6 @@ func cmdZINCRBY(ctx *Context) error {
 	zset.Members[member] = newScore
 
 	return ctx.WriteBulkString(strconv.FormatFloat(newScore, 'f', -1, 64))
-}
-
-// respZIncrBy is the transaction-replay form of ZINCRBY: it mirrors
-// cmdZINCRBY's semantics but returns the RESP value for the EXEC array.
-func respZIncrBy(ctx *Context, qc queuedCommand, incr float64) *resp.Value {
-	if len(qc.args) < 3 {
-		return resp.ErrorValue("ERR wrong number of arguments")
-	}
-	key := string(qc.args[0])
-	member := string(qc.args[2])
-
-	zset, err := getOrCreateSortedSet(ctx, key)
-	if err != nil {
-		return resp.ErrorValue(err.Error())
-	}
-
-	zset.Lock()
-	defer zset.Unlock()
-	newScore := incr
-	if current, exists := zset.Members[member]; exists {
-		newScore = current + incr
-	}
-	if math.IsNaN(newScore) || math.IsInf(newScore, 0) {
-		return resp.ErrorValue(ErrFloatOverflow.Error())
-	}
-	zset.Members[member] = newScore
-	return resp.BulkString(strconv.FormatFloat(newScore, 'f', -1, 64))
 }
 
 func cmdZRANGE(ctx *Context) error {
@@ -2019,9 +1991,13 @@ func cmdBZPOPGeneric(ctx *Context, max bool) error {
 	for i := 0; i < ctx.ArgCount()-1; i++ {
 		keys = append(keys, ctx.ArgString(i))
 	}
-	timeout, err := strconv.Atoi(ctx.ArgString(ctx.ArgCount() - 1))
+	timeout, err := parseBlockTimeout(ctx.ArgString(ctx.ArgCount() - 1))
 	if err != nil {
-		return ctx.WriteError(ErrNotInteger)
+		return ctx.WriteError(err)
+	}
+
+	if err := checkSortedSetKeys(ctx, keys); err != nil {
+		return ctx.WriteError(err)
 	}
 
 	// Try immediate pop
@@ -2033,17 +2009,12 @@ func cmdBZPOPGeneric(ctx *Context, max bool) error {
 		})
 	}
 
-	if timeout == 0 {
-		return ctx.WriteNull()
-	}
-
-	notifier := ctx.Store.KeyNotifier()
-	dur := time.Duration(timeout) * time.Second
+	dur := timeout
 
 	for {
-		notifiedKey, notified := notifier.WaitForKeys(keys, dur)
+		notifiedKey, notified := ctx.waitForZSetKeys(keys, dur)
 		if !notified {
-			return ctx.WriteNull()
+			return ctx.WriteNullArray()
 		}
 		if key, member, score, ok := tryZPop(ctx, []string{notifiedKey}, max); ok {
 			return ctx.WriteArray([]*resp.Value{
@@ -2083,9 +2054,9 @@ func cmdBZMPOP(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
-	timeout, err := strconv.ParseInt(ctx.ArgString(0), 10, 64)
+	timeout, err := parseBlockTimeout(ctx.ArgString(0))
 	if err != nil {
-		return ctx.WriteError(ErrNotInteger)
+		return ctx.WriteError(err)
 	}
 
 	numKeys, err := strconv.Atoi(ctx.ArgString(1))
@@ -2133,6 +2104,10 @@ func cmdBZMPOP(ctx *Context) error {
 
 	max := dir == "MAX"
 
+	if err := checkSortedSetKeys(ctx, keys); err != nil {
+		return ctx.WriteError(err)
+	}
+
 	// Try immediate pop
 	if key, popped := tryZMPop(ctx, keys, count, max); popped != nil {
 		return ctx.WriteArray([]*resp.Value{
@@ -2141,17 +2116,12 @@ func cmdBZMPOP(ctx *Context) error {
 		})
 	}
 
-	if timeout == 0 {
-		return ctx.WriteNull()
-	}
-
-	notifier := ctx.Store.KeyNotifier()
-	dur := time.Duration(timeout) * time.Second
+	dur := timeout
 
 	for {
-		_, notified := notifier.WaitForKeys(keys, dur)
+		_, notified := ctx.waitForZSetKeys(keys, dur)
 		if !notified {
-			return ctx.WriteNull()
+			return ctx.WriteNullArray()
 		}
 		if key, popped := tryZMPop(ctx, keys, count, max); popped != nil {
 			return ctx.WriteArray([]*resp.Value{
@@ -2160,6 +2130,17 @@ func cmdBZMPOP(ctx *Context) error {
 			})
 		}
 	}
+}
+
+// checkSortedSetKeys reports WRONGTYPE for the first key that holds a value
+// other than a sorted set, as Redis does before a blocking pop waits.
+func checkSortedSetKeys(ctx *Context, keys []string) error {
+	for _, key := range keys {
+		if _, err := getSortedSet(ctx, key); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func tryZMPop(ctx *Context, keys []string, count int, max bool) (string, []*resp.Value) {

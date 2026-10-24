@@ -57,6 +57,16 @@ func (kn *KeyNotifier) WaitForKey(key string, timeout time.Duration) bool {
 // WaitForKeys blocks until any of the keys receives a notification or timeout expires.
 // Returns the key that was notified and true, or empty string and false on timeout.
 func (kn *KeyNotifier) WaitForKeys(keys []string, timeout time.Duration) (string, bool) {
+	return kn.WaitForKeysCancel(keys, timeout, nil, nil)
+}
+
+// WaitForKeysCancel is WaitForKeys with two additions. ready, when non-nil,
+// is checked for every key after the waiters are registered: a write that
+// landed between the caller's last look at the data and the registration has
+// already fired its notification, so without the check the caller would sleep
+// through it. cancel, when non-nil, ends the wait early (the client went away)
+// and reports a timeout.
+func (kn *KeyNotifier) WaitForKeysCancel(keys []string, timeout time.Duration, cancel <-chan struct{}, ready func(key string) bool) (string, bool) {
 	ch := make(chan string, 1)
 	perKey := make([]chan struct{}, len(keys))
 
@@ -68,8 +78,25 @@ func (kn *KeyNotifier) WaitForKeys(keys []string, timeout time.Duration) (string
 	}
 	kn.mu.Unlock()
 
+	defer func() {
+		kn.mu.Lock()
+		for i, key := range keys {
+			kn.removeWaiter(key, perKey[i])
+		}
+		kn.mu.Unlock()
+	}()
+
+	if ready != nil {
+		for _, key := range keys {
+			if ready(key) {
+				return key, true
+			}
+		}
+	}
+
 	// Start goroutines that forward per-key notifications
 	done := make(chan struct{})
+	defer close(done)
 	for i, key := range keys {
 		go func(k string, n chan struct{}) {
 			select {
@@ -82,15 +109,6 @@ func (kn *KeyNotifier) WaitForKeys(keys []string, timeout time.Duration) (string
 			}
 		}(key, perKey[i])
 	}
-
-	defer func() {
-		close(done)
-		kn.mu.Lock()
-		for i, key := range keys {
-			kn.removeWaiter(key, perKey[i])
-		}
-		kn.mu.Unlock()
-	}()
 
 	if timeout == 0 {
 		select {
@@ -108,6 +126,8 @@ func (kn *KeyNotifier) WaitForKeys(keys []string, timeout time.Duration) (string
 	case k := <-ch:
 		return k, true
 	case <-timer.C:
+		return "", false
+	case <-cancel:
 		return "", false
 	}
 }

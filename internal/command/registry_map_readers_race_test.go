@@ -60,7 +60,7 @@ func TestGridReadersAreSafeWhileGridSetWrites(t *testing.T) {
 					t.Errorf("GRID.GET: unexpected error: %v", err)
 					return
 				}
-				if reply := buf.String(); !strings.HasPrefix(reply, "$") && !strings.HasPrefix(reply, "_") {
+				if reply := buf.String(); !strings.HasPrefix(reply, "$") && !strings.HasPrefix(reply, "$-1") {
 					t.Errorf("GRID.GET: expected a bulk string or null reply, got %q", reply)
 					return
 				}
@@ -124,7 +124,7 @@ func TestMerkleReadersAreSafeWhileMerkleAddWrites(t *testing.T) {
 						t.Errorf("%s: unexpected error: %v", cmd, err)
 						return
 					}
-					if reply := buf.String(); !strings.HasPrefix(reply, ":") && !strings.HasPrefix(reply, "*") && !strings.HasPrefix(reply, "_") {
+					if reply := buf.String(); !strings.HasPrefix(reply, ":") && !strings.HasPrefix(reply, "*") && !strings.HasPrefix(reply, "$-1") {
 						t.Errorf("%s: expected an integer, array or null reply, got %q", cmd, reply)
 						return
 					}

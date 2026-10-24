@@ -43,7 +43,7 @@ func TestXReadBlockZeroX(t *testing.T) {
 	}
 	started := time.Now()
 	value = run("XREAD", "BLOCK", "100", "STREAMS", "s", "$")
-	if value.Type != resp.TypeNull {
+	if !value.IsNull && value.Type != resp.TypeNull {
 		t.Errorf("FAIL timeout control: expected null on timeout, got %v", value)
 	}
 	if elapsed := time.Since(started); elapsed > 5*time.Second {

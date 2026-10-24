@@ -102,7 +102,7 @@ func TestRegressionConfigImportRequiresCompletePair(t *testing.T) {
 
 	// A rejected import must not have left an empty namespace behind. CONFIG.GET
 	// answers an unknown namespace with a RESP null (_).
-	if out := runIntegrationCmd(t, router, s, "CONFIG.GET", "reg_ns_only", "k1"); !strings.HasPrefix(out, "_") {
+	if out := runIntegrationCmd(t, router, s, "CONFIG.GET", "reg_ns_only", "k1"); !strings.HasPrefix(out, "$-1") {
 		t.Errorf("rejected CONFIG.IMPORT must not create a namespace, GET returned %q", out)
 	}
 }

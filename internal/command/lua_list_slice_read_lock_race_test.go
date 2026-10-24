@@ -181,7 +181,7 @@ func TestLuaListSliceControlsUncontended(t *testing.T) {
 	}
 
 	// Boundary: LINDEX out of range is a Lua nil, not an error.
-	if out := luaSliceRun(t, s, router, "EVAL", "return redis.call('LINDEX', redis.KEYS[1], 99)", "1", "l"); !strings.HasPrefix(out, "_") {
+	if out := luaSliceRun(t, s, router, "EVAL", "return redis.call('LINDEX', redis.KEYS[1], 99)", "1", "l"); !strings.HasPrefix(out, "$-1") {
 		t.Fatalf("CONTROL FAIL: LINDEX out of range = %q, want a null reply", out)
 	}
 }

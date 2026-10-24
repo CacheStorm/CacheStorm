@@ -16,9 +16,9 @@ func TestBlockingMovePreservesDataOnTypeError(t *testing.T) {
 			RegisterListCommands(r)
 			move := func(src, dst string) string {
 				if cmd == "BLMOVE" {
-					return runCmd(t, s, r, cmd, src, dst, "RIGHT", "LEFT", "0")
+					return runCmd(t, s, r, cmd, src, dst, "RIGHT", "LEFT", "0.01")
 				}
-				return runCmd(t, s, r, cmd, src, dst, "0")
+				return runCmd(t, s, r, cmd, src, dst, "0.01")
 			}
 			runCmd(t, s, r, "RPUSH", "src", "a", "b")
 			if err := s.Set("bad", &store.StringValue{Data: []byte("untouched")}, store.SetOptions{}); err != nil {
@@ -42,7 +42,7 @@ func TestBlockingMovePreservesDataOnTypeError(t *testing.T) {
 			if _, exists := s.Get("unused"); exists {
 				t.Fatal("created destination after source type error")
 			}
-			if got := move("missing", "unused"); got != "_\r\n" {
+			if got := move("missing", "unused"); got != "$-1\r\n" {
 				t.Fatalf("missing source: %q", got)
 			}
 			if got := move("src", "dst"); got != "$1\r\nb\r\n" {

@@ -210,7 +210,7 @@ func TestZSetRangeControlsUncontended(t *testing.T) {
 	if got := zsetLockRun(t, s, router, "ZPOPMIN", "z"); got != "*2\r\n$1\r\na\r\n$1\r\n1\r\n" {
 		t.Fatalf("CONTROL FAIL: ZPOPMIN = %q, want a with score 1", got)
 	}
-	if got := zsetLockRun(t, s, router, "ZSCORE", "z", "a"); got != "_\r\n" {
+	if got := zsetLockRun(t, s, router, "ZSCORE", "z", "a"); got != "$-1\r\n" {
 		t.Fatalf("CONTROL FAIL: ZSCORE after ZPOPMIN = %q, want nil (member was removed)", got)
 	}
 

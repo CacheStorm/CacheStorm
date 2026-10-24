@@ -2993,7 +2993,7 @@ func TestCmdBLPOP_ImmediateSuccess(t *testing.T) {
 
 	s.Set("blp", &store.ListValue{Elements: [][]byte{[]byte("item1"), []byte("item2")}}, store.SetOptions{})
 
-	ctx := discardCtx("BLPOP", bytesArgs("blp", "0"), s)
+	ctx := discardCtx("BLPOP", bytesArgs("blp", "0.01"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {
 		t.Fatalf("BLPOP: %v", err)
 	}
@@ -3005,7 +3005,7 @@ func TestCmdBLPOP_Timeout(t *testing.T) {
 	RegisterListCommands(router)
 
 	// Empty list with timeout=0 should return null immediately
-	ctx := discardCtx("BLPOP", bytesArgs("emptyblp", "0"), s)
+	ctx := discardCtx("BLPOP", bytesArgs("emptyblp", "0.01"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {
 		t.Fatalf("BLPOP timeout: %v", err)
 	}
@@ -3035,7 +3035,7 @@ func TestCmdBRPOP_ImmediateSuccess(t *testing.T) {
 
 	s.Set("brp", &store.ListValue{Elements: [][]byte{[]byte("item1"), []byte("item2")}}, store.SetOptions{})
 
-	ctx := discardCtx("BRPOP", bytesArgs("brp", "0"), s)
+	ctx := discardCtx("BRPOP", bytesArgs("brp", "0.01"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {
 		t.Fatalf("BRPOP: %v", err)
 	}
@@ -3046,7 +3046,7 @@ func TestCmdBRPOP_Timeout(t *testing.T) {
 	router := NewRouter()
 	RegisterListCommands(router)
 
-	ctx := discardCtx("BRPOP", bytesArgs("emptybrp", "0"), s)
+	ctx := discardCtx("BRPOP", bytesArgs("emptybrp", "0.01"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {
 		t.Fatalf("BRPOP timeout: %v", err)
 	}
