@@ -1323,21 +1323,22 @@ func TestServerMaxConnections(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 
-	// Second connection should be accepted by TCP but rejected by the server
+	// The second connection is accepted by TCP, told why it is refused and
+	// closed, as Redis does.
 	conn2, err := net.Dial("tcp", addr)
 	if err != nil {
-		// Connection was outright rejected, which is also valid
-		return
+		t.Fatalf("dial: %v", err)
 	}
 	defer conn2.Close()
 
-	// The second connection should be closed by the server.
-	// Try to read - should get an error or empty read.
-	conn2.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
-	buf := make([]byte, 1024)
-	_, readErr := conn2.Read(buf)
-	// We expect either an error (EOF/timeout) or zero bytes
-	_ = readErr
+	conn2.SetReadDeadline(time.Now().Add(2 * time.Second))
+	reply, err := io.ReadAll(conn2)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if string(reply) != "-ERR max number of clients reached\r\n" {
+		t.Fatalf("refused connection got %q", reply)
+	}
 }
 
 // ===========================================================================

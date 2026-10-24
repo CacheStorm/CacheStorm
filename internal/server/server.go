@@ -474,6 +474,10 @@ func (s *Server) updateMetricsGauges() {
 }
 
 func (s *Server) acceptLoop() {
+	// backoff paces retries after a failed Accept. A persistent failure such
+	// as running out of file descriptors returns at once on every call, so
+	// retrying immediately spun a core and flooded the log.
+	var backoff time.Duration
 	for {
 		select {
 		case <-s.stopCh:
@@ -486,13 +490,26 @@ func (s *Server) acceptLoop() {
 			if s.stopping.Load() {
 				return
 			}
-			logger.Error().Err(err).Msg("accept error")
+			if backoff == 0 {
+				backoff = 5 * time.Millisecond
+			} else if backoff *= 2; backoff > time.Second {
+				backoff = time.Second
+			}
+			logger.Error().Err(err).Dur("retry_in", backoff).Msg("accept error")
+			select {
+			case <-s.stopCh:
+				return
+			case <-time.After(backoff):
+			}
 			continue
 		}
+		backoff = 0
 
-		// Enforce MaxConnections
+		// Enforce MaxConnections. Redis tells the client why it is refused.
 		maxConns := int64(s.cfg.Server.MaxConnections)
 		if maxConns > 0 && s.connCount.Load() >= maxConns {
+			_ = conn.SetWriteDeadline(time.Now().Add(time.Second))
+			_, _ = conn.Write([]byte("-ERR max number of clients reached\r\n"))
 			conn.Close()
 			continue
 		}
@@ -567,7 +584,16 @@ func (s *Server) Stop(ctx context.Context) error {
 	// Stop active expiration with the server.
 	s.store.StopExpiry()
 
-	// 3. Wait for in-flight requests to complete (with timeout)
+	// 3. Let every connection finish the command it is running, then close.
+	// Idle clients would otherwise hold the drain for its whole timeout.
+	s.conns.Range(func(_, value any) bool {
+		if c, ok := value.(*Connection); ok {
+			c.Drain()
+		}
+		return true
+	})
+
+	// Wait for in-flight requests to complete (with timeout)
 	done := make(chan struct{})
 	go func() {
 		s.wg.Wait()

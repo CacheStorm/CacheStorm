@@ -9,6 +9,7 @@ import (
 	"runtime/debug"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cachestorm/cachestorm/internal/acl"
@@ -26,7 +27,10 @@ const (
 )
 
 type Connection struct {
-	ID           int64
+	ID int64
+	// draining is set when the server shuts down: the connection finishes the
+	// command it is running and then closes instead of reading another.
+	draining     atomic.Bool
 	conn         net.Conn
 	bufReader    *bufio.Reader
 	reader       *resp.Reader
@@ -160,6 +164,12 @@ func (c *Connection) Handle() {
 			c.conn.SetReadDeadline(time.Time{})
 		} else {
 			c.conn.SetReadDeadline(time.Now().Add(c.readTimeout))
+		}
+		// Checked after the deadline is armed: Drain sets the flag and then
+		// moves the deadline to now, so either this check sees the flag or
+		// the read below is interrupted by Drain's deadline.
+		if c.draining.Load() && c.bufReader.Buffered() == 0 {
+			return
 		}
 		cmd, args, err := c.reader.ReadClientCommand()
 		if err != nil {
@@ -356,6 +366,14 @@ func (c *Connection) Close() {
 	logger.Debug().
 		Int64("conn_id", c.ID).
 		Msg("client disconnected")
+}
+
+// Drain asks the connection to close once its current command, and any
+// command already buffered, has run. An idle connection blocked in a read is
+// woken at once.
+func (c *Connection) Drain() {
+	c.draining.Store(true)
+	_ = c.conn.SetReadDeadline(time.Now())
 }
 
 func (c *Connection) RemoteAddr() string {
