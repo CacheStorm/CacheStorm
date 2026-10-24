@@ -117,8 +117,8 @@ func TestWatchAbortsWhenWatchedKeyModified(t *testing.T) {
 	execCtx, execBuf := mkTxContext(tx, "EXEC", nil, s)
 	_ = router.Execute(execCtx)
 
-	if execBuf.String() != "$-1\r\n" {
-		t.Fatalf("EXEC must abort with a null reply (the writer's RESP3 _) when a watched key changed before EXEC, got %q", execBuf.String())
+	if execBuf.String() != "*-1\r\n" {
+		t.Fatalf("EXEC must abort with a null array reply when a watched key changed before EXEC, got %q", execBuf.String())
 	}
 	entry, exists := s.Get("w")
 	if !exists {

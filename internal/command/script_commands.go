@@ -130,7 +130,7 @@ func cmdEVAL(ctx *Context) error {
 		args = append(args, ctx.ArgString(i))
 	}
 
-	result, err := engine.EvalGuarded(script, keys, args, scriptGuard(ctx))
+	result, err := scriptEngineFor(ctx, engine).EvalGuarded(script, keys, args, scriptGuard(ctx))
 	if err != nil {
 		return ctx.WriteError(err)
 	}
@@ -170,7 +170,7 @@ func cmdEVALSHA(ctx *Context) error {
 		args = append(args, ctx.ArgString(i))
 	}
 
-	result, err := engine.EvalSHAGuarded(sha, keys, args, scriptGuard(ctx))
+	result, err := scriptEngineFor(ctx, engine).evalSHAFrom(engine, sha, keys, args, scriptGuard(ctx))
 	if err != nil {
 		return ctx.WriteError(err)
 	}

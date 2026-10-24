@@ -16,19 +16,28 @@ func newNamespaceRemovalRouter(s *store.Store) *Router {
 	return router
 }
 
-// SELECT must keep working as the standard single-keyspace compatibility
-// no-op: real Redis clients issue SELECT during handshake, so it answers OK
-// and the server keeps one shared keyspace.
-func TestSelectIsCompatibilityNoOp(t *testing.T) {
+// SELECT switches to another database within the context: the key written
+// after SELECT 5 is not visible in database 0, and an index past the last
+// database is refused.
+func TestSelectSwitchesDatabase(t *testing.T) {
 	s := store.NewStore()
 	r := newNamespaceRemovalRouter(s)
 
-	if reply := runCmd(t, s, r, "SELECT", "5"); !strings.Contains(reply, "+OK") {
-		t.Fatalf("SELECT must answer OK on a single-keyspace server, got %q", reply)
+	ctx := NewContext("SELECT", [][]byte{[]byte("5")}, s, resp.NewWriter(&bytes.Buffer{}))
+	if err := r.Execute(ctx); err != nil {
+		t.Fatal(err)
 	}
-	runCmd(t, s, r, "SET", "k", "v")
-	if got := runCmd(t, s, r, "GET", "k"); !strings.Contains(got, "v") {
-		t.Fatalf("GET after SELECT must see the shared keyspace, got %q", got)
+	if ctx.DB != 5 || ctx.Store == s {
+		t.Fatalf("SELECT 5 must switch the context to database 5, got db=%d", ctx.DB)
+	}
+	if err := ctx.Store.Set("k", &store.StringValue{Data: []byte("v")}, store.SetOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if s.Exists("k") {
+		t.Fatal("a key written in database 5 must not appear in database 0")
+	}
+	if reply := runCmd(t, s, r, "SELECT", "16"); !strings.Contains(reply, "DB index is out of range") {
+		t.Fatalf("SELECT 16 must be refused, got %q", reply)
 	}
 }
 

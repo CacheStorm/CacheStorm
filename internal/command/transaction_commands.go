@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
+	"github.com/cachestorm/cachestorm/internal/store"
 )
 
 var (
@@ -26,7 +27,15 @@ type Transaction struct {
 	queued      []queuedCommand
 	active      bool
 	aborted     bool
-	watchedKeys map[string]int64
+	watchedKeys map[watchedKey]int64
+}
+
+// watchedKey is a key in one database. A nil store is a key recorded through
+// the legacy Watch, checked against the getVersion passed to
+// CheckWatchedVersions.
+type watchedKey struct {
+	db  *store.Store
+	key string
 }
 
 type queuedCommand struct {
@@ -38,7 +47,7 @@ func NewTransaction() *Transaction {
 	return &Transaction{
 		queued:      make([]queuedCommand, 0),
 		active:      false,
-		watchedKeys: make(map[string]int64),
+		watchedKeys: make(map[watchedKey]int64),
 	}
 }
 
@@ -82,10 +91,18 @@ func (t *Transaction) IsAborted() bool {
 	return t.aborted
 }
 
+// ClearWatch drops every watch, releasing the registrations held in the
+// watched databases.
 func (t *Transaction) ClearWatch() {
 	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.watchedKeys = make(map[string]int64)
+	watched := t.watchedKeys
+	t.watchedKeys = make(map[watchedKey]int64)
+	t.mu.Unlock()
+	for wk := range watched {
+		if wk.db != nil {
+			wk.db.UnwatchKey(wk.key)
+		}
+	}
 }
 
 func (t *Transaction) IsActive() bool {
@@ -102,18 +119,41 @@ func (t *Transaction) Start() {
 	t.queued = t.queued[:0]
 }
 
+// Watch records key at version without registering it with a database; it
+// is checked against the getVersion given to CheckWatchedVersions.
 func (t *Transaction) Watch(key string, version int64) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.watchedKeys[key] = version
+	t.watchedKeys[watchedKey{key: key}] = version
 }
 
+// WatchIn watches key in database db: any modification of the key in that
+// database, by any client, makes the following EXEC fail. Watching the same
+// key twice keeps the first baseline.
+func (t *Transaction) WatchIn(db *store.Store, key string) {
+	wk := watchedKey{db: db, key: key}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if _, ok := t.watchedKeys[wk]; ok {
+		return
+	}
+	t.watchedKeys[wk] = db.WatchKey(key)
+}
+
+// CheckWatchedVersions reports whether no watched key changed since it was
+// watched. Keys watched in a database are checked there; legacy keys use
+// getVersion.
 func (t *Transaction) CheckWatchedVersions(getVersion func(key string) int64) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	for key, version := range t.watchedKeys {
-		currentVersion := getVersion(key)
-		if currentVersion != version {
+	for wk, version := range t.watchedKeys {
+		var current int64
+		if wk.db != nil {
+			current = wk.db.GetVersion(wk.key)
+		} else if getVersion != nil {
+			current = getVersion(wk.key)
+		}
+		if current != version {
 			return false
 		}
 	}
@@ -159,7 +199,11 @@ func cmdEXEC(ctx *Context) error {
 		if !ctx.Transaction.CheckWatchedVersions(ctx.Store.GetVersion) {
 			ctx.Transaction.Clear()
 			ctx.Transaction.ClearWatch()
-			return ctx.WriteNull()
+			// A failed WATCH check is a null array in RESP2, null in RESP3.
+			if ctx.Writer.IsRESP3() {
+				return ctx.WriteNull()
+			}
+			return ctx.WriteNullArray()
 		}
 	}
 
@@ -175,10 +219,11 @@ func cmdEXEC(ctx *Context) error {
 	executed := make([]ExecutedCommand, 0, len(queued))
 
 	for _, qc := range queued {
+		db := ctx.DB
 		result := executeQueuedCommand(ctx, qc)
 		results = append(results, result)
 		if result.Type != resp.TypeError {
-			executed = append(executed, ExecutedCommand{Name: qc.cmd, Args: qc.args})
+			executed = append(executed, ExecutedCommand{Name: qc.cmd, Args: qc.args, DB: db})
 		}
 	}
 
@@ -207,9 +252,7 @@ func cmdWATCH(ctx *Context) error {
 	}
 
 	for i := 0; i < ctx.ArgCount(); i++ {
-		key := ctx.ArgString(i)
-		version := ctx.Store.GetVersion(key)
-		ctx.Transaction.Watch(key, version)
+		ctx.Transaction.WatchIn(ctx.Store, ctx.ArgString(i))
 	}
 
 	return ctx.WriteOK()
@@ -242,7 +285,13 @@ func executeQueuedCommand(ctx *Context, qc queuedCommand) *resp.Value {
 	sub.StartTime = time.Now()
 
 	err := def.Handler(&sub)
+	touchWrittenKeys(&sub)
 
+	// SELECT inside the transaction switches the database for the commands
+	// queued after it, and for the connection once EXEC returns.
+	ctx.Store = sub.Store
+	ctx.DB = sub.DB
+	ctx.DBs = sub.DBs
 	ctx.Authenticated = sub.Authenticated
 	ctx.ACLUser = sub.ACLUser
 	ctx.ClientName = sub.ClientName

@@ -93,6 +93,8 @@ type Server struct {
 	wg            sync.WaitGroup
 	// sentinelCancel stops the Sentinel peer listener started in Start().
 	sentinelCancel context.CancelFunc
+	// dbs holds the numbered databases; database 0 starts out as store.
+	dbs *store.Databases
 }
 
 func New(cfg *config.Config) (*Server, error) {
@@ -212,6 +214,10 @@ func New(cfg *config.Config) (*Server, error) {
 	command.RegisterResilienceCommands(s.router)
 	command.RegisterMLCommands(s.router)
 
+	// Database 0 is s.store; the others are created on first use and share
+	// its Pub/Sub hub, memory tracker and hooks, configured above.
+	s.dbs = store.NewDatabases(s.store, cfg.Server.Databases)
+
 	command.InitReplicationManager(s.store)
 
 	if cfg.Server.RequirePass != "" {
@@ -225,6 +231,7 @@ func New(cfg *config.Config) (*Server, error) {
 			Password: cfg.HTTP.Password,
 		}
 		s.httpServer = NewHTTPServer(s.store, s.router, httpCfg)
+		s.httpServer.dbs = s.dbs
 		s.httpServer.connCount = func() int64 { return s.connCount.Load() }
 	}
 
@@ -266,16 +273,19 @@ func New(cfg *config.Config) (*Server, error) {
 				}
 			}
 			if len(commands) > 0 {
-				s.replayAOF(commands)
+				lastDB := s.replayAOF(commands)
+				// Appends continue where the file left off, so the writer
+				// starts in the database the replay ended in.
+				s.aof.SetCurrentDB(lastDB)
 				logger.Info().Int("commands", len(commands)).Msg("AOF data restored")
 			}
 		}
 
 		// Set post-execute hook on router to persist write commands
-		s.router.SetPostExecute(func(cmd string, args [][]byte) {
+		s.router.SetPostExecuteDB(func(db int, cmd string, args [][]byte) {
 			upperCmd := strings.ToUpper(cmd)
 			if writeCommands[upperCmd] {
-				if err := s.aof.Append(upperCmd, args); err != nil {
+				if err := s.aof.AppendDB(db, upperCmd, args); err != nil {
 					logger.Error().Err(err).Str("cmd", cmd).Msg("AOF append failed")
 				}
 			}
@@ -288,7 +298,7 @@ func New(cfg *config.Config) (*Server, error) {
 			for _, c := range cmds {
 				upperCmd := strings.ToUpper(c.Name)
 				if writeCommands[upperCmd] {
-					writes = append(writes, persistence.Command{Name: upperCmd, Args: c.Args})
+					writes = append(writes, persistence.Command{Name: upperCmd, Args: c.Args, DB: c.DB})
 				}
 			}
 			if err := s.aof.AppendTransaction(writes); err != nil {
@@ -368,7 +378,7 @@ func (s *Server) Start(_ context.Context) error {
 	s.listener = listener
 
 	// Active expiration: remove expired keys without requiring reads.
-	s.store.StartExpiry()
+	s.dbs.StartExpiry()
 
 	go s.acceptLoop()
 
@@ -464,8 +474,8 @@ func (s *Server) startMetricsServer() {
 // updateMetricsGauges pushes current store and connection counters into the
 // metrics plugin so the Prometheus exposition reflects live state.
 func (s *Server) updateMetricsGauges() {
-	s.metricsPlugin.SetKeysTotal(int64(s.store.KeyCount()))
-	s.metricsPlugin.SetMemoryBytes(s.store.MemUsage())
+	s.metricsPlugin.SetKeysTotal(s.dbs.KeyCount())
+	s.metricsPlugin.SetMemoryBytes(s.dbs.MemUsage())
 	s.metricsPlugin.SetConnectedClients(s.connCount.Load())
 	s.metricsPlugin.SetHitCount(store.GlobalMetrics.TotalHits.Load())
 	s.metricsPlugin.SetMissCount(store.GlobalMetrics.TotalMisses.Load())
@@ -501,6 +511,7 @@ func (s *Server) acceptLoop() {
 		s.connCount.Add(1)
 		store.GlobalMetrics.RecordConnection()
 		c := NewConnection(connID, conn, s.store, s.router, s.pluginMgr)
+		c.dbs = s.dbs
 
 		// Apply configured timeouts
 		if rt := s.cfg.Server.ReadTimeoutDuration(); rt > 0 {
@@ -565,7 +576,7 @@ func (s *Server) Stop(ctx context.Context) error {
 	}
 
 	// Stop active expiration with the server.
-	s.store.StopExpiry()
+	s.dbs.StopExpiry()
 
 	// 3. Wait for in-flight requests to complete (with timeout)
 	done := make(chan struct{})
@@ -610,16 +621,29 @@ func (s *Server) Stop(ctx context.Context) error {
 	return nil
 }
 
+// Store returns database 0.
 func (s *Server) Store() *store.Store {
-	return s.store
+	return s.dbs.DB(0)
 }
 
-func (s *Server) replayAOF(commands []persistence.Command) {
+// Databases returns every database the server serves.
+func (s *Server) Databases() *store.Databases {
+	return s.dbs
+}
+
+// replayAOF applies the AOF's commands, following its SELECTs, and returns
+// the database the last command left selected.
+func (s *Server) replayAOF(commands []persistence.Command) int {
 	replayed := 0
 	failed := 0
+	db := 0
 	apply := func(cmd persistence.Command) {
-		ctx := command.NewContext(cmd.Name, cmd.Args, s.store, nil)
-		if err := s.router.ExecuteSilent(ctx); err != nil {
+		ctx := command.NewContext(cmd.Name, cmd.Args, s.dbs.DB(db), nil)
+		ctx.DB = db
+		ctx.DBs = s.dbs
+		err := s.router.ExecuteSilent(ctx)
+		db = ctx.DB
+		if err != nil {
 			failed++
 			if failed <= 10 {
 				logger.Warn().Err(err).Str("cmd", cmd.Name).Msg("AOF replay command failed")
@@ -665,6 +689,7 @@ func (s *Server) replayAOF(commands []persistence.Command) {
 			Int("failed", failed).
 			Msg("AOF replay completed with errors")
 	}
+	return db
 }
 
 func parseEvictionPolicy(name string) store.EvictionPolicy {

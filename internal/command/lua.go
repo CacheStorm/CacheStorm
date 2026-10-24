@@ -24,6 +24,9 @@ type ScriptEngine struct {
 	mu      sync.RWMutex
 	scripts map[string]string
 	store   *store.Store
+	// dbs, set on the per-call engine of a script (scriptEngineFor), lets
+	// SELECT inside the script switch that script's database.
+	dbs *store.Databases
 }
 
 func NewScriptEngine(s *store.Store) *ScriptEngine {
@@ -772,6 +775,9 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 			}
 		}
 		return lua.LNumber(0)
+
+	case "SELECT":
+		return e.scriptSelect(args)
 
 	case "DBSIZE":
 		return lua.LNumber(e.store.KeyCount())
