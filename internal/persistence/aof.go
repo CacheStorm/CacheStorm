@@ -47,6 +47,10 @@ type AOFWriter struct {
 	stopCh    chan struct{}
 	wg        sync.WaitGroup
 	running   atomic.Bool
+	// curDB is the database the commands at the end of the file apply to;
+	// a command for another database is preceded by SELECT. -1 means
+	// unknown, so the next command always gets a SELECT.
+	curDB int
 }
 
 func NewAOFWriter(cfg AOFConfig) *AOFWriter {
@@ -145,6 +149,7 @@ func (w *AOFWriter) syncFile() {
 	}
 }
 
+// Append records a command in the database the file is currently in.
 func (w *AOFWriter) Append(cmd string, args [][]byte) error {
 	if !w.config.Enabled || !w.running.Load() {
 		return nil
@@ -155,6 +160,59 @@ func (w *AOFWriter) Append(cmd string, args [][]byte) error {
 
 	w.writerBuf = appendCommand(w.writerBuf[:0], cmd, args)
 	return w.writeLocked(1)
+}
+
+// SetCurrentDB tells the writer which database the end of the file applies
+// to, as left by replaying it. -1 makes the next append start with a SELECT.
+func (w *AOFWriter) SetCurrentDB(db int) {
+	w.mu.Lock()
+	w.curDB = db
+	w.mu.Unlock()
+}
+
+// CurrentDB returns the database the end of the file applies to.
+func (w *AOFWriter) CurrentDB() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.curDB
+}
+
+// appendSelect adds a SELECT to the buffer when db is not the database the
+// buffer ends in, and returns the database it ends in afterwards.
+func (w *AOFWriter) appendSelect(cur, db int) int {
+	if db == cur {
+		return cur
+	}
+	w.writerBuf = appendCommand(w.writerBuf, "SELECT", [][]byte{strconv.AppendInt(nil, int64(db), 10)})
+	return db
+}
+
+// AppendDB records a command that ran in database db, preceded by a SELECT
+// when the file is in another database, so replay applies it to the same
+// database.
+func (w *AOFWriter) AppendDB(db int, cmd string, args [][]byte) error {
+	if !w.config.Enabled || !w.running.Load() {
+		return nil
+	}
+
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	w.writerBuf = w.writerBuf[:0]
+	cur := w.appendSelect(w.curDB, db)
+	w.writerBuf = appendCommand(w.writerBuf, cmd, args)
+	return w.commitLocked(1, cur)
+}
+
+// commitLocked writes the buffer and records the database it ends in. A
+// failed write leaves the file's database unknown.
+func (w *AOFWriter) commitLocked(commands int64, db int) error {
+	if err := w.writeLocked(commands); err != nil {
+		w.curDB = -1
+		return err
+	}
+	w.curDB = db
+	return nil
 }
 
 // AppendTransaction records the commands an EXEC ran as one MULTI ... EXEC
@@ -170,11 +228,13 @@ func (w *AOFWriter) AppendTransaction(cmds []Command) error {
 	defer w.mu.Unlock()
 
 	w.writerBuf = appendCommand(w.writerBuf[:0], "MULTI", nil)
+	cur := w.curDB
 	for _, c := range cmds {
+		cur = w.appendSelect(cur, c.DB)
 		w.writerBuf = appendCommand(w.writerBuf, c.Name, c.Args)
 	}
 	w.writerBuf = appendCommand(w.writerBuf, "EXEC", nil)
-	return w.writeLocked(int64(len(cmds)))
+	return w.commitLocked(int64(len(cmds)), cur)
 }
 
 func (w *AOFWriter) writeLocked(commands int64) error {
@@ -247,9 +307,13 @@ func NewAOFReader() *AOFReader {
 	return &AOFReader{}
 }
 
+// Command is one command of the AOF. DB is the database it applies to when
+// it is appended; the reader leaves it 0 and replay follows the file's
+// SELECTs instead.
 type Command struct {
 	Name string
 	Args [][]byte
+	DB   int
 }
 
 func (r *AOFReader) Load(path string) ([]Command, error) {
@@ -337,13 +401,10 @@ func (rw *AOFRewriter) Rewrite(aofPath string) error {
 
 	writer := bufio.NewWriterSize(f, 8192)
 
-	entries := rw.store.GetAll()
-	for key, entry := range entries {
-		if err := rw.writeEntry(writer, key, entry); err != nil {
-			f.Close()
-			os.Remove(tempPath)
-			return err
-		}
+	if err := rw.writeAll(writer); err != nil {
+		f.Close()
+		os.Remove(tempPath)
+		return err
 	}
 
 	if err := writer.Flush(); err != nil {
@@ -376,6 +437,48 @@ func (rw *AOFRewriter) Rewrite(aofPath string) error {
 	}
 
 	logger.Info().Str("path", aofPath).Msg("AOF rewrite completed")
+	return nil
+}
+
+// MultiDBSource is a rewrite source that holds several numbered databases.
+// DatabaseEntries returns each database's entries, indexed by database.
+type MultiDBSource interface {
+	DatabaseEntries() []map[string]interface{}
+}
+
+// writeAll writes the source's keys. A multi-database source gets a SELECT
+// before each non-empty database and a final SELECT 0, so commands appended
+// after the rewrite land in database 0 as the writer assumes.
+func (rw *AOFRewriter) writeAll(w *bufio.Writer) error {
+	multi, ok := rw.store.(MultiDBSource)
+	if !ok {
+		for key, entry := range rw.store.GetAll() {
+			if err := rw.writeEntry(w, key, entry); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	selected := 0
+	for db, entries := range multi.DatabaseEntries() {
+		if len(entries) == 0 {
+			continue
+		}
+		if db != selected {
+			if err := rw.writeCommand(w, "SELECT", strconv.Itoa(db)); err != nil {
+				return err
+			}
+			selected = db
+		}
+		for key, entry := range entries {
+			if err := rw.writeEntry(w, key, entry); err != nil {
+				return err
+			}
+		}
+	}
+	if selected != 0 {
+		return rw.writeCommand(w, "SELECT", "0")
+	}
 	return nil
 }
 
@@ -679,6 +782,11 @@ func (m *AOFManager) BGREWRITEAOF() error {
 	}
 
 	rewriteErr := m.rewriter.Rewrite(path)
+	if rewriteErr == nil {
+		m.writer.SetCurrentDB(0)
+	} else {
+		m.writer.SetCurrentDB(-1)
+	}
 	if wasRunning {
 		if startErr := m.writer.Start(); startErr != nil {
 			if rewriteErr != nil {
