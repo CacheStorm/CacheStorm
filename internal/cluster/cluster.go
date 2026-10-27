@@ -446,61 +446,70 @@ func (c *Cluster) lookupMasterLocked(id string, unknown string) (*Node, error) {
 
 // SetSlot implements CLUSTER SETSLOT slot MIGRATING|IMPORTING|NODE|STABLE.
 // keysInSlot counts the keys this node holds in a slot.
+//
+// NODE follows Redis 7.4: a node giving away a slot must hold no keys for
+// it, and its MIGRATING state clears once it holds none; a master left
+// without slots becomes a replica of the new owner; the importing node bumps
+// its config epoch without consensus and broadcasts a PONG, so the rest of
+// the cluster learns the new owner at once.
 func (c *Cluster) SetSlot(slot int, action, nodeID string, keysInSlot func(int) int) error {
 	c.mu.Lock()
+	defer c.unlockAndSave()
 	if c.myself.replica() {
-		c.mu.Unlock()
 		return errors.New("ERR Please use SETSLOT only with masters.") //nolint:staticcheck // Redis reply text
 	}
-	var err error
 	switch action {
 	case "MIGRATING":
 		if c.owner[slot] != c.myself {
-			err = fmt.Errorf("ERR I'm not the owner of hash slot %d", slot)
-			break
+			return fmt.Errorf("ERR I'm not the owner of hash slot %d", slot)
 		}
-		var n *Node
-		if n, err = c.lookupMasterLocked(nodeID, "ERR I don't know about node %s"); err == nil {
-			c.migrating[slot] = n
+		n, err := c.lookupMasterLocked(nodeID, "ERR I don't know about node %s")
+		if err != nil {
+			return err
 		}
+		c.migrating[slot] = n
 	case "IMPORTING":
 		if c.owner[slot] == c.myself {
-			err = fmt.Errorf("ERR I'm already the owner of hash slot %d", slot)
-			break
+			return fmt.Errorf("ERR I'm already the owner of hash slot %d", slot)
 		}
-		var n *Node
-		if n, err = c.lookupMasterLocked(nodeID, "ERR I don't know about node %s"); err == nil {
-			c.importing[slot] = n
+		n, err := c.lookupMasterLocked(nodeID, "ERR I don't know about node %s")
+		if err != nil {
+			return err
 		}
+		c.importing[slot] = n
 	case "STABLE":
 		c.importing[slot], c.migrating[slot] = nil, nil
 	case "NODE":
-		var n *Node
-		if n, err = c.lookupMasterLocked(nodeID, "ERR Unknown node %s"); err != nil {
-			break
+		n, err := c.lookupMasterLocked(nodeID, "ERR Unknown node %s")
+		if err != nil {
+			return err
 		}
 		keys := keysInSlot(slot)
 		if c.owner[slot] == c.myself && n != c.myself && keys != 0 {
-			err = fmt.Errorf("ERR Can't assign hashslot %d to a different node while I still hold keys for this hash slot.", slot) //nolint:staticcheck // Redis reply text
-			break
+			return fmt.Errorf("ERR Can't assign hashslot %d to a different node while I still hold keys for this hash slot.", slot) //nolint:staticcheck // Redis reply text
 		}
 		if keys == 0 {
 			c.migrating[slot] = nil
 		}
+		wasMine := c.owner[slot] == c.myself
 		c.delSlotLocked(slot)
 		c.addSlotLocked(n, slot)
+		if wasMine && n != c.myself && c.myself.numSlots == 0 {
+			logger.Info().Str("master", n.ID).Msg("cluster: configuration change detected, reconfiguring this node as a replica")
+			c.setMyMasterLocked(n)
+		}
 		if n == c.myself && c.importing[slot] != nil {
-			c.bumpEpochLocked()
+			if c.bumpEpochLocked() {
+				logger.Info().Uint64("epoch", c.myself.ConfigEpoch).Int("slot", slot).Msg("cluster: configEpoch updated after importing slot")
+			}
 			c.importing[slot] = nil
+			if c.bus != nil {
+				c.broadcastPongLocked(false)
+			}
 		}
 	}
-	if err != nil {
-		c.mu.Unlock()
-		return err
-	}
+	c.todoSave = true
 	c.updateStateLocked()
-	c.mu.Unlock()
-	c.persist()
 	return nil
 }
 

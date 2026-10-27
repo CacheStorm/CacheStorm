@@ -1,6 +1,7 @@
 // Command goredis exercises CacheStorm with go-redis v9 over RESP2 and RESP3:
 // HELLO, AUTH, SELECT, pipelines, MULTI, Pub/Sub, EVAL, BLPOP and SSCAN, and
-// with CACHESTORM_CLUSTER_ADDR set, ClusterClient against a cluster-mode node.
+// with CACHESTORM_CLUSTER_ADDR set, ClusterClient against a cluster-mode node;
+// CACHESTORM_CLUSTER_LOAD runs ClusterClient traffic until a stop file appears.
 package main
 
 import (
@@ -17,6 +18,10 @@ func main() {
 		for _, proto := range []int{2, 3} {
 			check(proto)
 		}
+	}
+	if addr := os.Getenv("CACHESTORM_CLUSTER_LOAD"); addr != "" {
+		clusterLoad(addr, os.Getenv("CACHESTORM_LOAD_STOP"))
+		return
 	}
 	if addr := os.Getenv("CACHESTORM_CLUSTER_ADDR"); addr != "" {
 		for _, proto := range []int{2, 3} {

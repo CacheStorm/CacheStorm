@@ -165,14 +165,24 @@ func TestRestoreFrequencyUsesConfiguredLFUPolicy(t *testing.T) {
 	}
 }
 
-func TestDumpRejectsUnsupportedStringShapedValues(t *testing.T) {
+// A time series or JSON document must not be dumped as a string: it travels
+// under its own private type and comes back as the same type.
+func TestDumpKeepsNonRedisTypes(t *testing.T) {
 	for _, value := range []store.Value{store.NewTimeSeriesValue(0), &store.JSONValue{Data: []byte(`{"k":"v"}`)}} {
 		s := store.NewStore()
 		if err := s.Set("k", value, store.SetOptions{}); err != nil {
 			t.Fatal(err)
 		}
-		if got := restoreRun(t, s, "DUMP", "k"); got.Type != resp.TypeError {
-			t.Fatalf("DUMP silently converted %T", value)
+		got := restoreRun(t, s, "DUMP", "k")
+		if got.Type != resp.TypeBulkString {
+			t.Fatalf("DUMP of %T: %v", value, got.Err)
+		}
+		if r := restoreRun(t, s, "RESTORE", "copy", "0", string(got.Bulk)); r.Type == resp.TypeError {
+			t.Fatalf("RESTORE of %T: %s", value, r.Err)
+		}
+		entry, ok := s.GetShard("copy").Get("copy")
+		if !ok || entry.Value.Type() != value.Type() {
+			t.Fatalf("RESTORE of %T gave %T", value, entry.Value)
 		}
 	}
 }

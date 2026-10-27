@@ -83,6 +83,7 @@ func RegisterKeyCommands(router *Router) {
 	router.Register(&CommandDef{Name: "TOUCH", Handler: cmdTOUCH})
 	router.Register(&CommandDef{Name: "DUMP", Handler: cmdDUMP})
 	router.Register(&CommandDef{Name: "RESTORE", Handler: cmdRESTORE})
+	router.Register(&CommandDef{Name: "RESTORE-ASKING", Handler: cmdRESTORE})
 	router.Register(&CommandDef{Name: "COPY", Handler: cmdCOPY})
 	router.Register(&CommandDef{Name: "MOVE", Handler: cmdMOVE})
 	router.Register(&CommandDef{Name: "WAITAOF", Handler: cmdWAITAOF})

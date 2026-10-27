@@ -45,7 +45,7 @@ var writeCommands = map[string]bool{
 	"GETDEL": true, "GETSET": true, "GETEX": true, "SETRANGE": true,
 	"DEL": true, "UNLINK": true, "RENAME": true, "RENAMENX": true, "EXPIRE": true, "EXPIREAT": true,
 	"PEXPIRE": true, "PEXPIREAT": true, "PERSIST": true,
-	"COPY": true, "MOVE": true, "MIGRATE": true, "RESTORE": true, "SORT": true,
+	"COPY": true, "MOVE": true, "MIGRATE": true, "RESTORE": true, "RESTORE-ASKING": true, "SORT": true,
 	"FLUSHALL": true, "FLUSHDB": true, "SWAPDB": true,
 	"HSET": true, "HSETNX": true, "HMSET": true, "HDEL": true, "HINCRBY": true, "HINCRBYFLOAT": true,
 	"HGETDEL": true, "HGETEX": true,

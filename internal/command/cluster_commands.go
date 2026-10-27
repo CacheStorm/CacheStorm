@@ -449,9 +449,7 @@ func clusterSetSlot(ctx *Context, c *cluster.Cluster, args [][]byte) error {
 	node := ""
 	valid := false
 	switch action {
-	case "MIGRATING":
-		valid = len(args) >= 3
-	case "IMPORTING", "NODE":
+	case "MIGRATING", "IMPORTING", "NODE":
 		valid = len(args) == 3
 	case "STABLE":
 		valid = len(args) == 2
@@ -580,42 +578,36 @@ func replicationOffset(ctx *Context) int64 {
 
 // cmdMIGRATE implements MIGRATE host port key|"" destination-db timeout
 // [COPY] [REPLACE] [AUTH password | AUTH2 username password]
-// [KEYS key [key ...]]. Each key is sent as RESTORE with its DUMP payload
-// and remaining TTL; without COPY the keys are then deleted here, which the
-// AOF and the replicas record as DEL.
+// [KEYS key [key ...]] as Redis' migrateCommand. The keys are sent pipelined
+// as RESTORE (RESTORE-ASKING in cluster mode, so an importing target accepts
+// them) with their DUMP payload and remaining TTL, while a reader collects
+// the replies; the timeout bounds each network operation. Without COPY the
+// keys the target accepted are then deleted here, which the AOF and the
+// replicas record as DEL. The command holds the write gate exclusively, so
+// no write lands on a key between its dump and its deletion.
 func cmdMIGRATE(ctx *Context) error {
 	if ctx.ArgCount() < 5 {
 		return ctx.WriteError(arityError("migrate"))
 	}
 	host, port := ctx.ArgString(0), ctx.ArgString(1)
-	db, err := strconv.Atoi(ctx.ArgString(3))
-	if err != nil || db < 0 {
-		return ctx.WriteError(ErrNotInteger)
-	}
-	timeoutMS, err := strconv.ParseInt(ctx.ArgString(4), 10, 64)
-	if err != nil || timeoutMS < 0 {
-		return ctx.WriteError(ErrNotInteger)
-	}
-	if timeoutMS == 0 {
-		timeoutMS = 1000
-	}
 	copyKeys, replace := false, false
 	var auth [][]byte
 	keys := []string{ctx.ArgString(2)}
 	for i := 5; i < ctx.ArgCount(); i++ {
+		more := ctx.ArgCount() - 1 - i
 		switch strings.ToUpper(ctx.ArgString(i)) {
 		case "COPY":
 			copyKeys = true
 		case "REPLACE":
 			replace = true
 		case "AUTH":
-			if i+1 >= ctx.ArgCount() {
+			if more < 1 {
 				return ctx.WriteError(ErrSyntaxError)
 			}
 			auth = [][]byte{ctx.Arg(i + 1)}
 			i++
 		case "AUTH2":
-			if i+2 >= ctx.ArgCount() {
+			if more < 2 {
 				return ctx.WriteError(ErrSyntaxError)
 			}
 			auth = [][]byte{ctx.Arg(i + 1), ctx.Arg(i + 2)}
@@ -632,6 +624,17 @@ func cmdMIGRATE(ctx *Context) error {
 			return ctx.WriteError(ErrSyntaxError)
 		}
 	}
+	timeoutMS, err := strconv.ParseInt(ctx.ArgString(4), 10, 64)
+	if err != nil {
+		return ctx.WriteError(ErrNotInteger)
+	}
+	db, err := strconv.ParseInt(ctx.ArgString(3), 10, 64)
+	if err != nil {
+		return ctx.WriteError(ErrNotInteger)
+	}
+	if timeoutMS <= 0 {
+		timeoutMS = 1000
+	}
 
 	type item struct {
 		key     string
@@ -642,18 +645,21 @@ func cmdMIGRATE(ctx *Context) error {
 	now := time.Now().UnixMilli()
 	for _, key := range keys {
 		entry, ok := ctx.Store.Get(key)
-		if !ok {
+		if !ok || entry.IsExpired() {
 			continue
+		}
+		ttl := int64(0)
+		if at := entry.ExpiresAt.Load(); at > 0 {
+			if ttl = at - now; ttl < 0 {
+				continue
+			}
+			if ttl < 1 {
+				ttl = 1
+			}
 		}
 		payload, err := persistence.EncodeDump(entry.Value)
 		if err != nil {
 			return ctx.WriteError(err)
-		}
-		ttl := int64(0)
-		if at := entry.ExpiresAt.Load(); at > 0 {
-			if ttl = at - now; ttl < 1 {
-				ttl = 1
-			}
 		}
 		items = append(items, item{key, ttl, payload})
 	}
@@ -662,13 +668,17 @@ func cmdMIGRATE(ctx *Context) error {
 	}
 
 	timeout := time.Duration(timeoutMS) * time.Millisecond
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, port), timeout)
+	raw, err := net.DialTimeout("tcp", net.JoinHostPort(host, port), timeout)
 	if err != nil {
 		return ctx.WriteError(fmt.Errorf("IOERR error or timeout connecting to the client"))
 	}
+	conn := &deadlineConn{Conn: raw, timeout: timeout}
 	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(timeout))
 
+	restore := []byte("RESTORE")
+	if ctx.ClusterEnabled() {
+		restore = []byte("RESTORE-ASKING")
+	}
 	var out bytes.Buffer
 	w := resp.NewWriter(&out)
 	send := func(args ...[]byte) {
@@ -678,43 +688,73 @@ func cmdMIGRATE(ctx *Context) error {
 		}
 		_ = w.WriteArray(vals)
 	}
-	expected := 0
 	if auth != nil {
 		send(append([][]byte{[]byte("AUTH")}, auth...)...)
-		expected++
 	}
-	send([]byte("SELECT"), []byte(strconv.Itoa(db)))
-	expected++
+	send([]byte("SELECT"), []byte(strconv.FormatInt(db, 10)))
 	for _, it := range items {
-		args := [][]byte{[]byte("RESTORE"), []byte(it.key), []byte(strconv.FormatInt(it.ttl, 10)), it.payload}
+		args := [][]byte{restore, []byte(it.key), []byte(strconv.FormatInt(it.ttl, 10)), it.payload}
 		if replace {
 			args = append(args, []byte("REPLACE"))
 		}
 		send(args...)
 	}
-	if _, err := conn.Write(out.Bytes()); err != nil {
-		return ctx.WriteError(fmt.Errorf("IOERR error or timeout writing to target instance"))
+
+	// The replies are read while the commands are written, so a target
+	// that answers before it has read everything never stalls the pipe.
+	expected := len(items) + 1
+	if auth != nil {
+		expected++
 	}
-	rd := resp.NewReader(conn)
-	for i := 0; i < expected; i++ {
-		v, err := rd.ReadValue()
-		if err != nil {
-			return ctx.WriteError(fmt.Errorf("IOERR error or timeout reading to target instance"))
+	type reply struct {
+		v   *resp.Value
+		err error
+	}
+	replies := make(chan reply, expected)
+	go func() {
+		rd := resp.NewReader(conn)
+		for i := 0; i < expected; i++ {
+			v, err := rd.ReadValue()
+			replies <- reply{v, err}
+			if err != nil {
+				return
+			}
 		}
-		if v.Type == resp.TypeError {
-			return ctx.Writer.WriteError("ERR Target instance replied with error: " + strings.TrimPrefix(v.Err, "ERR "))
+	}()
+	const chunk = 64 * 1024
+	data := out.Bytes()
+	for len(data) > 0 {
+		n := min(chunk, len(data))
+		if _, err := conn.Write(data[:n]); err != nil {
+			conn.Close()
+			return ctx.WriteError(fmt.Errorf("IOERR error or timeout writing to target instance"))
+		}
+		data = data[n:]
+	}
+	readErr := errors.New("IOERR error or timeout reading to target instance")
+	for i := expected - len(items); i > 0; i-- {
+		r := <-replies
+		if r.err != nil {
+			conn.Close()
+			return ctx.WriteError(readErr)
+		}
+		if r.v.Type == resp.TypeError {
+			conn.Close()
+			return ctx.Writer.WriteError("ERR Target instance replied with error: " + r.v.Err)
 		}
 	}
 	var moved []string
 	var firstErr string
+	ioFailed := false
 	for _, it := range items {
-		v, err := rd.ReadValue()
-		if err != nil {
-			return ctx.WriteError(fmt.Errorf("IOERR error or timeout reading to target instance"))
+		r := <-replies
+		if r.err != nil {
+			ioFailed = true
+			break
 		}
-		if v.Type == resp.TypeError {
+		if r.v.Type == resp.TypeError {
 			if firstErr == "" {
-				firstErr = v.Err
+				firstErr = r.v.Err
 			}
 			continue
 		}
@@ -735,8 +775,28 @@ func cmdMIGRATE(ctx *Context) error {
 	} else {
 		ctx.PropagateAs()
 	}
-	if firstErr != "" {
-		return ctx.Writer.WriteError("ERR Target instance replied with error: " + strings.TrimPrefix(firstErr, "ERR "))
+	switch {
+	case firstErr != "":
+		return ctx.Writer.WriteError("ERR Target instance replied with error: " + firstErr)
+	case ioFailed:
+		return ctx.WriteError(readErr)
 	}
 	return ctx.WriteOK()
+}
+
+// deadlineConn applies the MIGRATE timeout to each read and write, as
+// Redis' syncRead and syncWrite do, rather than to the whole transfer.
+type deadlineConn struct {
+	net.Conn
+	timeout time.Duration
+}
+
+func (c *deadlineConn) Read(p []byte) (int, error) {
+	_ = c.SetReadDeadline(time.Now().Add(c.timeout))
+	return c.Conn.Read(p)
+}
+
+func (c *deadlineConn) Write(p []byte) (int, error) {
+	_ = c.SetWriteDeadline(time.Now().Add(c.timeout))
+	return c.Conn.Write(p)
 }

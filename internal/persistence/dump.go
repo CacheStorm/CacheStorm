@@ -1,12 +1,15 @@
 package persistence
 
 import (
+	"bytes"
 	"encoding/binary"
+	"encoding/gob"
 	"errors"
 	"fmt"
 	"math"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/cachestorm/cachestorm/internal/store"
 )
@@ -15,6 +18,16 @@ var ErrDumpChecksum = errors.New("ERR DUMP payload version or checksum are wrong
 var ErrDumpFormat = errors.New("ERR Bad data format")
 
 const maxDumpString = 512 << 20
+
+// The value types Redis has no RDB encoding for that CacheStorm serves are
+// dumped under private type bytes, so DUMP/RESTORE and MIGRATE move them
+// between CacheStorm nodes whole: a stream with its consumer groups, a JSON
+// document and a time series. Redis refuses these payloads.
+const (
+	dumpTypeStream     = 200
+	dumpTypeJSON       = 201
+	dumpTypeTimeSeries = 202
+)
 
 func EncodeDump(value store.Value) ([]byte, error) {
 	var out []byte
@@ -88,6 +101,29 @@ func EncodeDump(value store.Value) ([]byte, error) {
 			}
 			out = binary.LittleEndian.AppendUint64(out, math.Float64bits(score))
 		}
+	case *store.StreamValue:
+		var data bytes.Buffer
+		if err := gob.NewEncoder(&data).Encode(v.Clone()); err != nil {
+			return nil, err
+		}
+		out = append(out, dumpTypeStream)
+		str(data.String())
+	case *store.JSONValue:
+		v.RLock()
+		data := string(v.Data)
+		v.RUnlock()
+		out = append(out, dumpTypeJSON)
+		str(data)
+	case *store.TimeSeriesValue:
+		var data bytes.Buffer
+		v.RLock()
+		err := gob.NewEncoder(&data).Encode(v)
+		v.RUnlock()
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, dumpTypeTimeSeries)
+		str(data.String())
 	default:
 		raw, ok := value.(store.RedisStringValue)
 		if !ok {
@@ -459,6 +495,40 @@ func (d *dumpDecoder) value() store.Value {
 		}
 		if len(v.Elements) == 0 {
 			d.err = ErrDumpFormat
+		}
+		return v
+	case dumpTypeStream:
+		data := d.str()
+		if d.err != nil {
+			return nil
+		}
+		v := store.NewStreamValue(0)
+		if err := gob.NewDecoder(strings.NewReader(data)).Decode(v); err != nil {
+			d.err = ErrDumpFormat
+			return nil
+		}
+		if v.Groups == nil {
+			v.Groups = make(map[string]*store.ConsumerGroup)
+		}
+		return v
+	case dumpTypeJSON:
+		data := d.str()
+		if d.err != nil {
+			return nil
+		}
+		return &store.JSONValue{Data: []byte(data)}
+	case dumpTypeTimeSeries:
+		data := d.str()
+		if d.err != nil {
+			return nil
+		}
+		v := store.NewTimeSeriesValue(0)
+		if err := gob.NewDecoder(strings.NewReader(data)).Decode(v); err != nil {
+			d.err = ErrDumpFormat
+			return nil
+		}
+		if v.Labels == nil {
+			v.Labels = make(map[string]string)
 		}
 		return v
 	default:

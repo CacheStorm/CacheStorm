@@ -47,7 +47,7 @@ var aclSingleKeyCommands = map[string]bool{
 	// generic key + expiry
 	"COPY": true, "DUMP": true, "EXPIRE": true, "EXPIREAT": true, "EXPIRETIME": true,
 	"EXISTS_": true, "MOVE": true, "PERSIST": true, "PEXPIRE": true, "PEXPIREAT": true,
-	"PEXPIRETIME": true, "RENAME": true, "RENAMENX": true, "RESTORE": true,
+	"PEXPIRETIME": true, "RENAME": true, "RENAMENX": true, "RESTORE": true, "RESTORE-ASKING": true,
 	"TOUCH": true, "TTL": true, "TYPE": true, "UNLINK": true,
 	// lists
 	"BLMOVE": true, "BLMPOP": true, "BRPOP": true, "BRPOPLPUSH": true, "LINDEX": true,

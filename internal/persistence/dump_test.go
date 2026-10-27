@@ -137,7 +137,7 @@ func TestDumpRejectsMalformedStructureAndEmptyCollections(t *testing.T) {
 			t.Fatalf("malformed structure accepted: %x", body)
 		}
 	}
-	for _, value := range []store.Value{&store.ListValue{}, &store.HashValue{}, &store.SetValue{}, &store.SortedSetValue{}, store.NewStreamValue(0), store.NewTimeSeriesValue(0), &store.JSONValue{Data: []byte(`{"k":"v"}`)}} {
+	for _, value := range []store.Value{&store.ListValue{}, &store.HashValue{}, &store.SetValue{}, &store.SortedSetValue{}} {
 		if _, err := EncodeDump(value); err == nil {
 			t.Fatalf("invalid or unsupported value encoded: %T", value)
 		}

@@ -157,10 +157,26 @@ The failover code is in `internal/cluster/failover.go` and follows `cluster_lega
   - `internal/cluster/failover_test.go` checks the vote rules and the replica rank.
   - `scripts/cluster-smoke.sh` creates a 6-node cluster with `--cluster-replicas 1`, kills a master process, and checks that `redis-cli --cluster check` is OK again, the keys survive and go-redis ClusterClient still works.
 
-### Phase 4: resharding
+### Phase 4: resharding (done)
 
-- `MIGRATE ... KEYS` (already implemented) together with the SETSLOT flow.
+- `MIGRATE ... KEYS` together with the SETSLOT flow.
 - Done when `redis-cli --cluster reshard`, `rebalance`, `add-node` and `del-node` work on a loaded cluster without losing keys.
+
+#### How it works
+
+redis-cli moves a slot with `clusterManagerMoveSlot`: `SETSLOT IMPORTING` on the target, `SETSLOT MIGRATING` on the source, then `CLUSTER GETKEYSINSLOT slot <pipeline>` and `MIGRATE host port "" 0 timeout [REPLACE] [AUTH ...] KEYS ...` until the source holds no key of the slot, then `SETSLOT NODE <target>` on the target, the source and every other master.
+
+- **SETSLOT** (`internal/cluster/cluster.go`, `SetSlot`) follows Redis 7.4's `clusterCommandSetSlot`:
+  - MIGRATING needs the slot to be this node's and IMPORTING needs it not to be; both need a known master. They are saved to nodes.conf (`[slot->-id]`, `[slot-<-id]`).
+  - NODE is refused while this node owns the slot and still holds keys for it; it never deletes keys. With no keys left, the MIGRATING state clears.
+  - A master that gives away its last slot becomes a replica of the new owner (`cluster-allow-replica-migration`, on in Redis by default). redis-cli's next SETSLOT to it gets `Please use SETSLOT only with masters.`, which redis-cli accepts.
+  - The importing node that takes the slot bumps its config epoch without consensus (`clusterBumpConfigEpochWithoutConsensus`), clears IMPORTING and broadcasts a PONG. The other nodes take the slot through `clusterUpdateSlotsConfigWith` (the greater config epoch wins); a node with a stale claim gets an UPDATE. Gossip never moves a slot this node is importing.
+- **MIGRATE** (`internal/command/cluster_commands.go`) sends `AUTH`, `SELECT db` and one `RESTORE-ASKING` (`RESTORE` outside cluster mode) per key with its DUMP payload and remaining TTL, in 64 KiB chunks, while a reader collects the replies; the timeout applies to each read and write. The keys the target accepted are deleted and recorded as one DEL in the AOF and the replication stream. MIGRATE takes the write gate exclusively, so a write to a key cannot land between its dump and its deletion, and routing for a write waiting on the gate is decided after MIGRATE is done.
+- **RESTORE-ASKING** is RESTORE with Redis' `asking` command flag: routing serves it for an importing slot without a preceding `ASKING`. It is recorded as `RESTORE ... ABSTTL`, so the target's replicas and AOF get the keys with their absolute expiry.
+- **DUMP payloads.** Strings, lists, sets, hashes and sorted sets use Redis's RDB encodings. Streams (with their consumer groups), JSON documents and time series, which have none, use private type bytes 200–202, so they migrate whole between CacheStorm nodes; Redis refuses those payloads. Each key keeps its encoding after RESTORE because CacheStorm derives the encoding from the value.
+- **Redirections** during a migration (`clusterRoute`, as `getNodeByQuery`): on the source, a command whose keys are all missing gets `ASK slot target`, one that finds only some of them gets `TRYAGAIN`; on the target, a command after `ASKING` (or RESTORE-ASKING) is served unless it names several keys and some are missing (`TRYAGAIN`); without ASKING it gets `MOVED` to the source. MIGRATE itself is always served on a migrating or importing slot. After SETSLOT NODE, every node answers `MOVED` to the new owner.
+- **Tests.** `internal/server/cluster_migration_test.go` migrates a slot holding strings (with and without TTL, integer-encoded), small and large hashes, int and string sets, a sorted set, a list and a stream between two masters of a 3 + 3 cluster, checking ASK/ASKING/TRYAGAIN/RESTORE-ASKING in the middle, the MOVED replies, DUMP and OBJECT ENCODING and TTLs after, the keys on both replicas, the epochs and nodes.conf; it also checks that a master emptied by SETSLOT NODE becomes a replica. `scripts/cluster-smoke.sh` runs reshard, add-node (master and replica), rebalance `--cluster-use-empty-masters`, del-node and fix with redis-cli 7.4 under go-redis ClusterClient traffic.
+- **Not implemented.** Redis' cached MIGRATE connections (each MIGRATE dials the target); `SETSLOT` replication to replicas, which arrived after Redis 7.4.
 
 ### Phase 5: hardening
 
