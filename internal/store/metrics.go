@@ -230,7 +230,6 @@ func (m *Metrics) Snapshot() map[string]interface{} {
 
 func (m *Metrics) Reset() {
 	m.TotalConnections.Store(0)
-	m.ActiveConnections.Store(0)
 	m.TotalCommands.Store(0)
 	m.TotalReads.Store(0)
 	m.TotalWrites.Store(0)

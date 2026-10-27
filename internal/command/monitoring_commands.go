@@ -223,10 +223,23 @@ func cmdSTATSCPU(ctx *Context) error {
 	})
 }
 
+// connectedClients is the server's live client count, as INFO reports it.
+func connectedClients(ctx *Context) int64 {
+	if r := ctx.dispatcher(); r != nil {
+		r.mu.RLock()
+		fn := r.serverStatus
+		r.mu.RUnlock()
+		if fn != nil {
+			return fn().ConnectedClients
+		}
+	}
+	return store.GlobalMetrics.ActiveConnections.Load()
+}
+
 func cmdSTATSCLIENTS(ctx *Context) error {
 	return ctx.WriteArray([]*resp.Value{
 		resp.BulkString("connected_clients"),
-		resp.IntegerValue(store.GlobalMetrics.ActiveConnections.Load()),
+		resp.IntegerValue(connectedClients(ctx)),
 		resp.BulkString("total_connections"),
 		resp.IntegerValue(store.GlobalMetrics.TotalConnections.Load()),
 	})
