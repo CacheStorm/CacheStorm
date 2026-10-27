@@ -1,6 +1,7 @@
 package search
 
 import (
+	"errors"
 	"maps"
 	"regexp"
 	"sort"
@@ -43,6 +44,8 @@ type SearchResult struct {
 type IndexManager struct {
 	mu      sync.RWMutex
 	indexes map[string]*Index
+	// aliases maps an alias to the index it names (FT.ALIASADD).
+	aliases map[string]string
 }
 
 var globalIndexManager = NewIndexManager()
@@ -50,6 +53,7 @@ var globalIndexManager = NewIndexManager()
 func NewIndexManager() *IndexManager {
 	return &IndexManager{
 		indexes: make(map[string]*Index),
+		aliases: make(map[string]string),
 	}
 }
 
@@ -89,14 +93,94 @@ func (m *IndexManager) DropIndex(name string) bool {
 	}
 
 	delete(m.indexes, name)
+	for alias, target := range m.aliases {
+		if target == name {
+			delete(m.aliases, alias)
+		}
+	}
 	return true
+}
+
+// The alias errors carry RediSearch's reply texts.
+//
+//nolint:staticcheck // RediSearch's error texts are capitalised
+var (
+	ErrAliasExists  = errors.New("Alias already exists")
+	ErrAliasMissing = errors.New("Alias does not exist")
+	ErrNoIndex      = errors.New("Unknown index name")
+)
+
+// AddAlias makes alias another name for index.
+func (m *IndexManager) AddAlias(alias, index string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.aliases[alias]; ok {
+		return ErrAliasExists
+	}
+	if _, ok := m.indexes[index]; !ok {
+		return ErrNoIndex
+	}
+	m.aliases[alias] = index
+	return nil
+}
+
+// UpdateAlias points alias at index, adding it when missing.
+func (m *IndexManager) UpdateAlias(alias, index string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.indexes[index]; !ok {
+		return ErrNoIndex
+	}
+	m.aliases[alias] = index
+	return nil
+}
+
+// DelAlias removes alias.
+func (m *IndexManager) DelAlias(alias string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.aliases[alias]; !ok {
+		return ErrAliasMissing
+	}
+	delete(m.aliases, alias)
+	return nil
 }
 
 func (m *IndexManager) GetIndex(name string) (*Index, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	idx, ok := m.indexes[name]
+	if !ok {
+		if target, aliased := m.aliases[name]; aliased {
+			idx, ok = m.indexes[target]
+		}
+	}
 	return idx, ok
+}
+
+// TagValues returns the distinct values of a tag field across the index's
+// documents: each value split on commas, trimmed and lower-cased, sorted.
+func (idx *Index) TagValues(field string) []string {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+	seen := make(map[string]struct{})
+	for _, doc := range idx.Documents {
+		v, ok := doc.Fields[field]
+		if !ok {
+			continue
+		}
+		for _, tag := range strings.Split(v, ",") {
+			if tag = strings.ToLower(strings.TrimSpace(tag)); tag != "" {
+				seen[tag] = struct{}{}
+			}
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for t := range seen {
+		out = append(out, t)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func (m *IndexManager) ListIndexes() []string {

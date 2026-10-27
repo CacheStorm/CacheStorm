@@ -2,6 +2,7 @@ package command
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -196,11 +197,12 @@ func cmdSTATSMEMORY(ctx *Context) error {
 }
 
 func cmdSTATSCPU(ctx *Context) error {
+	sys, user := processCPU()
 	return ctx.WriteArray([]*resp.Value{
 		resp.BulkString("used_cpu_sys"),
-		resp.BulkString("0.00"),
+		resp.BulkString(strconv.FormatFloat(sys, 'f', 2, 64)),
 		resp.BulkString("used_cpu_user"),
-		resp.BulkString("0.00"),
+		resp.BulkString(strconv.FormatFloat(user, 'f', 2, 64)),
 	})
 }
 

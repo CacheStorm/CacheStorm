@@ -23,6 +23,7 @@ func RegisterSearchCommands(router *Router) {
 	router.Register(&CommandDef{Name: "FT.TAGVALS", Handler: cmdFTTAGVALS})
 	router.Register(&CommandDef{Name: "FT.ALIASADD", Handler: cmdFTALIASADD})
 	router.Register(&CommandDef{Name: "FT.ALIASDEL", Handler: cmdFTALIASDEL})
+	router.Register(&CommandDef{Name: "FT.ALIASUPDATE", Handler: cmdFTALIASUPDATE})
 }
 
 func cmdFTCREATE(ctx *Context) error {
@@ -373,43 +374,48 @@ func cmdFTAGGREGATE(ctx *Context) error {
 }
 
 func cmdFTTAGVALS(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
+	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
-
-	indexName := ctx.ArgString(0)
-	_ = indexName
-	fieldName := ctx.ArgString(1)
-	_ = fieldName
-
-	return ctx.WriteArray([]*resp.Value{})
+	idx, ok := search.GetIndexManager().GetIndex(ctx.ArgString(0))
+	if !ok {
+		return ctx.WriteError(fmt.Errorf("%s: no such index", ctx.ArgString(0)))
+	}
+	vals := idx.TagValues(ctx.ArgString(1))
+	out := make([]*resp.Value, len(vals))
+	for i, v := range vals {
+		out[i] = resp.BulkString(v)
+	}
+	return ctx.WriteArray(out)
 }
 
 func cmdFTALIASADD(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
+	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
-
-	alias := ctx.ArgString(0)
-	index := ctx.ArgString(1)
-
-	manager := search.GetIndexManager()
-	if _, ok := manager.GetIndex(index); !ok {
-		return ctx.WriteError(fmt.Errorf("ERR index not found"))
+	if err := search.GetIndexManager().AddAlias(ctx.ArgString(0), ctx.ArgString(1)); err != nil {
+		return ctx.Writer.WriteError(err.Error())
 	}
+	return ctx.WriteOK()
+}
 
-	_ = alias
+func cmdFTALIASUPDATE(ctx *Context) error {
+	if ctx.ArgCount() != 2 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+	if err := search.GetIndexManager().UpdateAlias(ctx.ArgString(0), ctx.ArgString(1)); err != nil {
+		return ctx.Writer.WriteError(err.Error())
+	}
 	return ctx.WriteOK()
 }
 
 func cmdFTALIASDEL(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+	if ctx.ArgCount() != 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
-
-	alias := ctx.ArgString(0)
-	_ = alias
-
+	if err := search.GetIndexManager().DelAlias(ctx.ArgString(0)); err != nil {
+		return ctx.Writer.WriteError(err.Error())
+	}
 	return ctx.WriteOK()
 }
 

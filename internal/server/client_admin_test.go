@@ -295,3 +295,39 @@ func TestACLLogRecordsDenials(t *testing.T) {
 		t.Fatalf("ACL LOG after RESET = %+v", got)
 	}
 }
+
+func TestSearchAliasesAndTagValues(t *testing.T) {
+	s := startReplServer(t, nil)
+	c := dialRepl(t, s)
+	c.do("FT.CREATE", "aliasidx", "SCHEMA", "tags", "TAG")
+	c.do("FT.ADD", "aliasidx", "d1", "1.0", "FIELDS", "tags", "Red, blue")
+	c.do("FT.ADD", "aliasidx", "d2", "1.0", "FIELDS", "tags", "green,red")
+	if got := c.do("FT.ALIASADD", "aliasname", "aliasidx"); got.Str != "OK" {
+		t.Fatalf("FT.ALIASADD = %+v", got)
+	}
+	if got := c.do("FT.ALIASADD", "aliasname", "aliasidx"); got.Type != resp.TypeError {
+		t.Fatalf("duplicate FT.ALIASADD = %+v", got)
+	}
+	got := c.do("FT.TAGVALS", "aliasname", "tags")
+	if len(got.Array) != 3 || string(got.Array[0].Bulk) != "blue" || string(got.Array[2].Bulk) != "red" {
+		t.Fatalf("FT.TAGVALS through the alias = %+v", got)
+	}
+	if got := c.do("FT.ALIASDEL", "aliasname"); got.Str != "OK" {
+		t.Fatalf("FT.ALIASDEL = %+v", got)
+	}
+	if got := c.do("FT.TAGVALS", "aliasname", "tags"); got.Type != resp.TypeError {
+		t.Fatalf("FT.TAGVALS after FT.ALIASDEL = %+v", got)
+	}
+	c.do("FT.DROPINDEX", "aliasidx")
+}
+
+func TestRuntimeStatsAreReal(t *testing.T) {
+	c := dialRepl(t, startReplServer(t, nil))
+	stats := c.do("HEAP.STATS")
+	if len(stats.Array) < 2 || stats.Array[1].Int == 0 {
+		t.Fatalf("HEAP.STATS = %+v, want real allocation counts", stats)
+	}
+	if got := c.do("MEMORY", "PURGE"); got.Str != "OK" {
+		t.Fatalf("MEMORY PURGE = %+v", got)
+	}
+}

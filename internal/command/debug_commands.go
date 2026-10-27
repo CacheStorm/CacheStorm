@@ -3,6 +3,7 @@ package command
 import (
 	"errors"
 	"fmt"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -266,6 +267,7 @@ func cmdMEMORY(ctx *Context) error {
 		diagnosis.WriteString("\nNo critical issues detected.\n")
 		return ctx.WriteBulkString(diagnosis.String())
 	case "PURGE":
+		debug.FreeOSMemory()
 		return ctx.WriteOK()
 	default:
 		return ctx.WriteError(fmt.Errorf("ERR unknown MEMORY subcommand '%s'", subCmd))

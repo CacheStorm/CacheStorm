@@ -2,6 +2,9 @@ package command
 
 import (
 	"fmt"
+	"runtime"
+	"runtime/debug"
+	"strconv"
 	"sync"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
@@ -663,19 +666,27 @@ func splitFirst(s, sep string) []string {
 }
 
 func cmdMEMORYTRIM(ctx *Context) error {
+	debug.FreeOSMemory()
 	return ctx.WriteOK()
 }
 
 func cmdMEMORYFRAG(ctx *Context) error {
+	var ms runtime.MemStats
+	runtime.ReadMemStats(&ms)
+	ratio := 1.0
+	if ms.HeapInuse > 0 {
+		ratio = float64(ms.HeapSys-ms.HeapReleased) / float64(ms.HeapInuse)
+	}
 	return ctx.WriteArray([]*resp.Value{
 		resp.BulkString("fragmentation_ratio"),
-		resp.BulkString("1.0"),
+		resp.BulkString(strconv.FormatFloat(ratio, 'f', 2, 64)),
 		resp.BulkString("fragmented_bytes"),
-		resp.IntegerValue(0),
+		resp.IntegerValue(int64(ms.HeapSys - ms.HeapReleased - ms.HeapInuse)),
 	})
 }
 
 func cmdMEMORYPURGE(ctx *Context) error {
+	debug.FreeOSMemory()
 	return ctx.WriteOK()
 }
 

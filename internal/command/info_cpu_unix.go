@@ -8,13 +8,18 @@ import (
 	"syscall"
 )
 
-func infoCPU(w *infoWriter) {
+// processCPU returns the system and user CPU seconds the process used.
+func processCPU() (sys, user float64) {
 	var ru syscall.Rusage
-	sys, user := 0.0, 0.0
 	if err := syscall.Getrusage(syscall.RUSAGE_SELF, &ru); err == nil {
 		sys = float64(ru.Stime.Sec) + float64(ru.Stime.Usec)/1e6
 		user = float64(ru.Utime.Sec) + float64(ru.Utime.Usec)/1e6
 	}
+	return sys, user
+}
+
+func infoCPU(w *infoWriter) {
+	sys, user := processCPU()
 	w.section("CPU")
 	w.field("used_cpu_sys", strconv.FormatFloat(sys, 'f', 6, 64))
 	w.field("used_cpu_user", strconv.FormatFloat(user, 'f', 6, 64))

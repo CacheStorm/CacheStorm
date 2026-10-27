@@ -3,6 +3,7 @@ package command
 import (
 	"errors"
 	"fmt"
+	"runtime"
 	"sync"
 	"time"
 
@@ -998,18 +999,24 @@ func cmdPROFILEXLIST(ctx *Context) error {
 }
 
 func cmdHEAPSTATS(ctx *Context) error {
+	var ms runtime.MemStats
+	runtime.ReadMemStats(&ms)
 	return ctx.WriteArray([]*resp.Value{
-		resp.BulkString("allocations"), resp.IntegerValue(0),
-		resp.BulkString("frees"), resp.IntegerValue(0),
-		resp.BulkString("in_use"), resp.IntegerValue(0),
+		resp.BulkString("allocations"), resp.IntegerValue(int64(ms.Mallocs)),
+		resp.BulkString("frees"), resp.IntegerValue(int64(ms.Frees)),
+		resp.BulkString("in_use"), resp.IntegerValue(int64(ms.HeapInuse)),
+		resp.BulkString("heap_alloc"), resp.IntegerValue(int64(ms.HeapAlloc)),
+		resp.BulkString("heap_sys"), resp.IntegerValue(int64(ms.HeapSys)),
+		resp.BulkString("gc_cycles"), resp.IntegerValue(int64(ms.NumGC)),
 	})
 }
 
 func cmdHEAPDUMP(ctx *Context) error {
-	return ctx.WriteOK()
+	return ctx.WriteError(errors.New("ERR HEAP.DUMP is not supported; use the HTTP /debug/pprof/heap endpoint"))
 }
 
 func cmdHEAPGC(ctx *Context) error {
+	runtime.GC()
 	return ctx.WriteOK()
 }
 
