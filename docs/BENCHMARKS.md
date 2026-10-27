@@ -17,7 +17,36 @@ docker run --rm --network host redis:7.4-alpine \
   redis-benchmark -p <port> -q -n 50000 -c 50 -P 16 -t lpush,lpop
 ```
 
-## Results, 2026-10-25 (requests per second)
+## Results, 2026-10-27 (requests per second, pipelined)
+
+`redis-benchmark` without `-r` sends every SET, GET and INCR to the single key
+`key:__rand_int__`, so the earlier SET figures measured one hot key rather
+than a workload. These runs add `-r 1000000` (one million distinct keys,
+1,000,000 requests, 50 clients, `-P 16`):
+
+```bash
+docker run --rm --network host redis:7.4-alpine \
+  redis-benchmark -p <port> -q -n 1000000 -r 1000000 -c 50 -P 16 -t set,get,incr,lpush,hset
+```
+
+| Command | CacheStorm | Redis 7.4.11 | CacheStorm p50 | Redis p50 |
+|---|---|---|---|---|
+| SET | 788,022 | 627,353 | 0.54 ms | 1.10 ms |
+| GET | 876,424 | 753,580 | 0.46 ms | 0.91 ms |
+| INCR | 799,361 | 634,518 | 0.51 ms | 1.08 ms |
+| LPUSH (one key) | 307,031 | 445,038 | 0.38 ms | 1.66 ms |
+| HSET (one key) | 197,161 | 557,725 | 0.56 ms | 1.28 ms |
+
+Across many keys CacheStorm uses several cores and outruns single-threaded
+Redis with half its median latency. `redis-benchmark` sends LPUSH to `mylist`
+and HSET to `myhash` whatever `-r` is, so those rows are a single hot key:
+every write to one key holds that key's stripe of the write gate, so they run
+one at a time and the per-write cost (command dispatch, the collection plan,
+gate hand-off between goroutines) decides the rate. Single-key write
+throughput is the known gap; batching contended writes to one key is the
+planned remedy.
+
+## Results, 2026-10-25 (single key, superseded)
 
 | Command | CacheStorm P1 | Redis P1 | CacheStorm P16 | Redis P16 |
 |---|---|---|---|---|
@@ -27,7 +56,21 @@ docker run --rm --network host redis:7.4-alpine \
 | LPUSH | 57,937 | 53,050 | 297,619 | 350,877 |
 | LPOP | 58,893 | – | 308,642 | – |
 
-Unpipelined, both servers are bound by round trips and perform alike. Pipelined reads match Redis; pipelined writes reach 40–85% of Redis, because every write holds a stripe of the write gate that orders it with the AOF and the replication stream.
+Unpipelined, both servers are bound by round trips and perform alike.
+
+## Snapshot pauses, 2026-10-27
+
+One million 100-byte strings (138 MB of AOF). Writes wait for the encode
+step; the transfer to a replica and, for BGSAVE, the disk write and checksum
+run after the gate is released.
+
+| Operation | Before | After |
+|---|---|---|
+| AOF rewrite (encode, write, fsync, swap) | 3.4 s | 0.48 s |
+| Replica full sync (encode) | 2.2 s | 0.5 s |
+| BGSAVE (encode) | 1.4 s | 0.52 s |
+
+The pause still grows linearly with the dataset (about 0.5 µs per key).
 
 ## History
 
