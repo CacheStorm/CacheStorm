@@ -119,6 +119,29 @@ type Context struct {
 	// DBs holds every database, so SELECT, MOVE, COPY ... DB, SWAPDB and
 	// FLUSHALL can reach the others. nil means Store is the only database.
 	DBs *store.Databases
+
+	// keys caches CommandKeys for keysCmd and keysArgs, which the gate, the
+	// memory accounting and client tracking each need once per command.
+	keys     []string
+	keysCmd  string
+	keysArgs [][]byte
+	keysSet  bool
+}
+
+// CommandKeys returns the keys the command names, computed once per command
+// and arguments.
+func (ctx *Context) CommandKeys() []string {
+	if ctx.keysSet && ctx.keysCmd == ctx.Command && sameArgs(ctx.keysArgs, ctx.Args) {
+		return ctx.keys
+	}
+	ctx.keys = CommandKeys(ctx.Command, ctx.Args)
+	ctx.keysCmd, ctx.keysArgs, ctx.keysSet = ctx.Command, ctx.Args, true
+	return ctx.keys
+}
+
+// sameArgs reports whether a and b are the same argument slice.
+func sameArgs(a, b [][]byte) bool {
+	return len(a) == len(b) && (len(a) == 0 || &a[0] == &b[0])
 }
 
 // ReplicaConf is the replica information a connection announced with

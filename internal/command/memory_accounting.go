@@ -38,7 +38,7 @@ func reaccountWrittenKeys(ctx *Context) {
 	if ctx.Store == nil || readonlyCommands[ctx.Command] {
 		return
 	}
-	ctx.Store.Reaccount(aclKeysForCommand(ctx.Command, ctx.Args)...)
+	ctx.Store.Reaccount(ctx.CommandKeys()...)
 }
 
 // overMemoryFor reports whether cmd must be refused because used memory is

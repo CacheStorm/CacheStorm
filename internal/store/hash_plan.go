@@ -3,6 +3,7 @@ package store
 import (
 	"bytes"
 	"math"
+	"sync"
 )
 
 func (s *Store) ApplyHashFields(key string, prepare func(*HashValue) (map[string][]byte, error)) error {
@@ -76,13 +77,13 @@ func (s *Store) ApplyHashPairs(key string, nx bool, args [][]byte) (int, error) 
 			}
 			pairs = pairs[:2]
 		}
+		op := hashSetOpPool.Get().(*hashSetOp)
+		op.hash, op.pairs = hash, pairs
 		n := len(pairs) / 2
 		// keep lists the pairs that are not overridden by a later pair for
 		// the same field.
-		var inline [8]int
-		keep := inline[:0]
 		var last map[string]int
-		if n > len(inline) {
+		if n > len(op.keepBuf) {
 			last = make(map[string]int, n)
 			for i := 0; i < n; i++ {
 				last[string(pairs[2*i])] = i
@@ -105,12 +106,10 @@ func (s *Store) ApplyHashPairs(key string, nx bool, args [][]byte) (int, error) 
 					continue
 				}
 			}
-			keep = append(keep, i)
+			op.keep = append(op.keep, i)
 		}
 		size := hash.SizeOf()
-		var deltas [8]int64
-		deltaList := deltas[:0]
-		for _, i := range keep {
+		for _, i := range op.keep {
 			field, val := pairs[2*i], pairs[2*i+1]
 			var d int64
 			if old, exists := hash.Fields[string(field)]; exists {
@@ -120,22 +119,54 @@ func (s *Store) ApplyHashPairs(key string, nx bool, args [][]byte) (int, error) 
 				added++
 			}
 			if d > 0 && d > math.MaxInt64-size {
-				hash.Unlock()
+				op.release()
 				return ValuePlan{}, ErrValueTooLarge
 			}
 			size += d
-			deltaList = append(deltaList, d)
+			op.deltas = append(op.deltas, d)
 		}
-		return ValuePlan{Size: size, Apply: func() Value {
-			if hash.Fields == nil {
-				hash.Fields = make(map[string][]byte, len(keep))
-			}
-			for k, i := range keep {
-				hash.Fields[string(pairs[2*i])] = pairs[2*i+1]
-				hash.size.add(deltaList[k])
-			}
-			return hash
-		}, unlock: hash.Unlock, allowEmptyKey: value != nil}, nil
+		return ValuePlan{Size: size, op: op, allowEmptyKey: value != nil}, nil
 	})
 	return added, err
+}
+
+// hashSetOp is ApplyHashPairs' plan, pooled so that HSET on a large hash does
+// not allocate a closure and its slices on every call.
+type hashSetOp struct {
+	hash     *HashValue
+	pairs    [][]byte
+	keep     []int
+	deltas   []int64
+	keepBuf  [8]int
+	deltaBuf [8]int64
+}
+
+var hashSetOpPool = sync.Pool{New: func() any {
+	op := &hashSetOp{}
+	op.keep, op.deltas = op.keepBuf[:0], op.deltaBuf[:0]
+	return op
+}}
+
+func (op *hashSetOp) apply() Value {
+	hash := op.hash
+	if hash.Fields == nil {
+		hash.Fields = make(map[string][]byte, len(op.keep))
+	}
+	for k, i := range op.keep {
+		hash.Fields[string(op.pairs[2*i])] = op.pairs[2*i+1]
+		hash.size.add(op.deltas[k])
+	}
+	return hash
+}
+
+// release unlocks the hash and returns op to the pool.
+func (op *hashSetOp) release() {
+	op.hash.Unlock()
+	op.hash, op.pairs = nil, nil
+	if cap(op.keep) > len(op.keepBuf) {
+		op.keep, op.deltas = op.keepBuf[:0], op.deltaBuf[:0]
+	} else {
+		op.keep, op.deltas = op.keep[:0], op.deltas[:0]
+	}
+	hashSetOpPool.Put(op)
 }

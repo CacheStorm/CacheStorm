@@ -3,6 +3,7 @@ package server
 import (
 	"errors"
 	"net"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -90,12 +91,13 @@ func stripeOf(key string) int {
 }
 
 // planWrite works out the hold a write of cmd needs, without locking.
-func (g *writeGate) planWrite(cmd string, args [][]byte) *gateHold {
-	h := &gateHold{g: g}
+func (g *writeGate) planWrite(h *gateHold, ctx *command.Context) *gateHold {
+	cmd, args := ctx.Command, ctx.Args
+	*h = gateHold{g: g}
 	if exclusiveWrites[cmd] || globalRead(cmd, args) {
 		h.exclusive = true
 	} else {
-		keys := command.CommandKeys(cmd, args)
+		keys := ctx.CommandKeys()
 		if len(keys) == 0 {
 			h.exclusive = true
 		} else {
@@ -126,11 +128,11 @@ func globalRead(cmd string, args [][]byte) bool {
 }
 
 // planRead works out the hold a read of cmd needs, without locking.
-func (g *writeGate) planRead(cmd string, args [][]byte) *gateHold {
-	h := &gateHold{g: g, read: true, exclusive: globalRead(cmd, args)}
+func (g *writeGate) planRead(h *gateHold, ctx *command.Context) *gateHold {
+	*h = gateHold{g: g, read: true, exclusive: globalRead(ctx.Command, ctx.Args)}
 	if !h.exclusive {
 		h.stripes = h.inline[:0]
-		for _, key := range command.CommandKeys(cmd, args) {
+		for _, key := range ctx.CommandKeys() {
 			h.stripes = appendStripe(h.stripes, stripeOf(key))
 		}
 	}
@@ -183,9 +185,27 @@ func (h *gateHold) lock() {
 		if h.read {
 			h.g.stripes[s].RLock()
 		} else {
-			h.g.stripes[s].Lock()
+			lockStripe(&h.g.stripes[s])
 		}
 	}
+}
+
+// stripeSpins bounds how often lockStripe retries before it parks.
+const stripeSpins = 64
+
+// lockStripe write-locks mu, retrying briefly before blocking. Pipelined
+// writes to one hot key hand a stripe between connections every few
+// microseconds; once waiters have queued for a millisecond sync.Mutex hands
+// it over in FIFO order to parked goroutines, and the wakeup then costs more
+// than the commands the hold covers.
+func lockStripe(mu *sync.RWMutex) {
+	for i := 0; i < stripeSpins; i++ {
+		if mu.TryLock() {
+			return
+		}
+		runtime.Gosched()
+	}
+	mu.Lock()
 }
 
 func (h *gateHold) unlock() {
@@ -341,7 +361,7 @@ func (s *Server) refuseOnReplica(ctx *command.Context) bool {
 }
 
 func (s *Server) holdGate(ctx *command.Context) func() {
-	h := s.planGate(ctx)
+	h := s.planGate(ctx, &gateHold{})
 	if h == nil {
 		return func() {}
 	}
@@ -351,9 +371,9 @@ func (s *Server) holdGate(ctx *command.Context) func() {
 	return h.unlock
 }
 
-// planGate returns the hold ctx's command needs, unlocked, or nil when it
-// runs without the gate.
-func (s *Server) planGate(ctx *command.Context) *gateHold {
+// planGate fills h with the hold ctx's command needs and returns it,
+// unlocked, or returns nil when the command runs without the gate.
+func (s *Server) planGate(ctx *command.Context, h *gateHold) *gateHold {
 	if s == nil {
 		return nil
 	}
@@ -365,9 +385,9 @@ func (s *Server) planGate(ctx *command.Context) *gateHold {
 		return nil
 	}
 	if gated(ctx.Command, ctx.Args) || exclusiveWrites[ctx.Command] {
-		return s.gate.planWrite(ctx.Command, ctx.Args)
+		return s.gate.planWrite(h, ctx)
 	}
-	return s.gate.planRead(ctx.Command, ctx.Args)
+	return s.gate.planRead(h, ctx)
 }
 
 func hasLogicalWrites(cmds []command.ExecutedCommand) bool {

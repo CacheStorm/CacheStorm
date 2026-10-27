@@ -31,11 +31,11 @@ docker run --rm --network host redis:7.4-alpine \
 
 | Command | CacheStorm | Redis 7.4.11 | CacheStorm p50 | Redis p50 |
 |---|---|---|---|---|
-| SET | 811,688 | 627,353 | 0.53 ms | 1.10 ms |
-| GET | 1,051,525 | 753,580 | 0.38 ms | 0.91 ms |
-| INCR | 854,701 | 634,518 | 0.50 ms | 1.08 ms |
-| LPUSH (one key) | 428,816 | 445,038 | 1.58 ms | 1.66 ms |
-| HSET (one key, ~1M fields) | 318,776 | 557,725 | 2.19 ms | 1.28 ms |
+| SET | 869,565 | 627,353 | 0.50 ms | 1.10 ms |
+| GET | 1,016,260 | 753,580 | 0.38 ms | 0.91 ms |
+| INCR | 933,707 | 634,518 | 0.45 ms | 1.08 ms |
+| LPUSH (one key) | 476,872 | 445,038 | 1.48 ms | 1.66 ms |
+| HSET (one key, ~630k fields) | 351,741 | 557,725 | 2.09 ms | 1.28 ms |
 
 Across many keys CacheStorm uses several cores and outruns single-threaded
 Redis with half its median latency. `redis-benchmark` sends LPUSH to `mylist`
@@ -49,9 +49,21 @@ instead of 16 times; the hold is never kept across a socket write, a blocking
 command or a read that would wait for the network, and at most 64 commands
 share one hold. The per-command path also stopped allocating a transaction
 and an address string and stopped taking a process-wide lock for the
-connection registry. HSET on one hash with a million fields remains the
-known gap: each write is a lookup in one large Go map, which Redis' listpack
-and dict encodings handle with fewer cache misses.
+connection registry.
+
+A third change took LPUSH past Redis (429k to 477k) and HSET from 319k to
+352k. With fifty connections queued on one stripe for over a millisecond, Go's
+sync.Mutex hands the lock to parked goroutines in FIFO order, and each
+wakeup cost more than the 16 commands the hold then covers. A connection now
+retries the stripe a bounded number of times, yielding in between, before it
+parks; 64 retries measured best, 16 left half the gain and 256 starved the
+holder. HSET's own path also stopped allocating a closure per call, and a
+write no longer looks its key up twice. HSET on one hash with hundreds of
+thousands of fields remains the known gap: each write is a lookup in one
+large Go map, which Redis' encodings handle with fewer cache misses, and a
+single key's writes run one at a time on any server.
+
+The table is the median of three runs.
 
 ## Results, 2026-10-25 (single key, superseded)
 

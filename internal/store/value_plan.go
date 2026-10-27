@@ -7,10 +7,20 @@ type ValuePlan struct {
 	Apply         func() Value
 	unlock        func()
 	allowEmptyKey bool
+	// op replaces Apply and unlock for hot paths that must not allocate a
+	// closure per call.
+	op planOp
 }
 
+type planOp interface {
+	apply() Value
+	release()
+}
+
+// ApplyValuePlan runs a write against key's current value. Like Redis'
+// lookupKeyWrite it reaps an expired key and refreshes the key's access time
+// without counting a keyspace hit or miss.
 func (s *Store) ApplyValuePlan(key string, prepare func(Value) (ValuePlan, error)) error {
-	s.Get(key)
 	return s.applyValuePlan(key, nil, nil, prepare)
 }
 
@@ -23,7 +33,10 @@ func (s *Store) applyValuePlan(key string, options *SetOptions, snapshot *Entry,
 		live := previous != nil && !previous.IsExpired()
 		if previous != nil && !live && !s.passiveExpiry.Load() {
 			shard.mu.Unlock()
-			s.DeleteIfExpired(key)
+			if s.DeleteIfExpired(key) {
+				s.DeleteVersion(key)
+				GlobalMetrics.RecordExpiration()
+			}
 			continue
 		}
 		var current Value
@@ -48,7 +61,9 @@ func (s *Store) applyValuePlan(key string, options *SetOptions, snapshot *Entry,
 		}
 		plan, err := prepare(current)
 		unlock := func() {
-			if plan.unlock != nil {
+			if plan.op != nil {
+				plan.op.release()
+			} else if plan.unlock != nil {
 				plan.unlock()
 			}
 			shard.mu.Unlock()
@@ -57,7 +72,7 @@ func (s *Store) applyValuePlan(key string, options *SetOptions, snapshot *Entry,
 			unlock()
 			return err
 		}
-		if plan.Apply == nil {
+		if plan.Apply == nil && plan.op == nil {
 			unlock()
 			return nil
 		}
@@ -99,7 +114,12 @@ func (s *Store) applyValuePlan(key string, options *SetOptions, snapshot *Entry,
 			}
 			continue
 		}
-		value := plan.Apply()
+		var value Value
+		if plan.op != nil {
+			value = plan.op.apply()
+		} else {
+			value = plan.Apply()
+		}
 		var entry *Entry
 		if snapshot != nil {
 			entry = snapshot.rehome()
@@ -123,6 +143,7 @@ func (s *Store) applyValuePlan(key string, options *SetOptions, snapshot *Entry,
 				entry = previous.rehome()
 				entry.Value = value
 			}
+			entry.Touch()
 		} else {
 			entry = NewEntry(value)
 		}

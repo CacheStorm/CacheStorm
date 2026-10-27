@@ -381,7 +381,7 @@ func (s *Server) trackCommand(ctx *command.Context, failed bool) {
 	case "CLIENT", "MULTI", "EXEC", "DISCARD", "WATCH", "UNWATCH":
 		return
 	}
-	s.tracker.trackRead(ctx.ClientID, command.CommandKeys(ctx.Command, ctx.Args))
+	s.tracker.trackRead(ctx.ClientID, ctx.CommandKeys())
 }
 
 // invalidateTracked sends the invalidations a write of cmd causes.

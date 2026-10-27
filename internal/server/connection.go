@@ -121,6 +121,9 @@ type Connection struct {
 	// how many commands share one hold.
 	heldGate  *gateHold
 	heldCount int
+	// holds are the two buffers commands plan their hold into: one may be
+	// heldGate while the next command plans into the other.
+	holds [2]gateHold
 	// gateWaiting is set while a blocking command has handed heldGate back
 	// to wait, so releaseGate does not unlock it a second time.
 	gateWaiting bool
@@ -551,7 +554,11 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 		} else {
 			// The hold is recorded in heldGate as soon as it is taken, so a
 			// panicking command still has it released by Handle.
-			want := c.srv.planGate(ctx)
+			buf := &c.holds[0]
+			if c.heldGate == buf {
+				buf = &c.holds[1]
+			}
+			want := c.srv.planGate(ctx, buf)
 			if want != nil {
 				if !c.heldGate.covers(want) {
 					c.releaseGate()
