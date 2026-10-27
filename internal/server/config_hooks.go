@@ -62,6 +62,7 @@ func (s *Server) configSet(name, value string) (bool, error) {
 		}
 		_, policy := s.store.MemoryLimit()
 		s.store.SetMemoryLimit(limit, policy, 0)
+		applyGoMemoryLimit(limit)
 		return true, nil
 	case "maxmemory-policy":
 		v, err := command.ParseConfigEnum(name, value, "volatile-lru", "volatile-lfu", "volatile-random", "volatile-ttl",

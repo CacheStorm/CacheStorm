@@ -45,6 +45,7 @@ func main() {
 
 	logger.Init(cfg.Logging.Level, cfg.Logging.Format, cfg.Logging.Output)
 
+	server.ManageGoMemoryLimit.Store(true)
 	srv, err := server.New(cfg)
 	if err != nil {
 		logger.Fatal().Err(err).Msg("failed to create server")

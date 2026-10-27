@@ -252,6 +252,7 @@ func New(cfg *config.Config) (result *Server, retErr error) {
 		policy = store.EvictionAllKeysLRU
 	}
 	s.store.ConfigureMemory(maxMem, policy, cfg.Memory.WarningPct, cfg.Memory.CriticalPct, cfg.Memory.SampleSize)
+	applyGoMemoryLimit(maxMem)
 	if maxMem > 0 {
 		logger.Info().
 			Int64("max_memory_bytes", maxMem).
