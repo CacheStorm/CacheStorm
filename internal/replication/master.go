@@ -248,7 +248,7 @@ func (m *Manager) fullSync(r *replica, legacy bool) error {
 		m.dbs.BeginAuthoritativeApply()
 	}
 	if err == nil {
-		err = persistence.WriteSnapshot(&snap, DBSource{DBs: m.dbs, Functions: functions})
+		err = persistence.WriteSnapshot(&snap, DBSource{DBs: m.dbs, Functions: functions, Search: m.host.SearchCommands()})
 	}
 	if replicaSource {
 		m.dbs.EndAuthoritativeApply()
@@ -313,9 +313,13 @@ func hostOf(addr string) string {
 type DBSource struct {
 	DBs       *store.Databases
 	Functions []byte
+	// Search holds the commands that rebuild the search indexes.
+	Search [][]string
 }
 
 func (d DBSource) FunctionPayload() []byte { return d.Functions }
+
+func (d DBSource) SearchCommands() [][]string { return d.Search }
 
 // ForEachEntry implements persistence.EntryStreamer.
 func (d DBSource) ForEachEntry(fn func(db int, key string, entry interface{}) error) error {

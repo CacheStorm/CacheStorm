@@ -67,6 +67,10 @@ var exclusiveWrites = map[string]bool{
 	"EVAL_RO": true, "EVALSHA_RO": true, "FCALL_RO": true,
 	"INVALIDATE": true, "ADDTAG": true, "REMTAG": true, "TAGLINK": true,
 	"TAGUNLINK": true, "SETTAG": true,
+	// The search indexes are shared by every database and an index is
+	// reachable through its aliases, so the index name does not order writes.
+	"FT.CREATE": true, "FT.DROPINDEX": true, "FT.ADD": true, "FT.DEL": true,
+	"FT.ALIASADD": true, "FT.ALIASDEL": true, "FT.ALIASUPDATE": true,
 }
 
 // stripeOf hashes key with FNV-1a without allocating a hasher.
@@ -252,8 +256,9 @@ func (s *Server) CommitFullSync(dbs *store.Databases, replay *command.Router) er
 		return errors.New("replication database count mismatch")
 	}
 	functions := replay.FunctionRegistry().CloneForStore(s.Store())
+	searchIndexes := replay.SearchIndexes()
 	if s.aof != nil {
-		if err := s.aof.Rewrite(replication.DBSource{DBs: dbs, Functions: functions.DumpPayload()}); err != nil {
+		if err := s.aof.Rewrite(replication.DBSource{DBs: dbs, Functions: functions.DumpPayload(), Search: searchIndexes.Commands()}); err != nil {
 			return err
 		}
 	}
@@ -261,11 +266,27 @@ func (s *Server) CommitFullSync(dbs *store.Databases, replay *command.Router) er
 		return err
 	}
 	s.router.SetFunctionRegistry(functions)
+	s.router.SetSearchIndexes(searchIndexes)
 	return nil
 }
 
 func (s *Server) FunctionPayload() ([]byte, error) {
 	return s.snapshotFunctionCommand([][]byte{[]byte("DUMP")})
+}
+
+// SearchCommands implements replication.Host.
+func (s *Server) SearchCommands() [][]string {
+	return s.router.SearchIndexes().Commands()
+}
+
+// persistenceSource is dbs with the state an AOF rewrite or a snapshot
+// carries besides the keys: the function libraries and the search indexes.
+func (s *Server) persistenceSource(dbs *store.Databases) (replication.DBSource, error) {
+	functions, err := s.FunctionPayload()
+	if err != nil {
+		return replication.DBSource{}, err
+	}
+	return replication.DBSource{DBs: dbs, Functions: functions, Search: s.SearchCommands()}, nil
 }
 
 // ListeningPort implements replication.Host.

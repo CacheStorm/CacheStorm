@@ -26,6 +26,15 @@ func RegisterSearchCommands(router *Router) {
 	router.Register(&CommandDef{Name: "FT.ALIASUPDATE", Handler: cmdFTALIASUPDATE})
 }
 
+func searchIndexesFor(ctx *Context) *search.IndexManager {
+	if r := ctx.dispatcher(); r != nil {
+		if m := r.SearchIndexes(); m != nil {
+			return m
+		}
+	}
+	return search.GetIndexManager()
+}
+
 func cmdFTCREATE(ctx *Context) error {
 	if ctx.ArgCount() < 1 {
 		return ctx.WriteError(ErrWrongArgCount)
@@ -97,7 +106,7 @@ func cmdFTCREATE(ctx *Context) error {
 		}
 	}
 
-	manager := search.GetIndexManager()
+	manager := searchIndexesFor(ctx)
 	if err := manager.CreateIndex(indexName, schema); err != nil {
 		return ctx.WriteError(err)
 	}
@@ -111,7 +120,7 @@ func cmdFTDROPINDEX(ctx *Context) error {
 	}
 
 	indexName := ctx.ArgString(0)
-	manager := search.GetIndexManager()
+	manager := searchIndexesFor(ctx)
 
 	if !manager.DropIndex(indexName) {
 		return ctx.WriteError(fmt.Errorf("ERR index not found"))
@@ -126,7 +135,7 @@ func cmdFTINFO(ctx *Context) error {
 	}
 
 	indexName := ctx.ArgString(0)
-	manager := search.GetIndexManager()
+	manager := searchIndexesFor(ctx)
 
 	idx, ok := manager.GetIndex(indexName)
 	if !ok {
@@ -205,7 +214,7 @@ func cmdFTSEARCH(ctx *Context) error {
 		}
 	}
 
-	manager := search.GetIndexManager()
+	manager := searchIndexesFor(ctx)
 	idx, ok := manager.GetIndex(indexName)
 	if !ok {
 		return ctx.WriteError(fmt.Errorf("ERR index not found"))
@@ -261,7 +270,7 @@ func cmdFTADD(ctx *Context) error {
 		}
 	}
 
-	manager := search.GetIndexManager()
+	manager := searchIndexesFor(ctx)
 	idx, ok := manager.GetIndex(indexName)
 	if !ok {
 		return ctx.WriteError(fmt.Errorf("ERR index not found"))
@@ -292,7 +301,7 @@ func cmdFTDEL(ctx *Context) error {
 	indexName := ctx.ArgString(0)
 	docID := ctx.ArgString(1)
 
-	manager := search.GetIndexManager()
+	manager := searchIndexesFor(ctx)
 	idx, ok := manager.GetIndex(indexName)
 	if !ok {
 		return ctx.WriteError(fmt.Errorf("ERR index not found"))
@@ -313,7 +322,7 @@ func cmdFTGET(ctx *Context) error {
 	indexName := ctx.ArgString(0)
 	docID := ctx.ArgString(1)
 
-	manager := search.GetIndexManager()
+	manager := searchIndexesFor(ctx)
 	idx, ok := manager.GetIndex(indexName)
 	if !ok {
 		return ctx.WriteError(fmt.Errorf("ERR index not found"))
@@ -333,7 +342,7 @@ func cmdFTGET(ctx *Context) error {
 }
 
 func cmdFTLIST(ctx *Context) error {
-	manager := search.GetIndexManager()
+	manager := searchIndexesFor(ctx)
 	indexes := manager.ListIndexes()
 
 	results := make([]*resp.Value, 0, len(indexes))
@@ -352,7 +361,7 @@ func cmdFTAGGREGATE(ctx *Context) error {
 	indexName := ctx.ArgString(0)
 	query := ctx.ArgString(1)
 
-	manager := search.GetIndexManager()
+	manager := searchIndexesFor(ctx)
 	idx, ok := manager.GetIndex(indexName)
 	if !ok {
 		return ctx.WriteError(fmt.Errorf("ERR index not found"))
@@ -379,7 +388,7 @@ func cmdFTTAGVALS(ctx *Context) error {
 	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
-	idx, ok := search.GetIndexManager().GetIndex(ctx.ArgString(0))
+	idx, ok := searchIndexesFor(ctx).GetIndex(ctx.ArgString(0))
 	if !ok {
 		return ctx.WriteError(fmt.Errorf("%s: no such index", ctx.ArgString(0)))
 	}
@@ -395,7 +404,7 @@ func cmdFTALIASADD(ctx *Context) error {
 	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
-	if err := search.GetIndexManager().AddAlias(ctx.ArgString(0), ctx.ArgString(1)); err != nil {
+	if err := searchIndexesFor(ctx).AddAlias(ctx.ArgString(0), ctx.ArgString(1)); err != nil {
 		return ctx.Writer.WriteError(err.Error())
 	}
 	return ctx.WriteOK()
@@ -405,7 +414,7 @@ func cmdFTALIASUPDATE(ctx *Context) error {
 	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
-	if err := search.GetIndexManager().UpdateAlias(ctx.ArgString(0), ctx.ArgString(1)); err != nil {
+	if err := searchIndexesFor(ctx).UpdateAlias(ctx.ArgString(0), ctx.ArgString(1)); err != nil {
 		return ctx.Writer.WriteError(err.Error())
 	}
 	return ctx.WriteOK()
@@ -415,7 +424,7 @@ func cmdFTALIASDEL(ctx *Context) error {
 	if ctx.ArgCount() != 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
-	if err := search.GetIndexManager().DelAlias(ctx.ArgString(0)); err != nil {
+	if err := searchIndexesFor(ctx).DelAlias(ctx.ArgString(0)); err != nil {
 		return ctx.Writer.WriteError(err.Error())
 	}
 	return ctx.WriteOK()

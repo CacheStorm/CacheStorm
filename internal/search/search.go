@@ -5,6 +5,7 @@ import (
 	"maps"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -180,6 +181,75 @@ func (idx *Index) TagValues(field string) []string {
 		out = append(out, t)
 	}
 	sort.Strings(out)
+	return out
+}
+
+// Commands returns the FT.CREATE, FT.ADD and FT.ALIASADD commands that
+// rebuild the manager: every index, then the documents, then the aliases.
+func (m *IndexManager) Commands() [][]string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	names := make([]string, 0, len(m.indexes))
+	for name := range m.indexes {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var out [][]string
+	for _, name := range names {
+		cmd := []string{"FT.CREATE", name}
+		if fields := m.indexes[name].Schema.Fields; len(fields) > 0 {
+			cmd = append(cmd, "SCHEMA")
+			for _, f := range fields {
+				cmd = append(cmd, f.Name, f.Type)
+				if f.Sortable {
+					cmd = append(cmd, "SORTABLE")
+				}
+				if f.NoIndex {
+					cmd = append(cmd, "NOINDEX")
+				}
+			}
+		}
+		out = append(out, cmd)
+	}
+	for _, name := range names {
+		out = append(out, m.indexes[name].documentCommands()...)
+	}
+	aliases := make([]string, 0, len(m.aliases))
+	for alias := range m.aliases {
+		aliases = append(aliases, alias)
+	}
+	sort.Strings(aliases)
+	for _, alias := range aliases {
+		out = append(out, []string{"FT.ALIASADD", alias, m.aliases[alias]})
+	}
+	return out
+}
+
+func (idx *Index) documentCommands() [][]string {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+	ids := make([]string, 0, len(idx.Documents))
+	for id := range idx.Documents {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	out := make([][]string, 0, len(ids))
+	for _, id := range ids {
+		doc := idx.Documents[id]
+		cmd := []string{"FT.ADD", idx.Name, id, strconv.FormatFloat(doc.Score, 'f', -1, 64), "REPLACE"}
+		if len(doc.Fields) > 0 {
+			fields := make([]string, 0, len(doc.Fields))
+			for f := range doc.Fields {
+				fields = append(fields, f)
+			}
+			sort.Strings(fields)
+			cmd = append(cmd, "FIELDS")
+			for _, f := range fields {
+				cmd = append(cmd, f, doc.Fields[f])
+			}
+		}
+		out = append(out, cmd)
+	}
 	return out
 }
 

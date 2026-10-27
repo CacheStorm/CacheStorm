@@ -7,7 +7,6 @@ import (
 
 	"github.com/cachestorm/cachestorm/internal/config"
 	"github.com/cachestorm/cachestorm/internal/logger"
-	"github.com/cachestorm/cachestorm/internal/replication"
 )
 
 // aofRewriteCheckInterval is how often the AOF size is compared with the
@@ -64,9 +63,9 @@ func (s *Server) startAOFRewrite() error {
 // the write gate exclusively.
 func (s *Server) rewriteAOFLocked() error {
 	start := time.Now()
-	functions, err := s.FunctionPayload()
+	src, err := s.persistenceSource(s.dbs)
 	if err == nil {
-		err = s.aof.Rewrite(replication.DBSource{DBs: s.dbs, Functions: functions})
+		err = s.aof.Rewrite(src)
 	}
 	size := s.aof.Size()
 	s.snapshotMu.Lock()

@@ -11,7 +11,6 @@ import (
 	"github.com/cachestorm/cachestorm/internal/command"
 	"github.com/cachestorm/cachestorm/internal/logger"
 	"github.com/cachestorm/cachestorm/internal/persistence"
-	"github.com/cachestorm/cachestorm/internal/replication"
 	"github.com/cachestorm/cachestorm/internal/resp"
 )
 
@@ -56,10 +55,42 @@ func (s *Server) configureSnapshots(restore bool) error {
 			return fmt.Errorf("restore snapshot functions: %w", err)
 		}
 	}
+	if err := s.restoreSearch([]byte(reader.AuxFields[snapshotSearchAux])); err != nil {
+		return fmt.Errorf("restore snapshot search indexes: %w", err)
+	}
 
 	if s.aof != nil {
-		if err := s.aof.Rewrite(replication.DBSource{DBs: s.dbs, Functions: functions}); err != nil {
+		src, err := s.persistenceSource(s.dbs)
+		if err == nil {
+			err = s.aof.Rewrite(src)
+		}
+		if err != nil {
 			return fmt.Errorf("seed AOF from snapshot: %w", err)
+		}
+	}
+	return nil
+}
+
+// snapshotSearchAux is the snapshot aux field that holds the search indexes,
+// as the FT.CREATE, FT.ADD and FT.ALIASADD commands that rebuild them.
+const snapshotSearchAux = "cachestorm-search"
+
+func (s *Server) restoreSearch(payload []byte) error {
+	cmds, err := persistence.DecodeCommands(payload)
+	if err != nil {
+		return err
+	}
+	for _, cmd := range cmds {
+		name := command.CanonicalName(cmd.Name)
+		if name != "FT.CREATE" && name != "FT.ADD" && name != "FT.ALIASADD" {
+			return fmt.Errorf("unexpected command %s", name)
+		}
+		ctx := command.NewContext(name, cmd.Args, s.Store(), nil)
+		if err := s.router.ExecuteSilent(ctx); err != nil {
+			return err
+		}
+		if ctx.Writer.Errors() > 0 {
+			return fmt.Errorf("%s returned an error reply", name)
 		}
 	}
 	return nil
@@ -147,10 +178,14 @@ func (s *Server) saveSnapshot(background bool) error {
 		finish(err)
 		return fmt.Errorf("ERR snapshot functions: %w", err)
 	}
+	aux := map[string]string{"cachestorm-functions": string(functions)}
+	if searchCmds := s.SearchCommands(); len(searchCmds) > 0 {
+		aux[snapshotSearchAux] = string(persistence.EncodeCommands(searchCmds))
+	}
 	var data bytes.Buffer
 	// The checksum is computed after the encoder returns, so a background
 	// save holds the write gate only while the dataset is encoded.
-	writer := persistence.NewRDBWriterForDatabases(s.dbs, persistence.RDBConfig{Version: persistence.RDBVersion11, AuxFields: map[string]string{"cachestorm-functions": string(functions)}})
+	writer := persistence.NewRDBWriterForDatabases(s.dbs, persistence.RDBConfig{Version: persistence.RDBVersion11, AuxFields: aux})
 	if err := writer.Encode(&data); err != nil {
 		finish(err)
 		return fmt.Errorf("ERR snapshot failed: %w", err)

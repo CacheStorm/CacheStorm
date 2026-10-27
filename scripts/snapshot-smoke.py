@@ -107,6 +107,9 @@ def main():
             check(c.do("XADD", "events", "1-0", b"\xfffield", "one", b"\xfffield", "two"), b"1-0")
             check(c.do("XGROUP", "CREATE", "events", "workers", "0"), b"OK")
             c.do("XREADGROUP", "GROUP", "workers", "consumer", "STREAMS", "events", ">")
+            check(c.do("FT.CREATE", "docs", "SCHEMA", "title", "TEXT"), b"OK")
+            check(c.do("FT.ADD", "docs", "d1", "1", "FIELDS", "title", "snapshot smoke"), b"OK")
+            check(c.do("FT.ALIASADD", "docs_alias", "docs"), b"OK")
             check(c.do("SAVE"), b"OK")
             first.kill()
             first.wait(timeout=10)
@@ -124,6 +127,7 @@ def main():
             check(r.do("FCALL", "read_key", "1", "same"), b"three")
             check(r.do("XPENDING", "events", "workers")[0], 1)
             check(r.do("XRANGE", "events", "-", "+"), [[b"1-0", [b"\xfffield", b"one", b"\xfffield", b"two"]]])
+            check(r.do("FT.SEARCH", "docs_alias", "smoke", "NOCONTENT"), [1, b"d1"])
             second.kill()
             second.wait(timeout=10)
             r.close()
@@ -136,7 +140,7 @@ def main():
             corrupt, _ = launch()
             if corrupt.wait(timeout=10) == 0 or "checksum" not in log.read_text():
                 raise RuntimeError("corrupt snapshot did not stop startup")
-            print("PASS: SAVE survives SIGKILL; databases, TTL, HLL registers, stream groups and functions restored; corrupt snapshot refused")
+            print("PASS: SAVE survives SIGKILL; databases, TTL, HLL registers, stream groups, functions and search indexes restored; corrupt snapshot refused")
         finally:
             for client in clients:
                 client.close()

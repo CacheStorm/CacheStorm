@@ -40,6 +40,7 @@ func (h *fakeHost) CommitFullSync(dbs *store.Databases, replay *command.Router) 
 }
 
 func (h *fakeHost) FunctionPayload() ([]byte, error) { return nil, h.functionError }
+func (h *fakeHost) SearchCommands() [][]string       { return nil }
 func (h *fakeHost) ListeningPort() int               { return 1234 }
 
 func newTestManager(t *testing.T, cfg Config) (*Manager, *store.Databases) {

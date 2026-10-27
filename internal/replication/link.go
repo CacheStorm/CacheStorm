@@ -475,6 +475,7 @@ func (m *Manager) loadSnapshot(br *bufio.Reader, replid string, offset int64) er
 	staging.BeginAuthoritativeApply()
 	replay := m.router.ForkForReplay(staging.DB(0), []string{
 		"SET", "HSET", "RPUSH", "SADD", "ZADD", "GEOADD", "JSON.SET", "XGROUP", "XADD", "XSETID", "XCLAIM", "TS.CREATE", "TS.ADD", "ADDTAG", "PEXPIREAT", "SELECT", "FUNCTION",
+		"FT.CREATE", "FT.ADD", "FT.ALIASADD",
 	})
 	payload := bufio.NewReaderSize(io.LimitReader(br, size), 64*1024)
 	db := 0

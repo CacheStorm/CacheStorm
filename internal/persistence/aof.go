@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -590,6 +591,13 @@ func (rw *AOFRewriter) writeAll(w *bufio.Writer) error {
 			}
 		}
 	}
+	if src, ok := rw.store.(interface{ SearchCommands() [][]string }); ok {
+		for _, cmd := range src.SearchCommands() {
+			if err := rw.writeCommand(w, cmd[0], cmd[1:]...); err != nil {
+				return err
+			}
+		}
+	}
 	multi, ok := rw.store.(MultiDBSource)
 	if !ok {
 		for key, entry := range rw.store.GetAll() {
@@ -1113,6 +1121,41 @@ func (a multiDBAdapter) FunctionPayload() []byte {
 		return src.FunctionPayload()
 	}
 	return nil
+}
+
+func (a multiDBAdapter) SearchCommands() [][]string {
+	if src, ok := a.MultiDBSource.(interface{ SearchCommands() [][]string }); ok {
+		return src.SearchCommands()
+	}
+	return nil
+}
+
+// EncodeCommands encodes cmds as RESP arrays, the AOF's command format.
+func EncodeCommands(cmds [][]string) []byte {
+	var buf []byte
+	for _, cmd := range cmds {
+		buf = appendArrayHeader(buf, len(cmd))
+		for _, arg := range cmd {
+			buf = appendBulkString(buf, arg)
+		}
+	}
+	return buf
+}
+
+// DecodeCommands parses what EncodeCommands produced.
+func DecodeCommands(data []byte) ([]Command, error) {
+	reader := resp.NewReader(bytes.NewReader(data))
+	var out []Command
+	for {
+		name, args, err := reader.ReadCommand()
+		if errors.Is(err, io.EOF) {
+			return out, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, Command{Name: name, Args: args})
+	}
 }
 
 func (a multiDBAdapter) GetAll() map[string]interface{} {

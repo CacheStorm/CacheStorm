@@ -21,6 +21,7 @@ import (
 	"github.com/cachestorm/cachestorm/internal/persistence"
 	"github.com/cachestorm/cachestorm/internal/plugin"
 	"github.com/cachestorm/cachestorm/internal/replication"
+	"github.com/cachestorm/cachestorm/internal/search"
 	"github.com/cachestorm/cachestorm/internal/sentinel"
 	"github.com/cachestorm/cachestorm/internal/store"
 	"github.com/cachestorm/cachestorm/plugins/metrics"
@@ -74,6 +75,8 @@ var writeCommands = map[string]bool{
 	"JSON.ARRAPPEND": true, "JSON.STRAPPEND": true,
 	"TS.ADD": true, "TS.CREATE": true, "TS.DEL": true, "TS.ALTER": true,
 	"TS.INCRBY": true, "TS.DECRBY": true, "TS.MADD": true,
+	"FT.CREATE": true, "FT.DROPINDEX": true, "FT.ADD": true, "FT.DEL": true,
+	"FT.ALIASADD": true, "FT.ALIASDEL": true, "FT.ALIASUPDATE": true,
 }
 
 // persistedCommand reports whether cmd is appended to the AOF. Besides the
@@ -205,6 +208,7 @@ func New(cfg *config.Config) (result *Server, retErr error) {
 	}
 
 	s.router.SetFunctionRegistry(command.NewFunctionRegistry(s.store))
+	s.router.SetSearchIndexes(search.NewIndexManager())
 
 	// The plugin manager exists unconditionally: command hooks and store
 	// event hooks (evict/expire/tag-invalidate) dispatch to whatever is
@@ -417,11 +421,11 @@ func New(cfg *config.Config) (result *Server, retErr error) {
 			if cfg.Replication.IsReplica() {
 				s.repl.MarkLocalWrite()
 			}
-			functions, err := s.FunctionPayload()
+			src, err := s.persistenceSource(s.dbs)
 			if err != nil {
 				return nil, err
 			}
-			if err := s.aof.Rewrite(replication.DBSource{DBs: s.dbs, Functions: functions}); err != nil {
+			if err := s.aof.Rewrite(src); err != nil {
 				return nil, fmt.Errorf("upgrade legacy AOF: %w", err)
 			}
 		}

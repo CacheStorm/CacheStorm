@@ -394,5 +394,8 @@ func (s *Server) invalidateTracked(writer int64, cmd string, args [][]byte) {
 		s.tracker.invalidateAll(writer)
 		return
 	}
+	if strings.HasPrefix(cmd, "FT.") {
+		return
+	}
 	s.tracker.invalidate(writer, command.CommandKeys(cmd, args))
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/cachestorm/cachestorm/internal/acl"
 	"github.com/cachestorm/cachestorm/internal/logger"
 	"github.com/cachestorm/cachestorm/internal/resp"
+	"github.com/cachestorm/cachestorm/internal/search"
 	"github.com/cachestorm/cachestorm/internal/store"
 )
 
@@ -29,6 +30,7 @@ type Router struct {
 	mu               sync.RWMutex
 	commands         map[string]*CommandDef
 	functionRegistry *FunctionRegistry
+	searchIndexes    *search.IndexManager
 	// duplicates records command names registered more than once. Register is
 	// last-write-wins, so a second registration silently replaced the first;
 	// six names were registered in two files at once and nothing said so.
@@ -127,7 +129,7 @@ func (r *Router) DuplicateRegistrations() []string {
 func (r *Router) ForkForReplay(s *store.Store, allowed []string) *Router {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	n := &Router{commands: make(map[string]*CommandDef), duplicates: make(map[string]struct{}), functionRegistry: NewFunctionRegistry(s)}
+	n := &Router{commands: make(map[string]*CommandDef), duplicates: make(map[string]struct{}), functionRegistry: NewFunctionRegistry(s), searchIndexes: search.NewIndexManager()}
 	timeSeries := store.NewTimeSeriesManager()
 	for _, name := range allowed {
 		if def := r.commands[name]; def != nil {
@@ -154,6 +156,20 @@ func (r *Router) SetFunctionRegistry(registry *FunctionRegistry) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.functionRegistry = registry
+}
+
+// SearchIndexes returns the router's search indexes; nil means the
+// process-wide manager.
+func (r *Router) SearchIndexes() *search.IndexManager {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.searchIndexes
+}
+
+func (r *Router) SetSearchIndexes(m *search.IndexManager) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.searchIndexes = m
 }
 
 func (r *Router) SetSnapshotHooks(save func(bool) error, lastSave func() int64, info func() string) {

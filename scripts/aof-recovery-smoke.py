@@ -153,6 +153,9 @@ def main():
             check(query(port, ("PERSIST", "restored")), 1)
             check(query(port, ("RESTORE", "restore-deadline", "60000", payload)), b"OK")
             restore_deadline = query(port, ("PEXPIRETIME", "restore-deadline"))
+            check(query(port, ("FT.CREATE", "docs", "SCHEMA", "title", "TEXT")), b"OK")
+            check(query(port, ("FT.ADD", "docs", "d1", "1", "FIELDS", "title", "durable search")), b"OK")
+            check(query(port, ("FT.ALIASADD", "docs_alias", "docs")), b"OK")
             first.kill()
             first.wait(timeout=10)
             time.sleep(0.25)
@@ -167,6 +170,7 @@ def main():
             check(query(port, ("HGET", "restored", "f&=")), b"v&=\x00")
             check(query(port, ("HGET", "restored", "after")), b"two")
             check(query(port, ("PEXPIRETIME", "restore-deadline")), restore_deadline)
+            check(query(port, ("FT.SEARCH", "docs_alias", "durable", "NOCONTENT")), [1, b"d1"])
             second.terminate()
             check(second.wait(timeout=10), 0)
             directory = work / "bitmap-memory"
@@ -203,7 +207,7 @@ def main():
             check(query(port, ("EXISTS", "missing")), 0)
             second.terminate()
             check(second.wait(timeout=10), 0)
-            print("PASS: invalid AOF stops startup unchanged; torn transactions are removed; acknowledged writes, original expiry deadlines, persisted HLL history and bounded bitmap writes survive SIGKILL and restart in the correct database")
+            print("PASS: invalid AOF stops startup unchanged; torn transactions are removed; acknowledged writes, original expiry deadlines, persisted HLL history, search indexes and bounded bitmap writes survive SIGKILL and restart in the correct database")
         finally:
             for proc in processes:
                 if proc.poll() is None:

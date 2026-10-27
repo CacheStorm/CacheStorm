@@ -53,6 +53,7 @@ type Host interface {
 	UnlockWrites()
 	CommitFullSync(*store.Databases, *command.Router) error
 	FunctionPayload() ([]byte, error)
+	SearchCommands() [][]string
 	// ListeningPort is the port a replica announces to its master.
 	ListeningPort() int
 }
