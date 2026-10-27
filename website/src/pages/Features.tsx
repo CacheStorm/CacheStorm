@@ -172,11 +172,10 @@ const comparisonData: CompareRow[] = [
   { feature: "Pub/Sub", cachestorm: "yes", redis: "yes" },
   { feature: "Multi-threaded I/O", cachestorm: "yes", redis: "partial", note: "Redis 6+ partial" },
   { feature: "Written in Go", cachestorm: "yes", redis: "no", note: "C" },
-  { feature: "Single Binary Deployment", cachestorm: "yes", redis: "no" },
   { feature: "Built-in Profiling (pprof)", cachestorm: "yes", redis: "no" },
   { feature: "YAML Configuration", cachestorm: "yes", redis: "no", note: "Redis uses custom format" },
   { feature: "Env Variable Config", cachestorm: "yes", redis: "no" },
-  { feature: "Open Source", cachestorm: "yes", redis: "partial", note: "SSPL since Redis 7.4" },
+  { feature: "Open Source", cachestorm: "yes", redis: "partial", note: "RSALv2/SSPL in 7.4; AGPLv3 option since 8.0" },
 ];
 
 function CompareIcon({ val }: { val: CompareVal }) {
@@ -281,27 +280,26 @@ cachestorm_connected_clients 42`,
     description:
       "Secure your data with TLS encryption, fine-grained ACLs, and password authentication. CacheStorm supports mutual TLS for zero-trust environments and per-user command restrictions.",
     code: `# cachestorm.yaml
-security:
-  tls:
-    enabled: true
-    cert_file: "/etc/tls/server.crt"
-    key_file: "/etc/tls/server.key"
-    ca_file: "/etc/tls/ca.crt"
+server:
+  requirepass: ""             # or CACHESTORM_REQUIREPASS
+  tls_cert_file: "/etc/tls/server.crt"
+  tls_key_file: "/etc/tls/server.key"
+  tls_ca_cert_file: "/etc/tls/ca.crt"
+  tls_auth_clients: "yes"     # mutual TLS
+replication:
+  tls: true                   # replicas sync over TLS
+cluster:
+  tls: true                   # mutual TLS on the cluster bus
 
-  acl:
-    enabled: true
-    file: "/etc/cachestorm/acl.conf"
-
-# acl.conf
-user admin on >secret ~* +@all
-user app on >app-pwd ~app:* +@read +@write
-user reader on >read-pwd ~* +@read`,
+# per-user ACLs, as in Redis
+ACL SETUSER app on >app-pwd ~app:* &app:* +@read +@write
+ACL SETUSER reader on >read-pwd ~* +@read`,
     codeTitle: "security config",
     highlights: [
-      "TLS 1.2/1.3 with mutual TLS support",
-      "Per-user ACLs with command and key restrictions",
-      "Runtime ACL management commands",
-      "Environment variable based secrets",
+      "TLS 1.2/1.3 with mutual TLS for clients, replicas and the cluster bus",
+      "Redis ACLs: per-user command, key and channel rules",
+      "ACL LOG of denied commands, keys and channels",
+      "Secrets from environment variables",
     ],
     reverse: true,
   },
@@ -311,21 +309,21 @@ user reader on >read-pwd ~* +@read`,
     description:
       "CacheStorm includes built-in Prometheus metrics, Go pprof profiling, and comprehensive server statistics. No external exporters needed -- monitoring is a first-class feature.",
     code: `# Prometheus metrics (built-in)
-$ curl http://localhost:9121/metrics
+$ curl http://localhost:9090/metrics
+cachestorm_up 1
 cachestorm_uptime_seconds 86400
 cachestorm_connected_clients 42
-cachestorm_commands_total{cmd="GET"} 1500000
-cachestorm_commands_duration_seconds{...}
+cachestorm_commands_total{command="GET"} 1500000
 cachestorm_memory_used_bytes 134217728
 cachestorm_keyspace_hits_total 1200000
 cachestorm_keyspace_misses_total 50000
 
-# pprof profiling
-$ go tool pprof http://localhost:6060/debug/pprof/heap`,
+# pprof profiling on the HTTP API port
+$ go tool pprof http://localhost:8080/debug/pprof/heap`,
     codeTitle: "metrics",
     highlights: [
       "Built-in Prometheus /metrics endpoint",
-      "Command latency histograms with percentiles",
+      "Per-command latency histograms",
       "Memory, connections, and keyspace statistics",
       "Go pprof for CPU and memory profiling",
     ],
@@ -334,27 +332,25 @@ $ go tool pprof http://localhost:6060/debug/pprof/heap`,
     icon: <Network className="w-5 h-5 text-[var(--color-primary)]" />,
     title: "High Availability & Clustering",
     description:
-      "Scale horizontally with cluster mode or vertically with replication. Sentinel provides automatic failover for zero-downtime deployments. Deploy across availability zones for geographic redundancy.",
-    code: `# 3-master cluster with replicas
-$ cachestorm-cli --cluster create \\
+      "Scale horizontally with Redis Cluster mode or add read replicas with replication. Cluster replicas fail over automatically, and Redis Sentinel can manage failover for a standalone master. Unmodified cluster clients and redis-cli --cluster work as they do with Redis.",
+    code: `# 3 masters + 3 replicas, with the standard redis-cli
+$ redis-cli --cluster create \\
     node1:6380 node2:6380 node3:6380 \\
     node4:6380 node5:6380 node6:6380 \\
     --cluster-replicas 1
+[OK] All nodes agree about slots configuration.
+[OK] All 16384 slots covered.
 
->>> Cluster created!
-Master 1: slots 0-5460     (node1 -> node4)
-Master 2: slots 5461-10922 (node2 -> node5)
-Master 3: slots 10923-16383 (node3 -> node6)
-
-# Sentinel auto-failover
-$ SENTINEL get-master-addr-by-name primary
-["10.0.1.10", "6380"]`,
+# grow the cluster online
+$ redis-cli --cluster add-node node7:6380 node1:6380
+$ redis-cli --cluster rebalance node1:6380 \\
+    --cluster-use-empty-masters`,
     codeTitle: "cluster setup",
     highlights: [
-      "Master-replica replication with automatic sync",
-      "Sentinel mode for automatic failover",
-      "Cluster mode with hash-slot sharding",
-      "Cross-AZ deployment support",
+      "Master-replica replication with partial resync",
+      "Works with Redis Sentinel for automatic failover",
+      "Redis Cluster mode: replicas, failover, resharding",
+      "Managed with the standard redis-cli --cluster tools",
     ],
     reverse: true,
   },
