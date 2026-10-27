@@ -10,7 +10,7 @@ CacheStorm is a high-performance, Redis-compatible in-memory database written in
 
 - **Redis 7.4 compatibility** - measured by `tests/compat` (differential harness against real Redis; `COMPAT_RATCHET=1` gates CI)
 - **Commands** - about 1,500 registered (Redis 7.4 set plus extensions)
-- **100% test coverage and 100% success rate** - Measured 2026-10-25: **88.0% internal Go statement coverage; complete root test suite passed**
+- **100% test coverage and 100% success rate** - Measured 2026-10-27: **87.0% internal Go statement coverage; complete root test suite passed**
 
 ## Build Commands
 
@@ -113,16 +113,17 @@ D:\Codebox\CacheStorm\
 
 | Package | Statement coverage |
 |---------|----------|
-| command | 89.1% |
-| store | 87.4% |
-| cluster | 97.9% |
-| resp | 88.3% |
-| persistence | 80.5% |
-| server | 90.7% |
-| replication | 50.4% |
-| internal/... combined | 88.0% |
+| command | 88.0% |
+| store | 87.3% |
+| cluster | 97.7% |
+| resp | 85.0% |
+| persistence | 80.3% |
+| server | 90.0% |
+| config | 91.0% |
+| replication | 49.3% own tests; 87.4% with the server's end-to-end replication tests (`-coverpkg=./internal/replication`) |
+| internal/... combined | 87.0% |
 
-Measured on 2026-10-25 with `go test ./... -coverprofile=... -count=1 -timeout=5m`; the table filters `internal/...` from the complete root-module profile. The profile uses native Go per-package statement instrumentation. Redis compatibility is measured separately by `tests/compat`.
+Measured on 2026-10-27 with `go test ./internal/... -coverprofile=... -count=1`; per-package native Go statement instrumentation. Replication is exercised mostly through real master/replica servers in `internal/server`, which the per-package figure does not count. Redis compatibility is measured separately by `tests/compat`.
 
 ## Known Issues Fixed
 

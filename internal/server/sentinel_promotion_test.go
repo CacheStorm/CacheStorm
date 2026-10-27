@@ -1,6 +1,9 @@
 package server
 
 import (
+	"bufio"
+	"io"
+	"net"
 	"strconv"
 	"strings"
 	"testing"
@@ -143,4 +146,50 @@ func TestWAITAOF(t *testing.T) {
 	if got := dialRepl(t, replica).do("WAITAOF", "0", "0", "0"); got.Type != resp.TypeError {
 		t.Fatalf("WAITAOF on a replica = %+v, want an error", got)
 	}
+}
+
+// SYNC is the pre-PSYNC protocol: the master answers with the snapshot as
+// one bulk payload, without +FULLRESYNC, and then streams the writes.
+func TestLegacySYNCStreamsSnapshotAndWrites(t *testing.T) {
+	master := startReplServer(t, nil)
+	mc := dialRepl(t, master)
+	mc.do("SET", "before", "1")
+	conn, err := net.Dial("tcp", "127.0.0.1:"+strconv.Itoa(master.testPort()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if _, err := conn.Write(encodeArgs("SYNC")); err != nil {
+		t.Fatal(err)
+	}
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	rd := bufio.NewReader(conn)
+	header, err := rd.ReadString('\n')
+	if err != nil || !strings.HasPrefix(header, "$") {
+		t.Fatalf("SYNC header = %q, %v; want the bulk length of the snapshot", header, err)
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(header[1:]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := make([]byte, n)
+	if _, err := io.ReadFull(rd, snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(snapshot), "before") {
+		t.Fatalf("SYNC snapshot lacks the existing key: %q", snapshot)
+	}
+	mc.do("SET", "after", "2")
+	r := resp.NewReader(rd)
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		v, err := r.ReadValue()
+		if err != nil {
+			t.Fatalf("reading the stream: %v", err)
+		}
+		if v.Type == resp.TypeArray && len(v.Array) == 3 && strings.EqualFold(string(v.Array[0].Bulk), "SET") && string(v.Array[1].Bulk) == "after" {
+			return
+		}
+	}
+	t.Fatal("the write after SYNC was not streamed")
 }
