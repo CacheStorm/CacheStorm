@@ -224,7 +224,6 @@ func TestMoreCommandsBatch7(t *testing.T) {
 		{"LEASE.RENEW lease", "LEASE.RENEW", [][]byte{[]byte("l1")}},
 		{"SKETCH.CREATE sketch", "SKETCH.CREATE", [][]byte{[]byte("s1")}},
 		{"SKETCH.UPDATE item", "SKETCH.UPDATE", [][]byte{[]byte("s1"), []byte("item1")}},
-		{"SKETCH.MERGE two", "SKETCH.MERGE", [][]byte{[]byte("s1"), []byte("s2")}},
 		{"PARTITION.ADD item", "PARTITION.ADD", [][]byte{[]byte("p1"), []byte("item1")}},
 	}
 
@@ -291,7 +290,6 @@ func TestResilienceCommandsBatch7(t *testing.T) {
 		cmd  string
 		args [][]byte
 	}{
-		{"OBSERVABILITY.METRIC name", "OBSERVABILITY.METRIC", [][]byte{[]byte("metric1")}},
 		{"DIAGNOSTIC.RUN check", "DIAGNOSTIC.RUN", nil},
 		{"MEMORYX.FREE memory", "MEMORYX.FREE", nil},
 		{"MEMORYX.STATS stats", "MEMORYX.STATS", nil},

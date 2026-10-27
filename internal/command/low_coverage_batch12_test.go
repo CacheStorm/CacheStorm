@@ -51,17 +51,6 @@ func TestLowCoverageBatch12_ExtraCommands(t *testing.T) {
 		_ = runHandler(t, router, "DEDUP.CLEAR", [][]byte{[]byte("dedup2")}, s)
 	})
 
-	t.Run("COMPRESSION.COMPRESS", func(t *testing.T) {
-		_ = runHandler(t, router, "COMPRESSION.COMPRESS", [][]byte{[]byte("test data")}, s)
-	})
-
-	t.Run("COMPRESSION.DECOMPRESS", func(t *testing.T) {
-		_ = runHandler(t, router, "COMPRESSION.DECOMPRESS", [][]byte{[]byte("compressed:9")}, s)
-	})
-
-	t.Run("COMPRESSION.INFO", func(t *testing.T) {
-		_ = runHandler(t, router, "COMPRESSION.INFO", [][]byte{}, s)
-	})
 }
 
 func TestLowCoverageBatch12_EncodingCommands(t *testing.T) {

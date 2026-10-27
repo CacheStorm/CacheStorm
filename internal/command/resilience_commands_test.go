@@ -22,9 +22,6 @@ func TestResilienceCommandsMEMORYXFullCoverage(t *testing.T) {
 		{"MEMORYX.FREE not found", "MEMORYX.FREE", [][]byte{[]byte("notfound")}},
 		{"MEMORYX.FREE no args", "MEMORYX.FREE", nil},
 		{"MEMORYX.STATS", "MEMORYX.STATS", nil},
-		{"MEMORYX.TRACK start", "MEMORYX.TRACK", [][]byte{[]byte("START")}},
-		{"MEMORYX.TRACK stop", "MEMORYX.TRACK", [][]byte{[]byte("STOP")}},
-		{"MEMORYX.TRACK no args", "MEMORYX.TRACK", nil},
 	}
 
 	for _, tt := range tests {
@@ -46,12 +43,6 @@ func TestResilienceCommandsOBSERVABILITYFullCoverage(t *testing.T) {
 	}{
 		{"OBSERVABILITY.START", "OBSERVABILITY.START", nil},
 		{"OBSERVABILITY.STOP", "OBSERVABILITY.STOP", nil},
-		{"OBSERVABILITY.METRIC", "OBSERVABILITY.METRIC", [][]byte{[]byte("metric1"), []byte("100")}},
-		{"OBSERVABILITY.METRIC no args", "OBSERVABILITY.METRIC", nil},
-		{"OBSERVABILITY.TRACE", "OBSERVABILITY.TRACE", [][]byte{[]byte("trace1")}},
-		{"OBSERVABILITY.TRACE no args", "OBSERVABILITY.TRACE", nil},
-		{"OBSERVABILITY.LOG", "OBSERVABILITY.LOG", [][]byte{[]byte("INFO"), []byte("test message")}},
-		{"OBSERVABILITY.LOG no args", "OBSERVABILITY.LOG", nil},
 	}
 
 	for _, tt := range tests {
@@ -100,8 +91,6 @@ func TestResilienceCommandsEVENTSOURCINGFullCoverage(t *testing.T) {
 		{"EVENTSOURCING.GET", "EVENTSOURCING.GET", [][]byte{[]byte("stream1"), []byte("0")}},
 		{"EVENTSOURCING.GET not found", "EVENTSOURCING.GET", [][]byte{[]byte("notfound"), []byte("0")}},
 		{"EVENTSOURCING.GET no args", "EVENTSOURCING.GET", nil},
-		{"EVENTSOURCING.SNAPSHOT", "EVENTSOURCING.SNAPSHOT", [][]byte{[]byte("stream1")}},
-		{"EVENTSOURCING.SNAPSHOT no args", "EVENTSOURCING.SNAPSHOT", nil},
 		{"EVENTSOURCING.RESTORE", "EVENTSOURCING.RESTORE", [][]byte{[]byte("stream1"), []byte("snapshot1")}},
 		{"EVENTSOURCING.RESTORE no args", "EVENTSOURCING.RESTORE", nil},
 	}

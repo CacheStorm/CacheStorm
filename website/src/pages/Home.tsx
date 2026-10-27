@@ -102,7 +102,7 @@ const stats = [
   { value: "20M+", label: "Operations/sec" },
   { value: "<1ms", label: "P99 Latency" },
   { value: "256", label: "Concurrent Shards" },
-  { value: "~1,600", label: "Built-in Commands" },
+  { value: "~1,500", label: "Built-in Commands" },
 ];
 
 const features = [
@@ -114,7 +114,7 @@ const features = [
   {
     icon: Layers,
     title: "Rich Data Structures",
-    description: "Strings, hashes, lists, sets, sorted sets, streams, JSON, time series, graphs, HyperLogLog, bitmaps and more. About 1,600 commands out of the box.",
+    description: "Strings, hashes, lists, sets, sorted sets, streams, JSON, time series, graphs, HyperLogLog, bitmaps and more. About 1,500 commands out of the box.",
   },
   {
     icon: Lock,
@@ -221,7 +221,7 @@ export function Home() {
                 style={{ color: "var(--color-text-secondary)" }}
               >
                 CacheStorm is a high-performance caching server written in Go.
-                256-shard lock-free architecture, about 1,600 commands, enterprise
+                256-shard lock-free architecture, about 1,500 commands, enterprise
                 security, and full observability — in a single binary.
               </p>
 

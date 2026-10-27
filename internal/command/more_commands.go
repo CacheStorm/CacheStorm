@@ -40,23 +40,12 @@ func RegisterMoreCommands(router *Router) {
 	router.Register(&CommandDef{Name: "ROLLOUT.PERCENTAGE", Handler: cmdROLLOUTPERCENTAGE})
 	router.Register(&CommandDef{Name: "ROLLOUT.LIST", Handler: cmdROLLOUTLIST})
 
-	router.Register(&CommandDef{Name: "SCHEMA.REGISTER", Handler: cmdSCHEMAREGISTER})
-	router.Register(&CommandDef{Name: "SCHEMA.VALIDATE", Handler: cmdSCHEMAVALIDATE})
-	router.Register(&CommandDef{Name: "SCHEMA.DELETE", Handler: cmdSCHEMADELETE})
-	router.Register(&CommandDef{Name: "SCHEMA.LIST", Handler: cmdSCHEMALIST})
-
 	router.Register(&CommandDef{Name: "PIPELINE.CREATE", Handler: cmdPIPELINECREATE})
 	router.Register(&CommandDef{Name: "PIPELINE.ADDSTAGE", Handler: cmdPIPELINEADDSTAGE})
 	router.Register(&CommandDef{Name: "PIPELINE.EXECUTE", Handler: cmdPIPELINEEXECUTE})
 	router.Register(&CommandDef{Name: "PIPELINE.STATUS", Handler: cmdPIPELINESTATUS})
 	router.Register(&CommandDef{Name: "PIPELINE.DELETE", Handler: cmdPIPELINEDELETE})
 	router.Register(&CommandDef{Name: "PIPELINE.LIST", Handler: cmdPIPELINELIST})
-
-	router.Register(&CommandDef{Name: "NOTIFY.CREATE", Handler: cmdNOTIFYCREATE})
-	router.Register(&CommandDef{Name: "NOTIFY.SEND", Handler: cmdNOTIFYSEND})
-	router.Register(&CommandDef{Name: "NOTIFY.LIST", Handler: cmdNOTIFYLIST})
-	router.Register(&CommandDef{Name: "NOTIFY.DELETE", Handler: cmdNOTIFYDELETE})
-	router.Register(&CommandDef{Name: "NOTIFY.TEMPLATE", Handler: cmdNOTIFYTEMPLATE})
 
 	router.Register(&CommandDef{Name: "ALERT.CREATE", Handler: cmdALERTCREATE})
 	router.Register(&CommandDef{Name: "ALERT.TRIGGER", Handler: cmdALERTTRIGGER})
@@ -136,7 +125,6 @@ func RegisterMoreCommands(router *Router) {
 	router.Register(&CommandDef{Name: "SKETCH.CREATE", Handler: cmdSKETCHCREATE})
 	router.Register(&CommandDef{Name: "SKETCH.UPDATE", Handler: cmdSKETCHUPDATE})
 	router.Register(&CommandDef{Name: "SKETCH.QUERY", Handler: cmdSKETCHQUERY})
-	router.Register(&CommandDef{Name: "SKETCH.MERGE", Handler: cmdSKETCHMERGE})
 	router.Register(&CommandDef{Name: "SKETCH.DELETE", Handler: cmdSKETCHDELETE})
 
 	router.Register(&CommandDef{Name: "RINGBUFFER.CREATE", Handler: cmdRINGBUFFERCREATE})
@@ -706,57 +694,6 @@ func cmdROLLOUTLIST(ctx *Context) error {
 }
 
 var (
-	schemas   = make(map[string]string)
-	schemasMu sync.RWMutex
-)
-
-func cmdSCHEMAREGISTER(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	schema := ctx.ArgString(1)
-	schemasMu.Lock()
-	schemas[name] = schema
-	schemasMu.Unlock()
-	return ctx.WriteOK()
-}
-
-func cmdSCHEMAVALIDATE(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	_ = ctx.ArgString(0)
-	_ = ctx.ArgString(1)
-	return ctx.WriteInteger(1)
-}
-
-func cmdSCHEMADELETE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	schemasMu.Lock()
-	defer schemasMu.Unlock()
-	if _, exists := schemas[name]; !exists {
-		return ctx.WriteInteger(0)
-	}
-	delete(schemas, name)
-	return ctx.WriteInteger(1)
-}
-
-func cmdSCHEMALIST(ctx *Context) error {
-	schemasMu.RLock()
-	results := make([]*resp.Value, 0)
-	for name := range schemas {
-		results = append(results, resp.BulkString(name))
-	}
-	reply := results
-	schemasMu.RUnlock()
-	return ctx.WriteArray(reply)
-}
-
-var (
 	pipelines   = make(map[string]*Pipeline)
 	pipelinesMu sync.RWMutex
 )
@@ -861,81 +798,12 @@ func cmdPIPELINELIST(ctx *Context) error {
 	return ctx.WriteArray(reply)
 }
 
-var (
-	notifications   = make(map[string]*Notification)
-	notificationsMu sync.RWMutex
-)
-
 type Notification struct {
 	ID        string
 	Name      string
 	Type      string
 	Template  string
 	CreatedAt int64
-}
-
-func cmdNOTIFYCREATE(ctx *Context) error {
-	if ctx.ArgCount() < 3 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	notifyType := ctx.ArgString(1)
-	template := ctx.ArgString(2)
-	notificationsMu.Lock()
-	notifications[name] = &Notification{ID: generateUUID(), Name: name, Type: notifyType, Template: template, CreatedAt: time.Now().UnixMilli()}
-	notificationsMu.Unlock()
-	return ctx.WriteOK()
-}
-
-func cmdNOTIFYSEND(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	_ = ctx.ArgString(0)
-	_ = ctx.ArgString(1)
-	return ctx.WriteOK()
-}
-
-func cmdNOTIFYLIST(ctx *Context) error {
-	notificationsMu.RLock()
-	results := make([]*resp.Value, 0)
-	for name, n := range notifications {
-		results = append(results, resp.ArrayValue([]*resp.Value{
-			resp.BulkString("name"), resp.BulkString(name),
-			resp.BulkString("type"), resp.BulkString(n.Type),
-		}))
-	}
-	reply := results
-	notificationsMu.RUnlock()
-	return ctx.WriteArray(reply)
-}
-
-func cmdNOTIFYDELETE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	notificationsMu.Lock()
-	defer notificationsMu.Unlock()
-	if _, exists := notifications[name]; !exists {
-		return ctx.WriteInteger(0)
-	}
-	delete(notifications, name)
-	return ctx.WriteInteger(1)
-}
-
-func cmdNOTIFYTEMPLATE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	notificationsMu.RLock()
-	n, exists := notifications[name]
-	notificationsMu.RUnlock()
-	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR notification not found"))
-	}
-	return ctx.WriteBulkString(n.Template)
 }
 
 var (
@@ -2283,16 +2151,6 @@ func cmdSKETCHQUERY(ctx *Context) error {
 	}
 	sketchesMu.RUnlock()
 	return ctx.WriteInteger(min)
-}
-
-func cmdSKETCHMERGE(ctx *Context) error {
-	if ctx.ArgCount() < 3 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	_ = ctx.ArgString(0)
-	_ = ctx.ArgString(1)
-	_ = ctx.ArgString(2)
-	return ctx.WriteOK()
 }
 
 func cmdSKETCHDELETE(ctx *Context) error {

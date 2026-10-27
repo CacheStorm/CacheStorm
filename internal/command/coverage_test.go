@@ -612,13 +612,8 @@ func TestResilienceObservabilityCommands(t *testing.T) {
 		cmd  string
 		args [][]byte
 	}{
-		{"OBSERVABILITY.TRACE", "OBSERVABILITY.TRACE", [][]byte{[]byte("op1"), []byte("start")}},
-		{"OBSERVABILITY.METRIC", "OBSERVABILITY.METRIC", [][]byte{[]byte("metric1"), []byte("1.0")}},
-		{"OBSERVABILITY.LOG", "OBSERVABILITY.LOG", [][]byte{[]byte("info"), []byte("message")}},
-		{"OBSERVABILITY.SPAN", "OBSERVABILITY.SPAN", [][]byte{[]byte("span1"), []byte("start")}},
 		{"TELEMETRY.RECORD", "TELEMETRY.RECORD", [][]byte{[]byte("metric1"), []byte("1.0")}},
 		{"TELEMETRY.QUERY", "TELEMETRY.QUERY", [][]byte{[]byte("metric1")}},
-		{"TELEMETRY.EXPORT", "TELEMETRY.EXPORT", nil},
 	}
 
 	for _, tt := range tests {
@@ -646,12 +641,10 @@ func TestResilienceDiagnosticCommands(t *testing.T) {
 		{"PROFILE.RESULT", "PROFILE.RESULT", nil},
 		{"PROFILEX.LIST", "PROFILEX.LIST", nil},
 		{"HEAP.STATS", "HEAP.STATS", nil},
-		{"HEAP.DUMP", "HEAP.DUMP", nil},
 		{"HEAP.GC", "HEAP.GC", nil},
 		{"MEMORYX.ALLOC", "MEMORYX.ALLOC", [][]byte{[]byte("buf1"), []byte("1024")}},
 		{"MEMORYX.FREE", "MEMORYX.FREE", [][]byte{[]byte("buf1")}},
 		{"MEMORYX.STATS", "MEMORYX.STATS", nil},
-		{"MEMORYX.TRACK", "MEMORYX.TRACK", [][]byte{[]byte("alloc1"), []byte("1024")}},
 	}
 
 	for _, tt := range tests {
@@ -670,14 +663,7 @@ func TestMLModelCommands(t *testing.T) {
 		name string
 		cmd  string
 		args [][]byte
-	}{
-		{"MODEL.CREATE", "MODEL.CREATE", [][]byte{[]byte("model1"), []byte("classifier")}},
-		{"MODEL.TRAIN", "MODEL.TRAIN", [][]byte{[]byte("model1"), []byte("data1")}},
-		{"MODEL.PREDICT", "MODEL.PREDICT", [][]byte{[]byte("model1"), []byte("1.0,2.0,3.0")}},
-		{"MODEL.DELETE", "MODEL.DELETE", [][]byte{[]byte("model1")}},
-		{"MODEL.LIST", "MODEL.LIST", nil},
-		{"MODEL.STATUS", "MODEL.STATUS", [][]byte{[]byte("model1")}},
-	}
+	}{}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -700,7 +686,6 @@ func TestMLFeatureCommands(t *testing.T) {
 		{"FEATURE.GET", "FEATURE.GET", [][]byte{[]byte("entity1"), []byte("f1")}},
 		{"FEATURE.DEL", "FEATURE.DEL", [][]byte{[]byte("entity1"), []byte("f1")}},
 		{"FEATURE.INCR", "FEATURE.INCR", [][]byte{[]byte("entity1"), []byte("f1"), []byte("0.5")}},
-		{"FEATURE.NORMALIZE", "FEATURE.NORMALIZE", [][]byte{[]byte("entity1"), []byte("minmax")}},
 		{"FEATURE.VECTOR", "FEATURE.VECTOR", [][]byte{[]byte("entity1"), []byte("f1,f2,f3")}},
 	}
 
@@ -723,8 +708,6 @@ func TestMLEmbeddingCommands(t *testing.T) {
 	}{
 		{"EMBEDDING.CREATE", "EMBEDDING.CREATE", [][]byte{[]byte("emb1"), []byte("0.1"), []byte("0.2"), []byte("0.3")}},
 		{"EMBEDDING.GET", "EMBEDDING.GET", [][]byte{[]byte("emb1")}},
-		{"EMBEDDING.SEARCH", "EMBEDDING.SEARCH", [][]byte{[]byte("emb1"), []byte("0.1,0.2,0.3"), []byte("5")}},
-		{"EMBEDDING.SIMILAR", "EMBEDDING.SIMILAR", [][]byte{[]byte("emb1"), []byte("emb2")}},
 		{"EMBEDDING.DELETE", "EMBEDDING.DELETE", [][]byte{[]byte("emb1")}},
 	}
 
@@ -748,7 +731,6 @@ func TestMLTensorCommands(t *testing.T) {
 		{"TENSOR.CREATE", "TENSOR.CREATE", [][]byte{[]byte("t1"), []byte("2,3")}},
 		{"TENSOR.GET", "TENSOR.GET", [][]byte{[]byte("t1")}},
 		{"TENSOR.ADD", "TENSOR.ADD", [][]byte{[]byte("t1"), []byte("t2")}},
-		{"TENSOR.MATMUL", "TENSOR.MATMUL", [][]byte{[]byte("t1"), []byte("t2")}},
 		{"TENSOR.RESHAPE", "TENSOR.RESHAPE", [][]byte{[]byte("t1"), []byte("3,2")}},
 		{"TENSOR.DELETE", "TENSOR.DELETE", [][]byte{[]byte("t1")}},
 	}
@@ -769,16 +751,7 @@ func TestMLClassifierCommands(t *testing.T) {
 		name string
 		cmd  string
 		args [][]byte
-	}{
-		{"CLASSIFIER.CREATE", "CLASSIFIER.CREATE", [][]byte{[]byte("clf1"), []byte("spam"), []byte("ham")}},
-		{"CLASSIFIER.TRAIN", "CLASSIFIER.TRAIN", [][]byte{[]byte("clf1"), []byte("data1")}},
-		{"CLASSIFIER.PREDICT", "CLASSIFIER.PREDICT", [][]byte{[]byte("clf1"), []byte("test message")}},
-		{"CLASSIFIER.DELETE", "CLASSIFIER.DELETE", [][]byte{[]byte("clf1")}},
-		{"REGRESSOR.CREATE", "REGRESSOR.CREATE", [][]byte{[]byte("reg1")}},
-		{"REGRESSOR.TRAIN", "REGRESSOR.TRAIN", [][]byte{[]byte("reg1"), []byte("data1")}},
-		{"REGRESSOR.PREDICT", "REGRESSOR.PREDICT", [][]byte{[]byte("reg1"), []byte("1.0,2.0,3.0")}},
-		{"REGRESSOR.DELETE", "REGRESSOR.DELETE", [][]byte{[]byte("reg1")}},
-	}
+	}{}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -796,17 +769,7 @@ func TestMLClusterCommands(t *testing.T) {
 		name string
 		cmd  string
 		args [][]byte
-	}{
-		{"CLUSTER.CREATE", "CLUSTER.CREATE", [][]byte{[]byte("clust1"), []byte("kmeans"), []byte("3")}},
-		{"CLUSTER.FIT", "CLUSTER.FIT", [][]byte{[]byte("clust1"), []byte("data1")}},
-		{"CLUSTER.PREDICT", "CLUSTER.PREDICT", [][]byte{[]byte("clust1"), []byte("1.0,2.0")}},
-		{"CLUSTER.CENTROIDS", "CLUSTER.CENTROIDS", [][]byte{[]byte("clust1")}},
-		{"CLUSTER.DELETE", "CLUSTER.DELETE", [][]byte{[]byte("clust1")}},
-		{"ANOMALY.CREATE", "ANOMALY.CREATE", [][]byte{[]byte("anom1"), []byte("zscore")}},
-		{"ANOMALY.DETECT", "ANOMALY.DETECT", [][]byte{[]byte("anom1"), []byte("100.0")}},
-		{"ANOMALY.LEARN", "ANOMALY.LEARN", [][]byte{[]byte("anom1"), []byte("50.0")}},
-		{"ANOMALY.DELETE", "ANOMALY.DELETE", [][]byte{[]byte("anom1")}},
-	}
+	}{}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -824,14 +787,7 @@ func TestMLNLPCommands(t *testing.T) {
 		name string
 		cmd  string
 		args [][]byte
-	}{
-		{"SENTIMENT.ANALYZE", "SENTIMENT.ANALYZE", [][]byte{[]byte("I love this product!")}},
-		{"SENTIMENT.BATCH", "SENTIMENT.BATCH", [][]byte{[]byte("I love it"), []byte("I hate it"), []byte("It's okay")}},
-		{"NLP.TOKENIZE", "NLP.TOKENIZE", [][]byte{[]byte("Hello world, this is a test.")}},
-		{"NLP.ENTITIES", "NLP.ENTITIES", [][]byte{[]byte("John works at Google in New York.")}},
-		{"NLP.KEYWORDS", "NLP.KEYWORDS", [][]byte{[]byte("Machine learning is a subset of artificial intelligence.")}},
-		{"NLP.SUMMARIZE", "NLP.SUMMARIZE", [][]byte{[]byte("Long text to summarize here..."), []byte("50")}},
-	}
+	}{}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -849,12 +805,7 @@ func TestMLSimilarityCommands(t *testing.T) {
 		name string
 		cmd  string
 		args [][]byte
-	}{
-		{"SIMILARITY.COSINE", "SIMILARITY.COSINE", [][]byte{[]byte("1.0,2.0,3.0"), []byte("2.0,3.0,4.0")}},
-		{"SIMILARITY.EUCLIDEAN", "SIMILARITY.EUCLIDEAN", [][]byte{[]byte("1.0,2.0"), []byte("3.0,4.0")}},
-		{"SIMILARITY.JACCARD", "SIMILARITY.JACCARD", [][]byte{[]byte("a,b,c"), []byte("b,c,d")}},
-		{"SIMILARITY.DOTPRODUCT", "SIMILARITY.DOTPRODUCT", [][]byte{[]byte("1.0,2.0"), []byte("3.0,4.0")}},
-	}
+	}{}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -900,12 +851,7 @@ func TestMLExperimentCommands(t *testing.T) {
 		{"MLXPERIMENT.CREATE", "MLXPERIMENT.CREATE", [][]byte{[]byte("exp1")}},
 		{"MLXPERIMENT.LOG", "MLXPERIMENT.LOG", [][]byte{[]byte("exp1"), []byte("accuracy"), []byte("0.95")}},
 		{"MLXPERIMENT.METRICS", "MLXPERIMENT.METRICS", [][]byte{[]byte("exp1")}},
-		{"MLXPERIMENT.COMPARE", "MLXPERIMENT.COMPARE", [][]byte{[]byte("exp1"), []byte("exp2")}},
 		{"MLXPERIMENT.DELETE", "MLXPERIMENT.DELETE", [][]byte{[]byte("exp1")}},
-		{"PIPELINEML.CREATE", "PIPELINEML.CREATE", [][]byte{[]byte("pipe1")}},
-		{"PIPELINEML.ADD", "PIPELINEML.ADD", [][]byte{[]byte("pipe1"), []byte("normalize")}},
-		{"PIPELINEML.RUN", "PIPELINEML.RUN", [][]byte{[]byte("pipe1"), []byte("data1")}},
-		{"PIPELINEML.DELETE", "PIPELINEML.DELETE", [][]byte{[]byte("pipe1")}},
 	}
 
 	for _, tt := range tests {
@@ -927,12 +873,7 @@ func TestMLHyperparamCommands(t *testing.T) {
 	}{
 		{"HYPERPARAM.SET", "HYPERPARAM.SET", [][]byte{[]byte("hp1"), []byte("learning_rate"), []byte("0.01")}},
 		{"HYPERPARAM.GET", "HYPERPARAM.GET", [][]byte{[]byte("hp1"), []byte("learning_rate")}},
-		{"HYPERPARAM.SEARCH", "HYPERPARAM.SEARCH", [][]byte{[]byte("hp1"), []byte("grid")}},
 		{"HYPERPARAM.DELETE", "HYPERPARAM.DELETE", [][]byte{[]byte("hp1")}},
-		{"EVALUATOR.CREATE", "EVALUATOR.CREATE", [][]byte{[]byte("eval1"), []byte("accuracy")}},
-		{"EVALUATOR.RUN", "EVALUATOR.RUN", [][]byte{[]byte("eval1"), []byte("model1"), []byte("data1")}},
-		{"EVALUATOR.METRICS", "EVALUATOR.METRICS", [][]byte{[]byte("eval1")}},
-		{"EVALUATOR.DELETE", "EVALUATOR.DELETE", [][]byte{[]byte("eval1")}},
 	}
 
 	for _, tt := range tests {
@@ -951,16 +892,7 @@ func TestMLRecommendCommands(t *testing.T) {
 		name string
 		cmd  string
 		args [][]byte
-	}{
-		{"RECOMMEND.CREATE", "RECOMMEND.CREATE", [][]byte{[]byte("rec1")}},
-		{"RECOMMEND.TRAIN", "RECOMMEND.TRAIN", [][]byte{[]byte("rec1"), []byte("ratings1")}},
-		{"RECOMMEND.GET", "RECOMMEND.GET", [][]byte{[]byte("rec1"), []byte("user1"), []byte("10")}},
-		{"RECOMMEND.DELETE", "RECOMMEND.DELETE", [][]byte{[]byte("rec1")}},
-		{"TIMEFORECAST.CREATE", "TIMEFORECAST.CREATE", [][]byte{[]byte("tf1")}},
-		{"TIMEFORECAST.TRAIN", "TIMEFORECAST.TRAIN", [][]byte{[]byte("tf1"), []byte("ts1")}},
-		{"TIMEFORECAST.PREDICT", "TIMEFORECAST.PREDICT", [][]byte{[]byte("tf1"), []byte("10")}},
-		{"TIMEFORECAST.DELETE", "TIMEFORECAST.DELETE", [][]byte{[]byte("tf1")}},
-	}
+	}{}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -3550,12 +3482,7 @@ func TestFilterCommandsCoverage(t *testing.T) {
 		name string
 		cmd  string
 		args [][]byte
-	}{
-		{"FILTER.CREATE", "FILTER.CREATE", [][]byte{[]byte("f1"), []byte("key =~ ^user.*")}},
-		{"FILTER.DELETE", "FILTER.DELETE", [][]byte{[]byte("f1")}},
-		{"FILTER.APPLY", "FILTER.APPLY", [][]byte{[]byte("f1"), []byte("mykey")}},
-		{"FILTER.LIST", "FILTER.LIST", nil},
-	}
+	}{}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -4477,12 +4404,7 @@ func TestAdvancedCommands2PolicyCoverage(t *testing.T) {
 		name string
 		cmd  string
 		args [][]byte
-	}{
-		{"POLICY.CREATE", "POLICY.CREATE", [][]byte{[]byte("p1"), []byte("allow")}},
-		{"POLICY.CHECK", "POLICY.CHECK", [][]byte{[]byte("p1"), []byte("action")}},
-		{"POLICY.LIST", "POLICY.LIST", [][]byte{}},
-		{"POLICY.DELETE", "POLICY.DELETE", [][]byte{[]byte("p1")}},
-	}
+	}{}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -5007,7 +4929,6 @@ func TestExtraCommandsShardCoverage(t *testing.T) {
 		{"SHARD.MAP", "SHARD.MAP", [][]byte{[]byte("k1")}},
 		{"SHARD.LIST", "SHARD.LIST", [][]byte{}},
 		{"SHARD.STATUS", "SHARD.STATUS", [][]byte{}},
-		{"SHARD.MOVE", "SHARD.MOVE", [][]byte{[]byte("k1"), []byte("node2")}},
 		{"SHARD.REBALANCE", "SHARD.REBALANCE", [][]byte{}},
 	}
 
@@ -5027,10 +4948,7 @@ func TestExtraCommandsCompressionCoverage(t *testing.T) {
 		name string
 		cmd  string
 		args [][]byte
-	}{
-		{"COMPRESSION.COMPRESS", "COMPRESSION.COMPRESS", [][]byte{[]byte("hello")}},
-		{"COMPRESSION.DECOMPRESS", "COMPRESSION.DECOMPRESS", [][]byte{[]byte("compressed")}},
-	}
+	}{}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -5305,12 +5223,7 @@ func TestMoreCommandsSchemaCoverage(t *testing.T) {
 		name string
 		cmd  string
 		args [][]byte
-	}{
-		{"SCHEMA.REGISTER", "SCHEMA.REGISTER", [][]byte{[]byte("sch1"), []byte("{\"type\":\"object\"}")}},
-		{"SCHEMA.VALIDATE", "SCHEMA.VALIDATE", [][]byte{[]byte("sch1"), []byte("{}")}},
-		{"SCHEMA.LIST", "SCHEMA.LIST", [][]byte{}},
-		{"SCHEMA.DELETE", "SCHEMA.DELETE", [][]byte{[]byte("sch1")}},
-	}
+	}{}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -5353,13 +5266,7 @@ func TestMoreCommandsNotifyCoverage(t *testing.T) {
 		name string
 		cmd  string
 		args [][]byte
-	}{
-		{"NOTIFY.CREATE", "NOTIFY.CREATE", [][]byte{[]byte("n1")}},
-		{"NOTIFY.SEND", "NOTIFY.SEND", [][]byte{[]byte("n1"), []byte("message")}},
-		{"NOTIFY.LIST", "NOTIFY.LIST", [][]byte{}},
-		{"NOTIFY.TEMPLATE", "NOTIFY.TEMPLATE", [][]byte{[]byte("n1"), []byte("template1")}},
-		{"NOTIFY.DELETE", "NOTIFY.DELETE", [][]byte{[]byte("n1")}},
-	}
+	}{}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -5933,12 +5840,7 @@ func TestAdvancedCommands2FilterCoverage(t *testing.T) {
 		name string
 		cmd  string
 		args [][]byte
-	}{
-		{"FILTER.CREATE", "FILTER.CREATE", [][]byte{[]byte("f1"), []byte("value > 0")}},
-		{"FILTER.APPLY", "FILTER.APPLY", [][]byte{[]byte("f1"), []byte("10")}},
-		{"FILTER.LIST", "FILTER.LIST", [][]byte{}},
-		{"FILTER.DELETE", "FILTER.DELETE", [][]byte{[]byte("f1")}},
-	}
+	}{}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -6122,8 +6024,6 @@ func TestExtendedCommandsRemainingCoverage(t *testing.T) {
 		cmd  string
 		args [][]byte
 	}{
-		{"SIMILARITY.COSINE", "SIMILARITY.COSINE", [][]byte{[]byte("1,2,3"), []byte("4,5,6")}},
-		{"SIMILARITY.EUCLIDEAN", "SIMILARITY.EUCLIDEAN", [][]byte{[]byte("1,2,3"), []byte("4,5,6")}},
 		{"EMBEDDING.CREATE", "EMBEDDING.CREATE", [][]byte{[]byte("e1"), []byte("text")}},
 		{"EMBEDDING.GET", "EMBEDDING.GET", [][]byte{[]byte("e1")}},
 	}
@@ -6689,7 +6589,6 @@ func TestMoreCommandsSketchCoverage(t *testing.T) {
 		{"SKETCH.CREATE", "SKETCH.CREATE", [][]byte{[]byte("s1")}},
 		{"SKETCH.UPDATE", "SKETCH.UPDATE", [][]byte{[]byte("s1"), []byte("item1")}},
 		{"SKETCH.QUERY", "SKETCH.QUERY", [][]byte{[]byte("s1"), []byte("item1")}},
-		{"SKETCH.MERGE", "SKETCH.MERGE", [][]byte{[]byte("s1"), []byte("s2")}},
 		{"SKETCH.DELETE", "SKETCH.DELETE", [][]byte{[]byte("s1")}},
 	}
 
@@ -7234,12 +7133,7 @@ func TestAdvancedCommands2MiddlewareCoverage(t *testing.T) {
 		name string
 		cmd  string
 		args [][]byte
-	}{
-		{"MIDDLEWARE.CREATE", "MIDDLEWARE.CREATE", [][]byte{[]byte("m1")}},
-		{"MIDDLEWARE.EXECUTE", "MIDDLEWARE.EXECUTE", [][]byte{[]byte("m1")}},
-		{"MIDDLEWARE.LIST", "MIDDLEWARE.LIST", [][]byte{}},
-		{"MIDDLEWARE.DELETE", "MIDDLEWARE.DELETE", [][]byte{[]byte("m1")}},
-	}
+	}{}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -7257,12 +7151,7 @@ func TestAdvancedCommands2InterceptorCoverage(t *testing.T) {
 		name string
 		cmd  string
 		args [][]byte
-	}{
-		{"INTERCEPTOR.CREATE", "INTERCEPTOR.CREATE", [][]byte{[]byte("i1")}},
-		{"INTERCEPTOR.CHECK", "INTERCEPTOR.CHECK", [][]byte{[]byte("i1")}},
-		{"INTERCEPTOR.LIST", "INTERCEPTOR.LIST", [][]byte{}},
-		{"INTERCEPTOR.DELETE", "INTERCEPTOR.DELETE", [][]byte{[]byte("i1")}},
-	}
+	}{}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -7280,12 +7169,7 @@ func TestAdvancedCommands2GuardCoverage(t *testing.T) {
 		name string
 		cmd  string
 		args [][]byte
-	}{
-		{"GUARD.CREATE", "GUARD.CREATE", [][]byte{[]byte("g1")}},
-		{"GUARD.CHECK", "GUARD.CHECK", [][]byte{[]byte("g1")}},
-		{"GUARD.LIST", "GUARD.LIST", [][]byte{}},
-		{"GUARD.DELETE", "GUARD.DELETE", [][]byte{[]byte("g1")}},
-	}
+	}{}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -7303,12 +7187,7 @@ func TestAdvancedCommands2ProxyCoverage(t *testing.T) {
 		name string
 		cmd  string
 		args [][]byte
-	}{
-		{"PROXY.CREATE", "PROXY.CREATE", [][]byte{[]byte("p1")}},
-		{"PROXY.ROUTE", "PROXY.ROUTE", [][]byte{[]byte("p1"), []byte("/api/*")}},
-		{"PROXY.LIST", "PROXY.LIST", [][]byte{}},
-		{"PROXY.DELETE", "PROXY.DELETE", [][]byte{[]byte("p1")}},
-	}
+	}{}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -7398,12 +7277,7 @@ func TestAdvancedCommands2QueryCoverage(t *testing.T) {
 		name string
 		cmd  string
 		args [][]byte
-	}{
-		{"QUERY.CREATE", "QUERY.CREATE", [][]byte{[]byte("q1"), []byte("SELECT *")}},
-		{"QUERY.EXECUTE", "QUERY.EXECUTE", [][]byte{[]byte("q1")}},
-		{"QUERY.LIST", "QUERY.LIST", [][]byte{}},
-		{"QUERY.DELETE", "QUERY.DELETE", [][]byte{[]byte("q1")}},
-	}
+	}{}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -7444,12 +7318,7 @@ func TestAdvancedCommands2ReportCoverage(t *testing.T) {
 		name string
 		cmd  string
 		args [][]byte
-	}{
-		{"REPORT.CREATE", "REPORT.CREATE", [][]byte{[]byte("r1")}},
-		{"REPORT.GENERATE", "REPORT.GENERATE", [][]byte{[]byte("r1")}},
-		{"REPORT.LIST", "REPORT.LIST", [][]byte{}},
-		{"REPORT.DELETE", "REPORT.DELETE", [][]byte{[]byte("r1")}},
-	}
+	}{}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -7562,13 +7431,7 @@ func TestAdvancedCommands2RoleXCoverage(t *testing.T) {
 		name string
 		cmd  string
 		args [][]byte
-	}{
-		{"ROLEX.CREATE", "ROLEX.CREATE", [][]byte{[]byte("admin")}},
-		{"ROLEX.ASSIGN", "ROLEX.ASSIGN", [][]byte{[]byte("user1"), []byte("admin")}},
-		{"ROLEX.CHECK", "ROLEX.CHECK", [][]byte{[]byte("user1"), []byte("admin")}},
-		{"ROLEX.LIST", "ROLEX.LIST", [][]byte{}},
-		{"ROLEX.DELETE", "ROLEX.DELETE", [][]byte{[]byte("admin")}},
-	}
+	}{}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -8641,12 +8504,7 @@ func TestResilienceCommandsObservabilityCoverage(t *testing.T) {
 		name string
 		cmd  string
 		args [][]byte
-	}{
-		{"OBSERVABILITY.TRACE", "OBSERVABILITY.TRACE", [][]byte{[]byte("t1")}},
-		{"OBSERVABILITY.METRIC", "OBSERVABILITY.METRIC", [][]byte{[]byte("m1"), []byte("10")}},
-		{"OBSERVABILITY.LOG", "OBSERVABILITY.LOG", [][]byte{[]byte("msg")}},
-		{"OBSERVABILITY.SPAN", "OBSERVABILITY.SPAN", [][]byte{[]byte("s1")}},
-	}
+	}{}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -8667,7 +8525,6 @@ func TestResilienceCommandsTelemetryCoverage(t *testing.T) {
 	}{
 		{"TELEMETRY.RECORD", "TELEMETRY.RECORD", [][]byte{[]byte("metric"), []byte("10")}},
 		{"TELEMETRY.QUERY", "TELEMETRY.QUERY", [][]byte{[]byte("metric")}},
-		{"TELEMETRY.EXPORT", "TELEMETRY.EXPORT", [][]byte{}},
 	}
 
 	for _, tt := range tests {
@@ -8733,7 +8590,6 @@ func TestResilienceCommandsHeapCoverage(t *testing.T) {
 		args [][]byte
 	}{
 		{"HEAP.STATS", "HEAP.STATS", [][]byte{}},
-		{"HEAP.DUMP", "HEAP.DUMP", [][]byte{}},
 		{"HEAP.GC", "HEAP.GC", [][]byte{}},
 	}
 
@@ -8757,7 +8613,6 @@ func TestResilienceCommandsMemoryXCoverage(t *testing.T) {
 		{"MEMORYX.ALLOC", "MEMORYX.ALLOC", [][]byte{[]byte("m1"), []byte("100")}},
 		{"MEMORYX.FREE", "MEMORYX.FREE", [][]byte{[]byte("m1")}},
 		{"MEMORYX.STATS", "MEMORYX.STATS", [][]byte{}},
-		{"MEMORYX.TRACK", "MEMORYX.TRACK", [][]byte{[]byte("m1")}},
 	}
 
 	for _, tt := range tests {
@@ -8991,7 +8846,6 @@ func TestResilienceCommandsEventSourcingCoverage(t *testing.T) {
 	}{
 		{"EVENTSOURCING.APPEND", "EVENTSOURCING.APPEND", [][]byte{[]byte("es1"), []byte("event")}},
 		{"EVENTSOURCING.REPLAY", "EVENTSOURCING.REPLAY", [][]byte{[]byte("es1")}},
-		{"EVENTSOURCING.SNAPSHOT", "EVENTSOURCING.SNAPSHOT", [][]byte{[]byte("es1")}},
 		{"EVENTSOURCING.GET", "EVENTSOURCING.GET", [][]byte{[]byte("es1")}},
 	}
 
@@ -9011,10 +8865,7 @@ func TestResilienceCommandsCompactCoverage(t *testing.T) {
 		name string
 		cmd  string
 		args [][]byte
-	}{
-		{"COMPACT.MERGE", "COMPACT.MERGE", [][]byte{[]byte("c1")}},
-		{"COMPACT.STATUS", "COMPACT.STATUS", [][]byte{[]byte("c1")}},
-	}
+	}{}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -9535,7 +9386,6 @@ func TestExtraCommandsMoreCoverage(t *testing.T) {
 		cmd  string
 		args [][]byte
 	}{
-		{"COMPRESSION.INFO", "COMPRESSION.INFO", [][]byte{}},
 		{"DEDUP.ADD", "DEDUP.ADD", [][]byte{[]byte("dd1"), []byte("item1")}},
 		{"DEDUP.CHECK", "DEDUP.CHECK", [][]byte{[]byte("dd1"), []byte("item1")}},
 		{"DEDUP.EXPIRE", "DEDUP.EXPIRE", [][]byte{[]byte("dd1"), []byte("60")}},
@@ -9950,12 +9800,7 @@ func TestAdvancedCommands2ExtraCoverage(t *testing.T) {
 		{"GRANT.CHECK", "GRANT.CHECK", [][]byte{[]byte("user1"), []byte("perm1")}},
 		{"EVENTX.SUBSCRIBE", "EVENTX.SUBSCRIBE", [][]byte{[]byte("e1")}},
 		{"HOOK.CREATE", "HOOK.CREATE", [][]byte{[]byte("h1"), []byte("event")}},
-		{"MIDDLEWARE.CREATE", "MIDDLEWARE.CREATE", [][]byte{[]byte("mw1")}},
-		{"INTERCEPTOR.CREATE", "INTERCEPTOR.CREATE", [][]byte{[]byte("i1")}},
-		{"GUARD.CREATE", "GUARD.CREATE", [][]byte{[]byte("g1")}},
-		{"PROXY.CREATE", "PROXY.CREATE", [][]byte{[]byte("p1")}},
 		{"VIEW.CREATE", "VIEW.CREATE", [][]byte{[]byte("v1"), []byte("query")}},
-		{"REPORT.CREATE", "REPORT.CREATE", [][]byte{[]byte("r1")}},
 		{"AUDITX.LOG", "AUDITX.LOG", [][]byte{[]byte("action"), []byte("user")}},
 		{"AUDITX.SEARCH", "AUDITX.SEARCH", [][]byte{[]byte("user")}},
 		{"TOKEN.CREATE", "TOKEN.CREATE", [][]byte{[]byte("user1")}},
@@ -9964,8 +9809,6 @@ func TestAdvancedCommands2ExtraCoverage(t *testing.T) {
 		{"ENTITY.CREATE", "ENTITY.CREATE", [][]byte{[]byte("e1")}},
 		{"CONNECTIONX.CREATE", "CONNECTIONX.CREATE", [][]byte{[]byte("c1")}},
 		{"INDEX.ADD", "INDEX.ADD", [][]byte{[]byte("i1"), []byte("doc1"), []byte("data")}},
-		{"ROLEX.ASSIGN", "ROLEX.ASSIGN", [][]byte{[]byte("user1"), []byte("role1")}},
-		{"ROLEX.CHECK", "ROLEX.CHECK", [][]byte{[]byte("user1"), []byte("role1")}},
 	}
 
 	for _, tt := range tests {
@@ -10117,9 +9960,7 @@ func TestMLCommandsExtraCoverage(t *testing.T) {
 		name string
 		cmd  string
 		args [][]byte
-	}{
-		{"CLUSTER.CENTROIDS", "CLUSTER.CENTROIDS", [][]byte{[]byte("c1")}},
-	}
+	}{}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -11085,7 +10926,6 @@ func TestExtraCommandsMore2Coverage(t *testing.T) {
 		{"SHARD.MAP", "SHARD.MAP", [][]byte{[]byte("k1")}},
 		{"SHARD.LIST", "SHARD.LIST", [][]byte{}},
 		{"SHARD.STATUS", "SHARD.STATUS", [][]byte{}},
-		{"SHARD.MOVE", "SHARD.MOVE", [][]byte{[]byte("k1"), []byte("node2")}},
 		{"SHARD.REBALANCE", "SHARD.REBALANCE", [][]byte{}},
 	}
 
@@ -11264,17 +11104,10 @@ func TestMoreCommandsMore2Coverage(t *testing.T) {
 		{"ROLLOUT.LIST", "ROLLOUT.LIST", [][]byte{}},
 		{"ROLLOUT.DELETE", "ROLLOUT.DELETE", [][]byte{[]byte("r1")}},
 		{"SCHEMA.CREATE", "SCHEMA.CREATE", [][]byte{[]byte("sch1"), []byte("{\"type\":\"object\"}")}},
-		{"SCHEMA.VALIDATE", "SCHEMA.VALIDATE", [][]byte{[]byte("sch1"), []byte("{\"a\":1}")}},
-		{"SCHEMA.LIST", "SCHEMA.LIST", [][]byte{}},
-		{"SCHEMA.DELETE", "SCHEMA.DELETE", [][]byte{[]byte("sch1")}},
 		{"PIPELINE.CREATE", "PIPELINE.CREATE", [][]byte{[]byte("p1")}},
 		{"PIPELINE.ADD", "PIPELINE.ADD", [][]byte{[]byte("p1"), []byte("GET"), []byte("k1")}},
 		{"PIPELINE.EXECUTE", "PIPELINE.EXECUTE", [][]byte{[]byte("p1")}},
 		{"PIPELINE.DELETE", "PIPELINE.DELETE", [][]byte{[]byte("p1")}},
-		{"NOTIFY.CREATE", "NOTIFY.CREATE", [][]byte{[]byte("n1"), []byte("http://localhost/webhook")}},
-		{"NOTIFY.SEND", "NOTIFY.SEND", [][]byte{[]byte("n1"), []byte("message")}},
-		{"NOTIFY.LIST", "NOTIFY.LIST", [][]byte{}},
-		{"NOTIFY.DELETE", "NOTIFY.DELETE", [][]byte{[]byte("n1")}},
 		{"ALERT.CREATE", "ALERT.CREATE", [][]byte{[]byte("a1"), []byte("cpu>80")}},
 		{"ALERT.TRIGGER", "ALERT.TRIGGER", [][]byte{[]byte("a1")}},
 		{"ALERT.ACKNOWLEDGE", "ALERT.ACKNOWLEDGE", [][]byte{[]byte("a1")}},
@@ -11349,9 +11182,6 @@ func TestExtraCommandsMore3Coverage(t *testing.T) {
 		cmd  string
 		args [][]byte
 	}{
-		{"COMPRESSION.INFO", "COMPRESSION.INFO", [][]byte{}},
-		{"COMPRESSION.COMPRESS", "COMPRESSION.COMPRESS", [][]byte{[]byte("data")}},
-		{"COMPRESSION.DECOMPRESS", "COMPRESSION.DECOMPRESS", [][]byte{[]byte("compressed")}},
 		{"DEDUP.ADD", "DEDUP.ADD", [][]byte{[]byte("dd1"), []byte("item")}},
 		{"DEDUP.CHECK", "DEDUP.CHECK", [][]byte{[]byte("dd1"), []byte("item")}},
 		{"DEDUP.EXPIRE", "DEDUP.EXPIRE", [][]byte{[]byte("dd1"), []byte("60")}},
@@ -11428,10 +11258,6 @@ func TestAdvancedCommands2MoreCoverage(t *testing.T) {
 		cmd  string
 		args [][]byte
 	}{
-		{"FILTER.CREATE", "FILTER.CREATE", [][]byte{[]byte("f1"), []byte("expr")}},
-		{"FILTER.DELETE", "FILTER.DELETE", [][]byte{[]byte("f1")}},
-		{"FILTER.APPLY", "FILTER.APPLY", [][]byte{[]byte("f1"), []byte("data")}},
-		{"FILTER.LIST", "FILTER.LIST", [][]byte{}},
 		{"TRANSFORM.CREATE", "TRANSFORM.CREATE", [][]byte{[]byte("t1"), []byte("expr")}},
 		{"TRANSFORM.DELETE", "TRANSFORM.DELETE", [][]byte{[]byte("t1")}},
 		{"TRANSFORM.APPLY", "TRANSFORM.APPLY", [][]byte{[]byte("t1"), []byte("data")}},
@@ -11463,10 +11289,6 @@ func TestAdvancedCommands2MoreCoverage(t *testing.T) {
 		{"RULE.DELETE", "RULE.DELETE", [][]byte{[]byte("r1")}},
 		{"RULE.EVAL", "RULE.EVAL", [][]byte{[]byte("r1"), []byte("data")}},
 		{"RULE.LIST", "RULE.LIST", [][]byte{}},
-		{"POLICY.CREATE", "POLICY.CREATE", [][]byte{[]byte("p1"), []byte("rules")}},
-		{"POLICY.DELETE", "POLICY.DELETE", [][]byte{[]byte("p1")}},
-		{"POLICY.CHECK", "POLICY.CHECK", [][]byte{[]byte("p1"), []byte("action")}},
-		{"POLICY.LIST", "POLICY.LIST", [][]byte{}},
 		{"PERMIT.GRANT", "PERMIT.GRANT", [][]byte{[]byte("user1"), []byte("perm1")}},
 		{"PERMIT.REVOKE", "PERMIT.REVOKE", [][]byte{[]byte("user1"), []byte("perm1")}},
 		{"PERMIT.CHECK", "PERMIT.CHECK", [][]byte{[]byte("user1"), []byte("perm1")}},
@@ -11555,22 +11377,6 @@ func TestAdvancedCommands2More2Coverage(t *testing.T) {
 		{"HOOK.DELETE", "HOOK.DELETE", [][]byte{[]byte("h1")}},
 		{"HOOK.TRIGGER", "HOOK.TRIGGER", [][]byte{[]byte("h1")}},
 		{"HOOK.LIST", "HOOK.LIST", [][]byte{}},
-		{"MIDDLEWARE.CREATE", "MIDDLEWARE.CREATE", [][]byte{[]byte("m1"), []byte("fn")}},
-		{"MIDDLEWARE.DELETE", "MIDDLEWARE.DELETE", [][]byte{[]byte("m1")}},
-		{"MIDDLEWARE.EXECUTE", "MIDDLEWARE.EXECUTE", [][]byte{[]byte("m1"), []byte("req")}},
-		{"MIDDLEWARE.LIST", "MIDDLEWARE.LIST", [][]byte{}},
-		{"INTERCEPTOR.CREATE", "INTERCEPTOR.CREATE", [][]byte{[]byte("i1"), []byte("fn")}},
-		{"INTERCEPTOR.DELETE", "INTERCEPTOR.DELETE", [][]byte{[]byte("i1")}},
-		{"INTERCEPTOR.CHECK", "INTERCEPTOR.CHECK", [][]byte{[]byte("i1"), []byte("req")}},
-		{"INTERCEPTOR.LIST", "INTERCEPTOR.LIST", [][]byte{}},
-		{"GUARD.CREATE", "GUARD.CREATE", [][]byte{[]byte("g1"), []byte("condition")}},
-		{"GUARD.DELETE", "GUARD.DELETE", [][]byte{[]byte("g1")}},
-		{"GUARD.CHECK", "GUARD.CHECK", [][]byte{[]byte("g1"), []byte("ctx")}},
-		{"GUARD.LIST", "GUARD.LIST", [][]byte{}},
-		{"PROXY.CREATE", "PROXY.CREATE", [][]byte{[]byte("p1"), []byte("target")}},
-		{"PROXY.DELETE", "PROXY.DELETE", [][]byte{[]byte("p1")}},
-		{"PROXY.ROUTE", "PROXY.ROUTE", [][]byte{[]byte("p1"), []byte("req")}},
-		{"PROXY.LIST", "PROXY.LIST", [][]byte{}},
 		{"CACHEX.CREATE", "CACHEX.CREATE", [][]byte{[]byte("c1"), []byte("100")}},
 		{"CACHEX.DELETE", "CACHEX.DELETE", [][]byte{[]byte("c1")}},
 		{"CACHEX.GET", "CACHEX.GET", [][]byte{[]byte("c1"), []byte("k1")}},
@@ -11586,18 +11392,10 @@ func TestAdvancedCommands2More2Coverage(t *testing.T) {
 		{"INDEX.ADD", "INDEX.ADD", [][]byte{[]byte("i1"), []byte("doc1"), []byte("value")}},
 		{"INDEX.SEARCH", "INDEX.SEARCH", [][]byte{[]byte("i1"), []byte("query")}},
 		{"INDEX.LIST", "INDEX.LIST", [][]byte{}},
-		{"QUERY.CREATE", "QUERY.CREATE", [][]byte{[]byte("q1"), []byte("expr")}},
-		{"QUERY.DELETE", "QUERY.DELETE", [][]byte{[]byte("q1")}},
-		{"QUERY.EXECUTE", "QUERY.EXECUTE", [][]byte{[]byte("q1")}},
-		{"QUERY.LIST", "QUERY.LIST", [][]byte{}},
 		{"VIEW.CREATE", "VIEW.CREATE", [][]byte{[]byte("v1"), []byte("query")}},
 		{"VIEW.DELETE", "VIEW.DELETE", [][]byte{[]byte("v1")}},
 		{"VIEW.GET", "VIEW.GET", [][]byte{[]byte("v1")}},
 		{"VIEW.LIST", "VIEW.LIST", [][]byte{}},
-		{"REPORT.CREATE", "REPORT.CREATE", [][]byte{[]byte("r1"), []byte("template")}},
-		{"REPORT.DELETE", "REPORT.DELETE", [][]byte{[]byte("r1")}},
-		{"REPORT.GENERATE", "REPORT.GENERATE", [][]byte{[]byte("r1")}},
-		{"REPORT.LIST", "REPORT.LIST", [][]byte{}},
 		{"AUDITX.LOG", "AUDITX.LOG", [][]byte{[]byte("action"), []byte("user"), []byte("resource")}},
 		{"AUDITX.GET", "AUDITX.GET", [][]byte{[]byte("id1")}},
 		{"AUDITX.SEARCH", "AUDITX.SEARCH", [][]byte{[]byte("user")}},
@@ -11617,11 +11415,6 @@ func TestAdvancedCommands2More2Coverage(t *testing.T) {
 		{"PROFILE.GET", "PROFILE.GET", [][]byte{[]byte("user1"), []byte("field")}},
 		{"PROFILE.SET", "PROFILE.SET", [][]byte{[]byte("user1"), []byte("field"), []byte("value")}},
 		{"PROFILE.LIST", "PROFILE.LIST", [][]byte{}},
-		{"ROLEX.CREATE", "ROLEX.CREATE", [][]byte{[]byte("role1"), []byte("perms")}},
-		{"ROLEX.DELETE", "ROLEX.DELETE", [][]byte{[]byte("role1")}},
-		{"ROLEX.ASSIGN", "ROLEX.ASSIGN", [][]byte{[]byte("user1"), []byte("role1")}},
-		{"ROLEX.CHECK", "ROLEX.CHECK", [][]byte{[]byte("user1"), []byte("perm1")}},
-		{"ROLEX.LIST", "ROLEX.LIST", [][]byte{}},
 	}
 
 	for _, tt := range tests {

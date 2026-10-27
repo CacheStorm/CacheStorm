@@ -46,14 +46,8 @@ func RegisterResilienceCommands(router *Router) {
 	router.Register(&CommandDef{Name: "FALLBACK.EXECUTE", Handler: cmdFALLBACKEXECUTE})
 	router.Register(&CommandDef{Name: "FALLBACK.DELETE", Handler: cmdFALLBACKDELETE})
 
-	router.Register(&CommandDef{Name: "OBSERVABILITY.TRACE", Handler: cmdOBSERVABILITYTRACE})
-	router.Register(&CommandDef{Name: "OBSERVABILITY.METRIC", Handler: cmdOBSERVABILITYMETRIC})
-	router.Register(&CommandDef{Name: "OBSERVABILITY.LOG", Handler: cmdOBSERVABILITYLOG})
-	router.Register(&CommandDef{Name: "OBSERVABILITY.SPAN", Handler: cmdOBSERVABILITYSPAN})
-
 	router.Register(&CommandDef{Name: "TELEMETRY.RECORD", Handler: cmdTELEMETRYRECORD})
 	router.Register(&CommandDef{Name: "TELEMETRY.QUERY", Handler: cmdTELEMETRYQUERY})
-	router.Register(&CommandDef{Name: "TELEMETRY.EXPORT", Handler: cmdTELEMETRYEXPORT})
 
 	router.Register(&CommandDef{Name: "DIAGNOSTIC.RUN", Handler: cmdDIAGNOSTICRUN})
 	router.Register(&CommandDef{Name: "DIAGNOSTIC.RESULT", Handler: cmdDIAGNOSTICRESULT})
@@ -65,13 +59,11 @@ func RegisterResilienceCommands(router *Router) {
 	router.Register(&CommandDef{Name: "PROFILEX.LIST", Handler: cmdPROFILEXLIST})
 
 	router.Register(&CommandDef{Name: "HEAP.STATS", Handler: cmdHEAPSTATS})
-	router.Register(&CommandDef{Name: "HEAP.DUMP", Handler: cmdHEAPDUMP})
 	router.Register(&CommandDef{Name: "HEAP.GC", Handler: cmdHEAPGC})
 
 	router.Register(&CommandDef{Name: "MEMORYX.ALLOC", Handler: cmdMEMORYXALLOC})
 	router.Register(&CommandDef{Name: "MEMORYX.FREE", Handler: cmdMEMORYXFREE})
 	router.Register(&CommandDef{Name: "MEMORYX.STATS", Handler: cmdMEMORYXSTATS})
-	router.Register(&CommandDef{Name: "MEMORYX.TRACK", Handler: cmdMEMORYXTRACK})
 
 	router.Register(&CommandDef{Name: "CONPOOL.CREATE", Handler: cmdCONPOOLCREATE})
 	router.Register(&CommandDef{Name: "CONPOOL.GET", Handler: cmdCONPOOLGET})
@@ -135,11 +127,7 @@ func RegisterResilienceCommands(router *Router) {
 
 	router.Register(&CommandDef{Name: "EVENTSOURCING.APPEND", Handler: cmdEVENTSOURCINGAPPEND})
 	router.Register(&CommandDef{Name: "EVENTSOURCING.REPLAY", Handler: cmdEVENTSOURCINGREPLAY})
-	router.Register(&CommandDef{Name: "EVENTSOURCING.SNAPSHOT", Handler: cmdEVENTSOURCINGSNAPSHOT})
 	router.Register(&CommandDef{Name: "EVENTSOURCING.GET", Handler: cmdEVENTSOURCINGGET})
-
-	router.Register(&CommandDef{Name: "COMPACT.MERGE", Handler: cmdCOMPACTMERGE})
-	router.Register(&CommandDef{Name: "COMPACT.STATUS", Handler: cmdCOMPACTSTATUS})
 
 	router.Register(&CommandDef{Name: "BACKPRESSURE.CREATE", Handler: cmdBACKPRESSURECREATE})
 	router.Register(&CommandDef{Name: "BACKPRESSURE.CHECK", Handler: cmdBACKPRESSURECHECK})
@@ -775,43 +763,6 @@ func cmdFALLBACKDELETE(ctx *Context) error {
 	return ctx.WriteInteger(1)
 }
 
-func cmdOBSERVABILITYTRACE(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	_ = ctx.ArgString(0)
-	_ = ctx.ArgString(1)
-	return ctx.WriteOK()
-}
-
-func cmdOBSERVABILITYMETRIC(ctx *Context) error {
-	if ctx.ArgCount() < 3 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	_ = ctx.ArgString(0)
-	_ = ctx.ArgString(1)
-	_ = ctx.ArgString(2)
-	return ctx.WriteOK()
-}
-
-func cmdOBSERVABILITYLOG(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	_ = ctx.ArgString(0)
-	_ = ctx.ArgString(1)
-	return ctx.WriteOK()
-}
-
-func cmdOBSERVABILITYSPAN(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	_ = ctx.ArgString(0)
-	_ = ctx.ArgString(1)
-	return ctx.WriteOK()
-}
-
 var (
 	telemetry   = make(map[string][]*TelemetryPoint)
 	telemetryMu sync.RWMutex
@@ -862,14 +813,6 @@ func cmdTELEMETRYQUERY(ctx *Context) error {
 		}))
 	}
 	return ctx.WriteArray(results)
-}
-
-func cmdTELEMETRYEXPORT(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	_ = ctx.ArgString(0)
-	return ctx.WriteOK()
 }
 
 var (
@@ -1011,10 +954,6 @@ func cmdHEAPSTATS(ctx *Context) error {
 	})
 }
 
-func cmdHEAPDUMP(ctx *Context) error {
-	return ctx.WriteError(errors.New("ERR HEAP.DUMP is not supported; use the HTTP /debug/pprof/heap endpoint"))
-}
-
 func cmdHEAPGC(ctx *Context) error {
 	runtime.GC()
 	return ctx.WriteOK()
@@ -1093,15 +1032,6 @@ func cmdMEMORYXSTATS(ctx *Context) error {
 	}
 	memoryMu.RUnlock()
 	return ctx.WriteArray(reply)
-}
-
-func cmdMEMORYXTRACK(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	_ = ctx.ArgString(0)
-	_ = ctx.ArgString(1)
-	return ctx.WriteOK()
 }
 
 var (
@@ -2070,15 +2000,6 @@ func cmdEVENTSOURCINGREPLAY(ctx *Context) error {
 	return ctx.WriteArray(results)
 }
 
-func cmdEVENTSOURCINGSNAPSHOT(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	_ = ctx.ArgString(0)
-	_ = ctx.ArgString(1)
-	return ctx.WriteOK()
-}
-
 func cmdEVENTSOURCINGGET(ctx *Context) error {
 	if ctx.ArgCount() < 2 {
 		return ctx.WriteError(ErrWrongArgCount)
@@ -2102,25 +2023,6 @@ func cmdEVENTSOURCINGGET(ctx *Context) error {
 		}
 	}
 	return ctx.WriteNull()
-}
-
-func cmdCOMPACTMERGE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	_ = ctx.ArgString(0)
-	return ctx.WriteOK()
-}
-
-func cmdCOMPACTSTATUS(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	_ = ctx.ArgString(0)
-	return ctx.WriteArray([]*resp.Value{
-		resp.BulkString("status"), resp.BulkString("idle"),
-		resp.BulkString("last_compact"), resp.IntegerValue(0),
-	})
 }
 
 var (

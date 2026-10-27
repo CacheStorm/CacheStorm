@@ -83,21 +83,7 @@ func TestMoreCommandsNotifyLowCoverage(t *testing.T) {
 		name string
 		cmd  string
 		args [][]byte
-	}{
-		{"NOTIFY.CREATE basic", "NOTIFY.CREATE", [][]byte{[]byte("channel1"), []byte("email"), []byte("user@example.com")}},
-		{"NOTIFY.CREATE no args", "NOTIFY.CREATE", nil},
-		{"NOTIFY.CREATE missing args", "NOTIFY.CREATE", [][]byte{[]byte("channel1")}},
-		{"NOTIFY.SEND", "NOTIFY.SEND", [][]byte{[]byte("channel1"), []byte("Test message")}},
-		{"NOTIFY.SEND not found", "NOTIFY.SEND", [][]byte{[]byte("notfound"), []byte("Test message")}},
-		{"NOTIFY.SEND no args", "NOTIFY.SEND", nil},
-		{"NOTIFY.LIST empty", "NOTIFY.LIST", nil},
-		{"NOTIFY.LIST with pattern", "NOTIFY.LIST", [][]byte{[]byte("channel*")}},
-		{"NOTIFY.DELETE success", "NOTIFY.DELETE", [][]byte{[]byte("channel1")}},
-		{"NOTIFY.DELETE not found", "NOTIFY.DELETE", [][]byte{[]byte("notfound")}},
-		{"NOTIFY.DELETE no args", "NOTIFY.DELETE", nil},
-		{"NOTIFY.TEMPLATE", "NOTIFY.TEMPLATE", [][]byte{[]byte("template1"), []byte("Hello {{name}}")}},
-		{"NOTIFY.TEMPLATE no args", "NOTIFY.TEMPLATE", nil},
-	}
+	}{}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -208,17 +194,7 @@ func TestMoreCommandsSchemaLowCoverage(t *testing.T) {
 		name string
 		cmd  string
 		args [][]byte
-	}{
-		{"SCHEMA.REGISTER basic", "SCHEMA.REGISTER", [][]byte{[]byte("schema1"), []byte(`{"type":"object"}`)}},
-		{"SCHEMA.REGISTER no args", "SCHEMA.REGISTER", nil},
-		{"SCHEMA.VALIDATE valid", "SCHEMA.VALIDATE", [][]byte{[]byte("schema1"), []byte(`{"key":"value"}`)}},
-		{"SCHEMA.VALIDATE invalid", "SCHEMA.VALIDATE", [][]byte{[]byte("schema1"), []byte(`invalid`)}},
-		{"SCHEMA.VALIDATE not found", "SCHEMA.VALIDATE", [][]byte{[]byte("notfound"), []byte(`{}`)}},
-		{"SCHEMA.VALIDATE no args", "SCHEMA.VALIDATE", nil},
-		{"SCHEMA.DELETE success", "SCHEMA.DELETE", [][]byte{[]byte("schema1")}},
-		{"SCHEMA.DELETE not found", "SCHEMA.DELETE", [][]byte{[]byte("notfound")}},
-		{"SCHEMA.DELETE no args", "SCHEMA.DELETE", nil},
-	}
+	}{}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

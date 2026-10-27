@@ -287,9 +287,6 @@ func TestIntegrationCommandsPROXYFullCoverage(t *testing.T) {
 		{"PROXY.ADD no args", "PROXY.ADD", nil},
 		{"PROXY.REMOVE", "PROXY.REMOVE", [][]byte{[]byte("127.0.0.1:6379")}},
 		{"PROXY.REMOVE no args", "PROXY.REMOVE", nil},
-		{"PROXY.LIST", "PROXY.LIST", nil},
-		{"PROXY.ROUTE", "PROXY.ROUTE", [][]byte{[]byte("key1")}},
-		{"PROXY.ROUTE no args", "PROXY.ROUTE", nil},
 	}
 
 	for _, tt := range tests {

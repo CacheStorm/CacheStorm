@@ -136,8 +136,6 @@ func TestExtraCommandsShardLowCoverage(t *testing.T) {
 	}{
 		{"SHARD.MAP no args", "SHARD.MAP", nil},
 		{"SHARD.MAP key", "SHARD.MAP", [][]byte{[]byte("key1")}},
-		{"SHARD.MOVE no args", "SHARD.MOVE", nil},
-		{"SHARD.MOVE key", "SHARD.MOVE", [][]byte{[]byte("key1"), []byte("shard1")}},
 		{"SHARD.REBALANCE no args", "SHARD.REBALANCE", nil},
 		{"SHARD.LIST empty", "SHARD.LIST", nil},
 		{"SHARD.STATUS empty", "SHARD.STATUS", nil},

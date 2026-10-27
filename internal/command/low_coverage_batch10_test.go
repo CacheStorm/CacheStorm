@@ -15,10 +15,6 @@ func TestLowCoverageBatch10_ShardCommands(t *testing.T) {
 		_ = runHandler(t, router, "SHARD.MAP", [][]byte{[]byte("shard1"), []byte("key1")}, s)
 	})
 
-	t.Run("SHARD.MOVE", func(t *testing.T) {
-		_ = runHandler(t, router, "SHARD.MOVE", [][]byte{[]byte("shard1"), []byte("node1")}, s)
-	})
-
 	t.Run("SHARD.REBALANCE no shard", func(t *testing.T) {
 		_ = runHandler(t, router, "SHARD.REBALANCE", [][]byte{[]byte("shard1")}, s)
 	})
@@ -37,17 +33,10 @@ func TestLowCoverageBatch10_CompressionCommands(t *testing.T) {
 	router := NewRouter()
 	RegisterExtraCommands(router)
 
-	t.Run("COMPRESSION.COMPRESS", func(t *testing.T) {
-		_ = runHandler(t, router, "COMPRESSION.COMPRESS", [][]byte{[]byte("test data")}, s)
-	})
-
 	t.Run("COMPRESSION.DEOMPRESS", func(t *testing.T) {
 		_ = runHandler(t, router, "COMPRESSION.DEOMPRESS", [][]byte{[]byte("compressed:9")}, s)
 	})
 
-	t.Run("COMPRESSION.INFO", func(t *testing.T) {
-		_ = runHandler(t, router, "COMPRESSION.INFO", [][]byte{}, s)
-	})
 }
 
 func TestLowCoverageBatch10_DedupCommands(t *testing.T) {
@@ -300,45 +289,10 @@ func TestLowCoverageBatch10_SchedulerCircuitCommands(t *testing.T) {
 	})
 }
 
-func TestLowCoverageBatch10_ResilienceCommands(t *testing.T) {
-	s := store.NewStore()
-	router := NewRouter()
-	RegisterResilienceCommands(router)
-
-	t.Run("OBSERVABILITY.METRIC", func(t *testing.T) {
-		_ = runHandler(t, router, "OBSERVABILITY.METRIC", [][]byte{
-			[]byte("metric1"),
-			[]byte("counter"),
-			[]byte("1"),
-		}, s)
-	})
-
-	t.Run("OBSERVABILITY.TRACE", func(t *testing.T) {
-		_ = runHandler(t, router, "OBSERVABILITY.TRACE", [][]byte{
-			[]byte("trace1"),
-			[]byte("start"),
-		}, s)
-	})
-
-	t.Run("OBSERVABILITY.SPAN", func(t *testing.T) {
-		_ = runHandler(t, router, "OBSERVABILITY.SPAN", [][]byte{
-			[]byte("span1"),
-			[]byte("trace1"),
-			[]byte("operation"),
-		}, s)
-	})
-}
-
 func TestLowCoverageBatch10_SketchCommands(t *testing.T) {
 	s := store.NewStore()
 	router := NewRouter()
 	RegisterMoreCommands(router)
-
-	t.Run("SKETCH.MERGE", func(t *testing.T) {
-		_ = runHandler(t, router, "SKETCH.CREATE", [][]byte{[]byte("sketch1")}, s)
-		_ = runHandler(t, router, "SKETCH.CREATE", [][]byte{[]byte("sketch2")}, s)
-		_ = runHandler(t, router, "SKETCH.MERGE", [][]byte{[]byte("sketch1"), []byte("sketch2")}, s)
-	})
 
 	t.Run("SKETCH.QUERY", func(t *testing.T) {
 		_ = runHandler(t, router, "SKETCH.CREATE", [][]byte{[]byte("sketch3")}, s)

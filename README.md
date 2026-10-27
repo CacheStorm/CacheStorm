@@ -21,7 +21,7 @@
 
 ---
 
-A high-performance in-memory data store written in Go. **about 1,600 commands**, 256-shard lock-free architecture, built-in HTTP API, enterprise security, and full observability — in a single binary.
+A high-performance in-memory data store written in Go. **about 1,500 commands**, 256-shard lock-free architecture, built-in HTTP API, enterprise security, and full observability — in a single binary.
 
 **Test Coverage: 90-99%** across 18 internal packages (core store: 99.2%). 100% test success rate. Works with any RESP-compatible client.
 
@@ -66,17 +66,16 @@ A high-performance in-memory data store written in Go. **about 1,600 commands**,
 | **Caching** | 50+ | Cache warming, invalidation |
 | **Scheduling** | 40+ | Jobs, cron, timers |
 | **Messaging** | 60+ | Pub/Sub, queues, streams |
-| **Resilience** | 138 | Circuit breakers, rate limiters, retries |
+| **Resilience** | 128 | Circuit breakers, rate limiters, retries |
 | **Data Processing** | 100+ | Aggregation, windowing, joins |
 | **Monitoring** | 80+ | Metrics, alerts, dashboards |
 | **Security** | 40+ | ACL, secrets, encryption |
 | **Workflows** | 50+ | DAGs, state machines |
-| **Machine Learning** | 80+ | Models, embeddings, tensors |
+| **ML data helpers** | 25 | Feature store, datasets, embeddings and tensor storage (no training or prediction) |
 | **And more...** | 400+ | See [Commands Reference](./docs/commands.md) |
 
 ### Performance
-- **High Throughput**: ~20M GET/sec, ~1.3M SET/sec (single thread)
-- **Parallel Performance**: ~106M GET/sec, ~2.2M SET/sec (parallel)
+- **Throughput over TCP**: about 790k SET/s and 880k GET/s pipelined across one million keys, ahead of Redis 7.4 on the same machine with half its median latency (see [Benchmarks](./docs/BENCHMARKS.md) for the method and the single-hot-key case, where Redis is faster)
 - **256-Shard Architecture**: Concurrent access with minimal lock contention
 - **Channel-Based Blocking**: BLPOP/BRPOP/BZPOPMIN/XREADGROUP use event-driven waiting, not polling
 - **Zero Core Dependencies**: Core functionality implemented from scratch
@@ -826,7 +825,7 @@ cachestorm/
 │   ├── batch/             # Batch processing
 │   ├── buffer/            # Buffer management
 │   ├── cluster/           # Cluster library (not wired: cluster mode is unsupported)
-│   ├── command/           # Command handlers (about 1,600 commands)
+│   ├── command/           # Command handlers (about 1,500 commands)
 │   ├── config/            # Configuration management
 │   ├── graph/             # Graph operations
 │   ├── logger/            # Logging (100% coverage)

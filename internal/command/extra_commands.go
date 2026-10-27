@@ -60,14 +60,9 @@ func RegisterExtraCommands(router *Router) {
 	router.Register(&CommandDef{Name: "RAFT.COMMIT", Handler: cmdRAFTCOMMIT})
 
 	router.Register(&CommandDef{Name: "SHARD.MAP", Handler: cmdSHARDMAP})
-	router.Register(&CommandDef{Name: "SHARD.MOVE", Handler: cmdSHARDMOVE})
 	router.Register(&CommandDef{Name: "SHARD.REBALANCE", Handler: cmdSHARDREBALANCE})
 	router.Register(&CommandDef{Name: "SHARD.LIST", Handler: cmdSHARDLIST})
 	router.Register(&CommandDef{Name: "SHARD.STATUS", Handler: cmdSHARDSTATUS})
-
-	router.Register(&CommandDef{Name: "COMPRESSION.COMPRESS", Handler: cmdCOMPRESSIONCOMPRESS})
-	router.Register(&CommandDef{Name: "COMPRESSION.DECOMPRESS", Handler: cmdCOMPRESSIONDECOMPRESS})
-	router.Register(&CommandDef{Name: "COMPRESSION.INFO", Handler: cmdCOMPRESSIONINFO})
 
 	router.Register(&CommandDef{Name: "DEDUP.ADD", Handler: cmdDEDUPADD})
 	router.Register(&CommandDef{Name: "DEDUP.CHECK", Handler: cmdDEDUPCHECK})
@@ -1049,15 +1044,6 @@ func cmdSHARDMAP(ctx *Context) error {
 	return ctx.WriteBulkString(s.Nodes[nodeIdx])
 }
 
-func cmdSHARDMOVE(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	_ = ctx.ArgString(0)
-	_ = ctx.ArgString(1)
-	return ctx.WriteOK()
-}
-
 func cmdSHARDREBALANCE(ctx *Context) error {
 	if ctx.ArgCount() < 1 {
 		return ctx.WriteError(ErrWrongArgCount)
@@ -1098,29 +1084,6 @@ func cmdSHARDSTATUS(ctx *Context) error {
 		resp.BulkString("name"), resp.BulkString(s.Name),
 		resp.BulkString("nodes"), resp.IntegerValue(int64(len(s.Nodes))),
 		resp.BulkString("keys"), resp.IntegerValue(int64(len(s.Keys))),
-	})
-}
-
-func cmdCOMPRESSIONCOMPRESS(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	data := ctx.ArgString(0)
-	return ctx.WriteBulkString(fmt.Sprintf("compressed:%d", len(data)))
-}
-
-func cmdCOMPRESSIONDECOMPRESS(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	data := ctx.ArgString(0)
-	return ctx.WriteBulkString(fmt.Sprintf("decompressed:%s", data))
-}
-
-func cmdCOMPRESSIONINFO(ctx *Context) error {
-	return ctx.WriteArray([]*resp.Value{
-		resp.BulkString("algorithm"), resp.BulkString("lz4"),
-		resp.BulkString("level"), resp.IntegerValue(6),
 	})
 }
 

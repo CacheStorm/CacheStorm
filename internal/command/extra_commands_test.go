@@ -198,8 +198,6 @@ func TestExtraCommandsSHARDFullCoverage(t *testing.T) {
 		args [][]byte
 	}{
 		{"SHARD.MAP", "SHARD.MAP", nil},
-		{"SHARD.MOVE", "SHARD.MOVE", [][]byte{[]byte("1"), []byte("node2")}},
-		{"SHARD.MOVE no args", "SHARD.MOVE", nil},
 		{"SHARD.REBALANCE", "SHARD.REBALANCE", nil},
 		{"SHARD.LIST", "SHARD.LIST", nil},
 		{"SHARD.STATUS", "SHARD.STATUS", [][]byte{[]byte("1")}},
@@ -222,13 +220,7 @@ func TestExtraCommandsCOMPRESSIONFullCoverage(t *testing.T) {
 		name string
 		cmd  string
 		args [][]byte
-	}{
-		{"COMPRESSION.COMPRESS", "COMPRESSION.COMPRESS", [][]byte{[]byte("testdata")}},
-		{"COMPRESSION.COMPRESS no args", "COMPRESSION.COMPRESS", nil},
-		{"COMPRESSION.DECOMPRESS", "COMPRESSION.DECOMPRESS", [][]byte{[]byte("compresseddata")}},
-		{"COMPRESSION.DECOMPRESS no args", "COMPRESSION.DECOMPRESS", nil},
-		{"COMPRESSION.INFO", "COMPRESSION.INFO", nil},
-	}
+	}{}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

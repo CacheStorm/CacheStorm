@@ -315,64 +315,6 @@ func TestIdempotencyCheckIsSafeWhileIdempotencyReplaceWrites(t *testing.T) {
 	wg.Wait()
 }
 
-// TestNotifyTemplateIsSafeWhileNotifyCreateReplaces reads a notification's
-// template while another client republishes it.
-//
-// NOTIFY.TEMPLATE releases the map lock right after the lookup and then reads
-// the template with no lock at all. NOTIFY.CREATE publishes a NEW
-// notification rather than mutating the published one, so the unlocked read
-// touches memory no writer ever writes again. The test pins that conclusion.
-func TestNotifyTemplateIsSafeWhileNotifyCreateReplaces(t *testing.T) {
-	s := store.NewStore()
-	router := NewRouter()
-	RegisterMoreCommands(router)
-
-	const iterations = 2000
-
-	registryCleanup(t, &notificationsMu, notifications, "notify-race")
-	if reply := registryRun(t, router, s, "NOTIFY.CREATE", "notify-race", "type", "template"); reply != "+OK\r\n" {
-		t.Fatalf("NOTIFY.CREATE reply = %q, want +OK", reply)
-	}
-
-	var wg sync.WaitGroup
-	start := make(chan struct{})
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		<-start
-		for i := 0; i < iterations; i++ {
-			ctx, _ := bufCtx("NOTIFY.CREATE", bytesArgs("notify-race", "type", "template"), s)
-			if err := router.Execute(ctx); err != nil {
-				t.Errorf("NOTIFY.CREATE: unexpected error: %v", err)
-				return
-			}
-		}
-	}()
-
-	for r := 0; r < 2; r++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			<-start
-			for i := 0; i < iterations; i++ {
-				ctx, buf := bufCtx("NOTIFY.TEMPLATE", bytesArgs("notify-race"), s)
-				if err := router.Execute(ctx); err != nil {
-					t.Errorf("NOTIFY.TEMPLATE: unexpected error: %v", err)
-					return
-				}
-				if reply := buf.String(); !strings.HasPrefix(reply, "$") {
-					t.Errorf("NOTIFY.TEMPLATE: expected a bulk string reply, got %q", reply)
-					return
-				}
-			}
-		}()
-	}
-
-	close(start)
-	wg.Wait()
-}
-
 // TestTenantGetIsSafeWhileTenantConfigWrites reads a tenant while another
 // client writes its configuration.
 //

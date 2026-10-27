@@ -477,26 +477,6 @@ func TestLowCoverageBatch13_MLCommands(t *testing.T) {
 		_ = runHandler(t, router, "TENSOR.GET", [][]byte{[]byte("tensor2")}, s)
 	})
 
-	t.Run("MODEL.CREATE", func(t *testing.T) {
-		_ = runHandler(t, router, "MODEL.CREATE", [][]byte{
-			[]byte("model1"),
-			[]byte("linear"),
-		}, s)
-	})
-
-	t.Run("MODEL.TRAIN", func(t *testing.T) {
-		_ = runHandler(t, router, "MODEL.CREATE", [][]byte{[]byte("model2"), []byte("linear")}, s)
-		_ = runHandler(t, router, "MODEL.TRAIN", [][]byte{
-			[]byte("model2"),
-			[]byte("x"),
-			[]byte("y"),
-		}, s)
-	})
-
-	t.Run("MODEL.PREDICT", func(t *testing.T) {
-		_ = runHandler(t, router, "MODEL.CREATE", [][]byte{[]byte("model3"), []byte("linear")}, s)
-		_ = runHandler(t, router, "MODEL.PREDICT", [][]byte{[]byte("model3"), []byte("10")}, s)
-	})
 }
 
 func TestLowCoverageBatch13_ActorCommands(t *testing.T) {

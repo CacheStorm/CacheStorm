@@ -2449,64 +2449,6 @@ func TestCmdTHROTTLEDELETE_Success(t *testing.T) {
 // ML COMMANDS
 // =============================================================================
 
-func TestCmdMODELCREATE_Success(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("MODEL.CREATE", bytesArgs("m1", "linear"), s)
-	err := cmdMODELCREATE(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdMODELTRAIN_Success(t *testing.T) {
-	s := store.NewStore()
-	cmdMODELCREATE(discardCtx("MODEL.CREATE", bytesArgs("m-tr", "linear"), s))
-	ctx := discardCtx("MODEL.TRAIN", bytesArgs("m-tr", "data"), s)
-	err := cmdMODELTRAIN(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdMODELPREDICT_Success(t *testing.T) {
-	s := store.NewStore()
-	cmdMODELCREATE(discardCtx("MODEL.CREATE", bytesArgs("m-pred", "linear"), s))
-	ctx := discardCtx("MODEL.PREDICT", bytesArgs("m-pred", "input"), s)
-	err := cmdMODELPREDICT(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdMODELDELETE_Success(t *testing.T) {
-	s := store.NewStore()
-	cmdMODELCREATE(discardCtx("MODEL.CREATE", bytesArgs("m-del", "linear"), s))
-	ctx := discardCtx("MODEL.DELETE", bytesArgs("m-del"), s)
-	err := cmdMODELDELETE(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdMODELLIST_Success(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("MODEL.LIST", bytesArgs(), s)
-	err := cmdMODELLIST(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdMODELSTATUS_Success(t *testing.T) {
-	s := store.NewStore()
-	cmdMODELCREATE(discardCtx("MODEL.CREATE", bytesArgs("m-status", "linear"), s))
-	ctx := discardCtx("MODEL.STATUS", bytesArgs("m-status"), s)
-	err := cmdMODELSTATUS(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
 func TestCmdFEATURESET_Success(t *testing.T) {
 	s := store.NewStore()
 	ctx := discardCtx("FEATURE.SET", bytesArgs("entity1", "feat1", "1.5"), s)
@@ -2540,33 +2482,6 @@ func TestCmdFEATUREINCR_Success(t *testing.T) {
 	s := store.NewStore()
 	ctx := discardCtx("FEATURE.INCR", bytesArgs("e-incr", "f1", "1.0"), s)
 	err := cmdFEATUREINCR(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdSENTIMENTANALYZE_Success(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("SENTIMENT.ANALYZE", bytesArgs("I love this product"), s)
-	err := cmdSENTIMENTANALYZE(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdNLPTOKENIZE_Success(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("NLP.TOKENIZE", bytesArgs("hello world"), s)
-	err := cmdNLPTOKENIZE(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdSIMILARITYCOSINE_Success(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("SIMILARITY.COSINE", bytesArgs("1,0", "0,1"), s)
-	err := cmdSIMILARITYCOSINE(ctx)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

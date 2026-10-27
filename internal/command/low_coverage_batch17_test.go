@@ -218,20 +218,6 @@ func TestLowCoverageBatch17_CborEncoding(t *testing.T) {
 	})
 }
 
-func TestLowCoverageBatch17_SketchMerge(t *testing.T) {
-	s := store.NewStore()
-	router := NewRouter()
-	RegisterMoreCommands(router)
-
-	t.Run("SKETCH.MERGE basic", func(t *testing.T) {
-		_ = runHandler(t, router, "SKETCH.CREATE", [][]byte{[]byte("sketch1"), []byte("1000")}, s)
-		_ = runHandler(t, router, "SKETCH.CREATE", [][]byte{[]byte("sketch2"), []byte("1000")}, s)
-		_ = runHandler(t, router, "SKETCH.UPDATE", [][]byte{[]byte("sketch1"), []byte("item1")}, s)
-		_ = runHandler(t, router, "SKETCH.UPDATE", [][]byte{[]byte("sketch2"), []byte("item2")}, s)
-		_ = runHandler(t, router, "SKETCH.MERGE", [][]byte{[]byte("sketch1"), []byte("sketch2")}, s)
-	})
-}
-
 func TestLowCoverageBatch17_CircuitStats(t *testing.T) {
 	s := store.NewStore()
 	router := NewRouter()

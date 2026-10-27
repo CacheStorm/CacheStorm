@@ -9,10 +9,6 @@ import (
 )
 
 func RegisterAdvancedCommands2(router *Router) {
-	router.Register(&CommandDef{Name: "FILTER.CREATE", Handler: cmdFILTERCREATE})
-	router.Register(&CommandDef{Name: "FILTER.DELETE", Handler: cmdFILTERDELETE})
-	router.Register(&CommandDef{Name: "FILTER.APPLY", Handler: cmdFILTERAPPLY})
-	router.Register(&CommandDef{Name: "FILTER.LIST", Handler: cmdFILTERLIST})
 
 	router.Register(&CommandDef{Name: "TRANSFORM.CREATE", Handler: cmdTRANSFORMCREATE})
 	router.Register(&CommandDef{Name: "TRANSFORM.DELETE", Handler: cmdTRANSFORMDELETE})
@@ -51,11 +47,6 @@ func RegisterAdvancedCommands2(router *Router) {
 	router.Register(&CommandDef{Name: "RULE.DELETE", Handler: cmdRULEDELETE})
 	router.Register(&CommandDef{Name: "RULE.EVAL", Handler: cmdRULEEVAL})
 	router.Register(&CommandDef{Name: "RULE.LIST", Handler: cmdRULELIST})
-
-	router.Register(&CommandDef{Name: "POLICY.CREATE", Handler: cmdPOLICYCREATE})
-	router.Register(&CommandDef{Name: "POLICY.DELETE", Handler: cmdPOLICYDELETE})
-	router.Register(&CommandDef{Name: "POLICY.CHECK", Handler: cmdPOLICYCHECK})
-	router.Register(&CommandDef{Name: "POLICY.LIST", Handler: cmdPOLICYLIST})
 
 	router.Register(&CommandDef{Name: "PERMIT.GRANT", Handler: cmdPERMITGRANT})
 	router.Register(&CommandDef{Name: "PERMIT.REVOKE", Handler: cmdPERMITREVOKE})
@@ -142,26 +133,6 @@ func RegisterAdvancedCommands2(router *Router) {
 	router.Register(&CommandDef{Name: "HOOK.TRIGGER", Handler: cmdHOOKTRIGGER})
 	router.Register(&CommandDef{Name: "HOOK.LIST", Handler: cmdHOOKLIST})
 
-	router.Register(&CommandDef{Name: "MIDDLEWARE.CREATE", Handler: cmdMIDDLEWARECREATE})
-	router.Register(&CommandDef{Name: "MIDDLEWARE.DELETE", Handler: cmdMIDDLEWAREDELETE})
-	router.Register(&CommandDef{Name: "MIDDLEWARE.EXECUTE", Handler: cmdMIDDLEWAREEXECUTE})
-	router.Register(&CommandDef{Name: "MIDDLEWARE.LIST", Handler: cmdMIDDLEWARELIST})
-
-	router.Register(&CommandDef{Name: "INTERCEPTOR.CREATE", Handler: cmdINTERCEPTORCREATE})
-	router.Register(&CommandDef{Name: "INTERCEPTOR.DELETE", Handler: cmdINTERCEPTORDELETE})
-	router.Register(&CommandDef{Name: "INTERCEPTOR.CHECK", Handler: cmdINTERCEPTORCHECK})
-	router.Register(&CommandDef{Name: "INTERCEPTOR.LIST", Handler: cmdINTERCEPTORLIST})
-
-	router.Register(&CommandDef{Name: "GUARD.CREATE", Handler: cmdGUARDCREATE})
-	router.Register(&CommandDef{Name: "GUARD.DELETE", Handler: cmdGUARDDELETE})
-	router.Register(&CommandDef{Name: "GUARD.CHECK", Handler: cmdGUARDCHECK})
-	router.Register(&CommandDef{Name: "GUARD.LIST", Handler: cmdGUARDLIST})
-
-	router.Register(&CommandDef{Name: "PROXY.CREATE", Handler: cmdPROXYCREATE})
-	router.Register(&CommandDef{Name: "PROXY.DELETE", Handler: cmdPROXYDELETE})
-	router.Register(&CommandDef{Name: "PROXY.ROUTE", Handler: cmdPROXYROUTE})
-	router.Register(&CommandDef{Name: "PROXY.LIST", Handler: cmdPROXYLIST})
-
 	router.Register(&CommandDef{Name: "CACHEX.CREATE", Handler: cmdCACHEXCREATE})
 	router.Register(&CommandDef{Name: "CACHEX.DELETE", Handler: cmdCACHEXDELETE})
 	router.Register(&CommandDef{Name: "CACHEX.GET", Handler: cmdCACHEXGET})
@@ -180,20 +151,10 @@ func RegisterAdvancedCommands2(router *Router) {
 	router.Register(&CommandDef{Name: "INDEX.SEARCH", Handler: cmdINDEXSEARCH})
 	router.Register(&CommandDef{Name: "INDEX.LIST", Handler: cmdINDEXLIST})
 
-	router.Register(&CommandDef{Name: "QUERY.CREATE", Handler: cmdQUERYCREATE})
-	router.Register(&CommandDef{Name: "QUERY.DELETE", Handler: cmdQUERYDELETE})
-	router.Register(&CommandDef{Name: "QUERY.EXECUTE", Handler: cmdQUERYEXECUTE})
-	router.Register(&CommandDef{Name: "QUERY.LIST", Handler: cmdQUERYLIST})
-
 	router.Register(&CommandDef{Name: "VIEW.CREATE", Handler: cmdVIEWCREATE})
 	router.Register(&CommandDef{Name: "VIEW.DELETE", Handler: cmdVIEWDELETE})
 	router.Register(&CommandDef{Name: "VIEW.GET", Handler: cmdVIEWGET})
 	router.Register(&CommandDef{Name: "VIEW.LIST", Handler: cmdVIEWLIST})
-
-	router.Register(&CommandDef{Name: "REPORT.CREATE", Handler: cmdREPORTCREATE})
-	router.Register(&CommandDef{Name: "REPORT.DELETE", Handler: cmdREPORTDELETE})
-	router.Register(&CommandDef{Name: "REPORT.GENERATE", Handler: cmdREPORTGENERATE})
-	router.Register(&CommandDef{Name: "REPORT.LIST", Handler: cmdREPORTLIST})
 
 	router.Register(&CommandDef{Name: "AUDITX.LOG", Handler: cmdAUDITXLOG})
 	router.Register(&CommandDef{Name: "AUDITX.GET", Handler: cmdAUDITXGET})
@@ -218,62 +179,6 @@ func RegisterAdvancedCommands2(router *Router) {
 	router.Register(&CommandDef{Name: "PROFILE.SET", Handler: cmdPROFILESET})
 	router.Register(&CommandDef{Name: "PROFILE.LIST", Handler: cmdPROFILELIST})
 
-	router.Register(&CommandDef{Name: "ROLEX.CREATE", Handler: cmdROLEXCREATE})
-	router.Register(&CommandDef{Name: "ROLEX.DELETE", Handler: cmdROLEXDELETE})
-	router.Register(&CommandDef{Name: "ROLEX.ASSIGN", Handler: cmdROLEXASSIGN})
-	router.Register(&CommandDef{Name: "ROLEX.CHECK", Handler: cmdROLEXCHECK})
-	router.Register(&CommandDef{Name: "ROLEX.LIST", Handler: cmdROLEXLIST})
-}
-
-var (
-	filters   = make(map[string]string)
-	filtersMu sync.RWMutex
-)
-
-func cmdFILTERCREATE(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	expr := ctx.ArgString(1)
-	filtersMu.Lock()
-	filters[name] = expr
-	filtersMu.Unlock()
-	return ctx.WriteOK()
-}
-
-func cmdFILTERDELETE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	filtersMu.Lock()
-	defer filtersMu.Unlock()
-	if _, exists := filters[name]; !exists {
-		return ctx.WriteInteger(0)
-	}
-	delete(filters, name)
-	return ctx.WriteInteger(1)
-}
-
-func cmdFILTERAPPLY(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	_ = ctx.ArgString(0)
-	_ = ctx.ArgString(1)
-	return ctx.WriteInteger(1)
-}
-
-func cmdFILTERLIST(ctx *Context) error {
-	filtersMu.RLock()
-	results := make([]*resp.Value, 0)
-	for name := range filters {
-		results = append(results, resp.BulkString(name))
-	}
-	reply := results
-	filtersMu.RUnlock()
-	return ctx.WriteArray(reply)
 }
 
 var (
@@ -744,57 +649,6 @@ func cmdRULELIST(ctx *Context) error {
 	}
 	reply := results
 	rulesMu.RUnlock()
-	return ctx.WriteArray(reply)
-}
-
-var (
-	policies   = make(map[string]string)
-	policiesMu sync.RWMutex
-)
-
-func cmdPOLICYCREATE(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	def := ctx.ArgString(1)
-	policiesMu.Lock()
-	policies[name] = def
-	policiesMu.Unlock()
-	return ctx.WriteOK()
-}
-
-func cmdPOLICYDELETE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	policiesMu.Lock()
-	defer policiesMu.Unlock()
-	if _, exists := policies[name]; !exists {
-		return ctx.WriteInteger(0)
-	}
-	delete(policies, name)
-	return ctx.WriteInteger(1)
-}
-
-func cmdPOLICYCHECK(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	_ = ctx.ArgString(0)
-	_ = ctx.ArgString(1)
-	return ctx.WriteInteger(1)
-}
-
-func cmdPOLICYLIST(ctx *Context) error {
-	policiesMu.RLock()
-	results := make([]*resp.Value, 0)
-	for name := range policies {
-		results = append(results, resp.BulkString(name))
-	}
-	reply := results
-	policiesMu.RUnlock()
 	return ctx.WriteArray(reply)
 }
 
@@ -1991,11 +1845,6 @@ func cmdHOOKLIST(ctx *Context) error {
 	return ctx.WriteArray(reply)
 }
 
-var (
-	middlewares   = make(map[string]*Middleware)
-	middlewaresMu sync.RWMutex
-)
-
 type Middleware struct {
 	ID     string
 	Name   string
@@ -2003,119 +1852,11 @@ type Middleware struct {
 	After  string
 }
 
-func cmdMIDDLEWARECREATE(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	before := ctx.ArgString(1)
-	after := ""
-	if ctx.ArgCount() >= 3 {
-		after = ctx.ArgString(2)
-	}
-	id := generateUUID()
-	middlewaresMu.Lock()
-	middlewares[id] = &Middleware{ID: id, Name: name, Before: before, After: after}
-	middlewaresMu.Unlock()
-	return ctx.WriteBulkString(id)
-}
-
-func cmdMIDDLEWAREDELETE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	id := ctx.ArgString(0)
-	middlewaresMu.Lock()
-	defer middlewaresMu.Unlock()
-	if _, exists := middlewares[id]; !exists {
-		return ctx.WriteInteger(0)
-	}
-	delete(middlewares, id)
-	return ctx.WriteInteger(1)
-}
-
-func cmdMIDDLEWAREEXECUTE(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	_ = ctx.ArgString(0)
-	_ = ctx.ArgString(1)
-	return ctx.WriteOK()
-}
-
-func cmdMIDDLEWARELIST(ctx *Context) error {
-	middlewaresMu.RLock()
-	results := make([]*resp.Value, 0)
-	for id := range middlewares {
-		results = append(results, resp.BulkString(id))
-	}
-	reply := results
-	middlewaresMu.RUnlock()
-	return ctx.WriteArray(reply)
-}
-
-var (
-	interceptors   = make(map[string]*Interceptor)
-	interceptorsMu sync.RWMutex
-)
-
 type Interceptor struct {
 	ID      string
 	Name    string
 	Pattern string
 }
-
-func cmdINTERCEPTORCREATE(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	pattern := ctx.ArgString(1)
-	id := generateUUID()
-	interceptorsMu.Lock()
-	interceptors[id] = &Interceptor{ID: id, Name: name, Pattern: pattern}
-	interceptorsMu.Unlock()
-	return ctx.WriteBulkString(id)
-}
-
-func cmdINTERCEPTORDELETE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	id := ctx.ArgString(0)
-	interceptorsMu.Lock()
-	defer interceptorsMu.Unlock()
-	if _, exists := interceptors[id]; !exists {
-		return ctx.WriteInteger(0)
-	}
-	delete(interceptors, id)
-	return ctx.WriteInteger(1)
-}
-
-func cmdINTERCEPTORCHECK(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	_ = ctx.ArgString(0)
-	_ = ctx.ArgString(1)
-	return ctx.WriteInteger(1)
-}
-
-func cmdINTERCEPTORLIST(ctx *Context) error {
-	interceptorsMu.RLock()
-	results := make([]*resp.Value, 0)
-	for id := range interceptors {
-		results = append(results, resp.BulkString(id))
-	}
-	reply := results
-	interceptorsMu.RUnlock()
-	return ctx.WriteArray(reply)
-}
-
-var (
-	guards   = make(map[string]*Guard)
-	guardsMu sync.RWMutex
-)
 
 type Guard struct {
 	ID        string
@@ -2123,108 +1864,10 @@ type Guard struct {
 	Condition string
 }
 
-func cmdGUARDCREATE(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	condition := ctx.ArgString(1)
-	id := generateUUID()
-	guardsMu.Lock()
-	guards[id] = &Guard{ID: id, Name: name, Condition: condition}
-	guardsMu.Unlock()
-	return ctx.WriteBulkString(id)
-}
-
-func cmdGUARDDELETE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	id := ctx.ArgString(0)
-	guardsMu.Lock()
-	defer guardsMu.Unlock()
-	if _, exists := guards[id]; !exists {
-		return ctx.WriteInteger(0)
-	}
-	delete(guards, id)
-	return ctx.WriteInteger(1)
-}
-
-func cmdGUARDCHECK(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	_ = ctx.ArgString(0)
-	return ctx.WriteInteger(1)
-}
-
-func cmdGUARDLIST(ctx *Context) error {
-	guardsMu.RLock()
-	results := make([]*resp.Value, 0)
-	for id := range guards {
-		results = append(results, resp.BulkString(id))
-	}
-	reply := results
-	guardsMu.RUnlock()
-	return ctx.WriteArray(reply)
-}
-
-var (
-	proxies   = make(map[string]*Proxy)
-	proxiesMu sync.RWMutex
-)
-
 type Proxy struct {
 	ID     string
 	Name   string
 	Target string
-}
-
-func cmdPROXYCREATE(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	target := ctx.ArgString(1)
-	id := generateUUID()
-	proxiesMu.Lock()
-	proxies[id] = &Proxy{ID: id, Name: name, Target: target}
-	proxiesMu.Unlock()
-	return ctx.WriteBulkString(id)
-}
-
-func cmdPROXYDELETE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	id := ctx.ArgString(0)
-	proxiesMu.Lock()
-	defer proxiesMu.Unlock()
-	if _, exists := proxies[id]; !exists {
-		return ctx.WriteInteger(0)
-	}
-	delete(proxies, id)
-	return ctx.WriteInteger(1)
-}
-
-func cmdPROXYROUTE(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	_ = ctx.ArgString(0)
-	_ = ctx.ArgString(1)
-	return ctx.WriteOK()
-}
-
-func cmdPROXYLIST(ctx *Context) error {
-	proxiesMu.RLock()
-	results := make([]*resp.Value, 0)
-	for id := range proxies {
-		results = append(results, resp.BulkString(id))
-	}
-	reply := results
-	proxiesMu.RUnlock()
-	return ctx.WriteArray(reply)
 }
 
 var (
@@ -2474,56 +2117,6 @@ func cmdINDEXLIST(ctx *Context) error {
 }
 
 var (
-	queries   = make(map[string]string)
-	queriesMu sync.RWMutex
-)
-
-func cmdQUERYCREATE(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	query := ctx.ArgString(1)
-	queriesMu.Lock()
-	queries[name] = query
-	queriesMu.Unlock()
-	return ctx.WriteOK()
-}
-
-func cmdQUERYDELETE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	queriesMu.Lock()
-	defer queriesMu.Unlock()
-	if _, exists := queries[name]; !exists {
-		return ctx.WriteInteger(0)
-	}
-	delete(queries, name)
-	return ctx.WriteInteger(1)
-}
-
-func cmdQUERYEXECUTE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	_ = ctx.ArgString(0)
-	return ctx.WriteArray([]*resp.Value{})
-}
-
-func cmdQUERYLIST(ctx *Context) error {
-	queriesMu.RLock()
-	results := make([]*resp.Value, 0)
-	for name := range queries {
-		results = append(results, resp.BulkString(name))
-	}
-	reply := results
-	queriesMu.RUnlock()
-	return ctx.WriteArray(reply)
-}
-
-var (
 	views   = make(map[string]string)
 	viewsMu sync.RWMutex
 )
@@ -2579,61 +2172,10 @@ func cmdVIEWLIST(ctx *Context) error {
 	return ctx.WriteArray(reply)
 }
 
-var (
-	reports   = make(map[string]*Report)
-	reportsMu sync.RWMutex
-)
-
 type Report struct {
 	ID       string
 	Name     string
 	Template string
-}
-
-func cmdREPORTCREATE(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	template := ctx.ArgString(1)
-	id := generateUUID()
-	reportsMu.Lock()
-	reports[id] = &Report{ID: id, Name: name, Template: template}
-	reportsMu.Unlock()
-	return ctx.WriteBulkString(id)
-}
-
-func cmdREPORTDELETE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	id := ctx.ArgString(0)
-	reportsMu.Lock()
-	defer reportsMu.Unlock()
-	if _, exists := reports[id]; !exists {
-		return ctx.WriteInteger(0)
-	}
-	delete(reports, id)
-	return ctx.WriteInteger(1)
-}
-
-func cmdREPORTGENERATE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	_ = ctx.ArgString(0)
-	return ctx.WriteOK()
-}
-
-func cmdREPORTLIST(ctx *Context) error {
-	reportsMu.RLock()
-	results := make([]*resp.Value, 0)
-	for id := range reports {
-		results = append(results, resp.BulkString(id))
-	}
-	reply := results
-	reportsMu.RUnlock()
-	return ctx.WriteArray(reply)
 }
 
 var (
@@ -2989,70 +2531,8 @@ func cmdPROFILELIST(ctx *Context) error {
 	return ctx.WriteArray(reply)
 }
 
-var (
-	rolesX    = make(map[string]*RoleX)
-	rolesXMux sync.RWMutex
-)
-
 type RoleX struct {
 	ID          string
 	Name        string
 	Permissions []string
-}
-
-func cmdROLEXCREATE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	id := generateUUID()
-	rolesXMux.Lock()
-	rolesX[id] = &RoleX{ID: id, Name: name, Permissions: make([]string, 0)}
-	rolesXMux.Unlock()
-	return ctx.WriteBulkString(id)
-}
-
-func cmdROLEXDELETE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	id := ctx.ArgString(0)
-	rolesXMux.Lock()
-	defer rolesXMux.Unlock()
-	if _, exists := rolesX[id]; !exists {
-		return ctx.WriteInteger(0)
-	}
-	delete(rolesX, id)
-	return ctx.WriteInteger(1)
-}
-
-func cmdROLEXASSIGN(ctx *Context) error {
-	if ctx.ArgCount() < 3 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	_ = ctx.ArgString(0)
-	_ = ctx.ArgString(1)
-	_ = ctx.ArgString(2)
-	return ctx.WriteOK()
-}
-
-func cmdROLEXCHECK(ctx *Context) error {
-	if ctx.ArgCount() < 3 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	_ = ctx.ArgString(0)
-	_ = ctx.ArgString(1)
-	_ = ctx.ArgString(2)
-	return ctx.WriteInteger(1)
-}
-
-func cmdROLEXLIST(ctx *Context) error {
-	rolesXMux.RLock()
-	results := make([]*resp.Value, 0)
-	for id := range rolesX {
-		results = append(results, resp.BulkString(id))
-	}
-	reply := results
-	rolesXMux.RUnlock()
-	return ctx.WriteArray(reply)
 }

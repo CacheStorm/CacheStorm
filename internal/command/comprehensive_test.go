@@ -64,8 +64,8 @@ func TestAllCommandsExist(t *testing.T) {
 	count := len(router.Commands())
 	t.Logf("Total registered commands: %d", count)
 
-	if count < 1500 {
-		t.Errorf("Expected at least 1500 commands, got %d", count)
+	if count < 1450 {
+		t.Errorf("Expected at least 1450 commands, got %d", count)
 	}
 
 	_ = s
@@ -574,12 +574,8 @@ func TestMLCommandsComprehensive(t *testing.T) {
 		cmd  string
 		args [][]byte
 	}{
-		{"MODEL.CREATE", "MODEL.CREATE", [][]byte{[]byte("model1"), []byte("classifier")}},
-		{"MODEL.STATUS", "MODEL.STATUS", [][]byte{[]byte("model1")}},
 		{"FEATURE.SET", "FEATURE.SET", [][]byte{[]byte("entity1"), []byte("f1"), []byte("1.5")}},
 		{"FEATURE.GET", "FEATURE.GET", [][]byte{[]byte("entity1"), []byte("f1")}},
-		{"CLASSIFIER.CREATE", "CLASSIFIER.CREATE", [][]byte{[]byte("clf"), []byte("spam"), []byte("ham")}},
-		{"REGRESSOR.CREATE", "REGRESSOR.CREATE", [][]byte{[]byte("reg")}},
 		{"DATASET.CREATE", "DATASET.CREATE", [][]byte{[]byte("data1")}},
 		{"EMBEDDING.CREATE", "EMBEDDING.CREATE", [][]byte{[]byte("emb1"), []byte("0.1"), []byte("0.2"), []byte("0.3")}},
 	}

@@ -1,6 +1,6 @@
 # CacheStorm Commands Reference
 
-CacheStorm registers about 1,600 commands across 50+ modules: the Redis 7.4 command set plus CacheStorm extensions. Compatibility with Redis is measured by the differential harness in `tests/compat`.
+CacheStorm registers about 1,500 commands across 50+ modules: the Redis 7.4 command set plus CacheStorm extensions. Compatibility with Redis is measured by the differential harness in `tests/compat`.
 
 Every command name in this reference is verified against the registered command
 set: 1,596 documented, 0 phantoms, 0 missing.
@@ -567,12 +567,6 @@ PARTITIONX.REBALANCE name arg2
 ### Model Commands
 
 ```
-MODEL.CREATE name type [PARAMS param value [param value ...]]
-MODEL.TRAIN name dataKey [PARAMS param value ...]
-MODEL.PREDICT name inputKey
-MODEL.DELETE name
-MODEL.LIST [PATTERN pattern]
-MODEL.STATUS name
 ```
 
 ### Feature Commands
@@ -582,7 +576,6 @@ FEATURE.SET key field value
 FEATURE.GET key field
 FEATURE.DEL key field
 FEATURE.INCR entity key delta
-FEATURE.NORMALIZE entity method
 FEATURE.VECTOR key [FIELDS field [field ...]]
 ```
 
@@ -591,8 +584,6 @@ FEATURE.VECTOR key [FIELDS field [field ...]]
 ```
 EMBEDDING.CREATE name dimensions [METRIC metric]
 EMBEDDING.GET id
-EMBEDDING.SEARCH name vector [K k] [THRESHOLD threshold]
-EMBEDDING.SIMILAR name key [K k]
 EMBEDDING.DELETE id
 ```
 
@@ -602,7 +593,6 @@ EMBEDDING.DELETE id
 TENSOR.CREATE name dim dim [dim ...] [| value ...]
 TENSOR.GET name
 TENSOR.ADD name1 name2 [OUT out]
-TENSOR.MATMUL name1 name2 [OUT out]
 TENSOR.RESHAPE name shape
 TENSOR.DELETE name
 ```
@@ -1585,18 +1575,6 @@ ALERT.TRIGGER
 ```
 
 ---
-## Anomaly Commands
-
-`ANOMALY.*` command family (4 commands).
-
-```
-ANOMALY.CREATE
-ANOMALY.DELETE
-ANOMALY.DETECT
-ANOMALY.LEARN
-```
-
----
 ## Anti entropy Commands
 
 `ANTI_ENTROPY.*` command family (4 commands).
@@ -1824,41 +1802,16 @@ CHAINX.LIST
 ---
 ## Circuitx Commands
 
-`CIRCUITX.*` command family (1 commands).
+`CIRCUITX.*` command family (1 command).
 
 ```
 CIRCUITX.HALFOPEN
 ```
 
 ---
-## Classifier Commands
-
-`CLASSIFIER.*` command family (4 commands).
-
-```
-CLASSIFIER.CREATE
-CLASSIFIER.DELETE
-CLASSIFIER.PREDICT
-CLASSIFIER.TRAIN
-```
-
----
-## Clustering Commands
-
-`CLUSTER.*` command family (5 commands).
-
-```
-CLUSTER.CENTROIDS
-CLUSTER.CREATE
-CLUSTER.DELETE
-CLUSTER.FIT
-CLUSTER.PREDICT
-```
-
----
 ## Cms Commands
 
-`CMS.*` command family (1 commands).
+`CMS.*` command family (1 command).
 
 ```
 CMS.INIT
@@ -1874,27 +1827,6 @@ COALESCE.ADD
 COALESCE.CLEAR
 COALESCE.CREATE
 COALESCE.GET
-```
-
----
-## Compact Commands
-
-`COMPACT.*` command family (2 commands).
-
-```
-COMPACT.MERGE
-COMPACT.STATUS
-```
-
----
-## Compression Commands
-
-`COMPRESSION.*` command family (3 commands).
-
-```
-COMPRESSION.COMPRESS
-COMPRESSION.DECOMPRESS
-COMPRESSION.INFO
 ```
 
 ---
@@ -2116,27 +2048,14 @@ EVAL.TEMPLATE
 ```
 
 ---
-## Evaluator Commands
-
-`EVALUATOR.*` command family (4 commands).
-
-```
-EVALUATOR.CREATE
-EVALUATOR.DELETE
-EVALUATOR.METRICS
-EVALUATOR.RUN
-```
-
----
 ## Event Sourcing Commands
 
-`EVENTSOURCING.*` command family (4 commands).
+`EVENTSOURCING.*` command family (3 commands).
 
 ```
 EVENTSOURCING.APPEND
 EVENTSOURCING.GET
 EVENTSOURCING.REPLAY
-EVENTSOURCING.SNAPSHOT
 ```
 
 ---
@@ -2175,18 +2094,6 @@ EXPERIMENT.TRACK
 FALLBACK.CREATE
 FALLBACK.DELETE
 FALLBACK.EXECUTE
-```
-
----
-## Filter Commands
-
-`FILTER.*` command family (4 commands).
-
-```
-FILTER.APPLY
-FILTER.CREATE
-FILTER.DELETE
-FILTER.LIST
 ```
 
 ---
@@ -2293,18 +2200,6 @@ GRID.SET
 ```
 
 ---
-## Guard Commands
-
-`GUARD.*` command family (4 commands).
-
-```
-GUARD.CHECK
-GUARD.CREATE
-GUARD.DELETE
-GUARD.LIST
-```
-
----
 ## Health Commands
 
 `HEALTH.*` command family (3 commands).
@@ -2332,11 +2227,10 @@ HEALTHX.UNREGISTER
 ---
 ## Heap Commands
 
-`HEAP.*` command family (8 commands).
+`HEAP.*` command family (7 commands).
 
 ```
 HEAP.DELETE
-HEAP.DUMP
 HEAP.GC
 HEAP.PEEK
 HEAP.POP
@@ -2374,12 +2268,11 @@ HOOK.TRIGGER
 ---
 ## Hyperparam Commands
 
-`HYPERPARAM.*` command family (4 commands).
+`HYPERPARAM.*` command family (3 commands).
 
 ```
 HYPERPARAM.DELETE
 HYPERPARAM.GET
-HYPERPARAM.SEARCH
 HYPERPARAM.SET
 ```
 
@@ -2410,18 +2303,6 @@ INDEX.SEARCH
 ```
 
 ---
-## Interceptor Commands
-
-`INTERCEPTOR.*` command family (4 commands).
-
-```
-INTERCEPTOR.CHECK
-INTERCEPTOR.CREATE
-INTERCEPTOR.DELETE
-INTERCEPTOR.LIST
-```
-
----
 ## Jobx Commands
 
 `JOBX.*` command family (5 commands).
@@ -2437,7 +2318,7 @@ JOBX.STATUS
 ---
 ## Json Commands
 
-`JSON.*` command family (1 commands).
+`JSON.*` command family (1 command).
 
 ```
 JSON.MSET
@@ -2562,13 +2443,12 @@ MEMO.WARM
 ---
 ## Memory Management Commands
 
-`MEMORYX.*` command family (4 commands).
+`MEMORYX.*` command family (3 commands).
 
 ```
 MEMORYX.ALLOC
 MEMORYX.FREE
 MEMORYX.STATS
-MEMORYX.TRACK
 ```
 
 ---
@@ -2609,65 +2489,15 @@ METRICS.RESET
 ```
 
 ---
-## Middleware Commands
-
-`MIDDLEWARE.*` command family (4 commands).
-
-```
-MIDDLEWARE.CREATE
-MIDDLEWARE.DELETE
-MIDDLEWARE.EXECUTE
-MIDDLEWARE.LIST
-```
-
----
 ## ML Experimentation Commands
 
-`MLXPERIMENT.*` command family (5 commands).
+`MLXPERIMENT.*` command family (4 commands).
 
 ```
-MLXPERIMENT.COMPARE
 MLXPERIMENT.CREATE
 MLXPERIMENT.DELETE
 MLXPERIMENT.LOG
 MLXPERIMENT.METRICS
-```
-
----
-## Nlp Commands
-
-`NLP.*` command family (4 commands).
-
-```
-NLP.ENTITIES
-NLP.KEYWORDS
-NLP.SUMMARIZE
-NLP.TOKENIZE
-```
-
----
-## Notify Commands
-
-`NOTIFY.*` command family (5 commands).
-
-```
-NOTIFY.CREATE
-NOTIFY.DELETE
-NOTIFY.LIST
-NOTIFY.SEND
-NOTIFY.TEMPLATE
-```
-
----
-## Observability Commands
-
-`OBSERVABILITY.*` command family (4 commands).
-
-```
-OBSERVABILITY.LOG
-OBSERVABILITY.METRIC
-OBSERVABILITY.SPAN
-OBSERVABILITY.TRACE
 ```
 
 ---
@@ -2724,18 +2554,6 @@ PIPELINE.STATUS
 ```
 
 ---
-## Pipelineml Commands
-
-`PIPELINEML.*` command family (4 commands).
-
-```
-PIPELINEML.ADD
-PIPELINEML.CREATE
-PIPELINEML.DELETE
-PIPELINEML.RUN
-```
-
----
 ## Pipelinex Commands
 
 `PIPELINEX.*` command family (4 commands).
@@ -2758,18 +2576,6 @@ PLUGIN.INFO
 PLUGIN.LIST
 PLUGIN.LOAD
 PLUGIN.UNLOAD
-```
-
----
-## Policy Commands
-
-`POLICY.*` command family (4 commands).
-
-```
-POLICY.CHECK
-POLICY.CREATE
-POLICY.DELETE
-POLICY.LIST
 ```
 
 ---
@@ -2816,7 +2622,7 @@ PROBE.RUN
 ---
 ## Profilex Commands
 
-`PROFILEX.*` command family (1 commands).
+`PROFILEX.*` command family (1 command).
 
 ```
 PROFILEX.LIST
@@ -2833,30 +2639,6 @@ PROMISE.CREATE
 PROMISE.REJECT
 PROMISE.RESOLVE
 PROMISE.STATUS
-```
-
----
-## Proxy Commands
-
-`PROXY.*` command family (4 commands).
-
-```
-PROXY.CREATE
-PROXY.DELETE
-PROXY.LIST
-PROXY.ROUTE
-```
-
----
-## Query Engine Commands
-
-`QUERY.*` command family (4 commands).
-
-```
-QUERY.CREATE
-QUERY.DELETE
-QUERY.EXECUTE
-QUERY.LIST
 ```
 
 ---
@@ -2924,18 +2706,6 @@ REACTIVE.WATCH
 ```
 
 ---
-## Recommend Commands
-
-`RECOMMEND.*` command family (4 commands).
-
-```
-RECOMMEND.CREATE
-RECOMMEND.DELETE
-RECOMMEND.GET
-RECOMMEND.TRAIN
-```
-
----
 ## Record Commands
 
 `RECORD.*` command family (4 commands).
@@ -2945,18 +2715,6 @@ RECORD.ADD
 RECORD.CREATE
 RECORD.DELETE
 RECORD.GET
-```
-
----
-## Regressor Commands
-
-`REGRESSOR.*` command family (4 commands).
-
-```
-REGRESSOR.CREATE
-REGRESSOR.DELETE
-REGRESSOR.PREDICT
-REGRESSOR.TRAIN
 ```
 
 ---
@@ -2997,18 +2755,6 @@ REPLAYX.STOP
 ```
 
 ---
-## Report Commands
-
-`REPORT.*` command family (4 commands).
-
-```
-REPORT.CREATE
-REPORT.DELETE
-REPORT.GENERATE
-REPORT.LIST
-```
-
----
 ## Ring Buffer Commands
 
 `RINGBUFFER.*` command family (5 commands).
@@ -3019,19 +2765,6 @@ RINGBUFFER.DELETE
 RINGBUFFER.READ
 RINGBUFFER.SIZE
 RINGBUFFER.WRITE
-```
-
----
-## Rolex Commands
-
-`ROLEX.*` command family (5 commands).
-
-```
-ROLEX.ASSIGN
-ROLEX.CHECK
-ROLEX.CREATE
-ROLEX.DELETE
-ROLEX.LIST
 ```
 
 ---
@@ -3121,18 +2854,6 @@ SANITIZE.STRING
 ```
 
 ---
-## Schemas Commands
-
-`SCHEMA.*` command family (4 commands).
-
-```
-SCHEMA.DELETE
-SCHEMA.LIST
-SCHEMA.REGISTER
-SCHEMA.VALIDATE
-```
-
----
 ## Semaphores Commands
 
 `SEMAPHOREX.*` command family (4 commands).
@@ -3142,16 +2863,6 @@ SEMAPHOREX.ACQUIRE
 SEMAPHOREX.CREATE
 SEMAPHOREX.RELEASE
 SEMAPHOREX.STATUS
-```
-
----
-## Sentiment Commands
-
-`SENTIMENT.*` command family (2 commands).
-
-```
-SENTIMENT.ANALYZE
-SENTIMENT.BATCH
 ```
 
 ---
@@ -3183,12 +2894,11 @@ SESSIONX.SET
 ---
 ## Sharding Commands
 
-`SHARD.*` command family (5 commands).
+`SHARD.*` command family (4 commands).
 
 ```
 SHARD.LIST
 SHARD.MAP
-SHARD.MOVE
 SHARD.REBALANCE
 SHARD.STATUS
 ```
@@ -3205,26 +2915,13 @@ SHUFFLE.GET
 ```
 
 ---
-## Similarity Commands
-
-`SIMILARITY.*` command family (4 commands).
-
-```
-SIMILARITY.COSINE
-SIMILARITY.DOTPRODUCT
-SIMILARITY.EUCLIDEAN
-SIMILARITY.JACCARD
-```
-
----
 ## Sketch Commands
 
-`SKETCH.*` command family (5 commands).
+`SKETCH.*` command family (4 commands).
 
 ```
 SKETCH.CREATE
 SKETCH.DELETE
-SKETCH.MERGE
 SKETCH.QUERY
 SKETCH.UPDATE
 ```
@@ -3411,10 +3108,9 @@ TASKX.RUN
 ---
 ## Telemetry Commands
 
-`TELEMETRY.*` command family (3 commands).
+`TELEMETRY.*` command family (2 commands).
 
 ```
-TELEMETRY.EXPORT
 TELEMETRY.QUERY
 TELEMETRY.RECORD
 ```
@@ -3465,18 +3161,6 @@ THROTTLE.SET
 THROTTLEX.CHECK
 THROTTLEX.CREATE
 THROTTLEX.STATUS
-```
-
----
-## Time Forecasting Commands
-
-`TIMEFORECAST.*` command family (4 commands).
-
-```
-TIMEFORECAST.CREATE
-TIMEFORECAST.DELETE
-TIMEFORECAST.PREDICT
-TIMEFORECAST.TRAIN
 ```
 
 ---

@@ -988,22 +988,6 @@ func TestCmdSHARDMAP_WrongArgs(t *testing.T) {
 	}
 }
 
-func TestCmdSHARDMOVE_Success(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("SHARD.MOVE", bytesArgs("shard1", "target"), s)
-	if err := cmdSHARDMOVE(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdSHARDMOVE_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("SHARD.MOVE", bytesArgs("x"), s)
-	if err := cmdSHARDMOVE(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
 func TestCmdSHARDREBALANCE_WrongArgs(t *testing.T) {
 	s := store.NewStore()
 	ctx := discardCtx("SHARD.REBALANCE", bytesArgs(), s)
@@ -1029,46 +1013,6 @@ func TestCmdSHARDSTATUS_WrongArgs(t *testing.T) {
 }
 
 // --- COMPRESSION ---
-
-func TestCmdCOMPRESSIONCOMPRESS_Success(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("COMPRESSION.COMPRESS", bytesArgs("hello world"), s)
-	if err := cmdCOMPRESSIONCOMPRESS(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdCOMPRESSIONCOMPRESS_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("COMPRESSION.COMPRESS", bytesArgs(), s)
-	if err := cmdCOMPRESSIONCOMPRESS(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdCOMPRESSIONDECOMPRESS_Success(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("COMPRESSION.DECOMPRESS", bytesArgs("compressed:11"), s)
-	if err := cmdCOMPRESSIONDECOMPRESS(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdCOMPRESSIONDECOMPRESS_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("COMPRESSION.DECOMPRESS", bytesArgs(), s)
-	if err := cmdCOMPRESSIONDECOMPRESS(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdCOMPRESSIONINFO_Success(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("COMPRESSION.INFO", bytesArgs(), s)
-	if err := cmdCOMPRESSIONINFO(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
 
 // --- DEDUP ---
 
@@ -2901,63 +2845,6 @@ func TestCmdROLLOUTLIST_Success(t *testing.T) {
 
 // --- SCHEMA ---
 
-func TestCmdSCHEMAREGISTER_Success(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("SCHEMA.REGISTER", bytesArgs("sch1", "{\"type\":\"object\"}"), s)
-	if err := cmdSCHEMAREGISTER(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdSCHEMAREGISTER_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("SCHEMA.REGISTER", bytesArgs("sch1"), s)
-	if err := cmdSCHEMAREGISTER(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdSCHEMAVALIDATE_Success(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("SCHEMA.VALIDATE", bytesArgs("sch1", "{\"key\":\"val\"}"), s)
-	if err := cmdSCHEMAVALIDATE(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdSCHEMAVALIDATE_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("SCHEMA.VALIDATE", bytesArgs("sch1"), s)
-	if err := cmdSCHEMAVALIDATE(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdSCHEMADELETE_Success(t *testing.T) {
-	s := store.NewStore()
-	_ = cmdSCHEMAREGISTER(discardCtx("", bytesArgs("schdel", "{}"), s))
-	ctx := discardCtx("SCHEMA.DELETE", bytesArgs("schdel"), s)
-	if err := cmdSCHEMADELETE(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdSCHEMADELETE_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("SCHEMA.DELETE", bytesArgs(), s)
-	if err := cmdSCHEMADELETE(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdSCHEMALIST_Success(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("SCHEMA.LIST", bytesArgs(), s)
-	if err := cmdSCHEMALIST(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
 // --- PIPELINE ---
 
 func TestCmdPIPELINECREATE_Success(t *testing.T) {
@@ -3053,80 +2940,6 @@ func TestCmdPIPELINELIST_Success(t *testing.T) {
 }
 
 // --- NOTIFY ---
-
-func TestCmdNOTIFYCREATE_Success(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("NOTIFY.CREATE", bytesArgs("notif1", "email", "Hello {{name}}"), s)
-	if err := cmdNOTIFYCREATE(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdNOTIFYCREATE_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("NOTIFY.CREATE", bytesArgs("notif1", "email"), s)
-	if err := cmdNOTIFYCREATE(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdNOTIFYSEND_Success(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("NOTIFY.SEND", bytesArgs("notif1", "recipient"), s)
-	if err := cmdNOTIFYSEND(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdNOTIFYSEND_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("NOTIFY.SEND", bytesArgs("x"), s)
-	if err := cmdNOTIFYSEND(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdNOTIFYLIST_Success(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("NOTIFY.LIST", bytesArgs(), s)
-	if err := cmdNOTIFYLIST(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdNOTIFYDELETE_Success(t *testing.T) {
-	s := store.NewStore()
-	_ = cmdNOTIFYCREATE(discardCtx("", bytesArgs("notifdel", "email", "tmpl"), s))
-	ctx := discardCtx("NOTIFY.DELETE", bytesArgs("notifdel"), s)
-	if err := cmdNOTIFYDELETE(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdNOTIFYDELETE_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("NOTIFY.DELETE", bytesArgs(), s)
-	if err := cmdNOTIFYDELETE(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdNOTIFYTEMPLATE_Success(t *testing.T) {
-	s := store.NewStore()
-	_ = cmdNOTIFYCREATE(discardCtx("", bytesArgs("notiftmpl", "email", "Hello"), s))
-	ctx := discardCtx("NOTIFY.TEMPLATE", bytesArgs("notiftmpl"), s)
-	if err := cmdNOTIFYTEMPLATE(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdNOTIFYTEMPLATE_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("NOTIFY.TEMPLATE", bytesArgs(), s)
-	if err := cmdNOTIFYTEMPLATE(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
 
 // --- ALERT ---
 
@@ -4196,22 +4009,6 @@ func TestCmdSKETCHQUERY_WrongArgs(t *testing.T) {
 	s := store.NewStore()
 	ctx := discardCtx("SKETCH.QUERY", bytesArgs("x"), s)
 	if err := cmdSKETCHQUERY(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdSKETCHMERGE_Success(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("SKETCH.MERGE", bytesArgs("dest", "src1", "src2"), s)
-	if err := cmdSKETCHMERGE(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdSKETCHMERGE_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("SKETCH.MERGE", bytesArgs("dest", "src1"), s)
-	if err := cmdSKETCHMERGE(ctx); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

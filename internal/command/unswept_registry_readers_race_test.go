@@ -27,15 +27,6 @@ func TestUnsweptRegistryReadersAreSynchronised(t *testing.T) {
 		{
 			register: RegisterMLCommands,
 			registryFamilyCase: registryFamilyCase{
-				name:   "model",
-				setup:  [][]string{{"MODEL.CREATE", "k", "regression"}},
-				writer: [][]string{{"MODEL.TRAIN", "k", "data"}},
-				reader: [][]string{{"MODEL.STATUS", "k"}},
-			},
-		},
-		{
-			register: RegisterMLCommands,
-			registryFamilyCase: registryFamilyCase{
 				name:   "tensor",
 				setup:  [][]string{{"TENSOR.CREATE", "k", "2", "3", "|", "f32"}, {"TENSOR.CREATE", "other", "2", "3", "|", "f32"}},
 				writer: [][]string{{"TENSOR.ADD", "k", "other"}},
@@ -45,55 +36,10 @@ func TestUnsweptRegistryReadersAreSynchronised(t *testing.T) {
 		{
 			register: RegisterMLCommands,
 			registryFamilyCase: registryFamilyCase{
-				name:   "classifier",
-				setup:  [][]string{{"CLASSIFIER.CREATE", "k", "a", "b"}},
-				writer: [][]string{{"CLASSIFIER.TRAIN", "k"}},
-				reader: [][]string{{"CLASSIFIER.TRAIN", "k"}},
-			},
-		},
-		{
-			register: RegisterMLCommands,
-			registryFamilyCase: registryFamilyCase{
-				name:   "regressor",
-				setup:  [][]string{{"REGRESSOR.CREATE", "k"}},
-				writer: [][]string{{"REGRESSOR.TRAIN", "k"}},
-				reader: [][]string{{"REGRESSOR.TRAIN", "k"}},
-			},
-		},
-		{
-			register: RegisterMLCommands,
-			registryFamilyCase: registryFamilyCase{
-				name:   "cluster",
-				setup:  [][]string{{"CLUSTER.CREATE", "k", "3"}},
-				writer: [][]string{{"CLUSTER.FIT", "k"}},
-				reader: [][]string{{"CLUSTER.CENTROIDS", "k"}},
-			},
-		},
-		{
-			register: RegisterMLCommands,
-			registryFamilyCase: registryFamilyCase{
-				name:   "anomaly",
-				setup:  [][]string{{"ANOMALY.CREATE", "k"}},
-				writer: [][]string{{"ANOMALY.LEARN", "k"}},
-				reader: [][]string{{"ANOMALY.LEARN", "k"}},
-			},
-		},
-		{
-			register: RegisterMLCommands,
-			registryFamilyCase: registryFamilyCase{
 				name:   "dataset",
 				setup:  [][]string{{"DATASET.CREATE", "k"}},
 				writer: [][]string{{"DATASET.ADD", "k", "item"}},
 				reader: [][]string{{"DATASET.GET", "k"}},
-			},
-		},
-		{
-			register: RegisterMLCommands,
-			registryFamilyCase: registryFamilyCase{
-				name:   "pipelineml",
-				setup:  [][]string{{"PIPELINEML.CREATE", "k"}},
-				writer: [][]string{{"PIPELINEML.ADD", "k", "step"}},
-				reader: [][]string{{"PIPELINEML.ADD", "k", "step"}},
 			},
 		},
 		{
