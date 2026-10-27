@@ -113,18 +113,18 @@ func (ec *EvictionController) evictOne() bool {
 	// is about to be deleted.
 	entry, _ := ec.store.GetShard(key).Get(key)
 
-	ec.store.Delete(key)
+	if entry == nil || !ec.store.evictObserved(key, entry) {
+		return false
+	}
 	GlobalMetrics.RecordEviction()
 
 	ec.onEvictMu.RLock()
 	onEvict := ec.onEvict
 	ec.onEvictMu.RUnlock()
-	if entry != nil && onEvict != nil {
+	if onEvict != nil {
 		onEvict(key, entry)
 	}
-	if entry != nil {
-		ec.store.fireEvictKey(key)
-	}
+	ec.store.fireEvictKey(key)
 	return true
 }
 

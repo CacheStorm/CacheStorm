@@ -3,7 +3,6 @@ package store
 import (
 	"errors"
 	"fmt"
-	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -34,34 +33,39 @@ type GetResult struct {
 }
 
 type SetOptions struct {
-	TTL     time.Duration
-	NX      bool
-	XX      bool
-	KeepTTL bool
-	Tags    []string
+	TTL        time.Duration
+	ExpireAtMS int64
+	NX         bool
+	XX         bool
+	KeepTTL    bool
+	Tags       []string
 }
 
 type Store struct {
-	shards       [NumShards]*Shard
-	tagIndex     *TagIndex
-	pubsub       *PubSub
-	keyNotifier  *KeyNotifier
-	versions     map[string]int64
-	watchRefs    map[string]int
-	watching     atomic.Int64
-	versionMu    sync.RWMutex
-	memTracker   *MemoryTracker
-	evictor      *EvictionController
-	expiry       *TimingWheel
-	setOpsMu     sync.RWMutex
-	expiryMu     sync.Mutex
-	expiryActive bool
-	hooksMu      sync.RWMutex
-	hooks        StoreHooks
+	order         uint64
+	passiveExpiry atomic.Bool
+	loading       atomic.Bool
+	shards        [NumShards]*Shard
+	tagIndex      *TagIndex
+	pubsub        *PubSub
+	keyNotifier   *KeyNotifier
+	versions      map[string]int64
+	watchRefs     map[string]int
+	watching      atomic.Int64
+	versionMu     sync.RWMutex
+	memTracker    *MemoryTracker
+	evictor       *EvictionController
+	expiry        *TimingWheel
+	setOpsMu      sync.RWMutex
+	expiryMu      sync.Mutex
+	expiryActive  bool
+	hooksMu       sync.RWMutex
+	hooks         StoreHooks
 }
 
 func NewStore() *Store {
 	s := &Store{
+		order:       storeOrder.Add(1),
 		tagIndex:    NewTagIndex(),
 		pubsub:      NewPubSub(),
 		keyNotifier: NewKeyNotifier(),
@@ -71,6 +75,7 @@ func NewStore() *Store {
 	s.expiry = NewTimingWheel(s)
 	for i := 0; i < NumShards; i++ {
 		s.shards[i] = NewShard()
+		s.shards[i].loading = &s.loading
 	}
 	return s
 }
@@ -173,6 +178,9 @@ func (s *Store) scheduleExpiry(key string, expiresAt int64) {
 // under the shard lock so a stale schedule can never delete a rescheduled or
 // PERSISTed key. Reports whether the key was removed.
 func (s *Store) DeleteIfExpired(key string) bool {
+	if s.passiveExpiry.Load() {
+		return false
+	}
 	idx := s.shardIndex(key)
 	shard := s.shards[idx]
 
@@ -344,6 +352,10 @@ func (s *Store) Get(key string) (*Entry, bool) {
 	}
 
 	if entry.IsExpired() {
+		if s.passiveExpiry.Load() {
+			GlobalMetrics.RecordMiss()
+			return nil, false
+		}
 		mem, reaped := s.reapExpired(shard, key, entry)
 		if !reaped {
 			return s.Get(key)
@@ -364,100 +376,37 @@ func (s *Store) Get(key string) (*Entry, bool) {
 	return entry, true
 }
 
-// admit validates a write of value under key and enforces maxmemory,
-// evicting first when needed. It takes no shard lock of its own key.
-func (s *Store) admit(key string, value Value) error {
-	// Validate key
-	if len(key) == 0 {
-		return ErrInvalidKey
+func (s *Store) ExpiryDeadline(key string) (int64, bool) {
+	entry, ok := s.shards[s.shardIndex(key)].Get(key)
+	if !ok {
+		return 0, false
+	}
+	return entry.ExpiresAt.Load(), true
+}
+
+func validateStoreWrite(key string, value Value) (int64, error) {
+	if key == "" {
+		return 0, ErrInvalidKey
 	}
 	if len(key) > MaxKeySize {
-		return ErrKeyTooLarge
+		return 0, ErrKeyTooLarge
 	}
-
-	// Validate value size
-	if value.SizeOf() > MaxValueSize {
-		return ErrValueTooLarge
+	size := value.SizeOf()
+	if size < 0 || size > MaxValueSize {
+		return 0, ErrValueTooLarge
 	}
-
-	// Check memory limit and try eviction if needed
-	if s.memTracker != nil && s.memTracker.Max() > 0 {
-		valueSize := value.SizeOf()
-		if !s.memTracker.CanAllocate(valueSize) {
-			// Try eviction before rejecting
-			if s.evictor != nil {
-				if err := s.evictor.CheckAndEvict(); err != nil {
-					logger.Warn().Err(err).Msg("eviction attempt failed")
-				}
-			}
-			if !s.memTracker.CanAllocate(valueSize) {
-				logger.Warn().
-					Int64("value_size", valueSize).
-					Int64("usage", s.memTracker.Usage()).
-					Int64("max", s.memTracker.Max()).
-					Msg("OOM: rejecting write, memory limit exceeded")
-				return ErrMemoryLimit
-			}
-		}
-	}
-	return nil
+	return size, nil
 }
 
 func (s *Store) Set(key string, value Value, opts SetOptions) error {
-	if err := s.admit(key, value); err != nil {
+	size, err := validateStoreWrite(key, value)
+	if err != nil {
 		return err
 	}
-
-	idx := s.shardIndex(key)
-	shard := s.shards[idx]
-
-	// Conditional writes must use the same "does this key exist" rule as
-	// Store.Get: an expired key does not exist. The old raw shard.Get made a
-	// key whose TTL had lapsed but which active expiry had not yet reaped look
-	// present, so NX refused an entitled write and XX revived a dead key.
-	if opts.NX {
-		if _, exists := shard.getLive(key); exists {
-			return ErrKeyExists
-		}
-	}
-
-	if opts.XX {
-		if _, exists := shard.getLive(key); !exists {
-			return ErrKeyNotFound
-		}
-	}
-
-	// Reconcile tag membership: the replaced entry's mappings must drop
-	// before the new ones are added (RemoveKey-then-AddTags keeps tags
-	// shared between old and new).
-	var oldTags []string
-	if prev, exists := shard.Get(key); exists {
-		oldTags = prev.Tags
-	}
-	if len(oldTags) > 0 {
-		s.tagIndex.RemoveKey(key, oldTags)
-	}
-
-	entry := NewEntry(value)
-	if opts.KeepTTL {
-		// Carry the previous expiry instant unchanged: in-place
-		// modifications (APPEND, SETRANGE, INCR family) must not reset or
-		// drop the key's TTL.
-		if prev, exists := shard.Get(key); exists {
-			entry.ExpiresAt.Store(prev.ExpiresAt.Load())
-		}
-	} else if opts.TTL > 0 {
-		entry.SetTTL(opts.TTL)
-		s.scheduleExpiry(key, entry.ExpiresAt.Load())
-	}
-	if len(opts.Tags) > 0 {
-		entry.Tags = opts.Tags
-		s.tagIndex.AddTags(key, opts.Tags)
-	}
-
-	s.trackMemory(shard.Set(key, entry))
-	s.published(key, value)
-	return nil
+	opts.Tags = append([]string(nil), opts.Tags...)
+	return s.applyValuePlan(key, &opts, nil, func(Value) (ValuePlan, error) {
+		return ValuePlan{Size: size, Apply: func() Value { return value }}, nil
+	})
 }
 
 // published records that value was just installed under key: the version a
@@ -482,32 +431,29 @@ func (s *Store) GetOrCreate(key string, create func() Value) (Value, bool, error
 		return entry.Value, false, nil
 	}
 	value := create()
-	if err := s.admit(key, value); err != nil {
+	size, err := validateStoreWrite(key, value)
+	if err != nil {
 		return nil, false, err
 	}
-
+	var result Value
+	created := false
 	shard := s.shards[s.shardIndex(key)]
-	shard.mu.Lock()
-	if cur, ok := shard.data[key]; ok && !cur.IsExpired() {
-		shard.mu.Unlock()
-		cur.Touch()
-		GlobalMetrics.RecordHit()
-		return cur.Value, false, nil
+	err = s.applyValuePlan(key, nil, nil, func(current Value) (ValuePlan, error) {
+		if current != nil {
+			shard.data[key].Touch()
+			GlobalMetrics.RecordHit()
+			result = current
+			created = false
+			return ValuePlan{}, nil
+		}
+		result = value
+		created = true
+		return ValuePlan{Size: size, Apply: func() Value { return value }}, nil
+	})
+	if err != nil {
+		return nil, false, err
 	}
-	if cur, ok := shard.data[key]; ok && cur.IsExpired() {
-		s.fireExpireLocked(key)
-	}
-	delta, old := shard.setLocked(key, NewEntry(value))
-	shard.mu.Unlock()
-
-	s.trackMemory(delta)
-	if old != nil {
-		// The replaced entry had expired: reap it like Get's lazy expiry.
-		s.tagIndex.RemoveKey(key, old.Tags)
-		s.fireExpire(key, old.Value)
-	}
-	s.published(key, value)
-	return value, true, nil
+	return result, created, nil
 }
 
 // collection is a value that is removed from the keyspace when emptied.
@@ -573,33 +519,19 @@ func emptyCollection(value Value) bool {
 	return false
 }
 
-func (s *Store) SetEntry(key string, entry *Entry) {
-	// Validate key size
+func (s *Store) SetEntry(key string, entry *Entry) error {
 	if len(key) > MaxKeySize {
-		return
+		return ErrKeyTooLarge
 	}
-
-	idx := s.shardIndex(key)
-	shard := s.shards[idx]
-
-	// RENAME and MOVE hand over the entry still stored under the old key (or
-	// in the other database). Installing a wrapper of its own keeps each
-	// key's accounted footprint separate, so removing the old key credits
-	// what was charged for it rather than what the new key was charged.
+	if entry == nil || entry.Value == nil {
+		return ErrWrongType
+	}
 	entry = entry.rehome()
-
-	// Reconcile tag membership: a key being replaced (RENAME/COPY over an
-	// existing key) must drop its old mappings before the entry's own tags
-	// are added. RemoveKey with no tags sweeps every tag, so mappings left by
-	// a previous occupant cannot survive the overwrite.
-	s.tagIndex.RemoveKey(key, nil)
-	if len(entry.Tags) > 0 {
-		s.tagIndex.AddTags(key, entry.Tags)
-	}
-
-	s.trackMemory(shard.Set(key, entry))
-	s.IncrementVersion(key)
-	s.scheduleExpiry(key, entry.ExpiresAt.Load())
+	entry.Tags = append([]string(nil), entry.Tags...)
+	size := entry.Value.SizeOf()
+	return s.applyValuePlan(key, nil, entry, func(Value) (ValuePlan, error) {
+		return ValuePlan{Size: size, Apply: func() Value { return entry.Value }}, nil
+	})
 }
 
 func (s *Store) Delete(key string) bool {
@@ -618,6 +550,23 @@ func (s *Store) Delete(key string) bool {
 		s.TouchKey(key)
 	}
 	return deleted
+}
+
+func (s *Store) evictObserved(key string, expected *Entry) bool {
+	shard := s.shards[s.shardIndex(key)]
+	shard.mu.Lock()
+	entry, ok := shard.data[key]
+	if !ok || entry != expected {
+		shard.mu.Unlock()
+		return false
+	}
+	freed := shard.deleteLocked(key, entry)
+	s.fireEvictLocked(key)
+	shard.mu.Unlock()
+	s.trackMemory(-freed)
+	s.tagIndex.RemoveKey(key, entry.Tags)
+	s.TouchKey(key)
+	return true
 }
 
 func (s *Store) DeleteBatch(keys []string) int {
@@ -681,6 +630,9 @@ func (s *Store) Exists(key string) bool {
 	}
 
 	if entry.IsExpired() {
+		if s.passiveExpiry.Load() {
+			return false
+		}
 		mem, reaped := s.reapExpired(shard, key, entry)
 		if !reaped {
 			return s.Exists(key)
@@ -723,27 +675,16 @@ func (s *Store) TTL(key string) time.Duration {
 	return entry.TTL()
 }
 
-// nowNSPlus returns time.Now().UnixNano() + d, SATURATING at the int64 bounds
-// instead of wrapping.
-//
-//	time.Time.UnixNano is undefined outside 1678..2262, so a TTL longer than
-//	the ~236 years of headroom int64 nanoseconds actually have produced a
-//	NEGATIVE expiry instant. Entry.IsExpired then reported the key as already
-//	expired and it was silently deleted behind a :1 reply -- and the command
-//	layer deliberately accepts TTLs up to maxExpireAtSeconds (292 years).
-func nowNSPlus(d int64) int64 {
-	now := time.Now().UnixNano()
-	if d > 0 && now > math.MaxInt64-d {
-		return math.MaxInt64
+func (s *Store) TTLMillis(key string) int64 {
+	entry, exists := s.Get(key)
+	if !exists {
+		return -2
 	}
-	if d < 0 && now < math.MinInt64-d {
-		return math.MinInt64
-	}
-	return now + d
+	return entry.TTLMillis()
 }
 
 func (s *Store) SetTTL(key string, ttl time.Duration) bool {
-	expiresAt := nowNSPlus(int64(ttl))
+	expiresAt := time.Now().Add(ttl).UnixMilli()
 	if !s.shards[s.shardIndex(key)].updateExpiry(key, expiresAt) {
 		return false
 	}
@@ -790,7 +731,7 @@ func (s *Store) GetTTL(key string) time.Duration {
 		return -1 * time.Second
 	}
 
-	remaining := time.Duration(entry.ExpiresAt.Load() - time.Now().UnixNano())
+	remaining := expiryDuration(entry.ExpiresAt.Load() - time.Now().UnixMilli())
 	if remaining < 0 {
 		return -2 * time.Second
 	}
@@ -848,20 +789,6 @@ func (s *Store) GetShard(key string) *Shard {
 	return s.shards[s.shardIndex(key)]
 }
 
-// getLiveEntry reads an entry without counting a client hit or touching
-// LRU state, treating an expired entry as absent. For internal operations
-// whose reads must not distort hit-rate accounting.
-func (s *Store) getLiveEntry(key string) *Entry {
-	entry, _ := s.GetShard(key).Get(key)
-	if entry == nil {
-		return nil
-	}
-	if expiresAt := entry.ExpiresAt.Load(); expiresAt > 0 && expiresAt <= time.Now().UnixNano() {
-		return nil
-	}
-	return entry
-}
-
 // MoveSetMember atomically moves member from the set at srcKey to the set
 // at dstKey, creating the destination when missing and deleting an emptied
 // source. Both set locks are acquired in deterministic key order, so
@@ -870,93 +797,7 @@ func (s *Store) getLiveEntry(key string) *Entry {
 // source is drained. A wrong-type source or destination fails before any
 // mutation, leaving the member in place.
 func (s *Store) MoveSetMember(srcKey, dstKey, member string) (bool, error) {
-	// The set-operations lock: exclusive for cross-key moves, shared for
-	// multi-key reads (SUNION and friends). This is what makes SMOVE
-	// atomic from every observer's perspective: no multi-key reader can
-	// interleave inside the move, and the per-set value locks below keep
-	// single-key operations mutually exclusive with it.
-	s.setOpsMu.Lock()
-	defer s.setOpsMu.Unlock()
-
-	for {
-		srcEntry := s.getLiveEntry(srcKey)
-		if srcEntry == nil {
-			return false, nil
-		}
-		srcSet, ok := srcEntry.Value.(*SetValue)
-		if !ok {
-			return false, ErrWrongType
-		}
-		if dstEntry := s.getLiveEntry(dstKey); dstEntry != nil {
-			if _, ok := dstEntry.Value.(*SetValue); !ok {
-				return false, ErrWrongType
-			}
-		}
-
-		srcSet.Lock()
-		dead := srcSet.dead
-		_, exists := srcSet.Members[member]
-		srcSet.Unlock()
-		if dead {
-			continue
-		}
-		// Same key: nothing to move; report membership like Redis does.
-		if !exists || srcKey == dstKey {
-			return exists, nil
-		}
-
-		// The destination is created before any value lock is taken: the
-		// shard lock may only be acquired with no value lock held.
-		v, created, err := s.GetOrCreate(dstKey, func() Value {
-			return &SetValue{Members: make(map[string]struct{})}
-		})
-		if err != nil {
-			return false, err
-		}
-		dstSet, ok := v.(*SetValue)
-		if !ok {
-			return false, ErrWrongType
-		}
-
-		// Per-set value locks in deterministic key order so concurrent
-		// single-key operations on both sets serialize with the move.
-		first, second := srcSet, dstSet
-		if dstKey < srcKey {
-			first, second = second, first
-		}
-		first.Lock()
-		second.Lock()
-		unlock := func() {
-			second.Unlock()
-			first.Unlock()
-		}
-		if srcSet.dead || dstSet.dead {
-			unlock()
-			if created {
-				s.DeleteIfEmpty(dstKey, dstSet)
-			}
-			continue
-		}
-		if _, exists := srcSet.Members[member]; !exists {
-			unlock()
-			if created {
-				s.DeleteIfEmpty(dstKey, dstSet)
-			}
-			return false, nil
-		}
-
-		// While both locks are held the member may be visible in both sets,
-		// never in neither.
-		dstSet.AddMember(member)
-		srcSet.RemoveMember(member)
-		srcEmptied := len(srcSet.Members) == 0
-		unlock()
-
-		if srcEmptied {
-			s.DeleteIfEmpty(srcKey, srcSet)
-		}
-		return true, nil
-	}
+	return s.moveSetMember(srcKey, dstKey, member)
 }
 
 // SetOpsRLock takes the shared set-operations lock. Multi-key set reads

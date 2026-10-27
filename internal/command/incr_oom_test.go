@@ -14,40 +14,27 @@ import (
 // counter advanced while the store still held the old value. cmdSET already
 // propagated the error; the increment handlers must too.
 
-// newOOMStore builds a saturated store: a small noeviction limit configured
-// before any writes, a counter at 41, and enough filler keys to push tracked
-// usage to the limit so any further write is rejected.
 func newOOMStore(t *testing.T) (*store.Store, *Router) {
 	t.Helper()
 	s := store.NewStore()
-	// The limit must hold the counter plus the filler keys, and be small
-	// enough that the fill below saturates it.
-	s.ConfigureMemory(70000, store.EvictionNoEviction, 80, 90, 5)
-
-	router := newTxRouter(s)
-
-	// The counter under test, before the fill.
-	runCmd(t, s, router, "SET", "counter", "41")
-
-	// One large filler, then many small distinct-key fillers (overwrites do
-	// not grow tracked usage). 300 x ~100 tracked bytes saturates the limit;
-	// failed fillers are harmless noise.
-	runCmd(t, s, router, "SET", "filler-big", strings.Repeat("x", 65536))
-	for i := 0; i < 300; i++ {
-		runCmd(t, s, router, "SET", "f"+itoa(i), "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy")
+	s.ConfigureMemory(10000, store.EvictionNoEviction, 80, 90, 5)
+	if err := s.Set("counter", &store.StringValue{Data: []byte("99")}, store.SetOptions{}); err != nil {
+		t.Fatal(err)
 	}
-	return s, router
-}
-
-func itoa(i int) string {
-	if i == 0 {
-		return "0"
+	if err := s.Set("filler", &store.StringValue{}, store.SetOptions{}); err != nil {
+		t.Fatal(err)
 	}
-	var digits []byte
-	for ; i > 0; i /= 10 {
-		digits = append([]byte{byte('0' + i%10)}, digits...)
+	length := int(9499 - s.MemUsage())
+	if length <= 0 {
+		t.Fatal("memory-pressure setup changed")
 	}
-	return string(digits)
+	if err := s.Set("filler", &store.StringValue{Data: make([]byte, length)}, store.SetOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if s.MemoryTracker().Usage() != 9499 {
+		t.Fatal("memory-pressure setup changed")
+	}
+	return s, newTxRouter(s)
 }
 
 func TestIncrReportsOOMRejection(t *testing.T) {
@@ -57,7 +44,7 @@ func TestIncrReportsOOMRejection(t *testing.T) {
 	if !strings.Contains(reply, "OOM") {
 		t.Fatalf("INCR under OOM rejection must propagate the error, got %q", reply)
 	}
-	if got := storedStr(t, s, "counter"); got != "41" {
+	if got := storedStr(t, s, "counter"); got != "99" {
 		t.Fatalf("rejected INCR must leave the counter unchanged, got %q", got)
 	}
 }
@@ -69,7 +56,7 @@ func TestIncrByFloatReportsOOMRejection(t *testing.T) {
 	if !strings.Contains(reply, "OOM") {
 		t.Fatalf("INCRBYFLOAT under OOM rejection must propagate the error, got %q", reply)
 	}
-	if got := storedStr(t, s, "counter"); got != "41" {
+	if got := storedStr(t, s, "counter"); got != "99" {
 		t.Fatalf("rejected INCRBYFLOAT must leave the counter unchanged, got %q", got)
 	}
 }
@@ -90,7 +77,18 @@ func TestReplayedIncrReportsOOMRejection(t *testing.T) {
 	if !strings.Contains(execBuf.String(), "OOM") {
 		t.Fatalf("replayed INCR under OOM rejection must surface the error, got %q", execBuf.String())
 	}
-	if got := storedStr(t, s, "counter"); got != "41" {
+	if got := storedStr(t, s, "counter"); got != "99" {
 		t.Fatalf("rejected replayed INCR must leave the counter unchanged, got %q", got)
+	}
+}
+
+func TestSameSizeCounterWriteDoesNotNeedAdditionalMemory(t *testing.T) {
+	s, r := newOOMStore(t)
+	before := s.MemUsage()
+	if got := runCmd(t, s, r, "DECR", "counter"); got != ":98\r\n" {
+		t.Fatalf("same-size decrement=%q", got)
+	}
+	if s.MemUsage() != before || s.MemoryTracker().Usage() != before {
+		t.Fatal("same-size write changed accounting")
 	}
 }

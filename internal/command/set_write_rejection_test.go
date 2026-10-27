@@ -21,10 +21,10 @@ func TestSetWritesReportStoreRejection(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if err := s.Set("filler", &store.StringValue{Data: []byte(strings.Repeat("x", 550))}, store.SetOptions{}); err != nil {
+			if err := s.Set("filler", &store.StringValue{Data: []byte(strings.Repeat("x", 548))}, store.SetOptions{}); err != nil {
 				t.Fatal(err)
 			}
-			if s.MemoryTracker().Usage() != 951 {
+			if s.MemoryTracker().Usage() != 949 {
 				t.Fatal("memory-pressure setup changed")
 			}
 			before, _ := s.Get("dst")
@@ -49,7 +49,7 @@ func TestSetWritesReportStoreRejection(t *testing.T) {
 				if got := runSetAuditX(t, s, "SISMEMBER", "src", "a"); got != ":1\r\n" {
 					t.Fatal("source changed")
 				}
-				if s.MemoryTracker().Usage() != 951 {
+				if s.MemoryTracker().Usage() != 949 {
 					t.Fatal("rejected write changed accounting")
 				}
 			}

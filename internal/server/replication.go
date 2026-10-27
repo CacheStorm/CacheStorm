@@ -1,12 +1,10 @@
 package server
 
 import (
-	"encoding/json"
 	"errors"
 	"net"
-	"os"
-	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -40,13 +38,14 @@ const gateStripes = 256
 // exclusively.
 type writeGate struct {
 	global  sync.RWMutex
-	stripes [gateStripes]sync.Mutex
+	stripes [gateStripes]sync.RWMutex
 }
 
 // gateHold is one acquisition of the gate.
 type gateHold struct {
 	g         *writeGate
 	exclusive bool
+	read      bool
 	stripes   []int
 	// inline backs stripes for the common case of a command with few keys,
 	// so acquiring the gate does not allocate.
@@ -56,8 +55,11 @@ type gateHold struct {
 // exclusiveWrites are writes that reach keys they do not name, or several
 // databases, so they take the whole gate.
 var exclusiveWrites = map[string]bool{
+	"SAVE": true, "BGSAVE": true,
 	"EXEC": true, "EVAL": true, "EVALSHA": true, "FCALL": true,
 	"FLUSHALL": true, "FLUSHDB": true, "SWAPDB": true, "MOVE": true,
+	"RENAME": true, "RENAMENX": true, "COPY": true,
+	"MSET": true, "MSETNX": true, "SMOVE": true,
 	"SCRIPT": true, "FUNCTION": true, "MIGRATE": true,
 	// Read-only scripts take the gate exclusively too: a script is atomic in
 	// Redis, so it must not see a write land between two of its reads.
@@ -90,7 +92,7 @@ func stripeOf(key string) int {
 // acquire takes the gate for cmd.
 func (g *writeGate) acquire(cmd string, args [][]byte) *gateHold {
 	h := &gateHold{g: g}
-	if exclusiveWrites[cmd] {
+	if exclusiveWrites[cmd] || globalRead(cmd, args) {
 		h.exclusive = true
 	} else {
 		keys := command.CommandKeys(cmd, args)
@@ -101,6 +103,35 @@ func (g *writeGate) acquire(cmd string, args [][]byte) *gateHold {
 			for _, k := range keys {
 				h.stripes = appendStripe(h.stripes, stripeOf(k))
 			}
+		}
+	}
+	h.lock()
+	return h
+}
+
+func globalRead(cmd string, args [][]byte) bool {
+	switch cmd {
+	case "KEYS", "SCAN", "DBSIZE", "RANDOMKEY":
+		return true
+	case "SORT", "SORT_RO":
+		for i := 1; i+1 < len(args); i++ {
+			if strings.EqualFold(string(args[i]), "BY") && !strings.EqualFold(string(args[i+1]), "nosort") {
+				return true
+			}
+			if strings.EqualFold(string(args[i]), "GET") && string(args[i+1]) != "#" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (g *writeGate) acquireRead(cmd string, args [][]byte) *gateHold {
+	h := &gateHold{g: g, read: true, exclusive: globalRead(cmd, args)}
+	if !h.exclusive {
+		h.stripes = h.inline[:0]
+		for _, key := range command.CommandKeys(cmd, args) {
+			h.stripes = appendStripe(h.stripes, stripeOf(key))
 		}
 	}
 	h.lock()
@@ -135,7 +166,11 @@ func (h *gateHold) lock() {
 	}
 	h.g.global.RLock()
 	for _, s := range h.stripes {
-		h.g.stripes[s].Lock()
+		if h.read {
+			h.g.stripes[s].RLock()
+		} else {
+			h.g.stripes[s].Lock()
+		}
 	}
 }
 
@@ -145,7 +180,11 @@ func (h *gateHold) unlock() {
 		return
 	}
 	for i := len(h.stripes) - 1; i >= 0; i-- {
-		h.g.stripes[h.stripes[i]].Unlock()
+		if h.read {
+			h.g.stripes[h.stripes[i]].RUnlock()
+		} else {
+			h.g.stripes[h.stripes[i]].Unlock()
+		}
 	}
 	h.g.global.RUnlock()
 }
@@ -160,6 +199,8 @@ func gated(cmd string, args [][]byte) bool {
 // client. Scripts run, but in read-only mode (see Context.ReplicaReadOnly).
 func replicaRefuses(cmd string, args [][]byte) bool {
 	switch cmd {
+	case "PFCOUNT":
+		return false
 	case "EVAL", "EVALSHA", "FCALL", "SCRIPT":
 		return false
 	}
@@ -172,13 +213,25 @@ func (s *Server) LockWrites() { s.gate.global.Lock() }
 // UnlockWrites implements replication.Host.
 func (s *Server) UnlockWrites() { s.gate.global.Unlock() }
 
-// AfterFullSync implements replication.Host: the AOF is rewritten from the
-// dataset the full resync loaded, so it describes that dataset alone.
-func (s *Server) AfterFullSync() error {
-	if s.aof == nil {
-		return nil
+func (s *Server) CommitFullSync(dbs *store.Databases, replay *command.Router) error {
+	if dbs.Count() != s.dbs.Count() {
+		return errors.New("replication database count mismatch")
 	}
-	return s.aof.Rewrite(replication.DBSource{DBs: s.dbs})
+	functions := replay.FunctionRegistry().CloneForStore(s.Store())
+	if s.aof != nil {
+		if err := s.aof.Rewrite(replication.DBSource{DBs: dbs, Functions: functions.DumpPayload()}); err != nil {
+			return err
+		}
+	}
+	if err := s.dbs.ReplaceFrom(dbs); err != nil {
+		return err
+	}
+	s.router.SetFunctionRegistry(functions)
+	return nil
+}
+
+func (s *Server) FunctionPayload() ([]byte, error) {
+	return s.snapshotFunctionCommand([][]byte{[]byte("DUMP")})
 }
 
 // ListeningPort implements replication.Host.
@@ -215,9 +268,12 @@ func (s *Server) newReplication(cfg *config.Config) {
 
 // recordWrites hands writes that ran outside the router (the REST API) to the
 // AOF and the replication stream, as one transaction.
-func (s *Server) recordWrites(cmds []command.ExecutedCommand) {
+func (s *Server) recordWrites(cmds []command.ExecutedCommand) error {
 	if len(cmds) == 0 {
-		return
+		return nil
+	}
+	if hasLogicalWrites(cmds) {
+		s.repl.MarkLocalWrite()
 	}
 	if s.aof != nil {
 		writes := make([]persistence.Command, len(cmds))
@@ -226,61 +282,11 @@ func (s *Server) recordWrites(cmds []command.ExecutedCommand) {
 		}
 		if err := s.aof.AppendTransaction(writes); err != nil {
 			logger.Error().Err(err).Msg("AOF append failed")
+			return errAOFUnavailable
 		}
 	}
 	s.repl.FeedTransaction(cmds)
-}
-
-// loadReplicationState adopts the stream position a replica saved at its last
-// shutdown, when it restarts as a replica with the AOF that matches it. The
-// file is removed either way: once the server runs, the AOF moves on.
-func (s *Server) loadReplicationState(dataDir string) {
-	path := filepath.Join(dataDir, replicationStateFile)
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return
-	}
-	if err := os.Remove(path); err != nil {
-		logger.Warn().Err(err).Msg("cannot remove the replication state file")
-	}
-	if !s.cfg.Replication.IsReplica() {
-		return
-	}
-	var st replication.State
-	if err := json.Unmarshal(data, &st); err != nil || st.ReplID == "" || st.Offset < 0 {
-		logger.Warn().Msg("ignoring an unreadable replication state file")
-		return
-	}
-	s.repl.RestoreState(st)
-	logger.Info().Str("replid", st.ReplID).Int64("offset", st.Offset).Msg("replication state restored")
-}
-
-// saveReplicationState records a replica's stream position next to its AOF
-// at shutdown.
-func (s *Server) saveReplicationState() {
-	if s.aof == nil {
-		return
-	}
-	st, ok := s.repl.SavedState()
-	if !ok {
-		return
-	}
-	data, err := json.Marshal(st)
-	if err != nil {
-		return
-	}
-	dataDir := s.cfg.Persistence.DataDir
-	if dataDir == "" {
-		dataDir = "."
-	}
-	tmp := filepath.Join(dataDir, replicationStateFile+".tmp")
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		logger.Warn().Err(err).Msg("cannot save the replication state")
-		return
-	}
-	if err := os.Rename(tmp, filepath.Join(dataDir, replicationStateFile)); err != nil {
-		logger.Warn().Err(err).Msg("cannot save the replication state")
-	}
+	return nil
 }
 
 // storeHooks returns the store hooks: the plugin dispatchers, and the
@@ -290,16 +296,8 @@ func (s *Server) storeHooks() store.StoreHooks {
 		OnEvict:         s.pluginMgr.RunEvictHooks,
 		OnExpire:        s.pluginMgr.RunExpireHooks,
 		OnTagInvalidate: s.pluginMgr.RunTagInvalidateHooks,
-		OnExpireLocked: func(st *store.Store, key string) {
-			if s.repl != nil {
-				s.repl.FeedDelete(st, key)
-			}
-		},
-		OnEvictKey: func(st *store.Store, key string) {
-			if s.repl != nil {
-				s.repl.FeedDelete(st, key)
-			}
-		},
+		OnExpireLocked:  s.recordRemoval,
+		OnEvictLocked:   s.recordRemoval,
 		ExpiryGuard: func(_ *store.Store, key string) func() {
 			return s.gate.acquireKey(key).unlock
 		},
@@ -328,11 +326,6 @@ func (s *Server) refuseOnReplica(ctx *command.Context) bool {
 	return true
 }
 
-// holdGate takes the write gate for the command ctx is about to run and
-// returns its release. A write holds the stripes of its keys, EXEC and the
-// scripts hold the whole gate, and every other command holds it shared, so
-// no command observes a transaction or a script half applied. A blocking
-// command releases it while it waits.
 func (s *Server) holdGate(ctx *command.Context) func() {
 	if s == nil {
 		return func() {}
@@ -348,10 +341,18 @@ func (s *Server) holdGate(ctx *command.Context) func() {
 	if gated(ctx.Command, ctx.Args) || exclusiveWrites[ctx.Command] {
 		h = s.gate.acquire(ctx.Command, ctx.Args)
 	} else {
-		h = &gateHold{g: &s.gate}
-		h.lock()
+		h = s.gate.acquireRead(ctx.Command, ctx.Args)
 	}
 	ctx.BeforeWait = h.unlock
 	ctx.AfterWait = h.lock
 	return h.unlock
+}
+
+func hasLogicalWrites(cmds []command.ExecutedCommand) bool {
+	for _, cmd := range cmds {
+		if cmd.Name != "PFCOUNT" && cmd.Name != "SELECT" {
+			return true
+		}
+	}
+	return false
 }

@@ -118,6 +118,7 @@ func cmdSWAPDB(ctx *Context) error {
 }
 
 func cmdMOVE(ctx *Context) error {
+	ctx.writeEffectsHandled = true
 	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
@@ -134,20 +135,23 @@ func cmdMOVE(ctx *Context) error {
 	if dst == ctx.Store {
 		return ctx.WriteError(errSameObject)
 	}
-	entry, exists := ctx.Store.Get(key)
-	if !exists {
+	changed, err := ctx.Store.Transfer(key, dst, key, store.TransferOptions{})
+	if err == store.ErrKeyNotFound {
+		ctx.PropagateAs()
 		return ctx.WriteInteger(0)
 	}
-	if dst.Exists(key) {
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	if !changed {
+		ctx.PropagateAs()
 		return ctx.WriteInteger(0)
 	}
-	dst.SetEntry(key, entry)
-	ctx.Store.Delete(key)
-	dst.KeyNotifier().NotifyKey(key)
 	return ctx.WriteInteger(1)
 }
 
 func cmdCOPY(ctx *Context) error {
+	ctx.writeEffectsHandled = true
 	if ctx.ArgCount() < 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
@@ -185,24 +189,22 @@ func cmdCOPY(ctx *Context) error {
 		return ctx.WriteError(errSameObject)
 	}
 
-	entry, exists := ctx.Store.Get(srcKey)
-	if !exists {
+	if (ctx.Replaying || ctx.LegacyReplay) && len(dstKey) > store.MaxKeySize {
+		ctx.PropagateAs()
+		return ctx.WriteInteger(1)
+	}
+	changed, err := ctx.Store.Transfer(srcKey, dst, dstKey, store.TransferOptions{Copy: true, Replace: replace})
+	if err == store.ErrKeyNotFound {
+		ctx.PropagateAs()
 		return ctx.WriteInteger(0)
 	}
-
-	if !replace && dst.Exists(dstKey) {
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	if !changed {
+		ctx.PropagateAs()
 		return ctx.WriteInteger(0)
 	}
-
-	newEntry := store.NewEntry(entry.Value.Clone())
-	newEntry.ExpiresAt.Store(entry.ExpiresAt.Load())
-	if len(entry.Tags) > 0 {
-		newEntry.Tags = make([]string, len(entry.Tags))
-		copy(newEntry.Tags, entry.Tags)
-	}
-
-	dst.SetEntry(dstKey, newEntry)
-	dst.KeyNotifier().NotifyKey(dstKey)
 	return ctx.WriteInteger(1)
 }
 
@@ -256,7 +258,7 @@ func isWriteCommand(cmd string) bool {
 // client blocked on the destination slept through the data. A write with no
 // client blocked anywhere costs one atomic load.
 func signalWrittenKeys(ctx *Context) {
-	if ctx.Store == nil || !isWriteCommand(ctx.Command) {
+	if ctx.writeEffectsHandled || ctx.Store == nil || !isWriteCommand(ctx.Command) {
 		return
 	}
 	kn := ctx.Store.KeyNotifier()
@@ -269,7 +271,7 @@ func signalWrittenKeys(ctx *Context) {
 }
 
 func touchWrittenKeys(ctx *Context) {
-	if ctx.Store == nil || !ctx.Store.HasWatchedKeys() || !isWriteCommand(ctx.Command) {
+	if ctx.writeEffectsHandled || ctx.Store == nil || !ctx.Store.HasWatchedKeys() || !isWriteCommand(ctx.Command) {
 		return
 	}
 	ctx.Store.TouchKeys(aclKeysForCommand(ctx.Command, ctx.Args))

@@ -324,7 +324,7 @@ func TestSetValueString(t *testing.T) {
 
 func TestEntrySetExpiresAt(t *testing.T) {
 	entry := NewEntry(&StringValue{Data: []byte("test")})
-	expiresAt := time.Now().Add(10 * time.Second).UnixNano()
+	expiresAt := time.Now().Add(10 * time.Second).UnixMilli()
 	entry.SetExpiresAt(expiresAt)
 
 	if entry.ExpiresAt.Load() != expiresAt {
@@ -334,7 +334,7 @@ func TestEntrySetExpiresAt(t *testing.T) {
 
 func TestEntryTTLExpired(t *testing.T) {
 	entry := NewEntry(&StringValue{Data: []byte("test")})
-	entry.SetExpiresAt(time.Now().Add(-1 * time.Second).UnixNano())
+	entry.SetExpiresAt(time.Now().Add(-1 * time.Second).UnixMilli())
 
 	ttl := entry.TTL()
 	if ttl != -2 {

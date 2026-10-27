@@ -378,18 +378,16 @@ func TestACLGeoSearchStoreChecksSourceKey(t *testing.T) {
 	}
 }
 
-// The set-algebra commands are NUMKEYS-counted:
+// Redis's set-algebra key specs: SINTERCARD is the only NUMKEYS-counted one.
 //
-//	SINTER  numkeys key [key ...]
+//	SINTER  key [key ...]
+//	SDIFF   key [key ...]
+//	SUNION  key [key ...]
 //	SINTERCARD numkeys key [key ...]
-//	SDIFF   numkeys key [key ...]
-//	SUNION  numkeys key [key ...]
-//	SDIFFSTORE destination numkeys key [key ...]
+//	SDIFFSTORE destination key [key ...]
 //
-// SINTERCARD has no entry and falls to the fail-closed default (args[0]);
-// SINTER/SDIFF/SUNION sit in aclSingleKeyCommands, which also returns args[0].
-// In both cases args[0] is the numkeys COUNT, not a key. These tests assert the
-// CORRECT contract, so a blanket refusal shows up as a failure.
+// Every real key must be permission-checked, and SINTERCARD's count must not be
+// mistaken for a key.
 func TestACLSetAlgebraChecksRealKeys(t *testing.T) {
 	a := newACLMultiKeySession(t)
 
@@ -405,16 +403,16 @@ func TestACLSetAlgebraChecksRealKeys(t *testing.T) {
 		name string
 		args []string
 	}{
-		{"SINTER", []string{"SINTER", "2", "user:s1", "user:s2"}},
+		{"SINTER", []string{"SINTER", "user:s1", "user:s2"}},
 		{"SINTERCARD", []string{"SINTERCARD", "2", "user:s1", "user:s2"}},
-		{"SDIFF", []string{"SDIFF", "2", "user:s1", "user:s2"}},
-		{"SUNION", []string{"SUNION", "2", "user:s1", "user:s2"}},
-		{"SDIFFSTORE", []string{"SDIFFSTORE", "user:sdst", "2", "user:s1", "user:s2"}},
+		{"SDIFF", []string{"SDIFF", "user:s1", "user:s2"}},
+		{"SUNION", []string{"SUNION", "user:s1", "user:s2"}},
+		{"SDIFFSTORE", []string{"SDIFFSTORE", "user:sdst", "user:s1", "user:s2"}},
 	}
 	for _, c := range cases {
 		v := a.do(c.args...)
 		if aclIsNoperm(v) {
-			t.Errorf("%s over two ALLOWED keys returned NOPERM -- only args[0] (the numkeys count) is permission-checked, so the command is unusable under a key pattern", c.name)
+			t.Errorf("%s over two ALLOWED keys returned NOPERM -- the command is unusable under a key pattern", c.name)
 		}
 	}
 }
@@ -440,12 +438,12 @@ func TestACLSetAlgebraRefusesKeysOutsidePattern(t *testing.T) {
 		name string
 		args []string
 	}{
-		{"SINTER", []string{"SINTER", "2", "user:s1", "other:zs"}},
+		{"SINTER", []string{"SINTER", "user:s1", "other:zs"}},
 		{"SINTERCARD", []string{"SINTERCARD", "2", "user:s1", "other:zs"}},
-		{"SDIFF", []string{"SDIFF", "2", "user:s1", "other:zs"}},
-		{"SUNION", []string{"SUNION", "2", "user:s1", "other:zs"}},
-		{"SDIFFSTORE (source outside)", []string{"SDIFFSTORE", "user:sdst2", "2", "user:s1", "other:zs"}},
-		{"SDIFFSTORE (destination outside)", []string{"SDIFFSTORE", "other:zs", "2", "user:s1", "user:s1"}},
+		{"SDIFF", []string{"SDIFF", "user:s1", "other:zs"}},
+		{"SUNION", []string{"SUNION", "user:s1", "other:zs"}},
+		{"SDIFFSTORE (source outside)", []string{"SDIFFSTORE", "user:sdst2", "user:s1", "other:zs"}},
+		{"SDIFFSTORE (destination outside)", []string{"SDIFFSTORE", "other:zs", "user:s1", "user:s1"}},
 	}
 	for _, c := range cases {
 		v := a.do(c.args...)
@@ -458,12 +456,10 @@ func TestACLSetAlgebraRefusesKeysOutsidePattern(t *testing.T) {
 
 // SINTERSTORE and SUNIONSTORE share SDIFFSTORE's shape:
 //
-//	SINTERSTORE destination numkeys key [key ...]
-//	SUNIONSTORE  destination numkeys key [key ...]
+//	SINTERSTORE destination key [key ...]
+//	SUNIONSTORE  destination key [key ...]
 //
-// Both sat in aclAllArgsCommands, which checks EVERY argument — so the numkeys
-// COUNT was permission-checked as if it were a key and a ~user:* user was
-// blanket-refused. Like SDIFFSTORE they now return destination + sources.
+// Both the destination and every source must be checked.
 func TestACLSetStoreAllowsSandboxedKeysAndRefusesOthers(t *testing.T) {
 	a := newACLMultiKeySession(t)
 
@@ -474,18 +470,17 @@ func TestACLSetStoreAllowsSandboxedKeysAndRefusesOthers(t *testing.T) {
 		t.Fatalf("setup: SADD returned type %v %q, want an integer", v.Type, v.Str)
 	}
 
-	// ALLOW: destination and both sources inside ~user:*. The count must not
-	// be treated as a key, or every one of these is refused.
+	// ALLOW: destination and both sources inside ~user:*.
 	allow := []struct {
 		name string
 		args []string
 	}{
-		{"SINTERSTORE", []string{"SINTERSTORE", "user:is", "2", "user:s1", "user:s2"}},
-		{"SUNIONSTORE", []string{"SUNIONSTORE", "user:us", "2", "user:s1", "user:s2"}},
+		{"SINTERSTORE", []string{"SINTERSTORE", "user:is", "user:s1", "user:s2"}},
+		{"SUNIONSTORE", []string{"SUNIONSTORE", "user:us", "user:s1", "user:s2"}},
 	}
 	for _, c := range allow {
 		if v := a.do(c.args...); aclIsNoperm(v) {
-			t.Errorf("%s over keys INSIDE ~user:* returned NOPERM -- the numkeys count is being checked as a key", c.name)
+			t.Errorf("%s over keys INSIDE ~user:* returned NOPERM -- a permitted key was refused", c.name)
 		}
 	}
 
@@ -494,8 +489,8 @@ func TestACLSetStoreAllowsSandboxedKeysAndRefusesOthers(t *testing.T) {
 		name string
 		args []string
 	}{
-		{"SINTERSTORE", []string{"SINTERSTORE", "user:is2", "2", "user:s1", "other:zs"}},
-		{"SUNIONSTORE", []string{"SUNIONSTORE", "user:us2", "2", "user:s1", "other:zs"}},
+		{"SINTERSTORE", []string{"SINTERSTORE", "user:is2", "user:s1", "other:zs"}},
+		{"SUNIONSTORE", []string{"SUNIONSTORE", "user:us2", "user:s1", "other:zs"}},
 	}
 	for _, c := range refuseSource {
 		if v := a.do(c.args...); !aclIsNoperm(v) {
@@ -509,8 +504,8 @@ func TestACLSetStoreAllowsSandboxedKeysAndRefusesOthers(t *testing.T) {
 		name string
 		args []string
 	}{
-		{"SINTERSTORE", []string{"SINTERSTORE", "other:zs", "2", "user:s1", "user:s1"}},
-		{"SUNIONSTORE", []string{"SUNIONSTORE", "other:zs", "2", "user:s1", "user:s1"}},
+		{"SINTERSTORE", []string{"SINTERSTORE", "other:zs", "user:s1", "user:s1"}},
+		{"SUNIONSTORE", []string{"SUNIONSTORE", "other:zs", "user:s1", "user:s1"}},
 	}
 	for _, c := range refuseDest {
 		if v := a.do(c.args...); !aclIsNoperm(v) {

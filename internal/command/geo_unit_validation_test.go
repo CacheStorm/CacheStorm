@@ -27,7 +27,7 @@ func TestGeoUnitValidation(t *testing.T) {
 		{"GEODIST m control", []string{"GEODIST", "geo", "Palermo", "Catania", "m"}, false, "166", 0},
 		{"GEODIST km control", []string{"GEODIST", "geo", "Palermo", "Catania", "km"}, false, "166", 0},
 		{"GEODIST mi control", []string{"GEODIST", "geo", "Palermo", "Catania", "mi"}, false, "103", 0},
-		{"GEODIST ft control", []string{"GEODIST", "geo", "Palermo", "Catania", "ft"}, false, "5453", 0},
+		{"GEODIST ft control", []string{"GEODIST", "geo", "Palermo", "Catania", "ft"}, false, "5455", 0},
 		{"GEODIST no unit control", []string{"GEODIST", "geo", "Palermo", "Catania"}, false, "166", 0},
 		{"GEORADIUS unknown unit errors", []string{"GEORADIUS", "geo", "13.361389", "38.115556", "200", "kilometers"}, true, "", 0},
 		{"GEORADIUS mi control", []string{"GEORADIUS", "geo", "13.361389", "38.115556", "200", "mi"}, false, "", 2},

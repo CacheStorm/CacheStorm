@@ -1,6 +1,7 @@
 package command
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
@@ -14,6 +15,7 @@ import (
 	"github.com/cachestorm/cachestorm/internal/acl"
 	"github.com/cachestorm/cachestorm/internal/logger"
 	"github.com/cachestorm/cachestorm/internal/resp"
+	"github.com/cachestorm/cachestorm/internal/store"
 )
 
 type CommandDef struct { //nolint:revive // Command prefix is intentional for clarity
@@ -24,24 +26,29 @@ type CommandDef struct { //nolint:revive // Command prefix is intentional for cl
 }
 
 type Router struct {
-	mu       sync.RWMutex
-	commands map[string]*CommandDef
+	mu               sync.RWMutex
+	commands         map[string]*CommandDef
+	functionRegistry *FunctionRegistry
 	// duplicates records command names registered more than once. Register is
 	// last-write-wins, so a second registration silently replaced the first;
 	// six names were registered in two files at once and nothing said so.
 	duplicates  map[string]struct{}
 	requirePass string
-	postExecute func(db int, cmd string, args [][]byte)
+	postExecute func(ctx *Context, db int, cmd string, args [][]byte) error
 	// postExec receives the commands an EXEC ran, so the transaction is
 	// persisted as one unit instead of command by command.
-	postExec func(cmds []ExecutedCommand)
+	postExec   func(ctx *Context, cmds []ExecutedCommand) error
+	writeCheck func(string, [][]byte) error
 	// persisted reports whether a command is recorded in the AOF and the
 	// replication stream; script effects are filtered through it.
 	persisted func(cmd string, args [][]byte) bool
 	// port is the TCP port the server listens on, for INFO.
 	port int
 	// replInfo renders the INFO replication section.
-	replInfo func() string
+	replInfo         func() string
+	snapshotSave     func(bool) error
+	snapshotLastSave func() int64
+	snapshotInfo     func() string
 }
 
 // commandSpec is the arity, flags and key positions Redis reports for one of
@@ -107,6 +114,50 @@ func (r *Router) DuplicateRegistrations() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+func (r *Router) ForkForReplay(s *store.Store, allowed []string) *Router {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	n := &Router{commands: make(map[string]*CommandDef), duplicates: make(map[string]struct{}), functionRegistry: NewFunctionRegistry(s)}
+	timeSeries := store.NewTimeSeriesManager()
+	for _, name := range allowed {
+		if def := r.commands[name]; def != nil {
+			copyDef := *def
+			switch name {
+			case "TS.CREATE":
+				copyDef.Handler = replayTimeSeries(timeSeries, createTimeSeriesWith)
+			case "TS.ADD":
+				copyDef.Handler = replayTimeSeries(timeSeries, addTimeSeriesWith)
+			}
+			n.commands[name] = &copyDef
+		}
+	}
+	return n
+}
+
+func (r *Router) FunctionRegistry() *FunctionRegistry {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.functionRegistry
+}
+
+func (r *Router) SetFunctionRegistry(registry *FunctionRegistry) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.functionRegistry = registry
+}
+
+func (r *Router) SetSnapshotHooks(save func(bool) error, lastSave func() int64, info func() string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.snapshotSave, r.snapshotLastSave, r.snapshotInfo = save, lastSave, info
+}
+
+func (r *Router) snapshotHooks() (func(bool) error, func() int64, func() string) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.snapshotSave, r.snapshotLastSave, r.snapshotInfo
 }
 
 func (r *Router) SetRequirePass(password string) {
@@ -225,7 +276,11 @@ func (r *Router) SetPostExecute(fn func(cmd string, args [][]byte)) {
 func (r *Router) SetPostExecuteDB(fn func(db int, cmd string, args [][]byte)) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.postExecute = fn
+	if fn == nil {
+		r.postExecute = nil
+		return
+	}
+	r.postExecute = func(ctx *Context, db int, cmd string, args [][]byte) error { fn(db, cmd, args); return nil }
 }
 
 // SetPostExec installs the hook that receives the commands a successful EXEC
@@ -234,7 +289,11 @@ func (r *Router) SetPostExecuteDB(fn func(db int, cmd string, args [][]byte)) {
 func (r *Router) SetPostExec(fn func(cmds []ExecutedCommand)) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.postExec = fn
+	if fn == nil {
+		r.postExec = nil
+		return
+	}
+	r.postExec = func(ctx *Context, cmds []ExecutedCommand) error { fn(cmds); return nil }
 }
 
 // SetPersistFilter installs the predicate that decides which commands are
@@ -284,7 +343,7 @@ func (r *Router) replicationInfo() func() string {
 	return r.replInfo
 }
 
-func (r *Router) postExecuteHook() func(db int, cmd string, args [][]byte) {
+func (r *Router) postExecuteHook() func(ctx *Context, db int, cmd string, args [][]byte) error {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.postExecute
@@ -293,30 +352,78 @@ func (r *Router) postExecuteHook() func(db int, cmd string, args [][]byte) {
 // record hands what a command executed to the persistence hooks: its
 // override when the handler set one, nothing when it answered with an error,
 // itself otherwise.
-func (r *Router) record(ctx *Context, db int, errsBefore int64) {
+func (r *Router) record(ctx *Context, db int, errsBefore int64) error {
 	if cmds, ok := ctx.Propagation(); ok {
 		switch len(cmds) {
 		case 0:
 		case 1:
 			if hook := r.postExecuteHook(); hook != nil {
-				hook(cmds[0].DB, cmds[0].Name, cmds[0].Args)
+				return hook(ctx, cmds[0].DB, cmds[0].Name, cmds[0].Args)
 			}
 		default:
 			if hook := r.postExecHook(); hook != nil {
-				hook(cmds)
+				return hook(ctx, cmds)
 			}
 		}
-		return
+		return nil
 	}
 	if ctx.Writer != nil && ctx.Writer.Errors() > errsBefore {
-		return
+		return nil
 	}
 	if hook := r.postExecuteHook(); hook != nil {
-		hook(db, ctx.Command, ctx.Args)
+		return hook(ctx, db, ctx.Command, ctx.Args)
 	}
+	return nil
 }
 
-func (r *Router) postExecHook() func(cmds []ExecutedCommand) {
+func (r *Router) SetCommitHooks(check func(string, [][]byte) error, single func(*Context, int, string, [][]byte) error, batch func(*Context, []ExecutedCommand) error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.writeCheck, r.postExecute, r.postExec = check, single, batch
+}
+
+func (r *Router) checkWrite(ctx *Context) (bool, error) {
+	r.mu.RLock()
+	check := r.writeCheck
+	r.mu.RUnlock()
+	if check == nil || (ctx.Command != "EXEC" && !r.Persisted(ctx.Command, ctx.Args)) {
+		return false, nil
+	}
+	if ctx.Command == "PFCOUNT" {
+		return true, nil
+	}
+	return true, check(ctx.Command, ctx.Args)
+}
+
+func (r *Router) executeHandler(ctx *Context, cmd *CommandDef, capture bool) (err error) {
+	original := ctx.Writer
+	var out bytes.Buffer
+	if capture {
+		ctx.Writer = resp.NewWriter(&out)
+		ctx.Writer.SetRESP3(original.IsRESP3())
+		defer func() {
+			captured := ctx.Writer
+			ctx.Writer = original
+			if err == nil {
+				err = original.WriteCaptured(out.Bytes(), captured.Errors())
+			}
+		}()
+	}
+	db := ctx.DB
+	errsBefore := ctx.Writer.Errors()
+	ctx.writeEffectsHandled = false
+	err = cmd.Handler(ctx)
+	ctx.passWakeup()
+	reaccountWrittenKeys(ctx)
+	touchWrittenKeys(ctx)
+	signalWrittenKeys(ctx)
+	if err == nil {
+		err = r.record(ctx, db, errsBefore)
+	}
+	return err
+}
+
+func (r *Router) postExecHook() func(ctx *Context, cmds []ExecutedCommand) error {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.postExec
@@ -374,6 +481,14 @@ func (r *Router) Execute(ctx *Context) error {
 		return ctx.Writer.WriteError(errExecAbortOOM.Error())
 	}
 
+	capture, checkErr := r.checkWrite(ctx)
+	if checkErr != nil {
+		if ctx.Transaction != nil && ctx.Transaction.IsActive() {
+			ctx.Transaction.Abort()
+		}
+		return checkErr
+	}
+
 	// MULTI queues commands for atomic execution at EXEC.
 	if ctx.Transaction != nil && ctx.Transaction.IsActive() && !isTransactionControl(ctx.Command) {
 		ctx.Transaction.Queue(ctx.Command, ctx.Args)
@@ -381,20 +496,7 @@ func (r *Router) Execute(ctx *Context) error {
 	}
 
 	ctx.StartTime = time.Now()
-	db := ctx.DB
-	errsBefore := ctx.Writer.Errors()
-	err := cmd.Handler(ctx)
-	ctx.passWakeup()
-	reaccountWrittenKeys(ctx)
-	touchWrittenKeys(ctx)
-	signalWrittenKeys(ctx)
-
-	// Post-execute hook (AOF persistence and replication)
-	if err == nil {
-		r.record(ctx, db, errsBefore)
-	}
-
-	return err
+	return r.executeHandler(ctx, cmd, capture)
 }
 
 // isTransactionControl reports whether cmd runs immediately even inside
@@ -417,8 +519,12 @@ func (r *Router) ExecuteSilent(ctx *Context) error {
 	if !ok {
 		return ErrUnknownCommand
 	}
+
 	if ctx.Writer == nil {
 		ctx.Writer = resp.NewWriter(io.Discard)
+	}
+	if !checkArity(ctx.Command, len(ctx.Args)) {
+		return ctx.Writer.WriteError(arityError(ctx.Command).Error())
 	}
 	ctx.Authenticated = true
 	ctx.StartTime = time.Now()
@@ -470,19 +576,13 @@ func (r *Router) ExecuteHTTP(ctx *Context) (interface{}, error) {
 		return nil, errOOM
 	}
 
-	db := ctx.DB
-	errsBefore := ctx.Writer.Errors()
-	err := cmd.Handler(ctx)
-	ctx.passWakeup()
-	reaccountWrittenKeys(ctx)
-	touchWrittenKeys(ctx)
-	signalWrittenKeys(ctx)
+	capture, err := r.checkWrite(ctx)
 	if err != nil {
 		return nil, err
 	}
-
-	// Post-execute hook (AOF persistence and replication)
-	r.record(ctx, db, errsBefore)
+	if err := r.executeHandler(ctx, cmd, capture); err != nil {
+		return nil, err
+	}
 
 	// Return a simple acknowledgement - the actual response was written to the RESP writer
 	return "OK", nil

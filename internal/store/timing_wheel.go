@@ -70,8 +70,11 @@ func (tw *TimingWheel) Add(key string, expiresAt int64) {
 	tw.mu.Lock()
 	defer tw.mu.Unlock()
 
-	now := time.Now().UnixNano()
-	duration := time.Duration(expiresAt - now)
+	now := time.Now().UnixMilli()
+	duration := time.Duration(0)
+	if expiresAt > now {
+		duration = expiryDuration(expiresAt - now)
+	}
 
 	switch {
 	case duration <= 0:
@@ -153,7 +156,7 @@ func (tw *TimingWheel) tickLoop() {
 }
 
 func (tw *TimingWheel) tick() {
-	now := time.Now().UnixNano()
+	now := time.Now().UnixMilli()
 
 	tw.levels[0].mu.Lock()
 	bucket := tw.levels[0].slots[tw.levels[0].current]
@@ -232,7 +235,7 @@ func (tw *TimingWheel) cascadeLevel(level int, now int64) {
 	}
 
 	for _, item := range toMove {
-		tw.addToLevel(level-1, item.key, item.expiresAt, time.Duration(item.expiresAt-now))
+		tw.addToLevel(level-1, item.key, item.expiresAt, expiryDuration(item.expiresAt-now))
 	}
 }
 
@@ -287,7 +290,7 @@ func (tw *TimingWheel) farFutureCleanup() {
 func (tw *TimingWheel) cleanupFarFuture() {
 	tw.mu.Lock()
 
-	now := time.Now().UnixNano()
+	now := time.Now().UnixMilli()
 
 	tw.farFuture.mu.Lock()
 	var expired []string
@@ -297,7 +300,7 @@ func (tw *TimingWheel) cleanupFarFuture() {
 		if expiresAt <= now {
 			expired = append(expired, key)
 		} else {
-			duration := time.Duration(expiresAt - now)
+			duration := expiryDuration(expiresAt - now)
 			if duration < 365*24*time.Hour {
 				if toMove == nil {
 					toMove = make(map[string]int64)
@@ -315,7 +318,7 @@ func (tw *TimingWheel) cleanupFarFuture() {
 	// Move keys that are now within range
 	for key, expiresAt := range toMove {
 		delete(tw.farFuture.keys, key)
-		duration := time.Duration(expiresAt - now)
+		duration := expiryDuration(expiresAt - now)
 		switch {
 		case duration < time.Hour:
 			tw.addToLevel(0, key, expiresAt, duration)

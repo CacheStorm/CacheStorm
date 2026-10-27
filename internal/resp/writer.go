@@ -275,3 +275,11 @@ func (w *Writer) WriteZero() error {
 func (w *Writer) WriteOne() error {
 	return w.WriteInteger(1)
 }
+
+func (w *Writer) WriteCaptured(data []byte, errors int64) error {
+	w.errors += errors
+	if _, err := w.wr.Write(data); err != nil {
+		return err
+	}
+	return w.wr.Flush()
+}

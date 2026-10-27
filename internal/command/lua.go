@@ -1048,12 +1048,14 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 		if len(args) < 2 {
 			return lua.LString("ERR")
 		}
-		entry, exists := e.store.Get(args[0])
-		if !exists {
+		_, err := e.store.Transfer(args[0], e.store, args[1], store.TransferOptions{Replace: true})
+		if err == store.ErrKeyNotFound {
 			return lua.LString("ERR no such key")
 		}
-		e.store.Delete(args[0])
-		e.store.SetEntry(args[1], entry)
+		if err != nil {
+			L.RaiseError("%s", err.Error())
+			return lua.LNil
+		}
 		return lua.LString("OK")
 
 	case "PERSIST":

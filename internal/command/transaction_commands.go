@@ -232,7 +232,9 @@ func cmdEXEC(ctx *Context) error {
 
 	if r := ctx.dispatcher(); r != nil && len(executed) > 0 {
 		if hook := r.postExecHook(); hook != nil {
-			hook(executed)
+			if err := hook(ctx, executed); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -312,6 +314,7 @@ func execQueued(ctx *Context, qc queuedCommand) (*resp.Value, *Context) {
 	sub.StartTime = time.Now()
 	sub.propagate = nil
 	sub.propagateSet = false
+	sub.writeEffectsHandled = false
 
 	err := def.Handler(&sub)
 	reaccountWrittenKeys(&sub)

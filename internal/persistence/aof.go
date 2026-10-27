@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -37,32 +38,44 @@ type AOFConfig struct {
 }
 
 type AOFWriter struct {
-	config    AOFConfig
-	mu        sync.Mutex
-	file      *os.File
-	writer    *bufio.Writer
-	writerBuf []byte
-	size      atomic.Int64
-	dirty     atomic.Int64
-	lastSync  time.Time
-	stopCh    chan struct{}
-	wg        sync.WaitGroup
-	running   atomic.Bool
+	config     AOFConfig
+	lifecycle  sync.Mutex
+	replaceOps aofReplaceOps
+	fatalErr   error
+	mu         sync.Mutex
+	file       *os.File
+	writer     *bufio.Writer
+	writerBuf  []byte
+	size       atomic.Int64
+	dirty      atomic.Int64
+	lastSync   time.Time
+	stopCh     chan struct{}
+	wg         sync.WaitGroup
+	running    atomic.Bool
 	// curDB is the database the commands at the end of the file apply to;
 	// a command for another database is preceded by SELECT. -1 means
 	// unknown, so the next command always gets a SELECT.
-	curDB int
+	curDB    int
+	openFile func(string, int, os.FileMode) (*os.File, error)
 }
 
 func NewAOFWriter(cfg AOFConfig) *AOFWriter {
 	return &AOFWriter{
-		config:    cfg,
-		writerBuf: make([]byte, 0, 4096),
-		stopCh:    make(chan struct{}),
+		config:     cfg,
+		writerBuf:  make([]byte, 0, 4096),
+		stopCh:     make(chan struct{}),
+		replaceOps: defaultAOFReplaceOps(),
 	}
 }
 
 func (w *AOFWriter) Start() error {
+	w.lifecycle.Lock()
+	defer w.lifecycle.Unlock()
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.fatalErr != nil {
+		return w.fatalErr
+	}
 	if !w.config.Enabled {
 		return nil
 	}
@@ -74,7 +87,11 @@ func (w *AOFWriter) Start() error {
 	path := filepath.Join(w.config.DataDir, w.config.Filename)
 
 	var err error
-	w.file, err = os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	open := w.openFile
+	if open == nil {
+		open = openAOFFile
+	}
+	w.file, err = open(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		return fmt.Errorf("failed to open AOF file: %v", err)
 	}
@@ -85,6 +102,22 @@ func (w *AOFWriter) Start() error {
 		return fmt.Errorf("failed to stat AOF file: %v", err)
 	}
 	w.size.Store(stat.Size())
+	if stat.Size() == 0 && stat.Mode().IsRegular() {
+		if err := writeAOFHeader(w.file); err != nil {
+			w.file.Close()
+			return err
+		}
+		if err := w.file.Sync(); err != nil {
+			w.file.Close()
+			return err
+		}
+		info, err := w.file.Stat()
+		if err != nil {
+			w.file.Close()
+			return err
+		}
+		w.size.Store(info.Size())
+	}
 
 	w.writer = bufio.NewWriterSize(w.file, 8192)
 	w.running.Store(true)
@@ -99,23 +132,40 @@ func (w *AOFWriter) Start() error {
 }
 
 func (w *AOFWriter) Stop() {
-	if !w.running.CompareAndSwap(true, false) {
-		return
+	if err := w.StopWithError(); err != nil {
+		logger.Error().Err(err).Msg("AOF shutdown failed")
 	}
+}
 
+func (w *AOFWriter) StopWithError() error {
+	w.lifecycle.Lock()
+	defer w.lifecycle.Unlock()
+	if !w.running.CompareAndSwap(true, false) {
+		w.mu.Lock()
+		defer w.mu.Unlock()
+		return w.fatalErr
+	}
 	close(w.stopCh)
 	w.wg.Wait()
-
 	w.mu.Lock()
-	if w.writer != nil {
-		w.writer.Flush()
+	defer w.mu.Unlock()
+	err := w.fatalErr
+	if err == nil {
+		if w.writer != nil {
+			err = w.writer.Flush()
+		}
+		if w.file != nil {
+			err = errors.Join(err, w.file.Sync())
+		}
 	}
 	if w.file != nil {
-		w.file.Close()
+		err = errors.Join(err, w.file.Close())
 	}
-	w.mu.Unlock()
-
+	if err != nil {
+		w.fatalErr = err
+	}
 	logger.Info().Msg("AOF writer stopped")
+	return err
 }
 
 func (w *AOFWriter) syncLoop() {
@@ -137,12 +187,20 @@ func (w *AOFWriter) syncLoop() {
 func (w *AOFWriter) syncFile() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	if w.fatalErr != nil {
+		return
+	}
 
 	if w.writer != nil {
-		_ = w.writer.Flush()
+		if err := w.writer.Flush(); err != nil {
+			w.fatalErr = err
+			logger.Error().Err(err).Msg("aof flush failed")
+			return
+		}
 	}
 	if w.file != nil {
 		if err := w.file.Sync(); err != nil {
+			w.fatalErr = err
 			logger.Error().Err(err).Msg("aof fsync failed")
 		} else {
 			w.lastSync = time.Now()
@@ -239,9 +297,13 @@ func (w *AOFWriter) AppendTransaction(cmds []Command) error {
 }
 
 func (w *AOFWriter) writeLocked(commands int64) error {
+	if w.fatalErr != nil {
+		return w.fatalErr
+	}
 	n, err := w.writer.Write(w.writerBuf)
 	if err != nil {
-		return fmt.Errorf("failed to write to AOF: %v", err)
+		w.fatalErr = fmt.Errorf("failed to write to AOF: %w", err)
+		return w.fatalErr
 	}
 
 	w.size.Add(int64(n))
@@ -249,9 +311,11 @@ func (w *AOFWriter) writeLocked(commands int64) error {
 
 	if w.config.SyncPolicy == AOFAlways {
 		if err := w.writer.Flush(); err != nil {
+			w.fatalErr = err
 			return err
 		}
 		if err := w.file.Sync(); err != nil {
+			w.fatalErr = err
 			return err
 		}
 	}
@@ -289,19 +353,36 @@ func (w *AOFWriter) Dirty() int64 {
 func (w *AOFWriter) Flush() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	if w.fatalErr != nil {
+		return w.fatalErr
+	}
 
 	if w.writer != nil {
 		if err := w.writer.Flush(); err != nil {
+			if w.running.Load() {
+				w.fatalErr = err
+			}
 			return err
 		}
 	}
 	if w.file != nil {
-		return w.file.Sync()
+		err := w.file.Sync()
+		if w.running.Load() {
+			w.fatalErr = err
+		}
+		return err
 	}
 	return nil
 }
 
+func (w *AOFWriter) Err() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.fatalErr
+}
+
 type AOFReader struct {
+	Version int
 }
 
 func NewAOFReader() *AOFReader {
@@ -341,6 +422,7 @@ func (c *countingReader) Read(p []byte) (int, error) {
 // append does not land after the torn bytes. Bytes that do not parse as a
 // command anywhere before the tail are corruption and return an error.
 func (r *AOFReader) LoadValid(path string) ([]Command, int64, error) {
+	r.Version = 0
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to open AOF file: %v", err)
@@ -351,7 +433,8 @@ func (r *AOFReader) LoadValid(path string) ([]Command, int64, error) {
 	counter := &countingReader{r: f}
 	br := bufio.NewReader(counter)
 	reader := resp.NewReader(br)
-	var valid int64
+	var valid, txOffset int64
+	txIndex := -1
 
 	for {
 		cmd, args, err := reader.ReadCommand()
@@ -362,11 +445,43 @@ func (r *AOFReader) LoadValid(path string) ([]Command, int64, error) {
 			return nil, valid, fmt.Errorf("failed to read command at offset %d: %v", valid, err)
 		}
 
+		name := strings.ToUpper(cmd)
+		if name == aofVersionCommand {
+			if valid != 0 || r.Version != 0 || len(args) != 1 || string(args[0]) != "2" {
+				return nil, valid, errors.New("invalid or unsupported AOF version header")
+			}
+			r.Version = AOFVersion
+			valid = counter.n - int64(br.Buffered())
+			continue
+		}
+		switch name {
+		case "MULTI":
+			if len(args) != 0 || txIndex >= 0 {
+				return nil, valid, fmt.Errorf("invalid MULTI at offset %d", valid)
+			}
+			txIndex, txOffset = len(commands), valid
+		case "EXEC", "DISCARD":
+			if len(args) != 0 || txIndex < 0 {
+				return nil, valid, fmt.Errorf("invalid %s at offset %d", name, valid)
+			}
+			if name == "DISCARD" {
+				commands = commands[:txIndex]
+				txIndex = -1
+				valid = counter.n - int64(br.Buffered())
+				continue
+			}
+			txIndex = -1
+		}
+
 		commands = append(commands, Command{
 			Name: cmd,
 			Args: args,
 		})
 		valid = counter.n - int64(br.Buffered())
+	}
+
+	if txIndex >= 0 {
+		commands, valid = commands[:txIndex], txOffset
 	}
 
 	logger.Info().Int("commands", len(commands)).Msg("AOF loaded")
@@ -401,6 +516,11 @@ func (rw *AOFRewriter) Rewrite(aofPath string) error {
 	}
 
 	writer := bufio.NewWriterSize(f, 8192)
+	if err := writeAOFHeader(writer); err != nil {
+		f.Close()
+		os.Remove(tempPath)
+		return err
+	}
 
 	if err := rw.writeAll(writer); err != nil {
 		f.Close()
@@ -451,6 +571,13 @@ type MultiDBSource interface {
 // before each non-empty database and a final SELECT 0, so commands appended
 // after the rewrite land in database 0 as the writer assumes.
 func (rw *AOFRewriter) writeAll(w *bufio.Writer) error {
+	if src, ok := rw.store.(interface{ FunctionPayload() []byte }); ok {
+		if payload := src.FunctionPayload(); len(payload) > 0 {
+			if err := rw.writeCommand(w, "FUNCTION", "RESTORE", string(payload), "FLUSH"); err != nil {
+				return err
+			}
+		}
+	}
 	multi, ok := rw.store.(MultiDBSource)
 	if !ok {
 		for key, entry := range rw.store.GetAll() {
@@ -488,6 +615,12 @@ func (rw *AOFRewriter) writeEntry(w *bufio.Writer, key string, entry interface{}
 	case *store.Entry:
 		if err := rw.writeValueCommands(w, key, v.Value); err != nil {
 			return err
+		}
+		if len(v.Tags) > 0 {
+			args := append([]string{key}, v.Tags...)
+			if err := rw.writeCommand(w, "ADDTAG", args...); err != nil {
+				return err
+			}
 		}
 		return rw.writeExpiry(w, key, v.ExpiresAt.Load())
 	case store.Value:
@@ -572,13 +705,11 @@ func (rw *AOFRewriter) writeStreamConsumers(w *bufio.Writer, key, name string, g
 }
 
 // writeExpiry re-emits a key's absolute expiry after its value commands.
-// Entry.ExpiresAt is Unix nanoseconds; PEXPIREAT takes milliseconds. Without
-// this a rewrite drops every TTL and silently turns expiring keys permanent.
 func (rw *AOFRewriter) writeExpiry(w *bufio.Writer, key string, expiresAt int64) error {
 	if expiresAt <= 0 {
 		return nil
 	}
-	return rw.writeCommand(w, "PEXPIREAT", key, strconv.FormatInt(expiresAt/int64(time.Millisecond), 10))
+	return rw.writeCommand(w, "PEXPIREAT", key, strconv.FormatInt(expiresAt, 10))
 }
 
 // writeCommand appends one RESP array command to the rewrite buffer.
@@ -765,8 +896,14 @@ func (rw *AOFRewriter) writeValueCommands(w *bufio.Writer, key string, value sto
 		return nil
 
 	default:
-		// Unknown value shape: preserve the legacy lossy SET fallback.
-		return rw.writeCommand(w, "SET", key, fmt.Sprintf("%v", value))
+		if raw, ok := value.(store.RedisStringValue); ok {
+			data, err := raw.RedisStringBytes()
+			if err != nil {
+				return err
+			}
+			return rw.writeCommand(w, "SET", key, string(data))
+		}
+		return fmt.Errorf("unsupported value type %T in AOF snapshot", value)
 	}
 }
 
@@ -904,6 +1041,13 @@ type multiDBAdapter struct {
 	MultiDBSource
 }
 
+func (a multiDBAdapter) FunctionPayload() []byte {
+	if src, ok := a.MultiDBSource.(interface{ FunctionPayload() []byte }); ok {
+		return src.FunctionPayload()
+	}
+	return nil
+}
+
 func (a multiDBAdapter) GetAll() map[string]interface{} {
 	out := make(map[string]interface{})
 	for _, entries := range a.DatabaseEntries() {
@@ -926,24 +1070,9 @@ func WriteSnapshot(w io.Writer, src MultiDBSource) error {
 	return bw.Flush()
 }
 
-// Rewrite replaces the file with a rewrite of src and continues appending
-// after it, in database 0. The caller must keep other appends out while it
-// runs: an append made during the rewrite is dropped.
 func (w *AOFWriter) Rewrite(src MultiDBSource) error {
 	if !w.config.Enabled {
 		return nil
 	}
-	wasRunning := w.running.Load()
-	if wasRunning {
-		w.Stop()
-	}
-	path := filepath.Join(w.config.DataDir, w.config.Filename)
-	err := NewAOFRewriter(w.config, multiDBAdapter{src}).Rewrite(path)
-	w.SetCurrentDB(0)
-	if wasRunning {
-		if startErr := w.Start(); startErr != nil && err == nil {
-			err = startErr
-		}
-	}
-	return err
+	return w.replaceSnapshot(src)
 }

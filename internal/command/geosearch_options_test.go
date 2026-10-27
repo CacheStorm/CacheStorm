@@ -68,7 +68,7 @@ func TestGeoSearchOptions(t *testing.T) {
 		for _, e := range got.Array {
 			scores[string(e.Array[0].Bulk)] = string(e.Array[1].Bulk)
 		}
-		if scores["Catania"] != "0" {
+		if scores["Catania"] != "0.0000" {
 			t.Errorf("Catania distance = %q, want 0", scores["Catania"])
 		}
 		if !strings.HasPrefix(scores["Palermo"], "166.2") {
@@ -131,13 +131,13 @@ func TestGeoSearchOptions(t *testing.T) {
 		if coord.Type != resp.TypeArray || len(coord.Array) != 2 {
 			t.Fatalf("coords type %v len %d, want [lon lat]", coord.Type, len(coord.Array))
 		}
-		if string(coord.Array[0].Bulk) != "15.087269" || string(coord.Array[1].Bulk) != "37.502669" {
+		if string(coord.Array[0].Bulk) != "15.08726745843887329" || string(coord.Array[1].Bulk) != "37.50266842333162032" {
 			t.Errorf("coords = [%q %q], want Catania's", coord.Array[0].Bulk, coord.Array[1].Bulk)
 		}
 	})
 
 	t.Run("WITHHASH adds geohash integer", func(t *testing.T) {
-		want := store.EncodeGeohashInt(15.087269, 37.502669)
+		want := uint64(store.GeoScore(15.087269, 37.502669))
 		got := run("GEOSEARCH", "geo", "FROMMEMBER", "Catania", "BYRADIUS", "200", "km", "WITHHASH", "COUNT", "1")
 		if got.Type != resp.TypeArray || len(got.Array) != 1 {
 			t.Fatalf("replied %v with %d entries, want 1", got.Type, len(got.Array))
@@ -167,8 +167,8 @@ func TestGeoSearchOptions(t *testing.T) {
 
 	t.Run("missing FROMMEMBER control", func(t *testing.T) {
 		got := run("GEOSEARCH", "geo", "FROMMEMBER", "NoCity", "BYRADIUS", "200", "km")
-		if got.Type != resp.TypeArray || len(got.Array) != 0 {
-			t.Fatalf("replied %v with %d entries, want an empty array", got.Type, len(got.Array))
+		if got.Type != resp.TypeError || got.Err != "ERR could not decode requested zset member" {
+			t.Fatalf("missing center=%+v", got)
 		}
 	})
 }

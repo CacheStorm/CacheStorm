@@ -1,7 +1,9 @@
 package persistence
 
 import (
+	"bytes"
 	"encoding/binary"
+	"encoding/gob"
 	"fmt"
 	"io"
 	"os"
@@ -27,11 +29,13 @@ type RDBConfig struct {
 	Version     RDBVersion
 	Compression bool
 	Checksum    bool
+	AuxFields   map[string]string
 }
 
 type RDBWriter struct {
 	config RDBConfig
 	store  *store.Store
+	dbs    *store.Databases
 	mu     sync.Mutex
 }
 
@@ -42,55 +46,44 @@ func NewRDBWriter(s *store.Store, cfg RDBConfig) *RDBWriter {
 	}
 }
 
+func NewRDBWriterForDatabases(dbs *store.Databases, cfg RDBConfig) *RDBWriter {
+	w := NewRDBWriter(dbs.DB(0), cfg)
+	w.dbs = dbs
+	return w
+}
+
 func (w *RDBWriter) Save(path string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	return writeRDBAtomic(path, w.writeRDB)
+}
 
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("failed to create directory: %v", err)
-	}
-
-	tempPath := path + ".tmp"
-
-	f, err := os.Create(tempPath)
-	if err != nil {
-		return fmt.Errorf("failed to create file: %v", err)
-	}
-
-	if err := w.writeRDB(f); err != nil {
-		f.Close()
-		os.Remove(tempPath)
-		return err
-	}
-
-	if err := f.Sync(); err != nil {
-		f.Close()
-		os.Remove(tempPath)
-		return fmt.Errorf("failed to sync file: %v", err)
-	}
-
-	if err := f.Close(); err != nil {
-		os.Remove(tempPath)
-		return fmt.Errorf("failed to close file: %v", err)
-	}
-
-	if err := os.Rename(tempPath, path); err != nil {
-		os.Remove(tempPath)
-		return fmt.Errorf("failed to rename file: %v", err)
-	}
-
-	logger.Info().Str("path", path).Msg("RDB saved successfully")
-	return nil
+func (w *RDBWriter) Encode(dst io.Writer) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.writeRDB(dst)
 }
 
 func (w *RDBWriter) writeRDB(f io.Writer) error {
+	if w.config.Checksum {
+		f = &rdbChecksumWriter{Writer: f}
+	}
 	if err := w.writeHeader(f); err != nil {
 		return err
 	}
 
-	if err := w.writeDatabase(f, 0); err != nil {
-		return err
+	if w.dbs == nil {
+		if err := w.writeDatabase(f, 0); err != nil {
+			return err
+		}
+	} else {
+		for db := 0; db < w.dbs.Count(); db++ {
+			if st := w.dbs.Existing(db); st != nil {
+				if err := w.writeDatabaseStore(f, db, st); err != nil {
+					return err
+				}
+			}
+		}
 	}
 
 	if err := w.writeEnd(f); err != nil {
@@ -116,6 +109,10 @@ func (w *RDBWriter) writeHeader(f io.Writer) error {
 		{"used-mem", fmt.Sprintf("%d", w.store.MemUsage())},
 	}
 
+	for key, value := range w.config.AuxFields {
+		auxFields = append(auxFields, struct{ key, value string }{key, value})
+	}
+
 	for _, aux := range auxFields {
 		if err := w.writeAuxField(f, aux.key, aux.value); err != nil {
 			return err
@@ -136,6 +133,10 @@ func (w *RDBWriter) writeAuxField(f io.Writer, key, value string) error {
 }
 
 func (w *RDBWriter) writeDatabase(f io.Writer, db int) error {
+	return w.writeDatabaseStore(f, db, w.store)
+}
+
+func (w *RDBWriter) writeDatabaseStore(f io.Writer, db int, st *store.Store) error {
 	if err := w.writeByte(f, 0xFE); err != nil {
 		return err
 	}
@@ -143,7 +144,7 @@ func (w *RDBWriter) writeDatabase(f io.Writer, db int) error {
 		return err
 	}
 
-	resizeDB := w.store.KeyCount()
+	resizeDB := st.KeyCount()
 	if err := w.writeByte(f, 0xFB); err != nil {
 		return err
 	}
@@ -154,7 +155,7 @@ func (w *RDBWriter) writeDatabase(f io.Writer, db int) error {
 		return err
 	}
 
-	entries := w.store.GetAll()
+	entries := st.GetAll()
 	for key, entry := range entries {
 		if entry == nil || entry.IsExpired() {
 			continue
@@ -169,11 +170,31 @@ func (w *RDBWriter) writeDatabase(f io.Writer, db int) error {
 }
 
 func (w *RDBWriter) writeEntry(f io.Writer, key string, entry *store.Entry) error {
+	switch entry.Value.(type) {
+	case *store.StringValue, *store.ListValue, *store.SetValue, *store.HashValue, *store.SortedSetValue, *store.GeoValue, *store.JSONValue, *store.StreamValue, *store.TimeSeriesValue:
+	default:
+		if _, ok := entry.Value.(store.RedisStringValue); !ok {
+			return fmt.Errorf("unsupported snapshot value %T for key %q", entry.Value, key)
+		}
+	}
+	if len(entry.Tags) > 0 {
+		if err := w.writeByte(f, 0xF8); err != nil {
+			return err
+		}
+		if err := w.writeLength(f, len(entry.Tags)); err != nil {
+			return err
+		}
+		for _, tag := range entry.Tags {
+			if err := w.writeString(f, tag); err != nil {
+				return err
+			}
+		}
+	}
 	if entry.TTL() > 0 {
 		if err := w.writeByte(f, 0xFC); err != nil {
 			return err
 		}
-		expiresAt := time.Unix(0, entry.ExpiresAt.Load()).UnixMilli()
+		expiresAt := entry.ExpiresAt.Load()
 		if err := binary.Write(f, binary.LittleEndian, expiresAt); err != nil {
 			return err
 		}
@@ -208,7 +229,7 @@ func (w *RDBWriter) getValueType(v store.Value) int {
 	case *store.JSONValue:
 		return 6
 	case *store.StreamValue:
-		return 7
+		return 9
 	case *store.TimeSeriesValue:
 		return 8
 	default:
@@ -317,33 +338,11 @@ func (w *RDBWriter) writeValue(f io.Writer, v store.Value, valueType int) error 
 			return err
 		}
 	case *store.StreamValue:
-		vt.RLock()
-		entries := make([]*store.StreamEntry, len(vt.Entries))
-		copy(entries, vt.Entries)
-		maxLen := vt.MaxLen
-		vt.RUnlock()
-		if err := w.writeLength(f, len(entries)); err != nil {
+		var data bytes.Buffer
+		if err := gob.NewEncoder(&data).Encode(vt.Clone()); err != nil {
 			return err
 		}
-		if err := w.writeLength(f, int(maxLen)); err != nil {
-			return err
-		}
-		for _, entry := range entries {
-			if err := w.writeString(f, entry.ID); err != nil {
-				return err
-			}
-			if err := w.writeLength(f, len(entry.Fields)); err != nil {
-				return err
-			}
-			for k, val := range entry.Fields {
-				if err := w.writeString(f, k); err != nil {
-					return err
-				}
-				if err := w.writeString(f, string(val)); err != nil {
-					return err
-				}
-			}
-		}
+		return w.writeString(f, data.String())
 	case *store.TimeSeriesValue:
 		vt.RLock()
 		retention := vt.Retention
@@ -391,7 +390,14 @@ func (w *RDBWriter) writeValue(f io.Writer, v store.Value, valueType int) error 
 			}
 		}
 	default:
-		return w.writeString(f, v.String())
+		if raw, ok := v.(store.RedisStringValue); ok {
+			data, err := raw.RedisStringBytes()
+			if err != nil {
+				return err
+			}
+			return w.writeString(f, string(data))
+		}
+		return fmt.Errorf("unsupported value type %T in RDB snapshot", v)
 	}
 	return nil
 }
@@ -402,6 +408,10 @@ func (w *RDBWriter) writeEnd(f io.Writer) error {
 	}
 
 	checksum := make([]byte, 8)
+	if cw, ok := f.(*rdbChecksumWriter); ok {
+		binary.LittleEndian.PutUint64(checksum, cw.checksum)
+		f = cw.Writer
+	}
 	_, err := f.Write(checksum)
 	return err
 }
@@ -449,8 +459,10 @@ func (w *RDBWriter) writeString(f io.Writer, s string) error {
 }
 
 type RDBReader struct {
-	store *store.Store
-	mu    sync.Mutex
+	AuxFields map[string]string
+	store     *store.Store
+	dbs       *store.Databases
+	mu        sync.Mutex
 }
 
 func NewRDBReader(s *store.Store) *RDBReader {
@@ -459,20 +471,34 @@ func NewRDBReader(s *store.Store) *RDBReader {
 	}
 }
 
+func NewRDBReaderForDatabases(dbs *store.Databases) *RDBReader {
+	r := NewRDBReader(dbs.DB(0))
+	r.dbs = dbs
+	return r
+}
+
 func (r *RDBReader) Load(path string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-
-	f, err := os.Open(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("failed to open file: %v", err)
+		return fmt.Errorf("failed to open file: %w", err)
 	}
-	defer f.Close()
-
-	if err := r.readRDB(f); err != nil {
+	if len(data) < 18 {
+		return r.readRDB(bytes.NewReader(data))
+	}
+	body := data[:len(data)-8]
+	checksum := binary.LittleEndian.Uint64(data[len(data)-8:])
+	if checksum != 0 && checksum != rdbChecksum(0, body) {
+		return fmt.Errorf("RDB checksum mismatch")
+	}
+	if r.dbs != nil {
+		r.dbs.FlushAll()
+		r.store = r.dbs.DB(0)
+	}
+	if err := r.readRDB(bytes.NewReader(body)); err != nil {
 		return err
 	}
-
 	logger.Info().Str("path", path).Msg("RDB loaded successfully")
 	return nil
 }
@@ -497,9 +523,12 @@ func (r *RDBReader) readRDB(f io.Reader) error {
 		return fmt.Errorf("unsupported RDB version: %d", version)
 	}
 
+	r.AuxFields = make(map[string]string)
+
 	// Expiry (unix ms) from a preceding 0xFC/0xFD opcode; applies to the
 	// next entry only.
 	var pendingExpiryMS int64
+	var pendingTags []string
 
 	for {
 		opcode, err := r.readByte(f)
@@ -520,8 +549,7 @@ func (r *RDBReader) readRDB(f io.Reader) error {
 			if err != nil {
 				return err
 			}
-			_ = key
-			_ = value
+			r.AuxFields[key] = value
 
 		case 0xFB:
 			_, err := r.readLength(f)
@@ -534,11 +562,30 @@ func (r *RDBReader) readRDB(f io.Reader) error {
 			}
 
 		case 0xFE:
-			r.store.Flush()
-			// The writer emits the DB number right after 0xFE; consume it so
-			// the following bytes are not misparsed as the next opcode.
-			if _, err := r.readLength(f); err != nil {
+			db, err := r.readLength(f)
+			if err != nil {
 				return err
+			}
+			if r.dbs != nil {
+				if !r.dbs.Valid(db) {
+					return fmt.Errorf("RDB database %d is out of range", db)
+				}
+				r.store = r.dbs.DB(db)
+			} else if db != 0 {
+				return fmt.Errorf("RDB database %d requires a multi-database reader", db)
+			}
+			r.store.Flush()
+		case 0xF8:
+			count, err := r.readLength(f)
+			if err != nil {
+				return err
+			}
+			pendingTags = make([]string, count)
+			for i := range pendingTags {
+				pendingTags[i], err = r.readString(f)
+				if err != nil {
+					return err
+				}
 			}
 
 		case 0xFC:
@@ -556,18 +603,23 @@ func (r *RDBReader) readRDB(f io.Reader) error {
 			pendingExpiryMS = int64(expiresAt) * 1000
 
 		case 0xFF:
+			var extra [1]byte
+			if _, err := io.ReadFull(f, extra[:]); err != io.EOF {
+				return fmt.Errorf("RDB trailing data after EOF")
+			}
 			return nil
 
 		default:
-			if err := r.readEntry(f, opcode, pendingExpiryMS); err != nil {
+			if err := r.readEntry(f, opcode, pendingExpiryMS, pendingTags); err != nil {
 				return err
 			}
 			pendingExpiryMS = 0
+			pendingTags = nil
 		}
 	}
 }
 
-func (r *RDBReader) readEntry(f io.Reader, valueType byte, expiresAtMS int64) error {
+func (r *RDBReader) readEntry(f io.Reader, valueType byte, expiresAtMS int64, tags ...[]string) error {
 	key, err := r.readString(f)
 	if err != nil {
 		return err
@@ -671,7 +723,12 @@ func (r *RDBReader) readEntry(f io.Reader, valueType byte, expiresAtMS int64) er
 			}
 			points[member] = point
 		}
-		value = &store.GeoValue{Points: points}
+		legacy := &store.GeoValue{Points: points}
+		if canonical, ok := legacy.SortedSet(); ok {
+			value = canonical
+		} else {
+			value = legacy
+		}
 
 	case 6:
 		data, err := r.readString(f)
@@ -722,6 +779,17 @@ func (r *RDBReader) readEntry(f io.Reader, valueType byte, expiresAtMS int64) er
 			MaxLen:  int64(maxLen),
 			Groups:  make(map[string]*store.ConsumerGroup),
 		}
+
+	case 9:
+		data, err := r.readString(f)
+		if err != nil {
+			return err
+		}
+		stream := store.NewStreamValue(0)
+		if err := gob.NewDecoder(strings.NewReader(data)).Decode(stream); err != nil {
+			return err
+		}
+		value = stream
 
 	case 8:
 		var retention int64
@@ -790,14 +858,14 @@ func (r *RDBReader) readEntry(f io.Reader, valueType byte, expiresAtMS int64) er
 
 	// Restore expiry from a preceding 0xFC (ms) / 0xFD (s) opcode, if any.
 	opts := store.SetOptions{}
+	if len(tags) > 0 {
+		opts.Tags = tags[0]
+	}
 	if expiresAtMS > 0 {
-		remaining := time.Duration(expiresAtMS-time.Now().UnixMilli()) * time.Millisecond
-		if remaining <= 0 {
-			// Already expired — skip, mirroring the writer which drops
-			// expired entries when saving.
+		if expiresAtMS <= time.Now().UnixMilli() {
 			return nil
 		}
-		opts.TTL = remaining
+		opts.ExpireAtMS = expiresAtMS
 	}
 
 	return r.store.Set(key, value, opts)

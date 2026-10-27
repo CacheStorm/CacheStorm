@@ -61,9 +61,9 @@ var writeCommands = map[string]bool{
 	"BZPOPMIN": true, "BZPOPMAX": true,
 	"XADD": true, "XDEL": true, "XTRIM": true,
 	"XACK": true, "XCLAIM": true, "XAUTOCLAIM": true, "XGROUP": true, "XSETID": true,
-	"PFADD": true, "PFMERGE": true,
+	"PFADD": true, "PFMERGE": true, "PFCOUNT": true,
 	"SETBIT": true, "BITOP": true, "BITFIELD": true,
-	"GEOADD": true, "GEORADIUS": true, "GEOSEARCHSTORE": true,
+	"GEOADD": true, "GEORADIUS": true, "GEORADIUSBYMEMBER": true, "GEOSEARCHSTORE": true,
 	"ADDTAG": true, "REMTAG": true, "TAGLINK": true, "TAGUNLINK": true,
 	"SETTAG": true, "INVALIDATE": true,
 	// Scripting mutates through redis.call inside the handler, so the script is
@@ -100,6 +100,15 @@ func persistedCommand(cmd string, args [][]byte) bool {
 }
 
 type Server struct {
+	acceptWG      sync.WaitGroup
+	listenTCP     func(string, string) (net.Listener, error)
+	lifecycleMu   sync.Mutex
+	started       bool
+	startFailed   bool
+	stopped       bool
+	stopErr       error
+	dataDirectory string
+	dataLease     *persistence.DataDirectoryLock
 	cfg           *config.Config
 	listener      net.Listener
 	router        *command.Router
@@ -123,19 +132,54 @@ type Server struct {
 	repl *replication.Manager
 	// gate orders every write with its propagation to the AOF and the
 	// replicas, and lets a full resync snapshot the data between writes.
-	gate writeGate
+	gate              writeGate
+	snapshotMu        sync.Mutex
+	snapshotWG        sync.WaitGroup
+	snapshotRunning   bool
+	snapshotClosing   bool
+	snapshotLastTime  int64
+	snapshotLastError error
+	snapshotInterval  time.Duration
+	snapshotWrite     func([]byte) error
 }
 
-func New(cfg *config.Config) (*Server, error) {
+func New(cfg *config.Config) (result *Server, retErr error) {
 	if cfg.Cluster.Enabled {
 		return nil, errClusterUnsupported
 	}
-	s := &Server{
+	var lease *persistence.DataDirectoryLock
+	if cfg.Persistence.Enabled {
+		var err error
+		lease, err = persistence.LockDataDirectory(cfg.Persistence.DataDir)
+		if err != nil {
+			return nil, err
+		}
+	}
+	var s *Server
+	defer func() {
+		if result == nil {
+			if s != nil && s.httpServer != nil {
+				s.httpServer.cancel()
+			}
+			if lease != nil {
+				retErr = errors.Join(retErr, lease.Close())
+			}
+		}
+	}()
+
+	s = &Server{
 		cfg:    cfg,
 		store:  store.NewStore(),
 		router: command.NewRouter(),
 		stopCh: make(chan struct{}),
 	}
+
+	s.dataLease = lease
+	if lease != nil {
+		s.dataDirectory = lease.Directory()
+	}
+
+	s.router.SetFunctionRegistry(command.NewFunctionRegistry(s.store))
 
 	// The plugin manager exists unconditionally: command hooks and store
 	// event hooks (evict/expire/tag-invalidate) dispatch to whatever is
@@ -244,6 +288,9 @@ func New(cfg *config.Config) (*Server, error) {
 	// Database 0 is s.store; the others are created on first use and share
 	// its Pub/Sub hub, memory tracker and hooks, configured above.
 	s.dbs = store.NewDatabases(s.store, cfg.Server.Databases)
+	if cfg.Replication.IsReplica() {
+		s.dbs.SetPassiveExpiry(true)
+	}
 
 	s.newReplication(cfg)
 
@@ -278,11 +325,10 @@ func New(cfg *config.Config) (*Server, error) {
 	}
 
 	// Configure AOF persistence
+	aofFound := false
+	legacyAOF := false
 	if cfg.Persistence.Enabled && cfg.Persistence.AOF {
-		dataDir := cfg.Persistence.DataDir
-		if dataDir == "" {
-			dataDir = "."
-		}
+		dataDir := s.persistenceDirectory()
 		if err := os.MkdirAll(dataDir, 0755); err != nil {
 			return nil, err
 		}
@@ -300,89 +346,137 @@ func New(cfg *config.Config) (*Server, error) {
 		// new writes went on being appended to the unreadable file.
 		aofPath := filepath.Join(dataDir, "appendonly.aof")
 		if info, err := os.Stat(aofPath); err == nil {
+			aofFound = true
 			reader := persistence.NewAOFReader()
 			commands, valid, err := reader.LoadValid(aofPath)
 			if err != nil {
 				return nil, fmt.Errorf("AOF %s is corrupt: %w", aofPath, err)
+			}
+			if len(commands) > 0 {
+				lastDB, err := s.replayAOF(commands, reader.Version == persistence.AOFVersion)
+				if err != nil {
+					return nil, fmt.Errorf("replay AOF %s: %w", aofPath, err)
+				}
+				// Appends continue where the file left off, so the writer
+				// starts in the database the replay ended in.
+				s.aof.SetCurrentDB(lastDB)
+				if tracker := s.store.MemoryTracker(); tracker != nil && tracker.Max() > 0 && tracker.Usage() > tracker.Max() {
+					return nil, errors.New("AOF loaded dataset exceeds maxmemory")
+				}
+				logger.Info().Int("commands", len(commands)).Msg("AOF data restored")
 			}
 			if valid < info.Size() {
 				logger.Warn().
 					Int64("size", info.Size()).
 					Int64("valid", valid).
 					Msg("AOF ends with an incomplete command, truncating it")
-				if err := os.Truncate(aofPath, valid); err != nil {
+				if err := truncateRecoveredAOF(aofPath, valid); err != nil {
 					return nil, fmt.Errorf("truncate AOF %s: %w", aofPath, err)
 				}
 			}
-			if len(commands) > 0 {
-				lastDB := s.replayAOF(commands)
-				// Appends continue where the file left off, so the writer
-				// starts in the database the replay ended in.
-				s.aof.SetCurrentDB(lastDB)
-				logger.Info().Int("commands", len(commands)).Msg("AOF data restored")
-			}
+			legacyAOF = reader.Version == 0 && valid > 0
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("stat AOF: %w", err)
 		}
 
-		s.loadReplicationState(dataDir)
+		if err := s.loadReplicationState(dataDir); err != nil {
+			return nil, err
+		}
+		if legacyAOF {
+			if cfg.Replication.IsReplica() {
+				s.repl.MarkLocalWrite()
+			}
+			functions, err := s.FunctionPayload()
+			if err != nil {
+				return nil, err
+			}
+			if err := s.aof.Rewrite(replication.DBSource{DBs: s.dbs, Functions: functions}); err != nil {
+				return nil, fmt.Errorf("upgrade legacy AOF: %w", err)
+			}
+		}
+	}
+
+	if err := s.configureSnapshots(!aofFound); err != nil {
+		return nil, err
 	}
 
 	// Every write the router executes goes to the AOF, when it is enabled,
 	// and to the replication stream.
-	s.router.SetPostExecuteDB(func(db int, cmd string, args [][]byte) {
+	var checkPersistence func(string, [][]byte) error
+	if s.aof != nil {
+		checkPersistence = func(_ string, _ [][]byte) error { return s.persistenceError() }
+	}
+	s.router.SetCommitHooks(checkPersistence, func(ctx *command.Context, db int, cmd string, args [][]byte) error {
 		upperCmd := strings.ToUpper(cmd)
 		if !persistedCommand(upperCmd, args) {
-			return
+			return nil
+		}
+		if !ctx.FromMaster && upperCmd != "PFCOUNT" {
+			s.repl.MarkLocalWrite()
 		}
 		if s.aof != nil {
 			if err := s.aof.AppendDB(db, upperCmd, args); err != nil {
 				logger.Error().Err(err).Str("cmd", cmd).Msg("AOF append failed")
+				return errAOFUnavailable
 			}
 		}
 		s.repl.Feed(db, upperCmd, args)
-	})
+		return nil
+	},
 
-	// EXEC runs its queue outside the per-command hook; its writes are
-	// recorded here as one MULTI ... EXEC block, as are a script's effects.
-	s.router.SetPostExec(func(cmds []command.ExecutedCommand) {
-		writes := make([]command.ExecutedCommand, 0, len(cmds))
-		for _, c := range cmds {
-			upperCmd := strings.ToUpper(c.Name)
-			if persistedCommand(upperCmd, c.Args) {
-				writes = append(writes, command.ExecutedCommand{Name: upperCmd, Args: c.Args, DB: c.DB})
+		// EXEC runs its queue outside the per-command hook; its writes are
+		// recorded here as one MULTI ... EXEC block, as are a script's effects.
+		func(ctx *command.Context, cmds []command.ExecutedCommand) error {
+			writes := make([]command.ExecutedCommand, 0, len(cmds))
+			for _, c := range cmds {
+				upperCmd := strings.ToUpper(c.Name)
+				if persistedCommand(upperCmd, c.Args) {
+					writes = append(writes, command.ExecutedCommand{Name: upperCmd, Args: c.Args, DB: c.DB})
+				}
 			}
-		}
-		if len(writes) == 0 {
-			return
-		}
-		if s.aof != nil {
-			aofWrites := make([]persistence.Command, len(writes))
-			for i, c := range writes {
-				aofWrites[i] = persistence.Command{Name: c.Name, Args: c.Args, DB: c.DB}
+			if len(writes) == 0 {
+				return nil
 			}
-			if err := s.aof.AppendTransaction(aofWrites); err != nil {
-				logger.Error().Err(err).Msg("AOF transaction append failed")
+			if !ctx.FromMaster && hasLogicalWrites(writes) {
+				s.repl.MarkLocalWrite()
 			}
-		}
-		s.repl.FeedTransaction(writes)
-	})
-
-	// Give SAVE/BGSAVE something real to do. They used to stamp a timestamp and
-	// reply +OK while performing no I/O, so a client treating SAVE as a
-	// durability barrier got a guarantee the server never kept. s.aof is read
-	// through the pointer at call time, so this is correct whether or not AOF is
-	// configured; when it is not, the hook reports that instead of pretending.
-	command.SetSaveHook(func() error {
-		if s.aof == nil {
-			return errors.New("ERR persistence is not configured")
-		}
-		return s.aof.Flush()
-	})
+			if s.aof != nil {
+				aofWrites := make([]persistence.Command, len(writes))
+				for i, c := range writes {
+					aofWrites[i] = persistence.Command{Name: c.Name, Args: c.Args, DB: c.DB}
+				}
+				if err := s.aof.AppendTransaction(aofWrites); err != nil {
+					logger.Error().Err(err).Msg("AOF transaction append failed")
+					return errAOFUnavailable
+				}
+			}
+			s.repl.FeedTransaction(writes)
+			return nil
+		})
 
 	return s, nil
 }
 
-func (s *Server) Start(_ context.Context) error {
+func (s *Server) Start(_ context.Context) (retErr error) {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	if s.stopping.Load() || s.startFailed {
+		return errors.New("server cannot start after shutdown or failed persistent startup; construct a new server")
+	}
+	if s.started {
+		return errors.New("server is already started")
+	}
 	startupComplete := false
+	defer func() {
+		if !startupComplete && s.dataLease != nil {
+			s.stopSnapshots()
+			s.repl.Stop()
+			s.dbs.StopExpiry()
+			s.startFailed = true
+			retErr = errors.Join(retErr, s.dataLease.Close())
+			s.dataLease = nil
+		}
+	}()
 	// Start AOF writer if configured
 	if s.aof != nil {
 		if err := s.aof.Start(); err != nil {
@@ -390,7 +484,7 @@ func (s *Server) Start(_ context.Context) error {
 		}
 		defer func() {
 			if !startupComplete {
-				s.aof.Stop()
+				retErr = errors.Join(retErr, s.aof.StopWithError())
 			}
 		}()
 	}
@@ -427,7 +521,11 @@ func (s *Server) Start(_ context.Context) error {
 		}
 		logger.Info().Str("addr", addr).Msg("CacheStorm server started (TLS)")
 	} else {
-		listener, err = net.Listen("tcp", addr)
+		listen := s.listenTCP
+		if listen == nil {
+			listen = net.Listen
+		}
+		listener, err = listen("tcp", addr)
 		if err != nil {
 			return err
 		}
@@ -449,7 +547,11 @@ func (s *Server) Start(_ context.Context) error {
 		}
 	}
 
-	go s.acceptLoop()
+	s.acceptWG.Add(1)
+	go func() {
+		defer s.acceptWG.Done()
+		s.acceptLoop()
+	}()
 
 	if s.httpServer != nil {
 		go func() {
@@ -471,7 +573,10 @@ func (s *Server) Start(_ context.Context) error {
 		s.startSentinel()
 	}
 
+	s.startSnapshotLoop()
+
 	startupComplete = true
+	s.started = true
 	return nil
 }
 
@@ -632,6 +737,12 @@ func (s *Server) startSentinel() {
 }
 
 func (s *Server) Stop(ctx context.Context) error {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	if s.stopped {
+		return s.stopErr
+	}
+	defer func() { s.stopped = true }()
 	s.stopping.Store(true)
 	close(s.stopCh)
 
@@ -639,6 +750,7 @@ func (s *Server) Stop(ctx context.Context) error {
 	if s.listener != nil {
 		s.listener.Close()
 	}
+	s.acceptWG.Wait()
 	logger.Info().Msg("stopped accepting new connections")
 
 	// 1a. Stop replication: the master link and every attached replica, so
@@ -656,8 +768,10 @@ func (s *Server) Stop(ctx context.Context) error {
 	}
 
 	// 2. Stop HTTP server
+	var httpShutdownErr error
 	if s.httpServer != nil {
 		if err := s.httpServer.Stop(); err != nil {
+			httpShutdownErr = err
 			logger.Error().Err(err).Msg("HTTP server stop error")
 		}
 	}
@@ -699,8 +813,10 @@ func (s *Server) Stop(ctx context.Context) error {
 	drainCtx, drainCancel := context.WithTimeout(ctx, drainTimeout)
 	defer drainCancel()
 
+	drained := false
 	select {
 	case <-done:
+		drained = true
 		logger.Info().Msg("all connections drained gracefully")
 	case <-drainCtx.Done():
 		// 4. Force close remaining connections after drain timeout
@@ -717,20 +833,41 @@ func (s *Server) Stop(ctx context.Context) error {
 		defer forceCancel()
 		select {
 		case <-done:
+			drained = true
 		case <-forceCtx.Done():
 			logger.Error().Msg("some connections did not close cleanly")
 		}
 	}
 
-	// 5. Stop AOF writer (flush remaining data)
-	if s.aof != nil {
-		s.aof.Stop()
-		// A replica records where in its master's stream the AOF ends.
-		s.saveReplicationState()
+	s.stopSnapshots()
+	drained = drained && httpShutdownErr == nil
+	if !drained {
+		if s.aof != nil {
+			httpShutdownErr = errors.Join(httpShutdownErr, s.aof.Flush())
+		}
+		s.stopErr = errors.Join(httpShutdownErr, errors.New("shutdown incomplete; persistence remains owned until process exit"))
+		logger.Error().Err(s.stopErr).Msg("CacheStorm shutdown incomplete")
+		return s.stopErr
 	}
 
+	var persistenceErr error
+	if s.aof != nil {
+		persistenceErr = s.aof.StopWithError()
+		if persistenceErr == nil {
+			persistenceErr = s.saveReplicationState()
+		}
+		if persistenceErr != nil {
+			logger.Error().Err(persistenceErr).Msg("persistence shutdown failed")
+		}
+	}
+
+	if s.dataLease != nil {
+		persistenceErr = errors.Join(persistenceErr, s.dataLease.Close())
+		s.dataLease = nil
+	}
+	s.stopErr = persistenceErr
 	logger.Info().Msg("CacheStorm server stopped")
-	return nil
+	return persistenceErr
 }
 
 // Store returns database 0.
@@ -743,65 +880,65 @@ func (s *Server) Databases() *store.Databases {
 	return s.dbs
 }
 
-// replayAOF applies the AOF's commands, following its SELECTs, and returns
-// the database the last command left selected.
-func (s *Server) replayAOF(commands []persistence.Command) int {
-	replayed := 0
-	failed := 0
-	db := 0
-	apply := func(cmd persistence.Command) {
-		ctx := command.NewContext(cmd.Name, cmd.Args, s.dbs.DB(db), nil)
-		ctx.DB = db
-		ctx.DBs = s.dbs
-		err := s.router.ExecuteSilent(ctx)
-		db = ctx.DB
-		if err != nil {
-			failed++
-			if failed <= 10 {
-				logger.Warn().Err(err).Str("cmd", cmd.Name).Msg("AOF replay command failed")
-			}
-		} else {
-			replayed++
-		}
+func (s *Server) replayAOF(commands []persistence.Command, loading ...bool) (int, error) {
+	deferExpiry := len(loading) > 0 && loading[0]
+	if deferExpiry {
+		s.dbs.ForEach(func(_ int, st *store.Store) { st.BeginLoading() })
+		defer s.dbs.ForEach(func(_ int, st *store.Store) { st.EndLoading() })
 	}
-
-	// A MULTI ... EXEC block is applied only once its EXEC marker is read, so
-	// a transaction the crash cut short is dropped as a whole.
+	db := 0
+	apply := func(cmd persistence.Command, index int) error {
+		name := command.CanonicalName(cmd.Name)
+		if name != "SELECT" && !persistedCommand(name, cmd.Args) {
+			return fmt.Errorf("AOF command %d (%s) is not a persistence command", index+1, name)
+		}
+		ctx := command.NewContext(name, cmd.Args, s.dbs.DB(db), nil)
+		ctx.DB, ctx.DBs, ctx.InExec = db, s.dbs, true
+		ctx.Replaying = deferExpiry
+		ctx.LegacyReplay = !deferExpiry
+		err := s.router.ExecuteSilent(ctx)
+		if err == nil && ctx.Writer.Errors() > 0 {
+			err = errors.New("command returned an error reply")
+		}
+		if err != nil {
+			return fmt.Errorf("AOF command %d (%s), database %d: %w", index+1, name, db, err)
+		}
+		db = ctx.DB
+		return nil
+	}
 	var pending []persistence.Command
-	inTx := false
-	for _, cmd := range commands {
-		switch strings.ToUpper(cmd.Name) {
+	txStart := -1
+	for i, cmd := range commands {
+		switch command.CanonicalName(cmd.Name) {
 		case "MULTI":
-			pending = pending[:0]
-			inTx = true
-			continue
-		case "EXEC":
-			for _, c := range pending {
-				apply(c)
+			if len(cmd.Args) != 0 || txStart >= 0 {
+				return db, fmt.Errorf("invalid MULTI at AOF command %d", i+1)
 			}
-			pending = pending[:0]
-			inTx = false
+			pending, txStart = pending[:0], i
+			continue
+		case "EXEC", "DISCARD":
+			if len(cmd.Args) != 0 || txStart < 0 {
+				return db, fmt.Errorf("invalid transaction marker at AOF command %d", i+1)
+			}
+			if command.CanonicalName(cmd.Name) == "EXEC" {
+				for j, c := range pending {
+					if err := apply(c, txStart+j+1); err != nil {
+						return db, err
+					}
+				}
+			}
+			pending, txStart = pending[:0], -1
 			continue
 		}
-		if inTx {
+		if txStart >= 0 {
 			pending = append(pending, cmd)
 			continue
 		}
-		apply(cmd)
+		if err := apply(cmd, i); err != nil {
+			return db, err
+		}
 	}
-	if inTx {
-		logger.Warn().
-			Int("commands", len(pending)).
-			Msg("AOF ends inside a transaction, discarding the incomplete transaction")
-	}
-	if failed > 0 {
-		logger.Warn().
-			Int("total", len(commands)).
-			Int("replayed", replayed).
-			Int("failed", failed).
-			Msg("AOF replay completed with errors")
-	}
-	return db
+	return db, nil
 }
 
 func parseEvictionPolicy(name string) store.EvictionPolicy {

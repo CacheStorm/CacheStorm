@@ -11755,8 +11755,8 @@ func TestHyperLogLogValueMethods(t *testing.T) {
 	})
 
 	t.Run("String", func(t *testing.T) {
-		if hll.String() != "HyperLogLog" {
-			t.Errorf("expected HyperLogLog, got %s", hll.String())
+		if err := store.ValidateHLL([]byte(hll.String())); err != nil {
+			t.Fatalf("invalid HLL serialization: %v", err)
 		}
 	})
 

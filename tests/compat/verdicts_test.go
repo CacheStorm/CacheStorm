@@ -30,9 +30,8 @@ const (
 )
 
 var verdicts = map[string]Verdict{
-	"strings/set-exat-pxat-past": {SevEdge, bug, "expiry instants after the year 2262 are capped (expiry is stored as int64 nanoseconds), so TTL reports the capped instant"},
-	"keys/expiretime":            {SevEdge, bug, "expiry instants after the year 2262 are capped (expiry is stored as int64 nanoseconds), so EXPIRETIME/PEXPIRETIME/TTL report the capped instant"},
-	"lua/redis-call-errors":      {SevEdge, intent, "compile errors carry gopher-lua's parser message (\"near 'error': parse error\") instead of Lua 5.1's"},
+	"restore/overflow-relative-ttl": {SevEdge, intent, "relative TTL overflow is rejected before mutation; Redis 7.4.11 acknowledges it, logs a negative ABSTTL and loses the key on AOF restart (reproduced in the restore/dump production-readiness round)"},
+	"lua/redis-call-errors":         {SevEdge, intent, "compile errors carry gopher-lua's parser message (\"near 'error': parse error\") instead of Lua 5.1's"},
 }
 
 var arityAccepts = map[string]string{}

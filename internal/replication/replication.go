@@ -51,9 +51,8 @@ type Host interface {
 	// with its propagation.
 	LockWrites()
 	UnlockWrites()
-	// AfterFullSync runs, with writes locked, once a full resync has loaded
-	// the master's dataset; the server rewrites its AOF from it.
-	AfterFullSync() error
+	CommitFullSync(*store.Databases, *command.Router) error
+	FunctionPayload() ([]byte, error)
 	// ListeningPort is the port a replica announces to its master.
 	ListeningPort() int
 }
@@ -266,6 +265,20 @@ func (m *Manager) ReplID() (string, int64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.replid, m.offset
+}
+
+func (m *Manager) MarkLocalWrite() {
+	m.mu.Lock()
+	if m.role != RoleReplica {
+		m.mu.Unlock()
+		return
+	}
+	m.cached = false
+	replicas := m.detachAllLocked()
+	m.mu.Unlock()
+	for _, r := range replicas {
+		r.close()
+	}
 }
 
 // Feed records a write a client executed in database db.
@@ -510,9 +523,11 @@ func (m *Manager) Wait(numReplicas int, timeout time.Duration, done <-chan struc
 // State is the part of a replica's replication state that survives a
 // restart, so the replica can continue from its master's backlog.
 type State struct {
-	ReplID string
-	Offset int64
-	DB     int
+	MasterHost string
+	MasterPort int
+	ReplID     string
+	Offset     int64
+	DB         int
 }
 
 // SavedState returns the state to persist next to the data at shutdown, and
@@ -524,7 +539,7 @@ func (m *Manager) SavedState() (State, bool) {
 	if m.role != RoleReplica || !m.cached || m.linkTx.IsActive() {
 		return State{}, false
 	}
-	return State{ReplID: m.replid, Offset: m.offset, DB: m.linkDB}, true
+	return State{ReplID: m.replid, Offset: m.offset, DB: m.linkDB, MasterHost: m.masterHost, MasterPort: m.masterPort}, true
 }
 
 // RestoreState adopts a state saved by SavedState for the dataset the server

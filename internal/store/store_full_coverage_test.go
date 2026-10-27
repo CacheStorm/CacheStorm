@@ -1243,8 +1243,9 @@ func TestStore_SetEntry_KeyTooLarge(t *testing.T) {
 	s := NewStore()
 	longKey := strings.Repeat("x", MaxKeySize+1)
 	entry := NewEntry(&StringValue{Data: []byte("val")})
-	// Should silently return
-	s.SetEntry(longKey, entry)
+	if err := s.SetEntry(longKey, entry); err != ErrKeyTooLarge {
+		t.Fatalf("oversized entry key: %v", err)
+	}
 	if s.KeyCount() != 0 {
 		t.Fatal("expected 0 keys after SetEntry with too-large key")
 	}
@@ -1253,7 +1254,7 @@ func TestStore_SetEntry_KeyTooLarge(t *testing.T) {
 func TestStore_Exists_Expired(t *testing.T) {
 	s := NewStore()
 	entry := NewEntry(&StringValue{Data: []byte("val")})
-	entry.ExpiresAt.Store(time.Now().Add(-time.Second).UnixNano())
+	entry.ExpiresAt.Store(time.Now().Add(-time.Second).UnixMilli())
 	s.shards[s.shardIndex("expkey")].Set("expkey", entry)
 
 	if s.Exists("expkey") {
@@ -1273,7 +1274,7 @@ func TestStore_GetTTL_NoExpiry(t *testing.T) {
 func TestStore_GetTTL_Expired(t *testing.T) {
 	s := NewStore()
 	entry := NewEntry(&StringValue{Data: []byte("val")})
-	entry.ExpiresAt.Store(time.Now().Add(-time.Second).UnixNano())
+	entry.ExpiresAt.Store(time.Now().Add(-time.Second).UnixMilli())
 	s.shards[s.shardIndex("expired")].Set("expired", entry)
 
 	ttl := s.GetTTL("expired")
@@ -1807,41 +1808,41 @@ func TestTimingWheel_AddVariousLevels(t *testing.T) {
 	s := NewStore()
 	tw := NewTimingWheel(s)
 
-	now := time.Now().UnixNano()
+	now := time.Now().UnixMilli()
 
 	// Expired (duration <= 0)
 	tw.Add("expired", now-1)
 
 	// Level 0: < 1 hour
-	tw.Add("level0", now+int64(30*time.Minute))
+	tw.Add("level0", now+int64((30*time.Minute)/time.Millisecond))
 
 	// Level 1: < 24 hours
-	tw.Add("level1", now+int64(12*time.Hour))
+	tw.Add("level1", now+int64((12*time.Hour)/time.Millisecond))
 
 	// Level 2: < 30 days
-	tw.Add("level2", now+int64(15*24*time.Hour))
+	tw.Add("level2", now+int64((15*24*time.Hour)/time.Millisecond))
 
 	// Level 3: < 365 days
-	tw.Add("level3", now+int64(100*24*time.Hour))
+	tw.Add("level3", now+int64((100*24*time.Hour)/time.Millisecond))
 
 	// Far future: > 365 days
-	tw.Add("farfuture", now+int64(400*24*time.Hour))
+	tw.Add("farfuture", now+int64((400*24*time.Hour)/time.Millisecond))
 }
 
 func TestTimingWheel_CleanupFarFuture(t *testing.T) {
 	s := NewStore()
 	tw := NewTimingWheel(s)
 
-	now := time.Now().UnixNano()
+	now := time.Now().UnixMilli()
 
 	// Add an expired entry to farFuture
 	tw.farFuture.mu.Lock()
-	tw.farFuture.keys["expired"] = now - int64(time.Second)
+	tw.farFuture.keys["expired"] = now - int64((time.Second)/time.Millisecond)
 	tw.farFuture.mu.Unlock()
 
 	// Add an entry that's now within range (< 365 days)
 	tw.farFuture.mu.Lock()
-	tw.farFuture.keys["within_range"] = now + int64(30*time.Minute)
+	tw.farFuture.keys["within_range"] = now + int64((30*time.Minute)/time.Millisecond)
 	tw.farFuture.mu.Unlock()
 
 	tw.cleanupFarFuture()
@@ -1861,9 +1862,9 @@ func TestTimingWheel_ExpireBucket(t *testing.T) {
 	tw := NewTimingWheel(s)
 
 	bucket := newWheelBucket()
-	now := time.Now().UnixNano()
-	bucket.keys["testkey"] = now - int64(time.Second) // expired
-	bucket.keys["future"] = now + int64(time.Hour)    // not expired
+	now := time.Now().UnixMilli()
+	bucket.keys["testkey"] = now - int64((time.Second)/time.Millisecond) // expired
+	bucket.keys["future"] = now + int64((time.Hour)/time.Millisecond)    // not expired
 
 	tw.expireBucket(bucket, now)
 
@@ -1880,12 +1881,12 @@ func TestTimingWheel_ExpireBucket(t *testing.T) {
 func TestTimingWheel_Cascade(t *testing.T) {
 	s := NewStore()
 	tw := NewTimingWheel(s)
-	now := time.Now().UnixNano()
+	now := time.Now().UnixMilli()
 
 	// Put a key in level 1 at current slot
 	level1 := tw.levels[1]
 	level1.slots[level1.current].mu.Lock()
-	level1.slots[level1.current].keys["cascadekey"] = now + int64(30*time.Minute)
+	level1.slots[level1.current].keys["cascadekey"] = now + int64((30*time.Minute)/time.Millisecond)
 	level1.slots[level1.current].mu.Unlock()
 
 	tw.cascadeLevel(1, now)
@@ -1894,11 +1895,11 @@ func TestTimingWheel_Cascade(t *testing.T) {
 func TestTimingWheel_CascadeLevel2(t *testing.T) {
 	s := NewStore()
 	tw := NewTimingWheel(s)
-	now := time.Now().UnixNano()
+	now := time.Now().UnixMilli()
 
 	level2 := tw.levels[2]
 	level2.slots[level2.current].mu.Lock()
-	level2.slots[level2.current].keys["cascadekey2"] = now + int64(12*time.Hour)
+	level2.slots[level2.current].keys["cascadekey2"] = now + int64((12*time.Hour)/time.Millisecond)
 	level2.slots[level2.current].mu.Unlock()
 
 	tw.cascadeLevel(2, now)
@@ -1907,11 +1908,11 @@ func TestTimingWheel_CascadeLevel2(t *testing.T) {
 func TestTimingWheel_CascadeLevel3(t *testing.T) {
 	s := NewStore()
 	tw := NewTimingWheel(s)
-	now := time.Now().UnixNano()
+	now := time.Now().UnixMilli()
 
 	level3 := tw.levels[3]
 	level3.slots[level3.current].mu.Lock()
-	level3.slots[level3.current].keys["cascadekey3"] = now + int64(15*24*time.Hour)
+	level3.slots[level3.current].keys["cascadekey3"] = now + int64((15*24*time.Hour)/time.Millisecond)
 	level3.slots[level3.current].mu.Unlock()
 
 	tw.cascadeLevel(3, now)
@@ -1920,12 +1921,12 @@ func TestTimingWheel_CascadeLevel3(t *testing.T) {
 func TestTimingWheel_CascadeExpired(t *testing.T) {
 	s := NewStore()
 	tw := NewTimingWheel(s)
-	now := time.Now().UnixNano()
+	now := time.Now().UnixMilli()
 
 	// Put an expired key in level 1
 	level1 := tw.levels[1]
 	level1.slots[level1.current].mu.Lock()
-	level1.slots[level1.current].keys["expired_cascade"] = now - int64(time.Second)
+	level1.slots[level1.current].keys["expired_cascade"] = now - int64((time.Second)/time.Millisecond)
 	level1.slots[level1.current].mu.Unlock()
 
 	tw.cascadeLevel(1, now)
@@ -1934,7 +1935,7 @@ func TestTimingWheel_CascadeExpired(t *testing.T) {
 func TestTimingWheel_CascadeBeyondLevel3(t *testing.T) {
 	s := NewStore()
 	tw := NewTimingWheel(s)
-	now := time.Now().UnixNano()
+	now := time.Now().UnixMilli()
 	// Cascade at level 4 should return immediately
 	tw.cascadeLevel(4, now)
 }
@@ -2568,7 +2569,7 @@ func TestStore_SetWithTags(t *testing.T) {
 func TestStore_GetExpired(t *testing.T) {
 	s := NewStore()
 	entry := NewEntry(&StringValue{Data: []byte("val")})
-	entry.ExpiresAt.Store(time.Now().Add(-time.Second).UnixNano())
+	entry.ExpiresAt.Store(time.Now().Add(-time.Second).UnixMilli())
 	idx := s.shardIndex("expkey")
 	s.shards[idx].Set("expkey", entry)
 
@@ -3158,7 +3159,7 @@ func TestTimingWheel_AddToLevel_NegativeSlot(t *testing.T) {
 	s := NewStore()
 	tw := NewTimingWheel(s)
 	// Directly call addToLevel with a very small duration to get slot = 0
-	tw.addToLevel(0, "test", time.Now().UnixNano()+int64(time.Millisecond), time.Millisecond)
+	tw.addToLevel(0, "test", time.Now().UnixMilli()+int64(time.Millisecond), time.Millisecond)
 }
 
 // timing_wheel.go:155 - tick: cascade when current == 0
@@ -3178,12 +3179,12 @@ func TestTimingWheel_Tick_Cascade(t *testing.T) {
 func TestTimingWheel_CascadeLevel3_Move(t *testing.T) {
 	s := NewStore()
 	tw := NewTimingWheel(s)
-	now := time.Now().UnixNano()
+	now := time.Now().UnixMilli()
 
 	// Add a key to level 3 at current slot that needs to cascade to level 2
 	level3 := tw.levels[3]
 	level3.slots[level3.current].mu.Lock()
-	level3.slots[level3.current].keys["movedkey"] = now + int64(20*24*time.Hour)
+	level3.slots[level3.current].keys["movedkey"] = now + int64((20*24*time.Hour)/time.Millisecond)
 	level3.slots[level3.current].mu.Unlock()
 
 	tw.cascadeLevel(3, now)
@@ -3202,15 +3203,15 @@ func TestTimingWheel_StartStop(t *testing.T) {
 func TestTimingWheel_CleanupFarFuture_AllBranches(t *testing.T) {
 	s := NewStore()
 	tw := NewTimingWheel(s)
-	now := time.Now().UnixNano()
+	now := time.Now().UnixMilli()
 
 	tw.farFuture.mu.Lock()
-	tw.farFuture.keys["short"] = now + int64(30*time.Minute)      // < 1 hour -> level 0
-	tw.farFuture.keys["medium"] = now + int64(12*time.Hour)       // < 24 hours -> level 1
-	tw.farFuture.keys["long"] = now + int64(15*24*time.Hour)      // < 30 days -> level 2
-	tw.farFuture.keys["verylong"] = now + int64(200*24*time.Hour) // < 365 days -> level 3
-	tw.farFuture.keys["stillfar"] = now + int64(400*24*time.Hour) // >= 365 days -> stays in farFuture
-	tw.farFuture.keys["expired"] = now - int64(time.Second)       // expired
+	tw.farFuture.keys["short"] = now + int64((30*time.Minute)/time.Millisecond)      // < 1 hour -> level 0
+	tw.farFuture.keys["medium"] = now + int64((12*time.Hour)/time.Millisecond)       // < 24 hours -> level 1
+	tw.farFuture.keys["long"] = now + int64((15*24*time.Hour)/time.Millisecond)      // < 30 days -> level 2
+	tw.farFuture.keys["verylong"] = now + int64((200*24*time.Hour)/time.Millisecond) // < 365 days -> level 3
+	tw.farFuture.keys["stillfar"] = now + int64((400*24*time.Hour)/time.Millisecond) // >= 365 days -> stays in farFuture
+	tw.farFuture.keys["expired"] = now - int64((time.Second)/time.Millisecond)       // expired
 	tw.farFuture.mu.Unlock()
 
 	tw.cleanupFarFuture()
@@ -3329,7 +3330,7 @@ func TestStore_SetWithEvictionRetry(t *testing.T) {
 func TestStore_GetTTL_ExpiredDirect(t *testing.T) {
 	s := NewStore()
 	entry := NewEntry(&StringValue{Data: []byte("val")})
-	entry.ExpiresAt.Store(time.Now().Add(-time.Hour).UnixNano())
+	entry.ExpiresAt.Store(time.Now().Add(-time.Hour).UnixMilli())
 	idx := s.shardIndex("ttlexp")
 	s.shards[idx].Set("ttlexp", entry)
 
@@ -3349,7 +3350,7 @@ func TestTimingWheel_CascadeChain(t *testing.T) {
 	tw.levels[1].current = tw.levels[1].numSlots - 1
 	tw.levels[1].mu.Unlock()
 
-	now := time.Now().UnixNano()
+	now := time.Now().UnixMilli()
 	tw.cascadeLevel(1, now)
 }
 
@@ -3532,7 +3533,7 @@ func TestStore_GetTTL_JustExpired(t *testing.T) {
 	// Actually, we need ExpiresAt > 0 and ExpiresAt in the past after the IsExpired check
 	// The remaining < 0 check is for the case where time passes between checks
 	// Let's set a very close expiry
-	entry.ExpiresAt.Store(time.Now().Add(1 * time.Nanosecond).UnixNano())
+	entry.ExpiresAt.Store(time.Now().Add(1 * time.Nanosecond).UnixMilli())
 	idx := s.shardIndex("justexp")
 	s.shards[idx].Set("justexp", entry)
 	time.Sleep(time.Millisecond)
@@ -3549,7 +3550,7 @@ func TestTimingWheel_AddToLevel_EdgeCase(t *testing.T) {
 	s := NewStore()
 	tw := NewTimingWheel(s)
 	// Call addToLevel with very small duration that might produce slot < 0
-	tw.addToLevel(0, "test", time.Now().UnixNano(), 0)
+	tw.addToLevel(0, "test", time.Now().UnixMilli(), 0)
 }
 
 // utility.go:434 - SnowflakeIDGenerator.Next: sequence wraps to 0 (s.sequence == 0 after AND)
@@ -3670,7 +3671,7 @@ func TestStore_GetTTL_RemainingNegative(t *testing.T) {
 	s := NewStore()
 	entry := NewEntry(&StringValue{Data: []byte("val")})
 	// ExpiresAt is in the past but positive (not 0) and entry is not yet cleaned
-	entry.ExpiresAt.Store(time.Now().Add(-100 * time.Millisecond).UnixNano())
+	entry.ExpiresAt.Store(time.Now().Add(-100 * time.Millisecond).UnixMilli())
 	idx := s.shardIndex("negttl")
 	s.shards[idx].Set("negttl", entry)
 
@@ -3687,9 +3688,9 @@ func TestTimingWheel_AddToLevel_ZeroDuration(t *testing.T) {
 	s := NewStore()
 	tw := NewTimingWheel(s)
 	// Duration = 0 -> slot = 0 + current = current, slot should be non-negative
-	tw.addToLevel(0, "zero_dur", time.Now().UnixNano(), time.Duration(0))
+	tw.addToLevel(0, "zero_dur", time.Now().UnixMilli(), time.Duration(0))
 	// Also test with negative duration (should be caught by Add, but guard is there)
-	tw.addToLevel(0, "neg_dur", time.Now().UnixNano(), time.Duration(-1))
+	tw.addToLevel(0, "neg_dur", time.Now().UnixMilli(), time.Duration(-1))
 }
 
 // json.go DeletePath with path that has parseJSONPath return empty

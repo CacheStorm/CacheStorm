@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // PlaceholderPassword is the password written in the production config
@@ -58,6 +59,13 @@ func Validate(cfg *Config) error {
 		return fmt.Errorf("invalid eviction policy: %s", cfg.Memory.EvictionPolicy)
 	}
 	cfg.Memory.EvictionPolicy = strings.ToLower(cfg.Memory.EvictionPolicy)
+
+	if cfg.Persistence.Enabled && cfg.Persistence.SnapshotInterval != "" {
+		interval, err := time.ParseDuration(cfg.Persistence.SnapshotInterval)
+		if err != nil || interval < 0 {
+			return fmt.Errorf("invalid persistence.snapshot_interval: %q", cfg.Persistence.SnapshotInterval)
+		}
+	}
 
 	validLogLevels := map[string]bool{
 		"debug": true,

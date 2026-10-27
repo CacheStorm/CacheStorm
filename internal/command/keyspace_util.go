@@ -62,29 +62,6 @@ func errInvalidExpireIn(cmd string) error {
 	return errors.New("ERR invalid expire time in '" + cmd + "' command")
 }
 
-// Expiry instants are stored as Unix nanoseconds in an int64, which ends in
-// the year 2262. Redis keeps milliseconds and accepts instants far beyond
-// that, so a later instant is clamped to this ceiling (with a day of margin so
-// that adding a relative TTL to a slightly later clock cannot wrap).
-const maxStoredExpireNs = math.MaxInt64 - int64(24*time.Hour)
-
-func expireMsToNs(ms int64) int64 {
-	if ms > maxStoredExpireNs/int64(time.Millisecond) {
-		return maxStoredExpireNs
-	}
-	return ms * int64(time.Millisecond)
-}
-
-// expireMsToTTL converts an absolute millisecond instant that lies in the
-// future into a TTL for store.SetOptions.
-func expireMsToTTL(ms int64) time.Duration {
-	ttl := time.Duration(expireMsToNs(ms) - time.Now().UnixNano())
-	if ttl <= 0 {
-		ttl = 1
-	}
-	return ttl
-}
-
 // stringExpireMs validates and converts the expire argument of SET, SETEX,
 // PSETEX and GETEX into an absolute Unix time in milliseconds, following
 // Redis' getExpireMillisecondsOrReply.

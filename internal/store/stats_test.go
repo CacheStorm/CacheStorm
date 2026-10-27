@@ -629,7 +629,7 @@ func TestTimingWheelAdd(t *testing.T) {
 	s := NewStore()
 	tw := NewTimingWheel(s)
 
-	expiresAt := time.Now().Add(30 * time.Minute).UnixNano()
+	expiresAt := time.Now().Add(30 * time.Minute).UnixMilli()
 	tw.Add("key1", expiresAt)
 }
 
@@ -637,14 +637,14 @@ func TestTimingWheelAddExpired(t *testing.T) {
 	s := NewStore()
 	tw := NewTimingWheel(s)
 
-	tw.Add("key1", time.Now().Add(-1*time.Second).UnixNano())
+	tw.Add("key1", time.Now().Add(-1*time.Second).UnixMilli())
 }
 
 func TestTimingWheelAddFarFuture(t *testing.T) {
 	s := NewStore()
 	tw := NewTimingWheel(s)
 
-	expiresAt := time.Now().Add(400 * 24 * time.Hour).UnixNano()
+	expiresAt := time.Now().Add(400 * 24 * time.Hour).UnixMilli()
 	tw.Add("key1", expiresAt)
 }
 
@@ -652,7 +652,7 @@ func TestTimingWheelRemove(t *testing.T) {
 	s := NewStore()
 	tw := NewTimingWheel(s)
 
-	expiresAt := time.Now().Add(30 * time.Minute).UnixNano()
+	expiresAt := time.Now().Add(30 * time.Minute).UnixMilli()
 	tw.Add("key1", expiresAt)
 	tw.Remove("key1")
 }

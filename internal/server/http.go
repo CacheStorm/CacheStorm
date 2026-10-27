@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -87,7 +88,14 @@ func (h *HTTPServer) restWrite(w http.ResponseWriter, keys []string, apply func(
 		hold.lock()
 	}
 	defer hold.unlock()
-	h.srv.recordWrites(apply())
+	if err := h.srv.persistenceError(); err != nil {
+		h.writeError(w, http.StatusServiceUnavailable, err.Error())
+		return false
+	}
+	if err := h.srv.recordWrites(apply()); err != nil {
+		h.writeError(w, http.StatusServiceUnavailable, err.Error())
+		return false
+	}
 	return true
 }
 
@@ -473,6 +481,10 @@ func (h *HTTPServer) handleReady(w http.ResponseWriter, _ *http.Request) {
 		h.writeError(w, http.StatusServiceUnavailable, "server not ready")
 		return
 	}
+	if h.srv != nil && h.srv.persistenceError() != nil {
+		h.writeError(w, http.StatusServiceUnavailable, errAOFUnavailable.Error())
+		return
+	}
 	h.writeJSON(w, http.StatusOK, map[string]interface{}{
 		"status": "ready",
 		"uptime": time.Since(h.started).String(),
@@ -580,6 +592,10 @@ func (h *HTTPServer) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 func (h *HTTPServer) handleKeys(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "GET":
+		if h.srv != nil {
+			h.srv.gate.global.RLock()
+			defer h.srv.gate.global.RUnlock()
+		}
 		pattern := r.URL.Query().Get("pattern")
 		if pattern == "" {
 			pattern = "*"
@@ -678,7 +694,8 @@ func (h *HTTPServer) handleKeys(w http.ResponseWriter, r *http.Request) {
 			if setErr = h.db0().Set(req.Key, value, opts); setErr != nil {
 				return nil
 			}
-			return restSetCommands(req.Key, req.Type, req.Value, req.TTL, req.Tags)
+			deadline, _ := h.db0().ExpiryDeadline(req.Key)
+			return restSetCommands(req.Key, req.Type, req.Value, deadline, req.Tags)
 		}) {
 			return
 		}
@@ -706,6 +723,10 @@ func (h *HTTPServer) handleKey(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case "GET":
+		if h.srv != nil {
+			h.srv.gate.global.RLock()
+			defer h.srv.gate.global.RUnlock()
+		}
 		// ACL: reading through the REST API is a GET on the key, so the
 		// identity needs the command grant and a matching key pattern.
 		if restKeyRefused(r, key, "GET") {
@@ -996,7 +1017,11 @@ func (h *HTTPServer) handleExecute(w http.ResponseWriter, r *http.Request) {
 	result, err := h.router.ExecuteHTTP(ctx)
 	release()
 	if err != nil {
-		h.writeError(w, http.StatusBadRequest, err.Error())
+		status := http.StatusBadRequest
+		if errors.Is(err, errAOFUnavailable) {
+			status = http.StatusServiceUnavailable
+		}
+		h.writeError(w, status, err.Error())
 		return
 	}
 
@@ -1931,7 +1956,7 @@ const adminUIHTML = `<!DOCTYPE html>
 
 // restSetCommands is the REST key write as commands, for the AOF and the
 // replicas: the value of the requested type, its tags and its TTL.
-func restSetCommands(key, typ, value string, ttl time.Duration, tags []string) []command.ExecutedCommand {
+func restSetCommands(key, typ, value string, deadline int64, tags []string) []command.ExecutedCommand {
 	b := func(parts ...string) [][]byte {
 		out := make([][]byte, len(parts))
 		for i, p := range parts {
@@ -1956,8 +1981,8 @@ func restSetCommands(key, typ, value string, ttl time.Duration, tags []string) [
 	if len(tags) > 0 {
 		cmds = append(cmds, command.ExecutedCommand{Name: "ADDTAG", Args: b(append([]string{key}, tags...)...)})
 	}
-	if ttl > 0 {
-		cmds = append(cmds, command.ExecutedCommand{Name: "PEXPIRE", Args: b(key, strconv.FormatInt(ttl.Milliseconds(), 10))})
+	if deadline > 0 {
+		cmds = append(cmds, command.ExecutedCommand{Name: "PEXPIREAT", Args: b(key, strconv.FormatInt(deadline, 10))})
 	}
 	return cmds
 }

@@ -108,7 +108,9 @@ func TestSetEntryKeepsAccountingPerKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	entry, _ := s.Get("short")
-	s.SetEntry("a-much-longer-key-name", entry)
+	if err := s.SetEntry("a-much-longer-key-name", entry); err != nil {
+		t.Errorf("SetEntry: %v", err)
+	}
 	s.Delete("short")
 	if got, want := s.MemUsage(), footprintOf("a-much-longer-key-name", entry.Value); got != want {
 		t.Fatalf("MemUsage=%d, want %d", got, want)

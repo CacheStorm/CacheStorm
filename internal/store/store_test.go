@@ -336,7 +336,7 @@ func TestStoreSetExpiresAt(t *testing.T) {
 
 	s.Set("key1", &StringValue{Data: []byte("value1")}, SetOptions{})
 
-	expiresAt := time.Now().Add(10 * time.Second).UnixNano()
+	expiresAt := time.Now().Add(10 * time.Second).UnixMilli()
 	if !s.SetExpiresAt("key1", expiresAt) {
 		t.Error("SetExpiresAt should return true")
 	}

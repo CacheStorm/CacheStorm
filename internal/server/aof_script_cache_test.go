@@ -30,7 +30,7 @@ func TestAOFRestoresEvalshaAndFcallWrites(t *testing.T) {
 	if got := run("FCALL", "aofset", "1", "viafn", "2"); got != "+OK\r\n" {
 		t.Fatalf("FCALL reply %q", got)
 	}
-	s.aof.Stop()
+	stopReplServer(s)
 
 	// Forget the in-process script cache and libraries, so only the AOF can
 	// bring them back. ExecuteSilent skips the persistence hook.
@@ -41,7 +41,7 @@ func TestAOFRestoresEvalshaAndFcallWrites(t *testing.T) {
 		}
 	}
 
-	restored, err := New(cfg)
+	restored, err := newOwnedTestServer(t, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}

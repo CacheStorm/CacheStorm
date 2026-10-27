@@ -1,6 +1,7 @@
 package store
 
 import (
+	"math"
 	"sync/atomic"
 )
 
@@ -85,4 +86,30 @@ func (mt *MemoryTracker) PressurePercent() float64 {
 		return 0
 	}
 	return float64(mt.currentUsage.Load()) / float64(mt.maxMemory) * 100
+}
+
+func (mt *MemoryTracker) withinLimit(usage int64) bool {
+	return mt.maxMemory <= 0 || float64(usage)/float64(mt.maxMemory) < mt.emergencyPct
+}
+
+func (mt *MemoryTracker) TryReserve(delta int64) bool {
+	if delta == 0 {
+		return true
+	}
+	for {
+		current := mt.currentUsage.Load()
+		if delta > 0 && current > math.MaxInt64-delta {
+			return false
+		}
+		if delta < 0 && current < math.MinInt64-delta {
+			return false
+		}
+		next := current + delta
+		if delta > 0 && !mt.withinLimit(next) {
+			return false
+		}
+		if mt.currentUsage.CompareAndSwap(current, next) {
+			return true
+		}
+	}
 }

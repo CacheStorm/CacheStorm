@@ -264,9 +264,10 @@ func TestAOFRewriterRewriteEmptyStore(t *testing.T) {
 		t.Fatalf("Rewrite with empty store: %v", err)
 	}
 
-	data, _ := os.ReadFile(path)
-	if len(data) != 0 {
-		t.Error("rewritten AOF with empty store should be empty")
+	reader := NewAOFReader()
+	commands, _, err := reader.LoadValid(path)
+	if err != nil || len(commands) != 0 || reader.Version != AOFVersion {
+		t.Fatalf("empty snapshot should contain only version header: %d commands version %d error %v", len(commands), reader.Version, err)
 	}
 }
 

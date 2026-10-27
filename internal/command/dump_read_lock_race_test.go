@@ -3,10 +3,10 @@ package command
 import (
 	"bytes"
 	"fmt"
-	"strings"
 	"sync"
 	"testing"
 
+	"github.com/cachestorm/cachestorm/internal/persistence"
 	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
 )
@@ -208,24 +208,25 @@ func TestDumpControlsUncontended(t *testing.T) {
 		return string(v.Bulk)
 	}
 
-	// Hash arm writes each field as "key=value&": 4 fields => 4 '&'.
-	if got := strings.Count(dumpBulk("h"), "&"); got != 4 {
-		t.Fatalf("CONTROL FAIL: DUMP h serialized %d fields, want 4", got)
-	}
-	// Set arm writes each member followed by ',': 4 members => 4 ','.
-	if got := strings.Count(dumpBulk("st"), ","); got != 4 {
-		t.Fatalf("CONTROL FAIL: DUMP st serialized %d members, want 4", got)
-	}
-	// List arm writes each element followed by ',': 4 elements => 4 ','.
-	if got := strings.Count(dumpBulk("l"), ","); got != 4 {
-		t.Fatalf("CONTROL FAIL: DUMP l serialized %d elements, want 4", got)
-	}
-	// Sorted set arm writes "member:score," per member: 4 members => 4 ','.
-	if got := strings.Count(dumpBulk("z"), ","); got != 4 {
-		t.Fatalf("CONTROL FAIL: DUMP z serialized %d members, want 4", got)
-	}
-	if got := dumpBulk("h"); !strings.HasPrefix(got, "CACHSTORM001") {
-		t.Fatalf("CONTROL FAIL: DUMP h = %q, want a CACHSTORM001 prefix", got)
+	for _, key := range []string{"h", "st", "l", "z"} {
+		decoded, err := persistence.DecodeDump([]byte(dumpBulk(key)))
+		if err != nil {
+			t.Fatalf("DUMP %s: %v", key, err)
+		}
+		var count int
+		switch v := decoded.(type) {
+		case *store.HashValue:
+			count = len(v.Fields)
+		case *store.SetValue:
+			count = len(v.Members)
+		case *store.ListValue:
+			count = len(v.Elements)
+		case *store.SortedSetValue:
+			count = len(v.Members)
+		}
+		if count != 4 {
+			t.Fatalf("DUMP %s members=%d want 4", key, count)
+		}
 	}
 
 	// A missing key still yields a null bulk string.

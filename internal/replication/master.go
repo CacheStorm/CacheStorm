@@ -170,7 +170,7 @@ func (m *Manager) attach(conn net.Conn, conf *command.ReplicaConf, req syncReque
 	r.lastAck.Store(time.Now().UnixNano())
 
 	m.mu.Lock()
-	if m.stopped {
+	if m.stopped || (m.role == RoleReplica && !m.cached) {
 		m.mu.Unlock()
 		_ = conn.Close()
 		return r
@@ -235,7 +235,24 @@ func (m *Manager) continuableLocked(req syncRequest) ([]byte, bool) {
 func (m *Manager) fullSync(r *replica, legacy bool) error {
 	var snap bytes.Buffer
 	m.host.LockWrites()
-	err := persistence.WriteSnapshot(&snap, DBSource{DBs: m.dbs})
+	m.mu.Lock()
+	invalid := m.role == RoleReplica && !m.cached
+	replicaSource := m.role == RoleReplica
+	m.mu.Unlock()
+	if invalid {
+		m.host.UnlockWrites()
+		return fmt.Errorf("replica has no synchronized dataset")
+	}
+	functions, err := m.host.FunctionPayload()
+	if replicaSource {
+		m.dbs.BeginAuthoritativeApply()
+	}
+	if err == nil {
+		err = persistence.WriteSnapshot(&snap, DBSource{DBs: m.dbs, Functions: functions})
+	}
+	if replicaSource {
+		m.dbs.EndAuthoritativeApply()
+	}
 	if err != nil {
 		m.host.UnlockWrites()
 		return err
@@ -294,8 +311,11 @@ func hostOf(addr string) string {
 // DBSource exposes databases as a snapshot source: every database, each as
 // its live entries.
 type DBSource struct {
-	DBs *store.Databases
+	DBs       *store.Databases
+	Functions []byte
 }
+
+func (d DBSource) FunctionPayload() []byte { return d.Functions }
 
 // DatabaseEntries implements persistence.MultiDBSource.
 func (d DBSource) DatabaseEntries() []map[string]interface{} {

@@ -9,23 +9,6 @@ import (
 	"github.com/cachestorm/cachestorm/internal/store"
 )
 
-// Regression: BITFIELD accepted its type-encoding argument
-// case-insensitively but interpreted it case-SENSITIVELY.
-//
-//	parseEncoding()  : strings.ToLower(encoding)      -> "I8" accepted, 8 bits
-//	bitfieldGet()    : strings.HasPrefix(encoding, "i") -> "I8" is NOT "i..."
-//	bitfieldIncr()   : strings.HasPrefix(encoding, "i") -> "I8" is NOT "i..."
-//
-// Redis BITFIELD encodings are case-insensitive (i8/I8/u8/U8 are equivalent).
-// Here the same stored bits returned different values depending only on the
-// case of the encoding argument:
-//
-//	BITFIELD k SET i8 0 -1 ; BITFIELD k GET i8 0 -> -1   (signed, correct)
-//	BITFIELD k SET I8 0 -1 ; BITFIELD k GET I8 0 -> 255  (read as unsigned)
-//
-// Impact: silent data corruption, and a signed saturation floor that depends
-// on the spelling of the encoding.
-
 func bitfieldCaseRun(t *testing.T, s *store.Store, router *Router, cmd string, args ...string) string {
 	t.Helper()
 	parsed := make([][]byte, len(args))
@@ -78,86 +61,44 @@ func bitfieldCaseRouter() *Router {
 	return router
 }
 
-// TestBitfieldEncodingIsCaseInsensitive is the decode symptom: identical stored
-// bits must decode identically regardless of the encoding's case.
-func TestBitfieldEncodingIsCaseInsensitive(t *testing.T) {
+func TestBitfieldEncodingRejectsUppercase(t *testing.T) {
 	s := store.NewStore()
-	router := bitfieldCaseRouter()
-
-	if out := bitfieldCaseRun(t, s, router, "BITFIELD", "low", "SET", "i8", "0", "-1"); out != "*1\r\n:0\r\n" {
-		t.Fatalf("SET i8 0 -1 returned %q, want old value 0", out)
+	r := bitfieldCaseRouter()
+	for _, encoding := range []string{"I8", "U8", "u64", "i65", "u08"} {
+		if out := bitfieldCaseRun(t, s, r, "BITFIELD", "k", "SET", encoding, "0", "1"); !strings.HasPrefix(out, "-ERR Invalid bitfield type.") {
+			t.Fatalf("encoding %s accepted: %q", encoding, out)
+		}
 	}
-	if out := bitfieldCaseRun(t, s, router, "BITFIELD", "up", "SET", "I8", "0", "-1"); out != "*1\r\n:0\r\n" {
-		t.Fatalf("SET I8 0 -1 returned %q, want old value 0", out)
-	}
-
-	lower := bitfieldCaseGet(t, s, router, "low", "i8", 0)
-	upper := bitfieldCaseGet(t, s, router, "up", "I8", 0)
-
-	if lower != -1 {
-		t.Fatalf("CONTROL FAIL: GET i8 after SET i8 -1 = %d, want -1", lower)
-	}
-	if upper != lower {
-		t.Fatalf("BITFIELD GET I8 = %d but GET i8 = %d for the same stored bits; "+
-			"the type encoding must be case-insensitive", upper, lower)
+	if s.Exists("k") {
+		t.Fatal("invalid encoding created key")
 	}
 }
 
-// TestBitfieldEncodingCaseAffectsOverflow covers SAT and WRAP, whose signed
-// bounds must not depend on the case of the encoding.
-func TestBitfieldEncodingCaseAffectsOverflow(t *testing.T) {
+func TestBitfieldSignedSaturationAndWrap(t *testing.T) {
 	s := store.NewStore()
-	router := bitfieldCaseRouter()
-
-	bitfieldCaseRun(t, s, router, "BITFIELD", "low", "SET", "i8", "0", "100")
-	bitfieldCaseRun(t, s, router, "BITFIELD", "up", "SET", "I8", "0", "100")
-
-	loOut := bitfieldCaseRun(t, s, router, "BITFIELD", "low", "OVERFLOW", "SAT", "INCRBY", "i8", "0", "-1000")
-	upOut := bitfieldCaseRun(t, s, router, "BITFIELD", "up", "OVERFLOW", "SAT", "INCRBY", "I8", "0", "-1000")
-
-	if !strings.Contains(loOut, ":-128\r\n") {
-		t.Fatalf("CONTROL FAIL: INCRBY i8 SAT -1000 from 100 = %q, want -128", loOut)
+	r := bitfieldCaseRouter()
+	bitfieldCaseRun(t, s, r, "BITFIELD", "k", "SET", "i8", "0", "100")
+	if out := bitfieldCaseRun(t, s, r, "BITFIELD", "k", "OVERFLOW", "SAT", "INCRBY", "i8", "0", "-1000"); out != "*1\r\n:-128\r\n" {
+		t.Fatalf("signed saturation: %q", out)
 	}
-	if !strings.Contains(upOut, ":-128\r\n") {
-		t.Fatalf("INCRBY I8 SAT -1000 from 100 = %q, want -128; the signed "+
-			"saturation floor must not depend on the encoding's case", upOut)
-	}
-
-	// WRAP past the signed maximum must land on the negative twin.
-	bitfieldCaseRun(t, s, router, "BITFIELD", "upw", "SET", "I8", "0", "127")
-	bitfieldCaseRun(t, s, router, "BITFIELD", "upw", "OVERFLOW", "WRAP", "INCRBY", "I8", "0", "1")
-	if v := bitfieldCaseGet(t, s, router, "upw", "I8", 0); v != -128 {
-		t.Fatalf("WRAP INCRBY I8 past 127 = %d, want -128; a signed encoding "+
-			"must wrap into the negative range", v)
+	bitfieldCaseRun(t, s, r, "BITFIELD", "k", "SET", "i8", "0", "127")
+	bitfieldCaseRun(t, s, r, "BITFIELD", "k", "INCRBY", "i8", "0", "1")
+	if got := bitfieldCaseGet(t, s, r, "k", "i8", 0); got != -128 {
+		t.Fatalf("wrap=%d", got)
 	}
 }
 
-// TestBitfieldEncodingCaseControls covers only paths that do NOT depend on the
-// signed/unsigned branch, so they pass both before and after the fix. Any
-// assertion using an uppercase "i" encoding belongs in a defect test, not here.
-func TestBitfieldEncodingCaseControls(t *testing.T) {
+func TestBitfieldUnsignedWrapAndReadControls(t *testing.T) {
 	s := store.NewStore()
-	router := bitfieldCaseRouter()
-
-	// Unsigned stays unsigned in every spelling.
-	bitfieldCaseRun(t, s, router, "BITFIELD", "ul", "SET", "u8", "0", "-1")
-	bitfieldCaseRun(t, s, router, "BITFIELD", "uu", "SET", "U8", "0", "-1")
-	if v := bitfieldCaseGet(t, s, router, "ul", "u8", 0); v != 255 {
-		t.Fatalf("CONTROL FAIL: GET u8 after SET u8 -1 = %d, want 255", v)
+	r := bitfieldCaseRouter()
+	bitfieldCaseRun(t, s, r, "BITFIELD", "k", "SET", "u8", "0", "-1")
+	if got := bitfieldCaseGet(t, s, r, "k", "u8", 0); got != 255 {
+		t.Fatalf("unsigned wrap=%d", got)
 	}
-	if v := bitfieldCaseGet(t, s, router, "uu", "U8", 0); v != 255 {
-		t.Fatalf("CONTROL FAIL: GET U8 after SET U8 -1 = %d, want 255", v)
+	if got := bitfieldCaseGet(t, s, r, "missing", "i64", 0); got != 0 {
+		t.Fatalf("missing=%d", got)
 	}
-
-	// Lowercase signed spellings keep working.
-	bitfieldCaseRun(t, s, router, "BITFIELD", "w", "SET", "i8", "0", "127")
-	bitfieldCaseRun(t, s, router, "BITFIELD", "w", "OVERFLOW", "WRAP", "INCRBY", "i8", "0", "1")
-	if v := bitfieldCaseGet(t, s, router, "w", "i8", 0); v != -128 {
-		t.Fatalf("CONTROL FAIL: WRAP INCRBY i8 past 127 = %d, want -128", v)
-	}
-
-	bitfieldCaseRun(t, s, router, "BITFIELD", "s16", "SET", "i16", "0", "-2")
-	if v := bitfieldCaseGet(t, s, router, "s16", "i16", 0); v != -2 {
-		t.Fatalf("CONTROL FAIL: GET i16 after SET i16 -2 = %d, want -2", v)
+	if s.Exists("missing") {
+		t.Fatal("read created key")
 	}
 }

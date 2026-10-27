@@ -423,6 +423,7 @@ func (v *SetValue) Clone() Value {
 }
 
 type Entry struct {
+	loading     atomic.Pointer[atomic.Bool]
 	Value       Value
 	Tags        []string
 	CreatedAt   int64
@@ -461,19 +462,25 @@ func (e *Entry) rehome() *Entry {
 }
 
 func (e *Entry) IsExpired() bool {
+	if loading := e.loading.Load(); loading != nil && loading.Load() {
+		return false
+	}
 	if expiresAt := e.ExpiresAt.Load(); expiresAt != 0 {
-		return time.Now().UnixNano() > expiresAt
+		return time.Now().UnixMilli() >= expiresAt
 	}
 	return false
 }
 
-func (e *Entry) MemoryUsage() int64 {
-	var size int64 = 64
-	size += e.Value.SizeOf()
-	for _, tag := range e.Tags {
+func entryMetadataSize(tags []string) int64 {
+	size := int64(64)
+	for _, tag := range tags {
 		size += int64(len(tag)) + 16
 	}
 	return size
+}
+
+func (e *Entry) MemoryUsage() int64 {
+	return entryMetadataSize(e.Tags) + e.Value.SizeOf()
 }
 
 func (e *Entry) Touch() {
@@ -482,21 +489,39 @@ func (e *Entry) Touch() {
 }
 
 func (e *Entry) SetTTL(ttl time.Duration) {
-	e.ExpiresAt.Store(time.Now().Add(ttl).UnixNano())
+	e.ExpiresAt.Store(time.Now().Add(ttl).UnixMilli())
 }
 
 func (e *Entry) SetExpiresAt(expiresAt int64) {
 	e.ExpiresAt.Store(expiresAt)
 }
 
-func (e *Entry) TTL() time.Duration {
+func (e *Entry) TTLMillis() int64 {
 	expiresAt := e.ExpiresAt.Load()
 	if expiresAt == 0 {
 		return -1
 	}
-	remaining := time.Until(time.Unix(0, expiresAt))
-	if remaining < 0 {
+	now := time.Now().UnixMilli()
+	if expiresAt <= now {
 		return -2
 	}
-	return remaining
+	return expiresAt - now
+}
+
+func expiryDuration(ms int64) time.Duration {
+	if ms > int64((1<<63-1)/time.Millisecond) {
+		return time.Duration(1<<63 - 1)
+	}
+	if ms < int64((-1<<63)/time.Millisecond) {
+		return time.Duration(-1 << 63)
+	}
+	return time.Duration(ms) * time.Millisecond
+}
+
+func (e *Entry) TTL() time.Duration {
+	ms := e.TTLMillis()
+	if ms < 0 {
+		return time.Duration(ms)
+	}
+	return expiryDuration(ms)
 }

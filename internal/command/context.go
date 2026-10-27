@@ -47,6 +47,10 @@ type Context struct {
 	// so the connection carries it back (see internal/server/connection.go).
 	ClientName string
 
+	FromMaster   bool
+	Replaying    bool
+	LegacyReplay bool
+
 	// InExec is set while EXEC runs a queued command. A blocking command
 	// must not wait inside a transaction: Redis answers it as if the timeout
 	// had already expired.
@@ -60,7 +64,7 @@ type Context struct {
 	// so the wakeup can be passed to the next waiter (see passWakeup).
 	passKey   string
 	passReady func(string) bool
-	passOwner bool
+	passToken store.WakeToken
 
 	// router is the router dispatching this command, recorded by
 	// Router.Execute so EXEC runs its queue through the same handlers.
@@ -88,8 +92,9 @@ type Context struct {
 	// propagate replaces what the command records in the AOF and the
 	// replication stream when propagateSet is true; an empty list records
 	// nothing.
-	propagate    []ExecutedCommand
-	propagateSet bool
+	propagate           []ExecutedCommand
+	propagateSet        bool
+	writeEffectsHandled bool
 
 	// wakeAfter, while EXEC runs its queue, collects the wakeups of blocked
 	// clients its commands trigger, delivered once the queue has run.
@@ -215,16 +220,15 @@ func (ctx *Context) waitForKeysReady(keys []string, timeout time.Duration, ready
 	if ctx.InExec {
 		return "", false
 	}
-	var notified bool
 	if ctx.BeforeWait != nil {
 		ctx.BeforeWait()
 		defer ctx.AfterWait()
 	}
 	key, ok := ctx.Store.KeyNotifier().WaitForKeysOpts(keys, timeout, store.WaitOptions{
-		Cancel:   ctx.Done,
-		Ready:    ready,
-		Consume:  true,
-		Notified: &notified,
+		Token:   &ctx.passToken,
+		Cancel:  ctx.Done,
+		Ready:   ready,
+		Consume: true,
 		// A command that waits again after a wakeup found nothing to take
 		// keeps its place at the head of the queue.
 		Front: ctx.passKey != "",
@@ -234,7 +238,6 @@ func (ctx *Context) waitForKeysReady(keys []string, timeout time.Duration, ready
 		// command has taken its share, Router.Execute hands the key on to
 		// the next one if data is left.
 		ctx.passKey, ctx.passReady = key, ready
-		ctx.passOwner = ctx.passOwner || notified
 	}
 	return key, ok
 }
@@ -261,8 +264,9 @@ func (ctx *Context) passWakeup() {
 	if ctx.passKey == "" {
 		return
 	}
-	ctx.Store.KeyNotifier().Pass(ctx.passKey, ctx.passReady, ctx.passOwner)
-	ctx.passKey, ctx.passReady, ctx.passOwner = "", nil, false
+	ctx.Store.KeyNotifier().PassToken(ctx.passKey, ctx.passReady, ctx.passToken)
+	ctx.passToken = store.WakeToken{}
+	ctx.passKey, ctx.passReady = "", nil
 }
 
 func (ctx *Context) IsAuthenticated() bool {

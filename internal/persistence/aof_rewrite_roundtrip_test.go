@@ -187,14 +187,14 @@ func TestAOFRewriteRoundTripPreservesTypes(t *testing.T) {
 	if !ok {
 		t.Fatal("geo:sicily missing after replay")
 	}
-	geoOut, ok := geoEntry.Value.(*store.GeoValue)
+	geoOut, ok := geoEntry.Value.(*store.SortedSetValue)
 	if !ok {
-		t.Fatalf("geo:sicily type = %T, want *store.GeoValue", geoEntry.Value)
+		t.Fatalf("geo:sicily type = %T, want *store.SortedSetValue", geoEntry.Value)
 	}
-	if pal := geoOut.Points["palermo"]; pal.Lon != 13.361389 || pal.Lat != 38.115556 {
+	if pal := geoOut.Members["palermo"]; pal != store.GeoScore(13.361389, 38.115556) {
 		t.Fatalf("palermo = %+v", pal)
 	}
-	if cat := geoOut.Points["catania"]; cat.Lon != 15.087269 || cat.Lat != 37.502669 {
+	if cat := geoOut.Members["catania"]; cat != store.GeoScore(15.087269, 37.502669) {
 		t.Fatalf("catania = %+v", cat)
 	}
 

@@ -6,6 +6,7 @@ package store
 // the store itself never imports the plugin layer. Set Hooks before the
 // store starts serving traffic.
 type StoreHooks struct {
+	OnEvictLocked   func(s *Store, key string)
 	OnEvict         func(key string, value interface{})
 	OnExpire        func(key string, value interface{})
 	OnTagInvalidate func(tag string, keys []string)
@@ -22,6 +23,15 @@ type StoreHooks struct {
 	// before the key is checked and removed, and the function it returns is
 	// called afterwards.
 	ExpiryGuard func(s *Store, key string) func()
+}
+
+func (s *Store) fireEvictLocked(key string) {
+	s.hooksMu.RLock()
+	h := s.hooks.OnEvictLocked
+	s.hooksMu.RUnlock()
+	if h != nil {
+		h(s, key)
+	}
 }
 
 // SetHooks installs the event callbacks. Call before the store serves

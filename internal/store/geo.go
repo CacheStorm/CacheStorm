@@ -31,7 +31,11 @@ func (v *GeoValue) Type() DataType { return DataTypeGeo }
 func (v *GeoValue) SizeOf() int64 {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
-	return int64(len(v.Points))*24 + 48
+	size := int64(len(v.Points))*32 + 48
+	for member := range v.Points {
+		size += int64(len(member))
+	}
+	return size
 }
 func (v *GeoValue) String() string {
 	v.mu.RLock()

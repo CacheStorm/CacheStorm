@@ -48,13 +48,17 @@ func TestTimingWheelSchedulesElapsedDeadlines(t *testing.T) {
 			s := NewStore()
 			e := NewEntry(&StringValue{Data: []byte("old")})
 			e.ExpiresAt.Store(1)
-			s.SetEntry("key", e)
+			if err := s.SetEntry("key", e); err != nil {
+				t.Errorf("SetEntry: %v", err)
+			}
 			if mode != "set-entry" {
 				e = NewEntry(&StringValue{Data: []byte("live")})
 				if mode == "rescheduled" || mode == "persisted" {
 					e.ExpiresAt.Store(math.MaxInt64)
 				}
-				s.SetEntry("key", e)
+				if err := s.SetEntry("key", e); err != nil {
+					t.Errorf("SetEntry: %v", err)
+				}
 				if mode == "persisted" && !s.Persist("key") {
 					t.Fatal("persist failed")
 				}

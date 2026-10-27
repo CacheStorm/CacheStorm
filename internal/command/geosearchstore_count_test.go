@@ -30,11 +30,11 @@ func geoLen(s *store.Store, key string) int {
 	if !exists {
 		return -1
 	}
-	geo, ok := entry.Value.(*store.GeoValue)
+	geo, ok := entry.Value.(*store.SortedSetValue)
 	if !ok {
 		return -2
 	}
-	return len(geo.Points)
+	return len(geo.Members)
 }
 
 // TestProofGeoSearchStoreCountLimits is the round proof.
@@ -105,7 +105,7 @@ func TestProofGeoSearchStoreCountLimits(t *testing.T) {
 		t.Fatalf("SECONDARY FAIL: COUNT 2 stored %d members, want 2", n)
 	}
 	d2, _ := s.Get("d:cnt2")
-	if _, ok := d2.Value.(*store.GeoValue).Points["far"]; ok {
+	if _, ok := d2.Value.(*store.SortedSetValue).Members["far"]; ok {
 		t.Fatalf("SECONDARY FAIL: COUNT 2 kept \"far\" (the most distant member); " +
 			"COUNT implies nearest-first, so \"far\" must be dropped")
 	}

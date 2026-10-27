@@ -1712,6 +1712,52 @@ TYPE key
 
 ---
 
+### Bitmap growth and BITFIELD
+
+SETBIT and BITFIELD compute their required final data length before allocating a larger bitmap buffer. With noeviction, rejected growth leaves existing bytes, expiry, tags, WATCH version, tracked memory and AOF records unchanged, including inside EXEC and Lua. Eviction policies can remove keys while trying to make room; those removals are journaled. Local eviction on a writable replica invalidates its upstream checkpoint even when the requesting command subsequently fails.
+
+BITFIELD validates every subcommand before applying any of them. GET-only calls leave missing keys absent and produce no AOF effects. BITFIELD_RO provides the explicit readonly command and rejects SET/INCRBY. Encodings use lowercase `i1` through `i64` or `u1` through `u63`; uppercase encodings, u64, invalid integers and out-of-range offsets are rejected on new requests. `#index` scales an offset by its field width. SET and INCRBY support WRAP/SAT/FAIL. Extreme signed SET saturation follows the measured Redis 7.4.11 behavior, including its wrapped bound calculation.
+
+Persisted new BITFIELD effects contain resolved, canonical SET suboperations, including any necessary allocation effect. This avoids replaying relative increments or changed overflow rules. Recovery separately accepts common historical uppercase/u64/noncanonical integer records and retains their earlier SET wrapping behavior. Read-only BITFIELD records from older binaries retain their historical empty-key effect during recovery; new read-only calls are omitted from the log. This does not guarantee recovery for every formerly accepted malformed or oversized command.
+
+Atomic tracked-footprint admission now also covers Store.Set, GetOrCreate and planned HLL/GEOADD writes. SetEntry and core entry transfers also reserve their tracked footprint. Other in-place writers retain their existing rules; their concurrent growth is not proven to obey the reservation invariant. Tracking bounds dataset footprints, not parser buffers, planning structures, transient reallocation copies, total RSS or every extension's state. Very large values, cross-database eviction selection and native runtime/failure models still need broader validation.
+
+---
+
+## Entry transfers
+
+RENAME/RENAMENX/MOVE/COPY perform one source/destination operation. Admission includes the destination key, value, entry and tags, credits any replaced destination, and credits a removed source when both stores share their memory tracker. A neutral move does not need duplicate capacity. With noeviction, rejection preserves live values, expiry/tags, WATCH and journal state. Eviction policies may remove keys while attempting admission; those removals are not rolled back.
+
+COPY reserves before cloning and retains the source's expiry/tags; its value is independent of the source. If the retained source and the new copy cannot jointly fit their shared budget, it rejects before attempting unproductive eviction. Rename/move retain the transferred entry metadata and remove the source only after admission. COPY reads do not change source WATCH state, no-op transfers do not append journal records, and successful destination writes notify its watchers and blocked readers. Core transfers hold the server gate through persistence, which pauses readers during large copies.
+
+SetEntry reports errors to its internal callers instead of silently dropping oversized keys. New COPY requests with destinations beyond CacheStorm's 64 KiB key limit return an error. Trusted replay retains historical oversized COPY no-ops that older binaries acknowledged without creating a destination. Keep original backups; these records never contained a successful destination value to recover. These admission rules implement CacheStorm's tracked-dataset budget; broad Redis maxmemory equivalence and large-copy latency remain separate validation work.
+
+## Geospatial commands
+
+GEOADD stores a sorted set whose scores encode the Redis geohash cells. ZSCORE/ZRANGE/ZREM and DUMP/RESTORE operate on the same values. GEOPOS reports decoded cell centers, GEOHASH returns eleven characters, and distances use Redis's earth model, unit factors and four decimal places. Core coordinate/score/hash and binary transfers are tested against Redis 7.4.11. Native snapshot files remain CacheStorm-specific.
+
+GEOADD validates all coordinate triples and mutually exclusive NX/XX options before changing a key. NaN/out-of-range coordinates are rejected. With noeviction, invalid batches and rejected growth preserve the value, expiry/tags, WATCH and journal. Coordinates in the same geohash cell are no-op updates. Successful writes reserve the tracked sorted-set footprint before publishing a complete map. Geo STORE replacements now also use the shared Store.Set reservation and credit their previous destination footprint. The sorted-set estimate charges more per member than the earlier private geo map; review capacity when upgrading.
+
+GEORADIUS, GEORADIUSBYMEMBER, GEOSEARCH and GEOSEARCHSTORE read sorted sets. STORE/STOREDIST replace their destination, clear its old expiry/tags, and journal the computed result as RESTORE (or DEL for an empty result). Rejected queries preserve the destination. Radius reads do not change WATCH or AOF. GEORADIUS_RO and GEORADIUSBYMEMBER_RO reject store options and work as readonly commands. Destination keys are included in ACL/gate checks, and write replies wait for AOF commit.
+
+Finite legacy native geo snapshots migrate to sorted-set scores on load. Older raw GEOADD AOF records use the corrected representation during replay. This quantizes previously exact private coordinates to cell centers. Historical NaN/out-of-range private geo data is retained in its legacy representation rather than discarded; public GEOADD cannot convert those invalid keys. Preserve original backups and export/repair that data with its matching older binary before replacing it. Older CacheStorm binaries whose geo handlers require the private type cannot query new sorted-set geo data as geo; keep matching binaries and backups for rollback. Old failed batches that already left unjournaled partial data cannot reconstruct those effects from AOF.
+
+Admission/publication currently scan/copy the existing map and spatial queries scan the index; Redis's indexed complexity and large-index capacity are not established. Transient planning/copy/response buffers are outside tracked dataset limits. Eviction modes can remove keys under pressure, following existing journal rules; a rejected request does not roll those evictions back. Broader query grammar, ordering/tie behavior and platform/load validation remain part of the production-readiness work.
+
+## HyperLogLog Commands
+
+```
+PFADD key [element ...]
+PFCOUNT key [key ...]
+PFMERGE destination [source ...]
+```
+
+HyperLogLogs use Redis-compatible HYLL binary strings with 16,384 registers, sparse/dense encodings, Redis hashing and cardinality estimation. GET/SET and DUMP/RESTORE can transfer these bytes between Redis 7.4 and CacheStorm. Sparse opcode layout may differ while retaining identical registers and cardinality. Encoding uses the default 3,000-byte sparse threshold; a configurable Redis `hll-sparse-max-bytes` setting is not provided.
+
+PFADD returns 1 when it creates a key or changes registers, otherwise 0. PFMERGE includes existing destination registers and preserves its expiry/tags. Mutation paths use planned memory admission. PFCOUNT over several keys computes a union without creating or modifying them. Single-key PFCOUNT can refresh the cardinality cache, which changes the string bytes and WATCH version; that conditional effect is persisted and replicated. Readonly replicas and readonly scripts can count. If AOF is already unhealthy, PFCOUNT computes the result without updating the cache. A newly encountered persistence failure retains the normal MISCONF behavior.
+
+SAVE, AOF rewrites and full synchronization now retain encoded registers. Older snapshots/rewrites that already replaced an HLL with the literal diagnostic string `HyperLogLog` cannot recover its registers. Restore from original input or an intact PFADD command history. Do not treat an ordinary user string containing that word as an HLL. Historical raw PFADD logs replay using corrected Redis hashing/estimation, so counts can differ from the previous inaccurate implementation.
+
 ### DUMP / RESTORE
 Serialize/Deserialize the value stored at key.
 
@@ -1719,6 +1765,15 @@ Serialize/Deserialize the value stored at key.
 DUMP key
 RESTORE key ttl serialized-value [REPLACE] [ABSTTL] [IDLETIME seconds] [FREQ frequency]
 ```
+
+DUMP emits a Redis-compatible binary payload for strings (including HYLL data), lists, sets, hashes and sorted sets, including binary/empty members and full floating-point scores. It excludes the key's TTL. RESTORE validates the payload's RDB version, CRC64 and structure before changing the destination. It accepts Redis 7.4 core encodings, including integer/LZF strings, listpack, intset and quicklist, plus older ziplist/zipmap encodings. Streams, hashes with field-expiry metadata, Redis modules and CacheStorm extension values are not covered by this codec; unsupported values/payloads return an error rather than silently losing data. This command codec does not make CacheStorm's native snapshot file interchangeable with Redis RDB files.
+
+TTL is relative milliseconds by default; zero means persistent. ABSTTL selects an absolute Unix millisecond deadline. REPLACE is required for an existing destination. Invalid TTL/options, invalid payload and rejected store allocation return an error. IDLETIME and FREQ are mutually exclusive; the configured LRU/LFU policy determines which metadata is used. Effective RESTORE writes propagate with REPLACE and ABSTTL, preserving deadlines through AOF replay, transactions, scripts and delayed replication.
+
+CacheStorm deliberately rejects relative TTL addition that overflows int64 before changing the destination. Redis 7.4.11 acknowledges this boundary input but writes a negative ABSTTL to AOF; a real-process restart test reproduced the acknowledged key being lost during replay. This difference is recorded in the differential harness alongside the existing Lua diagnostic difference; it is not an exact compatibility pass.
+
+Earlier CacheStorm DUMP blobs used a private `CACHSTORM001` delimiter format without a checksum, which could already lose delimiter/empty-member data. New public RESTORE rejects that format. AOF recovery retains a separate legacy decoder for old persisted RESTORE records, including previous v2 files. This cannot reconstruct data already lost by the old serializer. Keep original backups; before upgrading, restore client-side private blobs with the matching old binary and export their ordinary key/value data for import into the new version. Preserve type and expiry metadata during that export.
+
 
 ---
 

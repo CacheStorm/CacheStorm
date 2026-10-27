@@ -57,7 +57,6 @@ func c(args ...string) Step              { return Step{Args: args} }
 func on(conn int, args ...string) Step   { return Step{Conn: conn, Args: args} }
 func srt(args ...string) Step            { return Step{Args: args, Norm: NormSorted} }
 func pairs(args ...string) Step          { return Step{Args: args, Norm: NormSortedPairs} }
-func nested(args ...string) Step         { return Step{Args: args, Norm: NormNested} }
 func ttl(tol int64, args ...string) Step { return Step{Args: args, Norm: NormTTL, Tol: tol} }
 func kind(args ...string) Step           { return Step{Args: args, Norm: NormKind} }
 func length(args ...string) Step         { return Step{Args: args, Norm: NormLen} }

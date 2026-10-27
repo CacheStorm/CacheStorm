@@ -66,19 +66,19 @@ func TestRDBSaveLoadRoundTripExtendedTypes(t *testing.T) {
 	if !ok {
 		t.Fatal("geo:sicily missing after load")
 	}
-	geoOut, ok := geoEntry.Value.(*store.GeoValue)
+	geoOut, ok := geoEntry.Value.(*store.SortedSetValue)
 	if !ok {
-		t.Fatalf("geo:sicily type = %T, want *store.GeoValue", geoEntry.Value)
+		t.Fatalf("geo:sicily type = %T, want *store.SortedSetValue", geoEntry.Value)
 	}
-	if len(geoOut.Points) != 2 {
-		t.Fatalf("geo points = %d, want 2", len(geoOut.Points))
+	if len(geoOut.Members) != 2 {
+		t.Fatalf("geo points = %d, want 2", len(geoOut.Members))
 	}
-	pal, ok := geoOut.Points["palermo"]
-	if !ok || pal.Lon != 13.361389 || pal.Lat != 38.115556 {
+	pal, ok := geoOut.Members["palermo"]
+	if !ok || pal != store.GeoScore(13.361389, 38.115556) {
 		t.Fatalf("palermo = %+v", pal)
 	}
-	cat, ok := geoOut.Points["catania"]
-	if !ok || cat.Lon != 15.087269 || cat.Lat != 37.502669 {
+	cat, ok := geoOut.Members["catania"]
+	if !ok || cat != store.GeoScore(15.087269, 37.502669) {
 		t.Fatalf("catania = %+v", cat)
 	}
 

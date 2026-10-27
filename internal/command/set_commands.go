@@ -66,22 +66,18 @@ func cmdSADD(ctx *Context) error {
 		return ctx.WriteError(arityError(ctx.Command))
 	}
 
-	key := ctx.ArgString(0)
-	set, err := lockOrCreateSet(ctx, key)
+	ctx.writeEffectsHandled = true
+	members := make([]string, ctx.ArgCount()-1)
+	for i := 1; i < ctx.ArgCount(); i++ {
+		members[i-1] = ctx.ArgString(i)
+	}
+	added, err := ctx.Store.AddSetMembers(ctx.ArgString(0), members)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
-
-	defer set.Unlock()
-	added := 0
-	for i := 1; i < ctx.ArgCount(); i++ {
-		member := ctx.ArgString(i)
-		if _, exists := set.Members[member]; !exists {
-			set.AddMember(member)
-			added++
-		}
+	if added == 0 {
+		ctx.PropagateAs()
 	}
-
 	return ctx.WriteInteger(int64(added))
 }
 
@@ -340,11 +336,15 @@ func cmdSMOVE(ctx *Context) error {
 		return ctx.WriteError(arityError(ctx.Command))
 	}
 
+	ctx.writeEffectsHandled = true
 	moved, err := ctx.Store.MoveSetMember(ctx.ArgString(0), ctx.ArgString(1), ctx.ArgString(2))
 	if err != nil {
 		return ctx.WriteError(err)
 	}
 
+	if !moved || ctx.ArgString(0) == ctx.ArgString(1) {
+		ctx.PropagateAs()
+	}
 	if moved {
 		return ctx.WriteInteger(1)
 	}
@@ -516,6 +516,7 @@ func cmdSUNIONSTORE(ctx *Context) error {
 	// The shared set-operations lock: a concurrent MoveSetMember takes it
 	// exclusively, so this multi-set read can never observe the move
 	// half-applied.
+	ctx.writeEffectsHandled = true
 	ctx.Store.SetOpsRLock()
 	dstKey := ctx.ArgString(0)
 	result := make(map[string]struct{})
@@ -535,7 +536,11 @@ func cmdSUNIONSTORE(ctx *Context) error {
 	}
 
 	if len(result) == 0 {
-		ctx.Store.Delete(dstKey)
+		if ctx.Store.Delete(dstKey) {
+			ctx.Store.KeyNotifier().NotifyKey(dstKey)
+		} else {
+			ctx.PropagateAs()
+		}
 		reply := int64(0)
 		ctx.Store.SetOpsRUnlock()
 		return ctx.WriteInteger(reply)
@@ -561,6 +566,7 @@ func cmdSINTERSTORE(ctx *Context) error {
 	// The shared set-operations lock: a concurrent MoveSetMember takes it
 	// exclusively, so this multi-set read can never observe the move
 	// half-applied.
+	ctx.writeEffectsHandled = true
 	ctx.Store.SetOpsRLock()
 	dstKey := ctx.ArgString(0)
 
@@ -600,7 +606,11 @@ func cmdSINTERSTORE(ctx *Context) error {
 	}
 
 	if len(result) == 0 {
-		ctx.Store.Delete(dstKey)
+		if ctx.Store.Delete(dstKey) {
+			ctx.Store.KeyNotifier().NotifyKey(dstKey)
+		} else {
+			ctx.PropagateAs()
+		}
 		reply := int64(0)
 		ctx.Store.SetOpsRUnlock()
 		return ctx.WriteInteger(reply)
@@ -626,6 +636,7 @@ func cmdSDIFFSTORE(ctx *Context) error {
 	// The shared set-operations lock: a concurrent MoveSetMember takes it
 	// exclusively, so this multi-set read can never observe the move
 	// half-applied.
+	ctx.writeEffectsHandled = true
 	ctx.Store.SetOpsRLock()
 	dstKey := ctx.ArgString(0)
 
@@ -658,7 +669,11 @@ func cmdSDIFFSTORE(ctx *Context) error {
 	}
 
 	if len(result) == 0 {
-		ctx.Store.Delete(dstKey)
+		if ctx.Store.Delete(dstKey) {
+			ctx.Store.KeyNotifier().NotifyKey(dstKey)
+		} else {
+			ctx.PropagateAs()
+		}
 		reply := int64(0)
 		ctx.Store.SetOpsRUnlock()
 		return ctx.WriteInteger(reply)

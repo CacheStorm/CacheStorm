@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"sort"
 	"strconv"
 	"strings"
@@ -57,16 +58,40 @@ type FunctionRegistry struct {
 var functionRegistry *FunctionRegistry
 var functionOnce sync.Once
 
+func NewFunctionRegistry(s *store.Store) *FunctionRegistry {
+	return &FunctionRegistry{
+		libraries: make(map[string]*Library),
+		functions: make(map[string]*Function),
+		named:     make(map[string]*Function),
+		store:     s,
+	}
+}
+
+func (r *FunctionRegistry) CloneForStore(s *store.Store) *FunctionRegistry {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	n := NewFunctionRegistry(s)
+	n.libraries = maps.Clone(r.libraries)
+	n.functions = maps.Clone(r.functions)
+	n.named = maps.Clone(r.named)
+	return n
+}
+
 func GetFunctionRegistry(s *store.Store) *FunctionRegistry {
-	functionOnce.Do(func() {
-		functionRegistry = &FunctionRegistry{
-			libraries: make(map[string]*Library),
-			functions: make(map[string]*Function),
-			named:     make(map[string]*Function),
-			store:     s,
-		}
-	})
+	functionOnce.Do(func() { functionRegistry = NewFunctionRegistry(s) })
 	return functionRegistry
+}
+
+func functionRegistryFor(ctx *Context) *FunctionRegistry {
+	if r := ctx.dispatcher(); r != nil {
+		r.mu.RLock()
+		registry := r.functionRegistry
+		r.mu.RUnlock()
+		if registry != nil {
+			return registry
+		}
+	}
+	return GetFunctionRegistry(ctx.Store)
 }
 
 const maxLibraries = 1000 // Maximum number of function libraries
@@ -739,7 +764,7 @@ func cmdFUNCTION(ctx *Context) error {
 	}
 
 	subCmd := strings.ToUpper(ctx.ArgString(0))
-	registry := GetFunctionRegistry(ctx.Store)
+	registry := functionRegistryFor(ctx)
 
 	switch subCmd {
 	case "LOAD":
@@ -896,6 +921,10 @@ func handleFunctionList(ctx *Context, registry *FunctionRegistry) error {
 const functionDumpMagic = "CSFN\x01"
 
 func handleFunctionDump(ctx *Context, registry *FunctionRegistry) error {
+	return ctx.WriteBulkBytes(registry.DumpPayload())
+}
+
+func (registry *FunctionRegistry) DumpPayload() []byte {
 	libs := registry.ListLibraries("")
 	var buf bytes.Buffer
 	buf.WriteString(functionDumpMagic)
@@ -908,7 +937,7 @@ func handleFunctionDump(ctx *Context, registry *FunctionRegistry) error {
 		}
 		writeDumpString(&buf, lib.Code)
 	}
-	return ctx.WriteBulkString(buf.String())
+	return buf.Bytes()
 }
 
 func writeDumpString(buf *bytes.Buffer, s string) {
@@ -1100,7 +1129,7 @@ func fcall(ctx *Context, readOnly bool) error {
 	if err != nil {
 		return ctx.WriteError(err)
 	}
-	registry := GetFunctionRegistry(ctx.Store)
+	registry := functionRegistryFor(ctx)
 	lib, fn, ok := registry.resolveFunction(ctx.ArgString(0))
 	if !ok {
 		return ctx.WriteError(errors.New("ERR Function not found"))

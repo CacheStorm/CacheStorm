@@ -25,7 +25,9 @@ func TestSetEntryRegistersTags(t *testing.T) {
 		t.Fatal("setup: key k missing")
 	}
 
-	s.SetEntry("moved", entry)
+	if err := s.SetEntry("moved", entry); err != nil {
+		t.Errorf("SetEntry: %v", err)
+	}
 
 	got := s.GetTagIndex().GetKeys("env")
 	found := false
@@ -51,7 +53,9 @@ func TestSetEntryDropsStaleTagsOnOverwrite(t *testing.T) {
 
 	fresh := NewEntry(&StringValue{Data: []byte("v2")})
 	fresh.Tags = []string{"newtag"}
-	s.SetEntry("k", fresh)
+	if err := s.SetEntry("k", fresh); err != nil {
+		t.Errorf("SetEntry: %v", err)
+	}
 
 	if got := s.GetTagIndex().GetKeys("oldtag"); len(got) != 0 {
 		t.Fatalf("GetKeys(oldtag) = %v, want empty — the replaced entry's mapping must be dropped", got)
@@ -74,7 +78,9 @@ func TestSetEntryWithoutTagsLeavesIndexAlone(t *testing.T) {
 		t.Fatalf("setup: GetKeys(env) = %v, want one key", got)
 	}
 
-	s.SetEntry("plain", NewEntry(&StringValue{Data: []byte("v")}))
+	if err := s.SetEntry("plain", NewEntry(&StringValue{Data: []byte("v")})); err != nil {
+		t.Errorf("SetEntry: %v", err)
+	}
 
 	if got := s.GetTagIndex().GetKeys("env"); len(got) != 1 || got[0] != "k" {
 		t.Fatalf("GetKeys(env) = %v, want [k] — an untagged SetEntry must not disturb the index", got)

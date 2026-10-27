@@ -368,6 +368,13 @@ func cmdINFO(ctx *Context) error {
 		sb.WriteString("\r\n")
 	}
 
+	if want("persistence") && r != nil {
+		_, _, info := r.snapshotHooks()
+		if info != nil {
+			sb.WriteString(info())
+		}
+	}
+
 	if want("keyspace") {
 		sb.WriteString(keyspaceInfo(ctx))
 	}
@@ -412,11 +419,6 @@ func cmdPEXPIREAT(ctx *Context) error {
 	return expireGeneric(ctx, 0, false, "pexpireat")
 }
 
-// An absolute expiry is stored as a Unix nanosecond timestamp, so the input
-// must stay inside the int64 nanosecond range (~year 1678..2262). Converting an
-// out-of-range value overflows into a PAST instant, which would expire the key
-// immediately while the command reported success. These bounds are the largest
-// second/millisecond values whose conversion to nanoseconds cannot overflow.
 const (
 	maxExpireAtSeconds = 9223372036    // MaxInt64 / time.Second
 	maxExpireAtMillis  = 9223372036854 // MaxInt64 / time.Millisecond
@@ -487,33 +489,40 @@ func expireGeneric(ctx *Context, basetimeMs int64, seconds bool, cmd string) err
 
 	entry, exists := ctx.Store.Get(key)
 	if !exists {
+		ctx.PropagateAs()
 		return ctx.WriteInteger(0)
 	}
 	if flags != 0 {
-		currentNs := entry.ExpiresAt.Load()
-		volatile := currentNs != 0
-		current := currentNs / int64(time.Millisecond)
+		current := entry.ExpiresAt.Load()
+		volatile := current != 0
 		if flags&expireFlagNX != 0 && volatile {
+			ctx.PropagateAs()
 			return ctx.WriteInteger(0)
 		}
 		if flags&expireFlagXX != 0 && !volatile {
+			ctx.PropagateAs()
 			return ctx.WriteInteger(0)
 		}
 		if flags&expireFlagGT != 0 && (!volatile || when <= current) {
+			ctx.PropagateAs()
 			return ctx.WriteInteger(0)
 		}
 		if flags&expireFlagLT != 0 && volatile && when >= current {
+			ctx.PropagateAs()
 			return ctx.WriteInteger(0)
 		}
 	}
 
-	if when <= time.Now().UnixMilli() {
+	if when <= time.Now().UnixMilli() && !ctx.Replaying {
 		ctx.Store.Delete(key)
+		ctx.propagateDelete(key)
 		return ctx.WriteInteger(1)
 	}
-	if ctx.Store.SetExpiresAt(key, expireMsToNs(when)) {
+	if ctx.Store.SetExpiresAt(key, when) {
+		ctx.propagateExpiry(key, when)
 		return ctx.WriteInteger(1)
 	}
+	ctx.PropagateAs()
 	return ctx.WriteInteger(0)
 }
 
@@ -522,15 +531,11 @@ func cmdTTL(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
-	ttl := ctx.Store.TTL(ctx.ArgString(0))
-	// Store.TTL returns bare -1 (no expiry) and -2 (no key) as nanosecond
-	// sentinels. Dividing them by time.Second collapses both to 0, so report
-	// them verbatim the way Redis does.
+	ttl := ctx.Store.TTLMillis(ctx.ArgString(0))
 	if ttl < 0 {
-		return ctx.WriteInteger(int64(ttl))
+		return ctx.WriteInteger(ttl)
 	}
-	// Redis rounds the remaining milliseconds to the nearest second.
-	return ctx.WriteInteger((int64(ttl/time.Millisecond) + 500) / 1000)
+	return ctx.WriteInteger((ttl + 500) / 1000)
 }
 
 func cmdPTTL(ctx *Context) error {
@@ -538,13 +543,7 @@ func cmdPTTL(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
-	ttl := ctx.Store.TTL(ctx.ArgString(0))
-	// Same sentinel handling as cmdTTL: report -1/-2 verbatim rather than
-	// dividing the bare nanosecond sentinels into 0.
-	if ttl < 0 {
-		return ctx.WriteInteger(int64(ttl))
-	}
-	return ctx.WriteInteger(int64(ttl / time.Millisecond))
+	return ctx.WriteInteger(ctx.Store.TTLMillis(ctx.ArgString(0)))
 }
 
 func cmdPEXPIRETIME(ctx *Context) error {
@@ -559,7 +558,7 @@ func cmdPEXPIRETIME(ctx *Context) error {
 	if entry.ExpiresAt.Load() == 0 {
 		return ctx.WriteInteger(-1)
 	}
-	return ctx.WriteInteger(entry.ExpiresAt.Load() / 1e6)
+	return ctx.WriteInteger(entry.ExpiresAt.Load())
 }
 
 func cmdEXPIRETIME(ctx *Context) error {
@@ -574,7 +573,12 @@ func cmdEXPIRETIME(ctx *Context) error {
 	if entry.ExpiresAt.Load() == 0 {
 		return ctx.WriteInteger(-1)
 	}
-	return ctx.WriteInteger(entry.ExpiresAt.Load() / 1e9)
+	at := entry.ExpiresAt.Load()
+	seconds := at / 1000
+	if at%1000 >= 500 {
+		seconds++
+	}
+	return ctx.WriteInteger(seconds)
 }
 
 func cmdPERSIST(ctx *Context) error {
@@ -585,6 +589,7 @@ func cmdPERSIST(ctx *Context) error {
 	if ctx.Store.Persist(ctx.ArgString(0)) {
 		return ctx.WriteInteger(1)
 	}
+	ctx.PropagateAs()
 	return ctx.WriteInteger(0)
 }
 
@@ -603,50 +608,39 @@ func cmdTYPE(ctx *Context) error {
 var errNoSuchKey = errors.New("ERR no such key")
 
 func cmdRENAME(ctx *Context) error {
+	ctx.writeEffectsHandled = true
 	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
-
-	oldKey := ctx.ArgString(0)
-	newKey := ctx.ArgString(1)
-
-	entry, exists := ctx.Store.Get(oldKey)
-	if !exists {
+	changed, err := ctx.Store.Transfer(ctx.ArgString(0), ctx.Store, ctx.ArgString(1), store.TransferOptions{Replace: true})
+	if err == store.ErrKeyNotFound {
 		return ctx.WriteError(errNoSuchKey)
 	}
-	if len(newKey) > store.MaxKeySize {
-		return ctx.WriteError(store.ErrKeyTooLarge)
+	if err != nil {
+		return ctx.WriteError(err)
 	}
-
-	ctx.Store.Delete(oldKey)
-	ctx.Store.SetEntry(newKey, entry)
-
+	if !changed {
+		ctx.PropagateAs()
+	}
 	return ctx.WriteOK()
 }
 
 func cmdRENAMENX(ctx *Context) error {
+	ctx.writeEffectsHandled = true
 	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
-
-	oldKey := ctx.ArgString(0)
-	newKey := ctx.ArgString(1)
-
-	entry, exists := ctx.Store.Get(oldKey)
-	if !exists {
+	changed, err := ctx.Store.Transfer(ctx.ArgString(0), ctx.Store, ctx.ArgString(1), store.TransferOptions{})
+	if err == store.ErrKeyNotFound {
 		return ctx.WriteError(errNoSuchKey)
 	}
-	if len(newKey) > store.MaxKeySize {
-		return ctx.WriteError(store.ErrKeyTooLarge)
+	if err != nil {
+		return ctx.WriteError(err)
 	}
-
-	if ctx.Store.Exists(newKey) {
+	if !changed {
+		ctx.PropagateAs()
 		return ctx.WriteInteger(0)
 	}
-
-	ctx.Store.Delete(oldKey)
-	ctx.Store.SetEntry(newKey, entry)
-
 	return ctx.WriteInteger(1)
 }
 
@@ -703,166 +697,6 @@ func cmdTOUCH(ctx *Context) error {
 	}
 
 	return ctx.WriteInteger(touched)
-}
-
-func cmdDUMP(ctx *Context) error {
-	if ctx.ArgCount() != 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	key := ctx.ArgString(0)
-	entry, exists := ctx.Store.Get(key)
-	if !exists {
-		return ctx.WriteNullBulkString()
-	}
-
-	var dump strings.Builder
-	dump.WriteString("CACHSTORM001")
-	dump.WriteByte(byte(entry.Value.Type()))
-	fmt.Fprintf(&dump, "%d", entry.ExpiresAt.Load())
-	dump.WriteString(":")
-
-	// Every arm below reads a collection the command handlers mutate under the
-	// value's write lock (HSET/HDEL, RPUSH/LPOP, SADD/SREM, ZADD/ZREM). A map
-	// iteration or a slice read concurrent with a write is undefined behaviour
-	// and, for maps, a fatal runtime error ("concurrent map iteration and map
-	// write") that kills the process. Serialize under the matching read lock.
-	// No Store call happens inside these arms, so holding RLock across the
-	// writes to the strings.Builder cannot self-deadlock.
-	switch v := entry.Value.(type) {
-	case *store.StringValue:
-		dump.Write(v.Data)
-	case *store.HashValue:
-		v.RLock()
-		for k, val := range v.Fields {
-			dump.WriteString(k)
-			dump.WriteByte('=')
-			dump.Write(val)
-			dump.WriteByte('&')
-		}
-		v.RUnlock()
-	case *store.ListValue:
-		v.RLock()
-		for _, el := range v.Elements {
-			dump.Write(el)
-			dump.WriteByte(',')
-		}
-		v.RUnlock()
-	case *store.SetValue:
-		v.RLock()
-		for k := range v.Members {
-			dump.WriteString(k)
-			dump.WriteByte(',')
-		}
-		v.RUnlock()
-	case *store.SortedSetValue:
-		v.RLock()
-		for _, se := range v.GetSortedRange(0, -1, true, false) {
-			fmt.Fprintf(&dump, "%s:%f,", se.Member, se.Score)
-		}
-		v.RUnlock()
-	}
-
-	return ctx.WriteBulkString(dump.String())
-}
-
-func cmdRESTORE(ctx *Context) error {
-	if ctx.ArgCount() < 3 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	key := ctx.ArgString(0)
-	ttl, err := strconv.ParseInt(ctx.ArgString(1), 10, 64)
-	if err != nil {
-		return ctx.WriteError(ErrNotInteger)
-	}
-
-	serialized := ctx.ArgString(2)
-
-	if len(serialized) < 13 || !strings.HasPrefix(serialized, "CACHSTORM001") {
-		return ctx.WriteError(errors.New("ERR DUMP payload version or checksum are wrong"))
-	}
-
-	replace := false
-	for i := 3; i < ctx.ArgCount(); i++ {
-		if strings.ToUpper(ctx.ArgString(i)) == "REPLACE" {
-			replace = true
-		}
-	}
-
-	if !replace {
-		if _, exists := ctx.Store.Get(key); exists {
-			return ctx.WriteError(errors.New("BUSYKEY Target key name already exists"))
-		}
-	}
-
-	data := serialized[12:]
-	typeByte := data[0]
-	data = data[1:]
-
-	colonIdx := strings.Index(data, ":")
-	if colonIdx == -1 {
-		return ctx.WriteError(errors.New("ERR invalid DUMP format"))
-	}
-
-	_ = data[:colonIdx]
-	data = data[colonIdx+1:]
-
-	var value store.Value
-	switch store.DataType(typeByte) {
-	case store.DataTypeString:
-		value = &store.StringValue{Data: []byte(data)}
-	case store.DataTypeHash:
-		hv := &store.HashValue{Fields: make(map[string][]byte)}
-		if len(data) > 0 {
-			pairs := strings.Split(data, "&")
-			for _, pair := range pairs {
-				if pair == "" {
-					continue
-				}
-				kv := strings.SplitN(pair, "=", 2)
-				if len(kv) == 2 {
-					hv.Fields[kv[0]] = []byte(kv[1])
-				}
-			}
-		}
-		value = hv
-	case store.DataTypeList:
-		lv := &store.ListValue{Elements: make([][]byte, 0)}
-		if len(data) > 0 {
-			items := strings.Split(data, ",")
-			for _, item := range items {
-				if item != "" {
-					lv.Elements = append(lv.Elements, []byte(item))
-				}
-			}
-		}
-		value = lv
-	case store.DataTypeSet:
-		sv := &store.SetValue{Members: make(map[string]struct{})}
-		if len(data) > 0 {
-			items := strings.Split(data, ",")
-			for _, item := range items {
-				if item != "" {
-					sv.Members[item] = struct{}{}
-				}
-			}
-		}
-		value = sv
-	default:
-		return ctx.WriteError(errors.New("ERR unsupported type for RESTORE"))
-	}
-
-	ctx.Store.Set(key, value, store.SetOptions{})
-	// Redis defines RESTORE's ttl as an ABSOLUTE Unix timestamp in
-	// milliseconds (since 3.0), not a relative duration. Apply it through the
-	// absolute-expiry path so a past timestamp yields an already-expired key —
-	// Store.Get hides those — rather than reviving it with a fresh lifetime.
-	if ttl > 0 {
-		ctx.Store.SetExpiresAt(key, time.UnixMilli(ttl).UnixNano())
-	}
-
-	return ctx.WriteOK()
 }
 
 func cmdAUTH(ctx *Context) error {
@@ -1750,6 +1584,12 @@ func cmdSLOWLOG(ctx *Context) error {
 }
 
 func cmdLASTSAVE(ctx *Context) error {
+	if r := ctx.dispatcher(); r != nil {
+		_, last, _ := r.snapshotHooks()
+		if last != nil {
+			return ctx.WriteInteger(last())
+		}
+	}
 	if lastSaveTime.Load() == 0 {
 		lastSaveTime.Store(time.Now().Unix())
 	}
@@ -1813,6 +1653,15 @@ func cmdSHUTDOWN(ctx *Context) error {
 }
 
 func cmdSAVE(ctx *Context) error {
+	if r := ctx.dispatcher(); r != nil {
+		save, _, _ := r.snapshotHooks()
+		if save != nil {
+			if err := save(false); err != nil {
+				return ctx.WriteError(err)
+			}
+			return ctx.WriteOK()
+		}
+	}
 	// SAVE is the explicit durability barrier, so it must actually persist
 	// before reporting success. Stamping the timestamp and replying +OK while
 	// doing no I/O gave clients a guarantee the server had not kept, and
@@ -1825,6 +1674,18 @@ func cmdSAVE(ctx *Context) error {
 }
 
 func cmdBGSAVE(ctx *Context) error {
+	if ctx.ArgCount() > 1 || (ctx.ArgCount() == 1 && !strings.EqualFold(ctx.ArgString(0), "SCHEDULE")) {
+		return ctx.WriteError(ErrSyntaxError)
+	}
+	if r := ctx.dispatcher(); r != nil {
+		save, _, _ := r.snapshotHooks()
+		if save != nil {
+			if err := save(true); err != nil {
+				return ctx.WriteError(err)
+			}
+			return ctx.WriteSimpleString("Background saving started")
+		}
+	}
 	// BGSAVE is the background form of the same barrier. The configured flush
 	// is cheap and idempotent, so it runs inline: reporting "started" without a
 	// guaranteed write would reintroduce the same false guarantee.

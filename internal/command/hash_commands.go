@@ -48,29 +48,39 @@ func getHash(ctx *Context, key string) (*store.HashValue, error) {
 	return hash, nil
 }
 
+func applyHashSetFields(ctx *Context, nx bool) (int, error) {
+	added := 0
+	err := ctx.Store.ApplyHashFields(ctx.ArgString(0), func(hash *store.HashValue) (map[string][]byte, error) {
+		added = 0
+		if nx {
+			if _, exists := hash.Fields[ctx.ArgString(1)]; exists {
+				return nil, nil
+			}
+		}
+		fields := make(map[string][]byte, (ctx.ArgCount()-1)/2)
+		for i := 1; i < ctx.ArgCount(); i += 2 {
+			fields[ctx.ArgString(i)] = ctx.Arg(i + 1)
+		}
+		for field := range fields {
+			if _, exists := hash.Fields[field]; !exists {
+				added++
+			}
+		}
+		return fields, nil
+	})
+	return added, err
+}
+
 func cmdHSET(ctx *Context) error {
 	if ctx.ArgCount() < 2 || ctx.ArgCount()%2 == 0 {
 		return ctx.WriteError(arityError(ctx.Command))
 	}
 
-	key := ctx.ArgString(0)
-	hash, err := lockOrCreateHash(ctx, key)
+	ctx.writeEffectsHandled = true
+	added, err := applyHashSetFields(ctx, false)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
-
-	defer hash.Unlock()
-
-	added := 0
-	for i := 1; i < ctx.ArgCount(); i += 2 {
-		field := ctx.ArgString(i)
-		value := ctx.Arg(i + 1)
-		if _, exists := hash.Fields[field]; !exists {
-			added++
-		}
-		hash.SetField(field, value)
-	}
-
 	return ctx.WriteInteger(int64(added))
 }
 
@@ -107,19 +117,10 @@ func cmdHMSET(ctx *Context) error {
 		return ctx.WriteError(arityError(ctx.Command))
 	}
 
-	key := ctx.ArgString(0)
-	hash, err := lockOrCreateHash(ctx, key)
-	if err != nil {
+	ctx.writeEffectsHandled = true
+	if _, err := applyHashSetFields(ctx, false); err != nil {
 		return ctx.WriteError(err)
 	}
-
-	defer hash.Unlock()
-	for i := 1; i < ctx.ArgCount(); i += 2 {
-		field := ctx.ArgString(i)
-		value := ctx.Arg(i + 1)
-		hash.SetField(field, value)
-	}
-
 	return ctx.WriteOK()
 }
 
@@ -324,35 +325,30 @@ func cmdHINCRBY(ctx *Context) error {
 		return ctx.WriteError(arityError(ctx.Command))
 	}
 
-	key := ctx.ArgString(0)
+	ctx.writeEffectsHandled = true
 	field := ctx.ArgString(1)
 	incr, err := strconv.ParseInt(ctx.ArgString(2), 10, 64)
 	if err != nil {
 		return ctx.WriteError(ErrNotInteger)
 	}
-
-	hash, err := lockOrCreateHash(ctx, key)
-	if err != nil {
-		return ctx.WriteError(err)
-	}
-
-	newVal := incr
-	if current, exists := hash.Fields[field]; exists {
-		newVal, err = computeIntIncr(current, incr)
-		if err != nil {
-			empty := len(hash.Fields) == 0
-			hash.Unlock()
-			if empty {
-				deleteIfEmpty(ctx, key, hash)
-			}
+	var newVal int64
+	err = ctx.Store.ApplyHashFields(ctx.ArgString(0), func(hash *store.HashValue) (map[string][]byte, error) {
+		newVal = incr
+		if current, exists := hash.Fields[field]; exists {
+			var err error
+			newVal, err = computeIntIncr(current, incr)
 			if err == ErrNotInteger {
 				err = errHashNotInteger
 			}
-			return ctx.WriteError(err)
+			if err != nil {
+				return nil, err
+			}
 		}
+		return map[string][]byte{field: []byte(strconv.FormatInt(newVal, 10))}, nil
+	})
+	if err != nil {
+		return ctx.WriteError(err)
 	}
-	hash.SetField(field, []byte(strconv.FormatInt(newVal, 10)))
-	hash.Unlock()
 	return ctx.WriteInteger(newVal)
 }
 
@@ -416,7 +412,7 @@ func cmdHINCRBYFLOAT(ctx *Context) error {
 		return ctx.WriteError(arityError(ctx.Command))
 	}
 
-	key := ctx.ArgString(0)
+	ctx.writeEffectsHandled = true
 	field := ctx.ArgString(1)
 	incr, ok := parseLongDouble(ctx.ArgString(2))
 	if !ok {
@@ -425,39 +421,30 @@ func cmdHINCRBYFLOAT(ctx *Context) error {
 	if incr.IsInf() {
 		return ctx.WriteError(errHashIncrNaNOrInf)
 	}
-
-	hash, err := lockOrCreateHash(ctx, key)
+	var result string
+	err := ctx.Store.ApplyHashFields(ctx.ArgString(0), func(hash *store.HashValue) (map[string][]byte, error) {
+		sum := new(big.Float).SetPrec(longDoublePrec).SetMode(big.ToNearestEven)
+		if current, exists := hash.Fields[field]; exists {
+			cur, ok := parseLongDouble(string(current))
+			if !ok {
+				return nil, errHashNotFloat
+			}
+			if cur.IsInf() {
+				return nil, ErrFloatOverflow
+			}
+			sum.Add(cur, incr)
+		} else {
+			sum.Set(incr)
+		}
+		if sum.Sign() != 0 && sum.MantExp(nil) > longDoubleMaxExp {
+			return nil, ErrFloatOverflow
+		}
+		result = formatLongDoubleHuman(sum)
+		return map[string][]byte{field: []byte(result)}, nil
+	})
 	if err != nil {
 		return ctx.WriteError(err)
 	}
-
-	sum := new(big.Float).SetPrec(longDoublePrec).SetMode(big.ToNearestEven)
-	fail := func(e error) error {
-		empty := len(hash.Fields) == 0
-		hash.Unlock()
-		if empty {
-			deleteIfEmpty(ctx, key, hash)
-		}
-		return ctx.WriteError(e)
-	}
-	if current, exists := hash.Fields[field]; exists {
-		cur, ok := parseLongDouble(string(current))
-		if !ok {
-			return fail(errHashNotFloat)
-		}
-		if cur.IsInf() {
-			return fail(ErrFloatOverflow)
-		}
-		sum.Add(cur, incr)
-	} else {
-		sum.Set(incr)
-	}
-	if sum.Sign() != 0 && sum.MantExp(nil) > longDoubleMaxExp {
-		return fail(ErrFloatOverflow)
-	}
-	result := formatLongDoubleHuman(sum)
-	hash.SetField(field, []byte(result))
-	hash.Unlock()
 	return ctx.WriteBulkString(result)
 }
 
@@ -466,22 +453,15 @@ func cmdHSETNX(ctx *Context) error {
 		return ctx.WriteError(arityError(ctx.Command))
 	}
 
-	key := ctx.ArgString(0)
-	field := ctx.ArgString(1)
-	value := ctx.Arg(2)
-
-	hash, err := lockOrCreateHash(ctx, key)
+	ctx.writeEffectsHandled = true
+	added, err := applyHashSetFields(ctx, true)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
-
-	defer hash.Unlock()
-	if _, exists := hash.Fields[field]; exists {
-		return ctx.WriteInteger(0)
+	if added == 0 {
+		ctx.PropagateAs()
 	}
-
-	hash.SetField(field, value)
-	return ctx.WriteInteger(1)
+	return ctx.WriteInteger(int64(added))
 }
 
 func cmdHSTRLEN(ctx *Context) error {
@@ -780,7 +760,7 @@ func cmdHGETEX(ctx *Context) error {
 			if ts > maxExpireAtSeconds || ts < -maxExpireAtSeconds {
 				return ctx.WriteError(errInvalidExpireTime)
 			}
-			ctx.Store.SetExpiresAt(key, time.Unix(ts, 0).UnixNano())
+			ctx.Store.SetExpiresAt(key, ts*1000)
 		case "PXAT":
 			i++
 			if i >= ctx.ArgCount() {
@@ -793,7 +773,7 @@ func cmdHGETEX(ctx *Context) error {
 			if ms > maxExpireAtMillis || ms < -maxExpireAtMillis {
 				return ctx.WriteError(errInvalidExpireTime)
 			}
-			ctx.Store.SetExpiresAt(key, time.Unix(0, ms*int64(time.Millisecond)).UnixNano())
+			ctx.Store.SetExpiresAt(key, ms)
 		}
 	}
 

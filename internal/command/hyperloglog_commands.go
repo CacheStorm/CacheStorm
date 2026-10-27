@@ -1,7 +1,7 @@
 package command
 
 import (
-	"math"
+	"encoding/binary"
 
 	"github.com/cachestorm/cachestorm/internal/store"
 )
@@ -12,193 +12,203 @@ func RegisterHyperLogLogCommands(router *Router) {
 	router.Register(&CommandDef{Name: "PFMERGE", Handler: cmdPFMERGE})
 }
 
-const hllBits = 14
-const hllRegisters = 1 << hllBits
+type HyperLogLogValue = store.HyperLogLogValue
 
-type HyperLogLogValue struct {
-	Registers [hllRegisters]uint8
+func hllValueBytes(value store.Value) ([]byte, error) {
+	if legacy, ok := value.(*HyperLogLogValue); ok {
+		return legacy.RedisStringBytes()
+	}
+	data, ok := stringValueOf(value)
+	if !ok {
+		return nil, store.ErrWrongType
+	}
+	return data, nil
 }
-
-func (v *HyperLogLogValue) Type() store.DataType { return store.DataTypeString }
-func (v *HyperLogLogValue) SizeOf() int64        { return hllRegisters + 24 }
-func (v *HyperLogLogValue) String() string       { return "HyperLogLog" }
-func (v *HyperLogLogValue) Clone() store.Value {
-	cloned := &HyperLogLogValue{}
-	cloned.Registers = v.Registers
-	return cloned
+func decodeHLLValue(value store.Value) (*store.HLLState, error) {
+	if value == nil {
+		return &store.HLLState{}, nil
+	}
+	data, err := hllValueBytes(value)
+	if err != nil {
+		return nil, err
+	}
+	return store.DecodeHLL(data)
 }
-
-func getOrCreateHLL(ctx *Context, key string) *HyperLogLogValue {
-	entry, exists := ctx.Store.Get(key)
-	if !exists {
-		hll := &HyperLogLogValue{}
-		ctx.Store.Set(key, hll, store.SetOptions{})
-		return hll
-	}
-
-	if hll, ok := entry.Value.(*HyperLogLogValue); ok {
-		return hll
-	}
-	return nil
-}
-
-func getHLL(ctx *Context, key string) (*HyperLogLogValue, error) {
-	entry, exists := ctx.Store.Get(key)
-	if !exists {
-		return nil, nil
-	}
-
-	if hll, ok := entry.Value.(*HyperLogLogValue); ok {
-		return hll, nil
-	}
-	return nil, store.ErrWrongType
-}
-
-func murmurHash(data []byte) uint64 {
-	var h uint64 = 0
-
-	for _, b := range data {
-		h ^= uint64(b)
-		h *= 0xc6a4a7935bd1e995
-		h ^= h >> 47
-	}
-
-	return h
-}
-
-func hllHash(data []byte) uint64 {
-	return murmurHash(data)
-}
-
-func countLeadingZeros(hash uint64) uint8 {
-	if hash == 0 {
-		return 64
-	}
-	var count uint8 = 1
-	for (hash & (1 << 63)) == 0 {
-		hash <<= 1
-		count++
-	}
-	return count
-}
-
-func (hll *HyperLogLogValue) Add(data []byte) bool {
-	hash := hllHash(data)
-	index := hash & (hllRegisters - 1)
-	rho := countLeadingZeros(hash>>hllBits) + 1
-
-	if hll.Registers[index] < rho {
-		hll.Registers[index] = rho
-		return true
-	}
-	return false
-}
-
-func (hll *HyperLogLogValue) Count() int64 {
-	var sum float64 = 0
-	zeroCount := 0
-
-	for i := 0; i < hllRegisters; i++ {
-		sum += 1.0 / float64(uint64(1)<<hll.Registers[i])
-		if hll.Registers[i] == 0 {
-			zeroCount++
-		}
-	}
-
-	alpha := 0.7213 / (1.0 + 1.079/float64(hllRegisters))
-	estimate := alpha * float64(hllRegisters*hllRegisters) / sum
-
-	if estimate <= 2.5*float64(hllRegisters) && zeroCount > 0 {
-		estimate = float64(hllRegisters) * math.Log(float64(hllRegisters)/float64(zeroCount))
-	}
-
-	return int64(estimate)
-}
-
-func (hll *HyperLogLogValue) Merge(other *HyperLogLogValue) {
-	for i := 0; i < hllRegisters; i++ {
-		if other.Registers[i] > hll.Registers[i] {
-			hll.Registers[i] = other.Registers[i]
-		}
-	}
+func hllStringPlan(data []byte) store.ValuePlan {
+	return store.ValuePlan{Size: int64(len(data)) + 24, Apply: func() store.Value { return &store.StringValue{Data: data} }}
 }
 
 func cmdPFADD(ctx *Context) error {
+	ctx.writeEffectsHandled = true
 	if ctx.ArgCount() < 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
-
-	key := ctx.ArgString(0)
-	hll := getOrCreateHLL(ctx, key)
-	if hll == nil {
-		return ctx.WriteError(store.ErrWrongType)
-	}
-
-	updated := 0
-	for i := 1; i < ctx.ArgCount(); i++ {
-		if hll.Add(ctx.Arg(i)) {
-			updated = 1
+	updated := false
+	err := ctx.Store.ApplyValuePlan(ctx.ArgString(0), func(value store.Value) (store.ValuePlan, error) {
+		if value != nil && ctx.ArgCount() == 1 {
+			data, err := hllValueBytes(value)
+			if err != nil {
+				return store.ValuePlan{}, err
+			}
+			if err := store.ValidateHLL(data); err != nil {
+				return store.ValuePlan{}, err
+			}
+			updated = false
+			return store.ValuePlan{}, nil
 		}
+		if value != nil {
+			current, err := hllValueBytes(value)
+			if err != nil {
+				return store.ValuePlan{}, err
+			}
+			if err := store.ValidateHLL(current); err != nil {
+				return store.ValuePlan{}, err
+			}
+			if current[4] == 0 {
+				next, changed, err := store.AddDenseHLL(current, ctx.Args[1:])
+				if err != nil {
+					return store.ValuePlan{}, err
+				}
+				updated = changed
+				if !updated {
+					return store.ValuePlan{}, nil
+				}
+				return hllStringPlan(next), nil
+			}
+		}
+		state, err := decodeHLLValue(value)
+		if err != nil {
+			return store.ValuePlan{}, err
+		}
+		updated = value == nil
+		for _, element := range ctx.Args[1:] {
+			if state.Add(element) {
+				updated = true
+			}
+		}
+		if !updated {
+			return store.ValuePlan{}, nil
+		}
+		data, err := state.Encode(true)
+		if err != nil {
+			return store.ValuePlan{}, err
+		}
+		return hllStringPlan(data), nil
+	})
+	if err != nil {
+		return ctx.WriteError(err)
 	}
+	if !updated {
+		ctx.PropagateAs()
+		return ctx.WriteInteger(0)
+	}
+	return ctx.WriteInteger(1)
+}
 
-	return ctx.WriteInteger(int64(updated))
+func hllCacheWriteAllowed(ctx *Context) bool {
+	r := ctx.dispatcher()
+	if r == nil {
+		return true
+	}
+	r.mu.RLock()
+	check := r.writeCheck
+	r.mu.RUnlock()
+	return check == nil || check("PFCOUNT", ctx.Args) == nil
 }
 
 func cmdPFCOUNT(ctx *Context) error {
+	ctx.writeEffectsHandled = true
 	if ctx.ArgCount() < 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
-
-	if ctx.ArgCount() == 1 {
-		key := ctx.ArgString(0)
-		hll, err := getHLL(ctx, key)
-		if err != nil {
-			return ctx.WriteError(err)
+	ctx.PropagateAs()
+	if ctx.ArgCount() > 1 {
+		merged := &store.HLLState{}
+		for _, key := range ctx.Args {
+			entry, ok := ctx.Store.Get(string(key))
+			if !ok {
+				continue
+			}
+			state, err := decodeHLLValue(entry.Value)
+			if err != nil {
+				return ctx.WriteError(err)
+			}
+			merged.Merge(state)
 		}
-		if hll == nil {
-			return ctx.WriteInteger(0)
-		}
-		return ctx.WriteInteger(hll.Count())
+		return ctx.WriteInteger(merged.Count())
 	}
-
-	merged := &HyperLogLogValue{}
-	for i := 0; i < ctx.ArgCount(); i++ {
-		hll, err := getHLL(ctx, ctx.ArgString(i))
+	var count int64
+	changed := false
+	err := ctx.Store.ApplyValuePlan(ctx.ArgString(0), func(value store.Value) (store.ValuePlan, error) {
+		changed = false
+		if value == nil {
+			count = 0
+			return store.ValuePlan{}, nil
+		}
+		data, err := hllValueBytes(value)
 		if err != nil {
-			return ctx.WriteError(err)
+			return store.ValuePlan{}, err
 		}
-		if hll != nil {
-			merged.Merge(hll)
+		if err := store.ValidateHLL(data); err != nil {
+			return store.ValuePlan{}, err
 		}
+		if data[15]&128 == 0 {
+			count = int64(binary.LittleEndian.Uint64(data[8:16]))
+			return store.ValuePlan{}, nil
+		}
+		state, err := store.DecodeHLL(data)
+		if err != nil {
+			return store.ValuePlan{}, err
+		}
+		count = state.Count()
+		if !hllCacheWriteAllowed(ctx) {
+			return store.ValuePlan{}, nil
+		}
+		next := append([]byte(nil), data...)
+		binary.LittleEndian.PutUint64(next[8:16], uint64(count))
+		changed = true
+		return hllStringPlan(next), nil
+	})
+	if err != nil {
+		return ctx.WriteError(err)
 	}
-
-	return ctx.WriteInteger(merged.Count())
+	if changed {
+		ctx.PropagateAs(ExecutedCommand{Name: "PFCOUNT", Args: ctx.Args, DB: ctx.DB})
+	}
+	return ctx.WriteInteger(count)
 }
 
 func cmdPFMERGE(ctx *Context) error {
+	ctx.writeEffectsHandled = true
 	if ctx.ArgCount() < 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
-
-	destKey := ctx.ArgString(0)
-	sources := make([]*HyperLogLogValue, 0, ctx.ArgCount()-1)
-	for i := 1; i < ctx.ArgCount(); i++ {
-		src, err := getHLL(ctx, ctx.ArgString(i))
+	sources := &store.HLLState{}
+	for _, key := range ctx.Args[1:] {
+		entry, ok := ctx.Store.Get(string(key))
+		if !ok {
+			continue
+		}
+		state, err := decodeHLLValue(entry.Value)
 		if err != nil {
 			return ctx.WriteError(err)
 		}
-		if src != nil {
-			sources = append(sources, src)
+		sources.Merge(state)
+	}
+	err := ctx.Store.ApplyValuePlan(ctx.ArgString(0), func(value store.Value) (store.ValuePlan, error) {
+		state, err := decodeHLLValue(value)
+		if err != nil {
+			return store.ValuePlan{}, err
 		}
+		state.Merge(sources)
+		data, err := state.Encode(true)
+		if err != nil {
+			return store.ValuePlan{}, err
+		}
+		return hllStringPlan(data), nil
+	})
+	if err != nil {
+		return ctx.WriteError(err)
 	}
-	dest := getOrCreateHLL(ctx, destKey)
-	if dest == nil {
-		return ctx.WriteError(store.ErrWrongType)
-	}
-
-	for _, src := range sources {
-		dest.Merge(src)
-	}
-
 	return ctx.WriteOK()
 }

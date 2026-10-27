@@ -190,7 +190,7 @@ func (r *scriptRun) call(L *lua.LState) (lua.LValue, bool) {
 	for i, a := range argv[1:] {
 		args[i] = []byte(a)
 	}
-	if r.ctx.ReplicaReadOnly && (commandHasFlag(name, "write") || r.router.Persisted(name, args)) {
+	if r.ctx.ReplicaReadOnly && name != "PFCOUNT" && (commandHasFlag(name, "write") || r.router.Persisted(name, args)) {
 		return luaErrTable(L, "READONLY You can't write against a read only replica."), true
 	}
 	reply, recorded := runQueuedCommand(r.ctx, queuedCommand{cmd: name, args: args})

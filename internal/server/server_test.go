@@ -25,7 +25,7 @@ func TestNewServer(t *testing.T) {
 		},
 	}
 
-	s, err := New(cfg)
+	s, err := newOwnedTestServer(t, cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestNewServerWithHTTP(t *testing.T) {
 		},
 	}
 
-	s, err := New(cfg)
+	s, err := newOwnedTestServer(t, cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestServerStore(t *testing.T) {
 		HTTP:   config.HTTPConfig{Enabled: false},
 	}
 
-	s, _ := New(cfg)
+	s, _ := newOwnedTestServer(t, cfg)
 	if s.Store() == nil {
 		t.Error("expected store")
 	}
@@ -80,7 +80,7 @@ func TestServerStartStop(t *testing.T) {
 		HTTP:   config.HTTPConfig{Enabled: false},
 	}
 
-	s, err := New(cfg)
+	s, err := newOwnedTestServer(t, cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -830,7 +830,7 @@ func TestServerStopWithoutStart(t *testing.T) {
 		HTTP:   config.HTTPConfig{Enabled: false},
 	}
 
-	s, _ := New(cfg)
+	s, _ := newOwnedTestServer(t, cfg)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
@@ -850,7 +850,7 @@ func TestServerWithHTTPEnabled(t *testing.T) {
 		},
 	}
 
-	s, err := New(cfg)
+	s, err := newOwnedTestServer(t, cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1158,7 +1158,7 @@ func TestServerAcceptLoop(t *testing.T) {
 		HTTP:   config.HTTPConfig{Enabled: false},
 	}
 
-	s, err := New(cfg)
+	s, err := newOwnedTestServer(t, cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

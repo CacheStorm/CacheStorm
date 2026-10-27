@@ -65,8 +65,6 @@ func lockExisting[T lockableCollection](ctx *Context, key string) (T, error) {
 }
 
 func newList() *store.ListValue { return &store.ListValue{Elements: make([][]byte, 0)} }
-func newHash() *store.HashValue { return &store.HashValue{Fields: make(map[string][]byte)} }
-func newSet() *store.SetValue   { return &store.SetValue{Members: make(map[string]struct{})} }
 func newSortedSet() *store.SortedSetValue {
 	return &store.SortedSetValue{Members: make(map[string]float64)}
 }
@@ -75,18 +73,6 @@ func newSortedSet() *store.SortedSetValue {
 func lockOrCreateList(ctx *Context, key string) (*store.ListValue, error) {
 	l, _, err := lockOrCreate(ctx, key, newList)
 	return l, err
-}
-
-// lockOrCreateHash returns the hash at key write-locked, creating it empty.
-func lockOrCreateHash(ctx *Context, key string) (*store.HashValue, error) {
-	h, _, err := lockOrCreate(ctx, key, newHash)
-	return h, err
-}
-
-// lockOrCreateSet returns the set at key write-locked, creating it empty.
-func lockOrCreateSet(ctx *Context, key string) (*store.SetValue, error) {
-	s, _, err := lockOrCreate(ctx, key, newSet)
-	return s, err
 }
 
 // lockOrCreateSortedSet returns the sorted set at key write-locked, creating

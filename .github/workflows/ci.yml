@@ -208,3 +208,20 @@ jobs:
           cache: true
       - name: Master and replica
         run: scripts/replication-smoke.sh
+
+  snapshot-smoke:
+    name: Persistence recovery and directory ownership
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: Save, kill, restart and verify
+        run: python3 scripts/snapshot-smoke.py
+      - name: AOF replay failure and transaction recovery
+        run: python3 -B scripts/aof-recovery-smoke.py
+      - name: Exclusive data directory and process crash cleanup
+        run: python3 -B scripts/data-directory-smoke.py

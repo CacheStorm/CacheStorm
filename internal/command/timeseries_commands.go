@@ -28,7 +28,9 @@ func RegisterTSCommands(router *Router) {
 	router.Register(&CommandDef{Name: "TS.DECRBY", Handler: cmdTSDECRBY})
 }
 
-func cmdTSCREATE(ctx *Context) error {
+func cmdTSCREATE(ctx *Context) error { return createTimeSeriesWith(ctx, tsManager) }
+
+func createTimeSeriesWith(ctx *Context, manager *store.TimeSeriesManager) error {
 	if ctx.ArgCount() < 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
@@ -67,7 +69,7 @@ func cmdTSCREATE(ctx *Context) error {
 		}
 	}
 
-	if err := tsManager.Create(key, retention, labels); err != nil {
+	if err := manager.Create(key, retention, labels); err != nil {
 		return ctx.WriteError(err)
 	}
 	return ctx.WriteOK()
@@ -95,7 +97,9 @@ func cmdTSDEL(ctx *Context) error {
 	return ctx.WriteInteger(int64(deleted))
 }
 
-func cmdTSADD(ctx *Context) error {
+func cmdTSADD(ctx *Context) error { return addTimeSeriesWith(ctx, tsManager) }
+
+func addTimeSeriesWith(ctx *Context, manager *store.TimeSeriesManager) error {
 	if ctx.ArgCount() < 3 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
@@ -151,12 +155,12 @@ func cmdTSADD(ctx *Context) error {
 		}
 	}
 
-	ts, ok := tsManager.Get(key)
+	ts, ok := manager.Get(key)
 	if !ok {
-		if err := tsManager.Create(key, retention, labels); err != nil {
+		if err := manager.Create(key, retention, labels); err != nil {
 			return ctx.WriteError(err)
 		}
-		ts, _ = tsManager.Get(key)
+		ts, _ = manager.Get(key)
 	}
 
 	policy := store.DuplicateReject

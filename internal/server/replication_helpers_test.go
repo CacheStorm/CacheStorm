@@ -39,7 +39,7 @@ func startReplServer(t *testing.T, mutate func(*config.Config)) *Server {
 
 func startReplServerCfg(t *testing.T, cfg *config.Config) *Server {
 	t.Helper()
-	s, err := New(cfg)
+	s, err := newOwnedTestServer(t, cfg)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

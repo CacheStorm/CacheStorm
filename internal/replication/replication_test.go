@@ -17,17 +17,30 @@ import (
 )
 
 type fakeHost struct {
-	mu        sync.Mutex
-	fullSyncs int
+	dbs           *store.Databases
+	router        *command.Router
+	mu            sync.Mutex
+	fullSyncs     int
+	functionError error
+	persistError  error
 }
 
 func (h *fakeHost) LockWrites()   { h.mu.Lock() }
 func (h *fakeHost) UnlockWrites() { h.mu.Unlock() }
-func (h *fakeHost) AfterFullSync() error {
+func (h *fakeHost) CommitFullSync(dbs *store.Databases, replay *command.Router) error {
 	h.fullSyncs++
+	if h.persistError != nil {
+		return h.persistError
+	}
+	if err := h.dbs.ReplaceFrom(dbs); err != nil {
+		return err
+	}
+	h.router.SetFunctionRegistry(replay.FunctionRegistry().CloneForStore(h.dbs.DB(0)))
 	return nil
 }
-func (h *fakeHost) ListeningPort() int { return 1234 }
+
+func (h *fakeHost) FunctionPayload() ([]byte, error) { return nil, h.functionError }
+func (h *fakeHost) ListeningPort() int               { return 1234 }
 
 func newTestManager(t *testing.T, cfg Config) (*Manager, *store.Databases) {
 	t.Helper()
@@ -39,7 +52,7 @@ func newTestManager(t *testing.T, cfg Config) (*Manager, *store.Databases) {
 	command.RegisterListCommands(r)
 	command.RegisterTransactionCommands(r)
 	command.RegisterNamespaceCommands(r)
-	m := New(cfg, &fakeHost{}, r, dbs)
+	m := New(cfg, &fakeHost{dbs: dbs, router: r}, r, dbs)
 	m.RegisterCommands(r)
 	t.Cleanup(m.Stop)
 	return m, dbs

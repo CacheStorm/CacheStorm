@@ -21,9 +21,7 @@ import (
 // maxExpireAtSeconds = 9223372036 (292 years), so a perfectly valid, in-range
 // TTL still destroyed the key one layer down.
 
-// TestSetTTLFarFutureSaturatesInsteadOfWrapping is the primary case: a TTL far
-// beyond the int64-nanosecond range must leave the key alive, not delete it.
-func TestSetTTLFarFutureSaturatesInsteadOfWrapping(t *testing.T) {
+func TestSetTTLFarFuturePreservesDuration(t *testing.T) {
 	s := NewStore()
 	if err := s.Set("k", &StringValue{Data: []byte("v")}, SetOptions{}); err != nil {
 		t.Fatalf("Set: %v", err)
@@ -38,41 +36,26 @@ func TestSetTTLFarFutureSaturatesInsteadOfWrapping(t *testing.T) {
 		t.Fatalf("the key was DELETED by a far-future TTL; time.Now().Add(ttl)." +
 			"UnixNano() wrapped negative and IsExpired() read it as already expired")
 	}
-	if got := s.TTL("k"); got <= 0 {
-		t.Fatalf("TTL after a far-future SetTTL = %v, want a positive remaining TTL", got)
+	if got, want := s.TTL("k"), 292*365*24*time.Hour; got < want-time.Second || got > want {
+		t.Fatalf("TTL after far-future SetTTL = %v, want approximately %v", got, want)
 	}
 }
 
-// TestSetTTLNSSaturationUnit pins nowNSPlus directly at both int64 bounds, so
-// the saturation logic is checked without waiting on a 292-year TTL.
-func TestSetTTLNSSaturationUnit(t *testing.T) {
-	// Saturated high: now + MaxInt64 would overflow, so the result must be
-	// MaxInt64 rather than a wrapped NEGATIVE value.
-	if got := nowNSPlus(math.MaxInt64); got != math.MaxInt64 {
-		t.Fatalf("nowNSPlus(MaxInt64) = %d, want MaxInt64 (%d)", got, int64(math.MaxInt64))
+func TestExpiryDurationSaturation(t *testing.T) {
+	for _, test := range []struct {
+		ms   int64
+		want time.Duration
+	}{
+		{math.MaxInt64, time.Duration(math.MaxInt64)},
+		{math.MinInt64, time.Duration(math.MinInt64)},
+		{0, 0},
+		{90000, 90 * time.Second},
+		{-90000, -90 * time.Second},
+	} {
+		if got := expiryDuration(test.ms); got != test.want {
+			t.Fatalf("expiryDuration(%d) = %v, want %v", test.ms, got, test.want)
+		}
 	}
-	// A delta that does NOT overflow must be exact, not saturated.
-	now := time.Now().UnixNano()
-	if got := nowNSPlus(0); got < now || got-now > int64(5*time.Second) {
-		t.Fatalf("nowNSPlus(0) = %d, want ~now (%d) within a few seconds", got, now)
-	}
-	if got := nowNSPlus(int64(90 * time.Second)); got < now || got-now > int64(95*time.Second) {
-		t.Fatalf("nowNSPlus(90s) = %d, want now+~90s", got)
-	}
-	// 1<<62 does NOT overflow (now + 4.6e18 is still under MaxInt64), so it must
-	// be passed through rather than saturated -- a guard that saturated too
-	// eagerly would report the wrong remaining TTL for large-but-legal values.
-	// nowNSPlus samples its OWN time.Now(), so allow a small sampling window
-	// rather than demanding exact equality against the `now` captured above.
-	want := now + (1 << 62)
-	if got := nowNSPlus(1 << 62); got < want || got-want > int64(5*time.Second) {
-		t.Fatalf("nowNSPlus(1<<62) = %d, want ~now+2^62 (%d): a non-overflowing delta "+
-			"must not be saturated", got, want)
-	}
-
-	// The negative branch is intentionally untested: time.Now().UnixNano() is
-	// positive (~1.8e18), so no int64 delta can underflow now+d past MinInt64.
-	// The branch is defensive, not reachable from SetTTL's guarded inputs.
 }
 
 // TestSetTTLControlsUncontended is the control: ordinary TTLs still apply and

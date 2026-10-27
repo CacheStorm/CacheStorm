@@ -54,6 +54,7 @@ func NewKeyNotifier() *KeyNotifier {
 
 // WaitOptions tunes WaitForKeysOpts.
 type WaitOptions struct {
+	Token *WakeToken
 	// Cancel, when non-nil, ends the wait early (the client went away) and
 	// reports a timeout.
 	Cancel <-chan struct{}
@@ -73,6 +74,11 @@ type WaitOptions struct {
 	// woken but found the data already taken waits again with Front, so it
 	// keeps the place it had instead of going to the back of the queue.
 	Front bool
+}
+
+type WakeToken struct {
+	key string
+	ch  chan struct{}
 }
 
 // WaitForKey blocks until the key receives a write notification or the timeout expires.
@@ -134,6 +140,24 @@ func (kn *KeyNotifier) WaitForKeysOpts(keys []string, timeout time.Duration, opt
 	var whichMu sync.Mutex
 
 	kn.mu.Lock()
+	if opts.Token != nil {
+		previous := *opts.Token
+		if tok, ok := kn.inflight[previous.key]; ok && tok.ch == previous.ch {
+			delete(kn.inflight, previous.key)
+		}
+		*opts.Token = WakeToken{}
+	}
+	if kn.wakeHooks == nil {
+		kn.wakeHooks = make(map[chan struct{}]func(string))
+	}
+	kn.wakeHooks[ch] = func(key string) {
+		whichMu.Lock()
+		if which == "" {
+			which = key
+		}
+		whichMu.Unlock()
+	}
+
 	for _, key := range keys {
 		if opts.Front {
 			kn.waiters[key] = append([]chan struct{}{ch}, kn.waiters[key]...)
@@ -152,13 +176,14 @@ func (kn *KeyNotifier) WaitForKeysOpts(keys []string, timeout time.Duration, opt
 		defer whichMu.Unlock()
 		return which, which != ""
 	}
-	kn.recordWake(ch, func(key string) {
-		whichMu.Lock()
-		if which == "" {
-			which = key
+	owned := func(key string) {
+		if opts.Notified != nil {
+			*opts.Notified = true
 		}
-		whichMu.Unlock()
-	})
+		if opts.Token != nil {
+			*opts.Token = WakeToken{key: key, ch: ch}
+		}
+	}
 
 	finish := func(notified bool) {
 		kn.mu.Lock()
@@ -190,6 +215,10 @@ func (kn *KeyNotifier) WaitForKeysOpts(keys []string, timeout time.Duration, opt
 			}
 			if opts.Ready(key) {
 				finish(true)
+				if notifiedKey, ok := woken(); ok {
+					owned(notifiedKey)
+					return notifiedKey, true
+				}
 				return key, true
 			}
 		}
@@ -199,10 +228,11 @@ func (kn *KeyNotifier) WaitForKeysOpts(keys []string, timeout time.Duration, opt
 		select {
 		case <-ch:
 			finish(true)
-			if opts.Notified != nil {
-				*opts.Notified = true
+			key, ok := woken()
+			if ok {
+				owned(key)
 			}
-			return woken()
+			return key, ok
 		default:
 			finish(false)
 			return "", false
@@ -215,10 +245,11 @@ func (kn *KeyNotifier) WaitForKeysOpts(keys []string, timeout time.Duration, opt
 	select {
 	case <-ch:
 		finish(true)
-		if opts.Notified != nil {
-			*opts.Notified = true
+		key, ok := woken()
+		if ok {
+			owned(key)
 		}
-		return woken()
+		return key, ok
 	case <-timer.C:
 	case <-opts.Cancel:
 	}
@@ -231,6 +262,9 @@ func (kn *KeyNotifier) WaitForKeysOpts(keys []string, timeout time.Duration, opt
 func (kn *KeyNotifier) consumerAhead(key string, ch chan struct{}) bool {
 	kn.mu.Lock()
 	defer kn.mu.Unlock()
+	if tok, ok := kn.inflight[key]; ok && tok.ch != ch && time.Since(tok.since) < inflightGrace {
+		return true
+	}
 	for _, w := range kn.waiters[key] {
 		if w == ch {
 			return false
@@ -240,16 +274,6 @@ func (kn *KeyNotifier) consumerAhead(key string, ch chan struct{}) bool {
 		}
 	}
 	return false
-}
-
-// recordWake registers fn to learn which key woke the waiter behind ch.
-func (kn *KeyNotifier) recordWake(ch chan struct{}, fn func(key string)) {
-	kn.mu.Lock()
-	if kn.wakeHooks == nil {
-		kn.wakeHooks = make(map[chan struct{}]func(string))
-	}
-	kn.wakeHooks[ch] = fn
-	kn.mu.Unlock()
 }
 
 // NotifyKey wakes the waiters on a key after a write (LPUSH, ZADD, XADD,
@@ -315,6 +339,15 @@ func (kn *KeyNotifier) Pass(key string, ready func(string) bool, owner bool) {
 		kn.mu.Lock()
 		delete(kn.inflight, key)
 		kn.mu.Unlock()
+	}
+	if ready == nil || ready(key) {
+		kn.NotifyKey(key)
+	}
+}
+
+func (kn *KeyNotifier) PassToken(key string, ready func(string) bool, token WakeToken) {
+	if token.key == key && token.ch != nil {
+		kn.release(key, token.ch)
 	}
 	if ready == nil || ready(key) {
 		kn.NotifyKey(key)

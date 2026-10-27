@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"math/bits"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -158,6 +159,8 @@ func (d *Databases) StopExpiry() {
 // tracker and hooks.
 func (s *Store) newSibling() *Store {
 	n := NewStore()
+	n.passiveExpiry.Store(s.passiveExpiry.Load())
+	n.loading.Store(s.loading.Load())
 	n.pubsub = s.pubsub
 	if s.memTracker != nil {
 		n.memTracker = s.memTracker
@@ -178,8 +181,8 @@ func (s *Store) newSibling() *Store {
 // ExpiryStats returns how many live keys carry an expiry and their average
 // remaining time to live in milliseconds, for the INFO keyspace section.
 func (s *Store) ExpiryStats() (expires int64, avgTTLms int64) {
-	now := time.Now().UnixNano()
-	var total int64
+	now := time.Now().UnixMilli()
+	var sumHi, sumLo uint64
 	for _, sh := range &s.shards {
 		sh.mu.RLock()
 		for _, e := range sh.data {
@@ -188,12 +191,15 @@ func (s *Store) ExpiryStats() (expires int64, avgTTLms int64) {
 				continue
 			}
 			expires++
-			total += (at - now) / int64(time.Millisecond)
+			var carry uint64
+			sumLo, carry = bits.Add64(sumLo, uint64(at-now), 0)
+			sumHi += carry
 		}
 		sh.mu.RUnlock()
 	}
 	if expires > 0 {
-		avgTTLms = total / expires
+		average, _ := bits.Div64(sumHi, sumLo, uint64(expires))
+		avgTTLms = int64(average)
 	}
 	return expires, avgTTLms
 }

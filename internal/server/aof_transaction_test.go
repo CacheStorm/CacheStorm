@@ -8,6 +8,7 @@ import (
 
 	"github.com/cachestorm/cachestorm/internal/command"
 	"github.com/cachestorm/cachestorm/internal/config"
+	"github.com/cachestorm/cachestorm/internal/persistence"
 	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
 )
@@ -26,14 +27,14 @@ func aofTxConfig(t *testing.T) *config.Config {
 
 func aofTxStart(t *testing.T, cfg *config.Config) (*Server, func(name string, args ...string) string) {
 	t.Helper()
-	s, err := New(cfg)
+	s, err := newOwnedTestServer(t, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := s.aof.Start(); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(s.aof.Stop)
+	t.Cleanup(func() { stopReplServer(s) })
 	tx := command.NewTransaction()
 	run := func(name string, args ...string) string {
 		t.Helper()
@@ -65,9 +66,9 @@ func TestAOFRestoresTransactionWrites(t *testing.T) {
 	if got := run("EXEC"); got != "*4\r\n+OK\r\n:1\r\n:2\r\n$1\r\n2\r\n" {
 		t.Fatalf("EXEC reply: %q", got)
 	}
-	s.aof.Stop()
+	stopReplServer(s)
 
-	restored, err := New(cfg)
+	restored, err := newOwnedTestServer(t, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +92,7 @@ func TestAOFDiscardsTransactionWithoutExec(t *testing.T) {
 	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	s, err := New(cfg)
+	s, err := newOwnedTestServer(t, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,14 +121,16 @@ func TestAOFTruncatesTornTail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Size() != int64(len(complete)) {
-		t.Fatalf("AOF size %d after load, want %d (torn tail cut)", info.Size(), len(complete))
+	reader := persistence.NewAOFReader()
+	_, valid, err := reader.LoadValid(path)
+	if err != nil || valid != info.Size() || reader.Version != persistence.AOFVersion {
+		t.Fatalf("recovered AOF is not a complete upgraded snapshot: valid %d size %d version %d error %v", valid, info.Size(), reader.Version, err)
 	}
 
 	run("SET", "after", "1")
-	s.aof.Stop()
+	stopReplServer(s)
 
-	restored, err := New(cfg)
+	restored, err := newOwnedTestServer(t, cfg)
 	if err != nil {
 		t.Fatalf("reload after truncation: %v", err)
 	}
@@ -145,7 +148,7 @@ func TestAOFRefusesCorruptFile(t *testing.T) {
 	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := New(cfg); err == nil {
+	if _, err := newOwnedTestServer(t, cfg); err == nil {
 		t.Fatal("a corrupt AOF must stop startup instead of being silently ignored")
 	}
 }

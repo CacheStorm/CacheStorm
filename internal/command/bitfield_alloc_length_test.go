@@ -40,7 +40,7 @@ func rawLen(t *testing.T, s *store.Store, key string) int {
 // TestProofBitfieldSetAllocatesExactLength is the round proof.
 //
 // Contract (Redis BITFIELD): the string is grown to hold exactly the bits the
-// field needs. SET u8 at offset 0 needs 1 byte, SET u64 at offset 0 needs 8.
+// field needs. SET u8 at offset 0 needs 1 byte, SET i64 at offset 0 needs 8.
 // The stored length is observable through BITOP, which replies with the length
 // of the destination string it wrote.
 //
@@ -95,13 +95,13 @@ func TestProofBitfieldSetAllocatesExactLength(t *testing.T) {
 	}
 
 	// ---- SECONDARY: a 64-bit field needs 8 bytes at offset 0, not 9.
-	if got := execBf(s, r, "BITFIELD", "bf64", "SET", "u64", "0", "1"); got != "*1\r\n:0\r\n" {
-		t.Fatalf("SECONDARY setup: BITFIELD SET u64 = %q", got)
+	if got := execBf(s, r, "BITFIELD", "bf64", "SET", "i64", "0", "1"); got != "*1\r\n:0\r\n" {
+		t.Fatalf("SECONDARY setup: BITFIELD SET i64 = %q", got)
 	}
 	if n := rawLen(t, s, "bf64"); n != 8 {
-		t.Fatalf("FAIL: BITFIELD SET u64 0 1 stored %d bytes, want exactly 8", n)
+		t.Fatalf("FAIL: BITFIELD SET i64 0 1 stored %d bytes, want exactly 8", n)
 	}
-	t.Log("PASS: u64 at offset 0 occupies exactly eight bytes")
+	t.Log("PASS: i64 at offset 0 occupies exactly eight bytes")
 
 	// ---- THIRDARY: an unaligned field genuinely needs 2 bytes — the exact
 	// case the spurious "+1" was presumably meant to cover. It must stay 2,

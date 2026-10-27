@@ -28,7 +28,7 @@ func TestEntryIsExpired(t *testing.T) {
 		t.Error("new entry should not be expired")
 	}
 
-	entry.ExpiresAt.Store(time.Now().Add(-1 * time.Second).UnixNano())
+	entry.ExpiresAt.Store(time.Now().Add(-1 * time.Second).UnixMilli())
 	if !entry.IsExpired() {
 		t.Error("entry should be expired")
 	}

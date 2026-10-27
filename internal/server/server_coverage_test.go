@@ -1200,7 +1200,7 @@ func TestNewServerWithRequirePass(t *testing.T) {
 		HTTP: config.HTTPConfig{Enabled: false},
 	}
 
-	s, err := New(cfg)
+	s, err := newOwnedTestServer(t, cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1228,7 +1228,7 @@ func TestNewServerWithMemoryConfig(t *testing.T) {
 		},
 	}
 
-	s, err := New(cfg)
+	s, err := newOwnedTestServer(t, cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1251,7 +1251,7 @@ func TestNewServerWithMemoryConfigZeroSampleSize(t *testing.T) {
 		},
 	}
 
-	s, err := New(cfg)
+	s, err := newOwnedTestServer(t, cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1274,7 +1274,7 @@ func TestServerStartWithBadTLS(t *testing.T) {
 		HTTP: config.HTTPConfig{Enabled: false},
 	}
 
-	s, err := New(cfg)
+	s, err := newOwnedTestServer(t, cfg)
 	if err != nil {
 		t.Fatalf("unexpected error creating server: %v", err)
 	}
@@ -1300,7 +1300,7 @@ func TestServerMaxConnections(t *testing.T) {
 		HTTP: config.HTTPConfig{Enabled: false},
 	}
 
-	s, err := New(cfg)
+	s, err := newOwnedTestServer(t, cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1355,7 +1355,7 @@ func TestServerWithConfiguredTimeouts(t *testing.T) {
 		HTTP: config.HTTPConfig{Enabled: false},
 	}
 
-	s, err := New(cfg)
+	s, err := newOwnedTestServer(t, cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1398,7 +1398,7 @@ func TestServerStopDrainTimeout(t *testing.T) {
 		HTTP: config.HTTPConfig{Enabled: false},
 	}
 
-	s, err := New(cfg)
+	s, err := newOwnedTestServer(t, cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1441,7 +1441,7 @@ func TestServerStopWithHTTP(t *testing.T) {
 		},
 	}
 
-	s, err := New(cfg)
+	s, err := newOwnedTestServer(t, cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1472,7 +1472,7 @@ func TestServerReplayAOF(t *testing.T) {
 		HTTP: config.HTTPConfig{Enabled: false},
 	}
 
-	s, err := New(cfg)
+	s, err := newOwnedTestServer(t, cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1482,7 +1482,9 @@ func TestServerReplayAOF(t *testing.T) {
 		{Name: "SET", Args: [][]byte{[]byte("aof_key1"), []byte("aof_val1")}},
 		{Name: "SET", Args: [][]byte{[]byte("aof_key2"), []byte("aof_val2")}},
 	}
-	s.replayAOF(commands)
+	if db, err := s.replayAOF(commands); err != nil || db != 0 {
+		t.Fatalf("replay result: db %d error %v", db, err)
+	}
 
 	// Verify keys were set
 	entry, exists := s.store.Get("aof_key1")
@@ -1509,7 +1511,7 @@ func TestServerReplayAOFWithErrors(t *testing.T) {
 		HTTP: config.HTTPConfig{Enabled: false},
 	}
 
-	s, err := New(cfg)
+	s, err := newOwnedTestServer(t, cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1521,7 +1523,12 @@ func TestServerReplayAOFWithErrors(t *testing.T) {
 		{Name: "ANOTHERBAD", Args: [][]byte{}},
 		{Name: "SET", Args: [][]byte{[]byte("valid_key2"), []byte("valid_val2")}},
 	}
-	s.replayAOF(commands)
+	if _, err := s.replayAOF(commands); err == nil {
+		t.Fatal("replay ignored invalid command")
+	}
+	if s.store.Exists("valid_key2") {
+		t.Fatal("replay continued after invalid command")
+	}
 
 	// Valid keys should still be set
 	_, exists := s.store.Get("valid_key")
@@ -1539,7 +1546,7 @@ func TestServerReplayAOFAllFailed(t *testing.T) {
 		HTTP: config.HTTPConfig{Enabled: false},
 	}
 
-	s, err := New(cfg)
+	s, err := newOwnedTestServer(t, cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1558,8 +1565,9 @@ func TestServerReplayAOFAllFailed(t *testing.T) {
 		{Name: "BADCMD10", Args: [][]byte{}},
 		{Name: "BADCMD11", Args: [][]byte{}},
 	}
-	s.replayAOF(commands)
-	// Just verify no panic - the function logs warnings for first 10 failures
+	if _, err := s.replayAOF(commands); err == nil {
+		t.Fatal("replay ignored invalid commands")
+	}
 }
 
 // ===========================================================================
@@ -1582,7 +1590,7 @@ func TestNewServerWithPersistence(t *testing.T) {
 		},
 	}
 
-	s, err := New(cfg)
+	s, err := newOwnedTestServer(t, cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1609,7 +1617,7 @@ func TestNewServerWithPersistenceEmptyDataDir(t *testing.T) {
 		},
 	}
 
-	s, err := New(cfg)
+	s, err := newOwnedTestServer(t, cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1638,7 +1646,7 @@ func TestServerStartStopWithAOF(t *testing.T) {
 		},
 	}
 
-	s, err := New(cfg)
+	s, err := newOwnedTestServer(t, cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2206,7 +2214,7 @@ func TestNewServerWithInvalidPersistenceDir(t *testing.T) {
 		},
 	}
 
-	_, err := New(cfg)
+	_, err := newOwnedTestServer(t, cfg)
 	if err == nil {
 		t.Error("expected error with invalid persistence directory")
 	}
@@ -2379,7 +2387,7 @@ func TestServerStoreAccessor(t *testing.T) {
 		HTTP:   config.HTTPConfig{Enabled: false},
 	}
 
-	s, _ := New(cfg)
+	s, _ := newOwnedTestServer(t, cfg)
 	st := s.Store()
 	if st == nil {
 		t.Error("Store() should not return nil")
@@ -2449,7 +2457,7 @@ func TestNewServerWithExistingAOF(t *testing.T) {
 		},
 	}
 
-	s, err := New(cfg)
+	s, err := newOwnedTestServer(t, cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2486,7 +2494,7 @@ func TestNewServerWithCorruptAOF(t *testing.T) {
 
 	// Starting empty on a corrupt AOF hides the loss while new writes are
 	// appended after bytes no later load can read, so startup must refuse.
-	if _, err := New(cfg); err == nil {
+	if _, err := newOwnedTestServer(t, cfg); err == nil {
 		t.Fatal("expected New to refuse a corrupt AOF")
 	}
 }
@@ -2514,7 +2522,7 @@ func TestNewServerWithEmptyAOF(t *testing.T) {
 		},
 	}
 
-	s, err := New(cfg)
+	s, err := newOwnedTestServer(t, cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2539,7 +2547,7 @@ func TestNewServerHTTPConnCountCallback(t *testing.T) {
 		},
 	}
 
-	s, err := New(cfg)
+	s, err := newOwnedTestServer(t, cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2577,7 +2585,7 @@ func TestServerAOFPostExecuteHook(t *testing.T) {
 		},
 	}
 
-	s, err := New(cfg)
+	s, err := newOwnedTestServer(t, cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2630,7 +2638,7 @@ func TestServerStopHTTPError(t *testing.T) {
 		},
 	}
 
-	s, err := New(cfg)
+	s, err := newOwnedTestServer(t, cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2663,7 +2671,7 @@ func TestServerAcceptLoopStopping(t *testing.T) {
 		HTTP: config.HTTPConfig{Enabled: false},
 	}
 
-	s, err := New(cfg)
+	s, err := newOwnedTestServer(t, cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2838,7 +2846,7 @@ func TestServerStartWithTLS(t *testing.T) {
 		HTTP: config.HTTPConfig{Enabled: false},
 	}
 
-	s, err := New(cfg)
+	s, err := newOwnedTestServer(t, cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2869,7 +2877,7 @@ func TestServerStartBadBind(t *testing.T) {
 		HTTP: config.HTTPConfig{Enabled: false},
 	}
 
-	s, err := New(cfg)
+	s, err := newOwnedTestServer(t, cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2903,7 +2911,7 @@ func TestServerStartAOFError(t *testing.T) {
 		},
 	}
 
-	s, err := New(cfg)
+	s, err := newOwnedTestServer(t, cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

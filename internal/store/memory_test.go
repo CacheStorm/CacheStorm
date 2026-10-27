@@ -54,7 +54,7 @@ func TestTimingWheelAddRemove(t *testing.T) {
 	s := NewStore()
 	tw := NewTimingWheel(s)
 
-	tw.Add("key1", time.Now().Add(10*time.Second).UnixNano())
+	tw.Add("key1", time.Now().Add(10*time.Second).UnixMilli())
 	tw.Remove("key1")
 }
 

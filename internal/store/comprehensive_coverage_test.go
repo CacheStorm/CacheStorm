@@ -2513,7 +2513,7 @@ func TestTimingWheelCascade(t *testing.T) {
 	s.Set("cascadekey", &StringValue{Data: []byte("value")}, SetOptions{TTL: 5 * time.Second})
 
 	// Manually drive one hourly cascade (level 0 wrapped).
-	tw.cascadeHour(time.Now().UnixNano())
+	tw.cascadeHour(time.Now().UnixMilli())
 }
 
 func TestTimingWheelExpireKey(t *testing.T) {

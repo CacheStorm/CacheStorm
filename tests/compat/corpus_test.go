@@ -14,11 +14,21 @@ func k(group, name string, steps ...Step) Case {
 func corpus() []Case {
 	var cs []Case
 	cs = append(cs, stringCases()...)
+	cs = append(cs, msetBatchCases()...)
 	cs = append(cs, keyCases()...)
+	cs = append(cs, restoreCases()...)
+	cs = append(cs, bitmapMutationCases()...)
+	cs = append(cs, hllCases()...)
+	cs = append(cs, geoAddValidationCases()...)
+	cs = append(cs, geoZsetCases()...)
+	cs = append(cs, entryTransferCases()...)
 	cs = append(cs, hashCases()...)
+	cs = append(cs, hashGrowthCases()...)
 	cs = append(cs, listCases()...)
 	cs = append(cs, blockingCases()...)
 	cs = append(cs, setCases()...)
+	cs = append(cs, setAdmissionCases()...)
+	cs = append(cs, readIsolationCases()...)
 	cs = append(cs, zsetCases()...)
 	cs = append(cs, streamCases()...)
 	cs = append(cs, txCases()...)
@@ -49,6 +59,8 @@ func stringCases() []Case {
 		k(g, "set-keepttl", c("SET", "k", "v", "EX", "100"), c("SET", "k", "v2", "KEEPTTL"), ttl(1, "TTL", "k"), c("SET", "k", "v3"), c("TTL", "k")),
 		k(g, "set-ex-invalid", c("SET", "k", "v", "EX", "0"), c("SET", "k", "v", "EX", "-1"), c("SET", "k", "v", "EX", "abc"), c("SET", "k", "v", "PX", "0"), c("EXISTS", "k")),
 		k(g, "set-syntax-errors", c("SET", "k", "v", "NX", "XX"), c("SET", "k", "v", "EX", "10", "PX", "100"), c("SET", "k", "v", "EX"), c("SET", "k", "v", "BOGUS"), c("SET", "k", "v", "KEEPTTL", "EX", "10"), c("EXISTS", "k")),
+		k(g, "set-pxat-max", c("SET", "k", "v", "PXAT", "9223372036854775807"), c("PEXPIRETIME", "k"), c("EXPIRETIME", "k"), ttl(1500, "PTTL", "k"), ttl(1, "TTL", "k"), c("SET", "k", "new", "KEEPTTL"), c("PEXPIRETIME", "k")),
+		k(g, "getex-pxat-max", c("SET", "k", "v"), c("GETEX", "k", "PXAT", "9223372036854775807"), c("PEXPIRETIME", "k"), ttl(1500, "PTTL", "k"), c("GETEX", "k", "PERSIST"), c("TTL", "k")),
 		k(g, "set-exat-pxat-past", c("SET", "k", "v", "PXAT", "1"), c("GET", "k"), c("SET", "k2", "v", "EXAT", "1"), c("EXISTS", "k2"), c("SET", "k3", "v", "EXAT", "99999999999"), c("TTL", "k3")),
 		k(g, "set-ex-overflow", c("SET", "k", "v", "EX", "9223372036854775807"), c("SET", "k", "v", "PX", "9223372036854775807"), c("EXISTS", "k")),
 		k(g, "getex", c("SET", "k", "v"), c("GETEX", "k", "EX", "100"), ttl(1, "TTL", "k"), c("GETEX", "k", "PERSIST"), c("TTL", "k"), c("GETEX", "missing"), c("GETEX", "k", "PX", "50000"), ttl(1500, "PTTL", "k"), c("GETEX", "k")),
@@ -86,6 +98,10 @@ func keyCases() []Case {
 		k(g, "expire-negative-deletes", c("SET", "k", "v"), c("EXPIRE", "k", "-1"), c("EXISTS", "k"), c("SET", "k2", "v"), c("PEXPIRE", "k2", "0"), c("EXISTS", "k2"), c("SET", "k3", "v"), c("EXPIREAT", "k3", "1"), c("EXISTS", "k3")),
 		k(g, "expire-actually-expires", c("SET", "k", "v"), c("PEXPIRE", "k", "50"), sleep(150), c("GET", "k"), c("EXISTS", "k"), c("TTL", "k"), c("DBSIZE")),
 		k(g, "ttl-missing-nottl", c("SET", "k", "v"), c("TTL", "k"), c("PTTL", "k"), c("TTL", "missing"), c("PTTL", "missing"), c("EXPIRETIME", "k"), c("EXPIRETIME", "missing"), c("PEXPIRETIME", "missing")),
+		k(g, "expiretime-rounding", c("SET", "k", "v", "PXAT", "4102444800499"), c("EXPIRETIME", "k"), c("PEXPIREAT", "k", "4102444800500"), c("EXPIRETIME", "k"), c("PEXPIREAT", "k", "4102444800999"), c("EXPIRETIME", "k")),
+		k(g, "expiretime-max", c("SET", "k", "v"), c("PEXPIREAT", "k", "9223372036854775807"), c("PEXPIRETIME", "k"), c("EXPIRETIME", "k"), ttl(1500, "PTTL", "k"), ttl(1, "TTL", "k")),
+		k(g, "expire-gt-lt-far-future", c("SET", "k", "v", "PXAT", "16725225600000"), c("PEXPIREAT", "k", "16725225600001", "GT"), c("PEXPIREAT", "k", "16725225600000", "GT"), c("PEXPIREAT", "k", "16725225600000", "LT"), c("PEXPIRETIME", "k"), c("COPY", "k", "copy"), c("PEXPIRETIME", "copy")),
+		k(g, "expire-relative-far-future", c("SET", "k", "v"), c("EXPIRE", "k", "99999999999999"), ttl(1, "TTL", "k"), c("PEXPIRE", "k", "9000000000000000000"), ttl(1500, "PTTL", "k"), ttl(1, "TTL", "k")),
 		k(g, "expiretime", c("SET", "k", "v"), c("EXPIREAT", "k", "33177117420"), c("EXPIRETIME", "k"), c("PEXPIRETIME", "k"), c("PEXPIREAT", "k", "33177117420000"), c("TTL", "k")),
 		k(g, "rename", c("SET", "a", "1"), c("RENAME", "a", "b"), c("GET", "a"), c("GET", "b"), c("RENAME", "missing", "x"), c("RENAME", "b", "b"), c("GET", "b"), c("SET", "c", "3"), c("RENAME", "b", "c"), c("GET", "c")),
 		k(g, "rename-keeps-ttl", c("SET", "a", "1", "EX", "100"), c("RENAME", "a", "b"), ttl(1, "TTL", "b"), c("SET", "c", "1", "EX", "100"), c("SET", "d", "2"), c("RENAME", "d", "c"), c("TTL", "c")),

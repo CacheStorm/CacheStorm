@@ -207,26 +207,10 @@ func aclKeysForCommand(cmd string, args [][]byte) []string {
 		}
 		keys = append(keys, storeKeyAfter(args)...)
 		return append(keys, sortLookupKeys(args)...)
-	case "SINTER", "SINTERCARD", "SDIFF", "SUNION":
-		// SINTER numkeys key [key ...] — args[0] is the COUNT, not a key, so
-		// these were previously resolved as aclSingleKeyCommands and returned
-		// args[0]. A ~user:* user was then refused every call (the count never
-		// matches the pattern) while no real key was ever checked.
+	case "SINTERCARD":
 		return keysAfterNumkeys(args, 0)
-	case "SDIFFSTORE", "SINTERSTORE", "SUNIONSTORE":
-		// SDIFFSTORE destination numkeys key [key ...] — args[0] is the
-		// destination this command WRITES, and the sources follow the count.
-		// These three were in aclAllArgsCommands, which checked EVERY argument
-		// including the numkeys COUNT, so a ~user:* user was blanket-refused
-		// (the count never matches the pattern).
-		if len(args) < 1 {
-			return nil
-		}
-		keys := keysAfterNumkeys(args, 1)
-		if keys == nil {
-			return nil
-		}
-		return append([]string{string(args[0])}, keys...)
+	case "SINTER", "SDIFF", "SUNION", "SDIFFSTORE", "SINTERSTORE", "SUNIONSTORE":
+		return toStrings(args)
 	case "GEOSEARCHSTORE":
 		// GEOSEARCHSTORE destination source <FROMMEMBER m | FROMLONLAT lon lat>
 		// ... — BOTH keys must be checked. There was no entry for this command,
@@ -257,7 +241,7 @@ func aclKeysForCommand(cmd string, args [][]byte) []string {
 		}
 		return toStrings(args)
 	case "RENAME", "RENAMENX", "SMOVE", "LMOVE", "RPOPLPUSH", "BLMOVE", "BRPOPLPUSH",
-		"COPY", "GEORADIUSBYMEMBER_RO":
+		"COPY":
 		// source destination [member ...] — BOTH sides must be permitted.
 		// Omitting the destination lets a user move a key out of the
 		// key-pattern they are confined to.
@@ -268,7 +252,20 @@ func aclKeysForCommand(cmd string, args [][]byte) []string {
 			return toStrings(args[:1])
 		}
 		return nil
-	case "GEORADIUSSTORE", "GEORADIUSBYMEMBER":
+	case "GEORADIUS", "GEORADIUSBYMEMBER":
+		if len(args) == 0 {
+			return nil
+		}
+		keys := []string{string(args[0])}
+		offset := 5
+		if cmd == "GEORADIUSBYMEMBER" {
+			offset = 4
+		}
+		if len(args) > offset {
+			keys = append(keys, storeKeyAfter(args[offset:])...)
+		}
+		return keys
+	case "GEORADIUSSTORE":
 		// source ... [STORE destination]
 		keys := []string{}
 		if len(args) >= 1 {

@@ -44,7 +44,7 @@ func newMultiDBAOFServer(t *testing.T, dir string) *Server {
 	cfg.Persistence.AOF = true
 	cfg.Persistence.DataDir = dir
 	cfg.Persistence.AOFSync = "always"
-	s, err := New(cfg)
+	s, err := newOwnedTestServer(t, cfg)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -90,10 +90,10 @@ func TestAOFRestartRestoresEveryDatabase(t *testing.T) {
 	}
 	c.do("MOVE", "e", "5")
 	c.do("SET", "f", "db3")
-	s.aof.Stop()
+	stopReplServer(s)
 
 	s2 := newMultiDBAOFServer(t, dir)
-	defer s2.aof.Stop()
+	defer stopReplServer(s2)
 	db0, db3, db5 := s2.dbs.DB(0), s2.dbs.DB(3), s2.dbs.DB(5)
 	checks := []struct {
 		db   *store.Store
@@ -117,9 +117,9 @@ func TestAOFRestartRestoresEveryDatabase(t *testing.T) {
 	// to database 0 after the restart gets a SELECT 0 first.
 	c2 := &aofSession{t: t, s: s2, tx: command.NewTransaction()}
 	c2.do("SET", "g", "db0-after")
-	s2.aof.Stop()
+	stopReplServer(s2)
 	s3 := newMultiDBAOFServer(t, dir)
-	defer s3.aof.Stop()
+	defer stopReplServer(s3)
 	if got := getString(t, s3.dbs.DB(0), "g"); got != "db0-after" {
 		t.Fatalf("write after restart: got %q", got)
 	}

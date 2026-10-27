@@ -48,17 +48,12 @@ func restorePayload(t *testing.T, value string) string {
 	return string(v.Bulk)
 }
 
-// Redis defines RESTORE's ttl as an ABSOLUTE Unix timestamp in milliseconds
-// (since 3.0), not a relative duration. cmdRESTORE read it as relative
-// (`opts.TTL = time.Duration(ttl) * time.Millisecond`), so a past timestamp —
-// which means "this key should already be gone" — instead revived the key with
-// a brand-new lifetime.
 func TestRestorePastAbsoluteTimestampIsAlreadyExpired(t *testing.T) {
 	payload := restorePayload(t, "v")
 	s := store.NewStore()
 
 	past := time.Now().Add(-time.Hour).UnixMilli()
-	restoreRun(t, s, "RESTORE", "k", strconv.FormatInt(past, 10), payload)
+	restoreRun(t, s, "RESTORE", "k", strconv.FormatInt(past, 10), payload, "ABSTTL")
 
 	if v := restoreRun(t, s, "EXISTS", "k"); v.Type != resp.TypeInteger || v.Int != 0 {
 		t.Fatalf("EXISTS = %d, want 0: a past absolute ttl must not leave a visible key", v.Int)
@@ -72,7 +67,7 @@ func TestRestoreFutureAbsoluteTimestampIsNotExtended(t *testing.T) {
 	s := store.NewStore()
 
 	future := time.Now().Add(5 * time.Minute).UnixMilli()
-	restoreRun(t, s, "RESTORE", "k", strconv.FormatInt(future, 10), payload)
+	restoreRun(t, s, "RESTORE", "k", strconv.FormatInt(future, 10), payload, "ABSTTL")
 
 	entry, ok := s.Get("k")
 	if !ok {
@@ -83,7 +78,7 @@ func TestRestoreFutureAbsoluteTimestampIsNotExtended(t *testing.T) {
 	}
 	// Allow 2s of slack for clock granularity, but nothing like the ~94 years
 	// a relative reading would produce.
-	limit := time.UnixMilli(future).Add(2 * time.Second).UnixNano()
+	limit := time.UnixMilli(future).Add(2 * time.Second).UnixMilli()
 	if entry.ExpiresAt.Load() > limit {
 		t.Fatalf("ExpiresAt = %d, want <= %d (the absolute timestamp passed in, plus slack)", entry.ExpiresAt.Load(), limit)
 	}
@@ -95,7 +90,7 @@ func TestRestoreNearFutureTimestampIsVisible(t *testing.T) {
 	s := store.NewStore()
 
 	soon := time.Now().Add(30 * time.Second).UnixMilli()
-	restoreRun(t, s, "RESTORE", "k", strconv.FormatInt(soon, 10), payload)
+	restoreRun(t, s, "RESTORE", "k", strconv.FormatInt(soon, 10), payload, "ABSTTL")
 
 	if v := restoreRun(t, s, "EXISTS", "k"); v.Int != 1 {
 		t.Fatalf("EXISTS = %d, want 1 for a timestamp 30s in the future", v.Int)
@@ -138,7 +133,7 @@ func TestRestorePastTimestampStillReturnsOK(t *testing.T) {
 	s := store.NewStore()
 
 	past := time.Now().Add(-time.Hour).UnixMilli()
-	if v := restoreRun(t, s, "RESTORE", "k", strconv.FormatInt(past, 10), payload); v.Type == resp.TypeError {
+	if v := restoreRun(t, s, "RESTORE", "k", strconv.FormatInt(past, 10), payload, "ABSTTL"); v.Type == resp.TypeError {
 		t.Fatalf("RESTORE with a past ttl returned %q, want +OK", v.Err)
 	}
 }

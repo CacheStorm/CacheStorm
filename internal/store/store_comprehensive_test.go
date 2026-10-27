@@ -87,7 +87,7 @@ func TestStoreSetTTLNonexistent(t *testing.T) {
 func TestStoreSetExpiresAtNonexistent(t *testing.T) {
 	s := NewStore()
 
-	if s.SetExpiresAt("nonexistent", time.Now().Add(10*time.Second).UnixNano()) {
+	if s.SetExpiresAt("nonexistent", time.Now().Add(10*time.Second).UnixMilli()) {
 		t.Error("SetExpiresAt should return false for nonexistent key")
 	}
 }
@@ -141,7 +141,9 @@ func TestStoreSetEntry(t *testing.T) {
 	s := NewStore()
 
 	entry := NewEntry(&StringValue{Data: []byte("value")})
-	s.SetEntry("key", entry)
+	if err := s.SetEntry("key", entry); err != nil {
+		t.Errorf("SetEntry: %v", err)
+	}
 
 	e, exists := s.Get("key")
 	if !exists {
@@ -307,7 +309,7 @@ func TestEntryTTL(t *testing.T) {
 		t.Errorf("TTL should be between 0 and 10s, got %v", e.TTL())
 	}
 
-	e.SetExpiresAt(time.Now().Add(-1 * time.Second).UnixNano())
+	e.SetExpiresAt(time.Now().Add(-1 * time.Second).UnixMilli())
 	if e.TTL() != -2 {
 		t.Errorf("TTL should be -2 for expired entry, got %v", e.TTL())
 	}

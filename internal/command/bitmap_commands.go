@@ -3,10 +3,11 @@ package command
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 
-	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
 )
 
@@ -17,42 +18,32 @@ func RegisterBitmapCommands(router *Router) {
 	router.Register(&CommandDef{Name: "BITPOS", Handler: cmdBITPOS})
 	router.Register(&CommandDef{Name: "BITOP", Handler: cmdBITOP})
 	router.Register(&CommandDef{Name: "BITFIELD", Handler: cmdBITFIELD})
+	router.Register(&CommandDef{Name: "BITFIELD_RO", Handler: cmdBITFIELD})
 }
 
 type BitmapValue struct {
+	mu   sync.RWMutex
 	Data []byte
 }
 
 func (v *BitmapValue) Type() store.DataType { return store.DataTypeString }
-func (v *BitmapValue) SizeOf() int64        { return int64(len(v.Data)) + 24 }
-func (v *BitmapValue) String() string       { return string(v.Data) }
+func (v *BitmapValue) SizeOf() int64 {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	return int64(len(v.Data)) + 48
+}
+func (v *BitmapValue) String() string { v.mu.RLock(); defer v.mu.RUnlock(); return string(v.Data) }
+func (v *BitmapValue) RedisStringBytes() ([]byte, error) {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	return append([]byte(nil), v.Data...), nil
+}
 func (v *BitmapValue) Clone() store.Value {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
 	cloned := make([]byte, len(v.Data))
 	copy(cloned, v.Data)
 	return &BitmapValue{Data: cloned}
-}
-
-func getOrCreateBitmap(ctx *Context, key string) *BitmapValue {
-	entry, exists := ctx.Store.Get(key)
-	if !exists {
-		bm := &BitmapValue{Data: make([]byte, 0)}
-		ctx.Store.Set(key, bm, store.SetOptions{})
-		return bm
-	}
-
-	switch v := entry.Value.(type) {
-	case *BitmapValue:
-		return v
-	case *store.StringValue:
-		// Convert and store back: SETBIT on a string-created key must grow a
-		// value the store actually holds, or the reallocation branch loses
-		// the write behind a success reply.
-		bm := &BitmapValue{Data: v.Data}
-		ctx.Store.Set(key, bm, store.SetOptions{})
-		return bm
-	default:
-		return nil
-	}
 }
 
 func getBitmap(ctx *Context, key string) *BitmapValue {
@@ -78,57 +69,28 @@ func bitmapWrongType(ctx *Context, key string) bool {
 	if !exists {
 		return false
 	}
-	_, ok := stringValueOf(entry.Value)
-	return !ok
+	switch entry.Value.(type) {
+	case *store.StringValue, *BitmapValue:
+		return false
+	default:
+		return true
+	}
 }
 
 func cmdSETBIT(ctx *Context) error {
+	ctx.writeEffectsHandled = true
 	if ctx.ArgCount() != 3 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
-
-	key := ctx.ArgString(0)
-	offset, err := strconv.ParseInt(ctx.ArgString(1), 10, 64)
-	if err != nil {
-		return ctx.WriteError(ErrNotInteger)
+	offset, ok := parseBitmapNumber(ctx.Arg(1), ctx.Replaying || ctx.LegacyReplay)
+	if !ok || offset < 0 || offset > 4294967295 {
+		return ctx.WriteError(bitfieldOffsetError())
 	}
-	if offset < 0 || offset > 4294967295 { // 2^32 - 1, same as Redis
-		return ctx.WriteError(errors.New("ERR bit offset is not an integer or out of range"))
+	bit, ok := parseBitmapNumber(ctx.Arg(2), ctx.Replaying || ctx.LegacyReplay)
+	if !ok || (bit != 0 && bit != 1) {
+		return ctx.WriteError(fmt.Errorf("ERR bit is not an integer or out of range"))
 	}
-	bit, err := strconv.Atoi(ctx.ArgString(2))
-	if err != nil {
-		return ctx.WriteError(ErrNotInteger)
-	}
-	if bit != 0 && bit != 1 {
-		return ctx.WriteError(ErrInvalidArg)
-	}
-
-	bm := getOrCreateBitmap(ctx, key)
-	if bm == nil {
-		return ctx.WriteError(store.ErrWrongType)
-	}
-
-	byteIndex := int(offset / 8)
-	bitIndex := uint(7 - offset%8)
-
-	if byteIndex >= len(bm.Data) {
-		newData := make([]byte, byteIndex+1)
-		copy(newData, bm.Data)
-		bm.Data = newData
-	}
-
-	oldBit := 0
-	if bm.Data[byteIndex]&(1<<bitIndex) != 0 {
-		oldBit = 1
-	}
-
-	if bit == 1 {
-		bm.Data[byteIndex] |= (1 << bitIndex)
-	} else {
-		bm.Data[byteIndex] &^= (1 << bitIndex)
-	}
-
-	return ctx.WriteInteger(int64(oldBit))
+	return bitmapSetBit(ctx, offset, byte(bit))
 }
 
 func cmdGETBIT(ctx *Context) error {
@@ -152,6 +114,8 @@ func cmdGETBIT(ctx *Context) error {
 	if bm == nil {
 		return ctx.WriteInteger(0)
 	}
+	bm.mu.RLock()
+	defer bm.mu.RUnlock()
 
 	byteIndex := int(offset / 8)
 	bitIndex := uint(7 - offset%8)
@@ -196,6 +160,8 @@ func cmdBITCOUNT(ctx *Context) error {
 	if bm == nil {
 		return ctx.WriteInteger(0)
 	}
+	bm.mu.RLock()
+	defer bm.mu.RUnlock()
 
 	data := bm.Data
 	if end < 0 {
@@ -265,6 +231,8 @@ func cmdBITPOS(ctx *Context) error {
 	if bm == nil {
 		return ctx.WriteInteger(-1)
 	}
+	bm.mu.RLock()
+	defer bm.mu.RUnlock()
 
 	data := bm.Data
 	if len(data) == 0 {
@@ -353,11 +321,14 @@ func cmdBITOP(ctx *Context) error {
 		if bm == nil {
 			return ctx.WriteInteger(0)
 		}
+		bm = bm.Clone().(*BitmapValue)
 		inverted := make([]byte, len(bm.Data))
 		for j := range bm.Data {
 			inverted[j] = ^bm.Data[j]
 		}
-		ctx.Store.Set(destKey, &BitmapValue{Data: inverted}, store.SetOptions{})
+		if err := ctx.Store.Set(destKey, &BitmapValue{Data: inverted}, store.SetOptions{}); err != nil {
+			return ctx.WriteError(err)
+		}
 		return ctx.WriteInteger(int64(len(inverted)))
 	}
 
@@ -380,6 +351,7 @@ func cmdBITOP(ctx *Context) error {
 			continue
 		}
 
+		bm = bm.Clone().(*BitmapValue)
 		if !seeded {
 			result = make([]byte, len(bm.Data))
 			copy(result, bm.Data)
@@ -419,123 +391,18 @@ func cmdBITOP(ctx *Context) error {
 		return ctx.WriteInteger(0)
 	}
 
-	ctx.Store.Set(destKey, &BitmapValue{Data: result}, store.SetOptions{})
+	if err := ctx.Store.Set(destKey, &BitmapValue{Data: result}, store.SetOptions{}); err != nil {
+		return ctx.WriteError(err)
+	}
 	return ctx.WriteInteger(int64(len(result)))
 }
 
 func cmdBITFIELD(ctx *Context) error {
+	ctx.writeEffectsHandled = true
 	if ctx.ArgCount() < 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
-
-	key := ctx.ArgString(0)
-	bm := getOrCreateBitmap(ctx, key)
-	if bm == nil {
-		return ctx.WriteError(store.ErrWrongType)
-	}
-
-	results := make([]*resp.Value, 0)
-	overflow := "WRAP"
-
-	i := 1
-	for i < ctx.ArgCount() {
-		op := strings.ToUpper(ctx.ArgString(i))
-
-		switch op {
-		case "GET":
-			if i+2 >= ctx.ArgCount() {
-				return ctx.WriteError(ErrSyntaxError)
-			}
-			// BITFIELD encodings are case-insensitive: parseEncoding() accepts
-			// "i8", "I8", "u8", "U8" alike. The helpers below decide signed vs
-			// unsigned with strings.HasPrefix(encoding, "i"), which is only
-			// correct on a normalised string -- otherwise "I8" silently reads
-			// and saturates as UNSIGNED. Lower-case once, here.
-			encoding := strings.ToLower(ctx.ArgString(i + 1))
-			offset, err := strconv.ParseInt(ctx.ArgString(i+2), 10, 64)
-			if err != nil {
-				return ctx.WriteError(ErrNotInteger)
-			}
-			if offset < 0 {
-				return ctx.WriteError(errors.New("ERR bit offset is not an integer or out of range"))
-			}
-
-			val := bitfieldGet(bm.Data, encoding, offset)
-			results = append(results, resp.IntegerValue(val))
-			i += 3
-
-		case "SET":
-			if i+3 >= ctx.ArgCount() {
-				return ctx.WriteError(ErrSyntaxError)
-			}
-			// BITFIELD encodings are case-insensitive: parseEncoding() accepts
-			// "i8", "I8", "u8", "U8" alike. The helpers below decide signed vs
-			// unsigned with strings.HasPrefix(encoding, "i"), which is only
-			// correct on a normalised string -- otherwise "I8" silently reads
-			// and saturates as UNSIGNED. Lower-case once, here.
-			encoding := strings.ToLower(ctx.ArgString(i + 1))
-			offset, err := strconv.ParseInt(ctx.ArgString(i+2), 10, 64)
-			if err != nil {
-				return ctx.WriteError(ErrNotInteger)
-			}
-			if offset < 0 {
-				return ctx.WriteError(errors.New("ERR bit offset is not an integer or out of range"))
-			}
-			value, err := strconv.ParseInt(ctx.ArgString(i+3), 10, 64)
-			if err != nil {
-				return ctx.WriteError(ErrNotInteger)
-			}
-
-			oldVal := bitfieldSet(bm, encoding, offset, value)
-			results = append(results, resp.IntegerValue(oldVal))
-			i += 4
-
-		case "INCRBY":
-			if i+3 >= ctx.ArgCount() {
-				return ctx.WriteError(ErrSyntaxError)
-			}
-			// BITFIELD encodings are case-insensitive: parseEncoding() accepts
-			// "i8", "I8", "u8", "U8" alike. The helpers below decide signed vs
-			// unsigned with strings.HasPrefix(encoding, "i"), which is only
-			// correct on a normalised string -- otherwise "I8" silently reads
-			// and saturates as UNSIGNED. Lower-case once, here.
-			encoding := strings.ToLower(ctx.ArgString(i + 1))
-			offset, err := strconv.ParseInt(ctx.ArgString(i+2), 10, 64)
-			if err != nil {
-				return ctx.WriteError(ErrNotInteger)
-			}
-			if offset < 0 {
-				return ctx.WriteError(errors.New("ERR bit offset is not an integer or out of range"))
-			}
-			increment, err := strconv.ParseInt(ctx.ArgString(i+3), 10, 64)
-			if err != nil {
-				return ctx.WriteError(ErrNotInteger)
-			}
-
-			newVal, failed := bitfieldIncr(bm, encoding, offset, increment, overflow)
-			if failed {
-				results = append(results, resp.NullValue())
-			} else {
-				results = append(results, resp.IntegerValue(newVal))
-			}
-			i += 4
-
-		case "OVERFLOW":
-			if i+1 >= ctx.ArgCount() {
-				return ctx.WriteError(ErrSyntaxError)
-			}
-			overflow = strings.ToUpper(ctx.ArgString(i + 1))
-			if overflow != "WRAP" && overflow != "SAT" && overflow != "FAIL" {
-				return ctx.WriteError(ErrSyntaxError)
-			}
-			i += 2
-
-		default:
-			return ctx.WriteError(ErrSyntaxError)
-		}
-	}
-
-	return ctx.WriteArray(results)
+	return bitmapBitfield(ctx)
 }
 
 func bitfieldGet(data []byte, encoding string, offset int64) int64 {

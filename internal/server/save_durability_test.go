@@ -25,7 +25,7 @@ func newSaveServer(t *testing.T, syncPolicy string) (*Server, string) {
 	cfg.Persistence.DataDir = dir
 	cfg.Persistence.AOFSync = syncPolicy
 
-	s, err := New(cfg)
+	s, err := newOwnedTestServer(t, cfg)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -35,7 +35,7 @@ func newSaveServer(t *testing.T, syncPolicy string) (*Server, string) {
 	if err := s.aof.Start(); err != nil {
 		t.Fatalf("start AOF writer: %v", err)
 	}
-	t.Cleanup(func() { s.aof.Stop() })
+	t.Cleanup(func() { stopReplServer(s) })
 	return s, filepath.Join(dir, "appendonly.aof")
 }
 

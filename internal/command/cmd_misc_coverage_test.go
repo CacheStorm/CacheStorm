@@ -678,13 +678,16 @@ func TestCmdSORTRO_Success(t *testing.T) {
 
 func TestCmdRESTORE_Success(t *testing.T) {
 	s := store.NewStore()
-	// Dump format: "CACHSTORM001" + type byte + expiry + ":" + data
-	dump := "CACHSTORM001\x010:"
-	ctx := discardCtx("RESTORE", bytesArgs("newkey", "0", dump+"hello"), s)
+	ctx := discardCtx("RESTORE", bytesArgs("newkey", "0", restorePayload(t, "hello")), s)
 	err := cmdRESTORE(ctx)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	entry, ok := s.Get("newkey")
+	if !ok || entry.Value.String() != "hello" {
+		t.Fatal("RESTORE did not store hello")
+	}
+
 }
 
 // =============================================================================

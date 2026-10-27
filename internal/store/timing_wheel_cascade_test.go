@@ -24,22 +24,22 @@ func TestCascadeSweepsLevel1Coverage(t *testing.T) {
 	if err := s.Set("ttl:key", &StringValue{Data: []byte("v")}, SetOptions{}); err != nil {
 		t.Fatalf("Set: %v", err)
 	}
-	if !s.SetExpiresAt("ttl:key", time.Now().Add(-time.Second).UnixNano()) {
+	if !s.SetExpiresAt("ttl:key", time.Now().Add(-time.Second).UnixMilli()) {
 		t.Fatal("SetExpiresAt must succeed on a live key")
 	}
 
 	// Schedule the key 120 level-1 slots (2h) ahead of the current pointer.
 	l1 := s.expiry.levels[1]
 	l1.mu.Lock()
-	l1.slots[120].keys["ttl:key"] = time.Now().Add(2 * time.Hour).UnixNano()
+	l1.slots[120].keys["ttl:key"] = time.Now().Add(2 * time.Hour).UnixMilli()
 	l1.mu.Unlock()
 
 	// cascadeLevel sweeps the current slot then advances, so slot 120 is
 	// swept during the third hourly batch.
-	now := time.Now().UnixNano()
-	s.expiry.cascadeHour(now + int64(time.Hour))
-	s.expiry.cascadeHour(now + 2*int64(time.Hour))
-	s.expiry.cascadeHour(now + 3*int64(time.Hour))
+	now := time.Now().UnixMilli()
+	s.expiry.cascadeHour(now + int64((time.Hour)/time.Millisecond))
+	s.expiry.cascadeHour(now + 2*int64((time.Hour)/time.Millisecond))
+	s.expiry.cascadeHour(now + 3*int64((time.Hour)/time.Millisecond))
 
 	if s.Exists("ttl:key") {
 		t.Fatal("expired key must be removed once its level-1 slot is swept (within three hourly wraps); the old cascade advanced one slot per wrap")
@@ -52,21 +52,21 @@ func TestCascadeSweepsLevel2Coverage(t *testing.T) {
 	if err := s.Set("ttl:day", &StringValue{Data: []byte("v")}, SetOptions{}); err != nil {
 		t.Fatalf("Set: %v", err)
 	}
-	if !s.SetExpiresAt("ttl:day", time.Now().Add(-time.Second).UnixNano()) {
+	if !s.SetExpiresAt("ttl:day", time.Now().Add(-time.Second).UnixMilli()) {
 		t.Fatal("SetExpiresAt must succeed on a live key")
 	}
 
 	// Schedule the key 25 level-2 slots (25h) ahead of the current pointer.
 	l2 := s.expiry.levels[2]
 	l2.mu.Lock()
-	l2.slots[25].keys["ttl:day"] = time.Now().Add(25 * time.Hour).UnixNano()
+	l2.slots[25].keys["ttl:day"] = time.Now().Add(25 * time.Hour).UnixMilli()
 	l2.mu.Unlock()
 
 	// Level 2 advances one 1-hour slot per hourly wrap; slot 25 is swept by
 	// wrap 25. Pre-fix, level 2 only advanced when level 1 wrapped.
-	now := time.Now().UnixNano()
+	now := time.Now().UnixMilli()
 	for i := 1; i <= 25; i++ {
-		s.expiry.cascadeHour(now + int64(i)*int64(time.Hour))
+		s.expiry.cascadeHour(now + int64(i)*int64((time.Hour)/time.Millisecond))
 	}
 
 	if s.Exists("ttl:day") {
@@ -82,9 +82,9 @@ func TestCascadeLeavesControlKeyAlive(t *testing.T) {
 		t.Fatalf("Set control: %v", err)
 	}
 
-	now := time.Now().UnixNano()
+	now := time.Now().UnixMilli()
 	for i := 1; i <= 30; i++ {
-		s.expiry.cascadeHour(now + int64(i)*int64(time.Hour))
+		s.expiry.cascadeHour(now + int64(i)*int64((time.Hour)/time.Millisecond))
 	}
 
 	if !s.Exists("ctl") {

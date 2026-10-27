@@ -31,8 +31,13 @@ func stringValueOf(v store.Value) ([]byte, bool) {
 	switch val := v.(type) {
 	case *store.StringValue:
 		return val.Data, true
+	case *HyperLogLogValue:
+		data, err := val.RedisStringBytes()
+		return data, err == nil
 	case *BitmapValue:
-		return val.Data, true
+		val.mu.RLock()
+		defer val.mu.RUnlock()
+		return append([]byte(nil), val.Data...), true
 	}
 	return nil, false
 }
@@ -113,18 +118,20 @@ func setGeneric(ctx *Context, key string, value []byte, flags int, hasExpire boo
 		return ctx.WriteNullBulkString()
 	}
 	abort := func() error {
+		ctx.PropagateAs()
 		if flags&strOptGET != 0 {
 			return reply()
 		}
 		return ctx.WriteNull()
 	}
 
-	if hasExpire && whenMs <= time.Now().UnixMilli() {
+	if hasExpire && whenMs <= time.Now().UnixMilli() && !ctx.Replaying {
 		found := ctx.Store.Exists(key)
 		if (flags&strOptNX != 0 && found) || (flags&strOptXX != 0 && !found) {
 			return abort()
 		}
 		ctx.Store.Delete(key)
+		ctx.propagateDelete(key)
 		return reply()
 	}
 
@@ -134,7 +141,7 @@ func setGeneric(ctx *Context, key string, value []byte, flags int, hasExpire boo
 		KeepTTL: flags&strOptKEEPTTL != 0,
 	}
 	if hasExpire {
-		opts.TTL = expireMsToTTL(whenMs)
+		opts.ExpireAtMS = whenMs
 	}
 	if err := ctx.Store.Set(key, &store.StringValue{Data: value}, opts); err != nil {
 		if errors.Is(err, store.ErrKeyExists) || errors.Is(err, store.ErrKeyNotFound) {
@@ -142,6 +149,15 @@ func setGeneric(ctx *Context, key string, value []byte, flags int, hasExpire boo
 		}
 		return ctx.WriteError(err)
 	}
+	if flags&strOptKEEPTTL != 0 {
+		var exists bool
+		whenMs, exists = ctx.Store.ExpiryDeadline(key)
+		if !exists {
+			ctx.propagateDelete(key)
+			return reply()
+		}
+	}
+	ctx.propagateSetX(key, value, whenMs)
 	return reply()
 }
 
@@ -199,31 +215,17 @@ func cmdMSET(ctx *Context) error {
 		return ctx.WriteError(arityError("mset"))
 	}
 
-	// MSET is atomic ("all given keys are set at once"): validate every pair
-	// and pre-check capacity before applying anything — a mid-application
-	// failure would leave a partially applied MSET. The padding keeps the
-	// estimate conservative against the tracker's per-entry overhead.
-	var estimated int64
+	ctx.writeEffectsHandled = true
+	pairs := make([]store.StringPair, 0, ctx.ArgCount()/2)
 	for i := 0; i < ctx.ArgCount(); i += 2 {
-		k := ctx.ArgString(i)
-		if len(k) == 0 || len(k) > store.MaxKeySize {
+		key := ctx.ArgString(i)
+		if len(key) == 0 || len(key) > store.MaxKeySize {
 			return ctx.WriteError(store.ErrInvalidKey)
 		}
-		if len(ctx.Arg(i+1)) > store.MaxValueSize {
-			return ctx.WriteError(store.ErrValueTooLarge)
-		}
-		estimated += int64(len(k) + len(ctx.Arg(i+1)) + 128)
+		pairs = append(pairs, store.StringPair{Key: key, Data: ctx.Arg(i + 1)})
 	}
-	if mt := ctx.Store.MemoryTracker(); mt != nil && !mt.CanAllocate(estimated) {
-		return ctx.WriteError(store.ErrMemoryLimit)
-	}
-
-	for i := 0; i < ctx.ArgCount(); i += 2 {
-		if err := ctx.Store.Set(ctx.ArgString(i), &store.StringValue{Data: ctx.Arg(i + 1)}, store.SetOptions{}); err != nil {
-			// Reachable only under concurrent pressure after the pre-flight:
-			// report it rather than hiding a partial application behind +OK.
-			return ctx.WriteError(err)
-		}
+	if _, err := ctx.Store.SetStringBatch(pairs, false); err != nil {
+		return ctx.WriteError(err)
 	}
 	return ctx.WriteOK()
 }
@@ -484,11 +486,12 @@ func cmdSETNX(ctx *Context) error {
 	err := ctx.Store.Set(key, &store.StringValue{Data: value}, store.SetOptions{NX: true})
 	if err != nil {
 		if errors.Is(err, store.ErrKeyExists) {
+			ctx.PropagateAs()
 			return ctx.WriteInteger(0)
 		}
 		return ctx.WriteError(err)
 	}
-
+	ctx.propagateSetX(key, value, 0)
 	return ctx.WriteInteger(1)
 }
 
@@ -516,39 +519,24 @@ func cmdMSETNX(ctx *Context) error {
 		return ctx.WriteError(arityError("msetnx"))
 	}
 
-	// MSETNX is atomic ("all given keys are set at once"): validate every
-	// pair and pre-check capacity before applying anything — a mid-way
-	// failure would leave a partially applied MSETNX. The padding keeps the
-	// estimate conservative against the tracker's per-entry overhead.
-	var estimated int64
+	ctx.writeEffectsHandled = true
+	pairs := make([]store.StringPair, 0, ctx.ArgCount()/2)
 	for i := 0; i < ctx.ArgCount(); i += 2 {
-		k := ctx.ArgString(i)
-		if len(k) == 0 || len(k) > store.MaxKeySize {
+		key := ctx.ArgString(i)
+		if len(key) == 0 || len(key) > store.MaxKeySize {
 			return ctx.WriteError(store.ErrInvalidKey)
 		}
-		if len(ctx.Arg(i+1)) > store.MaxValueSize {
-			return ctx.WriteError(store.ErrValueTooLarge)
-		}
-		estimated += int64(len(k) + len(ctx.Arg(i+1)) + 128)
+		pairs = append(pairs, store.StringPair{Key: key, Data: ctx.Arg(i + 1)})
 	}
-
-	for i := 0; i < ctx.ArgCount(); i += 2 {
-		if ctx.Store.Exists(ctx.ArgString(i)) {
-			return ctx.WriteInteger(0)
-		}
+	written, err := ctx.Store.SetStringBatch(pairs, true)
+	if err != nil {
+		return ctx.WriteError(err)
 	}
-
-	if mt := ctx.Store.MemoryTracker(); mt != nil && !mt.CanAllocate(estimated) {
-		return ctx.WriteError(store.ErrMemoryLimit)
+	if !written {
+		ctx.PropagateAs()
+		return ctx.WriteInteger(0)
 	}
-
-	for i := 0; i < ctx.ArgCount(); i += 2 {
-		if err := ctx.Store.Set(ctx.ArgString(i), &store.StringValue{Data: ctx.Arg(i + 1)}, store.SetOptions{}); err != nil {
-			// Reachable only under concurrent pressure after the pre-flight:
-			// report it rather than hiding a partial application behind :1.
-			return ctx.WriteError(err)
-		}
-	}
+	ctx.PropagateAs(ExecutedCommand{Name: "MSET", Args: ctx.Args, DB: ctx.DB})
 	return ctx.WriteInteger(1)
 }
 
@@ -589,6 +577,7 @@ func cmdGETDEL(ctx *Context) error {
 	key := ctx.ArgString(0)
 	entry, exists := ctx.Store.Get(key)
 	if !exists {
+		ctx.PropagateAs()
 		return ctx.WriteNullBulkString()
 	}
 
@@ -618,6 +607,7 @@ func cmdGETEX(ctx *Context) error {
 
 	entry, exists := ctx.Store.Get(key)
 	if !exists {
+		ctx.PropagateAs()
 		return ctx.WriteNullBulkString()
 	}
 	data, ok := stringValueOf(entry.Value)
@@ -635,12 +625,23 @@ func cmdGETEX(ctx *Context) error {
 	copy(result, data)
 
 	switch {
-	case expireArg != nil && whenMs <= time.Now().UnixMilli():
+	case expireArg != nil && whenMs <= time.Now().UnixMilli() && !ctx.Replaying:
 		ctx.Store.Delete(key)
+		ctx.propagateDelete(key)
 	case expireArg != nil:
-		ctx.Store.SetExpiresAt(key, expireMsToNs(whenMs))
+		if ctx.Store.SetExpiresAt(key, whenMs) {
+			ctx.propagateExpiry(key, whenMs)
+		} else {
+			ctx.PropagateAs()
+		}
 	case flags&strOptPERSIST != 0:
-		ctx.Store.Persist(key)
+		if ctx.Store.Persist(key) {
+			ctx.PropagateAs(ExecutedCommand{Name: "PERSIST", Args: [][]byte{[]byte(key)}, DB: ctx.DB})
+		} else {
+			ctx.PropagateAs()
+		}
+	default:
+		ctx.PropagateAs()
 	}
 
 	return ctx.WriteBulkBytes(result)

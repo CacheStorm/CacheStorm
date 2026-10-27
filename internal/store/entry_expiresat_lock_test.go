@@ -71,7 +71,7 @@ func TestEntryExpiresAtRacesSetTTL(t *testing.T) {
 		defer wg.Done()
 		for i := 0; i < 4000; i++ {
 			s.SetTTL(key, time.Duration(i%500+1)*time.Second)
-			s.SetExpiresAt(key, time.Now().Add(time.Duration(i%500+1)*time.Second).UnixNano())
+			s.SetExpiresAt(key, time.Now().Add(time.Duration(i%500+1)*time.Second).UnixMilli())
 		}
 	}()
 	// Reader: TTL / EXPIRETIME path -- Get returns the pointer, then read bare.

@@ -39,3 +39,5 @@ node_modules/
 *.bak
 .venv/
 .pytest_cache/
+
+.cachestorm.lock

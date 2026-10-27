@@ -31,14 +31,14 @@ func TestGeoSearchStoreStoreDist(t *testing.T) {
 			args:       []string{"GEOSEARCHSTORE", "dstore", "geo", "FROMMEMBER", "Catania", "BYRADIUS", "200", "km", "STOREDIST"},
 			wantCount:  2,
 			storeDist:  true,
-			wantScores: map[string]float64{"Catania": 0, "Palermo": 166.2295},
+			wantScores: map[string]float64{"Catania": 0, "Palermo": 166.27415156960032},
 		},
 		{
 			name:       "STOREDIST converts to the requested unit",
 			args:       []string{"GEOSEARCHSTORE", "dmi", "geo", "FROMMEMBER", "Catania", "BYRADIUS", "200", "mi", "STOREDIST"},
 			wantCount:  2,
 			storeDist:  true,
-			wantScores: map[string]float64{"Catania": 0, "Palermo": 103.2935},
+			wantScores: map[string]float64{"Catania": 0, "Palermo": 103.31822459492737},
 		},
 		{
 			name:      "STOREDIST empty result deletes dest",
@@ -91,12 +91,12 @@ func TestGeoSearchStoreStoreDist(t *testing.T) {
 				t.Fatalf("destination %s missing", dest)
 			}
 			if !tc.storeDist {
-				geo, isGeo := entry.Value.(*store.GeoValue)
+				geo, isGeo := entry.Value.(*store.SortedSetValue)
 				if !isGeo {
-					t.Fatalf("without STOREDIST destination type = %T, want GeoValue", entry.Value)
+					t.Fatalf("without STOREDIST destination type = %T, want SortedSetValue", entry.Value)
 				}
-				if len(geo.Points) != 2 {
-					t.Fatalf("destination has %d members, want 2", len(geo.Points))
+				if len(geo.Members) != 2 {
+					t.Fatalf("destination has %d members, want 2", len(geo.Members))
 				}
 				return
 			}

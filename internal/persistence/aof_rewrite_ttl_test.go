@@ -52,6 +52,7 @@ func rewriteTTLAndReplay(t *testing.T, src *store.Store) *store.Store {
 	command.RegisterSortedSetCommands(router)
 	// PEXPIREAT lives in RegisterKeyCommands, not RegisterServerCommands.
 	command.RegisterKeyCommands(router)
+	command.RegisterTagCommands(router)
 
 	for _, c := range commands {
 		var respBuf bytes.Buffer

@@ -110,6 +110,7 @@ func (m *Manager) ReplicaOf(host string, port int) error {
 		m.cached = true
 	}
 	m.role = RoleReplica
+	m.dbs.SetPassiveExpiry(true)
 	m.feeding.Store(false)
 	m.masterHost, m.masterPort = host, port
 	m.linkState = linkConnect
@@ -157,6 +158,14 @@ func (m *Manager) Promote() {
 	}
 	m.replid2 = m.replid
 	m.secondOffset = m.offset + 1
+	if !m.cached {
+		m.replid2 = zeroReplID
+		m.secondOffset = -1
+		if m.backlog != nil {
+			m.backlog = nil
+			m.createBacklogLocked()
+		}
+	}
 	m.replid = NewReplID()
 	m.role = RoleMaster
 	m.feeding.Store(m.backlog != nil)
@@ -166,6 +175,7 @@ func (m *Manager) Promote() {
 	m.syncInProgress = false
 	m.cached = true
 	m.mu.Unlock()
+	m.dbs.SetPassiveExpiry(false)
 	m.host.UnlockWrites()
 	m.dbs.StartExpiry()
 	logger.Info().Msg("promoted to master")
@@ -362,7 +372,10 @@ func (l *link) session() (bool, error) {
 			}
 			return true, err
 		}
-		getack := m.applyFromMaster(args, raw)
+		getack, err := m.applyFromMaster(args, raw)
+		if err != nil {
+			return true, err
+		}
 		if getack {
 			if err := ack(); err != nil {
 				return true, err
@@ -374,7 +387,7 @@ func (l *link) session() (bool, error) {
 // applyFromMaster executes one command of the master's stream and appends it
 // to this server's own stream. It reports whether the master asked for an
 // acknowledgement.
-func (m *Manager) applyFromMaster(args [][]byte, raw []byte) bool {
+func (m *Manager) applyFromMaster(args [][]byte, raw []byte) (bool, error) {
 	name := command.CanonicalName(string(args[0]))
 	getack := name == "REPLCONF" && len(args) > 1 && strings.EqualFold(string(args[1]), "GETACK")
 
@@ -395,8 +408,27 @@ func (m *Manager) applyFromMaster(args [][]byte, raw []byte) bool {
 		ctx.Transaction = tx
 		ctx.SetAuthenticated(true)
 		ctx.InExec = true
-		if err := m.router.Execute(ctx); err != nil {
-			logger.Warn().Err(err).Str("cmd", name).Msg("command from master failed")
+		ctx.FromMaster = true
+		ctx.Replaying = true
+		m.dbs.BeginAuthoritativeApply()
+		err := m.router.Execute(ctx)
+		m.dbs.EndAuthoritativeApply()
+		if err == nil && ctx.Writer.Errors() > 0 {
+			err = fmt.Errorf("command returned an error reply")
+		}
+		if err != nil {
+			tx.ClearWatch()
+			m.mu.Lock()
+			m.cached = false
+			m.backlog, m.histLen = nil, 0
+			m.linkTx = command.NewTransaction()
+			dropped := m.detachAllLocked()
+			m.mu.Unlock()
+			m.host.UnlockWrites()
+			for _, replica := range dropped {
+				replica.close()
+			}
+			return false, fmt.Errorf("command from master %s failed: %w", name, err)
 		}
 		db = ctx.DB
 	}
@@ -409,7 +441,7 @@ func (m *Manager) applyFromMaster(args [][]byte, raw []byte) bool {
 	for _, r := range dropped {
 		r.close()
 	}
-	return getack
+	return getack, nil
 }
 
 // loadSnapshot replaces the dataset with the master's snapshot.
@@ -439,7 +471,11 @@ func (m *Manager) loadSnapshot(br *bufio.Reader, replid string, offset int64) er
 	m.host.LockWrites()
 	defer m.host.UnlockWrites()
 
-	m.dbs.FlushAll()
+	staging := m.dbs.NewStaging()
+	staging.BeginAuthoritativeApply()
+	replay := m.router.ForkForReplay(staging.DB(0), []string{
+		"SET", "HSET", "RPUSH", "SADD", "ZADD", "GEOADD", "JSON.SET", "XGROUP", "XADD", "XSETID", "XCLAIM", "TS.CREATE", "TS.ADD", "ADDTAG", "PEXPIREAT", "SELECT", "FUNCTION",
+	})
 	payload := bufio.NewReaderSize(io.LimitReader(br, size), 64*1024)
 	db := 0
 	var applied int64
@@ -455,17 +491,31 @@ func (m *Manager) loadSnapshot(br *bufio.Reader, replid string, offset int64) er
 			return err
 		}
 		applied += int64(len(raw))
-		st := m.dbs.DB(db)
-		ctx := command.NewContext(string(args[0]), args[1:], st, nil)
+		name := command.CanonicalName(string(args[0]))
+		if name == "FUNCTION" && (len(args) < 2 || !strings.EqualFold(string(args[1]), "RESTORE")) {
+			return fmt.Errorf("unsupported snapshot FUNCTION operation")
+		}
+		st := staging.DB(db)
+		if st == nil {
+			return fmt.Errorf("snapshot database %d is out of range", db)
+		}
+		ctx := command.NewContext(name, args[1:], st, nil)
 		ctx.DB = db
-		ctx.DBs = m.dbs
-		if err := m.router.ExecuteSilent(ctx); err != nil {
+		ctx.DBs = staging
+		ctx.Replaying = true
+		if err := replay.ExecuteSilent(ctx); err != nil {
 			return fmt.Errorf("snapshot command %s failed: %w", ctx.Command, err)
+		}
+		if ctx.Writer.Errors() > 0 {
+			return fmt.Errorf("snapshot command %s returned an error reply", ctx.Command)
+		}
+		if tracker := staging.DB(0).MemoryTracker(); tracker != nil && tracker.Max() > 0 && tracker.Usage() > tracker.Max() {
+			return fmt.Errorf("snapshot exceeds maxmemory")
 		}
 		db = ctx.DB
 	}
-	if err := m.host.AfterFullSync(); err != nil {
-		logger.Error().Err(err).Msg("persisting the full resynchronization failed")
+	if err := m.host.CommitFullSync(staging, replay); err != nil {
+		return fmt.Errorf("persisting the full resynchronization failed: %w", err)
 	}
 
 	m.mu.Lock()
