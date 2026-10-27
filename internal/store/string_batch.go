@@ -93,9 +93,19 @@ func (s *Store) SetStringBatch(pairs []StringPair, nx bool) (bool, error) {
 			continue
 		}
 		actual := int64(0)
+		var created map[string]bool
+		notifyNew := s.Notifying(NotifyNew)
 		for _, key := range keys {
 			shard := s.shards[s.shardIndex(key)]
 			entry := NewEntry(values[key])
+			if notifyNew {
+				if previous := shard.data[key]; previous == nil || previous.IsExpired() {
+					if created == nil {
+						created = make(map[string]bool)
+					}
+					created[key] = true
+				}
+			}
 			change, previous := shard.setLocked(key, entry)
 			actual += change
 			if previous != nil && len(previous.Tags) > 0 {
@@ -109,6 +119,15 @@ func (s *Store) SetStringBatch(pairs []StringPair, nx bool) (bool, error) {
 			s.trackMemory(actual)
 		}
 		unlock()
+		if s.Notifying(NotifyString | NotifyNew) {
+			for _, pair := range pairs {
+				if created[pair.Key] {
+					delete(created, pair.Key)
+					s.notifyNew(pair.Key)
+				}
+				s.Notify(NotifyString, "set", pair.Key)
+			}
+		}
 		for _, key := range keys {
 			s.published(key, values[key])
 		}

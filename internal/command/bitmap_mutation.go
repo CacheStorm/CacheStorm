@@ -177,6 +177,8 @@ func bitmapSetBit(ctx *Context, offset int64, bit byte) error {
 	}
 	if !changed {
 		ctx.PropagateAs()
+	} else {
+		ctx.notify(store.NotifyString, "setbit", ctx.ArgString(0))
 	}
 	return ctx.WriteInteger(previous)
 }
@@ -285,6 +287,9 @@ func bitmapBitfield(ctx *Context) error {
 	})
 	if err != nil {
 		return ctx.WriteError(err)
+	}
+	if changed {
+		ctx.notify(store.NotifyString, "setbit", ctx.ArgString(0))
 	}
 	if !changed {
 		ctx.PropagateAs()

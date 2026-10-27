@@ -1300,6 +1300,43 @@ PUBSUB subcommand [argument [argument ...]]
 
 ---
 
+### Keyspace notifications
+With `notify-keyspace-events` set (`CONFIG SET notify-keyspace-events KEA`,
+or `server.notify_keyspace_events` in the YAML file), every change to the
+keyspace is published over Pub/Sub, as in Redis:
+
+- `K`: to `__keyspace@<db>__:<key>`, with the event name as the message;
+- `E`: to `__keyevent@<db>__:<event>`, with the key as the message.
+
+At least one of `K` and `E` must be set, together with the classes to
+publish: `g` generic (`del`, `expire`, `persist`, `rename_from`/`rename_to`,
+`move_from`/`move_to`, `copy_to`, `restore`), `$` strings (`set`, `incrby`,
+`incrbyfloat`, `append`, `setrange`, `setbit`, `pfadd`), `l` lists (`lpush`,
+`rpush`, `lpop`, `rpop`, `linsert`, `lset`, `lrem`, `ltrim`, `sortstore`),
+`s` sets (`sadd`, `srem`, `spop`, `sinterstore`, `sunionstore`, `sdiffstore`),
+`h` hashes (`hset`, `hdel`, `hincrby`, `hincrbyfloat`, `hexpire`, `hpersist`,
+`hexpired`), `z` sorted sets (`zadd`, `zincr`, `zrem`, `zremrangeby*`,
+`zpopmin`/`zpopmax`, `zunionstore`, `zinterstore`, `zdiffstore`,
+`zrangestore`, `georadiusstore`, `geosearchstore`), `t` streams (`xadd`,
+`xtrim`, `xdel`, `xsetid`, `xgroup-*`), `x` expired, `e` evicted, `m` key
+misses of read-only commands (`keymiss`), `n` new keys (`new`), `d` module
+events, and `A` for `g$lshzxetd`. CONFIG GET returns the flags in Redis'
+canonical form (`KEA` reads back as `AKE`); an unknown character is an error.
+
+Event names, order and conditions follow Redis 7.4: a command that changes
+nothing publishes nothing, a container emptied by a command is followed by
+`del`, LMOVE publishes the push on the destination before the pop on the
+source, and MULTI/EXEC and scripts publish as their commands run. `expired`
+fires from lazy and active expiry and `hexpired` from field expiry. A replica
+publishes the events of the writes it applies from its master; it does not
+expire keys itself, so an expired key is announced there as the `del` the
+master sends. Notifications reach this node's subscribers only (also in
+cluster mode, where they are not broadcast over the bus), RESP3 clients get
+them as push messages, and delivery is fire-and-forget like any Pub/Sub
+message. With notifications off (the default) a write pays one atomic load.
+
+---
+
 ## Transaction Commands
 
 ### MULTI

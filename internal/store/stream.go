@@ -522,14 +522,33 @@ func (v *StreamValue) addEntryLocked(args StreamAddArgs, pairs []StreamField, no
 
 // XAdd appends an entry and then applies the trim clause, under one lock.
 func (v *StreamValue) XAdd(args StreamAddArgs, pairs []StreamField, trim StreamTrimArgs, nowMS uint64) (*StreamEntry, error) {
+	entry, _, err := v.XAddTrim(args, pairs, trim, nowMS)
+	return entry, err
+}
+
+// XAddTrim is XAdd that also reports how many entries the trim removed.
+func (v *StreamValue) XAddTrim(args StreamAddArgs, pairs []StreamField, trim StreamTrimArgs, nowMS uint64) (*StreamEntry, int64, error) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	entry, err := v.addEntryLocked(args, pairs, nowMS)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	v.trimLocked(trim)
-	return entry, nil
+	return entry, v.trimLocked(trim), nil
+}
+
+// HasConsumer reports whether the group exists and has the consumer.
+func (v *StreamValue) HasConsumer(groupName, name string) bool {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	g, ok := v.Groups[groupName]
+	if !ok {
+		return false
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	_, ok = g.Consumers[name]
+	return ok
 }
 
 func pairsFromMap(fields map[string][]byte) []StreamField {

@@ -775,6 +775,7 @@ func cmdMIGRATE(ctx *Context) error {
 		for _, key := range moved {
 			if ctx.Store.Delete(key) {
 				delArgs = append(delArgs, []byte(key))
+				ctx.notify(store.NotifyGeneric, "del", key)
 			}
 		}
 		if len(delArgs) > 0 {

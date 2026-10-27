@@ -77,6 +77,8 @@ func cmdSADD(ctx *Context) error {
 	}
 	if added == 0 {
 		ctx.PropagateAs()
+	} else {
+		ctx.notify(store.NotifySet, "sadd", ctx.ArgString(0))
 	}
 	return ctx.WriteInteger(int64(added))
 }
@@ -107,6 +109,9 @@ func cmdSREM(ctx *Context) error {
 	isEmpty := len(set.Members) == 0
 	set.Unlock()
 
+	if removed > 0 {
+		ctx.notify(store.NotifySet, "srem", key)
+	}
 	if isEmpty {
 		deleteIfEmpty(ctx, key, set)
 	}
@@ -221,6 +226,7 @@ func cmdSPOP(ctx *Context) error {
 			set.RemoveMember(member)
 			isEmpty := len(set.Members) == 0
 			set.Unlock()
+			ctx.notify(store.NotifySet, "spop", key)
 			if isEmpty {
 				deleteIfEmpty(ctx, key, set)
 			}
@@ -241,6 +247,9 @@ func cmdSPOP(ctx *Context) error {
 		}
 		set.ClearMembers()
 		set.Unlock()
+		if len(popped) > 0 {
+			ctx.notify(store.NotifySet, "spop", key)
+		}
 		deleteIfEmpty(ctx, key, set)
 		propagateSREM(ctx, key, popped...)
 		return ctx.WriteArray(members)
@@ -259,6 +268,9 @@ func cmdSPOP(ctx *Context) error {
 		i++
 	}
 	set.Unlock()
+	if len(popped) > 0 {
+		ctx.notify(store.NotifySet, "spop", key)
+	}
 
 	propagateSREM(ctx, key, popped...)
 	return ctx.WriteArray(members)
@@ -537,6 +549,7 @@ func cmdSUNIONSTORE(ctx *Context) error {
 
 	if len(result) == 0 {
 		if ctx.Store.Delete(dstKey) {
+			ctx.notify(store.NotifyGeneric, "del", dstKey)
 			ctx.Store.KeyNotifier().NotifyKey(dstKey)
 		} else {
 			ctx.PropagateAs()
@@ -552,6 +565,7 @@ func cmdSUNIONSTORE(ctx *Context) error {
 		ctx.Store.SetOpsRUnlock()
 		return ctx.WriteError(replyErr)
 	}
+	ctx.notify(store.NotifySet, "sunionstore", dstKey)
 
 	reply := int64(int64(len(result)))
 	ctx.Store.SetOpsRUnlock()
@@ -607,6 +621,7 @@ func cmdSINTERSTORE(ctx *Context) error {
 
 	if len(result) == 0 {
 		if ctx.Store.Delete(dstKey) {
+			ctx.notify(store.NotifyGeneric, "del", dstKey)
 			ctx.Store.KeyNotifier().NotifyKey(dstKey)
 		} else {
 			ctx.PropagateAs()
@@ -622,6 +637,7 @@ func cmdSINTERSTORE(ctx *Context) error {
 		ctx.Store.SetOpsRUnlock()
 		return ctx.WriteError(replyErr)
 	}
+	ctx.notify(store.NotifySet, "sinterstore", dstKey)
 
 	reply := int64(int64(len(result)))
 	ctx.Store.SetOpsRUnlock()
@@ -670,6 +686,7 @@ func cmdSDIFFSTORE(ctx *Context) error {
 
 	if len(result) == 0 {
 		if ctx.Store.Delete(dstKey) {
+			ctx.notify(store.NotifyGeneric, "del", dstKey)
 			ctx.Store.KeyNotifier().NotifyKey(dstKey)
 		} else {
 			ctx.PropagateAs()
@@ -685,6 +702,7 @@ func cmdSDIFFSTORE(ctx *Context) error {
 		ctx.Store.SetOpsRUnlock()
 		return ctx.WriteError(replyErr)
 	}
+	ctx.notify(store.NotifySet, "sdiffstore", dstKey)
 
 	reply := int64(int64(len(result)))
 	ctx.Store.SetOpsRUnlock()

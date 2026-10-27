@@ -93,6 +93,9 @@ type ServerConfig struct {
 	// certificate signed by TLSCACertFile, "optional" verifies one when it
 	// is sent, "no" never asks. Empty means "yes" when a CA is configured.
 	TLSAuthClients string `yaml:"tls_auth_clients"`
+	// NotifyKeyspaceEvents is notify-keyspace-events: the classes of
+	// keyspace notifications published over Pub/Sub; empty disables them.
+	NotifyKeyspaceEvents string `yaml:"notify_keyspace_events"`
 }
 
 type HTTPConfig struct {

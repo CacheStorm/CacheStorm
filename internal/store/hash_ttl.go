@@ -353,6 +353,10 @@ func (s *Store) finishHashReap(key string, entry *Entry, fields []string, delete
 	}
 	s.TouchKey(key)
 	GlobalMetrics.RecordHashFieldsExpired(int64(len(fields)))
+	s.Notify(NotifyHash, "hexpired", key)
+	if deleted {
+		s.Notify(NotifyGeneric, "del", key)
+	}
 }
 
 // settleHashFields applies lazy field expiry to the hash h stored in entry

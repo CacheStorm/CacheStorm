@@ -250,6 +250,7 @@ func cmdPFADD(ctx *Context) error {
 		ctx.PropagateAs()
 		return ctx.WriteInteger(0)
 	}
+	ctx.notify(store.NotifyString, "pfadd", ctx.ArgString(0))
 	return ctx.WriteInteger(1)
 }
 
@@ -358,5 +359,6 @@ func cmdPFMERGE(ctx *Context) error {
 	if err != nil {
 		return ctx.WriteError(err)
 	}
+	ctx.notify(store.NotifyString, "pfadd", ctx.ArgString(0))
 	return ctx.WriteOK()
 }

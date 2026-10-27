@@ -34,6 +34,7 @@ func NewDatabases(base *Store, n int) *Databases {
 	}
 	d := &Databases{slots: make([]atomic.Pointer[Store], n)}
 	d.slots[0].Store(base)
+	base.dbIndex.Store(0)
 	return d
 }
 
@@ -66,6 +67,7 @@ func (d *Databases) dbLocked(index int) *Store {
 		return s
 	}
 	s := d.slots[0].Load().newSibling()
+	s.dbIndex.Store(int32(index))
 	if d.expiring {
 		s.StartExpiry()
 	}
@@ -96,6 +98,8 @@ func (d *Databases) Swap(a, b int) error {
 	sa, sb := d.dbLocked(a), d.dbLocked(b)
 	d.slots[a].Store(sb)
 	d.slots[b].Store(sa)
+	sb.dbIndex.Store(int32(a))
+	sa.dbIndex.Store(int32(b))
 	d.mu.Unlock()
 	sa.TouchAllWatched()
 	sb.TouchAllWatched()

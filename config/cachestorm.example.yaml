@@ -45,6 +45,11 @@ server:
   # tls_ca_cert_file: "/etc/cachestorm/tls/ca.crt"
   # tls_auth_clients: "yes"     # yes | optional | no
 
+  # Keyspace notifications (notify-keyspace-events), published over Pub/Sub
+  # to __keyspace@<db>__:<key> and __keyevent@<db>__:<event>.
+  # Flags: K E g $ l s h z x e t m d n A; empty = off.
+  # notify_keyspace_events: "KEA"
+
 # HTTP Admin API
 http:
   enabled: true

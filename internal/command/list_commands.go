@@ -78,7 +78,12 @@ func listPush(ctx *Context, left bool) error {
 	if err != nil {
 		return ctx.WriteError(err)
 	}
+	event := "rpush"
+	if left {
+		event = "lpush"
+	}
 	if created {
+		ctx.notify(store.NotifyList, event, key)
 		return ctx.WriteInteger(int64(argCount))
 	}
 
@@ -98,6 +103,7 @@ func listPush(ctx *Context, left bool) error {
 	length := int64(len(list.Elements))
 	list.Unlock()
 
+	ctx.notify(store.NotifyList, event, key)
 	ctx.Store.KeyNotifier().NotifyKey(key)
 	return ctx.WriteInteger(length)
 }
@@ -133,6 +139,7 @@ func cmdLPUSHX(ctx *Context) error {
 	length := int64(len(list.Elements))
 	list.Unlock()
 
+	ctx.notify(store.NotifyList, "lpush", key)
 	ctx.Store.KeyNotifier().NotifyKey(key)
 	return ctx.WriteInteger(length)
 }
@@ -159,6 +166,7 @@ func cmdRPUSHX(ctx *Context) error {
 	length := int64(len(list.Elements))
 	list.Unlock()
 
+	ctx.notify(store.NotifyList, "rpush", key)
 	ctx.Store.KeyNotifier().NotifyKey(key)
 	return ctx.WriteInteger(length)
 }
@@ -214,6 +222,7 @@ func listPopGeneric(ctx *Context, left bool) error {
 	empty := len(list.Elements) == 0
 	list.Unlock()
 
+	ctx.notify(store.NotifyList, popEvent(left), key)
 	if empty {
 		deleteIfEmpty(ctx, key, list)
 	}
@@ -384,6 +393,7 @@ func cmdLSET(ctx *Context) error {
 
 	list.SetAt(index, value)
 	list.Unlock()
+	ctx.notify(store.NotifyList, "lset", key)
 	return ctx.WriteOK()
 }
 
@@ -448,6 +458,9 @@ func cmdLREM(ctx *Context) error {
 	empty := len(list.Elements) == 0
 	list.Unlock()
 
+	if removed > 0 {
+		ctx.notify(store.NotifyList, "lrem", key)
+	}
 	if empty {
 		deleteIfEmpty(ctx, key, list)
 	}
@@ -504,6 +517,7 @@ func cmdLINSERT(ctx *Context) error {
 	}
 
 	list.ReplaceElements(newElements)
+	ctx.notify(store.NotifyList, "linsert", key)
 	return ctx.WriteInteger(int64(len(list.Elements)))
 }
 
@@ -533,6 +547,7 @@ func cmdLTRIM(ctx *Context) error {
 	length := len(list.Elements)
 	if length == 0 {
 		list.Unlock()
+		ctx.notify(store.NotifyList, "ltrim", key)
 		return ctx.WriteOK()
 	}
 
@@ -552,12 +567,14 @@ func cmdLTRIM(ctx *Context) error {
 	if start > stop || start >= length {
 		list.ReplaceElements(make([][]byte, 0))
 		list.Unlock()
+		ctx.notify(store.NotifyList, "ltrim", key)
 		deleteIfEmpty(ctx, key, list)
 		return ctx.WriteOK()
 	}
 
 	list.Trim(start, stop)
 	list.Unlock()
+	ctx.notify(store.NotifyList, "ltrim", key)
 	return ctx.WriteOK()
 }
 
@@ -744,17 +761,23 @@ func tryListMove(ctx *Context, srcKey, dstKey, whereFrom, whereTo string) ([]byt
 			srcList.PushBack(value)
 		}
 		srcList.Unlock()
+		ctx.notify(store.NotifyList, pushEvent(whereTo == "LEFT"), dstKey)
+		ctx.notify(store.NotifyList, popEvent(whereFrom == "LEFT"), srcKey)
 		return value, true, nil
 	}
 
 	srcEmpty := len(srcList.Elements) == 0
 	srcList.Unlock()
-	if srcEmpty {
-		deleteIfEmpty(ctx, srcKey, srcList)
-	}
+	srcDeleted := srcEmpty && ctx.Store.DeleteIfEmpty(srcKey, srcList)
 
 	if err := pushToList(ctx, dstKey, value, whereTo == "LEFT"); err != nil {
 		return nil, false, err
+	}
+	// Redis pushes onto the destination before it announces the pop.
+	ctx.notify(store.NotifyList, pushEvent(whereTo == "LEFT"), dstKey)
+	ctx.notify(store.NotifyList, popEvent(whereFrom == "LEFT"), srcKey)
+	if srcDeleted {
+		ctx.notify(store.NotifyGeneric, "del", srcKey)
 	}
 	return value, true, nil
 }
@@ -783,6 +806,7 @@ func listPopFirst(ctx *Context, keys []string, left bool) (string, []byte, error
 		}
 		isEmpty := len(list.Elements) == 0
 		list.Unlock()
+		ctx.notify(store.NotifyList, popEvent(left), key)
 		if isEmpty {
 			deleteIfEmpty(ctx, key, list)
 		}
@@ -1074,6 +1098,7 @@ func tryListMPop(ctx *Context, keys []string, dir string, count int) (*resp.Valu
 		}
 		isEmpty := len(list.Elements) == 0
 		list.Unlock()
+		ctx.notify(store.NotifyList, popEvent(dir == "LEFT"), key)
 		if isEmpty {
 			deleteIfEmpty(ctx, key, list)
 		}
@@ -1105,6 +1130,7 @@ func cmdLMPUSH(ctx *Context) error {
 	length := int64(len(list.Elements))
 	list.Unlock()
 
+	ctx.notify(store.NotifyList, "lpush", key)
 	ctx.Store.KeyNotifier().NotifyKey(key)
 	return ctx.WriteInteger(length)
 }
@@ -1137,4 +1163,18 @@ func cmdBLMPOP(ctx *Context) error {
 		}
 	}
 	return ctx.WriteValue(reply)
+}
+
+func pushEvent(left bool) string {
+	if left {
+		return "lpush"
+	}
+	return "rpush"
+}
+
+func popEvent(left bool) string {
+	if left {
+		return "lpop"
+	}
+	return "rpop"
 }

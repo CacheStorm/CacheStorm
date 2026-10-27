@@ -176,6 +176,9 @@ func configValues(ctx *Context) map[string]string {
 		"latency-monitor-threshold": strconv.FormatInt(LatencyThreshold(), 10),
 	}
 	c.mu.RUnlock()
+	if ctx.Store != nil {
+		values["notify-keyspace-events"] = store.FormatNotifyFlags(ctx.Store.NotifyFlags())
+	}
 	if h := configHooksFor(ctx); h != nil && h.Values != nil {
 		for name, value := range h.Values() {
 			values[name] = value
@@ -328,6 +331,14 @@ func cmdConfigSet(ctx *Context) error {
 			SetLatencyThreshold(v)
 		case "activedefrag":
 			c.activedefrag = value == "yes"
+		case "notify-keyspace-events":
+			flags, ok := store.ParseNotifyFlags(value)
+			if !ok {
+				return ctx.WriteError(errors.New("ERR CONFIG SET failed (possibly related to argument 'notify-keyspace-events') - Invalid event class character. Use 'Ag$lshzxeKEtmdn'.")) //nolint:staticcheck // Redis reply text
+			}
+			if ctx.Store != nil {
+				ctx.Store.SetNotifyFlags(flags)
+			}
 		default:
 			return ctx.WriteError(errors.New("ERR Unknown option or number of arguments for CONFIG SET '" + param + "'"))
 		}

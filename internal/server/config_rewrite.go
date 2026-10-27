@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/cachestorm/cachestorm/internal/store"
 )
 
 // rewriteConfig is CONFIG REWRITE: the settings CONFIG SET can change are
@@ -47,6 +49,9 @@ func (s *Server) rewriteConfig() error {
 	setYAML(root, []string{"memory", "eviction_sample_size"}, strconv.Itoa(samples))
 	setYAML(root, []string{"server", "max_connections"}, strconv.FormatInt(s.maxClients.Load(), 10))
 	setYAML(root, []string{"server", "read_timeout"}, idle.String())
+	if events := store.FormatNotifyFlags(s.store.NotifyFlags()); events != "" || s.cfg.Server.NotifyKeyspaceEvents != "" {
+		setYAML(root, []string{"server", "notify_keyspace_events"}, events)
+	}
 	// A password supplied by CACHESTORM_REQUIREPASS stays out of the file;
 	// only one set with CONFIG SET is written.
 	if pass := s.router.RequirePass(); pass != s.cfg.Server.RequirePass {

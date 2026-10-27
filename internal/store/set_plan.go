@@ -198,6 +198,16 @@ func (s *Store) moveSetMember(srcKey, dstKey, member string) (bool, error) {
 			s.trackMemory(actual)
 		}
 		unlock()
+		s.Notify(NotifySet, "srem", srcKey)
+		if srcEmpty {
+			s.Notify(NotifyGeneric, "del", srcKey)
+		}
+		if !live {
+			s.notifyNew(dstKey)
+		}
+		if !duplicate {
+			s.Notify(NotifySet, "sadd", dstKey)
+		}
 		s.TouchKey(srcKey)
 		s.keyNotifier.NotifyKey(srcKey)
 		if !duplicate {

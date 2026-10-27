@@ -61,6 +61,7 @@ func cmdHSET(ctx *Context) error {
 	if err != nil {
 		return ctx.WriteError(err)
 	}
+	ctx.notify(store.NotifyHash, "hset", ctx.ArgString(0))
 	return ctx.WriteInteger(int64(added))
 }
 
@@ -101,6 +102,7 @@ func cmdHMSET(ctx *Context) error {
 	if _, err := applyHashSetFields(ctx, false); err != nil {
 		return ctx.WriteError(err)
 	}
+	ctx.notify(store.NotifyHash, "hset", ctx.ArgString(0))
 	return ctx.WriteOK()
 }
 
@@ -190,6 +192,9 @@ func cmdHDEL(ctx *Context) error {
 	isEmpty := len(hash.Fields) == 0
 	hash.Unlock()
 
+	if deleted > 0 {
+		ctx.notify(store.NotifyHash, "hdel", key)
+	}
 	if isEmpty {
 		deleteIfEmpty(ctx, key, hash)
 	}
@@ -329,6 +334,7 @@ func cmdHINCRBY(ctx *Context) error {
 	if err != nil {
 		return ctx.WriteError(err)
 	}
+	ctx.notify(store.NotifyHash, "hincrby", ctx.ArgString(0))
 	return ctx.WriteInteger(newVal)
 }
 
@@ -425,6 +431,7 @@ func cmdHINCRBYFLOAT(ctx *Context) error {
 	if err != nil {
 		return ctx.WriteError(err)
 	}
+	ctx.notify(store.NotifyHash, "hincrbyfloat", ctx.ArgString(0))
 	return ctx.WriteBulkString(result)
 }
 
@@ -440,6 +447,8 @@ func cmdHSETNX(ctx *Context) error {
 	}
 	if added == 0 {
 		ctx.PropagateAs()
+	} else {
+		ctx.notify(store.NotifyHash, "hset", ctx.ArgString(0))
 	}
 	return ctx.WriteInteger(int64(added))
 }
@@ -631,6 +640,7 @@ func cmdHGETDEL(ctx *Context) error {
 		hash.DeleteField(fields[0])
 		isEmpty := len(hash.Fields) == 0
 		hash.Unlock()
+		ctx.notify(store.NotifyHash, "hdel", key)
 		if isEmpty {
 			deleteIfEmpty(ctx, key, hash)
 		}
@@ -638,16 +648,21 @@ func cmdHGETDEL(ctx *Context) error {
 	}
 
 	results := make([]*resp.Value, 0, len(fields))
+	removed := false
 	for _, field := range fields {
 		if value, exists := hash.Fields[field]; exists {
 			results = append(results, resp.BulkBytes(value))
 			hash.DeleteField(field)
+			removed = true
 		} else {
 			results = append(results, resp.NullValue())
 		}
 	}
 	isEmpty := len(hash.Fields) == 0
 	hash.Unlock()
+	if removed {
+		ctx.notify(store.NotifyHash, "hdel", key)
+	}
 	if isEmpty {
 		deleteIfEmpty(ctx, key, hash)
 	}

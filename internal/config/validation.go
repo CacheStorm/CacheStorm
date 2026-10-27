@@ -26,6 +26,10 @@ func Validate(cfg *Config) error {
 		return fmt.Errorf("replace the placeholder password %q before starting", PlaceholderPassword)
 	}
 
+	if strings.Trim(cfg.Server.NotifyKeyspaceEvents, "Ag$lshzxeKEtmdn") != "" {
+		return fmt.Errorf("invalid notify_keyspace_events %q: use the characters of 'Ag$lshzxeKEtmdn'", cfg.Server.NotifyKeyspaceEvents)
+	}
+
 	if cfg.Server.MaxConnections < 0 {
 		return fmt.Errorf("max_connections cannot be negative")
 	}

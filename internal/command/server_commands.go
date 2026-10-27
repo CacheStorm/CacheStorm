@@ -531,10 +531,12 @@ func expireGeneric(ctx *Context, basetimeMs int64, seconds bool, cmd string) err
 	if when <= time.Now().UnixMilli() && !ctx.Replaying {
 		ctx.Store.Delete(key)
 		ctx.propagateDelete(key)
+		ctx.notify(store.NotifyGeneric, "del", key)
 		return ctx.WriteInteger(1)
 	}
 	if ctx.Store.SetExpiresAt(key, when) {
 		ctx.propagateExpiry(key, when)
+		ctx.notify(store.NotifyGeneric, "expire", key)
 		return ctx.WriteInteger(1)
 	}
 	ctx.PropagateAs()
@@ -601,7 +603,8 @@ func cmdPERSIST(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
-	if ctx.Store.Persist(ctx.ArgString(0)) {
+	if key := ctx.ArgString(0); ctx.Store.Persist(key) {
+		ctx.notify(store.NotifyGeneric, "persist", key)
 		return ctx.WriteInteger(1)
 	}
 	ctx.PropagateAs()
@@ -636,6 +639,8 @@ func cmdRENAME(ctx *Context) error {
 	}
 	if !changed {
 		ctx.PropagateAs()
+	} else {
+		notifyRename(ctx, ctx.ArgString(0), ctx.ArgString(1))
 	}
 	return ctx.WriteOK()
 }
@@ -656,7 +661,13 @@ func cmdRENAMENX(ctx *Context) error {
 		ctx.PropagateAs()
 		return ctx.WriteInteger(0)
 	}
+	notifyRename(ctx, ctx.ArgString(0), ctx.ArgString(1))
 	return ctx.WriteInteger(1)
+}
+
+func notifyRename(ctx *Context, from, to string) {
+	ctx.notify(store.NotifyGeneric, "rename_from", from)
+	ctx.notify(store.NotifyGeneric, "rename_to", to)
 }
 
 func cmdKEYS(ctx *Context) error {
@@ -1008,6 +1019,12 @@ func cmdCLIENT(ctx *Context) error {
 	}
 }
 
+func sortStoreDelete(ctx *Context, key string) {
+	if ctx.Store.Delete(key) {
+		ctx.notify(store.NotifyGeneric, "del", key)
+	}
+}
+
 func cmdSORT(ctx *Context) error {
 	return doSort(ctx, false)
 }
@@ -1153,7 +1170,8 @@ func doSort(ctx *Context, readOnly bool) error {
 	entry, exists := ctx.Store.Get(key)
 	if !exists {
 		if storeKey != "" && !readOnly {
-			ctx.Store.Delete(storeKey)
+			sortStoreDelete(ctx, storeKey)
+			return ctx.WriteInteger(0)
 		}
 		return ctx.WriteArray([]*resp.Value{})
 	}
@@ -1297,7 +1315,7 @@ func doSort(ctx *Context, readOnly bool) error {
 				return ctx.WriteError(errors.New("ERR SORT_RO does not support STORE"))
 			}
 			if len(projected) == 0 {
-				ctx.Store.Delete(storeKey)
+				sortStoreDelete(ctx, storeKey)
 				return ctx.WriteInteger(0)
 			}
 			list := &store.ListValue{Elements: make([][]byte, 0, len(projected))}
@@ -1309,6 +1327,7 @@ func doSort(ctx *Context, readOnly bool) error {
 				list.Elements = append(list.Elements, p.Bulk)
 			}
 			ctx.Store.Set(storeKey, list, store.SetOptions{})
+			ctx.notify(store.NotifyList, "sortstore", storeKey)
 			return ctx.WriteInteger(int64(len(projected)))
 		}
 
@@ -1320,7 +1339,7 @@ func doSort(ctx *Context, readOnly bool) error {
 			return ctx.WriteError(errors.New("ERR SORT_RO does not support STORE"))
 		}
 		if len(elements) == 0 {
-			ctx.Store.Delete(storeKey)
+			sortStoreDelete(ctx, storeKey)
 			return ctx.WriteInteger(0)
 		}
 
@@ -1329,6 +1348,7 @@ func doSort(ctx *Context, readOnly bool) error {
 			list.Elements = append(list.Elements, []byte(elem))
 		}
 		ctx.Store.Set(storeKey, list, store.SetOptions{})
+		ctx.notify(store.NotifyList, "sortstore", storeKey)
 		return ctx.WriteInteger(int64(len(elements)))
 	}
 

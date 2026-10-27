@@ -454,6 +454,9 @@ func (r *Router) executeHandler(ctx *Context, cmd *CommandDef, capture bool) (er
 	db := ctx.DB
 	errsBefore := ctx.Writer.Errors()
 	ctx.writeEffectsHandled = false
+	if ctx.Store != nil && ctx.Store.Notifying(store.NotifyKeyMiss) {
+		notifyKeyMisses(ctx)
+	}
 	err = cmd.Handler(ctx)
 	if auditEnabled() {
 		recordAudit(ctx, err == nil && ctx.Writer.Errors() == errsBefore)

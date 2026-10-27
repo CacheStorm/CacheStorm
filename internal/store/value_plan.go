@@ -54,6 +54,7 @@ func (s *Store) applyValuePlan(key string, options *SetOptions, snapshot *Entry,
 					s.trackMemory(delta)
 					if len(fields) > 0 {
 						GlobalMetrics.RecordHashFieldsExpired(int64(len(fields)))
+						s.Notify(NotifyHash, "hexpired", key)
 					}
 				}
 			}
@@ -186,6 +187,9 @@ func (s *Store) applyValuePlan(key string, options *SetOptions, snapshot *Entry,
 			s.scheduleExpiry(key, entry.ExpiresAt.Load())
 		}
 		unlock()
+		if !live {
+			s.notifyNew(key)
+		}
 		s.published(key, value)
 		return nil
 	}

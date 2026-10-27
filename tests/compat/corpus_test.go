@@ -39,9 +39,10 @@ func corpus() []Case {
 	cs = append(cs, dbCases()...)
 	cs = append(cs, miscCases()...)
 	cs = append(cs, luaCases()...)
+	cs = append(cs, keyspaceEventCases()...)
 	multi := map[string]bool{"transactions/multi-select": true, "transactions/watch-other-db-no-abort": true, "lua/lua-select-isolated": true}
 	for i := range cs {
-		if cs[i].Group == "db" || multi[cs[i].Group+"/"+cs[i].Name] {
+		if cs[i].Group == "db" || cs[i].Group == "keyspace-events" || multi[cs[i].Group+"/"+cs[i].Name] {
 			cs[i].MultiDB = true
 		}
 	}

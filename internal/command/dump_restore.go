@@ -97,6 +97,7 @@ func cmdRESTORE(ctx *Context) error {
 	if ttl > 0 && deadline <= commandNow && !ctx.Replaying {
 		if ctx.Store.Delete(key) {
 			ctx.propagateDelete(key)
+			ctx.notify(store.NotifyGeneric, "del", key)
 		} else {
 			ctx.PropagateAs()
 		}
@@ -124,5 +125,6 @@ func cmdRESTORE(ctx *Context) error {
 		args = append(args, []byte("FREQ"), strconv.AppendInt(nil, freq, 10))
 	}
 	ctx.PropagateAs(ExecutedCommand{Name: "RESTORE", Args: args, DB: ctx.DB})
+	ctx.notify(store.NotifyGeneric, "restore", key)
 	return ctx.WriteOK()
 }

@@ -31,6 +31,7 @@ server:
   tls_key_file: ""              # TLS private key
   tls_ca_cert_file: ""          # CA that signs client (and master) certificates
   tls_auth_clients: ""          # yes | optional | no; empty = yes when a CA is set
+  notify_keyspace_events: ""    # Keyspace notifications (notify-keyspace-events), e.g. "KEA"; empty = off
 
 # HTTP/API Configuration
 http:
@@ -337,6 +338,7 @@ These parameters take effect immediately, for every connected client:
 | `timeout` | Idle client timeout in seconds (`0` = never) |
 | `requirepass` | New password; existing authenticated clients stay authenticated |
 | `slowlog-log-slower-than`, `slowlog-max-len` | Slow log threshold (µs) and size |
+| `notify-keyspace-events` | Keyspace notification classes (`K E g $ l s h z x e t m d n A`); see "Keyspace notifications" in commands-detailed.md |
 
 `port`, `bind`, `databases`, `dir`, `appendonly`, `appendfsync`,
 `protected-mode` and `tcp-keepalive` are reported by `CONFIG GET` but are

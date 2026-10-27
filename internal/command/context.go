@@ -440,3 +440,11 @@ func mapUint(m map[string]interface{}, key string) uint {
 	v, _ := m[key].(uint)
 	return v
 }
+
+// notify publishes a keyspace notification for key in the command's
+// database (see store.Store.Notify).
+func (ctx *Context) notify(class int, event, key string) {
+	if ctx.Store != nil {
+		ctx.Store.Notify(class, event, key)
+	}
+}

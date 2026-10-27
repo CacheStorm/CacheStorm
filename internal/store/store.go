@@ -45,6 +45,7 @@ type Store struct {
 	order         uint64
 	passiveExpiry atomic.Bool
 	loading       atomic.Bool
+	dbIndex       atomic.Int32
 	shards        [NumShards]*Shard
 	tagIndex      *TagIndex
 	pubsub        *PubSub

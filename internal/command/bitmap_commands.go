@@ -349,7 +349,9 @@ func cmdBITOP(ctx *Context) error {
 		maxLen = max(maxLen, len(data))
 	}
 	if maxLen == 0 {
-		ctx.Store.Delete(destKey)
+		if ctx.Store.Delete(destKey) {
+			ctx.notify(store.NotifyGeneric, "del", destKey)
+		}
 		return ctx.WriteInteger(0)
 	}
 	result := make([]byte, maxLen)
@@ -378,6 +380,7 @@ func cmdBITOP(ctx *Context) error {
 	if err := ctx.Store.Set(destKey, &BitmapValue{Data: result}, store.SetOptions{}); err != nil {
 		return ctx.WriteError(err)
 	}
+	ctx.notify(store.NotifyString, "set", destKey)
 	return ctx.WriteInteger(int64(maxLen))
 }
 

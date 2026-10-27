@@ -325,6 +325,11 @@ func New(cfg *config.Config) (result *Server, retErr error) {
 	// Database 0 is s.store; the others are created on first use and share
 	// its Pub/Sub hub, memory tracker and hooks, configured above.
 	s.dbs = store.NewDatabases(s.store, cfg.Server.Databases)
+	notifyFlags, ok := store.ParseNotifyFlags(cfg.Server.NotifyKeyspaceEvents)
+	if !ok {
+		return nil, fmt.Errorf("invalid notify_keyspace_events %q", cfg.Server.NotifyKeyspaceEvents)
+	}
+	s.store.SetNotifyFlags(notifyFlags)
 	s.maxClients.Store(int64(cfg.Server.MaxConnections))
 	s.idleTimeout.Store(int64(cfg.Server.ReadTimeoutDuration()))
 	if cfg.Replication.IsReplica() {

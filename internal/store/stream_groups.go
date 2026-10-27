@@ -303,7 +303,8 @@ func (v *StreamValue) ClaimIDs(groupName, consumerName string, ids []StreamID, a
 		deliveryTS = now
 	}
 
-	var c *Consumer
+	// Redis 7.4 creates the consumer even when nothing is claimed.
+	c := g.consumerLocked(consumerName, now)
 	items := make([]StreamGroupItem, 0, len(ids))
 	for _, id := range ids {
 		key := id.String()
@@ -326,9 +327,6 @@ func (v *StreamValue) ClaimIDs(groupName, consumerName string, ids []StreamID, a
 		}
 		if !created && a.MinIdle > 0 && now-p.DeliveryTS < a.MinIdle {
 			continue
-		}
-		if c == nil {
-			c = g.consumerLocked(consumerName, now)
 		}
 		if created || p.Consumer != consumerName {
 			if !created {
@@ -367,7 +365,7 @@ func (v *StreamValue) AutoClaim(groupName, consumerName string, start StreamID, 
 	pel := g.sortedPendingLocked()
 	i := sort.Search(len(pel), func(i int) bool { return streamIDOf(pel[i].ID).Compare(start) >= 0 })
 	attempts := count * 10
-	var c *Consumer
+	c := g.consumerLocked(consumerName, now)
 	items := []StreamGroupItem{}
 	deleted := []StreamID{}
 	for attempts > 0 && count > 0 && i < len(pel) {
@@ -384,9 +382,6 @@ func (v *StreamValue) AutoClaim(groupName, consumerName string, start StreamID, 
 		}
 		if minIdle > 0 && now-p.DeliveryTS < minIdle {
 			continue
-		}
-		if c == nil {
-			c = g.consumerLocked(consumerName, now)
 		}
 		if p.Consumer != consumerName {
 			if old, exists := g.Consumers[p.Consumer]; exists {

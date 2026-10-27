@@ -57,6 +57,7 @@ func (s *Store) fireEvict(key string, value interface{}) {
 }
 
 func (s *Store) fireExpire(key string, value interface{}) {
+	s.Notify(NotifyExpired, "expired", key)
 	s.hooksMu.RLock()
 	h := s.hooks.OnExpire
 	s.hooksMu.RUnlock()

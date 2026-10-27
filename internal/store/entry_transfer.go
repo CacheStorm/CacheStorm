@@ -137,6 +137,7 @@ func (s *Store) Transfer(srcKey string, dst *Store, dstKey string, options Trans
 		}
 		dst.scheduleExpiry(dstKey, entry.ExpiresAt.Load())
 		unlock()
+		dst.notifyNew(dstKey)
 		if !options.Copy {
 			s.TouchKey(srcKey)
 			s.keyNotifier.NotifyKey(srcKey)

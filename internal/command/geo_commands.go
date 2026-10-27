@@ -216,6 +216,8 @@ options:
 	}
 	if added+changed == 0 {
 		ctx.PropagateAs()
+	} else {
+		ctx.notify(store.NotifyZSet, "zadd", key)
 	}
 
 	if ch {
@@ -1267,6 +1269,7 @@ func publishGeoResult(ctx *Context, key string, value *store.SortedSetValue) err
 	if value == nil || len(value.Members) == 0 {
 		if ctx.Store.Delete(key) {
 			ctx.PropagateAs(ExecutedCommand{Name: "DEL", Args: [][]byte{[]byte(key)}, DB: ctx.DB})
+			ctx.notify(store.NotifyGeneric, "del", key)
 		} else {
 			ctx.PropagateAs()
 		}
@@ -1280,6 +1283,11 @@ func publishGeoResult(ctx *Context, key string, value *store.SortedSetValue) err
 		return ctx.WriteError(err)
 	}
 	ctx.PropagateAs(ExecutedCommand{Name: "RESTORE", Args: [][]byte{[]byte(key), []byte("0"), payload, []byte("REPLACE")}, DB: ctx.DB})
+	if ctx.Command == "GEOSEARCHSTORE" {
+		ctx.notify(store.NotifyZSet, "geosearchstore", key)
+	} else {
+		ctx.notify(store.NotifyZSet, "georadiusstore", key)
+	}
 	return ctx.WriteInteger(int64(len(value.Members)))
 }
 

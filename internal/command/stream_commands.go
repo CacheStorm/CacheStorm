@@ -303,7 +303,7 @@ func cmdXADD(ctx *Context) error {
 		created = true
 	}
 
-	entry, err := stream.XAdd(a.id, pairs, a.trim, uint64(time.Now().UnixMilli()))
+	entry, trimmed, err := stream.XAddTrim(a.id, pairs, a.trim, uint64(time.Now().UnixMilli()))
 	if err != nil {
 		return ctx.WriteError(err)
 	}
@@ -320,13 +320,17 @@ func cmdXADD(ctx *Context) error {
 			if !ok {
 				return ctx.WriteError(store.ErrWrongType)
 			}
-			if entry, err = existing.XAdd(a.id, pairs, a.trim, uint64(time.Now().UnixMilli())); err != nil {
+			if entry, trimmed, err = existing.XAddTrim(a.id, pairs, a.trim, uint64(time.Now().UnixMilli())); err != nil {
 				return ctx.WriteError(err)
 			}
 		}
 	}
 	if !a.id.IDGiven || !a.id.SeqGiven {
 		ctx.Args[idIdx] = []byte(entry.ID)
+	}
+	ctx.notify(store.NotifyStream, "xadd", key)
+	if trimmed > 0 {
+		ctx.notify(store.NotifyStream, "xtrim", key)
 	}
 	ctx.Store.KeyNotifier().NotifyKey(key)
 	return ctx.WriteBulkString(entry.ID)
@@ -565,9 +569,13 @@ parse:
 			if stream == nil {
 				return nil, errNoReadGroup(sp.key, groupName)
 			}
+			knownConsumer := !ctx.Store.Notifying(store.NotifyStream) || stream.HasConsumer(groupName, consumerName)
 			items, served, ok := stream.ReadGroup(groupName, consumerName, !sp.newOnly, sp.gt, count, noack, now)
 			if !ok {
 				return nil, errNoReadGroup(sp.key, groupName)
+			}
+			if !knownConsumer && stream.HasConsumer(groupName, consumerName) {
+				ctx.notify(store.NotifyStream, "xgroup-createconsumer", sp.key)
 			}
 			if served {
 				results = append(results, resp.ArrayValue([]*resp.Value{resp.BulkString(sp.key), streamItemsValue(items, false)}))
@@ -695,7 +703,11 @@ func cmdXDEL(ctx *Context) error {
 		}
 		ids = append(ids, id)
 	}
-	return ctx.WriteInteger(stream.DeleteIDs(ids))
+	deleted := stream.DeleteIDs(ids)
+	if deleted > 0 {
+		ctx.notify(store.NotifyStream, "xdel", ctx.ArgString(0))
+	}
+	return ctx.WriteInteger(deleted)
 }
 
 func cmdXTRIM(ctx *Context) error {
@@ -713,7 +725,11 @@ func cmdXTRIM(ctx *Context) error {
 	if stream == nil {
 		return ctx.WriteInteger(0)
 	}
-	return ctx.WriteInteger(stream.TrimStream(a.trim))
+	trimmed := stream.TrimStream(a.trim)
+	if trimmed > 0 {
+		ctx.notify(store.NotifyStream, "xtrim", ctx.ArgString(0))
+	}
+	return ctx.WriteInteger(trimmed)
 }
 
 const xinfoHelp = `XINFO <subcommand> [<arg> [value] [opt] ...]. Subcommands are:
@@ -1026,6 +1042,7 @@ func cmdXGROUP(ctx *Context) error {
 		if !stream.CreateGroupAt(groupName, id, useLast, entriesRead) {
 			return ctx.WriteError(ErrBusyGroup)
 		}
+		ctx.notify(store.NotifyStream, "xgroup-create", key)
 		return ctx.WriteOK()
 
 	case "SETID":
@@ -1044,10 +1061,12 @@ func cmdXGROUP(ctx *Context) error {
 		if !stream.SetGroupID(groupName, id, useLast, entriesRead) {
 			return ctx.WriteError(errNoConsumerGroup(groupName, key))
 		}
+		ctx.notify(store.NotifyStream, "xgroup-setid", key)
 		return ctx.WriteOK()
 
 	case "DESTROY":
 		if stream.DestroyGroup(groupName) {
+			ctx.notify(store.NotifyStream, "xgroup-destroy", key)
 			ctx.Store.KeyNotifier().NotifyKey(key)
 			return ctx.WriteInteger(1)
 		}
@@ -1059,14 +1078,19 @@ func cmdXGROUP(ctx *Context) error {
 			return ctx.WriteError(errNoConsumerGroup(groupName, key))
 		}
 		if created {
+			ctx.notify(store.NotifyStream, "xgroup-createconsumer", key)
 			return ctx.WriteInteger(1)
 		}
 		return ctx.WriteInteger(0)
 
 	default:
+		existed := stream.HasConsumer(groupName, ctx.ArgString(3))
 		pending, ok := stream.DeleteConsumer(groupName, ctx.ArgString(3))
 		if !ok {
 			return ctx.WriteError(errNoConsumerGroup(groupName, key))
+		}
+		if existed {
+			ctx.notify(store.NotifyStream, "xgroup-delconsumer", key)
 		}
 		return ctx.WriteInteger(pending)
 	}
@@ -1272,9 +1296,13 @@ func cmdXCLAIM(ctx *Context) error {
 		args.DeliveryTS = now
 	}
 
+	knownConsumer := !ctx.Store.Notifying(store.NotifyStream) || stream.HasConsumer(groupName, consumerName)
 	items, ok := stream.ClaimIDs(groupName, consumerName, ids, args, now)
 	if !ok {
 		return ctx.WriteError(errNoGroupFor(key, groupName))
+	}
+	if !knownConsumer && stream.HasConsumer(groupName, consumerName) {
+		ctx.notify(store.NotifyStream, "xgroup-createconsumer", key)
 	}
 	return ctx.WriteValue(streamItemsValue(items, args.JustID))
 }
@@ -1322,9 +1350,13 @@ func cmdXAUTOCLAIM(ctx *Context) error {
 	if stream == nil || !stream.HasGroup(groupName) {
 		return ctx.WriteError(errNoGroupFor(key, groupName))
 	}
+	knownConsumer := !ctx.Store.Notifying(store.NotifyStream) || stream.HasConsumer(groupName, consumerName)
 	next, items, deleted, ok := stream.AutoClaim(groupName, consumerName, start, minIdle, count, justID, time.Now().UnixMilli())
 	if !ok {
 		return ctx.WriteError(errNoGroupFor(key, groupName))
+	}
+	if !knownConsumer && stream.HasConsumer(groupName, consumerName) {
+		ctx.notify(store.NotifyStream, "xgroup-createconsumer", key)
 	}
 	deletedVals := make([]*resp.Value, 0, len(deleted))
 	for _, id := range deleted {
@@ -1385,5 +1417,6 @@ func cmdXSETID(ctx *Context) error {
 	if err := stream.SetID(id, entriesAdded, maxDeleted); err != nil {
 		return ctx.WriteError(err)
 	}
+	ctx.notify(store.NotifyStream, "xsetid", ctx.ArgString(0))
 	return ctx.WriteOK()
 }

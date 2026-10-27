@@ -232,6 +232,11 @@ func hexpireGeneric(ctx *Context, unitMS int64, absolute bool) error {
 	}
 	empty := len(hash.Fields) == 0
 	hash.Unlock()
+	if len(deleted) > 0 {
+		ctx.notify(store.NotifyHash, "hdel", key)
+	} else if len(updated) > 0 {
+		ctx.notify(store.NotifyHash, "hexpire", key)
+	}
 	if empty {
 		deleteIfEmpty(ctx, key, hash)
 	} else if len(updated) > 0 {
@@ -327,6 +332,9 @@ func cmdHPERSIST(ctx *Context) error {
 		}
 	}
 	hash.Unlock()
+	if len(persisted) > 0 {
+		ctx.notify(store.NotifyHash, "hpersist", key)
+	}
 	hfePropagation(ctx, key, nil, 0, nil, persisted)
 	return ctx.WriteArray(results)
 }
@@ -424,6 +432,14 @@ func cmdHGETEX(ctx *Context) error {
 	}
 	empty := len(hash.Fields) == 0
 	hash.Unlock()
+	switch {
+	case len(deleted) > 0:
+		ctx.notify(store.NotifyHash, "hdel", key)
+	case len(updated) > 0:
+		ctx.notify(store.NotifyHash, "hexpire", key)
+	case len(persisted) > 0:
+		ctx.notify(store.NotifyHash, "hpersist", key)
+	}
 	if empty {
 		deleteIfEmpty(ctx, key, hash)
 	} else if len(updated) > 0 {
@@ -527,6 +543,10 @@ parse:
 		ctx.PropagateAs()
 		return ctx.WriteInteger(0)
 	}
+	ctx.notify(store.NotifyHash, "hset", key)
+	if expiryArg != "" {
+		ctx.notify(store.NotifyHash, "hexpire", key)
+	}
 	args := []string{}
 	if opts.KeepTTL {
 		args = append(args, "KEEPTTL")
@@ -556,7 +576,13 @@ func hsetexDelete(ctx *Context, key string, pairs [][]byte, opts store.HashSetEx
 		return false, err
 	}
 	if hash == nil {
-		return !opts.FXX, nil
+		if opts.FXX {
+			return false, nil
+		}
+		ctx.notify(store.NotifyHash, "hset", key)
+		ctx.notify(store.NotifyHash, "hdel", key)
+		ctx.notify(store.NotifyGeneric, "del", key)
+		return true, nil
 	}
 	for i := 0; i < len(pairs); i += 2 {
 		_, exists := hash.Fields[string(pairs[i])]
@@ -570,6 +596,8 @@ func hsetexDelete(ctx *Context, key string, pairs [][]byte, opts store.HashSetEx
 	}
 	empty := len(hash.Fields) == 0
 	hash.Unlock()
+	ctx.notify(store.NotifyHash, "hset", key)
+	ctx.notify(store.NotifyHash, "hdel", key)
 	if empty {
 		deleteIfEmpty(ctx, key, hash)
 	}

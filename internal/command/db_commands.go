@@ -162,6 +162,8 @@ func cmdMOVE(ctx *Context) error {
 		ctx.PropagateAs()
 		return ctx.WriteInteger(0)
 	}
+	ctx.notify(store.NotifyGeneric, "move_from", key)
+	dst.Notify(store.NotifyGeneric, "move_to", key)
 	return ctx.WriteInteger(1)
 }
 
@@ -223,6 +225,7 @@ func cmdCOPY(ctx *Context) error {
 		ctx.PropagateAs()
 		return ctx.WriteInteger(0)
 	}
+	dst.Notify(store.NotifyGeneric, "copy_to", dstKey)
 	return ctx.WriteInteger(1)
 }
 
@@ -249,6 +252,20 @@ func keyspaceInfo(ctx *Context) string {
 	})
 	sb.WriteString("\r\n")
 	return sb.String()
+}
+
+// notifyKeyMisses publishes the keymiss event for every key a read-only
+// command names that does not exist, as Redis' lookupKeyRead does.
+func notifyKeyMisses(ctx *Context) {
+	spec, ok := redisCommandSpecs[ctx.Command]
+	if !ok || !hasFlag(spec.Flags, "readonly") {
+		return
+	}
+	for _, key := range ctx.CommandKeys() {
+		if !ctx.Store.Exists(key) {
+			ctx.notify(store.NotifyKeyMiss, "keymiss", key)
+		}
+	}
 }
 
 // isWriteCommand reports whether Redis flags cmd as a write.

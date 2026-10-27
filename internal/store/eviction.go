@@ -191,6 +191,7 @@ func (ec *EvictionController) evictOne() bool {
 		return false
 	}
 	GlobalMetrics.RecordEviction()
+	ec.store.Notify(NotifyEvicted, "evicted", key)
 
 	ec.onEvictMu.RLock()
 	onEvict := ec.onEvict

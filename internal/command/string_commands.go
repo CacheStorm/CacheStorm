@@ -132,6 +132,9 @@ func setGeneric(ctx *Context, key string, value []byte, flags int, hasExpire boo
 		}
 		ctx.Store.Delete(key)
 		ctx.propagateDelete(key)
+		ctx.notify(store.NotifyString, "set", key)
+		ctx.notify(store.NotifyGeneric, "expire", key)
+		ctx.notify(store.NotifyExpired, "expired", key)
 		return reply()
 	}
 
@@ -148,6 +151,10 @@ func setGeneric(ctx *Context, key string, value []byte, flags int, hasExpire boo
 			return abort()
 		}
 		return ctx.WriteError(err)
+	}
+	ctx.notify(store.NotifyString, "set", key)
+	if hasExpire {
+		ctx.notify(store.NotifyGeneric, "expire", key)
 	}
 	if flags&strOptKEEPTTL != 0 {
 		var exists bool
@@ -187,8 +194,9 @@ func cmdDEL(ctx *Context) error {
 
 	deleted := int64(0)
 	for i := 0; i < ctx.ArgCount(); i++ {
-		if ctx.Store.Delete(ctx.ArgString(i)) {
+		if key := ctx.ArgString(i); ctx.Store.Delete(key) {
 			deleted++
+			ctx.notify(store.NotifyGeneric, "del", key)
 		}
 	}
 
@@ -312,12 +320,14 @@ func incrBy(ctx *Context, incr int64) error {
 		if err := ctx.Store.Set(key, &store.StringValue{Data: []byte(strconv.FormatInt(newVal, 10))}, store.SetOptions{KeepTTL: true}); err != nil {
 			return ctx.WriteError(err)
 		}
+		ctx.notify(store.NotifyString, "incrby", key)
 		return ctx.WriteInteger(newVal)
 	}
 
 	if err := ctx.Store.Set(key, &store.StringValue{Data: []byte(strconv.FormatInt(incr, 10))}, store.SetOptions{}); err != nil {
 		return ctx.WriteError(err)
 	}
+	ctx.notify(store.NotifyString, "incrby", key)
 	return ctx.WriteInteger(incr)
 }
 
@@ -350,6 +360,7 @@ func cmdAPPEND(ctx *Context) error {
 	if err := ctx.Store.Set(key, &store.StringValue{Data: newData}, store.SetOptions{KeepTTL: true}); err != nil {
 		return ctx.WriteError(err)
 	}
+	ctx.notify(store.NotifyString, "append", key)
 	return ctx.WriteInteger(int64(len(newData)))
 }
 
@@ -472,6 +483,7 @@ func cmdSETRANGE(ctx *Context) error {
 	if err := ctx.Store.Set(key, &store.StringValue{Data: data}, store.SetOptions{KeepTTL: true}); err != nil {
 		return ctx.WriteError(err)
 	}
+	ctx.notify(store.NotifyString, "setrange", key)
 	return ctx.WriteInteger(int64(len(data)))
 }
 
@@ -491,6 +503,7 @@ func cmdSETNX(ctx *Context) error {
 		}
 		return ctx.WriteError(err)
 	}
+	ctx.notify(store.NotifyString, "set", key)
 	ctx.propagateSetX(key, value, 0)
 	return ctx.WriteInteger(1)
 }
@@ -562,6 +575,7 @@ func cmdGETSET(ctx *Context) error {
 	if err := ctx.Store.Set(key, &store.StringValue{Data: newValue}, store.SetOptions{}); err != nil {
 		return ctx.WriteError(err)
 	}
+	ctx.notify(store.NotifyString, "set", key)
 	if !exists {
 		return ctx.WriteNullBulkString()
 	}
@@ -589,7 +603,9 @@ func cmdGETDEL(ctx *Context) error {
 	result := make([]byte, len(data))
 	copy(result, data)
 
-	ctx.Store.Delete(key)
+	if ctx.Store.Delete(key) {
+		ctx.notify(store.NotifyGeneric, "del", key)
+	}
 
 	return ctx.WriteBulkBytes(result)
 }
@@ -628,15 +644,18 @@ func cmdGETEX(ctx *Context) error {
 	case expireArg != nil && whenMs <= time.Now().UnixMilli() && !ctx.Replaying:
 		ctx.Store.Delete(key)
 		ctx.propagateDelete(key)
+		ctx.notify(store.NotifyGeneric, "del", key)
 	case expireArg != nil:
 		if ctx.Store.SetExpiresAt(key, whenMs) {
 			ctx.propagateExpiry(key, whenMs)
+			ctx.notify(store.NotifyGeneric, "expire", key)
 		} else {
 			ctx.PropagateAs()
 		}
 	case flags&strOptPERSIST != 0:
 		if ctx.Store.Persist(key) {
 			ctx.PropagateAs(ExecutedCommand{Name: "PERSIST", Args: [][]byte{[]byte(key)}, DB: ctx.DB})
+			ctx.notify(store.NotifyGeneric, "persist", key)
 		} else {
 			ctx.PropagateAs()
 		}
@@ -677,6 +696,7 @@ func cmdINCRBYFLOAT(ctx *Context) error {
 	if err := ctx.Store.Set(key, &store.StringValue{Data: []byte(formatted)}, opts); err != nil {
 		return ctx.WriteError(err)
 	}
+	ctx.notify(store.NotifyString, "incrbyfloat", key)
 	return ctx.WriteBulkString(formatted)
 }
 

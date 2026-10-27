@@ -40,9 +40,12 @@ type Step struct {
 	Tol      int64
 	SendOnly bool
 	RecvOnly bool
-	Sleep    time.Duration
-	Timeout  time.Duration
-	Raw      string
+	// Drain reads frames until a Pub/Sub message on drainChannel arrives
+	// and compares everything read up to it.
+	Drain   bool
+	Sleep   time.Duration
+	Timeout time.Duration
+	Raw     string
 }
 
 type Case struct {
@@ -65,6 +68,10 @@ func scanAllPairs(args ...string) Step   { return Step{Args: args, Norm: NormSca
 func send(conn int, args ...string) Step { return Step{Conn: conn, Args: args, SendOnly: true} }
 func recv(conn int) Step                 { return Step{Conn: conn, RecvOnly: true} }
 func sleep(ms int) Step                  { return Step{Sleep: time.Duration(ms) * time.Millisecond} }
+func drain(conn int) Step                { return Step{Conn: conn, Drain: true} }
+
+// drainChannel marks the end of the frames a Drain step collects.
+const drainChannel = "__compat_drain__"
 
 type Val struct {
 	Kind byte
@@ -491,6 +498,8 @@ func (t *Target) runStep(step Step) Reply {
 		}
 	case step.RecvOnly:
 		r = conn.Recv(timeout)
+	case step.Drain:
+		r = drainFrames(conn, timeout)
 	default:
 		r = conn.Do(timeout, step.Args...)
 	}
@@ -499,6 +508,43 @@ func (t *Target) runStep(step Step) Reply {
 		delete(t.conns, step.Conn)
 	}
 	return r
+}
+
+// drainFrames reads frames until the message published on drainChannel,
+// returning all of them as one reply.
+func drainFrames(conn *Conn, timeout time.Duration) Reply {
+	var raw bytes.Buffer
+	for i := 0; i < 10000; i++ {
+		r := conn.Recv(timeout)
+		raw.Write(r.Raw)
+		if r.Err != "" {
+			return Reply{Raw: raw.Bytes(), Err: r.Err}
+		}
+		if v := r.Val; v != nil && len(v.Arr) == 3 && v.Arr[0].Str == "message" && v.Arr[1].Str == drainChannel {
+			return Reply{Raw: raw.Bytes(), Val: &Val{Kind: '*'}}
+		}
+	}
+	return Reply{Raw: raw.Bytes(), Err: "drain: too many frames"}
+}
+
+// drainDisplay lists the messages a Drain step read, one "channel message"
+// pair per frame.
+func drainDisplay(r Reply) string {
+	rc := &recorder{r: bufio.NewReader(bytes.NewReader(r.Raw))}
+	var parts []string
+	for {
+		v, err := rc.read()
+		if err != nil {
+			break
+		}
+		if n := len(v.Arr); n >= 2 {
+			parts = append(parts, v.Arr[n-2].Str+" "+v.Arr[n-1].Str)
+		}
+	}
+	if r.Err != "" {
+		parts = append(parts, "<"+r.Err+">")
+	}
+	return strings.Join(parts, " | ")
 }
 
 var stateCmds = map[string][]string{
@@ -747,6 +793,9 @@ func stepString(s Step) string {
 	if s.RecvOnly {
 		return prefix + "(read next frame)"
 	}
+	if s.Drain {
+		return prefix + "(read frames up to the " + drainChannel + " message)"
+	}
 	if s.Raw != "" {
 		return prefix + "(raw bytes) " + strconv.Quote(s.Raw)
 	}
@@ -900,7 +949,7 @@ func TestCompat(t *testing.T) {
 	var results []CaseResult
 	for _, cc := range corpus() {
 		full := cc.Group + "/" + cc.Name
-		if filter != "" && !strings.Contains(full, filter) {
+		if filter != "" && !anyFilter(full, filter) {
 			continue
 		}
 		cc := cc
@@ -920,6 +969,10 @@ func TestCompat(t *testing.T) {
 			if !r.Pass() {
 				for _, s := range r.Steps {
 					if !s.Match {
+						if s.Step.Drain {
+							report("%s\n  redis:  %s\n  cstorm: %s", stepString(s.Step), drainDisplay(s.Redis), drainDisplay(s.CS))
+							continue
+						}
 						report("%s\n  redis:  %s\n  cstorm: %s", stepString(s.Step), s.Redis.Display(), s.CS.Display())
 					}
 				}
@@ -943,4 +996,13 @@ func TestCompat(t *testing.T) {
 		}
 	}
 	t.Logf("cases=%d pass=%d fail=%d report=%s", len(results), pass, len(results)-pass, out)
+}
+
+func anyFilter(full, filter string) bool {
+	for _, f := range strings.Split(filter, ",") {
+		if f != "" && strings.Contains(full, f) {
+			return true
+		}
+	}
+	return false
 }

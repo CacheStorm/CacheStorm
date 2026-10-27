@@ -85,7 +85,9 @@ func lockOrCreateSortedSet(ctx *Context, key string) (*store.SortedSetValue, err
 // deleteIfEmpty removes key when it still holds the emptied value v. It is
 // called after v's lock is released.
 func deleteIfEmpty(ctx *Context, key string, v store.Value) {
-	ctx.Store.DeleteIfEmpty(key, v)
+	if ctx.Store.DeleteIfEmpty(key, v) {
+		ctx.notify(store.NotifyGeneric, "del", key)
+	}
 }
 
 // lockOrInstall is lockOrCreate for a writer whose whole effect on a missing

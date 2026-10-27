@@ -98,6 +98,19 @@ func (tw *TimingWheel) addToLevel(level int, key string, expiresAt int64, durati
 	l := tw.levels[level]
 	l.mu.Lock()
 	slot := int(duration / l.tickSize)
+	if level == 0 {
+		// The current level-0 slot is swept on the remaining sweeps until the
+		// pointer advances, and each later slot for one second after that.
+		// The slot is the first one still being swept when the key is due
+		// (one sweep of margin): counting whole seconds from now put a key
+		// due after the pointer's next advance into a slot already passed,
+		// where it waited an hour for the wheel to come round.
+		remaining := time.Duration(int(time.Second/wheelTickInterval)-tw.subtick) * wheelTickInterval
+		slot = 0
+		if duration > remaining-wheelTickInterval {
+			slot = int((duration - remaining + wheelTickInterval + time.Second - 1) / time.Second)
+		}
+	}
 	slot = (l.current + slot) % l.numSlots
 	l.mu.Unlock()
 	if slot < 0 {

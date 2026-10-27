@@ -13,6 +13,9 @@ type PubSub struct {
 	patterns    map[string]map[*Subscriber]struct{}
 	shards      map[string]map[*Subscriber]struct{}
 	subscribers map[*Subscriber]struct{}
+	// notifyFlags holds the notify-keyspace-events classes; every database
+	// sharing the hub shares them.
+	notifyFlags atomic.Int32
 }
 
 // Subscriber is one client's Pub/Sub state: the channels, patterns and shard
