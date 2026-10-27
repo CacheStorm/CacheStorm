@@ -85,7 +85,7 @@ func humanBytes(n int64) string {
 	}
 }
 
-func infoServer(w *infoWriter, st ServerStatus, port int) {
+func infoServer(w *infoWriter, st ServerStatus, port int, mode string) {
 	uptime := int64(time.Since(st.Started) / time.Second)
 	if st.Started.IsZero() {
 		uptime = 0
@@ -98,7 +98,7 @@ func infoServer(w *infoWriter, st ServerStatus, port int) {
 	w.field("redis_version", infoRedisVersion)
 	w.field("redis_git_sha1", "00000000")
 	w.field("redis_git_dirty", "0")
-	w.field("redis_mode", "standalone")
+	w.field("redis_mode", mode)
 	w.field("cachestorm_version", version.Version)
 	w.field("os", runtime.GOOS+" "+runtime.GOARCH)
 	w.field("arch_bits", "64")

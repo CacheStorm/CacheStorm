@@ -62,7 +62,7 @@ A high-performance in-memory data store written in Go. **about 1,200 commands**,
 | **Search** | 12 | Full-text search |
 | **Graph** | 12 | Graph database operations (`GRAPH.QUERY` not implemented) |
 | **Probabilistic** | 20+ | Bloom/Cuckoo filters, Count-Min Sketch |
-| **Distributed** | 100+ | Master-replica replication (cluster mode is not supported) |
+| **Distributed** | 100+ | Master-replica replication; single-node Redis Cluster mode |
 | **Caching** | 50+ | Cache warming, invalidation |
 | **Scheduling** | 40+ | Jobs, cron, timers |
 | **Messaging** | 60+ | Pub/Sub, queues, streams |
@@ -87,7 +87,8 @@ A high-performance in-memory data store written in Go. **about 1,200 commands**,
 - **Transactions**: MULTI/EXEC/DISCARD/WATCH support
 - **Pub/Sub**: Subscribe, Publish, Pattern Subscribe, Sharded Pub/Sub (Redis 7)
 - **Persistence**: AOF with everysec/always sync policies, auto-replay on startup
-- **Replication**: Redis-style master-replica replication (`REPLICAOF`, PSYNC full and partial resync, read-only replicas, `WAIT`). Cluster mode is not supported in this release: `cluster.enabled: true` fails at startup
+- **Replication**: Redis-style master-replica replication (`REPLICAOF`, PSYNC full and partial resync, read-only replicas, `WAIT`)
+- **Cluster mode** (single node): `cluster.enabled: true` serves Redis Cluster clients. It covers the slot table, `nodes.conf`, the `CLUSTER` commands, and the `MOVED`/`ASK`/`CROSSSLOT`/`TRYAGAIN`/`CLUSTERDOWN` redirections. The cluster bus for multi-node clusters is not there yet; see [docs/cluster-design.md](docs/cluster-design.md)
 - **Memory Management**: Configurable maxmemory with LRU/LFU/Random eviction + OOM rejection
 - **Access Control**: ACL support with per-command authentication enforcement
 - **Graceful Shutdown**: Connection draining with configurable timeout
@@ -721,7 +722,7 @@ replication:
   replica_buffer_limit: 67108864  # bytes queued per replica before it is dropped
 
 cluster:
-  enabled: false               # cluster mode is not supported; true fails at startup
+  enabled: false               # true runs a single-node Redis Cluster node
 
 logging:
   level: "info"
@@ -817,7 +818,7 @@ cachestorm/
 │   ├── acl/               # Access control lists
 │   ├── batch/             # Batch processing
 │   ├── buffer/            # Buffer management
-│   ├── cluster/           # Cluster library (not wired: cluster mode is unsupported)
+│   ├── cluster/           # Cluster state: slot table, nodes.conf
 │   ├── command/           # Command handlers (about 1,200 commands)
 │   ├── config/            # Configuration management
 │   ├── graph/             # Graph operations

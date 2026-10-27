@@ -99,16 +99,15 @@ func TestValidateInvalidHTTPPortTooHigh(t *testing.T) {
 	}
 }
 
-// Cover Validate: cluster enabled with invalid bind port
-func TestValidateClusterInvalidBindPort(t *testing.T) {
+// Cover Validate: cluster enabled with invalid bus port
+func TestValidateClusterInvalidBusPort(t *testing.T) {
 	cfg := Default()
 	cfg.Cluster.Enabled = true
-	cfg.Cluster.NodeName = "node1"
-	cfg.Cluster.BindPort = 70000
+	cfg.Cluster.BusPort = 70000
 
 	err := Validate(cfg)
 	if err == nil {
-		t.Error("expected error for invalid cluster bind port")
+		t.Error("expected error for invalid cluster bus port")
 	}
 }
 
@@ -278,11 +277,11 @@ func TestValidateHTTPDisabledInvalidPort(t *testing.T) {
 	}
 }
 
-// Cover Validate: cluster disabled does not validate bind port
-func TestValidateClusterDisabledInvalidBindPort(t *testing.T) {
+// Cover Validate: cluster disabled does not validate the bus port
+func TestValidateClusterDisabledInvalidBusPort(t *testing.T) {
 	cfg := Default()
 	cfg.Cluster.Enabled = false
-	cfg.Cluster.BindPort = 99999
+	cfg.Cluster.BusPort = 99999
 
 	err := Validate(cfg)
 	if err != nil {

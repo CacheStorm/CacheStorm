@@ -120,6 +120,10 @@ type Context struct {
 	// FLUSHALL can reach the others. nil means Store is the only database.
 	DBs *store.Databases
 
+	// ClusterConn is the connection's cluster state (READONLY, ASKING and
+	// the routing of the running command); nil without a connection.
+	ClusterConn *ClusterConn
+
 	// keys caches CommandKeys for keysCmd and keysArgs, which the gate, the
 	// memory accounting and client tracking each need once per command.
 	keys     []string

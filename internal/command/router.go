@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/cachestorm/cachestorm/internal/acl"
+	"github.com/cachestorm/cachestorm/internal/cluster"
 	"github.com/cachestorm/cachestorm/internal/logger"
 	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/search"
@@ -58,6 +59,8 @@ type Router struct {
 	clientHooks      *ClientHooks
 	shutdown         func(ShutdownOptions) error
 	waitAOF          func(int64, int64, time.Duration, <-chan struct{}) (int64, int64, error)
+	// cluster is the cluster state; nil when cluster mode is off.
+	cluster *cluster.Cluster
 }
 
 // commandSpec is the arity, flags and key positions Redis reports for one of
@@ -472,6 +475,10 @@ func (r *Router) postExecHook() func(ctx *Context, cmds []ExecutedCommand) error
 func (r *Router) Execute(ctx *Context) error {
 	ctx.router = r
 	ctx.Command = CanonicalName(ctx.Command)
+	asking := false
+	if r.cluster != nil {
+		asking = ctx.takeAsking()
+	}
 	cmd, ok := r.Get(ctx.Command)
 	if !ok {
 		// Redis refuses to run a transaction once a command failed to queue.
@@ -502,6 +509,12 @@ func (r *Router) Execute(ctx *Context) error {
 	// reply, so the router must stop on the bool and return nil — returning
 	// the error would make the caller write a second reply.
 	if enforceACL(ctx, upperCmd) {
+		return nil
+	}
+
+	// Cluster mode: a command whose keys this node does not serve is
+	// answered with a redirection instead of running or being queued.
+	if r.cluster != nil && r.clusterRedirect(ctx, asking) {
 		return nil
 	}
 
@@ -609,6 +622,9 @@ func (r *Router) ExecuteHTTP(ctx *Context) (interface{}, error) {
 	// surface it.
 	if enforceACL(ctx, upperCmd) {
 		return nil, acl.ErrPermissionDenied
+	}
+	if r.cluster != nil && r.clusterRedirect(ctx, false) {
+		return nil, errors.New("cluster redirection")
 	}
 
 	if overMemoryFor(ctx, ctx.Command) {

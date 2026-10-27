@@ -211,23 +211,44 @@ func TestValidateInvalidLogLevel(t *testing.T) {
 	}
 }
 
-func TestValidateClusterEnabledWithoutNodeName(t *testing.T) {
+func TestValidateClusterEnabledDefaults(t *testing.T) {
 	cfg := Default()
 	cfg.Cluster.Enabled = true
-	cfg.Cluster.NodeName = ""
 
-	if err := Validate(cfg); err == nil {
-		t.Error("expected error for cluster without node name")
+	if err := Validate(cfg); err != nil {
+		t.Errorf("cluster mode with the default settings: %v", err)
 	}
 }
 
-func TestValidateClusterEnabledWithNodeName(t *testing.T) {
+func TestValidateClusterSettings(t *testing.T) {
+	for name, mutate := range map[string]func(*Config){
+		"config file outside data dir": func(c *Config) { c.Cluster.ConfigFile = "../nodes.conf" },
+		"empty config file":            func(c *Config) { c.Cluster.ConfigFile = "" },
+		"node timeout":                 func(c *Config) { c.Cluster.NodeTimeout = 0 },
+		"replica validity factor":      func(c *Config) { c.Cluster.ReplicaValidityFactor = -1 },
+		"announce port":                func(c *Config) { c.Cluster.AnnouncePort = 70000 },
+		"announce bus port":            func(c *Config) { c.Cluster.AnnounceBusPort = -1 },
+		"announce ip":                  func(c *Config) { c.Cluster.AnnounceIP = "not-an-ip" },
+		"port too high for bus":        func(c *Config) { c.Server.Port = 60000 },
+		"replica role": func(c *Config) {
+			c.Replication.Role = "replica"
+			c.Replication.MasterHost = "127.0.0.1"
+			c.Replication.MasterPort = 6379
+		},
+	} {
+		cfg := Default()
+		cfg.Cluster.Enabled = true
+		mutate(cfg)
+		if err := Validate(cfg); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
 	cfg := Default()
 	cfg.Cluster.Enabled = true
-	cfg.Cluster.NodeName = "node1"
-
+	cfg.Server.Port = 60000
+	cfg.Cluster.BusPort = 16000
 	if err := Validate(cfg); err != nil {
-		t.Errorf("unexpected error: %v", err)
+		t.Errorf("explicit bus port: %v", err)
 	}
 }
 

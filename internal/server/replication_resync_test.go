@@ -290,19 +290,24 @@ func TestReplicationBlockingCommandsUnderGate(t *testing.T) {
 	}
 }
 
-func TestClusterModeRefused(t *testing.T) {
-	cfg := replTestConfig(t, func(c *config.Config) {
-		c.Cluster.Enabled = true
-		c.Cluster.NodeName = "n1"
-	})
-	if _, err := New(cfg); err == nil || !strings.Contains(err.Error(), "cluster mode is not supported in this release") {
-		t.Fatalf("New with cluster.enabled: %v", err)
-	}
+func TestClusterCommandsWithoutClusterMode(t *testing.T) {
 	s := startReplServer(t, nil)
 	c := dialRepl(t, s)
-	for _, args := range [][]string{{"CLUSTER", "INFO"}, {"CLUSTER", "NODES"}, {"READONLY"}, {"ASKING"}} {
+	for _, args := range [][]string{{"CLUSTER", "INFO"}, {"CLUSTER", "NODES"}, {"CLUSTER", "HELP"}, {"READONLY"}, {"READWRITE"}, {"ASKING"}} {
 		if got := c.str(args...); got != "ERR:ERR This instance has cluster support disabled" {
 			t.Fatalf("%v: %s", args, got)
 		}
+	}
+	if got := c.str("CLUSTER", "BOGUS"); got != "ERR:ERR unknown subcommand 'BOGUS'. Try CLUSTER HELP." {
+		t.Fatalf("unknown subcommand: %s", got)
+	}
+	if got := c.str("CLUSTER", "INFO", "x"); got != "ERR:ERR wrong number of arguments for 'cluster|info' command" {
+		t.Fatalf("arity: %s", got)
+	}
+	if got := c.info("cluster")["cluster_enabled"]; got != "0" {
+		t.Fatalf("cluster_enabled = %q", got)
+	}
+	if got := c.str("SELECT", "3"); got != "OK" {
+		t.Fatalf("SELECT 3 without cluster mode: %s", got)
 	}
 }

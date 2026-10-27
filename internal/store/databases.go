@@ -159,6 +159,9 @@ func (d *Databases) StopExpiry() {
 // tracker and hooks.
 func (s *Store) newSibling() *Store {
 	n := NewStore()
+	if s.SlotIndexed() {
+		n.EnableSlotIndex()
+	}
 	n.passiveExpiry.Store(s.passiveExpiry.Load())
 	n.loading.Store(s.loading.Load())
 	n.pubsub = s.pubsub

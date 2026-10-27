@@ -47,6 +47,10 @@ type scriptRun struct {
 	// performs are recorded on it, so the AOF and the replicas receive the
 	// script's effects rather than the script.
 	parent *Context
+	// slot is the slot of the keys the script used, plus one; crossSlot
+	// lifts the single-slot rule (allow-cross-slot-keys).
+	slot      int
+	crossSlot bool
 }
 
 func newScriptRun(ctx *Context, e *ScriptEngine, name, chunk string, readOnly bool) *scriptRun {
@@ -64,8 +68,11 @@ func newScriptRun(ctx *Context, e *ScriptEngine, name, chunk string, readOnly bo
 		readOnly: readOnly,
 		name:     name,
 		chunk:    chunk,
+		slot:     ctx.commandSlot(),
 	}
 }
+
+const errNoClusterScript = "ERR Can not run script on cluster, 'no-cluster' flag is set."
 
 // replyError is an error whose text is sent to the client verbatim; Redis'
 // texts are capitalised and some end with a period.
@@ -189,6 +196,9 @@ func (r *scriptRun) call(L *lua.LState) (lua.LValue, bool) {
 	args := make([][]byte, len(argv)-1)
 	for i, a := range argv[1:] {
 		args[i] = []byte(a)
+	}
+	if msg := r.clusterScriptCheck(name, args); msg != "" {
+		return luaErrTable(L, msg), true
 	}
 	if r.ctx.ReplicaReadOnly && name != "PFCOUNT" && (commandHasFlag(name, "write") || r.router.Persisted(name, args)) {
 		return luaErrTable(L, "READONLY You can't write against a read only replica."), true
@@ -433,7 +443,9 @@ func luaCompileError(err error) string {
 
 // scriptShebang holds what a "#!lua" first line declares.
 type scriptShebang struct {
-	noWrites bool
+	noWrites  bool
+	noCluster bool
+	crossSlot bool
 }
 
 // parseScriptShebang strips a Redis 7 "#!lua [flags=...]" first line from an
@@ -464,7 +476,11 @@ func parseScriptShebang(script string) (string, scriptShebang, string) {
 			switch f {
 			case "no-writes":
 				sb.noWrites = true
-			case "", "allow-oom", "allow-stale", "no-cluster", "allow-cross-slot-keys":
+			case "no-cluster":
+				sb.noCluster = true
+			case "allow-cross-slot-keys":
+				sb.crossSlot = true
+			case "", "allow-oom", "allow-stale":
 			default:
 				return "", sb, "ERR Unexpected flag in script shebang: " + f
 			}
@@ -503,7 +519,11 @@ func (e *ScriptEngine) runScript(ctx *Context, script string, keys, args []strin
 	if errMsg != "" {
 		return resp.ErrorValue(errMsg)
 	}
+	if sb.noCluster && ctx.clusterState() != nil {
+		return resp.ErrorValue(errNoClusterScript)
+	}
 	run := newScriptRun(ctx, e, ScriptSHA(script), luaChunkScript, readOnly || sb.noWrites)
+	run.crossSlot = sb.crossSlot
 	L := e.newState(keys, args, run.guard, run)
 	defer L.Close()
 

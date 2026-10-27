@@ -48,11 +48,18 @@ memory:
   pressure_critical: 85         # Memory critical threshold %
   eviction_sample_size: 5       # Sample size for eviction
 
-# Cluster mode is not supported in this release: cluster.enabled: true makes
-# startup fail, and CLUSTER commands answer
-# "ERR This instance has cluster support disabled".
+# Cluster mode (Redis Cluster semantics; see "Cluster mode" below)
 cluster:
   enabled: false
+  config_file: nodes.conf       # relative to persistence.data_dir
+  node_timeout: 15000           # ms, as cluster-node-timeout
+  bus_port: 0                   # 0 = port + 10000
+  announce_ip: ""               # as cluster-announce-ip
+  announce_port: 0              # 0 = the listening port
+  announce_bus_port: 0          # 0 = bus_port
+  require_full_coverage: true   # down while any slot is unassigned
+  allow_reads_when_down: false  # serve reads while the cluster is down
+  replica_validity_factor: 10   # as cluster-replica-validity-factor
 
 # Replication Configuration (master-replica, Redis semantics)
 replication:
@@ -130,6 +137,46 @@ acknowledged write is lost.
 The `sentinel:` section starts CacheStorm's own sentinel role. It is
 experimental: it tracks masters but does not reconfigure servers on
 failover, so it is not a replacement for Redis Sentinel.
+
+### Cluster mode
+
+With `cluster.enabled: true` the server runs as a Redis Cluster node.
+This release covers a single node. The cluster bus, `CLUSTER MEET`,
+replicas and failover are not there yet.
+
+- **Identity and nodes.conf.** On first start the node generates a 40-hex
+  node ID and a shard ID and writes `nodes.conf` in `persistence.data_dir`.
+  This happens whether or not persistence is enabled. The file uses Redis's
+  format, including the `vars currentEpoch N lastVoteEpoch N` line. Every
+  change is written atomically: a temporary file, fsync, rename, then an
+  fsync of the directory. If the file exists at startup, it is loaded; a
+  corrupt file stops startup.
+- **Slots.** Assign slots with `CLUSTER ADDSLOTS`/`ADDSLOTSRANGE`. A single
+  node serving everything needs `CLUSTER ADDSLOTSRANGE 0 16383`. Until every
+  slot is assigned, `cluster_state` is `fail` (unless
+  `require_full_coverage: false`) and keyed commands get `CLUSTERDOWN`.
+- **Routing.** Keys hash with CRC16 modulo 16384 and `{hash tags}`. A keyed
+  command that is not served here gets the reply Redis gives:
+  - `MOVED slot host:port` when another node owns the slot;
+  - `ASK` for a key missing from a migrating slot;
+  - `TRYAGAIN` for a multi-key command that finds only some of its keys
+    during a migration;
+  - `CROSSSLOT` when the keys span slots.
+
+  An importing slot is served only after `ASKING`. The same rules apply to
+  the commands queued in `MULTI` (checked when they are queued and again at
+  `EXEC`), to the declared keys of `EVAL`/`FCALL`, to the keys a script
+  touches, and to `SPUBLISH`/`SSUBSCRIBE`. Commands without keys are never
+  redirected.
+- **Database 0 only.** `SELECT` with another index, `MOVE`, `SWAPDB` and
+  `COPY ... DB n` are refused, as in Redis. A data directory whose snapshot
+  or AOF holds keys in another database does not start in cluster mode.
+  Keys found at startup in a slot no node serves are claimed by this node.
+- `INFO cluster` reports `cluster_enabled:1`. `HELLO` and `INFO server`
+  report the `cluster` mode. go-redis `ClusterClient` and redis-py
+  `RedisCluster` are exercised by `scripts/client-smoke.sh`.
+- `REPLICAOF` is refused in cluster mode, and `replication.role: replica`
+  cannot be combined with it.
 
 ### AOF rewrite
 

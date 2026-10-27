@@ -172,9 +172,6 @@ type Server struct {
 }
 
 func New(cfg *config.Config) (result *Server, retErr error) {
-	if cfg.Cluster.Enabled {
-		return nil, errClusterUnsupported
-	}
 	var lease *persistence.DataDirectoryLock
 	if cfg.Persistence.Enabled {
 		var err error
@@ -205,6 +202,12 @@ func New(cfg *config.Config) (result *Server, retErr error) {
 	s.dataLease = lease
 	if lease != nil {
 		s.dataDirectory = lease.Directory()
+	}
+
+	if cfg.Cluster.Enabled {
+		if err := s.openCluster(); err != nil {
+			return nil, err
+		}
 	}
 
 	s.router.SetFunctionRegistry(command.NewFunctionRegistry(s.store))
@@ -437,6 +440,9 @@ func New(cfg *config.Config) (result *Server, retErr error) {
 	if err := s.configureAOFRewrite(); err != nil {
 		return nil, err
 	}
+	if err := s.verifyClusterData(); err != nil {
+		return nil, err
+	}
 	s.router.SetConfigHooks(s.configHooks())
 	s.runID = newRunID()
 	s.startedAt = time.Now()
@@ -584,6 +590,10 @@ func (s *Server) Start(_ context.Context) (retErr error) {
 
 	s.listener = listener
 	s.router.SetPort(s.ListeningPort())
+	if err := s.announceCluster(); err != nil {
+		listener.Close()
+		return fmt.Errorf("cluster: save nodes.conf: %w", err)
+	}
 
 	// Active expiration: remove expired keys without requiring reads.
 	s.dbs.StartExpiry()

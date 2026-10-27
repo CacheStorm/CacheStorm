@@ -133,6 +133,9 @@ func (m *Manager) cmdREPLICAOF(ctx *command.Context) error {
 	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(fmt.Errorf("ERR wrong number of arguments for '%s' command", strings.ToLower(ctx.Command)))
 	}
+	if ctx.ClusterEnabled() {
+		return ctx.WriteError(errors.New("ERR REPLICAOF not allowed in cluster mode.")) //nolint:staticcheck // Redis reply text
+	}
 	host, portArg := ctx.ArgString(0), ctx.ArgString(1)
 	promote := strings.EqualFold(host, "no") && strings.EqualFold(portArg, "one")
 	port := 0

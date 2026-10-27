@@ -709,8 +709,12 @@ func runFunction(ctx *Context, lib *Library, fn *Function, keys, args []string, 
 	if lib.Loaded {
 		code = libraryBody(code)
 	}
+	if hasFlag(fn.Flags, "no-cluster") && ctx.clusterState() != nil {
+		return resp.ErrorValue(errNoClusterScript)
+	}
 	engine := NewScriptEngine(ctx.Store)
 	run := newScriptRun(ctx, engine, fn.Name, luaChunkFunction, readOnly || hasFlag(fn.Flags, "no-writes"))
+	run.crossSlot = hasFlag(fn.Flags, "allow-cross-slot-keys")
 	L := engine.newState(keys, args, run.guard, run)
 	defer L.Close()
 

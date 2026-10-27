@@ -135,6 +135,8 @@ func str(v *resp.Value) string {
 		return "[" + strings.Join(parts, " ") + "]"
 	case resp.TypeNull:
 		return "<null>"
+	case resp.TypeVerbatim:
+		return string(v.Bulk)
 	}
 	return fmt.Sprintf("%#v", v)
 }

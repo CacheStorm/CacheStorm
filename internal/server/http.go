@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/cachestorm/cachestorm/internal/acl"
+	"github.com/cachestorm/cachestorm/internal/cluster"
 	"github.com/cachestorm/cachestorm/internal/command"
 	"github.com/cachestorm/cachestorm/internal/logger"
 	"github.com/cachestorm/cachestorm/internal/store"
@@ -889,11 +890,35 @@ func (h *HTTPServer) handleInvalidate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *HTTPServer) handleCluster(w http.ResponseWriter, _ *http.Request) {
-	h.writeError(w, http.StatusNotImplemented, errClusterUnsupported.Error())
+	var c *cluster.Cluster
+	if h.srv != nil {
+		c = h.srv.router.Cluster()
+	}
+	if c == nil {
+		h.writeError(w, http.StatusNotImplemented, errClusterDisabled.Error())
+		return
+	}
+	info := map[string]string{}
+	for _, line := range strings.Split(c.Info(), "\r\n") {
+		if k, v, ok := strings.Cut(line, ":"); ok {
+			info[k] = v
+		}
+	}
+	h.writeJSON(w, http.StatusOK, map[string]interface{}{
+		"enabled":  true,
+		"id":       c.MyID(),
+		"shard_id": c.MyShardID(),
+		"info":     info,
+		"nodes":    strings.Split(strings.TrimSuffix(c.Nodes(), "\n"), "\n"),
+	})
 }
 
 func (h *HTTPServer) handleClusterJoin(w http.ResponseWriter, _ *http.Request) {
-	h.writeError(w, http.StatusNotImplemented, errClusterUnsupported.Error())
+	if h.srv == nil || h.srv.router.Cluster() == nil {
+		h.writeError(w, http.StatusNotImplemented, errClusterDisabled.Error())
+		return
+	}
+	h.writeError(w, http.StatusNotImplemented, "joining a cluster needs the cluster bus (CLUSTER MEET), which this release does not have yet")
 }
 
 // httpDangerousCommands are blocked from execution via the HTTP API

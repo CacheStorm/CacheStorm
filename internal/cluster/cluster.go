@@ -1,288 +1,837 @@
+// Package cluster holds the Redis Cluster state of a node: its identity, the
+// known nodes, the owner of each of the 16384 hash slots with the slots being
+// migrated or imported, the epochs, and the nodes.conf file they persist to.
 package cluster
 
 import (
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"sort"
 	"strconv"
+	"strings"
 	"sync"
-	"time"
+
+	"github.com/cachestorm/cachestorm/internal/hashslot"
+	"github.com/cachestorm/cachestorm/internal/logger"
+	"github.com/cachestorm/cachestorm/internal/persistence"
 )
 
-type NodeRole int
+// Slots is the number of hash slots.
+const Slots = hashslot.Count
+
+// IDLen is the length of a node or shard ID: 40 hex characters.
+const IDLen = 40
+
+// Flags are the node flags CLUSTER NODES reports.
+type Flags uint16
 
 const (
-	RolePrimary NodeRole = iota
-	RoleReplica
+	FlagMyself Flags = 1 << iota
+	FlagMaster
+	FlagSlave
+	FlagPFail
+	FlagFail
+	FlagHandshake
+	FlagNoAddr
+	FlagNoFailover
 )
 
-type NodeState int
-
-const (
-	NodeStateJoining NodeState = iota
-	NodeStateOnline
-	NodeStateFailed
-	NodeStateLeaving
-)
-
-type SlotRange struct {
-	Start uint16
-	End   uint16
+var flagNames = []struct {
+	flag Flags
+	name string
+}{
+	{FlagMyself, "myself"},
+	{FlagMaster, "master"},
+	{FlagSlave, "slave"},
+	{FlagPFail, "fail?"},
+	{FlagFail, "fail"},
+	{FlagHandshake, "handshake"},
+	{FlagNoAddr, "noaddr"},
+	{FlagNoFailover, "nofailover"},
 }
 
-type Node struct {
-	ID         string
-	Addr       string
-	Port       int
-	GossipPort int
-	Role       NodeRole
-	Slots      []SlotRange
-	ReplicaOf  string
-	State      NodeState
-	LastSeen   time.Time
-}
-
-type SlotInfo struct {
-	Primary  *Node
-	Replicas []*Node
-}
-
-type Cluster struct {
-	mu      sync.RWMutex
-	self    *Node
-	nodes   map[string]*Node
-	slots   [16384]*SlotInfo
-	enabled bool
-	seeds   []string
-	stopCh  chan struct{}
-	wg      sync.WaitGroup
-}
-
-func New(nodeID, addr string, port, gossipPort int, seeds []string) *Cluster {
-	c := &Cluster{
-		self: &Node{
-			ID:         nodeID,
-			Addr:       addr,
-			Port:       port,
-			GossipPort: gossipPort,
-			Role:       RolePrimary,
-			State:      NodeStateJoining,
-		},
-		nodes:  make(map[string]*Node),
-		seeds:  seeds,
-		stopCh: make(chan struct{}),
+func (f Flags) String() string {
+	var parts []string
+	for _, fn := range flagNames {
+		if f&fn.flag != 0 {
+			parts = append(parts, fn.name)
+		}
 	}
-	c.nodes[nodeID] = c.self
+	if len(parts) == 0 {
+		return "noflags"
+	}
+	return strings.Join(parts, ",")
+}
+
+// Node is a cluster node as this node knows it.
+type Node struct {
+	ID          string
+	IP          string
+	Port        int
+	CPort       int
+	TLSPort     int
+	Hostname    string
+	ShardID     string
+	Flags       Flags
+	MasterID    string
+	PingSent    int64
+	PongRecv    int64
+	ConfigEpoch uint64
+	numSlots    int
+}
+
+func (n *Node) failing() bool { return n.Flags&(FlagFail|FlagPFail) != 0 }
+func (n *Node) replica() bool { return n.Flags&FlagSlave != 0 }
+
+// Addr is the client-facing address of a node.
+type Addr struct {
+	ID   string
+	IP   string
+	Port int
+}
+
+// Endpoint is the host:port a redirection names.
+func (a Addr) Endpoint() string {
+	return a.IP + ":" + strconv.Itoa(a.Port)
+}
+
+func (n *Node) addr() Addr { return Addr{ID: n.ID, IP: n.IP, Port: n.Port} }
+
+// Options are the cluster settings of the node.
+type Options struct {
+	RequireFullCoverage bool
+	AllowReadsWhenDown  bool
+}
+
+// Cluster is the cluster state of this node.
+type Cluster struct {
+	mu            sync.RWMutex
+	saveMu        sync.Mutex
+	path          string
+	opts          Options
+	myself        *Node
+	nodes         map[string]*Node
+	owner         [Slots]*Node
+	migrating     [Slots]*Node
+	importing     [Slots]*Node
+	currentEpoch  uint64
+	lastVoteEpoch uint64
+	ok            bool
+	size          int
+}
+
+// NewID returns a random 40-character hex node ID.
+func NewID() string {
+	var b [IDLen / 2]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		panic(err)
+	}
+	return hex.EncodeToString(b[:])
+}
+
+// ValidID reports whether id has the node ID format.
+func ValidID(id string) bool {
+	if len(id) != IDLen {
+		return false
+	}
+	for i := 0; i < len(id); i++ {
+		c := id[i]
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') && (c < 'A' || c > 'F') {
+			return false
+		}
+	}
+	return true
+}
+
+// New returns the state of a fresh node: a new identity, no slots, no
+// other nodes. path is where Save writes nodes.conf; empty disables saving.
+func New(path string, opts Options) *Cluster {
+	c := &Cluster{path: path, opts: opts, nodes: make(map[string]*Node)}
+	c.myself = &Node{ID: NewID(), ShardID: NewID(), Flags: FlagMyself | FlagMaster}
+	c.nodes[c.myself.ID] = c.myself
+	c.updateStateLocked()
 	return c
 }
 
-func (c *Cluster) Start() error {
+// Open loads the nodes.conf at path, or creates a fresh node and saves it
+// there when the file does not exist. created reports the latter.
+func Open(path string, opts Options) (c *Cluster, created bool, err error) {
+	data, err := readFile(path)
+	if err != nil {
+		return nil, false, err
+	}
+	if data == nil {
+		c = New(path, opts)
+		err = c.Save()
+		return c, true, err
+	}
+	c, err = Parse(string(data))
+	if err != nil {
+		return nil, false, fmt.Errorf("cluster config %s: %w", path, err)
+	}
+	c.path, c.opts = path, opts
 	c.mu.Lock()
-	c.enabled = true
+	c.updateStateLocked()
 	c.mu.Unlock()
+	return c, false, nil
+}
+
+// Path returns the nodes.conf path.
+func (c *Cluster) Path() string { return c.path }
+
+// MyID returns this node's ID.
+func (c *Cluster) MyID() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.myself.ID
+}
+
+// MyShardID returns the shard ID of this node.
+func (c *Cluster) MyShardID() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.myself.ShardID
+}
+
+// SetMyself sets the address this node announces. An empty ip keeps the one
+// already known.
+func (c *Cluster) SetMyself(ip string, port, cport, tlsPort int, hostname string) {
+	c.mu.Lock()
+	if ip != "" {
+		c.myself.IP = ip
+	}
+	c.myself.Port, c.myself.CPort, c.myself.TLSPort = port, cport, tlsPort
+	c.myself.Hostname = hostname
+	c.mu.Unlock()
+}
+
+// SlotState is what routing needs to know about one slot.
+type SlotState struct {
+	// Assigned reports that some node serves the slot; Owner is that node.
+	Assigned bool
+	Owner    Addr
+	// Mine reports that this node serves the slot.
+	Mine bool
+	// Migrating is the target the slot is migrating to, when MigratingSet.
+	MigratingSet bool
+	Migrating    Addr
+	// Importing reports that this node imports the slot.
+	Importing bool
+	// Healthy reports that the cluster state is ok.
+	Healthy bool
+	// AllowReadsWhenDown mirrors the option of the same name.
+	AllowReadsWhenDown bool
+}
+
+// Slot returns the routing state of slot.
+func (c *Cluster) Slot(slot int) SlotState {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	st := SlotState{Healthy: c.ok, AllowReadsWhenDown: c.opts.AllowReadsWhenDown}
+	if n := c.owner[slot]; n != nil {
+		st.Assigned, st.Owner, st.Mine = true, n.addr(), n == c.myself
+	}
+	if n := c.migrating[slot]; n != nil && st.Mine {
+		st.MigratingSet, st.Migrating = true, n.addr()
+	}
+	st.Importing = c.importing[slot] != nil
+	return st
+}
+
+// Healthy reports whether the cluster state is ok.
+func (c *Cluster) Healthy() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.ok
+}
+
+func (c *Cluster) updateStateLocked() {
+	ok := true
+	if c.opts.RequireFullCoverage {
+		for _, n := range &c.owner {
+			if n == nil || n.Flags&FlagFail != 0 {
+				ok = false
+				break
+			}
+		}
+	}
+	size, reachable := 0, 0
+	for _, n := range c.nodes {
+		if n.Flags&FlagMaster != 0 && n.numSlots > 0 {
+			size++
+			if !n.failing() {
+				reachable++
+			}
+		}
+	}
+	if reachable < size/2+1 {
+		ok = false
+	}
+	c.ok, c.size = ok, size
+}
+
+func (c *Cluster) addSlotLocked(n *Node, slot int) {
+	if c.owner[slot] != nil {
+		c.owner[slot].numSlots--
+	}
+	c.owner[slot] = n
+	n.numSlots++
+}
+
+func (c *Cluster) delSlotLocked(slot int) {
+	if n := c.owner[slot]; n != nil {
+		n.numSlots--
+		c.owner[slot] = nil
+	}
+}
+
+// SlotRange is an inclusive range of slots.
+type SlotRange struct{ Start, End int }
+
+// checkAssignments is Redis' checkSlotAssignmentsOrReply.
+func (c *Cluster) checkAssignmentsLocked(seen []bool, del bool, r SlotRange) error {
+	for slot := r.Start; slot <= r.End; slot++ {
+		if del && c.owner[slot] == nil {
+			return fmt.Errorf("ERR Slot %d is already unassigned", slot)
+		}
+		if !del && c.owner[slot] != nil {
+			return fmt.Errorf("ERR Slot %d is already busy", slot)
+		}
+		if seen[slot] {
+			return fmt.Errorf("ERR Slot %d specified multiple times", slot)
+		}
+		seen[slot] = true
+	}
 	return nil
 }
 
-func (c *Cluster) Stop() {
-	c.mu.Lock()
-	c.enabled = false
-	c.mu.Unlock()
-	close(c.stopCh)
-	c.wg.Wait()
-}
-
-func (c *Cluster) IsEnabled() bool {
+// CheckSlots validates one range of an ADDSLOTS (del false) or DELSLOTS
+// call, with seen holding the slots the call named before.
+func (c *Cluster) CheckSlots(seen []bool, del bool, r SlotRange) error {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.enabled
+	return c.checkAssignmentsLocked(seen, del, r)
 }
 
-func (c *Cluster) GetNode(id string) *Node {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.nodes[id]
+// AddSlots assigns the slots of ranges to this node (ADDSLOTS, ADDSLOTSRANGE).
+// Nothing changes when a slot is busy or given twice.
+func (c *Cluster) AddSlots(ranges []SlotRange) error {
+	return c.updateSlots(ranges, false)
 }
 
-func (c *Cluster) GetNodes() []*Node {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	nodes := make([]*Node, 0, len(c.nodes))
-	for _, n := range c.nodes {
-		nodes = append(nodes, n)
-	}
-	return nodes
+// DelSlots unassigns the slots of ranges (DELSLOTS, DELSLOTSRANGE).
+func (c *Cluster) DelSlots(ranges []SlotRange) error {
+	return c.updateSlots(ranges, true)
 }
 
-func (c *Cluster) AddNode(n *Node) {
+func (c *Cluster) updateSlots(ranges []SlotRange, del bool) error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.nodes[n.ID] = n
-}
-
-func (c *Cluster) RemoveNode(id string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	delete(c.nodes, id)
-	for slot, info := range &c.slots {
-		if info != nil && info.Primary != nil && info.Primary.ID == id {
-			c.slots[slot] = nil
+	seen := make([]bool, Slots)
+	for _, r := range ranges {
+		if err := c.checkAssignmentsLocked(seen, del, r); err != nil {
+			c.mu.Unlock()
+			return err
 		}
 	}
-}
-
-func (c *Cluster) Self() *Node {
-	return c.self
-}
-
-func (c *Cluster) NodeCount() int {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return len(c.nodes)
-}
-
-func (c *Cluster) AssignSlots(slots []SlotRange) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	// SlotRange.Start/End are uint16 (0..65535) but c.slots is [NumSlots]*SlotInfo
-	// (NumSlots = 16384). An out-of-range bound indexes past the array and panics;
-	// worse, because the loop counter `i` is itself uint16, an End of MaxUint16
-	// would wrap it back to 0 and spin forever rather than even panic. Filter the
-	// unusable ranges out first so c.self.Slots and the slot map stay consistent.
-	valid := make([]SlotRange, 0, len(slots))
-	for _, sr := range slots {
-		if sr.Start > sr.End || int(sr.Start) >= NumSlots || int(sr.End) >= NumSlots {
+	for slot, set := range seen {
+		if !set {
 			continue
 		}
-		valid = append(valid, sr)
-	}
-	c.self.Slots = valid
-
-	for _, sr := range valid {
-		for i := sr.Start; i <= sr.End; i++ {
-			c.slots[i] = &SlotInfo{Primary: c.self}
+		c.importing[slot] = nil
+		if del {
+			c.delSlotLocked(slot)
+		} else {
+			c.addSlotLocked(c.myself, slot)
 		}
 	}
+	c.updateStateLocked()
+	c.mu.Unlock()
+	c.persist()
+	return nil
 }
 
-func (c *Cluster) GetSlotOwner(slot uint16) *Node {
-	// slot is uint16 (0..65535) but c.slots is [NumSlots]*SlotInfo (16384), so an
-	// out-of-range slot would index past the array and panic.
-	if int(slot) >= NumSlots {
-		return nil
+// FlushSlots unassigns every slot this node serves.
+func (c *Cluster) FlushSlots() {
+	c.mu.Lock()
+	for slot, n := range &c.owner {
+		if n == c.myself {
+			c.delSlotLocked(slot)
+		}
 	}
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	if c.slots[slot] == nil {
-		return nil
-	}
-	return c.slots[slot].Primary
+	c.updateStateLocked()
+	c.mu.Unlock()
+	c.persist()
 }
 
-func (c *Cluster) BalanceSlots() {
+// ClaimSlot makes this node serve slot when nobody does, or marks it as
+// importing from its owner, the way Redis treats keys it finds at startup
+// in a slot it does not serve.
+func (c *Cluster) ClaimSlot(slot int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-
-	primaries := make([]*Node, 0, len(c.nodes))
-	for _, node := range c.nodes {
-		if node.Role == RolePrimary {
-			primaries = append(primaries, node)
-		} else {
-			node.Slots = nil
-		}
+	switch n := c.owner[slot]; {
+	case n == c.myself || c.importing[slot] != nil:
+	case n == nil:
+		logger.Warn().Int("slot", slot).Msg("cluster: I have keys for an unassigned slot, taking responsibility for it")
+		c.addSlotLocked(c.myself, slot)
+	default:
+		logger.Warn().Int("slot", slot).Str("owner", n.ID).Msg("cluster: I have keys for a slot served by another node, setting it to importing")
+		c.importing[slot] = n
 	}
-	c.slots = [NumSlots]*SlotInfo{}
-	nodeCount := len(primaries)
-	if nodeCount == 0 {
-		return
-	}
-
-	slotsPerNode := 16384 / nodeCount
-	remainder := 16384 % nodeCount
-
-	i := 0
-	for _, node := range primaries {
-		count := slotsPerNode
-		if remainder > 0 {
-			count++
-			remainder--
-		}
-
-		start := uint16(i)
-		end := uint16(i + count - 1)
-		node.Slots = []SlotRange{{Start: start, End: end}}
-
-		for j := start; j <= end; j++ {
-			c.slots[j] = &SlotInfo{Primary: node}
-		}
-
-		i += count
-	}
+	c.updateStateLocked()
 }
 
-func (c *Cluster) GetClusterInfo() map[string]interface{} {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+func (c *Cluster) lookupMasterLocked(id string, unknown string) (*Node, error) {
+	n := c.nodes[id]
+	if n == nil {
+		return nil, fmt.Errorf(unknown, id)
+	}
+	if n.replica() {
+		return nil, errors.New("ERR Target node is not a master")
+	}
+	return n, nil
+}
 
-	okNodes := 0
-	for _, n := range c.nodes {
-		if n.State == NodeStateOnline {
-			okNodes++
+// SetSlot implements CLUSTER SETSLOT slot MIGRATING|IMPORTING|NODE|STABLE.
+// keysInSlot counts the keys this node holds in a slot.
+func (c *Cluster) SetSlot(slot int, action, nodeID string, keysInSlot func(int) int) error {
+	c.mu.Lock()
+	if c.myself.replica() {
+		c.mu.Unlock()
+		return errors.New("ERR Please use SETSLOT only with masters.") //nolint:staticcheck // Redis reply text
+	}
+	var err error
+	switch action {
+	case "MIGRATING":
+		if c.owner[slot] != c.myself {
+			err = fmt.Errorf("ERR I'm not the owner of hash slot %d", slot)
+			break
+		}
+		var n *Node
+		if n, err = c.lookupMasterLocked(nodeID, "ERR I don't know about node %s"); err == nil {
+			c.migrating[slot] = n
+		}
+	case "IMPORTING":
+		if c.owner[slot] == c.myself {
+			err = fmt.Errorf("ERR I'm already the owner of hash slot %d", slot)
+			break
+		}
+		var n *Node
+		if n, err = c.lookupMasterLocked(nodeID, "ERR I don't know about node %s"); err == nil {
+			c.importing[slot] = n
+		}
+	case "STABLE":
+		c.importing[slot], c.migrating[slot] = nil, nil
+	case "NODE":
+		var n *Node
+		if n, err = c.lookupMasterLocked(nodeID, "ERR Unknown node %s"); err != nil {
+			break
+		}
+		keys := keysInSlot(slot)
+		if c.owner[slot] == c.myself && n != c.myself && keys != 0 {
+			err = fmt.Errorf("ERR Can't assign hashslot %d to a different node while I still hold keys for this hash slot.", slot) //nolint:staticcheck // Redis reply text
+			break
+		}
+		if keys == 0 {
+			c.migrating[slot] = nil
+		}
+		c.delSlotLocked(slot)
+		c.addSlotLocked(n, slot)
+		if n == c.myself && c.importing[slot] != nil {
+			c.bumpEpochLocked()
+			c.importing[slot] = nil
 		}
 	}
+	if err != nil {
+		c.mu.Unlock()
+		return err
+	}
+	c.updateStateLocked()
+	c.mu.Unlock()
+	c.persist()
+	return nil
+}
 
+func (c *Cluster) maxEpochLocked() uint64 {
+	max := c.currentEpoch
+	for _, n := range c.nodes {
+		if n.ConfigEpoch > max {
+			max = n.ConfigEpoch
+		}
+	}
+	return max
+}
+
+// bumpEpochLocked is clusterBumpConfigEpochWithoutConsensus.
+func (c *Cluster) bumpEpochLocked() bool {
+	if c.myself.ConfigEpoch == 0 || c.myself.ConfigEpoch != c.maxEpochLocked() {
+		c.currentEpoch++
+		c.myself.ConfigEpoch = c.currentEpoch
+		return true
+	}
+	return false
+}
+
+// BumpEpoch implements CLUSTER BUMPEPOCH: it reports whether the config
+// epoch changed and the epoch this node now has.
+func (c *Cluster) BumpEpoch() (bool, uint64) {
+	c.mu.Lock()
+	bumped := c.bumpEpochLocked()
+	epoch := c.myself.ConfigEpoch
+	c.mu.Unlock()
+	if bumped {
+		c.persist()
+	}
+	return bumped, epoch
+}
+
+// SetConfigEpoch implements CLUSTER SET-CONFIG-EPOCH.
+func (c *Cluster) SetConfigEpoch(epoch int64) error {
+	c.mu.Lock()
+	switch {
+	case epoch < 0:
+		c.mu.Unlock()
+		return fmt.Errorf("ERR Invalid config epoch specified: %d", epoch)
+	case len(c.nodes) > 1:
+		c.mu.Unlock()
+		return errors.New("ERR The user can assign a config epoch only when the node does not know any other node.") //nolint:staticcheck // Redis reply text
+	case c.myself.ConfigEpoch != 0:
+		c.mu.Unlock()
+		return errors.New("ERR Node config epoch is already non-zero")
+	}
+	c.myself.ConfigEpoch = uint64(epoch)
+	if c.currentEpoch < uint64(epoch) {
+		c.currentEpoch = uint64(epoch)
+	}
+	c.updateStateLocked()
+	c.mu.Unlock()
+	c.persist()
+	return nil
+}
+
+// Reset implements CLUSTER RESET: this node becomes a master serving no
+// slots and forgets every other node; a hard reset also zeroes the epochs and
+// takes a new node ID.
+func (c *Cluster) Reset(hard bool) {
+	c.mu.Lock()
+	c.myself.Flags = c.myself.Flags&^FlagSlave | FlagMaster
+	c.myself.MasterID = ""
+	for slot := range c.owner {
+		c.migrating[slot], c.importing[slot] = nil, nil
+		c.delSlotLocked(slot)
+	}
+	for id := range c.nodes {
+		if id != c.myself.ID {
+			delete(c.nodes, id)
+		}
+	}
+	if hard {
+		c.currentEpoch, c.lastVoteEpoch, c.myself.ConfigEpoch = 0, 0, 0
+		delete(c.nodes, c.myself.ID)
+		c.myself.ID, c.myself.ShardID = NewID(), NewID()
+		c.nodes[c.myself.ID] = c.myself
+	}
+	c.updateStateLocked()
+	c.mu.Unlock()
+	c.persist()
+}
+
+// IsReplica reports whether this node is a replica.
+func (c *Cluster) IsReplica() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.myself.replica()
+}
+
+// CountFailureReports implements CLUSTER COUNT-FAILURE-REPORTS. Failure
+// reports travel on the cluster bus, so every known node has none yet.
+func (c *Cluster) CountFailureReports(id string) (int, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.nodes[id] == nil {
+		return 0, fmt.Errorf("ERR Unknown node %s", id)
+	}
+	return 0, nil
+}
+
+// Info is the CLUSTER INFO text.
+func (c *Cluster) Info() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	assigned, okSlots, pfail, fail := 0, 0, 0, 0
+	for _, n := range &c.owner {
+		if n == nil {
+			continue
+		}
+		assigned++
+		switch {
+		case n.Flags&FlagFail != 0:
+			fail++
+		case n.Flags&FlagPFail != 0:
+			pfail++
+		default:
+			okSlots++
+		}
+	}
 	state := "ok"
-	if okNodes < len(c.nodes) {
+	if !c.ok {
 		state = "fail"
 	}
-
-	return map[string]interface{}{
-		"cluster_state": state,
-		"cluster_slots": 16384,
-		"cluster_nodes": len(c.nodes),
-		"cluster_my_id": c.self.ID,
-		"cluster_known": len(c.nodes),
-		"cluster_size":  len(c.nodes),
+	myEpoch := c.myself.ConfigEpoch
+	if m := c.nodes[c.myself.MasterID]; c.myself.replica() && m != nil {
+		myEpoch = m.ConfigEpoch
 	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "cluster_state:%s\r\n", state)
+	fmt.Fprintf(&b, "cluster_slots_assigned:%d\r\n", assigned)
+	fmt.Fprintf(&b, "cluster_slots_ok:%d\r\n", okSlots)
+	fmt.Fprintf(&b, "cluster_slots_pfail:%d\r\n", pfail)
+	fmt.Fprintf(&b, "cluster_slots_fail:%d\r\n", fail)
+	fmt.Fprintf(&b, "cluster_known_nodes:%d\r\n", len(c.nodes))
+	fmt.Fprintf(&b, "cluster_size:%d\r\n", c.size)
+	fmt.Fprintf(&b, "cluster_current_epoch:%d\r\n", c.currentEpoch)
+	fmt.Fprintf(&b, "cluster_my_epoch:%d\r\n", myEpoch)
+	b.WriteString("cluster_stats_messages_sent:0\r\n")
+	b.WriteString("cluster_stats_messages_received:0\r\n")
+	b.WriteString("total_cluster_links_buffer_limit_exceeded:0\r\n")
+	return b.String()
 }
 
-func (c *Cluster) GetClusterNodes() []map[string]interface{} {
+// sortedNodesLocked returns myself first, then the other nodes by ID.
+func (c *Cluster) sortedNodesLocked() []*Node {
+	out := make([]*Node, 0, len(c.nodes))
+	for _, n := range c.nodes {
+		if n != c.myself {
+			out = append(out, n)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return append([]*Node{c.myself}, out...)
+}
+
+// rangesLocked returns the slot ranges each node serves.
+func (c *Cluster) rangesLocked() map[*Node][]SlotRange {
+	out := make(map[*Node][]SlotRange)
+	for slot := 0; slot < Slots; {
+		n := c.owner[slot]
+		if n == nil {
+			slot++
+			continue
+		}
+		end := slot
+		for end+1 < Slots && c.owner[end+1] == n {
+			end++
+		}
+		out[n] = append(out[n], SlotRange{slot, end})
+		slot = end + 1
+	}
+	return out
+}
+
+// nodeLineLocked is one line of CLUSTER NODES, or of nodes.conf when
+// forConfig is set (with the aux fields and without the trailing newline).
+func (c *Cluster) nodeLineLocked(n *Node, ranges []SlotRange, forConfig bool) string {
+	var b strings.Builder
+	b.WriteString(n.ID)
+	fmt.Fprintf(&b, " %s:%d@%d", n.IP, n.Port, n.CPort)
+	if n.Hostname != "" {
+		b.WriteString("," + n.Hostname)
+	}
+	if forConfig {
+		if n.Hostname == "" {
+			b.WriteString(",")
+		}
+		if n.TLSPort != 0 {
+			fmt.Fprintf(&b, ",tls-port=%d", n.TLSPort)
+		}
+		b.WriteString(",shard-id=" + n.ShardID)
+	}
+	b.WriteString(" " + n.Flags.String() + " ")
+	if n.MasterID != "" {
+		b.WriteString(n.MasterID)
+	} else {
+		b.WriteString("-")
+	}
+	epoch := n.ConfigEpoch
+	if m := c.nodes[n.MasterID]; n.replica() && m != nil {
+		epoch = m.ConfigEpoch
+	}
+	link := "disconnected"
+	if n == c.myself {
+		link = "connected"
+	}
+	fmt.Fprintf(&b, " %d %d %d %s", n.PingSent, n.PongRecv, epoch, link)
+	for _, r := range ranges {
+		if r.Start == r.End {
+			fmt.Fprintf(&b, " %d", r.Start)
+		} else {
+			fmt.Fprintf(&b, " %d-%d", r.Start, r.End)
+		}
+	}
+	if n == c.myself {
+		for slot := 0; slot < Slots; slot++ {
+			if m := c.migrating[slot]; m != nil {
+				fmt.Fprintf(&b, " [%d->-%s]", slot, m.ID)
+			} else if m := c.importing[slot]; m != nil {
+				fmt.Fprintf(&b, " [%d-<-%s]", slot, m.ID)
+			}
+		}
+	}
+	return b.String()
+}
+
+// Nodes is the CLUSTER NODES text.
+func (c *Cluster) Nodes() string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-
-	result := make([]map[string]interface{}, 0, len(c.nodes))
-	for _, n := range c.nodes {
-		slots := ""
-		for _, sr := range n.Slots {
-			if slots != "" {
-				slots += " "
-			}
-			slots += strconv.Itoa(int(sr.Start)) + "-" + strconv.Itoa(int(sr.End))
-		}
-
-		role := "master"
-		if n.Role == RoleReplica {
-			role = "slave"
-		}
-
-		result = append(result, map[string]interface{}{
-			"id":    n.ID,
-			"addr":  n.Addr + ":" + strconv.Itoa(n.Port),
-			"role":  role,
-			"slots": slots,
-			"state": n.State.String(),
-		})
+	ranges := c.rangesLocked()
+	var b strings.Builder
+	for _, n := range c.sortedNodesLocked() {
+		b.WriteString(c.nodeLineLocked(n, ranges[n], false))
+		b.WriteString("\n")
 	}
-	return result
+	return b.String()
 }
 
-func (s NodeState) String() string {
-	switch s {
-	case NodeStateJoining:
-		return "joining"
-	case NodeStateOnline:
-		return "online"
-	case NodeStateFailed:
-		return "failed"
-	case NodeStateLeaving:
-		return "leaving"
-	default:
-		return "unknown"
+// Replicas returns the CLUSTER NODES lines of the replicas of node id.
+func (c *Cluster) Replicas(id string) ([]string, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	m := c.nodes[id]
+	if m == nil {
+		return nil, fmt.Errorf("ERR Unknown node %s", id)
+	}
+	if m.replica() {
+		return nil, errors.New("ERR The specified node is not a master")
+	}
+	ranges := c.rangesLocked()
+	var out []string
+	for _, n := range c.sortedNodesLocked() {
+		if n.replica() && n.MasterID == id {
+			out = append(out, c.nodeLineLocked(n, ranges[n], false))
+		}
+	}
+	return out, nil
+}
+
+// NodeView is what CLUSTER SLOTS and CLUSTER SHARDS report of a node.
+type NodeView struct {
+	ID       string
+	IP       string
+	Hostname string
+	Port     int
+	TLSPort  int
+	Replica  bool
+	Failing  bool
+	Myself   bool
+}
+
+func (c *Cluster) viewLocked(n *Node) NodeView {
+	return NodeView{ID: n.ID, IP: n.IP, Hostname: n.Hostname, Port: n.Port, TLSPort: n.TLSPort,
+		Replica: n.replica(), Failing: n.Flags&FlagFail != 0, Myself: n == c.myself}
+}
+
+// SlotsEntry is one entry of CLUSTER SLOTS.
+type SlotsEntry struct {
+	Start, End int
+	Nodes      []NodeView
+}
+
+// SlotMap returns the CLUSTER SLOTS entries: each range of slots with its
+// master and the master's replicas that are not failing, by start slot.
+func (c *Cluster) SlotMap() []SlotsEntry {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	var out []SlotsEntry
+	nodes := c.sortedNodesLocked()
+	for n, ranges := range c.rangesLocked() {
+		views := []NodeView{c.viewLocked(n)}
+		for _, r := range nodes {
+			if r.replica() && r.MasterID == n.ID && !r.failing() {
+				views = append(views, c.viewLocked(r))
+			}
+		}
+		for _, r := range ranges {
+			out = append(out, SlotsEntry{Start: r.Start, End: r.End, Nodes: views})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Start < out[j].Start })
+	return out
+}
+
+// Shard is one entry of CLUSTER SHARDS.
+type Shard struct {
+	Slots []SlotRange
+	Nodes []NodeView
+}
+
+// Shards returns the CLUSTER SHARDS entries: every shard with the slots its
+// master serves and its nodes, master first.
+func (c *Cluster) Shards() []Shard {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	ranges := c.rangesLocked()
+	byID := make(map[string]*Shard)
+	var order []string
+	for _, n := range c.sortedNodesLocked() {
+		sid := n.ShardID
+		if m := c.nodes[n.MasterID]; n.replica() && m != nil {
+			sid = m.ShardID
+		}
+		sh := byID[sid]
+		if sh == nil {
+			sh = &Shard{}
+			byID[sid] = sh
+			order = append(order, sid)
+		}
+		if n.replica() {
+			sh.Nodes = append(sh.Nodes, c.viewLocked(n))
+		} else {
+			sh.Slots = ranges[n]
+			sh.Nodes = append([]NodeView{c.viewLocked(n)}, sh.Nodes...)
+		}
+	}
+	out := make([]Shard, 0, len(order))
+	for _, sid := range order {
+		out = append(out, *byID[sid])
+	}
+	return out
+}
+
+// Config returns the nodes.conf text.
+func (c *Cluster) Config() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	ranges := c.rangesLocked()
+	var b strings.Builder
+	for _, n := range c.sortedNodesLocked() {
+		if n.Flags&FlagHandshake != 0 {
+			continue
+		}
+		b.WriteString(c.nodeLineLocked(n, ranges[n], true))
+		b.WriteString("\n")
+	}
+	fmt.Fprintf(&b, "vars currentEpoch %d lastVoteEpoch %d\n", c.currentEpoch, c.lastVoteEpoch)
+	return b.String()
+}
+
+// Save writes nodes.conf atomically. Saves are serialized, so the file
+// always ends up with the latest state.
+func (c *Cluster) Save() error {
+	if c.path == "" {
+		return nil
+	}
+	c.saveMu.Lock()
+	defer c.saveMu.Unlock()
+	return persistence.WriteFileAtomic(c.path, []byte(c.Config()))
+}
+
+// persist saves nodes.conf after a state change. The change stands even
+// when the write fails; the failure is logged.
+func (c *Cluster) persist() {
+	if err := c.Save(); err != nil {
+		logger.Error().Err(err).Str("path", c.path).Msg("cluster: saving the node config failed")
 	}
 }

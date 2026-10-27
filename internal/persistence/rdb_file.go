@@ -57,11 +57,24 @@ func WriteRDBFile(path string, data []byte) error {
 }
 
 func writeRDBAtomic(path string, write func(io.Writer) error) error {
+	return writeAtomic(path, ".cachestorm-rdb-*", write)
+}
+
+// WriteFileAtomic replaces path with data: it writes a temporary file in the
+// same directory, syncs it, renames it over path and syncs the directory.
+func WriteFileAtomic(path string, data []byte) error {
+	return writeAtomic(path, ".cachestorm-tmp-*", func(w io.Writer) error {
+		_, err := w.Write(data)
+		return err
+	})
+}
+
+func writeAtomic(path, pattern string, write func(io.Writer) error) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
-	f, err := os.CreateTemp(dir, ".cachestorm-rdb-*")
+	f, err := os.CreateTemp(dir, pattern)
 	if err != nil {
 		return err
 	}
@@ -88,7 +101,7 @@ func writeRDBAtomic(path string, write func(io.Writer) error) error {
 	}
 	defer directory.Close()
 	if err := directory.Sync(); err != nil {
-		return fmt.Errorf("sync snapshot directory: %w", err)
+		return fmt.Errorf("sync directory: %w", err)
 	}
 	return nil
 }

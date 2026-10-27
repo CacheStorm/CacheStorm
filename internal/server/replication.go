@@ -17,10 +17,6 @@ import (
 	"github.com/cachestorm/cachestorm/internal/store"
 )
 
-// errClusterUnsupported is returned by New when the configuration enables
-// cluster mode, which this release does not implement.
-var errClusterUnsupported = errors.New("cluster mode is not supported in this release: set cluster.enabled to false (master-replica replication is configured in the replication section)")
-
 // readOnlyReplicaError is the reply of a read-only replica to a write.
 const readOnlyReplicaError = "READONLY You can't write against a read only replica."
 

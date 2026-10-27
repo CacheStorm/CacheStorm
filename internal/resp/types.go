@@ -18,6 +18,9 @@ const (
 	// TypeDouble is a RESP3 double; Str holds its text. A RESP2 writer
 	// encodes it as a bulk string with the same text.
 	TypeDouble Type = ','
+	// TypeVerbatim is a RESP3 verbatim string; Str holds its three-letter
+	// format and Bulk its text. A RESP2 writer encodes it as a bulk string.
+	TypeVerbatim Type = '='
 )
 
 type Value struct {
@@ -90,6 +93,11 @@ func DoubleValue(s string) *Value {
 }
 
 // PushValue is a RESP3 push message.
+// VerbatimValue returns a verbatim string of format ("txt" or "mkd").
+func VerbatimValue(format, text string) *Value {
+	return &Value{Type: TypeVerbatim, Str: format, Bulk: []byte(text)}
+}
+
 func PushValue(items []*Value) *Value {
 	return &Value{Type: TypePush, Array: items}
 }

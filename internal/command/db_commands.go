@@ -54,10 +54,19 @@ func cmdSELECT(ctx *Context) error {
 	if !ok {
 		return ctx.WriteError(ErrNotInteger)
 	}
+	if index != 0 && ctx.clusterRefuses() {
+		return ctx.WriteError(errors.New("ERR SELECT is not allowed in cluster mode"))
+	}
 	if err := ctx.selectDB(index); err != nil {
 		return ctx.WriteError(err)
 	}
 	return ctx.WriteOK()
+}
+
+// clusterRefuses reports whether cluster mode refuses a client's use of a
+// database other than 0. Replayed and replicated commands are not refused.
+func (ctx *Context) clusterRefuses() bool {
+	return !ctx.Replaying && !ctx.LegacyReplay && !ctx.FromMaster && ctx.clusterState() != nil
 }
 
 func cmdDBSIZE(ctx *Context) error {
@@ -100,6 +109,9 @@ func cmdSWAPDB(ctx *Context) error {
 	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
+	if ctx.clusterRefuses() {
+		return ctx.WriteError(errors.New("ERR SWAPDB is not allowed in cluster mode"))
+	}
 	a, ok := parseDBIndex(ctx.ArgString(0))
 	if !ok {
 		return ctx.WriteError(errInvalidFirstDB)
@@ -121,6 +133,9 @@ func cmdMOVE(ctx *Context) error {
 	ctx.writeEffectsHandled = true
 	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(ErrWrongArgCount)
+	}
+	if ctx.clusterRefuses() {
+		return ctx.WriteError(errors.New("ERR MOVE is not allowed in cluster mode"))
 	}
 	key := ctx.ArgString(0)
 	index, ok := parseDBIndex(ctx.ArgString(1))
@@ -174,6 +189,9 @@ func cmdCOPY(ctx *Context) error {
 			index, ok := parseDBIndex(ctx.ArgString(i))
 			if !ok {
 				return ctx.WriteError(ErrNotInteger)
+			}
+			if index != 0 && ctx.clusterRefuses() {
+				return ctx.WriteError(errDBIndexOutOfRange)
 			}
 			dbs := ctx.databases()
 			if !dbs.Valid(index) {

@@ -4,6 +4,9 @@ import "fmt"
 
 func (d *Databases) NewStaging() *Databases {
 	base := NewStore()
+	if d.DB(0).SlotIndexed() {
+		base.EnableSlotIndex()
+	}
 	if tracker := d.DB(0).MemoryTracker(); tracker != nil {
 		base.ConfigureMemory(tracker.Max(), EvictionNoEviction, 80, 90, 5)
 	}
@@ -57,6 +60,11 @@ func (d *Databases) ReplaceFrom(src *Databases) error {
 				}
 			}
 			delta -= shard.memUsage
+			if shard.slots != nil {
+				for key := range shard.data {
+					shard.slots.remove(key)
+				}
+			}
 			if incoming == nil {
 				shard.data = make(map[string]*Entry)
 				shard.keyCount, shard.memUsage = 0, 0
@@ -64,8 +72,14 @@ func (d *Databases) ReplaceFrom(src *Databases) error {
 				from := incoming.shards[j]
 				from.mu.Lock()
 				shard.data, shard.keyCount, shard.memUsage = from.data, from.keyCount, from.memUsage
-				for _, entry := range shard.data {
+				for key, entry := range shard.data {
 					entry.loading.Store(&dst.loading)
+					if shard.slots != nil {
+						shard.slots.add(key)
+					}
+					if from.slots != nil {
+						from.slots.remove(key)
+					}
 				}
 				from.data = make(map[string]*Entry)
 				from.keyCount, from.memUsage = 0, 0

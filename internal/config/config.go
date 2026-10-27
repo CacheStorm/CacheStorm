@@ -109,14 +109,20 @@ type MemoryConfig struct {
 }
 
 type ClusterConfig struct {
-	Enabled       bool     `yaml:"enabled" default:"false"`
-	NodeName      string   `yaml:"node_name"`
-	BindAddr      string   `yaml:"bind_addr" default:"0.0.0.0"`
-	BindPort      int      `yaml:"bind_port" default:"7946"`
-	AdvertiseAddr string   `yaml:"advertise_addr"`
-	AdvertisePort int      `yaml:"advertise_port"`
-	Seeds         []string `yaml:"seeds"`
-	Replicas      int      `yaml:"replicas" default:"1"`
+	Enabled bool `yaml:"enabled" default:"false"`
+	// ConfigFile is the nodes.conf file, relative to persistence.data_dir.
+	ConfigFile string `yaml:"config_file" default:"nodes.conf"`
+	// NodeTimeout is cluster-node-timeout, in milliseconds.
+	NodeTimeout int `yaml:"node_timeout" default:"15000"`
+	// BusPort is the cluster bus port; 0 means the client port + 10000.
+	BusPort             int    `yaml:"bus_port" default:"0"`
+	AnnounceIP          string `yaml:"announce_ip"`
+	AnnouncePort        int    `yaml:"announce_port"`
+	AnnounceBusPort     int    `yaml:"announce_bus_port"`
+	RequireFullCoverage bool   `yaml:"require_full_coverage" default:"true"`
+	AllowReadsWhenDown  bool   `yaml:"allow_reads_when_down" default:"false"`
+	// ReplicaValidityFactor is cluster-replica-validity-factor.
+	ReplicaValidityFactor int `yaml:"replica_validity_factor" default:"10"`
 }
 
 type PersistenceConfig struct {

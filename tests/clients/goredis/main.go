@@ -1,5 +1,6 @@
 // Command goredis exercises CacheStorm with go-redis v9 over RESP2 and RESP3:
-// HELLO, AUTH, SELECT, pipelines, MULTI, Pub/Sub, EVAL, BLPOP and SSCAN.
+// HELLO, AUTH, SELECT, pipelines, MULTI, Pub/Sub, EVAL, BLPOP and SSCAN, and
+// with CACHESTORM_CLUSTER_ADDR set, ClusterClient against a cluster-mode node.
 package main
 
 import (
@@ -12,8 +13,15 @@ import (
 )
 
 func main() {
-	for _, proto := range []int{2, 3} {
-		check(proto)
+	if os.Getenv("CACHESTORM_ADDR") != "" {
+		for _, proto := range []int{2, 3} {
+			check(proto)
+		}
+	}
+	if addr := os.Getenv("CACHESTORM_CLUSTER_ADDR"); addr != "" {
+		for _, proto := range []int{2, 3} {
+			checkCluster(addr, proto)
+		}
 	}
 }
 

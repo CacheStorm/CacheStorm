@@ -341,8 +341,12 @@ Response:
 
 ## Cluster
 
-Cluster mode is not supported in this release. `GET /api/cluster` and
-`POST /api/cluster/join` answer `501 Not Implemented`.
+`GET /api/cluster` returns the node's ID, shard ID, the `CLUSTER INFO`
+fields and the `CLUSTER NODES` lines when the server runs in cluster mode,
+and `501 Not Implemented` otherwise. `POST /api/cluster/join` answers `501`:
+joining other nodes needs the cluster bus, which this release does not have
+yet. Keyed commands sent through `/api/execute` follow the same cluster
+routing as on the RESP port.
 
 ---
 

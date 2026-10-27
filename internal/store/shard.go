@@ -16,6 +16,7 @@ type Shard struct {
 	data     map[string]*Entry
 	keyCount int64
 	memUsage int64
+	slots    *slotIndex
 }
 
 func NewShard() *Shard {
@@ -57,6 +58,9 @@ func (s *Shard) setLocked(key string, entry *Entry) (int64, *Entry) {
 		s.memUsage -= oldMem
 	} else {
 		s.keyCount++
+		if s.slots != nil {
+			s.slots.add(key)
+		}
 	}
 
 	newMem := footprint(key, entry)
@@ -74,6 +78,9 @@ func (s *Shard) deleteLocked(key string, entry *Entry) int64 {
 	s.memUsage -= mem
 	s.keyCount--
 	delete(s.data, key)
+	if s.slots != nil {
+		s.slots.remove(key)
+	}
 	return mem
 }
 
@@ -175,6 +182,11 @@ func (s *Shard) Flush() int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	freed := s.memUsage
+	if s.slots != nil {
+		for key := range s.data {
+			s.slots.remove(key)
+		}
+	}
 	s.data = make(map[string]*Entry)
 	s.keyCount = 0
 	s.memUsage = 0

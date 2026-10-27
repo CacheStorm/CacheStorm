@@ -59,3 +59,25 @@ func TestRESP3PushAndPairs(t *testing.T) {
 		}
 	}
 }
+
+func TestVerbatimRoundTrip(t *testing.T) {
+	for _, resp3 := range []bool{false, true} {
+		var buf bytes.Buffer
+		w := NewWriter(&buf)
+		w.SetRESP3(resp3)
+		if err := w.WriteVerbatim("txt", "a:b\r\n"); err != nil {
+			t.Fatal(err)
+		}
+		want := "$5\r\na:b\r\n\r\n"
+		if resp3 {
+			want = "=9\r\ntxt:a:b\r\n\r\n"
+		}
+		if buf.String() != want {
+			t.Fatalf("resp3=%v: %q", resp3, buf.String())
+		}
+		v, err := NewReader(&buf).ReadValue()
+		if err != nil || string(v.Bulk) != "a:b\r\n" {
+			t.Fatalf("read back: %v %+v", err, v)
+		}
+	}
+}

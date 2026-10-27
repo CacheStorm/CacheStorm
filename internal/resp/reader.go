@@ -69,6 +69,12 @@ func (r *Reader) ReadValue() (*Value, error) {
 			return nil, err
 		}
 		return DoubleValue(string(line)), nil
+	case TypeVerbatim:
+		v, err := r.readBulkString()
+		if err != nil || v.IsNull || len(v.Bulk) < 4 || v.Bulk[3] != ':' {
+			return nil, ErrInvalidFormat
+		}
+		return VerbatimValue(string(v.Bulk[:3]), string(v.Bulk[4:])), nil
 	case TypePush:
 		v, err := r.readArray()
 		if err != nil || v.IsNull {

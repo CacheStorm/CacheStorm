@@ -27,8 +27,10 @@ func Default() *Config {
 			SampleSize:     5,
 		},
 		Cluster: ClusterConfig{
-			BindPort: 7946,
-			Replicas: 1,
+			ConfigFile:            "nodes.conf",
+			NodeTimeout:           15000,
+			RequireFullCoverage:   true,
+			ReplicaValidityFactor: 10,
 		},
 		Replication: ReplicationConfig{
 			Role:               "master",

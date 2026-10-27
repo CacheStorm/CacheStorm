@@ -71,6 +71,8 @@ type Connection struct {
 	// command's Context, the same way aclUser is.
 	clientName  string
 	transaction *command.Transaction
+	// clusterConn is the READONLY/ASKING state of the connection.
+	clusterConn command.ClusterConn
 
 	// writeMu serialises use of writer (and pushBuf, which shares its
 	// socket) between the command loop and the Pub/Sub delivery goroutine.
@@ -523,6 +525,7 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 		ctx.ACLUser = c.aclUser
 		ctx.ClientName = c.clientName
 		ctx.ReplConf = &c.replConf
+		ctx.ClusterConn = &c.clusterConn
 
 		if cmd == "QUIT" {
 			c.conn.SetWriteDeadline(time.Now().Add(c.writeTimeout))

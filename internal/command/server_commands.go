@@ -322,7 +322,7 @@ func cmdINFO(ctx *Context) error {
 	}
 	var w infoWriter
 	if want("server") {
-		infoServer(&w, st, port)
+		infoServer(&w, st, port, ctx.serverMode())
 	}
 	if want("clients") {
 		infoClients(&w, st)
@@ -357,6 +357,14 @@ func cmdINFO(ctx *Context) error {
 
 	if want("cpu") {
 		infoCPU(&w)
+	}
+
+	if want("cluster") {
+		if ctx.clusterState() != nil {
+			sb.WriteString("# Cluster\r\ncluster_enabled:1\r\n\r\n")
+		} else {
+			sb.WriteString("# Cluster\r\ncluster_enabled:0\r\n\r\n")
+		}
 	}
 
 	if want("keyspace") {

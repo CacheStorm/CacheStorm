@@ -5,6 +5,7 @@ import (
 	"math"
 	"net"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -96,10 +97,6 @@ func Validate(cfg *Config) error {
 		return fmt.Errorf("invalid log level: %s", cfg.Logging.Level)
 	}
 
-	if cfg.Cluster.Enabled && cfg.Cluster.NodeName == "" {
-		return fmt.Errorf("node_name is required when cluster is enabled")
-	}
-
 	switch cfg.Replication.Role {
 	case "", "master":
 	case "replica", "slave":
@@ -124,10 +121,9 @@ func Validate(cfg *Config) error {
 		}
 	}
 
-	// Validate cluster bind port
-	if cfg.Cluster.Enabled && cfg.Cluster.BindPort != 0 {
-		if cfg.Cluster.BindPort < 1 || cfg.Cluster.BindPort > 65535 {
-			return fmt.Errorf("invalid cluster bind port: %d", cfg.Cluster.BindPort)
+	if cfg.Cluster.Enabled {
+		if err := validateCluster(cfg); err != nil {
+			return err
 		}
 	}
 
@@ -187,4 +183,34 @@ func ParseMemorySize(s string) (int64, error) {
 		return 0, fmt.Errorf("invalid memory size: %s", s)
 	}
 	return num, nil
+}
+
+// validateCluster checks the cluster section of a configuration that enables
+// cluster mode.
+func validateCluster(cfg *Config) error {
+	c := cfg.Cluster
+	if cfg.Replication.IsReplica() {
+		return fmt.Errorf("replication.role %s cannot be combined with cluster mode: replicas are attached with CLUSTER REPLICATE", cfg.Replication.Role)
+	}
+	if c.ConfigFile == "" || filepath.Base(c.ConfigFile) != c.ConfigFile {
+		return fmt.Errorf("invalid cluster config_file %q: it must be a file name inside persistence.data_dir", c.ConfigFile)
+	}
+	if c.NodeTimeout <= 0 {
+		return fmt.Errorf("invalid cluster node_timeout: %d", c.NodeTimeout)
+	}
+	if c.ReplicaValidityFactor < 0 {
+		return fmt.Errorf("invalid cluster replica_validity_factor: %d", c.ReplicaValidityFactor)
+	}
+	for name, port := range map[string]int{"bus_port": c.BusPort, "announce_port": c.AnnouncePort, "announce_bus_port": c.AnnounceBusPort} {
+		if port < 0 || port > 65535 {
+			return fmt.Errorf("invalid cluster %s: %d", name, port)
+		}
+	}
+	if c.BusPort == 0 && cfg.Server.Port+10000 > 65535 {
+		return fmt.Errorf("port %d is too high for cluster mode: the cluster bus port is the port + 10000; set cluster.bus_port", cfg.Server.Port)
+	}
+	if c.AnnounceIP != "" && net.ParseIP(c.AnnounceIP) == nil {
+		return fmt.Errorf("invalid cluster announce_ip: %s", c.AnnounceIP)
+	}
+	return nil
 }

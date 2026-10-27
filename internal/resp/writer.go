@@ -66,7 +66,7 @@ func (w *Writer) WriteValue(v *Value) error {
 			return w.WriteNullArray()
 		}
 		return w.WriteArray(v.Array)
-	case TypeMap, TypePush, TypeDouble:
+	case TypeMap, TypePush, TypeDouble, TypeVerbatim:
 		if err := w.WriteValueNoFlush(v); err != nil {
 			return err
 		}
@@ -272,6 +272,24 @@ func (w *Writer) WriteValueNoFlush(v *Value) error {
 		w.wr.WriteString(v.Str)
 		_, err := w.wr.WriteString("\r\n")
 		return err
+	case TypeVerbatim:
+		if !w.resp3.Load() {
+			w.wr.WriteByte(byte(TypeBulkString))
+			w.wr.WriteString(strconv.Itoa(len(v.Bulk)))
+		} else {
+			w.wr.WriteByte(byte(TypeVerbatim))
+			w.wr.WriteString(strconv.Itoa(len(v.Bulk) + 4))
+			w.wr.WriteString("\r\n")
+			w.wr.WriteString(v.Str)
+			w.wr.WriteByte(':')
+			w.wr.Write(v.Bulk)
+			_, err := w.wr.WriteString("\r\n")
+			return err
+		}
+		w.wr.WriteString("\r\n")
+		w.wr.Write(v.Bulk)
+		_, err := w.wr.WriteString("\r\n")
+		return err
 	case TypeMap:
 		if v.Map == nil && v.Array != nil {
 			return w.writePairsNoFlush(v.Array)
@@ -289,6 +307,12 @@ func (w *Writer) WriteValueNoFlush(v *Value) error {
 	default:
 		return ErrInvalidType
 	}
+}
+
+// WriteVerbatim writes text as a verbatim string of format, a bulk string
+// for a RESP2 client.
+func (w *Writer) WriteVerbatim(format, text string) error {
+	return w.WriteValue(VerbatimValue(format, text))
 }
 
 func (w *Writer) WriteOK() error {

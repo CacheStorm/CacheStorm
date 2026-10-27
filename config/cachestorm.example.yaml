@@ -96,9 +96,15 @@ replication:
   # master_auth: ""
   read_only: true
 
-# Cluster mode is not supported in this release; enabled: true fails at startup.
+# Cluster mode: a single Redis Cluster node; nodes.conf lives in
+# persistence.data_dir. Assign slots with CLUSTER ADDSLOTSRANGE 0 16383.
 cluster:
   enabled: false
+  # config_file: nodes.conf
+  # bus_port: 0                  # 0 = port + 10000
+  # announce_ip: ""
+  # require_full_coverage: true
+  # allow_reads_when_down: false
 
 # Logging Configuration
 logging:
