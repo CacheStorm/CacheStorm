@@ -58,6 +58,9 @@ type Context struct {
 	// CloseConnection asks the connection to close once the command ran,
 	// without a reply of its own (SHUTDOWN).
 	CloseConnection bool
+	// ResetConnection is set by RESET: the connection drops its tracking,
+	// MONITOR, cluster flags and CLIENT REPLY mode.
+	ResetConnection bool
 	// InScript is set for the commands a script runs (InExec is also set).
 	InScript bool
 

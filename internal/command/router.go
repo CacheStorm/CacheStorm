@@ -557,7 +557,7 @@ func (r *Router) Execute(ctx *Context) error {
 // immediately because the replay dispatcher has no UNWATCH case.
 func isTransactionControl(cmd string) bool {
 	switch strings.ToUpper(cmd) {
-	case "MULTI", "EXEC", "DISCARD", "WATCH", "UNWATCH":
+	case "MULTI", "EXEC", "DISCARD", "WATCH", "UNWATCH", "RESET":
 		return true
 	}
 	return false

@@ -25,6 +25,7 @@ func RegisterServerCommands(router *Router) {
 	router.Register(&CommandDef{Name: "PING", Handler: cmdPING})
 	router.Register(&CommandDef{Name: "ECHO", Handler: cmdECHO})
 	router.Register(&CommandDef{Name: "QUIT", Handler: cmdQUIT})
+	router.Register(&CommandDef{Name: "RESET", Handler: cmdRESET})
 	router.Register(&CommandDef{Name: "COMMAND", Handler: cmdCOMMAND})
 	router.Register(&CommandDef{Name: "INFO", Handler: cmdINFO})
 	router.Register(&CommandDef{Name: "DBSIZE", Handler: cmdDBSIZE})
@@ -107,6 +108,37 @@ func cmdECHO(ctx *Context) error {
 func cmdQUIT(ctx *Context) error {
 	ctx.WriteOK()
 	return nil
+}
+
+// cmdRESET returns the connection to the state of a new one, as Redis'
+// clearClientConnectionState does. The client library name and version stay.
+func cmdRESET(ctx *Context) error {
+	if ctx.ArgCount() != 0 {
+		return ctx.WriteError(arityError("reset"))
+	}
+	if ctx.Transaction != nil {
+		ctx.Transaction.Clear()
+		ctx.Transaction.ClearWatch()
+	}
+	if h := trackingHooksFor(ctx); h != nil && h.Disable != nil {
+		h.Disable(ctx.ClientID)
+	}
+	if sub := ctx.Subscriber; sub != nil {
+		if ps := ctx.Store.GetPubSub(); ps != nil {
+			ps.UnsubscribeChannels(sub)
+			ps.UnsubscribePatterns(sub)
+			ps.SUnsubscribe(sub)
+		}
+	}
+	ctx.DB = 0
+	ctx.ACLUser = nil
+	ctx.Username = ""
+	ctx.SetAuthenticated(ctx.dispatcher() == nil || ctx.dispatcher().RequirePass() == "")
+	ctx.ClientName = ""
+	ctx.ReplyMode = "on"
+	ctx.ResetConnection = true
+	ctx.Writer.SetRESP3(false)
+	return ctx.Writer.WriteSimpleString("RESET")
 }
 
 func cmdCOMMAND(ctx *Context) error {

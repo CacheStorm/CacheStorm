@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Corrected the root Docker image healthcheck to use `/api/health`.
 
 ### Added
+- RESET returns a connection to its initial state as in Redis: it discards MULTI and WATCH, turns off client tracking and MONITOR, leaves every channel, pattern and shard channel, selects database 0, switches to RESP2, deauthenticates to the default user, clears the client name and the CLIENT REPLY mode and the cluster READONLY/ASKING flags, and replies +RESET; it runs inside MULTI and in subscribed mode
 - Cluster mode, phase 3 of `docs/cluster-design.md`: replicas and failover, in the model of Redis's `cluster_legacy.c`.
   - `CLUSTER REPLICATE <node-id>` makes an empty node without slots a replica, with Redis's errors. It replicates through the existing replication manager (`replication.master_auth` is its password), takes its master's shard ID and gossips its replica flag, master ID and replication offset. Its nodes.conf line reads `slave <master-id>`.
   - `CLUSTER REPLICAS`/`SLAVES` list replicas in CLUSTER NODES format. `CLUSTER SLOTS` lists each available replica after its master, and `CLUSTER SHARDS` reports `role replica`, `replication-offset` and `health`.

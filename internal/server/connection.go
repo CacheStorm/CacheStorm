@@ -630,6 +630,13 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 		if c.plugins != nil {
 			c.plugins.RunAfterHooks(ctx)
 		}
+		if ctx.ResetConnection {
+			if c.srv != nil {
+				c.srv.monitor.remove(c.ID)
+			}
+			c.clusterConn = command.ClusterConn{}
+			c.replySkip = false
+		}
 		// Capture subscriber if created during this command (e.g. SUBSCRIBE)
 		if ctx.Subscriber != nil && c.subscriber == nil {
 			c.subscriber = ctx.Subscriber
