@@ -7,7 +7,6 @@ import (
 	"math/rand"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
@@ -31,7 +30,7 @@ func RegisterHashCommands(router *Router) {
 	router.Register(&CommandDef{Name: "HSCAN", Handler: cmdHSCAN})
 	router.Register(&CommandDef{Name: "HRANDFIELD", Handler: cmdHRANDFIELD})
 	router.Register(&CommandDef{Name: "HGETDEL", Handler: cmdHGETDEL})
-	router.Register(&CommandDef{Name: "HGETEX", Handler: cmdHGETEX})
+	RegisterHashTTLCommands(router)
 }
 
 func getHash(ctx *Context, key string) (*store.HashValue, error) {
@@ -653,136 +652,4 @@ func cmdHGETDEL(ctx *Context) error {
 		deleteIfEmpty(ctx, key, hash)
 	}
 	return ctx.WriteArray(results)
-}
-
-func cmdHGETEX(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(arityError(ctx.Command))
-	}
-
-	key := ctx.ArgString(0)
-	fields := make([]string, 0)
-
-	for i := 1; i < ctx.ArgCount(); i++ {
-		arg := strings.ToUpper(ctx.ArgString(i))
-		switch arg {
-		case "EX", "PX", "EXAT", "PXAT":
-			i++
-			if i >= ctx.ArgCount() {
-				return ctx.WriteError(ErrSyntaxError)
-			}
-		case "PERSIST":
-		default:
-			fields = append(fields, ctx.ArgString(i))
-		}
-	}
-
-	hash, err := getHash(ctx, key)
-	if err != nil {
-		return ctx.WriteError(err)
-	}
-	if hash == nil {
-		if len(fields) == 1 {
-			return ctx.WriteNullBulkString()
-		}
-		results := make([]*resp.Value, len(fields))
-		for i := range results {
-			results[i] = resp.NullValue()
-		}
-		return ctx.WriteArray(results)
-	}
-
-	for i := 1; i < ctx.ArgCount(); i++ {
-		arg := strings.ToUpper(ctx.ArgString(i))
-		switch arg {
-		case "EX":
-			i++
-			if i >= ctx.ArgCount() {
-				return ctx.WriteError(ErrSyntaxError)
-			}
-			sec, err := strconv.ParseInt(ctx.ArgString(i), 10, 64)
-			if err != nil {
-				return ctx.WriteError(ErrNotInteger)
-			}
-			// Bound the TTL before multiplying: sec * 1e9 overflows int64
-			// nanoseconds and wraps NEGATIVE, which Store.SetTTL turns into
-			// an expiry instant in the PAST -- the hash is born expired and
-			// its data is reaped on the next read behind a success reply.
-			// EXAT below already guards the same argument; EX must too.
-			if sec <= 0 || sec > maxExpireAtSeconds {
-				return ctx.WriteError(errInvalidExpireTime)
-			}
-			ctx.Store.SetTTL(key, time.Duration(sec)*time.Second)
-		case "PX":
-			i++
-			if i >= ctx.ArgCount() {
-				return ctx.WriteError(ErrSyntaxError)
-			}
-			ms, err := strconv.ParseInt(ctx.ArgString(i), 10, 64)
-			if err != nil {
-				return ctx.WriteError(ErrNotInteger)
-			}
-			// See EX: ms * 1e6 overflows int64 nanoseconds the same way.
-			if ms <= 0 || ms > maxExpireAtMillis {
-				return ctx.WriteError(errInvalidExpireTime)
-			}
-			ctx.Store.SetTTL(key, time.Duration(ms)*time.Millisecond)
-		case "PERSIST":
-			ctx.Store.Persist(key)
-		case "EXAT":
-			i++
-			if i >= ctx.ArgCount() {
-				return ctx.WriteError(ErrSyntaxError)
-			}
-			ts, err := strconv.ParseInt(ctx.ArgString(i), 10, 64)
-			if err != nil {
-				return ctx.WriteError(ErrNotInteger)
-			}
-			if ts > maxExpireAtSeconds || ts < -maxExpireAtSeconds {
-				return ctx.WriteError(errInvalidExpireTime)
-			}
-			ctx.Store.SetExpiresAt(key, ts*1000)
-		case "PXAT":
-			i++
-			if i >= ctx.ArgCount() {
-				return ctx.WriteError(ErrSyntaxError)
-			}
-			ms, err := strconv.ParseInt(ctx.ArgString(i), 10, 64)
-			if err != nil {
-				return ctx.WriteError(ErrNotInteger)
-			}
-			if ms > maxExpireAtMillis || ms < -maxExpireAtMillis {
-				return ctx.WriteError(errInvalidExpireTime)
-			}
-			ctx.Store.SetExpiresAt(key, ms)
-		}
-	}
-
-	if len(fields) == 0 {
-		return ctx.WriteNullBulkString()
-	}
-
-	hash.RLock()
-	if len(fields) == 1 {
-		value, exists := hash.Fields[fields[0]]
-		if !exists {
-			hash.RUnlock()
-			return ctx.WriteNullBulkString()
-		}
-		reply := value
-		hash.RUnlock()
-		return ctx.WriteBulkBytes(reply)
-	}
-
-	results := make([]*resp.Value, 0, len(fields))
-	for _, field := range fields {
-		if value, exists := hash.Fields[field]; exists {
-			results = append(results, resp.BulkBytes(value))
-		} else {
-			results = append(results, resp.NullValue())
-		}
-	}
-	reply := results
-	hash.RUnlock()
-	return ctx.WriteArray(reply)
 }

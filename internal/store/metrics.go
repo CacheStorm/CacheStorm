@@ -17,6 +17,7 @@ type Metrics struct {
 	TotalMisses       atomic.Int64
 	TotalEvictions    atomic.Int64
 	TotalExpirations  atomic.Int64
+	ExpiredSubkeys    atomic.Int64
 	TotalErrors       atomic.Int64
 	TotalBytesIn      atomic.Int64
 	TotalBytesOut     atomic.Int64
@@ -167,6 +168,12 @@ func (m *Metrics) RecordExpiration() {
 	m.TotalExpirations.Add(1)
 }
 
+// RecordHashFieldsExpired counts hash fields removed by field expiry
+// (INFO's expired_subkeys).
+func (m *Metrics) RecordHashFieldsExpired(n int64) {
+	m.ExpiredSubkeys.Add(n)
+}
+
 func (m *Metrics) RecordError() {
 	m.TotalErrors.Add(1)
 }
@@ -237,6 +244,7 @@ func (m *Metrics) Reset() {
 	m.TotalMisses.Store(0)
 	m.TotalEvictions.Store(0)
 	m.TotalExpirations.Store(0)
+	m.ExpiredSubkeys.Store(0)
 	m.TotalErrors.Store(0)
 	m.TotalBytesIn.Store(0)
 	m.TotalBytesOut.Store(0)

@@ -3,7 +3,7 @@
 CacheStorm registers about 1,200 commands across 50+ modules: the Redis 7.4 command set plus CacheStorm extensions. Compatibility with Redis is measured by the differential harness in `tests/compat`.
 
 Every command name in this reference is verified against the registered command
-set: 1,227 documented, 0 phantoms, 0 missing.
+set: 1,237 documented, 0 phantoms, 0 missing.
 
 Counts in the table below are the commands listed in each section; `SET` and `COMMAND` are also repeated
 under Tag-Based Invalidation and Command Help but counted only once, under Core Redis.
@@ -12,7 +12,7 @@ under Tag-Based Invalidation and Command Help but counted only once, under Core 
 
 | Category | Commands | Description |
 |----------|----------|-------------|
-| [Core Redis](#core-redis-commands) | 196 | Standard Redis commands |
+| [Core Redis](#core-redis-commands) | 207 | Standard Redis commands |
 | [JSON](#json-commands) | 13 | JSON document operations |
 | [Time Series](#time-series-commands) | 12 | Time-series data |
 | [Search](#search-commands) | 13 | Full-text search |
@@ -44,8 +44,8 @@ under Tag-Based Invalidation and Command Help but counted only once, under Core 
 | [Circuit Breakers](#circuit-breaker-commands) | 9 | Failure/success state tracking |
 | [Service Discovery](#service-discovery-commands) | 8 | Service registration and discovery |
 | [Profiles](#profile-commands) | 5 | User profile records |
-| [Extended families](#extended-command-families) | 510 | 59 unprefixed commands and 101 further families |
-| **Total registered** | **1,227** | |
+| [Extended families](#extended-command-families) | 509 | 58 unprefixed commands and 101 further families |
+| **Total registered** | **1,237** | |
 
 ---
 
@@ -95,7 +95,28 @@ HINCRBYFLOAT key field increment
 HSETNX key field value
 HSTRLEN key field
 HRANDFIELD key [count [WITHVALUES]]
+HEXPIRE key seconds [NX|XX|GT|LT] FIELDS numfields field [field ...]
+HPEXPIRE key milliseconds [NX|XX|GT|LT] FIELDS numfields field [field ...]
+HEXPIREAT key unix-time-seconds [NX|XX|GT|LT] FIELDS numfields field [field ...]
+HPEXPIREAT key unix-time-milliseconds [NX|XX|GT|LT] FIELDS numfields field [field ...]
+HTTL key FIELDS numfields field [field ...]
+HPTTL key FIELDS numfields field [field ...]
+HEXPIRETIME key FIELDS numfields field [field ...]
+HPEXPIRETIME key FIELDS numfields field [field ...]
+HPERSIST key FIELDS numfields field [field ...]
+HGETEX key [EX seconds|PX milliseconds|EXAT unix-time-seconds|PXAT unix-time-milliseconds|PERSIST] FIELDS numfields field [field ...]
+HSETEX key [FNX|FXX] [EX seconds|PX milliseconds|EXAT unix-time-seconds|PXAT unix-time-milliseconds|KEEPTTL] FIELDS numfields field value [field value ...]
 ```
+
+Hash fields can expire on their own (Redis 7.4 hash field expiration).
+HEXPIRE and friends reply per field: `-2` no such field, `0` the NX/XX/GT/LT
+condition was not met, `1` the expiry was set, `2` the field was deleted
+because the time is already past. HTTL/HPTTL/HEXPIRETIME/HPEXPIRETIME reply
+`-2` for a missing field and `-1` for a field without expiry; HPERSIST replies
+`-2`, `-1` or `1`. An expired field is never returned; it is removed on access
+or by the background expiry, and the key goes away with its last field. HSET,
+HMSET and HSETEX without KEEPTTL clear a field's expiry; HINCRBY,
+HINCRBYFLOAT and HSETNX keep it. HGETEX and HSETEX follow Redis 8.
 
 ### List Commands
 
@@ -1358,7 +1379,7 @@ Argument signatures are given for some families; for the rest, check the command
 ---
 ## Unprefixed Commands
 
-Commands without a dotted namespace prefix (59 commands).
+Commands without a dotted namespace prefix (58 commands).
 
 ```
 ADDTAG
@@ -1384,7 +1405,6 @@ GETDEL
 GETEX
 HELLO
 HGETDEL
-HGETEX
 HOTKEYS
 HSCAN
 INCRBYFLOAT
@@ -2683,4 +2703,4 @@ WINDOW.GET
 
 *Last updated: 2026-10-12*
 *CacheStorm v0.3.0*
-*Total Commands: 1,596 (verified against the registered command set)*
+*Total Commands: 1,237 (verified against the registered command set)*

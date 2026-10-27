@@ -65,6 +65,11 @@ type HashValue struct {
 	mu     sync.RWMutex
 	dead   bool
 	size   sizeCounter
+	// ttl holds the field expiries; nil until a field is first given one.
+	ttl *hashFieldTTLs
+	// minExpire is the earliest field expiry (unix ms), 0 when no field has
+	// one, readable without the lock.
+	minExpire atomic.Int64
 }
 
 func (v *HashValue) Lock()    { v.mu.Lock() }
@@ -91,13 +96,23 @@ func (v *HashValue) SizeOf() int64 {
 	for k, val := range v.Fields {
 		n += hashFieldSize(k, val)
 	}
+	n += v.ttlSizeLocked()
 	v.size.set(n)
 	return hashBaseSize + n
 }
 
-// SetField stores val under field and reports whether the field is new. The
-// caller holds the value's write lock.
+// SetField stores val under field, dropping any expiry the field had, as
+// HSET does, and reports whether the field is new. The caller holds the
+// value's write lock.
 func (v *HashValue) SetField(field string, val []byte) bool {
+	v.clearFieldTTL(field)
+	return v.SetFieldKeepTTL(field, val)
+}
+
+// SetFieldKeepTTL stores val under field keeping the field's expiry, as
+// HINCRBY does, and reports whether the field is new. The caller holds the
+// value's write lock.
+func (v *HashValue) SetFieldKeepTTL(field string, val []byte) bool {
 	if v.Fields == nil {
 		v.Fields = make(map[string][]byte)
 	}
@@ -120,6 +135,7 @@ func (v *HashValue) DeleteField(field string) bool {
 	}
 	delete(v.Fields, field)
 	v.size.add(-hashFieldSize(field, old))
+	v.clearFieldTTL(field)
 	return true
 }
 func (v *HashValue) String() string {
@@ -143,6 +159,7 @@ func (v *HashValue) Clone() Value {
 		copy(cv, val)
 		cloned.Fields[k] = cv
 	}
+	v.cloneTTLsLocked(cloned)
 	return cloned
 }
 

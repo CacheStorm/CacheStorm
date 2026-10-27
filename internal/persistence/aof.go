@@ -654,6 +654,9 @@ func (rw *AOFRewriter) writeAll(w *bufio.Writer) error {
 func (rw *AOFRewriter) writeEntry(w *bufio.Writer, key string, entry interface{}) error {
 	switch v := entry.(type) {
 	case *store.Entry:
+		if !hashLive(v.Value) {
+			return nil
+		}
 		if err := rw.writeValueCommands(w, key, v.Value); err != nil {
 			return err
 		}
@@ -826,13 +829,15 @@ func (rw *AOFRewriter) writeValueCommands(w *bufio.Writer, key string, value sto
 		return rw.writeKeyValue(w, "SET", key, vt.Data)
 
 	case *store.HashValue:
-		vt.RLock()
-		items := make([]string, 0, len(vt.Fields)*2)
-		for field, val := range vt.Fields {
-			items = append(items, field, string(val))
+		snap := snapshotHash(vt)
+		items := make([]string, 0, len(snap.fields)*2)
+		for i, field := range snap.fields {
+			items = append(items, field, string(snap.values[i]))
 		}
-		vt.RUnlock()
-		return rw.writeBatched(w, "HSET", key, 2, items)
+		if err := rw.writeBatched(w, "HSET", key, 2, items); err != nil {
+			return err
+		}
+		return rw.writeHashTTLs(w, key, snap)
 
 	case *store.ListValue:
 		vt.RLock()

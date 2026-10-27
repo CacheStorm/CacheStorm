@@ -124,6 +124,7 @@ func (d *Databases) ReplaceFrom(src *Databases) error {
 			for _, shard := range &dst.shards {
 				for key, entry := range shard.GetAll() {
 					dst.scheduleExpiry(key, entry.ExpiresAt.Load())
+					dst.scheduleHashValue(key, entry.Value)
 					if !entry.IsExpired() {
 						dst.published(key, entry.Value)
 					}

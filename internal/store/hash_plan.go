@@ -41,7 +41,7 @@ func (s *Store) ApplyHashFields(key string, prepare func(*HashValue) (map[string
 		}
 		return ValuePlan{Size: size, Apply: func() Value {
 			for field, data := range fields {
-				hash.SetField(field, data)
+				hash.SetFieldKeepTTL(field, data)
 			}
 			return hash
 		}, unlock: hash.Unlock, allowEmptyKey: value != nil}, nil
@@ -153,7 +153,9 @@ func (op *hashSetOp) apply() Value {
 		hash.Fields = make(map[string][]byte, len(op.keep))
 	}
 	for k, i := range op.keep {
-		hash.Fields[string(op.pairs[2*i])] = op.pairs[2*i+1]
+		field := string(op.pairs[2*i])
+		hash.clearFieldTTL(field)
+		hash.Fields[field] = op.pairs[2*i+1]
 		hash.size.add(op.deltas[k])
 	}
 	return hash
@@ -169,4 +171,82 @@ func (op *hashSetOp) release() {
 		op.keep, op.deltas = op.keep[:0], op.deltas[:0]
 	}
 	hashSetOpPool.Put(op)
+}
+
+// HashSetExOptions are HSETEX's options: FNX sets the fields only when none
+// exists, FXX only when all exist; KeepTTL keeps the fields' expiries and
+// ExpireAt (unix ms, 0 for none) gives them one. Without either a set field
+// loses its expiry.
+type HashSetExOptions struct {
+	FNX      bool
+	FXX      bool
+	KeepTTL  bool
+	ExpireAt int64
+}
+
+// ApplyHashSetEx sets the field/value pairs in args on the hash at key, all
+// of them or, when the FNX/FXX condition fails, none, and reports whether it
+// set them. A field named twice takes its last value.
+func (s *Store) ApplyHashSetEx(key string, args [][]byte, o HashSetExOptions) (bool, error) {
+	applied := false
+	err := s.ApplyValuePlan(key, func(value Value) (ValuePlan, error) {
+		applied = false
+		var hash *HashValue
+		if value == nil {
+			if o.FXX {
+				return ValuePlan{}, nil
+			}
+			hash = &HashValue{}
+		} else {
+			var ok bool
+			hash, ok = value.(*HashValue)
+			if !ok {
+				return ValuePlan{}, ErrWrongType
+			}
+		}
+		hash.SizeOf()
+		hash.Lock()
+		size := hash.SizeOf()
+		seen := make(map[string]int, len(args)/2)
+		for i := 0; i < len(args); i += 2 {
+			seen[string(args[i])] = i
+		}
+		for field, i := range seen {
+			old, exists := hash.Fields[field]
+			if (o.FNX && exists) || (o.FXX && !exists) {
+				hash.Unlock()
+				return ValuePlan{}, nil
+			}
+			n := hashFieldSize(field, args[i+1])
+			if exists {
+				n -= hashFieldSize(field, old)
+			}
+			if o.ExpireAt > 0 {
+				n += hashFieldTTLOverhead
+			}
+			if n > 0 && n > math.MaxInt64-size {
+				hash.Unlock()
+				return ValuePlan{}, ErrValueTooLarge
+			}
+			size += n
+		}
+		applied = true
+		return ValuePlan{Size: size, Apply: func() Value {
+			for field, i := range seen {
+				if o.KeepTTL {
+					hash.SetFieldKeepTTL(field, args[i+1])
+				} else {
+					hash.SetField(field, args[i+1])
+				}
+				if o.ExpireAt > 0 {
+					hash.SetFieldExpireAt(field, o.ExpireAt)
+				}
+			}
+			return hash
+		}, unlock: hash.Unlock, allowEmptyKey: value != nil}, nil
+	})
+	if err != nil {
+		applied = false
+	}
+	return applied, err
 }

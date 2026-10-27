@@ -56,6 +56,7 @@ type Store struct {
 	memTracker    *MemoryTracker
 	evictor       *EvictionController
 	expiry        *TimingWheel
+	hfe           *hashExpiryIndex
 	setOpsMu      sync.RWMutex
 	expiryMu      sync.Mutex
 	expiryActive  bool
@@ -73,9 +74,11 @@ func NewStore() *Store {
 		watchRefs:   make(map[string]int),
 	}
 	s.expiry = NewTimingWheel(s)
+	s.hfe = newHashExpiryIndex()
 	for i := 0; i < NumShards; i++ {
 		s.shards[i] = NewShard()
 		s.shards[i].loading = &s.loading
+		s.shards[i].hfe = s.hfe
 	}
 	return s
 }
@@ -410,6 +413,18 @@ func (s *Store) Get(key string) (*Entry, bool) {
 		return nil, false
 	}
 
+	if h, ok := entry.Value.(*HashValue); ok && h.minExpire.Load() != 0 {
+		settled, live, retry := s.settleHashFields(shard, key, entry, h)
+		if retry {
+			return s.Get(key)
+		}
+		if !live {
+			GlobalMetrics.RecordMiss()
+			return nil, false
+		}
+		entry = settled
+	}
+
 	entry.Touch()
 	GlobalMetrics.RecordHit()
 	return entry, true
@@ -695,6 +710,14 @@ func (s *Store) Exists(key string) bool {
 		return false
 	}
 
+	if h, ok := entry.Value.(*HashValue); ok && h.minExpire.Load() != 0 {
+		_, live, retry := s.settleHashFields(shard, key, entry, h)
+		if retry {
+			return s.Exists(key)
+		}
+		return live
+	}
+
 	return true
 }
 
@@ -817,6 +840,7 @@ func (s *Store) Flush() {
 	for i := 0; i < NumShards; i++ {
 		freed += s.shards[i].Flush()
 	}
+	s.hfe.reset()
 	for _, tag := range s.tagIndex.Tags() {
 		s.tagIndex.invalidate(tag)
 	}

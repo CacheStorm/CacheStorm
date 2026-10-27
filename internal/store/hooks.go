@@ -23,6 +23,10 @@ type StoreHooks struct {
 	// before the key is checked and removed, and the function it returns is
 	// called afterwards.
 	ExpiryGuard func(s *Store, key string) func()
+	// OnHashFieldsExpiredLocked is called, with the shard lock of key held,
+	// when fields of the hash at key expired and were removed. Replication
+	// and the AOF record them as HDEL, as Redis propagates field expiry.
+	OnHashFieldsExpiredLocked func(s *Store, key string, fields []string)
 }
 
 func (s *Store) fireEvictLocked(key string) {
@@ -96,4 +100,13 @@ func (s *Store) expiryGuard(key string) func() {
 		return func() {}
 	}
 	return h(s, key)
+}
+
+func (s *Store) fireHashFieldsExpiredLocked(key string, fields []string) {
+	s.hooksMu.RLock()
+	h := s.hooks.OnHashFieldsExpiredLocked
+	s.hooksMu.RUnlock()
+	if h != nil {
+		h(s, key, fields)
+	}
 }

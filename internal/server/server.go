@@ -48,7 +48,8 @@ var writeCommands = map[string]bool{
 	"COPY": true, "MOVE": true, "MIGRATE": true, "RESTORE": true, "RESTORE-ASKING": true, "SORT": true,
 	"FLUSHALL": true, "FLUSHDB": true, "SWAPDB": true,
 	"HSET": true, "HSETNX": true, "HMSET": true, "HDEL": true, "HINCRBY": true, "HINCRBYFLOAT": true,
-	"HGETDEL": true, "HGETEX": true,
+	"HGETDEL": true, "HGETEX": true, "HSETEX": true, "HEXPIRE": true, "HPEXPIRE": true,
+	"HEXPIREAT": true, "HPEXPIREAT": true, "HPERSIST": true,
 	"LPUSH": true, "RPUSH": true, "LPOP": true, "RPOP": true, "LSET": true, "LREM": true,
 	"LTRIM": true, "LINSERT": true, "RPOPLPUSH": true, "LMOVE": true,
 	"LPUSHX": true, "RPUSHX": true, "LMPUSH": true, "LMPOP": true,
@@ -229,7 +230,7 @@ func New(cfg *config.Config) (result *Server, retErr error) {
 
 	// Bridge the store's lifecycle events (eviction, expiry, tag
 	// invalidation) to the registered plugin consumers.
-	s.store.SetHooks(s.storeHooks())
+	s.store.SetHooks(s.withFieldExpiryHooks(s.storeHooks()))
 
 	// Slow log: honor the configured enabled flag, threshold, and size.
 	store.GlobalSlowLog.SetEnabled(cfg.Plugins.SlowLog.Enabled)

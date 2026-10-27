@@ -1,6 +1,9 @@
 package store
 
-import "math"
+import (
+	"math"
+	"time"
+)
 
 type ValuePlan struct {
 	Size          int64
@@ -38,6 +41,22 @@ func (s *Store) applyValuePlan(key string, options *SetOptions, snapshot *Entry,
 				GlobalMetrics.RecordExpiration()
 			}
 			continue
+		}
+		if live && !s.loading.Load() && !s.passiveExpiry.Load() {
+			if h, ok := previous.Value.(*HashValue); ok && h.minExpire.Load() != 0 {
+				if now := time.Now().UnixMilli(); h.fieldsDue(now) {
+					fields, deleted, delta := s.reapHashFieldsLocked(shard, key, previous, h, now, 0)
+					if deleted {
+						shard.mu.Unlock()
+						s.finishHashReap(key, previous, fields, deleted, delta)
+						continue
+					}
+					s.trackMemory(delta)
+					if len(fields) > 0 {
+						GlobalMetrics.RecordHashFieldsExpired(int64(len(fields)))
+					}
+				}
+			}
 		}
 		var current Value
 		var tags []string

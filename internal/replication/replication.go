@@ -331,6 +331,24 @@ func (m *Manager) FeedDelete(s *store.Store, key string) {
 	m.feed([]command.ExecutedCommand{{Name: "DEL", Args: [][]byte{[]byte(key)}, DB: db}}, false)
 }
 
+// FeedHashFieldDeletes records the expiry of hash fields of key in store s
+// as one HDEL per field, as Redis propagates field expiry. It is called with
+// the key's shard lock held.
+func (m *Manager) FeedHashFieldDeletes(s *store.Store, key string, fields []string) {
+	if !m.feeding.Load() {
+		return
+	}
+	db := m.dbIndex(s)
+	if db < 0 {
+		return
+	}
+	cmds := make([]command.ExecutedCommand, len(fields))
+	for i, f := range fields {
+		cmds[i] = command.ExecutedCommand{Name: "HDEL", Args: [][]byte{[]byte(key), []byte(f)}, DB: db}
+	}
+	m.feed(cmds, false)
+}
+
 func (m *Manager) dbIndex(s *store.Store) int {
 	for i := 0; i < m.dbs.Count(); i++ {
 		if m.dbs.Existing(i) == s {

@@ -17,6 +17,7 @@ type Shard struct {
 	keyCount int64
 	memUsage int64
 	slots    *slotIndex
+	hfe      *hashExpiryIndex
 }
 
 func NewShard() *Shard {
@@ -67,6 +68,9 @@ func (s *Shard) setLocked(key string, entry *Entry) (int64, *Entry) {
 	entry.accounted.Store(newMem)
 	s.memUsage += newMem
 	s.data[key] = entry
+	if h, ok := entry.Value.(*HashValue); ok {
+		s.hfe.schedule(key, h.NextFieldExpiry())
+	}
 
 	return newMem - oldMem, old
 }

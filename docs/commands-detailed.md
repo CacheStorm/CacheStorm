@@ -411,6 +411,66 @@ HRANDFIELD key [count [WITHVALUES]]
 
 ---
 
+### Hash field expiration (Redis 7.4)
+Give individual hash fields a time to live. An expired field is never
+returned: reads remove it, and a background pass removes it without reads.
+When the last field expires the key is deleted. An expired field reaches the
+AOF and the replicas as `HDEL`, and HEXPIRE/HPEXPIRE/HEXPIREAT are recorded as
+`HPEXPIREAT` with the absolute time, as in Redis.
+
+```
+HEXPIRE key seconds [NX|XX|GT|LT] FIELDS numfields field [field ...]
+HPEXPIRE key milliseconds [NX|XX|GT|LT] FIELDS numfields field [field ...]
+HEXPIREAT key unix-time-seconds [NX|XX|GT|LT] FIELDS numfields field [field ...]
+HPEXPIREAT key unix-time-milliseconds [NX|XX|GT|LT] FIELDS numfields field [field ...]
+```
+
+**Return Value:** An array with, per field, `-2` (no such field or key), `0`
+(the condition was not met), `1` (the expiry was set) or `2` (the field was
+deleted because the time is 0 or in the past).
+
+NX sets only fields without an expiry, XX only fields with one, GT only when
+the new time is later (a field without expiry counts as infinite), LT only
+when it is earlier.
+
+```
+HTTL key FIELDS numfields field [field ...]
+HPTTL key FIELDS numfields field [field ...]
+HEXPIRETIME key FIELDS numfields field [field ...]
+HPEXPIRETIME key FIELDS numfields field [field ...]
+HPERSIST key FIELDS numfields field [field ...]
+```
+
+**Return Value:** Per field `-2` (no such field), `-1` (no expiry), or the
+remaining time / the expiry time. HPERSIST replies `1` when it removed an
+expiry.
+
+**Examples:**
+```redis
+HSET session:1 token abc user 42
+HEXPIRE session:1 300 FIELDS 1 token     # [1]
+HTTL session:1 FIELDS 2 token user       # [300, -1]
+HPERSIST session:1 FIELDS 1 token        # [1]
+```
+
+HSET and HMSET clear a field's expiry; HINCRBY, HINCRBYFLOAT and HSETNX keep
+it. OBJECT ENCODING reports `listpackex` for a small hash that has used field
+expiries.
+
+### HGETEX / HSETEX (Redis 8)
+
+```
+HGETEX key [EX seconds|PX ms|EXAT unix-time|PXAT unix-time-ms|PERSIST] FIELDS numfields field [field ...]
+HSETEX key [FNX|FXX] [EX seconds|PX ms|EXAT unix-time|PXAT unix-time-ms|KEEPTTL] FIELDS numfields field value [field value ...]
+```
+
+HGETEX returns the values of the fields (nil for a missing one) and sets or
+removes their expiry. HSETEX sets all the fields or, when FNX (none may exist)
+or FXX (all must exist) fails, none, and replies `1` or `0`; without an expiry
+option it clears the fields' expiries, with KEEPTTL it keeps them.
+
+---
+
 ## List Commands
 
 ### LPUSH / RPUSH

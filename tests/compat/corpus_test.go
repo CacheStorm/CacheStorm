@@ -24,6 +24,7 @@ func corpus() []Case {
 	cs = append(cs, entryTransferCases()...)
 	cs = append(cs, hashCases()...)
 	cs = append(cs, hashGrowthCases()...)
+	cs = append(cs, hashTTLCases()...)
 	cs = append(cs, listCases()...)
 	cs = append(cs, blockingCases()...)
 	cs = append(cs, setCases()...)

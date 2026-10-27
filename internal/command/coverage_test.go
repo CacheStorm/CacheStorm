@@ -2707,8 +2707,8 @@ func TestHashCommandsExtendedCoverage(t *testing.T) {
 		args [][]byte
 	}{
 		{"HGETDEL", "HGETDEL", [][]byte{[]byte("hash1"), []byte("f1")}},
-		{"HGETEX EX", "HGETEX", [][]byte{[]byte("hash1"), []byte("f2"), []byte("EX"), []byte("100")}},
-		{"HGETEX PX", "HGETEX", [][]byte{[]byte("hash1"), []byte("f2"), []byte("PX"), []byte("100000")}},
+		{"HGETEX EX", "HGETEX", [][]byte{[]byte("hash1"), []byte("EX"), []byte("100"), []byte("FIELDS"), []byte("1"), []byte("f2")}},
+		{"HGETEX PX", "HGETEX", [][]byte{[]byte("hash1"), []byte("PX"), []byte("100000"), []byte("FIELDS"), []byte("1"), []byte("f2")}},
 		{"HRANDFIELD", "HRANDFIELD", [][]byte{[]byte("hash1")}},
 		{"HRANDFIELD count", "HRANDFIELD", [][]byte{[]byte("hash1"), []byte("2")}},
 		{"HRANDFIELD withvalues", "HRANDFIELD", [][]byte{[]byte("hash1"), []byte("2"), []byte("WITHVALUES")}},

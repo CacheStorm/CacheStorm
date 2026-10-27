@@ -175,6 +175,7 @@ func (tw *TimingWheel) tick() {
 	// only advances once per slot-second — matching the slot math in Add,
 	// where slot = duration / level tickSize.
 	tw.expireBucket(bucket, now)
+	tw.store.activeExpireHashFields(now)
 
 	if wrapped {
 		tw.cascadeHour(now)

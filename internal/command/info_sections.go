@@ -166,6 +166,7 @@ func infoStats(w *infoWriter, st ServerStatus) {
 	w.field("instantaneous_input_kbps", strconv.FormatFloat(st.InputKbps, 'f', 2, 64))
 	w.field("instantaneous_output_kbps", strconv.FormatFloat(st.OutputKbps, 'f', 2, 64))
 	w.int("rejected_connections", st.RejectedConns)
+	w.int("expired_subkeys", m.ExpiredSubkeys.Load())
 	w.int("expired_keys", m.TotalExpirations.Load())
 	w.int("evicted_keys", m.TotalEvictions.Load())
 	w.int("keyspace_hits", m.TotalHits.Load())

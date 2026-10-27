@@ -164,6 +164,14 @@ func (w *RDBWriter) writeDatabaseStore(f io.Writer, db int, st *store.Store) err
 }
 
 func (w *RDBWriter) writeEntry(f io.Writer, key string, entry *store.Entry) error {
+	var hashSnap *hashSnapshot
+	if h, ok := entry.Value.(*store.HashValue); ok && h.HasFieldTTLs() {
+		snap := snapshotHash(h)
+		if len(snap.fields) == 0 {
+			return nil
+		}
+		hashSnap = &snap
+	}
 	switch entry.Value.(type) {
 	case *store.StringValue, *store.ListValue, *store.SetValue, *store.HashValue, *store.SortedSetValue, *store.GeoValue, *store.JSONValue, *store.StreamValue, *store.TimeSeriesValue:
 	default:
@@ -195,6 +203,9 @@ func (w *RDBWriter) writeEntry(f io.Writer, key string, entry *store.Entry) erro
 	}
 
 	valueType := w.getValueType(entry.Value)
+	if hashSnap != nil && hashSnap.anyTTL {
+		valueType = rdbTypeHashTTL
+	}
 	if err := w.writeByte(f, byte(valueType)); err != nil {
 		return err
 	}
@@ -203,6 +214,9 @@ func (w *RDBWriter) writeEntry(f io.Writer, key string, entry *store.Entry) erro
 		return err
 	}
 
+	if hashSnap != nil {
+		return w.writeHashSnapshot(f, hashSnap)
+	}
 	return w.writeValue(f, entry.Value, valueType)
 }
 
@@ -678,6 +692,37 @@ func (r *RDBReader) readEntry(f io.Reader, valueType byte, expiresAtMS int64, ta
 		}
 		value = &store.HashValue{Fields: fields}
 
+	case rdbTypeHashTTL:
+		length, err := r.readLength(f)
+		if err != nil {
+			return err
+		}
+		fields := make([]string, 0, length)
+		values := make([][]byte, 0, length)
+		ttls := make([]int64, 0, length)
+		for i := 0; i < length; i++ {
+			field, err := r.readString(f)
+			if err != nil {
+				return err
+			}
+			val, err := r.readString(f)
+			if err != nil {
+				return err
+			}
+			var at int64
+			if err := binary.Read(f, binary.LittleEndian, &at); err != nil {
+				return err
+			}
+			fields = append(fields, field)
+			values = append(values, []byte(val))
+			ttls = append(ttls, at)
+		}
+		h := newHashWithTTLs(fields, values, ttls)
+		if h == nil {
+			return nil
+		}
+		value = h
+
 	case 4:
 		length, err := r.readLength(f)
 		if err != nil {
@@ -1059,4 +1104,26 @@ func (pm *PersistenceManager) MarkDirty() {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 	pm.dirty++
+}
+
+// writeHashSnapshot writes a hash as type 3, or as rdbTypeHashTTL when a
+// field has an expiry.
+func (w *RDBWriter) writeHashSnapshot(f io.Writer, snap *hashSnapshot) error {
+	if err := w.writeLength(f, len(snap.fields)); err != nil {
+		return err
+	}
+	for i, field := range snap.fields {
+		if err := w.writeString(f, field); err != nil {
+			return err
+		}
+		if err := w.writeString(f, string(snap.values[i])); err != nil {
+			return err
+		}
+		if snap.anyTTL {
+			if err := binary.Write(f, binary.LittleEndian, snap.ttls[i]); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }

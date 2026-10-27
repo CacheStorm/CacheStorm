@@ -107,7 +107,7 @@ D:\Codebox\CacheStorm\
 | v0.1.24 | 1,598    | ML commands |
 | v0.1.25 | 1,606    | Redis compatibility improvements |
 | v0.1.26 | 1,578    | Bug fixes and test improvements |
-| unreleased | 1,227 | Production-readiness rounds; 386 placeholder extension commands removed in two passes; RESET and RESTORE-ASKING added (counted from the router) |
+| unreleased | 1,237 | Production-readiness rounds; 386 placeholder extension commands removed in two passes; RESET, RESTORE-ASKING, PFDEBUG, PFSELFTEST and hash field expiration (HEXPIRE family, HSETEX) added (counted from the router) |
 
 ## Test Coverage (Current)
 

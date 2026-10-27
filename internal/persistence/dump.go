@@ -31,6 +31,7 @@ const (
 
 func EncodeDump(value store.Value) ([]byte, error) {
 	var out []byte
+	version := uint16(11)
 	str := func(s string) { out = appendDumpLength(out, uint64(len(s))); out = append(out, s...) }
 	switch v := value.(type) {
 	case *store.StringValue:
@@ -64,6 +65,17 @@ func EncodeDump(value store.Value) ([]byte, error) {
 			str(k)
 		}
 	case *store.HashValue:
+		if v.HasFieldTTLs() {
+			snap := snapshotHash(v)
+			if len(snap.fields) == 0 {
+				return nil, ErrDumpFormat
+			}
+			if snap.anyTTL {
+				out = appendDumpHashTTL(out, snap)
+				version = 12
+				break
+			}
+		}
 		v.RLock()
 		defer v.RUnlock()
 		if len(v.Fields) == 0 {
@@ -136,7 +148,7 @@ func EncodeDump(value store.Value) ([]byte, error) {
 		out = append(out, 0)
 		str(string(data))
 	}
-	out = binary.LittleEndian.AppendUint16(out, 11)
+	out = binary.LittleEndian.AppendUint16(out, version)
 	out = binary.LittleEndian.AppendUint64(out, rdbChecksum(0, out))
 	return out, nil
 }
@@ -398,6 +410,8 @@ func (d *dumpDecoder) value() store.Value {
 			d.err = ErrDumpFormat
 		}
 		return v
+	case dumpTypeHashMetadata, dumpTypeHashListpackEx:
+		return d.hashWithTTLs(typ)
 	case 9, 10, 11, 12, 13, 16, 17, 20:
 		data := []byte(d.str())
 		var items []string

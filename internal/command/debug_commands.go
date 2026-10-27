@@ -131,6 +131,9 @@ func getEncoding(v store.Value) string {
 				return "hashtable"
 			}
 		}
+		if val.FieldTTLsUsed() {
+			return "listpackex"
+		}
 		return "listpack"
 	case *store.ListValue:
 		val.RLock()

@@ -58,6 +58,9 @@ var aclSingleKeyCommands = map[string]bool{
 	"HDEL": true, "HEXISTS": true, "HGET": true, "HGETALL": true, "HINCRBY": true,
 	"HINCRBYFLOAT": true, "HKEYS": true, "HLEN": true, "HMSET": true, "HRANDFIELD": true,
 	"HSCAN": true, "HSET": true, "HSETNX": true, "HSTRLEN": true, "HVALS": true,
+	"HEXPIRE": true, "HPEXPIRE": true, "HEXPIREAT": true, "HPEXPIREAT": true, "HTTL": true,
+	"HPTTL": true, "HEXPIRETIME": true, "HPEXPIRETIME": true, "HPERSIST": true, "HGETEX": true,
+	"HSETEX": true,
 	// sets
 	"SADD": true, "SCARD": true, "SDIFF": true, "SINTER": true, "SINTERSTORE": true,
 	"SISMEMBER": true, "SMEMBERS": true, "SMISMEMBER": true, "SMOVE": true, "SPOP": true,
