@@ -4,7 +4,10 @@ import (
 	"fmt"
 	"runtime"
 	"runtime/debug"
+	"sort"
 	"strconv"
+	"sync/atomic"
+	"time"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
@@ -49,6 +52,52 @@ func RegisterUtilityExtCommands(router *Router) {
 	router.Register(&CommandDef{Name: "MEMORY.TRIM", Handler: cmdMEMORYTRIM})
 	router.Register(&CommandDef{Name: "MEMORY.FRAG", Handler: cmdMEMORYFRAG})
 	router.Register(&CommandDef{Name: "MEMORY.PURGE", Handler: cmdMEMORYPURGE})
+}
+
+// auditDispatch gates recording of every dispatched command into
+// store.GlobalAuditLog. It is off by default; the router checks it with one
+// atomic load per command, so a disabled audit log costs no lock or allocation.
+var auditDispatch atomic.Bool
+
+const (
+	auditMaxArgs   = 16
+	auditMaxArgLen = 128
+)
+
+var auditRedactedCommands = map[string]bool{
+	"AUTH":    true,
+	"HELLO":   true,
+	"ACL":     true,
+	"CONFIG":  true,
+	"MIGRATE": true,
+}
+
+func auditEnabled() bool {
+	return auditDispatch.Load()
+}
+
+func auditArg(b []byte) string {
+	if len(b) > auditMaxArgLen {
+		return string(b[:auditMaxArgLen]) + "..."
+	}
+	return string(b)
+}
+
+func recordAudit(ctx *Context, success bool) {
+	key := ""
+	var args []string
+	if len(ctx.Args) > 0 && !auditRedactedCommands[ctx.Command] {
+		key = auditArg(ctx.Args[0])
+		n := len(ctx.Args) - 1
+		if n > auditMaxArgs {
+			n = auditMaxArgs
+		}
+		args = make([]string, n)
+		for i := range args {
+			args[i] = auditArg(ctx.Args[i+1])
+		}
+	}
+	store.GlobalAuditLog.Log(ctx.Command, key, args, ctx.RemoteAddr, ctx.Username, success, time.Since(ctx.StartTime).Microseconds())
 }
 
 func cmdAUDITLOG(ctx *Context) error {
@@ -106,7 +155,7 @@ func cmdAUDITGET(ctx *Context) error {
 		resp.BulkString(entry.User),
 		resp.BulkString("success"),
 		resp.BulkString(fmt.Sprintf("%v", entry.Success)),
-		resp.BulkString("duration"),
+		resp.BulkString("duration_us"),
 		resp.IntegerValue(entry.Duration),
 	})
 }
@@ -200,35 +249,36 @@ func cmdAUDITCOUNT(ctx *Context) error {
 func cmdAUDITSTATS(ctx *Context) error {
 	stats := store.GlobalAuditLog.Stats()
 
-	results := make([]*resp.Value, 0)
-	for k, v := range stats {
-		results = append(results, resp.BulkString(k))
-		switch val := v.(type) {
-		case int64:
-			results = append(results, resp.IntegerValue(val))
-		case bool:
-			results = append(results, resp.BulkString(fmt.Sprintf("%v", val)))
-		case map[string]int64:
-			arr := make([]*resp.Value, 0)
-			for ck, cv := range val {
-				arr = append(arr, resp.BulkString(ck), resp.IntegerValue(cv))
-			}
-			results = append(results, resp.ArrayValue(arr))
-		default:
-			results = append(results, resp.BulkString(fmt.Sprintf("%v", val)))
+	results := []*resp.Value{
+		resp.BulkString("total"), resp.IntegerValue(mapInt64(stats, "total")),
+		resp.BulkString("success"), resp.IntegerValue(mapInt64(stats, "success")),
+		resp.BulkString("failed"), resp.IntegerValue(mapInt64(stats, "failed")),
+		resp.BulkString("enabled"), resp.BulkString(fmt.Sprintf("%v", auditEnabled())),
+		resp.BulkString("max_size"), resp.IntegerValue(int64(mapInt(stats, "max_size"))),
+	}
+	cmds := make([]*resp.Value, 0)
+	if counts, ok := stats["commands"].(map[string]int64); ok {
+		names := make([]string, 0, len(counts))
+		for name := range counts {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			cmds = append(cmds, resp.BulkString(name), resp.IntegerValue(counts[name]))
 		}
 	}
+	results = append(results, resp.BulkString("commands"), resp.ArrayValue(cmds))
 
 	return ctx.WriteArray(results)
 }
 
 func cmdAUDITENABLE(ctx *Context) error {
-	store.GlobalAuditLog.Enabled = true
+	auditDispatch.Store(true)
 	return ctx.WriteOK()
 }
 
 func cmdAUDITDISABLE(ctx *Context) error {
-	store.GlobalAuditLog.Enabled = false
+	auditDispatch.Store(false)
 	return ctx.WriteOK()
 }
 

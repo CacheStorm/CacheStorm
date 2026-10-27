@@ -2,6 +2,7 @@ package command
 
 import (
 	"fmt"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -153,10 +154,19 @@ func cmdSLOWLOGCONFIG(ctx *Context) error {
 }
 
 func cmdSTATSKEYSPACE(ctx *Context) error {
-	totalKeys := ctx.Store.KeyCount()
 	typeCounts := make(map[store.DataType]int64)
+	var totalKeys, expires, ttlSumMs int64
 	for _, entry := range ctx.Store.GetAll() {
+		totalKeys++
 		typeCounts[entry.Value.Type()]++
+		if ttl := entry.TTL(); ttl > 0 {
+			expires++
+			ttlSumMs += ttl.Milliseconds()
+		}
+	}
+	var avgTTL int64
+	if expires > 0 {
+		avgTTL = ttlSumMs / expires
 	}
 
 	return ctx.WriteArray([]*resp.Value{
@@ -172,15 +182,20 @@ func cmdSTATSKEYSPACE(ctx *Context) error {
 		resp.IntegerValue(typeCounts[store.DataTypeSet]),
 		resp.BulkString("zset_keys"),
 		resp.IntegerValue(typeCounts[store.DataTypeSortedSet]),
+		resp.BulkString("stream_keys"),
+		resp.IntegerValue(typeCounts[store.DataTypeStream]),
 		resp.BulkString("expires"),
-		resp.IntegerValue(0),
+		resp.IntegerValue(expires),
 		resp.BulkString("avg_ttl"),
-		resp.IntegerValue(0),
+		resp.IntegerValue(avgTTL),
 	})
 }
 
 func cmdSTATSMEMORY(ctx *Context) error {
 	usedMemory := ctx.Store.MemUsage()
+	var ms runtime.MemStats
+	runtime.ReadMemStats(&ms)
+	fig := readMemoryFigures(ctx, usedMemory, &ms)
 
 	return ctx.WriteArray([]*resp.Value{
 		resp.BulkString("used_memory"),
@@ -188,11 +203,13 @@ func cmdSTATSMEMORY(ctx *Context) error {
 		resp.BulkString("used_memory_human"),
 		resp.BulkString(formatBytes(usedMemory)),
 		resp.BulkString("peak_memory"),
-		resp.IntegerValue(0),
+		resp.IntegerValue(fig.peak),
+		resp.BulkString("used_memory_rss"),
+		resp.IntegerValue(fig.rss),
 		resp.BulkString("total_allocated"),
-		resp.IntegerValue(0),
+		resp.IntegerValue(int64(ms.TotalAlloc)),
 		resp.BulkString("fragmentation_ratio"),
-		resp.BulkString("0.00"),
+		resp.BulkString(strconv.FormatFloat(fig.fragmentation(), 'f', 2, 64)),
 	})
 }
 
@@ -212,8 +229,6 @@ func cmdSTATSCLIENTS(ctx *Context) error {
 		resp.IntegerValue(store.GlobalMetrics.ActiveConnections.Load()),
 		resp.BulkString("total_connections"),
 		resp.IntegerValue(store.GlobalMetrics.TotalConnections.Load()),
-		resp.BulkString("blocked_clients"),
-		resp.IntegerValue(0),
 	})
 }
 
@@ -251,6 +266,12 @@ func cmdSTATSALL(ctx *Context) error {
 		resp.IntegerValue(mapInt64(metrics, "bytes_in")),
 		resp.BulkString("bytes_out"),
 		resp.IntegerValue(mapInt64(metrics, "bytes_out")),
+		resp.BulkString("total_errors"),
+		resp.IntegerValue(mapInt64(metrics, "total_errors")),
+		resp.BulkString("total_evictions"),
+		resp.IntegerValue(store.GlobalMetrics.TotalEvictions.Load()),
+		resp.BulkString("total_expirations"),
+		resp.IntegerValue(store.GlobalMetrics.TotalExpirations.Load()),
 	}
 
 	return ctx.WriteArray(results)
@@ -272,7 +293,32 @@ func cmdHEALTHLIVENESS(ctx *Context) error {
 }
 
 func cmdHEALTHREADINESS(ctx *Context) error {
+	if ctx.Store == nil {
+		return ctx.WriteError(fmt.Errorf("NOTREADY no data store"))
+	}
+	if reason := replicaNotReadyReason(ctx); reason != "" {
+		return ctx.WriteError(fmt.Errorf("NOTREADY %s", reason))
+	}
 	return ctx.WriteSimpleString("OK")
+}
+
+func replicaNotReadyReason(ctx *Context) string {
+	if ctx.router == nil {
+		return ""
+	}
+	fn := ctx.router.replicationInfo()
+	if fn == nil {
+		return ""
+	}
+	for _, line := range strings.Split(fn(), "\r\n") {
+		switch strings.TrimSpace(line) {
+		case "master_link_status:down":
+			return "master link is down"
+		case "master_sync_in_progress:1":
+			return "sync with master in progress"
+		}
+	}
+	return ""
 }
 
 func formatBytes(n int64) string {

@@ -2,6 +2,8 @@ package command
 
 import (
 	"fmt"
+	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -466,9 +468,8 @@ var (
 type Experiment struct {
 	Name        string
 	Variants    []string
-	Weights     []int64
 	Assignments map[string]string
-	Events      map[string][]string
+	Events      map[string]map[string]int64
 }
 
 func cmdEXPERIMENTCREATE(ctx *Context) error {
@@ -476,14 +477,18 @@ func cmdEXPERIMENTCREATE(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
-	variants := make([]string, 0)
-	weights := make([]int64, 0)
+	variants := make([]string, 0, ctx.ArgCount()-1)
+	seen := make(map[string]bool)
 	for i := 1; i < ctx.ArgCount(); i++ {
-		variants = append(variants, ctx.ArgString(i))
-		weights = append(weights, 1)
+		v := ctx.ArgString(i)
+		if seen[v] {
+			return ctx.WriteError(fmt.Errorf("ERR duplicate variant '%s'", v))
+		}
+		seen[v] = true
+		variants = append(variants, v)
 	}
 	experimentsMu.Lock()
-	experiments[name] = &Experiment{Name: name, Variants: variants, Weights: weights, Assignments: make(map[string]string), Events: make(map[string][]string)}
+	experiments[name] = &Experiment{Name: name, Variants: variants, Assignments: make(map[string]string), Events: make(map[string]map[string]int64)}
 	experimentsMu.Unlock()
 	return ctx.WriteOK()
 }
@@ -550,9 +555,19 @@ func cmdEXPERIMENTTRACK(ctx *Context) error {
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR experiment not found"))
 	}
-	key := userID + ":" + event
-	exp.Events[key] = append(exp.Events[key], fmt.Sprintf("%d", time.Now().UnixMilli()))
+	if _, assigned := exp.Assignments[userID]; !assigned {
+		return ctx.WriteError(fmt.Errorf("ERR user is not assigned to this experiment"))
+	}
+	if exp.Events[event] == nil {
+		exp.Events[event] = make(map[string]int64)
+	}
+	exp.Events[event][userID]++
 	return ctx.WriteOK()
+}
+
+type experimentEventStats struct {
+	count int64
+	users int64
 }
 
 func cmdEXPERIMENTRESULTS(ctx *Context) error {
@@ -560,31 +575,67 @@ func cmdEXPERIMENTRESULTS(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
-	// Iterate the assignments map while holding the read lock. The lock used
-	// to be released right after the lookup, so the map was iterated with no
-	// lock at all while EXPERIMENT.ASSIGN wrote it under the write lock.
-	// Concurrent map iteration and map write is a FATAL Go runtime error
-	// ("fatal error: concurrent map iteration and map write"): it cannot be
-	// recovered and it terminates the whole server process, not just this
-	// connection.
 	experimentsMu.RLock()
 	exp, exists := experiments[name]
 	if !exists {
 		experimentsMu.RUnlock()
 		return ctx.WriteError(fmt.Errorf("ERR experiment not found"))
 	}
-	results := make([]*resp.Value, 0)
-	results = append(results, resp.BulkString("name"), resp.BulkString(exp.Name), resp.BulkString("assignments"), resp.IntegerValue(int64(len(exp.Assignments))))
-	for _, v := range exp.Variants {
-		count := 0
-		for _, a := range exp.Assignments {
-			if a == v {
-				count++
-			}
-		}
-		results = append(results, resp.BulkString("variant_"+v), resp.IntegerValue(int64(count)))
+	expName := exp.Name
+	variants := append([]string(nil), exp.Variants...)
+	assigned := make(map[string]int64, len(variants))
+	for _, v := range exp.Assignments {
+		assigned[v]++
 	}
+	eventNames := make([]string, 0, len(exp.Events))
+	perVariant := make(map[string]map[string]*experimentEventStats, len(variants))
+	for event, users := range exp.Events {
+		eventNames = append(eventNames, event)
+		for user, n := range users {
+			v := exp.Assignments[user]
+			if perVariant[v] == nil {
+				perVariant[v] = make(map[string]*experimentEventStats)
+			}
+			st := perVariant[v][event]
+			if st == nil {
+				st = &experimentEventStats{}
+				perVariant[v][event] = st
+			}
+			st.count += n
+			st.users++
+		}
+	}
+	total := int64(len(exp.Assignments))
 	experimentsMu.RUnlock()
+	sort.Strings(eventNames)
+
+	results := []*resp.Value{
+		resp.BulkString("name"), resp.BulkString(expName),
+		resp.BulkString("assignments"), resp.IntegerValue(total),
+	}
+	for _, v := range variants {
+		events := make([]*resp.Value, 0, len(eventNames))
+		for _, event := range eventNames {
+			st := perVariant[v][event]
+			if st == nil {
+				st = &experimentEventStats{}
+			}
+			rate := 0.0
+			if assigned[v] > 0 {
+				rate = float64(st.users) / float64(assigned[v])
+			}
+			events = append(events, resp.ArrayValue([]*resp.Value{
+				resp.BulkString("event"), resp.BulkString(event),
+				resp.BulkString("count"), resp.IntegerValue(st.count),
+				resp.BulkString("users"), resp.IntegerValue(st.users),
+				resp.BulkString("conversion_rate"), resp.BulkString(strconv.FormatFloat(rate, 'f', 4, 64)),
+			}))
+		}
+		results = append(results,
+			resp.BulkString("variant_"+v), resp.IntegerValue(assigned[v]),
+			resp.BulkString("events_"+v), resp.ArrayValue(events),
+		)
+	}
 	return ctx.WriteArray(results)
 }
 
@@ -711,6 +762,22 @@ type Alert struct {
 	Message   string
 	Status    string
 	CreatedAt int64
+	History   []AlertTransition
+}
+
+type AlertTransition struct {
+	Status    string
+	Timestamp int64
+}
+
+const maxAlertHistory = 1000
+
+func (a *Alert) setStatus(status string) {
+	a.Status = status
+	a.History = append(a.History, AlertTransition{Status: status, Timestamp: time.Now().UnixMilli()})
+	if len(a.History) > maxAlertHistory {
+		a.History = append([]AlertTransition(nil), a.History[len(a.History)-maxAlertHistory:]...)
+	}
 }
 
 func cmdALERTCREATE(ctx *Context) error {
@@ -719,8 +786,10 @@ func cmdALERTCREATE(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	message := ctx.ArgString(1)
+	alert := &Alert{ID: generateUUID(), Name: name, Message: message, CreatedAt: time.Now().UnixMilli()}
+	alert.setStatus("active")
 	alertsMu.Lock()
-	alerts[name] = &Alert{ID: generateUUID(), Name: name, Message: message, Status: "active", CreatedAt: time.Now().UnixMilli()}
+	alerts[name] = alert
 	alertsMu.Unlock()
 	return ctx.WriteOK()
 }
@@ -736,7 +805,7 @@ func cmdALERTTRIGGER(ctx *Context) error {
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR alert not found"))
 	}
-	alert.Status = "firing"
+	alert.setStatus("firing")
 	return ctx.WriteOK()
 }
 
@@ -751,7 +820,7 @@ func cmdALERTACKNOWLEDGE(ctx *Context) error {
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR alert not found"))
 	}
-	alert.Status = "acknowledged"
+	alert.setStatus("acknowledged")
 	return ctx.WriteOK()
 }
 
@@ -766,7 +835,7 @@ func cmdALERTRESOLVE(ctx *Context) error {
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR alert not found"))
 	}
-	alert.Status = "resolved"
+	alert.setStatus("resolved")
 	return ctx.WriteOK()
 }
 
@@ -804,6 +873,13 @@ func cmdALERTHISTORY(ctx *Context) error {
 	alertMessage := alert.Message
 	alertStatus := alert.Status
 	alertCreatedAt := alert.CreatedAt
+	history := make([]*resp.Value, len(alert.History))
+	for i, h := range alert.History {
+		history[i] = resp.ArrayValue([]*resp.Value{
+			resp.BulkString("status"), resp.BulkString(h.Status),
+			resp.BulkString("timestamp"), resp.IntegerValue(h.Timestamp),
+		})
+	}
 	alertsMu.RUnlock()
 
 	return ctx.WriteArray([]*resp.Value{
@@ -812,6 +888,7 @@ func cmdALERTHISTORY(ctx *Context) error {
 		resp.BulkString("message"), resp.BulkString(alertMessage),
 		resp.BulkString("status"), resp.BulkString(alertStatus),
 		resp.BulkString("created_at"), resp.IntegerValue(alertCreatedAt),
+		resp.BulkString("history"), resp.ArrayValue(history),
 	})
 }
 

@@ -2,7 +2,10 @@ package command
 
 import (
 	"fmt"
+	"sort"
+	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
@@ -29,6 +32,7 @@ func RegisterExtraCommands(router *Router) {
 	router.Register(&CommandDef{Name: "CRDT.ORSET.ADD", Handler: cmdCRDTORSETADD})
 	router.Register(&CommandDef{Name: "CRDT.ORSET.REMOVE", Handler: cmdCRDTORSETREMOVE})
 	router.Register(&CommandDef{Name: "CRDT.ORSET.GET", Handler: cmdCRDTORSETGET})
+	router.Register(&CommandDef{Name: "CRDT.ORSET.TAGS", Handler: cmdCRDTORSETTAGS})
 
 	router.Register(&CommandDef{Name: "DEDUP.ADD", Handler: cmdDEDUPADD})
 	router.Register(&CommandDef{Name: "DEDUP.CHECK", Handler: cmdDEDUPCHECK})
@@ -317,15 +321,11 @@ func cmdCRDTGCOUNTERGET(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	crdtGCounterMu.RLock()
-	counter, exists := crdtGCounter[name]
-	crdtGCounterMu.RUnlock()
-	if !exists {
-		return ctx.WriteInteger(0)
-	}
 	var total int64
-	for _, v := range counter {
+	for _, v := range crdtGCounter[name] {
 		total += v
 	}
+	crdtGCounterMu.RUnlock()
 	return ctx.WriteInteger(total)
 }
 
@@ -424,36 +424,61 @@ func cmdCRDTGSETGET(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	crdtGSetMu.RLock()
-	set, exists := crdtGSet[name]
-	crdtGSetMu.RUnlock()
-	if !exists {
-		return ctx.WriteArray([]*resp.Value{})
-	}
-	results := make([]*resp.Value, 0)
-	for v := range set {
+	results := make([]*resp.Value, 0, len(crdtGSet[name]))
+	for v := range crdtGSet[name] {
 		results = append(results, resp.BulkString(v))
 	}
+	crdtGSetMu.RUnlock()
 	return ctx.WriteArray(results)
 }
 
 var (
-	crdtORSet   = make(map[string]map[string]bool)
+	crdtORSet   = make(map[string]*orSetState)
 	crdtORSetMu sync.RWMutex
+	crdtORSetID atomic.Int64
 )
 
+type orSetState struct {
+	tags       map[string]map[string]struct{}
+	tombstones map[string]map[string]struct{}
+}
+
+func newORSetState() *orSetState {
+	return &orSetState{
+		tags:       make(map[string]map[string]struct{}),
+		tombstones: make(map[string]map[string]struct{}),
+	}
+}
+
 func cmdCRDTORSETADD(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
+	if ctx.ArgCount() < 2 || ctx.ArgCount() > 3 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
 	value := ctx.ArgString(1)
-	crdtORSetMu.Lock()
-	defer crdtORSetMu.Unlock()
-	if _, exists := crdtORSet[name]; !exists {
-		crdtORSet[name] = make(map[string]bool)
+	var tag string
+	if ctx.ArgCount() == 3 {
+		tag = ctx.ArgString(2)
+		if tag == "" {
+			return ctx.WriteError(fmt.Errorf("ERR tag must not be empty"))
+		}
+	} else {
+		tag = "auto-" + strconv.FormatInt(crdtORSetID.Add(1), 10)
 	}
-	crdtORSet[name][value] = true
-	return ctx.WriteInteger(1)
+	crdtORSetMu.Lock()
+	set, exists := crdtORSet[name]
+	if !exists {
+		set = newORSetState()
+		crdtORSet[name] = set
+	}
+	if _, removed := set.tombstones[value][tag]; !removed {
+		if set.tags[value] == nil {
+			set.tags[value] = make(map[string]struct{})
+		}
+		set.tags[value][tag] = struct{}{}
+	}
+	crdtORSetMu.Unlock()
+	return ctx.WriteBulkString(tag)
 }
 
 func cmdCRDTORSETREMOVE(ctx *Context) error {
@@ -463,15 +488,37 @@ func cmdCRDTORSETREMOVE(ctx *Context) error {
 	name := ctx.ArgString(0)
 	value := ctx.ArgString(1)
 	crdtORSetMu.Lock()
-	defer crdtORSetMu.Unlock()
-	if _, exists := crdtORSet[name]; !exists {
+	set, exists := crdtORSet[name]
+	if !exists {
+		crdtORSetMu.Unlock()
 		return ctx.WriteInteger(0)
 	}
-	if crdtORSet[name][value] {
-		delete(crdtORSet[name], value)
-		return ctx.WriteInteger(1)
+	var observed []string
+	if ctx.ArgCount() > 2 {
+		for i := 2; i < ctx.ArgCount(); i++ {
+			observed = append(observed, ctx.ArgString(i))
+		}
+	} else {
+		for tag := range set.tags[value] {
+			observed = append(observed, tag)
+		}
 	}
-	return ctx.WriteInteger(0)
+	removed := int64(0)
+	for _, tag := range observed {
+		if set.tombstones[value] == nil {
+			set.tombstones[value] = make(map[string]struct{})
+		}
+		set.tombstones[value][tag] = struct{}{}
+		if _, ok := set.tags[value][tag]; ok {
+			delete(set.tags[value], tag)
+			removed++
+		}
+	}
+	if len(set.tags[value]) == 0 {
+		delete(set.tags, value)
+	}
+	crdtORSetMu.Unlock()
+	return ctx.WriteInteger(removed)
 }
 
 func cmdCRDTORSETGET(ctx *Context) error {
@@ -481,13 +528,39 @@ func cmdCRDTORSETGET(ctx *Context) error {
 	name := ctx.ArgString(0)
 	crdtORSetMu.RLock()
 	set, exists := crdtORSet[name]
-	crdtORSetMu.RUnlock()
-	if !exists {
-		return ctx.WriteArray([]*resp.Value{})
+	values := make([]string, 0)
+	if exists {
+		for v := range set.tags {
+			values = append(values, v)
+		}
 	}
-	results := make([]*resp.Value, 0)
-	for v := range set {
-		results = append(results, resp.BulkString(v))
+	crdtORSetMu.RUnlock()
+	sort.Strings(values)
+	results := make([]*resp.Value, len(values))
+	for i, v := range values {
+		results[i] = resp.BulkString(v)
+	}
+	return ctx.WriteArray(results)
+}
+
+func cmdCRDTORSETTAGS(ctx *Context) error {
+	if ctx.ArgCount() != 2 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+	name := ctx.ArgString(0)
+	value := ctx.ArgString(1)
+	crdtORSetMu.RLock()
+	tags := make([]string, 0)
+	if set, exists := crdtORSet[name]; exists {
+		for tag := range set.tags[value] {
+			tags = append(tags, tag)
+		}
+	}
+	crdtORSetMu.RUnlock()
+	sort.Strings(tags)
+	results := make([]*resp.Value, len(tags))
+	for i, t := range tags {
+		results[i] = resp.BulkString(t)
 	}
 	return ctx.WriteArray(results)
 }

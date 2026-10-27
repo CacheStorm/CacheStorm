@@ -1,6 +1,9 @@
 package command
 
 import (
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -292,22 +295,20 @@ func cmdCHAINADD(ctx *Context) error {
 	}
 
 	var index int64 = 0
-	var prevHash = "0"
+	var prevHash = chainGenesisPrevHash
 	if len(chain.Blocks) > 0 {
 		lastBlock := chain.Blocks[len(chain.Blocks)-1]
 		index = lastBlock.Index + 1
 		prevHash = lastBlock.Hash
 	}
 
-	hash := computeHash(index, data, prevHash)
-
 	block := &Block{
 		Index:     index,
 		Timestamp: time.Now().UnixMilli(),
 		Data:      data,
 		PrevHash:  prevHash,
-		Hash:      hash,
 	}
+	block.Hash = computeBlockHash(block)
 
 	chain.Blocks = append(chain.Blocks, block)
 
@@ -315,13 +316,43 @@ func cmdCHAINADD(ctx *Context) error {
 	return ctx.WriteInteger(index)
 }
 
-func computeHash(index int64, data, prevHash string) string {
-	input := fmt.Sprintf("%d%s%s", index, data, prevHash)
-	hash := uint32(0)
-	for _, c := range input {
-		hash = hash*31 + uint32(c)
+const chainGenesisPrevHash = "0"
+
+func computeBlockHash(b *Block) string {
+	h := sha256.New()
+	var buf [8]byte
+	binary.BigEndian.PutUint64(buf[:], uint64(b.Index))
+	h.Write(buf[:])
+	binary.BigEndian.PutUint64(buf[:], uint64(b.Timestamp))
+	h.Write(buf[:])
+	for _, field := range []string{b.Data, b.PrevHash} {
+		binary.BigEndian.PutUint64(buf[:], uint64(len(field)))
+		h.Write(buf[:])
+		h.Write([]byte(field))
 	}
-	return fmt.Sprintf("%08x", hash)
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+func validateBlocks(blocks []*Block) bool {
+	prevHash := chainGenesisPrevHash
+	for i, b := range blocks {
+		if b.Index != int64(i) || b.PrevHash != prevHash || b.Hash != computeBlockHash(b) {
+			return false
+		}
+		prevHash = b.Hash
+	}
+	return true
+}
+
+func chainSnapshot(name string) ([]*Block, bool) {
+	chainsMu.RLock()
+	defer chainsMu.RUnlock()
+	chain, exists := chains[name]
+	if !exists {
+		return nil, false
+	}
+	n := len(chain.Blocks)
+	return chain.Blocks[:n:n], true
 }
 
 func cmdCHAINGET(ctx *Context) error {
@@ -332,19 +363,16 @@ func cmdCHAINGET(ctx *Context) error {
 	name := ctx.ArgString(0)
 	index := parseInt64(ctx.ArgString(1))
 
-	chainsMu.RLock()
-	chain, exists := chains[name]
-	chainsMu.RUnlock()
-
+	blocks, exists := chainSnapshot(name)
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR chain not found"))
 	}
 
-	if index < 0 || int(index) >= len(chain.Blocks) {
+	if index < 0 || index >= int64(len(blocks)) {
 		return ctx.WriteNull()
 	}
 
-	block := chain.Blocks[index]
+	block := blocks[index]
 
 	return ctx.WriteArray([]*resp.Value{
 		resp.BulkString("index"),
@@ -365,31 +393,15 @@ func cmdCHAINVALIDATE(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
-	name := ctx.ArgString(0)
-
-	chainsMu.RLock()
-	chain, exists := chains[name]
-	chainsMu.RUnlock()
-
+	blocks, exists := chainSnapshot(ctx.ArgString(0))
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR chain not found"))
 	}
 
-	for i := 1; i < len(chain.Blocks); i++ {
-		current := chain.Blocks[i]
-		previous := chain.Blocks[i-1]
-
-		if current.PrevHash != previous.Hash {
-			return ctx.WriteInteger(0)
-		}
-
-		expectedHash := computeHash(current.Index, current.Data, current.PrevHash)
-		if current.Hash != expectedHash {
-			return ctx.WriteInteger(0)
-		}
+	if validateBlocks(blocks) {
+		return ctx.WriteInteger(1)
 	}
-
-	return ctx.WriteInteger(1)
+	return ctx.WriteInteger(0)
 }
 
 func cmdCHAINLENGTH(ctx *Context) error {
@@ -420,15 +432,12 @@ func cmdCHAINLAST(ctx *Context) error {
 
 	name := ctx.ArgString(0)
 
-	chainsMu.RLock()
-	chain, exists := chains[name]
-	chainsMu.RUnlock()
-
-	if !exists || len(chain.Blocks) == 0 {
+	blocks, exists := chainSnapshot(name)
+	if !exists || len(blocks) == 0 {
 		return ctx.WriteNull()
 	}
 
-	block := chain.Blocks[len(chain.Blocks)-1]
+	block := blocks[len(blocks)-1]
 
 	return ctx.WriteArray([]*resp.Value{
 		resp.BulkString("index"),

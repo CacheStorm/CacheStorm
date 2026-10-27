@@ -434,6 +434,9 @@ func (r *Router) executeHandler(ctx *Context, cmd *CommandDef, capture bool) (er
 	errsBefore := ctx.Writer.Errors()
 	ctx.writeEffectsHandled = false
 	err = cmd.Handler(ctx)
+	if auditEnabled() {
+		recordAudit(ctx, err == nil && ctx.Writer.Errors() == errsBefore)
+	}
 	ctx.passWakeup()
 	reaccountWrittenKeys(ctx)
 	touchWrittenKeys(ctx)

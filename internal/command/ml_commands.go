@@ -2,6 +2,10 @@ package command
 
 import (
 	"fmt"
+	"math"
+	"math/rand"
+	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
@@ -395,21 +399,51 @@ func cmdDATASETGET(ctx *Context) error {
 }
 
 func cmdDATASETSPLIT(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
+	if ctx.ArgCount() != 2 && ctx.ArgCount() != 4 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
-	ratio := parseFloatExt([]byte(ctx.ArgString(1)))
+	ratio, err := strconv.ParseFloat(ctx.ArgString(1), 64)
+	if err != nil || math.IsNaN(ratio) || ratio < 0 || ratio > 1 {
+		return ctx.WriteError(fmt.Errorf("ERR ratio must be a number between 0 and 1"))
+	}
+	shuffle := false
+	var seed int64
+	if ctx.ArgCount() == 4 {
+		if !strings.EqualFold(ctx.ArgString(2), "SEED") {
+			return ctx.WriteError(ErrSyntaxError)
+		}
+		seed, err = strconv.ParseInt(ctx.ArgString(3), 10, 64)
+		if err != nil {
+			return ctx.WriteError(ErrNotInteger)
+		}
+		shuffle = true
+	}
 	datasetsMx.RLock()
 	d, exists := datasets[name]
+	var items []string
+	if exists {
+		items = append([]string(nil), d.Data...)
+	}
 	datasetsMx.RUnlock()
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR dataset not found"))
 	}
-	split := int(float64(len(d.Data)) * ratio)
+	if shuffle {
+		rng := rand.New(rand.NewSource(seed))
+		rng.Shuffle(len(items), func(i, j int) { items[i], items[j] = items[j], items[i] })
+	}
+	split := int(math.Floor(float64(len(items)) * ratio))
+	toValues := func(in []string) []*resp.Value {
+		out := make([]*resp.Value, len(in))
+		for i, item := range in {
+			out[i] = resp.BulkString(item)
+		}
+		return out
+	}
 	return ctx.WriteArray([]*resp.Value{
-		resp.BulkString("train"), resp.IntegerValue(int64(split)),
-		resp.BulkString("test"), resp.IntegerValue(int64(len(d.Data) - split)),
+		resp.BulkString("train"), resp.ArrayValue(toValues(items[:split])),
+		resp.BulkString("test"), resp.ArrayValue(toValues(items[split:])),
 	})
 }
 
