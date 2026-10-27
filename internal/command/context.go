@@ -175,6 +175,21 @@ func NewContextWithClient(cmd string, args [][]byte, s *store.Store, w *resp.Wri
 	}
 }
 
+// NewConnectionContext builds the context of one command on a connection
+// that keeps its own transaction state, so none is allocated per command.
+func NewConnectionContext(cmd string, args [][]byte, s *store.Store, w *resp.Writer, clientID int64, remoteAddr string, tx *Transaction) *Context {
+	return &Context{
+		Command:     cmd,
+		Args:        args,
+		Store:       s,
+		Writer:      w,
+		StartTime:   time.Now(),
+		Transaction: tx,
+		ClientID:    clientID,
+		RemoteAddr:  remoteAddr,
+	}
+}
+
 // dispatcher returns the router running this command, falling back to the
 // process router for contexts built outside Router.Execute.
 func (ctx *Context) dispatcher() *Router {

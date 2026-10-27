@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cachestorm/cachestorm/internal/command"
@@ -246,6 +247,8 @@ func (s *Server) clientKill(caller int64, f command.ClientFilter) int {
 // pauseState is CLIENT PAUSE: until is when the pause ends and changed is
 // closed whenever the pause is lifted or replaced, waking waiting clients.
 type pauseState struct {
+	// untilNano mirrors until for the lock-free check every command makes.
+	untilNano  atomic.Int64
 	mu         sync.Mutex
 	until      time.Time
 	writesOnly bool
@@ -267,6 +270,7 @@ func (s *Server) pauseClients(until time.Time, writesOnly bool) {
 			s.pause.writesOnly = false
 		}
 	}
+	s.pause.untilNano.Store(s.pause.until.UnixNano())
 	if s.pause.changed != nil {
 		close(s.pause.changed)
 	}
@@ -277,6 +281,7 @@ func (s *Server) unpauseClients() {
 	s.pause.mu.Lock()
 	defer s.pause.mu.Unlock()
 	s.pause.until = time.Time{}
+	s.pause.untilNano.Store(0)
 	if s.pause.changed != nil {
 		close(s.pause.changed)
 		s.pause.changed = nil
@@ -299,6 +304,12 @@ func pausedCommand(cmd string, writesOnly bool) bool {
 		return true
 	}
 	return command.IsWriteCommand(cmd)
+}
+
+// pauseActive reports cheaply whether a CLIENT PAUSE is in force.
+func (s *Server) pauseActive() bool {
+	until := s.pause.untilNano.Load()
+	return until != 0 && time.Now().UnixNano() < until
 }
 
 // waitWhilePaused blocks a command CLIENT PAUSE holds until the pause ends.

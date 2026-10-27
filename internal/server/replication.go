@@ -89,8 +89,8 @@ func stripeOf(key string) int {
 	return int(h % gateStripes)
 }
 
-// acquire takes the gate for cmd.
-func (g *writeGate) acquire(cmd string, args [][]byte) *gateHold {
+// planWrite works out the hold a write of cmd needs, without locking.
+func (g *writeGate) planWrite(cmd string, args [][]byte) *gateHold {
 	h := &gateHold{g: g}
 	if exclusiveWrites[cmd] || globalRead(cmd, args) {
 		h.exclusive = true
@@ -105,7 +105,6 @@ func (g *writeGate) acquire(cmd string, args [][]byte) *gateHold {
 			}
 		}
 	}
-	h.lock()
 	return h
 }
 
@@ -126,7 +125,8 @@ func globalRead(cmd string, args [][]byte) bool {
 	return false
 }
 
-func (g *writeGate) acquireRead(cmd string, args [][]byte) *gateHold {
+// planRead works out the hold a read of cmd needs, without locking.
+func (g *writeGate) planRead(cmd string, args [][]byte) *gateHold {
 	h := &gateHold{g: g, read: true, exclusive: globalRead(cmd, args)}
 	if !h.exclusive {
 		h.stripes = h.inline[:0]
@@ -134,8 +134,22 @@ func (g *writeGate) acquireRead(cmd string, args [][]byte) *gateHold {
 			h.stripes = appendStripe(h.stripes, stripeOf(key))
 		}
 	}
-	h.lock()
 	return h
+}
+
+// covers reports whether holding h already gives what want needs: the same
+// mode and the same stripes. Exclusive holds are never shared, so a pipeline
+// cannot keep the whole server waiting.
+func (h *gateHold) covers(want *gateHold) bool {
+	if h == nil || want == nil || h.exclusive || want.exclusive || h.read != want.read || len(h.stripes) != len(want.stripes) {
+		return false
+	}
+	for i := range h.stripes {
+		if h.stripes[i] != want.stripes[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // appendStripe inserts stripe into the sorted, duplicate-free list. Locking
@@ -327,25 +341,33 @@ func (s *Server) refuseOnReplica(ctx *command.Context) bool {
 }
 
 func (s *Server) holdGate(ctx *command.Context) func() {
-	if s == nil {
+	h := s.planGate(ctx)
+	if h == nil {
 		return func() {}
 	}
-	if ctx.Command != "EXEC" && ctx.Transaction != nil && ctx.Transaction.IsActive() {
-		// Inside MULTI the command is only queued; EXEC runs it.
-		return func() {}
-	}
-	if ungatedCommands[ctx.Command] {
-		return func() {}
-	}
-	var h *gateHold
-	if gated(ctx.Command, ctx.Args) || exclusiveWrites[ctx.Command] {
-		h = s.gate.acquire(ctx.Command, ctx.Args)
-	} else {
-		h = s.gate.acquireRead(ctx.Command, ctx.Args)
-	}
+	h.lock()
 	ctx.BeforeWait = h.unlock
 	ctx.AfterWait = h.lock
 	return h.unlock
+}
+
+// planGate returns the hold ctx's command needs, unlocked, or nil when it
+// runs without the gate.
+func (s *Server) planGate(ctx *command.Context) *gateHold {
+	if s == nil {
+		return nil
+	}
+	if ctx.Command != "EXEC" && ctx.Transaction != nil && ctx.Transaction.IsActive() {
+		// Inside MULTI the command is only queued; EXEC runs it.
+		return nil
+	}
+	if ungatedCommands[ctx.Command] {
+		return nil
+	}
+	if gated(ctx.Command, ctx.Args) || exclusiveWrites[ctx.Command] {
+		return s.gate.planWrite(ctx.Command, ctx.Args)
+	}
+	return s.gate.planRead(ctx.Command, ctx.Args)
 }
 
 func hasLogicalWrites(cmds []command.ExecutedCommand) bool {

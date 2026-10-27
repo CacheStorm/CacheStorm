@@ -562,3 +562,42 @@ func (r *Reader) readCRLF() error {
 	}
 	return nil
 }
+
+// HasCompleteCommand reports whether buf starts with a whole client command,
+// multibulk or inline, so that reading it will not wait for the network.
+// It is conservative: anything it cannot confirm reports false.
+func HasCompleteCommand(buf []byte) bool {
+	if len(buf) == 0 {
+		return false
+	}
+	if buf[0] != byte(TypeArray) {
+		return bytes.IndexByte(buf, '\n') >= 0
+	}
+	i := bytes.IndexByte(buf, '\n')
+	if i < 0 {
+		return false
+	}
+	n, ok := parseDecimal(bytes.TrimSuffix(buf[1:i], []byte("\r")))
+	if !ok {
+		return false
+	}
+	pos := i + 1
+	for k := int64(0); k < n; k++ {
+		if pos >= len(buf) || buf[pos] != byte(TypeBulkString) {
+			return false
+		}
+		j := bytes.IndexByte(buf[pos:], '\n')
+		if j < 0 {
+			return false
+		}
+		l, ok := parseDecimal(bytes.TrimSuffix(buf[pos+1:pos+j], []byte("\r")))
+		if !ok || l < 0 {
+			return false
+		}
+		pos += j + 1 + int(l) + 2
+		if pos > len(buf) {
+			return false
+		}
+	}
+	return true
+}

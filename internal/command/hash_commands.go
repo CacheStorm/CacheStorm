@@ -49,26 +49,7 @@ func getHash(ctx *Context, key string) (*store.HashValue, error) {
 }
 
 func applyHashSetFields(ctx *Context, nx bool) (int, error) {
-	added := 0
-	err := ctx.Store.ApplyHashFields(ctx.ArgString(0), func(hash *store.HashValue) (map[string][]byte, error) {
-		added = 0
-		if nx {
-			if _, exists := hash.Fields[ctx.ArgString(1)]; exists {
-				return nil, nil
-			}
-		}
-		fields := make(map[string][]byte, (ctx.ArgCount()-1)/2)
-		for i := 1; i < ctx.ArgCount(); i += 2 {
-			fields[ctx.ArgString(i)] = ctx.Arg(i + 1)
-		}
-		for field := range fields {
-			if _, exists := hash.Fields[field]; !exists {
-				added++
-			}
-		}
-		return fields, nil
-	})
-	return added, err
+	return ctx.Store.ApplyHashPairs(ctx.ArgString(0), nx, ctx.Args[1:])
 }
 
 func cmdHSET(ctx *Context) error {

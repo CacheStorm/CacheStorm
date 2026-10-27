@@ -36,7 +36,7 @@ func TestSeededRegistryReadersHoldTheReadLock(t *testing.T) {
 	}
 
 	connectionsMu.Lock()
-	connections[42] = &ConnectionInfo{ID: 42, RemoteAddr: "127.0.0.1:1234", ConnectedAt: 1, Commands: 0}
+	connections[42] = &ConnectionInfo{ID: 42, RemoteAddr: "127.0.0.1:1234", ConnectedAt: 1}
 	connectionsMu.Unlock()
 	t.Cleanup(func() {
 		connectionsMu.Lock()
@@ -65,9 +65,7 @@ func TestSeededRegistryReadersHoldTheReadLock(t *testing.T) {
 		defer wg.Done()
 		<-start
 		for i := 0; i < iterations; i++ {
-			connectionsMu.Lock()
-			connections[42].Commands++
-			connectionsMu.Unlock()
+			BumpConnectionCommand(42)
 		}
 	}()
 
@@ -116,7 +114,8 @@ func TestSeededRegistryReaderReplyIsExact(t *testing.T) {
 	RegisterMVCCCommands(router)
 
 	connectionsMu.Lock()
-	connections[7] = &ConnectionInfo{ID: 7, RemoteAddr: "10.0.0.1:9999", ConnectedAt: 123, Commands: 5}
+	connections[7] = &ConnectionInfo{ID: 7, RemoteAddr: "10.0.0.1:9999", ConnectedAt: 123}
+	connections[7].Commands.Store(5)
 	connectionsMu.Unlock()
 	t.Cleanup(func() {
 		connectionsMu.Lock()

@@ -31,20 +31,27 @@ docker run --rm --network host redis:7.4-alpine \
 
 | Command | CacheStorm | Redis 7.4.11 | CacheStorm p50 | Redis p50 |
 |---|---|---|---|---|
-| SET | 788,022 | 627,353 | 0.54 ms | 1.10 ms |
-| GET | 876,424 | 753,580 | 0.46 ms | 0.91 ms |
-| INCR | 799,361 | 634,518 | 0.51 ms | 1.08 ms |
-| LPUSH (one key) | 307,031 | 445,038 | 0.38 ms | 1.66 ms |
-| HSET (one key) | 197,161 | 557,725 | 0.56 ms | 1.28 ms |
+| SET | 811,688 | 627,353 | 0.53 ms | 1.10 ms |
+| GET | 1,051,525 | 753,580 | 0.38 ms | 0.91 ms |
+| INCR | 854,701 | 634,518 | 0.50 ms | 1.08 ms |
+| LPUSH (one key) | 428,816 | 445,038 | 1.58 ms | 1.66 ms |
+| HSET (one key, ~1M fields) | 318,776 | 557,725 | 2.19 ms | 1.28 ms |
 
 Across many keys CacheStorm uses several cores and outruns single-threaded
 Redis with half its median latency. `redis-benchmark` sends LPUSH to `mylist`
 and HSET to `myhash` whatever `-r` is, so those rows are a single hot key:
-every write to one key holds that key's stripe of the write gate, so they run
-one at a time and the per-write cost (command dispatch, the collection plan,
-gate hand-off between goroutines) decides the rate. Single-key write
-throughput is the known gap; batching contended writes to one key is the
-planned remedy.
+every write to one key holds that key's stripe of the write gate.
+
+Two changes lifted the hot-key rows (LPUSH from 307k, HSET from 197k). A
+connection keeps its stripe across consecutive pipelined commands on the same
+stripes, so a 16-command pipeline hands the gate to another connection once
+instead of 16 times; the hold is never kept across a socket write, a blocking
+command or a read that would wait for the network, and at most 64 commands
+share one hold. The per-command path also stopped allocating a transaction
+and an address string and stopped taking a process-wide lock for the
+connection registry. HSET on one hash with a million fields remains the
+known gap: each write is a lookup in one large Go map, which Redis' listpack
+and dict encodings handle with fewer cache misses.
 
 ## Results, 2026-10-25 (single key, superseded)
 

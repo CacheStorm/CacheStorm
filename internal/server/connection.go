@@ -92,6 +92,8 @@ type Connection struct {
 	replConf command.ReplicaConf
 	// handler serves the connection once a command (PSYNC) took it over.
 	handler command.ConnHandler
+	// remoteAddr caches conn.RemoteAddr().String() for the command contexts.
+	remoteAddr string
 
 	// info is what CLIENT LIST reports, readable from other goroutines.
 	info clientInfo
@@ -113,6 +115,47 @@ type Connection struct {
 	blockMu    sync.Mutex
 	unblockCh  chan struct{}
 	unblockErr bool
+	// heldGate is the write-gate hold kept from the previous command of a
+	// pipeline, so the next command on the same stripes runs without
+	// handing the gate to another connection in between; heldCount bounds
+	// how many commands share one hold.
+	heldGate  *gateHold
+	heldCount int
+	// gateWaiting is set while a blocking command has handed heldGate back
+	// to wait, so releaseGate does not unlock it a second time.
+	gateWaiting bool
+}
+
+// maxGateBatch bounds how many pipelined commands run under one gate hold
+// before other connections get a turn.
+const maxGateBatch = 64
+
+// releaseGate drops the gate hold kept from the previous command.
+func (c *Connection) releaseGate() {
+	if c.heldGate != nil {
+		if !c.gateWaiting {
+			c.heldGate.unlock()
+		}
+		c.heldGate = nil
+		c.heldCount = 0
+		c.gateWaiting = false
+	}
+}
+
+// keepGate reports whether the hold of the command that just ran may be kept
+// for the next one: only for a shared (non-exclusive) hold, a command that
+// did not block, and a next command already complete in the read buffer, so
+// the hold is never kept while waiting on the network.
+func (c *Connection) keepGate(h *gateHold, ctx *command.Context, blocking bool) bool {
+	if h.exclusive || blocking || c.subscriber != nil || c.heldCount+1 >= maxGateBatch || ctx.CloseConnection || ctx.Handoff != nil || c.killed.Load() {
+		return false
+	}
+	n := c.bufReader.Buffered()
+	if n == 0 {
+		return false
+	}
+	buf, err := c.bufReader.Peek(n)
+	return err == nil && resp.HasCompleteCommand(buf)
 }
 
 // unblock ends the blocking command the connection is waiting in, as a
@@ -317,6 +360,9 @@ func newConnection(id int64, conn net.Conn, s *store.Store, r *command.Router, p
 
 func (c *Connection) Handle() {
 	defer c.Close()
+	// The gate hold belongs to this goroutine: it is dropped here, not in
+	// Close, which shutdown may call from another goroutine.
+	defer c.releaseGate()
 	defer c.recoverPanic()
 
 	logger.Debug().
@@ -340,10 +386,18 @@ func (c *Connection) Handle() {
 		if c.draining.Load() && c.bufReader.Buffered() == 0 {
 			return
 		}
+		if c.heldGate != nil {
+			if n := c.bufReader.Buffered(); n == 0 {
+				c.releaseGate()
+			} else if buf, perr := c.bufReader.Peek(n); perr != nil || !resp.HasCompleteCommand(buf) {
+				c.releaseGate()
+			}
+		}
 		cmd, args, err := c.reader.ReadClientCommand()
 		if err != nil {
 			// Replies kept for a pipeline go out before the connection
 			// reports the error or closes.
+			c.releaseGate()
 			c.writeMu.Lock()
 			if ferr := c.writer.Flush(); ferr == nil {
 				if rerr := c.sink.release(); rerr != nil {
@@ -379,12 +433,14 @@ func (c *Connection) Handle() {
 			continue
 		}
 
-		if c.srv != nil {
+		if c.srv != nil && c.srv.pauseActive() {
+			c.releaseGate()
 			c.srv.waitWhilePaused(cmd)
 		}
 		if c.runCommand(cmd, args) {
 			// QUIT, a handoff or a write error ends the connection; replies
 			// kept for the pipeline before it still go out.
+			c.releaseGate()
 			c.writeMu.Lock()
 			if err := c.writer.Flush(); err == nil {
 				if err := c.sink.release(); err != nil {
@@ -446,13 +502,15 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 			out = resp.NewWriter(captured)
 			out.SetRESP3(c.writer.IsRESP3())
 		}
-		ctx := command.NewContextWithClient(cmd, args, st, out, c.ID, c.conn.RemoteAddr().String())
+		if c.transaction == nil {
+			c.transaction = command.NewTransaction()
+		}
+		if c.remoteAddr == "" {
+			c.remoteAddr = c.conn.RemoteAddr().String()
+		}
+		ctx := command.NewConnectionContext(cmd, args, st, out, c.ID, c.remoteAddr, c.transaction)
 		ctx.DB = c.db
 		ctx.DBs = c.dbs
-		if c.transaction == nil {
-			c.transaction = ctx.Transaction
-		}
-		ctx.Transaction = c.transaction
 		// Share the subscriber across commands so PubSub state persists
 		if c.subscriber != nil {
 			ctx.Subscriber = c.subscriber
@@ -488,13 +546,34 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 		var err error
 		c.sink.hold()
 		if c.srv != nil && c.srv.refuseOnReplica(ctx) {
+			c.releaseGate()
 			err = nil
 		} else {
-			release := c.srv.holdGate(ctx)
+			// The hold is recorded in heldGate as soon as it is taken, so a
+			// panicking command still has it released by Handle.
+			want := c.srv.planGate(ctx)
+			if want != nil {
+				if !c.heldGate.covers(want) {
+					c.releaseGate()
+					want.lock()
+					c.heldGate = want
+				}
+				h := c.heldGate
+				ctx.BeforeWait = func() { h.unlock(); c.gateWaiting = true }
+				ctx.AfterWait = func() { h.lock(); c.gateWaiting = false }
+			} else {
+				c.releaseGate()
+			}
 			errsBefore := c.writer.Errors()
 			err = c.router.Execute(ctx)
 			c.srv.trackCommand(ctx, err != nil || c.writer.Errors() != errsBefore)
-			release()
+			if c.heldGate != nil {
+				if c.keepGate(c.heldGate, ctx, stopMerge != nil) {
+					c.heldCount++
+				} else {
+					c.releaseGate()
+				}
+			}
 		}
 		if stopWatch != nil {
 			stopWatch()
@@ -581,6 +660,7 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 		c.publishInfo()
 
 		if ctx.Handoff != nil {
+			c.releaseGate()
 			_ = c.writer.Flush()
 			if err := c.sink.release(); err != nil {
 				return true
@@ -598,6 +678,10 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 			return true
 		}
 		if c.bufReader.Buffered() == 0 || c.sink.buf.Len() >= maxHeldReplies || c.subscriber != nil || c.killed.Load() {
+			// The gate is never held across a socket write: a client that
+			// does not read its replies would keep it, and every other
+			// client, waiting.
+			c.releaseGate()
 			if err := c.sink.release(); err != nil {
 				return true
 			}

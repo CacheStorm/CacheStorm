@@ -44,6 +44,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Monitoring: the metrics port serves the full exposition (up, uptime, keys and memory across all databases, hits, misses, evictions, expirations, network bytes); Prometheus scrapes it without credentials, the Compose file mounts `alerts.yml`, and the "instance down" alert uses Prometheus' own `up` series
 
 ### Changed
+- Pipelined writes to one hot key are up to 40-60% faster (LPUSH 307k to 429k/s, now level with Redis; HSET 197k to 319k/s): a connection keeps its write-gate stripe across consecutive pipelined commands on the same keys instead of handing it to another connection after every command, never holding it across a socket write, a blocking command or a wait for input. HSET no longer builds a map per call, and every command stopped taking a process-wide lock for the connection registry and allocating a transaction and an address string
+- CONNECTION.KILL closes the connection; it used to only remove it from CONNECTION.LIST
 - LOLWUT reports the build's version instead of "1.0.0"
 - ACL LOAD/SAVE and DEBUG RELOAD/LOADAOF report that they are not available instead of replying OK without doing anything
 - The built-in sentinel role logs that it is experimental: it tracks masters but does not reconfigure servers on failover. The configuration guide documents Redis Sentinel for automatic failover

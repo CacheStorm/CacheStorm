@@ -3,6 +3,7 @@ package command
 import (
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
@@ -909,13 +910,9 @@ var (
 func TrackConnection(id int64, remoteAddr string) {
 	now := time.Now().UnixMilli()
 	connectionsMu.Lock()
-	connections[id] = &ConnectionInfo{
-		ID:          id,
-		RemoteAddr:  remoteAddr,
-		ConnectedAt: now,
-		LastActive:  now,
-		Commands:    0,
-	}
+	info := &ConnectionInfo{ID: id, RemoteAddr: remoteAddr, ConnectedAt: now}
+	info.LastActive.Store(now)
+	connections[id] = info
 	connectionsMu.Unlock()
 }
 
@@ -927,23 +924,23 @@ func UntrackConnection(id int64) {
 }
 
 // BumpConnectionCommand records that a connection issued one more command.
-// The counter lives in the shared entry, so the update runs under the
-// registry write lock: CONNECTION.INFO reads it under the read lock.
+// The counters are atomic, so every command takes only the registry's read
+// lock instead of serialising all connections on its write lock.
 func BumpConnectionCommand(id int64) {
-	connectionsMu.Lock()
+	connectionsMu.RLock()
 	if c, exists := connections[id]; exists {
-		c.Commands++
-		c.LastActive = time.Now().UnixMilli()
+		c.Commands.Add(1)
+		c.LastActive.Store(time.Now().UnixMilli())
 	}
-	connectionsMu.Unlock()
+	connectionsMu.RUnlock()
 }
 
 type ConnectionInfo struct {
 	ID          int64
 	RemoteAddr  string
 	ConnectedAt int64
-	LastActive  int64
-	Commands    int64
+	LastActive  atomic.Int64
+	Commands    atomic.Int64
 }
 
 func cmdCONNECTIONLIST(ctx *Context) error {
@@ -968,16 +965,12 @@ func cmdCONNECTIONKILL(ctx *Context) error {
 	}
 
 	id := parseInt64(ctx.ArgString(0))
-
-	connectionsMu.Lock()
-	defer connectionsMu.Unlock()
-
-	if _, exists := connections[id]; !exists {
-		return ctx.WriteInteger(0)
+	// The connection is closed through CLIENT KILL; deleting the registry
+	// entry alone left the client connected while reporting it killed.
+	if h := clientHooksFor(ctx); h != nil {
+		return ctx.WriteInteger(int64(h.Kill(ctx.ClientID, ClientFilter{IDs: []int64{id}})))
 	}
-
-	delete(connections, id)
-	return ctx.WriteInteger(1)
+	return ctx.WriteInteger(0)
 }
 
 func cmdCONNECTIONCOUNT(ctx *Context) error {
@@ -1011,7 +1004,7 @@ func cmdCONNECTIONINFO(ctx *Context) error {
 		resp.BulkString("connected_at"),
 		resp.IntegerValue(conn.ConnectedAt),
 		resp.BulkString("commands"),
-		resp.IntegerValue(conn.Commands),
+		resp.IntegerValue(conn.Commands.Load()),
 	}
 	connectionsMu.RUnlock()
 	return ctx.WriteArray(reply)

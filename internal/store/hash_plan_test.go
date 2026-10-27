@@ -183,3 +183,38 @@ func TestHashPlanEvictionReentersAndReselects(t *testing.T) {
 	}
 	requireBatchAccountingX(t, s)
 }
+
+func TestApplyHashPairsLastValueWinsAndCountsNewFields(t *testing.T) {
+	s := NewStore()
+	args := [][]byte{[]byte("f"), []byte("1"), []byte("g"), []byte("2"), []byte("f"), []byte("3")}
+	if added, err := s.ApplyHashPairs("h", false, args); err != nil || added != 2 {
+		t.Fatalf("added = %d, %v; want 2", added, err)
+	}
+	var many [][]byte
+	for i := 0; i < 20; i++ {
+		many = append(many, []byte("k"+string(rune('a'+i%5))), []byte{byte('0' + i%10)})
+	}
+	if added, err := s.ApplyHashPairs("h", false, many); err != nil || added != 5 {
+		t.Fatalf("added with 20 pairs over 5 fields = %d, %v; want 5", added, err)
+	}
+	e, _ := s.Get("h")
+	h := e.Value.(*HashValue)
+	h.RLock()
+	f, ka := string(h.Fields["f"]), string(h.Fields["ka"])
+	h.RUnlock()
+	if f != "3" || ka != "5" {
+		t.Fatalf("f=%q ka=%q, want the last values 3 and 5", f, ka)
+	}
+	if added, _ := s.ApplyHashPairs("h", true, [][]byte{[]byte("f"), []byte("x")}); added != 0 {
+		t.Fatal("NX overwrote an existing field")
+	}
+	var want int64
+	h.RLock()
+	for k, v := range h.Fields {
+		want += hashFieldSize(k, v)
+	}
+	h.RUnlock()
+	if got, ok := h.size.load(); !ok || got != want {
+		t.Fatalf("tracked size %d, recomputed %d", got, want)
+	}
+}
