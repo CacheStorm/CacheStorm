@@ -41,6 +41,9 @@ server:
   # TLS Configuration (empty = plaintext)
   # tls_cert_file: "/etc/cachestorm/tls/server.crt"
   # tls_key_file: "/etc/cachestorm/tls/server.key"
+  # Client certificates (mutual TLS), as tls-ca-cert-file/tls-auth-clients:
+  # tls_ca_cert_file: "/etc/cachestorm/tls/ca.crt"
+  # tls_auth_clients: "yes"     # yes | optional | no
 
 # HTTP Admin API
 http:
@@ -94,6 +97,7 @@ replication:
   # master_host: ""
   # master_port: 6380
   # master_auth: ""
+  # tls: false                 # connect to the master over TLS (tls-replication)
   read_only: true
 
 # Cluster mode: a Redis Cluster node; nodes.conf lives in

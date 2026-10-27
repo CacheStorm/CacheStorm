@@ -1,7 +1,9 @@
 package server
 
 import (
+	"crypto/tls"
 	"errors"
+	"fmt"
 	"net"
 	"runtime"
 	"sort"
@@ -302,9 +304,17 @@ func (s *Server) Replication() *replication.Manager {
 
 // newReplication builds the replication manager and connects it to the
 // router, the store hooks and the persistence hooks.
-func (s *Server) newReplication(cfg *config.Config) {
+func (s *Server) newReplication(cfg *config.Config) error {
 	rc := cfg.Replication
+	var replTLS *tls.Config
+	if rc.TLS {
+		var err error
+		if replTLS, err = replicaTLSConfig(&cfg.Server); err != nil {
+			return fmt.Errorf("replication TLS: %w", err)
+		}
+	}
 	s.repl = replication.New(replication.Config{
+		TLS:                replTLS,
 		MasterAuth:         rc.MasterAuth,
 		ReadOnly:           rc.ReadOnly,
 		Timeout:            time.Duration(rc.ReplTimeout) * time.Second,
@@ -315,6 +325,7 @@ func (s *Server) newReplication(cfg *config.Config) {
 	}, s, s.router, s.dbs)
 	s.repl.RegisterCommands(s.router)
 	s.router.SetPersistFilter(persistedCommand)
+	return nil
 }
 
 // recordWrites hands writes that ran outside the router (the REST API) to the

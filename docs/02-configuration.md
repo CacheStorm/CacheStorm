@@ -29,6 +29,8 @@ server:
   protected_mode: true          # Without a password, serve only loopback clients
   tls_cert_file: ""             # TLS certificate (empty = plaintext)
   tls_key_file: ""              # TLS private key
+  tls_ca_cert_file: ""          # CA that signs client (and master) certificates
+  tls_auth_clients: ""          # yes | optional | no; empty = yes when a CA is set
 
 # HTTP/API Configuration
 http:
@@ -71,6 +73,8 @@ replication:
   repl_timeout: 60              # seconds of silence before a link is dropped
   backlog_size: 1048576         # bytes kept for partial resynchronization
   replica_buffer_limit: 67108864 # bytes queued per replica before it is dropped
+  tls: false                    # dial the master over TLS, presenting tls_cert_file
+                                # and verifying it with tls_ca_cert_file
 
 # Persistence Configuration
 persistence:

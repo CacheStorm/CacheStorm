@@ -86,6 +86,13 @@ type ServerConfig struct {
 	ProtectedMode bool   `yaml:"protected_mode" default:"true"`
 	TLSCertFile   string `yaml:"tls_cert_file"`
 	TLSKeyFile    string `yaml:"tls_key_file"`
+	// TLSCACertFile verifies client certificates and, for a replica, the
+	// master's certificate (tls-ca-cert-file).
+	TLSCACertFile string `yaml:"tls_ca_cert_file"`
+	// TLSAuthClients is tls-auth-clients: "yes" requires a client
+	// certificate signed by TLSCACertFile, "optional" verifies one when it
+	// is sent, "no" never asks. Empty means "yes" when a CA is configured.
+	TLSAuthClients string `yaml:"tls_auth_clients"`
 }
 
 type HTTPConfig struct {
@@ -154,6 +161,10 @@ type ReplicationConfig struct {
 	// ReplicaBufferLimit is the most bytes queued for one replica before it
 	// is disconnected (client-output-buffer-limit replica).
 	ReplicaBufferLimit int `yaml:"replica_buffer_limit" default:"67108864"`
+	// TLS makes a replica connect to its master over TLS (tls-replication),
+	// presenting server.tls_cert_file and verifying the master against
+	// server.tls_ca_cert_file, or the system roots without one.
+	TLS bool `yaml:"tls"`
 }
 
 // IsReplica reports whether the configuration starts the server as a

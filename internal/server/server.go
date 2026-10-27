@@ -330,7 +330,9 @@ func New(cfg *config.Config) (result *Server, retErr error) {
 		s.dbs.SetPassiveExpiry(true)
 	}
 
-	s.newReplication(cfg)
+	if err := s.newReplication(cfg); err != nil {
+		return nil, err
+	}
 
 	if cfg.Server.RequirePass != "" {
 		s.router.SetRequirePass(cfg.Server.RequirePass)
@@ -551,25 +553,9 @@ func (s *Server) Start(_ context.Context) (retErr error) {
 	var err error
 
 	if s.cfg.Server.TLSCertFile != "" && s.cfg.Server.TLSKeyFile != "" {
-		cert, tlsErr := tls.LoadX509KeyPair(s.cfg.Server.TLSCertFile, s.cfg.Server.TLSKeyFile)
+		tlsCfg, tlsErr := serverTLSConfig(&s.cfg.Server)
 		if tlsErr != nil {
 			return tlsErr
-		}
-		tlsCfg := &tls.Config{
-			Certificates: []tls.Certificate{cert},
-			MinVersion:   tls.VersionTLS12,
-			CurvePreferences: []tls.CurveID{
-				tls.X25519,
-				tls.CurveP256,
-			},
-			CipherSuites: []uint16{
-				tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
-				tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-				tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-				tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-				tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
-				tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
-			},
 		}
 		listener, err = tls.Listen("tcp", addr, tlsCfg)
 		if err != nil {

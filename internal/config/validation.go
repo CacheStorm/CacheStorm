@@ -133,6 +133,20 @@ func Validate(cfg *Config) error {
 			return fmt.Errorf("TLS cert file not found: %s", cfg.Server.TLSCertFile)
 		}
 	}
+	if cfg.Server.TLSCACertFile != "" {
+		if _, err := os.Stat(cfg.Server.TLSCACertFile); os.IsNotExist(err) {
+			return fmt.Errorf("TLS CA cert file not found: %s", cfg.Server.TLSCACertFile)
+		}
+	}
+	switch cfg.Server.TLSAuthClients {
+	case "", "no", "optional":
+	case "yes":
+		if cfg.Server.TLSCACertFile == "" {
+			return fmt.Errorf("tls_auth_clients: yes needs tls_ca_cert_file")
+		}
+	default:
+		return fmt.Errorf("invalid tls_auth_clients %q: use yes, no or optional", cfg.Server.TLSAuthClients)
+	}
 	if cfg.Server.TLSKeyFile != "" {
 		if _, err := os.Stat(cfg.Server.TLSKeyFile); os.IsNotExist(err) {
 			return fmt.Errorf("TLS key file not found: %s", cfg.Server.TLSKeyFile)

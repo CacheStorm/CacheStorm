@@ -2,6 +2,7 @@ package replication
 
 import (
 	"bufio"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -229,7 +230,17 @@ func (l *link) session() (bool, error) {
 	m.mu.Unlock()
 
 	addr := net.JoinHostPort(l.host, strconv.Itoa(l.port))
-	conn, err := net.DialTimeout("tcp", addr, m.cfg.Timeout)
+	var conn net.Conn
+	var err error
+	if m.cfg.TLS != nil {
+		tc := m.cfg.TLS.Clone()
+		if tc.ServerName == "" {
+			tc.ServerName = l.host
+		}
+		conn, err = tls.DialWithDialer(&net.Dialer{Timeout: m.cfg.Timeout}, "tcp", addr, tc)
+	} else {
+		conn, err = net.DialTimeout("tcp", addr, m.cfg.Timeout)
+	}
 	if err != nil {
 		return false, err
 	}

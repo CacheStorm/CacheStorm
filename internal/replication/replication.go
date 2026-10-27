@@ -16,6 +16,7 @@ package replication
 
 import (
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/hex"
 	"io"
 	"strconv"
@@ -82,6 +83,8 @@ type Config struct {
 	// AnnounceIP and AnnouncePort override what a replica tells its master.
 	AnnounceIP   string
 	AnnouncePort int
+	// TLS, when set, is used to dial the master (tls-replication).
+	TLS *tls.Config
 }
 
 func (c *Config) applyDefaults() {
