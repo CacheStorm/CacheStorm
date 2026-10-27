@@ -203,7 +203,42 @@ func cmdCLUSTER(ctx *Context) error {
 	case "SHARDS":
 		return ctx.WriteArray(clusterShardsReply(ctx, c))
 	case "LINKS":
-		return ctx.WriteArray([]*resp.Value{})
+		links := c.Links()
+		out := make([]*resp.Value, len(links))
+		for i, l := range links {
+			out[i] = resp.PairsValue([]*resp.Value{
+				resp.BulkString("direction"), resp.BulkString(l.Direction),
+				resp.BulkString("node"), resp.BulkString(l.Node),
+				resp.BulkString("create-time"), resp.IntegerValue(l.CreateTime),
+				resp.BulkString("events"), resp.BulkString(l.Events),
+				resp.BulkString("send-buffer-allocated"), resp.IntegerValue(l.SendBuffer),
+				resp.BulkString("send-buffer-used"), resp.IntegerValue(l.SendBuffer),
+			})
+		}
+		return ctx.WriteArray(out)
+	case "MEET":
+		if len(args) > 3 {
+			return ctx.WriteError(errors.New("ERR unknown subcommand or wrong number of arguments for '" + ctx.ArgString(0) + "'. Try CLUSTER HELP."))
+		}
+		port, err := strconv.ParseInt(string(args[1]), 10, 64)
+		if err != nil {
+			return ctx.WriteError(fmt.Errorf("ERR Invalid base port specified: %s", args[1]))
+		}
+		cport := port + 10000
+		if len(args) == 3 {
+			if cport, err = strconv.ParseInt(string(args[2]), 10, 64); err != nil {
+				return ctx.WriteError(fmt.Errorf("ERR Invalid bus port specified: %s", args[2]))
+			}
+		}
+		if port < 0 || port > 65535 || cport < 0 || cport > 65535 || c.Meet(string(args[0]), int(port), int(cport)) != nil {
+			return ctx.WriteError(fmt.Errorf("ERR Invalid node address specified: %s:%s", args[0], args[1]))
+		}
+		return ctx.WriteOK()
+	case "FORGET":
+		if err := c.Forget(string(args[0])); err != nil {
+			return ctx.WriteError(err)
+		}
+		return ctx.WriteOK()
 	case "KEYSLOT":
 		return ctx.WriteInteger(int64(hashslot.Key(string(args[0]))))
 	case "COUNTKEYSINSLOT":
@@ -316,7 +351,7 @@ func cmdCLUSTER(ctx *Context) error {
 		}
 		return ctx.WriteArray(out)
 	}
-	return ctx.WriteError(errors.New("ERR CLUSTER " + sub + " needs the cluster bus, which this release does not have yet"))
+	return ctx.WriteError(errors.New("ERR CLUSTER " + sub + " needs replica support, which this release does not have yet"))
 }
 
 // clusterDB is database 0, the only one cluster mode serves.

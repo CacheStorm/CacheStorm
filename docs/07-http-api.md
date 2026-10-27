@@ -343,9 +343,10 @@ Response:
 
 `GET /api/cluster` returns the node's ID, shard ID, the `CLUSTER INFO`
 fields and the `CLUSTER NODES` lines when the server runs in cluster mode,
-and `501 Not Implemented` otherwise. `POST /api/cluster/join` answers `501`:
-joining other nodes needs the cluster bus, which this release does not have
-yet. Keyed commands sent through `/api/execute` follow the same cluster
+and `501 Not Implemented` otherwise. `POST /api/cluster/join` with
+`{"host": "10.0.0.2", "port": 6379, "bus_port": 16379}` runs `CLUSTER MEET`
+(`bus_port` defaults to `port` + 10000) and answers `400` for an invalid
+address. Keyed commands sent through `/api/execute` follow the same cluster
 routing as on the RESP port.
 
 ---

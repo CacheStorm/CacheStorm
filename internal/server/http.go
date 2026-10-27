@@ -913,12 +913,35 @@ func (h *HTTPServer) handleCluster(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
-func (h *HTTPServer) handleClusterJoin(w http.ResponseWriter, _ *http.Request) {
+// handleClusterJoin runs CLUSTER MEET with {"host", "port", "bus_port"};
+// bus_port defaults to port + 10000.
+func (h *HTTPServer) handleClusterJoin(w http.ResponseWriter, r *http.Request) {
 	if h.srv == nil || h.srv.router.Cluster() == nil {
 		h.writeError(w, http.StatusNotImplemented, errClusterDisabled.Error())
 		return
 	}
-	h.writeError(w, http.StatusNotImplemented, "joining a cluster needs the cluster bus (CLUSTER MEET), which this release does not have yet")
+	if r.Method != http.MethodPost {
+		h.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	var req struct {
+		Host    string `json:"host"`
+		Port    int    `json:"port"`
+		BusPort int    `json:"bus_port"`
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if req.BusPort == 0 {
+		req.BusPort = req.Port + 10000
+	}
+	if err := h.srv.router.Cluster().Meet(req.Host, req.Port, req.BusPort); err != nil {
+		h.writeError(w, http.StatusBadRequest, "invalid node address "+net.JoinHostPort(req.Host, strconv.Itoa(req.Port)))
+		return
+	}
+	h.writeJSON(w, http.StatusOK, map[string]interface{}{"message": "handshake started"})
 }
 
 // httpDangerousCommands are blocked from execution via the HTTP API
@@ -1671,7 +1694,7 @@ const adminUIHTML = `<!DOCTYPE html>
                 showViewKeyModal: false,
                 showTagKeysModal: false,
                 newKey: { key: '', value: '', type: 'string', tags: '' },
-                joinCluster: { host: '127.0.0.1', port: 7946 },
+                joinCluster: { host: '127.0.0.1', port: 6379 },
                 viewingKey: {},
                 viewingTagName: '',
                 viewingTagKeys: [],

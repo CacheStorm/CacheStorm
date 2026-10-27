@@ -53,7 +53,7 @@ cluster:
   enabled: false
   config_file: nodes.conf       # relative to persistence.data_dir
   node_timeout: 15000           # ms, as cluster-node-timeout
-  bus_port: 0                   # 0 = port + 10000
+  bus_port: 0                   # cluster bus port; 0 = port + 10000
   announce_ip: ""               # as cluster-announce-ip
   announce_port: 0              # 0 = the listening port
   announce_bus_port: 0          # 0 = bus_port
@@ -140,9 +140,9 @@ failover, so it is not a replacement for Redis Sentinel.
 
 ### Cluster mode
 
-With `cluster.enabled: true` the server runs as a Redis Cluster node.
-This release covers a single node. The cluster bus, `CLUSTER MEET`,
-replicas and failover are not there yet.
+With `cluster.enabled: true` the server runs as a Redis Cluster node and
+forms multi-master clusters with other CacheStorm nodes. Replicas, failover
+and resharding are not there yet.
 
 - **Identity and nodes.conf.** On first start the node generates a 40-hex
   node ID and a shard ID and writes `nodes.conf` in `persistence.data_dir`.
@@ -155,6 +155,22 @@ replicas and failover are not there yet.
   node serving everything needs `CLUSTER ADDSLOTSRANGE 0 16383`. Until every
   slot is assigned, `cluster_state` is `fail` (unless
   `require_full_coverage: false`) and keyed commands get `CLUSTERDOWN`.
+- **Cluster bus.** The node listens on `bus_port` (default: the client
+  port + 10000) on the `server.bind` address, for CacheStorm's own
+  node-to-node protocol; open it between the nodes. `announce_bus_port` is
+  the bus port the other nodes are told. Nodes join with `CLUSTER MEET ip
+  port [bus-port]` and learn about each other through gossip, so
+  `redis-cli --cluster create` works (see `scripts/cluster-smoke.sh`).
+  `CLUSTER FORGET` removes a node and keeps it out for 60 seconds.
+- **Failure detection.** A node that does not answer a ping within
+  `node_timeout` is flagged `fail?` (PFAIL); once a majority of the masters
+  serving slots report it, it becomes `fail` everywhere and, with
+  `require_full_coverage`, the cluster goes down while its slots are not
+  served. A master in the minority of a partition also reports the cluster
+  down. A failed master that answers again is cleared after
+  2 × `node_timeout`.
+- **Pub/Sub.** `PUBLISH` reaches the subscribers of every node; `SPUBLISH`
+  stays on the node serving the channel's slot.
 - **Routing.** Keys hash with CRC16 modulo 16384 and `{hash tags}`. A keyed
   command that is not served here gets the reply Redis gives:
   - `MOVED slot host:port` when another node owns the slot;

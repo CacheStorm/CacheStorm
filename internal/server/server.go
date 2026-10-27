@@ -592,8 +592,13 @@ func (s *Server) Start(_ context.Context) (retErr error) {
 	s.router.SetPort(s.ListeningPort())
 	if err := s.announceCluster(); err != nil {
 		listener.Close()
-		return fmt.Errorf("cluster: save nodes.conf: %w", err)
+		return fmt.Errorf("cluster: %w", err)
 	}
+	defer func() {
+		if !startupComplete {
+			s.stopClusterBus()
+		}
+	}()
 
 	// Active expiration: remove expired keys without requiring reads.
 	s.dbs.StartExpiry()
@@ -818,6 +823,7 @@ func (s *Server) Stop(ctx context.Context) error {
 	}
 	s.acceptWG.Wait()
 	logger.Info().Msg("stopped accepting new connections")
+	s.stopClusterBus()
 
 	// 1a. Stop replication: the master link and every attached replica, so
 	// no write arrives from the master while the server drains.

@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/cachestorm/cachestorm/internal/hashslot"
 	"github.com/cachestorm/cachestorm/internal/logger"
@@ -80,6 +81,17 @@ type Node struct {
 	PongRecv    int64
 	ConfigEpoch uint64
 	numSlots    int
+	slots       [Slots / 8]byte
+
+	link         *link
+	inbound      *link
+	failReports  map[*Node]int64
+	failTime     int64
+	dataReceived int64
+	ctime        int64
+	nextDial     int64
+	dialBackoff  time.Duration
+	meet         bool
 }
 
 func (n *Node) failing() bool { return n.Flags&(FlagFail|FlagPFail) != 0 }
@@ -116,10 +128,17 @@ type Cluster struct {
 	owner         [Slots]*Node
 	migrating     [Slots]*Node
 	importing     [Slots]*Node
+	notClaiming   [Slots / 8]byte
 	currentEpoch  uint64
 	lastVoteEpoch uint64
 	ok            bool
 	size          int
+
+	ipLearnable bool
+	blacklist   map[string]int64
+	todoSave    bool
+	bus         *bus
+	stats       msgStats
 }
 
 // NewID returns a random 40-character hex node ID.
@@ -202,6 +221,7 @@ func (c *Cluster) SetMyself(ip string, port, cport, tlsPort int, hostname string
 	if ip != "" {
 		c.myself.IP = ip
 	}
+	c.ipLearnable = ip == ""
 	c.myself.Port, c.myself.CPort, c.myself.TLSPort = port, cport, tlsPort
 	c.myself.Hostname = hostname
 	c.mu.Unlock()
@@ -273,19 +293,24 @@ func (c *Cluster) updateStateLocked() {
 }
 
 func (c *Cluster) addSlotLocked(n *Node, slot int) {
-	if c.owner[slot] != nil {
-		c.owner[slot].numSlots--
-	}
+	c.delSlotLocked(slot)
 	c.owner[slot] = n
 	n.numSlots++
+	setBit(n.slots[:], slot)
 }
 
 func (c *Cluster) delSlotLocked(slot int) {
 	if n := c.owner[slot]; n != nil {
 		n.numSlots--
+		clearBit(n.slots[:], slot)
 		c.owner[slot] = nil
 	}
+	clearBit(c.notClaiming[:], slot)
 }
+
+func setBit(b []byte, i int)       { b[i>>3] |= 1 << (i & 7) }
+func clearBit(b []byte, i int)     { b[i>>3] &^= 1 << (i & 7) }
+func testBit(b []byte, i int) bool { return b[i>>3]&(1<<(i&7)) != 0 }
 
 // SlotRange is an inclusive range of slots.
 type SlotRange struct{ Start, End int }
@@ -522,9 +547,9 @@ func (c *Cluster) Reset(hard bool) {
 		c.migrating[slot], c.importing[slot] = nil, nil
 		c.delSlotLocked(slot)
 	}
-	for id := range c.nodes {
-		if id != c.myself.ID {
-			delete(c.nodes, id)
+	for _, n := range c.nodes {
+		if n != c.myself {
+			c.delNodeLocked(n)
 		}
 	}
 	if hard {
@@ -545,15 +570,16 @@ func (c *Cluster) IsReplica() bool {
 	return c.myself.replica()
 }
 
-// CountFailureReports implements CLUSTER COUNT-FAILURE-REPORTS. Failure
-// reports travel on the cluster bus, so every known node has none yet.
+// CountFailureReports implements CLUSTER COUNT-FAILURE-REPORTS: the number
+// of masters that recently reported node id as failing.
 func (c *Cluster) CountFailureReports(id string) (int, error) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	if c.nodes[id] == nil {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	n := c.nodes[id]
+	if n == nil {
 		return 0, fmt.Errorf("ERR Unknown node %s", id)
 	}
-	return 0, nil
+	return c.failureReportsLocked(n, nowMs()), nil
 }
 
 // Info is the CLUSTER INFO text.
@@ -593,9 +619,7 @@ func (c *Cluster) Info() string {
 	fmt.Fprintf(&b, "cluster_size:%d\r\n", c.size)
 	fmt.Fprintf(&b, "cluster_current_epoch:%d\r\n", c.currentEpoch)
 	fmt.Fprintf(&b, "cluster_my_epoch:%d\r\n", myEpoch)
-	b.WriteString("cluster_stats_messages_sent:0\r\n")
-	b.WriteString("cluster_stats_messages_received:0\r\n")
-	b.WriteString("total_cluster_links_buffer_limit_exceeded:0\r\n")
+	c.stats.write(&b)
 	return b.String()
 }
 
@@ -659,7 +683,7 @@ func (c *Cluster) nodeLineLocked(n *Node, ranges []SlotRange, forConfig bool) st
 		epoch = m.ConfigEpoch
 	}
 	link := "disconnected"
-	if n == c.myself {
+	if n == c.myself || n.link.up() {
 		link = "connected"
 	}
 	fmt.Fprintf(&b, " %d %d %d %s", n.PingSent, n.PongRecv, epoch, link)

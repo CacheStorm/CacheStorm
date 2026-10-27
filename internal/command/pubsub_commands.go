@@ -123,6 +123,9 @@ func cmdPUBLISH(ctx *Context) error {
 	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
+	if c := ctx.clusterState(); c != nil {
+		c.Publish(ctx.ArgString(0), ctx.Arg(1))
+	}
 	ps := ctx.Store.GetPubSub()
 	if ps == nil {
 		return ctx.WriteInteger(0)

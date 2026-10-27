@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -50,6 +51,12 @@ func (c *replClient) raw(want string, args ...string) string {
 		c.t.Fatalf("%v: read %q: %v", args, buf, err)
 	}
 	return string(buf)
+}
+
+func (s *Server) testBusPort() int {
+	_, p, _ := net.SplitHostPort(s.router.Cluster().BusAddr())
+	n, _ := strconv.Atoi(p)
+	return n
 }
 
 func keyInSlot(t *testing.T, prefix string, slot int) string {
@@ -115,7 +122,7 @@ func TestClusterSingleNode(t *testing.T) {
 	if len(id) != 40 || len(shard) != 40 || !strings.Contains(string(conf), "shard-id="+shard) {
 		t.Fatalf("ids %q %q", id, shard)
 	}
-	addr := fmt.Sprintf("127.0.0.1:%d@%d", port, port+10000)
+	addr := fmt.Sprintf("127.0.0.1:%d@%d", port, s.testBusPort())
 	if got := c.str("CLUSTER", "NODES"); got != id+" "+addr+" myself,master - 0 0 0 connected 0-16383\n" {
 		t.Fatalf("CLUSTER NODES: %q", got)
 	}

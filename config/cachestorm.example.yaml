@@ -96,12 +96,14 @@ replication:
   # master_auth: ""
   read_only: true
 
-# Cluster mode: a single Redis Cluster node; nodes.conf lives in
-# persistence.data_dir. Assign slots with CLUSTER ADDSLOTSRANGE 0 16383.
+# Cluster mode: a Redis Cluster node; nodes.conf lives in
+# persistence.data_dir. Join nodes with CLUSTER MEET (or redis-cli --cluster
+# create); a lone node serves everything after CLUSTER ADDSLOTSRANGE 0 16383.
 cluster:
   enabled: false
   # config_file: nodes.conf
-  # bus_port: 0                  # 0 = port + 10000
+  # node_timeout: 15000          # ms
+  # bus_port: 0                  # cluster bus; 0 = port + 10000
   # announce_ip: ""
   # require_full_coverage: true
   # allow_reads_when_down: false

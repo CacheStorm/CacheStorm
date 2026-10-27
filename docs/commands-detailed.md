@@ -1476,17 +1476,17 @@ QUIT
 Without `cluster.enabled`, every CLUSTER subcommand, ASKING, READONLY and
 READWRITE answer `ERR This instance has cluster support disabled`, as a Redis
 server started without `cluster-enabled` does. In cluster mode, the following
-work as in Redis 7.4 on a single node:
+work as in Redis 7.4:
 
 - INFO, MYID, MYSHARDID, NODES, SLOTS and SHARDS;
 - KEYSLOT, COUNTKEYSINSLOT and GETKEYSINSLOT;
 - ADDSLOTS, ADDSLOTSRANGE, DELSLOTS, DELSLOTSRANGE and FLUSHSLOTS;
 - SETSLOT, RESET, SAVECONFIG, BUMPEPOCH and SET-CONFIG-EPOCH;
-- LINKS, COUNT-FAILURE-REPORTS, REPLICAS/SLAVES and HELP;
+- MEET, FORGET, LINKS, COUNT-FAILURE-REPORTS, REPLICAS/SLAVES and HELP;
 - ASKING, READONLY and READWRITE.
 
-MEET, FORGET, REPLICATE and FAILOVER need the cluster bus and return an error
-in this release. See the cluster section of `docs/02-configuration.md`.
+REPLICATE and FAILOVER need replica support and return an error in this
+release. See the cluster section of `docs/02-configuration.md`.
 
 ### CLUSTER INFO
 Provides info about Redis Cluster node state.
