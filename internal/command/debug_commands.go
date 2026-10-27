@@ -192,7 +192,26 @@ func getEncoding(v store.Value) string {
 var errObjectFreqNoLFU = errors.New("ERR An LFU maxmemory policy is not selected, access frequency not tracked. " + //nolint:staticcheck // Redis reply text
 	"Please note that when switching between policies at runtime LRU and LFU data will take some time to adjust.")
 
+const objectHelp = `OBJECT <subcommand> [<arg> [value] [opt] ...]. Subcommands are:
+ENCODING <key>
+    Return the kind of internal representation used in order to store the value
+    associated with a <key>.
+FREQ <key>
+    Return the access frequency index of the <key>. The returned integer is
+    proportional to the logarithm of the recent access frequency of the key.
+IDLETIME <key>
+    Return the idle time of the <key>, that is the approximated number of
+    seconds elapsed since the last access to the key.
+REFCOUNT <key>
+    Return the number of references of the value associated with the specified
+    <key>.
+HELP
+    Print this help.`
+
 func cmdOBJECT(ctx *Context) error {
+	if ctx.ArgCount() == 1 && strings.EqualFold(ctx.ArgString(0), "HELP") {
+		return ctx.WriteArray(helpReply(objectHelp))
+	}
 	if ctx.ArgCount() < 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}

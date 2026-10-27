@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math/bits"
 	"strconv"
 	"strings"
 	"sync"
@@ -132,269 +133,252 @@ func cmdGETBIT(ctx *Context) error {
 	return ctx.WriteInteger(int64(bit))
 }
 
-func cmdBITCOUNT(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
+var errBitArgument = errors.New("ERR The bit argument must be 1 or 0.") //nolint:staticcheck // Redis reply text
 
-	key := ctx.ArgString(0)
-	start := 0
-	end := -1
-
-	if ctx.ArgCount() >= 3 {
-		var err error
-		start, err = strconv.Atoi(ctx.ArgString(1))
-		if err != nil {
-			return ctx.WriteError(ErrNotInteger)
-		}
-		end, err = strconv.Atoi(ctx.ArgString(2))
-		if err != nil {
-			return ctx.WriteError(ErrNotInteger)
-		}
+// bitmapBytes returns a copy of key's string bytes and whether the key
+// exists; err is WRONGTYPE for a key of another type.
+func bitmapBytes(ctx *Context, key string) ([]byte, bool, error) {
+	entry, ok := ctx.Store.Get(key)
+	if !ok {
+		return nil, false, nil
 	}
-
-	if bitmapWrongType(ctx, key) {
-		return ctx.WriteError(store.ErrWrongType)
+	switch v := entry.Value.(type) {
+	case *BitmapValue:
+		v.mu.RLock()
+		defer v.mu.RUnlock()
+		return append([]byte(nil), v.Data...), true, nil
+	case *store.StringValue:
+		return v.Data, true, nil
 	}
-	bm := getBitmap(ctx, key)
-	if bm == nil {
-		return ctx.WriteInteger(0)
-	}
-	bm.mu.RLock()
-	defer bm.mu.RUnlock()
+	return nil, true, store.ErrWrongType
+}
 
-	data := bm.Data
-	if end < 0 {
-		end = len(data) + end
+// bitRange resolves a BITCOUNT/BITPOS start/end pair over totlen bytes, as
+// Redis does: in BIT mode the range is in bits and the edge bytes get masks
+// for the bits outside it.
+func bitRange(start, end, totlen int64, isBit bool) (s, e int64, firstMask, lastMask byte) {
+	if isBit {
+		totlen <<= 3
 	}
 	if start < 0 {
-		start = len(data) + start
+		start += totlen
+	}
+	if end < 0 {
+		end += totlen
 	}
 	if start < 0 {
 		start = 0
 	}
-	if end >= len(data) {
-		end = len(data) - 1
+	if end < 0 {
+		end = 0
+	}
+	if end >= totlen {
+		end = totlen - 1
+	}
+	if isBit && start <= end {
+		firstMask = ^byte((1<<(8-(start&7)))-1) & 0xFF
+		lastMask = byte((1 << (7 - (end & 7))) - 1)
+		start >>= 3
+		end >>= 3
+	}
+	return start, end, firstMask, lastMask
+}
+
+func parseBitUnit(arg string) (bool, error) {
+	switch strings.ToUpper(arg) {
+	case "BIT":
+		return true, nil
+	case "BYTE":
+		return false, nil
+	}
+	return false, ErrSyntaxError
+}
+
+func cmdBITCOUNT(ctx *Context) error {
+	n := ctx.ArgCount()
+	if n < 1 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+	if n != 1 && n != 3 && n != 4 {
+		return ctx.WriteError(ErrSyntaxError)
+	}
+	var start, end int64
+	isBit := false
+	if n >= 3 {
+		var err error
+		if start, err = strconv.ParseInt(ctx.ArgString(1), 10, 64); err != nil {
+			return ctx.WriteError(ErrNotInteger)
+		}
+		if end, err = strconv.ParseInt(ctx.ArgString(2), 10, 64); err != nil {
+			return ctx.WriteError(ErrNotInteger)
+		}
+		if n == 4 {
+			if isBit, err = parseBitUnit(ctx.ArgString(3)); err != nil {
+				return ctx.WriteError(err)
+			}
+		}
+	}
+	data, ok, err := bitmapBytes(ctx, ctx.ArgString(0))
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	if !ok {
+		return ctx.WriteInteger(0)
+	}
+	var firstMask, lastMask byte
+	if n >= 3 {
+		if start < 0 && end < 0 && start > end {
+			return ctx.WriteInteger(0)
+		}
+		start, end, firstMask, lastMask = bitRange(start, end, int64(len(data)), isBit)
+	} else {
+		start, end = 0, int64(len(data))-1
 	}
 	if start > end {
 		return ctx.WriteInteger(0)
 	}
-
 	count := 0
-	for i := start; i <= end; i++ {
-		b := data[i]
-		for b != 0 {
-			count += int(b & 1)
-			b >>= 1
-		}
+	for _, b := range data[start : end+1] {
+		count += bits.OnesCount8(b)
 	}
-
+	if firstMask != 0 {
+		count -= bits.OnesCount8(data[start] & firstMask)
+	}
+	if lastMask != 0 {
+		count -= bits.OnesCount8(data[end] & lastMask)
+	}
 	return ctx.WriteInteger(int64(count))
 }
 
 func cmdBITPOS(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
+	n := ctx.ArgCount()
+	if n < 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
-
-	key := ctx.ArgString(0)
-	bit, err := strconv.Atoi(ctx.ArgString(1))
+	bit, err := strconv.ParseInt(ctx.ArgString(1), 10, 64)
 	if err != nil {
 		return ctx.WriteError(ErrNotInteger)
 	}
 	if bit != 0 && bit != 1 {
-		return ctx.WriteError(ErrInvalidArg)
+		return ctx.WriteError(errBitArgument)
 	}
-
-	start := 0
-	end := -1
-	endGiven := false
-
-	if ctx.ArgCount() >= 3 {
-		start, err = strconv.Atoi(ctx.ArgString(2))
-		if err != nil {
+	var start, end int64 = 0, -1
+	isBit, endGiven := false, false
+	switch {
+	case n >= 3 && n <= 5:
+		if start, err = strconv.ParseInt(ctx.ArgString(2), 10, 64); err != nil {
 			return ctx.WriteError(ErrNotInteger)
 		}
-	}
-	if ctx.ArgCount() >= 4 {
-		end, err = strconv.Atoi(ctx.ArgString(3))
-		if err != nil {
-			return ctx.WriteError(ErrNotInteger)
+		if n == 5 {
+			if isBit, err = parseBitUnit(ctx.ArgString(4)); err != nil {
+				return ctx.WriteError(err)
+			}
 		}
-		endGiven = true
+		if n >= 4 {
+			if end, err = strconv.ParseInt(ctx.ArgString(3), 10, 64); err != nil {
+				return ctx.WriteError(ErrNotInteger)
+			}
+			endGiven = true
+		}
+	case n != 2:
+		return ctx.WriteError(ErrSyntaxError)
 	}
-
-	if bitmapWrongType(ctx, key) {
-		return ctx.WriteError(store.ErrWrongType)
+	data, ok, err := bitmapBytes(ctx, ctx.ArgString(0))
+	if err != nil {
+		return ctx.WriteError(err)
 	}
-	bm := getBitmap(ctx, key)
-	if bm == nil {
-		return ctx.WriteInteger(-1)
-	}
-	bm.mu.RLock()
-	defer bm.mu.RUnlock()
-
-	data := bm.Data
-	if len(data) == 0 {
+	if !ok {
 		if bit == 1 {
 			return ctx.WriteInteger(-1)
 		}
 		return ctx.WriteInteger(0)
 	}
-
-	if end < 0 {
-		end = len(data) + end
-	}
-	if start < 0 {
-		start = len(data) + start
-	}
-	if start < 0 {
-		start = 0
-	}
-	if end >= len(data) {
-		end = len(data) - 1
-	}
+	start, end, firstMask, lastMask := bitRange(start, end, int64(len(data)), isBit)
 	if start > end {
 		return ctx.WriteInteger(-1)
 	}
-
-	target := byte(0)
-	if bit == 1 {
-		target = 1
-	}
-
+	want := bit == 1
 	for i := start; i <= end; i++ {
 		b := data[i]
+		var outside byte
+		if i == start {
+			outside |= firstMask
+		}
+		if i == end {
+			outside |= lastMask
+		}
+		if want {
+			b &^= outside
+		} else {
+			b |= outside
+		}
 		for j := 0; j < 8; j++ {
-			if (b & (1 << uint(7-j))) != 0 {
-				if target == 1 {
-					return ctx.WriteInteger(int64(i*8 + j))
-				}
-			} else {
-				if target == 0 {
-					return ctx.WriteInteger(int64(i*8 + j))
-				}
+			if (b&(0x80>>j) != 0) == want {
+				return ctx.WriteInteger(i*8 + int64(j))
 			}
 		}
 	}
-
-	if bit == 0 {
-		// Redis confines the search to an explicitly supplied end offset, so a
-		// 0 bit absent from that range is "not found". Answering with a position
-		// past the last bit is only correct when no end offset was given.
-		if endGiven {
-			return ctx.WriteInteger(-1)
-		}
-		return ctx.WriteInteger(int64(len(data) * 8))
+	if want || endGiven {
+		return ctx.WriteInteger(-1)
 	}
-
-	return ctx.WriteInteger(-1)
+	return ctx.WriteInteger((end + 1) * 8)
 }
 
 func cmdBITOP(ctx *Context) error {
 	if ctx.ArgCount() < 3 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
-
-	op := ctx.ArgString(0)
+	op := strings.ToUpper(ctx.ArgString(0))
+	switch op {
+	case "AND", "OR", "XOR", "NOT":
+	default:
+		return ctx.WriteError(ErrSyntaxError)
+	}
+	if op == "NOT" && ctx.ArgCount() != 3 {
+		return ctx.WriteError(errors.New("ERR BITOP NOT must be called with a single source key.")) //nolint:staticcheck // Redis reply text
+	}
 	destKey := ctx.ArgString(1)
-	srcKeys := make([]string, 0, ctx.ArgCount()-2)
+	srcs := make([][]byte, 0, ctx.ArgCount()-2)
+	maxLen := 0
 	for i := 2; i < ctx.ArgCount(); i++ {
-		srcKeys = append(srcKeys, ctx.ArgString(i))
-	}
-
-	// NOT is unary, not a combining op: Redis takes exactly one source and
-	// stores its inversion. It used to be handled by a `case "NOT"` inside
-	// the combining loop below, but that switch is only reached from the
-	// i > 0 iterations (i == 0 copies and continues), so the branch was
-	// unreachable and NOT silently stored an unmodified copy of the source.
-	for _, k := range srcKeys {
-		if bitmapWrongType(ctx, k) {
-			return ctx.WriteError(store.ErrWrongType)
-		}
-	}
-	if op == "NOT" {
-		if len(srcKeys) != 1 {
-			return ctx.WriteError(errors.New("ERR BITOP NOT must be called with a single source key"))
-		}
-		bm := getBitmap(ctx, srcKeys[0])
-		if bm == nil {
-			return ctx.WriteInteger(0)
-		}
-		bm = bm.Clone().(*BitmapValue)
-		inverted := make([]byte, len(bm.Data))
-		for j := range bm.Data {
-			inverted[j] = ^bm.Data[j]
-		}
-		if err := ctx.Store.Set(destKey, &BitmapValue{Data: inverted}, store.SetOptions{}); err != nil {
+		data, _, err := bitmapBytes(ctx, ctx.ArgString(i))
+		if err != nil {
 			return ctx.WriteError(err)
 		}
-		return ctx.WriteInteger(int64(len(inverted)))
+		srcs = append(srcs, data)
+		maxLen = max(maxLen, len(data))
 	}
-
-	// A source key that does not exist "counts as an empty string" (Redis
-	// BITOP). An empty string is the IDENTITY element for OR and XOR, but the
-	// ANNIHILATOR for AND: ANDing with an all-zero operand can only clear
-	// every bit. The old `continue` skipped the missing source outright, so
-	// `BITOP AND dest k1 missing` stored a byte-for-byte COPY of k1 — which is
-	// what OR produces — and AND was not even commutative, because seeding was
-	// keyed on the loop INDEX (i == 0) rather than on whether the accumulator
-	// had been seeded yet.
-	var result []byte
-	seeded := false
-	sawMissing := false
-
-	for _, k := range srcKeys {
-		bm := getBitmap(ctx, k)
-		if bm == nil {
-			sawMissing = true
-			continue
-		}
-
-		bm = bm.Clone().(*BitmapValue)
-		if !seeded {
-			result = make([]byte, len(bm.Data))
-			copy(result, bm.Data)
-			seeded = true
-			continue
-		}
-
-		if len(bm.Data) > len(result) {
-			newResult := make([]byte, len(bm.Data))
-			copy(newResult, result)
-			result = newResult
-		}
-
-		for j := 0; j < len(bm.Data) && j < len(result); j++ {
-			switch op {
-			case "AND":
-				result[j] &= bm.Data[j]
-			case "OR":
-				result[j] |= bm.Data[j]
-			case "XOR":
-				result[j] ^= bm.Data[j]
-			}
-		}
-		if op == "AND" {
-			clear(result[len(bm.Data):])
-		}
-	}
-
-	// Apply the missing operand's zero bits to an AND result.
-	if op == "AND" && sawMissing && result != nil {
-		for j := range result {
-			result[j] = 0
-		}
-	}
-
-	if result == nil {
+	if maxLen == 0 {
+		ctx.Store.Delete(destKey)
 		return ctx.WriteInteger(0)
 	}
-
+	result := make([]byte, maxLen)
+	for j := range result {
+		var v byte
+		for i, src := range srcs {
+			var b byte
+			if j < len(src) {
+				b = src[j]
+			}
+			switch {
+			case op == "NOT":
+				v = ^b
+			case i == 0:
+				v = b
+			case op == "AND":
+				v &= b
+			case op == "OR":
+				v |= b
+			default:
+				v ^= b
+			}
+		}
+		result[j] = v
+	}
 	if err := ctx.Store.Set(destKey, &BitmapValue{Data: result}, store.SetOptions{}); err != nil {
 		return ctx.WriteError(err)
 	}
-	return ctx.WriteInteger(int64(len(result)))
+	return ctx.WriteInteger(int64(maxLen))
 }
 
 func cmdBITFIELD(ctx *Context) error {
