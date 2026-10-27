@@ -17,6 +17,8 @@ const (
 type MemoryTracker struct {
 	maxMemory    atomic.Int64
 	currentUsage atomic.Int64
+	// peak is the highest usage seen, INFO's used_memory_peak.
+	peak         atomic.Int64
 	warningPct   float64
 	criticalPct  float64
 	emergencyPct float64
@@ -39,7 +41,27 @@ func (mt *MemoryTracker) SetMax(maxMemory int64) {
 }
 
 func (mt *MemoryTracker) Add(bytes int64) {
-	mt.currentUsage.Add(bytes)
+	mt.notePeak(mt.currentUsage.Add(bytes))
+}
+
+func (mt *MemoryTracker) notePeak(usage int64) {
+	for {
+		peak := mt.peak.Load()
+		if usage <= peak || mt.peak.CompareAndSwap(peak, usage) {
+			return
+		}
+	}
+}
+
+// Peak returns the highest usage seen since the tracker was created or the
+// peak was reset.
+func (mt *MemoryTracker) Peak() int64 {
+	return mt.peak.Load()
+}
+
+// ResetPeak sets the peak to the current usage (CONFIG RESETSTAT).
+func (mt *MemoryTracker) ResetPeak() {
+	mt.peak.Store(mt.currentUsage.Load())
 }
 
 func (mt *MemoryTracker) Sub(bytes int64) {
@@ -120,6 +142,7 @@ func (mt *MemoryTracker) TryReserve(delta int64) bool {
 			return false
 		}
 		if mt.currentUsage.CompareAndSwap(current, next) {
+			mt.notePeak(next)
 			return true
 		}
 	}

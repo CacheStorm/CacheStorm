@@ -112,6 +112,22 @@ func (s *Store) ConfigureMemory(maxMemory int64, policy EvictionPolicy, warningP
 	})
 }
 
+// MemoryPeak returns the highest tracked memory usage, shared by every
+// database that shares this store's tracker; 0 without a tracker.
+func (s *Store) MemoryPeak() int64 {
+	if s.memTracker == nil {
+		return 0
+	}
+	return s.memTracker.Peak()
+}
+
+// ResetMemoryPeak restarts peak tracking from the current usage.
+func (s *Store) ResetMemoryPeak() {
+	if s.memTracker != nil {
+		s.memTracker.ResetPeak()
+	}
+}
+
 // trackMemory applies a shard-size delta to the configured memory tracker so
 // pressure checks and eviction observe live usage. Shard Set/Delete/Flush
 // return exact byte deltas; without this feed the tracker stays at zero,

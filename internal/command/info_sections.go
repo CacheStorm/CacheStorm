@@ -132,17 +132,24 @@ func infoMemory(w *infoWriter, ctx *Context) {
 	limit, policy := ctx.Store.MemoryLimit()
 	var ms runtime.MemStats
 	runtime.ReadMemStats(&ms)
+	mem := readMemoryFigures(ctx, used, &ms)
 	w.section("Memory")
 	w.int("used_memory", used)
 	w.field("used_memory_human", humanBytes(used))
-	w.int("used_memory_rss", int64(ms.Sys))
-	w.field("used_memory_rss_human", humanBytes(int64(ms.Sys)))
+	w.int("used_memory_rss", mem.rss)
+	w.field("used_memory_rss_human", humanBytes(mem.rss))
+	w.int("used_memory_peak", mem.peak)
+	w.field("used_memory_peak_human", humanBytes(mem.peak))
+	w.field("used_memory_peak_perc", mem.peakPerc())
 	w.int("used_memory_heap", int64(ms.HeapAlloc))
 	w.field("used_memory_heap_human", humanBytes(int64(ms.HeapAlloc)))
-	w.int("total_system_memory", 0)
+	w.int("total_system_memory", mem.system)
+	w.field("total_system_memory_human", humanBytes(mem.system))
 	w.int("maxmemory", limit)
 	w.field("maxmemory_human", humanBytes(limit))
 	w.field("maxmemory_policy", policy.String())
+	w.field("mem_fragmentation_ratio", strconv.FormatFloat(mem.fragmentation(), 'f', 2, 64))
+	w.int("mem_fragmentation_bytes", mem.rss-used)
 	w.field("mem_allocator", "go")
 	w.int("gc_cycles", int64(ms.NumGC))
 	w.end()
@@ -167,4 +174,40 @@ func infoStats(w *infoWriter, st ServerStatus) {
 	w.int("total_reads_processed", m.TotalReads.Load())
 	w.int("total_writes_processed", m.TotalWrites.Load())
 	w.end()
+}
+
+// memoryFigures are the process-level memory numbers INFO memory, MEMORY
+// STATS and MEMORY DOCTOR share.
+type memoryFigures struct {
+	used, rss, peak, system int64
+}
+
+func readMemoryFigures(ctx *Context, used int64, ms *runtime.MemStats) memoryFigures {
+	m := memoryFigures{used: used, peak: ctx.Store.MemoryPeak(), system: totalSystemMemory()}
+	if rss, ok := processRSS(); ok {
+		m.rss = rss
+	} else {
+		m.rss = int64(ms.Sys - ms.HeapReleased)
+	}
+	if m.peak < used {
+		m.peak = used
+	}
+	return m
+}
+
+func (m memoryFigures) peakPerc() string {
+	if m.peak == 0 {
+		return "100.00%"
+	}
+	return strconv.FormatFloat(float64(m.used)*100/float64(m.peak), 'f', 2, 64) + "%"
+}
+
+// fragmentation is RSS over used memory, as Redis reports it. The Go runtime
+// and the server's own structures are in RSS but not in used memory, so a
+// nearly empty server reads high.
+func (m memoryFigures) fragmentation() float64 {
+	if m.used <= 0 {
+		return 0
+	}
+	return float64(m.rss) / float64(m.used)
 }

@@ -3,6 +3,7 @@ package command
 import (
 	"errors"
 	"fmt"
+	"runtime"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -240,32 +241,7 @@ func cmdMEMORY(ctx *Context) error {
 	case "MALLOC-STATS":
 		return ctx.WriteSimpleString("allocator: go runtime")
 	case "DOCTOR":
-		var diagnosis strings.Builder
-		diagnosis.WriteString("CacheStorm Memory Doctor:\n\n")
-
-		memUsage := ctx.Store.MemUsage()
-		keyCount := ctx.Store.KeyCount()
-
-		fmt.Fprintf(&diagnosis, "Total memory usage: %d bytes\n", memUsage)
-		fmt.Fprintf(&diagnosis, "Total keys: %d\n", keyCount)
-
-		if keyCount > 0 {
-			avgSize := memUsage / keyCount
-			fmt.Fprintf(&diagnosis, "Average key size: %d bytes\n", avgSize)
-
-			if avgSize > 10000 {
-				diagnosis.WriteString("\nWarning: Average key size is high.\n")
-				diagnosis.WriteString("Consider using smaller values or compression.\n")
-			}
-		}
-
-		if memUsage > 100*1024*1024 {
-			diagnosis.WriteString("\nWarning: Memory usage exceeds 100MB.\n")
-			diagnosis.WriteString("Consider setting maxmemory limit or using eviction policy.\n")
-		}
-
-		diagnosis.WriteString("\nNo critical issues detected.\n")
-		return ctx.WriteBulkString(diagnosis.String())
+		return ctx.WriteBulkString(memoryDoctorReport(ctx))
 	case "PURGE":
 		debug.FreeOSMemory()
 		return ctx.WriteOK()
@@ -314,22 +290,68 @@ func cmdMemoryUsage(ctx *Context) error {
 }
 
 func cmdMemoryStats(ctx *Context) error {
-	var results []*resp.Value
-
-	addResult := func(k, v string) {
-		results = append(results, resp.BulkString(k), resp.BulkString(v))
+	m, keys := currentMemoryFigures(ctx)
+	perKey := int64(0)
+	if keys > 0 {
+		perKey = m.used / keys
 	}
+	peakPerc := 100.0
+	if m.peak > 0 {
+		peakPerc = float64(m.used) * 100 / float64(m.peak)
+	}
+	double := func(f float64) *resp.Value { return resp.DoubleValue(strconv.FormatFloat(f, 'f', -1, 64)) }
+	return ctx.Writer.WriteValue(resp.PairsValue([]*resp.Value{
+		resp.BulkString("peak.allocated"), resp.IntegerValue(m.peak),
+		resp.BulkString("total.allocated"), resp.IntegerValue(m.used),
+		resp.BulkString("keys.count"), resp.IntegerValue(keys),
+		resp.BulkString("keys.bytes-per-key"), resp.IntegerValue(perKey),
+		resp.BulkString("dataset.bytes"), resp.IntegerValue(m.used),
+		resp.BulkString("peak.percentage"), double(peakPerc),
+		resp.BulkString("allocator.resident"), resp.IntegerValue(m.rss),
+		resp.BulkString("fragmentation"), double(m.fragmentation()),
+		resp.BulkString("fragmentation.bytes"), resp.IntegerValue(m.rss - m.used),
+	}))
+}
 
-	addResult("peak.allocated", strconv.FormatInt(ctx.Store.MemUsage(), 10))
-	addResult("total.allocated", strconv.FormatInt(ctx.Store.MemUsage(), 10))
-	addResult("keys.count", strconv.FormatInt(ctx.Store.KeyCount(), 10))
-	addResult("keys.bytes-per-key", func() string {
-		count := ctx.Store.KeyCount()
-		if count == 0 {
-			return "0"
-		}
-		return strconv.FormatInt(ctx.Store.MemUsage()/count, 10)
-	}())
+// currentMemoryFigures reads the memory figures and the key count across
+// every database.
+func currentMemoryFigures(ctx *Context) (memoryFigures, int64) {
+	used, keys := ctx.Store.MemUsage(), ctx.Store.KeyCount()
+	if dbs := ctx.databases(); dbs != nil {
+		used, keys = dbs.MemUsage(), dbs.KeyCount()
+	}
+	var ms runtime.MemStats
+	runtime.ReadMemStats(&ms)
+	return readMemoryFigures(ctx, used, &ms), keys
+}
 
-	return ctx.WriteArray(results)
+// memoryDoctorReport is MEMORY DOCTOR: Redis' checks for an empty instance,
+// a past peak and a large RSS overhead, plus a maxmemory that is nearly
+// reached with nothing to evict.
+func memoryDoctorReport(ctx *Context) string {
+	m, _ := currentMemoryFigures(ctx)
+	if m.used < 5<<20 {
+		return "Hi Sam, this instance is empty or is using very little memory, my issues detector can't be used in these conditions. " +
+			"Please, leave for your mission on Earth and fill it with some data. The new Sam and I will be back to our programming as soon as I finished rebooting."
+	}
+	var issues []string
+	if m.peak > m.used*3/2 {
+		issues = append(issues, " * Peak memory: In the past this instance used more than 150% the memory that is currently using ("+humanBytes(m.peak)+
+			" against "+humanBytes(m.used)+"). The Go runtime returns freed memory to the operating system gradually, so the RSS can stay high for a while after a peak. "+
+			"If the peak was occasional and you want the memory back now, run MEMORY PURGE.")
+	}
+	if m.fragmentation() > 1.4 && m.rss-m.used > 64<<20 {
+		issues = append(issues, " * High total RSS: This instance has an RSS of "+humanBytes(m.rss)+" for "+humanBytes(m.used)+" of data, a ratio of "+
+			strconv.FormatFloat(m.fragmentation(), 'f', 2, 64)+". This is usually due to a memory peak (see above) or to garbage the Go runtime has not collected yet. "+
+			"MEMORY PURGE runs a collection and returns free memory to the operating system; a lower GOGC trades CPU for a smaller heap.")
+	}
+	if limit, policy := ctx.Store.MemoryLimit(); limit > 0 && m.used > limit*9/10 && policy == store.EvictionNoEviction {
+		issues = append(issues, " * Near maxmemory: "+humanBytes(m.used)+" of the "+humanBytes(limit)+
+			" maxmemory is used and the policy is noeviction, so writes will soon be refused with OOM. Raise maxmemory or choose an eviction policy.")
+	}
+	if len(issues) == 0 {
+		return "Hi Sam, I can't find any memory issue in your instance. I can only account for what occurs on this base."
+	}
+	return "Sam, I detected a few issues in this CacheStorm instance memory implants:\n\n" + strings.Join(issues, "\n\n") +
+		"\n\nI'm here to keep you safe, Sam. I want to help you.\n"
 }

@@ -64,6 +64,13 @@ func scriptGuard(ctx *Context) ScriptCallGuard {
 	if user == nil {
 		return nil
 	}
+	// denied records the refusal in ACL LOG with the "lua" context, as Redis
+	// does for a command a script was not allowed to run.
+	denied := func(reason, object string) {
+		inScript := *ctx
+		inScript.InScript = true
+		recordACLDenial(&inScript, reason, object, user.Name)
+	}
 	return func(cmd string, args []string) error {
 		upper := strings.ToUpper(cmd)
 		// Admin-command reservation: exactly like enforceACL, server
@@ -72,7 +79,9 @@ func scriptGuard(ctx *Context) ScriptCallGuard {
 		// escalation if such a command is ever implemented in the engine.
 		// Defense in depth — executeCommand currently implements none of
 		// them, but the guard must not depend on that accident.
+		shown := strings.ToLower(upper)
 		if aclAdminCommands[upper] {
+			denied("command", shown)
 			return fmt.Errorf("NOPERM script attempted to execute the '%s' command which is not allowed", upper)
 		}
 		// Command permission: a script runs as the invoking user, so a
@@ -81,11 +90,18 @@ func scriptGuard(ctx *Context) ScriptCallGuard {
 		// key-less redis.call('flushdb'), otherwise bypass the user's grants
 		// entirely. The bypass set mirrors enforceACL: a client must always
 		// be able to probe and authenticate.
-		if !aclBypassCommands[upper] && !user.CanExecuteCommand(upper) {
+		allowed := aclBypassCommands[upper] || user.CanExecuteCommand(upper)
+		if hasSubcommands(upper) && len(args) > 0 {
+			allowed = aclBypassCommands[upper] || user.CanExecuteSubcommand(upper, args[0])
+			shown += "|" + strings.ToLower(args[0])
+		}
+		if !allowed {
+			denied("command", shown)
 			return fmt.Errorf("NOPERM script attempted to execute the '%s' command which is not allowed", upper)
 		}
 		for _, key := range aclKeysForCommand(upper, stringArgsToBytes(args)) {
 			if !user.CanAccessKey(key) {
+				denied("key", key)
 				return fmt.Errorf("NOPERM script attempted to use a key which is not allowed")
 			}
 		}

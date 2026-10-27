@@ -296,6 +296,41 @@ func TestACLLogRecordsDenials(t *testing.T) {
 	}
 }
 
+// A command or key a script is refused is logged with the "lua" context, as
+// in Redis.
+func TestACLLogRecordsScriptDenials(t *testing.T) {
+	s := startReplServer(t, nil)
+	admin := dialRepl(t, s)
+	admin.do("ACL", "LOG", "RESET")
+	admin.do("ACL", "SETUSER", "scripter", "on", ">pw", "-@all", "+eval", "+get", "~user:*")
+	u := dialRepl(t, s)
+	u.do("AUTH", "scripter", "pw")
+	if got := u.do("EVAL", "return redis.call('set', 'user:1', 'x')", "0"); got.Type != resp.TypeError {
+		t.Fatalf("script SET = %+v, want an error", got)
+	}
+	if got := u.do("EVAL", "return redis.call('get', 'other:1')", "0"); got.Type != resp.TypeError {
+		t.Fatalf("script GET of a denied key = %+v, want an error", got)
+	}
+	log := admin.do("ACL", "LOG")
+	if len(log.Array) != 2 {
+		t.Fatalf("ACL LOG has %d entries, want 2: %+v", len(log.Array), log)
+	}
+	fields := func(v *resp.Value) map[string]string {
+		out := map[string]string{}
+		for j := 0; j+1 < len(v.Array); j += 2 {
+			out[string(v.Array[j].Bulk)] = string(v.Array[j+1].Bulk)
+		}
+		return out
+	}
+	key, cmd := fields(log.Array[0]), fields(log.Array[1])
+	if key["reason"] != "key" || key["object"] != "other:1" || key["context"] != "lua" {
+		t.Fatalf("script key entry = %v", key)
+	}
+	if cmd["reason"] != "command" || cmd["object"] != "set" || cmd["context"] != "lua" || cmd["username"] != "scripter" {
+		t.Fatalf("script command entry = %v", cmd)
+	}
+}
+
 func TestSearchAliasesAndTagValues(t *testing.T) {
 	s := startReplServer(t, nil)
 	c := dialRepl(t, s)

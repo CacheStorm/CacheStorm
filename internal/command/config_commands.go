@@ -342,6 +342,7 @@ func cmdConfigResetStat(ctx *Context) error {
 	// counter keeps climbing, so a client that trusts the +OK keeps reading
 	// stale, ever-growing statistics from INFO/STATSALL.
 	store.GlobalMetrics.Reset()
+	ctx.Store.ResetMemoryPeak()
 	return ctx.WriteOK()
 }
 
