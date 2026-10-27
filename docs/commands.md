@@ -3,7 +3,7 @@
 CacheStorm registers about 1,200 commands across 50+ modules: the Redis 7.4 command set plus CacheStorm extensions. Compatibility with Redis is measured by the differential harness in `tests/compat`.
 
 Every command name in this reference is verified against the registered command
-set: 1,237 documented, 0 phantoms, 0 missing.
+set: 1,238 documented, 0 phantoms, 0 missing.
 
 Counts in the table below are the commands listed in each section; `SET` and `COMMAND` are also repeated
 under Tag-Based Invalidation and Command Help but counted only once, under Core Redis.
@@ -12,7 +12,7 @@ under Tag-Based Invalidation and Command Help but counted only once, under Core 
 
 | Category | Commands | Description |
 |----------|----------|-------------|
-| [Core Redis](#core-redis-commands) | 207 | Standard Redis commands |
+| [Core Redis](#core-redis-commands) | 208 | Standard Redis commands |
 | [JSON](#json-commands) | 13 | JSON document operations |
 | [Time Series](#time-series-commands) | 12 | Time-series data |
 | [Search](#search-commands) | 13 | Full-text search |
@@ -45,7 +45,7 @@ under Tag-Based Invalidation and Command Help but counted only once, under Core 
 | [Service Discovery](#service-discovery-commands) | 8 | Service registration and discovery |
 | [Profiles](#profile-commands) | 5 | User profile records |
 | [Extended families](#extended-command-families) | 509 | 58 unprefixed commands and 101 further families |
-| **Total registered** | **1,237** | |
+| **Total registered** | **1,238** | |
 
 ---
 
@@ -338,6 +338,7 @@ MODULE LIST
 MODULE LOAD path [arg [arg ...]]
 MODULE UNLOAD name
 MONITOR
+FAILOVER [TO host port [FORCE]] [ABORT] [TIMEOUT milliseconds]
 REPLICAOF host port
 ROLE
 SHUTDOWN [NOSAVE|SAVE] [NOW] [FORCE] [ABORT]
@@ -2703,4 +2704,4 @@ WINDOW.GET
 
 *Last updated: 2026-10-12*
 *CacheStorm v0.3.0*
-*Total Commands: 1,237 (verified against the registered command set)*
+*Total Commands: 1,238 (verified against the registered command set)*

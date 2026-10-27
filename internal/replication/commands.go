@@ -24,6 +24,7 @@ func (m *Manager) RegisterCommands(router *command.Router) {
 	router.Register(&command.CommandDef{Name: "REPLICAOF", Handler: m.cmdREPLICAOF})
 	router.Register(&command.CommandDef{Name: "SLAVEOF", Handler: m.cmdREPLICAOF})
 	router.Register(&command.CommandDef{Name: "WAIT", Handler: m.cmdWAIT})
+	router.Register(&command.CommandDef{Name: "FAILOVER", Handler: m.cmdFAILOVER})
 	router.SetReplicationInfo(m.Info)
 }
 
@@ -70,6 +71,18 @@ func (m *Manager) cmdPSYNC(ctx *command.Context) error {
 	off, err := strconv.ParseInt(ctx.ArgString(1), 10, 64)
 	if err != nil {
 		return ctx.WriteError(errors.New("ERR value is not an integer or out of range"))
+	}
+	if ctx.ArgCount() > 2 && strings.EqualFold(ctx.ArgString(2), "FAILOVER") {
+		// The master hands its role over (FAILOVER): it resumes from this
+		// replica, which becomes a master keeping the stream it shares.
+		m.mu.Lock()
+		mine := m.role == RoleReplica && m.replid == ctx.ArgString(0)
+		m.mu.Unlock()
+		if !mine {
+			return ctx.WriteError(redisError("ERR PSYNC FAILOVER replid must match my replid."))
+		}
+		m.Promote()
+		logger.Info().Str("client", ctx.RemoteAddr).Msg("MASTER MODE enabled (failover request)")
 	}
 	return m.handoff(ctx, syncRequest{replid: ctx.ArgString(0), offset: off})
 }
@@ -244,7 +257,7 @@ func (m *Manager) Info() string {
 			i, r.ip, r.port, r.getState(), r.ackOffset.Load(), lag)
 		i++
 	}
-	sb.WriteString("master_failover_state:no-failover\r\n")
+	fmt.Fprintf(&sb, "master_failover_state:%s\r\n", m.failoverStateLocked())
 	fmt.Fprintf(&sb, "master_replid:%s\r\n", m.replid)
 	fmt.Fprintf(&sb, "master_replid2:%s\r\n", m.replid2)
 	fmt.Fprintf(&sb, "master_repl_offset:%d\r\n", m.offset)

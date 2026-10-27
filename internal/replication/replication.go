@@ -142,9 +142,11 @@ type Manager struct {
 	// Replica side: the master to follow and the state of the link. linkDB
 	// and linkTx are the master client's selected database and transaction,
 	// kept across reconnections so a partial resync continues exactly.
-	masterHost     string
-	masterPort     int
-	link           *link
+	masterHost string
+	masterPort int
+	link       *link
+	// failover is the FAILOVER in progress, nil when there is none.
+	failover       *failoverRun
 	linkState      string
 	linkDB         int
 	linkTx         *command.Transaction

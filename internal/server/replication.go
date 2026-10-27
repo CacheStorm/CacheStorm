@@ -243,6 +243,14 @@ func replicaRefuses(cmd string, args [][]byte) bool {
 	return persistedCommand(cmd, args) || command.IsWriteCommand(cmd)
 }
 
+// PauseWrites implements replication.WritePauser for FAILOVER: client
+// writes pause until the given time, and the writes already running finish
+// first.
+func (s *Server) PauseWrites(until time.Time) { s.pauseWritesForFailover(until) }
+
+// UnpauseWrites implements replication.WritePauser.
+func (s *Server) UnpauseWrites() { s.unpauseClients() }
+
 // LockWrites implements replication.Host.
 func (s *Server) LockWrites() { s.gate.global.Lock() }
 

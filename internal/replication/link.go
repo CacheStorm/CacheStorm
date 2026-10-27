@@ -32,9 +32,10 @@ var ErrAlreadyConnected = errors.New("already connected to specified master")
 // connect, handshake, resync, apply the stream, and start over with backoff
 // when anything fails.
 type link struct {
-	m    *Manager
-	host string
-	port int
+	m        *Manager
+	host     string
+	port     int
+	failover bool
 
 	stop chan struct{}
 	done chan struct{}
@@ -82,6 +83,12 @@ func (l *link) stopped() bool {
 // disconnected; the link starts with a partial resync from the server's own
 // stream position, which the new master accepts if it shares the history.
 func (m *Manager) ReplicaOf(host string, port int) error {
+	return m.replicaOf(host, port, false)
+}
+
+// replicaOf starts replicating from host:port. With failover the link asks
+// the target to take over as master (PSYNC ... FAILOVER).
+func (m *Manager) replicaOf(host string, port int, failover bool) error {
 	m.mu.Lock()
 	if m.stopped {
 		m.mu.Unlock()
@@ -117,7 +124,7 @@ func (m *Manager) ReplicaOf(host string, port int) error {
 	m.linkState = linkConnect
 	m.linkDownSince = time.Now()
 	replicas := m.detachAllLocked()
-	l := &link{m: m, host: host, port: port, stop: make(chan struct{}), done: make(chan struct{})}
+	l := &link{m: m, host: host, port: port, failover: failover, stop: make(chan struct{}), done: make(chan struct{})}
 	m.link = l
 	m.mu.Unlock()
 	m.host.UnlockWrites()
@@ -318,7 +325,11 @@ func (l *link) session() (bool, error) {
 		replid, next = m.replid, m.offset+1
 	}
 	m.mu.Unlock()
-	if reply, err = call("PSYNC", replid, strconv.FormatInt(next, 10)); err != nil {
+	psync := []string{"PSYNC", replid, strconv.FormatInt(next, 10)}
+	if l.failover {
+		psync = append(psync, "FAILOVER")
+	}
+	if reply, err = call(psync...); err != nil {
 		return false, err
 	}
 	switch {
