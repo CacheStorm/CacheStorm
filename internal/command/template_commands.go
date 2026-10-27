@@ -625,7 +625,7 @@ func isValidHostname(host string) bool {
 			return false
 		}
 		for _, r := range label {
-			if r < 0x80 && !(r == '-' || r >= '0' && r <= '9' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z') {
+			if r < 0x80 && r != '-' && (r < '0' || r > '9') && (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') {
 				return false
 			}
 		}

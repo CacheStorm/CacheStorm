@@ -18,8 +18,9 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/cachestorm/cachestorm/internal/resp"
 	"gopkg.in/yaml.v3"
+
+	"github.com/cachestorm/cachestorm/internal/resp"
 )
 
 // errInvalidPercentEncoding is returned for a '%' that is not followed by
@@ -280,8 +281,9 @@ func writeOrderedJSON(buf *bytes.Buffer, v any) error {
 func writeJSONString(buf *bytes.Buffer, s string) {
 	enc := json.NewEncoder(buf)
 	enc.SetEscapeHTML(false)
-	_ = enc.Encode(s)
-	buf.Truncate(buf.Len() - 1)
+	if enc.Encode(s) == nil {
+		buf.Truncate(buf.Len() - 1)
+	}
 }
 
 // formatJSONFloat always yields a fraction or exponent so that a decoded
@@ -893,7 +895,10 @@ func yamlNodeFromJSON(v any) (*yaml.Node, error) {
 	case *jsonObject:
 		n := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 		for _, k := range t.keys {
-			kn, _ := yamlNodeFromJSON(k)
+			kn, err := yamlNodeFromJSON(k)
+			if err != nil {
+				return nil, err
+			}
 			vn, err := yamlNodeFromJSON(t.vals[k])
 			if err != nil {
 				return nil, err

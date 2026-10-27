@@ -314,7 +314,7 @@ func TestAuditFixes2ASemaphoreCounts(t *testing.T) {
 	}
 
 	cancel := make(chan struct{})
-	ctx, buf = semCtx(s, "af2-sem", "1", "0")
+	ctx, _ = semCtx(s, "af2-sem", "1", "0")
 	ctx.Done = cancel
 	done = make(chan struct{})
 	go func() {
