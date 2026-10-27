@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"math/rand"
 	"runtime"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,6 +22,8 @@ func RegisterResilienceCommands(router *Router) {
 	router.Register(&CommandDef{Name: "CIRCUITX.METRICS", Handler: cmdCIRCUITXMETRICS})
 	router.Register(&CommandDef{Name: "CIRCUITX.RESET", Handler: cmdCIRCUITXRESET})
 	router.Register(&CommandDef{Name: "CIRCUITX.DELETE", Handler: cmdCIRCUITXDELETE})
+	router.Register(&CommandDef{Name: "CIRCUITX.ALLOW", Handler: cmdCIRCUITXALLOW})
+	router.Register(&CommandDef{Name: "CIRCUITX.RECORD", Handler: cmdCIRCUITXRECORD})
 
 	router.Register(&CommandDef{Name: "RATELIMITER.CREATE", Handler: cmdRATELIMITERCREATE})
 	router.Register(&CommandDef{Name: "RATELIMITER.TRY", Handler: cmdRATELIMITERTRY})
@@ -117,32 +121,84 @@ func RegisterResilienceCommands(router *Router) {
 
 var (
 	circuits   = make(map[string]*Circuit)
-	circuitsMu sync.RWMutex
+	circuitsMu sync.Mutex
 )
 
+const (
+	circuitClosed   = "closed"
+	circuitOpen     = "open"
+	circuitHalfOpen = "half-open"
+)
+
+// Circuit is a circuit breaker. Callers ask CIRCUITX.ALLOW before a call and
+// report its outcome with CIRCUITX.RECORD. In the closed state
+// FailureThreshold consecutive failures open the circuit; once it has been
+// open for Timeout milliseconds it turns half-open, where SuccessThreshold
+// successes close it and any failure opens it again.
 type Circuit struct {
-	Name            string
-	State           string
-	Failures        int64
-	Successes       int64
-	Threshold       int64
-	Timeout         int64
-	LastFailure     int64
-	LastStateChange int64
-	HalfOpenMax     int64
-	HalfOpenCount   int64
+	Name             string
+	State            string
+	Failures         int64
+	Successes        int64
+	FailureThreshold int64
+	SuccessThreshold int64
+	Timeout          int64
+	LastFailure      int64
+	LastStateChange  int64
+	TotalFailures    int64
+	TotalSuccesses   int64
+	Rejected         int64
+}
+
+func (c *Circuit) setState(state string, now int64) {
+	c.State = state
+	c.Failures = 0
+	c.Successes = 0
+	c.LastStateChange = now
+}
+
+func (c *Circuit) refresh(now int64) {
+	if c.State == circuitOpen && now-c.LastStateChange >= c.Timeout {
+		c.setState(circuitHalfOpen, now)
+	}
+}
+
+func (c *Circuit) retryAfter(now int64) int64 {
+	if c.State != circuitOpen {
+		return 0
+	}
+	if left := c.LastStateChange + c.Timeout - now; left > 0 {
+		return left
+	}
+	return 0
+}
+
+func parseCircuitInt(s string, min int64) (int64, bool) {
+	v, err := strconv.ParseInt(s, 10, 64)
+	if err != nil || v < min {
+		return 0, false
+	}
+	return v, true
 }
 
 func cmdCIRCUITXCREATE(ctx *Context) error {
-	if ctx.ArgCount() < 3 {
+	if ctx.ArgCount() < 3 || ctx.ArgCount() > 4 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
-	threshold := parseInt64(ctx.ArgString(1))
-	timeoutMs := parseInt64(ctx.ArgString(2))
-	halfOpenMax := int64(5)
-	if ctx.ArgCount() >= 4 {
-		halfOpenMax = parseInt64(ctx.ArgString(3))
+	failureThreshold, ok := parseCircuitInt(ctx.ArgString(1), 1)
+	if !ok {
+		return ctx.WriteError(errors.New("ERR failure threshold must be a positive integer"))
+	}
+	timeoutMs, ok := parseCircuitInt(ctx.ArgString(2), 0)
+	if !ok {
+		return ctx.WriteError(errors.New("ERR timeout must be a non-negative integer"))
+	}
+	successThreshold := int64(1)
+	if ctx.ArgCount() == 4 {
+		if successThreshold, ok = parseCircuitInt(ctx.ArgString(3), 1); !ok {
+			return ctx.WriteError(errors.New("ERR success threshold must be a positive integer"))
+		}
 	}
 	circuitsMu.Lock()
 	if _, exists := circuits[name]; !exists && len(circuits) >= 10000 {
@@ -150,143 +206,252 @@ func cmdCIRCUITXCREATE(ctx *Context) error {
 		return ctx.WriteError(errors.New("ERR maximum number of circuits reached"))
 	}
 	circuits[name] = &Circuit{
-		Name:            name,
-		State:           "closed",
-		Failures:        0,
-		Successes:       0,
-		Threshold:       threshold,
-		Timeout:         timeoutMs,
-		LastFailure:     0,
-		LastStateChange: time.Now().UnixMilli(),
-		HalfOpenMax:     halfOpenMax,
-		HalfOpenCount:   0,
+		Name:             name,
+		State:            circuitClosed,
+		FailureThreshold: failureThreshold,
+		SuccessThreshold: successThreshold,
+		Timeout:          timeoutMs,
+		LastStateChange:  time.Now().UnixMilli(),
 	}
 	circuitsMu.Unlock()
 	return ctx.WriteOK()
 }
 
-func cmdCIRCUITXOPEN(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+// setCircuitState forces a circuit into a state, as the manual OPEN, CLOSE,
+// HALFOPEN and RESET commands do.
+func setCircuitState(ctx *Context, state string, resetTotals bool) error {
+	if ctx.ArgCount() != 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
 	circuitsMu.Lock()
-	defer circuitsMu.Unlock()
-	if c, exists := circuits[name]; exists {
-		c.State = "open"
-		c.LastStateChange = time.Now().UnixMilli()
-		return ctx.WriteOK()
+	c, exists := circuits[name]
+	if exists {
+		now := time.Now().UnixMilli()
+		c.setState(state, now)
+		if state == circuitOpen {
+			c.LastFailure = now
+		}
+		if resetTotals {
+			c.TotalFailures, c.TotalSuccesses, c.Rejected, c.LastFailure = 0, 0, 0, 0
+		}
 	}
-	return ctx.WriteError(fmt.Errorf("ERR circuit not found"))
+	circuitsMu.Unlock()
+	if !exists {
+		return ctx.WriteError(errors.New("ERR circuit not found"))
+	}
+	return ctx.WriteOK()
+}
+
+func cmdCIRCUITXOPEN(ctx *Context) error {
+	return setCircuitState(ctx, circuitOpen, false)
 }
 
 func cmdCIRCUITXCLOSE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	circuitsMu.Lock()
-	defer circuitsMu.Unlock()
-	if c, exists := circuits[name]; exists {
-		c.State = "closed"
-		c.Failures = 0
-		c.Successes = 0
-		c.HalfOpenCount = 0
-		c.LastStateChange = time.Now().UnixMilli()
-		return ctx.WriteOK()
-	}
-	return ctx.WriteError(fmt.Errorf("ERR circuit not found"))
+	return setCircuitState(ctx, circuitClosed, false)
 }
 
 func cmdCIRCUITXHALFOPEN(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+	return setCircuitState(ctx, circuitHalfOpen, false)
+}
+
+func cmdCIRCUITXRESET(ctx *Context) error {
+	return setCircuitState(ctx, circuitClosed, true)
+}
+
+func cmdCIRCUITXALLOW(ctx *Context) error {
+	if ctx.ArgCount() != 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
 	circuitsMu.Lock()
-	defer circuitsMu.Unlock()
-	if c, exists := circuits[name]; exists {
-		c.State = "half-open"
-		c.HalfOpenCount = 0
-		c.LastStateChange = time.Now().UnixMilli()
-		return ctx.WriteOK()
+	c, exists := circuits[name]
+	allowed := false
+	if exists {
+		c.refresh(time.Now().UnixMilli())
+		allowed = c.State != circuitOpen
+		if !allowed {
+			c.Rejected++
+		}
 	}
-	return ctx.WriteError(fmt.Errorf("ERR circuit not found"))
+	circuitsMu.Unlock()
+	if !exists {
+		return ctx.WriteError(errors.New("ERR circuit not found"))
+	}
+	if allowed {
+		return ctx.WriteInteger(1)
+	}
+	return ctx.WriteInteger(0)
 }
 
-func cmdCIRCUITXSTATUS(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+func cmdCIRCUITXRECORD(ctx *Context) error {
+	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
-	circuitsMu.RLock()
+	var success bool
+	switch strings.ToUpper(ctx.ArgString(1)) {
+	case "SUCCESS":
+		success = true
+	case "FAILURE":
+	default:
+		return ctx.WriteError(errors.New("ERR outcome must be SUCCESS or FAILURE"))
+	}
+	circuitsMu.Lock()
+	c, exists := circuits[name]
+	state := ""
+	if exists {
+		now := time.Now().UnixMilli()
+		c.refresh(now)
+		if success {
+			c.TotalSuccesses++
+			switch c.State {
+			case circuitClosed:
+				c.Failures = 0
+			case circuitHalfOpen:
+				c.Successes++
+				if c.Successes >= c.SuccessThreshold {
+					c.setState(circuitClosed, now)
+				}
+			}
+		} else {
+			c.TotalFailures++
+			c.LastFailure = now
+			switch c.State {
+			case circuitClosed:
+				c.Failures++
+				if c.Failures >= c.FailureThreshold {
+					c.setState(circuitOpen, now)
+				}
+			case circuitHalfOpen:
+				c.setState(circuitOpen, now)
+			}
+		}
+		state = c.State
+	}
+	circuitsMu.Unlock()
+	if !exists {
+		return ctx.WriteError(errors.New("ERR circuit not found"))
+	}
+	return ctx.WriteBulkString(state)
+}
+
+func cmdCIRCUITXSTATUS(ctx *Context) error {
+	if ctx.ArgCount() != 1 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+	name := ctx.ArgString(0)
+	circuitsMu.Lock()
 	c, exists := circuits[name]
 	if !exists {
-		reply := fmt.Errorf("ERR circuit not found")
-		circuitsMu.RUnlock()
-		return ctx.WriteError(reply)
+		circuitsMu.Unlock()
+		return ctx.WriteError(errors.New("ERR circuit not found"))
 	}
+	now := time.Now().UnixMilli()
+	c.refresh(now)
 	reply := []*resp.Value{
 		resp.BulkString("name"), resp.BulkString(c.Name),
 		resp.BulkString("state"), resp.BulkString(c.State),
 		resp.BulkString("failures"), resp.IntegerValue(c.Failures),
 		resp.BulkString("successes"), resp.IntegerValue(c.Successes),
+		resp.BulkString("failure_threshold"), resp.IntegerValue(c.FailureThreshold),
+		resp.BulkString("success_threshold"), resp.IntegerValue(c.SuccessThreshold),
+		resp.BulkString("timeout"), resp.IntegerValue(c.Timeout),
+		resp.BulkString("retry_after"), resp.IntegerValue(c.retryAfter(now)),
 	}
-	circuitsMu.RUnlock()
+	circuitsMu.Unlock()
 	return ctx.WriteArray(reply)
 }
 
 func cmdCIRCUITXMETRICS(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+	if ctx.ArgCount() != 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
-	circuitsMu.RLock()
+	circuitsMu.Lock()
 	c, exists := circuits[name]
 	if !exists {
-		reply := fmt.Errorf("ERR circuit not found")
-		circuitsMu.RUnlock()
-		return ctx.WriteError(reply)
+		circuitsMu.Unlock()
+		return ctx.WriteError(errors.New("ERR circuit not found"))
+	}
+	rate := 0.0
+	if total := c.TotalFailures + c.TotalSuccesses; total > 0 {
+		rate = float64(c.TotalFailures) / float64(total)
 	}
 	reply := []*resp.Value{
-		resp.BulkString("total_failures"), resp.IntegerValue(c.Failures),
-		resp.BulkString("total_successes"), resp.IntegerValue(c.Successes),
-		resp.BulkString("failure_rate"), resp.BulkString(fmt.Sprintf("%.2f", float64(c.Failures)/float64(c.Failures+c.Successes+1))),
+		resp.BulkString("total_failures"), resp.IntegerValue(c.TotalFailures),
+		resp.BulkString("total_successes"), resp.IntegerValue(c.TotalSuccesses),
+		resp.BulkString("rejected"), resp.IntegerValue(c.Rejected),
+		resp.BulkString("failure_rate"), resp.BulkString(fmt.Sprintf("%.2f", rate)),
 	}
-	circuitsMu.RUnlock()
+	circuitsMu.Unlock()
 	return ctx.WriteArray(reply)
 }
 
-func cmdCIRCUITXRESET(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	circuitsMu.Lock()
-	defer circuitsMu.Unlock()
-	if c, exists := circuits[name]; exists {
-		c.State = "closed"
-		c.Failures = 0
-		c.Successes = 0
-		c.HalfOpenCount = 0
-		c.LastStateChange = time.Now().UnixMilli()
-		return ctx.WriteOK()
-	}
-	return ctx.WriteError(fmt.Errorf("ERR circuit not found"))
-}
-
 func cmdCIRCUITXDELETE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+	if ctx.ArgCount() != 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
 	circuitsMu.Lock()
-	defer circuitsMu.Unlock()
-	if _, exists := circuits[name]; !exists {
+	_, exists := circuits[name]
+	delete(circuits, name)
+	circuitsMu.Unlock()
+	if !exists {
 		return ctx.WriteInteger(0)
 	}
-	delete(circuits, name)
 	return ctx.WriteInteger(1)
+}
+
+// resilienceMaxWait caps how long PROMISE.AWAIT, FUTURE.GET,
+// RATELIMITER.WAIT and BULKHEAD.ACQUIRE block; a zero timeout means the cap.
+const resilienceMaxWait = 5 * time.Minute
+
+func parseResilienceTimeout(s string) (time.Duration, error) {
+	ms, err := strconv.ParseInt(s, 10, 64)
+	if err != nil || ms < 0 {
+		return 0, errors.New("ERR timeout is not an integer or out of range")
+	}
+	if ms == 0 || ms > resilienceMaxWait.Milliseconds() {
+		return resilienceMaxWait, nil
+	}
+	return time.Duration(ms) * time.Millisecond, nil
+}
+
+// beginResilienceWait releases the connection's gate for the time a command
+// blocks; the returned function takes it back.
+func beginResilienceWait(ctx *Context) func() {
+	if ctx.BeforeWait == nil {
+		return func() {}
+	}
+	ctx.BeforeWait()
+	if ctx.AfterWait == nil {
+		return func() {}
+	}
+	return ctx.AfterWait
+}
+
+// resilienceWait blocks until ch is closed, d passes or the client goes away,
+// and reports whether ch was closed.
+func resilienceWait(ctx *Context, ch <-chan struct{}, d time.Duration) bool {
+	if d <= 0 {
+		select {
+		case <-ch:
+			return true
+		default:
+			return false
+		}
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ch:
+		return true
+	case <-t.C:
+		return false
+	case <-ctx.Done:
+		return false
+	}
 }
 
 var (
@@ -300,23 +465,69 @@ type RateLimiterX struct {
 	Window   int64
 	Requests []int64
 	Strategy string
+	// changed is closed, and replaced, when RESET, DELETE or a new CREATE
+	// frees slots early, so a blocked RATELIMITER.WAIT looks again.
+	changed chan struct{}
+}
+
+func (rl *RateLimiterX) notify() {
+	close(rl.changed)
+	rl.changed = make(chan struct{})
+}
+
+func (rl *RateLimiterX) prune(now int64) {
+	cutoff := now - rl.Window
+	i := 0
+	for i < len(rl.Requests) && rl.Requests[i] <= cutoff {
+		i++
+	}
+	if i > 0 {
+		rl.Requests = append(rl.Requests[:0], rl.Requests[i:]...)
+	}
+}
+
+// take records a request if a slot is free; otherwise it returns how many
+// milliseconds remain until the oldest request that blocks one leaves the
+// window.
+func (rl *RateLimiterX) take(now int64) (bool, int64) {
+	rl.prune(now)
+	n := int64(len(rl.Requests))
+	if n < rl.Limit {
+		rl.Requests = append(rl.Requests, now)
+		return true, 0
+	}
+	wait := rl.Requests[n-rl.Limit] + rl.Window - now
+	if wait < 1 {
+		wait = 1
+	}
+	return false, wait
 }
 
 func cmdRATELIMITERCREATE(ctx *Context) error {
-	if ctx.ArgCount() < 3 {
+	if ctx.ArgCount() < 3 || ctx.ArgCount() > 4 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
-	limit := parseInt64(ctx.ArgString(1))
-	windowMs := parseInt64(ctx.ArgString(2))
+	limit, ok := parseCircuitInt(ctx.ArgString(1), 1)
+	if !ok {
+		return ctx.WriteError(errors.New("ERR limit must be a positive integer"))
+	}
+	windowMs, ok := parseCircuitInt(ctx.ArgString(2), 1)
+	if !ok {
+		return ctx.WriteError(errors.New("ERR window must be a positive integer"))
+	}
 	strategy := "sliding"
-	if ctx.ArgCount() >= 4 {
+	if ctx.ArgCount() == 4 {
 		strategy = ctx.ArgString(3)
 	}
 	rateLimitersXMux.Lock()
-	if _, exists := rateLimitersX[name]; !exists && len(rateLimitersX) >= 10000 {
+	old, exists := rateLimitersX[name]
+	if !exists && len(rateLimitersX) >= 10000 {
 		rateLimitersXMux.Unlock()
 		return ctx.WriteError(errors.New("ERR maximum number of rate limiters reached"))
+	}
+	if exists {
+		old.notify()
 	}
 	rateLimitersX[name] = &RateLimiterX{
 		Name:     name,
@@ -324,91 +535,135 @@ func cmdRATELIMITERCREATE(ctx *Context) error {
 		Window:   windowMs,
 		Requests: make([]int64, 0),
 		Strategy: strategy,
+		changed:  make(chan struct{}),
 	}
 	rateLimitersXMux.Unlock()
 	return ctx.WriteOK()
 }
 
 func cmdRATELIMITERTRY(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+	if ctx.ArgCount() != 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
 	rateLimitersXMux.Lock()
-	defer rateLimitersXMux.Unlock()
 	rl, exists := rateLimitersX[name]
 	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR rate limiter not found"))
+		rateLimitersXMux.Unlock()
+		return ctx.WriteError(errors.New("ERR rate limiter not found"))
 	}
-	now := time.Now().UnixMilli()
-	cutoff := now - rl.Window
-	newRequests := make([]int64, 0)
-	for _, ts := range rl.Requests {
-		if ts > cutoff {
-			newRequests = append(newRequests, ts)
-		}
-	}
-	rl.Requests = newRequests
-	if int64(len(rl.Requests)) >= rl.Limit {
+	allowed, _ := rl.take(time.Now().UnixMilli())
+	remaining := rl.Limit - int64(len(rl.Requests))
+	window := rl.Window
+	rateLimitersXMux.Unlock()
+	if !allowed {
 		return ctx.WriteArray([]*resp.Value{
 			resp.IntegerValue(0),
 			resp.IntegerValue(0),
-			resp.IntegerValue(rl.Window),
+			resp.IntegerValue(window),
 		})
 	}
-	rl.Requests = append(rl.Requests, now)
 	return ctx.WriteArray([]*resp.Value{
 		resp.IntegerValue(1),
-		resp.IntegerValue(rl.Limit - int64(len(rl.Requests))),
-		resp.IntegerValue(rl.Window),
+		resp.IntegerValue(remaining),
+		resp.IntegerValue(window),
 	})
 }
 
+// cmdRATELIMITERWAIT blocks until the limiter has a free slot, takes it and
+// replies with the milliseconds it waited, or a null reply on timeout.
 func cmdRATELIMITERWAIT(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
-	rateLimitersXMux.RLock()
-	rl, exists := rateLimitersX[name]
-	rateLimitersXMux.RUnlock()
-	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR rate limiter not found"))
+	timeout, err := parseResilienceTimeout(ctx.ArgString(1))
+	if err != nil {
+		return ctx.WriteError(err)
 	}
-	return ctx.WriteInteger(rl.Window)
+	start := time.Now()
+	deadline := start.Add(timeout)
+	var endWait func()
+	defer func() {
+		if endWait != nil {
+			endWait()
+		}
+	}()
+	for {
+		rateLimitersXMux.Lock()
+		rl, exists := rateLimitersX[name]
+		if !exists {
+			rateLimitersXMux.Unlock()
+			return ctx.WriteError(errors.New("ERR rate limiter not found"))
+		}
+		now := time.Now()
+		allowed, waitMs := rl.take(now.UnixMilli())
+		changed := rl.changed
+		rateLimitersXMux.Unlock()
+		if allowed {
+			return ctx.WriteInteger(now.Sub(start).Milliseconds())
+		}
+		left := deadline.Sub(now)
+		if ctx.InExec || left <= 0 {
+			return ctx.WriteNull()
+		}
+		if endWait == nil {
+			endWait = beginResilienceWait(ctx)
+		}
+		d := time.Duration(waitMs) * time.Millisecond
+		if d > left {
+			d = left
+		}
+		if !resilienceWait(ctx, changed, d) {
+			select {
+			case <-ctx.Done:
+				return ctx.WriteNull()
+			default:
+			}
+		}
+	}
 }
 
 func cmdRATELIMITERRESET(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+	if ctx.ArgCount() != 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
 	rateLimitersXMux.Lock()
-	defer rateLimitersXMux.Unlock()
 	rl, exists := rateLimitersX[name]
-	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR rate limiter not found"))
+	if exists {
+		rl.Requests = make([]int64, 0)
+		rl.notify()
 	}
-	rl.Requests = make([]int64, 0)
+	rateLimitersXMux.Unlock()
+	if !exists {
+		return ctx.WriteError(errors.New("ERR rate limiter not found"))
+	}
 	return ctx.WriteOK()
 }
 
 func cmdRATELIMITERSTATUS(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+	if ctx.ArgCount() != 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
 	rateLimitersXMux.RLock()
 	rl, exists := rateLimitersX[name]
 	if !exists {
-		reply := fmt.Errorf("ERR rate limiter not found")
 		rateLimitersXMux.RUnlock()
-		return ctx.WriteError(reply)
+		return ctx.WriteError(errors.New("ERR rate limiter not found"))
+	}
+	cutoff := time.Now().UnixMilli() - rl.Window
+	current := int64(0)
+	for _, ts := range rl.Requests {
+		if ts > cutoff {
+			current++
+		}
 	}
 	reply := []*resp.Value{
 		resp.BulkString("name"), resp.BulkString(rl.Name),
 		resp.BulkString("limit"), resp.IntegerValue(rl.Limit),
-		resp.BulkString("current"), resp.IntegerValue(int64(len(rl.Requests))),
+		resp.BulkString("current"), resp.IntegerValue(current),
 		resp.BulkString("strategy"), resp.BulkString(rl.Strategy),
 	}
 	rateLimitersXMux.RUnlock()
@@ -416,16 +671,20 @@ func cmdRATELIMITERSTATUS(ctx *Context) error {
 }
 
 func cmdRATELIMITERDELETE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+	if ctx.ArgCount() != 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
 	rateLimitersXMux.Lock()
-	defer rateLimitersXMux.Unlock()
-	if _, exists := rateLimitersX[name]; !exists {
+	rl, exists := rateLimitersX[name]
+	if exists {
+		rl.notify()
+		delete(rateLimitersX, name)
+	}
+	rateLimitersXMux.Unlock()
+	if !exists {
 		return ctx.WriteInteger(0)
 	}
-	delete(rateLimitersX, name)
 	return ctx.WriteInteger(1)
 }
 
@@ -440,94 +699,170 @@ var (
 	bulkheadsMu sync.RWMutex
 )
 
+// Bulkhead limits concurrent work to MaxConcurrent permits. Waiting counts
+// the BULKHEAD.ACQUIRE calls blocked for a permit right now; Rejected counts
+// the acquires that gave up without one.
 type Bulkhead struct {
 	Name          string
 	MaxConcurrent int
 	Current       int
-	WaitQueue     int
+	Waiting       int
+	Rejected      int64
+	// released is closed, and replaced, whenever a permit may have become
+	// free, waking the blocked acquires.
+	released chan struct{}
+}
+
+func (b *Bulkhead) notify() {
+	close(b.released)
+	b.released = make(chan struct{})
 }
 
 func cmdBULKHEADCREATE(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
+	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
-	maxConcurrent := int(parseInt64(ctx.ArgString(1)))
+	maxConcurrent, ok := parseCircuitInt(ctx.ArgString(1), 1)
+	if !ok || maxConcurrent > 1<<31-1 {
+		return ctx.WriteError(errors.New("ERR max concurrent must be a positive integer"))
+	}
 	bulkheadsMu.Lock()
-	bulkheads[name] = &Bulkhead{Name: name, MaxConcurrent: maxConcurrent, Current: 0, WaitQueue: 0}
+	old, exists := bulkheads[name]
+	if !exists && len(bulkheads) >= 10000 {
+		bulkheadsMu.Unlock()
+		return ctx.WriteError(errors.New("ERR maximum number of bulkheads reached"))
+	}
+	if exists {
+		old.notify()
+	}
+	bulkheads[name] = &Bulkhead{Name: name, MaxConcurrent: int(maxConcurrent), released: make(chan struct{})}
 	bulkheadsMu.Unlock()
 	return ctx.WriteOK()
 }
 
+// cmdBULKHEADACQUIRE takes a permit and replies 1, or 0 when none is free.
+// With a timeout it blocks for up to that long waiting for one.
 func cmdBULKHEADACQUIRE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+	if ctx.ArgCount() < 1 || ctx.ArgCount() > 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
-	bulkheadsMu.Lock()
-	defer bulkheadsMu.Unlock()
-	b, exists := bulkheads[name]
-	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR bulkhead not found"))
+	var timeout time.Duration
+	if ctx.ArgCount() == 2 {
+		var err error
+		if timeout, err = parseResilienceTimeout(ctx.ArgString(1)); err != nil {
+			return ctx.WriteError(err)
+		}
 	}
-	if b.Current >= b.MaxConcurrent {
-		b.WaitQueue++
-		return ctx.WriteInteger(0)
+	if ctx.InExec {
+		timeout = 0
 	}
-	b.Current++
-	return ctx.WriteInteger(1)
+	deadline := time.Now().Add(timeout)
+	var endWait func()
+	defer func() {
+		if endWait != nil {
+			endWait()
+		}
+	}()
+	var waitingOn *Bulkhead
+	for {
+		bulkheadsMu.Lock()
+		if waitingOn != nil {
+			waitingOn.Waiting--
+		}
+		b, exists := bulkheads[name]
+		if !exists || (waitingOn != nil && b != waitingOn) {
+			bulkheadsMu.Unlock()
+			return ctx.WriteError(errors.New("ERR bulkhead not found"))
+		}
+		if b.Current < b.MaxConcurrent {
+			b.Current++
+			bulkheadsMu.Unlock()
+			return ctx.WriteInteger(1)
+		}
+		left := time.Until(deadline)
+		cancelled := false
+		select {
+		case <-ctx.Done:
+			cancelled = true
+		default:
+		}
+		if left <= 0 || cancelled {
+			b.Rejected++
+			bulkheadsMu.Unlock()
+			return ctx.WriteInteger(0)
+		}
+		b.Waiting++
+		waitingOn = b
+		released := b.released
+		bulkheadsMu.Unlock()
+		if endWait == nil {
+			endWait = beginResilienceWait(ctx)
+		}
+		resilienceWait(ctx, released, left)
+	}
 }
 
 func cmdBULKHEADRELEASE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+	if ctx.ArgCount() != 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
 	bulkheadsMu.Lock()
-	defer bulkheadsMu.Unlock()
 	b, exists := bulkheads[name]
-	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR bulkhead not found"))
-	}
-	if b.Current > 0 {
+	held := exists && b.Current > 0
+	if held {
 		b.Current--
+		b.notify()
+	}
+	bulkheadsMu.Unlock()
+	if !exists {
+		return ctx.WriteError(errors.New("ERR bulkhead not found"))
+	}
+	if !held {
+		return ctx.WriteError(errors.New("ERR bulkhead has no permit to release"))
 	}
 	return ctx.WriteOK()
 }
 
 func cmdBULKHEADSTATUS(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+	if ctx.ArgCount() != 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
 	bulkheadsMu.RLock()
 	b, exists := bulkheads[name]
 	if !exists {
-		reply := fmt.Errorf("ERR bulkhead not found")
 		bulkheadsMu.RUnlock()
-		return ctx.WriteError(reply)
+		return ctx.WriteError(errors.New("ERR bulkhead not found"))
 	}
 	reply := []*resp.Value{
 		resp.BulkString("name"), resp.BulkString(b.Name),
 		resp.BulkString("current"), resp.IntegerValue(int64(b.Current)),
 		resp.BulkString("max"), resp.IntegerValue(int64(b.MaxConcurrent)),
-		resp.BulkString("waiting"), resp.IntegerValue(int64(b.WaitQueue)),
+		resp.BulkString("waiting"), resp.IntegerValue(int64(b.Waiting)),
+		resp.BulkString("rejected"), resp.IntegerValue(b.Rejected),
 	}
 	bulkheadsMu.RUnlock()
 	return ctx.WriteArray(reply)
 }
 
 func cmdBULKHEADDELETE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+	if ctx.ArgCount() != 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
 	bulkheadsMu.Lock()
-	defer bulkheadsMu.Unlock()
-	if _, exists := bulkheads[name]; !exists {
+	b, exists := bulkheads[name]
+	if exists {
+		b.notify()
+		delete(bulkheads, name)
+	}
+	bulkheadsMu.Unlock()
+	if !exists {
 		return ctx.WriteInteger(0)
 	}
-	delete(bulkheads, name)
 	return ctx.WriteInteger(1)
 }
 
@@ -809,59 +1144,61 @@ type Promise struct {
 	Value   string
 	Error   string
 	Created int64
+	// settled is closed once the promise is resolved or rejected.
+	settled chan struct{}
 }
 
 func cmdPROMISECREATE(ctx *Context) error {
 	id := generateUUID()
 	promisesMu.Lock()
-	promises[id] = &Promise{ID: id, Status: "pending", Value: "", Error: "", Created: time.Now().UnixMilli()}
+	promises[id] = &Promise{ID: id, Status: "pending", Created: time.Now().UnixMilli(), settled: make(chan struct{})}
 	promisesMu.Unlock()
 	return ctx.WriteBulkString(id)
 }
 
-func cmdPROMISERESOLVE(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
+func settlePromise(ctx *Context, status string) error {
+	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	id := ctx.ArgString(0)
 	value := ctx.ArgString(1)
 	promisesMu.Lock()
-	defer promisesMu.Unlock()
-	if p, exists := promises[id]; exists && p.Status == "pending" {
-		p.Status = "resolved"
-		p.Value = value
-		return ctx.WriteOK()
+	p, exists := promises[id]
+	ok := exists && p.Status == "pending"
+	if ok {
+		p.Status = status
+		if status == "resolved" {
+			p.Value = value
+		} else {
+			p.Error = value
+		}
+		close(p.settled)
 	}
-	return ctx.WriteError(fmt.Errorf("ERR promise not found or not pending"))
+	promisesMu.Unlock()
+	if !ok {
+		return ctx.WriteError(errors.New("ERR promise not found or not pending"))
+	}
+	return ctx.WriteOK()
+}
+
+func cmdPROMISERESOLVE(ctx *Context) error {
+	return settlePromise(ctx, "resolved")
 }
 
 func cmdPROMISEREJECT(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	id := ctx.ArgString(0)
-	err := ctx.ArgString(1)
-	promisesMu.Lock()
-	defer promisesMu.Unlock()
-	if p, exists := promises[id]; exists && p.Status == "pending" {
-		p.Status = "rejected"
-		p.Error = err
-		return ctx.WriteOK()
-	}
-	return ctx.WriteError(fmt.Errorf("ERR promise not found or not pending"))
+	return settlePromise(ctx, "rejected")
 }
 
 func cmdPROMISESTATUS(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+	if ctx.ArgCount() != 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	id := ctx.ArgString(0)
 	promisesMu.RLock()
 	p, exists := promises[id]
 	if !exists {
-		reply := fmt.Errorf("ERR promise not found")
 		promisesMu.RUnlock()
-		return ctx.WriteError(reply)
+		return ctx.WriteError(errors.New("ERR promise not found"))
 	}
 	reply := []*resp.Value{
 		resp.BulkString("id"), resp.BulkString(p.ID),
@@ -871,30 +1208,51 @@ func cmdPROMISESTATUS(ctx *Context) error {
 	return ctx.WriteArray(reply)
 }
 
+// cmdPROMISEAWAIT blocks until the promise settles, for up to timeout_ms.
+// It replies with the resolved value, the rejection as an error, or a null
+// reply when the promise is still pending at the timeout.
 func cmdPROMISEAWAIT(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	id := ctx.ArgString(0)
+	timeout, err := parseResilienceTimeout(ctx.ArgString(1))
+	if err != nil {
+		return ctx.WriteError(err)
+	}
 	promisesMu.RLock()
 	p, exists := promises[id]
-	if !exists {
-		reply := fmt.Errorf("ERR promise not found")
-		promisesMu.RUnlock()
-		return ctx.WriteError(reply)
+	var settled chan struct{}
+	if exists {
+		settled = p.settled
 	}
-	if p.Status == "pending" {
-		promisesMu.RUnlock()
-		return ctx.WriteNull()
-	}
-	if p.Status == "resolved" {
-		reply := p.Value
-		promisesMu.RUnlock()
-		return ctx.WriteBulkString(reply)
-	}
-	reply := errors.New(p.Error)
 	promisesMu.RUnlock()
-	return ctx.WriteError(reply)
+	if !exists {
+		return ctx.WriteError(errors.New("ERR promise not found"))
+	}
+	if ctx.InExec {
+		timeout = 0
+	}
+	select {
+	case <-settled:
+	default:
+		if timeout <= 0 {
+			return ctx.WriteNull()
+		}
+		endWait := beginResilienceWait(ctx)
+		ok := resilienceWait(ctx, settled, timeout)
+		endWait()
+		if !ok {
+			return ctx.WriteNull()
+		}
+	}
+	promisesMu.RLock()
+	status, value, reason := p.Status, p.Value, p.Error
+	promisesMu.RUnlock()
+	if status == "resolved" {
+		return ctx.WriteBulkString(value)
+	}
+	return ctx.WriteError(errors.New("ERR promise rejected: " + reason))
 }
 
 var (
@@ -902,75 +1260,104 @@ var (
 	futuresMu sync.RWMutex
 )
 
+// Future moves once from pending to completed or cancelled.
 type Future struct {
 	ID     string
 	Status string
 	Value  string
-	Error  string
+	// done is closed once the future is completed or cancelled.
+	done chan struct{}
 }
 
 func cmdFUTURECREATE(ctx *Context) error {
 	id := generateUUID()
 	futuresMu.Lock()
-	futures[id] = &Future{ID: id, Status: "pending", Value: "", Error: ""}
+	futures[id] = &Future{ID: id, Status: "pending", done: make(chan struct{})}
 	futuresMu.Unlock()
 	return ctx.WriteBulkString(id)
 }
 
-func cmdFUTURECOMPLETE(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	id := ctx.ArgString(0)
-	value := ctx.ArgString(1)
+func finishFuture(ctx *Context, id, status, value string) error {
 	futuresMu.Lock()
-	defer futuresMu.Unlock()
-	if f, exists := futures[id]; exists {
-		f.Status = "completed"
-		f.Value = value
-		return ctx.WriteOK()
-	}
-	return ctx.WriteError(fmt.Errorf("ERR future not found"))
-}
-
-func cmdFUTUREGET(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	id := ctx.ArgString(0)
-	futuresMu.RLock()
 	f, exists := futures[id]
 	if !exists {
-		reply := fmt.Errorf("ERR future not found")
-		futuresMu.RUnlock()
-		return ctx.WriteError(reply)
+		futuresMu.Unlock()
+		return ctx.WriteError(errors.New("ERR future not found"))
 	}
-	if f.Status == "pending" {
-		futuresMu.RUnlock()
-		return ctx.WriteNull()
+	if f.Status != "pending" {
+		current := f.Status
+		futuresMu.Unlock()
+		return ctx.WriteError(fmt.Errorf("ERR future is already %s", current))
 	}
-	if f.Status == "completed" {
-		reply := f.Value
-		futuresMu.RUnlock()
-		return ctx.WriteBulkString(reply)
+	f.Status = status
+	f.Value = value
+	close(f.done)
+	futuresMu.Unlock()
+	return ctx.WriteOK()
+}
+
+func cmdFUTURECOMPLETE(ctx *Context) error {
+	if ctx.ArgCount() != 2 {
+		return ctx.WriteError(ErrWrongArgCount)
 	}
-	reply := errors.New(f.Error)
-	futuresMu.RUnlock()
-	return ctx.WriteError(reply)
+	return finishFuture(ctx, ctx.ArgString(0), "completed", ctx.ArgString(1))
 }
 
 func cmdFUTURECANCEL(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+	if ctx.ArgCount() != 1 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+	return finishFuture(ctx, ctx.ArgString(0), "cancelled", "")
+}
+
+// cmdFUTUREGET replies with the completed value, an error for a cancelled
+// future, or a null reply while it is pending. With a timeout it first
+// blocks for up to that long for the future to finish.
+func cmdFUTUREGET(ctx *Context) error {
+	if ctx.ArgCount() < 1 || ctx.ArgCount() > 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	id := ctx.ArgString(0)
-	futuresMu.Lock()
-	defer futuresMu.Unlock()
-	if f, exists := futures[id]; exists {
-		f.Status = "cancelled"
-		return ctx.WriteOK()
+	var timeout time.Duration
+	if ctx.ArgCount() == 2 {
+		var err error
+		if timeout, err = parseResilienceTimeout(ctx.ArgString(1)); err != nil {
+			return ctx.WriteError(err)
+		}
 	}
-	return ctx.WriteError(fmt.Errorf("ERR future not found"))
+	futuresMu.RLock()
+	f, exists := futures[id]
+	var done chan struct{}
+	if exists {
+		done = f.done
+	}
+	futuresMu.RUnlock()
+	if !exists {
+		return ctx.WriteError(errors.New("ERR future not found"))
+	}
+	if ctx.InExec {
+		timeout = 0
+	}
+	select {
+	case <-done:
+	default:
+		if timeout <= 0 {
+			return ctx.WriteNull()
+		}
+		endWait := beginResilienceWait(ctx)
+		ok := resilienceWait(ctx, done, timeout)
+		endWait()
+		if !ok {
+			return ctx.WriteNull()
+		}
+	}
+	futuresMu.RLock()
+	status, value := f.Status, f.Value
+	futuresMu.RUnlock()
+	if status == "completed" {
+		return ctx.WriteBulkString(value)
+	}
+	return ctx.WriteError(errors.New("ERR future was cancelled"))
 }
 
 var (
@@ -1281,6 +1668,9 @@ var (
 	debouncesXMux sync.RWMutex
 )
 
+// DebounceX keeps the argument of the latest CALL. The call fires once no
+// other CALL has arrived for Delay milliseconds: only then does FLUSH hand
+// the argument out, unless FLUSH is given FORCE.
 type DebounceX struct {
 	Name       string
 	Delay      int64
@@ -1290,68 +1680,94 @@ type DebounceX struct {
 }
 
 func cmdDEBOUNCEXCREATE(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
+	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
-	delayMs := parseInt64(ctx.ArgString(1))
+	delayMs, ok := parseCircuitInt(ctx.ArgString(1), 0)
+	if !ok {
+		return ctx.WriteError(errors.New("ERR delay must be a non-negative integer"))
+	}
 	debouncesXMux.Lock()
-	debouncesX[name] = &DebounceX{Name: name, Delay: delayMs, LastCall: 0, Pending: false, PendingArg: ""}
+	if _, exists := debouncesX[name]; !exists && len(debouncesX) >= 10000 {
+		debouncesXMux.Unlock()
+		return ctx.WriteError(errors.New("ERR maximum number of debouncers reached"))
+	}
+	debouncesX[name] = &DebounceX{Name: name, Delay: delayMs}
 	debouncesXMux.Unlock()
 	return ctx.WriteOK()
 }
 
 func cmdDEBOUNCEXCALL(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
+	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
 	arg := ctx.ArgString(1)
 	debouncesXMux.Lock()
-	defer debouncesXMux.Unlock()
 	d, exists := debouncesX[name]
-	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR debounce not found"))
+	if exists {
+		d.LastCall = time.Now().UnixMilli()
+		d.Pending = true
+		d.PendingArg = arg
 	}
-	d.LastCall = time.Now().UnixMilli()
-	d.Pending = true
-	d.PendingArg = arg
+	debouncesXMux.Unlock()
+	if !exists {
+		return ctx.WriteError(errors.New("ERR debounce not found"))
+	}
 	return ctx.WriteOK()
 }
 
 func cmdDEBOUNCEXCANCEL(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+	if ctx.ArgCount() != 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
 	debouncesXMux.Lock()
-	defer debouncesXMux.Unlock()
-	if d, exists := debouncesX[name]; exists {
+	d, exists := debouncesX[name]
+	if exists {
 		d.Pending = false
 		d.PendingArg = ""
-		return ctx.WriteOK()
 	}
-	return ctx.WriteError(fmt.Errorf("ERR debounce not found"))
+	debouncesXMux.Unlock()
+	if !exists {
+		return ctx.WriteError(errors.New("ERR debounce not found"))
+	}
+	return ctx.WriteOK()
 }
 
+// cmdDEBOUNCEXFLUSH replies with the pending argument, and clears it, once
+// the delay has passed since the last CALL; FORCE flushes it at once. It
+// replies null when nothing is pending or the delay has not passed yet.
 func cmdDEBOUNCEXFLUSH(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+	if ctx.ArgCount() < 1 || ctx.ArgCount() > 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
+	force := false
+	if ctx.ArgCount() == 2 {
+		if !strings.EqualFold(ctx.ArgString(1), "FORCE") {
+			return ctx.WriteError(ErrSyntaxError)
+		}
+		force = true
+	}
 	debouncesXMux.Lock()
-	defer debouncesXMux.Unlock()
 	d, exists := debouncesX[name]
 	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR debounce not found"))
+		debouncesXMux.Unlock()
+		return ctx.WriteError(errors.New("ERR debounce not found"))
 	}
-	if d.Pending {
-		arg := d.PendingArg
+	fire := d.Pending && (force || time.Now().UnixMilli()-d.LastCall >= d.Delay)
+	arg := d.PendingArg
+	if fire {
 		d.Pending = false
 		d.PendingArg = ""
-		return ctx.WriteBulkString(arg)
 	}
-	return ctx.WriteNull()
+	debouncesXMux.Unlock()
+	if !fire {
+		return ctx.WriteNull()
+	}
+	return ctx.WriteBulkString(arg)
 }
 
 var (
@@ -1620,87 +2036,129 @@ var (
 	joinsXMux sync.RWMutex
 )
 
+const maxJoinXEntries = 100000
+
+// JoinX is an inner join on a key: GET pairs every left value with every
+// right value added under the same key.
 type JoinX struct {
-	Name  string
-	Left  []string
-	Right []string
+	Name    string
+	Left    map[string][]string
+	Right   map[string][]string
+	Keys    []string
+	Entries int
 }
 
 func cmdJOINXCREATE(ctx *Context) error {
 	if ctx.ArgCount() < 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
-	// JoinX stores only Name/Left/Right; there is nowhere to record a join
-	// type or condition. Accepting those arguments and replying +OK would
-	// report success for configuration that is silently dropped.
+	// JoinX is always an inner join on the key given to ADD; there is nowhere
+	// to record another join type or condition, so they are rejected rather
+	// than silently dropped.
 	if ctx.ArgCount() > 1 {
 		return ctx.WriteError(fmt.Errorf("ERR JOINX.CREATE does not support type or condition arguments"))
 	}
 	name := ctx.ArgString(0)
 	joinsXMux.Lock()
-	joinsX[name] = &JoinX{Name: name, Left: make([]string, 0), Right: make([]string, 0)}
+	if _, exists := joinsX[name]; !exists && len(joinsX) >= 10000 {
+		joinsXMux.Unlock()
+		return ctx.WriteError(errors.New("ERR maximum number of joins reached"))
+	}
+	joinsX[name] = &JoinX{Name: name, Left: make(map[string][]string), Right: make(map[string][]string)}
 	joinsXMux.Unlock()
 	return ctx.WriteOK()
 }
 
 func cmdJOINXADD(ctx *Context) error {
-	if ctx.ArgCount() < 3 {
+	if ctx.ArgCount() != 4 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
-	side := ctx.ArgString(1)
-	value := ctx.ArgString(2)
+	side := strings.ToUpper(ctx.ArgString(1))
+	if side != "LEFT" && side != "RIGHT" {
+		return ctx.WriteError(errors.New("ERR side must be LEFT or RIGHT"))
+	}
+	key := ctx.ArgString(2)
+	value := ctx.ArgString(3)
 	joinsXMux.Lock()
-	defer joinsXMux.Unlock()
 	j, exists := joinsX[name]
 	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR join not found"))
+		joinsXMux.Unlock()
+		return ctx.WriteError(errors.New("ERR join not found"))
 	}
-	if side == "left" {
-		j.Left = append(j.Left, value)
+	if j.Entries >= maxJoinXEntries {
+		joinsXMux.Unlock()
+		return ctx.WriteError(errors.New("ERR join is full"))
+	}
+	_, inLeft := j.Left[key]
+	_, inRight := j.Right[key]
+	if !inLeft && !inRight {
+		j.Keys = append(j.Keys, key)
+	}
+	if side == "LEFT" {
+		j.Left[key] = append(j.Left[key], value)
 	} else {
-		j.Right = append(j.Right, value)
+		j.Right[key] = append(j.Right[key], value)
 	}
+	j.Entries++
+	joinsXMux.Unlock()
 	return ctx.WriteOK()
 }
 
+// cmdJOINXGET replies with one [key k left l right r] row for every left and
+// right value that share a key, keys in the order they were first added.
+// An optional key limits the rows to that key.
 func cmdJOINXGET(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+	if ctx.ArgCount() < 1 || ctx.ArgCount() > 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
 	joinsXMux.RLock()
 	j, exists := joinsX[name]
 	if !exists {
-		reply := []*resp.Value{}
 		joinsXMux.RUnlock()
-		return ctx.WriteArray(reply)
+		return ctx.WriteArray([]*resp.Value{})
 	}
-	results := make([]*resp.Value, 0)
-	for _, l := range j.Left {
-		for _, r := range j.Right {
-			results = append(results, resp.ArrayValue([]*resp.Value{
-				resp.BulkString("left"), resp.BulkString(l),
-				resp.BulkString("right"), resp.BulkString(r),
-			}))
+	keys := j.Keys
+	if ctx.ArgCount() == 2 {
+		keys = []string{ctx.ArgString(1)}
+	}
+	rows := 0
+	for _, k := range keys {
+		rows += len(j.Left[k]) * len(j.Right[k])
+		if rows > maxJoinXEntries {
+			joinsXMux.RUnlock()
+			return ctx.WriteError(errors.New("ERR join result too large"))
 		}
 	}
-	reply := results
+	results := make([]*resp.Value, 0, rows)
+	for _, k := range keys {
+		for _, l := range j.Left[k] {
+			for _, r := range j.Right[k] {
+				results = append(results, resp.ArrayValue([]*resp.Value{
+					resp.BulkString("key"), resp.BulkString(k),
+					resp.BulkString("left"), resp.BulkString(l),
+					resp.BulkString("right"), resp.BulkString(r),
+				}))
+			}
+		}
+	}
 	joinsXMux.RUnlock()
-	return ctx.WriteArray(reply)
+	return ctx.WriteArray(results)
 }
 
 func cmdJOINXDELETE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+	if ctx.ArgCount() != 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
 	joinsXMux.Lock()
-	defer joinsXMux.Unlock()
-	if _, exists := joinsX[name]; !exists {
+	_, exists := joinsX[name]
+	delete(joinsX, name)
+	joinsXMux.Unlock()
+	if !exists {
 		return ctx.WriteInteger(0)
 	}
-	delete(joinsX, name)
 	return ctx.WriteInteger(1)
 }
 

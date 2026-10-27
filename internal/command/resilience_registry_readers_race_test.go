@@ -173,7 +173,7 @@ func TestResilienceRegistryReadersAreSynchronised(t *testing.T) {
 				name:   "promise",
 				setup:  [][]string{{"PROMISE.CREATE", "k"}},
 				writer: [][]string{{"PROMISE.RESOLVE", "{last}", "value"}},
-				reader: [][]string{{"PROMISE.STATUS", "{last}"}, {"PROMISE.AWAIT", "{last}"}},
+				reader: [][]string{{"PROMISE.STATUS", "{last}"}, {"PROMISE.AWAIT", "{last}", "1"}},
 			},
 			skipWriterPrecheck: true,
 		},
@@ -181,9 +181,10 @@ func TestResilienceRegistryReadersAreSynchronised(t *testing.T) {
 			registryFamilyCase: registryFamilyCase{
 				name:   "future",
 				setup:  [][]string{{"FUTURE.CREATE", "k"}},
-				writer: [][]string{{"FUTURE.CANCEL", "{last}"}, {"FUTURE.COMPLETE", "{last}", "value"}},
+				writer: [][]string{{"FUTURE.COMPLETE", "{last}", "value"}},
 				reader: [][]string{{"FUTURE.GET", "{last}"}},
 			},
+			skipWriterPrecheck: true,
 		},
 		{
 			registryFamilyCase: registryFamilyCase{

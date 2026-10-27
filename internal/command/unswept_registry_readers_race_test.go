@@ -92,7 +92,7 @@ func TestUnsweptRegistryReadersAreSynchronised(t *testing.T) {
 			registryFamilyCase: registryFamilyCase{
 				name:   "joinx",
 				setup:  [][]string{{"JOINX.CREATE", "k"}},
-				writer: [][]string{{"JOINX.ADD", "k", "left", "1"}},
+				writer: [][]string{{"JOINX.ADD", "k", "left", "key", "1"}},
 				reader: [][]string{{"JOINX.GET", "k"}},
 			},
 		},
