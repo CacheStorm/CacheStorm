@@ -30,7 +30,7 @@ func TestStringBatchFinalFootprintX(t *testing.T) {
 	}
 	for _, key := range []string{"a", "b"} {
 		e, ok := s.Get(key)
-		if !ok || e.ExpiresAt.Load() != 0 || len(e.Tags) != 0 {
+		if !ok || e.ExpiresAt.Load() != 0 || len(e.TagList()) != 0 {
 			t.Fatalf("replacement metadata: %s %+v", key, e)
 		}
 	}
@@ -40,14 +40,15 @@ func TestStringBatchFinalFootprintX(t *testing.T) {
 func TestStringBatchBudgetBoundaryAndFailureX(t *testing.T) {
 	s := NewStore()
 	s.ConfigureMemory(1024, EvictionNoEviction, 70, 90, 5)
-	if ok, err := s.SetStringBatch([]StringPair{{"a", make([]byte, 762)}, {"b", nil}}, false); !ok || err != nil {
+	fit := 972 - footprintOf("a", &StringValue{}) - footprintOf("b", &StringValue{})
+	if ok, err := s.SetStringBatch([]StringPair{{"a", make([]byte, fit)}, {"b", nil}}, false); !ok || err != nil {
 		t.Fatalf("972-byte control: %v %v", ok, err)
 	}
 	version := s.WatchKey("a")
 	defer s.UnwatchKey("a")
 	before, _ := s.Get("a")
 	for i := 0; i < 3; i++ {
-		if ok, err := s.SetStringBatch([]StringPair{{"a", make([]byte, 763)}, {"b", nil}}, false); ok || !errors.Is(err, ErrMemoryLimit) {
+		if ok, err := s.SetStringBatch([]StringPair{{"a", make([]byte, fit+1)}, {"b", nil}}, false); ok || !errors.Is(err, ErrMemoryLimit) {
 			t.Fatalf("973-byte rejection: %v %v", ok, err)
 		}
 		entry, _ := s.Get("a")
@@ -65,7 +66,7 @@ func TestStringBatchDuplicatesValidationAndNX(t *testing.T) {
 		t.Fatalf("last duplicate controls final footprint: %v %v", ok, err)
 	}
 	e, _ := s.Get("a")
-	if e.Value.String() != "last" || s.MemUsage() != 109 {
+	if e.Value.String() != "last" || s.MemUsage() != footprintOf("a", &StringValue{Data: []byte("last")}) {
 		t.Fatalf("duplicate result: %v usage=%d", e.Value, s.MemUsage())
 	}
 	version := s.WatchKey("a")
@@ -97,7 +98,7 @@ func TestStringBatchExpiredAndLoadingX(t *testing.T) {
 		ok, err := s.SetStringBatch([]StringPair{{"a", make([]byte, 1200)}, {"b", nil}}, false)
 		if loading {
 			s.EndLoading()
-			if !ok || err != nil || s.MemUsage() != 1410 || len(s.GetTagIndex().GetKeys("expired")) != 0 {
+			if !ok || err != nil || s.MemUsage() != footprintOf("a", &StringValue{Data: make([]byte, 1200)})+footprintOf("b", &StringValue{}) || len(s.GetTagIndex().GetKeys("expired")) != 0 {
 				t.Fatalf("historical load: %v %v usage=%d", ok, err, s.MemUsage())
 			}
 		} else if ok || !errors.Is(err, ErrMemoryLimit) || s.Exists("a") || s.Exists("b") {
@@ -137,7 +138,7 @@ func TestStringBatchConcurrentAdmissionX(t *testing.T) {
 				t.Fatalf("loser: %+v", r)
 			}
 		}
-		if wins != 1 || s.KeyCount() != 2 || s.MemUsage() != 1412 {
+		if wins != 1 || s.KeyCount() != 2 || s.MemUsage() != 2*footprintOf("a1", &StringValue{Data: make([]byte, 600)}) {
 			t.Fatalf("wins=%d keys=%d usage=%d", wins, s.KeyCount(), s.MemUsage())
 		}
 		requireBatchAccountingX(t, s)

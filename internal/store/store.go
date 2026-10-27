@@ -238,7 +238,7 @@ func (s *Store) DeleteIfExpired(key string) bool {
 	shard.mu.Unlock()
 
 	s.trackMemory(-mem)
-	s.tagIndex.RemoveKey(key, entry.Tags)
+	s.tagIndex.RemoveKey(key, entry.TagList())
 	s.TouchKey(key)
 	s.fireExpire(key, entry.Value)
 	return true
@@ -405,7 +405,7 @@ func (s *Store) Get(key string) (*Entry, bool) {
 		}
 		s.trackMemory(-mem)
 		s.DeleteVersion(key) // Clean up version to prevent memory leak
-		s.tagIndex.RemoveKey(key, entry.Tags)
+		s.tagIndex.RemoveKey(key, entry.TagList())
 		s.fireExpire(key, entry.Value)
 		// A lookup of an expired key counts as both a miss and an expiration
 		// (lazy expiry here is the only expiry path that observes reads).
@@ -550,7 +550,7 @@ func (s *Store) DeleteIfEmpty(key string, v Value) bool {
 	shard.mu.Unlock()
 
 	s.trackMemory(-mem)
-	s.tagIndex.RemoveKey(key, entry.Tags)
+	s.tagIndex.RemoveKey(key, entry.TagList())
 	s.TouchKey(key)
 	return true
 }
@@ -582,7 +582,7 @@ func (s *Store) SetEntry(key string, entry *Entry) error {
 		return ErrWrongType
 	}
 	entry = entry.rehome()
-	entry.Tags = append([]string(nil), entry.Tags...)
+	entry.SetTags(append([]string(nil), entry.TagList()...))
 	size := entry.Value.SizeOf()
 	return s.applyValuePlan(key, nil, entry, func(Value) (ValuePlan, error) {
 		return ValuePlan{Size: size, Apply: func() Value { return entry.Value }}, nil
@@ -598,7 +598,7 @@ func (s *Store) Delete(key string) bool {
 		return false
 	}
 
-	s.tagIndex.RemoveKey(key, entry.Tags)
+	s.tagIndex.RemoveKey(key, entry.TagList())
 	mem, deleted := shard.Delete(key)
 	if deleted {
 		s.trackMemory(-mem)
@@ -619,7 +619,7 @@ func (s *Store) evictObserved(key string, expected *Entry) bool {
 	s.fireEvictLocked(key)
 	shard.mu.Unlock()
 	s.trackMemory(-freed)
-	s.tagIndex.RemoveKey(key, entry.Tags)
+	s.tagIndex.RemoveKey(key, entry.TagList())
 	s.TouchKey(key)
 	return true
 }
@@ -652,11 +652,11 @@ func (s *Store) DeleteBatch(keys []string) int {
 			}
 			freed += shard.deleteLocked(key, entry)
 			s.touchLocked(key)
-			if len(entry.Tags) > 0 {
+			if len(entry.TagList()) > 0 {
 				untag = append(untag, struct {
 					key  string
 					tags []string
-				}{key, entry.Tags})
+				}{key, entry.TagList()})
 			}
 			deleted++
 		}
@@ -701,7 +701,7 @@ func (s *Store) Exists(key string) bool {
 		// a later INVALIDATE <tag> CASCADE deleted a live key that had been
 		// recreated WITHOUT that tag (Set only reconciles the tags of the
 		// entry currently in the shard, which is by then the new untagged one).
-		s.tagIndex.RemoveKey(key, entry.Tags)
+		s.tagIndex.RemoveKey(key, entry.TagList())
 		// Announce the expiry like every other reaping path. DeleteIfExpired
 		// and Get's inline lazy expiry both call fireExpire, and the store's
 		// event contract wires OnExpire to the plugin dispatchers in

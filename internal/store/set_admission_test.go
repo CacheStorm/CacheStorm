@@ -192,7 +192,7 @@ func TestSetOwnsInputTags(t *testing.T) {
 	}
 	tags[0] = "caller-changed"
 	entry, ok := s.Get("key")
-	if !ok || len(entry.Tags) != 1 || entry.Tags[0] != "original" || len(s.GetTagIndex().GetKeys("original")) != 1 || len(s.GetTagIndex().GetKeys("caller-changed")) != 0 {
+	if !ok || len(entry.TagList()) != 1 || entry.TagList()[0] != "original" || len(s.GetTagIndex().GetKeys("original")) != 1 || len(s.GetTagIndex().GetKeys("caller-changed")) != 0 {
 		t.Fatal("caller tag mutation changed stored metadata")
 	}
 }

@@ -35,7 +35,7 @@ func TestSetGrowthX(t *testing.T) {
 				set := entry.Value.(*store.SetValue)
 				same = len(set.Members) == 1
 				_, kept := set.Members["kept"]
-				same = same && kept && entry.ExpiresAt.Load() == 4102444800000 && len(entry.Tags) == 1
+				same = same && kept && entry.ExpiresAt.Load() == 4102444800000 && len(entry.TagList()) == 1
 			}
 			t.Logf("EXPECTED: OOM unchanged data/budget/watch/journal | ACTUAL: %q same=%v usage=%d->%d records=%d", got, same, before, s.MemUsage(), records)
 			if !strings.HasPrefix(got, "-OOM") || !same || s.MemUsage() != before || s.GetVersion("s") != version || records != 0 {

@@ -349,7 +349,7 @@ func (s *Store) finishHashReap(key string, entry *Entry, fields []string, delete
 	}
 	s.trackMemory(delta)
 	if deleted {
-		s.tagIndex.RemoveKey(key, entry.Tags)
+		s.tagIndex.RemoveKey(key, entry.TagList())
 	}
 	s.TouchKey(key)
 	GlobalMetrics.RecordHashFieldsExpired(int64(len(fields)))

@@ -26,7 +26,7 @@ func TestHashGrowthAdmissionX(t *testing.T) {
 						t.Fatal("CONTROL", err)
 					}
 					if numeric {
-						size := 949 - s.MemUsage() - 105
+						size := 949 - s.MemUsage() - (store.EntryOverhead + 24 + int64(len("p")) + 16)
 						if err := s.Set("p", &store.StringValue{Data: make([]byte, size)}, store.SetOptions{}); err != nil {
 							t.Fatal("CONTROL filler", err)
 						}

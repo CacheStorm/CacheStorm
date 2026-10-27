@@ -73,7 +73,7 @@ func TestHLLAOFRewriteAndCacheReplay(t *testing.T) {
 				t.Fatal(err)
 			}
 			got, ok := restored.store.Get("h")
-			if !ok || got.Value.String() != expected || got.ExpiresAt.Load() != 4102444800000 || len(got.Tags) != 1 {
+			if !ok || got.Value.String() != expected || got.ExpiresAt.Load() != 4102444800000 || len(got.TagList()) != 1 {
 				t.Fatal("rewrite lost HLL data/cache/metadata")
 			}
 		})

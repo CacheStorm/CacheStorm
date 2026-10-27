@@ -20,7 +20,7 @@ func TestHashPlanPreservesIdentityAndMetadata(t *testing.T) {
 		return map[string][]byte{"a": make([]byte, 1200), "b": nil}, nil
 	})
 	after, _ := s.Get("h")
-	if err != nil || after != before || after.Value != hash || s.MemUsage() != usage || after.ExpiresAt.Load() != 4102444800000 || len(after.Tags) != 1 {
+	if err != nil || after != before || after.Value != hash || s.MemUsage() != usage || after.ExpiresAt.Load() != 4102444800000 || len(after.TagList()) != 1 {
 		t.Fatalf("replacement changed identity/metadata/budget: %v", err)
 	}
 	requireBatchAccountingX(t, s)

@@ -33,7 +33,7 @@ func TestBitmapGrowthRejectsMemoryBeforeMutation(t *testing.T) {
 				t.Fatalf("growth accepted beyond memory limit: %q", result)
 			}
 			got, ok := s.Get("k")
-			if !ok || got.ExpiresAt.Load() != deadline || len(got.Tags) != 1 || got.Tags[0] != "tag" || !bytes.Equal([]byte(got.Value.String()), []byte{128}) {
+			if !ok || got.ExpiresAt.Load() != deadline || len(got.TagList()) != 1 || got.TagList()[0] != "tag" || !bytes.Equal([]byte(got.Value.String()), []byte{128}) {
 				t.Fatal("rejected growth changed data or metadata")
 			}
 			if s.MemoryTracker().Usage() != before || s.MemUsage() != before {

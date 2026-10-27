@@ -179,14 +179,14 @@ func (w *RDBWriter) writeEntry(f io.Writer, key string, entry *store.Entry) erro
 			return fmt.Errorf("unsupported snapshot value %T for key %q", entry.Value, key)
 		}
 	}
-	if len(entry.Tags) > 0 {
+	if len(entry.TagList()) > 0 {
 		if err := w.writeByte(f, 0xF8); err != nil {
 			return err
 		}
-		if err := w.writeLength(f, len(entry.Tags)); err != nil {
+		if err := w.writeLength(f, len(entry.TagList())); err != nil {
 			return err
 		}
-		for _, tag := range entry.Tags {
+		for _, tag := range entry.TagList() {
 			if err := w.writeString(f, tag); err != nil {
 				return err
 			}

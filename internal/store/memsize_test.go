@@ -64,7 +64,7 @@ func TestCollectionHelpersKeepSize(t *testing.T) {
 	}
 }
 
-func footprintOf(key string, v Value) int64 { return 64 + v.SizeOf() + int64(len(key)) + 16 }
+func footprintOf(key string, v Value) int64 { return EntryOverhead + v.SizeOf() + int64(len(key)) + 16 }
 
 // Reaccount charges in-place growth to the shard and the tracker; Delete then
 // credits exactly what was charged.

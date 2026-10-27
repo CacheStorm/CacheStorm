@@ -108,8 +108,8 @@ func (s *Store) SetStringBatch(pairs []StringPair, nx bool) (bool, error) {
 			}
 			change, previous := shard.setLocked(key, entry)
 			actual += change
-			if previous != nil && len(previous.Tags) > 0 {
-				s.tagIndex.RemoveKey(key, previous.Tags)
+			if previous != nil && len(previous.TagList()) > 0 {
+				s.tagIndex.RemoveKey(key, previous.TagList())
 			}
 			s.scheduleExpiry(key, 0)
 		}

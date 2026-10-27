@@ -660,8 +660,8 @@ func (rw *AOFRewriter) writeEntry(w *bufio.Writer, key string, entry interface{}
 		if err := rw.writeValueCommands(w, key, v.Value); err != nil {
 			return err
 		}
-		if len(v.Tags) > 0 {
-			args := append([]string{key}, v.Tags...)
+		if len(v.TagList()) > 0 {
+			args := append([]string{key}, v.TagList()...)
 			if err := rw.writeCommand(w, "ADDTAG", args...); err != nil {
 				return err
 			}

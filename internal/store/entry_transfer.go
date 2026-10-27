@@ -61,7 +61,7 @@ func (s *Store) Transfer(srcKey string, dst *Store, dstKey string, options Trans
 			unlock()
 			return false, nil
 		}
-		base := entryMetadataSize(source.Tags) + int64(len(dstKey)) + 16
+		base := entryMetadataSize(source.TagList()) + int64(len(dstKey)) + 16
 		size := source.Value.SizeOf()
 		if size < 0 || size > math.MaxInt64-base {
 			unlock()
@@ -107,17 +107,17 @@ func (s *Store) Transfer(srcKey string, dst *Store, dstKey string, options Trans
 			continue
 		}
 		entry := source.rehome()
-		entry.Tags = append([]string(nil), source.Tags...)
+		entry.SetTags(append([]string(nil), source.TagList()...))
 		if options.Copy {
 			entry = NewEntry(source.Value.Clone())
 			entry.ExpiresAt.Store(source.ExpiresAt.Load())
-			entry.Tags = append([]string(nil), source.Tags...)
+			entry.SetTags(append([]string(nil), source.TagList()...))
 		}
 		dstDelta, _ := dstShard.setLocked(dstKey, entry)
 		srcDelta := int64(0)
 		if !options.Copy {
 			srcDelta = -srcShard.deleteLocked(srcKey, source)
-			s.tagIndex.RemoveKey(srcKey, source.Tags)
+			s.tagIndex.RemoveKey(srcKey, source.TagList())
 		}
 		if reserved {
 			actual := dstDelta
@@ -132,8 +132,8 @@ func (s *Store) Transfer(srcKey string, dst *Store, dstKey string, options Trans
 			s.trackMemory(srcDelta)
 		}
 		dst.tagIndex.RemoveKey(dstKey, nil)
-		if len(entry.Tags) > 0 {
-			dst.tagIndex.AddTags(dstKey, entry.Tags)
+		if len(entry.TagList()) > 0 {
+			dst.tagIndex.AddTags(dstKey, entry.TagList())
 		}
 		dst.scheduleExpiry(dstKey, entry.ExpiresAt.Load())
 		unlock()

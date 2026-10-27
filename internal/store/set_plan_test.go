@@ -25,7 +25,7 @@ func TestSetPlanIdentityDuplicatesAndKeys(t *testing.T) {
 		t.Fatalf("add: %d %v", n, err)
 	}
 	after, _ := s.Get("s")
-	if after != before || after.Value != set || after.ExpiresAt.Load() != 4102444800000 || len(after.Tags) != 1 {
+	if after != before || after.Value != set || after.ExpiresAt.Load() != 4102444800000 || len(after.TagList()) != 1 {
 		t.Fatal("identity/metadata changed")
 	}
 	if n, err := s.AddSetMembers("missing", nil); n != 0 || err != nil || s.Exists("missing") {
@@ -99,7 +99,7 @@ func TestSetMoveAdmissionMetadataAndDuplicateDestination(t *testing.T) {
 	}
 	afterS, _ := s.Get("s")
 	afterD, _ := s.Get("d")
-	if afterS != src || afterD != dst || afterS.Value != a || afterD.Value != b || s.MemUsage() != before || afterD.ExpiresAt.Load() != 4102444800000 || len(afterD.Tags) != 1 {
+	if afterS != src || afterD != dst || afterS.Value != a || afterD.Value != b || s.MemUsage() != before || afterD.ExpiresAt.Load() != 4102444800000 || len(afterD.TagList()) != 1 {
 		t.Fatal("net accounting/identity/metadata mismatch")
 	}
 	if _, err := s.AddSetMembers("s", []string{"m"}); err != nil {
@@ -136,7 +136,7 @@ func TestSetMoveRejectedGrowthAndSourceCredit(t *testing.T) {
 		t.Fatalf("credit: %v %v", ok, err)
 	}
 	e, _ := s.Get("d")
-	if s.Exists("s") || e.ExpiresAt.Load() != 0 || len(e.Tags) != 0 || len(s.GetTagIndex().GetKeys("tag")) != 0 {
+	if s.Exists("s") || e.ExpiresAt.Load() != 0 || len(e.TagList()) != 0 || len(s.GetTagIndex().GetKeys("tag")) != 0 {
 		t.Fatal("source metadata carried/dangling")
 	}
 	requireBatchAccountingX(t, s)
@@ -145,7 +145,7 @@ func TestSetMoveRejectedGrowthAndSourceCredit(t *testing.T) {
 func TestSetMoveEvictionReleasesLocksAndReselects(t *testing.T) {
 	for _, remove := range []bool{false, true} {
 		s := NewStore()
-		s.ConfigureMemory(1024, EvictionAllKeysLRU, 70, 90, 128)
+		s.ConfigureMemory(1100, EvictionAllKeysLRU, 70, 90, 128)
 		member := strings.Repeat("m", 500)
 		if _, err := s.AddSetMembers("s", []string{member, "n"}); err != nil {
 			t.Fatal(err)

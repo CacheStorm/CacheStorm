@@ -21,7 +21,8 @@ func TestSetWritesReportStoreRejection(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if err := s.Set("filler", &store.StringValue{Data: []byte(strings.Repeat("x", 548))}, store.SetOptions{}); err != nil {
+			size := 949 - s.MemoryTracker().Usage() - (store.EntryOverhead + 24 + int64(len("filler")) + 16)
+			if err := s.Set("filler", &store.StringValue{Data: make([]byte, size)}, store.SetOptions{}); err != nil {
 				t.Fatal(err)
 			}
 			if s.MemoryTracker().Usage() != 949 {

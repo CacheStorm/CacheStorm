@@ -54,7 +54,7 @@ func TestMSetBatchFailureAndNoOpEffectsX(t *testing.T) {
 			}
 		}
 		entry, _ := s.Get("a")
-		if s.Exists("b") || entry.Value.String() != "old" || entry.ExpiresAt.Load() != 4102444800000 || len(entry.Tags) != 1 || s.GetVersion("a") != before || records != 0 {
+		if s.Exists("b") || entry.Value.String() != "old" || entry.ExpiresAt.Load() != 4102444800000 || len(entry.TagList()) != 1 || s.GetVersion("a") != before || records != 0 {
 			t.Fatalf("failed/no-op %s changed state: records=%d", name, records)
 		}
 		if got := runEntryTransfer(t, s, nil, r, name, "b", "new", "", "invalid"); !strings.HasPrefix(got, "-ERR") || s.Exists("b") || records != 0 {

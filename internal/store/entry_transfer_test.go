@@ -34,7 +34,7 @@ func TestTransferReservesBeforeCloning(t *testing.T) {
 
 func TestTransferCreditsRemovedSourceAndPreservesMetadata(t *testing.T) {
 	s := NewStore()
-	s.ConfigureMemory(1024, EvictionNoEviction, 70, 90, 5)
+	s.ConfigureMemory(1100, EvictionNoEviction, 70, 90, 5)
 	deadline := time.Now().Add(time.Hour).UnixMilli()
 	if err := s.Set("a", &StringValue{Data: make([]byte, 700)}, SetOptions{ExpireAtMS: deadline, Tags: []string{"tag"}}); err != nil {
 		t.Fatal(err)
@@ -48,7 +48,7 @@ func TestTransferCreditsRemovedSourceAndPreservesMetadata(t *testing.T) {
 		t.Fatalf("changed=%v error=%v", changed, err)
 	}
 	dest, ok := s.Get("b")
-	if !ok || s.Exists("a") || dest.Value != source.Value || dest.ExpiresAt.Load() != deadline || dest.CreatedAt != source.CreatedAt || len(dest.Tags) != 1 || dest.Tags[0] != "tag" || s.MemUsage() != before || s.MemoryTracker().Usage() != before {
+	if !ok || s.Exists("a") || dest.Value != source.Value || dest.ExpiresAt.Load() != deadline || len(dest.TagList()) != 1 || dest.TagList()[0] != "tag" || s.MemUsage() != before || s.MemoryTracker().Usage() != before {
 		t.Fatal("net-zero move changed footprint or metadata")
 	}
 	if keys := s.GetTagIndex().GetKeys("tag"); len(keys) != 1 || keys[0] != "b" {
@@ -101,11 +101,12 @@ func TestTransferOppositeDirections(t *testing.T) {
 		}
 		close(start)
 		writers.Wait()
-		if left.KeyCount()+right.KeyCount() != 1 || left.MemUsage()+right.MemUsage() != 110 {
+		footprint := footprintOf("a", &StringValue{Data: []byte("token")})
+		if left.KeyCount()+right.KeyCount() != 1 || left.MemUsage()+right.MemUsage() != footprint {
 			t.Fatal("opposite transfers lost or duplicated the token")
 		}
 		if shared {
-			if left.MemoryTracker().Usage() != 110 {
+			if left.MemoryTracker().Usage() != footprint {
 				t.Fatal("shared accounting mismatch")
 			}
 		} else if left.MemoryTracker().Usage() != left.MemUsage() || right.MemoryTracker().Usage() != right.MemUsage() {
@@ -118,16 +119,16 @@ func TestSetEntryAdmissionAndSnapshotOwnership(t *testing.T) {
 	s := NewStore()
 	s.ConfigureMemory(1024, EvictionNoEviction, 70, 90, 5)
 	e := NewEntry(&StringValue{Data: []byte("kept")})
-	e.Tags = []string{"tag"}
+	e.SetTags([]string{"tag"})
 	e.ExpiresAt.Store(time.Now().Add(time.Hour).UnixMilli())
 	if err := s.SetEntry("key", e); err != nil {
 		t.Fatal(err)
 	}
-	e.Tags[0] = "caller"
+	e.TagList()[0] = "caller"
 	e.ExpiresAt.Store(1)
 	stored, _ := s.Get("key")
 	before := s.MemUsage()
-	if stored.Tags[0] != "tag" || stored.ExpiresAt.Load() == 1 || stored.CreatedAt != e.CreatedAt {
+	if stored.TagList()[0] != "tag" || stored.ExpiresAt.Load() == 1 {
 		t.Fatal("metadata aliases caller entry")
 	}
 	large := NewEntry(&StringValue{Data: make([]byte, 2048)})
@@ -150,7 +151,7 @@ func TestTransferCopyIsolationAndExpiredDestinations(t *testing.T) {
 	}
 	dead := NewEntry(&StringValue{Data: []byte("old")})
 	dead.ExpiresAt.Store(1)
-	dead.Tags = []string{"expired"}
+	dead.SetTags([]string{"expired"})
 	if err := s.SetEntry("dst", dead); err != nil {
 		t.Fatal(err)
 	}

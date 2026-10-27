@@ -94,7 +94,7 @@ func TestBitmapConversionPreservesTTLTagsAndDetachedString(t *testing.T) {
 	RegisterBitmapCommands(router)
 	dumpRaceRun(t, s, router, "SETBIT", "k", "0", "1")
 	got, ok := s.Get("k")
-	if !ok || got.ExpiresAt.Load() != deadline || len(got.Tags) != 1 || got.Tags[0] != "tag" {
+	if !ok || got.ExpiresAt.Load() != deadline || len(got.TagList()) != 1 || got.TagList()[0] != "tag" {
 		t.Fatal("conversion lost metadata")
 	}
 	if string(original.Data) != "a" {

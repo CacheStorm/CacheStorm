@@ -12,10 +12,6 @@ func TestNewEntry(t *testing.T) {
 		t.Fatal("expected entry, got nil")
 	}
 
-	if entry.CreatedAt == 0 {
-		t.Error("expected CreatedAt to be set")
-	}
-
 	if entry.LastAccess.Load() == 0 {
 		t.Error("expected LastAccess to be set")
 	}
@@ -68,7 +64,7 @@ func TestEntryTouch(t *testing.T) {
 
 func TestEntryMemoryUsage(t *testing.T) {
 	entry := NewEntry(&StringValue{Data: []byte("test")})
-	entry.Tags = []string{"tag1", "tag2"}
+	entry.SetTags([]string{"tag1", "tag2"})
 
 	usage := entry.MemoryUsage()
 	if usage <= 0 {

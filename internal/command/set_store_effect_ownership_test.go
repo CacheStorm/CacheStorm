@@ -11,7 +11,7 @@ func TestSetStoreAccessKeysDoNotBecomeWriteEffectsX(t *testing.T) {
 	for _, name := range []string{"SUNIONSTORE", "SINTERSTORE", "SDIFFSTORE"} {
 		t.Run(name, func(t *testing.T) {
 			s := store.NewStore()
-			s.ConfigureMemory(2048, store.EvictionNoEviction, 70, 90, 5)
+			s.ConfigureMemory(2150, store.EvictionNoEviction, 70, 90, 5)
 			if _, err := s.AddSetMembers("a", []string{strings.Repeat("a", 600)}); err != nil {
 				t.Fatal(err)
 			}

@@ -604,7 +604,7 @@ func (h *HTTPServer) handleKeys(w http.ResponseWriter, r *http.Request) {
 					"type": entry.Value.Type().String(),
 					"ttl":  ttlStr,
 					"size": entry.Value.SizeOf(),
-					"tags": entry.Tags,
+					"tags": entry.TagList(),
 				})
 			}
 		}
@@ -712,7 +712,7 @@ func (h *HTTPServer) handleKey(w http.ResponseWriter, r *http.Request) {
 			"type":  entry.Value.Type().String(),
 			"value": entry.Value.String(),
 			"ttl":   ttlStr,
-			"tags":  entry.Tags,
+			"tags":  entry.TagList(),
 			"size":  entry.Value.SizeOf(),
 		})
 

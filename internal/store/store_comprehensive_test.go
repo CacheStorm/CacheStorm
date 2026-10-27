@@ -286,10 +286,11 @@ func TestSetValueMethods(t *testing.T) {
 
 func TestEntryTouchMethod(t *testing.T) {
 	e := NewEntry(&StringValue{Data: []byte("v")})
+	created := e.LastAccess.Load()
 	time.Sleep(time.Millisecond)
 	e.Touch()
 
-	if e.LastAccess.Load() <= e.CreatedAt {
+	if e.LastAccess.Load() <= created {
 		t.Error("LastAccess should be updated")
 	}
 	if e.AccessCount.Load() != 1 {
@@ -323,7 +324,7 @@ func TestEntryMemoryUsageMethod(t *testing.T) {
 	}
 
 	eWithTags := NewEntry(&StringValue{Data: []byte("test")})
-	eWithTags.Tags = []string{"tag1", "tag2"}
+	eWithTags.SetTags([]string{"tag1", "tag2"})
 	usageWithTags := eWithTags.MemoryUsage()
 	if usageWithTags <= usage {
 		t.Error("entry with tags should have higher memory usage")

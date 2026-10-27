@@ -144,7 +144,7 @@ func TestMSetAtomicPersistenceX(t *testing.T) {
 				if key == "a" {
 					want = strings.Repeat("z", 1200)
 				}
-				if !ok || entry.Value.String() != want || entry.ExpiresAt.Load() != 0 || len(entry.Tags) != 0 {
+				if !ok || entry.Value.String() != want || entry.ExpiresAt.Load() != 0 || len(entry.TagList()) != 0 {
 					t.Fatalf("restart mismatch: %s %+v", key, entry)
 				}
 			}

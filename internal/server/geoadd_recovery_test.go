@@ -56,7 +56,7 @@ func TestGeoAddRejectedWritesDoNotDivergeFromAOF(t *testing.T) {
 				t.Fatal(err)
 			}
 			entry, ok := restored.store.Get("geo")
-			if !ok || !reflect.DeepEqual(entry.Value.(*store.SortedSetValue).Members, expected) || entry.ExpiresAt.Load() != 4102444800000 || !reflect.DeepEqual(entry.Tags, []string{"tag"}) {
+			if !ok || !reflect.DeepEqual(entry.Value.(*store.SortedSetValue).Members, expected) || entry.ExpiresAt.Load() != 4102444800000 || !reflect.DeepEqual(entry.TagList(), []string{"tag"}) {
 				t.Fatal("live/AOF value or metadata diverged")
 			}
 		})

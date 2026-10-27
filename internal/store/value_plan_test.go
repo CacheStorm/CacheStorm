@@ -32,7 +32,7 @@ func TestValuePlanRefusesBeforeAllocationAndPreservesMetadata(t *testing.T) {
 		t.Fatalf("error=%v allocation=%v", err, applied)
 	}
 	got, _ := s.Get("k")
-	if got.Value.String() != "kept" || got.ExpiresAt.Load() != deadline || len(got.Tags) != 1 || s.GetVersion("k") != version || s.MemoryTracker().Usage() != usage || s.MemUsage() != usage {
+	if got.Value.String() != "kept" || got.ExpiresAt.Load() != deadline || len(got.TagList()) != 1 || s.GetVersion("k") != version || s.MemoryTracker().Usage() != usage || s.MemUsage() != usage {
 		t.Fatal("refused plan changed key or accounting")
 	}
 }
@@ -92,7 +92,7 @@ func TestValuePlanEvictionRetriesPreservingLiveMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, ok := s.Get("target")
-	if !ok || !bytes.HasPrefix([]byte(got.Value.String()), []byte("kept")) || got.ExpiresAt.Load() != deadline || len(got.Tags) != 1 || s.Exists("victim") || preparations < 2 {
+	if !ok || !bytes.HasPrefix([]byte(got.Value.String()), []byte("kept")) || got.ExpiresAt.Load() != deadline || len(got.TagList()) != 1 || s.Exists("victim") || preparations < 2 {
 		t.Fatal("eviction/retry lost live state")
 	}
 	if s.MemoryTracker().Usage() != s.MemUsage() {

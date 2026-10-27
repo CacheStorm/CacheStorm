@@ -49,7 +49,7 @@ func TestHLLRejectedGrowthPreservesValueAndMetadata(t *testing.T) {
 				t.Fatalf("growth accepted: %q", got)
 			}
 			entry, ok := s.Get("h")
-			if !ok || !bytes.Equal([]byte(entry.Value.String()), empty) || entry.ExpiresAt.Load() != deadline || len(entry.Tags) != 1 || entry.Tags[0] != "tag" {
+			if !ok || !bytes.Equal([]byte(entry.Value.String()), empty) || entry.ExpiresAt.Load() != deadline || len(entry.TagList()) != 1 || entry.TagList()[0] != "tag" {
 				t.Fatal("rejected growth changed value or metadata")
 			}
 			if s.GetVersion("h") != version || s.MemoryTracker().Usage() != before || s.MemUsage() != before {

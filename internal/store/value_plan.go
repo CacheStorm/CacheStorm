@@ -63,7 +63,7 @@ func (s *Store) applyValuePlan(key string, options *SetOptions, snapshot *Entry,
 		var tags []string
 		if live {
 			current = previous.Value
-			tags = previous.Tags
+			tags = previous.TagList()
 		}
 		if options != nil {
 			if options.NX && live {
@@ -77,7 +77,7 @@ func (s *Store) applyValuePlan(key string, options *SetOptions, snapshot *Entry,
 			tags = options.Tags
 		}
 		if snapshot != nil {
-			tags = snapshot.Tags
+			tags = snapshot.TagList()
 		}
 		plan, err := prepare(current)
 		unlock := func() {
@@ -146,7 +146,7 @@ func (s *Store) applyValuePlan(key string, options *SetOptions, snapshot *Entry,
 			entry.Value = value
 		} else if options != nil {
 			entry = NewEntry(value)
-			entry.Tags = tags
+			entry.SetTags(tags)
 			if options.KeepTTL {
 				if live {
 					entry.ExpiresAt.Store(previous.ExpiresAt.Load())
@@ -176,11 +176,11 @@ func (s *Store) applyValuePlan(key string, options *SetOptions, snapshot *Entry,
 		if snapshot != nil || options != nil || !live {
 			if snapshot != nil {
 				s.tagIndex.RemoveKey(key, nil)
-			} else if previous != nil && len(previous.Tags) > 0 {
-				s.tagIndex.RemoveKey(key, previous.Tags)
+			} else if previous != nil && len(previous.TagList()) > 0 {
+				s.tagIndex.RemoveKey(key, previous.TagList())
 			}
-			if len(entry.Tags) > 0 {
-				s.tagIndex.AddTags(key, entry.Tags)
+			if len(entry.TagList()) > 0 {
+				s.tagIndex.AddTags(key, entry.TagList())
 			}
 		}
 		if options != nil || snapshot != nil {

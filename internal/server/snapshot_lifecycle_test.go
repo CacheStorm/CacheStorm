@@ -48,7 +48,7 @@ func TestSnapshotSaveAndRestart(t *testing.T) {
 	if got := r.do("PEXPIRETIME", "same"); got.Int != 16725225600000 {
 		t.Fatalf("restored expiry = %+v", got)
 	}
-	if e, ok := restored.Store().Get("same"); !ok || len(e.Tags) != 1 || e.Tags[0] != "\xfftag" {
+	if e, ok := restored.Store().Get("same"); !ok || len(e.TagList()) != 1 || e.TagList()[0] != "\xfftag" {
 		t.Fatal("snapshot lost binary tag metadata")
 	}
 	r.do("SELECT", "2")
@@ -294,7 +294,7 @@ func TestSnapshotSeedsMissingAOFAndDefersToExistingAOF(t *testing.T) {
 		t.Fatalf("AOF seed lost function library: %+v", got)
 	}
 	entry, ok := restarted.Store().Get("k")
-	if !ok || len(entry.Tags) != 1 || entry.Tags[0] != "persisted-tag" {
+	if !ok || len(entry.TagList()) != 1 || entry.TagList()[0] != "persisted-tag" {
 		t.Fatalf("AOF seed lost snapshot tags: %+v", entry)
 	}
 	r.do("SELECT", "3")

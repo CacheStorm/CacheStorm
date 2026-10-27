@@ -55,7 +55,7 @@ func TestBitmapGrowthFailurePreservesAOFAndWatch(t *testing.T) {
 				t.Fatal("rejected growth recorded AOF effects")
 			}
 			entry, ok := s.store.Get("k")
-			if !ok || entry.Value.String() != string([]byte{128}) || entry.ExpiresAt.Load() != deadline || len(entry.Tags) != 1 || s.store.GetVersion("k") != version || s.store.MemoryTracker().Usage() != usage || s.store.MemUsage() != usage {
+			if !ok || entry.Value.String() != string([]byte{128}) || entry.ExpiresAt.Load() != deadline || len(entry.TagList()) != 1 || s.store.GetVersion("k") != version || s.store.MemoryTracker().Usage() != usage || s.store.MemUsage() != usage {
 				t.Fatal("rejected growth changed data, metadata, watch or accounting")
 			}
 		})
@@ -100,7 +100,7 @@ func TestBitmapAcceptedGrowthAndReadOnlyReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 	entry, ok := restored.store.Get("k")
-	if !ok || entry.Value.String() != string([]byte{7, 0, 255, 253}) || entry.ExpiresAt.Load() != deadline || len(entry.Tags) != 1 || restored.store.Exists("missing") {
+	if !ok || entry.Value.String() != string([]byte{7, 0, 255, 253}) || entry.ExpiresAt.Load() != deadline || len(entry.TagList()) != 1 || restored.store.Exists("missing") {
 		t.Fatal("bitmap history lost bytes, metadata or read-only effects")
 	}
 	if restored.store.MemoryTracker().Usage() != restored.store.MemUsage() {

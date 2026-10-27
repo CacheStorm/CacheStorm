@@ -52,7 +52,7 @@ func TestGeoAddValidationPrecedesMutation(t *testing.T) {
 				}
 				if existing {
 					geo := entry.Value.(*store.GeoValue)
-					if !reflect.DeepEqual(geo.Points, map[string]store.GeoPoint{"seed": {Lon: 0, Lat: 0}}) || entry.ExpiresAt.Load() != deadline || !reflect.DeepEqual(entry.Tags, []string{"tag"}) {
+					if !reflect.DeepEqual(geo.Points, map[string]store.GeoPoint{"seed": {Lon: 0, Lat: 0}}) || entry.ExpiresAt.Load() != deadline || !reflect.DeepEqual(entry.TagList(), []string{"tag"}) {
 						t.Fatal("invalid input changed data or metadata")
 					}
 				}

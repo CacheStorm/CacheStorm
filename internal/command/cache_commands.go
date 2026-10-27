@@ -219,9 +219,9 @@ func cmdCacheExport(ctx *Context) error {
 					entryData = append(entryData, resp.BulkString("value"), resp.ArrayValue(members))
 				}
 
-				if len(entry.Tags) > 0 {
+				if len(entry.TagList()) > 0 {
 					tags := make([]*resp.Value, 0)
-					for _, tag := range entry.Tags {
+					for _, tag := range entry.TagList() {
 						tags = append(tags, resp.BulkString(tag))
 					}
 					entryData = append(entryData, resp.BulkString("tags"), resp.ArrayValue(tags))

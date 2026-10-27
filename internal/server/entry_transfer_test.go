@@ -110,7 +110,7 @@ func TestEntryTransfersPersistOnlyAcceptedEffects(t *testing.T) {
 				t.Fatalf("move=%q", got)
 			}
 			entry, ok := s.dbs.DB(1).Get("renamed")
-			if !ok || entry.ExpiresAt.Load() != 4102444800000 || !reflect.DeepEqual(entry.Tags, []string{"tag"}) {
+			if !ok || entry.ExpiresAt.Load() != 4102444800000 || !reflect.DeepEqual(entry.TagList(), []string{"tag"}) {
 				t.Fatal("live transfer lost metadata")
 			}
 			if mode == "rewrite" {
@@ -128,7 +128,7 @@ func TestEntryTransfersPersistOnlyAcceptedEffects(t *testing.T) {
 				t.Fatal(err)
 			}
 			entry, ok = restored.dbs.DB(1).Get("renamed")
-			if !ok || entry.Value.String() != strings.Repeat("s", 2200) || entry.ExpiresAt.Load() != 4102444800000 || !reflect.DeepEqual(entry.Tags, []string{"tag"}) || restored.store.Exists("src") || restored.store.Exists("renamed") || restored.store.Exists("rejected") {
+			if !ok || entry.Value.String() != strings.Repeat("s", 2200) || entry.ExpiresAt.Load() != 4102444800000 || !reflect.DeepEqual(entry.TagList(), []string{"tag"}) || restored.store.Exists("src") || restored.store.Exists("renamed") || restored.store.Exists("rejected") {
 				t.Fatal("restart diverged from accepted transfers")
 			}
 		})

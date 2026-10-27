@@ -39,7 +39,7 @@ func TestHashGrowthAdmissionPersistenceX(t *testing.T) {
 				run("ADDTAG", "h", "tag")
 				run("PEXPIREAT", "h", "4102444800000")
 				if numeric {
-					size := 949 - s.store.MemUsage() - 105
+					size := 949 - s.store.MemUsage() - (store.EntryOverhead + 24 + int64(len("p")) + 16)
 					if got := run("SET", "p", strings.Repeat("p", int(size))); got != "+OK\r\n" {
 						t.Fatal(got)
 					}
@@ -65,7 +65,7 @@ func TestHashGrowthAdmissionPersistenceX(t *testing.T) {
 				}
 				entry, _ := s.store.Get("h")
 				hash := entry.Value.(*store.HashValue)
-				if string(hash.Fields["f"]) != initial || len(hash.Fields) != 1 || entry.ExpiresAt.Load() != 4102444800000 || len(entry.Tags) != 1 {
+				if string(hash.Fields["f"]) != initial || len(hash.Fields) != 1 || entry.ExpiresAt.Load() != 4102444800000 || len(entry.TagList()) != 1 {
 					t.Fatal("rejected growth changed hash/metadata")
 				}
 				if got := run("HSETNX", "h", "f", "wrong"); got != ":0\r\n" || s.aof.Size() != before {
@@ -99,7 +99,7 @@ func TestHashGrowthAdmissionPersistenceX(t *testing.T) {
 					t.Fatal("hash lost on restart")
 				}
 				hash = entry.Value.(*store.HashValue)
-				if string(hash.Fields["f"]) != want || len(hash.Fields) != 1 || entry.ExpiresAt.Load() != 4102444800000 || len(entry.Tags) != 1 || restored.store.MemUsage() != restored.store.MemoryTracker().Usage() {
+				if string(hash.Fields["f"]) != want || len(hash.Fields) != 1 || entry.ExpiresAt.Load() != 4102444800000 || len(entry.TagList()) != 1 || restored.store.MemUsage() != restored.store.MemoryTracker().Usage() {
 					t.Fatal("restart diverged from accepted effects")
 				}
 			})

@@ -52,7 +52,7 @@ func TestSetEntryDropsStaleTagsOnOverwrite(t *testing.T) {
 	}
 
 	fresh := NewEntry(&StringValue{Data: []byte("v2")})
-	fresh.Tags = []string{"newtag"}
+	fresh.SetTags([]string{"newtag"})
 	if err := s.SetEntry("k", fresh); err != nil {
 		t.Errorf("SetEntry: %v", err)
 	}

@@ -129,7 +129,7 @@ func (s *Store) moveSetMember(srcKey, dstKey, member string) (bool, error) {
 		srcEmpty := len(src.Members) == 1
 		srcSize := int64(0)
 		if !srcEmpty {
-			srcSize = entryMetadataSize(source.Tags) + int64(len(srcKey)) + 16 + src.SizeOf() - setMemberSize(member)
+			srcSize = entryMetadataSize(source.TagList()) + int64(len(srcKey)) + 16 + src.SizeOf() - setMemberSize(member)
 		}
 		dstSize := dst.SizeOf()
 		if !duplicate {
@@ -142,7 +142,7 @@ func (s *Store) moveSetMember(srcKey, dstKey, member string) (bool, error) {
 		}
 		dstBase := entryMetadataSize(nil) + int64(len(dstKey)) + 16
 		if live {
-			dstBase = entryMetadataSize(previous.Tags) + int64(len(dstKey)) + 16
+			dstBase = entryMetadataSize(previous.TagList()) + int64(len(dstKey)) + 16
 		}
 		if dstSize > math.MaxInt64-dstBase || srcSize > math.MaxInt64-dstBase-dstSize {
 			unlock()
@@ -183,7 +183,7 @@ func (s *Store) moveSetMember(srcKey, dstKey, member string) (bool, error) {
 		if srcEmpty {
 			src.markDeadLocked()
 			actual -= srcShard.deleteLocked(srcKey, source)
-			s.tagIndex.RemoveKey(srcKey, source.Tags)
+			s.tagIndex.RemoveKey(srcKey, source.TagList())
 		} else {
 			d, _ := srcShard.setLocked(srcKey, source)
 			actual += d

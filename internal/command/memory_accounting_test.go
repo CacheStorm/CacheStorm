@@ -101,8 +101,8 @@ func checkMemAccounting(t *testing.T, s *store.Store, step string) {
 		if got := entry.Value.SizeOf(); got != ref {
 			t.Fatalf("after %s: %s (%T) SizeOf=%d, recount=%d", step, key, entry.Value, got, ref)
 		}
-		fp := int64(64) + ref + int64(len(key)) + 16
-		for _, tag := range entry.Tags {
+		fp := int64(store.EntryOverhead) + ref + int64(len(key)) + 16
+		for _, tag := range entry.TagList() {
 			fp += int64(len(tag)) + 16
 		}
 		total += fp

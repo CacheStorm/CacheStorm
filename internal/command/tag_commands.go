@@ -51,8 +51,8 @@ func cmdTAGS(ctx *Context) error {
 		return ctx.WriteArray([]*resp.Value{})
 	}
 
-	tags := make([]*resp.Value, 0, len(entry.Tags))
-	for _, tag := range entry.Tags {
+	tags := make([]*resp.Value, 0, len(entry.TagList()))
+	for _, tag := range entry.TagList() {
 		tags = append(tags, resp.BulkString(tag))
 	}
 
@@ -71,7 +71,7 @@ func cmdADDTAG(ctx *Context) error {
 	}
 
 	existingTags := make(map[string]struct{})
-	for _, t := range entry.Tags {
+	for _, t := range entry.TagList() {
 		existingTags[t] = struct{}{}
 	}
 
@@ -81,7 +81,7 @@ func cmdADDTAG(ctx *Context) error {
 		tag := ctx.ArgString(i)
 		if _, exists := existingTags[tag]; !exists {
 			existingTags[tag] = struct{}{}
-			entry.Tags = append(entry.Tags, tag)
+			entry.SetTags(append(entry.TagList(), tag))
 			newTags = append(newTags, tag)
 			added++
 		}
@@ -109,14 +109,14 @@ func cmdREMTAG(ctx *Context) error {
 
 	newTags := make([]string, 0)
 	removed := 0
-	for _, tag := range entry.Tags {
+	for _, tag := range entry.TagList() {
 		if _, shouldRemove := removeTags[tag]; shouldRemove {
 			removed++
 		} else {
 			newTags = append(newTags, tag)
 		}
 	}
-	entry.Tags = newTags
+	entry.SetTags(newTags)
 	for tag := range removeTags {
 		ctx.Store.GetTagIndex().RemoveTags(key, []string{tag})
 	}
