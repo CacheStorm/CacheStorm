@@ -259,7 +259,7 @@ See [examples/](./examples/) directory for complete working examples.
 
 #### Resilience Patterns
 ```
-CIRCUITX.CREATE/OPEN/CLOSE/STATUS/METRICS    - Circuit breaker pattern
+CIRCUITX.CREATE/ALLOW/RECORD/STATUS/METRICS  - Circuit breaker pattern
 RATELIMITER.CREATE/TRY/WAIT/RESET/STATUS     - Rate limiting
 BULKHEAD.CREATE/ACQUIRE/RELEASE/STATUS       - Bulkhead isolation
 ```

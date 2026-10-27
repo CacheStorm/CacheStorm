@@ -3,44 +3,49 @@
 CacheStorm registers about 1,200 commands across 50+ modules: the Redis 7.4 command set plus CacheStorm extensions. Compatibility with Redis is measured by the differential harness in `tests/compat`.
 
 Every command name in this reference is verified against the registered command
-set: 1,596 documented, 0 phantoms, 0 missing.
+set: 1,223 documented, 0 phantoms, 0 missing.
+
+Counts in the table below are the commands listed in each section; `SET` and `COMMAND` are also repeated
+under Tag-Based Invalidation and Command Help but counted only once, under Core Redis.
 
 ## Command Categories
 
 | Category | Commands | Description |
 |----------|----------|-------------|
-| [Core Redis](#core-redis-commands) | 289 | Standard Redis commands |
-| [JSON](#json-commands) | 30+ | JSON document operations |
-| [Time Series](#time-series-commands) | 40+ | Time-series data |
-| [Search](#search-commands) | 50+ | Full-text search |
-| [Graph](#graph-commands) | 30+ | Graph database |
-| [Probabilistic](#probabilistic-commands) | 20+ | Bloom filters, sketches |
-| [Resilience](#resilience-commands) | 81 | Circuit breakers, rate limits |
-| [Data Processing](#data-processing-commands) | 100+ | Aggregation, joins |
-| [Machine Learning](#machine-learning-commands) | 80+ | Models, embeddings |
+| [Core Redis](#core-redis-commands) | 193 | Standard Redis commands |
+| [JSON](#json-commands) | 13 | JSON document operations |
+| [Time Series](#time-series-commands) | 12 | Time-series data |
+| [Search](#search-commands) | 13 | Full-text search |
+| [Graph](#graph-commands) | 12 | Graph database |
+| [Probabilistic](#probabilistic-commands) | 19 | Bloom filters, sketches |
+| [Resilience](#resilience-commands) | 21 | Circuit breakers, rate limits |
+| [Data Processing](#data-processing-commands) | 15 | Aggregation, joins |
+| [Machine Learning](#machine-learning-commands) | 13 | Models, embeddings |
 | [Namespace](#namespace-commands) | 1 | Multi-tenant namespaces |
-| [Tag Management](#tag-based-invalidation-commands) | 10 | Tag-based cache invalidation |
-| [Workflow](#workflow-commands) | 30+ | State machines |
-| [Advanced](#advanced-commands) | 100+ | Advanced data structures |
-| [Encoding](#encoding-commands) | 40+ | Data encoding/decoding |
-| [Digest](#digest-commands) | 20+ | Hashing and crypto |
-| [Events](#event-commands) | 30+ | Event sourcing |
-| [Utilities](#utility-commands) | 100+ | Various utilities |
-| [Integration](#integration-commands) | 100+ | External integrations |
+| [Tag Management](#tag-based-invalidation-commands) | 3 | Tag-based cache invalidation |
+| [Workflow](#workflow-commands) | 12 | State machines |
+| [Advanced](#advanced-commands) | 48 | Advanced data structures |
+| [Encoding](#encoding-commands) | 31 | Data encoding/decoding |
+| [Digest](#digest-commands) | 17 | Hashing and crypto |
+| [Events](#event-commands) | 21 | Event sourcing |
+| [Utilities](#utility-commands) | 54 | Various utilities |
+| [Integration](#integration-commands) | 66 | External integrations |
 | [String Processing](#string-processing-commands) | 20 | String analysis and text manipulation |
 | [Sessions](#session-commands) | 13 | Server-side session storage |
-| [CRDT](#crdt-commands) | 13 | Conflict-free replicated data types |
+| [CRDT](#crdt-commands) | 14 | Conflict-free replicated data types |
 | [Validation](#validation-commands) | 14 | Reusable value validation rules |
 | [Key Management](#key-management-commands) | 6 | Key lifecycle operations |
 | [Batch](#batch-commands) | 7 | Grouped operation submission |
 | [Vector](#vector-commands) | 10 | Vector embeddings and similarity search |
-| [T-Digest](#t-digest-commands) | 10 | Streaming quantile sketches |
-| [Message Queue](#message-queue-commands) | 10 | Durable queue with acknowledgements |
+| [T-Digest](#t-digest-commands) | 15 | Streaming quantile sketches |
+| [Message Queue](#message-queue-commands) | 10 | Queue with acknowledgements and dead letters |
 | [Documents](#document-commands) | 10 | Document storage and queries |
 | [Analytics](#analytics-commands) | 9 | Counters and aggregates |
 | [Circuit Breakers](#circuit-breaker-commands) | 9 | Failure/success state tracking |
 | [Service Discovery](#service-discovery-commands) | 8 | Service registration and discovery |
 | [Profiles](#profile-commands) | 5 | User profile records |
+| [Extended families](#extended-command-families) | 509 | 58 unprefixed commands and 101 further families |
+| **Total registered** | **1,223** | |
 
 ---
 
@@ -165,6 +170,7 @@ ZDIFF numkeys key [key ...] [WITHSCORES]
 ZDIFFSTORE destination numkeys key [key ...]
 ZINTER numkeys key [key ...] [WEIGHTS weight [weight ...]] [AGGREGATE SUM|MIN|MAX] [WITHSCORES]
 ZINTERSTORE destination numkeys key [key ...] [WEIGHTS weight [weight ...]] [AGGREGATE SUM|MIN|MAX]
+ZINTERCARD numkeys key [key ...] [LIMIT limit]
 ZUNION numkeys key [key ...] [WEIGHTS weight [weight ...]] [AGGREGATE SUM|MIN|MAX] [WITHSCORES]
 ZUNIONSTORE destination numkeys key [key ...] [WEIGHTS weight [weight ...]] [AGGREGATE SUM|MIN|MAX]
 ZRANDMEMBER key [count [WITHSCORES]]
@@ -180,6 +186,7 @@ BITCOUNT key [start end [BYTE|BIT]]
 BITPOS key bit [start [end [BYTE|BIT]]]
 BITOP operation destkey key [key ...]
 BITFIELD key [GET type offset] [SET type offset value] [INCRBY type offset increment] [OVERFLOW WRAP|SAT|FAIL]
+BITFIELD_RO key [GET type offset ...]
 ```
 
 ### HyperLogLog Commands
@@ -199,6 +206,8 @@ GEOHASH key member [member ...]
 GEOPOS key member [member ...]
 GEORADIUS key longitude latitude radius M|KM|FT|MI [WITHCOORD] [WITHDIST] [WITHHASH] [COUNT count [ANY]] [ASC|DESC] [STORE key] [STOREDIST key]
 GEORADIUSBYMEMBER key member radius M|KM|FT|MI [WITHCOORD] [WITHDIST] [WITHHASH] [COUNT count [ANY]] [ASC|DESC] [STORE key] [STOREDIST key]
+GEORADIUS_RO key longitude latitude radius M|KM|FT|MI [WITHCOORD] [WITHDIST] [WITHHASH] [COUNT count [ANY]] [ASC|DESC]
+GEORADIUSBYMEMBER_RO key member radius M|KM|FT|MI [WITHCOORD] [WITHDIST] [WITHHASH] [COUNT count [ANY]] [ASC|DESC]
 GEOSEARCH key [FROMMEMBER m] [FROMLONLAT lon lat] [BYRADIUS rad M|KM|FT|MI] [BYBOX w h M|KM|FT|MI] [ASC|DESC] [COUNT count [ANY]] [WITHCOORD] [WITHDIST] [WITHHASH]
 GEOSEARCHSTORE destination source [FROMMEMBER m] [FROMLONLAT lon lat] [BYRADIUS rad M|KM|FT|MI] [BYBOX w h M|KM|FT|MI] [ASC|DESC] [COUNT count [ANY]] [STOREDIST]
 ```
@@ -392,6 +401,7 @@ FT.AGGREGATE index query [VERBATIM] [LOAD count field [field ...]] [GROUPBY narg
 FT.TAGVALS index field
 FT.ALIASADD name index
 FT.ALIASDEL name
+FT.ALIASUPDATE name index
 FT.INFO index
 FT._LIST
 ```
@@ -469,35 +479,42 @@ TOPK.INFO key
 ### Circuit Breaker
 
 ```
-CIRCUITX.CREATE name threshold timeoutMs [halfOpenMax]
-CIRCUITX.OPEN name
-CIRCUITX.CLOSE name
-CIRCUITX.STATUS name
-CIRCUITX.METRICS name
-CIRCUITX.RESET name
-CIRCUITX.DELETE name
+CIRCUITX.CREATE name failure_threshold timeout_ms [success_threshold]   # create or replace a closed circuit; OK
+CIRCUITX.ALLOW name                  # 1 if a call may proceed, 0 while open (counts a rejection); an open circuit turns half-open after timeout_ms
+CIRCUITX.RECORD name SUCCESS|FAILURE # record a call outcome; replies with the resulting state
+CIRCUITX.OPEN name                   # force open; OK
+CIRCUITX.CLOSE name                  # force closed; OK
+CIRCUITX.HALFOPEN name               # force half-open; OK
+CIRCUITX.STATUS name                 # name, state, failures, successes, failure_threshold, success_threshold, timeout, retry_after
+CIRCUITX.METRICS name                # total_failures, total_successes, rejected, failure_rate
+CIRCUITX.RESET name                  # close and clear counters; OK
+CIRCUITX.DELETE name                 # 1 if deleted, 0 if absent
 ```
+
+Failures in the closed state open the circuit at `failure_threshold`; any failure in half-open reopens it, and `success_threshold` successes in half-open close it.
 
 ### Rate Limiter
 
 ```
-RATELIMITER.CREATE name rate burst [DURATION duration]
-RATELIMITER.TRY name [COST cost]
-RATELIMITER.WAIT name [COST cost] [TIMEOUT timeout]
-RATELIMITER.RESET name
-RATELIMITER.STATUS name
-RATELIMITER.DELETE name
+RATELIMITER.CREATE name limit window_ms [strategy]   # limit requests per sliding window; OK
+RATELIMITER.TRY name                 # [allowed(1|0), remaining, window_ms]
+RATELIMITER.WAIT name timeout_ms     # blocks until a slot frees; ms waited, or null on timeout
+RATELIMITER.RESET name               # clear recorded requests; OK
+RATELIMITER.STATUS name              # name, limit, current, strategy
+RATELIMITER.DELETE name               # 1 if deleted, 0 if absent
 ```
 
 ### Bulkhead
 
 ```
-BULKHEAD.CREATE name maxConcurrent [MAX_WAIT maxWait]
-BULKHEAD.ACQUIRE name [TIMEOUT timeout]
-BULKHEAD.RELEASE name
-BULKHEAD.STATUS name
-BULKHEAD.DELETE name
+BULKHEAD.CREATE name max_concurrent  # OK
+BULKHEAD.ACQUIRE name [timeout_ms]   # 1 when a permit is taken; without a timeout replies 0 at once if full, with one blocks up to timeout_ms, then 0
+BULKHEAD.RELEASE name                # OK; error if no permit is held
+BULKHEAD.STATUS name                 # name, current, max, waiting, rejected
+BULKHEAD.DELETE name                 # 1 if deleted, 0 if absent
 ```
+
+The blocking commands in this section (and `PROMISE.AWAIT`, `FUTURE.GET`) treat a `timeout_ms` of 0 as the 5-minute cap, never wait longer than that, and do not block inside `MULTI`/`EXEC`.
 
 ---
 
@@ -524,10 +541,10 @@ WINDOWX.AGGREGATE name aggType
 ### Stream Joins
 
 ```
-JOINX.CREATE name   # type/condition args are rejected
-JOINX.ADD name side value
-JOINX.GET name
-JOINX.DELETE name
+JOINX.CREATE name                    # inner join on a key; type/condition args are rejected
+JOINX.ADD name LEFT|RIGHT key value  # add a value to one side under key; OK
+JOINX.GET name [key]                 # one [key k left l right r] row per matching pair; optional key limits the rows
+JOINX.DELETE name                    # 1 if deleted, 0 if absent
 ```
 
 ### Partitioning
@@ -656,14 +673,14 @@ ACTOR.CLEAR name
 ### DAG (Directed Acyclic Graph)
 
 ```
-DAG.CREATE name
-DAG.DELETE name
-DAG.ADDNODE name node [data]
-DAG.ADDEDGE name from to [weight]
-DAG.TOPO name
-DAG.PARENTS name node
-DAG.CHILDREN name node
-DAG.LIST [pattern]
+DAG.CREATE name                      # create or replace an empty DAG; OK
+DAG.DELETE name                      # 1 if deleted, 0 if absent
+DAG.ADDNODE name node                # 1 if added, 0 if it exists
+DAG.ADDEDGE name from to             # both nodes must exist; an edge that would close a cycle is rejected; OK
+DAG.TOPO name                        # topological order, ties broken by name
+DAG.PARENTS name node                # sorted direct parents
+DAG.CHILDREN name node               # sorted direct children
+DAG.LIST                             # DAG names
 ```
 
 ### Parallel Processing
@@ -706,17 +723,17 @@ TRIE.PREFIX name prefix [COUNT count]
 TRIE.DELETE name key
 TRIE.AUTOCOMPLETE name prefix [COUNT count]
 
-RING.CREATE name replicas
-RING.ADD name node [weight]
-RING.GET name key
-RING.NODES name
-RING.REMOVE name node
+RING.CREATE name replicas            # consistent-hash ring, replicas = virtual nodes per node (1-1024); OK
+RING.ADD name node                   # node count after the add
+RING.GET name key                    # node that owns key; null if the ring is empty
+RING.NODES name                      # nodes sorted by name
+RING.REMOVE name node                # 1 if removed, 0 if absent
 
-SEM.CREATE name count
-SEM.ACQUIRE name permits
-SEM.RELEASE name permits
-SEM.TRYACQUIRE name permits
-SEM.VALUE name
+SEM.CREATE name max                  # create or replace with max permits; OK
+SEM.ACQUIRE name permits [timeout_ms] # blocks until permits are free: 1 acquired, 0 on timeout; 0 or omitted waits indefinitely; no blocking inside MULTI/EXEC
+SEM.TRYACQUIRE name permits          # never blocks; 1 acquired, 0 otherwise
+SEM.RELEASE name permits             # OK; error if it would exceed max
+SEM.VALUE name                       # value, max, waiters
 ```
 
 ---
@@ -724,24 +741,21 @@ SEM.VALUE name
 ## Encoding Commands
 
 ```
-MSGPACK.ENCODE data
-MSGPACK.DECODE data
+MSGPACK.ENCODE json                  # one JSON document to MessagePack bytes
+MSGPACK.DECODE msgpack               # raw MessagePack bytes to JSON text
 
 
 URL.ENCODE string
 URL.DECODE string
 
-XML.ENCODE tag value [ROOT root]
-XML.DECODE xml
+XML.ENCODE tag value                 # <tag>escaped value</tag>
+XML.DECODE xml                       # one text-only element; [tag, text]
 
-YAML.ENCODE data
-YAML.DECODE yaml
+YAML.ENCODE json                     # one JSON document to YAML
+YAML.DECODE yaml                     # one YAML document to JSON text
 
-TOML.ENCODE key value
-TOML.DECODE toml
-
-CBOR.ENCODE data
-CBOR.DECODE data
+CBOR.ENCODE json                     # one JSON document to CBOR bytes
+CBOR.DECODE cbor                     # raw CBOR bytes to JSON text
 
 CSV.ENCODE rows [DELIMITER delim]
 CSV.DECODE csv [DELIMITER delim]
@@ -753,16 +767,16 @@ UUID.VERSION uuid
 ULID.GEN
 ULID.EXTRACT ulid
 
-TIMESTAMP.NOW [UNIT unit]
-TIMESTAMP.PARSE input
-TIMESTAMP.FORMAT timestamp format
-TIMESTAMP.ADD timestamp amount unit
-TIMESTAMP.DIFF t1 t2 unit
-TIMESTAMP.STARTOF timestamp unit
-TIMESTAMP.ENDOF timestamp unit
+TIMESTAMP.NOW                        # unix, unix_milli, iso
+TIMESTAMP.PARSE input                # unix seconds/ms, RFC 3339, 2006-01-02 or "2006-01-02 15:04:05" (UTC); unix, iso
+TIMESTAMP.FORMAT unix_seconds layout # Go reference layout, server-local time zone
+TIMESTAMP.ADD unix_seconds unit amount   # unit: second|minute|hour|day|week|month|year
+TIMESTAMP.DIFF unix1 unix2 unit      # unix2 - unix1 in second|minute|hour|day|millisecond|microsecond|nanosecond
+TIMESTAMP.STARTOF unix_seconds unit  # UTC start of the second|minute|hour|day|week (Sunday)|month|year
+TIMESTAMP.ENDOF unix_seconds unit    # last second of that UTC period
 
-DIFF.TEXT text1 text2
-DIFF.JSON json1 json2
+DIFF.TEXT text1 text2                # Myers line diff: added, removed, unchanged counts and the diff lines (" ", "-", "+")
+DIFF.JSON json1 json2                # added, removed, changed top-level keys
 
 POOL.CREATE name size [FACTORY factory]
 POOL.GET name [TIMEOUT timeout]
@@ -803,10 +817,10 @@ CRYPTO.HMAC algorithm key data
 ### Event Sourcing
 
 ```
-EVENT.EMIT name [key value ...]
-EVENT.GET channel [cursor] [COUNT count]
-EVENT.LIST [pattern]
-EVENT.CLEAR channel
+EVENT.EMIT name [field value ...]    # id, name, timestamp
+EVENT.GET name [limit]               # newest events for name (limit defaults to 10), each with id, name, timestamp and data
+EVENT.LIST                           # newest 100 events of any name
+EVENT.CLEAR                          # drop every event; OK
 ```
 
 ### Compression
@@ -879,17 +893,19 @@ SNOWFLAKE.PARSE id
 ### Audit Logging
 
 ```
-AUDIT.LOG command [key] [DETAILS details]
-AUDIT.GET id [COUNT count]
-AUDIT.GETRANGE start end
-AUDIT.GETBYCMD command [COUNT count]
-AUDIT.GETBYKEY key [COUNT count]
-AUDIT.CLEAR [BEFORE timestamp]
-AUDIT.COUNT [COMMAND command] [KEY key]
-AUDIT.STATS
-AUDIT.ENABLE
-AUDIT.DISABLE
+AUDIT.LOG command [key] [arg ...]    # add a manual entry; replies its id
+AUDIT.GET id                         # id, timestamp, command, key, args, client_ip, user, success, duration_us; null if absent
+AUDIT.GETRANGE start_ms end_ms       # entries whose timestamp (ms) is in the inclusive range
+AUDIT.GETBYCMD command [limit]       # newest first, limit defaults to 100; case-sensitive (recorded names are uppercase)
+AUDIT.GETBYKEY key [limit]           # newest first, limit defaults to 100
+AUDIT.CLEAR                          # OK
+AUDIT.COUNT                          # number of entries
+AUDIT.STATS                          # total, success, failed, enabled, max_size, per-command counts
+AUDIT.ENABLE                         # record every dispatched command (off by default); OK
+AUDIT.DISABLE                        # OK
 ```
+
+When enabled, every dispatched command is recorded with its first argument as the key and up to 16 further arguments (each capped at 128 bytes); `success` is false when the command replied with an error. AUTH, HELLO, ACL, CONFIG and MIGRATE are recorded by name only, without arguments. The log keeps the newest 10,000 entries.
 
 ### Feature Flags
 
@@ -1104,19 +1120,20 @@ SESSION.DELETE id
 Conflict-free replicated data types for multi-node convergence.
 
 ```
-CRDT.GCOUNTER.INCR name nodeID [amount]
-CRDT.GCOUNTER.GET key
-CRDT.PNCounter.INCR name nodeID [amount]
-CRDT.PNCounter.DECR name nodeID [amount]
-CRDT.PNCounter.GET key
-CRDT.GSET.ADD key member [member ...]
-CRDT.GSET.GET key
-CRDT.ORSET.ADD key member [member ...]
-CRDT.ORSET.REMOVE key member
-CRDT.ORSET.GET key
-CRDT.LWW.SET key value [timestamp]
-CRDT.LWW.GET key
-CRDT.LWW.DELETE key
+CRDT.GCOUNTER.INCR name node_id [amount]  # that node's new count
+CRDT.GCOUNTER.GET name               # sum over nodes
+CRDT.PNCOUNTER.INCR name node_id     # +1 for node_id; OK
+CRDT.PNCOUNTER.DECR name node_id     # -1 for node_id; OK
+CRDT.PNCOUNTER.GET name              # increments minus decrements
+CRDT.GSET.ADD name value             # 1 if added, 0 if present
+CRDT.GSET.GET name                   # members
+CRDT.ORSET.ADD name value [tag]      # add an observed tag (generated if omitted); replies the tag
+CRDT.ORSET.REMOVE name value [tag ...] # tombstone the given tags, or every observed tag; number of live tags removed
+CRDT.ORSET.GET name                  # sorted values with at least one live tag
+CRDT.ORSET.TAGS name value           # sorted live tags of value
+CRDT.LWW.SET key value [timestamp]   # written only if timestamp (default now, ns) is newer; OK
+CRDT.LWW.GET key                     # value or null
+CRDT.LWW.DELETE key                  # 1 if deleted, 0 if absent
 ```
 
 ---
@@ -1142,39 +1159,46 @@ VECTOR.STATS name
 
 ## T-Digest Commands
 
-Streaming quantile sketches and distribution summaries.
+Streaming quantile sketches using RedisBloom syntax and replies (doubles as bulk strings). A missing key is an error.
 
 ```
-TDIGEST.CREATE key [COMPRESSION compression]
-TDIGEST.ADD key value [value ...]
-TDIGEST.MERGE destination source [source ...]
-TDIGEST.QUANTILE key quantile
-TDIGEST.CDF key value
-TDIGEST.MIN key
-TDIGEST.MAX key
-TDIGEST.MEAN key
-TDIGEST.RESET key
-TDIGEST.INFO key
+TDIGEST.CREATE key [COMPRESSION compression]   # default 100; error if key exists; OK
+TDIGEST.ADD key value [value ...]    # OK
+TDIGEST.MERGE destination_key numkeys source_key [source_key ...] [COMPRESSION compression] [OVERRIDE]  # OK
+TDIGEST.QUANTILE key quantile [quantile ...]   # one double per quantile (0..1)
+TDIGEST.CDF key value [value ...]    # one double per value
+TDIGEST.RANK key value [value ...]   # estimated rank per value (-1 below min, -2 if empty)
+TDIGEST.REVRANK key value [value ...] # estimated reverse rank per value
+TDIGEST.BYRANK key rank [rank ...]   # value per rank (inf past the end, nan if empty)
+TDIGEST.BYREVRANK key reverse_rank [reverse_rank ...]  # value per reverse rank (-inf past the end)
+TDIGEST.TRIMMED_MEAN key low_cut_quantile high_cut_quantile  # mean between the two quantiles
+TDIGEST.MIN key                      # nan if empty
+TDIGEST.MAX key                      # nan if empty
+TDIGEST.MEAN key                     # CacheStorm extension; nan if empty
+TDIGEST.RESET key                    # empty the sketch, keep compression; OK
+TDIGEST.INFO key                     # Compression, Capacity, Merged/Unmerged nodes and weight, Observations, Total compressions, Memory usage
 ```
 
 ---
 
 ## Message Queue Commands
 
-Durable publish/subscribe with explicit acknowledgement.
+In-memory queue with acknowledgements, a visibility timeout, retries and a dead-letter list. None of the commands block.
 
 ```
-MSGQUEUE.CREATE name [MAXLEN count]
-MSGQUEUE.PUBLISH name message
-MSGQUEUE.CONSUME name [COUNT count]
-MSGQUEUE.ACK name msgID
-MSGQUEUE.NACK name msgID
-MSGQUEUE.REQUEUE name msgID
-MSGQUEUE.DEADLETTER name
-MSGQUEUE.PURGE name
-MSGQUEUE.DELETE name
-MSGQUEUE.STATS name
+MSGQUEUE.CREATE name [max_retries]   # create or replace (default 3 retries); OK
+MSGQUEUE.PUBLISH name body           # replies the message id
+MSGQUEUE.CONSUME name [visibility_timeout_ms]  # take the oldest message (default 5000 ms visibility): id, body, retries; null if empty
+MSGQUEUE.ACK name id                 # 1 if acked, 0 if not in flight
+MSGQUEUE.NACK name id                # 1 requeued, 2 dead-lettered after max_retries, 0 if not in flight
+MSGQUEUE.REQUEUE name id             # move a dead letter back with retries reset; 1 or 0
+MSGQUEUE.DEADLETTER name             # dead-lettered messages
+MSGQUEUE.PURGE name                  # drop pending messages; number dropped
+MSGQUEUE.DELETE name                 # 1 if deleted, 0 if absent
+MSGQUEUE.STATS name                  # name, pending, processing, dead_letters, max_retries
 ```
+
+A consumed message that is not acknowledged within its visibility timeout is treated as NACKed.
 
 ---
 
@@ -1183,16 +1207,16 @@ MSGQUEUE.STATS name
 Document storage with indexing and aggregation queries.
 
 ```
-DOC.INSERT name id field value [field value ...]
-DOC.FIND name [filterField filterValue]
-DOC.FINDONE name field value
-DOC.UPDATE name id [FIELD field value ...]
-DOC.DELETE name id
-DOC.COUNT name [query]
-DOC.AGGREGATE name pipeline
-DOC.DISTINCT name field
-DOC.INDEX name field [UNIQUE]
-DOC.DROPINDEX name field
+DOC.INSERT name id field value [field value ...]  # insert or replace a document; replies the id
+DOC.FIND name [field value]          # all documents, or those where field equals value, sorted by id
+DOC.FINDONE name field value         # first match by id, or null
+DOC.UPDATE name id [field value ...] # merge fields into the document; OK
+DOC.DELETE name id                   # 1 if deleted, 0 if absent
+DOC.COUNT name                       # number of documents
+DOC.AGGREGATE name count|fields      # document count, or sorted field names in use
+DOC.DISTINCT name field              # sorted distinct values of field
+DOC.INDEX name field                 # index field (kept current on insert, update and delete); OK
+DOC.DROPINDEX name field             # 1 if dropped, 0 if no such index
 ```
 
 ---
@@ -1220,21 +1244,23 @@ CIRCUIT.STATS name
 Reusable validation rules and value checkers.
 
 ```
-VALIDATE.CREATE name rule
-VALIDATE.LIST
-VALIDATE.DELETE name
-VALIDATE.CHECK name value
-VALIDATE.ALPHA value
-VALIDATE.ALPHANUM value
-VALIDATE.EMAIL value
-VALIDATE.URL value
-VALIDATE.IP value
-VALIDATE.FLOAT value [min] [max]
-VALIDATE.INT value [min] [max]
-VALIDATE.LENGTH value min max
-VALIDATE.RANGE value min max
-VALIDATE.JSON value
+VALIDATE.CREATE name regex           # store an RE2 rule (unanchored unless ^...$); OK
+VALIDATE.LIST                        # rule names
+VALIDATE.DELETE name                 # 1 if deleted, 0 if absent
+VALIDATE.CHECK name value            # 1 if value matches the rule
+VALIDATE.ALPHA value                 # non-empty ASCII letters
+VALIDATE.ALPHANUM value              # non-empty ASCII letters and digits
+VALIDATE.EMAIL value                 # bare addr-spec with a dotted domain, at most 254 bytes
+VALIDATE.URL value                   # absolute scheme://host URL
+VALIDATE.IP value                    # IPv4 or IPv6, no zones
+VALIDATE.FLOAT value                 # optional sign, digits, at most one '.'; no exponent
+VALIDATE.INT value                   # optional sign and digits
+VALIDATE.LENGTH value min max        # byte length within min..max
+VALIDATE.RANGE value min max         # numeric value within min..max (exact comparison)
+VALIDATE.JSON value                  # valid JSON
 ```
+
+The checkers reply 1 when the value is valid and 0 otherwise.
 
 ---
 
@@ -1324,12 +1350,12 @@ The sections below list every remaining registered command family.
 
 Command names are reproduced exactly as registered in `internal/command`.
 
-Argument signatures are not included; check the command handler for syntax.
+Argument signatures are given for some families; for the rest, check the command handler for syntax.
 
 ---
 ## Unprefixed Commands
 
-Commands without a dotted namespace prefix (57 commands).
+Commands without a dotted namespace prefix (58 commands).
 
 ```
 ADDTAG
@@ -1344,13 +1370,16 @@ CLUSTERNODES
 CLUSTERSLOTS
 ECHO
 EVAL
+EVAL_RO
 EVALSHA
+EVALSHA_RO
 EXPIREAT
 FCALL
 FCALL_RO
 FUNCTION
 GETDEL
 GETEX
+HELLO
 HGETDEL
 HGETEX
 HOTKEYS
@@ -1410,12 +1439,12 @@ AGG.SUM
 `ALERT.*` command family (6 commands).
 
 ```
-ALERT.ACKNOWLEDGE
-ALERT.CREATE
-ALERT.HISTORY
-ALERT.LIST
-ALERT.RESOLVE
-ALERT.TRIGGER
+ALERT.CREATE name message            # create or replace with status active; OK
+ALERT.TRIGGER name                   # status firing; OK
+ALERT.ACKNOWLEDGE name               # status acknowledged; OK
+ALERT.RESOLVE name                   # status resolved; OK
+ALERT.LIST                           # name and status of every alert
+ALERT.HISTORY name                   # id, name, message, status, created_at and every status transition (last 1000)
 ```
 
 ---
@@ -1536,12 +1565,12 @@ CACHEX.SET
 `CHAIN.*` command family (6 commands).
 
 ```
-CHAIN.ADD
-CHAIN.CREATE
-CHAIN.GET
-CHAIN.LAST
-CHAIN.LENGTH
-CHAIN.VALIDATE
+CHAIN.CREATE name                    # create or replace an empty chain; OK
+CHAIN.ADD name data                  # append a SHA-256 linked block; replies its index
+CHAIN.GET name index                 # index, timestamp, data, hash, prev_hash; null if out of range
+CHAIN.LAST name                      # index, data, hash of the last block; null if empty
+CHAIN.LENGTH name                    # number of blocks
+CHAIN.VALIDATE name                  # 1 if every block's hash and link recompute correctly, else 0
 ```
 
 ---
@@ -1553,15 +1582,6 @@ CHAIN.VALIDATE
 CHAINED.DEL
 CHAINED.GET
 CHAINED.SET
-```
-
----
-## Circuitx Commands
-
-`CIRCUITX.*` command family (1 command).
-
-```
-CIRCUITX.HALFOPEN
 ```
 
 ---
@@ -1656,11 +1676,11 @@ COUNTERX2.LIST
 `DATASET.*` command family (5 commands).
 
 ```
-DATASET.ADD
-DATASET.CREATE
-DATASET.DELETE
-DATASET.GET
-DATASET.SPLIT
+DATASET.CREATE name                  # create or replace an empty dataset; OK
+DATASET.ADD name item                # new length
+DATASET.GET name                     # items; null if absent
+DATASET.SPLIT name ratio [SEED seed] # train and test item arrays, floor(len*ratio) in train; SEED shuffles deterministically
+DATASET.DELETE name                  # 1 if deleted, 0 if absent
 ```
 
 ---
@@ -1693,10 +1713,10 @@ DEBOUNCE.SET
 `DEBOUNCEX.*` command family (4 commands).
 
 ```
-DEBOUNCEX.CALL
-DEBOUNCEX.CANCEL
-DEBOUNCEX.CREATE
-DEBOUNCEX.FLUSH
+DEBOUNCEX.CREATE name delay_ms       # OK
+DEBOUNCEX.CALL name arg              # remember arg as the latest call and restart the delay; OK
+DEBOUNCEX.CANCEL name                # drop the pending call; OK
+DEBOUNCEX.FLUSH name [FORCE]         # the pending arg once delay_ms has passed since the last CALL (at once with FORCE); null otherwise
 ```
 
 ---
@@ -1730,13 +1750,13 @@ ENTITY.SET
 `EVAL.*` command family (7 commands).
 
 ```
-EVAL.EXPR
-EVAL.FORMAT
-EVAL.JSONPATH
-EVAL.REGEX
-EVAL.REGEXMATCH
-EVAL.REGEXREPLACE
-EVAL.TEMPLATE
+EVAL.EXPR expression                 # arithmetic with + - * / % ^, unary signs and parentheses; no variables or functions
+EVAL.JSONPATH json path              # $ with .name, ['name'] and [index] steps; JSON text, or null if not found
+EVAL.FORMAT format [arg ...]         # {} takes the next arg, {N} the Nth
+EVAL.TEMPLATE template name value [name value ...]  # replace {{ name }} placeholders
+EVAL.REGEX pattern text              # 1 if the RE2 pattern matches, else 0
+EVAL.REGEXMATCH pattern text         # all matches
+EVAL.REGEXREPLACE pattern replacement text  # replace every match; $1 and ${name} expand
 ```
 
 ---
@@ -1756,12 +1776,12 @@ EVENTSOURCING.REPLAY
 `EXPERIMENT.*` command family (6 commands).
 
 ```
-EXPERIMENT.ASSIGN
-EXPERIMENT.CREATE
-EXPERIMENT.DELETE
-EXPERIMENT.LIST
-EXPERIMENT.RESULTS
-EXPERIMENT.TRACK
+EXPERIMENT.CREATE name variant [variant ...]  # create or replace; OK
+EXPERIMENT.ASSIGN name user_id       # sticky, hash-based variant
+EXPERIMENT.TRACK name user_id event  # record an event for an assigned user; OK
+EXPERIMENT.RESULTS name              # assignments, then per variant its users and, per event, count, users and conversion_rate
+EXPERIMENT.LIST                      # experiment names
+EXPERIMENT.DELETE name               # 1 if deleted, 0 if absent
 ```
 
 ---
@@ -1783,10 +1803,10 @@ FREQ.TOP
 `FUTURE.*` command family (4 commands).
 
 ```
-FUTURE.CANCEL
-FUTURE.COMPLETE
-FUTURE.CREATE
-FUTURE.GET
+FUTURE.CREATE                        # new pending future; replies its id
+FUTURE.COMPLETE id value             # OK; error unless pending
+FUTURE.CANCEL id                     # OK; error unless pending
+FUTURE.GET id [timeout_ms]           # value when completed, error when cancelled, null while pending; with timeout_ms blocks up to that long
 ```
 
 ---
@@ -1859,9 +1879,9 @@ GRID.SET
 `HEALTH.*` command family (3 commands).
 
 ```
-HEALTH.CHECK
-HEALTH.LIVENESS
-HEALTH.READINESS
+HEALTH.CHECK                         # status, timestamp, uptime_seconds
+HEALTH.LIVENESS                      # OK
+HEALTH.READINESS                     # OK, or a NOTREADY error while a replica's master link is down or a sync is in progress
 ```
 
 ---
@@ -1983,11 +2003,11 @@ LEASE.REVOKE
 `LEVEL.*` command family (5 commands).
 
 ```
-LEVEL.CREATE
-LEVEL.DELETE
-LEVEL.GET
-LEVEL.LIST
-LEVEL.SET
+LEVEL.CREATE name max                # create or replace at level 0; OK
+LEVEL.SET name level                 # level must be 0..max; OK
+LEVEL.GET name                       # current, max
+LEVEL.LIST                           # sorted level names
+LEVEL.DELETE name                    # 1 if deleted, 0 if absent
 ```
 
 ---
@@ -2154,11 +2174,11 @@ PROFILEX.LIST
 `PROMISE.*` command family (5 commands).
 
 ```
-PROMISE.AWAIT
-PROMISE.CREATE
-PROMISE.REJECT
-PROMISE.RESOLVE
-PROMISE.STATUS
+PROMISE.CREATE                       # new pending promise; replies its id
+PROMISE.RESOLVE id value             # OK; error unless pending
+PROMISE.REJECT id reason             # OK; error unless pending
+PROMISE.STATUS id                    # id, status (pending|resolved|rejected)
+PROMISE.AWAIT id timeout_ms          # blocks until settled: value, error "promise rejected: reason", or null on timeout
 ```
 
 ---
@@ -2317,11 +2337,11 @@ SEMAPHOREX.STATUS
 `SESSIONX.*` command family (5 commands).
 
 ```
-SESSIONX.CREATE
-SESSIONX.DELETE
-SESSIONX.GET
-SESSIONX.LIST
-SESSIONX.SET
+SESSIONX.CREATE user ttl_ms          # replies the session id
+SESSIONX.SET id field value [field value ...]  # merge data; does not extend the TTL; OK
+SESSIONX.GET id                      # id, user, created_at, expires_at, ttl, data; error once expired
+SESSIONX.LIST                        # sorted live session ids
+SESSIONX.DELETE id                   # 1 if deleted, 0 if absent or expired
 ```
 
 ---
@@ -2430,11 +2450,11 @@ STAGE.PREV
 `STATS.*` command family (5 commands).
 
 ```
-STATS.ALL
-STATS.CLIENTS
-STATS.CPU
-STATS.KEYSPACE
-STATS.MEMORY
+STATS.ALL                            # uptime, connections, command, hit/miss, key, memory, traffic, error, eviction and expiration totals
+STATS.CLIENTS                        # connected_clients, total_connections
+STATS.CPU                            # used_cpu_sys, used_cpu_user
+STATS.KEYSPACE                       # total_keys, per-type key counts, expires, avg_ttl (ms)
+STATS.MEMORY                         # used_memory, used_memory_human, peak_memory, used_memory_rss, total_allocated, fragmentation_ratio
 ```
 
 ---

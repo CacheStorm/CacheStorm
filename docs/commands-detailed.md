@@ -1825,20 +1825,37 @@ WAITAOF numlocal numreplicas timeout
 ## Resilience Commands
 
 ### CIRCUITX.CREATE
-Create a circuit breaker.
+Create (or replace) a circuit breaker in the closed state.
 
 ```
-CIRCUITX.CREATE name [FAILURE_THRESHOLD threshold] [SUCCESS_THRESHOLD threshold] [TIMEOUT timeout] [HALF_OPEN_MAX max]
+CIRCUITX.CREATE name failure_threshold timeout_ms [success_threshold]
 ```
+
+`failure_threshold` consecutive failures open the circuit. After `timeout_ms` an open circuit turns half-open; `success_threshold` (default 1) successes there close it, and any failure reopens it.
 
 ---
 
-### RATELIMITER.CREATE
-Create a rate limiter.
+### CIRCUITX.ALLOW / CIRCUITX.RECORD
+Ask before a call and report its outcome.
 
 ```
-RATELIMITER.CREATE name rate burst [DURATION duration]
+CIRCUITX.ALLOW name
+CIRCUITX.RECORD name SUCCESS|FAILURE
 ```
+
+`ALLOW` replies 1 when the call may proceed and 0 while the circuit is open (counted as a rejection). `RECORD` replies with the state after the outcome: `closed`, `open` or `half-open`.
+
+---
+
+### RATELIMITER.CREATE / RATELIMITER.WAIT
+Create a sliding-window rate limiter and wait for a slot.
+
+```
+RATELIMITER.CREATE name limit window_ms [strategy]
+RATELIMITER.WAIT name timeout_ms
+```
+
+`WAIT` blocks until a request fits in the window and replies with the milliseconds waited, or null on timeout. A `timeout_ms` of 0 means the 5-minute cap; inside `MULTI`/`EXEC` it does not block.
 
 ---
 
