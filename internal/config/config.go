@@ -130,6 +130,9 @@ type ClusterConfig struct {
 	AllowReadsWhenDown  bool   `yaml:"allow_reads_when_down" default:"false"`
 	// ReplicaValidityFactor is cluster-replica-validity-factor.
 	ReplicaValidityFactor int `yaml:"replica_validity_factor" default:"10"`
+	// TLS is tls-cluster: the cluster bus and MIGRATE use mutual TLS with
+	// server.tls_cert_file, tls_key_file and tls_ca_cert_file.
+	TLS bool `yaml:"tls"`
 }
 
 type PersistenceConfig struct {

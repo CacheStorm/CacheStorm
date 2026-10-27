@@ -1,6 +1,7 @@
 package command
 
 import (
+	"crypto/tls"
 	"strconv"
 	"strings"
 
@@ -33,6 +34,19 @@ func (r *Router) SetCluster(c *cluster.Cluster) {
 }
 
 // Cluster returns the cluster state, nil when cluster mode is off.
+// SetMigrateTLS makes MIGRATE connect to its target over TLS (tls-cluster).
+func (r *Router) SetMigrateTLS(cfg *tls.Config) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.migrateTLS = cfg
+}
+
+func (r *Router) migrateTLSConfig() *tls.Config {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.migrateTLS
+}
+
 func (r *Router) Cluster() *cluster.Cluster {
 	return r.cluster
 }

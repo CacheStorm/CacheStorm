@@ -3,6 +3,7 @@ package cluster
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"net"
@@ -31,7 +32,10 @@ func nowMs() int64 { return time.Now().UnixMilli() }
 // BusOptions configure the cluster bus of a node.
 type BusOptions struct {
 	// Listener accepts the bus connections of the other nodes.
-	Listener    net.Listener
+	Listener net.Listener
+	// DialTLS, when set, is the TLS configuration links to other nodes are
+	// dialed with (tls-cluster).
+	DialTLS     *tls.Config
 	NodeTimeout time.Duration
 	// Publish delivers a PUBLISH that another node broadcast.
 	Publish func(channel string, message []byte)
@@ -380,7 +384,14 @@ func (c *Cluster) connectLocked(b *bus, n *Node) {
 func (c *Cluster) dial(b *bus, l *link, addr string) {
 	defer b.wg.Done()
 	d := net.Dialer{Timeout: b.writeTimeout()}
-	conn, err := d.DialContext(b.ctx, "tcp", addr)
+	var conn net.Conn
+	var err error
+	if b.opts.DialTLS != nil {
+		td := tls.Dialer{NetDialer: &d, Config: b.opts.DialTLS}
+		conn, err = td.DialContext(b.ctx, "tcp", addr)
+	} else {
+		conn, err = d.DialContext(b.ctx, "tcp", addr)
+	}
 	c.mu.Lock()
 	n := l.node
 	if err != nil {

@@ -234,7 +234,7 @@ func (l *link) session() (bool, error) {
 	var err error
 	if m.cfg.TLS != nil {
 		tc := m.cfg.TLS.Clone()
-		if tc.ServerName == "" {
+		if tc.ServerName == "" && !tc.InsecureSkipVerify {
 			tc.ServerName = l.host
 		}
 		conn, err = tls.DialWithDialer(&net.Dialer{Timeout: m.cfg.Timeout}, "tcp", addr, tc)

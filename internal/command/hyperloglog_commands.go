@@ -87,7 +87,7 @@ func cmdPFDEBUG(ctx *Context) error {
 	}
 	if sub == "GETREG" {
 		regs := make([]*resp.Value, len(state.Registers))
-		for i, r := range state.Registers {
+		for i, r := range &state.Registers {
 			regs[i] = resp.IntegerValue(int64(r))
 		}
 		return ctx.WriteArray(regs)

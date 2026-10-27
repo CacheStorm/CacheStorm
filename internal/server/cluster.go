@@ -1,6 +1,7 @@
 package server
 
 import (
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"net"
@@ -97,6 +98,25 @@ func (s *Server) announceCluster() error {
 	if err != nil {
 		return fmt.Errorf("cluster bus: %w", err)
 	}
+	var dialTLS *tls.Config
+	if s.cfg.Server.TLSCertFile != "" {
+		peer, err := peerTLSConfig(&s.cfg.Server)
+		if err != nil {
+			ln.Close()
+			return fmt.Errorf("cluster TLS: %w", err)
+		}
+		// The other nodes' client ports speak TLS, so MIGRATE does too.
+		s.router.SetMigrateTLS(peer)
+		if cc.TLS {
+			listenTLS, err := busTLSConfig(&s.cfg.Server)
+			if err != nil {
+				ln.Close()
+				return fmt.Errorf("cluster bus TLS: %w", err)
+			}
+			ln = tls.NewListener(ln, listenTLS)
+			dialTLS = peer
+		}
+	}
 	port := s.ListeningPort()
 	if cc.AnnouncePort != 0 {
 		port = cc.AnnouncePort
@@ -119,6 +139,7 @@ func (s *Server) announceCluster() error {
 	ps := s.store.GetPubSub()
 	if err := c.StartBus(cluster.BusOptions{
 		Listener:      ln,
+		DialTLS:       dialTLS,
 		NodeTimeout:   time.Duration(cc.NodeTimeout) * time.Millisecond,
 		Publish:       func(channel string, msg []byte) { ps.Publish(channel, msg) },
 		KeysInSlot:    s.store.CountKeysInSlot,

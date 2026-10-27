@@ -2,6 +2,7 @@ package command
 
 import (
 	"bytes"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"math"
@@ -668,7 +669,16 @@ func cmdMIGRATE(ctx *Context) error {
 	}
 
 	timeout := time.Duration(timeoutMS) * time.Millisecond
-	raw, err := net.DialTimeout("tcp", net.JoinHostPort(host, port), timeout)
+	var raw net.Conn
+	var migrateTLS *tls.Config
+	if r := ctx.dispatcher(); r != nil {
+		migrateTLS = r.migrateTLSConfig()
+	}
+	if cfg := migrateTLS; cfg != nil {
+		raw, err = tls.DialWithDialer(&net.Dialer{Timeout: timeout}, "tcp", net.JoinHostPort(host, port), cfg)
+	} else {
+		raw, err = net.DialTimeout("tcp", net.JoinHostPort(host, port), timeout)
+	}
 	if err != nil {
 		return ctx.WriteError(fmt.Errorf("IOERR error or timeout connecting to the client"))
 	}

@@ -147,6 +147,9 @@ func Validate(cfg *Config) error {
 	default:
 		return fmt.Errorf("invalid tls_auth_clients %q: use yes, no or optional", cfg.Server.TLSAuthClients)
 	}
+	if cfg.Cluster.TLS && (cfg.Server.TLSCertFile == "" || cfg.Server.TLSKeyFile == "" || cfg.Server.TLSCACertFile == "") {
+		return fmt.Errorf("cluster.tls needs server.tls_cert_file, tls_key_file and tls_ca_cert_file")
+	}
 	if cfg.Server.TLSKeyFile != "" {
 		if _, err := os.Stat(cfg.Server.TLSKeyFile); os.IsNotExist(err) {
 			return fmt.Errorf("TLS key file not found: %s", cfg.Server.TLSKeyFile)

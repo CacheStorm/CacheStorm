@@ -29,7 +29,7 @@ redis-cli --cluster create \
 redis-cli --cluster check 10.0.0.1:7000
 ```
 
-Each node also listens on its cluster bus port: by default the client port plus 10000, so 17000 to 17005 here. Open those ports between the nodes, but not to clients. The bus is CacheStorm's own protocol, so CacheStorm nodes cannot join a Redis cluster and Redis nodes cannot join a CacheStorm cluster. The bus has no encryption or authentication, which is also true of Redis's bus without TLS. Keep it on a private network.
+Each node also listens on its cluster bus port: by default the client port plus 10000, so 17000 to 17005 here. Open those ports between the nodes, but not to clients. The bus is CacheStorm's own protocol, so CacheStorm nodes cannot join a Redis cluster and Redis nodes cannot join a CacheStorm cluster. Without TLS the bus has no encryption or authentication, which is also true of Redis's bus. Keep it on a private network, or set `cluster.tls: true` with `server.tls_cert_file`, `tls_key_file` and `tls_ca_cert_file`. The bus then uses mutual TLS, and nodes are verified against the CA. When the client port uses TLS, replicas and `MIGRATE` connect over TLS as well.
 
 When the masters use `requirepass`, set `replication.master_auth` to the same password so their replicas can authenticate.
 

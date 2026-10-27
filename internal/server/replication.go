@@ -307,9 +307,11 @@ func (s *Server) Replication() *replication.Manager {
 func (s *Server) newReplication(cfg *config.Config) error {
 	rc := cfg.Replication
 	var replTLS *tls.Config
-	if rc.TLS {
+	// In cluster mode a node's client port is the one replicas sync from, so
+	// when it speaks TLS the replicas dial it with TLS too.
+	if rc.TLS || (cfg.Cluster.Enabled && cfg.Server.TLSCertFile != "") {
 		var err error
-		if replTLS, err = replicaTLSConfig(&cfg.Server); err != nil {
+		if replTLS, err = peerTLSConfig(&cfg.Server); err != nil {
 			return fmt.Errorf("replication TLS: %w", err)
 		}
 	}

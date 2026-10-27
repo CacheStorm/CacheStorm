@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"crypto/subtle"
+	"crypto/tls"
 	"encoding/hex"
 	"errors"
 	"io"
@@ -32,6 +33,7 @@ type Router struct {
 	commands         map[string]*CommandDef
 	functionRegistry *FunctionRegistry
 	searchIndexes    *search.IndexManager
+	migrateTLS       *tls.Config
 	// duplicates records command names registered more than once. Register is
 	// last-write-wins, so a second registration silently replaced the first;
 	// six names were registered in two files at once and nothing said so.

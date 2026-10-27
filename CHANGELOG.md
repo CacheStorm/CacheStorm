@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Corrected the root Docker image healthcheck to use `/api/health`.
 
 ### Added
+- `cluster.tls` (tls-cluster): the cluster bus uses mutual TLS with the server certificate and CA, peers verified by chain as Redis does. In cluster mode with TLS on the client port, MIGRATE and replica links dial their targets over TLS too
 - Mutual TLS and replication over TLS: `server.tls_ca_cert_file` with `tls_auth_clients: yes|optional|no` (as tls-ca-cert-file/tls-auth-clients) checks client certificates, and `replication.tls` (tls-replication) makes a replica dial its master over TLS with its own certificate, verifying the master against the CA. A bad replication TLS setup stops startup instead of falling back to plaintext
 - PFDEBUG GETREG|ENCODING|TODENSE|DECODE and PFSELFTEST, matching Redis 7.4 byte for byte (GETREG and TODENSE convert a sparse HLL to dense and propagate as PFDEBUG TODENSE); with RESET and RESTORE-ASKING this completes the Redis 7.4 command table apart from FAILOVER and the hash field expiration commands
 - Cluster mode, phase 4 of `docs/cluster-design.md`: slot migration and redis-cli resharding. `redis-cli --cluster reshard`, `rebalance` (with `--cluster-use-empty-masters`), `add-node` (as a master, and with `--cluster-slave --cluster-master-id`), `del-node` and `fix` (Redis 7.4) work against CacheStorm while a go-redis ClusterClient keeps writing and reading, without losing a key.

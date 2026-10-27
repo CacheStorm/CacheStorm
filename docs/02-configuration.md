@@ -62,6 +62,7 @@ cluster:
   require_full_coverage: true   # down while any slot is unassigned
   allow_reads_when_down: false  # serve reads while the cluster is down
   replica_validity_factor: 10   # as cluster-replica-validity-factor; 0 = no data age limit
+  tls: false                    # tls-cluster: mutual TLS on the bus (needs server.tls_* and tls_ca_cert_file)
 
 # Replication Configuration (master-replica, Redis semantics)
 replication:
