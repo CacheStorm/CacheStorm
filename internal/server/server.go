@@ -62,7 +62,7 @@ var writeCommands = map[string]bool{
 	"BZPOPMIN": true, "BZPOPMAX": true,
 	"XADD": true, "XDEL": true, "XTRIM": true,
 	"XACK": true, "XCLAIM": true, "XAUTOCLAIM": true, "XGROUP": true, "XSETID": true,
-	"PFADD": true, "PFMERGE": true, "PFCOUNT": true,
+	"PFADD": true, "PFMERGE": true, "PFCOUNT": true, "PFDEBUG": true,
 	"SETBIT": true, "BITOP": true, "BITFIELD": true,
 	"GEOADD": true, "GEORADIUS": true, "GEORADIUSBYMEMBER": true, "GEOSEARCHSTORE": true,
 	"ADDTAG": true, "REMTAG": true, "TAGLINK": true, "TAGUNLINK": true,

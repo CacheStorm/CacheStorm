@@ -3,7 +3,7 @@
 CacheStorm registers about 1,200 commands across 50+ modules: the Redis 7.4 command set plus CacheStorm extensions. Compatibility with Redis is measured by the differential harness in `tests/compat`.
 
 Every command name in this reference is verified against the registered command
-set: 1,225 documented, 0 phantoms, 0 missing.
+set: 1,227 documented, 0 phantoms, 0 missing.
 
 Counts in the table below are the commands listed in each section; `SET` and `COMMAND` are also repeated
 under Tag-Based Invalidation and Command Help but counted only once, under Core Redis.
@@ -12,7 +12,7 @@ under Tag-Based Invalidation and Command Help but counted only once, under Core 
 
 | Category | Commands | Description |
 |----------|----------|-------------|
-| [Core Redis](#core-redis-commands) | 194 | Standard Redis commands |
+| [Core Redis](#core-redis-commands) | 196 | Standard Redis commands |
 | [JSON](#json-commands) | 13 | JSON document operations |
 | [Time Series](#time-series-commands) | 12 | Time-series data |
 | [Search](#search-commands) | 13 | Full-text search |
@@ -45,7 +45,7 @@ under Tag-Based Invalidation and Command Help but counted only once, under Core 
 | [Service Discovery](#service-discovery-commands) | 8 | Service registration and discovery |
 | [Profiles](#profile-commands) | 5 | User profile records |
 | [Extended families](#extended-command-families) | 510 | 59 unprefixed commands and 101 further families |
-| **Total registered** | **1,225** | |
+| **Total registered** | **1,227** | |
 
 ---
 
@@ -195,6 +195,8 @@ BITFIELD_RO key [GET type offset ...]
 PFADD key [element ...]
 PFCOUNT key [key ...]
 PFMERGE destkey [sourcekey ...]
+PFDEBUG GETREG|ENCODING|TODENSE|DECODE key
+PFSELFTEST
 ```
 
 ### Geo Commands
