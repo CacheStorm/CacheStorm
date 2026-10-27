@@ -131,7 +131,7 @@ M1–M4 tamamlandı; replikasyon çalışıyor. Sıradaki işler:
 1. SAVE/BGSAVE, periyodik snapshot ve başlangıçta yükleme bağlandı. Sırada native snapshot yakalama ile tam senkronun yazma duraklamasını ve ek bellek maliyetini ölçüp azaltmak var.
 2. Tamamlandı (25 Ekim 2026): expiry milisaniye olarak saklanıyor; 2262 sınırı kaldırıldı. AOF/RDB roundtrip ve Redis karşılaştırmasıyla doğrulandı.
 3. Tamamlandı (27 Ekim 2026): gerçek Redis Sentinel ile otomatik failover üç CacheStorm süreciyle doğrulandı ve CI'a alındı (`scripts/sentinel-smoke.sh`). Yerleşik sentinel rolü deneysel olarak işaretlendi; sunucuları yeniden yapılandırmıyor.
-4. RESP3 (HELLO 3, push mesajları, map/set/double tipleri).
+4. Tamamlandı (27 Ekim 2026): RESP3 (HELLO 3, push, map, double, null) ve gerçek CLIENT TRACKING (client-side caching). go-redis, redis-py (client-side cache dahil) ve ioredis CI'da.
 5. Pipeline'lı yazmalarda yazma kapısının maliyetini düşürmek (Redis'in %40–85'i).
 
 AOF snapshot değişimi (25 Ekim 2026): yazarı durdurup yeniden açma kaldırıldı; eşzamanlı append kilit altında sıralanıyor. Hazırlama, yazma, fsync, rename ve directory-sync hataları kalıcı regresyonlarla sınanıyor. Geri alma sonrası append, hard-link bulunmayan dosya sisteminde de doğru dosyaya gidiyor. Geri alma da başarısızsa önceki veri korunuyor, kurtarma yolu bildiriliyor ve writer hata döndürüyor. AOF hataları artık MISCONF/HTTP 503 olarak istemciye taşınıyor; sonraki AOF kapsamındaki yazmalar uygulama öncesi reddediliyor. INFO ve readiness hatayı gösteriyor. Açık: ilk hatalı işlemin bellek/disk belirsizliği, güç kesintisi kurtarması ve Windows çalışma zamanı doğrulaması.

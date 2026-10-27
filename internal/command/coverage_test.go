@@ -12387,13 +12387,6 @@ func TestClusterCommands2(t *testing.T) {
 	}
 }
 
-func TestGetClientTracking(t *testing.T) {
-	info := GetClientTracking(123)
-	if info == nil {
-		t.Error("GetClientTracking should return non-nil")
-	}
-}
-
 func TestSyncRWMutex(t *testing.T) {
 	var m syncRWMutex
 	m.Lock()

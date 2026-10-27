@@ -69,7 +69,7 @@ func TestMapValueRoundTrip(t *testing.T) {
 					}
 					v = v.Array[0]
 				}
-				if !reflect.DeepEqual(v, tt.want) {
+				if !reflect.DeepEqual(v, resp3Nulls(tt.want)) {
 					t.Fatalf("roundtrip mismatch: got %#v, want %#v", v, tt.want)
 				}
 				v, err = r.ReadValue()

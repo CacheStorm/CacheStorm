@@ -38,7 +38,7 @@ func writeSubAck(ctx *Context, kind string, name *string, count int) error {
 	if name != nil {
 		nameVal = resp.BulkString(*name)
 	}
-	return ctx.Writer.WriteValue(resp.ArrayValue([]*resp.Value{
+	return ctx.Writer.WriteValue(resp.PushValue([]*resp.Value{
 		resp.BulkString(kind),
 		nameVal,
 		resp.IntegerValue(int64(count)),

@@ -336,7 +336,9 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 			}
 		}
 
-		if c.subscribed() {
+		// RESP3 carries pub/sub messages out of band, so a subscribed RESP3
+		// client may run any command, as in Redis.
+		if c.subscribed() && !c.writer.IsRESP3() {
 			if handled := c.handleSubscribedMode(cmd, args); handled {
 				command.BumpConnectionCommand(c.ID)
 				return false
@@ -391,7 +393,9 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 			err = nil
 		} else {
 			release := c.srv.holdGate(ctx)
+			errsBefore := c.writer.Errors()
 			err = c.router.Execute(ctx)
+			c.srv.trackCommand(ctx, err != nil || c.writer.Errors() != errsBefore)
 			release()
 		}
 		if stopWatch != nil {
@@ -420,6 +424,9 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 		if ctx.Subscriber != nil && c.subscriber == nil {
 			c.subscriber = ctx.Subscriber
 			c.startDelivery(c.subscriber)
+			if c.srv != nil && c.srv.tracker != nil {
+				c.srv.tracker.register(c)
+			}
 		}
 		// Carry auth state back onto the connection: AUTH sets the flag on
 		// the Context, which is rebuilt from scratch for the next command.
@@ -511,7 +518,12 @@ func (c *Connection) recoverPanic() {
 }
 
 func (c *Connection) Close() {
-	// Stop reporting the connection: it is gone.
+	// Stop reporting the connection: it is gone. The tracker forgets it
+	// first, under its lock, so no invalidation reaches the subscriber
+	// released below.
+	if c.srv != nil && c.srv.tracker != nil {
+		c.srv.tracker.forget(c.ID)
+	}
 	command.UntrackConnection(c.ID)
 	// Release the connection's WATCH registrations.
 	if c.transaction != nil {
@@ -682,7 +694,7 @@ func (c *Connection) writePendingLocked(sub *store.Subscriber, first []byte) err
 	if err := c.writer.Flush(); err != nil {
 		return err
 	}
-	if _, err := c.pushBuf.Write(first); err != nil {
+	if err := c.writePushFrame(first); err != nil {
 		return err
 	}
 	sub.Delivered(first)
@@ -692,7 +704,7 @@ func (c *Connection) writePendingLocked(sub *store.Subscriber, first []byte) err
 			if !ok {
 				return c.pushBuf.Flush()
 			}
-			if _, err := c.pushBuf.Write(f); err != nil {
+			if err := c.writePushFrame(f); err != nil {
 				return err
 			}
 			sub.Delivered(f)
@@ -702,6 +714,20 @@ func (c *Connection) writePendingLocked(sub *store.Subscriber, first []byte) err
 		break
 	}
 	return c.pushBuf.Flush()
+}
+
+// writePushFrame writes one queued out-of-band frame. Frames are encoded once
+// as RESP2 arrays and shared between subscribers; a RESP3 client receives
+// them as push messages, which differ only in the type byte.
+func (c *Connection) writePushFrame(frame []byte) error {
+	if len(frame) > 0 && frame[0] == '*' && c.writer.IsRESP3() {
+		if err := c.pushBuf.WriteByte('>'); err != nil {
+			return err
+		}
+		frame = frame[1:]
+	}
+	_, err := c.pushBuf.Write(frame)
+	return err
 }
 
 // stopDelivery ends the delivery goroutine, if one was started, and waits for

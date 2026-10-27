@@ -31,3 +31,31 @@ func TestWriterDefaultsToRESP2(t *testing.T) {
 		t.Fatalf("RESP2 encoding %q, want %q", got, want)
 	}
 }
+
+func TestRESP3PushAndPairs(t *testing.T) {
+	push := PushValue([]*Value{BulkString("invalidate"), ArrayValue([]*Value{BulkString("k")})})
+	pairs := PairsValue([]*Value{BulkString("b"), IntegerValue(2), BulkString("a"), IntegerValue(1)})
+	for _, tc := range []struct {
+		resp3 bool
+		value *Value
+		want  string
+	}{
+		{false, push, "*2\r\n$10\r\ninvalidate\r\n*1\r\n$1\r\nk\r\n"},
+		{true, push, ">2\r\n$10\r\ninvalidate\r\n*1\r\n$1\r\nk\r\n"},
+		{false, pairs, "*4\r\n$1\r\nb\r\n:2\r\n$1\r\na\r\n:1\r\n"},
+		{true, pairs, "%2\r\n$1\r\nb\r\n:2\r\n$1\r\na\r\n:1\r\n"},
+		{true, NullBulkString(), "_\r\n"},
+		{false, NullBulkString(), "$-1\r\n"},
+		{true, NullArray(), "_\r\n"},
+	} {
+		var buf bytes.Buffer
+		w := NewWriter(&buf)
+		w.SetRESP3(tc.resp3)
+		if err := w.WriteValue(tc.value); err != nil {
+			t.Fatal(err)
+		}
+		if buf.String() != tc.want {
+			t.Errorf("resp3=%v: wrote %q, want %q", tc.resp3, buf.String(), tc.want)
+		}
+	}
+}

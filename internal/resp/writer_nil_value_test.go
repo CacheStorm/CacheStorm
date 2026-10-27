@@ -62,9 +62,9 @@ func TestWriterRejectsNilValueTrees(t *testing.T) {
 					t.Fatal(err)
 				}
 				r := NewReader(&output)
-				want := input
+				want := resp3Nulls(input)
 				if mode == "array" {
-					want = ArrayValue([]*Value{input})
+					want = ArrayValue([]*Value{want})
 				}
 				if got, err := r.ReadValue(); err != nil || !reflect.DeepEqual(got, want) {
 					t.Fatalf("valid control: value=%#v error=%v, want %#v", got, err, want)
@@ -106,4 +106,29 @@ func TestWriterNilRejectionPreservesBufferedReply(t *testing.T) {
 			}
 		})
 	}
+}
+
+// resp3Nulls is v as a RESP3 writer sends it: every null, whether a null
+// bulk string or a null array in RESP2 terms, is the RESP3 null.
+func resp3Nulls(v *Value) *Value {
+	if v == nil {
+		return nil
+	}
+	if v.IsNull {
+		return NullValue()
+	}
+	out := *v
+	if v.Array != nil {
+		out.Array = make([]*Value, len(v.Array))
+		for i, item := range v.Array {
+			out.Array[i] = resp3Nulls(item)
+		}
+	}
+	if v.Map != nil {
+		out.Map = make(map[string]*Value, len(v.Map))
+		for k, item := range v.Map {
+			out.Map[k] = resp3Nulls(item)
+		}
+	}
+	return &out
 }

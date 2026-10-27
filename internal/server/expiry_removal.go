@@ -16,6 +16,9 @@ func (s *Server) recordRemoval(st *store.Store, key string) {
 	if dbIndex < 0 {
 		return
 	}
+	if s.tracker != nil && s.tracker.active() {
+		s.tracker.invalidate(0, []string{key})
+	}
 	if s.repl != nil {
 		s.repl.MarkLocalWrite()
 	}

@@ -28,12 +28,17 @@ func RegisterHelloCommands(router *Router) {
 // go-redis then fall back to RESP2 and AUTH/SELECT, as they do against a
 // Redis that refuses RESP3.
 func cmdHELLO(ctx *Context) error {
+	proto := int64(2)
+	if ctx.Writer.IsRESP3() {
+		proto = 3
+	}
 	if ctx.ArgCount() > 0 {
-		proto, err := strconv.ParseInt(ctx.ArgString(0), 10, 64)
+		var err error
+		proto, err = strconv.ParseInt(ctx.ArgString(0), 10, 64)
 		if err != nil {
 			return ctx.WriteError(errors.New("ERR Protocol version is not an integer or out of range"))
 		}
-		if proto != 2 {
+		if proto != 2 && proto != 3 {
 			return ctx.WriteError(errNoProto)
 		}
 	}
@@ -72,15 +77,16 @@ func cmdHELLO(ctx *Context) error {
 		ctx.ClientName = name
 	}
 
-	return ctx.WriteArray([]*resp.Value{
+	ctx.Writer.SetRESP3(proto == 3)
+	return ctx.Writer.WriteValue(resp.PairsValue([]*resp.Value{
 		resp.BulkString("server"), resp.BulkString("redis"),
 		resp.BulkString("version"), resp.BulkString(helloVersion()),
-		resp.BulkString("proto"), resp.IntegerValue(2),
+		resp.BulkString("proto"), resp.IntegerValue(proto),
 		resp.BulkString("id"), resp.IntegerValue(ctx.ClientID),
 		resp.BulkString("mode"), resp.BulkString("standalone"),
 		resp.BulkString("role"), resp.BulkString(helloRole()),
 		resp.BulkString("modules"), resp.ArrayValue([]*resp.Value{}),
-	})
+	}))
 }
 
 // helloVersion is the Redis version CacheStorm is compatible with, which is

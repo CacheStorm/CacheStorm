@@ -530,6 +530,19 @@ parse:
 		}
 	}
 
+	// writeResults answers with one [key, entries] element per stream: an
+	// array of pairs in RESP2 and a map keyed by stream in RESP3, as Redis.
+	writeResults := func(results []*resp.Value) error {
+		if !ctx.Writer.IsRESP3() {
+			return ctx.WriteArray(results)
+		}
+		pairs := make([]*resp.Value, 0, 2*len(results))
+		for _, r := range results {
+			pairs = append(pairs, r.Array[0], r.Array[1])
+		}
+		return ctx.Writer.WriteValue(resp.PairsValue(pairs))
+	}
+
 	serve := func() ([]*resp.Value, error) {
 		results := make([]*resp.Value, 0, len(specs))
 		now := time.Now().UnixMilli()
@@ -568,7 +581,7 @@ parse:
 		return ctx.WriteError(err)
 	}
 	if len(results) > 0 {
-		return ctx.WriteArray(results)
+		return writeResults(results)
 	}
 	if timeout < 0 {
 		return ctx.WriteNullArray()
@@ -646,7 +659,7 @@ parse:
 			return ctx.WriteError(err)
 		}
 		if len(results) > 0 {
-			return ctx.WriteArray(results)
+			return writeResults(results)
 		}
 	}
 }

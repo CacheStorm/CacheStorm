@@ -336,6 +336,21 @@ func sortEntries(entries []store.SortedEntry) {
 	})
 }
 
+// zScoreValue is a score reply: a RESP3 double, or its text in RESP2.
+func zScoreValue(score float64) *resp.Value {
+	return resp.DoubleValue(formatZScore(score))
+}
+
+// zEntriesValue renders members, optionally with scores: a flat
+// member, score, ... array in RESP2 and [member, score] pairs in RESP3, as
+// Redis does.
+func zEntriesValue(ctx *Context, entries []store.SortedEntry, withScores bool) *resp.Value {
+	if withScores && ctx.Writer.IsRESP3() {
+		return resp.ArrayValue(zPairsReply(entries))
+	}
+	return resp.ArrayValue(zEntriesReply(entries, withScores))
+}
+
 // zEntriesReply renders members, optionally each followed by its score.
 func zEntriesReply(entries []store.SortedEntry, withScores bool) []*resp.Value {
 	n := len(entries)
@@ -346,7 +361,7 @@ func zEntriesReply(entries []store.SortedEntry, withScores bool) []*resp.Value {
 	for _, e := range entries {
 		out = append(out, resp.BulkString(e.Member))
 		if withScores {
-			out = append(out, resp.BulkString(formatZScore(e.Score)))
+			out = append(out, zScoreValue(e.Score))
 		}
 	}
 	return out
@@ -358,7 +373,7 @@ func zPairsReply(entries []store.SortedEntry) []*resp.Value {
 	for _, e := range entries {
 		out = append(out, resp.ArrayValue([]*resp.Value{
 			resp.BulkString(e.Member),
-			resp.BulkString(formatZScore(e.Score)),
+			zScoreValue(e.Score),
 		}))
 	}
 	return out
@@ -496,7 +511,7 @@ flags:
 		if processed == 0 {
 			return ctx.WriteNullBulkString()
 		}
-		return ctx.WriteBulkString(formatZScore(lastScore))
+		return ctx.Writer.WriteValue(zScoreValue(lastScore))
 	}
 	if ch {
 		return ctx.WriteInteger(int64(added + updated))
@@ -585,7 +600,7 @@ func cmdZINCRBY(ctx *Context) error {
 	zset.Unlock()
 
 	ctx.Store.KeyNotifier().NotifyKey(key)
-	return ctx.WriteBulkString(formatZScore(newScore))
+	return ctx.Writer.WriteValue(zScoreValue(newScore))
 }
 
 const (
@@ -722,7 +737,7 @@ func zrangeGeneric(ctx *Context, storeResult bool, rangeType, dir int) error {
 		}
 		return ctx.WriteInteger(int64(len(entries)))
 	}
-	return ctx.WriteArray(zEntriesReply(entries, withScores))
+	return ctx.Writer.WriteValue(zEntriesValue(ctx, entries, withScores))
 }
 
 func clampInt(v int64) int {
@@ -810,7 +825,7 @@ func zrankGeneric(ctx *Context, reverse bool) error {
 	if withScore {
 		return ctx.WriteArray([]*resp.Value{
 			resp.IntegerValue(int64(rank)),
-			resp.BulkString(formatZScore(score)),
+			zScoreValue(score),
 		})
 	}
 	return ctx.WriteInteger(int64(rank))
@@ -954,7 +969,7 @@ func cmdZSCORE(ctx *Context) error {
 	if !exists {
 		return ctx.WriteNull()
 	}
-	return ctx.WriteBulkString(formatZScore(score))
+	return ctx.Writer.WriteValue(zScoreValue(score))
 }
 
 func cmdZMSCORE(ctx *Context) error {
@@ -977,7 +992,7 @@ func cmdZMSCORE(ctx *Context) error {
 			continue
 		}
 		if score, exists := zset.Members[ctx.ArgString(i)]; exists {
-			result = append(result, resp.BulkString(formatZScore(score)))
+			result = append(result, zScoreValue(score))
 		} else {
 			result = append(result, resp.NullValue())
 		}
@@ -1144,7 +1159,13 @@ func zpopMinMax(ctx *Context, max bool) error {
 	if zset == nil || count == 0 {
 		return ctx.WriteArray([]*resp.Value{})
 	}
-	return ctx.WriteArray(zEntriesReply(zpopFrom(ctx, key, count, max), true))
+	popped := zpopFrom(ctx, key, count, max)
+	// RESP3 pairs each member with its score, except when no count was
+	// given: then the single member and score come flat, as in Redis.
+	if n == 1 {
+		return ctx.WriteArray(zEntriesReply(popped, true))
+	}
+	return ctx.Writer.WriteValue(zEntriesValue(ctx, popped, true))
 }
 
 func cmdZPOPMIN(ctx *Context) error {
@@ -1225,7 +1246,7 @@ func cmdZRANDMEMBER(ctx *Context) error {
 	for i, idx := range picked {
 		out[i] = entries[idx]
 	}
-	return ctx.WriteArray(zEntriesReply(out, withScores))
+	return ctx.Writer.WriteValue(zEntriesValue(ctx, out, withScores))
 }
 
 // maxRandRepeats bounds the reply of a negative random-member count.
@@ -1463,7 +1484,7 @@ func zsetOpGeneric(ctx *Context, op int, hasDst, cardOnly bool) error {
 		return ctx.WriteInteger(int64(len(entries)))
 	}
 	sortEntries(entries)
-	return ctx.WriteArray(zEntriesReply(entries, withScores))
+	return ctx.Writer.WriteValue(zEntriesValue(ctx, entries, withScores))
 }
 
 func cmdZUNIONSTORE(ctx *Context) error {
@@ -1599,7 +1620,7 @@ func cmdBZPOPGeneric(ctx *Context, max bool) error {
 		reply = []*resp.Value{
 			resp.BulkString(key),
 			resp.BulkString(popped[0].Member),
-			resp.BulkString(formatZScore(popped[0].Score)),
+			zScoreValue(popped[0].Score),
 		}
 		return true
 	}
@@ -1612,7 +1633,7 @@ func cmdBZPOPGeneric(ctx *Context, max bool) error {
 		return ctx.WriteArray([]*resp.Value{
 			resp.BulkString(key),
 			resp.BulkString(popped[0].Member),
-			resp.BulkString(formatZScore(popped[0].Score)),
+			zScoreValue(popped[0].Score),
 		})
 	}
 	if !bzpopWait(ctx, keys, timeout, pop) {

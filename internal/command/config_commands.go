@@ -196,7 +196,7 @@ func cmdConfigGet(ctx *Context) error {
 			}
 		}
 	}
-	return ctx.WriteArray(results)
+	return ctx.Writer.WriteValue(resp.PairsValue(results))
 }
 
 func boolStr(b bool) string {

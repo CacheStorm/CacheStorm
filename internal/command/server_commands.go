@@ -922,30 +922,6 @@ func cmdMEMINFO(ctx *Context) error {
 	return ctx.WriteBulkString(sb.String())
 }
 
-type ClientTrackingInfo struct {
-	mu       sync.RWMutex
-	enabled  bool
-	redirect int64
-	prefixes []string
-	noLoop   bool
-}
-
-var globalClientTracking = struct {
-	mu      sync.RWMutex
-	clients map[int64]*ClientTrackingInfo
-}{
-	clients: make(map[int64]*ClientTrackingInfo),
-}
-
-func GetClientTracking(clientID int64) *ClientTrackingInfo {
-	globalClientTracking.mu.Lock()
-	defer globalClientTracking.mu.Unlock()
-	if _, ok := globalClientTracking.clients[clientID]; !ok {
-		globalClientTracking.clients[clientID] = &ClientTrackingInfo{}
-	}
-	return globalClientTracking.clients[clientID]
-}
-
 func cmdCLIENT(ctx *Context) error {
 	if ctx.ArgCount() < 1 {
 		return ctx.WriteError(ErrWrongArgCount)
@@ -1015,71 +991,34 @@ func cmdCLIENT(ctx *Context) error {
 		return ctx.WriteOK()
 	case "TRACKING":
 		return cmdClientTracking(ctx)
-	case "CACHING":
+	case "SETINFO":
+		if ctx.ArgCount() != 3 {
+			return ctx.WriteError(arityError("client|setinfo"))
+		}
+		attr, value := strings.ToUpper(ctx.ArgString(1)), ctx.ArgString(2)
+		if attr != "LIB-NAME" && attr != "LIB-VER" {
+			return ctx.WriteError(errors.New("ERR Unrecognized option '" + ctx.ArgString(1) + "'"))
+		}
+		if strings.ContainsAny(value, " \r\n") {
+			return ctx.WriteError(errors.New("ERR " + strings.ToLower(attr) + " cannot contain spaces, newlines or special characters."))
+		}
 		return ctx.WriteOK()
+	case "CACHING":
+		return cmdClientCaching(ctx)
+	case "TRACKINGINFO":
+		return cmdClientTrackingInfo(ctx)
 	case "NO-TOUCH":
 		return ctx.WriteOK()
 	case "INFO":
 		return ctx.WriteBulkString("id=" + strconv.FormatInt(ctx.ClientID, 10))
 	case "GETREDIR":
-		tracking := GetClientTracking(ctx.ClientID)
-		tracking.mu.RLock()
-		defer tracking.mu.RUnlock()
-		return ctx.WriteInteger(tracking.redirect)
+		if h := trackingHooksFor(ctx); h != nil {
+			return ctx.WriteInteger(h.Redirect(ctx.ClientID))
+		}
+		return ctx.WriteInteger(-1)
 	default:
 		return ctx.WriteError(errors.New("ERR unknown subcommand '" + subCmd + "'"))
 	}
-}
-
-func cmdClientTracking(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	onOff := strings.ToUpper(ctx.ArgString(1))
-	tracking := GetClientTracking(ctx.ClientID)
-	tracking.mu.Lock()
-	defer tracking.mu.Unlock()
-
-	switch onOff {
-	case "ON":
-		// Invalidation messages are not implemented yet. Accepting ON would
-		// let a client cache values it is never told have changed.
-		return ctx.WriteError(errors.New("ERR client tracking is not supported by this server"))
-	case "OFF":
-		tracking.enabled = false
-	default:
-		return ctx.WriteError(errors.New("ERR syntax error"))
-	}
-
-	for i := 2; i < ctx.ArgCount(); i++ {
-		arg := strings.ToUpper(ctx.ArgString(i))
-		switch arg {
-		case "REDIRECT":
-			if i+1 >= ctx.ArgCount() {
-				return ctx.WriteError(ErrSyntaxError)
-			}
-			redirectID, err := strconv.ParseInt(ctx.ArgString(i+1), 10, 64)
-			if err != nil {
-				return ctx.WriteError(ErrNotInteger)
-			}
-			tracking.redirect = redirectID
-			i++
-		case "BCAST":
-		case "PREFIX":
-			if i+1 >= ctx.ArgCount() {
-				return ctx.WriteError(ErrSyntaxError)
-			}
-			tracking.prefixes = append(tracking.prefixes, ctx.ArgString(i+1))
-			i++
-		case "OPTIN":
-		case "OPTOUT":
-		case "NOLOOP":
-			tracking.noLoop = true
-		}
-	}
-
-	return ctx.WriteOK()
 }
 
 func cmdSORT(ctx *Context) error {

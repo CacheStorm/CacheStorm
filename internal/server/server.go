@@ -157,6 +157,8 @@ type Server struct {
 	startedAt     time.Time
 	rates         rateSampler
 	rejectedConns atomic.Int64
+	// tracker implements CLIENT TRACKING.
+	tracker *tracker
 }
 
 func New(cfg *config.Config) (result *Server, retErr error) {
@@ -428,6 +430,8 @@ func New(cfg *config.Config) (result *Server, retErr error) {
 	s.runID = newRunID()
 	s.startedAt = time.Now()
 	s.router.SetServerStatus(s.serverStatus)
+	s.tracker = newTracker()
+	s.router.SetTrackingHooks(s.tracker.hooks(s))
 
 	// Every write the router executes goes to the AOF, when it is enabled,
 	// and to the replication stream.
@@ -440,6 +444,7 @@ func New(cfg *config.Config) (result *Server, retErr error) {
 		if !persistedCommand(upperCmd, args) {
 			return nil
 		}
+		s.invalidateTracked(ctx.ClientID, upperCmd, args)
 		if !ctx.FromMaster && upperCmd != "PFCOUNT" {
 			s.repl.MarkLocalWrite()
 		}
@@ -461,6 +466,7 @@ func New(cfg *config.Config) (result *Server, retErr error) {
 				upperCmd := strings.ToUpper(c.Name)
 				if persistedCommand(upperCmd, c.Args) {
 					writes = append(writes, command.ExecutedCommand{Name: upperCmd, Args: c.Args, DB: c.DB})
+					s.invalidateTracked(ctx.ClientID, upperCmd, c.Args)
 				}
 			}
 			if len(writes) == 0 {

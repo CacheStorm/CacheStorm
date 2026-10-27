@@ -12,6 +12,12 @@ const (
 	TypeArray        Type = '*'
 	TypeMap          Type = '%'
 	TypeNull         Type = '_'
+	// TypePush is a RESP3 out-of-band message (pub/sub, invalidation). A
+	// RESP2 writer encodes it as an array.
+	TypePush Type = '>'
+	// TypeDouble is a RESP3 double; Str holds its text. A RESP2 writer
+	// encodes it as a bulk string with the same text.
+	TypeDouble Type = ','
 )
 
 type Value struct {
@@ -69,6 +75,23 @@ func ArrayValue(items []*Value) *Value {
 
 func MapValue(m map[string]*Value) *Value {
 	return &Value{Type: TypeMap, Map: m}
+}
+
+// PairsValue is a map reply that keeps its order: pairs holds key, value,
+// key, value, ... A RESP3 writer encodes it as a map and a RESP2 writer as
+// the flat array Redis sends.
+func PairsValue(pairs []*Value) *Value {
+	return &Value{Type: TypeMap, Array: pairs}
+}
+
+// DoubleValue is a RESP3 double whose text is s, as Redis formats it.
+func DoubleValue(s string) *Value {
+	return &Value{Type: TypeDouble, Str: s}
+}
+
+// PushValue is a RESP3 push message.
+func PushValue(items []*Value) *Value {
+	return &Value{Type: TypePush, Array: items}
 }
 
 func OK() *Value {

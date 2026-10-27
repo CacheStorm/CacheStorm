@@ -15,7 +15,6 @@ import (
 // Type-first filter over the globals declared in the two files:
 //
 //	globalACL               *acl.ACL        — all access via methods
-//	globalClientTracking     struct{mu; map} — every access under its own mu  CLEAN
 //	globalSlowLog            *SlowLog        — all access via methods
 //	lastSaveTime             int64           *** BARE, UNLOCKED ACCESS ***
 //	globalConfig             *Config         — has mu; see below

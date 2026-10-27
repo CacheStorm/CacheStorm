@@ -310,6 +310,9 @@ func execQueued(ctx *Context, qc queuedCommand) (*resp.Value, *Context) {
 	sub.Command = qc.cmd
 	sub.Args = qc.args
 	sub.Writer = resp.NewWriter(&output)
+	// EXEC replies in the client's protocol; scripts see RESP2 replies, as
+	// in Redis without redis.setresp(3).
+	sub.Writer.SetRESP3(ctx.Command == "EXEC" && ctx.Writer.IsRESP3())
 	sub.InExec = true
 	sub.StartTime = time.Now()
 	sub.propagate = nil

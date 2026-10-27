@@ -49,7 +49,7 @@ func (r *Reader) readMap() (*Value, error) {
 
 func (w *Writer) writeMapNoFlush(values map[string]*Value) error {
 	header, n := TypeMap, len(values)
-	if !w.resp3 {
+	if !w.resp3.Load() {
 		header, n = TypeArray, 2*len(values)
 	}
 	if err := w.wr.WriteByte(byte(header)); err != nil {
@@ -69,6 +69,28 @@ func (w *Writer) writeMapNoFlush(values map[string]*Value) error {
 			return err
 		}
 		if err := w.WriteValueNoFlush(value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// writePairsNoFlush writes an ordered map held as key, value, ... pairs.
+func (w *Writer) writePairsNoFlush(pairs []*Value) error {
+	if len(pairs)%2 != 0 {
+		return ErrInvalidType
+	}
+	header, n := TypeMap, len(pairs)/2
+	if !w.resp3.Load() {
+		header, n = TypeArray, len(pairs)
+	}
+	w.wr.WriteByte(byte(header))
+	w.wr.WriteString(strconv.Itoa(n))
+	if _, err := w.wr.WriteString("\r\n"); err != nil {
+		return err
+	}
+	for _, v := range pairs {
+		if err := w.WriteValueNoFlush(v); err != nil {
 			return err
 		}
 	}

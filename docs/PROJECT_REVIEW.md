@@ -28,7 +28,7 @@
 
 Uyumluluk ölçümü 307 vakada 138 eşleşmeden 346 vakada 345 eşleşmeye çıktı. Expiry artık milisaniye olarak saklanıyor; 2262 sınırı kaldırıldı ve AOF/RDB roundtrip testleriyle doğrulandı. go-redis v9, redis-py 5 ve ioredis 5 parola korumalı sunucuya karşı CI'da çalışıyor. Ölçülen performans [BENCHMARKS.md](BENCHMARKS.md) içinde.
 
-Bilinen sınırlar: RESP3 desteklenmiyor (HELLO 3 `NOPROTO` döner); cluster modu yok; tam senkron fork'suz anlık görüntü alırken yazmaları duraklatır; bellek muhasebesi Go heap'i değil eleman tahminlerini sayar; otomatik failover gerçek süreçlerle doğrulanmadı; TypeScript ve Python paketleri yayımlanmadı.
+Bilinen sınırlar: cluster modu yok; tam senkron fork'suz anlık görüntü alırken yazmaları duraklatır; bellek muhasebesi Go heap'i değil eleman tahminlerini sayar; otomatik failover gerçek süreçlerle doğrulanmadı; TypeScript ve Python paketleri yayımlanmadı.
 
 ## Kapsam ve yöntem
 

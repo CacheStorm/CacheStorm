@@ -48,7 +48,7 @@ A high-performance in-memory data store written in Go. **about 1,600 commands**,
 ## Features
 
 ### Core Redis Compatibility
-- **Full Redis Protocol**: RESP3 protocol support, works with any Redis client
+- **Redis protocol**: RESP2 and RESP3 (HELLO 3, push messages, client-side caching with CLIENT TRACKING); works with standard Redis clients
 - **289 Core Commands**: Complete Redis command set for strings, hashes, lists, sets, sorted sets, etc.
 - **9 Core Data Types**: String, Hash, List, Set, SortedSet, Stream, Geo, Bitmap, HyperLogLog
 

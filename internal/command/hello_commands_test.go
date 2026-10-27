@@ -28,8 +28,11 @@ func TestHELLO(t *testing.T) {
 	s := store.NewStore()
 
 	ctx := NewContext("", nil, s, nil)
-	if got := helloRun(r, ctx, "HELLO", "3"); !strings.HasPrefix(got, "-NOPROTO") {
+	if got := helloRun(r, ctx, "HELLO", "3"); !strings.HasPrefix(got, "%7\r\n") || !strings.Contains(got, "$5\r\nproto\r\n:3\r\n") {
 		t.Fatalf("HELLO 3: %q", got)
+	}
+	if got := helloRun(r, ctx, "HELLO", "4"); !strings.HasPrefix(got, "-NOPROTO") {
+		t.Fatalf("HELLO 4: %q", got)
 	}
 	got := helloRun(r, ctx, "HELLO", "2", "SETNAME", "worker-1")
 	for _, want := range []string{"$6\r\nserver\r\n", "$5\r\nproto\r\n:2\r\n", "$4\r\nmode\r\n$10\r\nstandalone\r\n"} {

@@ -117,7 +117,9 @@ func TestAOFRewritesAutomaticallyAfterGrowth(t *testing.T) {
 		c.do("SET", "same", value)
 	}
 	waitAOFRewrites(t, s, 1)
-	if size := s.aof.Size(); size > 4<<10 {
+	// 100 SETs of 512 bytes are about 54 KB of log; the rewrite may run
+	// while the loop still appends, so only the compaction is checked.
+	if size := s.aof.Size(); size > 32<<10 {
 		t.Fatalf("AOF after automatic rewrite is %d bytes", size)
 	}
 	stopReplServer(s)

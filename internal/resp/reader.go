@@ -63,6 +63,19 @@ func (r *Reader) ReadValue() (*Value, error) {
 		return r.readBulkString()
 	case TypeArray:
 		return r.readArray()
+	case TypeDouble:
+		line, err := r.readLine()
+		if err != nil {
+			return nil, err
+		}
+		return DoubleValue(string(line)), nil
+	case TypePush:
+		v, err := r.readArray()
+		if err != nil || v.IsNull {
+			return nil, ErrInvalidFormat
+		}
+		v.Type = TypePush
+		return v, nil
 	case TypeMap:
 		return r.readMap()
 	case TypeNull:

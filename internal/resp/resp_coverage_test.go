@@ -536,8 +536,8 @@ func TestRoundTripAllTypes(t *testing.T) {
 			if err != nil {
 				t.Fatalf("read error: %v", err)
 			}
-			if v.Type != tt.value.Type {
-				t.Errorf("type mismatch: expected %v, got %v", tt.value.Type, v.Type)
+			if want := resp3Nulls(tt.value); v.Type != want.Type {
+				t.Errorf("type mismatch: expected %v, got %v", want.Type, v.Type)
 			}
 		})
 	}

@@ -1,5 +1,5 @@
-// Command goredis exercises CacheStorm with go-redis v9: HELLO fallback,
-// AUTH, SELECT, pipelines, MULTI, Pub/Sub, EVAL, BLPOP and SSCAN.
+// Command goredis exercises CacheStorm with go-redis v9 over RESP2 and RESP3:
+// HELLO, AUTH, SELECT, pipelines, MULTI, Pub/Sub, EVAL, BLPOP and SSCAN.
 package main
 
 import (
@@ -12,9 +12,16 @@ import (
 )
 
 func main() {
+	for _, proto := range []int{2, 3} {
+		check(proto)
+	}
+}
+
+func check(proto int) {
 	ctx := context.Background()
-	rdb := redis.NewClient(&redis.Options{Addr: os.Getenv("CACHESTORM_ADDR"), Password: os.Getenv("CACHESTORM_PASSWORD"), DB: 2})
-	fail := func(step string, err error) { fmt.Println("FAIL", step, err); os.Exit(1) }
+	rdb := redis.NewClient(&redis.Options{Addr: os.Getenv("CACHESTORM_ADDR"), Password: os.Getenv("CACHESTORM_PASSWORD"), DB: 2, Protocol: proto})
+	defer rdb.Close()
+	fail := func(step string, err error) { fmt.Println("FAIL", "protocol", proto, step, err); os.Exit(1) }
 	if err := rdb.Set(ctx, "k", "v", time.Minute).Err(); err != nil {
 		fail("set", err)
 	}
@@ -27,9 +34,12 @@ func main() {
 	pipe := rdb.Pipeline()
 	pipe.Incr(ctx, "n")
 	pipe.HSet(ctx, "h", "a", 1, "b", 2)
-	pipe.HGetAll(ctx, "h")
+	all := pipe.HGetAll(ctx, "h")
 	if _, err := pipe.Exec(ctx); err != nil {
 		fail("pipeline", err)
+	}
+	if m := all.Val(); m["a"] != "1" || m["b"] != "2" {
+		fail("hgetall", fmt.Errorf("%v", m))
 	}
 	if _, err := rdb.TxPipelined(ctx, func(p redis.Pipeliner) error { p.LPush(ctx, "l", "x"); p.LLen(ctx, "l"); return nil }); err != nil {
 		fail("multi", err)
@@ -68,5 +78,6 @@ func main() {
 	if n != 100 {
 		fail("sscan count", fmt.Errorf("%d", n))
 	}
-	fmt.Println("go-redis v9: all checks passed")
+	rdb.Del(ctx, "s", "l", "q", "n", "h")
+	fmt.Printf("go-redis v9 protocol=%d: all checks passed\n", proto)
 }

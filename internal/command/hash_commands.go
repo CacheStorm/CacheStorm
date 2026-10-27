@@ -170,7 +170,7 @@ func cmdHGETALL(ctx *Context) error {
 		return ctx.WriteError(err)
 	}
 	if hash == nil {
-		return ctx.WriteArray([]*resp.Value{})
+		return ctx.Writer.WriteValue(resp.PairsValue([]*resp.Value{}))
 	}
 
 	hash.RLock()
@@ -181,7 +181,7 @@ func cmdHGETALL(ctx *Context) error {
 
 	reply := results
 	hash.RUnlock()
-	return ctx.WriteArray(reply)
+	return ctx.Writer.WriteValue(resp.PairsValue(reply))
 }
 
 func cmdHDEL(ctx *Context) error {
