@@ -99,10 +99,13 @@ func cmdDebugObject(ctx *Context) error {
 // Redis 7.4's default thresholds for its compact encodings.
 const (
 	encMaxListpackEntries = 128
-	encMaxListpackValue   = 64
-	encMaxIntsetEntries   = 512
-	encMaxListpackBytes   = 8192
-	encMaxEmbstrLen       = 44
+	// hash-max-listpack-entries is 512 in Redis 7.4, unlike the set and
+	// zset limits.
+	encMaxHashListpackEntries = 512
+	encMaxListpackValue       = 64
+	encMaxIntsetEntries       = 512
+	encMaxListpackBytes       = 8192
+	encMaxEmbstrLen           = 44
 )
 
 // getEncoding reports the encoding Redis would use for v under its default
@@ -123,7 +126,7 @@ func getEncoding(v store.Value) string {
 	case *store.HashValue:
 		val.RLock()
 		defer val.RUnlock()
-		if len(val.Fields) > encMaxListpackEntries {
+		if len(val.Fields) > encMaxHashListpackEntries {
 			return "hashtable"
 		}
 		for f, x := range val.Fields {
