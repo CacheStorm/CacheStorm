@@ -211,6 +211,19 @@ func aclKeysForCommand(cmd string, args [][]byte) []string {
 		return keysAfterNumkeys(args, 0)
 	case "SINTER", "SDIFF", "SUNION", "SDIFFSTORE", "SINTERSTORE", "SUNIONSTORE":
 		return toStrings(args)
+	case "MIGRATE":
+		// MIGRATE host port key|"" db timeout ... [KEYS key ...]
+		var keys []string
+		if len(args) > 2 && len(args[2]) > 0 {
+			keys = append(keys, string(args[2]))
+		}
+		for i := 5; i < len(args); i++ {
+			if strings.EqualFold(string(args[i]), "KEYS") {
+				keys = append(keys, toStrings(args[i+1:])...)
+				break
+			}
+		}
+		return keys
 	case "GEOSEARCHSTORE":
 		// GEOSEARCHSTORE destination source <FROMMEMBER m | FROMLONLAT lon lat>
 		// ... — BOTH keys must be checked. There was no entry for this command,

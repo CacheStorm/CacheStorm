@@ -57,7 +57,7 @@ func TestMigrateNeverReportsSuccessWithoutMigrating(t *testing.T) {
 	s := store.NewStore()
 	migrateRun(t, s, "SET", "k", "v")
 
-	got := migrateRun(t, s, "MIGRATE", "127.0.0.1", "6379", "k", "0", "1000")
+	got := migrateRun(t, s, "MIGRATE", "127.0.0.1", "1", "k", "0", "1000")
 
 	if got.Type == resp.TypeSimpleString && got.Str == "OK" {
 		if migrateExists(t, s, "k") == 1 {
@@ -76,7 +76,7 @@ func TestMigrateRefusalLeavesKeyIntact(t *testing.T) {
 	s := store.NewStore()
 	migrateRun(t, s, "SET", "k", "v")
 
-	migrateRun(t, s, "MIGRATE", "127.0.0.1", "6379", "k", "0", "1000")
+	migrateRun(t, s, "MIGRATE", "127.0.0.1", "1", "k", "0", "1000")
 
 	if n := migrateExists(t, s, "k"); n != 1 {
 		t.Fatalf("EXISTS = %d, want 1: a MIGRATE that transfers nothing must not drop the key", n)
@@ -92,7 +92,7 @@ func TestMigrateCopyOptionStillRefuses(t *testing.T) {
 	s := store.NewStore()
 	migrateRun(t, s, "SET", "k", "v")
 
-	got := migrateRun(t, s, "MIGRATE", "127.0.0.1", "6379", "k", "0", "1000", "COPY")
+	got := migrateRun(t, s, "MIGRATE", "127.0.0.1", "1", "k", "0", "1000", "COPY")
 	if got.Type == resp.TypeSimpleString && got.Str == "OK" {
 		t.Fatalf("MIGRATE ... COPY replied +%s, want an error", got.Str)
 	}
@@ -106,9 +106,9 @@ func TestMigrateCopyOptionStillRefuses(t *testing.T) {
 func TestMigrateMissingKeyReturnsNokeyControl(t *testing.T) {
 	s := store.NewStore()
 
-	got := migrateRun(t, s, "MIGRATE", "127.0.0.1", "6379", "absent", "0", "1000")
-	if got.Type != resp.TypeBulkString || string(got.Bulk) != "NOKEY" {
-		t.Fatalf("control: MIGRATE on a missing key returned type %v %q, want bulk \"NOKEY\"", got.Type, got.Bulk)
+	got := migrateRun(t, s, "MIGRATE", "127.0.0.1", "1", "absent", "0", "1000")
+	if got.Type != resp.TypeSimpleString || got.Str != "NOKEY" {
+		t.Fatalf("control: MIGRATE on a missing key returned type %v %q, want +NOKEY", got.Type, got.Str)
 	}
 }
 
@@ -116,7 +116,7 @@ func TestMigrateMissingKeyReturnsNokeyControl(t *testing.T) {
 func TestMigrateWrongArgCountControl(t *testing.T) {
 	s := store.NewStore()
 
-	if v := migrateRun(t, s, "MIGRATE", "127.0.0.1", "6379"); v.Type != resp.TypeError {
+	if v := migrateRun(t, s, "MIGRATE", "127.0.0.1", "1"); v.Type != resp.TypeError {
 		t.Fatalf("control: MIGRATE with 2 args returned type %v, want an error", v.Type)
 	}
 	if v := migrateRun(t, s, "MIGRATE"); v.Type != resp.TypeError {
@@ -130,7 +130,7 @@ func TestMigrateBadTimeoutControl(t *testing.T) {
 	s := store.NewStore()
 	migrateRun(t, s, "SET", "k", "v")
 
-	if v := migrateRun(t, s, "MIGRATE", "127.0.0.1", "6379", "k", "0", "TIMEOUT", "abc"); v.Type != resp.TypeError {
+	if v := migrateRun(t, s, "MIGRATE", "127.0.0.1", "1", "k", "0", "TIMEOUT", "abc"); v.Type != resp.TypeError {
 		t.Fatalf("control: MIGRATE ... TIMEOUT abc returned type %v, want an error", v.Type)
 	}
 }

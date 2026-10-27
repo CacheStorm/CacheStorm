@@ -193,3 +193,70 @@ func TestLegacySYNCStreamsSnapshotAndWrites(t *testing.T) {
 	}
 	t.Fatal("the write after SYNC was not streamed")
 }
+
+func TestMIGRATEMovesKeys(t *testing.T) {
+	dir := t.TempDir()
+	srcCfg := replTestConfig(t, func(c *config.Config) {
+		c.Persistence.Enabled = true
+		c.Persistence.AOF = true
+		c.Persistence.AOFSync = "always"
+		c.Persistence.DataDir = dir
+		c.Persistence.SnapshotInterval = "0"
+	})
+	src := startReplServerCfg(t, srcCfg)
+	dst := startReplServer(t, func(c *config.Config) { c.Server.RequirePass = "pw" })
+	sc := dialRepl(t, src)
+	dc := dialRepl(t, dst)
+	dc.do("AUTH", "pw")
+	port := strconv.Itoa(dst.testPort())
+
+	sc.do("SET", "s", "v", "EX", "1000")
+	sc.do("HSET", "h", "f", "1")
+	if got := sc.do("MIGRATE", "127.0.0.1", port, "s", "2", "5000", "AUTH", "pw"); got.Str != "OK" {
+		t.Fatalf("MIGRATE = %+v", got)
+	}
+	if got := sc.do("EXISTS", "s"); got.Int != 0 {
+		t.Fatal("MIGRATE without COPY left the source key")
+	}
+	dc.do("SELECT", "2")
+	if got := dc.str("GET", "s"); got != "v" {
+		t.Fatalf("migrated value = %q", got)
+	}
+	if ttl := dc.do("TTL", "s").Int; ttl < 990 || ttl > 1000 {
+		t.Fatalf("migrated TTL = %d", ttl)
+	}
+
+	if got := sc.do("MIGRATE", "127.0.0.1", port, "h", "2", "5000", "COPY", "AUTH", "pw"); got.Str != "OK" {
+		t.Fatalf("MIGRATE COPY = %+v", got)
+	}
+	if got := sc.do("EXISTS", "h"); got.Int != 1 {
+		t.Fatal("MIGRATE COPY removed the source key")
+	}
+	if got := sc.do("MIGRATE", "127.0.0.1", port, "h", "2", "5000", "AUTH", "pw"); got.Type != resp.TypeError || !strings.Contains(got.Err, "BUSYKEY") {
+		t.Fatalf("MIGRATE onto an existing key without REPLACE = %+v", got)
+	}
+	if got := sc.do("EXISTS", "h"); got.Int != 1 {
+		t.Fatal("a refused MIGRATE removed the source key")
+	}
+	sc.do("SET", "a", "1")
+	sc.do("SET", "b", "2")
+	if got := sc.do("MIGRATE", "127.0.0.1", port, "", "2", "5000", "REPLACE", "AUTH", "pw", "KEYS", "a", "b", "h", "missing"); got.Str != "OK" {
+		t.Fatalf("MIGRATE KEYS REPLACE = %+v", got)
+	}
+	if got := dc.do("MGET", "a", "b"); string(got.Array[0].Bulk) != "1" || string(got.Array[1].Bulk) != "2" {
+		t.Fatalf("keys migrated with KEYS = %+v", got)
+	}
+	if got := sc.do("MIGRATE", "127.0.0.1", port, "missing", "2", "5000"); got.Str != "NOKEY" {
+		t.Fatalf("MIGRATE of a missing key = %+v", got)
+	}
+	sc.do("SET", "unreachable", "x")
+	if got := sc.do("MIGRATE", "127.0.0.1", "1", "unreachable", "0", "200"); got.Type != resp.TypeError || !strings.HasPrefix(got.Err, "IOERR") {
+		t.Fatalf("MIGRATE to a closed port = %+v", got)
+	}
+
+	stopReplServer(src)
+	restored := dialRepl(t, startReplServerCfg(t, srcCfg))
+	if got := restored.do("EXISTS", "s", "a", "b", "h", "unreachable"); got.Int != 1 {
+		t.Fatalf("after restart %d of the migrated keys exist, want only 'unreachable'", got.Int)
+	}
+}
