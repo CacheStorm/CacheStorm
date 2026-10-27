@@ -212,22 +212,7 @@ func TestMoreCommandsPipelineLowCoverage(t *testing.T) {
 		name string
 		cmd  string
 		args [][]byte
-	}{
-		{"PIPELINE.CREATE basic", "PIPELINE.CREATE", [][]byte{[]byte("pipe1")}},
-		{"PIPELINE.CREATE no args", "PIPELINE.CREATE", nil},
-		{"PIPELINE.ADDSTAGE", "PIPELINE.ADDSTAGE", [][]byte{[]byte("pipe1"), []byte("stage1"), []byte("filter")}},
-		{"PIPELINE.ADDSTAGE not found", "PIPELINE.ADDSTAGE", [][]byte{[]byte("notfound"), []byte("stage1"), []byte("filter")}},
-		{"PIPELINE.ADDSTAGE no args", "PIPELINE.ADDSTAGE", nil},
-		{"PIPELINE.EXECUTE", "PIPELINE.EXECUTE", [][]byte{[]byte("pipe1"), []byte("data")}},
-		{"PIPELINE.EXECUTE not found", "PIPELINE.EXECUTE", [][]byte{[]byte("notfound"), []byte("data")}},
-		{"PIPELINE.EXECUTE no args", "PIPELINE.EXECUTE", nil},
-		{"PIPELINE.STATUS", "PIPELINE.STATUS", [][]byte{[]byte("pipe1")}},
-		{"PIPELINE.STATUS not found", "PIPELINE.STATUS", [][]byte{[]byte("notfound")}},
-		{"PIPELINE.STATUS no args", "PIPELINE.STATUS", nil},
-		{"PIPELINE.DELETE success", "PIPELINE.DELETE", [][]byte{[]byte("pipe1")}},
-		{"PIPELINE.DELETE not found", "PIPELINE.DELETE", [][]byte{[]byte("notfound")}},
-		{"PIPELINE.DELETE no args", "PIPELINE.DELETE", nil},
-	}
+	}{}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

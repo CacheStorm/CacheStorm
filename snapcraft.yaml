@@ -2,7 +2,7 @@ name: cachestorm
 version: git
 summary: High-performance Redis-compatible in-memory database
 description: |
-  CacheStorm is a Redis-compatible in-memory database with about 1,500 commands
+  CacheStorm is a Redis-compatible in-memory database with about 1,200 commands
   including distributed systems features, data processing, and modern
   application capabilities.
 

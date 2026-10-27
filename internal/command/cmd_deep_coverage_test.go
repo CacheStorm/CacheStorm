@@ -77,31 +77,7 @@ func TestDeep_RATELIMITERDELETE_NotFound(t *testing.T) {
 
 // --- RETRY: not-found branch ---
 
-func TestDeep_RETRYEXECUTE_NotFound(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("RETRY.EXECUTE", bytesArgs("noretry"), s)
-	if err := cmdRETRYEXECUTE(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
 // --- TIMEOUT: not-found branches ---
-
-func TestDeep_TIMEOUTEXECUTE_NotFound(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("TIMEOUT.EXECUTE", bytesArgs("notimeout"), s)
-	if err := cmdTIMEOUTEXECUTE(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestDeep_TIMEOUTDELETE_NotFound(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("TIMEOUT.DELETE", bytesArgs("notimeout2"), s)
-	if err := cmdTIMEOUTDELETE(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
 
 // --- BULKHEAD: "acquire when full" and not-found branches ---
 
@@ -146,259 +122,15 @@ func TestDeep_TELEMETRYRECORD_WithTags(t *testing.T) {
 
 // --- DIAGNOSTIC: RESULT found/not-found ---
 
-func TestDeep_DIAGNOSTICRESULT_NotFound(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("DIAGNOSTIC.RESULT", bytesArgs("nodiag"), s)
-	if err := cmdDIAGNOSTICRESULT(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestDeep_DIAGNOSTICRESULT_Found(t *testing.T) {
-	s := store.NewStore()
-	ctx1, buf := bufCtx("DIAGNOSTIC.RUN", bytesArgs("diag1", "health"), s)
-	cmdDIAGNOSTICRUN(ctx1)
-	id := buf.String()
-	// Extract actual UUID from RESP bulk string: $36\r\n<uuid>\r\n
-	// We need to parse this; let's just call with the generated id
-	_ = id
-	// Instead, use list to find the diagnostic
-	ctx2 := discardCtx("DIAGNOSTIC.LIST", bytesArgs(), s)
-	cmdDIAGNOSTICLIST(ctx2)
-}
-
 // --- PROFILE: STOP + RESULT lifecycle ---
-
-func TestDeep_PROFILESTOP_NotFound(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("PROFILE.STOP", bytesArgs("noprof"), s)
-	if err := cmdPROFILESTOP(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestDeep_PROFILERRESULT_NotFound(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("PROFILE.RESULT", bytesArgs("noprof"), s)
-	if err := cmdPROFILERESULT(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
 
 // --- CONPOOL: get all, get when exhausted, return, not-found ---
 
-func TestDeep_CONPOOLGET_Exhausted(t *testing.T) {
-	s := store.NewStore()
-	// Create pool with 1 conn
-	cmdCONPOOLCREATE(discardCtx("", bytesArgs("cp_small", "1"), s))
-	// Get the single conn
-	cmdCONPOOLGET(discardCtx("", bytesArgs("cp_small"), s))
-	// Try again, should be null (exhausted)
-	ctx := discardCtx("CONPOOL.GET", bytesArgs("cp_small"), s)
-	if err := cmdCONPOOLGET(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestDeep_CONPOOLRETURN_NotFound(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("CONPOOL.RETURN", bytesArgs("nopool", "conn-0"), s)
-	if err := cmdCONPOOLRETURN(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestDeep_CONPOOLSTATUS_NotFound(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("CONPOOL.STATUS", bytesArgs("nopool2"), s)
-	if err := cmdCONPOOLSTATUS(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestDeep_CONPOOLDELETE_NotFound(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("CONPOOL.DELETE", bytesArgs("nopool3"), s)
-	if err := cmdCONPOOLDELETE(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
 // --- BATCHX: ADD, EXECUTE, STATUS, DELETE lifecycle with not-found paths ---
-
-func TestDeep_BATCHXADD_NotFound(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("BATCHX.ADD", bytesArgs("nobatch", "item1"), s)
-	if err := cmdBATCHXADD(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestDeep_BATCHXEXECUTE_NotFound(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("BATCHX.EXECUTE", bytesArgs("nobatch"), s)
-	if err := cmdBATCHXEXECUTE(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestDeep_BATCHXSTATUS_NotFound(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("BATCHX.STATUS", bytesArgs("nobatch"), s)
-	if err := cmdBATCHXSTATUS(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestDeep_BATCHXDELETE_NotFound(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("BATCHX.DELETE", bytesArgs("nobatch"), s)
-	if err := cmdBATCHXDELETE(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestDeep_BATCHX_Lifecycle(t *testing.T) {
-	s := store.NewStore()
-	ctx1, buf := bufCtx("BATCHX.CREATE", bytesArgs("testbatch"), s)
-	if err := cmdBATCHXCREATE(ctx1); err != nil {
-		t.Fatalf("create: %v", err)
-	}
-	raw := buf.String()
-	// Parse RESP bulk string "$36\r\n<uuid>\r\n"
-	id := parseRespBulk(raw)
-
-	// ADD item
-	if err := cmdBATCHXADD(discardCtx("", bytesArgs(id, "item1"), s)); err != nil {
-		t.Fatalf("add: %v", err)
-	}
-	if err := cmdBATCHXADD(discardCtx("", bytesArgs(id, "item2"), s)); err != nil {
-		t.Fatalf("add2: %v", err)
-	}
-
-	// STATUS
-	if err := cmdBATCHXSTATUS(discardCtx("", bytesArgs(id), s)); err != nil {
-		t.Fatalf("status: %v", err)
-	}
-
-	// EXECUTE
-	if err := cmdBATCHXEXECUTE(discardCtx("", bytesArgs(id), s)); err != nil {
-		t.Fatalf("execute: %v", err)
-	}
-
-	// DELETE
-	if err := cmdBATCHXDELETE(discardCtx("", bytesArgs(id), s)); err != nil {
-		t.Fatalf("delete: %v", err)
-	}
-}
 
 // --- PIPELINEX: ADD, EXECUTE, CANCEL lifecycle ---
 
-func TestDeep_PIPELINEXADD_NotFound(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("PIPELINEX.ADD", bytesArgs("nopipe", "cmd1"), s)
-	if err := cmdPIPELINEXADD(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestDeep_PIPELINEXEXECUTE_NotFound(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("PIPELINEX.EXECUTE", bytesArgs("nopipe"), s)
-	if err := cmdPIPELINEXEXECUTE(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestDeep_PIPELINEXCANCEL_NotFound(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("PIPELINEX.CANCEL", bytesArgs("nopipe"), s)
-	if err := cmdPIPELINEXCANCEL(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestDeep_PIPELINEX_Lifecycle(t *testing.T) {
-	s := store.NewStore()
-	ctx1, buf := bufCtx("PIPELINEX.START", bytesArgs(), s)
-	cmdPIPELINEXSTART(ctx1)
-	id := parseRespBulk(buf.String())
-
-	// ADD
-	if err := cmdPIPELINEXADD(discardCtx("", bytesArgs(id, "SET x 1"), s)); err != nil {
-		t.Fatalf("add: %v", err)
-	}
-
-	// EXECUTE
-	if err := cmdPIPELINEXEXECUTE(discardCtx("", bytesArgs(id), s)); err != nil {
-		t.Fatalf("execute: %v", err)
-	}
-}
-
-func TestDeep_PIPELINEX_Cancel(t *testing.T) {
-	s := store.NewStore()
-	ctx1, buf := bufCtx("PIPELINEX.START", bytesArgs(), s)
-	cmdPIPELINEXSTART(ctx1)
-	id := parseRespBulk(buf.String())
-
-	if err := cmdPIPELINEXCANCEL(discardCtx("", bytesArgs(id), s)); err != nil {
-		t.Fatalf("cancel: %v", err)
-	}
-}
-
 // --- TRANSX: COMMIT, ROLLBACK, STATUS lifecycle ---
-
-func TestDeep_TRANSXCOMMIT_NotFound(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("TRANSX.COMMIT", bytesArgs("notx"), s)
-	if err := cmdTRANSXCOMMIT(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestDeep_TRANSXROLLBACK_NotFound(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("TRANSX.ROLLBACK", bytesArgs("notx"), s)
-	if err := cmdTRANSXROLLBACK(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestDeep_TRANSXSTATUS_NotFound(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("TRANSX.STATUS", bytesArgs("notx"), s)
-	if err := cmdTRANSXSTATUS(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestDeep_TRANSX_CommitLifecycle(t *testing.T) {
-	s := store.NewStore()
-	ctx1, buf := bufCtx("TRANSX.BEGIN", bytesArgs(), s)
-	cmdTRANSXBEGIN(ctx1)
-	id := parseRespBulk(buf.String())
-
-	// COMMIT
-	if err := cmdTRANSXCOMMIT(discardCtx("", bytesArgs(id), s)); err != nil {
-		t.Fatalf("commit: %v", err)
-	}
-
-	// STATUS
-	if err := cmdTRANSXSTATUS(discardCtx("", bytesArgs(id), s)); err != nil {
-		t.Fatalf("status: %v", err)
-	}
-}
-
-func TestDeep_TRANSX_RollbackLifecycle(t *testing.T) {
-	s := store.NewStore()
-	ctx1, buf := bufCtx("TRANSX.BEGIN", bytesArgs(), s)
-	cmdTRANSXBEGIN(ctx1)
-	id := parseRespBulk(buf.String())
-
-	if err := cmdTRANSXROLLBACK(discardCtx("", bytesArgs(id), s)); err != nil {
-		t.Fatalf("rollback: %v", err)
-	}
-}
 
 // --- LOCKX: acquire existing lock held by different holder ---
 
@@ -467,52 +199,6 @@ func TestDeep_SEMAPHOREX_FullCycle(t *testing.T) {
 }
 
 // --- ASYNC: STATUS, RESULT, CANCEL lifecycle ---
-
-func TestDeep_ASYNCSTATUS_NotFound(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("ASYNC.STATUS", bytesArgs("nojob"), s)
-	if err := cmdASYNCSTATUS(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestDeep_ASYNCRESULT_NotFound(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("ASYNC.RESULT", bytesArgs("nojob"), s)
-	if err := cmdASYNCRESULT(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestDeep_ASYNCCANCEL_NotFound(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("ASYNC.CANCEL", bytesArgs("nojob"), s)
-	if err := cmdASYNCCANCEL(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestDeep_ASYNC_Lifecycle(t *testing.T) {
-	s := store.NewStore()
-	ctx1, buf := bufCtx("ASYNC.SUBMIT", bytesArgs("myjob"), s)
-	cmdASYNCSUBMIT(ctx1)
-	id := parseRespBulk(buf.String())
-
-	// STATUS
-	if err := cmdASYNCSTATUS(discardCtx("", bytesArgs(id), s)); err != nil {
-		t.Fatalf("status: %v", err)
-	}
-
-	// RESULT when not completed
-	if err := cmdASYNCRESULT(discardCtx("", bytesArgs(id), s)); err != nil {
-		t.Fatalf("result pending: %v", err)
-	}
-
-	// CANCEL
-	if err := cmdASYNCCANCEL(discardCtx("", bytesArgs(id), s)); err != nil {
-		t.Fatalf("cancel: %v", err)
-	}
-}
 
 // --- PROMISE: RESOLVE, REJECT, STATUS, AWAIT lifecycle ---
 
@@ -658,77 +344,6 @@ func TestDeep_FUTURE_CancelLifecycle(t *testing.T) {
 }
 
 // --- OBSERVABLE: NEXT, COMPLETE, ERROR, SUBSCRIBE lifecycle ---
-
-func TestDeep_OBSERVABLENEXT_NotFound(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("OBSERVABLE.NEXT", bytesArgs("noobs", "val"), s)
-	if err := cmdOBSERVABLENEXT(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestDeep_OBSERVABLECOMPLETE_NotFound(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("OBSERVABLE.COMPLETE", bytesArgs("noobs"), s)
-	if err := cmdOBSERVABLECOMPLETE(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestDeep_OBSERVABLEERROR_NotFound(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("OBSERVABLE.ERROR", bytesArgs("noobs", "err"), s)
-	if err := cmdOBSERVABLEERROR(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestDeep_OBSERVABLESUBSCRIBE_NotFound(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("OBSERVABLE.SUBSCRIBE", bytesArgs("noobs", "sub1"), s)
-	if err := cmdOBSERVABLESUBSCRIBE(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestDeep_OBSERVABLE_Lifecycle(t *testing.T) {
-	s := store.NewStore()
-	ctx1, buf := bufCtx("OBSERVABLE.CREATE", bytesArgs(), s)
-	cmdOBSERVABLECREATE(ctx1)
-	id := parseRespBulk(buf.String())
-
-	// SUBSCRIBE
-	if err := cmdOBSERVABLESUBSCRIBE(discardCtx("", bytesArgs(id, "sub1"), s)); err != nil {
-		t.Fatalf("subscribe: %v", err)
-	}
-
-	// NEXT
-	if err := cmdOBSERVABLENEXT(discardCtx("", bytesArgs(id, "val1"), s)); err != nil {
-		t.Fatalf("next: %v", err)
-	}
-
-	// ERROR
-	if err := cmdOBSERVABLEERROR(discardCtx("", bytesArgs(id, "some error"), s)); err != nil {
-		t.Fatalf("error: %v", err)
-	}
-}
-
-func TestDeep_OBSERVABLE_CompleteLifecycle(t *testing.T) {
-	s := store.NewStore()
-	ctx1, buf := bufCtx("OBSERVABLE.CREATE", bytesArgs(), s)
-	cmdOBSERVABLECREATE(ctx1)
-	id := parseRespBulk(buf.String())
-
-	// COMPLETE
-	if err := cmdOBSERVABLECOMPLETE(discardCtx("", bytesArgs(id), s)); err != nil {
-		t.Fatalf("complete: %v", err)
-	}
-
-	// NEXT after complete (not active) -> error
-	if err := cmdOBSERVABLENEXT(discardCtx("", bytesArgs(id, "val"), s)); err != nil {
-		t.Fatalf("next after complete: %v", err)
-	}
-}
 
 // --- STREAMPROC: not-found branches for PUSH, POP, DELETE ---
 
@@ -1064,81 +679,11 @@ func TestDeep_PARTITIONXGET_OutOfRange(t *testing.T) {
 	}
 }
 
-func TestDeep_PARTITIONXREBALANCE(t *testing.T) {
-	s := store.NewStore()
-	cmdPARTITIONXCREATE(discardCtx("", bytesArgs("partreb", "3"), s))
-	ctx := discardCtx("PARTITIONX.REBALANCE", bytesArgs("partreb", "5"), s)
-	if err := cmdPARTITIONXREBALANCE(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestDeep_PARTITIONXREBALANCE_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("PARTITIONX.REBALANCE", bytesArgs("x"), s)
-	if err := cmdPARTITIONXREBALANCE(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
 // ===========================================================================
 // EXTRA COMMANDS - Deep coverage
 // ===========================================================================
 
 // --- SHARD: MAP with existing shard, REBALANCE, LIST, STATUS ---
-
-func TestDeep_SHARDMAP_WithExistingShard(t *testing.T) {
-	s := store.NewStore()
-	// Directly populate the shard map
-	shardsMu.Lock()
-	shards["testshard"] = &ShardState{Name: "testshard", Nodes: []string{"node1", "node2", "node3"}, Keys: make(map[string]string)}
-	shardsMu.Unlock()
-	ctx := discardCtx("SHARD.MAP", bytesArgs("testshard", "mykey"), s)
-	if err := cmdSHARDMAP(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestDeep_SHARDMAP_EmptyNodes(t *testing.T) {
-	s := store.NewStore()
-	shardsMu.Lock()
-	shards["emptyshard"] = &ShardState{Name: "emptyshard", Nodes: []string{}, Keys: make(map[string]string)}
-	shardsMu.Unlock()
-	ctx := discardCtx("SHARD.MAP", bytesArgs("emptyshard", "mykey"), s)
-	if err := cmdSHARDMAP(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestDeep_SHARDMAP_NotFound(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("SHARD.MAP", bytesArgs("noshard", "mykey"), s)
-	if err := cmdSHARDMAP(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestDeep_SHARDREBALANCE(t *testing.T) {
-	s := store.NewStore()
-	shardsMu.Lock()
-	shards["rebshard"] = &ShardState{Name: "rebshard", Nodes: []string{"n1", "n2"}, Keys: make(map[string]string)}
-	shardsMu.Unlock()
-	ctx := discardCtx("SHARD.REBALANCE", bytesArgs("rebshard"), s)
-	if err := cmdSHARDREBALANCE(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestDeep_SHARDSTATUS_Found(t *testing.T) {
-	s := store.NewStore()
-	shardsMu.Lock()
-	shards["statshard"] = &ShardState{Name: "statshard", Nodes: []string{"n1"}, Keys: make(map[string]string)}
-	shardsMu.Unlock()
-	ctx := discardCtx("SHARD.STATUS", bytesArgs("statshard"), s)
-	if err := cmdSHARDSTATUS(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
 
 // --- DEDUP: EXPIRE not found ---
 
@@ -1151,22 +696,6 @@ func TestDeep_DEDUPEXPIRE_NotFound(t *testing.T) {
 }
 
 // --- BATCH: STATUS and CANCEL with found paths ---
-
-func TestDeep_BATCHSTATUS_NotFound(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("BATCH.STATUS", bytesArgs("nobatch_x"), s)
-	if err := cmdBATCHSTATUS(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestDeep_BATCHCANCEL_NotFound(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("BATCH.CANCEL", bytesArgs("nobatch_x"), s)
-	if err := cmdBATCHCANCEL(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
 
 // --- DEADLINE: CHECK not found, CANCEL not found ---
 
@@ -1208,16 +737,6 @@ func TestDeep_GATEWAYROUTE_Found(t *testing.T) {
 	}
 }
 
-func TestDeep_GATEWAYMETRICS_Found(t *testing.T) {
-	s := store.NewStore()
-	ctx1, buf := bufCtx("GATEWAY.CREATE", bytesArgs("gw3"), s)
-	cmdGATEWAYCREATE(ctx1)
-	id := parseRespBulk(buf.String())
-	if err := cmdGATEWAYMETRICS(discardCtx("", bytesArgs(id), s)); err != nil {
-		t.Fatalf("metrics: %v", err)
-	}
-}
-
 // --- SWITCH: STATE/TOGGLE not found branches ---
 
 func TestDeep_SWITCHSTATE_NotFound(t *testing.T) {
@@ -1237,22 +756,6 @@ func TestDeep_SWITCHTOGGLE_NotFound(t *testing.T) {
 }
 
 // --- REPLAYX: PAUSE/SPEED not found ---
-
-func TestDeep_REPLAYXPAUSE_NotFound(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("REPLAYX.PAUSE", bytesArgs("norep"), s)
-	if err := cmdREPLAYXPAUSE(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestDeep_REPLAYXSPEED_NotFound(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("REPLAYX.SPEED", bytesArgs("norep", "2"), s)
-	if err := cmdREPLAYXSPEED(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
 
 // --- ROUTE: MATCH/LIST with data ---
 
@@ -1277,31 +780,7 @@ func TestDeep_GHOSTDELETE_NotFound(t *testing.T) {
 
 // --- PROBE: RESULTS not found ---
 
-func TestDeep_PROBERESULTS_NotFound(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("PROBE.RESULTS", bytesArgs("noprobe"), s)
-	if err := cmdPROBERESULTS(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
 // --- RAGE: STOP/STATS not found ---
-
-func TestDeep_RAGESTOP_NotFound(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("RAGE.STOP", bytesArgs("norage"), s)
-	if err := cmdRAGESTOP(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestDeep_RAGESTATS_NotFound(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("RAGE.STATS", bytesArgs("norage"), s)
-	if err := cmdRAGESTATS(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
 
 // --- GRID: SET/GET/DELETE not found ---
 
@@ -1408,22 +887,6 @@ func TestDeep_ROLLUPXDELETE_NotFound(t *testing.T) {
 }
 
 // --- BEACON: STOP/CHECK not found ---
-
-func TestDeep_BEACONSTOP_NotFound(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("BEACON.STOP", bytesArgs("nobeacon"), s)
-	if err := cmdBEACONSTOP(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestDeep_BEACONCHECK_NotFound(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("BEACON.CHECK", bytesArgs("nobeacon"), s)
-	if err := cmdBEACONCHECK(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
 
 // ===========================================================================
 // MORE COMMANDS - Deep coverage
@@ -1673,14 +1136,6 @@ func TestDeep_QUOTAXDELETE_NotFound(t *testing.T) {
 }
 
 // --- METER: BILLING/DELETE not found ---
-
-func TestDeep_METERBILLING_NotFound(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("METER.BILLING", bytesArgs("nomtr"), s)
-	if err := cmdMETERBILLING(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
 
 // --- TENANT: GET not found ---
 
@@ -1933,57 +1388,13 @@ func TestDeep_CRDTORSETREMOVE_NoSet(t *testing.T) {
 
 // --- MERKLE: VERIFY/PROOF edge cases ---
 
-func TestDeep_MERKLEVERIFY_NoTree(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("MERKLE.VERIFY", bytesArgs("notree", "data"), s)
-	if err := cmdMERKLEVERIFY(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestDeep_MERKLEPROOF_NoTree(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("MERKLE.PROOF", bytesArgs("notree", "data"), s)
-	if err := cmdMERKLEPROOF(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
 // ===========================================================================
 // Additional lifecycle tests for UUID-based resources
 // ===========================================================================
 
 // --- PROFILE: START + STOP + RESULT lifecycle ---
 
-func TestDeep_PROFILE_FullLifecycle(t *testing.T) {
-	s := store.NewStore()
-	ctx1, buf := bufCtx("PROFILE.START", bytesArgs("deepprof"), s)
-	cmdPROFILESTART(ctx1)
-	id := parseRespBulk(buf.String())
-
-	// STOP
-	if err := cmdPROFILESTOP(discardCtx("", bytesArgs(id), s)); err != nil {
-		t.Fatalf("stop: %v", err)
-	}
-
-	// RESULT
-	if err := cmdPROFILERESULT(discardCtx("", bytesArgs(id), s)); err != nil {
-		t.Fatalf("result: %v", err)
-	}
-}
-
 // --- DIAGNOSTIC: RUN + RESULT lifecycle ---
-
-func TestDeep_DIAGNOSTIC_FullLifecycle(t *testing.T) {
-	s := store.NewStore()
-	ctx1, buf := bufCtx("DIAGNOSTIC.RUN", bytesArgs("deepdiag", "health"), s)
-	cmdDIAGNOSTICRUN(ctx1)
-	id := parseRespBulk(buf.String())
-
-	if err := cmdDIAGNOSTICRESULT(discardCtx("", bytesArgs(id), s)); err != nil {
-		t.Fatalf("result: %v", err)
-	}
-}
 
 // --- APIKEY: CREATE + VALIDATE + USAGE + REVOKE lifecycle ---
 
@@ -2015,26 +1426,6 @@ func TestDeep_APIKEY_FullLifecycle(t *testing.T) {
 }
 
 // --- ASYNC: SUBMIT + complete manually + RESULT lifecycle ---
-
-func TestDeep_ASYNC_CompleteAndResult(t *testing.T) {
-	s := store.NewStore()
-	ctx1, buf := bufCtx("ASYNC.SUBMIT", bytesArgs("completejob"), s)
-	cmdASYNCSUBMIT(ctx1)
-	id := parseRespBulk(buf.String())
-
-	// Manually set status to completed so we can get the result
-	asyncJobsMu.Lock()
-	if j, exists := asyncJobs[id]; exists {
-		j.Status = "completed"
-		j.Result = "done_result"
-	}
-	asyncJobsMu.Unlock()
-
-	// RESULT
-	if err := cmdASYNCRESULT(discardCtx("", bytesArgs(id), s)); err != nil {
-		t.Fatalf("result: %v", err)
-	}
-}
 
 // --- QUOTAX lifecycle: CREATE + CHECK + RESET + DELETE ---
 
@@ -2098,30 +1489,7 @@ func TestDeep_SLIDINGCHECK_WithBucket(t *testing.T) {
 
 // --- SHARD: improved SHARDMAP and SHARDLIST ---
 
-func TestDeep_SHARDLIST(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("SHARD.LIST", bytesArgs("3"), s)
-	if err := cmdSHARDLIST(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
 // --- BATCH (extra_commands): lifecycle ---
-
-func TestDeep_BATCH_Extra_Lifecycle(t *testing.T) {
-	s := store.NewStore()
-	ctx1, buf := bufCtx("BATCH.SUBMIT", bytesArgs("batchjob"), s)
-	cmdBATCHSUBMIT(ctx1)
-	id := parseRespBulk(buf.String())
-
-	if err := cmdBATCHSTATUS(discardCtx("", bytesArgs(id), s)); err != nil {
-		t.Fatalf("status: %v", err)
-	}
-
-	if err := cmdBATCHCANCEL(discardCtx("", bytesArgs(id), s)); err != nil {
-		t.Fatalf("cancel: %v", err)
-	}
-}
 
 // --- DEADLINE: SET + CHECK lifecycle ---
 
@@ -2185,19 +1553,6 @@ func TestDeep_SWITCH_Lifecycle(t *testing.T) {
 
 // --- REPLAY: lifecycle ---
 
-func TestDeep_REPLAYX_Lifecycle(t *testing.T) {
-	s := store.NewStore()
-	cmdREPLAYXSTART(discardCtx("", bytesArgs("rep_deep"), s))
-
-	if err := cmdREPLAYXPAUSE(discardCtx("", bytesArgs("rep_deep"), s)); err != nil {
-		t.Fatalf("pause: %v", err)
-	}
-
-	if err := cmdREPLAYXSPEED(discardCtx("", bytesArgs("rep_deep", "2"), s)); err != nil {
-		t.Fatalf("speed: %v", err)
-	}
-}
-
 // --- ROUTE: LIST with routes ---
 
 func TestDeep_ROUTELIST_WithRoutes(t *testing.T) {
@@ -2222,30 +1577,7 @@ func TestDeep_GHOST_Lifecycle(t *testing.T) {
 
 // --- PROBE: lifecycle ---
 
-func TestDeep_PROBE_Lifecycle(t *testing.T) {
-	s := store.NewStore()
-	cmdPROBECREATE(discardCtx("", bytesArgs("probe_deep", "http"), s))
-	cmdPROBERUN(discardCtx("", bytesArgs("probe_deep"), s))
-
-	if err := cmdPROBERESULTS(discardCtx("", bytesArgs("probe_deep"), s)); err != nil {
-		t.Fatalf("results: %v", err)
-	}
-}
-
 // --- RAGE: lifecycle ---
-
-func TestDeep_RAGE_Lifecycle(t *testing.T) {
-	s := store.NewStore()
-	cmdRAGETEST(discardCtx("", bytesArgs("rage_deep", "100"), s))
-
-	if err := cmdRAGESTOP(discardCtx("", bytesArgs("rage_deep"), s)); err != nil {
-		t.Fatalf("stop: %v", err)
-	}
-
-	if err := cmdRAGESTATS(discardCtx("", bytesArgs("rage_deep"), s)); err != nil {
-		t.Fatalf("stats: %v", err)
-	}
-}
 
 // --- GRID: lifecycle ---
 
@@ -2320,19 +1652,6 @@ func TestDeep_ROLLUPX_Lifecycle(t *testing.T) {
 }
 
 // --- BEACON: lifecycle ---
-
-func TestDeep_BEACON_Lifecycle(t *testing.T) {
-	s := store.NewStore()
-	cmdBEACONSTART(discardCtx("", bytesArgs("bcn_deep", "5000"), s))
-
-	if err := cmdBEACONCHECK(discardCtx("", bytesArgs("bcn_deep"), s)); err != nil {
-		t.Fatalf("check: %v", err)
-	}
-
-	if err := cmdBEACONSTOP(discardCtx("", bytesArgs("bcn_deep"), s)); err != nil {
-		t.Fatalf("stop: %v", err)
-	}
-}
 
 // --- COUNTERX: INCR/DECR/DELETE with found ---
 
@@ -2518,16 +1837,6 @@ func TestDeep_PARTITION_Lifecycle(t *testing.T) {
 
 // --- METER: BILLING lifecycle ---
 
-func TestDeep_METER_Lifecycle(t *testing.T) {
-	s := store.NewStore()
-	cmdMETERCREATE(discardCtx("", bytesArgs("mtr_deep", "0.01"), s))
-	cmdMETERRECORD(discardCtx("", bytesArgs("mtr_deep", "100"), s))
-
-	if err := cmdMETERBILLING(discardCtx("", bytesArgs("mtr_deep"), s)); err != nil {
-		t.Fatalf("billing: %v", err)
-	}
-}
-
 // --- TENANT: GET + CONFIG lifecycle ---
 
 func TestDeep_TENANT_Lifecycle(t *testing.T) {
@@ -2570,21 +1879,6 @@ func TestDeep_ROLLOUT_Lifecycle(t *testing.T) {
 }
 
 // --- MERKLE: VERIFY/PROOF lifecycle ---
-
-func TestDeep_MERKLE_VerifyLifecycle(t *testing.T) {
-	s := store.NewStore()
-	cmdMERKLECREATE(discardCtx("", bytesArgs("mkl_deep"), s))
-	cmdMERKLEADD(discardCtx("", bytesArgs("mkl_deep", "data1"), s))
-	cmdMERKLEADD(discardCtx("", bytesArgs("mkl_deep", "data2"), s))
-
-	if err := cmdMERKLEVERIFY(discardCtx("", bytesArgs("mkl_deep", "data1"), s)); err != nil {
-		t.Fatalf("verify: %v", err)
-	}
-
-	if err := cmdMERKLEPROOF(discardCtx("", bytesArgs("mkl_deep", "data1"), s)); err != nil {
-		t.Fatalf("proof: %v", err)
-	}
-}
 
 // --- CRDT LWW SET: with timestamp ---
 

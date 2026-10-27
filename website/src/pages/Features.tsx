@@ -220,7 +220,7 @@ Startup time: <100ms`,
     icon: <Terminal className="w-5 h-5 text-[var(--color-primary)]" />,
     title: "Rich Data Structures",
     description:
-      "Strings, hashes, lists, sets, sorted sets, streams, JSON, time series, bitmaps, HyperLogLog, and geospatial indexes. About 1,500 built-in commands cover every use case without external modules.",
+      "Strings, hashes, lists, sets, sorted sets, streams, JSON, time series, bitmaps, HyperLogLog, and geospatial indexes. About 1,200 built-in commands cover every use case without external modules.",
     code: `from cachestorm import CacheStorm
 
 cs = CacheStorm(host='localhost', port=6380)
@@ -240,7 +240,7 @@ cs.geoadd('stores', 28.9784, 41.0082, 'istanbul-hq')
 nearby = cs.georadius('stores', 29.0, 41.0, 10, unit='km')`,
     codeTitle: "app.py",
     highlights: [
-      "About 1,500 commands across 12+ data types",
+      "About 1,200 commands across 12+ data types",
       "JSON documents, time series, graphs built-in",
       "Pub/Sub, Lua scripting, transactions",
       "Works with any RESP-compatible client library",
@@ -382,7 +382,7 @@ export default function Features() {
           </h1>
 
           <p className="text-xl text-[var(--color-text-secondary)] max-w-2xl mx-auto leading-relaxed mb-10">
-            One binary. About 1,500 commands. Built-in HTTP API, Prometheus metrics, TLS, ACL, replication,
+            One binary. About 1,200 commands. Built-in HTTP API, Prometheus metrics, TLS, ACL, replication,
             persistence, and profiling. No plugins, no sidecars, no extra dependencies.
           </p>
 

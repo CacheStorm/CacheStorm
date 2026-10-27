@@ -2,7 +2,6 @@ package command
 
 import (
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
@@ -13,9 +12,7 @@ func RegisterCacheCommands(router *Router) {
 	router.Register(&CommandDef{Name: "CACHE.BULKGET", Handler: cmdCacheBulkGet})
 	router.Register(&CommandDef{Name: "CACHE.BULKDEL", Handler: cmdCacheBulkDel})
 	router.Register(&CommandDef{Name: "CACHE.STATS", Handler: cmdCacheStats})
-	router.Register(&CommandDef{Name: "CACHE.PREFETCH", Handler: cmdCachePrefetch})
 	router.Register(&CommandDef{Name: "CACHE.EXPORT", Handler: cmdCacheExport})
-	router.Register(&CommandDef{Name: "CACHE.IMPORT", Handler: cmdCacheImport})
 	router.Register(&CommandDef{Name: "CACHE.CLEAR", Handler: cmdCacheClear})
 }
 
@@ -162,26 +159,6 @@ func safeDiv(a, b int64) int64 {
 	return a / b
 }
 
-func cmdCachePrefetch(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	keys := make([]string, 0, ctx.ArgCount())
-	for i := 0; i < ctx.ArgCount(); i++ {
-		keys = append(keys, ctx.ArgString(i))
-	}
-
-	prefetched := int64(0)
-	for _, key := range keys {
-		if _, exists := ctx.Store.Get(key); exists {
-			prefetched++
-		}
-	}
-
-	return ctx.WriteInteger(prefetched)
-}
-
 func cmdCacheExport(ctx *Context) error {
 	if ctx.ArgCount() < 1 {
 		return ctx.WriteError(ErrWrongArgCount)
@@ -263,20 +240,6 @@ func cmdCacheExport(ctx *Context) error {
 	}
 
 	return ctx.WriteArray(results)
-}
-
-func cmdCacheImport(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	format := strings.ToUpper(ctx.ArgString(0))
-	replace := ctx.ArgCount() >= 2 && strings.ToUpper(ctx.ArgString(1)) == "REPLACE"
-
-	_ = format
-	_ = replace
-
-	return ctx.WriteOK()
 }
 
 func cmdCacheClear(ctx *Context) error {

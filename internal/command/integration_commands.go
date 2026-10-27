@@ -2,6 +2,8 @@ package command
 
 import (
 	"fmt"
+	"math"
+	"math/rand"
 	"sync"
 	"time"
 
@@ -24,11 +26,6 @@ func RegisterIntegrationCommands(router *Router) {
 	router.Register(&CommandDef{Name: "CACHE.LOCKED", Handler: cmdCACHELOCKED})
 	router.Register(&CommandDef{Name: "CACHE.REFRESH", Handler: cmdCACHEREFRESH})
 
-	router.Register(&CommandDef{Name: "NET.WHOIS", Handler: cmdNETWHOIS})
-	router.Register(&CommandDef{Name: "NET.DNS", Handler: cmdNETDNS})
-	router.Register(&CommandDef{Name: "NET.PING", Handler: cmdNETPING})
-	router.Register(&CommandDef{Name: "NET.PORT", Handler: cmdNETPORT})
-
 	router.Register(&CommandDef{Name: "ARRAY.PUSH", Handler: cmdARRAYPUSH})
 	router.Register(&CommandDef{Name: "ARRAY.POP", Handler: cmdARRAYPOP})
 	router.Register(&CommandDef{Name: "ARRAY.SHIFT", Handler: cmdARRAYSHIFT})
@@ -38,7 +35,6 @@ func RegisterIntegrationCommands(router *Router) {
 	router.Register(&CommandDef{Name: "ARRAY.REVERSE", Handler: cmdARRAYREVERSE})
 	router.Register(&CommandDef{Name: "ARRAY.SORT", Handler: cmdARRAYSORT})
 	router.Register(&CommandDef{Name: "ARRAY.UNIQUE", Handler: cmdARRAYUNIQUE})
-	router.Register(&CommandDef{Name: "ARRAY.FLATTEN", Handler: cmdARRAYFLATTEN})
 	router.Register(&CommandDef{Name: "ARRAY.MERGE", Handler: cmdARRAYMERGE})
 	router.Register(&CommandDef{Name: "ARRAY.INTERSECT", Handler: cmdARRAYINTERSECT})
 	router.Register(&CommandDef{Name: "ARRAY.DIFF", Handler: cmdARRAYDIFF})
@@ -230,11 +226,17 @@ var (
 	rateLimitersMu sync.RWMutex
 )
 
+type rateLimitKey struct {
+	ID     string
+	Window int64
+}
+
 type RateLimiterExt struct {
-	Name     string
-	Requests map[int64]int64
-	Limit    int64
-	Window   int64
+	Name       string
+	Requests   map[rateLimitKey]int64
+	Limit      int64
+	Window     int64
+	lastWindow int64
 }
 
 func cmdRATELIMITCREATE(ctx *Context) error {
@@ -245,11 +247,14 @@ func cmdRATELIMITCREATE(ctx *Context) error {
 	name := ctx.ArgString(0)
 	limit := parseInt64(ctx.ArgString(1))
 	windowMs := parseInt64(ctx.ArgString(2))
+	if windowMs <= 0 {
+		return ctx.WriteError(fmt.Errorf("ERR window must be positive"))
+	}
 
 	rateLimitersMu.Lock()
 	rateLimiters[name] = &RateLimiterExt{
 		Name:     name,
-		Requests: make(map[int64]int64),
+		Requests: make(map[rateLimitKey]int64),
 		Limit:    limit,
 		Window:   windowMs,
 	}
@@ -264,7 +269,7 @@ func cmdRATELIMITCHECK(ctx *Context) error {
 	}
 
 	name := ctx.ArgString(0)
-	_ = ctx.ArgString(1)
+	id := ctx.ArgString(1)
 
 	// CHECK counts this request: it READS rl.Requests[window] and then WRITES
 	// rl.Requests[window]++. rateLimiters maps names to *RateLimiterExt, so an
@@ -282,8 +287,17 @@ func cmdRATELIMITCHECK(ctx *Context) error {
 
 	now := time.Now().UnixMilli()
 	window := (now / rl.Window) * rl.Window
+	if window != rl.lastWindow {
+		for k := range rl.Requests {
+			if k.Window < window-rl.Window {
+				delete(rl.Requests, k)
+			}
+		}
+		rl.lastWindow = window
+	}
+	key := rateLimitKey{ID: id, Window: window}
 
-	count := rl.Requests[window]
+	count := rl.Requests[key]
 	remaining := rl.Limit - count
 
 	if remaining <= 0 {
@@ -294,7 +308,7 @@ func cmdRATELIMITCHECK(ctx *Context) error {
 		})
 	}
 
-	rl.Requests[window]++
+	rl.Requests[key]++
 
 	return ctx.WriteArray([]*resp.Value{
 		resp.IntegerValue(1),
@@ -324,7 +338,7 @@ func cmdRATELIMITRESET(ctx *Context) error {
 		return ctx.WriteError(fmt.Errorf("ERR rate limiter not found"))
 	}
 
-	rl.Requests = make(map[int64]int64)
+	rl.Requests = make(map[rateLimitKey]int64)
 
 	return ctx.WriteOK()
 }
@@ -456,77 +470,6 @@ func cmdCACHEREFRESH(ctx *Context) error {
 	}
 
 	return ctx.WriteInteger(0)
-}
-
-func cmdNETWHOIS(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	domain := ctx.ArgString(0)
-
-	return ctx.WriteArray([]*resp.Value{
-		resp.BulkString("domain"),
-		resp.BulkString(domain),
-		resp.BulkString("registrar"),
-		resp.BulkString("unknown"),
-		resp.BulkString("status"),
-		resp.BulkString("active"),
-	})
-}
-
-func cmdNETDNS(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	domain := ctx.ArgString(0)
-
-	return ctx.WriteArray([]*resp.Value{
-		resp.BulkString("domain"),
-		resp.BulkString(domain),
-		resp.BulkString("type"),
-		resp.BulkString("A"),
-		resp.BulkString("records"),
-		resp.ArrayValue([]*resp.Value{
-			resp.BulkString("127.0.0.1"),
-		}),
-	})
-}
-
-func cmdNETPING(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	host := ctx.ArgString(0)
-
-	return ctx.WriteArray([]*resp.Value{
-		resp.BulkString("host"),
-		resp.BulkString(host),
-		resp.BulkString("status"),
-		resp.BulkString("reachable"),
-		resp.BulkString("latency_ms"),
-		resp.IntegerValue(1),
-	})
-}
-
-func cmdNETPORT(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	host := ctx.ArgString(0)
-	port := parseInt64(ctx.ArgString(1))
-
-	return ctx.WriteArray([]*resp.Value{
-		resp.BulkString("host"),
-		resp.BulkString(host),
-		resp.BulkString("port"),
-		resp.IntegerValue(port),
-		resp.BulkString("status"),
-		resp.BulkString("open"),
-	})
 }
 
 var (
@@ -789,34 +732,6 @@ func cmdARRAYUNIQUE(ctx *Context) error {
 	arrays[name] = unique
 
 	return ctx.WriteInteger(int64(removed))
-}
-
-func cmdARRAYFLATTEN(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	name := ctx.ArgString(0)
-
-	arraysMu.RLock()
-	src, exists := arrays[name]
-	var arr []string
-	if exists {
-		arr = make([]string, len(src))
-		copy(arr, src)
-	}
-	arraysMu.RUnlock()
-
-	if !exists {
-		return ctx.WriteArray([]*resp.Value{})
-	}
-
-	results := make([]*resp.Value, len(arr))
-	for i, v := range arr {
-		results[i] = resp.BulkString(v)
-	}
-
-	return ctx.WriteArray(results)
 }
 
 func cmdARRAYMERGE(ctx *Context) error {
@@ -1424,12 +1339,7 @@ func cmdMATHSQRT(ctx *Context) error {
 		return ctx.WriteError(fmt.Errorf("ERR negative number"))
 	}
 
-	result := n / 2
-	for i := 0; i < 20; i++ {
-		result = (result + n/result) / 2
-	}
-
-	return ctx.WriteBulkString(fmt.Sprintf("%.6f", result))
+	return ctx.WriteBulkString(fmt.Sprintf("%.6f", math.Sqrt(n)))
 }
 
 func cmdMATHABS(ctx *Context) error {
@@ -1483,7 +1393,7 @@ func cmdMATHFLOOR(ctx *Context) error {
 	}
 
 	n := parseFloatExt([]byte(ctx.ArgString(0)))
-	result := int64(n)
+	result := int64(math.Floor(n))
 
 	return ctx.WriteInteger(result)
 }
@@ -1508,7 +1418,7 @@ func cmdMATHROUND(ctx *Context) error {
 	}
 
 	n := parseFloatExt([]byte(ctx.ArgString(0)))
-	result := int64(n + 0.5)
+	result := int64(math.Round(n))
 
 	return ctx.WriteInteger(result)
 }
@@ -1522,11 +1432,14 @@ func cmdMATHRANDOM(ctx *Context) error {
 		max = parseInt64(ctx.ArgString(1))
 	}
 
-	seed := time.Now().UnixNano()
-	range_ := max - min + 1
-	result := (seed % range_) + min
-
-	return ctx.WriteInteger(result)
+	if max < min {
+		return ctx.WriteError(fmt.Errorf("ERR max must not be less than min"))
+	}
+	span := uint64(max - min)
+	if span == math.MaxUint64 {
+		return ctx.WriteInteger(int64(rand.Uint64()))
+	}
+	return ctx.WriteInteger(min + int64(rand.Uint64()%(span+1)))
 }
 
 func cmdMATHSUM(ctx *Context) error {
@@ -1642,7 +1555,7 @@ func encodeGeohash(lat, lon float64) string {
 	lonMin, lonMax := -180.0, 180.0
 
 	var bits uint64
-	for i := 0; i < 30; i++ {
+	for i := 0; i < 60; i++ {
 		if i%2 == 0 {
 			mid := (lonMin + lonMax) / 2
 			if lon >= mid {
@@ -1697,16 +1610,22 @@ func decodeGeohash(geohash string) (float64, float64) {
 	}
 
 	var bits uint64
+	n := 0
 	for _, c := range geohash {
+		if n == 12 {
+			break
+		}
 		if val, ok := decodeMap[c]; ok {
 			bits = (bits << 5) | uint64(val)
+			n++
 		}
 	}
+	bits <<= uint(60 - 5*n)
 
 	latMin, latMax := -90.0, 90.0
 	lonMin, lonMax := -180.0, 180.0
 
-	for i := 0; i < 30; i++ {
+	for i := 0; i < 5*n; i++ {
 		if i%2 == 0 {
 			mid := (lonMin + lonMax) / 2
 			if bits&(1<<uint(59-i)) != 0 {

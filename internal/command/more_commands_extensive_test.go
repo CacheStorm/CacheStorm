@@ -16,25 +16,14 @@ func TestWorkflowCommandsExtensive(t *testing.T) {
 		cmd  string
 		args [][]byte
 	}{
-		{"WORKFLOW.CREATE no args", "WORKFLOW.CREATE", nil},
-		{"WORKFLOW.CREATE workflow", "WORKFLOW.CREATE", [][]byte{[]byte("wf1")}},
-		{"WORKFLOW.ADDSTEP no args", "WORKFLOW.ADDSTEP", nil},
-		{"WORKFLOW.ADDSTEP missing args", "WORKFLOW.ADDSTEP", [][]byte{[]byte("wf1")}},
-		{"WORKFLOW.START no args", "WORKFLOW.START", nil},
-		{"WORKFLOW.START not found", "WORKFLOW.START", [][]byte{[]byte("notfound")}},
 		{"WORKFLOW.EXECUTE no args", "WORKFLOW.EXECUTE", nil},
 		{"WORKFLOW.EXECUTE not found", "WORKFLOW.EXECUTE", [][]byte{[]byte("notfound")}},
 		{"WORKFLOW.STATUS no args", "WORKFLOW.STATUS", nil},
 		{"WORKFLOW.STATUS not found", "WORKFLOW.STATUS", [][]byte{[]byte("notfound")}},
-		{"WORKFLOW.PAUSE no args", "WORKFLOW.PAUSE", nil},
-		{"WORKFLOW.PAUSE not found", "WORKFLOW.PAUSE", [][]byte{[]byte("notfound")}},
 		{"WORKFLOW.RESUME no args", "WORKFLOW.RESUME", nil},
 		{"WORKFLOW.RESUME not found", "WORKFLOW.RESUME", [][]byte{[]byte("notfound")}},
 		{"WORKFLOW.CANCEL no args", "WORKFLOW.CANCEL", nil},
 		{"WORKFLOW.CANCEL not found", "WORKFLOW.CANCEL", [][]byte{[]byte("notfound")}},
-		{"WORKFLOW.LIST no args", "WORKFLOW.LIST", nil},
-		{"WORKFLOW.DELETE no args", "WORKFLOW.DELETE", nil},
-		{"WORKFLOW.DELETE not found", "WORKFLOW.DELETE", [][]byte{[]byte("notfound")}},
 	}
 
 	for _, tt := range tests {
@@ -89,14 +78,8 @@ func TestTemplateCommandsExtensive(t *testing.T) {
 		cmd  string
 		args [][]byte
 	}{
-		{"TEMPLATE.CREATE no args", "TEMPLATE.CREATE", nil},
-		{"TEMPLATE.CREATE template", "TEMPLATE.CREATE", [][]byte{[]byte("tpl1"), []byte("Hello {{name}}")}},
 		{"TEMPLATE.RENDER no args", "TEMPLATE.RENDER", nil},
 		{"TEMPLATE.RENDER not found", "TEMPLATE.RENDER", [][]byte{[]byte("notfound"), []byte(`{"name":"World"}`)}},
-		{"TEMPLATE.GET no args", "TEMPLATE.GET", nil},
-		{"TEMPLATE.GET not found", "TEMPLATE.GET", [][]byte{[]byte("notfound")}},
-		{"TEMPLATE.DELETE no args", "TEMPLATE.DELETE", nil},
-		{"TEMPLATE.DELETE not found", "TEMPLATE.DELETE", [][]byte{[]byte("notfound")}},
 		{"TEMPLATE.LIST no args", "TEMPLATE.LIST", nil},
 	}
 

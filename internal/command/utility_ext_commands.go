@@ -5,7 +5,6 @@ import (
 	"runtime"
 	"runtime/debug"
 	"strconv"
-	"sync"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
@@ -34,7 +33,6 @@ func RegisterUtilityExtCommands(router *Router) {
 	router.Register(&CommandDef{Name: "FLAG.LISTENABLED", Handler: cmdFLAGLISTENABLED})
 	router.Register(&CommandDef{Name: "FLAG.ADDVARIANT", Handler: cmdFLAGADDVARIANT})
 	router.Register(&CommandDef{Name: "FLAG.GETVARIANT", Handler: cmdFLAGGETVARIANT})
-	router.Register(&CommandDef{Name: "FLAG.ADDRULE", Handler: cmdFLAGADDRULE})
 
 	router.Register(&CommandDef{Name: "COUNTER.GET", Handler: cmdCOUNTERGET})
 	router.Register(&CommandDef{Name: "COUNTER.SET", Handler: cmdCOUNTERSET})
@@ -48,15 +46,9 @@ func RegisterUtilityExtCommands(router *Router) {
 	router.Register(&CommandDef{Name: "COUNTER.RESET", Handler: cmdCOUNTERRESET})
 	router.Register(&CommandDef{Name: "COUNTER.RESETALL", Handler: cmdCOUNTERRESETALL})
 
-	router.Register(&CommandDef{Name: "BACKUP.CREATE", Handler: cmdBACKUPCREATE})
-	router.Register(&CommandDef{Name: "BACKUP.RESTORE", Handler: cmdBACKUPRESTORE})
-	router.Register(&CommandDef{Name: "BACKUP.LIST", Handler: cmdBACKUPLIST})
-	router.Register(&CommandDef{Name: "BACKUP.DELETE", Handler: cmdBACKUPDELETE})
-
 	router.Register(&CommandDef{Name: "MEMORY.TRIM", Handler: cmdMEMORYTRIM})
 	router.Register(&CommandDef{Name: "MEMORY.FRAG", Handler: cmdMEMORYFRAG})
 	router.Register(&CommandDef{Name: "MEMORY.PURGE", Handler: cmdMEMORYPURGE})
-	router.Register(&CommandDef{Name: "MEMORY.ALLOC", Handler: cmdMEMORYALLOC})
 }
 
 func cmdAUDITLOG(ctx *Context) error {
@@ -405,28 +397,6 @@ func cmdFLAGGETVARIANT(ctx *Context) error {
 	return ctx.WriteBulkString(value)
 }
 
-func cmdFLAGADDRULE(ctx *Context) error {
-	if ctx.ArgCount() < 4 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	name := ctx.ArgString(0)
-	attribute := ctx.ArgString(1)
-	operator := ctx.ArgString(2)
-	value := ctx.ArgString(3)
-
-	rule := store.FeatureRule{
-		Attribute: attribute,
-		Operator:  operator,
-		Value:     value,
-	}
-
-	if store.GlobalFeatureFlags.AddRule(name, rule) {
-		return ctx.WriteOK()
-	}
-	return ctx.WriteError(fmt.Errorf("ERR flag not found"))
-}
-
 func cmdCOUNTERGET(ctx *Context) error {
 	if ctx.ArgCount() < 1 {
 		return ctx.WriteError(ErrWrongArgCount)
@@ -550,121 +520,6 @@ func cmdCOUNTERRESETALL(ctx *Context) error {
 	return ctx.WriteOK()
 }
 
-var (
-	backups   = make(map[string]string)
-	backupsMu sync.RWMutex
-)
-
-func cmdBACKUPCREATE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	name := ctx.ArgString(0)
-
-	keys := ctx.Store.Keys()
-	backup := ""
-	for _, k := range keys {
-		entry, ok := ctx.Store.Get(k)
-		if ok && entry != nil {
-			backup += k + ":" + entry.Value.String() + "\n"
-		}
-	}
-
-	backupsMu.Lock()
-	backups[name] = backup
-	backupsMu.Unlock()
-
-	return ctx.WriteInteger(int64(len(keys)))
-}
-
-func cmdBACKUPRESTORE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	name := ctx.ArgString(0)
-
-	backupsMu.RLock()
-	backup, ok := backups[name]
-	backupsMu.RUnlock()
-
-	if !ok {
-		return ctx.WriteError(fmt.Errorf("ERR backup not found"))
-	}
-
-	lines := splitLines(backup)
-	count := 0
-
-	for _, line := range lines {
-		if line == "" {
-			continue
-		}
-		parts := splitFirst(line, ":")
-		if len(parts) == 2 {
-			ctx.Store.Set(parts[0], &store.StringValue{Data: []byte(parts[1])}, store.SetOptions{})
-			count++
-		}
-	}
-
-	return ctx.WriteInteger(int64(count))
-}
-
-func cmdBACKUPLIST(ctx *Context) error {
-	backupsMu.RLock()
-
-	results := make([]*resp.Value, 0)
-	for name := range backups {
-		results = append(results, resp.BulkString(name))
-	}
-
-	reply := results
-	backupsMu.RUnlock()
-	return ctx.WriteArray(reply)
-}
-
-func cmdBACKUPDELETE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	name := ctx.ArgString(0)
-
-	backupsMu.Lock()
-	defer backupsMu.Unlock()
-
-	if _, exists := backups[name]; !exists {
-		return ctx.WriteInteger(0)
-	}
-
-	delete(backups, name)
-	return ctx.WriteInteger(1)
-}
-
-func splitLines(s string) []string {
-	result := make([]string, 0)
-	start := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\n' {
-			result = append(result, s[start:i])
-			start = i + 1
-		}
-	}
-	if start < len(s) {
-		result = append(result, s[start:])
-	}
-	return result
-}
-
-func splitFirst(s, sep string) []string {
-	for i := 0; i < len(s)-len(sep)+1; i++ {
-		if s[i:i+len(sep)] == sep {
-			return []string{s[:i], s[i+len(sep):]}
-		}
-	}
-	return []string{s}
-}
-
 func cmdMEMORYTRIM(ctx *Context) error {
 	debug.FreeOSMemory()
 	return ctx.WriteOK()
@@ -688,19 +543,4 @@ func cmdMEMORYFRAG(ctx *Context) error {
 func cmdMEMORYPURGE(ctx *Context) error {
 	debug.FreeOSMemory()
 	return ctx.WriteOK()
-}
-
-func cmdMEMORYALLOC(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	size := parseInt64(ctx.ArgString(0))
-
-	data := make([]byte, size)
-	for i := range data {
-		data[i] = 0
-	}
-
-	return ctx.WriteInteger(size)
 }

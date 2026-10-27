@@ -51,7 +51,6 @@ func TestAllAdvancedCommands(t *testing.T) {
 			s.Set("dag:dag1", &store.StringValue{Data: []byte("{}")}, store.SetOptions{})
 		}},
 		{"DAG.LIST", "DAG.LIST", nil, nil},
-		{"PARALLEL.EXEC", "PARALLEL.EXEC", [][]byte{[]byte("command1"), []byte("command2")}, nil},
 		{"PARALLEL.MAP", "PARALLEL.MAP", [][]byte{[]byte("key1"), []byte("key2"), []byte("UPPER")}, func() {
 			s.Set("key1", &store.StringValue{Data: []byte("hello")}, store.SetOptions{})
 			s.Set("key2", &store.StringValue{Data: []byte("world")}, store.SetOptions{})

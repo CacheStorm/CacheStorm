@@ -53,11 +53,9 @@ func RegisterServerCommands(router *Router) {
 	// resolve to the stub and stop configuring replication, with no error at
 	// all. The functional handler owns both names; do not register them twice.
 	router.Register(&CommandDef{Name: "LATENCY", Handler: cmdLATENCY})
-	router.Register(&CommandDef{Name: "STRALGO", Handler: cmdSTRALGO})
 	router.Register(&CommandDef{Name: "ACL", Handler: cmdACL})
 	router.Register(&CommandDef{Name: "MONITOR", Handler: cmdMONITOR})
 	router.Register(&CommandDef{Name: "SWAPDB", Handler: cmdSWAPDB})
-	router.Register(&CommandDef{Name: "DEBUGSEGFAULT", Handler: cmdDEBUGSEGFAULT})
 	RegisterHelloCommands(router)
 }
 
@@ -1646,72 +1644,6 @@ func cmdBGREWRITEAOF(ctx *Context) error {
 	return ctx.WriteSimpleString("Background append only file rewriting started")
 }
 
-func cmdSLAVEOF(ctx *Context) error {
-	if ctx.ArgCount() != 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	host := ctx.ArgString(0)
-	port := ctx.ArgString(1)
-
-	if host == "NO" && port == "ONE" {
-		return ctx.WriteOK()
-	}
-
-	_ = host
-	_ = port
-
-	return ctx.WriteOK()
-}
-
-func cmdSTRALGO(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	algorithm := strings.ToUpper(ctx.ArgString(0))
-
-	if algorithm != "LCS" {
-		return ctx.WriteError(errors.New("ERR unknown algorithm '" + algorithm + "'"))
-	}
-
-	keys := make([]string, 0)
-	minMatchLen := 1
-
-	for i := 1; i < ctx.ArgCount(); i++ {
-		arg := strings.ToUpper(ctx.ArgString(i))
-		switch arg {
-		case "KEYS":
-			i++
-			for i < ctx.ArgCount() && !strings.HasPrefix(strings.ToUpper(ctx.ArgString(i)), "IDX") && !strings.HasPrefix(strings.ToUpper(ctx.ArgString(i)), "LEN") && !strings.HasPrefix(strings.ToUpper(ctx.ArgString(i)), "MIN") {
-				keys = append(keys, ctx.ArgString(i))
-				i++
-			}
-			i--
-		case "STRINGS":
-			return ctx.WriteError(errors.New("ERR STRINGS option not supported, use KEYS"))
-		case "MINMATCHLEN":
-			i++
-			if i >= ctx.ArgCount() {
-				return ctx.WriteError(ErrSyntaxError)
-			}
-			var err error
-			minMatchLen, err = strconv.Atoi(ctx.ArgString(i))
-			if err != nil {
-				return ctx.WriteError(ErrNotInteger)
-			}
-		}
-	}
-
-	_ = minMatchLen
-
-	if len(keys) != 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	return ctx.WriteBulkString("")
-}
-
 func cmdACL(ctx *Context) error {
 	if ctx.ArgCount() < 1 {
 		return ctx.WriteError(ErrWrongArgCount)
@@ -1893,10 +1825,6 @@ func MonitorVisible(cmd string) bool {
 		return false
 	}
 	return !commandHasFlag(cmd, "admin")
-}
-
-func cmdDEBUGSEGFAULT(ctx *Context) error {
-	return ctx.WriteError(errors.New("ERR SEGFAULT not allowed"))
 }
 
 // SetWaitAOFHook installs the function WAITAOF waits with. It returns how

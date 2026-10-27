@@ -39,13 +39,12 @@ import (
 // TARGETING NOTE: an earlier version of this test drove randomInt with
 // UUID.VALIDATE, which turned out to be vacuous -- UUID.VALIDATE runs
 // isValidUUID, a pure predicate that never calls randomInt. The real path is
-// JOBX.CREATE -> cmdJOBXCREATE -> generateUUID() -> randomInt(16) ->
+// UUID.GEN -> cmdUUIDGEN -> generateUUID() -> randomInt(16) ->
 // encodingRand.Intn(n), so that is what drives the global here.
 
 func encodingAuditRouter() *Router {
 	r := NewRouter()
-	RegisterEncodingCommands(r)  // POOL.CREATE / POOL.GET -> pools, poolsMu
-	RegisterAdvancedCommands2(r) // JOBX.CREATE -> generateUUID -> randomInt -> encodingRand
+	RegisterEncodingCommands(r) // POOL.CREATE / POOL.GET -> pools, poolsMu; UUID.GEN -> generateUUID -> randomInt -> encodingRand
 	return r
 }
 
@@ -72,12 +71,12 @@ func TestEncodingGlobalsAreRaceFree(t *testing.T) {
 	// randomInt/encodingRand writer side.
 	for g := 0; g < 3; g++ {
 		wg.Add(1)
-		go func(g int) {
+		go func() {
 			defer wg.Done()
 			for i := 0; i < 1200; i++ {
-				runEncAudit(t, s, router, "JOBX.CREATE", fmt.Sprintf("job-%d-%d", g, i))
+				runEncAudit(t, s, router, "UUID.GEN")
 			}
-		}(g)
+		}()
 	}
 	// pools writer and reader.
 	wg.Add(1)
@@ -98,7 +97,7 @@ func TestEncodingGlobalsAreRaceFree(t *testing.T) {
 }
 
 // TestEncodingGlobalsControls is the control, and it is the part that proves the
-// race test above is not vacuous: JOBX.CREATE must return a DISTINCT id each
+// race test above is not vacuous: UUID.GEN must return a DISTINCT id each
 // call, which can only happen if generateUUID actually ran randomInt. (Counting
 // distinct replies from UUID.VALIDATE would prove nothing -- every valid UUID
 // answers ":1".)
@@ -109,18 +108,18 @@ func TestEncodingGlobalsControls(t *testing.T) {
 	const n = 200
 	ids := make(map[string]bool, n)
 	for i := 0; i < n; i++ {
-		out := runEncAudit(t, s, router, "JOBX.CREATE", fmt.Sprintf("ctl-%d", i))
+		out := runEncAudit(t, s, router, "UUID.GEN")
 		if len(out) == 0 {
-			t.Fatalf("CONTROL FAIL: JOBX.CREATE returned an empty reply")
+			t.Fatalf("CONTROL FAIL: UUID.GEN returned an empty reply")
 		}
 		if ids[out] {
-			t.Fatalf("CONTROL FAIL: JOBX.CREATE returned duplicate id %q on call %d -- "+
+			t.Fatalf("CONTROL FAIL: UUID.GEN returned duplicate id %q on call %d -- "+
 				"generateUUID is not running, so randomInt/encodingRand was never exercised", out, i)
 		}
 		ids[out] = true
 	}
 	if len(ids) != n {
-		t.Fatalf("CONTROL FAIL: %d distinct ids from %d JOBX.CREATE calls, want %d", len(ids), n, n)
+		t.Fatalf("CONTROL FAIL: %d distinct ids from %d UUID.GEN calls, want %d", len(ids), n, n)
 	}
 
 	if out := runEncAudit(t, s, router, "POOL.CREATE", "ctl-pool", "8"); out != "+OK\r\n" {

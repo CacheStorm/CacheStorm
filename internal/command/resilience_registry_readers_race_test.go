@@ -154,22 +154,6 @@ func TestResilienceRegistryReadersAreSynchronised(t *testing.T) {
 		},
 		{
 			registryFamilyCase: registryFamilyCase{
-				name:   "retry",
-				setup:  [][]string{{"RETRY.CREATE", "k", "3", "100"}},
-				writer: [][]string{{"RETRY.EXECUTE", "k", "op"}},
-				reader: [][]string{{"RETRY.STATUS", "k"}},
-			},
-		},
-		{
-			registryFamilyCase: registryFamilyCase{
-				name:   "timeout",
-				setup:  [][]string{{"TIMEOUT.CREATE", "k", "1000"}},
-				writer: [][]string{{"TIMEOUT.CREATE", "k", "1000"}},
-				reader: [][]string{{"TIMEOUT.EXECUTE", "k", "op"}},
-			},
-		},
-		{
-			registryFamilyCase: registryFamilyCase{
 				name:   "bulkhead",
 				setup:  [][]string{{"BULKHEAD.CREATE", "k", "10"}},
 				writer: [][]string{{"BULKHEAD.ACQUIRE", "k"}, {"BULKHEAD.RELEASE", "k"}},
@@ -182,38 +166,6 @@ func TestResilienceRegistryReadersAreSynchronised(t *testing.T) {
 				setup:  [][]string{{"TELEMETRY.RECORD", "k", "1000", "1.5"}},
 				writer: [][]string{{"TELEMETRY.RECORD", "k", "1000", "2.5"}},
 				reader: [][]string{{"TELEMETRY.QUERY", "k"}},
-			},
-		},
-		{
-			registryFamilyCase: registryFamilyCase{
-				name:   "diagnostic",
-				setup:  [][]string{{"DIAGNOSTIC.RUN", "k", "health"}},
-				writer: [][]string{{"DIAGNOSTIC.RUN", "k", "health"}},
-				reader: [][]string{{"DIAGNOSTIC.RESULT", "{last}"}},
-			},
-		},
-		{
-			registryFamilyCase: registryFamilyCase{
-				name:   "memoryx",
-				setup:  [][]string{{"MEMORYX.ALLOC", "k", "10"}},
-				writer: [][]string{{"MEMORYX.ALLOC", "k", "10"}},
-				reader: [][]string{{"MEMORYX.STATS", "k"}},
-			},
-		},
-		{
-			registryFamilyCase: registryFamilyCase{
-				name:   "conpool",
-				setup:  [][]string{{"CONPOOL.CREATE", "k", "10"}},
-				writer: [][]string{{"CONPOOL.GET", "k"}, {"CONPOOL.RETURN", "k", "conn"}},
-				reader: [][]string{{"CONPOOL.STATUS", "k"}},
-			},
-		},
-		{
-			registryFamilyCase: registryFamilyCase{
-				name:   "async",
-				setup:  [][]string{{"ASYNC.SUBMIT", "k", "payload"}},
-				writer: [][]string{{"ASYNC.CANCEL", "{last}"}},
-				reader: [][]string{{"ASYNC.STATUS", "{last}"}},
 			},
 		},
 		{

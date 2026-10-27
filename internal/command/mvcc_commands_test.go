@@ -17,20 +17,9 @@ func TestMVCCCommandsExtendedFullCoverage(t *testing.T) {
 		args [][]byte
 	}{
 		{"MVCC.START", "MVCC.START", nil},
-		{"MVCC.COMMIT", "MVCC.COMMIT", [][]byte{[]byte("tx1")}},
-		{"MVCC.COMMIT no args", "MVCC.COMMIT", nil},
-		{"MVCC.ROLLBACK", "MVCC.ROLLBACK", [][]byte{[]byte("tx1")}},
-		{"MVCC.ROLLBACK no args", "MVCC.ROLLBACK", nil},
-		{"MVCC.STATUS", "MVCC.STATUS", [][]byte{[]byte("tx1")}},
-		{"MVCC.STATUS no args", "MVCC.STATUS", nil},
 		{"MVCC.LIST", "MVCC.LIST", nil},
-		{"MVCC.SNAPSHOT", "MVCC.SNAPSHOT", nil},
 		{"MVCC.RESTORE", "MVCC.RESTORE", [][]byte{[]byte("snapshot1")}},
 		{"MVCC.RESTORE no args", "MVCC.RESTORE", nil},
-		{"MVCC.GET", "MVCC.GET", [][]byte{[]byte("tx1"), []byte("key1")}},
-		{"MVCC.GET no args", "MVCC.GET", nil},
-		{"MVCC.SET", "MVCC.SET", [][]byte{[]byte("tx1"), []byte("key1"), []byte("value1")}},
-		{"MVCC.SET no args", "MVCC.SET", nil},
 		{"MVCC.DEL", "MVCC.DEL", [][]byte{[]byte("tx1"), []byte("key1")}},
 		{"MVCC.DEL no args", "MVCC.DEL", nil},
 		{"MVCC.EXISTS", "MVCC.EXISTS", [][]byte{[]byte("tx1"), []byte("key1")}},
@@ -60,7 +49,6 @@ func TestMVCCCommandsSnapshotExtendedFullCoverage(t *testing.T) {
 		cmd  string
 		args [][]byte
 	}{
-		{"MVCC.SNAPSHOT create", "MVCC.SNAPSHOT", nil},
 		{"MVCC.RESTORE snapshot", "MVCC.RESTORE", [][]byte{[]byte("snapshot1")}},
 		{"MVCC.RESTORE not found", "MVCC.RESTORE", [][]byte{[]byte("notfound")}},
 		{"MVCC.LIST snapshots", "MVCC.LIST", nil},

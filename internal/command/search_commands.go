@@ -273,9 +273,11 @@ func cmdFTADD(ctx *Context) error {
 		Score:  score,
 	}
 
-	_ = replace
-
-	if err := idx.AddDocument(doc); err != nil {
+	add := idx.AddNewDocument
+	if replace {
+		add = idx.AddDocument
+	}
+	if err := add(doc); err != nil {
 		return ctx.WriteError(err)
 	}
 

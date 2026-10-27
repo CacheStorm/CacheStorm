@@ -6,80 +6,6 @@ import (
 	"github.com/cachestorm/cachestorm/internal/store"
 )
 
-func TestExtraCommandsSWIMFullCoverage(t *testing.T) {
-	s := store.NewStore()
-	router := NewRouter()
-	RegisterExtraCommands(router)
-
-	tests := []struct {
-		name string
-		cmd  string
-		args [][]byte
-	}{
-		{"SWIM.JOIN", "SWIM.JOIN", [][]byte{[]byte("node1"), []byte("192.168.1.1:7946")}},
-		{"SWIM.JOIN no args", "SWIM.JOIN", nil},
-		{"SWIM.LEAVE", "SWIM.LEAVE", [][]byte{[]byte("node1")}},
-		{"SWIM.LEAVE not found", "SWIM.LEAVE", [][]byte{[]byte("notfound")}},
-		{"SWIM.LEAVE no args", "SWIM.LEAVE", nil},
-		{"SWIM.MEMBERS empty", "SWIM.MEMBERS", nil},
-		{"SWIM.MEMBERS with data", "SWIM.MEMBERS", nil},
-		{"SWIM.PING", "SWIM.PING", [][]byte{[]byte("node1")}},
-		{"SWIM.PING not found", "SWIM.PING", [][]byte{[]byte("notfound")}},
-		{"SWIM.PING no args", "SWIM.PING", nil},
-		{"SWIM.SUSPECT", "SWIM.SUSPECT", [][]byte{[]byte("node1")}},
-		{"SWIM.SUSPECT not found", "SWIM.SUSPECT", [][]byte{[]byte("notfound")}},
-		{"SWIM.SUSPECT no args", "SWIM.SUSPECT", nil},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if tt.name == "SWIM.MEMBERS with data" || tt.name == "SWIM.LEAVE" || tt.name == "SWIM.PING" || tt.name == "SWIM.SUSPECT" {
-				swimMembersMu.Lock()
-				swimMembers["node1"] = &SwimMember{ID: "node1", Addr: "192.168.1.1:7946", Status: "alive", LastSeen: 0, Incarnation: 0}
-				swimMembersMu.Unlock()
-			}
-			runCommandTest(t, router, s, tt.cmd, tt.args)
-		})
-	}
-}
-
-func TestExtraCommandsGOSSIPFullCoverage(t *testing.T) {
-	s := store.NewStore()
-	router := NewRouter()
-	RegisterExtraCommands(router)
-
-	tests := []struct {
-		name string
-		cmd  string
-		args [][]byte
-	}{
-		{"GOSSIP.JOIN", "GOSSIP.JOIN", [][]byte{[]byte("node1"), []byte("192.168.1.1:7946")}},
-		{"GOSSIP.JOIN no args", "GOSSIP.JOIN", nil},
-		{"GOSSIP.LEAVE", "GOSSIP.LEAVE", [][]byte{[]byte("node1")}},
-		{"GOSSIP.LEAVE not found", "GOSSIP.LEAVE", [][]byte{[]byte("notfound")}},
-		{"GOSSIP.LEAVE no args", "GOSSIP.LEAVE", nil},
-		{"GOSSIP.BROADCAST", "GOSSIP.BROADCAST", [][]byte{[]byte("message")}},
-		{"GOSSIP.BROADCAST no args", "GOSSIP.BROADCAST", nil},
-		{"GOSSIP.GET", "GOSSIP.GET", [][]byte{[]byte("key1")}},
-		{"GOSSIP.GET not found", "GOSSIP.GET", [][]byte{[]byte("notfound")}},
-		{"GOSSIP.GET no args", "GOSSIP.GET", nil},
-		{"GOSSIP.MEMBERS empty", "GOSSIP.MEMBERS", nil},
-		{"GOSSIP.MEMBERS with data", "GOSSIP.MEMBERS", nil},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if tt.name == "GOSSIP.MEMBERS with data" || tt.name == "GOSSIP.LEAVE" || tt.name == "GOSSIP.GET" {
-				gossipMu.Lock()
-				gossipMembers["node1"] = &GossipMember{ID: "node1", Addr: "192.168.1.1:7946"}
-				gossipData["key1"] = "value1"
-				gossipMu.Unlock()
-			}
-			runCommandTest(t, router, s, tt.cmd, tt.args)
-		})
-	}
-}
-
 func TestExtraCommandsCRDTFullCoverage(t *testing.T) {
 	s := store.NewStore()
 	router := NewRouter()
@@ -139,18 +65,7 @@ func TestExtraCommandsMERKLEFullCoverage(t *testing.T) {
 		name string
 		cmd  string
 		args [][]byte
-	}{
-		{"MERKLE.CREATE", "MERKLE.CREATE", [][]byte{[]byte("mtree1")}},
-		{"MERKLE.CREATE no args", "MERKLE.CREATE", nil},
-		{"MERKLE.ADD", "MERKLE.ADD", [][]byte{[]byte("mtree1"), []byte("data1")}},
-		{"MERKLE.ADD no args", "MERKLE.ADD", nil},
-		{"MERKLE.VERIFY", "MERKLE.VERIFY", [][]byte{[]byte("mtree1"), []byte("data1")}},
-		{"MERKLE.VERIFY no args", "MERKLE.VERIFY", nil},
-		{"MERKLE.PROOF", "MERKLE.PROOF", [][]byte{[]byte("mtree1"), []byte("data1")}},
-		{"MERKLE.PROOF no args", "MERKLE.PROOF", nil},
-		{"MERKLE.ROOT", "MERKLE.ROOT", [][]byte{[]byte("mtree1")}},
-		{"MERKLE.ROOT no args", "MERKLE.ROOT", nil},
-	}
+	}{}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -168,17 +83,7 @@ func TestExtraCommandsRAFTFullCoverage(t *testing.T) {
 		name string
 		cmd  string
 		args [][]byte
-	}{
-		{"RAFT.STATE", "RAFT.STATE", nil},
-		{"RAFT.LEADER", "RAFT.LEADER", nil},
-		{"RAFT.TERM", "RAFT.TERM", nil},
-		{"RAFT.VOTE", "RAFT.VOTE", [][]byte{[]byte("node1"), []byte("1")}},
-		{"RAFT.VOTE no args", "RAFT.VOTE", nil},
-		{"RAFT.APPEND", "RAFT.APPEND", [][]byte{[]byte("1"), []byte("data")}},
-		{"RAFT.APPEND no args", "RAFT.APPEND", nil},
-		{"RAFT.COMMIT", "RAFT.COMMIT", [][]byte{[]byte("1")}},
-		{"RAFT.COMMIT no args", "RAFT.COMMIT", nil},
-	}
+	}{}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -196,13 +101,7 @@ func TestExtraCommandsSHARDFullCoverage(t *testing.T) {
 		name string
 		cmd  string
 		args [][]byte
-	}{
-		{"SHARD.MAP", "SHARD.MAP", nil},
-		{"SHARD.REBALANCE", "SHARD.REBALANCE", nil},
-		{"SHARD.LIST", "SHARD.LIST", nil},
-		{"SHARD.STATUS", "SHARD.STATUS", [][]byte{[]byte("1")}},
-		{"SHARD.STATUS no args", "SHARD.STATUS", nil},
-	}
+	}{}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -264,15 +163,7 @@ func TestExtraCommandsBATCHFullCoverage(t *testing.T) {
 		name string
 		cmd  string
 		args [][]byte
-	}{
-		{"BATCH.SUBMIT", "BATCH.SUBMIT", [][]byte{[]byte("cmd1"), []byte("arg1")}},
-		{"BATCH.SUBMIT no args", "BATCH.SUBMIT", nil},
-		{"BATCH.STATUS", "BATCH.STATUS", [][]byte{[]byte("batch1")}},
-		{"BATCH.STATUS no args", "BATCH.STATUS", nil},
-		{"BATCH.CANCEL", "BATCH.CANCEL", [][]byte{[]byte("batch1")}},
-		{"BATCH.CANCEL no args", "BATCH.CANCEL", nil},
-		{"BATCH.LIST", "BATCH.LIST", nil},
-	}
+	}{}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -378,8 +269,6 @@ func TestExtraCommandsGATEWAYFullCoverage(t *testing.T) {
 		{"GATEWAY.ROUTE", "GATEWAY.ROUTE", [][]byte{[]byte("gw1"), []byte("/api")}},
 		{"GATEWAY.ROUTE no args", "GATEWAY.ROUTE", nil},
 		{"GATEWAY.LIST", "GATEWAY.LIST", nil},
-		{"GATEWAY.METRICS", "GATEWAY.METRICS", [][]byte{[]byte("gw1")}},
-		{"GATEWAY.METRICS no args", "GATEWAY.METRICS", nil},
 	}
 
 	for _, tt := range tests {
@@ -531,17 +420,7 @@ func TestExtraCommandsPROBEFullCoverage(t *testing.T) {
 		name string
 		cmd  string
 		args [][]byte
-	}{
-		{"PROBE.CREATE", "PROBE.CREATE", [][]byte{[]byte("probe1"), []byte("http://localhost:8080")}},
-		{"PROBE.CREATE no args", "PROBE.CREATE", nil},
-		{"PROBE.DELETE", "PROBE.DELETE", [][]byte{[]byte("probe1")}},
-		{"PROBE.DELETE no args", "PROBE.DELETE", nil},
-		{"PROBE.RUN", "PROBE.RUN", [][]byte{[]byte("probe1")}},
-		{"PROBE.RUN no args", "PROBE.RUN", nil},
-		{"PROBE.RESULTS", "PROBE.RESULTS", [][]byte{[]byte("probe1")}},
-		{"PROBE.RESULTS no args", "PROBE.RESULTS", nil},
-		{"PROBE.LIST", "PROBE.LIST", nil},
-	}
+	}{}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -559,17 +438,7 @@ func TestExtraCommandsCANARYFullCoverage(t *testing.T) {
 		name string
 		cmd  string
 		args [][]byte
-	}{
-		{"CANARY.CREATE", "CANARY.CREATE", [][]byte{[]byte("canary1"), []byte("10")}},
-		{"CANARY.CREATE no args", "CANARY.CREATE", nil},
-		{"CANARY.DELETE", "CANARY.DELETE", [][]byte{[]byte("canary1")}},
-		{"CANARY.DELETE no args", "CANARY.DELETE", nil},
-		{"CANARY.CHECK", "CANARY.CHECK", [][]byte{[]byte("canary1")}},
-		{"CANARY.CHECK no args", "CANARY.CHECK", nil},
-		{"CANARY.STATUS", "CANARY.STATUS", [][]byte{[]byte("canary1")}},
-		{"CANARY.STATUS no args", "CANARY.STATUS", nil},
-		{"CANARY.LIST", "CANARY.LIST", nil},
-	}
+	}{}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -701,15 +570,7 @@ func TestExtraCommandsBEACONFullCoverage(t *testing.T) {
 		name string
 		cmd  string
 		args [][]byte
-	}{
-		{"BEACON.START", "BEACON.START", [][]byte{[]byte("beacon1"), []byte("5000")}},
-		{"BEACON.START no args", "BEACON.START", nil},
-		{"BEACON.STOP", "BEACON.STOP", [][]byte{[]byte("beacon1")}},
-		{"BEACON.STOP no args", "BEACON.STOP", nil},
-		{"BEACON.LIST", "BEACON.LIST", nil},
-		{"BEACON.CHECK", "BEACON.CHECK", [][]byte{[]byte("beacon1")}},
-		{"BEACON.CHECK no args", "BEACON.CHECK", nil},
-	}
+	}{}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

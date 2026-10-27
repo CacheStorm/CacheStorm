@@ -82,61 +82,6 @@ func TestGridReadersAreSafeWhileGridSetWrites(t *testing.T) {
 	wg.Wait()
 }
 
-// TestMerkleReadersAreSafeWhileMerkleAddWrites reads a merkle tree while
-// another client adds nodes to it.
-func TestMerkleReadersAreSafeWhileMerkleAddWrites(t *testing.T) {
-	s := store.NewStore()
-	router := NewRouter()
-	RegisterExtraCommands(router)
-
-	const iterations = 2000
-
-	registryCleanup(t, &merkleTreesMu, merkleTrees, "merkle-race")
-	if reply := registryRun(t, router, s, "MERKLE.CREATE", "merkle-race"); reply != "+OK\r\n" {
-		t.Fatalf("MERKLE.CREATE reply = %q, want +OK", reply)
-	}
-
-	var wg sync.WaitGroup
-	start := make(chan struct{})
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		<-start
-		for i := 0; i < iterations; i++ {
-			ctx, _ := bufCtx("MERKLE.ADD", bytesArgs("merkle-race", "payload"), s)
-			if err := router.Execute(ctx); err != nil {
-				t.Errorf("MERKLE.ADD: unexpected error: %v", err)
-				return
-			}
-		}
-	}()
-
-	for r := 0; r < 2; r++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			<-start
-			for i := 0; i < iterations; i++ {
-				for _, cmd := range []string{"MERKLE.VERIFY", "MERKLE.PROOF"} {
-					ctx, buf := bufCtx(cmd, bytesArgs("merkle-race", "hash"), s)
-					if err := router.Execute(ctx); err != nil {
-						t.Errorf("%s: unexpected error: %v", cmd, err)
-						return
-					}
-					if reply := buf.String(); !strings.HasPrefix(reply, ":") && !strings.HasPrefix(reply, "*") && !strings.HasPrefix(reply, "$-1") {
-						t.Errorf("%s: expected an integer, array or null reply, got %q", cmd, reply)
-						return
-					}
-				}
-			}
-		}()
-	}
-
-	close(start)
-	wg.Wait()
-}
-
 // TestCRDTPNCounterGetIsSafeWhileCounterIncrements reads a PN counter while
 // another client increments it.
 func TestCRDTPNCounterGetIsSafeWhileCounterIncrements(t *testing.T) {

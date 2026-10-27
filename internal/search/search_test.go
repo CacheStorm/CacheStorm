@@ -55,8 +55,8 @@ func TestCreateIndexDuplicate(t *testing.T) {
 
 	im.CreateIndex("test_idx", schema)
 	err := im.CreateIndex("test_idx", schema)
-	if err != nil {
-		t.Errorf("duplicate create should return nil error, got %v", err)
+	if err != ErrIndexExists {
+		t.Errorf("duplicate create = %v, want ErrIndexExists", err)
 	}
 }
 

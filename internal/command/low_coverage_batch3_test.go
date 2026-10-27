@@ -59,20 +59,6 @@ func TestExtendedCommandsLowCoverageBatch3(t *testing.T) {
 	}{
 		{"MSGQUEUE.NACK no args", "MSGQUEUE.NACK", nil},
 		{"MSGQUEUE.NACK not found", "MSGQUEUE.NACK", [][]byte{[]byte("notfound"), []byte("msg1")}},
-		{"HEALTHX.REGISTER no args", "HEALTHX.REGISTER", nil},
-		{"HEALTHX.REGISTER service", "HEALTHX.REGISTER", [][]byte{[]byte("service1"), []byte("endpoint")}},
-		{"HEALTHX.HISTORY no args", "HEALTHX.HISTORY", nil},
-		{"HEALTHX.HISTORY not found", "HEALTHX.HISTORY", [][]byte{[]byte("notfound")}},
-		{"CRON.HISTORY no args", "CRON.HISTORY", nil},
-		{"CRON.HISTORY not found", "CRON.HISTORY", [][]byte{[]byte("notfound")}},
-		{"WS.BROADCAST no args", "WS.BROADCAST", nil},
-		{"WS.BROADCAST message", "WS.BROADCAST", [][]byte{[]byte("message")}},
-		{"WS.LEAVE no args", "WS.LEAVE", nil},
-		{"WS.LEAVE not found", "WS.LEAVE", [][]byte{[]byte("notfound"), []byte("room1")}},
-		{"MEMO.CACHE no args", "MEMO.CACHE", nil},
-		{"MEMO.CACHE missing args", "MEMO.CACHE", [][]byte{[]byte("key1")}},
-		{"SENTINELX.WATCH no args", "SENTINELX.WATCH", nil},
-		{"SENTINELX.WATCH master", "SENTINELX.WATCH", [][]byte{[]byte("mymaster")}},
 	}
 
 	for _, tt := range tests {
@@ -92,19 +78,10 @@ func TestExtraCommandsLowCoverageBatch2(t *testing.T) {
 		cmd  string
 		args [][]byte
 	}{
-		{"GOSSIP.BROADCAST no args", "GOSSIP.BROADCAST", nil},
-		{"GOSSIP.BROADCAST message", "GOSSIP.BROADCAST", [][]byte{[]byte("test message")}},
 		{"VECTOR_CLOCK.CREATE no args", "VECTOR_CLOCK.CREATE", nil},
 		{"VECTOR_CLOCK.CREATE clock", "VECTOR_CLOCK.CREATE", [][]byte{[]byte("clock1")}},
 		{"VECTOR_CLOCK.COMPARE no args", "VECTOR_CLOCK.COMPARE", nil},
 		{"VECTOR_CLOCK.COMPARE missing args", "VECTOR_CLOCK.COMPARE", [][]byte{[]byte("clock1")}},
-		{"RAFT.STATE no args", "RAFT.STATE", nil},
-		{"RAFT.STATE state", "RAFT.STATE", [][]byte{[]byte("follower")}},
-		{"RAFT.LEADER no args", "RAFT.LEADER", nil},
-		{"RAFT.TERM no args", "RAFT.TERM", nil},
-		{"SHARD.MAP no args", "SHARD.MAP", nil},
-		{"SHARD.MAP key", "SHARD.MAP", [][]byte{[]byte("key1")}},
-		{"SHARD.REBALANCE no args", "SHARD.REBALANCE", nil},
 		{"GATEWAY.ROUTE no args", "GATEWAY.ROUTE", nil},
 		{"GATEWAY.ROUTE missing args", "GATEWAY.ROUTE", [][]byte{[]byte("gw1")}},
 		{"ROUTE.ADD no args", "ROUTE.ADD", nil},
@@ -114,8 +91,6 @@ func TestExtraCommandsLowCoverageBatch2(t *testing.T) {
 		{"ROUTE.MATCH no args", "ROUTE.MATCH", nil},
 		{"ROUTE.MATCH missing args", "ROUTE.MATCH", [][]byte{[]byte("route1")}},
 		{"ROUTE.LIST no args", "ROUTE.LIST", nil},
-		{"PROBE.CREATE no args", "PROBE.CREATE", nil},
-		{"PROBE.CREATE probe", "PROBE.CREATE", [][]byte{[]byte("probe1"), []byte("http://localhost:8080")}},
 	}
 
 	for _, tt := range tests {

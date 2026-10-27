@@ -97,7 +97,6 @@ func TestEncodingCommandsBatch7(t *testing.T) {
 		{"CBOR.ENCODE valid", "CBOR.ENCODE", [][]byte{[]byte(`{"key":"value"}`)}},
 		{"CBOR.DECODE empty", "CBOR.DECODE", [][]byte{[]byte("")}},
 		{"MSGPACK.ENCODE valid", "MSGPACK.ENCODE", [][]byte{[]byte(`{"key":"value"}`)}},
-		{"BSON.ENCODE valid", "BSON.ENCODE", [][]byte{[]byte(`{"key":"value"}`)}},
 	}
 
 	for _, tt := range tests {
@@ -118,9 +117,6 @@ func TestExtraCommandsBatch7(t *testing.T) {
 		args [][]byte
 	}{
 		{"VECTOR_CLOCK.COMPARE two", "VECTOR_CLOCK.COMPARE", [][]byte{[]byte("c1"), []byte("c2")}},
-		{"RAFT.STATE set", "RAFT.STATE", [][]byte{[]byte("follower")}},
-		{"RAFT.LEADER set", "RAFT.LEADER", [][]byte{[]byte("node1")}},
-		{"SHARD.REBALANCE trigger", "SHARD.REBALANCE", nil},
 		{"ROUTE.REMOVE existing", "ROUTE.REMOVE", [][]byte{[]byte("route1")}},
 		{"ROUTE.MATCH path", "ROUTE.MATCH", [][]byte{[]byte("/api/test")}},
 		{"ROUTE.LIST all", "ROUTE.LIST", nil},
@@ -289,11 +285,7 @@ func TestResilienceCommandsBatch7(t *testing.T) {
 		name string
 		cmd  string
 		args [][]byte
-	}{
-		{"DIAGNOSTIC.RUN check", "DIAGNOSTIC.RUN", nil},
-		{"MEMORYX.FREE memory", "MEMORYX.FREE", nil},
-		{"MEMORYX.STATS stats", "MEMORYX.STATS", nil},
-	}
+	}{}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -312,8 +304,6 @@ func TestSchedulerCommandsBatch7(t *testing.T) {
 		cmd  string
 		args [][]byte
 	}{
-		{"JOB.CREATE job", "JOB.CREATE", [][]byte{[]byte("j1"), []byte("* * * * *"), []byte("echo test")}},
-		{"JOB.STATS job", "JOB.STATS", [][]byte{[]byte("j1")}},
 		{"CIRCUIT.CREATE circuit", "CIRCUIT.CREATE", [][]byte{[]byte("c1")}},
 		{"CIRCUIT.STATS circuit", "CIRCUIT.STATS", [][]byte{[]byte("c1")}},
 		{"SESSION.REFRESH session", "SESSION.REFRESH", [][]byte{[]byte("s1")}},

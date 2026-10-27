@@ -2,6 +2,7 @@ package command
 
 import (
 	"fmt"
+	"regexp"
 	"sync"
 	"time"
 
@@ -10,26 +11,10 @@ import (
 
 func RegisterAdvancedCommands2(router *Router) {
 
-	router.Register(&CommandDef{Name: "TRANSFORM.CREATE", Handler: cmdTRANSFORMCREATE})
-	router.Register(&CommandDef{Name: "TRANSFORM.DELETE", Handler: cmdTRANSFORMDELETE})
-	router.Register(&CommandDef{Name: "TRANSFORM.APPLY", Handler: cmdTRANSFORMAPPLY})
-	router.Register(&CommandDef{Name: "TRANSFORM.LIST", Handler: cmdTRANSFORMLIST})
-
-	router.Register(&CommandDef{Name: "ENRICH.CREATE", Handler: cmdENRICHCREATE})
-	router.Register(&CommandDef{Name: "ENRICH.DELETE", Handler: cmdENRICHDELETE})
-	router.Register(&CommandDef{Name: "ENRICH.APPLY", Handler: cmdENRICHAPPLY})
-	router.Register(&CommandDef{Name: "ENRICH.LIST", Handler: cmdENRICHLIST})
-
 	router.Register(&CommandDef{Name: "VALIDATE.CREATE", Handler: cmdVALIDATECREATE})
 	router.Register(&CommandDef{Name: "VALIDATE.DELETE", Handler: cmdVALIDATEDELETE})
 	router.Register(&CommandDef{Name: "VALIDATE.CHECK", Handler: cmdVALIDATECHECK})
 	router.Register(&CommandDef{Name: "VALIDATE.LIST", Handler: cmdVALIDATELIST})
-
-	router.Register(&CommandDef{Name: "JOBX.CREATE", Handler: cmdJOBXCREATE})
-	router.Register(&CommandDef{Name: "JOBX.DELETE", Handler: cmdJOBXDELETE})
-	router.Register(&CommandDef{Name: "JOBX.RUN", Handler: cmdJOBXRUN})
-	router.Register(&CommandDef{Name: "JOBX.STATUS", Handler: cmdJOBXSTATUS})
-	router.Register(&CommandDef{Name: "JOBX.LIST", Handler: cmdJOBXLIST})
 
 	router.Register(&CommandDef{Name: "STAGE.CREATE", Handler: cmdSTAGECREATE})
 	router.Register(&CommandDef{Name: "STAGE.DELETE", Handler: cmdSTAGEDELETE})
@@ -43,11 +28,6 @@ func RegisterAdvancedCommands2(router *Router) {
 	router.Register(&CommandDef{Name: "CONTEXT.GET", Handler: cmdCONTEXTGET})
 	router.Register(&CommandDef{Name: "CONTEXT.LIST", Handler: cmdCONTEXTLIST})
 
-	router.Register(&CommandDef{Name: "RULE.CREATE", Handler: cmdRULECREATE})
-	router.Register(&CommandDef{Name: "RULE.DELETE", Handler: cmdRULEDELETE})
-	router.Register(&CommandDef{Name: "RULE.EVAL", Handler: cmdRULEEVAL})
-	router.Register(&CommandDef{Name: "RULE.LIST", Handler: cmdRULELIST})
-
 	router.Register(&CommandDef{Name: "PERMIT.GRANT", Handler: cmdPERMITGRANT})
 	router.Register(&CommandDef{Name: "PERMIT.REVOKE", Handler: cmdPERMITREVOKE})
 	router.Register(&CommandDef{Name: "PERMIT.CHECK", Handler: cmdPERMITCHECK})
@@ -57,16 +37,6 @@ func RegisterAdvancedCommands2(router *Router) {
 	router.Register(&CommandDef{Name: "GRANT.DELETE", Handler: cmdGRANTDELETE})
 	router.Register(&CommandDef{Name: "GRANT.CHECK", Handler: cmdGRANTCHECK})
 	router.Register(&CommandDef{Name: "GRANT.LIST", Handler: cmdGRANTLIST})
-
-	router.Register(&CommandDef{Name: "CHAINX.CREATE", Handler: cmdCHAINXCREATE})
-	router.Register(&CommandDef{Name: "CHAINX.DELETE", Handler: cmdCHAINXDELETE})
-	router.Register(&CommandDef{Name: "CHAINX.EXECUTE", Handler: cmdCHAINXEXECUTE})
-	router.Register(&CommandDef{Name: "CHAINX.LIST", Handler: cmdCHAINXLIST})
-
-	router.Register(&CommandDef{Name: "TASKX.CREATE", Handler: cmdTASKXCREATE})
-	router.Register(&CommandDef{Name: "TASKX.DELETE", Handler: cmdTASKXDELETE})
-	router.Register(&CommandDef{Name: "TASKX.RUN", Handler: cmdTASKXRUN})
-	router.Register(&CommandDef{Name: "TASKX.LIST", Handler: cmdTASKXLIST})
 
 	router.Register(&CommandDef{Name: "TIMER.CREATE", Handler: cmdTIMERCREATE})
 	router.Register(&CommandDef{Name: "TIMER.DELETE", Handler: cmdTIMERDELETE})
@@ -101,11 +71,6 @@ func RegisterAdvancedCommands2(router *Router) {
 	router.Register(&CommandDef{Name: "RELATION.GET", Handler: cmdRELATIONGET})
 	router.Register(&CommandDef{Name: "RELATION.LIST", Handler: cmdRELATIONLIST})
 
-	router.Register(&CommandDef{Name: "CONNECTIONX.CREATE", Handler: cmdCONNECTIONXCREATE})
-	router.Register(&CommandDef{Name: "CONNECTIONX.DELETE", Handler: cmdCONNECTIONXDELETE})
-	router.Register(&CommandDef{Name: "CONNECTIONX.STATUS", Handler: cmdCONNECTIONXSTATUS})
-	router.Register(&CommandDef{Name: "CONNECTIONX.LIST", Handler: cmdCONNECTIONXLIST})
-
 	router.Register(&CommandDef{Name: "POOLX.CREATE", Handler: cmdPOOLXCREATE})
 	router.Register(&CommandDef{Name: "POOLX.DELETE", Handler: cmdPOOLXDELETE})
 	router.Register(&CommandDef{Name: "POOLX.ACQUIRE", Handler: cmdPOOLXACQUIRE})
@@ -121,17 +86,6 @@ func RegisterAdvancedCommands2(router *Router) {
 	router.Register(&CommandDef{Name: "STREAMX.WRITE", Handler: cmdSTREAMXWRITE})
 	router.Register(&CommandDef{Name: "STREAMX.READ", Handler: cmdSTREAMXREAD})
 	router.Register(&CommandDef{Name: "STREAMX.DELETE", Handler: cmdSTREAMXDELETE})
-
-	router.Register(&CommandDef{Name: "EVENTX.CREATE", Handler: cmdEVENTXCREATE})
-	router.Register(&CommandDef{Name: "EVENTX.DELETE", Handler: cmdEVENTXDELETE})
-	router.Register(&CommandDef{Name: "EVENTX.EMIT", Handler: cmdEVENTXEMIT})
-	router.Register(&CommandDef{Name: "EVENTX.SUBSCRIBE", Handler: cmdEVENTXSUBSCRIBE})
-	router.Register(&CommandDef{Name: "EVENTX.LIST", Handler: cmdEVENTXLIST})
-
-	router.Register(&CommandDef{Name: "HOOK.CREATE", Handler: cmdHOOKCREATE})
-	router.Register(&CommandDef{Name: "HOOK.DELETE", Handler: cmdHOOKDELETE})
-	router.Register(&CommandDef{Name: "HOOK.TRIGGER", Handler: cmdHOOKTRIGGER})
-	router.Register(&CommandDef{Name: "HOOK.LIST", Handler: cmdHOOKLIST})
 
 	router.Register(&CommandDef{Name: "CACHEX.CREATE", Handler: cmdCACHEXCREATE})
 	router.Register(&CommandDef{Name: "CACHEX.DELETE", Handler: cmdCACHEXDELETE})
@@ -182,121 +136,7 @@ func RegisterAdvancedCommands2(router *Router) {
 }
 
 var (
-	transforms   = make(map[string]string)
-	transformsMu sync.RWMutex
-)
-
-func cmdTRANSFORMCREATE(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	expr := ctx.ArgString(1)
-	transformsMu.Lock()
-	transforms[name] = expr
-	transformsMu.Unlock()
-	return ctx.WriteOK()
-}
-
-func cmdTRANSFORMDELETE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	transformsMu.Lock()
-	defer transformsMu.Unlock()
-	if _, exists := transforms[name]; !exists {
-		return ctx.WriteInteger(0)
-	}
-	delete(transforms, name)
-	return ctx.WriteInteger(1)
-}
-
-func cmdTRANSFORMAPPLY(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	data := ctx.ArgString(1)
-	transformsMu.RLock()
-	expr, exists := transforms[name]
-	transformsMu.RUnlock()
-	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR transform not found"))
-	}
-	return ctx.WriteBulkString(fmt.Sprintf("transformed[%s]:%s", expr, data))
-}
-
-func cmdTRANSFORMLIST(ctx *Context) error {
-	transformsMu.RLock()
-	results := make([]*resp.Value, 0)
-	for name := range transforms {
-		results = append(results, resp.BulkString(name))
-	}
-	reply := results
-	transformsMu.RUnlock()
-	return ctx.WriteArray(reply)
-}
-
-var (
-	enrichers   = make(map[string]string)
-	enrichersMu sync.RWMutex
-)
-
-func cmdENRICHCREATE(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	source := ctx.ArgString(1)
-	enrichersMu.Lock()
-	enrichers[name] = source
-	enrichersMu.Unlock()
-	return ctx.WriteOK()
-}
-
-func cmdENRICHDELETE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	enrichersMu.Lock()
-	defer enrichersMu.Unlock()
-	if _, exists := enrichers[name]; !exists {
-		return ctx.WriteInteger(0)
-	}
-	delete(enrichers, name)
-	return ctx.WriteInteger(1)
-}
-
-func cmdENRICHAPPLY(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	data := ctx.ArgString(1)
-	enrichersMu.RLock()
-	source, exists := enrichers[name]
-	enrichersMu.RUnlock()
-	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR enricher not found"))
-	}
-	return ctx.WriteBulkString(fmt.Sprintf("enriched[%s]:%s", source, data))
-}
-
-func cmdENRICHLIST(ctx *Context) error {
-	enrichersMu.RLock()
-	results := make([]*resp.Value, 0)
-	for name := range enrichers {
-		results = append(results, resp.BulkString(name))
-	}
-	reply := results
-	enrichersMu.RUnlock()
-	return ctx.WriteArray(reply)
-}
-
-var (
-	validators   = make(map[string]string)
+	validators   = make(map[string]*regexp.Regexp)
 	validatorsMu sync.RWMutex
 )
 
@@ -305,7 +145,10 @@ func cmdVALIDATECREATE(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
-	rule := ctx.ArgString(1)
+	rule, err := regexp.Compile(ctx.ArgString(1))
+	if err != nil {
+		return ctx.WriteError(fmt.Errorf("ERR invalid validation pattern: %v", err))
+	}
 	validatorsMu.Lock()
 	validators[name] = rule
 	validatorsMu.Unlock()
@@ -331,14 +174,17 @@ func cmdVALIDATECHECK(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
-	_ = ctx.ArgString(1)
+	value := ctx.ArgString(1)
 	validatorsMu.RLock()
-	_, exists := validators[name]
+	rule, exists := validators[name]
 	validatorsMu.RUnlock()
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR validator not found"))
 	}
-	return ctx.WriteInteger(1)
+	if rule.MatchString(value) {
+		return ctx.WriteInteger(1)
+	}
+	return ctx.WriteInteger(0)
 }
 
 func cmdVALIDATELIST(ctx *Context) error {
@@ -349,90 +195,6 @@ func cmdVALIDATELIST(ctx *Context) error {
 	}
 	reply := results
 	validatorsMu.RUnlock()
-	return ctx.WriteArray(reply)
-}
-
-var (
-	jobsX    = make(map[string]*JobX)
-	jobsXMux sync.RWMutex
-)
-
-type JobX struct {
-	ID        string
-	Name      string
-	Status    string
-	CreatedAt int64
-}
-
-func cmdJOBXCREATE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	id := generateUUID()
-	jobsXMux.Lock()
-	jobsX[id] = &JobX{ID: id, Name: name, Status: "pending", CreatedAt: time.Now().UnixMilli()}
-	jobsXMux.Unlock()
-	return ctx.WriteBulkString(id)
-}
-
-func cmdJOBXDELETE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	id := ctx.ArgString(0)
-	jobsXMux.Lock()
-	defer jobsXMux.Unlock()
-	if _, exists := jobsX[id]; !exists {
-		return ctx.WriteInteger(0)
-	}
-	delete(jobsX, id)
-	return ctx.WriteInteger(1)
-}
-
-func cmdJOBXRUN(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	id := ctx.ArgString(0)
-	jobsXMux.Lock()
-	defer jobsXMux.Unlock()
-	if job, exists := jobsX[id]; exists {
-		job.Status = "completed"
-		return ctx.WriteOK()
-	}
-	return ctx.WriteError(fmt.Errorf("ERR job not found"))
-}
-
-func cmdJOBXSTATUS(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	id := ctx.ArgString(0)
-	jobsXMux.RLock()
-	job, exists := jobsX[id]
-	if !exists {
-		reply := fmt.Errorf("ERR job not found")
-		jobsXMux.RUnlock()
-		return ctx.WriteError(reply)
-	}
-	reply := []*resp.Value{
-		resp.BulkString("id"), resp.BulkString(job.ID),
-		resp.BulkString("name"), resp.BulkString(job.Name),
-		resp.BulkString("status"), resp.BulkString(job.Status),
-	}
-	jobsXMux.RUnlock()
-	return ctx.WriteArray(reply)
-}
-
-func cmdJOBXLIST(ctx *Context) error {
-	jobsXMux.RLock()
-	results := make([]*resp.Value, 0)
-	for id := range jobsX {
-		results = append(results, resp.BulkString(id))
-	}
-	reply := results
-	jobsXMux.RUnlock()
 	return ctx.WriteArray(reply)
 }
 
@@ -596,63 +358,6 @@ func cmdCONTEXTLIST(ctx *Context) error {
 }
 
 var (
-	rules   = make(map[string]string)
-	rulesMu sync.RWMutex
-)
-
-func cmdRULECREATE(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	expr := ctx.ArgString(1)
-	rulesMu.Lock()
-	rules[name] = expr
-	rulesMu.Unlock()
-	return ctx.WriteOK()
-}
-
-func cmdRULEDELETE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	rulesMu.Lock()
-	defer rulesMu.Unlock()
-	if _, exists := rules[name]; !exists {
-		return ctx.WriteInteger(0)
-	}
-	delete(rules, name)
-	return ctx.WriteInteger(1)
-}
-
-func cmdRULEEVAL(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	_ = ctx.ArgString(1)
-	rulesMu.RLock()
-	_, exists := rules[name]
-	rulesMu.RUnlock()
-	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR rule not found"))
-	}
-	return ctx.WriteInteger(1)
-}
-
-func cmdRULELIST(ctx *Context) error {
-	rulesMu.RLock()
-	results := make([]*resp.Value, 0)
-	for name := range rules {
-		results = append(results, resp.BulkString(name))
-	}
-	reply := results
-	rulesMu.RUnlock()
-	return ctx.WriteArray(reply)
-}
-
-var (
 	permits   = make(map[string]map[string]bool)
 	permitsMu sync.RWMutex
 )
@@ -685,8 +390,10 @@ func cmdPERMITREVOKE(ctx *Context) error {
 	defer permitsMu.Unlock()
 	key := user + ":" + resource + ":" + action
 	if p, exists := permits[user]; exists {
-		delete(p, key)
-		return ctx.WriteInteger(1)
+		if _, granted := p[key]; granted {
+			delete(p, key)
+			return ctx.WriteInteger(1)
+		}
 	}
 	return ctx.WriteInteger(0)
 }
@@ -812,128 +519,6 @@ func cmdGRANTLIST(ctx *Context) error {
 }
 
 var (
-	chainsX    = make(map[string]*ChainX)
-	chainsXMux sync.RWMutex
-)
-
-type ChainX struct {
-	Name  string
-	Steps []string
-}
-
-func cmdCHAINXCREATE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	chainsXMux.Lock()
-	chainsX[name] = &ChainX{Name: name, Steps: make([]string, 0)}
-	chainsXMux.Unlock()
-	return ctx.WriteOK()
-}
-
-func cmdCHAINXDELETE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	chainsXMux.Lock()
-	defer chainsXMux.Unlock()
-	if _, exists := chainsX[name]; !exists {
-		return ctx.WriteInteger(0)
-	}
-	delete(chainsX, name)
-	return ctx.WriteInteger(1)
-}
-
-func cmdCHAINXEXECUTE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	chainsXMux.RLock()
-	chain, exists := chainsX[name]
-	chainsXMux.RUnlock()
-	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR chain not found"))
-	}
-	return ctx.WriteInteger(int64(len(chain.Steps)))
-}
-
-func cmdCHAINXLIST(ctx *Context) error {
-	chainsXMux.RLock()
-	results := make([]*resp.Value, 0)
-	for name := range chainsX {
-		results = append(results, resp.BulkString(name))
-	}
-	reply := results
-	chainsXMux.RUnlock()
-	return ctx.WriteArray(reply)
-}
-
-var (
-	tasksX    = make(map[string]*TaskX)
-	tasksXMux sync.RWMutex
-)
-
-type TaskX struct {
-	ID     string
-	Name   string
-	Status string
-}
-
-func cmdTASKXCREATE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	id := generateUUID()
-	tasksXMux.Lock()
-	tasksX[id] = &TaskX{ID: id, Name: name, Status: "pending"}
-	tasksXMux.Unlock()
-	return ctx.WriteBulkString(id)
-}
-
-func cmdTASKXDELETE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	id := ctx.ArgString(0)
-	tasksXMux.Lock()
-	defer tasksXMux.Unlock()
-	if _, exists := tasksX[id]; !exists {
-		return ctx.WriteInteger(0)
-	}
-	delete(tasksX, id)
-	return ctx.WriteInteger(1)
-}
-
-func cmdTASKXRUN(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	id := ctx.ArgString(0)
-	tasksXMux.Lock()
-	defer tasksXMux.Unlock()
-	if task, exists := tasksX[id]; exists {
-		task.Status = "completed"
-		return ctx.WriteOK()
-	}
-	return ctx.WriteError(fmt.Errorf("ERR task not found"))
-}
-
-func cmdTASKXLIST(ctx *Context) error {
-	tasksXMux.RLock()
-	results := make([]*resp.Value, 0)
-	for id := range tasksX {
-		results = append(results, resp.BulkString(id))
-	}
-	reply := results
-	tasksXMux.RUnlock()
-	return ctx.WriteArray(reply)
-}
-
-var (
 	timers   = make(map[string]*Timer)
 	timersMu sync.RWMutex
 )
@@ -980,8 +565,8 @@ func cmdTIMERSTATUS(ctx *Context) error {
 	id := ctx.ArgString(0)
 	timersMu.RLock()
 	timer, exists := timers[id]
-	timersMu.RUnlock()
 	if !exists {
+		timersMu.RUnlock()
 		return ctx.WriteError(fmt.Errorf("ERR timer not found"))
 	}
 	elapsed := time.Now().UnixMilli() - timer.StartTime
@@ -989,9 +574,12 @@ func cmdTIMERSTATUS(ctx *Context) error {
 	if remaining < 0 {
 		remaining = 0
 	}
+	running := timer.Running && remaining > 0
+	timerID := timer.ID
+	timersMu.RUnlock()
 	return ctx.WriteArray([]*resp.Value{
-		resp.BulkString("id"), resp.BulkString(timer.ID),
-		resp.BulkString("running"), resp.BulkString(fmt.Sprintf("%v", timer.Running)),
+		resp.BulkString("id"), resp.BulkString(timerID),
+		resp.BulkString("running"), resp.BulkString(fmt.Sprintf("%v", running)),
 		resp.BulkString("remaining_ms"), resp.IntegerValue(remaining),
 	})
 }
@@ -1389,76 +977,6 @@ func cmdRELATIONLIST(ctx *Context) error {
 }
 
 var (
-	connectionsX    = make(map[string]*ConnectionX)
-	connectionsXMux sync.RWMutex
-)
-
-type ConnectionX struct {
-	ID        string
-	Source    string
-	Target    string
-	Status    string
-	CreatedAt int64
-}
-
-func cmdCONNECTIONXCREATE(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	source := ctx.ArgString(0)
-	target := ctx.ArgString(1)
-	id := generateUUID()
-	connectionsXMux.Lock()
-	connectionsX[id] = &ConnectionX{ID: id, Source: source, Target: target, Status: "active", CreatedAt: time.Now().UnixMilli()}
-	connectionsXMux.Unlock()
-	return ctx.WriteBulkString(id)
-}
-
-func cmdCONNECTIONXDELETE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	id := ctx.ArgString(0)
-	connectionsXMux.Lock()
-	defer connectionsXMux.Unlock()
-	if _, exists := connectionsX[id]; !exists {
-		return ctx.WriteInteger(0)
-	}
-	delete(connectionsX, id)
-	return ctx.WriteInteger(1)
-}
-
-func cmdCONNECTIONXSTATUS(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	id := ctx.ArgString(0)
-	connectionsXMux.RLock()
-	c, exists := connectionsX[id]
-	connectionsXMux.RUnlock()
-	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR connection not found"))
-	}
-	return ctx.WriteArray([]*resp.Value{
-		resp.BulkString("id"), resp.BulkString(c.ID),
-		resp.BulkString("status"), resp.BulkString(c.Status),
-		resp.BulkString("source"), resp.BulkString(c.Source),
-		resp.BulkString("target"), resp.BulkString(c.Target),
-	})
-}
-
-func cmdCONNECTIONXLIST(ctx *Context) error {
-	connectionsXMux.RLock()
-	results := make([]*resp.Value, 0)
-	for id := range connectionsX {
-		results = append(results, resp.BulkString(id))
-	}
-	reply := results
-	connectionsXMux.RUnlock()
-	return ctx.WriteArray(reply)
-}
-
-var (
 	poolsX    = make(map[string]*PoolX)
 	poolsXMux sync.RWMutex
 )
@@ -1578,8 +1096,11 @@ func cmdBUFFERXCREATE(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	size := int(parseInt64(ctx.ArgString(1)))
+	if size < 0 {
+		return ctx.WriteError(fmt.Errorf("ERR size must not be negative"))
+	}
 	buffersXMux.Lock()
-	buffersX[name] = &BufferX{Name: name, Data: make([]byte, size)}
+	buffersX[name] = &BufferX{Name: name, Data: make([]byte, 0, size)}
 	buffersXMux.Unlock()
 	return ctx.WriteOK()
 }
@@ -1698,176 +1219,6 @@ func cmdSTREAMXDELETE(ctx *Context) error {
 	}
 	delete(streamsX, name)
 	return ctx.WriteInteger(1)
-}
-
-var (
-	eventsX    = make(map[string]*EventX)
-	eventsXMux sync.RWMutex
-)
-
-type EventX struct {
-	Name        string
-	Subscribers map[string]bool
-	History     []string
-}
-
-func cmdEVENTXCREATE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	eventsXMux.Lock()
-	eventsX[name] = &EventX{Name: name, Subscribers: make(map[string]bool), History: make([]string, 0)}
-	eventsXMux.Unlock()
-	return ctx.WriteOK()
-}
-
-func cmdEVENTXDELETE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	eventsXMux.Lock()
-	defer eventsXMux.Unlock()
-	if _, exists := eventsX[name]; !exists {
-		return ctx.WriteInteger(0)
-	}
-	delete(eventsX, name)
-	return ctx.WriteInteger(1)
-}
-
-func cmdEVENTXEMIT(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	data := ctx.ArgString(1)
-	eventsXMux.Lock()
-	defer eventsXMux.Unlock()
-	if e, exists := eventsX[name]; exists {
-		e.History = append(e.History, data)
-		return ctx.WriteInteger(int64(len(e.Subscribers)))
-	}
-	return ctx.WriteError(fmt.Errorf("ERR event not found"))
-}
-
-func cmdEVENTXSUBSCRIBE(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	subscriber := ctx.ArgString(1)
-	eventsXMux.Lock()
-	defer eventsXMux.Unlock()
-	if e, exists := eventsX[name]; exists {
-		e.Subscribers[subscriber] = true
-		return ctx.WriteOK()
-	}
-	return ctx.WriteError(fmt.Errorf("ERR event not found"))
-}
-
-func cmdEVENTXLIST(ctx *Context) error {
-	eventsXMux.RLock()
-	results := make([]*resp.Value, 0)
-	for name := range eventsX {
-		results = append(results, resp.BulkString(name))
-	}
-	reply := results
-	eventsXMux.RUnlock()
-	return ctx.WriteArray(reply)
-}
-
-var (
-	hooks   = make(map[string]*Hook)
-	hooksMu sync.RWMutex
-)
-
-type Hook struct {
-	ID      string
-	Name    string
-	Trigger string
-	Action  string
-}
-
-func cmdHOOKCREATE(ctx *Context) error {
-	if ctx.ArgCount() < 3 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	trigger := ctx.ArgString(1)
-	action := ctx.ArgString(2)
-	id := generateUUID()
-	hooksMu.Lock()
-	hooks[id] = &Hook{ID: id, Name: name, Trigger: trigger, Action: action}
-	hooksMu.Unlock()
-	return ctx.WriteBulkString(id)
-}
-
-func cmdHOOKDELETE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	id := ctx.ArgString(0)
-	hooksMu.Lock()
-	defer hooksMu.Unlock()
-	if _, exists := hooks[id]; !exists {
-		return ctx.WriteInteger(0)
-	}
-	delete(hooks, id)
-	return ctx.WriteInteger(1)
-}
-
-func cmdHOOKTRIGGER(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	id := ctx.ArgString(0)
-	hooksMu.RLock()
-	hook, exists := hooks[id]
-	hooksMu.RUnlock()
-	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR hook not found"))
-	}
-	return ctx.WriteArray([]*resp.Value{
-		resp.BulkString("id"), resp.BulkString(hook.ID),
-		resp.BulkString("action"), resp.BulkString(hook.Action),
-	})
-}
-
-func cmdHOOKLIST(ctx *Context) error {
-	hooksMu.RLock()
-	results := make([]*resp.Value, 0)
-	for id := range hooks {
-		results = append(results, resp.BulkString(id))
-	}
-	reply := results
-	hooksMu.RUnlock()
-	return ctx.WriteArray(reply)
-}
-
-type Middleware struct {
-	ID     string
-	Name   string
-	Before string
-	After  string
-}
-
-type Interceptor struct {
-	ID      string
-	Name    string
-	Pattern string
-}
-
-type Guard struct {
-	ID        string
-	Name      string
-	Condition string
-}
-
-type Proxy struct {
-	ID     string
-	Name   string
-	Target string
 }
 
 var (
@@ -2170,12 +1521,6 @@ func cmdVIEWLIST(ctx *Context) error {
 	reply := results
 	viewsMu.RUnlock()
 	return ctx.WriteArray(reply)
-}
-
-type Report struct {
-	ID       string
-	Name     string
-	Template string
 }
 
 var (
@@ -2529,10 +1874,4 @@ func cmdPROFILELIST(ctx *Context) error {
 	reply := results
 	profilesMu.RUnlock()
 	return ctx.WriteArray(reply)
-}
-
-type RoleX struct {
-	ID          string
-	Name        string
-	Permissions []string
 }

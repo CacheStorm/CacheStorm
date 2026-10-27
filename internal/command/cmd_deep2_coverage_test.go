@@ -234,42 +234,6 @@ func TestDeep2_CacheRefresh(t *testing.T) {
 	}
 }
 
-func TestDeep2_NetWhois(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("NET.WHOIS", bytesArgs("example.com"), s)
-	if err := cmdNETWHOIS(ctx); err != nil {
-		t.Fatal(err)
-	}
-	ctx2 := discardCtx("NET.WHOIS", bytesArgs(), s)
-	if err := cmdNETWHOIS(ctx2); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestDeep2_NetDNS(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("NET.DNS", bytesArgs("example.com"), s)
-	if err := cmdNETDNS(ctx); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestDeep2_NetPing(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("NET.PING", bytesArgs("127.0.0.1"), s)
-	if err := cmdNETPING(ctx); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestDeep2_NetPort(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("NET.PORT", bytesArgs("127.0.0.1", "80"), s)
-	if err := cmdNETPORT(ctx); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestDeep2_ArrayPush(t *testing.T) {
 	s := store.NewStore()
 	ctx := discardCtx("ARRAY.PUSH", bytesArgs("arr1", "a", "b", "c"), s)
@@ -397,20 +361,6 @@ func TestDeep2_ArrayUnique(t *testing.T) {
 	// nonexistent
 	ctx3 := discardCtx("ARRAY.UNIQUE", bytesArgs("nonexistent"), s)
 	if err := cmdARRAYUNIQUE(ctx3); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestDeep2_ArrayFlatten(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("ARRAY.PUSH", bytesArgs("arrflat1", "a", "b"), s)
-	cmdARRAYPUSH(ctx)
-	ctx2 := discardCtx("ARRAY.FLATTEN", bytesArgs("arrflat1"), s)
-	if err := cmdARRAYFLATTEN(ctx2); err != nil {
-		t.Fatal(err)
-	}
-	ctx3 := discardCtx("ARRAY.FLATTEN", bytesArgs("nonexistent"), s)
-	if err := cmdARRAYFLATTEN(ctx3); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -745,24 +695,6 @@ func TestDeep2_MsgpackEncodeDecode(t *testing.T) {
 	// Bad data
 	ctx3 := discardCtx("MSGPACK.DECODE", [][]byte{{0xFF, 0x01}}, s)
 	if err := cmdMSGPACKDECODE(ctx3); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestDeep2_BsonEncodeDecode(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("BSON.ENCODE", bytesArgs("hello"), s)
-	if err := cmdBSONENCODE(ctx); err != nil {
-		t.Fatal(err)
-	}
-	encoded := bsonEncode([]byte("hello"))
-	ctx2 := discardCtx("BSON.DECODE", [][]byte{encoded}, s)
-	if err := cmdBSONDECODE(ctx2); err != nil {
-		t.Fatal(err)
-	}
-	// Bad data
-	ctx3 := discardCtx("BSON.DECODE", [][]byte{{0x01, 0x02}}, s)
-	if err := cmdBSONDECODE(ctx3); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -1171,26 +1103,10 @@ func TestDeep2_ServerBgrewriteaof(t *testing.T) {
 	}
 }
 
-func TestDeep2_ServerSlaveof(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("SLAVEOF", bytesArgs("NO", "ONE"), s)
-	if err := cmdSLAVEOF(ctx); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestDeep2_ServerLatency(t *testing.T) {
 	s := store.NewStore()
 	ctx := discardCtx("LATENCY", bytesArgs("LATEST"), s)
 	if err := cmdLATENCY(ctx); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestDeep2_ServerStralgo(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("STRALGO", bytesArgs("LCS", "STRINGS", "ohmytext", "mynewtext"), s)
-	if err := cmdSTRALGO(ctx); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -1269,14 +1185,6 @@ func TestDeep2_ServerShutdown(t *testing.T) {
 	// Without a server to stop, SHUTDOWN answers with exactly one error.
 	if got := buf.String(); !strings.HasPrefix(got, "-ERR ") || strings.Count(got, "\r\n") != 1 {
 		t.Fatalf("SHUTDOWN wrote %q, want a single error reply", got)
-	}
-}
-
-func TestDeep2_ServerDebugSegfault(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("DEBUGSEGFAULT", bytesArgs(), s)
-	if err := cmdDEBUGSEGFAULT(ctx); err != nil {
-		t.Fatal(err)
 	}
 }
 
@@ -1420,170 +1328,9 @@ func TestDeep2_ServiceCommands(t *testing.T) {
 	}
 }
 
-func TestDeep2_HealthXCommands(t *testing.T) {
-	s := store.NewStore()
-
-	ctx := discardCtx("HEALTHX.REGISTER", bytesArgs("hcheck1", "http", "http://localhost:8080/health", "30"), s)
-	if err := cmdHEALTHXREGISTER(ctx); err != nil {
-		t.Fatal(err)
-	}
-
-	ctx = discardCtx("HEALTHX.CHECK", bytesArgs("hcheck1"), s)
-	if err := cmdHEALTHXCHECK(ctx); err != nil {
-		t.Fatal(err)
-	}
-
-	ctx = discardCtx("HEALTHX.STATUS", bytesArgs("hcheck1"), s)
-	if err := cmdHEALTHXSTATUS(ctx); err != nil {
-		t.Fatal(err)
-	}
-
-	ctx = discardCtx("HEALTHX.HISTORY", bytesArgs("hcheck1"), s)
-	if err := cmdHEALTHXHISTORY(ctx); err != nil {
-		t.Fatal(err)
-	}
-
-	ctx = discardCtx("HEALTHX.LIST", bytesArgs(), s)
-	if err := cmdHEALTHXLIST(ctx); err != nil {
-		t.Fatal(err)
-	}
-
-	ctx = discardCtx("HEALTHX.UNREGISTER", bytesArgs("hcheck1"), s)
-	if err := cmdHEALTHXUNREGISTER(ctx); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestDeep2_CronCommands(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("CRON.ADD", bytesArgs("cron1", "*/5 * * * *", "ECHO", "hello"), s)
-	if err := cmdCRONADD(ctx); err != nil {
-		t.Fatal(err)
-	}
-	ctx = discardCtx("CRON.LIST", bytesArgs(), s)
-	if err := cmdCRONLIST(ctx); err != nil {
-		t.Fatal(err)
-	}
-	ctx = discardCtx("CRON.TRIGGER", bytesArgs("cron1"), s)
-	if err := cmdCRONTRIGGER(ctx); err != nil {
-		t.Fatal(err)
-	}
-	ctx = discardCtx("CRON.PAUSE", bytesArgs("cron1"), s)
-	if err := cmdCRONPAUSE(ctx); err != nil {
-		t.Fatal(err)
-	}
-	ctx = discardCtx("CRON.RESUME", bytesArgs("cron1"), s)
-	if err := cmdCRONRESUME(ctx); err != nil {
-		t.Fatal(err)
-	}
-	ctx = discardCtx("CRON.NEXT", bytesArgs("cron1"), s)
-	if err := cmdCRONNEXT(ctx); err != nil {
-		t.Fatal(err)
-	}
-	ctx = discardCtx("CRON.HISTORY", bytesArgs("cron1"), s)
-	if err := cmdCRONHISTORY(ctx); err != nil {
-		t.Fatal(err)
-	}
-	ctx = discardCtx("CRON.REMOVE", bytesArgs("cron1"), s)
-	if err := cmdCRONREMOVE(ctx); err != nil {
-		t.Fatal(err)
-	}
-}
-
 // ======================================================================
 // MVCC COMMANDS (mvcc_commands.go)
 // ======================================================================
-
-func TestDeep2_MVCCFullCycle(t *testing.T) {
-	s := store.NewStore()
-
-	// BEGIN
-	ctx := discardCtx("MVCC.BEGIN", bytesArgs(), s)
-	if err := cmdMVCCBEGIN(ctx); err != nil {
-		t.Fatal(err)
-	}
-
-	// We need the ID, so lets use the global counter
-	id := mvccNextID
-
-	// SET
-	ctx = discardCtx("MVCC.SET", bytesArgs(intToStr(id), "mykey", "myval"), s)
-	if err := cmdMVCCSET(ctx); err != nil {
-		t.Fatal(err)
-	}
-
-	// GET
-	ctx = discardCtx("MVCC.GET", bytesArgs(intToStr(id), "mykey"), s)
-	if err := cmdMVCCGET(ctx); err != nil {
-		t.Fatal(err)
-	}
-
-	// STATUS
-	ctx = discardCtx("MVCC.STATUS", bytesArgs(intToStr(id)), s)
-	if err := cmdMVCCSTATUS(ctx); err != nil {
-		t.Fatal(err)
-	}
-
-	// COMMIT
-	ctx = discardCtx("MVCC.COMMIT", bytesArgs(intToStr(id)), s)
-	if err := cmdMVCCCOMMIT(ctx); err != nil {
-		t.Fatal(err)
-	}
-
-	// nonexistent
-	ctx = discardCtx("MVCC.STATUS", bytesArgs("99999"), s)
-	if err := cmdMVCCSTATUS(ctx); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestDeep2_MVCCRollback(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("MVCC.BEGIN", bytesArgs(), s)
-	cmdMVCCBEGIN(ctx)
-	id := mvccNextID
-
-	ctx = discardCtx("MVCC.SET", bytesArgs(intToStr(id), "k", "v"), s)
-	cmdMVCCSET(ctx)
-
-	ctx = discardCtx("MVCC.ROLLBACK", bytesArgs(intToStr(id)), s)
-	if err := cmdMVCCROLLBACK(ctx); err != nil {
-		t.Fatal(err)
-	}
-	// nonexistent
-	ctx = discardCtx("MVCC.ROLLBACK", bytesArgs("99999"), s)
-	if err := cmdMVCCROLLBACK(ctx); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestDeep2_MVCCDelete(t *testing.T) {
-	s := store.NewStore()
-	s.Set("delkey", &store.StringValue{Data: []byte("val")}, store.SetOptions{})
-
-	ctx := discardCtx("MVCC.BEGIN", bytesArgs(), s)
-	cmdMVCCBEGIN(ctx)
-	id := mvccNextID
-
-	ctx = discardCtx("MVCC.DELETE", bytesArgs(intToStr(id), "delkey"), s)
-	if err := cmdMVCCDELETE(ctx); err != nil {
-		t.Fatal(err)
-	}
-
-	ctx = discardCtx("MVCC.COMMIT", bytesArgs(intToStr(id)), s)
-	if err := cmdMVCCCOMMIT(ctx); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestDeep2_MVCCSnapshot(t *testing.T) {
-	s := store.NewStore()
-	s.Set("snapkey", &store.StringValue{Data: []byte("snapval")}, store.SetOptions{})
-	ctx := discardCtx("MVCC.SNAPSHOT", bytesArgs(), s)
-	if err := cmdMVCCSNAPSHOT(ctx); err != nil {
-		t.Fatal(err)
-	}
-}
 
 func TestDeep2_SpatialCommands(t *testing.T) {
 	s := store.NewStore()
@@ -1703,30 +1450,6 @@ func TestDeep2_ConnectionCommands(t *testing.T) {
 	}
 }
 
-func TestDeep2_PluginCommands(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("PLUGIN.LOAD", bytesArgs("plug1", "1.0"), s)
-	if err := cmdPLUGINLOAD(ctx); err != nil {
-		t.Fatal(err)
-	}
-	ctx = discardCtx("PLUGIN.LIST", bytesArgs(), s)
-	if err := cmdPLUGINLIST(ctx); err != nil {
-		t.Fatal(err)
-	}
-	ctx = discardCtx("PLUGIN.INFO", bytesArgs("plug1"), s)
-	if err := cmdPLUGININFO(ctx); err != nil {
-		t.Fatal(err)
-	}
-	ctx = discardCtx("PLUGIN.CALL", bytesArgs("plug1", "func1"), s)
-	if err := cmdPLUGINCALL(ctx); err != nil {
-		t.Fatal(err)
-	}
-	ctx = discardCtx("PLUGIN.UNLOAD", bytesArgs("plug1"), s)
-	if err := cmdPLUGINUNLOAD(ctx); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestDeep2_RollupCommands(t *testing.T) {
 	s := store.NewStore()
 	ctx := discardCtx("ROLLUP.CREATE", bytesArgs("roll1", "60"), s)
@@ -1837,50 +1560,6 @@ func TestDeep2_EventClear(t *testing.T) {
 	s := store.NewStore()
 	ctx := discardCtx("EVENT.CLEAR", bytesArgs(), s)
 	if err := cmdEVENTCLEAR(ctx); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestDeep2_WebhookCommands(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("WEBHOOK.CREATE", bytesArgs("wh1", "http://example.com", "POST", "evt1"), s)
-	if err := cmdWEBHOOKCREATE(ctx); err != nil {
-		t.Fatal(err)
-	}
-	ctx = discardCtx("WEBHOOK.GET", bytesArgs("wh1"), s)
-	if err := cmdWEBHOOKGET(ctx); err != nil {
-		t.Fatal(err)
-	}
-	ctx = discardCtx("WEBHOOK.GET", bytesArgs("nonexistent"), s)
-	if err := cmdWEBHOOKGET(ctx); err != nil {
-		t.Fatal(err)
-	}
-	ctx = discardCtx("WEBHOOK.LIST", bytesArgs(), s)
-	if err := cmdWEBHOOKLIST(ctx); err != nil {
-		t.Fatal(err)
-	}
-	ctx = discardCtx("WEBHOOK.DISABLE", bytesArgs("wh1"), s)
-	if err := cmdWEBHOOKDISABLE(ctx); err != nil {
-		t.Fatal(err)
-	}
-	ctx = discardCtx("WEBHOOK.ENABLE", bytesArgs("wh1"), s)
-	if err := cmdWEBHOOKENABLE(ctx); err != nil {
-		t.Fatal(err)
-	}
-	ctx = discardCtx("WEBHOOK.STATS", bytesArgs("wh1"), s)
-	if err := cmdWEBHOOKSTATS(ctx); err != nil {
-		t.Fatal(err)
-	}
-	ctx = discardCtx("WEBHOOK.STATS", bytesArgs("nonexistent"), s)
-	if err := cmdWEBHOOKSTATS(ctx); err != nil {
-		t.Fatal(err)
-	}
-	ctx = discardCtx("WEBHOOK.DELETE", bytesArgs("wh1"), s)
-	if err := cmdWEBHOOKDELETE(ctx); err != nil {
-		t.Fatal(err)
-	}
-	ctx = discardCtx("WEBHOOK.DELETE", bytesArgs("nonexistent"), s)
-	if err := cmdWEBHOOKDELETE(ctx); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -2071,82 +1750,6 @@ func TestDeep2_AuditCommands(t *testing.T) {
 	}
 }
 
-func TestDeep2_FlagCommands(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("FLAG.CREATE", bytesArgs("flag1", "test flag"), s)
-	if err := cmdFLAGCREATE(ctx); err != nil {
-		t.Fatal(err)
-	}
-	ctx = discardCtx("FLAG.CREATE", bytesArgs("flag2"), s)
-	cmdFLAGCREATE(ctx)
-
-	ctx = discardCtx("FLAG.GET", bytesArgs("flag1"), s)
-	if err := cmdFLAGGET(ctx); err != nil {
-		t.Fatal(err)
-	}
-	ctx = discardCtx("FLAG.GET", bytesArgs("nonexistent"), s)
-	if err := cmdFLAGGET(ctx); err != nil {
-		t.Fatal(err)
-	}
-	ctx = discardCtx("FLAG.ENABLE", bytesArgs("flag1"), s)
-	if err := cmdFLAGENABLE(ctx); err != nil {
-		t.Fatal(err)
-	}
-	ctx = discardCtx("FLAG.ISENABLED", bytesArgs("flag1"), s)
-	if err := cmdFLAGISENABLED(ctx); err != nil {
-		t.Fatal(err)
-	}
-	ctx = discardCtx("FLAG.DISABLE", bytesArgs("flag1"), s)
-	if err := cmdFLAGDISABLE(ctx); err != nil {
-		t.Fatal(err)
-	}
-	ctx = discardCtx("FLAG.TOGGLE", bytesArgs("flag1"), s)
-	if err := cmdFLAGTOGGLE(ctx); err != nil {
-		t.Fatal(err)
-	}
-	ctx = discardCtx("FLAG.LIST", bytesArgs(), s)
-	if err := cmdFLAGLIST(ctx); err != nil {
-		t.Fatal(err)
-	}
-	ctx = discardCtx("FLAG.LISTENABLED", bytesArgs(), s)
-	if err := cmdFLAGLISTENABLED(ctx); err != nil {
-		t.Fatal(err)
-	}
-	ctx = discardCtx("FLAG.ADDVARIANT", bytesArgs("flag1", "color", "blue"), s)
-	if err := cmdFLAGADDVARIANT(ctx); err != nil {
-		t.Fatal(err)
-	}
-	// nonexistent flag
-	ctx = discardCtx("FLAG.ADDVARIANT", bytesArgs("nonexistent", "k", "v"), s)
-	if err := cmdFLAGADDVARIANT(ctx); err != nil {
-		t.Fatal(err)
-	}
-	ctx = discardCtx("FLAG.GETVARIANT", bytesArgs("flag1", "color"), s)
-	if err := cmdFLAGGETVARIANT(ctx); err != nil {
-		t.Fatal(err)
-	}
-	ctx = discardCtx("FLAG.GETVARIANT", bytesArgs("nonexistent", "k"), s)
-	if err := cmdFLAGGETVARIANT(ctx); err != nil {
-		t.Fatal(err)
-	}
-	ctx = discardCtx("FLAG.ADDRULE", bytesArgs("flag1", "country", "eq", "US"), s)
-	if err := cmdFLAGADDRULE(ctx); err != nil {
-		t.Fatal(err)
-	}
-	ctx = discardCtx("FLAG.ADDRULE", bytesArgs("nonexistent", "a", "b", "c"), s)
-	if err := cmdFLAGADDRULE(ctx); err != nil {
-		t.Fatal(err)
-	}
-	ctx = discardCtx("FLAG.DELETE", bytesArgs("flag1"), s)
-	if err := cmdFLAGDELETE(ctx); err != nil {
-		t.Fatal(err)
-	}
-	ctx = discardCtx("FLAG.DELETE", bytesArgs("nonexistent"), s)
-	if err := cmdFLAGDELETE(ctx); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestDeep2_CounterCommands(t *testing.T) {
 	s := store.NewStore()
 	ctx := discardCtx("COUNTER.SET", bytesArgs("cnt1", "10"), s)
@@ -2195,55 +1798,6 @@ func TestDeep2_CounterCommands(t *testing.T) {
 	}
 	ctx = discardCtx("COUNTER.DELETE", bytesArgs("cnt1"), s)
 	if err := cmdCOUNTERDELETE(ctx); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestDeep2_BackupCommands(t *testing.T) {
-	s := store.NewStore()
-	s.Set("bkkey", &store.StringValue{Data: []byte("bkval")}, store.SetOptions{})
-	ctx := discardCtx("BACKUP.CREATE", bytesArgs("bk1"), s)
-	if err := cmdBACKUPCREATE(ctx); err != nil {
-		t.Fatal(err)
-	}
-	ctx = discardCtx("BACKUP.LIST", bytesArgs(), s)
-	if err := cmdBACKUPLIST(ctx); err != nil {
-		t.Fatal(err)
-	}
-	ctx = discardCtx("BACKUP.RESTORE", bytesArgs("bk1"), s)
-	if err := cmdBACKUPRESTORE(ctx); err != nil {
-		t.Fatal(err)
-	}
-	ctx = discardCtx("BACKUP.RESTORE", bytesArgs("nonexistent"), s)
-	if err := cmdBACKUPRESTORE(ctx); err != nil {
-		t.Fatal(err)
-	}
-	ctx = discardCtx("BACKUP.DELETE", bytesArgs("bk1"), s)
-	if err := cmdBACKUPDELETE(ctx); err != nil {
-		t.Fatal(err)
-	}
-	ctx = discardCtx("BACKUP.DELETE", bytesArgs("nonexistent"), s)
-	if err := cmdBACKUPDELETE(ctx); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestDeep2_MemoryCommands(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("MEMORY.TRIM", bytesArgs(), s)
-	if err := cmdMEMORYTRIM(ctx); err != nil {
-		t.Fatal(err)
-	}
-	ctx = discardCtx("MEMORY.FRAG", bytesArgs(), s)
-	if err := cmdMEMORYFRAG(ctx); err != nil {
-		t.Fatal(err)
-	}
-	ctx = discardCtx("MEMORY.PURGE", bytesArgs(), s)
-	if err := cmdMEMORYPURGE(ctx); err != nil {
-		t.Fatal(err)
-	}
-	ctx = discardCtx("MEMORY.ALLOC", bytesArgs("1024"), s)
-	if err := cmdMEMORYALLOC(ctx); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -2349,26 +1903,6 @@ func TestDeep2_DAGCommands(t *testing.T) {
 	}
 	ctx = discardCtx("DAG.DELETE", bytesArgs("dag1"), s)
 	if err := cmdDAGDELETE(ctx); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestDeep2_ParallelCommands(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("PARALLEL.EXEC", bytesArgs("cmd1", "cmd2"), s)
-	if err := cmdPARALLELEXEC(ctx); err != nil {
-		t.Fatal(err)
-	}
-	ctx = discardCtx("PARALLEL.MAP", bytesArgs("a", "b", "c"), s)
-	if err := cmdPARALLELMAP(ctx); err != nil {
-		t.Fatal(err)
-	}
-	ctx = discardCtx("PARALLEL.REDUCE", bytesArgs("1", "2", "3"), s)
-	if err := cmdPARALLELREDUCE(ctx); err != nil {
-		t.Fatal(err)
-	}
-	ctx = discardCtx("PARALLEL.FILTER", bytesArgs("a", "b", "c"), s)
-	if err := cmdPARALLELFILTER(ctx); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -2731,27 +2265,3 @@ func TestDeep2_ExecuteQueuedDefaultCase(t *testing.T) {
 // ======================================================================
 // Helper function
 // ======================================================================
-
-func intToStr(n int64) string {
-	if n == 0 {
-		return "0"
-	}
-	neg := false
-	if n < 0 {
-		neg = true
-		n = -n
-	}
-	buf := make([]byte, 0, 20)
-	for n > 0 {
-		buf = append(buf, byte('0'+n%10))
-		n /= 10
-	}
-	if neg {
-		buf = append(buf, '-')
-	}
-	// reverse
-	for i, j := 0, len(buf)-1; i < j; i, j = i+1, j-1 {
-		buf[i], buf[j] = buf[j], buf[i]
-	}
-	return string(buf)
-}

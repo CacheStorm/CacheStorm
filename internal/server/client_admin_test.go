@@ -363,7 +363,7 @@ func TestACLCategoriesAndCommandIntrospection(t *testing.T) {
 		t.Fatalf("COMMAND INFO get = %+v", get)
 	}
 	count := admin.do("COMMAND", "COUNT").Int
-	if all := admin.do("COMMAND"); int64(len(all.Array)) != count || count < 1400 {
+	if all := admin.do("COMMAND"); int64(len(all.Array)) != count || count < 1150 {
 		t.Fatalf("COMMAND has %d entries, COMMAND COUNT says %d", len(all.Array), count)
 	}
 	if got := admin.do("COMMAND", "LIST", "FILTERBY", "ACLCAT", "hyperloglog"); len(got.Array) < 3 {

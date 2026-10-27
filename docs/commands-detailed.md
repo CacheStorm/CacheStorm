@@ -1039,33 +1039,6 @@ INVALIDATE user
 
 ---
 
-### TAGDEL
-Delete a tag (remove from all keys).
-
-```
-TAGDEL tag [tag ...]
-```
-
----
-
-### TAGEXISTS
-Check if a tag exists.
-
-```
-TAGEXISTS tag
-```
-
----
-
-### TAGTTL
-Get TTL information for a tag.
-
-```
-TAGTTL tag
-```
-
----
-
 ## Graph Commands
 
 Graph commands operate on a named property graph: labeled nodes connected by
@@ -1869,58 +1842,13 @@ RATELIMITER.CREATE name rate burst [DURATION duration]
 
 ---
 
-### RETRY.CREATE
-Create a retry policy.
-
-```
-RETRY.CREATE name maxAttempts [BACKOFF_TYPE type] [INITIAL_DELAY delay] [MAX_DELAY delay]
-```
-
----
-
 ## ML Commands
-
-### MODEL.CREATE
-Create an ML model.
-
-```
-MODEL.CREATE name type [PARAMS param value ...]
-```
-
----
-
-### MODEL.TRAIN
-Train a model.
-
-```
-MODEL.TRAIN name dataKey [PARAMS param value ...]
-```
-
----
-
-### MODEL.PREDICT
-Make a prediction.
-
-```
-MODEL.PREDICT name inputKey
-```
-
----
 
 ### EMBEDDING.CREATE
 Create an embedding index.
 
 ```
 EMBEDDING.CREATE name dimensions [METRIC metric]
-```
-
----
-
-### EMBEDDING.SEARCH
-Search embeddings.
-
-```
-EMBEDDING.SEARCH name vector [K k] [THRESHOLD threshold]
 ```
 
 ---

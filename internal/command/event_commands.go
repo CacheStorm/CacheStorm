@@ -15,14 +15,6 @@ func RegisterEventCommands(router *Router) {
 	router.Register(&CommandDef{Name: "EVENT.LIST", Handler: cmdEVENTLIST})
 	router.Register(&CommandDef{Name: "EVENT.CLEAR", Handler: cmdEVENTCLEAR})
 
-	router.Register(&CommandDef{Name: "WEBHOOK.CREATE", Handler: cmdWEBHOOKCREATE})
-	router.Register(&CommandDef{Name: "WEBHOOK.DELETE", Handler: cmdWEBHOOKDELETE})
-	router.Register(&CommandDef{Name: "WEBHOOK.GET", Handler: cmdWEBHOOKGET})
-	router.Register(&CommandDef{Name: "WEBHOOK.LIST", Handler: cmdWEBHOOKLIST})
-	router.Register(&CommandDef{Name: "WEBHOOK.ENABLE", Handler: cmdWEBHOOKENABLE})
-	router.Register(&CommandDef{Name: "WEBHOOK.DISABLE", Handler: cmdWEBHOOKDISABLE})
-	router.Register(&CommandDef{Name: "WEBHOOK.STATS", Handler: cmdWEBHOOKSTATS})
-
 	router.Register(&CommandDef{Name: "COMPRESS.RLE", Handler: cmdCOMPRESSRLE})
 	router.Register(&CommandDef{Name: "DECOMPRESS.RLE", Handler: cmdDECOMPRESSRLE})
 	router.Register(&CommandDef{Name: "COMPRESS.LZ4", Handler: cmdCOMPRESSLZ4})
@@ -111,164 +103,8 @@ func cmdEVENTLIST(ctx *Context) error {
 }
 
 func cmdEVENTCLEAR(ctx *Context) error {
-	store.GlobalEventManager.Events = make([]*store.Event, 0)
+	store.GlobalEventManager.Clear()
 	return ctx.WriteOK()
-}
-
-func cmdWEBHOOKCREATE(ctx *Context) error {
-	if ctx.ArgCount() < 3 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	id := ctx.ArgString(0)
-	url := ctx.ArgString(1)
-	method := strings.ToUpper(ctx.ArgString(2))
-	if method == "" {
-		method = "POST"
-	}
-
-	events := make([]string, 0)
-	for i := 3; i < ctx.ArgCount(); i++ {
-		events = append(events, ctx.ArgString(i))
-	}
-
-	wh := store.GlobalEventManager.CreateWebhook(id, url, method, events)
-
-	return ctx.WriteArray([]*resp.Value{
-		resp.BulkString("id"),
-		resp.BulkString(wh.ID),
-		resp.BulkString("url"),
-		resp.BulkString(wh.URL),
-		resp.BulkString("method"),
-		resp.BulkString(wh.Method),
-	})
-}
-
-func cmdWEBHOOKDELETE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	id := ctx.ArgString(0)
-
-	if store.GlobalEventManager.DeleteWebhook(id) {
-		return ctx.WriteInteger(1)
-	}
-	return ctx.WriteInteger(0)
-}
-
-func cmdWEBHOOKGET(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	id := ctx.ArgString(0)
-
-	wh, ok := store.GlobalEventManager.GetWebhook(id)
-	if !ok {
-		return ctx.WriteNull()
-	}
-
-	events := make([]*resp.Value, len(wh.Events))
-	for i, e := range wh.Events {
-		events[i] = resp.BulkString(e)
-	}
-
-	return ctx.WriteArray([]*resp.Value{
-		resp.BulkString("id"),
-		resp.BulkString(wh.ID),
-		resp.BulkString("url"),
-		resp.BulkString(wh.URL),
-		resp.BulkString("method"),
-		resp.BulkString(wh.Method),
-		resp.BulkString("events"),
-		resp.ArrayValue(events),
-		resp.BulkString("enabled"),
-		resp.BulkString(fmt.Sprintf("%v", wh.Enabled)),
-	})
-}
-
-func cmdWEBHOOKLIST(ctx *Context) error {
-	webhooks := store.GlobalEventManager.ListWebhooks()
-
-	results := make([]*resp.Value, 0)
-	for _, wh := range webhooks {
-		results = append(results,
-			resp.BulkString(wh.ID),
-			resp.BulkString(wh.URL),
-			resp.BulkString(fmt.Sprintf("%v", wh.Enabled)),
-		)
-	}
-
-	return ctx.WriteArray(results)
-}
-
-func cmdWEBHOOKENABLE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	id := ctx.ArgString(0)
-
-	if store.GlobalEventManager.EnableWebhook(id) {
-		return ctx.WriteInteger(1)
-	}
-	return ctx.WriteInteger(0)
-}
-
-func cmdWEBHOOKDISABLE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	id := ctx.ArgString(0)
-
-	if store.GlobalEventManager.DisableWebhook(id) {
-		return ctx.WriteInteger(1)
-	}
-	return ctx.WriteInteger(0)
-}
-
-func cmdWEBHOOKSTATS(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	id := ctx.ArgString(0)
-
-	wh, ok := store.GlobalEventManager.GetWebhook(id)
-	if !ok {
-		return ctx.WriteNull()
-	}
-
-	stats := wh.Stats()
-
-	results := make([]*resp.Value, 0)
-	for k, v := range stats {
-		results = append(results, resp.BulkString(k))
-		switch val := v.(type) {
-		case string:
-			results = append(results, resp.BulkString(val))
-		case int64:
-			results = append(results, resp.IntegerValue(val))
-		case []string:
-			arr := make([]*resp.Value, len(val))
-			for i, s := range val {
-				arr[i] = resp.BulkString(s)
-			}
-			results = append(results, resp.ArrayValue(arr))
-		case bool:
-			if val {
-				results = append(results, resp.BulkString("true"))
-			} else {
-				results = append(results, resp.BulkString("false"))
-			}
-		default:
-			results = append(results, resp.BulkString(fmt.Sprintf("%v", val)))
-		}
-	}
-
-	return ctx.WriteArray(results)
 }
 
 func cmdCOMPRESSRLE(ctx *Context) error {
@@ -368,13 +204,6 @@ var (
 	stacks   = make(map[string][]string)
 	stacksMu sync.RWMutex
 )
-
-type syncRWMutex struct{}
-
-func (m *syncRWMutex) Lock()    {}
-func (m *syncRWMutex) Unlock()  {}
-func (m *syncRWMutex) RLock()   {}
-func (m *syncRWMutex) RUnlock() {}
 
 func cmdQUEUECREATE(ctx *Context) error {
 	if ctx.ArgCount() < 1 {

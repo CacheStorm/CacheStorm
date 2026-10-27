@@ -121,6 +121,13 @@ func (em *EventManager) GetEvents(name string, limit int) []*Event {
 	return result
 }
 
+// Clear drops every recorded event.
+func (em *EventManager) Clear() {
+	em.mu.Lock()
+	em.Events = make([]*Event, 0)
+	em.mu.Unlock()
+}
+
 func (em *EventManager) CreateWebhook(id, url, method string, events []string) *Webhook {
 	em.mu.Lock()
 	defer em.mu.Unlock()

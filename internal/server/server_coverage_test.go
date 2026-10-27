@@ -726,7 +726,7 @@ func TestHandleExecuteDangerousCommands(t *testing.T) {
 	h := newTestHTTPServer()
 
 	dangerousCommands := []string{
-		"SHUTDOWN", "DEBUG", "DEBUGSEGFAULT", "FLUSHALL", "FLUSHDB",
+		"SHUTDOWN", "DEBUG", "FLUSHALL", "FLUSHDB",
 		"REPLICAOF", "SLAVEOF", "CLUSTER", "CONFIG", "BGREWRITEAOF",
 		"BGSAVE", "SAVE", "MONITOR", "SYNC", "PSYNC", "ACL", "MODULE",
 	}

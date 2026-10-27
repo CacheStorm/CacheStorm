@@ -741,23 +741,6 @@ func runFunction(ctx *Context, lib *Library, fn *Function, keys, args []string, 
 	return run.finish(L, tctx, err)
 }
 
-func globMatch(s, pattern string) bool {
-	if pattern == "*" {
-		return true
-	}
-	if strings.HasPrefix(pattern, "*") && strings.HasSuffix(pattern, "*") {
-		middle := pattern[1 : len(pattern)-1]
-		return strings.Contains(s, middle)
-	}
-	if strings.HasPrefix(pattern, "*") {
-		return strings.HasSuffix(s, pattern[1:])
-	}
-	if strings.HasSuffix(pattern, "*") {
-		return strings.HasPrefix(s, pattern[:len(pattern)-1])
-	}
-	return s == pattern
-}
-
 func cmdFUNCTION(ctx *Context) error {
 	if ctx.ArgCount() < 1 {
 		return ctx.WriteError(ErrWrongArgCount)
@@ -1138,18 +1121,6 @@ func fcall(ctx *Context, readOnly bool) error {
 		return ctx.WriteError(replyError("ERR Can not execute a script with write flag using *_ro command."))
 	}
 	return ctx.WriteValue(runFunction(ctx, lib, fn, keys, args, false))
-}
-
-func parseFuncInt(s string) (int64, error) {
-	var n int64
-	for _, c := range s {
-		if c >= '0' && c <= '9' {
-			n = n*10 + int64(c-'0')
-		} else {
-			return 0, fmt.Errorf("not an integer")
-		}
-	}
-	return n, nil
 }
 
 func RegisterFunctionCommands(router *Router) {

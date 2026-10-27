@@ -516,28 +516,10 @@ func TestCmdBGREWRITEAOF(t *testing.T) {
 	}
 }
 
-func TestCmdSLAVEOF(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("SLAVEOF", bytesArgs("NO", "ONE"), s)
-	err := cmdSLAVEOF(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
 func TestCmdLATENCY(t *testing.T) {
 	s := store.NewStore()
 	ctx := discardCtx("LATENCY", bytesArgs("LATEST"), s)
 	err := cmdLATENCY(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdSTRALGO(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("STRALGO", bytesArgs("LCS", "KEYS", "a", "b"), s)
-	err := cmdSTRALGO(ctx)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -565,15 +547,6 @@ func TestCmdSWAPDB(t *testing.T) {
 	s := store.NewStore()
 	ctx := discardCtx("SWAPDB", bytesArgs("0", "1"), s)
 	err := cmdSWAPDB(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdDEBUGSEGFAULT(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("DEBUGSEGFAULT", bytesArgs(), s)
-	err := cmdDEBUGSEGFAULT(ctx)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1177,16 +1150,6 @@ func TestCmdFLAGGETVARIANT_Success(t *testing.T) {
 	}
 }
 
-func TestCmdFLAGADDRULE_Success(t *testing.T) {
-	s := store.NewStore()
-	store.GlobalFeatureFlags.Create("rule-flag", "")
-	ctx := discardCtx("FLAG.ADDRULE", bytesArgs("rule-flag", "env", "eq", "prod"), s)
-	err := cmdFLAGADDRULE(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
 func TestCmdCOUNTERGET(t *testing.T) {
 	s := store.NewStore()
 	ctx := discardCtx("COUNTER.GET", bytesArgs("c1"), s)
@@ -1288,47 +1251,6 @@ func TestCmdCOUNTERRESETALL(t *testing.T) {
 	}
 }
 
-func TestCmdBACKUPCREATE_Success(t *testing.T) {
-	s := store.NewStore()
-	s.Set("k1", &store.StringValue{Data: []byte("v1")}, store.SetOptions{})
-	ctx := discardCtx("BACKUP.CREATE", bytesArgs("bk1"), s)
-	err := cmdBACKUPCREATE(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdBACKUPRESTORE_Success(t *testing.T) {
-	s := store.NewStore()
-	s.Set("k1", &store.StringValue{Data: []byte("v1")}, store.SetOptions{})
-	cctx := discardCtx("BACKUP.CREATE", bytesArgs("bk-restore"), s)
-	cmdBACKUPCREATE(cctx)
-	s.Flush()
-	ctx := discardCtx("BACKUP.RESTORE", bytesArgs("bk-restore"), s)
-	err := cmdBACKUPRESTORE(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdBACKUPLIST(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("BACKUP.LIST", bytesArgs(), s)
-	err := cmdBACKUPLIST(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdBACKUPDELETE(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("BACKUP.DELETE", bytesArgs("nonexist"), s)
-	err := cmdBACKUPDELETE(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
 func TestCmdMEMORYTRIM(t *testing.T) {
 	s := store.NewStore()
 	ctx := discardCtx("MEMORY.TRIM", bytesArgs(), s)
@@ -1356,182 +1278,13 @@ func TestCmdMEMORYPURGE(t *testing.T) {
 	}
 }
 
-func TestCmdMEMORYALLOC(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("MEMORY.ALLOC", bytesArgs("64"), s)
-	err := cmdMEMORYALLOC(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
 // =============================================================================
 // WORKFLOW COMMANDS
 // =============================================================================
 
-func TestCmdWORKFLOWCREATE_Success(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("WORKFLOW.CREATE", bytesArgs("wf1", "MyWorkflow"), s)
-	err := cmdWORKFLOWCREATE(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdWORKFLOWDELETE_Success(t *testing.T) {
-	s := store.NewStore()
-	store.GlobalWorkflowManager.Create("wf-del", "WF", nil)
-	ctx := discardCtx("WORKFLOW.DELETE", bytesArgs("wf-del"), s)
-	err := cmdWORKFLOWDELETE(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdWORKFLOWGET_Success(t *testing.T) {
-	s := store.NewStore()
-	store.GlobalWorkflowManager.Create("wf-get", "WF", nil)
-	ctx := discardCtx("WORKFLOW.GET", bytesArgs("wf-get"), s)
-	err := cmdWORKFLOWGET(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdWORKFLOWGET_Missing(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("WORKFLOW.GET", bytesArgs("nosuch"), s)
-	err := cmdWORKFLOWGET(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdWORKFLOWLIST(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("WORKFLOW.LIST", bytesArgs(), s)
-	err := cmdWORKFLOWLIST(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdWORKFLOWSTART_Success(t *testing.T) {
-	s := store.NewStore()
-	store.GlobalWorkflowManager.Create("wf-start", "WF", []store.WorkflowStep{{ID: "s1", Name: "step1", Command: "cmd"}})
-	ctx := discardCtx("WORKFLOW.START", bytesArgs("wf-start"), s)
-	err := cmdWORKFLOWSTART(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdWORKFLOWPAUSE_Success(t *testing.T) {
-	s := store.NewStore()
-	store.GlobalWorkflowManager.Create("wf-pause", "WF", []store.WorkflowStep{{ID: "s1", Name: "step1", Command: "cmd"}})
-	store.GlobalWorkflowManager.Start("wf-pause")
-	ctx := discardCtx("WORKFLOW.PAUSE", bytesArgs("wf-pause"), s)
-	err := cmdWORKFLOWPAUSE(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdWORKFLOWCOMPLETE_Success(t *testing.T) {
-	s := store.NewStore()
-	store.GlobalWorkflowManager.Create("wf-comp", "WF", []store.WorkflowStep{{ID: "s1", Name: "step1", Command: "cmd"}})
-	store.GlobalWorkflowManager.Start("wf-comp")
-	ctx := discardCtx("WORKFLOW.COMPLETE", bytesArgs("wf-comp"), s)
-	err := cmdWORKFLOWCOMPLETE(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdWORKFLOWFAIL_Success(t *testing.T) {
-	s := store.NewStore()
-	store.GlobalWorkflowManager.Create("wf-fail", "WF", []store.WorkflowStep{{ID: "s1", Name: "step1", Command: "cmd"}})
-	store.GlobalWorkflowManager.Start("wf-fail")
-	ctx := discardCtx("WORKFLOW.FAIL", bytesArgs("wf-fail", "something broke"), s)
-	err := cmdWORKFLOWFAIL(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdWORKFLOWRESET_Success(t *testing.T) {
-	s := store.NewStore()
-	store.GlobalWorkflowManager.Create("wf-reset", "WF", nil)
-	ctx := discardCtx("WORKFLOW.RESET", bytesArgs("wf-reset"), s)
-	err := cmdWORKFLOWRESET(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdWORKFLOWSETVAR_Success(t *testing.T) {
-	s := store.NewStore()
-	store.GlobalWorkflowManager.Create("wf-var", "WF", nil)
-	ctx := discardCtx("WORKFLOW.SETVAR", bytesArgs("wf-var", "key1", "val1"), s)
-	err := cmdWORKFLOWSETVAR(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdWORKFLOWGETVAR_Success(t *testing.T) {
-	s := store.NewStore()
-	store.GlobalWorkflowManager.Create("wf-gv", "WF", nil)
-	store.GlobalWorkflowManager.SetVariable("wf-gv", "k1", "v1")
-	ctx := discardCtx("WORKFLOW.GETVAR", bytesArgs("wf-gv", "k1"), s)
-	err := cmdWORKFLOWGETVAR(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
 // =============================================================================
 // TEMPLATE COMMANDS (workflow templates)
 // =============================================================================
-
-func TestCmdTEMPLATECREATE_Success(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("TEMPLATE.CREATE", bytesArgs("tmpl1", "0"), s)
-	err := cmdTEMPLATECREATE(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdTEMPLATEDELETE_Success(t *testing.T) {
-	s := store.NewStore()
-	store.GlobalWorkflowManager.CreateTemplate("del-tmpl", nil)
-	ctx := discardCtx("TEMPLATE.DELETE", bytesArgs("del-tmpl"), s)
-	err := cmdTEMPLATEDELETE(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdTEMPLATEGET_Success(t *testing.T) {
-	s := store.NewStore()
-	store.GlobalWorkflowManager.CreateTemplate("get-tmpl", nil)
-	ctx := discardCtx("TEMPLATE.GET", bytesArgs("get-tmpl"), s)
-	err := cmdTEMPLATEGET(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdTEMPLATEINSTANTIATE_Success(t *testing.T) {
-	s := store.NewStore()
-	store.GlobalWorkflowManager.CreateTemplate("inst-tmpl", nil)
-	ctx := discardCtx("TEMPLATE.INSTANTIATE", bytesArgs("inst-tmpl", "wf-inst"), s)
-	err := cmdTEMPLATEINSTANTIATE(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
 
 // =============================================================================
 // STATE MACHINE COMMANDS
@@ -1683,34 +1436,6 @@ func TestCmdCHAINEDDEL_Success(t *testing.T) {
 	cmdCHAINEDSET(discardCtx("CHAINED.SET", bytesArgs("root3", "path.a", "val"), s))
 	ctx := discardCtx("CHAINED.DEL", bytesArgs("root3", "path.a"), s)
 	err := cmdCHAINEDDEL(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdREACTIVEWATCH_Success(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("REACTIVE.WATCH", bytesArgs("key1", "callback1"), s)
-	err := cmdREACTIVEWATCH(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdREACTIVEUNWATCH_Success(t *testing.T) {
-	s := store.NewStore()
-	cmdREACTIVEWATCH(discardCtx("REACTIVE.WATCH", bytesArgs("unwkey", "cb1"), s))
-	ctx := discardCtx("REACTIVE.UNWATCH", bytesArgs("unwkey", "cb1"), s)
-	err := cmdREACTIVEUNWATCH(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdREACTIVETRIGGER_Success(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("REACTIVE.TRIGGER", bytesArgs("trigkey"), s)
-	err := cmdREACTIVETRIGGER(ctx)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1876,104 +1601,6 @@ func TestCmdMIGRATE_Success(t *testing.T) {
 // =============================================================================
 // SCHEDULER COMMANDS (jobs, circuits, sessions)
 // =============================================================================
-
-func TestCmdJOBCREATE_Success(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("JOB.CREATE", bytesArgs("j1", "myjob", "echo hello", "1000"), s)
-	err := cmdJOBCREATE(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdJOBDELETE_Success(t *testing.T) {
-	s := store.NewStore()
-	store.GlobalJobScheduler.Create("j-del", "myjob", "cmd", 1000)
-	ctx := discardCtx("JOB.DELETE", bytesArgs("j-del"), s)
-	err := cmdJOBDELETE(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdJOBGET_Success(t *testing.T) {
-	s := store.NewStore()
-	store.GlobalJobScheduler.Create("j-get", "myjob", "cmd", 1000)
-	ctx := discardCtx("JOB.GET", bytesArgs("j-get"), s)
-	err := cmdJOBGET(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdJOBLIST(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("JOB.LIST", bytesArgs(), s)
-	err := cmdJOBLIST(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdJOBENABLE_Success(t *testing.T) {
-	s := store.NewStore()
-	store.GlobalJobScheduler.Create("j-en", "myjob", "cmd", 1000)
-	ctx := discardCtx("JOB.ENABLE", bytesArgs("j-en"), s)
-	err := cmdJOBENABLE(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdJOBDISABLE_Success(t *testing.T) {
-	s := store.NewStore()
-	store.GlobalJobScheduler.Create("j-dis", "myjob", "cmd", 1000)
-	ctx := discardCtx("JOB.DISABLE", bytesArgs("j-dis"), s)
-	err := cmdJOBDISABLE(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdJOBRUN_Success(t *testing.T) {
-	s := store.NewStore()
-	store.GlobalJobScheduler.Create("j-run", "myjob", "echo ok", 1000)
-	ctx := discardCtx("JOB.RUN", bytesArgs("j-run"), s)
-	err := cmdJOBRUN(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdJOBSTATS_Success(t *testing.T) {
-	s := store.NewStore()
-	store.GlobalJobScheduler.Create("j-stats", "myjob", "cmd", 1000)
-	ctx := discardCtx("JOB.STATS", bytesArgs("j-stats"), s)
-	err := cmdJOBSTATS(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdJOBRESET_Success(t *testing.T) {
-	s := store.NewStore()
-	store.GlobalJobScheduler.Create("j-reset", "myjob", "cmd", 1000)
-	ctx := discardCtx("JOB.RESET", bytesArgs("j-reset"), s)
-	err := cmdJOBRESET(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdJOBUPDATE_Success(t *testing.T) {
-	s := store.NewStore()
-	store.GlobalJobScheduler.Create("j-up", "myjob", "cmd", 1000)
-	ctx := discardCtx("JOB.UPDATE", bytesArgs("j-up", "2000"), s)
-	err := cmdJOBUPDATE(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
 
 func TestCmdCIRCUITCREATE_Success(t *testing.T) {
 	s := store.NewStore()

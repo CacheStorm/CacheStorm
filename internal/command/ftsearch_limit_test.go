@@ -72,21 +72,21 @@ func TestProofFTSearchRejectsNegativeLimit(t *testing.T) {
 	r := NewRouter()
 	RegisterSearchCommands(r)
 
-	if out, panicked := runSearchCmd(s, r, "FT.CREATE", "idx", "SCHEMA", "body", "TEXT"); panicked || out != "+OK\r\n" {
+	if out, panicked := runSearchCmd(s, r, "FT.CREATE", "negative_limit_idx", "SCHEMA", "body", "TEXT"); panicked || out != "+OK\r\n" {
 		t.Fatalf("harness: FT.CREATE returned %q (panicked=%v), want +OK", out, panicked)
 	}
 	// FT.ADD's real signature is: FT.ADD <index> <docID> <score> FIELDS <name> <value>...
 	// Passing "body" in the score position made the document index the field
 	// hello="world", so the query matched nothing and CONTROL 1 failed for a
 	// harness reason rather than exposing the defect.
-	if out, panicked := runSearchCmd(s, r, "FT.ADD", "idx", "doc1", "1.0", "FIELDS", "body", "hello world"); panicked || out != "+OK\r\n" {
+	if out, panicked := runSearchCmd(s, r, "FT.ADD", "negative_limit_idx", "doc1", "1.0", "FIELDS", "body", "hello world"); panicked || out != "+OK\r\n" {
 		t.Fatalf("harness: FT.ADD returned %q (panicked=%v), want +OK", out, panicked)
 	}
 
 	// ---- CONTROL 1: a valid LIMIT still pages correctly.
 	// FT.SEARCH replies with an ARRAY whose first element is the total count,
 	// so the reply is "*N\r\n:<total>\r\n..." — not a bare integer.
-	out, panicked := runSearchCmd(s, r, "FT.SEARCH", "idx", "hello", "LIMIT", "0", "1")
+	out, panicked := runSearchCmd(s, r, "FT.SEARCH", "negative_limit_idx", "hello", "LIMIT", "0", "1")
 	if panicked {
 		t.Fatalf("CONTROL 1 broken harness: a VALID limit panicked: %s", out)
 	}
@@ -115,11 +115,11 @@ func TestProofFTSearchRejectsNegativeLimit(t *testing.T) {
 		name string
 		args []string
 	}{
-		{"negative offset", []string{"idx", "hello", "LIMIT", "-1", "1"}},
-		{"large negative offset", []string{"idx", "hello", "LIMIT", "-100", "5"}},
-		{"negative offset with negative limit", []string{"idx", "hello", "LIMIT", "-1", "-1"}},
-		{"negative limit only", []string{"idx", "hello", "LIMIT", "0", "-1"}},
-		{"mixed negative offset", []string{"idx", "hello", "NOCONTENT", "LIMIT", "-2", "3"}},
+		{"negative offset", []string{"negative_limit_idx", "hello", "LIMIT", "-1", "1"}},
+		{"large negative offset", []string{"negative_limit_idx", "hello", "LIMIT", "-100", "5"}},
+		{"negative offset with negative limit", []string{"negative_limit_idx", "hello", "LIMIT", "-1", "-1"}},
+		{"negative limit only", []string{"negative_limit_idx", "hello", "LIMIT", "0", "-1"}},
+		{"mixed negative offset", []string{"negative_limit_idx", "hello", "NOCONTENT", "LIMIT", "-2", "3"}},
 	} {
 		out, panicked := runSearchCmd(s, r, "FT.SEARCH", tc.args...)
 		if panicked {
@@ -139,7 +139,7 @@ func TestProofFTSearchRejectsNegativeLimit(t *testing.T) {
 
 	// ---- LIBRARY LEVEL: the engine itself must not panic, so no future caller
 	// of Search/SearchField can reintroduce this.
-	idx, ok := search.GetIndexManager().GetIndex("idx")
+	idx, ok := search.GetIndexManager().GetIndex("negative_limit_idx")
 	if !ok {
 		t.Fatalf("harness: index not found after FT.CREATE")
 	}

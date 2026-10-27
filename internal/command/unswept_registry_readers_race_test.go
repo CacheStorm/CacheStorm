@@ -28,7 +28,7 @@ func TestUnsweptRegistryReadersAreSynchronised(t *testing.T) {
 			register: RegisterMLCommands,
 			registryFamilyCase: registryFamilyCase{
 				name:   "tensor",
-				setup:  [][]string{{"TENSOR.CREATE", "k", "2", "3", "|", "f32"}, {"TENSOR.CREATE", "other", "2", "3", "|", "f32"}},
+				setup:  [][]string{{"TENSOR.CREATE", "k", "2", "3", "|", "1", "2", "3", "4", "5", "6"}, {"TENSOR.CREATE", "other", "2", "3", "|", "1", "2", "3", "4", "5", "6"}},
 				writer: [][]string{{"TENSOR.ADD", "k", "other"}},
 				reader: [][]string{{"TENSOR.GET", "k"}},
 			},
@@ -130,24 +130,6 @@ func TestUnsweptRegistryReadersAreSynchronised(t *testing.T) {
 				setup:  [][]string{{"COOLDOWN.SET", "k", "100000"}},
 				writer: [][]string{{"COOLDOWN.CHECK", "k"}},
 				reader: [][]string{{"COOLDOWN.CHECK", "k"}},
-			},
-		},
-		{
-			register: RegisterExtendedCommands,
-			registryFamilyCase: registryFamilyCase{
-				name:   "healthx",
-				setup:  [][]string{{"HEALTHX.REGISTER", "k", "target", "check"}},
-				writer: [][]string{{"HEALTHX.CHECK", "k"}},
-				reader: [][]string{{"HEALTHX.STATUS", "k"}},
-			},
-		},
-		{
-			register: RegisterExtendedCommands,
-			registryFamilyCase: registryFamilyCase{
-				name:   "sentinelx",
-				setup:  [][]string{{"SENTINELX.WATCH", "k", "target", "100"}},
-				writer: [][]string{{"SENTINELX.CONFIG", "k", "target", "200"}},
-				reader: [][]string{{"SENTINELX.STATUS", "k"}},
 			},
 		},
 		{

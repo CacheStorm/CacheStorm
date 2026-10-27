@@ -86,11 +86,7 @@ func TestResilienceCommandsLowCoverageBatch5(t *testing.T) {
 		name string
 		cmd  string
 		args [][]byte
-	}{
-		{"DIAGNOSTIC.RUN check", "DIAGNOSTIC.RUN", nil},
-		{"MEMORYX.FREE memory", "MEMORYX.FREE", nil},
-		{"MEMORYX.STATS memory", "MEMORYX.STATS", nil},
-	}
+	}{}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -108,12 +104,7 @@ func TestSchedulerCommandsLowCoverage(t *testing.T) {
 		name string
 		cmd  string
 		args [][]byte
-	}{
-		{"JOB.CREATE job", "JOB.CREATE", [][]byte{[]byte("job1"), []byte("* * * * *"), []byte("cmd")}},
-		{"JOB.CREATE no args", "JOB.CREATE", nil},
-		{"JOB.STATS job", "JOB.STATS", [][]byte{[]byte("job1")}},
-		{"JOB.STATS no args", "JOB.STATS", nil},
-	}
+	}{}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

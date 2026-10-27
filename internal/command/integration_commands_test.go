@@ -138,8 +138,6 @@ func TestIntegrationCommandsARRAYFullCoverage(t *testing.T) {
 		{"ARRAY.MERGE no args", "ARRAY.MERGE", nil},
 		{"ARRAY.UNIQUE", "ARRAY.UNIQUE", [][]byte{[]byte(`[1,2,2,3,3,3]`)}},
 		{"ARRAY.UNIQUE no args", "ARRAY.UNIQUE", nil},
-		{"ARRAY.FLATTEN", "ARRAY.FLATTEN", [][]byte{[]byte(`[[1,2],[3,4]]`)}},
-		{"ARRAY.FLATTEN no args", "ARRAY.FLATTEN", nil},
 		{"ARRAY.GROUP", "ARRAY.GROUP", [][]byte{[]byte(`[1,2,3,4,5]`), []byte("2")}},
 		{"ARRAY.GROUP no args", "ARRAY.GROUP", nil},
 		{"ARRAY.SLICE", "ARRAY.SLICE", [][]byte{[]byte(`[1,2,3,4,5]`), []byte("1"), []byte("3")}},
@@ -188,7 +186,6 @@ func TestIntegrationCommandsBATCHFullCoverage(t *testing.T) {
 		{"BATCH.START", "BATCH.START", nil},
 		{"BATCH.EXEC", "BATCH.EXEC", nil},
 		{"BATCH.DISCARD", "BATCH.DISCARD", nil},
-		{"BATCH.STATUS", "BATCH.STATUS", nil},
 	}
 
 	for _, tt := range tests {

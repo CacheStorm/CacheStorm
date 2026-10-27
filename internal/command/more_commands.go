@@ -40,13 +40,6 @@ func RegisterMoreCommands(router *Router) {
 	router.Register(&CommandDef{Name: "ROLLOUT.PERCENTAGE", Handler: cmdROLLOUTPERCENTAGE})
 	router.Register(&CommandDef{Name: "ROLLOUT.LIST", Handler: cmdROLLOUTLIST})
 
-	router.Register(&CommandDef{Name: "PIPELINE.CREATE", Handler: cmdPIPELINECREATE})
-	router.Register(&CommandDef{Name: "PIPELINE.ADDSTAGE", Handler: cmdPIPELINEADDSTAGE})
-	router.Register(&CommandDef{Name: "PIPELINE.EXECUTE", Handler: cmdPIPELINEEXECUTE})
-	router.Register(&CommandDef{Name: "PIPELINE.STATUS", Handler: cmdPIPELINESTATUS})
-	router.Register(&CommandDef{Name: "PIPELINE.DELETE", Handler: cmdPIPELINEDELETE})
-	router.Register(&CommandDef{Name: "PIPELINE.LIST", Handler: cmdPIPELINELIST})
-
 	router.Register(&CommandDef{Name: "ALERT.CREATE", Handler: cmdALERTCREATE})
 	router.Register(&CommandDef{Name: "ALERT.TRIGGER", Handler: cmdALERTTRIGGER})
 	router.Register(&CommandDef{Name: "ALERT.ACKNOWLEDGE", Handler: cmdALERTACKNOWLEDGE})
@@ -95,7 +88,6 @@ func RegisterMoreCommands(router *Router) {
 	router.Register(&CommandDef{Name: "METER.CREATE", Handler: cmdMETERCREATE})
 	router.Register(&CommandDef{Name: "METER.RECORD", Handler: cmdMETERRECORD})
 	router.Register(&CommandDef{Name: "METER.GET", Handler: cmdMETERGET})
-	router.Register(&CommandDef{Name: "METER.BILLING", Handler: cmdMETERBILLING})
 	router.Register(&CommandDef{Name: "METER.DELETE", Handler: cmdMETERDELETE})
 
 	router.Register(&CommandDef{Name: "TENANT.CREATE", Handler: cmdTENANTCREATE})
@@ -171,6 +163,9 @@ func cmdSLIDINGCREATE(ctx *Context) error {
 	name := ctx.ArgString(0)
 	limit := parseInt64(ctx.ArgString(1))
 	windowMs := parseInt64(ctx.ArgString(2))
+	if limit <= 0 {
+		return ctx.WriteError(fmt.Errorf("ERR limit must be positive"))
+	}
 	slidingWindowsMu.Lock()
 	slidingWindows[name] = &SlidingWindow{Name: name, Limit: limit, Window: windowMs, Entries: make([]int64, 0)}
 	slidingWindowsMu.Unlock()
@@ -291,6 +286,9 @@ func cmdBUCKETXCREATE(ctx *Context) error {
 	capacity := parseInt64(ctx.ArgString(1))
 	refill := parseInt64(ctx.ArgString(2))
 	intervalMs := parseInt64(ctx.ArgString(3))
+	if intervalMs <= 0 {
+		return ctx.WriteError(fmt.Errorf("ERR interval must be positive"))
+	}
 	bucketsXMux.Lock()
 	bucketsX[name] = &BucketX{Name: name, Capacity: capacity, Tokens: capacity, Refill: refill, Interval: intervalMs, LastCheck: time.Now().UnixMilli()}
 	bucketsXMux.Unlock()
@@ -533,6 +531,9 @@ func hashString(s string) int {
 	if h < 0 {
 		h = -h
 	}
+	if h < 0 {
+		h = 0
+	}
 	return h
 }
 
@@ -693,117 +694,10 @@ func cmdROLLOUTLIST(ctx *Context) error {
 	return ctx.WriteArray(reply)
 }
 
-var (
-	pipelines   = make(map[string]*Pipeline)
-	pipelinesMu sync.RWMutex
-)
-
 type Pipeline struct {
 	Name   string
 	Stages []string
 	Status string
-}
-
-func cmdPIPELINECREATE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	pipelinesMu.Lock()
-	pipelines[name] = &Pipeline{Name: name, Stages: make([]string, 0), Status: "idle"}
-	pipelinesMu.Unlock()
-	return ctx.WriteOK()
-}
-
-func cmdPIPELINEADDSTAGE(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	stage := ctx.ArgString(1)
-	pipelinesMu.Lock()
-	defer pipelinesMu.Unlock()
-	pipe, exists := pipelines[name]
-	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR pipeline not found"))
-	}
-	pipe.Stages = append(pipe.Stages, stage)
-	return ctx.WriteOK()
-}
-
-func cmdPIPELINEEXECUTE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	pipelinesMu.Lock()
-	defer pipelinesMu.Unlock()
-	pipe, exists := pipelines[name]
-	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR pipeline not found"))
-	}
-	pipe.Status = "completed"
-	return ctx.WriteOK()
-}
-
-func cmdPIPELINESTATUS(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	// Read the pipeline under the read lock. The lock used to be released
-	// right after the lookup, so the Status string and the Stages slice were
-	// read with no lock at all while PIPELINE.ADDSTAGE and PIPELINE.EXECUTE
-	// wrote them under the write lock.
-	pipelinesMu.RLock()
-	pipe, exists := pipelines[name]
-	if !exists {
-		pipelinesMu.RUnlock()
-		return ctx.WriteError(fmt.Errorf("ERR pipeline not found"))
-	}
-	pipeName := pipe.Name
-	pipeStatus := pipe.Status
-	pipeStages := int64(len(pipe.Stages))
-	pipelinesMu.RUnlock()
-
-	return ctx.WriteArray([]*resp.Value{
-		resp.BulkString("name"), resp.BulkString(pipeName),
-		resp.BulkString("status"), resp.BulkString(pipeStatus),
-		resp.BulkString("stages"), resp.IntegerValue(pipeStages),
-	})
-}
-
-func cmdPIPELINEDELETE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	pipelinesMu.Lock()
-	defer pipelinesMu.Unlock()
-	if _, exists := pipelines[name]; !exists {
-		return ctx.WriteInteger(0)
-	}
-	delete(pipelines, name)
-	return ctx.WriteInteger(1)
-}
-
-func cmdPIPELINELIST(ctx *Context) error {
-	pipelinesMu.RLock()
-	results := make([]*resp.Value, 0)
-	for name := range pipelines {
-		results = append(results, resp.BulkString(name))
-	}
-	reply := results
-	pipelinesMu.RUnlock()
-	return ctx.WriteArray(reply)
-}
-
-type Notification struct {
-	ID        string
-	Name      string
-	Type      string
-	Template  string
-	CreatedAt int64
 }
 
 var (
@@ -1634,35 +1528,6 @@ func cmdMETERGET(ctx *Context) error {
 	})
 }
 
-func cmdMETERBILLING(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	// Sum the records under the read lock. The lock used to be released right
-	// after the lookup, so the Records slice was walked with no lock at all
-	// while METER.RECORD appended to it under the write lock.
-	metersMu.RLock()
-	m, exists := meters[name]
-	if !exists {
-		metersMu.RUnlock()
-		return ctx.WriteError(fmt.Errorf("ERR meter not found"))
-	}
-	meterName := m.Name
-	meterUnit := m.Unit
-	var total int64
-	for _, v := range m.Records {
-		total += v
-	}
-	metersMu.RUnlock()
-
-	return ctx.WriteArray([]*resp.Value{
-		resp.BulkString("meter"), resp.BulkString(meterName),
-		resp.BulkString("usage"), resp.IntegerValue(total),
-		resp.BulkString("unit"), resp.BulkString(meterUnit),
-	})
-}
-
 func cmdMETERDELETE(ctx *Context) error {
 	if ctx.ArgCount() < 1 {
 		return ctx.WriteError(ErrWrongArgCount)
@@ -1987,6 +1852,9 @@ func cmdBLOOMXCREATE(ctx *Context) error {
 	name := ctx.ArgString(0)
 	size := int(parseInt64(ctx.ArgString(1)))
 	hashes := int(parseInt64(ctx.ArgString(2)))
+	if size <= 0 {
+		return ctx.WriteError(fmt.Errorf("ERR size must be positive"))
+	}
 	bloomXMux.Lock()
 	bloomX[name] = &BloomXFilter{Name: name, Size: size, Hashes: hashes, Bits: make([]bool, size)}
 	bloomXMux.Unlock()
@@ -2097,6 +1965,9 @@ func cmdSKETCHCREATE(ctx *Context) error {
 	name := ctx.ArgString(0)
 	width := int(parseInt64(ctx.ArgString(1)))
 	depth := int(parseInt64(ctx.ArgString(2)))
+	if width <= 0 || depth <= 0 {
+		return ctx.WriteError(fmt.Errorf("ERR width and depth must be positive"))
+	}
 	counts := make([][]int64, depth)
 	for i := range counts {
 		counts[i] = make([]int64, width)
@@ -2186,6 +2057,9 @@ func cmdRINGBUFFERCREATE(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	size := int(parseInt64(ctx.ArgString(1)))
+	if size <= 0 {
+		return ctx.WriteError(fmt.Errorf("ERR size must be positive"))
+	}
 	ringBuffersMu.Lock()
 	ringBuffers[name] = &RingBuffer{Name: name, Size: size, Data: make([]string, size), Head: 0, Count: 0}
 	ringBuffersMu.Unlock()
@@ -2575,6 +2449,9 @@ func cmdPARTITIONCREATE(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	count := int(parseInt64(ctx.ArgString(1)))
+	if count <= 0 {
+		return ctx.WriteError(fmt.Errorf("ERR count must be positive"))
+	}
 	partitionsMu.Lock()
 	partitions[name] = &Partition{Name: name, Count: count, Data: make([][]string, count)}
 	for i := range partitions[name].Data {

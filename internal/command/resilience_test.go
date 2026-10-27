@@ -64,8 +64,8 @@ func TestAllCommandsRegistered(t *testing.T) {
 
 	t.Logf("Total commands registered: %d", count)
 
-	if count < 1400 {
-		t.Errorf("Expected at least 1400 commands, got %d", count)
+	if count < 1100 {
+		t.Errorf("Expected at least 1100 commands, got %d", count)
 	}
 
 	_ = s
@@ -217,23 +217,6 @@ func TestWindowCommands(t *testing.T) {
 	})
 }
 
-func TestAsyncCommands(t *testing.T) {
-	s := store.NewStore()
-	router := NewRouter()
-	RegisterResilienceCommands(router)
-
-	t.Run("ASYNC.SUBMIT", func(t *testing.T) {
-		ctx := newTestContextX("ASYNC.SUBMIT", [][]byte{[]byte("task")}, s)
-		handler, ok := router.Get("ASYNC.SUBMIT")
-		if !ok {
-			t.Fatal("ASYNC.SUBMIT not found")
-		}
-		if err := handler.Handler(ctx); err != nil {
-			t.Errorf("ASYNC.SUBMIT error: %v", err)
-		}
-	})
-}
-
 func TestLockCommands(t *testing.T) {
 	s := store.NewStore()
 	router := NewRouter()
@@ -313,74 +296,6 @@ func TestBackpressureCommands(t *testing.T) {
 	})
 }
 
-func TestBatchCommands(t *testing.T) {
-	s := store.NewStore()
-	router := NewRouter()
-	RegisterResilienceCommands(router)
-
-	t.Run("BATCHX.CREATE", func(t *testing.T) {
-		ctx := newTestContextX("BATCHX.CREATE", [][]byte{[]byte("batch1")}, s)
-		handler, ok := router.Get("BATCHX.CREATE")
-		if !ok {
-			t.Fatal("BATCHX.CREATE not found")
-		}
-		if err := handler.Handler(ctx); err != nil {
-			t.Errorf("BATCHX.CREATE error: %v", err)
-		}
-	})
-}
-
-func TestPipelineCommands(t *testing.T) {
-	s := store.NewStore()
-	router := NewRouter()
-	RegisterResilienceCommands(router)
-
-	t.Run("PIPELINEX.START", func(t *testing.T) {
-		ctx := newTestContextX("PIPELINEX.START", [][]byte{}, s)
-		handler, ok := router.Get("PIPELINEX.START")
-		if !ok {
-			t.Fatal("PIPELINEX.START not found")
-		}
-		if err := handler.Handler(ctx); err != nil {
-			t.Errorf("PIPELINEX.START error: %v", err)
-		}
-	})
-}
-
-func TestTransactionCommands(t *testing.T) {
-	s := store.NewStore()
-	router := NewRouter()
-	RegisterResilienceCommands(router)
-
-	t.Run("TRANSX.BEGIN", func(t *testing.T) {
-		ctx := newTestContextX("TRANSX.BEGIN", [][]byte{}, s)
-		handler, ok := router.Get("TRANSX.BEGIN")
-		if !ok {
-			t.Fatal("TRANSX.BEGIN not found")
-		}
-		if err := handler.Handler(ctx); err != nil {
-			t.Errorf("TRANSX.BEGIN error: %v", err)
-		}
-	})
-}
-
-func TestConpoolCommands(t *testing.T) {
-	s := store.NewStore()
-	router := NewRouter()
-	RegisterResilienceCommands(router)
-
-	t.Run("CONPOOL.CREATE", func(t *testing.T) {
-		ctx := newTestContextX("CONPOOL.CREATE", [][]byte{[]byte("dbpool"), []byte("10")}, s)
-		handler, ok := router.Get("CONPOOL.CREATE")
-		if !ok {
-			t.Fatal("CONPOOL.CREATE not found")
-		}
-		if err := handler.Handler(ctx); err != nil {
-			t.Errorf("CONPOOL.CREATE error: %v", err)
-		}
-	})
-}
-
 func TestBulkheadCommands(t *testing.T) {
 	s := store.NewStore()
 	router := NewRouter()
@@ -398,40 +313,6 @@ func TestBulkheadCommands(t *testing.T) {
 	})
 }
 
-func TestTimeoutCommands(t *testing.T) {
-	s := store.NewStore()
-	router := NewRouter()
-	RegisterResilienceCommands(router)
-
-	t.Run("TIMEOUT.CREATE", func(t *testing.T) {
-		ctx := newTestContextX("TIMEOUT.CREATE", [][]byte{[]byte("request"), []byte("5000")}, s)
-		handler, ok := router.Get("TIMEOUT.CREATE")
-		if !ok {
-			t.Fatal("TIMEOUT.CREATE not found")
-		}
-		if err := handler.Handler(ctx); err != nil {
-			t.Errorf("TIMEOUT.CREATE error: %v", err)
-		}
-	})
-}
-
-func TestRetryCommands(t *testing.T) {
-	s := store.NewStore()
-	router := NewRouter()
-	RegisterResilienceCommands(router)
-
-	t.Run("RETRY.CREATE", func(t *testing.T) {
-		ctx := newTestContextX("RETRY.CREATE", [][]byte{[]byte("operation"), []byte("3"), []byte("100")}, s)
-		handler, ok := router.Get("RETRY.CREATE")
-		if !ok {
-			t.Fatal("RETRY.CREATE not found")
-		}
-		if err := handler.Handler(ctx); err != nil {
-			t.Errorf("RETRY.CREATE error: %v", err)
-		}
-	})
-}
-
 func TestTelemetryCommands(t *testing.T) {
 	s := store.NewStore()
 	router := NewRouter()
@@ -445,23 +326,6 @@ func TestTelemetryCommands(t *testing.T) {
 		}
 		if err := handler.Handler(ctx); err != nil {
 			t.Errorf("TELEMETRY.RECORD error: %v", err)
-		}
-	})
-}
-
-func TestObservableCommands(t *testing.T) {
-	s := store.NewStore()
-	router := NewRouter()
-	RegisterResilienceCommands(router)
-
-	t.Run("OBSERVABLE.CREATE", func(t *testing.T) {
-		ctx := newTestContextX("OBSERVABLE.CREATE", [][]byte{}, s)
-		handler, ok := router.Get("OBSERVABLE.CREATE")
-		if !ok {
-			t.Fatal("OBSERVABLE.CREATE not found")
-		}
-		if err := handler.Handler(ctx); err != nil {
-			t.Errorf("OBSERVABLE.CREATE error: %v", err)
 		}
 	})
 }

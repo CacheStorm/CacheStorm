@@ -4,13 +4,13 @@ This file provides guidance for AI agents working on the CacheStorm codecodebase
 
 ## Project Overview
 
-CacheStorm is a high-performance, Redis-compatible in-memory database written in Go with about 1,500 commands across 50+ modules.
+CacheStorm is a high-performance, Redis-compatible in-memory database written in Go with about 1,200 commands across 50+ modules.
 
 ## Goal
 
 - **Redis 7.4 compatibility** - measured by `tests/compat` (differential harness against real Redis; `COMPAT_RATCHET=1` gates CI)
-- **Commands** - about 1,500 registered (Redis 7.4 set plus extensions)
-- **100% test coverage and 100% success rate** - Measured 2026-10-27: **87.0% internal Go statement coverage; complete root test suite passed**
+- **Commands** - about 1,200 registered (Redis 7.4 set plus extensions)
+- **100% test coverage and 100% success rate** - Measured 2026-10-27: **86.2% internal Go statement coverage; complete root test suite passed**
 
 ## Build Commands
 
@@ -107,21 +107,21 @@ D:\Codebox\CacheStorm\
 | v0.1.24 | 1,598    | ML commands |
 | v0.1.25 | 1,606    | Redis compatibility improvements |
 | v0.1.26 | 1,578    | Bug fixes and test improvements |
-| unreleased | 1,488 | Production-readiness rounds; 116 placeholder extension commands removed (counted from the router) |
+| unreleased | 1,217 | Production-readiness rounds; 386 placeholder extension commands removed in two passes (counted from the router) |
 
 ## Test Coverage (Current)
 
 | Package | Statement coverage |
 |---------|----------|
-| command | 88.0% |
+| command | 86.9% |
 | store | 87.3% |
 | cluster | 97.7% |
-| resp | 85.0% |
+| resp | 81.4% |
 | persistence | 80.3% |
-| server | 90.0% |
+| server | 90.1% |
 | config | 91.0% |
 | replication | 49.3% own tests; 87.4% with the server's end-to-end replication tests (`-coverpkg=./internal/replication`) |
-| internal/... combined | 87.0% |
+| internal/... combined | 86.2% |
 
 Measured on 2026-10-27 with `go test ./internal/... -coverprofile=... -count=1`; per-package native Go statement instrumentation. Replication is exercised mostly through real master/replica servers in `internal/server`, which the per-package figure does not count. Redis compatibility is measured separately by `tests/compat`.
 

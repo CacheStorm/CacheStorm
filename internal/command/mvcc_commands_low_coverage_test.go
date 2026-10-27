@@ -176,23 +176,7 @@ func TestMVCCCommandsMVCC(t *testing.T) {
 		name string
 		cmd  string
 		args [][]byte
-	}{
-		{"MVCC.BEGIN no args", "MVCC.BEGIN", nil},
-		{"MVCC.BEGIN tx", "MVCC.BEGIN", [][]byte{[]byte("tx1")}},
-		{"MVCC.COMMIT no args", "MVCC.COMMIT", nil},
-		{"MVCC.COMMIT not found", "MVCC.COMMIT", [][]byte{[]byte("notfound")}},
-		{"MVCC.ROLLBACK no args", "MVCC.ROLLBACK", nil},
-		{"MVCC.ROLLBACK not found", "MVCC.ROLLBACK", [][]byte{[]byte("notfound")}},
-		{"MVCC.GET no args", "MVCC.GET", nil},
-		{"MVCC.GET not found", "MVCC.GET", [][]byte{[]byte("notfound")}},
-		{"MVCC.SET no args", "MVCC.SET", nil},
-		{"MVCC.SET missing args", "MVCC.SET", [][]byte{[]byte("key1")}},
-		{"MVCC.SET value", "MVCC.SET", [][]byte{[]byte("key1"), []byte("value1")}},
-		{"MVCC.DELETE no args", "MVCC.DELETE", nil},
-		{"MVCC.DELETE not found", "MVCC.DELETE", [][]byte{[]byte("notfound")}},
-		{"MVCC.STATUS no args", "MVCC.STATUS", nil},
-		{"MVCC.STATUS tx", "MVCC.STATUS", [][]byte{[]byte("tx1")}},
-	}
+	}{}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

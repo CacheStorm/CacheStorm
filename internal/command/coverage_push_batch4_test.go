@@ -107,8 +107,6 @@ func TestEncodingCommandsBatch4(t *testing.T) {
 		{"CBOR.DECODE empty", "CBOR.DECODE", [][]byte{[]byte("")}},
 		{"MSGPACK.ENCODE valid", "MSGPACK.ENCODE", [][]byte{[]byte(`{"key":"value"}`)}},
 		{"MSGPACK.DECODE valid", "MSGPACK.DECODE", [][]byte{[]byte("data")}},
-		{"BSON.ENCODE valid", "BSON.ENCODE", [][]byte{[]byte(`{"key":"value"}`)}},
-		{"BSON.DECODE valid", "BSON.DECODE", [][]byte{[]byte("data")}},
 		{"TIMESTAMP.PARSE valid", "TIMESTAMP.PARSE", [][]byte{[]byte("2024-01-15T10:30:00Z")}},
 		{"TIMESTAMP.PARSE invalid", "TIMESTAMP.PARSE", [][]byte{[]byte("invalid")}},
 	}
@@ -131,20 +129,11 @@ func TestExtraCommandsBatch4(t *testing.T) {
 		args [][]byte
 	}{
 		{"VECTOR_CLOCK.COMPARE both exist", "VECTOR_CLOCK.COMPARE", [][]byte{[]byte("clock1"), []byte("clock2")}},
-		{"RAFT.STATE set", "RAFT.STATE", [][]byte{[]byte("follower")}},
-		{"RAFT.LEADER set", "RAFT.LEADER", [][]byte{[]byte("node1")}},
-		{"RAFT.TERM set", "RAFT.TERM", [][]byte{[]byte("1")}},
-		{"RAFT.VOTE cast", "RAFT.VOTE", [][]byte{[]byte("node1"), []byte("1")}},
-		{"RAFT.APPEND entry", "RAFT.APPEND", [][]byte{[]byte("1"), []byte("command")}},
-		{"RAFT.COMMIT index", "RAFT.COMMIT", [][]byte{[]byte("1")}},
-		{"SHARD.MAP key hash", "SHARD.MAP", [][]byte{[]byte("key1"), []byte("hash")}},
-		{"SHARD.REBALANCE trigger", "SHARD.REBALANCE", nil},
 		{"GATEWAY.ROUTE create", "GATEWAY.ROUTE", [][]byte{[]byte("gw1"), []byte("/api"), []byte("svc1")}},
 		{"ROUTE.ADD new route", "ROUTE.ADD", [][]byte{[]byte("route1"), []byte("/path"), []byte("svc1")}},
 		{"ROUTE.REMOVE existing", "ROUTE.REMOVE", [][]byte{[]byte("route1")}},
 		{"ROUTE.MATCH path", "ROUTE.MATCH", [][]byte{[]byte("/api/test")}},
 		{"ROUTE.LIST all", "ROUTE.LIST", nil},
-		{"PROBE.CREATE health", "PROBE.CREATE", [][]byte{[]byte("probe1"), []byte("http://localhost:8080/health"), []byte("30")}},
 	}
 
 	for _, tt := range tests {

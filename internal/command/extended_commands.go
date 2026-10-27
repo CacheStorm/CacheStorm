@@ -30,22 +30,6 @@ func RegisterExtendedCommands(router *Router) {
 	router.Register(&CommandDef{Name: "SERVICE.WEIGHT", Handler: cmdSERVICEWEIGHT})
 	router.Register(&CommandDef{Name: "SERVICE.TAGS", Handler: cmdSERVICETAGS})
 
-	router.Register(&CommandDef{Name: "HEALTHX.REGISTER", Handler: cmdHEALTHXREGISTER})
-	router.Register(&CommandDef{Name: "HEALTHX.UNREGISTER", Handler: cmdHEALTHXUNREGISTER})
-	router.Register(&CommandDef{Name: "HEALTHX.CHECK", Handler: cmdHEALTHXCHECK})
-	router.Register(&CommandDef{Name: "HEALTHX.STATUS", Handler: cmdHEALTHXSTATUS})
-	router.Register(&CommandDef{Name: "HEALTHX.HISTORY", Handler: cmdHEALTHXHISTORY})
-	router.Register(&CommandDef{Name: "HEALTHX.LIST", Handler: cmdHEALTHXLIST})
-
-	router.Register(&CommandDef{Name: "CRON.ADD", Handler: cmdCRONADD})
-	router.Register(&CommandDef{Name: "CRON.REMOVE", Handler: cmdCRONREMOVE})
-	router.Register(&CommandDef{Name: "CRON.LIST", Handler: cmdCRONLIST})
-	router.Register(&CommandDef{Name: "CRON.TRIGGER", Handler: cmdCRONTRIGGER})
-	router.Register(&CommandDef{Name: "CRON.PAUSE", Handler: cmdCRONPAUSE})
-	router.Register(&CommandDef{Name: "CRON.RESUME", Handler: cmdCRONRESUME})
-	router.Register(&CommandDef{Name: "CRON.NEXT", Handler: cmdCRONNEXT})
-	router.Register(&CommandDef{Name: "CRON.HISTORY", Handler: cmdCRONHISTORY})
-
 	router.Register(&CommandDef{Name: "VECTOR.CREATE", Handler: cmdVECTORCREATE})
 	router.Register(&CommandDef{Name: "VECTOR.ADD", Handler: cmdVECTORADD})
 	router.Register(&CommandDef{Name: "VECTOR.GET", Handler: cmdVECTORGET})
@@ -68,50 +52,11 @@ func RegisterExtendedCommands(router *Router) {
 	router.Register(&CommandDef{Name: "DOC.INDEX", Handler: cmdDOCINDEX})
 	router.Register(&CommandDef{Name: "DOC.DROPINDEX", Handler: cmdDOCDROPINDEX})
 
-	router.Register(&CommandDef{Name: "TOPIC.SUBSCRIBE", Handler: cmdTOPICSUBSCRIBE})
-	router.Register(&CommandDef{Name: "TOPIC.UNSUBSCRIBE", Handler: cmdTOPICUNSUBSCRIBE})
-	router.Register(&CommandDef{Name: "TOPIC.PUBLISH", Handler: cmdTOPICPUBLISH})
-	router.Register(&CommandDef{Name: "TOPIC.SUBSCRIBERS", Handler: cmdTOPICSUBSCRIBERS})
-	router.Register(&CommandDef{Name: "TOPIC.LIST", Handler: cmdTOPICLIST})
-	router.Register(&CommandDef{Name: "TOPIC.HISTORY", Handler: cmdTOPICHISTORY})
-
-	router.Register(&CommandDef{Name: "WS.CONNECT", Handler: cmdWSCONNECT})
-	router.Register(&CommandDef{Name: "WS.DISCONNECT", Handler: cmdWSDISCONNECT})
-	router.Register(&CommandDef{Name: "WS.SEND", Handler: cmdWSSEND})
-	router.Register(&CommandDef{Name: "WS.BROADCAST", Handler: cmdWSBROADCAST})
-	router.Register(&CommandDef{Name: "WS.LIST", Handler: cmdWSLIST})
-	router.Register(&CommandDef{Name: "WS.ROOMS", Handler: cmdWSROOMS})
-	router.Register(&CommandDef{Name: "WS.JOIN", Handler: cmdWSJOIN})
-	router.Register(&CommandDef{Name: "WS.LEAVE", Handler: cmdWSLEAVE})
-
 	router.Register(&CommandDef{Name: "LEADER.ELECT", Handler: cmdLEADERELECT})
 	router.Register(&CommandDef{Name: "LEADER.RENEW", Handler: cmdLEADERRENEW})
 	router.Register(&CommandDef{Name: "LEADER.RESIGN", Handler: cmdLEADERRESIGN})
 	router.Register(&CommandDef{Name: "LEADER.CURRENT", Handler: cmdLEADERCURRENT})
 	router.Register(&CommandDef{Name: "LEADER.HISTORY", Handler: cmdLEADERHISTORY})
-
-	router.Register(&CommandDef{Name: "MEMO.CACHE", Handler: cmdMEMOCACHE})
-	router.Register(&CommandDef{Name: "MEMO.INVALIDATE", Handler: cmdMEMOINVALIDATE})
-	router.Register(&CommandDef{Name: "MEMO.STATS", Handler: cmdMEMOSTATS})
-	router.Register(&CommandDef{Name: "MEMO.CLEAR", Handler: cmdMEMOCLEAR})
-	router.Register(&CommandDef{Name: "MEMO.WARM", Handler: cmdMEMOWARM})
-
-	router.Register(&CommandDef{Name: "SENTINELX.WATCH", Handler: cmdSENTINELXWATCH})
-	router.Register(&CommandDef{Name: "SENTINELX.UNWATCH", Handler: cmdSENTINELXUNWATCH})
-	router.Register(&CommandDef{Name: "SENTINELX.STATUS", Handler: cmdSENTINELXSTATUS})
-	router.Register(&CommandDef{Name: "SENTINELX.ALERTS", Handler: cmdSENTINELXALERTS})
-	router.Register(&CommandDef{Name: "SENTINELX.CONFIG", Handler: cmdSENTINELXCONFIG})
-
-	router.Register(&CommandDef{Name: "BACKUPX.CREATE", Handler: cmdBACKUPXCREATE})
-	router.Register(&CommandDef{Name: "BACKUPX.RESTORE", Handler: cmdBACKUPXRESTORE})
-	router.Register(&CommandDef{Name: "BACKUPX.LIST", Handler: cmdBACKUPXLIST})
-	router.Register(&CommandDef{Name: "BACKUPX.DELETE", Handler: cmdBACKUPXDELETE})
-
-	router.Register(&CommandDef{Name: "REPLAY.START", Handler: cmdREPLAYSTART})
-	router.Register(&CommandDef{Name: "REPLAY.STOP", Handler: cmdREPLAYSTOP})
-	router.Register(&CommandDef{Name: "REPLAY.STATUS", Handler: cmdREPLAYSTATUS})
-	router.Register(&CommandDef{Name: "REPLAY.SPEED", Handler: cmdREPLAYSPEED})
-	router.Register(&CommandDef{Name: "REPLAY.SEEK", Handler: cmdREPLAYSEEK})
 
 	router.Register(&CommandDef{Name: "AGG.SUM", Handler: cmdAGGSUM})
 	router.Register(&CommandDef{Name: "AGG.AVG", Handler: cmdAGGAVG})
@@ -553,22 +498,6 @@ func cmdSERVICETAGS(ctx *Context) error {
 	return ctx.WriteError(fmt.Errorf("ERR service not found"))
 }
 
-var (
-	healthChecksX    = make(map[string]*HealthCheckX)
-	healthChecksXMux sync.RWMutex
-)
-
-type HealthCheckX struct {
-	Name      string
-	Target    string
-	Type      string
-	Interval  int64
-	Timeout   int64
-	Status    string
-	LastCheck int64
-	History   []*HealthCheckResultX
-}
-
 type HealthCheckResultX struct {
 	Timestamp int64
 	Status    string
@@ -576,321 +505,10 @@ type HealthCheckResultX struct {
 	Message   string
 }
 
-func cmdHEALTHXREGISTER(ctx *Context) error {
-	if ctx.ArgCount() < 3 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	target := ctx.ArgString(1)
-	checkType := ctx.ArgString(2)
-	interval := int64(30000)
-	if ctx.ArgCount() >= 4 {
-		interval = parseInt64(ctx.ArgString(3))
-	}
-	healthChecksXMux.Lock()
-	healthChecksX[name] = &HealthCheckX{
-		Name:      name,
-		Target:    target,
-		Type:      checkType,
-		Interval:  interval,
-		Timeout:   5000,
-		Status:    "unknown",
-		LastCheck: 0,
-		History:   make([]*HealthCheckResultX, 0),
-	}
-	healthChecksXMux.Unlock()
-	return ctx.WriteOK()
-}
-
-func cmdHEALTHXUNREGISTER(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	healthChecksXMux.Lock()
-	defer healthChecksXMux.Unlock()
-	if _, exists := healthChecksX[name]; !exists {
-		return ctx.WriteInteger(0)
-	}
-	delete(healthChecksX, name)
-	return ctx.WriteInteger(1)
-}
-
-func cmdHEALTHXCHECK(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	healthChecksXMux.Lock()
-	defer healthChecksXMux.Unlock()
-	check, exists := healthChecksX[name]
-	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR health check not found"))
-	}
-	now := time.Now().UnixMilli()
-	check.LastCheck = now
-	check.Status = "healthy"
-	result := &HealthCheckResultX{
-		Timestamp: now,
-		Status:    "healthy",
-		Latency:   1,
-		Message:   "OK",
-	}
-	check.History = append(check.History, result)
-	if len(check.History) > 100 {
-		check.History = check.History[1:]
-	}
-	return ctx.WriteArray([]*resp.Value{
-		resp.BulkString("name"), resp.BulkString(check.Name),
-		resp.BulkString("status"), resp.BulkString(check.Status),
-		resp.BulkString("latency_ms"), resp.IntegerValue(result.Latency),
-	})
-}
-
-func cmdHEALTHXSTATUS(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	healthChecksXMux.RLock()
-	check, exists := healthChecksX[name]
-	if !exists {
-		reply := fmt.Errorf("ERR health check not found")
-		healthChecksXMux.RUnlock()
-		return ctx.WriteError(reply)
-	}
-	reply := []*resp.Value{
-		resp.BulkString("name"), resp.BulkString(check.Name),
-		resp.BulkString("target"), resp.BulkString(check.Target),
-		resp.BulkString("type"), resp.BulkString(check.Type),
-		resp.BulkString("status"), resp.BulkString(check.Status),
-		resp.BulkString("last_check"), resp.IntegerValue(check.LastCheck),
-	}
-	healthChecksXMux.RUnlock()
-	return ctx.WriteArray(reply)
-}
-
-func cmdHEALTHXHISTORY(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	limit := 10
-	if ctx.ArgCount() >= 2 {
-		limit = int(parseInt64(ctx.ArgString(1)))
-	}
-	healthChecksXMux.RLock()
-	check, exists := healthChecksX[name]
-	healthChecksXMux.RUnlock()
-	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR health check not found"))
-	}
-	results := make([]*resp.Value, 0)
-	start := len(check.History) - limit
-	if start < 0 {
-		start = 0
-	}
-	for i := start; i < len(check.History); i++ {
-		r := check.History[i]
-		results = append(results, resp.ArrayValue([]*resp.Value{
-			resp.BulkString("timestamp"), resp.IntegerValue(r.Timestamp),
-			resp.BulkString("status"), resp.BulkString(r.Status),
-			resp.BulkString("latency_ms"), resp.IntegerValue(r.Latency),
-			resp.BulkString("message"), resp.BulkString(r.Message),
-		}))
-	}
-	return ctx.WriteArray(results)
-}
-
-func cmdHEALTHXLIST(ctx *Context) error {
-	healthChecksXMux.RLock()
-	results := make([]*resp.Value, 0)
-	for name, check := range healthChecksX {
-		results = append(results, resp.ArrayValue([]*resp.Value{
-			resp.BulkString("name"), resp.BulkString(name),
-			resp.BulkString("status"), resp.BulkString(check.Status),
-		}))
-	}
-	reply := results
-	healthChecksXMux.RUnlock()
-	return ctx.WriteArray(reply)
-}
-
-var (
-	cronJobs   = make(map[string]*CronJob)
-	cronJobsMu sync.RWMutex
-)
-
-type CronJob struct {
-	Name    string
-	Expr    string
-	Command string
-	Status  string
-	LastRun int64
-	NextRun int64
-	History []*CronJobRun
-	Paused  bool
-}
-
 type CronJobRun struct {
 	Timestamp int64
 	Status    string
 	Output    string
-}
-
-func cmdCRONADD(ctx *Context) error {
-	if ctx.ArgCount() < 3 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	expr := ctx.ArgString(1)
-	cmd := ctx.ArgString(2)
-	cronJobsMu.Lock()
-	cronJobs[name] = &CronJob{
-		Name:    name,
-		Expr:    expr,
-		Command: cmd,
-		Status:  "active",
-		LastRun: 0,
-		NextRun: time.Now().UnixMilli() + 60000,
-		History: make([]*CronJobRun, 0),
-		Paused:  false,
-	}
-	cronJobsMu.Unlock()
-	return ctx.WriteOK()
-}
-
-func cmdCRONREMOVE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	cronJobsMu.Lock()
-	defer cronJobsMu.Unlock()
-	if _, exists := cronJobs[name]; !exists {
-		return ctx.WriteInteger(0)
-	}
-	delete(cronJobs, name)
-	return ctx.WriteInteger(1)
-}
-
-func cmdCRONLIST(ctx *Context) error {
-	cronJobsMu.RLock()
-	results := make([]*resp.Value, 0)
-	for name, job := range cronJobs {
-		results = append(results, resp.ArrayValue([]*resp.Value{
-			resp.BulkString("name"), resp.BulkString(name),
-			resp.BulkString("expr"), resp.BulkString(job.Expr),
-			resp.BulkString("status"), resp.BulkString(job.Status),
-			resp.BulkString("paused"), resp.BulkString(fmt.Sprintf("%v", job.Paused)),
-		}))
-	}
-	reply := results
-	cronJobsMu.RUnlock()
-	return ctx.WriteArray(reply)
-}
-
-func cmdCRONTRIGGER(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	cronJobsMu.Lock()
-	defer cronJobsMu.Unlock()
-	job, exists := cronJobs[name]
-	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR cron job not found"))
-	}
-	job.LastRun = time.Now().UnixMilli()
-	job.History = append(job.History, &CronJobRun{
-		Timestamp: job.LastRun,
-		Status:    "success",
-		Output:    "triggered manually",
-	})
-	if len(job.History) > 100 {
-		job.History = job.History[1:]
-	}
-	return ctx.WriteOK()
-}
-
-func cmdCRONPAUSE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	cronJobsMu.Lock()
-	defer cronJobsMu.Unlock()
-	job, exists := cronJobs[name]
-	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR cron job not found"))
-	}
-	job.Paused = true
-	job.Status = "paused"
-	return ctx.WriteOK()
-}
-
-func cmdCRONRESUME(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	cronJobsMu.Lock()
-	defer cronJobsMu.Unlock()
-	job, exists := cronJobs[name]
-	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR cron job not found"))
-	}
-	job.Paused = false
-	job.Status = "active"
-	return ctx.WriteOK()
-}
-
-func cmdCRONNEXT(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	cronJobsMu.RLock()
-	job, exists := cronJobs[name]
-	cronJobsMu.RUnlock()
-	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR cron job not found"))
-	}
-	return ctx.WriteInteger(job.NextRun)
-}
-
-func cmdCRONHISTORY(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	limit := 10
-	if ctx.ArgCount() >= 2 {
-		limit = int(parseInt64(ctx.ArgString(1)))
-	}
-	cronJobsMu.RLock()
-	job, exists := cronJobs[name]
-	if !exists {
-		reply := fmt.Errorf("ERR cron job not found")
-		cronJobsMu.RUnlock()
-		return ctx.WriteError(reply)
-	}
-	results := make([]*resp.Value, 0)
-	start := len(job.History) - limit
-	if start < 0 {
-		start = 0
-	}
-	for i := start; i < len(job.History); i++ {
-		r := job.History[i]
-		results = append(results, resp.ArrayValue([]*resp.Value{
-			resp.BulkString("timestamp"), resp.IntegerValue(r.Timestamp),
-			resp.BulkString("status"), resp.BulkString(r.Status),
-			resp.BulkString("output"), resp.BulkString(r.Output),
-		}))
-	}
-	reply := results
-	cronJobsMu.RUnlock()
-	return ctx.WriteArray(reply)
 }
 
 var (
@@ -953,6 +571,9 @@ func cmdVECTORADD(ctx *Context) error {
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR vector store not found"))
 	}
+	if dim != store.Dim || ctx.ArgCount()-3 != dim {
+		return ctx.WriteError(fmt.Errorf("ERR vector dimension mismatch: expected %d", store.Dim))
+	}
 	if store.Normalize {
 		norm := 0.0
 		for _, v := range data {
@@ -977,18 +598,20 @@ func cmdVECTORGET(ctx *Context) error {
 	id := ctx.ArgString(1)
 	vectorStoresMu.RLock()
 	store, exists := vectorStores[name]
-	vectorStoresMu.RUnlock()
 	if !exists {
+		vectorStoresMu.RUnlock()
 		return ctx.WriteError(fmt.Errorf("ERR vector store not found"))
 	}
 	vec, ok := store.Vectors[id]
 	if !ok {
+		vectorStoresMu.RUnlock()
 		return ctx.WriteNull()
 	}
 	results := make([]*resp.Value, len(vec.Data))
 	for i, v := range vec.Data {
 		results[i] = resp.BulkString(fmt.Sprintf("%.6f", v))
 	}
+	vectorStoresMu.RUnlock()
 	return ctx.WriteArray(results)
 }
 
@@ -1029,21 +652,22 @@ func cmdVECTORSEARCH(ctx *Context) error {
 	for i := 0; i < dim && i+3 < ctx.ArgCount(); i++ {
 		query[i] = parseFloatExt([]byte(ctx.ArgString(3 + i)))
 	}
-	vectorStoresMu.RLock()
-	store, exists := vectorStores[name]
-	vectorStoresMu.RUnlock()
-	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR vector store not found"))
-	}
 	type scoreResult struct {
 		ID    string
 		Score float64
 	}
-	results := make([]scoreResult, 0)
+	vectorStoresMu.RLock()
+	store, exists := vectorStores[name]
+	if !exists {
+		vectorStoresMu.RUnlock()
+		return ctx.WriteError(fmt.Errorf("ERR vector store not found"))
+	}
+	results := make([]scoreResult, 0, len(store.Vectors))
 	for id, vec := range store.Vectors {
 		score := cosineSimilarity(query, vec.Data)
 		results = append(results, scoreResult{ID: id, Score: score})
 	}
+	vectorStoresMu.RUnlock()
 	sort.Slice(results, func(i, j int) bool { return results[i].Score > results[j].Score })
 	if k > len(results) {
 		k = len(results)
@@ -1482,280 +1106,6 @@ func cmdDOCDROPINDEX(ctx *Context) error {
 }
 
 var (
-	topicSubs = make(map[string]map[string]bool)
-	topicHist = make(map[string][]*TopicMessage)
-	topicMu   sync.RWMutex
-)
-
-type TopicMessage struct {
-	ID        string
-	Topic     string
-	Message   string
-	Timestamp int64
-}
-
-func cmdTOPICSUBSCRIBE(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	topic := ctx.ArgString(0)
-	clientID := ctx.ArgString(1)
-	topicMu.Lock()
-	defer topicMu.Unlock()
-	if _, exists := topicSubs[topic]; !exists {
-		topicSubs[topic] = make(map[string]bool)
-	}
-	topicSubs[topic][clientID] = true
-	return ctx.WriteOK()
-}
-
-func cmdTOPICUNSUBSCRIBE(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	topic := ctx.ArgString(0)
-	clientID := ctx.ArgString(1)
-	topicMu.Lock()
-	defer topicMu.Unlock()
-	if subs, exists := topicSubs[topic]; exists {
-		delete(subs, clientID)
-		if len(subs) == 0 {
-			delete(topicSubs, topic)
-		}
-	}
-	return ctx.WriteOK()
-}
-
-func cmdTOPICPUBLISH(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	topic := ctx.ArgString(0)
-	message := ctx.ArgString(1)
-	topicMu.Lock()
-	defer topicMu.Unlock()
-	msg := &TopicMessage{ID: generateUUID(), Topic: topic, Message: message, Timestamp: time.Now().UnixMilli()}
-	topicHist[topic] = append(topicHist[topic], msg)
-	if len(topicHist[topic]) > 100 {
-		topicHist[topic] = topicHist[topic][1:]
-	}
-	subs := topicSubs[topic]
-	return ctx.WriteInteger(int64(len(subs)))
-}
-
-func cmdTOPICSUBSCRIBERS(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	topic := ctx.ArgString(0)
-	topicMu.RLock()
-	subs, exists := topicSubs[topic]
-	if !exists {
-		reply := []*resp.Value{}
-		topicMu.RUnlock()
-		return ctx.WriteArray(reply)
-	}
-	results := make([]*resp.Value, 0)
-	for clientID := range subs {
-		results = append(results, resp.BulkString(clientID))
-	}
-	reply := results
-	topicMu.RUnlock()
-	return ctx.WriteArray(reply)
-}
-
-func cmdTOPICLIST(ctx *Context) error {
-	topicMu.RLock()
-	results := make([]*resp.Value, 0)
-	for topic := range topicSubs {
-		results = append(results, resp.BulkString(topic))
-	}
-	reply := results
-	topicMu.RUnlock()
-	return ctx.WriteArray(reply)
-}
-
-func cmdTOPICHISTORY(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	topic := ctx.ArgString(0)
-	limit := 10
-	if ctx.ArgCount() >= 2 {
-		limit = int(parseInt64(ctx.ArgString(1)))
-	}
-	topicMu.RLock()
-	hist, exists := topicHist[topic]
-	if !exists {
-		reply := []*resp.Value{}
-		topicMu.RUnlock()
-		return ctx.WriteArray(reply)
-	}
-	start := len(hist) - limit
-	if start < 0 {
-		start = 0
-	}
-	results := make([]*resp.Value, 0)
-	for i := start; i < len(hist); i++ {
-		msg := hist[i]
-		results = append(results, resp.ArrayValue([]*resp.Value{
-			resp.BulkString("id"), resp.BulkString(msg.ID),
-			resp.BulkString("message"), resp.BulkString(msg.Message),
-			resp.BulkString("timestamp"), resp.IntegerValue(msg.Timestamp),
-		}))
-	}
-	reply := results
-	topicMu.RUnlock()
-	return ctx.WriteArray(reply)
-}
-
-var (
-	wsConns = make(map[string]*WSConnection)
-	wsRooms = make(map[string]map[string]bool)
-	wsMu    sync.RWMutex
-)
-
-type WSConnection struct {
-	ID        string
-	Rooms     []string
-	Metadata  map[string]string
-	CreatedAt int64
-}
-
-func cmdWSCONNECT(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	id := ctx.ArgString(0)
-	wsMu.Lock()
-	defer wsMu.Unlock()
-	wsConns[id] = &WSConnection{ID: id, Rooms: make([]string, 0), Metadata: make(map[string]string), CreatedAt: time.Now().UnixMilli()}
-	return ctx.WriteOK()
-}
-
-func cmdWSDISCONNECT(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	id := ctx.ArgString(0)
-	wsMu.Lock()
-	defer wsMu.Unlock()
-	if conn, exists := wsConns[id]; exists {
-		for _, room := range conn.Rooms {
-			if members, ok := wsRooms[room]; ok {
-				delete(members, id)
-				if len(members) == 0 {
-					delete(wsRooms, room)
-				}
-			}
-		}
-		delete(wsConns, id)
-	}
-	return ctx.WriteOK()
-}
-
-func cmdWSSEND(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	id := ctx.ArgString(0)
-	wsMu.RLock()
-	_, exists := wsConns[id]
-	wsMu.RUnlock()
-	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR connection not found"))
-	}
-	return ctx.WriteOK()
-}
-
-func cmdWSBROADCAST(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	room := ctx.ArgString(0)
-	wsMu.RLock()
-	members, exists := wsRooms[room]
-	if !exists {
-		reply := int64(0)
-		wsMu.RUnlock()
-		return ctx.WriteInteger(reply)
-	}
-	reply := int64(int64(len(members)))
-	wsMu.RUnlock()
-	return ctx.WriteInteger(reply)
-}
-
-func cmdWSLIST(ctx *Context) error {
-	wsMu.RLock()
-	results := make([]*resp.Value, 0)
-	for id := range wsConns {
-		results = append(results, resp.BulkString(id))
-	}
-	reply := results
-	wsMu.RUnlock()
-	return ctx.WriteArray(reply)
-}
-
-func cmdWSROOMS(ctx *Context) error {
-	wsMu.RLock()
-	results := make([]*resp.Value, 0)
-	for room := range wsRooms {
-		results = append(results, resp.BulkString(room))
-	}
-	reply := results
-	wsMu.RUnlock()
-	return ctx.WriteArray(reply)
-}
-
-func cmdWSJOIN(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	id := ctx.ArgString(0)
-	room := ctx.ArgString(1)
-	wsMu.Lock()
-	defer wsMu.Unlock()
-	conn, exists := wsConns[id]
-	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR connection not found"))
-	}
-	conn.Rooms = append(conn.Rooms, room)
-	if _, ok := wsRooms[room]; !ok {
-		wsRooms[room] = make(map[string]bool)
-	}
-	wsRooms[room][id] = true
-	return ctx.WriteOK()
-}
-
-func cmdWSLEAVE(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	id := ctx.ArgString(0)
-	room := ctx.ArgString(1)
-	wsMu.Lock()
-	defer wsMu.Unlock()
-	conn, exists := wsConns[id]
-	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR connection not found"))
-	}
-	newRooms := make([]string, 0)
-	for _, r := range conn.Rooms {
-		if r != room {
-			newRooms = append(newRooms, r)
-		}
-	}
-	conn.Rooms = newRooms
-	if members, ok := wsRooms[room]; ok {
-		delete(members, id)
-		if len(members) == 0 {
-			delete(wsRooms, room)
-		}
-	}
-	return ctx.WriteOK()
-}
-
-var (
 	leaders   = make(map[string]*LeaderElection)
 	leadersMu sync.RWMutex
 )
@@ -1855,15 +1205,17 @@ func cmdLEADERCURRENT(ctx *Context) error {
 	name := ctx.ArgString(0)
 	leadersMu.RLock()
 	election, exists := leaders[name]
-	leadersMu.RUnlock()
-	if !exists {
+	if !exists || election.Leader == "" || time.Now().UnixMilli() > election.ExpiresAt {
+		leadersMu.RUnlock()
 		return ctx.WriteNull()
 	}
-	return ctx.WriteArray([]*resp.Value{
+	reply := []*resp.Value{
 		resp.BulkString("leader"), resp.BulkString(election.Leader),
 		resp.BulkString("term"), resp.IntegerValue(election.Term),
 		resp.BulkString("expires_at"), resp.IntegerValue(election.ExpiresAt),
-	})
+	}
+	leadersMu.RUnlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdLEADERHISTORY(ctx *Context) error {
@@ -1887,275 +1239,11 @@ func cmdLEADERHISTORY(ctx *Context) error {
 	return ctx.WriteArray(reply)
 }
 
-var (
-	memoCache = make(map[string]*MemoEntry)
-	memoStats = make(map[string]int64)
-	memoMu    sync.RWMutex
-)
-
-type MemoEntry struct {
-	Key       string
-	Value     string
-	ExpiresAt int64
-	Hits      int64
-}
-
-func cmdMEMOCACHE(ctx *Context) error {
-	if ctx.ArgCount() < 3 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	key := ctx.ArgString(0)
-	value := ctx.ArgString(1)
-	ttl := parseInt64(ctx.ArgString(2))
-	memoMu.Lock()
-	defer memoMu.Unlock()
-	memoCache[key] = &MemoEntry{Key: key, Value: value, ExpiresAt: time.Now().UnixMilli() + ttl, Hits: 0}
-	memoStats["sets"]++
-	return ctx.WriteOK()
-}
-
-func cmdMEMOINVALIDATE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	key := ctx.ArgString(0)
-	memoMu.Lock()
-	defer memoMu.Unlock()
-	if _, exists := memoCache[key]; exists {
-		delete(memoCache, key)
-		return ctx.WriteInteger(1)
-	}
-	return ctx.WriteInteger(0)
-}
-
-func cmdMEMOSTATS(ctx *Context) error {
-	memoMu.RLock()
-	reply := []*resp.Value{
-		resp.BulkString("entries"), resp.IntegerValue(int64(len(memoCache))),
-		resp.BulkString("sets"), resp.IntegerValue(memoStats["sets"]),
-	}
-	memoMu.RUnlock()
-	return ctx.WriteArray(reply)
-}
-
-func cmdMEMOCLEAR(ctx *Context) error {
-	memoMu.Lock()
-	defer memoMu.Unlock()
-	count := len(memoCache)
-	memoCache = make(map[string]*MemoEntry)
-	memoStats["sets"] = 0
-	return ctx.WriteInteger(int64(count))
-}
-
-func cmdMEMOWARM(ctx *Context) error {
-	if ctx.ArgCount() < 1 || ctx.ArgCount()%2 != 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	ttl := int64(3600000)
-	memoMu.Lock()
-	defer memoMu.Unlock()
-	count := 0
-	for i := 0; i+1 < ctx.ArgCount(); i += 2 {
-		key := ctx.ArgString(i)
-		value := ctx.ArgString(i + 1)
-		memoCache[key] = &MemoEntry{Key: key, Value: value, ExpiresAt: time.Now().UnixMilli() + ttl, Hits: 0}
-		count++
-	}
-	memoStats["sets"] += int64(count)
-	return ctx.WriteInteger(int64(count))
-}
-
-var (
-	sentinelsX    = make(map[string]*SentinelWatchX)
-	sentinelsXMux sync.RWMutex
-)
-
-type SentinelWatchX struct {
-	Name      string
-	Target    string
-	Threshold int64
-	Status    string
-	Alerts    []*SentinelAlertX
-}
-
 type SentinelAlertX struct {
 	Timestamp int64
 	Value     int64
 	Message   string
 }
-
-func cmdSENTINELXWATCH(ctx *Context) error {
-	if ctx.ArgCount() < 3 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	target := ctx.ArgString(1)
-	threshold := parseInt64(ctx.ArgString(2))
-	sentinelsXMux.Lock()
-	sentinelsX[name] = &SentinelWatchX{Name: name, Target: target, Threshold: threshold, Status: "ok", Alerts: make([]*SentinelAlertX, 0)}
-	sentinelsXMux.Unlock()
-	return ctx.WriteOK()
-}
-
-func cmdSENTINELXUNWATCH(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	sentinelsXMux.Lock()
-	defer sentinelsXMux.Unlock()
-	if _, exists := sentinelsX[name]; !exists {
-		return ctx.WriteInteger(0)
-	}
-	delete(sentinelsX, name)
-	return ctx.WriteInteger(1)
-}
-
-func cmdSENTINELXSTATUS(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	sentinelsXMux.RLock()
-	watch, exists := sentinelsX[name]
-	if !exists {
-		reply := fmt.Errorf("ERR sentinel not found")
-		sentinelsXMux.RUnlock()
-		return ctx.WriteError(reply)
-	}
-	reply := []*resp.Value{
-		resp.BulkString("name"), resp.BulkString(watch.Name),
-		resp.BulkString("target"), resp.BulkString(watch.Target),
-		resp.BulkString("threshold"), resp.IntegerValue(watch.Threshold),
-		resp.BulkString("status"), resp.BulkString(watch.Status),
-	}
-	sentinelsXMux.RUnlock()
-	return ctx.WriteArray(reply)
-}
-
-func cmdSENTINELXALERTS(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	sentinelsXMux.RLock()
-	watch, exists := sentinelsX[name]
-	sentinelsXMux.RUnlock()
-	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR sentinel not found"))
-	}
-	results := make([]*resp.Value, 0)
-	for _, alert := range watch.Alerts {
-		results = append(results, resp.ArrayValue([]*resp.Value{
-			resp.BulkString("timestamp"), resp.IntegerValue(alert.Timestamp),
-			resp.BulkString("value"), resp.IntegerValue(alert.Value),
-			resp.BulkString("message"), resp.BulkString(alert.Message),
-		}))
-	}
-	return ctx.WriteArray(results)
-}
-
-func cmdSENTINELXCONFIG(ctx *Context) error {
-	if ctx.ArgCount() < 3 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	param := ctx.ArgString(1)
-	value := ctx.ArgString(2)
-	sentinelsXMux.Lock()
-	defer sentinelsXMux.Unlock()
-	watch, exists := sentinelsX[name]
-	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR sentinel not found"))
-	}
-	switch param {
-	case "threshold":
-		watch.Threshold = parseInt64(value)
-	case "target":
-		watch.Target = value
-	default:
-		return ctx.WriteError(fmt.Errorf("ERR unknown parameter"))
-	}
-	return ctx.WriteOK()
-}
-
-var (
-	backupsX    = make(map[string]*BackupX)
-	backupsXMux sync.RWMutex
-)
-
-type BackupX struct {
-	ID        string
-	Name      string
-	Type      string
-	Size      int64
-	CreatedAt int64
-}
-
-func cmdBACKUPXCREATE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	name := ctx.ArgString(0)
-	backupType := "full"
-	if ctx.ArgCount() >= 2 {
-		backupType = ctx.ArgString(1)
-	}
-	id := generateUUID()
-	backupsXMux.Lock()
-	backupsX[id] = &BackupX{ID: id, Name: name, Type: backupType, Size: 0, CreatedAt: time.Now().UnixMilli()}
-	backupsXMux.Unlock()
-	return ctx.WriteBulkString(id)
-}
-
-func cmdBACKUPXRESTORE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	id := ctx.ArgString(0)
-	backupsXMux.RLock()
-	_, exists := backupsX[id]
-	backupsXMux.RUnlock()
-	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR backup not found"))
-	}
-	return ctx.WriteOK()
-}
-
-func cmdBACKUPXLIST(ctx *Context) error {
-	backupsXMux.RLock()
-	results := make([]*resp.Value, 0)
-	for id, backup := range backupsX {
-		results = append(results, resp.ArrayValue([]*resp.Value{
-			resp.BulkString("id"), resp.BulkString(id),
-			resp.BulkString("name"), resp.BulkString(backup.Name),
-			resp.BulkString("type"), resp.BulkString(backup.Type),
-			resp.BulkString("created_at"), resp.IntegerValue(backup.CreatedAt),
-		}))
-	}
-	reply := results
-	backupsXMux.RUnlock()
-	return ctx.WriteArray(reply)
-}
-
-func cmdBACKUPXDELETE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	id := ctx.ArgString(0)
-	backupsXMux.Lock()
-	defer backupsXMux.Unlock()
-	if _, exists := backupsX[id]; !exists {
-		return ctx.WriteInteger(0)
-	}
-	delete(backupsX, id)
-	return ctx.WriteInteger(1)
-}
-
-var (
-	replays   = make(map[string]*Replay)
-	replaysMu sync.RWMutex
-)
 
 type Replay struct {
 	ID       string
@@ -2163,81 +1251,6 @@ type Replay struct {
 	Speed    float64
 	Position int64
 	Total    int64
-}
-
-func cmdREPLAYSTART(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	id := ctx.ArgString(0)
-	replaysMu.Lock()
-	replays[id] = &Replay{ID: id, Status: "running", Speed: 1.0, Position: 0, Total: 100}
-	replaysMu.Unlock()
-	return ctx.WriteOK()
-}
-
-func cmdREPLAYSTOP(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	id := ctx.ArgString(0)
-	replaysMu.Lock()
-	defer replaysMu.Unlock()
-	if replay, exists := replays[id]; exists {
-		replay.Status = "stopped"
-		return ctx.WriteOK()
-	}
-	return ctx.WriteError(fmt.Errorf("ERR replay not found"))
-}
-
-func cmdREPLAYSTATUS(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	id := ctx.ArgString(0)
-	replaysMu.RLock()
-	replay, exists := replays[id]
-	replaysMu.RUnlock()
-	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR replay not found"))
-	}
-	return ctx.WriteArray([]*resp.Value{
-		resp.BulkString("id"), resp.BulkString(replay.ID),
-		resp.BulkString("status"), resp.BulkString(replay.Status),
-		resp.BulkString("speed"), resp.BulkString(fmt.Sprintf("%.2f", replay.Speed)),
-		resp.BulkString("position"), resp.IntegerValue(replay.Position),
-		resp.BulkString("total"), resp.IntegerValue(replay.Total),
-	})
-}
-
-func cmdREPLAYSPEED(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	id := ctx.ArgString(0)
-	speed := parseFloatExt([]byte(ctx.ArgString(1)))
-	replaysMu.Lock()
-	defer replaysMu.Unlock()
-	if replay, exists := replays[id]; exists {
-		replay.Speed = speed
-		return ctx.WriteOK()
-	}
-	return ctx.WriteError(fmt.Errorf("ERR replay not found"))
-}
-
-func cmdREPLAYSEEK(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	id := ctx.ArgString(0)
-	position := parseInt64(ctx.ArgString(1))
-	replaysMu.Lock()
-	defer replaysMu.Unlock()
-	if replay, exists := replays[id]; exists {
-		replay.Position = position
-		return ctx.WriteOK()
-	}
-	return ctx.WriteError(fmt.Errorf("ERR replay not found"))
 }
 
 var (

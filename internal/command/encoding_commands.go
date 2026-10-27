@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -21,9 +22,6 @@ var encodingRand = rand.New(rand.NewSource(time.Now().UnixNano()))
 func RegisterEncodingCommands(router *Router) {
 	router.Register(&CommandDef{Name: "MSGPACK.ENCODE", Handler: cmdMSGPACKENCODE})
 	router.Register(&CommandDef{Name: "MSGPACK.DECODE", Handler: cmdMSGPACKDECODE})
-
-	router.Register(&CommandDef{Name: "BSON.ENCODE", Handler: cmdBSONENCODE})
-	router.Register(&CommandDef{Name: "BSON.DECODE", Handler: cmdBSONDECODE})
 
 	router.Register(&CommandDef{Name: "URL.ENCODE", Handler: cmdURLENCODE})
 	router.Register(&CommandDef{Name: "URL.DECODE", Handler: cmdURLDECODE})
@@ -134,53 +132,6 @@ func msgpackDecode(data []byte) ([]byte, error) {
 		return nil, fmt.Errorf("incomplete msgpack data")
 	}
 	return data[headerSize : headerSize+length], nil
-}
-
-func cmdBSONENCODE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	data := ctx.Arg(0)
-	encoded := bsonEncode(data)
-	return ctx.WriteBulkBytes(encoded)
-}
-
-func bsonEncode(data []byte) []byte {
-	length := int32(len(data) + 5)
-	result := make([]byte, 4)
-	result[0] = byte(length)
-	result[1] = byte(length >> 8)
-	result[2] = byte(length >> 16)
-	result[3] = byte(length >> 24)
-	result = append(result, 0x02)
-	result = append(result, data...)
-	result = append(result, 0x00)
-	return result
-}
-
-func cmdBSONDECODE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	data := ctx.Arg(0)
-	decoded, err := bsonDecode(data)
-	if err != nil {
-		return ctx.WriteError(err)
-	}
-	return ctx.WriteBulkBytes(decoded)
-}
-
-func bsonDecode(data []byte) ([]byte, error) {
-	if len(data) < 6 {
-		return nil, fmt.Errorf("invalid bson format")
-	}
-	length := int32(data[0]) | int32(data[1])<<8 | int32(data[2])<<16 | int32(data[3])<<24
-	if len(data) < int(length) {
-		return nil, fmt.Errorf("incomplete bson data")
-	}
-	return data[5 : length-1], nil
 }
 
 func cmdURLENCODE(ctx *Context) error {
@@ -762,6 +713,21 @@ func cmdTIMESTAMPNOW(ctx *Context) error {
 	})
 }
 
+func parseTimestampInput(input string) (time.Time, bool) {
+	if n, err := strconv.ParseInt(input, 10, 64); err == nil {
+		if len(strings.TrimLeft(input, "+-")) >= 13 {
+			return time.UnixMilli(n), true
+		}
+		return time.Unix(n, 0), true
+	}
+	for _, layout := range []string{time.RFC3339, time.DateOnly, "2006-01-02 15:04:05"} {
+		if t, err := time.Parse(layout, input); err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
+}
+
 func cmdTIMESTAMPPARSE(ctx *Context) error {
 	if ctx.ArgCount() < 1 {
 		return ctx.WriteError(ErrWrongArgCount)
@@ -769,30 +735,9 @@ func cmdTIMESTAMPPARSE(ctx *Context) error {
 
 	input := ctx.ArgString(0)
 
-	var t time.Time
-	var err error
-
-	if len(input) == 10 {
-		var unix int64
-		for _, c := range input {
-			if c >= '0' && c <= '9' {
-				unix = unix*10 + int64(c-'0')
-			}
-		}
-		t = time.Unix(unix, 0)
-	} else if len(input) == 13 {
-		var unixMilli int64
-		for _, c := range input {
-			if c >= '0' && c <= '9' {
-				unixMilli = unixMilli*10 + int64(c-'0')
-			}
-		}
-		t = time.UnixMilli(unixMilli)
-	} else {
-		t, err = time.Parse(time.RFC3339, input)
-		if err != nil {
-			return ctx.WriteError(err)
-		}
+	t, ok := parseTimestampInput(input)
+	if !ok {
+		return ctx.WriteError(fmt.Errorf("ERR invalid timestamp format"))
 	}
 
 	return ctx.WriteArray([]*resp.Value{

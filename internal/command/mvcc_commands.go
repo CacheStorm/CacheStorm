@@ -11,14 +11,6 @@ import (
 )
 
 func RegisterMVCCCommands(router *Router) {
-	router.Register(&CommandDef{Name: "MVCC.BEGIN", Handler: cmdMVCCBEGIN})
-	router.Register(&CommandDef{Name: "MVCC.COMMIT", Handler: cmdMVCCCOMMIT})
-	router.Register(&CommandDef{Name: "MVCC.ROLLBACK", Handler: cmdMVCCROLLBACK})
-	router.Register(&CommandDef{Name: "MVCC.GET", Handler: cmdMVCCGET})
-	router.Register(&CommandDef{Name: "MVCC.SET", Handler: cmdMVCCSET})
-	router.Register(&CommandDef{Name: "MVCC.DELETE", Handler: cmdMVCCDELETE})
-	router.Register(&CommandDef{Name: "MVCC.STATUS", Handler: cmdMVCCSTATUS})
-	router.Register(&CommandDef{Name: "MVCC.SNAPSHOT", Handler: cmdMVCCSNAPSHOT})
 
 	router.Register(&CommandDef{Name: "SPATIAL.CREATE", Handler: cmdSPATIALCREATE})
 	router.Register(&CommandDef{Name: "SPATIAL.ADD", Handler: cmdSPATIALADD})
@@ -49,12 +41,6 @@ func RegisterMVCCCommands(router *Router) {
 	router.Register(&CommandDef{Name: "CONNECTION.COUNT", Handler: cmdCONNECTIONCOUNT})
 	router.Register(&CommandDef{Name: "CONNECTION.INFO", Handler: cmdCONNECTIONINFO})
 
-	router.Register(&CommandDef{Name: "PLUGIN.LOAD", Handler: cmdPLUGINLOAD})
-	router.Register(&CommandDef{Name: "PLUGIN.UNLOAD", Handler: cmdPLUGINUNLOAD})
-	router.Register(&CommandDef{Name: "PLUGIN.LIST", Handler: cmdPLUGINLIST})
-	router.Register(&CommandDef{Name: "PLUGIN.CALL", Handler: cmdPLUGINCALL})
-	router.Register(&CommandDef{Name: "PLUGIN.INFO", Handler: cmdPLUGININFO})
-
 	router.Register(&CommandDef{Name: "ROLLUP.CREATE", Handler: cmdROLLUPCREATE})
 	router.Register(&CommandDef{Name: "ROLLUP.ADD", Handler: cmdROLLUPADD})
 	router.Register(&CommandDef{Name: "ROLLUP.GET", Handler: cmdROLLUPGET})
@@ -74,238 +60,11 @@ func RegisterMVCCCommands(router *Router) {
 	router.Register(&CommandDef{Name: "QUOTA.LIST", Handler: cmdQUOTALIST})
 }
 
-var (
-	mvccTxns   = make(map[int64]*MVCCTransaction)
-	mvccTxnsMu sync.RWMutex
-	mvccNextID int64
-)
-
-type MVCCTransaction struct {
-	ID        int64
-	Status    string
-	CreatedAt int64
-	Changes   map[string]*MVCCChange
-}
-
 type MVCCChange struct {
 	Key       string
 	OldValue  string
 	NewValue  string
 	Operation string
-}
-
-func cmdMVCCBEGIN(ctx *Context) error {
-	mvccTxnsMu.Lock()
-	mvccNextID++
-	id := mvccNextID
-	mvccTxns[id] = &MVCCTransaction{
-		ID:        id,
-		Status:    "active",
-		CreatedAt: time.Now().UnixMilli(),
-		Changes:   make(map[string]*MVCCChange),
-	}
-	mvccTxnsMu.Unlock()
-
-	return ctx.WriteInteger(id)
-}
-
-func cmdMVCCCOMMIT(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	id := parseInt64(ctx.ArgString(0))
-
-	mvccTxnsMu.Lock()
-	defer mvccTxnsMu.Unlock()
-
-	txn, exists := mvccTxns[id]
-	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR transaction not found"))
-	}
-
-	if txn.Status != "active" {
-		return ctx.WriteError(fmt.Errorf("ERR transaction not active"))
-	}
-
-	for key, change := range txn.Changes {
-		switch change.Operation {
-		case "set":
-			ctx.Store.Set(key, &store.StringValue{Data: []byte(change.NewValue)}, store.SetOptions{})
-		case "delete":
-			ctx.Store.Delete(key)
-		}
-	}
-
-	txn.Status = "committed"
-	delete(mvccTxns, id)
-
-	return ctx.WriteOK()
-}
-
-func cmdMVCCROLLBACK(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	id := parseInt64(ctx.ArgString(0))
-
-	mvccTxnsMu.Lock()
-	defer mvccTxnsMu.Unlock()
-
-	txn, exists := mvccTxns[id]
-	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR transaction not found"))
-	}
-
-	txn.Status = "rolledback"
-	delete(mvccTxns, id)
-
-	return ctx.WriteOK()
-}
-
-func cmdMVCCGET(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	id := parseInt64(ctx.ArgString(0))
-	key := ctx.ArgString(1)
-
-	mvccTxnsMu.RLock()
-	txn, exists := mvccTxns[id]
-	mvccTxnsMu.RUnlock()
-
-	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR transaction not found"))
-	}
-
-	if change, ok := txn.Changes[key]; ok {
-		if change.Operation == "delete" {
-			return ctx.WriteNull()
-		}
-		return ctx.WriteBulkString(change.NewValue)
-	}
-
-	entry, ok := ctx.Store.Get(key)
-	if !ok {
-		return ctx.WriteNull()
-	}
-
-	return ctx.WriteBulkString(entry.Value.String())
-}
-
-func cmdMVCCSET(ctx *Context) error {
-	if ctx.ArgCount() < 3 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	id := parseInt64(ctx.ArgString(0))
-	key := ctx.ArgString(1)
-	value := ctx.ArgString(2)
-
-	mvccTxnsMu.RLock()
-	txn, exists := mvccTxns[id]
-	mvccTxnsMu.RUnlock()
-
-	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR transaction not found"))
-	}
-
-	if txn.Status != "active" {
-		return ctx.WriteError(fmt.Errorf("ERR transaction not active"))
-	}
-
-	oldValue := ""
-	if entry, ok := ctx.Store.Get(key); ok {
-		oldValue = entry.Value.String()
-	}
-
-	txn.Changes[key] = &MVCCChange{
-		Key:       key,
-		OldValue:  oldValue,
-		NewValue:  value,
-		Operation: "set",
-	}
-
-	return ctx.WriteOK()
-}
-
-func cmdMVCCDELETE(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	id := parseInt64(ctx.ArgString(0))
-	key := ctx.ArgString(1)
-
-	mvccTxnsMu.RLock()
-	txn, exists := mvccTxns[id]
-	mvccTxnsMu.RUnlock()
-
-	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR transaction not found"))
-	}
-
-	if txn.Status != "active" {
-		return ctx.WriteError(fmt.Errorf("ERR transaction not active"))
-	}
-
-	oldValue := ""
-	if entry, ok := ctx.Store.Get(key); ok {
-		oldValue = entry.Value.String()
-	}
-
-	txn.Changes[key] = &MVCCChange{
-		Key:       key,
-		OldValue:  oldValue,
-		NewValue:  "",
-		Operation: "delete",
-	}
-
-	return ctx.WriteOK()
-}
-
-func cmdMVCCSTATUS(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	id := parseInt64(ctx.ArgString(0))
-
-	mvccTxnsMu.RLock()
-	txn, exists := mvccTxns[id]
-	mvccTxnsMu.RUnlock()
-
-	if !exists {
-		return ctx.WriteNull()
-	}
-
-	return ctx.WriteArray([]*resp.Value{
-		resp.BulkString("id"),
-		resp.IntegerValue(txn.ID),
-		resp.BulkString("status"),
-		resp.BulkString(txn.Status),
-		resp.BulkString("changes"),
-		resp.IntegerValue(int64(len(txn.Changes))),
-	})
-}
-
-func cmdMVCCSNAPSHOT(ctx *Context) error {
-	keys := ctx.Store.Keys()
-
-	results := make([]*resp.Value, 0)
-	for _, key := range keys {
-		entry, ok := ctx.Store.Get(key)
-		if ok {
-			results = append(results,
-				resp.BulkString(key),
-				resp.BulkString(entry.Value.String()),
-			)
-		}
-	}
-
-	return ctx.WriteArray(results)
 }
 
 var (
@@ -356,20 +115,19 @@ func cmdSPATIALADD(ctx *Context) error {
 		data = ctx.ArgString(4)
 	}
 
-	spatialIndexesMu.RLock()
+	spatialIndexesMu.Lock()
 	idx, exists := spatialIndexes[name]
-	spatialIndexesMu.RUnlock()
-
 	if !exists {
+		spatialIndexesMu.Unlock()
 		return ctx.WriteError(fmt.Errorf("ERR spatial index not found"))
 	}
-
 	idx.Points[id] = &GeoPoint{
 		ID:   id,
 		Lat:  lat,
 		Lon:  lon,
 		Data: data,
 	}
+	spatialIndexesMu.Unlock()
 
 	return ctx.WriteOK()
 }
@@ -386,9 +144,8 @@ func cmdSPATIALNEARBY(ctx *Context) error {
 
 	spatialIndexesMu.RLock()
 	idx, exists := spatialIndexes[name]
-	spatialIndexesMu.RUnlock()
-
 	if !exists {
+		spatialIndexesMu.RUnlock()
 		return ctx.WriteError(fmt.Errorf("ERR spatial index not found"))
 	}
 
@@ -402,6 +159,7 @@ func cmdSPATIALNEARBY(ctx *Context) error {
 			)
 		}
 	}
+	spatialIndexesMu.RUnlock()
 
 	return ctx.WriteArray(results)
 }
@@ -419,9 +177,8 @@ func cmdSPATIALWITHIN(ctx *Context) error {
 
 	spatialIndexesMu.RLock()
 	idx, exists := spatialIndexes[name]
-	spatialIndexesMu.RUnlock()
-
 	if !exists {
+		spatialIndexesMu.RUnlock()
 		return ctx.WriteError(fmt.Errorf("ERR spatial index not found"))
 	}
 
@@ -432,6 +189,7 @@ func cmdSPATIALWITHIN(ctx *Context) error {
 			results = append(results, resp.BulkString(id))
 		}
 	}
+	spatialIndexesMu.RUnlock()
 
 	return ctx.WriteArray(results)
 }
@@ -444,20 +202,17 @@ func cmdSPATIALDELETE(ctx *Context) error {
 	name := ctx.ArgString(0)
 	id := ctx.ArgString(1)
 
-	spatialIndexesMu.RLock()
-	idx, exists := spatialIndexes[name]
-	spatialIndexesMu.RUnlock()
-
-	if !exists {
-		return ctx.WriteInteger(0)
+	spatialIndexesMu.Lock()
+	removed := 0
+	if idx, exists := spatialIndexes[name]; exists {
+		if _, ok := idx.Points[id]; ok {
+			delete(idx.Points, id)
+			removed = 1
+		}
 	}
+	spatialIndexesMu.Unlock()
 
-	if _, ok := idx.Points[id]; ok {
-		delete(idx.Points, id)
-		return ctx.WriteInteger(1)
-	}
-
-	return ctx.WriteInteger(0)
+	return ctx.WriteInteger(int64(removed))
 }
 
 func cmdSPATIALLIST(ctx *Context) error {
@@ -1010,125 +765,11 @@ func cmdCONNECTIONINFO(ctx *Context) error {
 	return ctx.WriteArray(reply)
 }
 
-var (
-	plugins   = make(map[string]*Plugin)
-	pluginsMu sync.RWMutex
-)
-
 type Plugin struct {
 	Name      string
 	Enabled   bool
 	LoadedAt  int64
 	Functions map[string]string
-}
-
-func cmdPLUGINLOAD(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	name := ctx.ArgString(0)
-
-	pluginsMu.Lock()
-	defer pluginsMu.Unlock()
-
-	plugins[name] = &Plugin{
-		Name:      name,
-		Enabled:   true,
-		LoadedAt:  time.Now().UnixMilli(),
-		Functions: make(map[string]string),
-	}
-
-	return ctx.WriteOK()
-}
-
-func cmdPLUGINUNLOAD(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	name := ctx.ArgString(0)
-
-	pluginsMu.Lock()
-	defer pluginsMu.Unlock()
-
-	if _, exists := plugins[name]; !exists {
-		return ctx.WriteInteger(0)
-	}
-
-	delete(plugins, name)
-	return ctx.WriteInteger(1)
-}
-
-func cmdPLUGINLIST(ctx *Context) error {
-	pluginsMu.RLock()
-
-	results := make([]*resp.Value, 0)
-	for name, p := range plugins {
-		results = append(results,
-			resp.BulkString(name),
-			resp.BulkString(fmt.Sprintf("%v", p.Enabled)),
-		)
-	}
-
-	reply := results
-	pluginsMu.RUnlock()
-	return ctx.WriteArray(reply)
-}
-
-func cmdPLUGINCALL(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	name := ctx.ArgString(0)
-	fn := ctx.ArgString(1)
-
-	pluginsMu.RLock()
-	plugin, exists := plugins[name]
-
-	if !exists {
-		reply := fmt.Errorf("ERR plugin not found")
-		pluginsMu.RUnlock()
-		return ctx.WriteError(reply)
-	}
-
-	if !plugin.Enabled {
-		reply := fmt.Errorf("ERR plugin disabled")
-		pluginsMu.RUnlock()
-		return ctx.WriteError(reply)
-	}
-
-	reply := fn + ":ok"
-	pluginsMu.RUnlock()
-	return ctx.WriteBulkString(reply)
-}
-
-func cmdPLUGININFO(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	name := ctx.ArgString(0)
-
-	pluginsMu.RLock()
-	plugin, exists := plugins[name]
-
-	if !exists {
-		pluginsMu.RUnlock()
-		return ctx.WriteNull()
-	}
-
-	reply := []*resp.Value{
-		resp.BulkString("name"),
-		resp.BulkString(plugin.Name),
-		resp.BulkString("enabled"),
-		resp.BulkString(fmt.Sprintf("%v", plugin.Enabled)),
-		resp.BulkString("loaded_at"),
-		resp.IntegerValue(plugin.LoadedAt),
-	}
-	pluginsMu.RUnlock()
-	return ctx.WriteArray(reply)
 }
 
 var (
@@ -1149,6 +790,9 @@ func cmdROLLUPCREATE(ctx *Context) error {
 
 	name := ctx.ArgString(0)
 	interval := parseInt64(ctx.ArgString(1))
+	if interval <= 0 {
+		return ctx.WriteError(fmt.Errorf("ERR interval must be positive"))
+	}
 
 	rollupsMu.Lock()
 	rollups[name] = &Rollup{
@@ -1264,21 +908,22 @@ func cmdCOOLDOWNCHECK(ctx *Context) error {
 
 	key := ctx.ArgString(0)
 
-	cooldownsMu.RLock()
+	cooldownsMu.Lock()
 	cd, exists := cooldowns[key]
-	cooldownsMu.RUnlock()
-
 	if !exists {
+		cooldownsMu.Unlock()
 		return ctx.WriteInteger(1)
 	}
 
 	now := time.Now().UnixMilli()
 	if now >= cd.LastUsed+cd.Duration {
 		cd.LastUsed = now
+		cooldownsMu.Unlock()
 		return ctx.WriteInteger(1)
 	}
 
 	remaining := (cd.LastUsed + cd.Duration) - now
+	cooldownsMu.Unlock()
 	return ctx.WriteArray([]*resp.Value{
 		resp.IntegerValue(0),
 		resp.IntegerValue(remaining),
@@ -1292,15 +937,16 @@ func cmdCOOLDOWNRESET(ctx *Context) error {
 
 	key := ctx.ArgString(0)
 
-	cooldownsMu.RLock()
+	cooldownsMu.Lock()
 	cd, exists := cooldowns[key]
-	cooldownsMu.RUnlock()
+	if exists {
+		cd.LastUsed = 0
+	}
+	cooldownsMu.Unlock()
 
 	if !exists {
 		return ctx.WriteInteger(0)
 	}
-
-	cd.LastUsed = 0
 	return ctx.WriteInteger(1)
 }
 

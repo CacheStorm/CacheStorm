@@ -62,7 +62,6 @@ func TestArrayReadersDoNotRaceWithInPlaceWriters(t *testing.T) {
 		{"ARRAY.LASTINDEXOF", arrayName, "a4"},
 		{"ARRAY.INCLUDES", arrayName, "a4"},
 		{"ARRAY.SLICE", arrayName, "1", "5"},
-		{"ARRAY.FLATTEN", arrayName},
 		{"ARRAY.INTERSECT", arrayName, otherName},
 		{"ARRAY.DIFF", arrayName, otherName},
 	}

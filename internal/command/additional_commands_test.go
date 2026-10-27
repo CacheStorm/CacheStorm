@@ -71,19 +71,10 @@ func TestWorkflowCommandsExtendedFullCoverage(t *testing.T) {
 		cmd  string
 		args [][]byte
 	}{
-		{"WORKFLOW.CREATE", "WORKFLOW.CREATE", [][]byte{[]byte("wf1")}},
-		{"WORKFLOW.CREATE no args", "WORKFLOW.CREATE", nil},
-		{"WORKFLOW.DELETE", "WORKFLOW.DELETE", [][]byte{[]byte("wf1")}},
-		{"WORKFLOW.DELETE no args", "WORKFLOW.DELETE", nil},
-		{"WORKFLOW.START", "WORKFLOW.START", [][]byte{[]byte("wf1")}},
-		{"WORKFLOW.START no args", "WORKFLOW.START", nil},
 		{"WORKFLOW.STOP", "WORKFLOW.STOP", [][]byte{[]byte("wf1")}},
 		{"WORKFLOW.STOP no args", "WORKFLOW.STOP", nil},
 		{"WORKFLOW.STATUS", "WORKFLOW.STATUS", [][]byte{[]byte("wf1")}},
 		{"WORKFLOW.STATUS no args", "WORKFLOW.STATUS", nil},
-		{"WORKFLOW.LIST", "WORKFLOW.LIST", nil},
-		{"WORKFLOW.ADDSTEP", "WORKFLOW.ADDSTEP", [][]byte{[]byte("wf1"), []byte("step1")}},
-		{"WORKFLOW.ADDSTEP no args", "WORKFLOW.ADDSTEP", nil},
 		{"WORKFLOW.REMOVESTEP", "WORKFLOW.REMOVESTEP", [][]byte{[]byte("wf1"), []byte("step1")}},
 		{"WORKFLOW.REMOVESTEP no args", "WORKFLOW.REMOVESTEP", nil},
 	}
@@ -107,12 +98,8 @@ func TestWorkflowCommandsExecutionFullCoverage(t *testing.T) {
 	}{
 		{"WORKFLOW.EXECUTE", "WORKFLOW.EXECUTE", [][]byte{[]byte("wf1")}},
 		{"WORKFLOW.EXECUTE no args", "WORKFLOW.EXECUTE", nil},
-		{"WORKFLOW.PAUSE", "WORKFLOW.PAUSE", [][]byte{[]byte("wf1")}},
-		{"WORKFLOW.PAUSE no args", "WORKFLOW.PAUSE", nil},
 		{"WORKFLOW.RESUME", "WORKFLOW.RESUME", [][]byte{[]byte("wf1")}},
 		{"WORKFLOW.RESUME no args", "WORKFLOW.RESUME", nil},
-		{"WORKFLOW.RESET", "WORKFLOW.RESET", [][]byte{[]byte("wf1")}},
-		{"WORKFLOW.RESET no args", "WORKFLOW.RESET", nil},
 		{"WORKFLOW.LOG", "WORKFLOW.LOG", [][]byte{[]byte("wf1")}},
 		{"WORKFLOW.LOG no args", "WORKFLOW.LOG", nil},
 	}

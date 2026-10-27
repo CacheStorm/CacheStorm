@@ -24,14 +24,6 @@ func TestExtendedRegistryReadersAreSynchronised(t *testing.T) {
 			reader: [][]string{{"MSGQUEUE.STATS", "k"}, {"MSGQUEUE.DEADLETTER", "k"}},
 		},
 		{
-			name:  "cron",
-			setup: [][]string{{"CRON.ADD", "k", "* * * * *", "echo hi"}},
-			// TRIGGER appends a run to the job's history and updates its last
-			// run timestamp.
-			writer: [][]string{{"CRON.TRIGGER", "k"}},
-			reader: [][]string{{"CRON.NEXT", "k"}, {"CRON.HISTORY", "k"}},
-		},
-		{
 			name:  "leader",
 			setup: [][]string{{"LEADER.ELECT", "k", "candidate", "0"}},
 			// ELECT records the election in the history and updates the

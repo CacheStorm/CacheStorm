@@ -77,7 +77,7 @@ func TestVectorSearchHappyPathUnchanged(t *testing.T) {
 	if reply, _ := runVector(t, router, "VECTOR.CREATE", "vec:ok", "2"); strings.HasPrefix(reply, "-") {
 		t.Fatalf("VECTOR.CREATE was rejected: %q", reply)
 	}
-	if reply, _ := runVector(t, router, "VECTOR.ADD", "vec:ok", "a", "1", "0"); strings.HasPrefix(reply, "-") {
+	if reply, _ := runVector(t, router, "VECTOR.ADD", "vec:ok", "a", "2", "1", "0"); strings.HasPrefix(reply, "-") {
 		t.Fatalf("VECTOR.ADD was rejected: %q", reply)
 	}
 

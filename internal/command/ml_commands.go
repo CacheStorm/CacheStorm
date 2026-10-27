@@ -42,15 +42,6 @@ func RegisterMLCommands(router *Router) {
 
 }
 
-type MLModel struct {
-	Name      string
-	Type      string
-	Status    string
-	Features  []string
-	CreatedAt int64
-	TrainedAt int64
-}
-
 var (
 	features   = make(map[string]map[string]float64)
 	featuresMx sync.RWMutex
@@ -136,15 +127,15 @@ func cmdFEATUREVECTOR(ctx *Context) error {
 	entity := ctx.ArgString(0)
 	featuresMx.RLock()
 	e, exists := features[entity]
-	featuresMx.RUnlock()
-	if !exists {
-		return ctx.WriteArray([]*resp.Value{})
-	}
-	results := make([]*resp.Value, 0)
+	results := make([]*resp.Value, 0, len(e))
 	for k, v := range e {
 		results = append(results, resp.ArrayValue([]*resp.Value{
 			resp.BulkString(k), resp.BulkString(fmt.Sprintf("%.6f", v)),
 		}))
+	}
+	featuresMx.RUnlock()
+	if !exists {
+		return ctx.WriteArray([]*resp.Value{})
 	}
 	return ctx.WriteArray(results)
 }
@@ -217,6 +208,17 @@ type Tensor struct {
 	Data  []float64
 }
 
+func tensorShapeMatches(shape []int, n int) bool {
+	product := 1
+	for _, d := range shape {
+		if d <= 0 || product > n/d {
+			return false
+		}
+		product *= d
+	}
+	return product == n
+}
+
 func cmdTENSORCREATE(ctx *Context) error {
 	if ctx.ArgCount() < 3 {
 		return ctx.WriteError(ErrWrongArgCount)
@@ -235,6 +237,9 @@ func cmdTENSORCREATE(ctx *Context) error {
 	for i < ctx.ArgCount() {
 		data = append(data, parseFloatExt([]byte(ctx.ArgString(i))))
 		i++
+	}
+	if !tensorShapeMatches(shape, len(data)) {
+		return ctx.WriteError(fmt.Errorf("ERR tensor shape does not match data length %d", len(data)))
 	}
 	tensorsMx.Lock()
 	defer tensorsMx.Unlock()
@@ -311,6 +316,9 @@ func cmdTENSORRESHAPE(ctx *Context) error {
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR tensor not found"))
 	}
+	if !tensorShapeMatches(newShape, len(t.Data)) {
+		return ctx.WriteError(fmt.Errorf("ERR tensor shape does not match data length %d", len(t.Data)))
+	}
 	t.Shape = newShape
 	return ctx.WriteOK()
 }
@@ -327,29 +335,6 @@ func cmdTENSORDELETE(ctx *Context) error {
 	}
 	delete(tensors, name)
 	return ctx.WriteInteger(1)
-}
-
-type Classifier struct {
-	Name    string
-	Labels  []string
-	Trained bool
-}
-
-type Regressor struct {
-	Name    string
-	Trained bool
-}
-
-type ClusterML struct {
-	Name      string
-	K         int
-	Trained   bool
-	Centroids [][]float64
-}
-
-type AnomalyDetector struct {
-	Name    string
-	Trained bool
 }
 
 var (
@@ -512,11 +497,6 @@ func cmdMLXPERIMENTDELETE(ctx *Context) error {
 	return ctx.WriteInteger(1)
 }
 
-type MLPipeline struct {
-	Name  string
-	Steps []string
-}
-
 var (
 	hyperparams   = make(map[string]*Hyperparams)
 	hyperparamsMx sync.RWMutex
@@ -574,17 +554,4 @@ func cmdHYPERPARAMDELETE(ctx *Context) error {
 	}
 	delete(hyperparams, name)
 	return ctx.WriteInteger(1)
-}
-
-type Evaluator struct {
-	Name    string
-	Metrics []string
-}
-
-type Recommender struct {
-	Name string
-}
-
-type TimeForecaster struct {
-	Name string
 }

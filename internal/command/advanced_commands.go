@@ -28,7 +28,6 @@ func RegisterActorCommands(router *Router) {
 	router.Register(&CommandDef{Name: "DAG.DELETE", Handler: cmdDAGDELETE})
 	router.Register(&CommandDef{Name: "DAG.LIST", Handler: cmdDAGLIST})
 
-	router.Register(&CommandDef{Name: "PARALLEL.EXEC", Handler: cmdPARALLELEXEC})
 	router.Register(&CommandDef{Name: "PARALLEL.MAP", Handler: cmdPARALLELMAP})
 	router.Register(&CommandDef{Name: "PARALLEL.REDUCE", Handler: cmdPARALLELREDUCE})
 	router.Register(&CommandDef{Name: "PARALLEL.FILTER", Handler: cmdPARALLELFILTER})
@@ -489,30 +488,6 @@ func cmdDAGLIST(ctx *Context) error {
 	reply := results
 	dagsMu.RUnlock()
 	return ctx.WriteArray(reply)
-}
-
-func cmdPARALLELEXEC(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	results := make([]*resp.Value, ctx.ArgCount())
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-
-	for i := 0; i < ctx.ArgCount(); i++ {
-		wg.Add(1)
-		go func(idx int, cmd string) {
-			defer wg.Done()
-			mu.Lock()
-			results[idx] = resp.BulkString(cmd + ":ok")
-			mu.Unlock()
-		}(i, ctx.ArgString(i))
-	}
-
-	wg.Wait()
-
-	return ctx.WriteArray(results)
 }
 
 func cmdPARALLELMAP(ctx *Context) error {
@@ -1095,15 +1070,28 @@ func cmdTRIEDELETE(ctx *Context) error {
 	}
 
 	name := ctx.ArgString(0)
-	_ = ctx.ArgString(1)
+	word := ctx.ArgString(1)
 
-	triesMu.RLock()
-	_, exists := tries[name]
-	triesMu.RUnlock()
+	triesMu.Lock()
+	defer triesMu.Unlock()
 
+	trie, exists := tries[name]
 	if !exists {
 		return ctx.WriteInteger(0)
 	}
+
+	node := trie.Root
+	for _, c := range word {
+		next, ok := node.Children[c]
+		if !ok {
+			return ctx.WriteInteger(0)
+		}
+		node = next
+	}
+	if !node.IsEnd {
+		return ctx.WriteInteger(0)
+	}
+	node.IsEnd = false
 
 	return ctx.WriteInteger(1)
 }

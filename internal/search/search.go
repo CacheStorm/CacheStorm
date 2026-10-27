@@ -66,7 +66,7 @@ func (m *IndexManager) CreateIndex(name string, schema Schema) error {
 	defer m.mu.Unlock()
 
 	if _, exists := m.indexes[name]; exists {
-		return nil
+		return ErrIndexExists
 	}
 
 	m.indexes[name] = &Index{
@@ -195,9 +195,28 @@ func (m *IndexManager) ListIndexes() []string {
 	return names
 }
 
+// ErrIndexExists is FT.CREATE's reply for a name already in use.
+var ErrIndexExists = errors.New("Index already exists")
+
+// ErrDocumentExists is FT.ADD's reply for an existing document without REPLACE.
+var ErrDocumentExists = errors.New("Document already exists")
+
+// AddDocument indexes doc, replacing any document with the same ID.
 func (idx *Index) AddDocument(doc *Document) error {
+	return idx.addDocument(doc, true)
+}
+
+// AddNewDocument indexes doc only when no document has its ID.
+func (idx *Index) AddNewDocument(doc *Document) error {
+	return idx.addDocument(doc, false)
+}
+
+func (idx *Index) addDocument(doc *Document, replace bool) error {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
+	if _, exists := idx.Documents[doc.ID]; exists && !replace {
+		return ErrDocumentExists
+	}
 	doc = copyDocumentFields(doc)
 
 	// Reconcile a document that is already indexed. Re-adding (including

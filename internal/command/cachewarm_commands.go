@@ -11,10 +11,7 @@ import (
 )
 
 func RegisterCacheWarmingCommands(router *Router) {
-	router.Register(&CommandDef{Name: "WARM.PRELOAD", Handler: cmdWARMPRELOAD})
-	router.Register(&CommandDef{Name: "WARM.PREFETCH", Handler: cmdWARMPREFETCH})
 	router.Register(&CommandDef{Name: "WARM.INVALIDATE", Handler: cmdWARMINVALIDATE})
-	router.Register(&CommandDef{Name: "WARM.STATUS", Handler: cmdWARMSTATUS})
 	router.Register(&CommandDef{Name: "BATCH.GET", Handler: cmdBATCHGET})
 	router.Register(&CommandDef{Name: "BATCH.SET", Handler: cmdBATCHSET})
 	router.Register(&CommandDef{Name: "BATCH.DEL", Handler: cmdBATCHDEL})
@@ -27,13 +24,8 @@ func RegisterCacheWarmingCommands(router *Router) {
 	router.Register(&CommandDef{Name: "KEY.RENAMENX", Handler: cmdKEYRENAMENX})
 	router.Register(&CommandDef{Name: "KEY.COPY", Handler: cmdKEYCOPY})
 	router.Register(&CommandDef{Name: "KEY.MOVE", Handler: cmdKEYMOVE})
-	router.Register(&CommandDef{Name: "KEY.DUMP", Handler: cmdKEYDUMP})
-	router.Register(&CommandDef{Name: "KEY.RESTORE", Handler: cmdKEYRESTORE})
-	router.Register(&CommandDef{Name: "KEY.OBJECT", Handler: cmdKEYOBJECT})
-	router.Register(&CommandDef{Name: "KEY.ENCODE", Handler: cmdKEYENCODE})
 	router.Register(&CommandDef{Name: "KEY.FREQ", Handler: cmdKEYFREQ})
 	router.Register(&CommandDef{Name: "KEY.IDLETIME", Handler: cmdKEYIDLETIME})
-	router.Register(&CommandDef{Name: "KEY.REFCOUNT", Handler: cmdKEYREFCOUNT})
 }
 
 type WarmCacheStatus struct {
@@ -47,48 +39,6 @@ var (
 	warmStatus   WarmCacheStatus
 	warmStatusMu sync.Mutex
 )
-
-func cmdWARMPRELOAD(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	preloaded := 0
-	for i := 0; i < ctx.ArgCount(); i++ {
-		key := ctx.ArgString(i)
-		if ctx.Store.Exists(key) {
-			preloaded++
-		}
-	}
-
-	warmStatusMu.Lock()
-	warmStatus.Preloaded += int64(preloaded)
-	warmStatus.LastWarm = time.Now()
-	warmStatusMu.Unlock()
-
-	return ctx.WriteInteger(int64(preloaded))
-}
-
-func cmdWARMPREFETCH(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	prefetched := 0
-	for i := 0; i < ctx.ArgCount(); i++ {
-		key := ctx.ArgString(i)
-		if entry, ok := ctx.Store.Get(key); ok && entry != nil {
-			prefetched++
-		}
-	}
-
-	warmStatusMu.Lock()
-	warmStatus.Prefetched += int64(prefetched)
-	warmStatus.LastWarm = time.Now()
-	warmStatusMu.Unlock()
-
-	return ctx.WriteInteger(int64(prefetched))
-}
 
 func cmdWARMINVALIDATE(ctx *Context) error {
 	if ctx.ArgCount() < 1 {
@@ -107,23 +57,6 @@ func cmdWARMINVALIDATE(ctx *Context) error {
 	warmStatusMu.Unlock()
 
 	return ctx.WriteInteger(int64(invalidated))
-}
-
-func cmdWARMSTATUS(ctx *Context) error {
-	warmStatusMu.Lock()
-	s := warmStatus
-	warmStatusMu.Unlock()
-
-	return ctx.WriteArray([]*resp.Value{
-		resp.BulkString("preloaded"),
-		resp.IntegerValue(s.Preloaded),
-		resp.BulkString("prefetched"),
-		resp.IntegerValue(s.Prefetched),
-		resp.BulkString("invalidated"),
-		resp.IntegerValue(s.Invalidated),
-		resp.BulkString("last_warm"),
-		resp.BulkString(s.LastWarm.Format(time.RFC3339)),
-	})
 }
 
 func cmdBATCHGET(ctx *Context) error {
@@ -267,13 +200,13 @@ func cmdKEYRENAME(ctx *Context) error {
 	oldKey := ctx.ArgString(0)
 	newKey := ctx.ArgString(1)
 
-	entry, ok := ctx.Store.Get(oldKey)
-	if !ok {
+	_, err := ctx.Store.Transfer(oldKey, ctx.Store, newKey, store.TransferOptions{Replace: true})
+	if err == store.ErrKeyNotFound {
 		return ctx.WriteError(fmt.Errorf("ERR no such key"))
 	}
-
-	ctx.Store.Set(newKey, entry.Value, store.SetOptions{})
-	ctx.Store.Delete(oldKey)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
 
 	return ctx.WriteOK()
 }
@@ -286,17 +219,16 @@ func cmdKEYRENAMENX(ctx *Context) error {
 	oldKey := ctx.ArgString(0)
 	newKey := ctx.ArgString(1)
 
-	entry, ok := ctx.Store.Get(oldKey)
-	if !ok {
+	changed, err := ctx.Store.Transfer(oldKey, ctx.Store, newKey, store.TransferOptions{})
+	if err == store.ErrKeyNotFound {
 		return ctx.WriteError(fmt.Errorf("ERR no such key"))
 	}
-
-	if ctx.Store.Exists(newKey) {
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	if !changed {
 		return ctx.WriteInteger(0)
 	}
-
-	ctx.Store.Set(newKey, entry.Value, store.SetOptions{})
-	ctx.Store.Delete(oldKey)
 
 	return ctx.WriteInteger(1)
 }
@@ -336,116 +268,19 @@ func cmdKEYMOVE(ctx *Context) error {
 	key := ctx.ArgString(0)
 	namespace := ctx.ArgString(1)
 
-	entry, ok := ctx.Store.Get(key)
-	if !ok {
+	nsKey := namespace + ":" + key
+	changed, err := ctx.Store.Transfer(key, ctx.Store, nsKey, store.TransferOptions{Replace: true})
+	if err == store.ErrKeyNotFound {
 		return ctx.WriteInteger(0)
 	}
-
-	nsKey := namespace + ":" + key
-	ctx.Store.Set(nsKey, entry.Value, store.SetOptions{})
-	ctx.Store.Delete(key)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	if !changed {
+		return ctx.WriteInteger(0)
+	}
 
 	return ctx.WriteInteger(1)
-}
-
-func cmdKEYDUMP(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	key := ctx.ArgString(0)
-
-	entry, ok := ctx.Store.Get(key)
-	if !ok {
-		return ctx.WriteNull()
-	}
-
-	dataType := entry.Value.Type()
-	dump := fmt.Sprintf("%d:%s", dataType, entry.Value.String())
-
-	return ctx.WriteBulkString(dump)
-}
-
-func cmdKEYRESTORE(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	key := ctx.ArgString(0)
-	_ = ctx.ArgString(1)
-
-	replace := false
-	ttl := int64(0)
-
-	for i := 2; i < ctx.ArgCount(); i++ {
-		arg := strings.ToUpper(ctx.ArgString(i))
-		switch arg {
-		case "REPLACE":
-			replace = true
-		case "TTL":
-			if i+1 < ctx.ArgCount() {
-				ttl = parseInt64(ctx.ArgString(i + 1))
-				i++
-			}
-		}
-	}
-
-	if ctx.Store.Exists(key) && !replace {
-		return ctx.WriteError(fmt.Errorf("ERR key already exists"))
-	}
-
-	var opts store.SetOptions
-	if ttl > 0 {
-		opts.TTL = time.Duration(ttl) * time.Millisecond
-	}
-
-	ctx.Store.Set(key, &store.StringValue{Data: []byte("restored")}, opts)
-
-	return ctx.WriteOK()
-}
-
-func cmdKEYOBJECT(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	subcmd := strings.ToUpper(ctx.ArgString(0))
-	key := ctx.ArgString(1)
-
-	entry, ok := ctx.Store.Get(key)
-	if !ok {
-		return ctx.WriteNull()
-	}
-
-	switch subcmd {
-	case "ENCODING":
-		return ctx.WriteBulkString("raw")
-	case "IDLETIME":
-		return ctx.WriteInteger(0)
-	case "REFCOUNT":
-		return ctx.WriteInteger(1)
-	case "FREQ":
-		return ctx.WriteInteger(int64(entry.AccessCount.Load()))
-	case "TYPE":
-		return ctx.WriteBulkString(entry.Value.Type().String())
-	default:
-		return ctx.WriteError(fmt.Errorf("ERR unknown subcommand"))
-	}
-}
-
-func cmdKEYENCODE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	key := ctx.ArgString(0)
-
-	entry, ok := ctx.Store.Get(key)
-	if !ok {
-		return ctx.WriteNull()
-	}
-
-	return ctx.WriteBulkString(entry.Value.Type().String())
 }
 
 func cmdKEYFREQ(ctx *Context) error {
@@ -479,18 +314,4 @@ func cmdKEYIDLETIME(ctx *Context) error {
 	idleSec := idleNs / 1e9
 
 	return ctx.WriteInteger(idleSec)
-}
-
-func cmdKEYREFCOUNT(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	key := ctx.ArgString(0)
-
-	if !ctx.Store.Exists(key) {
-		return ctx.WriteNull()
-	}
-
-	return ctx.WriteInteger(1)
 }

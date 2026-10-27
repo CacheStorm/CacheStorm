@@ -53,40 +53,16 @@ func registryBulkValue(reply string) string {
 func TestExtraRegistryReadersAreSynchronised(t *testing.T) {
 	cases := []registryFamilyCase{
 		{
-			name:   "antientropy",
-			setup:  [][]string{{"ANTI_ENTROPY.SYNC", "k", "1"}},
-			writer: [][]string{{"ANTI_ENTROPY.MERGE", "k", "{i}"}},
-			reader: [][]string{{"ANTI_ENTROPY.DIFF", "k", "{i}"}, {"ANTI_ENTROPY.STATUS", "k"}},
-		},
-		{
 			name:   "lww",
 			setup:  [][]string{{"CRDT.LWW.SET", "k", "v"}},
 			writer: [][]string{{"CRDT.LWW.SET", "k", "v2"}},
 			reader: [][]string{{"CRDT.LWW.GET", "k"}},
 		},
 		{
-			name:   "raft",
-			setup:  [][]string{{"RAFT.STATE", "k", "v"}},
-			writer: [][]string{{"RAFT.APPEND", "k", "e"}, {"RAFT.LEADER", "k", "l"}, {"RAFT.TERM", "k"}, {"RAFT.VOTE", "k", "c"}},
-			reader: [][]string{{"RAFT.COMMIT", "k"}},
-		},
-		{
-			name:   "batch",
-			setup:  [][]string{{"BATCH.SUBMIT", "3"}},
-			writer: [][]string{{"BATCH.CANCEL", "{last}"}},
-			reader: [][]string{{"BATCH.STATUS", "{last}"}},
-		},
-		{
 			name:   "deadline",
 			setup:  [][]string{{"DEADLINE.SET", "k", "60000", "cb"}},
 			writer: [][]string{{"DEADLINE.CANCEL", "k"}},
 			reader: [][]string{{"DEADLINE.CHECK", "k"}},
-		},
-		{
-			name:   "gateway",
-			setup:  [][]string{{"GATEWAY.CREATE", "k"}},
-			writer: [][]string{{"GATEWAY.ROUTE", "{last}", "pattern", "target"}},
-			reader: [][]string{{"GATEWAY.METRICS", "{last}"}},
 		},
 		{
 			name:   "bookmark",
@@ -101,34 +77,10 @@ func TestExtraRegistryReadersAreSynchronised(t *testing.T) {
 			reader: [][]string{{"GHOST.READ", "k"}},
 		},
 		{
-			name:   "probe",
-			setup:  [][]string{{"PROBE.CREATE", "k", "name", "target"}},
-			writer: [][]string{{"PROBE.RUN", "k"}},
-			reader: [][]string{{"PROBE.RESULTS", "k"}},
-		},
-		{
-			name:   "canary",
-			setup:  [][]string{{"CANARY.CREATE", "k", "name"}},
-			writer: [][]string{{"CANARY.CHECK", "k"}},
-			reader: [][]string{{"CANARY.STATUS", "k"}},
-		},
-		{
-			name:   "ragetest",
-			setup:  [][]string{{"RAGE.TEST", "k"}},
-			writer: [][]string{{"RAGE.STOP", "k"}},
-			reader: [][]string{{"RAGE.STATS", "k"}},
-		},
-		{
 			name:   "tape",
 			setup:  [][]string{{"TAPE.CREATE", "k"}},
 			writer: [][]string{{"TAPE.WRITE", "k", "payload"}},
 			reader: [][]string{{"TAPE.READ", "k"}},
-		},
-		{
-			name:   "beacon",
-			setup:  [][]string{{"BEACON.START", "k"}},
-			writer: [][]string{{"BEACON.STOP", "k"}},
-			reader: [][]string{{"BEACON.CHECK", "k"}},
 		},
 	}
 

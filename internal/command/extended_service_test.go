@@ -67,19 +67,7 @@ func TestExtendedCommandsHEALTHXFullCoverage(t *testing.T) {
 		name string
 		cmd  string
 		args [][]byte
-	}{
-		{"HEALTHX.REGISTER", "HEALTHX.REGISTER", [][]byte{[]byte("check1"), []byte("http://localhost:8080/health")}},
-		{"HEALTHX.REGISTER no args", "HEALTHX.REGISTER", nil},
-		{"HEALTHX.CHECK", "HEALTHX.CHECK", [][]byte{[]byte("check1")}},
-		{"HEALTHX.CHECK not found", "HEALTHX.CHECK", [][]byte{[]byte("notfound")}},
-		{"HEALTHX.CHECK no args", "HEALTHX.CHECK", nil},
-		{"HEALTHX.STATUS", "HEALTHX.STATUS", [][]byte{[]byte("check1")}},
-		{"HEALTHX.STATUS not found", "HEALTHX.STATUS", [][]byte{[]byte("notfound")}},
-		{"HEALTHX.STATUS no args", "HEALTHX.STATUS", nil},
-		{"HEALTHX.LIST", "HEALTHX.LIST", nil},
-		{"HEALTHX.UNREGISTER", "HEALTHX.UNREGISTER", [][]byte{[]byte("check1")}},
-		{"HEALTHX.UNREGISTER no args", "HEALTHX.UNREGISTER", nil},
-	}
+	}{}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -100,16 +88,8 @@ func TestExtendedCommandsSENTINELXFullCoverage(t *testing.T) {
 	}{
 		{"SENTINELX.REGISTER", "SENTINELX.REGISTER", [][]byte{[]byte("master1"), []byte("127.0.0.1"), []byte("6379")}},
 		{"SENTINELX.REGISTER no args", "SENTINELX.REGISTER", nil},
-		{"SENTINELX.WATCH", "SENTINELX.WATCH", [][]byte{[]byte("master1")}},
-		{"SENTINELX.WATCH not found", "SENTINELX.WATCH", [][]byte{[]byte("notfound")}},
-		{"SENTINELX.WATCH no args", "SENTINELX.WATCH", nil},
-		{"SENTINELX.UNWATCH", "SENTINELX.UNWATCH", [][]byte{[]byte("master1")}},
-		{"SENTINELX.UNWATCH no args", "SENTINELX.UNWATCH", nil},
 		{"SENTINELX.FAILOVER", "SENTINELX.FAILOVER", [][]byte{[]byte("master1")}},
 		{"SENTINELX.FAILOVER no args", "SENTINELX.FAILOVER", nil},
-		{"SENTINELX.ALERTS", "SENTINELX.ALERTS", [][]byte{[]byte("master1")}},
-		{"SENTINELX.ALERTS not found", "SENTINELX.ALERTS", [][]byte{[]byte("notfound")}},
-		{"SENTINELX.ALERTS no args", "SENTINELX.ALERTS", nil},
 		{"SENTINELX.MASTERS", "SENTINELX.MASTERS", nil},
 		{"SENTINELX.SLAVES", "SENTINELX.SLAVES", [][]byte{[]byte("master1")}},
 		{"SENTINELX.SLAVES no args", "SENTINELX.SLAVES", nil},
@@ -132,22 +112,10 @@ func TestExtendedCommandsREPLAYFullCoverage(t *testing.T) {
 		cmd  string
 		args [][]byte
 	}{
-		{"REPLAY.START", "REPLAY.START", [][]byte{[]byte("log1")}},
-		{"REPLAY.START no args", "REPLAY.START", nil},
-		{"REPLAY.STOP", "REPLAY.STOP", [][]byte{[]byte("log1")}},
-		{"REPLAY.STOP not found", "REPLAY.STOP", [][]byte{[]byte("notfound")}},
-		{"REPLAY.STOP no args", "REPLAY.STOP", nil},
 		{"REPLAY.PAUSE", "REPLAY.PAUSE", [][]byte{[]byte("log1")}},
 		{"REPLAY.PAUSE no args", "REPLAY.PAUSE", nil},
 		{"REPLAY.RESUME", "REPLAY.RESUME", [][]byte{[]byte("log1")}},
 		{"REPLAY.RESUME no args", "REPLAY.RESUME", nil},
-		{"REPLAY.STATUS", "REPLAY.STATUS", [][]byte{[]byte("log1")}},
-		{"REPLAY.STATUS not found", "REPLAY.STATUS", [][]byte{[]byte("notfound")}},
-		{"REPLAY.STATUS no args", "REPLAY.STATUS", nil},
-		{"REPLAY.SPEED", "REPLAY.SPEED", [][]byte{[]byte("log1"), []byte("2.0")}},
-		{"REPLAY.SPEED no args", "REPLAY.SPEED", nil},
-		{"REPLAY.SEEK", "REPLAY.SEEK", [][]byte{[]byte("log1"), []byte("1000")}},
-		{"REPLAY.SEEK no args", "REPLAY.SEEK", nil},
 	}
 
 	for _, tt := range tests {
@@ -197,8 +165,6 @@ func TestExtendedCommandsWSFullCoverage2(t *testing.T) {
 		cmd  string
 		args [][]byte
 	}{
-		{"WS.BROADCAST", "WS.BROADCAST", [][]byte{[]byte("message")}},
-		{"WS.BROADCAST no args", "WS.BROADCAST", nil},
 		{"WS.ROOM.BROADCAST", "WS.ROOM.BROADCAST", [][]byte{[]byte("room1"), []byte("message")}},
 		{"WS.ROOM.BROADCAST no args", "WS.ROOM.BROADCAST", nil},
 		{"WS.ROOM.LIST", "WS.ROOM.LIST", [][]byte{[]byte("room1")}},

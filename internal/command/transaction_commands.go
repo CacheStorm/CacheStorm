@@ -408,10 +408,6 @@ func parseFloat(data []byte) (float64, error) {
 	return result, nil
 }
 
-func float64ToString(f float64) string {
-	return fmt.Sprintf("%g", f)
-}
-
 // computeIntIncr parses current as a base-10 int64 and applies incr with an
 // overflow guard, mirroring Redis: non-integer values and boundary overflows
 // are rejected instead of wrapping.
@@ -424,36 +420,4 @@ func computeIntIncr(current []byte, incr int64) (int64, error) {
 		return 0, ErrOverflow
 	}
 	return parsed + incr, nil
-}
-
-func parseInt(data []byte) (int64, error) {
-	return strconv.ParseInt(string(data), 10, 64)
-}
-
-func int64ToBytes(n int64) []byte {
-	if n == 0 {
-		return []byte("0")
-	}
-
-	var negative bool
-	if n < 0 {
-		negative = true
-		n = -n
-	}
-
-	var buf [20]byte
-	i := len(buf)
-
-	for n > 0 {
-		i--
-		buf[i] = byte('0' + n%10)
-		n /= 10
-	}
-
-	if negative {
-		i--
-		buf[i] = '-'
-	}
-
-	return buf[i:]
 }

@@ -9,14 +9,14 @@ import (
 	"github.com/cachestorm/cachestorm/internal/store"
 )
 
-// TestSeededRegistryReadersHoldTheReadLock proves that CONNECTION.INFO,
-// PLUGIN.INFO and PLUGIN.CALL read their entry under the registry read lock.
+// TestSeededRegistryReadersHoldTheReadLock proves that CONNECTION.INFO reads
+// its entry under the registry read lock.
 //
 // The readers look the entry up, release the read lock and only then read the
 // entry's fields. That is safe today only because every writer publishes a
 // fresh entry instead of mutating the one a reader holds. The moment a writer
 // updates an entry in place — the server bumping a connection's command
-// counter, a plugin being enabled or disabled — the unlocked read races with
+// counter — the unlocked read races with
 // it.
 //
 // The writer here takes the registry WRITE lock and mutates the seeded entry
@@ -44,15 +44,6 @@ func TestSeededRegistryReadersHoldTheReadLock(t *testing.T) {
 		connectionsMu.Unlock()
 	})
 
-	pluginsMu.Lock()
-	plugins["seeded"] = &Plugin{Name: "seeded", Enabled: true, LoadedAt: 1, Functions: map[string]string{}}
-	pluginsMu.Unlock()
-	t.Cleanup(func() {
-		pluginsMu.Lock()
-		delete(plugins, "seeded")
-		pluginsMu.Unlock()
-	})
-
 	const iterations = 2000
 
 	var wg sync.WaitGroup
@@ -69,35 +60,12 @@ func TestSeededRegistryReadersHoldTheReadLock(t *testing.T) {
 		}
 	}()
 
-	// A writer that updates the plugin's flag in place, under the registry
-	// write lock.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		<-start
-		for i := 0; i < iterations; i++ {
-			pluginsMu.Lock()
-			plugins["seeded"].Enabled = !plugins["seeded"].Enabled
-			pluginsMu.Unlock()
-		}
-	}()
-
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		<-start
 		for i := 0; i < iterations; i++ {
 			run("CONNECTION.INFO", "42")
-		}
-	}()
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		<-start
-		for i := 0; i < iterations; i++ {
-			run("PLUGIN.INFO", "seeded")
-			run("PLUGIN.CALL", "seeded", "fn")
 		}
 	}()
 
@@ -123,15 +91,6 @@ func TestSeededRegistryReaderReplyIsExact(t *testing.T) {
 		connectionsMu.Unlock()
 	})
 
-	pluginsMu.Lock()
-	plugins["exact"] = &Plugin{Name: "exact", Enabled: true, LoadedAt: 77, Functions: map[string]string{}}
-	pluginsMu.Unlock()
-	t.Cleanup(func() {
-		pluginsMu.Lock()
-		delete(plugins, "exact")
-		pluginsMu.Unlock()
-	})
-
 	ctx, buf := bufCtx("CONNECTION.INFO", bytesArgs(strconv.FormatInt(7, 10)), s)
 	if err := router.Execute(ctx); err != nil {
 		t.Fatalf("CONNECTION.INFO: %v", err)
@@ -143,14 +102,4 @@ func TestSeededRegistryReaderReplyIsExact(t *testing.T) {
 		}
 	}
 
-	ctx, buf = bufCtx("PLUGIN.INFO", bytesArgs("exact"), s)
-	if err := router.Execute(ctx); err != nil {
-		t.Fatalf("PLUGIN.INFO: %v", err)
-	}
-	reply = buf.String()
-	for _, want := range []string{"exact", "77"} {
-		if !strings.Contains(reply, want) {
-			t.Fatalf("PLUGIN.INFO reply %q does not contain %q", reply, want)
-		}
-	}
 }

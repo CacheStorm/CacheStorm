@@ -55,23 +55,24 @@ func RegisterDataStructuresCommands(router *Router) {
 }
 
 var (
-	priorityQueues          = make(map[string]*store.PriorityQueue)
-	priorityQueuesMu        sync.RWMutex
-	lruCaches               = make(map[string]*store.LRUCache)
-	lruCachesMu             sync.RWMutex
-	tokenBuckets            = make(map[string]*store.TokenBucket)
-	tokenBucketsMu          sync.RWMutex
-	leakyBuckets            = make(map[string]*store.LeakyBucket)
-	leakyBucketsMu          sync.RWMutex
-	slidingWindowCounters   = make(map[string]*store.SlidingWindowCounter)
-	slidingWindowCountersMu sync.RWMutex
-	debounceTimers          = make(map[string]int64)
-	debounceValues          = make(map[string]string)
-	debounceDelay           = make(map[string]int64)
-	debounceMu              sync.RWMutex
-	throttleLastCall        = make(map[string]int64)
-	throttleInterval        = make(map[string]int64)
-	throttleMu              sync.RWMutex
+	priorityQueues           = make(map[string]*store.PriorityQueue)
+	priorityQueuesMu         sync.RWMutex
+	lruCaches                = make(map[string]*store.LRUCache)
+	lruCachesMu              sync.RWMutex
+	tokenBuckets             = make(map[string]*store.TokenBucket)
+	tokenBucketsMu           sync.RWMutex
+	leakyBuckets             = make(map[string]*store.LeakyBucket)
+	leakyBucketsMu           sync.RWMutex
+	slidingWindowCounters    = make(map[string]*store.SlidingWindowCounter)
+	slidingWindowCountersMu  sync.RWMutex
+	slidingWindowKeyCounters = make(map[string]map[string]*store.SlidingWindowCounter)
+	debounceTimers           = make(map[string]int64)
+	debounceValues           = make(map[string]string)
+	debounceDelay            = make(map[string]int64)
+	debounceMu               sync.RWMutex
+	throttleLastCall         = make(map[string]int64)
+	throttleInterval         = make(map[string]int64)
+	throttleMu               sync.RWMutex
 )
 
 func cmdPQCREATE(ctx *Context) error {
@@ -575,9 +576,13 @@ func cmdSLIDINGWINDOWCREATE(ctx *Context) error {
 	name := ctx.ArgString(0)
 	windowSizeMs := parseInt64(ctx.ArgString(1))
 	limit := parseInt64(ctx.ArgString(2))
+	if windowSizeMs <= 0 {
+		return ctx.WriteError(fmt.Errorf("ERR window must be positive"))
+	}
 
 	slidingWindowCountersMu.Lock()
 	slidingWindowCounters[name] = store.NewSlidingWindowCounter(windowSizeMs, limit)
+	slidingWindowKeyCounters[name] = make(map[string]*store.SlidingWindowCounter)
 	slidingWindowCountersMu.Unlock()
 
 	return ctx.WriteOK()
@@ -591,13 +596,23 @@ func cmdSLIDINGWINDOWINCR(ctx *Context) error {
 	name := ctx.ArgString(0)
 	key := ctx.ArgString(1)
 
-	slidingWindowCountersMu.RLock()
-	swc, exists := slidingWindowCounters[name]
-	slidingWindowCountersMu.RUnlock()
-
+	slidingWindowCountersMu.Lock()
+	tmpl, exists := slidingWindowCounters[name]
 	if !exists {
+		slidingWindowCountersMu.Unlock()
 		return ctx.WriteError(fmt.Errorf("ERR sliding window counter not found"))
 	}
+	perKey := slidingWindowKeyCounters[name]
+	if perKey == nil {
+		perKey = make(map[string]*store.SlidingWindowCounter)
+		slidingWindowKeyCounters[name] = perKey
+	}
+	swc := perKey[key]
+	if swc == nil {
+		swc = store.NewSlidingWindowCounter(tmpl.WindowSize, tmpl.Limit)
+		perKey[key] = swc
+	}
+	slidingWindowCountersMu.Unlock()
 
 	count, allowed := swc.Increment(key)
 
@@ -621,14 +636,28 @@ func cmdSLIDINGWINDOWCOUNT(ctx *Context) error {
 	name := ctx.ArgString(0)
 
 	slidingWindowCountersMu.RLock()
-	swc, exists := slidingWindowCounters[name]
+	_, exists := slidingWindowCounters[name]
+	perKey := slidingWindowKeyCounters[name]
+	var counters []*store.SlidingWindowCounter
+	if ctx.ArgCount() >= 2 {
+		if swc := perKey[ctx.ArgString(1)]; swc != nil {
+			counters = append(counters, swc)
+		}
+	} else {
+		for _, swc := range perKey {
+			counters = append(counters, swc)
+		}
+	}
 	slidingWindowCountersMu.RUnlock()
 
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR sliding window counter not found"))
 	}
 
-	count := swc.Count()
+	var count int64
+	for _, swc := range counters {
+		count += swc.Count()
+	}
 	return ctx.WriteInteger(count)
 }
 
@@ -639,9 +668,12 @@ func cmdSLIDINGWINDOWRESET(ctx *Context) error {
 
 	name := ctx.ArgString(0)
 
-	slidingWindowCountersMu.RLock()
+	slidingWindowCountersMu.Lock()
 	swc, exists := slidingWindowCounters[name]
-	slidingWindowCountersMu.RUnlock()
+	if exists {
+		slidingWindowKeyCounters[name] = make(map[string]*store.SlidingWindowCounter)
+	}
+	slidingWindowCountersMu.Unlock()
 
 	if !exists {
 		return ctx.WriteError(fmt.Errorf("ERR sliding window counter not found"))
@@ -666,6 +698,7 @@ func cmdSLIDINGWINDOWDELETE(ctx *Context) error {
 	}
 
 	delete(slidingWindowCounters, name)
+	delete(slidingWindowKeyCounters, name)
 	return ctx.WriteInteger(1)
 }
 

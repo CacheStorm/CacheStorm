@@ -32,24 +32,6 @@ func TestFinalRegistryReadersAreSynchronised(t *testing.T) {
 		{
 			register: RegisterAdvancedCommands2,
 			registryFamilyCase: registryFamilyCase{
-				name:   "connectionx",
-				setup:  [][]string{{"CONNECTIONX.CREATE", "src", "tgt"}},
-				writer: [][]string{{"CONNECTIONX.CREATE", "src", "tgt2"}},
-				reader: [][]string{{"CONNECTIONX.STATUS", "{last}"}},
-			},
-		},
-		{
-			register: RegisterAdvancedCommands2,
-			registryFamilyCase: registryFamilyCase{
-				name:   "jobx",
-				setup:  [][]string{{"JOBX.CREATE", "k"}},
-				writer: [][]string{{"JOBX.RUN", "{last}"}},
-				reader: [][]string{{"JOBX.STATUS", "{last}"}},
-			},
-		},
-		{
-			register: RegisterAdvancedCommands2,
-			registryFamilyCase: registryFamilyCase{
 				name:   "sessionx",
 				setup:  [][]string{{"SESSIONX.CREATE", "user", "60000"}},
 				writer: [][]string{{"SESSIONX.SET", "{last}", "key", "value"}},
@@ -117,15 +99,6 @@ func TestFinalRegistryReadersAreSynchronised(t *testing.T) {
 				setup:  [][]string{{"PARTITIONX.CREATE", "k", "4"}},
 				writer: [][]string{{"PARTITIONX.ADD", "k", "key", "value"}},
 				reader: [][]string{{"PARTITIONX.GET", "k", "0"}},
-			},
-		},
-		{
-			register: RegisterResilienceCommands,
-			registryFamilyCase: registryFamilyCase{
-				name:   "transx",
-				setup:  [][]string{{"TRANSX.BEGIN"}},
-				writer: [][]string{{"TRANSX.COMMIT", "{last}"}},
-				reader: [][]string{{"TRANSX.STATUS", "{last}"}},
 			},
 		},
 	}

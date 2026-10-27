@@ -16,13 +16,6 @@ func TestEncodingCommandsBSFullCoverage(t *testing.T) {
 		cmd  string
 		args [][]byte
 	}{
-		{"BSON.ENCODE map", "BSON.ENCODE", [][]byte{[]byte(`{"key":"value","num":123}`)}},
-		{"BSON.ENCODE array", "BSON.ENCODE", [][]byte{[]byte(`[1,2,3,4,5]`)}},
-		{"BSON.ENCODE invalid", "BSON.ENCODE", [][]byte{[]byte(`invalid json`)}},
-		{"BSON.ENCODE no args", "BSON.ENCODE", nil},
-		{"BSON.DECODE valid", "BSON.DECODE", [][]byte{{0x05, 0x00, 0x00, 0x00, 0x00}}},
-		{"BSON.DECODE invalid", "BSON.DECODE", [][]byte{[]byte(`invalid bson`)}},
-		{"BSON.DECODE no args", "BSON.DECODE", nil},
 		{"CBOR.ENCODE", "CBOR.ENCODE", [][]byte{[]byte(`{"key":"value"}`)}},
 		{"CBOR.ENCODE no args", "CBOR.ENCODE", nil},
 		{"CBOR.DECODE valid", "CBOR.DECODE", [][]byte{{0xbf, 0xff}}},

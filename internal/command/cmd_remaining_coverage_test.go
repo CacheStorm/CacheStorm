@@ -1,7 +1,6 @@
 package command
 
 import (
-	"fmt"
 	"strings"
 	"testing"
 
@@ -225,109 +224,6 @@ func TestCmdRATELIMITERDELETE_WrongArgs(t *testing.T) {
 	}
 }
 
-func TestCmdRETRYCREATE_Success(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdRETRYCREATE(discardCtx("", bytesArgs("ret1", "3", "100"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdRETRYCREATE_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdRETRYCREATE(discardCtx("", bytesArgs("ret1"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdRETRYEXECUTE_Success(t *testing.T) {
-	s := store.NewStore()
-	cmdRETRYCREATE(discardCtx("", bytesArgs("retex", "3", "100"), s))
-	if err := cmdRETRYEXECUTE(discardCtx("", bytesArgs("retex", "cmd"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdRETRYEXECUTE_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdRETRYEXECUTE(discardCtx("", bytesArgs("x"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdRETRYSTATUS_Success(t *testing.T) {
-	s := store.NewStore()
-	cmdRETRYCREATE(discardCtx("", bytesArgs("retst", "3", "100"), s))
-	if err := cmdRETRYSTATUS(discardCtx("", bytesArgs("retst"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdRETRYSTATUS_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdRETRYSTATUS(discardCtx("", bytesArgs(), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdRETRYDELETE_Success(t *testing.T) {
-	s := store.NewStore()
-	cmdRETRYCREATE(discardCtx("", bytesArgs("retdel", "3", "100"), s))
-	if err := cmdRETRYDELETE(discardCtx("", bytesArgs("retdel"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdRETRYDELETE_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdRETRYDELETE(discardCtx("", bytesArgs(), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdTIMEOUTCREATE_Success(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdTIMEOUTCREATE(discardCtx("", bytesArgs("to1", "5000"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdTIMEOUTCREATE_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdTIMEOUTCREATE(discardCtx("", bytesArgs("to1"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdTIMEOUTEXECUTE_Success(t *testing.T) {
-	s := store.NewStore()
-	cmdTIMEOUTCREATE(discardCtx("", bytesArgs("toex", "999999"), s))
-	if err := cmdTIMEOUTEXECUTE(discardCtx("", bytesArgs("toex", "cmd"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdTIMEOUTEXECUTE_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdTIMEOUTEXECUTE(discardCtx("", bytesArgs("x"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdTIMEOUTDELETE_Success(t *testing.T) {
-	s := store.NewStore()
-	cmdTIMEOUTCREATE(discardCtx("", bytesArgs("todel", "5000"), s))
-	if err := cmdTIMEOUTDELETE(discardCtx("", bytesArgs("todel"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdTIMEOUTDELETE_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdTIMEOUTDELETE(discardCtx("", bytesArgs(), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
 func TestCmdBULKHEADCREATE_Success(t *testing.T) {
 	s := store.NewStore()
 	if err := cmdBULKHEADCREATE(discardCtx("", bytesArgs("bh1", "5"), s)); err != nil {
@@ -403,50 +299,6 @@ func TestCmdBULKHEADDELETE_WrongArgs(t *testing.T) {
 	}
 }
 
-func TestCmdFALLBACKCREATE_Success(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdFALLBACKCREATE(discardCtx("", bytesArgs("fb1", "default_action"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdFALLBACKCREATE_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdFALLBACKCREATE(discardCtx("", bytesArgs("fb1"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdFALLBACKEXECUTE_Success(t *testing.T) {
-	s := store.NewStore()
-	cmdFALLBACKCREATE(discardCtx("", bytesArgs("fbex", "fallback_val"), s))
-	if err := cmdFALLBACKEXECUTE(discardCtx("", bytesArgs("fbex"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdFALLBACKEXECUTE_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdFALLBACKEXECUTE(discardCtx("", bytesArgs(), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdFALLBACKDELETE_Success(t *testing.T) {
-	s := store.NewStore()
-	cmdFALLBACKCREATE(discardCtx("", bytesArgs("fbdel", "act"), s))
-	if err := cmdFALLBACKDELETE(discardCtx("", bytesArgs("fbdel"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdFALLBACKDELETE_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdFALLBACKDELETE(discardCtx("", bytesArgs(), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
 func TestCmdTELEMETRYRECORD_Success(t *testing.T) {
 	s := store.NewStore()
 	if err := cmdTELEMETRYRECORD(discardCtx("", bytesArgs("metric1", "1000", "3.14"), s)); err != nil {
@@ -476,41 +328,6 @@ func TestCmdTELEMETRYQUERY_WrongArgs(t *testing.T) {
 	}
 }
 
-func TestCmdDIAGNOSTICRUN_Success(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdDIAGNOSTICRUN(discardCtx("", bytesArgs("check1", "health"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdDIAGNOSTICRUN_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdDIAGNOSTICRUN(discardCtx("", bytesArgs("x"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdDIAGNOSTICLIST_Success(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdDIAGNOSTICLIST(discardCtx("", bytesArgs(), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdPROFILESTART_Success(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdPROFILESTART(discardCtx("", bytesArgs("prof1"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdPROFILESTART_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdPROFILESTART(discardCtx("", bytesArgs(), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
 func TestCmdPROFILEXLIST_Success(t *testing.T) {
 	s := store.NewStore()
 	if err := cmdPROFILEXLIST(discardCtx("", bytesArgs(), s)); err != nil {
@@ -528,152 +345,6 @@ func TestCmdHEAPSTATS_Success(t *testing.T) {
 func TestCmdHEAPGC_Success(t *testing.T) {
 	s := store.NewStore()
 	if err := cmdHEAPGC(discardCtx("", bytesArgs(), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdMEMORYXALLOC_Success(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdMEMORYXALLOC(discardCtx("", bytesArgs("pool1", "1024"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdMEMORYXALLOC_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdMEMORYXALLOC(discardCtx("", bytesArgs("x"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdMEMORYXFREE_Success(t *testing.T) {
-	s := store.NewStore()
-	cmdMEMORYXALLOC(discardCtx("", bytesArgs("mfree", "1024"), s))
-	if err := cmdMEMORYXFREE(discardCtx("", bytesArgs("mfree", "512"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdMEMORYXFREE_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdMEMORYXFREE(discardCtx("", bytesArgs("x"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdMEMORYXSTATS_Success(t *testing.T) {
-	s := store.NewStore()
-	cmdMEMORYXALLOC(discardCtx("", bytesArgs("mstat", "1024"), s))
-	if err := cmdMEMORYXSTATS(discardCtx("", bytesArgs("mstat"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdMEMORYXSTATS_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdMEMORYXSTATS(discardCtx("", bytesArgs(), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdCONPOOLCREATE_Success(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdCONPOOLCREATE(discardCtx("", bytesArgs("cp1", "5"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdCONPOOLCREATE_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdCONPOOLCREATE(discardCtx("", bytesArgs("x"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdCONPOOLGET_Success(t *testing.T) {
-	s := store.NewStore()
-	cmdCONPOOLCREATE(discardCtx("", bytesArgs("cpg", "3"), s))
-	if err := cmdCONPOOLGET(discardCtx("", bytesArgs("cpg"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdCONPOOLGET_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdCONPOOLGET(discardCtx("", bytesArgs(), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdCONPOOLRETURN_Success(t *testing.T) {
-	s := store.NewStore()
-	cmdCONPOOLCREATE(discardCtx("", bytesArgs("cpr", "3"), s))
-	if err := cmdCONPOOLRETURN(discardCtx("", bytesArgs("cpr", "conn-0"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdCONPOOLRETURN_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdCONPOOLRETURN(discardCtx("", bytesArgs("x"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdCONPOOLSTATUS_Success(t *testing.T) {
-	s := store.NewStore()
-	cmdCONPOOLCREATE(discardCtx("", bytesArgs("cps", "3"), s))
-	if err := cmdCONPOOLSTATUS(discardCtx("", bytesArgs("cps"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdCONPOOLSTATUS_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdCONPOOLSTATUS(discardCtx("", bytesArgs(), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdCONPOOLDELETE_Success(t *testing.T) {
-	s := store.NewStore()
-	cmdCONPOOLCREATE(discardCtx("", bytesArgs("cpd", "3"), s))
-	if err := cmdCONPOOLDELETE(discardCtx("", bytesArgs("cpd"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdCONPOOLDELETE_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdCONPOOLDELETE(discardCtx("", bytesArgs(), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdBATCHXCREATE_Success(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdBATCHXCREATE(discardCtx("", bytesArgs("batch1"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdBATCHXCREATE_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdBATCHXCREATE(discardCtx("", bytesArgs(), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdPIPELINEXSTART_Success(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdPIPELINEXSTART(discardCtx("", bytesArgs(), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdTRANSXBEGIN_Success(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdTRANSXBEGIN(discardCtx("", bytesArgs(), s)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -797,20 +468,6 @@ func TestCmdSEMAPHOREXSTATUS_WrongArgs(t *testing.T) {
 	}
 }
 
-func TestCmdASYNCSUBMIT_Success(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdASYNCSUBMIT(discardCtx("", bytesArgs("job1"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdASYNCSUBMIT_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdASYNCSUBMIT(discardCtx("", bytesArgs(), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
 func TestCmdPROMISECREATE_Success(t *testing.T) {
 	s := store.NewStore()
 	if err := cmdPROMISECREATE(discardCtx("", bytesArgs(), s)); err != nil {
@@ -821,13 +478,6 @@ func TestCmdPROMISECREATE_Success(t *testing.T) {
 func TestCmdFUTURECREATE_Success(t *testing.T) {
 	s := store.NewStore()
 	if err := cmdFUTURECREATE(discardCtx("", bytesArgs(), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdOBSERVABLECREATE_Success(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdOBSERVABLECREATE(discardCtx("", bytesArgs(), s)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -1579,62 +1229,6 @@ func TestCmdCACHEREFRESH_WrongArgs(t *testing.T) {
 	}
 }
 
-func TestCmdNETWHOIS_Success(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdNETWHOIS(discardCtx("", bytesArgs("example.com"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdNETWHOIS_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdNETWHOIS(discardCtx("", bytesArgs(), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdNETDNS_Success(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdNETDNS(discardCtx("", bytesArgs("example.com"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdNETDNS_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdNETDNS(discardCtx("", bytesArgs(), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdNETPING_Success(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdNETPING(discardCtx("", bytesArgs("127.0.0.1"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdNETPING_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdNETPING(discardCtx("", bytesArgs(), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdNETPORT_Success(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdNETPORT(discardCtx("", bytesArgs("127.0.0.1", "8080"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdNETPORT_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdNETPORT(discardCtx("", bytesArgs("x"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
 func TestCmdARRAYPUSH_Success(t *testing.T) {
 	s := store.NewStore()
 	if err := cmdARRAYPUSH(discardCtx("", bytesArgs("arr1", "val1"), s)); err != nil {
@@ -1749,21 +1343,6 @@ func TestCmdARRAYUNIQUE_Success(t *testing.T) {
 func TestCmdARRAYUNIQUE_WrongArgs(t *testing.T) {
 	s := store.NewStore()
 	if err := cmdARRAYUNIQUE(discardCtx("", bytesArgs(), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdARRAYFLATTEN_Success(t *testing.T) {
-	s := store.NewStore()
-	cmdARRAYPUSH(discardCtx("", bytesArgs("arrflat", "a", "b"), s))
-	if err := cmdARRAYFLATTEN(discardCtx("", bytesArgs("arrflat"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdARRAYFLATTEN_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdARRAYFLATTEN(discardCtx("", bytesArgs(), s)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -2266,20 +1845,6 @@ func TestCmdMSGPACKENCODE_WrongArgs(t *testing.T) {
 	}
 }
 
-func TestCmdBSONENCODE_Success(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdBSONENCODE(discardCtx("", bytesArgs("data"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdBSONENCODE_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdBSONENCODE(discardCtx("", bytesArgs(), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
 func TestCmdURLENCODE_Success(t *testing.T) {
 	s := store.NewStore()
 	if err := cmdURLENCODE(discardCtx("", bytesArgs("hello world"), s)); err != nil {
@@ -2642,108 +2207,6 @@ func TestCmdPOOLPUT_WrongArgs(t *testing.T) {
 // MVCC COMMANDS
 // ===========================================================================
 
-func TestCmdMVCCBEGIN_Success(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdMVCCBEGIN(discardCtx("", bytesArgs(), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdMVCCBeginCommitRollback(t *testing.T) {
-	s := store.NewStore()
-
-	// Begin a transaction (returns id)
-	ctx1, buf1 := bufCtx("MVCC.BEGIN", bytesArgs(), s)
-	if err := cmdMVCCBEGIN(ctx1); err != nil {
-		t.Fatalf("MVCC.BEGIN: %v", err)
-	}
-	// Extract transaction ID from output - it's an integer
-	out := buf1.String()
-	_ = out // id written
-
-	// Begin another, then set and commit
-	ctx2 := discardCtx("MVCC.BEGIN", bytesArgs(), s)
-	cmdMVCCBEGIN(ctx2)
-	// Get current nextID from the global state
-	mvccTxnsMu.RLock()
-	var txnID int64
-	for id := range mvccTxns {
-		txnID = id
-	}
-	mvccTxnsMu.RUnlock()
-
-	idStr := fmt.Sprintf("%d", txnID)
-
-	// SET within txn
-	if err := cmdMVCCSET(discardCtx("", bytesArgs(idStr, "mykey", "myval"), s)); err != nil {
-		t.Fatalf("MVCC.SET: %v", err)
-	}
-
-	// GET within txn
-	if err := cmdMVCCGET(discardCtx("", bytesArgs(idStr, "mykey"), s)); err != nil {
-		t.Fatalf("MVCC.GET: %v", err)
-	}
-
-	// STATUS
-	if err := cmdMVCCSTATUS(discardCtx("", bytesArgs(idStr), s)); err != nil {
-		t.Fatalf("MVCC.STATUS: %v", err)
-	}
-
-	// COMMIT
-	if err := cmdMVCCCOMMIT(discardCtx("", bytesArgs(idStr), s)); err != nil {
-		t.Fatalf("MVCC.COMMIT: %v", err)
-	}
-}
-
-func TestCmdMVCCCOMMIT_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdMVCCCOMMIT(discardCtx("", bytesArgs(), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdMVCCROLLBACK_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdMVCCROLLBACK(discardCtx("", bytesArgs(), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdMVCCGET_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdMVCCGET(discardCtx("", bytesArgs("1"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdMVCCSET_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdMVCCSET(discardCtx("", bytesArgs("1", "key"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdMVCCDELETE_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdMVCCDELETE(discardCtx("", bytesArgs("1"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdMVCCSTATUS_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdMVCCSTATUS(discardCtx("", bytesArgs(), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdMVCCSNAPSHOT_Success(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdMVCCSNAPSHOT(discardCtx("", bytesArgs(), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
 func TestCmdSPATIALCREATE_Success(t *testing.T) {
 	s := store.NewStore()
 	if err := cmdSPATIALCREATE(discardCtx("", bytesArgs("idx1"), s)); err != nil {
@@ -3064,72 +2527,6 @@ func TestCmdCONNECTIONINFO_WrongArgs(t *testing.T) {
 	}
 }
 
-func TestCmdPLUGINLOAD_Success(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdPLUGINLOAD(discardCtx("", bytesArgs("myplugin"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdPLUGINLOAD_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdPLUGINLOAD(discardCtx("", bytesArgs(), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdPLUGINUNLOAD_Success(t *testing.T) {
-	s := store.NewStore()
-	cmdPLUGINLOAD(discardCtx("", bytesArgs("plgunload"), s))
-	if err := cmdPLUGINUNLOAD(discardCtx("", bytesArgs("plgunload"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdPLUGINUNLOAD_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdPLUGINUNLOAD(discardCtx("", bytesArgs(), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdPLUGINLIST_Success(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdPLUGINLIST(discardCtx("", bytesArgs(), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdPLUGINCALL_Success(t *testing.T) {
-	s := store.NewStore()
-	cmdPLUGINLOAD(discardCtx("", bytesArgs("plgcall"), s))
-	if err := cmdPLUGINCALL(discardCtx("", bytesArgs("plgcall", "myfunc"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdPLUGINCALL_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdPLUGINCALL(discardCtx("", bytesArgs("x"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdPLUGININFO_Success(t *testing.T) {
-	s := store.NewStore()
-	cmdPLUGINLOAD(discardCtx("", bytesArgs("plginfo"), s))
-	if err := cmdPLUGININFO(discardCtx("", bytesArgs("plginfo"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdPLUGININFO_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdPLUGININFO(discardCtx("", bytesArgs(), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
 func TestCmdROLLUPCREATE_Success(t *testing.T) {
 	s := store.NewStore()
 	if err := cmdROLLUPCREATE(discardCtx("", bytesArgs("ru1", "3600"), s)); err != nil {
@@ -3327,102 +2724,6 @@ func TestCmdEVENTLIST_Success(t *testing.T) {
 func TestCmdEVENTCLEAR_Success(t *testing.T) {
 	s := store.NewStore()
 	if err := cmdEVENTCLEAR(discardCtx("", bytesArgs(), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdWEBHOOKCREATE_Success(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdWEBHOOKCREATE(discardCtx("", bytesArgs("wh1", "http://example.com", "POST"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdWEBHOOKCREATE_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdWEBHOOKCREATE(discardCtx("", bytesArgs("wh1", "url"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdWEBHOOKDELETE_Success(t *testing.T) {
-	s := store.NewStore()
-	cmdWEBHOOKCREATE(discardCtx("", bytesArgs("whdel", "http://example.com", "POST"), s))
-	if err := cmdWEBHOOKDELETE(discardCtx("", bytesArgs("whdel"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdWEBHOOKDELETE_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdWEBHOOKDELETE(discardCtx("", bytesArgs(), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdWEBHOOKGET_Success(t *testing.T) {
-	s := store.NewStore()
-	cmdWEBHOOKCREATE(discardCtx("", bytesArgs("whget", "http://example.com", "POST"), s))
-	if err := cmdWEBHOOKGET(discardCtx("", bytesArgs("whget"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdWEBHOOKGET_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdWEBHOOKGET(discardCtx("", bytesArgs(), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdWEBHOOKLIST_Success(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdWEBHOOKLIST(discardCtx("", bytesArgs(), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdWEBHOOKENABLE_Success(t *testing.T) {
-	s := store.NewStore()
-	cmdWEBHOOKCREATE(discardCtx("", bytesArgs("when", "http://example.com", "POST"), s))
-	if err := cmdWEBHOOKENABLE(discardCtx("", bytesArgs("when"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdWEBHOOKENABLE_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdWEBHOOKENABLE(discardCtx("", bytesArgs(), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdWEBHOOKDISABLE_Success(t *testing.T) {
-	s := store.NewStore()
-	cmdWEBHOOKCREATE(discardCtx("", bytesArgs("whdis", "http://example.com", "POST"), s))
-	if err := cmdWEBHOOKDISABLE(discardCtx("", bytesArgs("whdis"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdWEBHOOKDISABLE_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdWEBHOOKDISABLE(discardCtx("", bytesArgs(), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdWEBHOOKSTATS_Success(t *testing.T) {
-	s := store.NewStore()
-	cmdWEBHOOKCREATE(discardCtx("", bytesArgs("whstats", "http://example.com", "POST"), s))
-	if err := cmdWEBHOOKSTATS(discardCtx("", bytesArgs("whstats"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdWEBHOOKSTATS_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdWEBHOOKSTATS(discardCtx("", bytesArgs(), s)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

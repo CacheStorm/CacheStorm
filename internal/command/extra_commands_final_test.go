@@ -15,17 +15,7 @@ func TestExtraCommandsReplayFinalCoverage(t *testing.T) {
 		name string
 		cmd  string
 		args [][]byte
-	}{
-		{"REPLAYX.START", "REPLAYX.START", [][]byte{[]byte("log1")}},
-		{"REPLAYX.START no args", "REPLAYX.START", nil},
-		{"REPLAYX.STOP", "REPLAYX.STOP", [][]byte{[]byte("log1")}},
-		{"REPLAYX.STOP not found", "REPLAYX.STOP", [][]byte{[]byte("notfound")}},
-		{"REPLAYX.STOP no args", "REPLAYX.STOP", nil},
-		{"REPLAYX.PAUSE", "REPLAYX.PAUSE", [][]byte{[]byte("log1")}},
-		{"REPLAYX.PAUSE no args", "REPLAYX.PAUSE", nil},
-		{"REPLAYX.SPEED", "REPLAYX.SPEED", [][]byte{[]byte("log1"), []byte("2.0")}},
-		{"REPLAYX.SPEED no args", "REPLAYX.SPEED", nil},
-	}
+	}{}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -130,16 +120,7 @@ func TestExtraCommandsRageFinalCoverage(t *testing.T) {
 		name string
 		cmd  string
 		args [][]byte
-	}{
-		{"RAGE.TEST", "RAGE.TEST", [][]byte{[]byte("test1"), []byte("100")}},
-		{"RAGE.TEST no args", "RAGE.TEST", nil},
-		{"RAGE.STOP", "RAGE.STOP", [][]byte{[]byte("test1")}},
-		{"RAGE.STOP no args", "RAGE.STOP", nil},
-		{"RAGE.STATS", "RAGE.STATS", [][]byte{[]byte("test1")}},
-		{"RAGE.STATS no args", "RAGE.STATS", nil},
-		{"RAGE.RESET", "RAGE.RESET", [][]byte{[]byte("test1")}},
-		{"RAGE.RESET no args", "RAGE.RESET", nil},
-	}
+	}{}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -246,8 +227,6 @@ func TestExtraCommandsGatewayFinalCoverage(t *testing.T) {
 		{"GATEWAY.ROUTE", "GATEWAY.ROUTE", [][]byte{[]byte("gw1"), []byte("/api")}},
 		{"GATEWAY.ROUTE no args", "GATEWAY.ROUTE", nil},
 		{"GATEWAY.LIST", "GATEWAY.LIST", nil},
-		{"GATEWAY.METRICS", "GATEWAY.METRICS", [][]byte{[]byte("gw1")}},
-		{"GATEWAY.METRICS no args", "GATEWAY.METRICS", nil},
 	}
 
 	for _, tt := range tests {
@@ -292,17 +271,7 @@ func TestExtraCommandsProbeFinalCoverage(t *testing.T) {
 		name string
 		cmd  string
 		args [][]byte
-	}{
-		{"PROBE.CREATE", "PROBE.CREATE", [][]byte{[]byte("probe1"), []byte("http://localhost:8080")}},
-		{"PROBE.CREATE no args", "PROBE.CREATE", nil},
-		{"PROBE.DELETE", "PROBE.DELETE", [][]byte{[]byte("probe1")}},
-		{"PROBE.DELETE no args", "PROBE.DELETE", nil},
-		{"PROBE.RUN", "PROBE.RUN", [][]byte{[]byte("probe1")}},
-		{"PROBE.RUN no args", "PROBE.RUN", nil},
-		{"PROBE.RESULTS", "PROBE.RESULTS", [][]byte{[]byte("probe1")}},
-		{"PROBE.RESULTS no args", "PROBE.RESULTS", nil},
-		{"PROBE.LIST", "PROBE.LIST", nil},
-	}
+	}{}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -320,17 +289,7 @@ func TestExtraCommandsCanaryFinalCoverage(t *testing.T) {
 		name string
 		cmd  string
 		args [][]byte
-	}{
-		{"CANARY.CREATE", "CANARY.CREATE", [][]byte{[]byte("canary1"), []byte("10")}},
-		{"CANARY.CREATE no args", "CANARY.CREATE", nil},
-		{"CANARY.DELETE", "CANARY.DELETE", [][]byte{[]byte("canary1")}},
-		{"CANARY.DELETE no args", "CANARY.DELETE", nil},
-		{"CANARY.CHECK", "CANARY.CHECK", [][]byte{[]byte("canary1")}},
-		{"CANARY.CHECK no args", "CANARY.CHECK", nil},
-		{"CANARY.STATUS", "CANARY.STATUS", [][]byte{[]byte("canary1")}},
-		{"CANARY.STATUS no args", "CANARY.STATUS", nil},
-		{"CANARY.LIST", "CANARY.LIST", nil},
-	}
+	}{}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -375,15 +334,7 @@ func TestExtraCommandsBeaconFinalCoverage(t *testing.T) {
 		name string
 		cmd  string
 		args [][]byte
-	}{
-		{"BEACON.START", "BEACON.START", [][]byte{[]byte("beacon1"), []byte("5000")}},
-		{"BEACON.START no args", "BEACON.START", nil},
-		{"BEACON.STOP", "BEACON.STOP", [][]byte{[]byte("beacon1")}},
-		{"BEACON.STOP no args", "BEACON.STOP", nil},
-		{"BEACON.LIST", "BEACON.LIST", nil},
-		{"BEACON.CHECK", "BEACON.CHECK", [][]byte{[]byte("beacon1")}},
-		{"BEACON.CHECK no args", "BEACON.CHECK", nil},
-	}
+	}{}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

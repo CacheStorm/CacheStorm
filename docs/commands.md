@@ -1,6 +1,6 @@
 # CacheStorm Commands Reference
 
-CacheStorm registers about 1,500 commands across 50+ modules: the Redis 7.4 command set plus CacheStorm extensions. Compatibility with Redis is measured by the differential harness in `tests/compat`.
+CacheStorm registers about 1,200 commands across 50+ modules: the Redis 7.4 command set plus CacheStorm extensions. Compatibility with Redis is measured by the differential harness in `tests/compat`.
 
 Every command name in this reference is verified against the registered command
 set: 1,596 documented, 0 phantoms, 0 missing.
@@ -15,41 +15,32 @@ set: 1,596 documented, 0 phantoms, 0 missing.
 | [Search](#search-commands) | 50+ | Full-text search |
 | [Graph](#graph-commands) | 30+ | Graph database |
 | [Probabilistic](#probabilistic-commands) | 20+ | Bloom filters, sketches |
-| [Distributed](#distributed-commands) | 100+ | Cluster, replication |
-| [Caching](#caching-commands) | 50+ | Cache management |
-| [Scheduling](#scheduling-commands) | 40+ | Jobs, cron, timers |
-| [Messaging](#messaging-commands) | 60+ | Pub/Sub, queues |
-| [Resilience](#resilience-commands) | 138 | Circuit breakers, rate limits |
+| [Resilience](#resilience-commands) | 81 | Circuit breakers, rate limits |
 | [Data Processing](#data-processing-commands) | 100+ | Aggregation, joins |
-| [Monitoring](#monitoring-commands) | 80+ | Metrics, alerts |
-| [Security](#security-commands) | 40+ | ACL, encryption |
 | [Machine Learning](#machine-learning-commands) | 80+ | Models, embeddings |
-| [Namespace](#namespace-commands) | 5 | Multi-tenant namespaces |
+| [Namespace](#namespace-commands) | 1 | Multi-tenant namespaces |
 | [Tag Management](#tag-based-invalidation-commands) | 10 | Tag-based cache invalidation |
-| [Workflow](#workflow-commands) | 30+ | Workflows and state machines |
+| [Workflow](#workflow-commands) | 30+ | State machines |
 | [Advanced](#advanced-commands) | 100+ | Advanced data structures |
 | [Encoding](#encoding-commands) | 40+ | Data encoding/decoding |
 | [Digest](#digest-commands) | 20+ | Hashing and crypto |
-| [Events](#event-commands) | 30+ | Event sourcing and webhooks |
+| [Events](#event-commands) | 30+ | Event sourcing |
 | [Utilities](#utility-commands) | 100+ | Various utilities |
 | [Integration](#integration-commands) | 100+ | External integrations |
 | [String Processing](#string-processing-commands) | 20 | String analysis and text manipulation |
 | [Sessions](#session-commands) | 13 | Server-side session storage |
 | [CRDT](#crdt-commands) | 13 | Conflict-free replicated data types |
 | [Validation](#validation-commands) | 14 | Reusable value validation rules |
-| [Key Management](#key-management-commands) | 11 | Key lifecycle operations |
-| [Batch](#batch-commands) | 11 | Grouped operation submission |
+| [Key Management](#key-management-commands) | 6 | Key lifecycle operations |
+| [Batch](#batch-commands) | 7 | Grouped operation submission |
 | [Vector](#vector-commands) | 10 | Vector embeddings and similarity search |
 | [T-Digest](#t-digest-commands) | 10 | Streaming quantile sketches |
 | [Message Queue](#message-queue-commands) | 10 | Durable queue with acknowledgements |
-| [Jobs](#job-commands) | 10 | Background job scheduling |
 | [Documents](#document-commands) | 10 | Document storage and queries |
 | [Analytics](#analytics-commands) | 9 | Counters and aggregates |
 | [Circuit Breakers](#circuit-breaker-commands) | 9 | Failure/success state tracking |
-| [WebSocket](#websocket-commands) | 8 | WebSocket connections and rooms |
 | [Service Discovery](#service-discovery-commands) | 8 | Service registration and discovery |
-| [Profiler](#profiler-commands) | 8 | Command execution profiling |
-| [MVCC](#mvcc-commands) | 8 | Multi-version concurrency control |
+| [Profiles](#profile-commands) | 5 | User profile records |
 
 ---
 
@@ -498,15 +489,6 @@ RATELIMITER.STATUS name
 RATELIMITER.DELETE name
 ```
 
-### Retry
-
-```
-RETRY.CREATE name maxRetry backoffMs
-RETRY.EXECUTE name command [args ...]
-RETRY.STATUS name
-RETRY.DELETE name
-```
-
 ### Bulkhead
 
 ```
@@ -554,20 +536,12 @@ JOINX.DELETE name
 PARTITIONX.CREATE name count
 PARTITIONX.ADD name key value
 PARTITIONX.GET name index
-PARTITIONX.REBALANCE name arg2
 ```
 
 ---
 
 
-> **Not implemented:** `PARTITIONX.REBALANCE` always answers with an error.
-
 ## Machine Learning Commands
-
-### Model Commands
-
-```
-```
 
 ### Feature Commands
 
@@ -644,24 +618,6 @@ SELECT index
 
 ## Workflow Commands
 
-### Workflow Management
-
-```
-WORKFLOW.CREATE id name
-WORKFLOW.DELETE name
-WORKFLOW.GET name
-WORKFLOW.LIST [pattern]
-WORKFLOW.START name [vars...]
-WORKFLOW.PAUSE id
-WORKFLOW.COMPLETE id
-WORKFLOW.FAIL id errMsg
-WORKFLOW.RESET id
-WORKFLOW.NEXT id
-WORKFLOW.SETVAR id key value
-WORKFLOW.GETVAR id key
-WORKFLOW.ADDSTEP id stepID name command timeout
-```
-
 ### State Machine
 
 ```
@@ -677,15 +633,6 @@ STATEM.RESET machine [state]
 STATEM.ISFINAL machine
 STATEM.INFO machine
 STATEM.LIST [pattern]
-```
-
-### Templates
-
-```
-TEMPLATE.CREATE name content
-TEMPLATE.DELETE name
-TEMPLATE.GET name
-TEMPLATE.INSTANTIATE templateName workflowID
 ```
 
 ---
@@ -722,7 +669,6 @@ DAG.LIST [pattern]
 ### Parallel Processing
 
 ```
-PARALLEL.EXEC commands... [MAX max]
 PARALLEL.MAP key command
 PARALLEL.REDUCE operation arg2 value [value ...]
 PARALLEL.FILTER key command
@@ -781,8 +727,6 @@ SEM.VALUE name
 MSGPACK.ENCODE data
 MSGPACK.DECODE data
 
-BSON.ENCODE data
-BSON.DECODE data
 
 URL.ENCODE string
 URL.DECODE string
@@ -863,18 +807,6 @@ EVENT.EMIT name [key value ...]
 EVENT.GET channel [cursor] [COUNT count]
 EVENT.LIST [pattern]
 EVENT.CLEAR channel
-```
-
-### Webhooks
-
-```
-WEBHOOK.CREATE id url method [EVENTS events...] [SECRET secret]
-WEBHOOK.DELETE name
-WEBHOOK.GET name
-WEBHOOK.LIST [pattern]
-WEBHOOK.ENABLE name
-WEBHOOK.DISABLE name
-WEBHOOK.STATS name
 ```
 
 ### Compression
@@ -973,7 +905,6 @@ FLAG.LIST [pattern]
 FLAG.LISTENABLED
 FLAG.ADDVARIANT name variant value [WEIGHT weight]
 FLAG.GETVARIANT name key
-FLAG.ADDRULE name attribute operator value
 ```
 
 ### Counters
@@ -992,22 +923,12 @@ COUNTER.RESET name
 COUNTER.RESETALL [pattern]
 ```
 
-### Backup
-
-```
-BACKUP.CREATE name [TYPE type]
-BACKUP.RESTORE name [OPTIONS options]
-BACKUP.LIST [pattern]
-BACKUP.DELETE name
-```
-
 ### Memory Management
 
 ```
 MEMORY.TRIM
 MEMORY.FRAG
 MEMORY.PURGE
-MEMORY.ALLOC size
 ```
 
 ---
@@ -1041,15 +962,6 @@ CACHE.LOCKED key
 CACHE.REFRESH key holder ttlMs
 ```
 
-### Network
-
-```
-NET.WHOIS domain
-NET.DNS domain [TYPE type]
-NET.PING host [COUNT count]
-NET.PORT host port [TIMEOUT timeout]
-```
-
 ### Array Operations
 
 ```
@@ -1062,7 +974,6 @@ ARRAY.SPLICE key start deleteCount [value ...]
 ARRAY.REVERSE key
 ARRAY.SORT key [ASC|DESC]
 ARRAY.UNIQUE key
-ARRAY.FLATTEN key [DEPTH depth]
 ARRAY.MERGE dest src
 ARRAY.INTERSECT key1 key2 [OUT out]
 ARRAY.DIFF key1 key2 [OUT out]
@@ -1216,7 +1127,7 @@ Vector embeddings: storage, similarity search, and index management.
 
 ```
 VECTOR.CREATE name dim
-VECTOR.ADD name id vector
+VECTOR.ADD name id dim value [value ...]
 VECTOR.GET name id
 VECTOR.DELETE name id
 VECTOR.SEARCH name k dim [vectorValue ...]
@@ -1263,25 +1174,6 @@ MSGQUEUE.DEADLETTER name
 MSGQUEUE.PURGE name
 MSGQUEUE.DELETE name
 MSGQUEUE.STATS name
-```
-
----
-
-## Job Commands
-
-Background job scheduling and execution control.
-
-```
-JOB.CREATE id name command intervalMs
-JOB.RUN name
-JOB.GET name
-JOB.LIST
-JOB.UPDATE id intervalMs
-JOB.DELETE name
-JOB.ENABLE name
-JOB.DISABLE name
-JOB.RESET name
-JOB.STATS name
 ```
 
 ---
@@ -1355,11 +1247,6 @@ KEY.COPY source destination [REPLACE]
 KEY.RENAME key newkey
 KEY.RENAMENX key newkey
 KEY.MOVE key db
-KEY.DUMP key
-KEY.RESTORE key value [REPLACE] [TTL milliseconds]
-KEY.ENCODE key
-KEY.OBJECT subcommand key
-KEY.REFCOUNT key
 KEY.IDLETIME key
 KEY.FREQ key
 ```
@@ -1371,17 +1258,13 @@ KEY.FREQ key
 Submit and inspect grouped operations.
 
 ```
-BATCH.SUBMIT name [PIPELINED]
 BATCH.GET id
-BATCH.STATUS id
 BATCH.EXEC id
-BATCH.CANCEL id
 BATCH.MGET name [key ...]
 BATCH.MSET key value [key value ...]
 BATCH.MDEL name [key ...]
 BATCH.SET key value [key value ...]
 BATCH.DEL name [key ...]
-BATCH.LIST
 ```
 
 ---
@@ -1404,23 +1287,6 @@ ANALYTICS.CLEAR name
 
 ---
 
-## WebSocket Commands
-
-WebSocket connection and room management.
-
-```
-WS.CONNECT id [path]
-WS.DISCONNECT id
-WS.SEND id message
-WS.BROADCAST room message
-WS.JOIN id room
-WS.LEAVE id room
-WS.ROOMS
-WS.LIST
-```
-
----
-
 ## Service Discovery Commands
 
 Register services and instances for discovery and health tracking.
@@ -1438,36 +1304,16 @@ SERVICE.LIST
 
 ---
 
-## Profiler Commands
+## Profile Commands
 
-Capture and inspect command execution profiles.
+Store and read user profile records.
 
 ```
-PROFILE.START name [SAMPLE rate]
-PROFILE.STOP
 PROFILE.GET id
-PROFILE.RESULT
 PROFILE.SET id key value
 PROFILE.LIST
 PROFILE.CREATE user
 PROFILE.DELETE id
-```
-
----
-
-## MVCC Commands
-
-Multi-version concurrency control: snapshot reads and transactional writes.
-
-```
-MVCC.BEGIN [key key ...]
-MVCC.COMMIT
-MVCC.ROLLBACK
-MVCC.SNAPSHOT
-MVCC.STATUS
-MVCC.GET id key
-MVCC.SET id key value
-MVCC.DELETE id key
 ```
 
 ---
@@ -1496,7 +1342,6 @@ CLUSTER
 CLUSTERINFO
 CLUSTERNODES
 CLUSTERSLOTS
-DEBUGSEGFAULT
 ECHO
 EVAL
 EVALSHA
@@ -1535,7 +1380,6 @@ SINTERCARD
 SMISMEMBER
 SORT
 SORT_RO
-STRALGO
 SUBSTR
 TAGCHILDREN
 TAGCOUNT
@@ -1575,18 +1419,6 @@ ALERT.TRIGGER
 ```
 
 ---
-## Anti entropy Commands
-
-`ANTI_ENTROPY.*` command family (4 commands).
-
-```
-ANTI_ENTROPY.DIFF
-ANTI_ENTROPY.MERGE
-ANTI_ENTROPY.STATUS
-ANTI_ENTROPY.SYNC
-```
-
----
 ## API Keys Commands
 
 `APIKEY.*` command family (5 commands).
@@ -1597,18 +1429,6 @@ APIKEY.LIST
 APIKEY.REVOKE
 APIKEY.USAGE
 APIKEY.VALIDATE
-```
-
----
-## Async Execution Commands
-
-`ASYNC.*` command family (4 commands).
-
-```
-ASYNC.CANCEL
-ASYNC.RESULT
-ASYNC.STATUS
-ASYNC.SUBMIT
 ```
 
 ---
@@ -1632,43 +1452,6 @@ AUDITX.SEARCH
 BACKPRESSURE.CHECK
 BACKPRESSURE.CREATE
 BACKPRESSURE.STATUS
-```
-
----
-## Backupx Commands
-
-`BACKUPX.*` command family (4 commands).
-
-```
-BACKUPX.CREATE
-BACKUPX.DELETE
-BACKUPX.LIST
-BACKUPX.RESTORE
-```
-
----
-## Batchx Commands
-
-`BATCHX.*` command family (5 commands).
-
-```
-BATCHX.ADD
-BATCHX.CREATE
-BATCHX.DELETE
-BATCHX.EXECUTE
-BATCHX.STATUS
-```
-
----
-## Beacon Commands
-
-`BEACON.*` command family (4 commands).
-
-```
-BEACON.CHECK
-BEACON.LIST
-BEACON.START
-BEACON.STOP
 ```
 
 ---
@@ -1724,15 +1507,13 @@ BUFFERX.WRITE
 ---
 ## Cache Management Commands
 
-`CACHE.*` command family (7 commands).
+`CACHE.*` command family (5 commands).
 
 ```
 CACHE.BULKDEL
 CACHE.BULKGET
 CACHE.CLEAR
 CACHE.EXPORT
-CACHE.IMPORT
-CACHE.PREFETCH
 CACHE.STATS
 ```
 
@@ -1747,19 +1528,6 @@ CACHEX.DELETE
 CACHEX.GET
 CACHEX.LIST
 CACHEX.SET
-```
-
----
-## Canary Commands
-
-`CANARY.*` command family (5 commands).
-
-```
-CANARY.CHECK
-CANARY.CREATE
-CANARY.DELETE
-CANARY.LIST
-CANARY.STATUS
 ```
 
 ---
@@ -1785,18 +1553,6 @@ CHAIN.VALIDATE
 CHAINED.DEL
 CHAINED.GET
 CHAINED.SET
-```
-
----
-## Chainx Commands
-
-`CHAINX.*` command family (4 commands).
-
-```
-CHAINX.CREATE
-CHAINX.DELETE
-CHAINX.EXECUTE
-CHAINX.LIST
 ```
 
 ---
@@ -1839,31 +1595,6 @@ CONNECTION.COUNT
 CONNECTION.INFO
 CONNECTION.KILL
 CONNECTION.LIST
-```
-
----
-## Connectionx Commands
-
-`CONNECTIONX.*` command family (4 commands).
-
-```
-CONNECTIONX.CREATE
-CONNECTIONX.DELETE
-CONNECTIONX.LIST
-CONNECTIONX.STATUS
-```
-
----
-## Connection Pooling Commands
-
-`CONPOOL.*` command family (5 commands).
-
-```
-CONPOOL.CREATE
-CONPOOL.DELETE
-CONPOOL.GET
-CONPOOL.RETURN
-CONPOOL.STATUS
 ```
 
 ---
@@ -1917,22 +1648,6 @@ COUNTERX2.DECR
 COUNTERX2.GET
 COUNTERX2.INCR
 COUNTERX2.LIST
-```
-
----
-## Cron Scheduler Commands
-
-`CRON.*` command family (8 commands).
-
-```
-CRON.ADD
-CRON.HISTORY
-CRON.LIST
-CRON.NEXT
-CRON.PAUSE
-CRON.REMOVE
-CRON.RESUME
-CRON.TRIGGER
 ```
 
 ---
@@ -1997,29 +1712,6 @@ DEDUP.EXPIRE
 ```
 
 ---
-## Diagnostic Commands
-
-`DIAGNOSTIC.*` command family (3 commands).
-
-```
-DIAGNOSTIC.LIST
-DIAGNOSTIC.RESULT
-DIAGNOSTIC.RUN
-```
-
----
-## Enrichment Commands
-
-`ENRICH.*` command family (4 commands).
-
-```
-ENRICH.APPLY
-ENRICH.CREATE
-ENRICH.DELETE
-ENRICH.LIST
-```
-
----
 ## Entity Commands
 
 `ENTITY.*` command family (5 commands).
@@ -2059,19 +1751,6 @@ EVENTSOURCING.REPLAY
 ```
 
 ---
-## Eventx Commands
-
-`EVENTX.*` command family (5 commands).
-
-```
-EVENTX.CREATE
-EVENTX.DELETE
-EVENTX.EMIT
-EVENTX.LIST
-EVENTX.SUBSCRIBE
-```
-
----
 ## Experimentation Commands
 
 `EXPERIMENT.*` command family (6 commands).
@@ -2083,17 +1762,6 @@ EXPERIMENT.DELETE
 EXPERIMENT.LIST
 EXPERIMENT.RESULTS
 EXPERIMENT.TRACK
-```
-
----
-## Fallback Commands
-
-`FALLBACK.*` command family (3 commands).
-
-```
-FALLBACK.CREATE
-FALLBACK.DELETE
-FALLBACK.EXECUTE
 ```
 
 ---
@@ -2124,13 +1792,12 @@ FUTURE.GET
 ---
 ## Gateway Commands
 
-`GATEWAY.*` command family (5 commands).
+`GATEWAY.*` command family (4 commands).
 
 ```
 GATEWAY.CREATE
 GATEWAY.DELETE
 GATEWAY.LIST
-GATEWAY.METRICS
 GATEWAY.ROUTE
 ```
 
@@ -2158,19 +1825,6 @@ GHOST.CREATE
 GHOST.DELETE
 GHOST.READ
 GHOST.WRITE
-```
-
----
-## Gossip Protocol Commands
-
-`GOSSIP.*` command family (5 commands).
-
-```
-GOSSIP.BROADCAST
-GOSSIP.GET
-GOSSIP.JOIN
-GOSSIP.LEAVE
-GOSSIP.MEMBERS
 ```
 
 ---
@@ -2211,20 +1865,6 @@ HEALTH.READINESS
 ```
 
 ---
-## Healthx Commands
-
-`HEALTHX.*` command family (6 commands).
-
-```
-HEALTHX.CHECK
-HEALTHX.HISTORY
-HEALTHX.LIST
-HEALTHX.REGISTER
-HEALTHX.STATUS
-HEALTHX.UNREGISTER
-```
-
----
 ## Heap Commands
 
 `HEAP.*` command family (7 commands).
@@ -2251,18 +1891,6 @@ HISTOGRAM.GET
 HISTOGRAM.INFO
 HISTOGRAM.MEAN
 HISTOGRAM.RESET
-```
-
----
-## Hook Commands
-
-`HOOK.*` command family (4 commands).
-
-```
-HOOK.CREATE
-HOOK.DELETE
-HOOK.LIST
-HOOK.TRIGGER
 ```
 
 ---
@@ -2300,19 +1928,6 @@ INDEX.CREATE
 INDEX.DELETE
 INDEX.LIST
 INDEX.SEARCH
-```
-
----
-## Jobx Commands
-
-`JOBX.*` command family (5 commands).
-
-```
-JOBX.CREATE
-JOBX.DELETE
-JOBX.LIST
-JOBX.RUN
-JOBX.STATUS
 ```
 
 ---
@@ -2428,49 +2043,11 @@ MASK.PHONE
 ```
 
 ---
-## Memo Commands
-
-`MEMO.*` command family (5 commands).
-
-```
-MEMO.CACHE
-MEMO.CLEAR
-MEMO.INVALIDATE
-MEMO.STATS
-MEMO.WARM
-```
-
----
-## Memory Management Commands
-
-`MEMORYX.*` command family (3 commands).
-
-```
-MEMORYX.ALLOC
-MEMORYX.FREE
-MEMORYX.STATS
-```
-
----
-## Merkle Trees Commands
-
-`MERKLE.*` command family (5 commands).
-
-```
-MERKLE.ADD
-MERKLE.CREATE
-MERKLE.PROOF
-MERKLE.ROOT
-MERKLE.VERIFY
-```
-
----
 ## Meter Commands
 
-`METER.*` command family (5 commands).
+`METER.*` command family (4 commands).
 
 ```
-METER.BILLING
 METER.CREATE
 METER.DELETE
 METER.GET
@@ -2501,19 +2078,6 @@ MLXPERIMENT.METRICS
 ```
 
 ---
-## Observable Commands
-
-`OBSERVABLE.*` command family (5 commands).
-
-```
-OBSERVABLE.COMPLETE
-OBSERVABLE.CREATE
-OBSERVABLE.ERROR
-OBSERVABLE.NEXT
-OBSERVABLE.SUBSCRIBE
-```
-
----
 ## Partitioning Commands
 
 `PARTITION.*` command family (5 commands).
@@ -2541,41 +2105,10 @@ PERMIT.REVOKE
 ---
 ## Pipeline Commands
 
-`PIPELINE.*` command family (7 commands).
+`PIPELINE.*` command family (1 commands).
 
 ```
-PIPELINE.ADDSTAGE
-PIPELINE.CREATE
-PIPELINE.DELETE
 PIPELINE.EXEC
-PIPELINE.EXECUTE
-PIPELINE.LIST
-PIPELINE.STATUS
-```
-
----
-## Pipelinex Commands
-
-`PIPELINEX.*` command family (4 commands).
-
-```
-PIPELINEX.ADD
-PIPELINEX.CANCEL
-PIPELINEX.EXECUTE
-PIPELINEX.START
-```
-
----
-## Plugins Commands
-
-`PLUGIN.*` command family (5 commands).
-
-```
-PLUGIN.CALL
-PLUGIN.INFO
-PLUGIN.LIST
-PLUGIN.LOAD
-PLUGIN.UNLOAD
 ```
 
 ---
@@ -2604,19 +2137,6 @@ PQ.LEN
 PQ.PEEK
 PQ.POP
 PQ.PUSH
-```
-
----
-## Health Probes Commands
-
-`PROBE.*` command family (5 commands).
-
-```
-PROBE.CREATE
-PROBE.DELETE
-PROBE.LIST
-PROBE.RESULTS
-PROBE.RUN
 ```
 
 ---
@@ -2669,43 +2189,6 @@ QUOTAX.USAGE
 ```
 
 ---
-## Raft Consensus Commands
-
-`RAFT.*` command family (6 commands).
-
-```
-RAFT.APPEND
-RAFT.COMMIT
-RAFT.LEADER
-RAFT.STATE
-RAFT.TERM
-RAFT.VOTE
-```
-
----
-## Rage Commands
-
-`RAGE.*` command family (4 commands).
-
-```
-RAGE.RESET
-RAGE.STATS
-RAGE.STOP
-RAGE.TEST
-```
-
----
-## Reactive Commands
-
-`REACTIVE.*` command family (3 commands).
-
-```
-REACTIVE.TRIGGER
-REACTIVE.UNWATCH
-REACTIVE.WATCH
-```
-
----
 ## Record Commands
 
 `RECORD.*` command family (4 commands).
@@ -2727,31 +2210,6 @@ RELATION.CREATE
 RELATION.DELETE
 RELATION.GET
 RELATION.LIST
-```
-
----
-## Replay Commands
-
-`REPLAY.*` command family (5 commands).
-
-```
-REPLAY.SEEK
-REPLAY.SPEED
-REPLAY.START
-REPLAY.STATUS
-REPLAY.STOP
-```
-
----
-## Replayx Commands
-
-`REPLAYX.*` command family (4 commands).
-
-```
-REPLAYX.PAUSE
-REPLAYX.SPEED
-REPLAYX.START
-REPLAYX.STOP
 ```
 
 ---
@@ -2817,18 +2275,6 @@ ROUTE.REMOVE
 ```
 
 ---
-## Rules Commands
-
-`RULE.*` command family (4 commands).
-
-```
-RULE.CREATE
-RULE.DELETE
-RULE.EVAL
-RULE.LIST
-```
-
----
 ## Sample Commands
 
 `SAMPLE.*` command family (5 commands).
@@ -2866,19 +2312,6 @@ SEMAPHOREX.STATUS
 ```
 
 ---
-## Sentinel Extension Commands
-
-`SENTINELX.*` command family (5 commands).
-
-```
-SENTINELX.ALERTS
-SENTINELX.CONFIG
-SENTINELX.STATUS
-SENTINELX.UNWATCH
-SENTINELX.WATCH
-```
-
----
 ## Sessionx Commands
 
 `SESSIONX.*` command family (5 commands).
@@ -2889,18 +2322,6 @@ SESSIONX.DELETE
 SESSIONX.GET
 SESSIONX.LIST
 SESSIONX.SET
-```
-
----
-## Sharding Commands
-
-`SHARD.*` command family (4 commands).
-
-```
-SHARD.LIST
-SHARD.MAP
-SHARD.REBALANCE
-SHARD.STATUS
 ```
 
 ---
@@ -3055,19 +2476,6 @@ STREAMX.WRITE
 ```
 
 ---
-## SWIM Membership Commands
-
-`SWIM.*` command family (5 commands).
-
-```
-SWIM.JOIN
-SWIM.LEAVE
-SWIM.MEMBERS
-SWIM.PING
-SWIM.SUSPECT
-```
-
----
 ## Switching Commands
 
 `SWITCH.*` command family (5 commands).
@@ -3091,18 +2499,6 @@ TAPE.DELETE
 TAPE.READ
 TAPE.SEEK
 TAPE.WRITE
-```
-
----
-## Taskx Commands
-
-`TASKX.*` command family (4 commands).
-
-```
-TASKX.CREATE
-TASKX.DELETE
-TASKX.LIST
-TASKX.RUN
 ```
 
 ---
@@ -3164,17 +2560,6 @@ THROTTLEX.STATUS
 ```
 
 ---
-## Timeout Commands
-
-`TIMEOUT.*` command family (3 commands).
-
-```
-TIMEOUT.CREATE
-TIMEOUT.DELETE
-TIMEOUT.EXECUTE
-```
-
----
 ## Timers Commands
 
 `TIMER.*` command family (4 commands).
@@ -3213,20 +2598,6 @@ TOKENBUCKET.RESET
 ```
 
 ---
-## Pub/Sub Topics Commands
-
-`TOPIC.*` command family (6 commands).
-
-```
-TOPIC.HISTORY
-TOPIC.LIST
-TOPIC.PUBLISH
-TOPIC.SUBSCRIBE
-TOPIC.SUBSCRIBERS
-TOPIC.UNSUBSCRIBE
-```
-
----
 ## Trace Commands
 
 `TRACE.*` command family (5 commands).
@@ -3237,30 +2608,6 @@ TRACE.GET
 TRACE.LIST
 TRACE.SPAN
 TRACE.START
-```
-
----
-## Transform Commands
-
-`TRANSFORM.*` command family (4 commands).
-
-```
-TRANSFORM.APPLY
-TRANSFORM.CREATE
-TRANSFORM.DELETE
-TRANSFORM.LIST
-```
-
----
-## Transx Commands
-
-`TRANSX.*` command family (4 commands).
-
-```
-TRANSX.BEGIN
-TRANSX.COMMIT
-TRANSX.ROLLBACK
-TRANSX.STATUS
 ```
 
 ---
@@ -3291,13 +2638,10 @@ VIEW.LIST
 ---
 ## Cache Warming Commands
 
-`WARM.*` command family (4 commands).
+`WARM.*` command family (1 commands).
 
 ```
 WARM.INVALIDATE
-WARM.PREFETCH
-WARM.PRELOAD
-WARM.STATUS
 ```
 
 ---

@@ -15,14 +15,7 @@ func TestResilienceCommandsMEMORYXFullCoverage(t *testing.T) {
 		name string
 		cmd  string
 		args [][]byte
-	}{
-		{"MEMORYX.ALLOC", "MEMORYX.ALLOC", [][]byte{[]byte("1000")}},
-		{"MEMORYX.ALLOC no args", "MEMORYX.ALLOC", nil},
-		{"MEMORYX.FREE", "MEMORYX.FREE", [][]byte{[]byte("ptr1")}},
-		{"MEMORYX.FREE not found", "MEMORYX.FREE", [][]byte{[]byte("notfound")}},
-		{"MEMORYX.FREE no args", "MEMORYX.FREE", nil},
-		{"MEMORYX.STATS", "MEMORYX.STATS", nil},
-	}
+	}{}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -62,7 +55,6 @@ func TestResilienceCommandsDIAGNOSTICFullCoverage(t *testing.T) {
 		cmd  string
 		args [][]byte
 	}{
-		{"DIAGNOSTIC.RUN", "DIAGNOSTIC.RUN", nil},
 		{"DIAGNOSTIC.STATUS", "DIAGNOSTIC.STATUS", nil},
 		{"DIAGNOSTIC.REPORT", "DIAGNOSTIC.REPORT", nil},
 	}
@@ -386,15 +378,7 @@ func TestResilienceCommandsRETRYFullCoverage(t *testing.T) {
 		name string
 		cmd  string
 		args [][]byte
-	}{
-		{"RETRY.CREATE", "RETRY.CREATE", [][]byte{[]byte("retry1"), []byte("3")}},
-		{"RETRY.CREATE no args", "RETRY.CREATE", nil},
-		{"RETRY.EXECUTE", "RETRY.EXECUTE", [][]byte{[]byte("retry1")}},
-		{"RETRY.EXECUTE not found", "RETRY.EXECUTE", [][]byte{[]byte("notfound")}},
-		{"RETRY.EXECUTE no args", "RETRY.EXECUTE", nil},
-		{"RETRY.STATUS", "RETRY.STATUS", [][]byte{[]byte("retry1")}},
-		{"RETRY.STATUS no args", "RETRY.STATUS", nil},
-	}
+	}{}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

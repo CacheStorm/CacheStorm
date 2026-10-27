@@ -1,10 +1,12 @@
 package command
 
 import (
+	"encoding/json"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
-	"unicode/utf8"
+	"unicode"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
 )
@@ -386,37 +388,15 @@ func cmdEVALREGEX(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
-	pattern := ctx.ArgString(0)
-	input := ctx.ArgString(1)
+	re, err := regexp.Compile(ctx.ArgString(0))
+	if err != nil {
+		return ctx.WriteError(fmt.Errorf("ERR invalid regex: %v", err))
+	}
 
-	matched := matchRegex(pattern, input)
-
-	if matched {
+	if re.MatchString(ctx.ArgString(1)) {
 		return ctx.WriteInteger(1)
 	}
 	return ctx.WriteInteger(0)
-}
-
-func matchRegex(pattern, input string) bool {
-	if pattern == ".*" {
-		return true
-	}
-
-	if strings.HasPrefix(pattern, "^") {
-		pattern = pattern[1:]
-		if !strings.HasPrefix(input, pattern) {
-			return false
-		}
-	}
-
-	if strings.HasSuffix(pattern, "$") {
-		pattern = pattern[:len(pattern)-1]
-		if !strings.HasSuffix(input, pattern) {
-			return false
-		}
-	}
-
-	return strings.Contains(input, pattern)
 }
 
 func cmdEVALREGEXMATCH(ctx *Context) error {
@@ -424,10 +404,12 @@ func cmdEVALREGEXMATCH(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
-	pattern := ctx.ArgString(0)
-	input := ctx.ArgString(1)
+	re, err := regexp.Compile(ctx.ArgString(0))
+	if err != nil {
+		return ctx.WriteError(fmt.Errorf("ERR invalid regex: %v", err))
+	}
 
-	matches := findMatches(pattern, input)
+	matches := re.FindAllString(ctx.ArgString(1), -1)
 
 	results := make([]*resp.Value, len(matches))
 	for i, m := range matches {
@@ -437,35 +419,17 @@ func cmdEVALREGEXMATCH(ctx *Context) error {
 	return ctx.WriteArray(results)
 }
 
-func findMatches(pattern, input string) []string {
-	if pattern == "" {
-		return make([]string, utf8.RuneCountInString(input)+1)
-	}
-	matches := make([]string, 0)
-
-	start := 0
-	for {
-		idx := strings.Index(input[start:], pattern)
-		if idx == -1 {
-			break
-		}
-		matches = append(matches, input[start+idx:start+idx+len(pattern)])
-		start += idx + len(pattern)
-	}
-
-	return matches
-}
-
 func cmdEVALREGEXREPLACE(ctx *Context) error {
 	if ctx.ArgCount() < 3 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
-	pattern := ctx.ArgString(0)
-	replacement := ctx.ArgString(1)
-	input := ctx.ArgString(2)
+	re, err := regexp.Compile(ctx.ArgString(0))
+	if err != nil {
+		return ctx.WriteError(fmt.Errorf("ERR invalid regex: %v", err))
+	}
 
-	result := strings.ReplaceAll(input, pattern, replacement)
+	result := re.ReplaceAllString(ctx.ArgString(2), ctx.ArgString(1))
 
 	return ctx.WriteBulkString(result)
 }
@@ -556,19 +520,10 @@ func cmdVALIDATEJSON(ctx *Context) error {
 
 	jsonStr := ctx.ArgString(0)
 
-	if isValidJSON(jsonStr) {
+	if json.Valid([]byte(jsonStr)) {
 		return ctx.WriteInteger(1)
 	}
 	return ctx.WriteInteger(0)
-}
-
-func isValidJSON(s string) bool {
-	s = strings.TrimSpace(s)
-	if (strings.HasPrefix(s, "{") && strings.HasSuffix(s, "}")) ||
-		(strings.HasPrefix(s, "[") && strings.HasSuffix(s, "]")) {
-		return true
-	}
-	return false
 }
 
 func cmdVALIDATEINT(ctx *Context) error {
@@ -1050,12 +1005,24 @@ func cmdSTRTITLE(ctx *Context) error {
 		return ctx.WriteBulkString(s)
 	}
 
-	result := strings.ToUpper(string(s[0]))
-	if len(s) > 1 {
-		result += strings.ToLower(s[1:])
+	var b strings.Builder
+	b.Grow(len(s))
+	startOfWord := true
+	for _, r := range s {
+		if unicode.IsSpace(r) {
+			startOfWord = true
+			b.WriteRune(r)
+			continue
+		}
+		if startOfWord {
+			b.WriteRune(unicode.ToUpper(r))
+			startOfWord = false
+		} else {
+			b.WriteRune(unicode.ToLower(r))
+		}
 	}
 
-	return ctx.WriteBulkString(result)
+	return ctx.WriteBulkString(b.String())
 }
 
 func cmdSTRWORDS(ctx *Context) error {

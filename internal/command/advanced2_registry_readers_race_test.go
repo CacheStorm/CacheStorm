@@ -48,14 +48,6 @@ func TestAdvanced2RegistryReadersAreSynchronised(t *testing.T) {
 			reader: [][]string{{"RELATION.GET", "{last}"}},
 		},
 		{
-			name:  "hook",
-			setup: [][]string{{"HOOK.CREATE", "name", "trigger", "action"}},
-			// HOOK.CREATE is the only mutator of a hook; HOOK.TRIGGER reads
-			// it with no lock.
-			writer: [][]string{{"HOOK.CREATE", "name", "trigger", "action"}},
-			reader: [][]string{{"HOOK.TRIGGER", "{last}"}},
-		},
-		{
 			name:  "index",
 			setup: [][]string{{"INDEX.CREATE", "k"}},
 			// INDEX.ADD writes the index's entries under the write lock;

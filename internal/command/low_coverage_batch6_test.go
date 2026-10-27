@@ -143,12 +143,7 @@ func TestUtilityExtCommandsLowCoverageBatch6(t *testing.T) {
 		name string
 		cmd  string
 		args [][]byte
-	}{
-		{"FLAG.ADDRULE rule", "FLAG.ADDRULE", [][]byte{[]byte("flag1"), []byte("condition")}},
-		{"FLAG.ADDRULE no args", "FLAG.ADDRULE", nil},
-		{"BACKUP.CREATE backup", "BACKUP.CREATE", [][]byte{[]byte("backup1")}},
-		{"BACKUP.CREATE no args", "BACKUP.CREATE", nil},
-	}
+	}{}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -167,16 +162,12 @@ func TestWorkflowCommandsLowCoverageBatch6(t *testing.T) {
 		cmd  string
 		args [][]byte
 	}{
-		{"WORKFLOW.FAIL workflow", "WORKFLOW.FAIL", [][]byte{[]byte("wf1"), []byte("error message")}},
-		{"WORKFLOW.FAIL no args", "WORKFLOW.FAIL", nil},
 		{"CHAINED.SET key", "CHAINED.SET", [][]byte{[]byte("key1"), []byte("value1")}},
 		{"CHAINED.SET no args", "CHAINED.SET", nil},
 		{"CHAINED.GET key", "CHAINED.GET", [][]byte{[]byte("key1")}},
 		{"CHAINED.GET no args", "CHAINED.GET", nil},
 		{"CHAINED.DEL key", "CHAINED.DEL", [][]byte{[]byte("key1")}},
 		{"CHAINED.DEL no args", "CHAINED.DEL", nil},
-		{"REACTIVE.UNWATCH key", "REACTIVE.UNWATCH", [][]byte{[]byte("key1")}},
-		{"REACTIVE.UNWATCH no args", "REACTIVE.UNWATCH", nil},
 	}
 
 	for _, tt := range tests {

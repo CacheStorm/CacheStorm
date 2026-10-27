@@ -38,12 +38,8 @@ func TestResilienceCommandsExtensive(t *testing.T) {
 		{"RATELIMITER.ALLOW not found", "RATELIMITER.ALLOW", [][]byte{[]byte("notfound")}},
 		{"RATELIMITER.STATUS no args", "RATELIMITER.STATUS", nil},
 		{"RATELIMITER.STATUS not found", "RATELIMITER.STATUS", [][]byte{[]byte("notfound")}},
-		{"RETRY.CREATE no args", "RETRY.CREATE", nil},
-		{"RETRY.CREATE retry", "RETRY.CREATE", [][]byte{[]byte("retry1"), []byte("3")}},
 		{"RETRY.EXEC no args", "RETRY.EXEC", nil},
 		{"RETRY.EXEC not found", "RETRY.EXEC", [][]byte{[]byte("notfound"), []byte("cmd")}},
-		{"TIMEOUT.CREATE no args", "TIMEOUT.CREATE", nil},
-		{"TIMEOUT.CREATE timeout", "TIMEOUT.CREATE", [][]byte{[]byte("timeout1"), []byte("5000")}},
 		{"TIMEOUT.EXEC no args", "TIMEOUT.EXEC", nil},
 		{"TIMEOUT.EXEC not found", "TIMEOUT.EXEC", [][]byte{[]byte("notfound"), []byte("cmd")}},
 		{"CACHEX.CREATE no args", "CACHEX.CREATE", nil},
@@ -75,7 +71,6 @@ func TestResilienceCommandsAdvanced(t *testing.T) {
 		cmd  string
 		args [][]byte
 	}{
-		{"MEMORYX.STATS", "MEMORYX.STATS", nil},
 		{"MEMORYX.FRAGMENTATION", "MEMORYX.FRAGMENTATION", nil},
 		{"MEMORYX.DEFRAG", "MEMORYX.DEFRAG", nil},
 		{"OBSERVABILITY.METRICS", "OBSERVABILITY.METRICS", nil},

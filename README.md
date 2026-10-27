@@ -21,7 +21,7 @@
 
 ---
 
-A high-performance in-memory data store written in Go. **about 1,500 commands**, 256-shard lock-free architecture, built-in HTTP API, enterprise security, and full observability — in a single binary.
+A high-performance in-memory data store written in Go. **about 1,200 commands**, 256-shard lock-free architecture, built-in HTTP API, enterprise security, and full observability — in a single binary.
 
 **Test Coverage: 90-99%** across 18 internal packages (core store: 99.2%). 100% test success rate. Works with any RESP-compatible client.
 
@@ -261,17 +261,13 @@ See [examples/](./examples/) directory for complete working examples.
 ```
 CIRCUITX.CREATE/OPEN/CLOSE/STATUS/METRICS    - Circuit breaker pattern
 RATELIMITER.CREATE/TRY/WAIT/RESET/STATUS     - Rate limiting
-RETRY.CREATE/EXECUTE/STATUS/DELETE           - Retry with backoff
 BULKHEAD.CREATE/ACQUIRE/RELEASE/STATUS       - Bulkhead isolation
-TIMEOUT.CREATE/EXECUTE/DELETE                - Timeout handling
 ```
 
 #### Async Processing
 ```
-ASYNC.SUBMIT/STATUS/RESULT/CANCEL            - Async job execution
 PROMISE.CREATE/RESOLVE/REJECT/AWAIT          - Promise pattern
 FUTURE.CREATE/COMPLETE/GET/CANCEL            - Future pattern
-OBSERVABLE.CREATE/NEXT/COMPLETE/SUBSCRIBE    - Observable streams
 ```
 
 #### Data Processing
@@ -279,12 +275,12 @@ OBSERVABLE.CREATE/NEXT/COMPLETE/SUBSCRIBE    - Observable streams
 AGGREGATOR.CREATE/ADD/GET/RESET              - Real-time aggregation
 WINDOWX.CREATE/ADD/GET/AGGREGATE             - Sliding/tumbling windows
 JOINX.CREATE/ADD/GET/DELETE                  - Stream joins
-PARTITIONX.CREATE/ADD/GET/REBALANCE          - Data partitioning
+PARTITIONX.CREATE/ADD/GET                    - Data partitioning
 ```
 
 #### Event Sourcing
 ```
-EVENTSOURCING.APPEND/REPLAY/SNAPSHOT/GET     - Event store
+EVENTSOURCING.APPEND/REPLAY/GET              - Event store
 STREAMPROC.CREATE/PUSH/POP/PEEK              - Stream processing
 ```
 
@@ -292,16 +288,13 @@ STREAMPROC.CREATE/PUSH/POP/PEEK              - Stream processing
 ```
 LOCKX.ACQUIRE/RELEASE/EXTEND/STATUS          - Distributed locks
 SEMAPHOREX.CREATE/ACQUIRE/RELEASE/STATUS     - Semaphores
-BATCHX.CREATE/ADD/EXECUTE/STATUS             - Batch processing
-PIPELINEX.START/ADD/EXECUTE/CANCEL           - Pipelining
 ```
 
 #### Monitoring
 ```
-TELEMETRY.RECORD/QUERY/EXPORT                - Telemetry data
-ALERTX.CREATE/FIRE/RESOLVE/LIST              - Alerting
-DASHBOARD.CREATE/ADDWIDGET/GET               - Dashboards
-METRICX.RECORD/QUERY/AGGREGATE               - Metrics
+TELEMETRY.RECORD/QUERY                       - Telemetry data
+ALERT.CREATE/TRIGGER/RESOLVE/LIST            - Alerting
+METRICS.GET/RESET                            - Metrics
 ```
 
 ## Data Types
@@ -825,7 +818,7 @@ cachestorm/
 │   ├── batch/             # Batch processing
 │   ├── buffer/            # Buffer management
 │   ├── cluster/           # Cluster library (not wired: cluster mode is unsupported)
-│   ├── command/           # Command handlers (about 1,500 commands)
+│   ├── command/           # Command handlers (about 1,200 commands)
 │   ├── config/            # Configuration management
 │   ├── graph/             # Graph operations
 │   ├── logger/            # Logging (100% coverage)
