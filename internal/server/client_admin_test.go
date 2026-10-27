@@ -115,10 +115,13 @@ func TestClientPause(t *testing.T) {
 		t.Fatalf("SET ran %v into a 300ms WRITE pause", waited)
 	}
 	admin.do("CLIENT", "PAUSE", "10000")
+	unpaused := make(chan struct{})
 	go func() {
+		defer close(unpaused)
 		time.Sleep(200 * time.Millisecond)
 		dialRepl(t, s).do("CLIENT", "UNPAUSE")
 	}()
+	defer func() { <-unpaused }()
 	start = time.Now()
 	if got := w.do("GET", "k"); string(got.Bulk) != "v" {
 		t.Fatalf("GET after UNPAUSE = %+v", got)
