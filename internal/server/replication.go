@@ -366,6 +366,10 @@ func (s *Server) refuseOnReplica(ctx *command.Context) bool {
 	if !replicaRefuses(ctx.Command, ctx.Args) {
 		return false
 	}
+	if s.router.ClusterRedirects(ctx) {
+		// In cluster mode the redirection comes first, as in Redis.
+		return false
+	}
 	if s.router.RequirePass() != "" && !ctx.IsAuthenticated() {
 		// The router answers NOAUTH first.
 		return false

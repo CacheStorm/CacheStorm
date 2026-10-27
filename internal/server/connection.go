@@ -567,6 +567,15 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 					want.lock()
 					c.heldGate = want
 				}
+				if c.srv.pauseActive() && c.srv.pausedNow(cmd) {
+					// A pause that began after the check before this
+					// command waits for the writes holding the gate, so a
+					// write that took the gate after it must wait too.
+					c.releaseGate()
+					c.srv.waitWhilePaused(cmd)
+					want.lock()
+					c.heldGate = want
+				}
 				h := c.heldGate
 				ctx.BeforeWait = func() { h.unlock(); c.gateWaiting = true }
 				ctx.AfterWait = func() { h.lock(); c.gateWaiting = false }

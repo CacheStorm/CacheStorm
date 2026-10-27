@@ -308,10 +308,16 @@ func cmdCLUSTER(ctx *Context) error {
 				return ctx.WriteError(ErrSyntaxError)
 			}
 		}
-		if !c.IsReplica() && clusterDB(ctx).KeyCount() != 0 {
+		replica := c.IsReplica()
+		if !replica && clusterDB(ctx).KeyCount() != 0 {
 			return ctx.WriteError(errors.New("ERR CLUSTER RESET can't be called with master nodes containing keys"))
 		}
 		c.Reset(hard)
+		if replica {
+			// A replica that leaves its master drops the data it had from it.
+			ctx.databases().FlushAll()
+			ctx.PropagateAs(ExecutedCommand{Name: "FLUSHALL", DB: ctx.DB})
+		}
 		return ctx.WriteOK()
 	case "SAVECONFIG":
 		if err := c.Save(); err != nil {
@@ -350,8 +356,32 @@ func cmdCLUSTER(ctx *Context) error {
 			out[i] = resp.BulkString(l)
 		}
 		return ctx.WriteArray(out)
+	case "REPLICATE":
+		if err := c.Replicate(string(args[0]), clusterDB(ctx).KeyCount() == 0); err != nil {
+			return ctx.WriteError(err)
+		}
+		return ctx.WriteOK()
+	case "FAILOVER":
+		if len(args) > 1 {
+			return ctx.WriteError(errors.New("ERR unknown subcommand or wrong number of arguments for '" + ctx.ArgString(0) + "'. Try CLUSTER HELP."))
+		}
+		force, takeover := false, false
+		if len(args) == 1 {
+			switch strings.ToUpper(string(args[0])) {
+			case "FORCE":
+				force = true
+			case "TAKEOVER":
+				force, takeover = true, true
+			default:
+				return ctx.WriteError(ErrSyntaxError)
+			}
+		}
+		if err := c.Failover(force, takeover); err != nil {
+			return ctx.WriteError(err)
+		}
+		return ctx.WriteOK()
 	}
-	return ctx.WriteError(errors.New("ERR CLUSTER " + sub + " needs replica support, which this release does not have yet"))
+	return ctx.WriteError(errors.New("ERR unknown subcommand '" + ctx.ArgString(0) + "'. Try CLUSTER HELP."))
 }
 
 // clusterDB is database 0, the only one cluster mode serves.
@@ -500,16 +530,19 @@ func clusterShardsReply(ctx *Context, c *cluster.Cluster) []*resp.Value {
 			if n.Hostname != "" {
 				fields = append(fields, resp.BulkString("hostname"), resp.BulkString(n.Hostname))
 			}
+			nodeOffset := n.ReplOffset
+			if n.Myself {
+				nodeOffset = offset
+			}
 			role, health := "master", "online"
 			if n.Replica {
 				role = "replica"
 			}
-			if n.Failing {
+			switch {
+			case n.Failing:
 				health = "fail"
-			}
-			nodeOffset := int64(0)
-			if n.Myself {
-				nodeOffset = offset
+			case n.Replica && nodeOffset == 0:
+				health = "loading"
 			}
 			fields = append(fields,
 				resp.BulkString("role"), resp.BulkString(role),

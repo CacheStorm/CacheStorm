@@ -261,6 +261,24 @@ func (m *Manager) ReadOnly() bool {
 	return m.role == RoleReplica && m.cfg.ReadOnly
 }
 
+// MasterDataAge is how long a replica has gone without data from its
+// master: the time since the last read while the link is up, since the link
+// went down otherwise. It is 0 on a master.
+func (m *Manager) MasterDataAge() time.Duration {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.role != RoleReplica {
+		return 0
+	}
+	if m.linkState == linkConnected && !m.lastIO.IsZero() {
+		return time.Since(m.lastIO)
+	}
+	if m.linkDownSince.IsZero() {
+		return 0
+	}
+	return time.Since(m.linkDownSince)
+}
+
 // ReplID returns the current replication id and offset.
 func (m *Manager) ReplID() (string, int64) {
 	m.mu.Lock()

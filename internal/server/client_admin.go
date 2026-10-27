@@ -312,6 +312,13 @@ func (s *Server) pauseActive() bool {
 	return until != 0 && time.Now().UnixNano() < until
 }
 
+// pausedNow reports whether a pause in force holds cmd.
+func (s *Server) pausedNow(cmd string) bool {
+	s.pause.mu.Lock()
+	defer s.pause.mu.Unlock()
+	return time.Now().Before(s.pause.until) && pausedCommand(cmd, s.pause.writesOnly)
+}
+
 // waitWhilePaused blocks a command CLIENT PAUSE holds until the pause ends.
 func (s *Server) waitWhilePaused(cmd string) {
 	if s == nil {

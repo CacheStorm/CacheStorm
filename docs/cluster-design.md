@@ -86,7 +86,7 @@ The bus lives in `internal/cluster` (`msg.go`, `bus.go`, `gossip.go`) and follow
   - FAIL names the failing node.
   - UPDATE names a node with its config epoch and slot bitmap.
   - PUBLISH carries the channel and the message.
-  - Types 5, 6 and 8 (failover auth request/ack, manual failover start) are reserved for phase 3. Unknown types are ignored after their header is processed.
+  - FAILOVER_AUTH_REQUEST (5), FAILOVER_AUTH_ACK (6) and MFSTART (8) carry only the header. The message flags carry PAUSED (bit 0, a master paused for a manual failover) and FORCEACK (bit 1, a vote request for a manual failover). Unknown types are ignored after their header is processed.
 - **Links.** Each node opens one outbound link to every known node and answers on the links it accepts; PONGs to a PING go back on the link it came on. Every link has a reader and a writer goroutine. Writes go through a queue capped at 64 MiB, which closes the link when exceeded. Reads and writes have deadlines. A failed dial is retried with a backoff doubling from 100 ms up to `node_timeout`/2 (at most 2 s).
 - **Cron.** Every 100 ms the node:
   - drops handshakes older than max(`node_timeout`, 1 s);
@@ -107,7 +107,7 @@ The bus lives in `internal/cluster` (`msg.go`, `bus.go`, `gossip.go`) and follow
 - **nodes.conf.** The file is saved after every config change: a node added, renamed or removed, an epoch change, a slot change, a FAIL set or cleared, or an address change.
 - **Tests.** The tests in `internal/server/cluster_bus_test.go` start in-process clusters with a 400 ms `node_timeout`. `scripts/cluster-smoke.sh` runs `redis-cli --cluster create`/`check` (Redis 7.4) against three processes.
 
-### Phase 3: replicas and failover
+### Phase 3: replicas and failover (done)
 
 - `CLUSTER REPLICATE` attaches a node as a replica, through the existing replication manager.
 - `CLUSTER REPLICAS`/`SLAVES`.
@@ -118,6 +118,44 @@ The bus lives in `internal/cluster` (`msg.go`, `bus.go`, `gossip.go`) and follow
 - `CLUSTER FAILOVER [FORCE|TAKEOVER]`.
 - Replica migration is not in scope.
 - Done when `redis-cli --cluster create --cluster-replicas 1` with 6 nodes succeeds, killing a master promotes its replica, and clients keep working.
+
+#### How it works
+
+The failover code is in `internal/cluster/failover.go` and follows `cluster_legacy.c`.
+
+- **Replicas.** `CLUSTER REPLICATE` is `clusterSetMaster`. A master needs no slots and an empty database 0 ("To set a master the node must be empty and without assigned slots."); the master can't be the node itself or a replica. The node takes its master's shard ID and closes its open slots. Its PINGs carry the replica flag, its master's ID, its master's slot bitmap and config epoch, and its replication offset. Every node records the offsets it hears.
+- **Replication.** The cluster package never calls the replication manager under its lock. A role goroutine started with the bus compares the role in the cluster state with the one it last applied, and points replication at the master's address (`ReplicaOf`) or stops it (`Promote`, as `REPLICAOF NO ONE`). It runs when the role changes and once a second, so a master that changes address is followed too. A node restarted from a nodes.conf that says `slave` resumes replicating.
+- **Reads.** A replica serves a keyed command for a slot of its master when the client sent `READONLY` (or for a shard channel) and the command, or a queued command of an EXEC, does not write; anything else gets `MOVED`. In cluster mode the redirection comes before the `READONLY You can't write against a read only replica` refusal, as in Redis; a write without keys, such as FLUSHALL, still gets that refusal.
+- **Replies.** `CLUSTER SLOTS` lists a replica after its master once it is not FAIL and has a non-zero replication offset (`isReplicaAvailable`). `CLUSTER SHARDS` reports `role`, `replication-offset` and `health` (`fail`, `loading` for a replica at offset 0, `online`).
+- **Election** (`clusterHandleSlaveFailover`, run by the cron and on every vote):
+  - It runs on a replica whose master is FAIL and serves slots, or during a manual failover.
+  - Unless the failover is manual, the replica gives up when its data is older than `repl-ping-replica-period` (10 s) + `node_timeout` × `replica_validity_factor`. The age is the time since the last read from the master, or since the link went down, less `node_timeout`.
+  - It schedules the election at 500 ms + random(0–500 ms) + rank × 1 s; the rank counts sibling replicas with a greater offset. It then sends a PONG to those siblings, and adds delay if its rank worsens before it asks.
+  - It bumps `currentEpoch` and broadcasts FAILOVER_AUTH_REQUEST (type 5). A manual failover sets the FORCEACK flag.
+  - An attempt expires after max(2 × `node_timeout`, 2 s) and is retried after twice that.
+- **Votes** (`clusterSendFailoverAuthIfNeeded`). Only a master that serves slots votes. It refuses:
+  - a request whose epoch is older than its `currentEpoch`;
+  - a second vote in one epoch (`lastVoteEpoch`, saved to nodes.conf before the FAILOVER_AUTH_ACK, type 6, goes out);
+  - a requester that is not a replica, or whose master is unknown, or up without FORCEACK;
+  - a second vote for the same master within 2 × `node_timeout`;
+  - a claimed slot whose owner has a newer config epoch.
+
+  The replica counts an ACK only from a slot-owning master whose epoch is at least the election epoch.
+- **Promotion** (`clusterFailoverReplaceYourMaster`). With votes from a majority of the slot-owning masters, the replica sets its config epoch to the election epoch. The role goroutine then stops replication first, keeping the data, so the node never serves its new slots as a read-only replica. Only then does it take the old master's slots, save nodes.conf and broadcast a PONG.
+- **Demotion.** In `clusterUpdateSlotsConfigWith`, a master left without slots by a newer config becomes a replica of the node that took them, as does a replica whose master was emptied (with `cluster-allow-replica-migration` on, its Redis default). A sub-replica moves to its grandmaster. A returning old master claims its slots with its old epoch; the other nodes answer with an UPDATE, and it becomes a replica of the new master. When a node that was a master announces itself as a replica of a master of the same shard, the other nodes give that master its slots.
+- **Manual failover** (`CLUSTER FAILOVER`):
+  - The replica sends MFSTART (type 8) to its master.
+  - The master pauses client writes for 10 s and waits for the writes in flight. A write that took the write gate after the pause began goes back to waiting, so the offset it then reads is final. It pings the replica every 100 ms with the PAUSED flag and that offset.
+  - Once the replica has processed up to that offset, the election starts at once and without the data age check.
+  - The demoted master resumes its writers; their commands then get `MOVED`.
+  - A manual failover that has not finished in 5 s is abandoned and the master resumes.
+  - `FORCE` skips the master: the election starts at once.
+  - `TAKEOVER` bumps the config epoch without consensus (`clusterBumpConfigEpochWithoutConsensus`) and promotes without an election.
+- **Not implemented.** Replica migration to orphaned masters, `cluster-replica-no-failover` (the `nofailover` flag is carried but cannot be set) and the writable delay after a failover.
+- **Tests.**
+  - `internal/server/cluster_failover_test.go` runs 3 masters + 3 replicas in process with a 400 ms `node_timeout`. It covers the REPLICATE errors, NODES/SLOTS/SHARDS/REPLICAS shape, READONLY/READWRITE and MOVED, write propagation, automatic failover after a master is stopped (about 1.5 s) with the old master rejoining as a replica, and a manual failover under a concurrent writer that loses no acknowledged write. It also covers FORCE, TAKEOVER and the FORCE-needed error.
+  - `internal/cluster/failover_test.go` checks the vote rules and the replica rank.
+  - `scripts/cluster-smoke.sh` creates a 6-node cluster with `--cluster-replicas 1`, kills a master process, and checks that `redis-cli --cluster check` is OK again, the keys survive and go-redis ClusterClient still works.
 
 ### Phase 4: resharding
 

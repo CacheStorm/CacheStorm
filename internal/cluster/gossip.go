@@ -11,21 +11,48 @@ import (
 )
 
 // unlockAndSave releases the mutex, then saves nodes.conf when a change
-// asked for it, deletes the keys of slots lost to another node and delivers
-// the PUBLISH messages received.
+// asked for it, sends the failover votes granted, wakes the role goroutine,
+// pauses or resumes writers for a manual failover, deletes the keys of slots
+// lost to another node and delivers the PUBLISH messages received.
 func (c *Cluster) unlockAndSave() {
 	save := c.todoSave
 	c.todoSave = false
+	role, pause, unpause := c.roleDirty, c.mfStartPause, c.mfUnpause
+	c.roleDirty, c.mfStartPause, c.mfUnpause = false, false, false
+	acks := c.pendingAcks
+	c.pendingAcks = nil
 	var del []int
 	var pubs []*message
 	var opts BusOptions
 	if b := c.bus; b != nil {
 		del, pubs, opts = b.delSlots, b.published, b.opts
 		b.delSlots, b.published = nil, nil
+		if role {
+			select {
+			case b.roleWake <- struct{}{}:
+			default:
+			}
+		}
 	}
 	c.mu.Unlock()
 	if save {
 		c.persist()
+	}
+	if len(acks) > 0 {
+		// A vote goes out only once lastVoteEpoch is on disk.
+		c.mu.Lock()
+		for _, n := range acks {
+			if c.nodes[n.ID] == n {
+				c.sendLocked(n.link, msgFailoverAuthAck, c.headerLocked(msgFailoverAuthAck).encode())
+			}
+		}
+		c.mu.Unlock()
+	}
+	if unpause && opts.UnpauseWrites != nil {
+		opts.UnpauseWrites()
+	}
+	if pause {
+		c.startManualFailoverPause(opts)
 	}
 	if opts.DelKeysInSlot != nil {
 		for _, slot := range del {
@@ -44,8 +71,12 @@ func (c *Cluster) headerLocked(typ msgType) *message {
 	me := c.myself
 	m := &message{
 		typ: typ, sender: me.ID, currentEpoch: c.currentEpoch, configEpoch: me.ConfigEpoch,
-		flags: me.Flags, port: me.Port, cport: me.CPort, tlsPort: me.TLSPort, stateOK: c.ok,
+		replOffset: uint64(max(c.myOffset.Load(), 0)),
+		flags:      me.Flags, port: me.Port, cport: me.CPort, tlsPort: me.TLSPort, stateOK: c.ok,
 		ip: me.IP, hostname: me.Hostname, shardID: me.ShardID, slots: me.slots,
+	}
+	if !me.replica() && c.mf.end != 0 && c.mf.paused {
+		m.mflags |= mflagPaused
 	}
 	if c.ipLearnable {
 		m.ip = ""
@@ -206,6 +237,9 @@ func (c *Cluster) delNodeLocked(n *Node) {
 	for _, o := range c.nodes {
 		delete(o.failReports, n)
 	}
+	if c.mf.replica == n {
+		c.resetManualFailoverLocked()
+	}
 	c.closeLinkLocked(n.link)
 	c.closeLinkLocked(n.inbound)
 	delete(c.nodes, n.ID)
@@ -288,11 +322,22 @@ func (c *Cluster) unclaimedLocked(slot int) bool {
 
 // updateSlotsConfigWithLocked is clusterUpdateSlotsConfigWith: the slots
 // sender claims with a greater config epoch than their owner's, or that
-// nobody claims, become sender's. Slots being imported are left alone.
+// nobody claims, become sender's. Slots being imported are left alone. A
+// master left without slots by this becomes a replica of sender, as does a
+// replica whose master was; otherwise the keys of the slots this node lost
+// are deleted.
 func (c *Cluster) updateSlotsConfigWithLocked(sender *Node, epoch uint64, slots *[Slots / 8]byte) {
-	if sender == c.myself {
+	me := c.myself
+	if sender == me {
 		return
 	}
+	cur := me
+	if me.replica() {
+		cur = c.nodes[me.MasterID]
+	}
+	var dirty []int
+	var newMaster *Node
+	migrated := 0
 	for j := 0; j < Slots; j++ {
 		if !testBit(slots[:], j) {
 			if c.owner[j] == sender {
@@ -308,12 +353,30 @@ func (c *Cluster) updateSlotsConfigWithLocked(sender *Node, epoch uint64, slots 
 			continue
 		}
 		if c.unclaimedLocked(j) || c.owner[j].ConfigEpoch < epoch {
-			if c.owner[j] == c.myself && c.bus != nil && c.bus.opts.KeysInSlot != nil && c.bus.opts.KeysInSlot(j) > 0 {
-				c.bus.delSlots = append(c.bus.delSlots, j)
+			if c.owner[j] == me && c.bus != nil && c.bus.opts.KeysInSlot != nil && c.bus.opts.KeysInSlot(j) > 0 {
+				dirty = append(dirty, j)
+			}
+			if cur != nil && c.owner[j] == cur {
+				newMaster = sender
+				migrated++
 			}
 			c.addSlotLocked(sender, j)
 			c.todoSave = true
 		}
+	}
+	var grand *Node
+	if master := c.nodes[me.MasterID]; me.replica() && master != nil && master.replica() {
+		grand = c.nodes[master.MasterID]
+	}
+	switch {
+	case newMaster != nil && cur.numSlots == 0:
+		logger.Info().Str("master", sender.ID).Msg("cluster: configuration change detected, reconfiguring this node as a replica")
+		c.setMyMasterLocked(sender)
+	case grand != nil && grand != me:
+		logger.Info().Str("master", grand.ID).Msg("cluster: this node is a sub-replica, reconfiguring it as a replica of its grandmaster")
+		c.setMyMasterLocked(grand)
+	case len(dirty) > 0 && c.bus != nil:
+		c.bus.delSlots = append(c.bus.delSlots, dirty...)
 	}
 	c.updateStateLocked()
 }
@@ -361,9 +424,15 @@ func (c *Cluster) processPacket(b *bus, l *link, m *message) {
 			sender.ConfigEpoch = m.configEpoch
 			c.todoSave = true
 		}
-		if m.shardID != "" && sender.ShardID != m.shardID && !sender.replica() {
+		if m.shardID != "" && sender.ShardID != m.shardID {
 			sender.ShardID = m.shardID
 			c.todoSave = true
+		}
+		sender.replOffset = int64(m.replOffset)
+		if c.mf.end != 0 && c.myself.replica() && c.myself.MasterID == sender.ID && m.mflags&mflagPaused != 0 && !c.mf.offsetKnown {
+			c.mf.masterOffset, c.mf.offsetKnown = int64(m.replOffset), true
+			logger.Info().Int64("offset", c.mf.masterOffset).Msg("cluster: received the replication offset of the paused master for the manual failover")
+			c.handleManualFailoverLocked()
 		}
 		if sender.Hostname != m.hostname {
 			sender.Hostname = m.hostname
@@ -399,6 +468,24 @@ func (c *Cluster) processPacket(b *bus, l *link, m *message) {
 		n.ConfigEpoch = m.updateEpoch
 		c.todoSave = true
 		c.updateSlotsConfigWithLocked(n, m.updateEpoch, &m.updateSlots)
+	case msgFailoverAuthRequest:
+		if sender != nil {
+			c.sendFailoverAuthIfNeededLocked(sender, m, now)
+		}
+	case msgFailoverAuthAck:
+		if sender != nil && !sender.replica() && sender.numSlots > 0 && m.currentEpoch >= c.failover.authEpoch {
+			c.failover.authCount++
+			c.handleReplicaFailoverLocked(now)
+		}
+	case msgMFStart:
+		if sender == nil || !sender.replica() || sender.MasterID != c.myself.ID || c.myself.replica() {
+			break
+		}
+		c.resetManualFailoverLocked()
+		c.mf.end = now + mfTimeout
+		c.mf.replica = sender
+		c.mf.pauseRequested = true
+		c.mfStartPause = true
 	}
 	c.updateStateLocked()
 }
@@ -474,10 +561,27 @@ func (c *Cluster) processPingLocked(l *link, m *message, sender *Node, now int64
 	if m.flags&FlagMaster != 0 {
 		c.setMasterLocked(sender)
 	} else if m.flags&FlagSlave != 0 {
+		master := c.nodes[m.masterID]
+		if master == sender {
+			master = nil
+		}
 		if !sender.replica() {
+			// A master turned into a replica. When its new master is of the
+			// same shard, that master took its slots over.
+			heir := master != nil && master.ShardID == sender.ShardID && sender.ConfigEpoch <= m.configEpoch
+			if heir {
+				c.setMasterLocked(master)
+				if m.configEpoch > master.ConfigEpoch {
+					master.ConfigEpoch = m.configEpoch
+				}
+			}
 			for slot := 0; slot < Slots; slot++ {
 				if c.owner[slot] == sender {
-					c.delSlotLocked(slot)
+					if heir {
+						c.addSlotLocked(master, slot)
+					} else {
+						c.delSlotLocked(slot)
+					}
 				}
 			}
 			sender.Flags = sender.Flags&^FlagMaster | FlagSlave
@@ -485,6 +589,10 @@ func (c *Cluster) processPingLocked(l *link, m *message, sender *Node, now int64
 		}
 		if m.masterID != "" && sender.MasterID != m.masterID {
 			sender.MasterID = m.masterID
+			c.todoSave = true
+		}
+		if master != nil && sender.ShardID != master.ShardID {
+			sender.ShardID = master.ShardID
 			c.todoSave = true
 		}
 	}
@@ -561,6 +669,7 @@ func (c *Cluster) processGossipLocked(m *message, sender *Node, now int64) {
 // cron is clusterCron, run every 100ms: it opens the missing links, pings,
 // and flags the nodes that do not answer as PFAIL.
 func (c *Cluster) cron(b *bus) {
+	c.sampleReplication(b.opts)
 	c.mu.Lock()
 	defer c.unlockAndSave()
 	if b.stopped {
@@ -605,6 +714,10 @@ func (c *Cluster) cron(b *bus) {
 		if n == c.myself || n.Flags&(FlagNoAddr|FlagHandshake) != 0 {
 			continue
 		}
+		if c.mf.end != 0 && c.mf.paused && !c.myself.replica() && c.mf.replica == n && n.link.up() {
+			c.sendPingLocked(n.link, msgPing)
+			continue
+		}
 		pingDelay, dataDelay := now-n.PingSent, now-n.dataReceived
 		if n.link.up() && now-n.link.ctime > b.timeout && n.PingSent != 0 && pingDelay > half && dataDelay > half {
 			c.closeLinkLocked(n.link)
@@ -620,6 +733,14 @@ func (c *Cluster) cron(b *bus) {
 			logger.Info().Str("node", n.ID).Msg("cluster: node is not reachable, marking it PFAIL")
 			n.Flags |= FlagPFail
 		}
+	}
+	c.manualFailoverCheckTimeoutLocked(now)
+	if c.myself.replica() {
+		c.handleManualFailoverLocked()
+		c.handleReplicaFailoverLocked(now)
+	}
+	if b.iteration%10 == 0 {
+		c.roleDirty = true
 	}
 	c.updateStateLocked()
 }

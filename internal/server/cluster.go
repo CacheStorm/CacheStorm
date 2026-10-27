@@ -11,6 +11,7 @@ import (
 
 	"github.com/cachestorm/cachestorm/internal/cluster"
 	"github.com/cachestorm/cachestorm/internal/logger"
+	"github.com/cachestorm/cachestorm/internal/replication"
 	"github.com/cachestorm/cachestorm/internal/store"
 )
 
@@ -122,12 +123,47 @@ func (s *Server) announceCluster() error {
 		Publish:       func(channel string, msg []byte) { ps.Publish(channel, msg) },
 		KeysInSlot:    s.store.CountKeysInSlot,
 		DelKeysInSlot: s.dropSlotKeys,
+		SetMaster:     s.clusterSetMaster,
+		ReplOffset: func() int64 {
+			_, off := s.repl.ReplID()
+			return off
+		},
+		ReplDataAge:           s.repl.MasterDataAge,
+		PauseWrites:           s.pauseWritesForFailover,
+		UnpauseWrites:         s.unpauseClients,
+		ReplicaValidityFactor: cc.ReplicaValidityFactor,
+		ReplPingPeriod:        replPingPeriod,
 	}); err != nil {
 		ln.Close()
 		return err
 	}
 	logger.Info().Str("addr", ln.Addr().String()).Msg("cluster bus started")
 	return nil
+}
+
+// replPingPeriod is repl-ping-replica-period, the period of the master's
+// pings on the replication stream.
+const replPingPeriod = 10 * time.Second
+
+// clusterSetMaster makes this node replicate the master at ip:port, or, with
+// port 0, promotes it, keeping its data.
+func (s *Server) clusterSetMaster(ip string, port int) {
+	if port == 0 {
+		s.repl.Promote()
+		return
+	}
+	if err := s.repl.ReplicaOf(ip, port); err != nil && !errors.Is(err, replication.ErrAlreadyConnected) {
+		logger.Warn().Err(err).Str("host", ip).Int("port", port).Msg("cluster: starting replication failed")
+	}
+}
+
+// pauseWritesForFailover pauses client writes for a manual failover and
+// returns once the writes already running have been applied and propagated,
+// so the replication offset read next is final.
+func (s *Server) pauseWritesForFailover(until time.Time) {
+	s.pauseClients(until, true)
+	s.gate.global.Lock()
+	s.gate.global.Unlock() //nolint:staticcheck,gocritic // the lock is a barrier for the writes in progress
 }
 
 // stopClusterBus stops the cluster bus and its goroutines.

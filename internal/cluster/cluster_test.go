@@ -97,6 +97,10 @@ func TestParseRedisNodesConf(t *testing.T) {
 	if len(shards) != 2 || len(shards[1].Nodes) != 2 || shards[1].Nodes[0].ID != otherID || shards[1].Nodes[1].ID != replicaID {
 		t.Fatalf("shards: %+v", shards)
 	}
+	if slots := c.SlotMap(); len(slots[1].Nodes) != 1 {
+		t.Fatalf("a replica that has received no data is listed: %+v", slots)
+	}
+	c.nodes[replicaID].replOffset = 1
 	slots := c.SlotMap()
 	if len(slots) != 4 || slots[0].Start != 0 || slots[0].End != 5460 || len(slots[1].Nodes) != 2 {
 		t.Fatalf("slots: %+v", slots)

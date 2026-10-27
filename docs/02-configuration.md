@@ -59,7 +59,7 @@ cluster:
   announce_bus_port: 0          # 0 = bus_port
   require_full_coverage: true   # down while any slot is unassigned
   allow_reads_when_down: false  # serve reads while the cluster is down
-  replica_validity_factor: 10   # as cluster-replica-validity-factor
+  replica_validity_factor: 10   # as cluster-replica-validity-factor; 0 = no data age limit
 
 # Replication Configuration (master-replica, Redis semantics)
 replication:
@@ -141,8 +141,8 @@ failover, so it is not a replacement for Redis Sentinel.
 ### Cluster mode
 
 With `cluster.enabled: true` the server runs as a Redis Cluster node and
-forms multi-master clusters with other CacheStorm nodes. Replicas, failover
-and resharding are not there yet.
+forms clusters of masters and replicas with other CacheStorm nodes, with
+automatic and manual failover. Resharding is not there yet.
 
 - **Identity and nodes.conf.** On first start the node generates a 40-hex
   node ID and a shard ID and writes `nodes.conf` in `persistence.data_dir`.
@@ -191,6 +191,29 @@ and resharding are not there yet.
 - `INFO cluster` reports `cluster_enabled:1`. `HELLO` and `INFO server`
   report the `cluster` mode. go-redis `ClusterClient` and redis-py
   `RedisCluster` are exercised by `scripts/client-smoke.sh`.
+- **Replicas.** `CLUSTER REPLICATE <master-id>` makes an empty node without
+  slots a replica of that master; `redis-cli --cluster create
+  --cluster-replicas 1` uses it. The replica replicates through the normal
+  replication link (`replication.master_auth` is the password it sends,
+  so set it when the masters have `requirepass`), its `nodes.conf` line reads
+  `slave <master-id>`, and `CLUSTER NODES`, `SLOTS`, `SHARDS` and
+  `REPLICAS` list it as Redis does. A replica answers `MOVED` to its master
+  unless the client sent `READONLY`, which lets it serve reads of its
+  master's slots; writes are always redirected.
+- **Automatic failover.** When a master is `fail`, its replicas wait 500 ms
+  plus up to 500 ms plus 1 s per better-placed replica (by replication
+  offset), then ask the masters for their vote in a new epoch. A master
+  votes once per epoch and once per failed master in 2 × `node_timeout`. The
+  replica that gets the votes of a majority of the slot-owning masters stops
+  replicating, keeps its data, takes the slots with the election epoch and
+  tells every node. A replica that has been cut off from its master for
+  longer than `node_timeout` × `replica_validity_factor` + 10 s does not
+  start an election. The old master, when it comes back, learns the newer
+  configuration and becomes a replica of the new master.
+- **Manual failover.** `CLUSTER FAILOVER` on a replica pauses the master's
+  writers, lets the replica catch up with the master's offset and then runs
+  the election, so no acknowledged write is lost. `FORCE` skips the
+  master, and `TAKEOVER` also skips the vote, taking a new epoch on its own.
 - `REPLICAOF` is refused in cluster mode, and `replication.role: replica`
   cannot be combined with it.
 

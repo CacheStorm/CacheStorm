@@ -22,6 +22,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Corrected the root Docker image healthcheck to use `/api/health`.
 
 ### Added
+- Cluster mode, phase 3 of `docs/cluster-design.md`: replicas and failover, in the model of Redis's `cluster_legacy.c`.
+  - `CLUSTER REPLICATE <node-id>` makes an empty node without slots a replica, with Redis's errors. It replicates through the existing replication manager (`replication.master_auth` is its password), takes its master's shard ID and gossips its replica flag, master ID and replication offset. Its nodes.conf line reads `slave <master-id>`.
+  - `CLUSTER REPLICAS`/`SLAVES` list replicas in CLUSTER NODES format. `CLUSTER SLOTS` lists each available replica after its master, and `CLUSTER SHARDS` reports `role replica`, `replication-offset` and `health`.
+  - A replica answers `MOVED` to its master, except for non-write commands on its master's slots from a `READONLY` client; `READWRITE` turns that off. In cluster mode the redirection comes before the read-only replica refusal, as in Redis.
+  - Automatic failover (`clusterHandleSlaveFailover`): a replica whose master is FAIL waits 500 ms + random(0–500 ms) + rank × 1 s, ranked by replication offset among its siblings. It then bumps `currentEpoch` and asks for votes over the bus (FAILOVER_AUTH_REQUEST, type 5).
+  - Masters vote (FAILOVER_AUTH_ACK, type 6) once per epoch and once per failed master in 2 × `node_timeout`, only when the requester's master is FAIL and none of its claimed slots has a newer config epoch; `lastVoteEpoch` is saved before the vote goes out.
+  - With a majority, the replica stops replicating, keeping its data as `REPLICAOF NO ONE` does, takes the slots with the election epoch and broadcasts a PONG. `replica_validity_factor` keeps a replica with stale data from running.
+  - A master left without slots by a newer configuration becomes a replica of the node that took them, so a killed master that comes back rejoins as a replica of its successor; a sub-replica moves to its grandmaster.
+  - `CLUSTER FAILOVER` pauses the master's writers and waits for the replica to reach the master's offset (MFSTART, type 8, and the PAUSED flag) before the election, so acknowledged writes are not lost. `FORCE` skips the master, and `TAKEOVER` bumps the epoch without an election.
+  - A command that took the write gate after a client pause began now waits for the pause too.
+
+  `scripts/cluster-smoke.sh` now runs six nodes with `redis-cli --cluster create --cluster-replicas 1` (Redis 7.4). It kills a master and checks that its replica takes over: `redis-cli --cluster check` is OK again, the keys survive and go-redis ClusterClient keeps working. Replica migration and `cluster-replica-no-failover` are not implemented
 - Cluster mode, phase 2 of `docs/cluster-design.md`: the cluster bus. A cluster-mode node listens on `cluster.bus_port` (default port + 10000) for CacheStorm's own versioned, length-prefixed binary node-to-node protocol. Frames are at most 16 MiB, links have read/write deadlines and a 64 MiB send queue, and failed dials back off. Nodes exchange ping/pong gossip in the model of Redis's `clusterProcessPacket`:
   - each message carries the sender's ID, address, ports, flags, epochs and slot bitmap, plus a few random known nodes and every PFAIL node;
   - `CLUSTER MEET ip port [bus-port]` handshakes, and nodes learn about each other transitively, so a MEET chain forms a full mesh;

@@ -68,8 +68,8 @@ func (n *busNode) meet(o *busNode) {
 }
 
 type nodeLine struct {
-	id, addr, flags, link, slots string
-	epoch                        uint64
+	id, addr, flags, master, link, slots string
+	epoch                                uint64
 }
 
 func (n *busNode) nodes() map[string]nodeLine {
@@ -81,7 +81,7 @@ func (n *busNode) nodes() map[string]nodeLine {
 			n.t.Fatalf("CLUSTER NODES line %q", line)
 		}
 		epoch, _ := strconv.ParseUint(f[6], 10, 64)
-		out[f[0]] = nodeLine{id: f[0], addr: f[1], flags: strings.TrimPrefix(f[2], "myself,"), link: f[7], slots: strings.Join(f[8:], " "), epoch: epoch}
+		out[f[0]] = nodeLine{id: f[0], addr: f[1], flags: strings.TrimPrefix(f[2], "myself,"), master: f[3], link: f[7], slots: strings.Join(f[8:], " "), epoch: epoch}
 	}
 	return out
 }
@@ -386,8 +386,10 @@ func TestClusterBusEpochCollision(t *testing.T) {
 		if !converged(nodes) {
 			return false
 		}
+		// The loser is left without slots, so it becomes a replica of the
+		// winner, as in Redis.
 		l := low.nodes()
-		return l[low.id].epoch == 6 && l[high.id].epoch == 5 && l[low.id].slots == "0-100" && l[high.id].slots == ""
+		return l[low.id].epoch == 6 && l[high.id].flags == "slave" && l[low.id].slots == "0-100" && l[high.id].slots == ""
 	})
 	for _, n := range nodes {
 		if got := n.clusterInfo()["cluster_current_epoch"]; got != "6" {

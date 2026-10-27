@@ -39,6 +39,22 @@ type BusOptions struct {
 	// them, when the slot is found to belong to another node.
 	KeysInSlot    func(slot int) int
 	DelKeysInSlot func(slot int)
+
+	// SetMaster points replication at the master at ip:port, or, with port
+	// 0, stops replicating and keeps the data, as REPLICAOF NO ONE does.
+	SetMaster func(ip string, port int)
+	// ReplOffset is this node's replication offset; ReplDataAge how long it
+	// has gone without data from its master.
+	ReplOffset  func() int64
+	ReplDataAge func() time.Duration
+	// PauseWrites pauses client writes until the given time and returns
+	// once the writes in progress are done; UnpauseWrites resumes them.
+	PauseWrites   func(until time.Time)
+	UnpauseWrites func()
+	// ReplicaValidityFactor is cluster-replica-validity-factor and
+	// ReplPingPeriod repl-ping-replica-period, for the data age check.
+	ReplicaValidityFactor int
+	ReplPingPeriod        time.Duration
 }
 
 type bus struct {
@@ -52,6 +68,7 @@ type bus struct {
 	iteration int
 	delSlots  []int
 	published []*message
+	roleWake  chan struct{}
 }
 
 type msgStats struct {
@@ -190,7 +207,7 @@ func (c *Cluster) StartBus(opts BusOptions) error {
 	if c.bus != nil {
 		return errors.New("cluster bus: already started")
 	}
-	b := &bus{opts: opts, timeout: opts.NodeTimeout.Milliseconds(), inbound: make(map[*link]struct{})}
+	b := &bus{opts: opts, timeout: opts.NodeTimeout.Milliseconds(), inbound: make(map[*link]struct{}), roleWake: make(chan struct{}, 1)}
 	if b.timeout < 1 {
 		b.timeout = 1
 	}
@@ -206,9 +223,12 @@ func (c *Cluster) StartBus(opts BusOptions) error {
 		n.ctime = now
 	}
 	c.bus = b
-	b.wg.Add(2)
+	c.roleSet = false
+	b.roleWake <- struct{}{}
+	b.wg.Add(3)
 	go c.acceptLoop(b)
 	go c.cronLoop(b)
+	go c.roleLoop(b)
 	return nil
 }
 

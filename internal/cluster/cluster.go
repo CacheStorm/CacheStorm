@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cachestorm/cachestorm/internal/hashslot"
@@ -92,6 +93,8 @@ type Node struct {
 	nextDial     int64
 	dialBackoff  time.Duration
 	meet         bool
+	replOffset   int64
+	votedTime    int64
 }
 
 func (n *Node) failing() bool { return n.Flags&(FlagFail|FlagPFail) != 0 }
@@ -139,6 +142,24 @@ type Cluster struct {
 	todoSave    bool
 	bus         *bus
 	stats       msgStats
+
+	failover failoverState
+	mf       manualFailover
+	// mfStartPause and mfUnpause ask unlockAndSave to pause or resume the
+	// writers for a manual failover.
+	mfStartPause bool
+	mfUnpause    bool
+	// roleDirty asks the role goroutine to bring the replication role in
+	// line with this node's role; roleApplied is the master address it
+	// last applied ("" for none), and only that goroutine touches it.
+	roleDirty   bool
+	roleApplied string
+	roleSet     bool
+	pendingAcks []*Node
+	// myOffset is this node's replication offset and dataAge the
+	// milliseconds since it last heard from its master, sampled by the cron.
+	myOffset atomic.Int64
+	dataAge  atomic.Int64
 }
 
 // NewID returns a random 40-character hex node ID.
@@ -243,6 +264,9 @@ type SlotState struct {
 	Healthy bool
 	// AllowReadsWhenDown mirrors the option of the same name.
 	AllowReadsWhenDown bool
+	// OwnerIsMyMaster reports that this node is a replica of the slot's
+	// owner, so it may serve reads of the slot to READONLY clients.
+	OwnerIsMyMaster bool
 }
 
 // Slot returns the routing state of slot.
@@ -252,6 +276,7 @@ func (c *Cluster) Slot(slot int) SlotState {
 	st := SlotState{Healthy: c.ok, AllowReadsWhenDown: c.opts.AllowReadsWhenDown}
 	if n := c.owner[slot]; n != nil {
 		st.Assigned, st.Owner, st.Mine = true, n.addr(), n == c.myself
+		st.OwnerIsMyMaster = c.myself.replica() && c.myself.MasterID == n.ID
 	}
 	if n := c.migrating[slot]; n != nil && st.Mine {
 		st.MigratingSet, st.Migrating = true, n.addr()
@@ -543,6 +568,9 @@ func (c *Cluster) Reset(hard bool) {
 	c.mu.Lock()
 	c.myself.Flags = c.myself.Flags&^FlagSlave | FlagMaster
 	c.myself.MasterID = ""
+	c.resetManualFailoverLocked()
+	c.failover.promote = false
+	c.roleDirty = true
 	for slot := range c.owner {
 		c.migrating[slot], c.importing[slot] = nil, nil
 		c.delSlotLocked(slot)
@@ -559,8 +587,8 @@ func (c *Cluster) Reset(hard bool) {
 		c.nodes[c.myself.ID] = c.myself
 	}
 	c.updateStateLocked()
-	c.mu.Unlock()
-	c.persist()
+	c.todoSave = true
+	c.unlockAndSave()
 }
 
 // IsReplica reports whether this node is a replica.
@@ -750,11 +778,26 @@ type NodeView struct {
 	Replica  bool
 	Failing  bool
 	Myself   bool
+	// ReplOffset is the replication offset the node last announced.
+	ReplOffset int64
 }
 
 func (c *Cluster) viewLocked(n *Node) NodeView {
 	return NodeView{ID: n.ID, IP: n.IP, Hostname: n.Hostname, Port: n.Port, TLSPort: n.TLSPort,
-		Replica: n.replica(), Failing: n.Flags&FlagFail != 0, Myself: n == c.myself}
+		Replica: n.replica(), Failing: n.Flags&FlagFail != 0, Myself: n == c.myself, ReplOffset: c.offsetOfLocked(n)}
+}
+
+func (c *Cluster) offsetOfLocked(n *Node) int64 {
+	if n == c.myself {
+		return c.myOffset.Load()
+	}
+	return n.replOffset
+}
+
+// replicaAvailableLocked is Redis' isReplicaAvailable: a replica that is not
+// failing and has received data.
+func (c *Cluster) replicaAvailableLocked(n *Node) bool {
+	return n.Flags&FlagFail == 0 && c.offsetOfLocked(n) != 0
 }
 
 // SlotsEntry is one entry of CLUSTER SLOTS.
@@ -764,7 +807,7 @@ type SlotsEntry struct {
 }
 
 // SlotMap returns the CLUSTER SLOTS entries: each range of slots with its
-// master and the master's replicas that are not failing, by start slot.
+// master and the master's available replicas, by start slot.
 func (c *Cluster) SlotMap() []SlotsEntry {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -773,7 +816,7 @@ func (c *Cluster) SlotMap() []SlotsEntry {
 	for n, ranges := range c.rangesLocked() {
 		views := []NodeView{c.viewLocked(n)}
 		for _, r := range nodes {
-			if r.replica() && r.MasterID == n.ID && !r.failing() {
+			if r.replica() && r.MasterID == n.ID && c.replicaAvailableLocked(r) {
 				views = append(views, c.viewLocked(r))
 			}
 		}

@@ -281,9 +281,52 @@ func (r *Router) clusterRoute(ctx *Context, top string, cmds []queuedCommand, as
 		return redirect{}
 	}
 	if !st.Mine {
+		// A replica serves reads of its master's slots to READONLY clients.
+		readOnly := ctx.ClusterConn != nil && ctx.ClusterConn.ReadOnly
+		if (readOnly || pubsub) && !write && st.OwnerIsMyMaster {
+			return redirect{}
+		}
 		return redirect{kind: redirMoved, slot: slot, to: st.Owner}
 	}
 	return redirect{}
+}
+
+// clusterCommands returns what routing must check for the command in ctx:
+// the command, or the queued commands of an EXEC. ok is false when routing
+// does not apply.
+func clusterCommands(ctx *Context) (cmds []queuedCommand, inMulti, ok bool) {
+	inMulti = ctx.Transaction != nil && ctx.Transaction.IsActive()
+	if ctx.Command == "EXEC" {
+		if !inMulti {
+			return nil, inMulti, false
+		}
+		return ctx.Transaction.GetQueued(), inMulti, true
+	}
+	if !clusterHasKeys(ctx.Command) {
+		return nil, inMulti, false
+	}
+	return []queuedCommand{{cmd: ctx.Command, args: ctx.Args}}, inMulti, true
+}
+
+// ClusterRedirects reports whether cluster routing would answer the
+// command in ctx with a redirection, without answering or changing any
+// state. It lets a read-only replica redirect a write rather than refuse it.
+func (r *Router) ClusterRedirects(ctx *Context) bool {
+	if r == nil || r.cluster == nil || ctx.FromMaster || ctx.Replaying {
+		return false
+	}
+	cmds, _, ok := clusterCommands(ctx)
+	if !ok {
+		return false
+	}
+	probe := *ctx
+	probe.ClusterConn = &ClusterConn{}
+	asking := false
+	if ctx.ClusterConn != nil {
+		probe.ClusterConn.ReadOnly = ctx.ClusterConn.ReadOnly
+		asking = ctx.ClusterConn.Asking
+	}
+	return r.clusterRoute(&probe, ctx.Command, cmds, asking).kind != redirNone
 }
 
 // clusterRedirect applies cluster routing to the command in ctx before it
@@ -297,18 +340,9 @@ func (r *Router) clusterRedirect(ctx *Context, asking bool) bool {
 	if ctx.FromMaster || ctx.Replaying {
 		return false
 	}
-	var cmds []queuedCommand
-	inMulti := ctx.Transaction != nil && ctx.Transaction.IsActive()
-	if ctx.Command == "EXEC" {
-		if !inMulti {
-			return false
-		}
-		cmds = ctx.Transaction.GetQueued()
-	} else {
-		if !clusterHasKeys(ctx.Command) {
-			return false
-		}
-		cmds = []queuedCommand{{cmd: ctx.Command, args: ctx.Args}}
+	cmds, inMulti, ok := clusterCommands(ctx)
+	if !ok {
+		return false
 	}
 	rd := r.clusterRoute(ctx, ctx.Command, cmds, asking)
 	if rd.kind == redirNone {
@@ -339,7 +373,7 @@ func (s *scriptRun) clusterScriptCheck(name string, args [][]byte) string {
 	}
 	asking := s.ctx.ClusterConn != nil && s.ctx.ClusterConn.asking
 	probe := *s.ctx
-	probe.ClusterConn = &ClusterConn{}
+	probe.ClusterConn = &ClusterConn{ReadOnly: s.ctx.ClusterConn != nil && s.ctx.ClusterConn.ReadOnly}
 	rd := r.clusterRoute(&probe, name, []queuedCommand{{cmd: name, args: args}}, asking)
 	switch rd.kind {
 	case redirNone:
