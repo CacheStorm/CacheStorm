@@ -21,9 +21,16 @@ type Metrics struct {
 	TotalBytesIn      atomic.Int64
 	TotalBytesOut     atomic.Int64
 	StartTime         time.Time
-	CommandCounts     map[string]*atomic.Int64
-	CommandLatencies  map[string]*LatencyTracker
-	mu                sync.RWMutex
+	// commands maps a command name to its statistics. The map is never
+	// modified once published: a new command copies it under mu, so the
+	// per-command path reads it without a lock.
+	commands atomic.Pointer[map[string]*commandStat]
+	mu       sync.RWMutex
+}
+
+type commandStat struct {
+	count   atomic.Int64
+	latency *LatencyTracker
 }
 
 type LatencyTracker struct {
@@ -95,11 +102,9 @@ func (lt *LatencyTracker) Stats() map[string]interface{} {
 }
 
 func NewMetrics() *Metrics {
-	return &Metrics{
-		StartTime:        time.Now(),
-		CommandCounts:    make(map[string]*atomic.Int64),
-		CommandLatencies: make(map[string]*LatencyTracker),
-	}
+	m := &Metrics{StartTime: time.Now()}
+	m.commands.Store(&map[string]*commandStat{})
+	return m
 }
 
 func (m *Metrics) RecordConnection() {
@@ -113,23 +118,29 @@ func (m *Metrics) RecordDisconnection() {
 
 func (m *Metrics) RecordCommand(cmd string, latencyNs int64) {
 	m.TotalCommands.Add(1)
-
-	// Every map access must happen under m.mu: reading the maps after
-	// unlocking races with a concurrent RecordCommand on the shared
-	// GlobalMetrics, one goroutine per connection. The stored values are
-	// pointers, so the atomic updates below stay outside the lock.
-	m.mu.Lock()
-	counter, exists := m.CommandCounts[cmd]
-	if !exists {
-		counter = &atomic.Int64{}
-		m.CommandCounts[cmd] = counter
-		m.CommandLatencies[cmd] = NewLatencyTracker()
+	st := (*m.commands.Load())[cmd]
+	if st == nil {
+		st = m.addCommand(cmd)
 	}
-	tracker := m.CommandLatencies[cmd]
-	m.mu.Unlock()
+	st.count.Add(1)
+	st.latency.Record(latencyNs)
+}
 
-	counter.Add(1)
-	tracker.Record(latencyNs)
+func (m *Metrics) addCommand(cmd string) *commandStat {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cur := *m.commands.Load()
+	if st := cur[cmd]; st != nil {
+		return st
+	}
+	next := make(map[string]*commandStat, len(cur)+1)
+	for k, v := range cur {
+		next[k] = v
+	}
+	st := &commandStat{latency: NewLatencyTracker()}
+	next[cmd] = st
+	m.commands.Store(&next)
+	return st
 }
 
 func (m *Metrics) RecordRead() {
@@ -184,10 +195,10 @@ func (m *Metrics) Snapshot() map[string]interface{} {
 	defer m.mu.RUnlock()
 
 	cmdStats := make(map[string]interface{})
-	for cmd, counter := range m.CommandCounts {
+	for cmd, st := range *m.commands.Load() {
 		cmdStats[cmd] = map[string]interface{}{
-			"count":   counter.Load(),
-			"latency": m.CommandLatencies[cmd].Stats(),
+			"count":   st.count.Load(),
+			"latency": st.latency.Stats(),
 		}
 	}
 
@@ -233,23 +244,18 @@ func (m *Metrics) Reset() {
 
 	m.mu.Lock()
 	m.StartTime = time.Now()
-	m.CommandCounts = make(map[string]*atomic.Int64)
-	m.CommandLatencies = make(map[string]*LatencyTracker)
+	m.commands.Store(&map[string]*commandStat{})
 	m.mu.Unlock()
 }
 
 func (m *Metrics) GetCommandStats(cmd string) map[string]interface{} {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	counter, exists := m.CommandCounts[cmd]
-	if !exists {
+	st := (*m.commands.Load())[cmd]
+	if st == nil {
 		return nil
 	}
-
 	return map[string]interface{}{
-		"count":   counter.Load(),
-		"latency": m.CommandLatencies[cmd].Stats(),
+		"count":   st.count.Load(),
+		"latency": st.latency.Stats(),
 	}
 }
 

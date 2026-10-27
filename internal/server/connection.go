@@ -536,7 +536,6 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 			}
 		}
 
-		c.conn.SetWriteDeadline(time.Now().Add(c.writeTimeout))
 		var stopWatch func()
 		var stopMerge func()
 		if blockingCommands[strings.ToUpper(cmd)] {
