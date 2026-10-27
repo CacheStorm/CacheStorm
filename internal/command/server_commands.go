@@ -2,10 +2,9 @@ package command
 
 import (
 	"crypto/rand"
+	"encoding/hex"
 	"errors"
-	"fmt"
 	"math"
-	"math/big"
 	"sort"
 	"strconv"
 	"strings"
@@ -146,14 +145,18 @@ func cmdCOMMAND(ctx *Context) error {
 	if ctx.ArgCount() == 0 {
 		return cmdCommandInfo(ctx, nil)
 	}
-	subCmd := strings.ToUpper(ctx.ArgString(0))
-	switch subCmd {
+	if !checkRedisSubcommand(ctx, "command", nil) {
+		return nil
+	}
+	switch strings.ToUpper(ctx.ArgString(0)) {
 	case "COUNT":
 		return ctx.WriteInteger(int64(len(registeredCommandNames(ctx))))
 	case "DOCS":
 		return cmdCommandDocs(ctx)
 	case "GETKEYS":
-		return cmdCommandGetKeys(ctx)
+		return cmdCommandGetKeys(ctx, false)
+	case "GETKEYSANDFLAGS":
+		return cmdCommandGetKeys(ctx, true)
 	case "INFO":
 		names := make([]string, 0, ctx.ArgCount()-1)
 		for i := 1; i < ctx.ArgCount(); i++ {
@@ -166,166 +169,8 @@ func cmdCOMMAND(ctx *Context) error {
 	case "LIST":
 		return cmdCommandList(ctx)
 	default:
-		return ctx.WriteError(fmt.Errorf("ERR unknown subcommand '%s'", subCmd))
+		return ctx.WriteArray(helpReply(commandHelp))
 	}
-}
-
-func cmdCommandDocs(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	commandName := strings.ToUpper(ctx.ArgString(1))
-
-	docs := map[string][]interface{}{
-		"GET":         {"summary", "Get the value of a key", "since", "1.0.0", "group", "string", "complexity", "O(1)"},
-		"SET":         {"summary", "Set the string value of a key", "since", "1.0.0", "group", "string", "complexity", "O(1)"},
-		"DEL":         {"summary", "Delete a key", "since", "1.0.0", "group", "generic", "complexity", "O(N) where N is the number of keys"},
-		"EXISTS":      {"summary", "Determine if a key exists", "since", "1.0.0", "group", "generic", "complexity", "O(1)"},
-		"EXPIRE":      {"summary", "Set a key's time to live in seconds", "since", "1.0.0", "group", "generic", "complexity", "O(1)"},
-		"TTL":         {"summary", "Get the time to live for a key in seconds", "since", "1.0.0", "group", "generic", "complexity", "O(1)"},
-		"TYPE":        {"summary", "Determine the type stored at key", "since", "1.0.0", "group", "generic", "complexity", "O(1)"},
-		"KEYS":        {"summary", "Find all keys matching the given pattern", "since", "1.0.0", "group", "generic", "complexity", "O(N) where N is the number of keys"},
-		"INCR":        {"summary", "Increment the integer value of a key by one", "since", "1.0.0", "group", "string", "complexity", "O(1)"},
-		"DECR":        {"summary", "Decrement the integer value of a key by one", "since", "1.0.0", "group", "string", "complexity", "O(1)"},
-		"INCRBY":      {"summary", "Increment the integer value of a key by the given amount", "since", "1.0.0", "group", "string", "complexity", "O(1)"},
-		"APPEND":      {"summary", "Append a value to a key", "since", "2.0.0", "group", "string", "complexity", "O(1)"},
-		"STRLEN":      {"summary", "Get the length of the value stored in a key", "since", "2.2.0", "group", "string", "complexity", "O(1)"},
-		"MGET":        {"summary", "Get the values of all the given keys", "since", "1.0.0", "group", "string", "complexity", "O(N) where N is the number of keys"},
-		"MSET":        {"summary", "Set multiple keys to multiple values", "since", "1.0.1", "group", "string", "complexity", "O(N) where N is the number of keys"},
-		"HSET":        {"summary", "Set the string value of a hash field", "since", "2.0.0", "group", "hash", "complexity", "O(1) for each field/value pair"},
-		"HGET":        {"summary", "Get the value of a hash field", "since", "2.0.0", "group", "hash", "complexity", "O(1)"},
-		"HDEL":        {"summary", "Delete one or more hash fields", "since", "2.0.0", "group", "hash", "complexity", "O(N) where N is the number of fields"},
-		"HGETALL":     {"summary", "Get all the fields and values in a hash", "since", "2.0.0", "group", "hash", "complexity", "O(N) where N is the size of the hash"},
-		"HKEYS":       {"summary", "Get all the fields in a hash", "since", "2.0.0", "group", "hash", "complexity", "O(N) where N is the size of the hash"},
-		"HVALS":       {"summary", "Get all the values in a hash", "since", "2.0.0", "group", "hash", "complexity", "O(N) where N is the size of the hash"},
-		"HEXISTS":     {"summary", "Determine if a hash field exists", "since", "2.0.0", "group", "hash", "complexity", "O(1)"},
-		"HLEN":        {"summary", "Get the number of fields in a hash", "since", "2.0.0", "group", "hash", "complexity", "O(1)"},
-		"LPUSH":       {"summary", "Prepend one or multiple elements to a list", "since", "1.0.0", "group", "list", "complexity", "O(1) for each element"},
-		"RPUSH":       {"summary", "Append one or multiple elements to a list", "since", "1.0.0", "group", "list", "complexity", "O(1) for each element"},
-		"LPOP":        {"summary", "Remove and get the first element in a list", "since", "1.0.0", "group", "list", "complexity", "O(1)"},
-		"RPOP":        {"summary", "Remove and get the last element in a list", "since", "1.0.0", "group", "list", "complexity", "O(1)"},
-		"LLEN":        {"summary", "Get the length of a list", "since", "1.0.0", "group", "list", "complexity", "O(1)"},
-		"LRANGE":      {"summary", "Get a range of elements from a list", "since", "1.0.0", "group", "list", "complexity", "O(S+N) where S is start offset"},
-		"BLPOP":       {"summary", "Remove and get the first element in a list, or block until one is available", "since", "2.0.0", "group", "list", "complexity", "O(1)"},
-		"BRPOP":       {"summary", "Remove and get the last element in a list, or block until one is available", "since", "2.0.0", "group", "list", "complexity", "O(1)"},
-		"SADD":        {"summary", "Add one or more members to a set", "since", "1.0.0", "group", "set", "complexity", "O(1) for each element"},
-		"SREM":        {"summary", "Remove one or more members from a set", "since", "1.0.0", "group", "set", "complexity", "O(1) for each element"},
-		"SMEMBERS":    {"summary", "Get all the members in a set", "since", "1.0.0", "group", "set", "complexity", "O(N) where N is the set cardinality"},
-		"SISMEMBER":   {"summary", "Determine if a given value is a member of a set", "since", "1.0.0", "group", "set", "complexity", "O(1)"},
-		"SCARD":       {"summary", "Get the number of members in a set", "since", "1.0.0", "group", "set", "complexity", "O(1)"},
-		"SPOP":        {"summary", "Remove and return one or multiple random members from a set", "since", "1.0.0", "group", "set", "complexity", "O(1)"},
-		"SUNION":      {"summary", "Add multiple sets", "since", "1.0.0", "group", "set", "complexity", "O(N) where N is the total number of elements"},
-		"SINTER":      {"summary", "Intersect multiple sets", "since", "1.0.0", "group", "set", "complexity", "O(N*M) worst case"},
-		"SDIFF":       {"summary", "Subtract multiple sets", "since", "1.0.0", "group", "set", "complexity", "O(N) where N is the total number of elements"},
-		"ZADD":        {"summary", "Add one or more members to a sorted set, or update its score", "since", "1.2.0", "group", "sorted_set", "complexity", "O(log(N)) for each element"},
-		"ZCARD":       {"summary", "Get the number of members in a sorted set", "since", "1.2.0", "group", "sorted_set", "complexity", "O(1)"},
-		"ZSCORE":      {"summary", "Get the score associated with the given member in a sorted set", "since", "1.2.0", "group", "sorted_set", "complexity", "O(1)"},
-		"ZRANGE":      {"summary", "Return a range of members in a sorted set", "since", "1.2.0", "group", "sorted_set", "complexity", "O(log(N)+M) with M being the number of elements"},
-		"ZRANK":       {"summary", "Determine the index of a member in a sorted set", "since", "2.0.0", "group", "sorted_set", "complexity", "O(log(N))"},
-		"ZREM":        {"summary", "Remove one or more members from a sorted set", "since", "1.2.0", "group", "sorted_set", "complexity", "O(M*log(N))"},
-		"XADD":        {"summary", "Add a new entry to a stream", "since", "5.0.0", "group", "stream", "complexity", "O(1)"},
-		"XREAD":       {"summary", "Return never seen elements from multiple streams", "since", "5.0.0", "group", "stream", "complexity", "O(N) with N being the number of elements"},
-		"XGROUP":      {"summary", "Create, destroy, and manage consumer groups", "since", "5.0.0", "group", "stream", "complexity", "O(1)"},
-		"PING":        {"summary", "Ping the server", "since", "1.0.0", "group", "connection", "complexity", "O(1)"},
-		"ECHO":        {"summary", "Echo the given string", "since", "1.0.0", "group", "connection", "complexity", "O(1)"},
-		"QUIT":        {"summary", "Close the connection", "since", "1.0.0", "group", "connection", "complexity", "O(1)"},
-		"INFO":        {"summary", "Get information and statistics about the server", "since", "1.0.0", "group", "server", "complexity", "O(1)"},
-		"DBSIZE":      {"summary", "Return the number of keys in the selected database", "since", "1.0.0", "group", "server", "complexity", "O(1)"},
-		"FLUSHDB":     {"summary", "Remove all keys from the current database", "since", "1.0.0", "group", "server", "complexity", "O(1)"},
-		"FLUSHALL":    {"summary", "Remove all keys from all databases", "since", "1.0.0", "group", "server", "complexity", "O(1)"},
-		"TIME":        {"summary", "Return the current server time", "since", "2.6.0", "group", "server", "complexity", "O(1)"},
-		"CLIENT":      {"summary", "The client command", "since", "2.4.0", "group", "server", "complexity", "O(1)"},
-		"CONFIG":      {"summary", "Get or set server configuration", "since", "2.0.0", "group", "server", "complexity", "O(1)"},
-		"SLOWLOG":     {"summary", "Manages the Redis slow queries log", "since", "2.2.12", "group", "server", "complexity", "O(1)"},
-		"MULTI":       {"summary", "Mark the start of a transaction block", "since", "1.2.0", "group", "transactions", "complexity", "O(1)"},
-		"EXEC":        {"summary", "Execute all commands issued after MULTI", "since", "1.2.0", "group", "transactions", "complexity", "O(1)"},
-		"DISCARD":     {"summary", "Discard all commands issued after MULTI", "since", "2.0.0", "group", "transactions", "complexity", "O(1)"},
-		"WATCH":       {"summary", "Watch the given keys to determine execution of the MULTI/EXEC block", "since", "2.2.0", "group", "transactions", "complexity", "O(1)"},
-		"UNWATCH":     {"summary", "Forget about all watched keys", "since", "2.2.0", "group", "transactions", "complexity", "O(1)"},
-		"PUBLISH":     {"summary", "Post a message to a channel", "since", "2.0.0", "group", "pubsub", "complexity", "O(N+M)"},
-		"SUBSCRIBE":   {"summary", "Subscribe to channels", "since", "2.0.0", "group", "pubsub", "complexity", "O(1)"},
-		"UNSUBSCRIBE": {"summary", "Unsubscribe from channels", "since", "2.0.0", "group", "pubsub", "complexity", "O(1)"},
-		"EVAL":        {"summary", "Execute a Lua script server side", "since", "2.6.0", "group", "scripting", "complexity", "O(1)"},
-		"EVALSHA":     {"summary", "Execute a Lua script server side", "since", "2.6.0", "group", "scripting", "complexity", "O(1)"},
-		"SCRIPT":      {"summary", "Manage the script cache", "since", "2.6.0", "group", "scripting", "complexity", "O(1)"},
-		"GEOADD":      {"summary", "Add one or more geospatial items", "since", "3.2.0", "group", "geo", "complexity", "O(1) for each element"},
-		"GEODIST":     {"summary", "Returns the distance between two members", "since", "3.2.0", "group", "geo", "complexity", "O(log(N))"},
-		"GEOHASH":     {"summary", "Returns members of a geospatial index as standard geohash strings", "since", "3.2.0", "group", "geo", "complexity", "O(log(N))"},
-		"GEOPOS":      {"summary", "Returns longitude and latitude of members", "since", "3.2.0", "group", "geo", "complexity", "O(N)"},
-		"SETBIT":      {"summary", "Sets or clears the bit at offset in the string value", "since", "2.2.0", "group", "bitmap", "complexity", "O(1)"},
-		"GETBIT":      {"summary", "Returns the bit value at offset in the string value", "since", "2.2.0", "group", "bitmap", "complexity", "O(1)"},
-		"BITCOUNT":    {"summary", "Count set bits in a string", "since", "2.6.0", "group", "bitmap", "complexity", "O(N)"},
-		"BITPOS":      {"summary", "Find first bit set or clear in a string", "since", "2.8.7", "group", "bitmap", "complexity", "O(N)"},
-		"BITOP":       {"summary", "Perform bitwise operations between strings", "since", "2.6.0", "group", "bitmap", "complexity", "O(N)"},
-		"BITFIELD":    {"summary", "Perform arbitrary bitfield integer operations", "since", "3.2.0", "group", "bitmap", "complexity", "O(1) for each subcommand"},
-		"PFADD":       {"summary", "Adds the specified elements to the specified HyperLogLog", "since", "2.8.9", "group", "hyperloglog", "complexity", "O(1)"},
-		"PFCOUNT":     {"summary", "Return the approximated cardinality of the set", "since", "2.8.9", "group", "hyperloglog", "complexity", "O(1)"},
-		"PFMERGE":     {"summary", "Merge N different HyperLogLogs into a single one", "since", "2.8.9", "group", "hyperloglog", "complexity", "O(N)"},
-		"SCAN":        {"summary", "Incrementally iterate the keys space", "since", "2.8.0", "group", "generic", "complexity", "O(1)"},
-		"SORT":        {"summary", "Sort the elements in a list, set or sorted set", "since", "1.0.0", "group", "generic", "complexity", "O(N+M*log(M))"},
-		"OBJECT":      {"summary", "Inspect the internals of Redis objects", "since", "2.2.3", "group", "generic", "complexity", "O(1)"},
-		"MEMORY":      {"summary", "Inspect memory usage", "since", "4.0.0", "group", "server", "complexity", "O(1)"},
-	}
-
-	if doc, ok := docs[commandName]; ok {
-		result := make([]*resp.Value, 0, len(doc)+2)
-		result = append(result, resp.BulkString(commandName))
-		for i := 0; i < len(doc); i += 2 {
-			k, _ := doc[i].(string)
-			v, _ := doc[i+1].(string)
-			result = append(result, resp.BulkString(k), resp.BulkString(v))
-		}
-		return ctx.WriteArray(result)
-	}
-
-	return ctx.WriteArray([]*resp.Value{})
-}
-
-func cmdCommandGetKeys(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	commandName := strings.ToUpper(ctx.ArgString(1))
-	args := ctx.Args[2:]
-
-	var keys []*resp.Value
-
-	switch commandName {
-	case "GET", "SET", "DEL", "EXISTS", "TYPE", "TTL", "PTTL", "EXPIRE", "PEXPIRE", "PERSIST",
-		"INCR", "DECR", "INCRBY", "DECRBY", "INCRBYFLOAT", "APPEND", "STRLEN", "GETSET", "GETEX", "GETDEL",
-		"SETRANGE", "GETRANGE", "SUBSTR", "SETNX", "HGETALL", "HKEYS", "HVALS", "HLEN", "SCARD", "SMEMBERS",
-		"SPOP", "SRANDMEMBER", "LLEN", "LRANGE", "LPOP", "RPOP", "ZCARD", "ZRANGE", "ZREVRANGE", "XLEN":
-		if len(args) > 0 {
-			keys = append(keys, resp.BulkString(string(args[0])))
-		}
-	case "MGET", "MSET":
-		for i := 0; i < len(args); i++ {
-			if commandName == "MSET" && i%2 == 1 {
-				continue
-			}
-			keys = append(keys, resp.BulkString(string(args[i])))
-		}
-	case "LPUSH", "RPUSH", "LPUSHX", "RPUSHX", "SADD", "SREM", "ZADD", "LREM", "LINDEX", "LSET", "HSET", "HGET", "HDEL", "SISMEMBER", "ZSCORE", "ZRANK", "ZREVRANK":
-		if len(args) > 0 {
-			keys = append(keys, resp.BulkString(string(args[0])))
-		}
-	case "BLPOP", "BRPOP":
-		for i := 0; i < len(args)-1; i++ {
-			keys = append(keys, resp.BulkString(string(args[i])))
-		}
-	case "RENAME", "RENAMENX", "RPOPLPUSH", "BRPOPLPUSH", "LMOVE", "BLMOVE", "SMOVE", "ZINTERSTORE", "ZUNIONSTORE", "ZDIFFSTORE", "COPY":
-		if len(args) >= 2 {
-			keys = append(keys, resp.BulkString(string(args[0])), resp.BulkString(string(args[1])))
-		}
-	case "SINTER", "SUNION", "SDIFF", "SINTERSTORE", "SUNIONSTORE", "SDIFFSTORE":
-		for _, arg := range args {
-			keys = append(keys, resp.BulkString(string(arg)))
-		}
-	}
-
-	return ctx.WriteArray(keys)
 }
 
 func cmdINFO(ctx *Context) error {
@@ -947,9 +792,11 @@ func cmdCLIENT(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
-	subCmd := strings.ToUpper(ctx.ArgString(0))
+	if !checkRedisSubcommand(ctx, "client", nil) {
+		return nil
+	}
 
-	switch subCmd {
+	switch strings.ToUpper(ctx.ArgString(0)) {
 	case "LIST":
 		return cmdClientList(ctx)
 	case "SETNAME":
@@ -992,8 +839,8 @@ func cmdCLIENT(ctx *Context) error {
 		if attr != "LIB-NAME" && attr != "LIB-VER" {
 			return ctx.WriteError(errors.New("ERR Unrecognized option '" + ctx.ArgString(1) + "'"))
 		}
-		if strings.ContainsAny(value, " \r\n") {
-			return ctx.WriteError(errors.New("ERR " + strings.ToLower(attr) + " cannot contain spaces, newlines or special characters."))
+		if !validClientName(value) {
+			return ctx.WriteError(errors.New("ERR " + ctx.ArgString(1) + " cannot contain spaces, newlines or special characters."))
 		}
 		if attr == "LIB-NAME" {
 			ctx.ClientLibName = value
@@ -1005,7 +852,21 @@ func cmdCLIENT(ctx *Context) error {
 		return cmdClientCaching(ctx)
 	case "TRACKINGINFO":
 		return cmdClientTrackingInfo(ctx)
-	case "NO-TOUCH":
+	case "NO-TOUCH", "NO-EVICT":
+		var flag int8
+		switch strings.ToLower(ctx.ArgString(1)) {
+		case "on":
+			flag = 1
+		case "off":
+			flag = -1
+		default:
+			return ctx.WriteError(ErrSyntaxError)
+		}
+		if strings.EqualFold(ctx.ArgString(0), "NO-TOUCH") {
+			ctx.ClientNoTouch = flag
+		} else {
+			ctx.ClientNoEvict = flag
+		}
 		return ctx.WriteOK()
 	case "INFO":
 		return cmdClientInfo(ctx)
@@ -1015,7 +876,7 @@ func cmdCLIENT(ctx *Context) error {
 		}
 		return ctx.WriteInteger(-1)
 	default:
-		return ctx.WriteError(errors.New("ERR unknown subcommand '" + subCmd + "'"))
+		return ctx.WriteArray(helpReply(clientHelp))
 	}
 }
 
@@ -1446,16 +1307,21 @@ func cmdSLOWLOG(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
-	subCmd := strings.ToUpper(ctx.ArgString(0))
+	if !checkRedisSubcommand(ctx, "slowlog", nil) {
+		return nil
+	}
 
-	switch subCmd {
+	switch strings.ToUpper(ctx.ArgString(0)) {
 	case "GET":
+		if ctx.ArgCount() > 2 {
+			return ctx.WriteError(errSubcommandSyntax(ctx.ArgString(0), "SLOWLOG"))
+		}
 		count := 10
 		if ctx.ArgCount() > 1 {
 			var err error
 			count, err = strconv.Atoi(ctx.ArgString(1))
-			if err != nil {
-				return ctx.WriteError(ErrNotInteger)
+			if err != nil || count < -1 {
+				return ctx.WriteError(errors.New("ERR count should be greater than or equal to -1"))
 			}
 		}
 
@@ -1505,7 +1371,7 @@ func cmdSLOWLOG(ctx *Context) error {
 		store.GlobalSlowLog.Clear()
 		return ctx.WriteOK()
 	default:
-		return ctx.WriteError(errors.New("ERR unknown subcommand '" + subCmd + "'"))
+		return ctx.WriteArray(helpReply(slowlogHelp))
 	}
 }
 
@@ -1679,6 +1545,9 @@ func cmdACL(ctx *Context) error {
 	if ctx.ArgCount() < 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
+	if !checkRedisSubcommand(ctx, "acl", nil) {
+		return nil
+	}
 
 	subCmd := strings.ToUpper(ctx.ArgString(0))
 
@@ -1743,54 +1612,24 @@ func cmdACL(ctx *Context) error {
 		if ctx.ArgCount() < 2 {
 			return ctx.WriteError(ErrWrongArgCount)
 		}
-		username := ctx.ArgString(1)
-		user, exists := globalACL.GetUser(username)
+		user, exists := globalACL.GetUser(ctx.ArgString(1))
 		if !exists {
 			return ctx.WriteNull()
 		}
-
-		return ctx.WriteArray([]*resp.Value{
-			resp.BulkString("flags"),
-			resp.ArrayValue([]*resp.Value{
-				resp.BulkString(func() string {
-					if user.IsEnabled() {
-						return "on"
-					}
-					return "off"
-				}()),
-				resp.BulkString(func() string {
-					if user.IsNoPassword() {
-						return "nopass"
-					}
-					return ""
-				}()),
-			}),
-			resp.BulkString("passwords"),
-			resp.ArrayValue([]*resp.Value{}),
-			resp.BulkString("commands"),
-			resp.BulkString("+@all"),
-			resp.BulkString("keys"),
-			resp.ArrayValue([]*resp.Value{resp.BulkString("~*")}),
-		})
+		return ctx.WriteValue(aclGetUserValue(user))
 	case "LOAD", "SAVE":
 		return ctx.Writer.WriteError("ERR This Redis instance is not configured to use an ACL file. You may want to specify users via the ACL SETUSER command and then issue a CONFIG REWRITE (assuming you have a Redis configuration file set) in order to store users in the Redis configuration.")
 	case "LOG":
 		return cmdACLLog(ctx)
 	case "DRYRUN":
 		if ctx.ArgCount() < 3 {
-			return ctx.WriteError(ErrWrongArgCount)
+			return ctx.WriteError(arityError("acl|dryrun"))
 		}
-		username := ctx.ArgString(1)
-		cmd := ctx.ArgString(2)
-		user, exists := globalACL.GetUser(username)
-		if !exists {
-			return ctx.WriteError(acl.ErrUserNotFound)
-		}
-		if user.CanExecuteCommand(cmd) {
-			return ctx.WriteOK()
-		}
-		return ctx.WriteError(acl.ErrPermissionDenied)
+		return aclDryRun(ctx)
 	case "GENPASS":
+		if ctx.ArgCount() > 2 {
+			return ctx.WriteError(errSubcommandSyntax(ctx.ArgString(0), "ACL"))
+		}
 		bits := 256
 		if ctx.ArgCount() > 1 {
 			var err error
@@ -1798,42 +1637,100 @@ func cmdACL(ctx *Context) error {
 			if err != nil {
 				return ctx.WriteError(ErrNotInteger)
 			}
+			if bits <= 0 || bits > 4096 {
+				return ctx.WriteError(errors.New("ERR ACL GENPASS argument must be the number of bits for the output password, a positive number up to 4096"))
+			}
 		}
 		return ctx.WriteBulkString(generatePassword(bits))
 	case "HELP":
-		return ctx.WriteArray([]*resp.Value{
-			resp.BulkString("LIST"),
-			resp.BulkString("USERS"),
-			resp.BulkString("WHOAMI"),
-			resp.BulkString("CAT"),
-			resp.BulkString("SETUSER <username> [rule ...]"),
-			resp.BulkString("GETUSER <username>"),
-			resp.BulkString("DELUSER <username> [username ...]"),
-			resp.BulkString("DRYRUN <username> <command>"),
-			resp.BulkString("GENPASS [bits]"),
-			resp.BulkString("LOAD"),
-			resp.BulkString("SAVE"),
-		})
+		return ctx.WriteArray(helpReply(aclHelp))
 	default:
-		return ctx.WriteError(errors.New("ERR unknown subcommand '" + subCmd + "'"))
+		return ctx.WriteError(errUnknownSubcommand(ctx.ArgString(0), "ACL"))
 	}
 }
 
-func generatePassword(bits int) string {
-	const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*"
-	length := bits / 6
-	if length < 8 {
-		length = 8
+// aclGetUserValue is the ACL GETUSER reply for user, in Redis 7.4's shape.
+func aclGetUserValue(user *acl.User) *resp.Value {
+	d := user.Describe()
+	flags := make([]*resp.Value, len(d.Flags))
+	for i, f := range d.Flags {
+		flags[i] = resp.BulkString(f)
 	}
-	result := make([]byte, length)
-	for i := range result {
-		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(chars))))
-		if err != nil {
-			n = big.NewInt(0) // crypto/rand failure is practically impossible; fall back to first char
+	passwords := make([]*resp.Value, len(d.Passwords))
+	for i, p := range d.Passwords {
+		passwords[i] = resp.BulkString(p)
+	}
+	return resp.PairsValue([]*resp.Value{
+		resp.BulkString("flags"), resp.SetValue(flags),
+		resp.BulkString("passwords"), resp.ArrayValue(passwords),
+		resp.BulkString("commands"), resp.BulkString(d.Commands),
+		resp.BulkString("keys"), resp.BulkString(d.Keys),
+		resp.BulkString("channels"), resp.BulkString(d.Channels),
+		resp.BulkString("selectors"), resp.ArrayValue([]*resp.Value{}),
+	})
+}
+
+// aclDryRun implements ACL DRYRUN username command [arg ...]: whether the
+// user could run the command, checking its command, key and channel
+// permissions. A denial is a bulk string reply, as in Redis.
+func aclDryRun(ctx *Context) error {
+	username := ctx.ArgString(1)
+	user, exists := globalACL.GetUser(username)
+	if !exists {
+		return ctx.WriteError(errors.New("ERR User '" + username + "' not found"))
+	}
+	argv := make([]string, 0, ctx.ArgCount()-2)
+	for i := 2; i < ctx.ArgCount(); i++ {
+		argv = append(argv, ctx.ArgString(i))
+	}
+	name := CanonicalName(argv[0])
+	r := ctx.dispatcher()
+	var def *CommandDef
+	found := false
+	if r != nil {
+		def, found = r.Get(name)
+	}
+	meta := lookupRedisCommandMeta(argv)
+	if !found || (meta == nil && redisCommandMeta(argv[0]) != nil) {
+		return ctx.WriteError(errors.New("ERR Command '" + argv[0] + "' not found"))
+	}
+	shown := strings.ToLower(argv[0])
+	arity := def.Arity
+	if meta != nil {
+		shown, arity = meta.name, meta.arity
+	}
+	if arity != 0 && !arityFits(arity, len(argv)) {
+		return ctx.WriteError(arityError(shown))
+	}
+	args := ctx.Args[3:]
+	allowed := user.CanExecuteCommand(name)
+	if hasSubcommands(name) && len(args) > 0 {
+		allowed = user.CanExecuteSubcommand(name, string(args[0]))
+	}
+	if !allowed {
+		return ctx.WriteBulkString("User " + user.Name + " has no permissions to run the '" + shown + "' command")
+	}
+	for _, key := range aclKeysForCommand(name, args) {
+		if !user.CanAccessKey(key) {
+			return ctx.WriteBulkString("User " + user.Name + " has no permissions to access the '" + key + "' key")
 		}
-		result[i] = chars[n.Int64()]
 	}
-	return string(result)
+	for _, ch := range aclChannelsForCommand(name, args) {
+		if !user.CanAccessChannel(ch) {
+			return ctx.WriteBulkString("User " + user.Name + " has no permissions to access the '" + ch + "' channel")
+		}
+	}
+	return ctx.WriteOK()
+}
+
+// generatePassword returns a random password of bits bits as Redis' ACL
+// GENPASS does: (bits+3)/4 lowercase hex digits.
+func generatePassword(bits int) string {
+	buf := make([]byte, (bits+7)/8)
+	if _, err := rand.Read(buf); err != nil {
+		panic(err)
+	}
+	return hex.EncodeToString(buf)[:(bits+3)/4]
 }
 
 // cmdMONITOR puts the connection in monitor mode: the server streams every

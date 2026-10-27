@@ -66,7 +66,7 @@ func (w *Writer) WriteValue(v *Value) error {
 			return w.WriteNullArray()
 		}
 		return w.WriteArray(v.Array)
-	case TypeMap, TypePush, TypeDouble, TypeVerbatim:
+	case TypeMap, TypePush, TypeSet, TypeDouble, TypeVerbatim:
 		if err := w.WriteValueNoFlush(v); err != nil {
 			return err
 		}
@@ -234,7 +234,7 @@ func (w *Writer) WriteValueNoFlush(v *Value) error {
 		w.wr.Write(v.Bulk)
 		_, err := w.wr.WriteString("\r\n")
 		return err
-	case TypeArray, TypePush:
+	case TypeArray, TypePush, TypeSet:
 		if v.IsNull {
 			if w.resp3.Load() {
 				_, err := w.wr.WriteString("_\r\n")
@@ -245,8 +245,8 @@ func (w *Writer) WriteValueNoFlush(v *Value) error {
 			return err
 		}
 		header := TypeArray
-		if v.Type == TypePush && w.resp3.Load() {
-			header = TypePush
+		if (v.Type == TypePush || v.Type == TypeSet) && w.resp3.Load() {
+			header = v.Type
 		}
 		w.wr.WriteByte(byte(header))
 		w.wr.WriteString(strconv.Itoa(len(v.Array)))

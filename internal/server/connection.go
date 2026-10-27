@@ -636,6 +636,10 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 			}
 			c.clusterConn = command.ClusterConn{}
 			c.replySkip = false
+			c.setClientFlags(-1, -1)
+		}
+		if ctx.ClientNoEvict != 0 || ctx.ClientNoTouch != 0 {
+			c.setClientFlags(ctx.ClientNoEvict, ctx.ClientNoTouch)
 		}
 		// Capture subscriber if created during this command (e.g. SUBSCRIBE)
 		if ctx.Subscriber != nil && c.subscriber == nil {

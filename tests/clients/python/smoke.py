@@ -34,6 +34,15 @@ for proto in (2, 3):
     # RESP2 returns [[stream, entries]], RESP3 a map {stream: [entries]}.
     entries = got["st"][0] if proto == 3 else got[0][1]
     assert entries and entries[0][1] == {"f": "v"}, got
+    cmds = r.command()
+    assert cmds["get"]["arity"] == 2 and "readonly" in cmds["get"]["flags"], cmds["get"]
+    assert r.command_getkeys("MSET", "a", "1", "b", "2") == ["a", "b"]
+    docs = r.execute_command("COMMAND DOCS", "get", "client|kill")
+    assert docs, docs
+    info = r.execute_command("COMMAND INFO", "get", "client|kill")
+    assert len(info) == 2, info
+    kf = r.execute_command("COMMAND GETKEYSANDFLAGS", "LMOVE", "a", "b", "LEFT", "RIGHT")
+    assert len(kf) == 2 and kf[0][0] == "a", kf
     print(f"redis-py protocol={proto}: all checks passed")
 
 # Client-side caching: the cached GET must be refreshed once another client

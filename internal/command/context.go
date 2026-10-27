@@ -50,6 +50,10 @@ type Context struct {
 	// ClientName, carried back to the connection after the command.
 	ClientLibName string
 	ClientLibVer  string
+	// ClientNoEvict and ClientNoTouch are set by CLIENT NO-EVICT and CLIENT
+	// NO-TOUCH: 1 turns the flag on, -1 off, 0 leaves it as it was.
+	ClientNoEvict int8
+	ClientNoTouch int8
 	// ReplyMode is set by CLIENT REPLY: "on", "off" or "skip"; empty when
 	// the command did not change it.
 	ReplyMode string

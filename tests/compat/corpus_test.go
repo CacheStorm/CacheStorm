@@ -40,6 +40,7 @@ func corpus() []Case {
 	cs = append(cs, miscCases()...)
 	cs = append(cs, coverageGapCases()...)
 	cs = append(cs, encodingAndEdgeCases()...)
+	cs = append(cs, adminCases()...)
 	cs = append(cs, luaCases()...)
 	cs = append(cs, keyspaceEventCases()...)
 	multi := map[string]bool{"transactions/multi-select": true, "transactions/watch-other-db-no-abort": true, "lua/lua-select-isolated": true}

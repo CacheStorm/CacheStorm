@@ -155,6 +155,7 @@ func TestToACLStringWithPasswords(t *testing.T) {
 			DeniedCommands:  map[string]bool{"FLUSHALL": true},
 			AllowedKeys:     []string{"user:*"},
 			AllowedChannels: []string{"news:*"},
+			CommandRules:    []string{"+get", "+set", "-flushall"},
 		},
 	}
 

@@ -26,6 +26,21 @@ type clientInfo struct {
 	lastUsed time.Time
 	multi    int
 	resp     int
+	noEvict  bool
+	noTouch  bool
+}
+
+// setClientFlags records CLIENT NO-EVICT and CLIENT NO-TOUCH: 1 sets a flag,
+// -1 clears it and 0 leaves it.
+func (c *Connection) setClientFlags(noEvict, noTouch int8) {
+	c.info.mu.Lock()
+	if noEvict != 0 {
+		c.info.noEvict = noEvict > 0
+	}
+	if noTouch != 0 {
+		c.info.noTouch = noTouch > 0
+	}
+	c.info.mu.Unlock()
 }
 
 // noteCommand records the command the connection is about to run, which
@@ -93,7 +108,8 @@ func (c *Connection) clientType() string {
 func (c *Connection) listLine(now time.Time, redirect int64) string {
 	c.info.mu.Lock()
 	info := clientInfo{name: c.info.name, libName: c.info.libName, libVer: c.info.libVer, user: c.info.user,
-		db: c.info.db, lastCmd: strings.ToLower(c.info.lastCmd), lastUsed: c.info.lastUsed, multi: c.info.multi, resp: c.info.resp}
+		db: c.info.db, lastCmd: strings.ToLower(c.info.lastCmd), lastUsed: c.info.lastUsed, multi: c.info.multi, resp: c.info.resp,
+		noEvict: c.info.noEvict, noTouch: c.info.noTouch}
 	if c.info.lastSub != "" {
 		info.lastCmd += "|" + strings.ToLower(c.info.lastSub)
 	}
@@ -125,6 +141,12 @@ func (c *Connection) listLine(now time.Time, redirect int64) string {
 	}
 	if redirect >= 0 {
 		flags += "t"
+	}
+	if info.noEvict {
+		flags += "e"
+	}
+	if info.noTouch {
+		flags += "T"
 	}
 	if flags == "" {
 		flags = "N"

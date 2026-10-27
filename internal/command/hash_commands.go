@@ -605,66 +605,57 @@ func cmdHRANDFIELD(ctx *Context) error {
 	return ctx.WriteArray(result)
 }
 
+// cmdHGETDEL is Redis 8's HGETDEL key FIELDS numfields field ...: it
+// returns the values of the fields, nil for a missing one, and deletes them,
+// and the key once the hash is empty. It is recorded as an HDEL of the
+// fields it deleted, or not at all.
 func cmdHGETDEL(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
+	ctx.writeEffectsHandled = true
+	if ctx.ArgCount() < 4 {
 		return ctx.WriteError(arityError(ctx.Command))
 	}
-
 	key := ctx.ArgString(0)
-	fields := make([]string, 0, ctx.ArgCount()-1)
-	for i := 1; i < ctx.ArgCount(); i++ {
-		fields = append(fields, ctx.ArgString(i))
+	if _, err := getHash(ctx, key); err != nil {
+		return ctx.WriteError(err)
 	}
-
+	fields, err := hfeFields(ctx, 1)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
 	hash, err := lockHash(ctx, key)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
+	results := make([]*resp.Value, len(fields))
 	if hash == nil {
-		if len(fields) == 1 {
-			return ctx.WriteNullBulkString()
-		}
-		results := make([]*resp.Value, len(fields))
 		for i := range results {
-			results[i] = resp.NullValue()
+			results[i] = resp.NullBulkString()
 		}
+		ctx.PropagateAs()
 		return ctx.WriteArray(results)
 	}
-
-	if len(fields) == 1 {
-		value, exists := hash.Fields[fields[0]]
-		if !exists {
-			hash.Unlock()
-			return ctx.WriteNullBulkString()
+	var deleted []string
+	for i, f := range fields {
+		value, ok := hash.Fields[f]
+		if !ok {
+			results[i] = resp.NullBulkString()
+			continue
 		}
-		hash.DeleteField(fields[0])
-		isEmpty := len(hash.Fields) == 0
-		hash.Unlock()
-		ctx.notify(store.NotifyHash, "hdel", key)
-		if isEmpty {
-			deleteIfEmpty(ctx, key, hash)
-		}
-		return ctx.WriteBulkBytes(value)
+		results[i] = resp.BulkBytes(value)
+		hash.DeleteField(f)
+		deleted = append(deleted, f)
 	}
-
-	results := make([]*resp.Value, 0, len(fields))
-	removed := false
-	for _, field := range fields {
-		if value, exists := hash.Fields[field]; exists {
-			results = append(results, resp.BulkBytes(value))
-			hash.DeleteField(field)
-			removed = true
-		} else {
-			results = append(results, resp.NullValue())
-		}
-	}
-	isEmpty := len(hash.Fields) == 0
+	empty := len(hash.Fields) == 0
 	hash.Unlock()
-	if removed {
-		ctx.notify(store.NotifyHash, "hdel", key)
+	if len(deleted) == 0 {
+		ctx.PropagateAs()
+		return ctx.WriteArray(results)
 	}
-	if isEmpty {
+	ctx.notify(store.NotifyHash, "hdel", key)
+	if empty {
 		deleteIfEmpty(ctx, key, hash)
 	}
+	ctx.Store.TouchKey(key)
+	ctx.PropagateAs(ExecutedCommand{Name: "HDEL", Args: hfeArgs(key, deleted...), DB: ctx.DB})
 	return ctx.WriteArray(results)
 }

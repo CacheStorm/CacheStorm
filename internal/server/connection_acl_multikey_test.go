@@ -326,13 +326,14 @@ func TestACLSortByAndGetPatternsAreChecked(t *testing.T) {
 		t.Fatalf("control: SORT ... BY nosort returned type %v %q, want an array", v.Type, v.Str)
 	}
 
-	// Control: GET # is the element itself, not a key.
-	if v := a.do("SORT", "user:list", "GET", "#"); v.Type != resp.TypeArray {
+	// Control: GET # is the element itself, not a key. ALPHA, because a
+	// numeric sort of "alpha" is an error in Redis.
+	if v := a.do("SORT", "user:list", "ALPHA", "GET", "#"); v.Type != resp.TypeArray {
 		t.Fatalf("control: SORT ... GET # returned type %v %q, want an array", v.Type, v.Str)
 	}
 
 	// Control: a BY pattern expanding INSIDE the pattern must work.
-	if v := a.do("SORT", "user:list", "BY", "user:d_*"); v.Type != resp.TypeArray {
+	if v := a.do("SORT", "user:list", "BY", "user:d_*", "ALPHA"); v.Type != resp.TypeArray {
 		t.Fatalf("control: SORT ... BY user:d_* returned type %v %q, want an array", v.Type, v.Str)
 	}
 

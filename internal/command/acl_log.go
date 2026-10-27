@@ -79,7 +79,7 @@ func recordACLDenial(ctx *Context, reason, object, username string) {
 func cmdACLLog(ctx *Context) error {
 	count := 10
 	if ctx.ArgCount() > 2 {
-		return ctx.WriteError(arityError("acl|log"))
+		return ctx.WriteError(errSubcommandSyntax(ctx.ArgString(0), "ACL"))
 	}
 	if ctx.ArgCount() == 2 {
 		if strings.EqualFold(ctx.ArgString(1), "RESET") {

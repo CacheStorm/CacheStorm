@@ -212,11 +212,14 @@ HELP
     Print this help.`
 
 func cmdOBJECT(ctx *Context) error {
-	if ctx.ArgCount() == 1 && strings.EqualFold(ctx.ArgString(0), "HELP") {
-		return ctx.WriteArray(helpReply(objectHelp))
+	if ctx.ArgCount() < 1 {
+		return ctx.WriteError(arityError("object"))
 	}
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
+	if !checkRedisSubcommand(ctx, "object", nil) {
+		return nil
+	}
+	if strings.EqualFold(ctx.ArgString(0), "HELP") {
+		return ctx.WriteArray(helpReply(objectHelp))
 	}
 
 	subCmd := strings.ToUpper(ctx.ArgString(0))
@@ -256,9 +259,11 @@ func cmdMEMORY(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
-	subCmd := strings.ToUpper(ctx.ArgString(0))
+	if !checkRedisSubcommand(ctx, "memory", nil) {
+		return nil
+	}
 
-	switch subCmd {
+	switch strings.ToUpper(ctx.ArgString(0)) {
 	case "USAGE":
 		return cmdMemoryUsage(ctx)
 	case "STATS":
@@ -271,7 +276,7 @@ func cmdMEMORY(ctx *Context) error {
 		debug.FreeOSMemory()
 		return ctx.WriteOK()
 	default:
-		return ctx.WriteError(fmt.Errorf("ERR unknown MEMORY subcommand '%s'", subCmd))
+		return ctx.WriteArray(helpReply(memoryHelp))
 	}
 }
 
@@ -301,7 +306,9 @@ func cmdMemoryUsage(ctx *Context) error {
 				return ctx.WriteError(ErrNotInteger)
 			}
 			i++
+			continue
 		}
+		return ctx.WriteError(ErrSyntaxError)
 	}
 
 	_ = samples

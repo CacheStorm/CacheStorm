@@ -273,7 +273,7 @@ func respToLua(L *lua.LState, v *resp.Value) lua.LValue {
 		return tbl
 	case resp.TypeError:
 		return luaErrTable(L, v.Err)
-	case resp.TypeArray:
+	case resp.TypeArray, resp.TypeSet:
 		if v.IsNull {
 			return lua.LFalse
 		}
@@ -283,6 +283,13 @@ func respToLua(L *lua.LState, v *resp.Value) lua.LValue {
 		}
 		return tbl
 	case resp.TypeMap:
+		if v.Map == nil {
+			tbl := L.CreateTable(len(v.Array), 0)
+			for _, item := range v.Array {
+				tbl.Append(respToLua(L, item))
+			}
+			return tbl
+		}
 		keys := make([]string, 0, len(v.Map))
 		for k := range v.Map {
 			keys = append(keys, k)

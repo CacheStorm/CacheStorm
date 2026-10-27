@@ -260,3 +260,134 @@ func cmdClientReply(ctx *Context) error {
 		return ctx.WriteError(ErrSyntaxError)
 	}
 }
+
+// clientHelp, aclHelp, moduleHelp, slowlogHelp and memoryHelp are the HELP
+// texts of Redis 7.4.
+const clientHelp = `CLIENT <subcommand> [<arg> [value] [opt] ...]. Subcommands are:
+CACHING (YES|NO)
+    Enable/disable tracking of the keys for next command in OPTIN/OPTOUT modes.
+GETREDIR
+    Return the client ID we are redirecting to when tracking is enabled.
+GETNAME
+    Return the name of the current connection.
+ID
+    Return the ID of the current connection.
+INFO
+    Return information about the current client connection.
+KILL <ip:port>
+    Kill connection made from <ip:port>.
+KILL <option> <value> [<option> <value> [...]]
+    Kill connections. Options are:
+    * ADDR (<ip:port>|<unixsocket>:0)
+      Kill connections made from the specified address
+    * LADDR (<ip:port>|<unixsocket>:0)
+      Kill connections made to specified local address
+    * TYPE (NORMAL|MASTER|REPLICA|PUBSUB)
+      Kill connections by type.
+    * USER <username>
+      Kill connections authenticated by <username>.
+    * SKIPME (YES|NO)
+      Skip killing current connection (default: yes).
+    * ID <client-id>
+      Kill connections by client id.
+    * MAXAGE <maxage>
+      Kill connections older than the specified age.
+LIST [options ...]
+    Return information about client connections. Options:
+    * TYPE (NORMAL|MASTER|REPLICA|PUBSUB)
+      Return clients of specified type.
+UNPAUSE
+    Stop the current client pause, resuming traffic.
+PAUSE <timeout> [WRITE|ALL]
+    Suspend all, or just write, clients for <timeout> milliseconds.
+REPLY (ON|OFF|SKIP)
+    Control the replies sent to the current connection.
+SETNAME <name>
+    Assign the name <name> to the current connection.
+SETINFO <option> <value>
+    Set client meta attr. Options are:
+    * LIB-NAME: the client lib name.
+    * LIB-VER: the client lib version.
+UNBLOCK <clientid> [TIMEOUT|ERROR]
+    Unblock the specified blocked client.
+TRACKING (ON|OFF) [REDIRECT <id>] [BCAST] [PREFIX <prefix> [...]]
+         [OPTIN] [OPTOUT] [NOLOOP]
+    Control server assisted client side caching.
+TRACKINGINFO
+    Report tracking status for the current connection.
+NO-EVICT (ON|OFF)
+    Protect current client connection from eviction.
+NO-TOUCH (ON|OFF)
+    Will not touch LRU/LFU stats when this mode is on.
+HELP
+    Print this help.`
+
+const aclHelp = `ACL <subcommand> [<arg> [value] [opt] ...]. Subcommands are:
+CAT [<category>]
+    List all commands that belong to <category>, or all command categories
+    when no category is specified.
+DELUSER <username> [<username> ...]
+    Delete a list of users.
+DRYRUN <username> <command> [<arg> ...]
+    Returns whether the user can execute the given command without executing the command.
+GETUSER <username>
+    Get the user's details.
+GENPASS [<bits>]
+    Generate a secure 256-bit user password. The optional ` + "`bits`" + ` argument can
+    be used to specify a different size.
+LIST
+    Show users details in config file format.
+LOAD
+    Reload users from the ACL file.
+LOG [<count> | RESET]
+    Show the ACL log entries.
+SAVE
+    Save the current config to the ACL file.
+SETUSER <username> <attribute> [<attribute> ...]
+    Create or modify a user with the specified attributes.
+USERS
+    List all the registered usernames.
+WHOAMI
+    Return the current connection username.
+HELP
+    Print this help.`
+
+const moduleHelp = `MODULE <subcommand> [<arg> [value] [opt] ...]. Subcommands are:
+LIST
+    Return a list of loaded modules.
+LOAD <path> [<arg> ...]
+    Load a module library from <path>, passing to it any optional arguments.
+LOADEX <path> [[CONFIG NAME VALUE] [CONFIG NAME VALUE]] [ARGS ...]
+    Load a module library from <path>, while passing it module configurations and optional arguments.
+UNLOAD <name>
+    Unload a module.
+HELP
+    Print this help.`
+
+const slowlogHelp = `SLOWLOG <subcommand> [<arg> [value] [opt] ...]. Subcommands are:
+GET [<count>]
+    Return top <count> entries from the slowlog (default: 10, -1 mean all).
+    Entries are made of:
+    id, timestamp, time in microseconds, arguments array, client IP and port,
+    client name
+LEN
+    Return the length of the slowlog.
+RESET
+    Reset the slowlog.
+HELP
+    Print this help.`
+
+const memoryHelp = `MEMORY <subcommand> [<arg> [value] [opt] ...]. Subcommands are:
+DOCTOR
+    Return memory problems reports.
+MALLOC-STATS
+    Return internal statistics report from the memory allocator.
+PURGE
+    Attempt to purge dirty pages for reclamation by the allocator.
+STATS
+    Return information about the memory usage of the server.
+USAGE <key> [SAMPLES <count>]
+    Return memory in bytes used by <key> and its value. Nested values are
+    sampled up to <count> times (default: 5, 0 means sample all).
+HELP
+    Print this help.`

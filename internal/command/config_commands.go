@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cachestorm/cachestorm/internal/config"
 	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
 )
@@ -86,9 +87,11 @@ func cmdCONFIG(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
-	subCmd := strings.ToUpper(ctx.ArgString(0))
+	if !checkRedisSubcommand(ctx, "config", nil) {
+		return nil
+	}
 
-	switch subCmd {
+	switch strings.ToUpper(ctx.ArgString(0)) {
 	case "GET":
 		return cmdConfigGet(ctx)
 	case "SET":
@@ -105,8 +108,81 @@ func cmdCONFIG(ctx *Context) error {
 		}
 		return ctx.WriteOK()
 	default:
-		return ctx.WriteError(ErrUnknownCommand)
+		return ctx.WriteArray(helpReply(configHelp))
 	}
+}
+
+const configHelp = `CONFIG <subcommand> [<arg> [value] [opt] ...]. Subcommands are:
+GET <pattern>
+    Return parameters matching the glob-like <pattern> and their values.
+SET <directive> <value>
+    Set the configuration <directive> to <value>.
+RESETSTAT
+    Reset statistics reported by the INFO command.
+REWRITE
+    Rewrite the configuration file.
+HELP
+    Print this help.`
+
+// ConfigSetError is a CONFIG SET failure for the parameter name, worded as
+// Redis words it.
+func ConfigSetError(name, reason string) error {
+	return errors.New("ERR CONFIG SET failed (possibly related to argument '" + name + "') - " + reason)
+}
+
+// ParseConfigInt parses the integer value of parameter name as Redis does,
+// with its errors for a value that is not an integer or is out of range.
+func ParseConfigInt(name, value string, lo, hi int64) (int64, error) {
+	v, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		return 0, ConfigSetError(name, "argument couldn't be parsed into an integer")
+	}
+	if v < lo || v > hi {
+		return 0, ConfigSetError(name, "argument must be between "+strconv.FormatInt(lo, 10)+" and "+strconv.FormatInt(hi, 10)+" inclusive")
+	}
+	return v, nil
+}
+
+// ParseConfigBool parses a yes/no parameter as Redis does.
+func ParseConfigBool(name, value string) (bool, error) {
+	switch strings.ToLower(value) {
+	case "yes":
+		return true, nil
+	case "no":
+		return false, nil
+	}
+	return false, ConfigSetError(name, "argument must be 'yes' or 'no'")
+}
+
+// ParseConfigEnum checks an enumerated parameter against its values, in
+// the order Redis lists them in its error.
+func ParseConfigEnum(name, value string, values ...string) (string, error) {
+	for _, v := range values {
+		if strings.EqualFold(v, value) {
+			return v, nil
+		}
+	}
+	return "", ConfigSetError(name, "argument(s) must be one of the following: "+strings.Join(values, ", "))
+}
+
+const (
+	configIntMax  = 1<<31 - 1
+	configIntMin  = -1 << 31
+	configLongMax = 1<<63 - 1
+)
+
+// configSettable lists the parameters CONFIG SET accepts besides those the
+// server's hooks own.
+var configSettable = map[string]bool{
+	"maxmemory": true, "maxmemory-policy": true, "maxmemory-samples": true, "maxclients": true,
+	"timeout": true, "slowlog-log-slower-than": true, "slowlog-max-len": true, "loglevel": true,
+	"appendonly": true, "appendfsync": true, "tcp-keepalive": true, "lfu-decay-time": true,
+	"lfu-log-factor": true, "latency-monitor-threshold": true, "activedefrag": true,
+	"notify-keyspace-events": true, "lazyfree-lazy-eviction": true, "lazyfree-lazy-expire": true,
+	"lazyfree-lazy-server-del": true, "hash-max-listpack-entries": true, "hash-max-listpack-value": true,
+	"list-max-listpack-size": true, "set-max-intset-entries": true, "zset-max-listpack-entries": true,
+	"databases": true, "daemonize": true, "pidfile": true, "port": true, "bind": true,
+	"protected-mode": true, "save": true,
 }
 
 // ConfigHooks connect CONFIG GET/SET to the running server. Values returns
@@ -191,7 +267,7 @@ func configValues(ctx *Context) map[string]string {
 // is a case-insensitive glob over the parameter names, as in Redis 7.
 func cmdConfigGet(ctx *Context) error {
 	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError("config|get"))
 	}
 	values := configValues(ctx)
 	names := make([]string, 0, len(values))
@@ -227,23 +303,24 @@ func cmdConfigSet(ctx *Context) error {
 	// pair loop then read ctx.ArgString(i+1) past the end and silently did
 	// nothing while replying +OK.
 	if ctx.ArgCount() < 3 || ctx.ArgCount()%2 == 0 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError("config|set"))
+	}
+	known := configValues(ctx)
+	seen := make(map[string]bool, ctx.ArgCount()/2)
+	for i := 1; i < ctx.ArgCount(); i += 2 {
+		param := strings.ToLower(ctx.ArgString(i))
+		if _, ok := known[param]; !ok && !configSettable[param] {
+			return ctx.WriteError(errors.New("ERR Unknown option or number of arguments for CONFIG SET - '" + ctx.ArgString(i) + "'"))
+		}
+		if seen[param] {
+			return ctx.WriteError(ConfigSetError(ctx.ArgString(i), "duplicate parameter"))
+		}
+		seen[param] = true
 	}
 
 	c := globalConfig
 	c.mu.Lock()
 	defer c.mu.Unlock()
-
-	validEvictionPolicies := map[string]bool{
-		"noeviction":      true,
-		"allkeys-lru":     true,
-		"allkeys-lfu":     true,
-		"allkeys-random":  true,
-		"volatile-lru":    true,
-		"volatile-lfu":    true,
-		"volatile-random": true,
-		"volatile-ttl":    true,
-	}
 
 	hooks := configHooksFor(ctx)
 	for i := 1; i < ctx.ArgCount(); i += 2 {
@@ -260,91 +337,164 @@ func cmdConfigSet(ctx *Context) error {
 			}
 		}
 
-		switch param {
-		case "maxmemory":
-			if v, err := strconv.ParseInt(value, 10, 64); err == nil {
-				if v < 0 {
-					return ctx.WriteError(errors.New("ERR Invalid argument '" + value + "' for CONFIG SET 'maxmemory'"))
-				}
-				c.maxMemory = v
-			}
-		case "maxmemory-policy":
-			if !validEvictionPolicies[value] {
-				return ctx.WriteError(errors.New("ERR Invalid argument '" + value + "' for CONFIG SET 'maxmemory-policy'"))
-			}
-			c.maxMemoryPolicy = value
-		case "maxclients":
-			if v, err := strconv.ParseInt(value, 10, 64); err == nil {
-				if v < 1 {
-					return ctx.WriteError(errors.New("ERR Invalid argument '" + value + "' for CONFIG SET 'maxclients'"))
-				}
-				c.maxClients = v
-			}
-		case "timeout":
-			if v, err := strconv.Atoi(value); err == nil {
-				if v < 0 {
-					return ctx.WriteError(errors.New("ERR Invalid argument '" + value + "' for CONFIG SET 'timeout'"))
-				}
-				c.timeout = v
-			}
-		case "slowlog-log-slower-than":
-			if v, err := strconv.ParseInt(value, 10, 64); err == nil {
-				c.slowlogLogSlowerThan = v
-				// Apply to the recorder the request path actually appends to
-				// (store.GlobalSlowLog). Writing command.globalSlowLog instead
-				// left the live threshold unchanged, so lowering it at runtime
-				// looked successful via CONFIG GET but recorded nothing.
-				// The parameter is in microseconds, as in Redis.
-				if v < 0 {
-					v = 0
-				}
-				store.GlobalSlowLog.SetThreshold(time.Duration(v) * time.Microsecond)
-			}
-		case "slowlog-max-len":
-			if v, err := strconv.Atoi(value); err == nil {
-				c.slowlogMaxLen = v
-				store.GlobalSlowLog.SetMaxSize(v)
-			}
-		case "loglevel":
-			c.logLevel = value
-		case "appendonly":
-			c.appendOnly = value == "yes"
-		case "appendfsync":
-			c.appendFsync = value
-		case "tcp-keepalive":
-			if v, err := strconv.Atoi(value); err == nil {
-				c.tcpKeepalive = v
-			}
-		case "lfu-decay-time":
-			if v, err := strconv.Atoi(value); err == nil {
-				c.lfuDecayTime = v
-			}
-		case "lfu-log-factor":
-			if v, err := strconv.Atoi(value); err == nil {
-				c.lfuLogFactor = v
-			}
-		case "latency-monitor-threshold":
-			v, err := strconv.ParseInt(value, 10, 64)
-			if err != nil || v < 0 {
-				return ctx.WriteError(errors.New("ERR CONFIG SET failed (possibly related to argument 'latency-monitor-threshold') - argument couldn't be parsed into an integer"))
-			}
-			SetLatencyThreshold(v)
-		case "activedefrag":
-			c.activedefrag = value == "yes"
-		case "notify-keyspace-events":
-			flags, ok := store.ParseNotifyFlags(value)
-			if !ok {
-				return ctx.WriteError(errors.New("ERR CONFIG SET failed (possibly related to argument 'notify-keyspace-events') - Invalid event class character. Use 'Ag$lshzxeKEtmdn'.")) //nolint:staticcheck // Redis reply text
-			}
-			if ctx.Store != nil {
-				ctx.Store.SetNotifyFlags(flags)
-			}
-		default:
-			return ctx.WriteError(errors.New("ERR Unknown option or number of arguments for CONFIG SET '" + param + "'"))
+		if err := c.setLocked(ctx, param, value); err != nil {
+			return ctx.WriteError(err)
 		}
 	}
 
 	return ctx.WriteOK()
+}
+
+// setLocked applies one CONFIG SET parameter the server's hooks do not own.
+func (c *Config) setLocked(ctx *Context, param, value string) error {
+	switch param {
+	case "maxmemory":
+		v, err := config.ParseMemorySize(value)
+		if err != nil || v < 0 {
+			return ConfigSetError(param, "argument must be a memory value")
+		}
+		c.maxMemory = v
+	case "maxmemory-policy":
+		v, err := ParseConfigEnum(param, value, "volatile-lru", "volatile-lfu", "volatile-random", "volatile-ttl",
+			"allkeys-lru", "allkeys-lfu", "allkeys-random", "noeviction")
+		if err != nil {
+			return err
+		}
+		c.maxMemoryPolicy = v
+	case "maxmemory-samples":
+		v, err := ParseConfigInt(param, value, 1, 64)
+		if err != nil {
+			return err
+		}
+		c.maxMemorySamples = int(v)
+	case "maxclients":
+		v, err := ParseConfigInt(param, value, 1, 1<<32-1)
+		if err != nil {
+			return err
+		}
+		c.maxClients = v
+	case "timeout":
+		v, err := ParseConfigInt(param, value, 0, configIntMax)
+		if err != nil {
+			return err
+		}
+		c.timeout = int(v)
+	case "slowlog-log-slower-than":
+		v, err := ParseConfigInt(param, value, -1, configLongMax)
+		if err != nil {
+			return err
+		}
+		c.slowlogLogSlowerThan = v
+		// Apply to the recorder the request path actually appends to
+		// (store.GlobalSlowLog); the parameter is in microseconds.
+		if v < 0 {
+			v = 0
+		}
+		store.GlobalSlowLog.SetThreshold(time.Duration(v) * time.Microsecond)
+	case "slowlog-max-len":
+		v, err := ParseConfigInt(param, value, 0, configLongMax)
+		if err != nil {
+			return err
+		}
+		c.slowlogMaxLen = int(v)
+		store.GlobalSlowLog.SetMaxSize(int(v))
+	case "loglevel":
+		v, err := ParseConfigEnum(param, value, "debug", "verbose", "notice", "warning", "nothing")
+		if err != nil {
+			return err
+		}
+		c.logLevel = v
+	case "appendonly", "activedefrag", "lazyfree-lazy-eviction", "lazyfree-lazy-expire", "lazyfree-lazy-server-del", "protected-mode":
+		v, err := ParseConfigBool(param, value)
+		if err != nil {
+			return err
+		}
+		switch param {
+		case "appendonly":
+			c.appendOnly = v
+		case "activedefrag":
+			c.activedefrag = v
+		case "lazyfree-lazy-eviction":
+			c.lazyFreeLazyEviction = v
+		case "lazyfree-lazy-expire":
+			c.lazyFreeLazyExpire = v
+		case "lazyfree-lazy-server-del":
+			c.lazyFreeLazyServerDel = v
+		case "protected-mode":
+			c.protectedMode = v
+		}
+	case "appendfsync":
+		v, err := ParseConfigEnum(param, value, "everysec", "always", "no")
+		if err != nil {
+			return err
+		}
+		c.appendFsync = v
+	case "tcp-keepalive", "lfu-decay-time", "lfu-log-factor":
+		v, err := ParseConfigInt(param, value, 0, configIntMax)
+		if err != nil {
+			return err
+		}
+		switch param {
+		case "tcp-keepalive":
+			c.tcpKeepalive = int(v)
+		case "lfu-decay-time":
+			c.lfuDecayTime = int(v)
+		default:
+			c.lfuLogFactor = int(v)
+		}
+	case "hash-max-listpack-entries", "hash-max-listpack-value", "set-max-intset-entries", "zset-max-listpack-entries":
+		v, err := ParseConfigInt(param, value, 0, configLongMax)
+		if err != nil {
+			return err
+		}
+		switch param {
+		case "hash-max-listpack-entries":
+			c.hashMaxListpackEntries = int(v)
+		case "hash-max-listpack-value":
+			c.hashMaxListpackValue = int(v)
+		case "set-max-intset-entries":
+			c.setMaxIntsetEntries = v
+		default:
+			c.zsetMaxListpackEntries = int(v)
+		}
+	case "list-max-listpack-size":
+		v, err := ParseConfigInt(param, value, configIntMin, configIntMax)
+		if err != nil {
+			return err
+		}
+		c.listMaxListpackSize = int(v)
+	case "latency-monitor-threshold":
+		v, err := ParseConfigInt(param, value, 0, configLongMax)
+		if err != nil {
+			return err
+		}
+		SetLatencyThreshold(v)
+	case "notify-keyspace-events":
+		flags, ok := store.ParseNotifyFlags(value)
+		if !ok {
+			return ConfigSetError(param, "Invalid event class character. Use 'Ag$lshzxeKEtmdn'.")
+		}
+		if ctx.Store != nil {
+			ctx.Store.SetNotifyFlags(flags)
+		}
+	case "port":
+		if _, err := ParseConfigInt(param, value, 0, 65535); err != nil {
+			return err
+		}
+		return ConfigSetError(param, "can't set immutable config")
+	case "daemonize":
+		if _, err := ParseConfigBool(param, value); err != nil {
+			return err
+		}
+		return ConfigSetError(param, "can't set immutable config")
+	case "databases", "pidfile", "bind":
+		return ConfigSetError(param, "can't set immutable config")
+	case "save":
+		c.saveIntervals = strings.Fields(value)
+	default:
+		return errors.New("ERR Unknown option or number of arguments for CONFIG SET - '" + param + "'")
+	}
+	return nil
 }
 
 func cmdConfigResetStat(ctx *Context) error {

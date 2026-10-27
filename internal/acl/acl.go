@@ -22,6 +22,11 @@ type Permission struct {
 	DeniedCommands  map[string]bool
 	AllowedKeys     []string
 	AllowedChannels []string
+	// CommandRules is the user's command rule history as Redis keeps it
+	// (selector->command_rules): "+cmd", "-cmd", "+cmd|sub" and "+@cat"
+	// entries in the order applied, a later rule for a command replacing
+	// earlier ones for it and its subcommands. +@all and -@all clear it.
+	CommandRules []string
 }
 
 type User struct {
@@ -31,7 +36,10 @@ type User struct {
 	Passwords   []string
 	Permissions Permission
 	IsDefault   bool
-	mu          sync.RWMutex
+	// SkipSanitizePayload is the skip-sanitize-payload flag; Redis users
+	// default to sanitize-payload.
+	SkipSanitizePayload bool
+	mu                  sync.RWMutex
 }
 
 type ACL struct {
@@ -115,6 +123,7 @@ func (a *ACL) ListUsers() []string {
 	for name := range a.Users {
 		users = append(users, name)
 	}
+	sort.Strings(users)
 	return users
 }
 
@@ -214,6 +223,36 @@ func (u *User) DenyCommand(cmd string) {
 }
 
 func (u *User) setCommandLocked(cmd string, allow bool) {
+	u.setCommandBitsLocked(cmd, allow)
+	if cmd == "*" || strings.EqualFold(cmd, "all") {
+		u.Permissions.CommandRules = nil
+		return
+	}
+	u.recordRuleLocked(cmd, allow)
+}
+
+// recordRuleLocked appends rule to the command rule history the way Redis'
+// ACLUpdateCommandRules does: earlier rules for the same command or category,
+// and for the command's subcommands, are dropped first.
+func (u *User) recordRuleLocked(rule string, allow bool) {
+	rule = strings.ToLower(rule)
+	kept := make([]string, 0, len(u.Permissions.CommandRules)+1)
+	for _, r := range u.Permissions.CommandRules {
+		body := r[1:]
+		if body == rule || strings.HasPrefix(body, rule+"|") {
+			continue
+		}
+		kept = append(kept, r)
+	}
+	if allow {
+		kept = append(kept, "+"+rule)
+	} else {
+		kept = append(kept, "-"+rule)
+	}
+	u.Permissions.CommandRules = kept
+}
+
+func (u *User) setCommandBitsLocked(cmd string, allow bool) {
 	p := &u.Permissions
 	if p.AllowedCommands == nil {
 		p.AllowedCommands = make(map[string]bool)
@@ -359,45 +398,110 @@ func (u *User) ToACLString() string {
 	defer u.mu.RUnlock()
 
 	parts := []string{"user", u.Name}
-	if u.Enabled {
-		parts = append(parts, "on")
-	} else {
-		parts = append(parts, "off")
-	}
-	if u.NoPassword {
-		parts = append(parts, "nopass")
-	}
+	parts = append(parts, u.flagsLocked()...)
 	for _, pw := range u.Passwords {
 		parts = append(parts, "#"+pw)
 	}
-	for _, key := range u.Permissions.AllowedKeys {
-		parts = append(parts, "~"+key)
-	}
-	if len(u.Permissions.AllowedChannels) == 0 {
-		parts = append(parts, "resetchannels")
-	}
-	for _, ch := range u.Permissions.AllowedChannels {
-		parts = append(parts, "&"+ch)
-	}
-	if u.Permissions.AllowedCommands["*"] {
-		parts = append(parts, "+@all")
+	p := &u.Permissions
+	if hasPattern(p.AllowedKeys, "*") {
+		parts = append(parts, "~*")
 	} else {
-		parts = append(parts, "-@all")
+		for _, key := range p.AllowedKeys {
+			parts = append(parts, "~"+key)
+		}
 	}
-	parts = append(parts, sortedRules("+", u.Permissions.AllowedCommands)...)
-	parts = append(parts, sortedRules("-", u.Permissions.DeniedCommands)...)
+	if hasPattern(p.AllowedChannels, "*") {
+		parts = append(parts, "&*")
+	} else {
+		parts = append(parts, "resetchannels")
+		for _, ch := range p.AllowedChannels {
+			parts = append(parts, "&"+ch)
+		}
+	}
+	parts = append(parts, u.commandRulesLocked())
 	return strings.Join(parts, " ")
 }
 
-func sortedRules(sign string, cmds map[string]bool) []string {
-	out := make([]string, 0, len(cmds))
-	for cmd := range cmds {
-		if cmd != "*" {
-			out = append(out, sign+strings.ToLower(cmd))
+// UserDescription is what ACL GETUSER reports for a user.
+type UserDescription struct {
+	Flags     []string
+	Passwords []string
+	Commands  string
+	Keys      string
+	Channels  string
+}
+
+// Describe returns the user's flags, password hashes and permissions as
+// ACL GETUSER reports them.
+func (u *User) Describe() UserDescription {
+	u.mu.RLock()
+	defer u.mu.RUnlock()
+	d := UserDescription{
+		Flags:     u.flagsLocked(),
+		Passwords: append([]string{}, u.Passwords...),
+		Commands:  u.commandRulesLocked(),
+	}
+	p := &u.Permissions
+	if hasPattern(p.AllowedKeys, "*") {
+		d.Keys = "~*"
+	} else {
+		keys := make([]string, len(p.AllowedKeys))
+		for i, k := range p.AllowedKeys {
+			keys[i] = "~" + k
+		}
+		d.Keys = strings.Join(keys, " ")
+	}
+	if hasPattern(p.AllowedChannels, "*") {
+		d.Channels = "&*"
+	} else {
+		chans := make([]string, len(p.AllowedChannels))
+		for i, c := range p.AllowedChannels {
+			chans[i] = "&" + c
+		}
+		d.Channels = strings.Join(chans, " ")
+	}
+	return d
+}
+
+func (u *User) flagsLocked() []string {
+	flags := make([]string, 0, 3)
+	if u.Enabled {
+		flags = append(flags, "on")
+	} else {
+		flags = append(flags, "off")
+	}
+	if u.NoPassword {
+		flags = append(flags, "nopass")
+	}
+	if u.SkipSanitizePayload {
+		flags = append(flags, "skip-sanitize-payload")
+	} else {
+		flags = append(flags, "sanitize-payload")
+	}
+	return flags
+}
+
+// commandRulesLocked renders the command rules as Redis'
+// ACLDescribeSelectorCommandRules does: +@all or -@all, then the rule
+// history.
+func (u *User) commandRulesLocked() string {
+	base := "-@all"
+	if u.Permissions.AllowedCommands["*"] {
+		base = "+@all"
+	}
+	if len(u.Permissions.CommandRules) == 0 {
+		return base
+	}
+	return base + " " + strings.Join(u.Permissions.CommandRules, " ")
+}
+
+func hasPattern(patterns []string, p string) bool {
+	for _, have := range patterns {
+		if have == p {
+			return true
 		}
 	}
-	sort.Strings(out)
-	return out
+	return false
 }
 
 // ParseACLRule applies the space-separated rules in rule to user.
@@ -422,7 +526,8 @@ func validateACLRule(part string) error {
 	}
 	switch strings.ToLower(part) {
 	case "on", "off", "nopass", "resetpass", "reset", "resetkeys", "resetchannels",
-		"allkeys", "allchannels", "allcommands", "nocommands":
+		"allkeys", "allchannels", "allcommands", "nocommands", "sanitize-payload",
+		"skip-sanitize-payload", "clearselectors":
 		return nil
 	}
 	if part == "" {
@@ -517,8 +622,16 @@ func (u *User) applyRule(part string) {
 	case "resetpass":
 		u.Passwords, u.NoPassword = nil, false
 		return
+	case "sanitize-payload":
+		u.SkipSanitizePayload = false
+		return
+	case "skip-sanitize-payload":
+		u.SkipSanitizePayload = true
+		return
+	case "clearselectors":
+		return
 	case "reset":
-		u.Passwords, u.NoPassword, u.Enabled = nil, false, false
+		u.Passwords, u.NoPassword, u.Enabled, u.SkipSanitizePayload = nil, false, false, false
 		p.AllowedKeys, p.AllowedChannels = nil, nil
 		u.setCommandLocked("*", false)
 		return
@@ -559,8 +672,9 @@ func (u *User) applyRule(part string) {
 			if cat != "all" {
 				members, _ := categoryResolver(cat)
 				for _, m := range members {
-					u.setCommandLocked(m, allow)
+					u.setCommandBitsLocked(m, allow)
 				}
+				u.recordRuleLocked("@"+cat, allow)
 				return
 			}
 			cmd = "*"

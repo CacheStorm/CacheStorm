@@ -92,5 +92,18 @@ func check(proto int) {
 		fail("sscan count", fmt.Errorf("%d", n))
 	}
 	rdb.Del(ctx, "s", "l", "q", "n", "h")
+	cmds, err := rdb.Command(ctx).Result()
+	if err != nil || cmds["get"] == nil || !cmds["get"].ReadOnly || cmds["get"].FirstKeyPos != 1 || cmds["client"] == nil {
+		fail("command", err)
+	}
+	if kf, err := rdb.CommandGetKeysAndFlags(ctx, "LMOVE", "a", "b", "LEFT", "RIGHT").Result(); err != nil || len(kf) != 2 || kf[1].Key != "b" || len(kf[1].Flags) != 2 {
+		fail("command getkeysandflags", fmt.Errorf("%v %v", kf, err))
+	}
+	if docs, err := rdb.Do(ctx, "COMMAND", "DOCS", "get", "client|kill").Result(); err != nil || docs == nil {
+		fail("command docs", err)
+	}
+	if info, err := rdb.Do(ctx, "COMMAND", "INFO", "get", "client|kill").Slice(); err != nil || len(info) != 2 {
+		fail("command info", err)
+	}
 	fmt.Printf("go-redis v9 protocol=%d: all checks passed\n", proto)
 }

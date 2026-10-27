@@ -1,9 +1,7 @@
 package server
 
 import (
-	"errors"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/cachestorm/cachestorm/internal/command"
@@ -16,10 +14,6 @@ func configYesNo(b bool) string {
 		return "yes"
 	}
 	return "no"
-}
-
-func invalidConfigArgument(name, value string) error {
-	return errors.New("ERR CONFIG SET failed (possibly related to argument '" + name + "') - argument couldn't be parsed into an integer or is out of range: '" + value + "'")
 }
 
 // configHooks connects CONFIG GET/SET to the running server.
@@ -64,46 +58,69 @@ func (s *Server) configSet(name, value string) (bool, error) {
 	case "maxmemory":
 		limit, err := config.ParseMemorySize(value)
 		if err != nil || limit < 0 {
-			return true, invalidConfigArgument(name, value)
+			return true, command.ConfigSetError(name, "argument must be a memory value")
 		}
 		_, policy := s.store.MemoryLimit()
 		s.store.SetMemoryLimit(limit, policy, 0)
 		return true, nil
 	case "maxmemory-policy":
-		policy, ok := store.ParseEvictionPolicy(strings.ToLower(value))
-		if !ok {
-			return true, errors.New("ERR CONFIG SET failed (possibly related to argument 'maxmemory-policy') - argument(s) must be one of the following: volatile-lru, allkeys-lru, volatile-lfu, allkeys-lfu, volatile-random, allkeys-random, volatile-ttl, noeviction")
+		v, err := command.ParseConfigEnum(name, value, "volatile-lru", "volatile-lfu", "volatile-random", "volatile-ttl",
+			"allkeys-lru", "allkeys-lfu", "allkeys-random", "noeviction")
+		if err != nil {
+			return true, err
 		}
+		policy, _ := store.ParseEvictionPolicy(v)
 		limit, _ := s.store.MemoryLimit()
 		s.store.SetMemoryLimit(limit, policy, 0)
 		return true, nil
 	case "maxmemory-samples":
-		n, err := strconv.Atoi(value)
-		if err != nil || n < 1 || n > 64 {
-			return true, invalidConfigArgument(name, value)
+		n, err := command.ParseConfigInt(name, value, 1, 64)
+		if err != nil {
+			return true, err
 		}
 		limit, policy := s.store.MemoryLimit()
-		s.store.SetMemoryLimit(limit, policy, n)
+		s.store.SetMemoryLimit(limit, policy, int(n))
 		return true, nil
 	case "maxclients":
-		n, err := strconv.ParseInt(value, 10, 64)
-		if err != nil || n < 1 {
-			return true, invalidConfigArgument(name, value)
+		n, err := command.ParseConfigInt(name, value, 1, 1<<32-1)
+		if err != nil {
+			return true, err
 		}
 		s.maxClients.Store(n)
 		return true, nil
 	case "timeout":
-		n, err := strconv.ParseInt(value, 10, 64)
-		if err != nil || n < 0 || n > int64(time.Duration(1<<62)/time.Second) {
-			return true, invalidConfigArgument(name, value)
+		n, err := command.ParseConfigInt(name, value, 0, 1<<31-1)
+		if err != nil {
+			return true, err
 		}
 		s.idleTimeout.Store(int64(time.Duration(n) * time.Second))
 		return true, nil
 	case "requirepass":
 		s.router.SetRequirePass(value)
 		return true, nil
-	case "port", "bind", "databases", "dir", "dbfilename", "appendfilename", "appendonly", "protected-mode", "tcp-keepalive", "appendfsync":
-		return true, errors.New("ERR CONFIG SET failed (possibly related to argument '" + name + "') - can't set immutable config")
+	case "port", "tcp-keepalive":
+		hi := int64(1<<31 - 1)
+		if name == "port" {
+			hi = 65535
+		}
+		if _, err := command.ParseConfigInt(name, value, 0, hi); err != nil {
+			return true, err
+		}
+		return true, command.ConfigSetError(name, "can't set immutable config")
+	case "appendonly", "protected-mode":
+		if _, err := command.ParseConfigBool(name, value); err != nil {
+			return true, err
+		}
+		return true, command.ConfigSetError(name, "can't set immutable config")
+	case "appendfsync":
+		if _, err := command.ParseConfigEnum(name, value, "everysec", "always", "no"); err != nil {
+			return true, err
+		}
+		return true, command.ConfigSetError(name, "can't set immutable config")
+	case "dir", "dbfilename":
+		return true, command.ConfigSetError(name, "can't set protected config")
+	case "bind", "databases", "appendfilename":
+		return true, command.ConfigSetError(name, "can't set immutable config")
 	}
 	return false, nil
 }

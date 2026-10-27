@@ -15,6 +15,8 @@ const (
 	// TypePush is a RESP3 out-of-band message (pub/sub, invalidation). A
 	// RESP2 writer encodes it as an array.
 	TypePush Type = '>'
+	// TypeSet is a RESP3 set. A RESP2 writer encodes it as an array.
+	TypeSet Type = '~'
 	// TypeDouble is a RESP3 double; Str holds its text. A RESP2 writer
 	// encodes it as a bulk string with the same text.
 	TypeDouble Type = ','
@@ -96,6 +98,11 @@ func DoubleValue(s string) *Value {
 // VerbatimValue returns a verbatim string of format ("txt" or "mkd").
 func VerbatimValue(format, text string) *Value {
 	return &Value{Type: TypeVerbatim, Str: format, Bulk: []byte(text)}
+}
+
+// SetValue is a RESP3 set reply of items, an array for a RESP2 client.
+func SetValue(items []*Value) *Value {
+	return &Value{Type: TypeSet, Array: items}
 }
 
 func PushValue(items []*Value) *Value {

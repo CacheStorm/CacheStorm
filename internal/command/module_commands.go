@@ -1,7 +1,7 @@
 package command
 
 import (
-	"fmt"
+	"errors"
 	"strings"
 
 	"github.com/cachestorm/cachestorm/internal/module"
@@ -13,18 +13,22 @@ func cmdMODULE(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
-	subCmd := strings.ToUpper(ctx.ArgString(0))
+	if !checkRedisSubcommand(ctx, "module", nil) {
+		return nil
+	}
 	registry := module.GetRegistry()
 
-	switch subCmd {
+	switch strings.ToUpper(ctx.ArgString(0)) {
 	case "LIST":
 		return handleModuleList(ctx, registry)
 	case "LOAD":
 		return handleModuleLoad(ctx, registry)
 	case "UNLOAD":
 		return handleModuleUnload(ctx, registry)
+	case "HELP":
+		return ctx.WriteArray(helpReply(moduleHelp))
 	default:
-		return ctx.WriteError(fmt.Errorf("ERR unknown subcommand '%s'", subCmd))
+		return ctx.WriteError(errors.New("ERR MODULE command not allowed. If the enable-module-command option is set to \"local\", you can run it from a local connection, otherwise you need to set this option in the configuration file, and then restart the server.")) //nolint:staticcheck // Redis reply text
 	}
 }
 
