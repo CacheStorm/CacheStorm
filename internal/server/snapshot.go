@@ -148,10 +148,19 @@ func (s *Server) saveSnapshot(background bool) error {
 		return fmt.Errorf("ERR snapshot functions: %w", err)
 	}
 	var data bytes.Buffer
-	writer := persistence.NewRDBWriterForDatabases(s.dbs, persistence.RDBConfig{Version: persistence.RDBVersion11, Checksum: true, AuxFields: map[string]string{"cachestorm-functions": string(functions)}})
+	// The checksum is computed after the encoder returns, so a background
+	// save holds the write gate only while the dataset is encoded.
+	writer := persistence.NewRDBWriterForDatabases(s.dbs, persistence.RDBConfig{Version: persistence.RDBVersion11, AuxFields: map[string]string{"cachestorm-functions": string(functions)}})
 	if err := writer.Encode(&data); err != nil {
 		finish(err)
 		return fmt.Errorf("ERR snapshot failed: %w", err)
+	}
+	store := write
+	write = func(data []byte) error {
+		if err := persistence.SealRDBChecksum(data); err != nil {
+			return err
+		}
+		return store(data)
 	}
 	if !background {
 		err := write(data.Bytes())

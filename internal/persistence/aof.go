@@ -493,6 +493,8 @@ type AOFRewriter struct {
 	store     interface{ GetAll() map[string]interface{} }
 	rewriting atomic.Bool
 	lastSize  int64
+	// scratch is reused to encode one command at a time.
+	scratch []byte
 }
 
 func NewAOFRewriter(cfg AOFConfig, store interface{ GetAll() map[string]interface{} }) *AOFRewriter {
@@ -567,6 +569,16 @@ type MultiDBSource interface {
 	DatabaseEntries() []map[string]interface{}
 }
 
+// EntryStreamer is a MultiDBSource that can hand its entries over one at a
+// time, in database order, instead of materializing every database as a map.
+type EntryStreamer interface {
+	ForEachEntry(fn func(db int, key string, entry interface{}) error) error
+}
+
+// rewriteItemsPerCommand caps how many collection items one rewritten command
+// carries, as Redis' AOF_REWRITE_ITEMS_PER_CMD does.
+const rewriteItemsPerCommand = 64
+
 // writeAll writes the source's keys. A multi-database source gets a SELECT
 // before each non-empty database and a final SELECT 0, so commands appended
 // after the rewrite land in database 0 as the writer assumes.
@@ -588,6 +600,27 @@ func (rw *AOFRewriter) writeAll(w *bufio.Writer) error {
 		return nil
 	}
 	selected := 0
+	if adapter, ok := multi.(multiDBAdapter); ok {
+		multi = adapter.MultiDBSource
+	}
+	if streamer, ok := multi.(EntryStreamer); ok {
+		err := streamer.ForEachEntry(func(db int, key string, entry interface{}) error {
+			if db != selected {
+				if err := rw.writeCommand(w, "SELECT", strconv.Itoa(db)); err != nil {
+					return err
+				}
+				selected = db
+			}
+			return rw.writeEntry(w, key, entry)
+		})
+		if err != nil {
+			return err
+		}
+		if selected != 0 {
+			return rw.writeCommand(w, "SELECT", "0")
+		}
+		return nil
+	}
 	for db, entries := range multi.DatabaseEntries() {
 		if len(entries) == 0 {
 			continue
@@ -714,12 +747,63 @@ func (rw *AOFRewriter) writeExpiry(w *bufio.Writer, key string, expiresAt int64)
 
 // writeCommand appends one RESP array command to the rewrite buffer.
 func (rw *AOFRewriter) writeCommand(w *bufio.Writer, name string, args ...string) error {
-	total := 1 + len(args)
-	if _, err := fmt.Fprintf(w, "*%d\r\n$%d\r\n%s\r\n", total, len(name), name); err != nil {
-		return err
-	}
+	buf := appendArrayHeader(rw.scratch[:0], 1+len(args))
+	buf = appendBulkString(buf, name)
 	for _, arg := range args {
-		if _, err := fmt.Fprintf(w, "$%d\r\n%s\r\n", len(arg), arg); err != nil {
+		buf = appendBulkString(buf, arg)
+	}
+	rw.scratch = buf
+	_, err := w.Write(buf)
+	return err
+}
+
+// writeKeyValue writes "name key value" without converting value to a
+// string.
+func (rw *AOFRewriter) writeKeyValue(w *bufio.Writer, name, key string, value []byte) error {
+	buf := appendArrayHeader(rw.scratch[:0], 3)
+	buf = appendBulkString(buf, name)
+	buf = appendBulkString(buf, key)
+	buf = appendBulkBytes(buf, value)
+	rw.scratch = buf
+	_, err := w.Write(buf)
+	return err
+}
+
+func appendArrayHeader(buf []byte, n int) []byte {
+	buf = append(buf, '*')
+	buf = strconv.AppendInt(buf, int64(n), 10)
+	return append(buf, '\r', '\n')
+}
+
+func appendBulkString(buf []byte, s string) []byte {
+	buf = append(buf, '$')
+	buf = strconv.AppendInt(buf, int64(len(s)), 10)
+	buf = append(buf, '\r', '\n')
+	buf = append(buf, s...)
+	return append(buf, '\r', '\n')
+}
+
+func appendBulkBytes(buf []byte, b []byte) []byte {
+	buf = append(buf, '$')
+	buf = strconv.AppendInt(buf, int64(len(b)), 10)
+	buf = append(buf, '\r', '\n')
+	buf = append(buf, b...)
+	return append(buf, '\r', '\n')
+}
+
+// writeBatched writes name key item... in commands of at most
+// rewriteItemsPerCommand items, each item being width arguments.
+func (rw *AOFRewriter) writeBatched(w *bufio.Writer, name, key string, width int, items []string) error {
+	per := rewriteItemsPerCommand * width
+	for start := 0; start < len(items); start += per {
+		end := start + per
+		if end > len(items) {
+			end = len(items)
+		}
+		args := make([]string, 0, end-start+1)
+		args = append(args, key)
+		args = append(args, items[start:end]...)
+		if err := rw.writeCommand(w, name, args...); err != nil {
 			return err
 		}
 	}
@@ -731,21 +815,16 @@ func (rw *AOFRewriter) writeCommand(w *bufio.Writer, name string, args ...string
 func (rw *AOFRewriter) writeValueCommands(w *bufio.Writer, key string, value store.Value) error {
 	switch vt := value.(type) {
 	case *store.StringValue:
-		return rw.writeCommand(w, "SET", key, string(vt.Data))
+		return rw.writeKeyValue(w, "SET", key, vt.Data)
 
 	case *store.HashValue:
 		vt.RLock()
-		fields := make(map[string][]byte, len(vt.Fields))
+		items := make([]string, 0, len(vt.Fields)*2)
 		for field, val := range vt.Fields {
-			fields[field] = val
+			items = append(items, field, string(val))
 		}
 		vt.RUnlock()
-		for field, val := range fields {
-			if err := rw.writeCommand(w, "HSET", key, field, string(val)); err != nil {
-				return err
-			}
-		}
-		return nil
+		return rw.writeBatched(w, "HSET", key, 2, items)
 
 	case *store.ListValue:
 		vt.RLock()
@@ -764,28 +843,16 @@ func (rw *AOFRewriter) writeValueCommands(w *bufio.Writer, key string, value sto
 			members = append(members, member)
 		}
 		vt.RUnlock()
-		for _, member := range members {
-			if err := rw.writeCommand(w, "SADD", key, member); err != nil {
-				return err
-			}
-		}
-		return nil
+		return rw.writeBatched(w, "SADD", key, 1, members)
 
 	case *store.SortedSetValue:
 		vt.RLock()
-		members := make([]string, 0, len(vt.Members))
-		scores := make([]float64, 0, len(vt.Members))
+		items := make([]string, 0, len(vt.Members)*2)
 		for member, score := range vt.Members {
-			members = append(members, member)
-			scores = append(scores, score)
+			items = append(items, strconv.FormatFloat(score, 'f', -1, 64), member)
 		}
 		vt.RUnlock()
-		for i, member := range members {
-			if err := rw.writeCommand(w, "ZADD", key, strconv.FormatFloat(scores[i], 'f', -1, 64), member); err != nil {
-				return err
-			}
-		}
-		return nil
+		return rw.writeBatched(w, "ZADD", key, 2, items)
 
 	case *store.GeoValue:
 		vt.RLock()
@@ -901,7 +968,7 @@ func (rw *AOFRewriter) writeValueCommands(w *bufio.Writer, key string, value sto
 			if err != nil {
 				return err
 			}
-			return rw.writeCommand(w, "SET", key, string(data))
+			return rw.writeKeyValue(w, "SET", key, data)
 		}
 		return fmt.Errorf("unsupported value type %T in AOF snapshot", value)
 	}

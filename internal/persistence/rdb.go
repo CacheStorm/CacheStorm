@@ -155,18 +155,12 @@ func (w *RDBWriter) writeDatabaseStore(f io.Writer, db int, st *store.Store) err
 		return err
 	}
 
-	entries := st.GetAll()
-	for key, entry := range entries {
-		if entry == nil || entry.IsExpired() {
-			continue
+	return st.ForEachLive(func(key string, entry *store.Entry) error {
+		if entry == nil {
+			return nil
 		}
-
-		if err := w.writeEntry(f, key, entry); err != nil {
-			return err
-		}
-	}
-
-	return nil
+		return w.writeEntry(f, key, entry)
+	})
 }
 
 func (w *RDBWriter) writeEntry(f io.Writer, key string, entry *store.Entry) error {

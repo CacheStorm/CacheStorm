@@ -3,6 +3,7 @@ package server
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -156,5 +157,46 @@ func TestAOFRewriteDueThresholds(t *testing.T) {
 	s.aofRewriteRunning = false
 	if s.aofRewriteDueForSize(1 << 30) {
 		t.Error("a zero percentage must disable automatic rewrites")
+	}
+}
+
+func TestAOFRewriteBatchesLargeCollections(t *testing.T) {
+	dir := t.TempDir()
+	cfg := aofRewriteConfig(t, dir, func(c *config.Config) { c.Persistence.AOFRewritePercentage = 0 })
+	s := startReplServerCfg(t, cfg)
+	c := dialRepl(t, s)
+	for i := 0; i < 200; i++ {
+		n := strconv.Itoa(i)
+		c.do("HSET", "h", "f"+n, "v"+n)
+		c.do("SADD", "s", "m"+n)
+		c.do("ZADD", "z", n+".5", "m"+n)
+		c.do("RPUSH", "l", n)
+	}
+	c.do("BGREWRITEAOF")
+	waitAOFRewrites(t, s, 1)
+	data, err := os.ReadFile(filepath.Join(dir, "appendonly.aof"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(string(data), "HSET"); n != 4 {
+		t.Fatalf("200 hash fields were written as %d HSET commands, want 4 batches of at most 64", n)
+	}
+	stopReplServer(s)
+
+	r := dialRepl(t, startReplServerCfg(t, cfg))
+	if got := r.do("HLEN", "h"); got.Int != 200 {
+		t.Fatalf("HLEN = %+v", got)
+	}
+	if got := r.do("HGET", "h", "f199"); string(got.Bulk) != "v199" {
+		t.Fatalf("HGET = %+v", got)
+	}
+	if got := r.do("SCARD", "s"); got.Int != 200 {
+		t.Fatalf("SCARD = %+v", got)
+	}
+	if got := r.do("ZSCORE", "z", "m150"); string(got.Bulk) != "150.5" {
+		t.Fatalf("ZSCORE = %+v", got)
+	}
+	if got := r.do("LINDEX", "l", "199"); string(got.Bulk) != "199" {
+		t.Fatalf("LINDEX = %+v", got)
 	}
 }

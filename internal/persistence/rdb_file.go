@@ -1,6 +1,8 @@
 package persistence
 
 import (
+	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"math/bits"
@@ -88,5 +90,16 @@ func writeRDBAtomic(path string, write func(io.Writer) error) error {
 	if err := directory.Sync(); err != nil {
 		return fmt.Errorf("sync snapshot directory: %w", err)
 	}
+	return nil
+}
+
+// SealRDBChecksum fills the 8-byte CRC64 trailer of a snapshot encoded with
+// Checksum disabled, so the checksum can be computed after the encoder has
+// released the dataset.
+func SealRDBChecksum(data []byte) error {
+	if len(data) < 9 || data[len(data)-9] != 0xFF {
+		return errors.New("snapshot does not end with an RDB trailer")
+	}
+	binary.LittleEndian.PutUint64(data[len(data)-8:], rdbChecksum(0, data[:len(data)-8]))
 	return nil
 }

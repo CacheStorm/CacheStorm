@@ -861,3 +861,32 @@ func (s *Store) GetAll() map[string]*Entry {
 	}
 	return result
 }
+
+// ForEachLive calls fn for every unexpired entry, shard by shard. Each shard's
+// entries are collected under its read lock and fn runs after the lock is
+// released, so fn may take other locks. It stops at the first error.
+func (s *Store) ForEachLive(fn func(key string, e *Entry) error) error {
+	type pair struct {
+		key   string
+		entry *Entry
+	}
+	var batch []pair
+	for i := 0; i < NumShards; i++ {
+		sh := s.shards[i]
+		batch = batch[:0]
+		sh.mu.RLock()
+		for k, v := range sh.data {
+			batch = append(batch, pair{k, v})
+		}
+		sh.mu.RUnlock()
+		for _, p := range batch {
+			if p.entry.IsExpired() {
+				continue
+			}
+			if err := fn(p.key, p.entry); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}

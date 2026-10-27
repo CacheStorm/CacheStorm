@@ -317,6 +317,23 @@ type DBSource struct {
 
 func (d DBSource) FunctionPayload() []byte { return d.Functions }
 
+// ForEachEntry implements persistence.EntryStreamer.
+func (d DBSource) ForEachEntry(fn func(db int, key string, entry interface{}) error) error {
+	for i := 0; i < d.DBs.Count(); i++ {
+		s := d.DBs.Existing(i)
+		if s == nil {
+			continue
+		}
+		db := i
+		if err := s.ForEachLive(func(key string, e *store.Entry) error {
+			return fn(db, key, e)
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // DatabaseEntries implements persistence.MultiDBSource.
 func (d DBSource) DatabaseEntries() []map[string]interface{} {
 	out := make([]map[string]interface{}, d.DBs.Count())
