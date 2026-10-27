@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/cachestorm/cachestorm/internal/command"
+	"github.com/cachestorm/cachestorm/internal/logger"
 	"github.com/cachestorm/cachestorm/internal/resp"
 )
 
@@ -132,17 +133,35 @@ func (m *Manager) cmdREPLICAOF(ctx *command.Context) error {
 	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(fmt.Errorf("ERR wrong number of arguments for '%s' command", strings.ToLower(ctx.Command)))
 	}
-	if ctx.InExec {
-		return ctx.WriteError(errors.New("ERR Command is not allowed inside a transaction"))
-	}
 	host, portArg := ctx.ArgString(0), ctx.ArgString(1)
-	if strings.EqualFold(host, "no") && strings.EqualFold(portArg, "one") {
-		m.Promote()
+	promote := strings.EqualFold(host, "no") && strings.EqualFold(portArg, "one")
+	port := 0
+	if !promote {
+		var err error
+		port, err = strconv.Atoi(portArg)
+		if err != nil || port < 0 || port > 65535 {
+			return ctx.WriteError(errors.New("ERR Invalid master port"))
+		}
+	}
+	if ctx.InExec {
+		// A role change takes the write gate exclusively, and EXEC is holding
+		// it, so the change runs once EXEC has released it. Redis Sentinel
+		// promotes a replica with MULTI, SLAVEOF NO ONE, CONFIG REWRITE,
+		// CLIENT KILL, EXEC and then polls INFO for the new role.
+		go func() {
+			if promote {
+				m.Promote()
+				return
+			}
+			if err := m.ReplicaOf(host, port); err != nil && !errors.Is(err, ErrAlreadyConnected) {
+				logger.Warn().Err(err).Str("host", host).Int("port", port).Msg("REPLICAOF inside a transaction failed")
+			}
+		}()
 		return ctx.WriteOK()
 	}
-	port, err := strconv.Atoi(portArg)
-	if err != nil || port < 0 || port > 65535 {
-		return ctx.WriteError(errors.New("ERR Invalid master port"))
+	if promote {
+		m.Promote()
+		return ctx.WriteOK()
 	}
 	switch err := m.ReplicaOf(host, port); {
 	case errors.Is(err, ErrAlreadyConnected):
@@ -238,6 +257,7 @@ func (m *Manager) Info() string {
 	fmt.Fprintf(&sb, "sync_full:%d\r\n", m.syncFull)
 	fmt.Fprintf(&sb, "sync_partial_ok:%d\r\n", m.syncPartialOK)
 	fmt.Fprintf(&sb, "sync_partial_err:%d\r\n", m.syncPartialErr)
+	sb.WriteString("\r\n")
 	return sb.String()
 }
 

@@ -152,6 +152,11 @@ type Server struct {
 	// timeout, which CONFIG SET can change while clients are connected.
 	maxClients  atomic.Int64
 	idleTimeout atomic.Int64
+	// runID, startedAt, rates and rejectedConns feed INFO.
+	runID         string
+	startedAt     time.Time
+	rates         rateSampler
+	rejectedConns atomic.Int64
 }
 
 func New(cfg *config.Config) (result *Server, retErr error) {
@@ -420,6 +425,9 @@ func New(cfg *config.Config) (result *Server, retErr error) {
 		return nil, err
 	}
 	s.router.SetConfigHooks(s.configHooks())
+	s.runID = newRunID()
+	s.startedAt = time.Now()
+	s.router.SetServerStatus(s.serverStatus)
 
 	// Every write the router executes goes to the AOF, when it is enabled,
 	// and to the replication stream.
@@ -596,6 +604,7 @@ func (s *Server) Start(_ context.Context) (retErr error) {
 
 	s.startSnapshotLoop()
 	s.startAOFRewriteLoop()
+	s.startRateSampler()
 
 	startupComplete = true
 	s.started = true
@@ -695,6 +704,7 @@ func (s *Server) acceptLoop() {
 		maxConns := s.maxClients.Load()
 		if maxConns > 0 && s.connCount.Load() >= maxConns {
 			_ = conn.SetWriteDeadline(time.Now().Add(time.Second))
+			s.rejectedConns.Add(1)
 			if _, err := conn.Write([]byte("-ERR max number of clients reached\r\n")); err != nil {
 				logger.Debug().Err(err).Msg("refused connection closed before the error was sent")
 			}
@@ -747,6 +757,7 @@ func (s *Server) acceptLoop() {
 // failure is logged rather than fatal: the data server works without peer
 // gossip.
 func (s *Server) startSentinel() {
+	logger.Warn().Msg("the built-in sentinel role is experimental: it tracks masters but does not reconfigure servers on failover; use Redis Sentinel for automatic failover")
 	if err := command.StartSentinel(); err != nil {
 		logger.Warn().Err(err).Msg("sentinel not started")
 	}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -22,6 +23,8 @@ type Config struct {
 	Plugins     PluginsConfig     `yaml:"plugins"`
 	Logging     LoggingConfig     `yaml:"logging"`
 	Sentinel    SentinelConfig    `yaml:"sentinel"`
+	// SourceFile is the file the configuration was loaded from, if any.
+	SourceFile string `yaml:"-"`
 }
 
 // SentinelConfig configures the Sentinel subsystem wired up by
@@ -190,6 +193,11 @@ func Load(path string) (*Config, error) {
 		}
 		if err := decodeStrict(data, cfg); err != nil {
 			return nil, fmt.Errorf("config %s: %w", path, err)
+		}
+		if abs, err := filepath.Abs(path); err == nil {
+			cfg.SourceFile = abs
+		} else {
+			cfg.SourceFile = path
 		}
 	}
 

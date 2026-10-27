@@ -209,6 +209,21 @@ jobs:
       - name: Master and replica
         run: scripts/replication-smoke.sh
 
+  # Three CacheStorm processes under three real Redis Sentinels: automatic
+  # failover, replica repointing and the old master rejoining as a replica.
+  sentinel-smoke:
+    name: Sentinel failover smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: Redis Sentinel failover
+        run: scripts/sentinel-smoke.sh
+
   snapshot-smoke:
     name: Persistence recovery and directory ownership
     runs-on: ubuntu-latest

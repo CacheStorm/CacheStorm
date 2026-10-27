@@ -42,19 +42,22 @@ type Connection struct {
 	sink *replySink
 	// draining is set when the server shuts down: the connection finishes the
 	// command it is running and then closes instead of reading another.
-	draining     atomic.Bool
-	conn         net.Conn
-	bufReader    *bufio.Reader
-	reader       *resp.Reader
-	writer       *resp.Writer
-	store        *store.Store
-	router       *command.Router
-	plugins      *plugin.Manager
-	namespace    string
-	createdAt    time.Time
-	lastCmd      string
-	rawCmd       string
-	readTimeout  time.Duration
+	draining    atomic.Bool
+	conn        net.Conn
+	bufReader   *bufio.Reader
+	reader      *resp.Reader
+	writer      *resp.Writer
+	store       *store.Store
+	router      *command.Router
+	plugins     *plugin.Manager
+	namespace   string
+	createdAt   time.Time
+	lastCmd     string
+	rawCmd      string
+	readTimeout time.Duration
+	// blocked is set while a blocking command (BLPOP, XREAD BLOCK, ...)
+	// waits, for INFO's blocked_clients.
+	blocked      atomic.Bool
 	writeTimeout time.Duration
 	subscriber   *store.Subscriber // PubSub subscriber, persists across commands
 	// authenticated belongs to the connection, not the per-command Context:
@@ -379,6 +382,8 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 		var stopWatch func()
 		if blockingCommands[strings.ToUpper(cmd)] {
 			ctx.Done, stopWatch = c.watchDisconnect()
+			c.blocked.Store(true)
+			defer c.blocked.Store(false)
 		}
 		var err error
 		c.sink.hold()

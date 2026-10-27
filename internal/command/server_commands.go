@@ -16,7 +16,6 @@ import (
 	"github.com/cachestorm/cachestorm/internal/acl"
 	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
-	"github.com/cachestorm/cachestorm/internal/version"
 )
 
 var globalACL = acl.NewACL()
@@ -349,24 +348,23 @@ func cmdINFO(ctx *Context) error {
 		port = r.Port()
 	}
 
-	var sb strings.Builder
+	var st ServerStatus
+	if r != nil {
+		st = r.getServerStatus()
+	} else {
+		st.Started = store.GlobalMetrics.StartTime
+	}
+	var w infoWriter
 	if want("server") {
-		sb.WriteString("# Server\r\n")
-		sb.WriteString("cachestorm_version:" + version.Version + "\r\n")
-		sb.WriteString("arch_bits:64\r\n")
-		sb.WriteString("tcp_port:")
-		sb.WriteString(strconv.Itoa(port))
-		sb.WriteString("\r\n")
-		sb.WriteString("\r\n")
+		infoServer(&w, st, port)
 	}
-
+	if want("clients") {
+		infoClients(&w, st)
+	}
 	if want("memory") {
-		sb.WriteString("# Memory\r\n")
-		sb.WriteString("used_memory:")
-		sb.WriteString(strconv.FormatInt(ctx.Store.MemUsage(), 10))
-		sb.WriteString("\r\n")
-		sb.WriteString("\r\n")
+		infoMemory(&w, ctx)
 	}
+	sb := &w.sb
 
 	if want("persistence") && r != nil {
 		_, _, info := r.snapshotHooks()
@@ -375,18 +373,28 @@ func cmdINFO(ctx *Context) error {
 		}
 	}
 
-	if want("keyspace") {
-		sb.WriteString(keyspaceInfo(ctx))
+	if want("stats") {
+		infoStats(&w, st)
 	}
 
 	if want("replication") {
+		var fn func() string
 		if r != nil {
-			if fn := r.replicationInfo(); fn != nil {
-				sb.WriteString(fn())
-				return ctx.WriteBulkString(sb.String())
-			}
+			fn = r.replicationInfo()
 		}
-		sb.WriteString("# Replication\r\nrole:master\r\nconnected_slaves:0\r\n")
+		if fn != nil {
+			sb.WriteString(fn())
+		} else {
+			sb.WriteString("# Replication\r\nrole:master\r\nconnected_slaves:0\r\n\r\n")
+		}
+	}
+
+	if want("cpu") {
+		infoCPU(&w)
+	}
+
+	if want("keyspace") {
+		sb.WriteString(keyspaceInfo(ctx))
 	}
 
 	return ctx.WriteBulkString(sb.String())

@@ -93,7 +93,9 @@ logging:
   format: "json"                # Log format: json, console
   output: "stdout"              # Output: stdout, stderr, or file path
 
-# Sentinel role (off on data servers)
+# Experimental built-in sentinel role (off on data servers); see
+# "High availability" below for automatic failover
+
 sentinel:
   enabled: false
   id: "sentinel-1"
@@ -104,6 +106,30 @@ sentinel:
   failover_time: "3m"
   seeds: []                     # addr:port of other sentinels
 ```
+
+### High availability
+
+Automatic failover uses **Redis Sentinel** (7.x) pointed at CacheStorm
+servers, exactly as it would be pointed at Redis:
+
+```
+sentinel monitor mymaster 10.0.0.1 6380 2
+sentinel auth-pass mymaster <requirepass>
+sentinel down-after-milliseconds mymaster 5000
+```
+
+The sentinels discover the replicas from `INFO replication` and each other
+over the `__sentinel__:hello` channel; when the master fails they elect a
+leader, promote a replica with `MULTI`/`SLAVEOF NO ONE`/`EXEC`, repoint the
+other replicas and demote the old master when it returns. Sentinel-aware
+clients (go-redis `NewFailoverClient`, redis-py `Sentinel`, ioredis
+`sentinels`) follow the switch. `scripts/sentinel-smoke.sh` runs this with
+three CacheStorm processes and three sentinels and checks that no
+acknowledged write is lost.
+
+The `sentinel:` section starts CacheStorm's own sentinel role. It is
+experimental: it tracks masters but does not reconfigure servers on
+failover, so it is not a replacement for Redis Sentinel.
 
 ### AOF rewrite
 

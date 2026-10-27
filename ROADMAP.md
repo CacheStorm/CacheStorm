@@ -130,7 +130,7 @@ M1–M4 tamamlandı; replikasyon çalışıyor. Sıradaki işler:
 
 1. SAVE/BGSAVE, periyodik snapshot ve başlangıçta yükleme bağlandı. Sırada native snapshot yakalama ile tam senkronun yazma duraklamasını ve ek bellek maliyetini ölçüp azaltmak var.
 2. Tamamlandı (25 Ekim 2026): expiry milisaniye olarak saklanıyor; 2262 sınırı kaldırıldı. AOF/RDB roundtrip ve Redis karşılaştırmasıyla doğrulandı.
-3. Sentinel ile otomatik failover'ı gerçek süreçlerle doğrulamak.
+3. Tamamlandı (27 Ekim 2026): gerçek Redis Sentinel ile otomatik failover üç CacheStorm süreciyle doğrulandı ve CI'a alındı (`scripts/sentinel-smoke.sh`). Yerleşik sentinel rolü deneysel olarak işaretlendi; sunucuları yeniden yapılandırmıyor.
 4. RESP3 (HELLO 3, push mesajları, map/set/double tipleri).
 5. Pipeline'lı yazmalarda yazma kapısının maliyetini düşürmek (Redis'in %40–85'i).
 

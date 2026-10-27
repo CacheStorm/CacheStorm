@@ -51,6 +51,7 @@ type Router struct {
 	snapshotInfo     func() string
 	aofRewrite       func() error
 	configHooks      *ConfigHooks
+	serverStatus     func() ServerStatus
 }
 
 // commandSpec is the arity, flags and key positions Redis reports for one of
