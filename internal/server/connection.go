@@ -92,6 +92,80 @@ type Connection struct {
 	replConf command.ReplicaConf
 	// handler serves the connection once a command (PSYNC) took it over.
 	handler command.ConnHandler
+
+	// info is what CLIENT LIST reports, readable from other goroutines.
+	info clientInfo
+	// handedOff, subscribing and the subscription counts mirror connection
+	// state for CLIENT LIST and CLIENT KILL TYPE.
+	handedOff   atomic.Bool
+	subscribing atomic.Bool
+	subCounts   atomic.Int64
+	psubCounts  atomic.Int64
+	ssubCounts  atomic.Int64
+	// killed is set by CLIENT KILL of the calling client: it is closed once
+	// its reply is out.
+	killed atomic.Bool
+	// replyOff and replySkip implement CLIENT REPLY OFF and SKIP.
+	replyOff  bool
+	replySkip bool
+	// blockMu guards unblockCh and unblockErr, which CLIENT UNBLOCK uses to
+	// end the blocking command the connection is running.
+	blockMu    sync.Mutex
+	unblockCh  chan struct{}
+	unblockErr bool
+}
+
+// unblock ends the blocking command the connection is waiting in, as a
+// timeout or, withError, with the UNBLOCKED error.
+func (c *Connection) unblock(withError bool) bool {
+	c.blockMu.Lock()
+	defer c.blockMu.Unlock()
+	if c.unblockCh == nil {
+		return false
+	}
+	c.unblockErr = withError
+	close(c.unblockCh)
+	c.unblockCh = nil
+	return true
+}
+
+// beginBlocking arms CLIENT UNBLOCK for a blocking command and returns the
+// channel that closes when the command is unblocked.
+func (c *Connection) beginBlocking() <-chan struct{} {
+	c.blockMu.Lock()
+	defer c.blockMu.Unlock()
+	c.unblockErr = false
+	c.unblockCh = make(chan struct{})
+	return c.unblockCh
+}
+
+// endBlocking disarms CLIENT UNBLOCK and reports whether the command was
+// unblocked with the error.
+func (c *Connection) endBlocking() bool {
+	c.blockMu.Lock()
+	defer c.blockMu.Unlock()
+	c.unblockCh = nil
+	return c.unblockErr
+}
+
+// mergeDone closes the returned channel once either input closes; stop
+// releases the goroutine when the command finishes first.
+func mergeDone(a, b <-chan struct{}) (<-chan struct{}, func()) {
+	if a == nil {
+		return b, func() {}
+	}
+	out := make(chan struct{})
+	stop := make(chan struct{})
+	go func() {
+		select {
+		case <-a:
+			close(out)
+		case <-b:
+			close(out)
+		case <-stop:
+		}
+	}()
+	return out, func() { close(stop) }
 }
 
 // countingConn wraps a connection and feeds the global byte counters so the
@@ -305,6 +379,9 @@ func (c *Connection) Handle() {
 			continue
 		}
 
+		if c.srv != nil {
+			c.srv.waitWhilePaused(cmd)
+		}
 		if c.runCommand(cmd, args) {
 			// QUIT, a handoff or a write error ends the connection; replies
 			// kept for the pipeline before it still go out.
@@ -351,7 +428,24 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 				st = db
 			}
 		}
-		ctx := command.NewContextWithClient(cmd, args, st, c.writer, c.ID, c.conn.RemoteAddr().String())
+		c.noteCommand(cmd, args)
+		out := c.writer
+		replyCmd := cmd == "CLIENT" && len(args) > 0 && strings.EqualFold(string(args[0]), "REPLY")
+		suppress := (c.replyOff || c.replySkip) && !replyCmd
+		if suppress {
+			out = resp.NewWriter(io.Discard)
+			out.SetRESP3(c.writer.IsRESP3())
+		}
+		if !replyCmd {
+			c.replySkip = false
+		}
+		var captured *bytes.Buffer
+		if blockingCommands[strings.ToUpper(cmd)] && !suppress {
+			captured = &bytes.Buffer{}
+			out = resp.NewWriter(captured)
+			out.SetRESP3(c.writer.IsRESP3())
+		}
+		ctx := command.NewContextWithClient(cmd, args, st, out, c.ID, c.conn.RemoteAddr().String())
 		ctx.DB = c.db
 		ctx.DBs = c.dbs
 		if c.transaction == nil {
@@ -382,8 +476,11 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 
 		c.conn.SetWriteDeadline(time.Now().Add(c.writeTimeout))
 		var stopWatch func()
+		var stopMerge func()
 		if blockingCommands[strings.ToUpper(cmd)] {
-			ctx.Done, stopWatch = c.watchDisconnect()
+			var gone <-chan struct{}
+			gone, stopWatch = c.watchDisconnect()
+			ctx.Done, stopMerge = mergeDone(gone, c.beginBlocking())
 			c.blocked.Store(true)
 			defer c.blocked.Store(false)
 		}
@@ -400,6 +497,18 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 		}
 		if stopWatch != nil {
 			stopWatch()
+		}
+		if stopMerge != nil {
+			stopMerge()
+			unblockedWithError := c.endBlocking()
+			if captured != nil {
+				if unblockedWithError {
+					c.writer.WriteError("UNBLOCKED client unblocked via CLIENT UNBLOCK")
+				} else if werr := c.writer.WriteCaptured(captured.Bytes(), ctx.Writer.Errors()); werr != nil {
+					return true
+				}
+				ctx.Writer = c.writer
+			}
 		}
 		if err != nil {
 			store.GlobalMetrics.RecordError()
@@ -437,6 +546,29 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 		c.db = ctx.DB
 		c.aclUser = ctx.ACLUser
 		c.clientName = ctx.ClientName
+		if ctx.ClientLibName != "" || ctx.ClientLibVer != "" {
+			c.setLibInfo(ctx.ClientLibName, ctx.ClientLibVer)
+		}
+		switch ctx.ReplyMode {
+		case "on":
+			c.replyOff = false
+		case "off":
+			c.replyOff = true
+		case "skip":
+			c.replySkip = true
+		}
+		if c.subscriber != nil {
+			total := int64(c.subscriber.TotalSubscriptions())
+			chans, shards := int64(c.subscriber.SubscriptionCount()), int64(c.subscriber.ShardSubscriptionCount())
+			c.subCounts.Store(chans)
+			c.ssubCounts.Store(shards)
+			c.psubCounts.Store(total - chans - shards)
+			c.subscribing.Store(total > 0)
+		}
+		if ctx.Handoff != nil {
+			c.handedOff.Store(true)
+		}
+		c.publishInfo()
 
 		if ctx.Handoff != nil {
 			_ = c.writer.Flush()
@@ -455,10 +587,13 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 		if err := c.writer.Flush(); err != nil {
 			return true
 		}
-		if c.bufReader.Buffered() == 0 || c.sink.buf.Len() >= maxHeldReplies || c.subscriber != nil {
+		if c.bufReader.Buffered() == 0 || c.sink.buf.Len() >= maxHeldReplies || c.subscriber != nil || c.killed.Load() {
 			if err := c.sink.release(); err != nil {
 				return true
 			}
+		}
+		if c.killed.Load() {
+			return true
 		}
 	}
 	return false

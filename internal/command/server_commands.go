@@ -931,24 +931,7 @@ func cmdCLIENT(ctx *Context) error {
 
 	switch subCmd {
 	case "LIST":
-		var sb strings.Builder
-		sb.WriteString("id=")
-		sb.WriteString(strconv.FormatInt(ctx.ClientID, 10))
-		sb.WriteString(" addr=127.0.0.1:0")
-		sb.WriteString(" name=")
-		sb.WriteString(" age=0")
-		sb.WriteString(" idle=0")
-		sb.WriteString(" flags=N")
-		sb.WriteString(" db=0")
-		sb.WriteString(" sub=0")
-		sb.WriteString(" psub=0")
-		sb.WriteString(" multi=-1")
-		sb.WriteString(" qbuf=0")
-		sb.WriteString(" obl=0")
-		sb.WriteString(" oll=0")
-		sb.WriteString(" omem=0")
-		sb.WriteString("\n")
-		return ctx.WriteBulkString(sb.String())
+		return cmdClientList(ctx)
 	case "SETNAME":
 		if ctx.ArgCount() != 2 {
 			return ctx.WriteError(ErrWrongArgCount)
@@ -970,25 +953,15 @@ func cmdCLIENT(ctx *Context) error {
 	case "ID":
 		return ctx.WriteInteger(ctx.ClientID)
 	case "KILL":
-		if ctx.ArgCount() < 2 {
-			return ctx.WriteError(ErrWrongArgCount)
-		}
-		return ctx.WriteOK()
+		return cmdClientKill(ctx)
 	case "PAUSE":
-		if ctx.ArgCount() < 2 {
-			return ctx.WriteError(ErrWrongArgCount)
-		}
-		return ctx.WriteOK()
+		return cmdClientPause(ctx)
+	case "UNPAUSE":
+		return cmdClientUnpause(ctx)
 	case "UNBLOCK":
-		if ctx.ArgCount() < 2 {
-			return ctx.WriteError(ErrWrongArgCount)
-		}
-		return ctx.WriteInteger(0)
+		return cmdClientUnblock(ctx)
 	case "REPLY":
-		if ctx.ArgCount() < 2 {
-			return ctx.WriteError(ErrWrongArgCount)
-		}
-		return ctx.WriteOK()
+		return cmdClientReply(ctx)
 	case "TRACKING":
 		return cmdClientTracking(ctx)
 	case "SETINFO":
@@ -1002,6 +975,11 @@ func cmdCLIENT(ctx *Context) error {
 		if strings.ContainsAny(value, " \r\n") {
 			return ctx.WriteError(errors.New("ERR " + strings.ToLower(attr) + " cannot contain spaces, newlines or special characters."))
 		}
+		if attr == "LIB-NAME" {
+			ctx.ClientLibName = value
+		} else {
+			ctx.ClientLibVer = value
+		}
 		return ctx.WriteOK()
 	case "CACHING":
 		return cmdClientCaching(ctx)
@@ -1010,7 +988,7 @@ func cmdCLIENT(ctx *Context) error {
 	case "NO-TOUCH":
 		return ctx.WriteOK()
 	case "INFO":
-		return ctx.WriteBulkString("id=" + strconv.FormatInt(ctx.ClientID, 10))
+		return cmdClientInfo(ctx)
 	case "GETREDIR":
 		if h := trackingHooksFor(ctx); h != nil {
 			return ctx.WriteInteger(h.Redirect(ctx.ClientID))

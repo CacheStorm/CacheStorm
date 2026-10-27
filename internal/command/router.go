@@ -53,6 +53,7 @@ type Router struct {
 	configHooks      *ConfigHooks
 	serverStatus     func() ServerStatus
 	trackingHooks    *TrackingHooks
+	clientHooks      *ClientHooks
 }
 
 // commandSpec is the arity, flags and key positions Redis reports for one of

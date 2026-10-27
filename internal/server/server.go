@@ -159,6 +159,8 @@ type Server struct {
 	rejectedConns atomic.Int64
 	// tracker implements CLIENT TRACKING.
 	tracker *tracker
+	// pause implements CLIENT PAUSE.
+	pause pauseState
 }
 
 func New(cfg *config.Config) (result *Server, retErr error) {
@@ -432,6 +434,7 @@ func New(cfg *config.Config) (result *Server, retErr error) {
 	s.router.SetServerStatus(s.serverStatus)
 	s.tracker = newTracker()
 	s.router.SetTrackingHooks(s.tracker.hooks(s))
+	s.router.SetClientHooks(s.clientHooks())
 
 	// Every write the router executes goes to the AOF, when it is enabled,
 	// and to the replication stream.

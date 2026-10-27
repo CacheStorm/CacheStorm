@@ -46,6 +46,13 @@ type Context struct {
 	// ClientName is set by CLIENT SETNAME. A fresh Context is built per command,
 	// so the connection carries it back (see internal/server/connection.go).
 	ClientName string
+	// ClientLibName and ClientLibVer are set by CLIENT SETINFO and, like
+	// ClientName, carried back to the connection after the command.
+	ClientLibName string
+	ClientLibVer  string
+	// ReplyMode is set by CLIENT REPLY: "on", "off" or "skip"; empty when
+	// the command did not change it.
+	ReplyMode string
 
 	FromMaster   bool
 	Replaying    bool
