@@ -444,7 +444,7 @@ type Entry struct {
 	Value   Value
 	// tags is nil for the many keys without tags, so an entry without them
 	// carries one pointer instead of a slice header.
-	tags        *[]string
+	tags        atomic.Pointer[[]string]
 	LastAccess  atomic.Int64
 	AccessCount atomic.Uint64
 	// ExpiresAt is atomic because Entry has no lock of its own and Shard.Get
@@ -467,25 +467,26 @@ func NewEntry(value Value) *Entry {
 
 // TagList returns the entry's tags; the caller must not modify the slice.
 func (e *Entry) TagList() []string {
-	if e.tags == nil {
-		return nil
+	if p := e.tags.Load(); p != nil {
+		return *p
 	}
-	return *e.tags
+	return nil
 }
 
 // SetTags replaces the entry's tags.
 func (e *Entry) SetTags(tags []string) {
 	if len(tags) == 0 {
-		e.tags = nil
+		e.tags.Store(nil)
 		return
 	}
-	e.tags = &tags
+	e.tags.Store(&tags)
 }
 
 // rehome returns a new entry for the same value with the same metadata, to
 // be installed under another key.
 func (e *Entry) rehome() *Entry {
-	n := &Entry{Value: e.Value, tags: e.tags}
+	n := &Entry{Value: e.Value}
+	n.tags.Store(e.tags.Load())
 	n.LastAccess.Store(e.LastAccess.Load())
 	n.AccessCount.Store(e.AccessCount.Load())
 	n.ExpiresAt.Store(e.ExpiresAt.Load())

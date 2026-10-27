@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- ADDTAG and REMTAG change a key's tags under the shard lock through Store.UpdateTags, which keeps the tag index in step and charges the tag bytes to used_memory (they wrote the tag list unlocked and were never accounted); an entry's tags are read and replaced atomically
 - Each key costs about 24 bytes less: the per-key entry went from 88 to 64 bytes (the unused creation time is gone and tags are held behind a pointer that is nil for untagged keys). On 630k small strings the live heap went from 130 MB to 109 MB and RSS after GC from 205 MB to 177 MB. used_memory and maxmemory now also count each key's slot in the shard map (`store.EntryOverhead`, 96 bytes per key), so used_memory tracks the real heap within about 10% instead of underestimating it by about 50%
 - With maxmemory set, the server gives the Go runtime a soft memory limit (1.25 × maxmemory + 64 MB, updated by CONFIG SET maxmemory, overridden by GOMEMLIMIT), so the garbage collector does not let the heap grow to twice the live data: under a 100 MB maxmemory and 600k keys, RSS went from 383 MB to 199 MB
 - ACL, COMMAND, CLIENT and CONFIG introspection replies match Redis 7.4 byte for byte:

@@ -63,31 +63,17 @@ func cmdADDTAG(ctx *Context) error {
 	if ctx.ArgCount() < 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
-
-	key := ctx.ArgString(0)
-	entry, exists := ctx.Store.Get(key)
-	if !exists {
-		return ctx.WriteInteger(0)
-	}
-
-	existingTags := make(map[string]struct{})
-	for _, t := range entry.TagList() {
-		existingTags[t] = struct{}{}
-	}
-
 	added := 0
-	newTags := make([]string, 0, ctx.ArgCount()-1)
-	for i := 1; i < ctx.ArgCount(); i++ {
-		tag := ctx.ArgString(i)
-		if _, exists := existingTags[tag]; !exists {
-			existingTags[tag] = struct{}{}
-			entry.SetTags(append(entry.TagList(), tag))
-			newTags = append(newTags, tag)
-			added++
+	ctx.Store.UpdateTags(ctx.ArgString(0), func(tags []string) []string {
+		for i := 1; i < ctx.ArgCount(); i++ {
+			tag := ctx.ArgString(i)
+			if !containsString(tags, tag) {
+				tags = append(tags, tag)
+				added++
+			}
 		}
-	}
-	ctx.Store.GetTagIndex().AddTags(key, newTags)
-
+		return tags
+	})
 	return ctx.WriteInteger(int64(added))
 }
 
@@ -95,32 +81,25 @@ func cmdREMTAG(ctx *Context) error {
 	if ctx.ArgCount() < 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
-
-	key := ctx.ArgString(0)
-	entry, exists := ctx.Store.Get(key)
-	if !exists {
-		return ctx.WriteInteger(0)
-	}
-
-	removeTags := make(map[string]struct{})
-	for i := 1; i < ctx.ArgCount(); i++ {
-		removeTags[ctx.ArgString(i)] = struct{}{}
-	}
-
-	newTags := make([]string, 0)
 	removed := 0
-	for _, tag := range entry.TagList() {
-		if _, shouldRemove := removeTags[tag]; shouldRemove {
-			removed++
-		} else {
-			newTags = append(newTags, tag)
+	ctx.Store.UpdateTags(ctx.ArgString(0), func(tags []string) []string {
+		kept := tags[:0]
+		for _, tag := range tags {
+			drop := false
+			for i := 1; i < ctx.ArgCount(); i++ {
+				if tag == ctx.ArgString(i) {
+					drop = true
+					break
+				}
+			}
+			if drop {
+				removed++
+			} else {
+				kept = append(kept, tag)
+			}
 		}
-	}
-	entry.SetTags(newTags)
-	for tag := range removeTags {
-		ctx.Store.GetTagIndex().RemoveTags(key, []string{tag})
-	}
-
+		return kept
+	})
 	return ctx.WriteInteger(int64(removed))
 }
 
@@ -232,4 +211,13 @@ func cmdTAGCHILDREN(ctx *Context) error {
 	}
 
 	return ctx.WriteArray(results)
+}
+
+func containsString(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }
