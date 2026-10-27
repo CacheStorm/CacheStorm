@@ -60,9 +60,12 @@ func main() {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
-	<-sigCh
+	select {
+	case <-sigCh:
+		logger.Info().Msg("shutdown signal received")
+	case <-srv.ShutdownRequested():
+	}
 	signal.Stop(sigCh)
-	logger.Info().Msg("shutdown signal received")
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()

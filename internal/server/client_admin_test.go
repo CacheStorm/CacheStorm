@@ -251,3 +251,47 @@ func TestMonitorStreamsCommands(t *testing.T) {
 		t.Fatalf("AUTH must not be shown; third line = %q", lines[2])
 	}
 }
+
+func TestACLLogRecordsDenials(t *testing.T) {
+	s := startReplServer(t, nil)
+	admin := dialRepl(t, s)
+	admin.do("ACL", "LOG", "RESET")
+	admin.do("ACL", "SETUSER", "limited", "on", ">pw", "-@all", "+get", "~user:*")
+	u := dialRepl(t, s)
+	u.do("AUTH", "limited", "pw")
+	if got := u.do("SET", "user:1", "x"); got.Type != resp.TypeError || got.Err != "NOPERM User limited has no permissions to run the 'set' command" {
+		t.Fatalf("denied command = %+v", got)
+	}
+	u.do("GET", "other:1")
+	u.do("GET", "other:1")
+	u.do("AUTH", "limited", "wrong")
+	log := admin.do("ACL", "LOG")
+	if len(log.Array) != 3 {
+		t.Fatalf("ACL LOG has %d entries, want 3: %+v", len(log.Array), log)
+	}
+	entry := func(i int) map[string]*resp.Value {
+		out := map[string]*resp.Value{}
+		a := log.Array[i].Array
+		for j := 0; j+1 < len(a); j += 2 {
+			out[string(a[j].Bulk)] = a[j+1]
+		}
+		return out
+	}
+	auth, key, cmd := entry(0), entry(1), entry(2)
+	if string(auth["reason"].Bulk) != "auth" || string(auth["username"].Bulk) != "limited" {
+		t.Fatalf("auth entry = %v", auth)
+	}
+	if string(key["reason"].Bulk) != "key" || string(key["object"].Bulk) != "other:1" || key["count"].Int != 2 {
+		t.Fatalf("key entry = %v", key)
+	}
+	if string(cmd["reason"].Bulk) != "command" || string(cmd["object"].Bulk) != "set" || string(cmd["context"].Bulk) != "toplevel" {
+		t.Fatalf("command entry = %v", cmd)
+	}
+	if got := admin.do("ACL", "LOG", "1"); len(got.Array) != 1 {
+		t.Fatalf("ACL LOG 1 = %+v", got)
+	}
+	admin.do("ACL", "LOG", "RESET")
+	if got := admin.do("ACL", "LOG"); len(got.Array) != 0 {
+		t.Fatalf("ACL LOG after RESET = %+v", got)
+	}
+}

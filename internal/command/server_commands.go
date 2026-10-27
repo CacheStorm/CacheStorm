@@ -721,6 +721,7 @@ func cmdAUTH(ctx *Context) error {
 
 		user, err := globalACL.Authenticate(username, password)
 		if err != nil {
+			recordACLDenial(ctx, "auth", "AUTH", username)
 			ctx.SetAuthenticated(false)
 			ctx.ACLUser = nil
 			ctx.Username = ""
@@ -743,6 +744,7 @@ func cmdAUTH(ctx *Context) error {
 	}
 
 	if !r.ValidatePassword(password) {
+		recordACLDenial(ctx, "auth", "AUTH", "default")
 		ctx.SetAuthenticated(false)
 		return ctx.Writer.WriteError("WRONGPASS invalid username-password pair or user is disabled.")
 	}
@@ -1556,27 +1558,62 @@ func cmdLOLWUT(ctx *Context) error {
 	return ctx.WriteBulkString(output.String())
 }
 
+// ShutdownOptions are the modifiers of SHUTDOWN.
+type ShutdownOptions struct {
+	Save   bool
+	NoSave bool
+	Now    bool
+	Force  bool
+}
+
+// SetShutdownHook installs the function SHUTDOWN stops the server with.
+func (r *Router) SetShutdownHook(fn func(ShutdownOptions) error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.shutdown = fn
+}
+
+// cmdSHUTDOWN implements SHUTDOWN [NOSAVE|SAVE] [NOW] [FORCE] [ABORT]. On
+// success it sends no reply: the connection closes as the server stops.
 func cmdSHUTDOWN(ctx *Context) error {
-	save := true
+	var o ShutdownOptions
+	abort := false
 	for i := 0; i < ctx.ArgCount(); i++ {
-		arg := strings.ToUpper(ctx.ArgString(i))
-		switch arg {
+		switch strings.ToUpper(ctx.ArgString(i)) {
 		case "NOSAVE":
-			save = false
+			o.NoSave = true
 		case "SAVE":
-			save = true
+			o.Save = true
+		case "NOW":
+			o.Now = true
+		case "FORCE":
+			o.Force = true
+		case "ABORT":
+			abort = true
+		default:
+			return ctx.WriteError(ErrSyntaxError)
 		}
 	}
-
-	_ = save
-	// Return the write's own error, not a sentinel. Returning errors.New("SHUTDOWN")
-	// here made the connection loop write a SECOND reply for this one command:
-	// +OK followed by a stray -SHUTDOWN. A client that pipelines SHUTDOWN with
-	// the next command read that stray error as the reply to its next command
-	// and the response stream desynchronized from there on. router.go states the
-	// same invariant for the ACL path — a handler that has already replied must
-	// return nil.
-	return ctx.WriteOK()
+	if (o.Save && o.NoSave) || (abort && ctx.ArgCount() > 1) {
+		return ctx.WriteError(ErrSyntaxError)
+	}
+	if abort {
+		return ctx.Writer.WriteError("ERR No shutdown in progress.")
+	}
+	var hook func(ShutdownOptions) error
+	if r := ctx.dispatcher(); r != nil {
+		r.mu.RLock()
+		hook = r.shutdown
+		r.mu.RUnlock()
+	}
+	if hook == nil {
+		return ctx.WriteError(errors.New("ERR SHUTDOWN is not available in this context"))
+	}
+	if err := hook(o); err != nil {
+		return ctx.WriteError(err)
+	}
+	ctx.CloseConnection = true
+	return nil
 }
 
 func cmdSAVE(ctx *Context) error {
@@ -1829,16 +1866,7 @@ func cmdACL(ctx *Context) error {
 	case "LOAD", "SAVE":
 		return ctx.Writer.WriteError("ERR This Redis instance is not configured to use an ACL file. You may want to specify users via the ACL SETUSER command and then issue a CONFIG REWRITE (assuming you have a Redis configuration file set) in order to store users in the Redis configuration.")
 	case "LOG":
-		count := 10
-		if ctx.ArgCount() > 1 {
-			var err error
-			count, err = strconv.Atoi(ctx.ArgString(1))
-			if err != nil {
-				return ctx.WriteError(ErrNotInteger)
-			}
-		}
-		_ = count
-		return ctx.WriteArray([]*resp.Value{})
+		return cmdACLLog(ctx)
 	case "DRYRUN":
 		if ctx.ArgCount() < 3 {
 			return ctx.WriteError(ErrWrongArgCount)
@@ -1921,14 +1949,50 @@ func cmdDEBUGSEGFAULT(ctx *Context) error {
 	return ctx.WriteError(errors.New("ERR SEGFAULT not allowed"))
 }
 
+// SetWaitAOFHook installs the function WAITAOF waits with. It returns how
+// many local AOFs (0 or 1) and replicas acknowledged the writes so far.
+func (r *Router) SetWaitAOFHook(fn func(numLocal, numReplicas int64, timeout time.Duration, done <-chan struct{}) (int64, int64, error)) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.waitAOF = fn
+}
+
+// cmdWAITAOF implements WAITAOF numlocal numreplicas timeout.
 func cmdWAITAOF(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
+	if ctx.ArgCount() != 3 {
+		return ctx.WriteError(arityError("waitaof"))
 	}
-	_ = ctx.ArgString(0)
-	_ = ctx.ArgString(1)
-	return ctx.WriteArray([]*resp.Value{
-		resp.IntegerValue(0),
-		resp.IntegerValue(0),
-	})
+	numLocal, err1 := strconv.ParseInt(ctx.ArgString(0), 10, 64)
+	numReplicas, err2 := strconv.ParseInt(ctx.ArgString(1), 10, 64)
+	if err1 != nil || err2 != nil || numLocal < 0 || numReplicas < 0 {
+		return ctx.WriteError(ErrNotInteger)
+	}
+	ms, err := strconv.ParseInt(ctx.ArgString(2), 10, 64)
+	if err != nil {
+		return ctx.WriteError(errors.New("ERR timeout is not an integer or out of range"))
+	}
+	if ms < 0 {
+		return ctx.WriteError(errors.New("ERR timeout is negative"))
+	}
+	var hook func(int64, int64, time.Duration, <-chan struct{}) (int64, int64, error)
+	if r := ctx.dispatcher(); r != nil {
+		r.mu.RLock()
+		hook = r.waitAOF
+		r.mu.RUnlock()
+	}
+	if hook == nil {
+		if numLocal > 0 {
+			return ctx.Writer.WriteError("ERR WAITAOF cannot be used when numlocal is set but appendonly is disabled.")
+		}
+		return ctx.WriteArray([]*resp.Value{resp.IntegerValue(0), resp.IntegerValue(0)})
+	}
+	timeout := time.Duration(ms) * time.Millisecond
+	if ctx.InExec {
+		timeout = -1
+	}
+	local, replicas, err := hook(numLocal, numReplicas, timeout, ctx.Done)
+	if err != nil {
+		return ctx.Writer.WriteError(err.Error())
+	}
+	return ctx.WriteArray([]*resp.Value{resp.IntegerValue(local), resp.IntegerValue(replicas)})
 }

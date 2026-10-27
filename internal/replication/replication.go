@@ -488,6 +488,13 @@ func (m *Manager) ackedReplicas(offset int64) int {
 // Wait blocks until numReplicas replicas acknowledged every write made
 // before the call, timeout passes (0 waits forever) or done is closed, and
 // returns how many did.
+// ReplicaCount returns how many replicas are attached.
+func (m *Manager) ReplicaCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.replicas)
+}
+
 func (m *Manager) Wait(numReplicas int, timeout time.Duration, done <-chan struct{}) int {
 	m.mu.Lock()
 	target := m.offset

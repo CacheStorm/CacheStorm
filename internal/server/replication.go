@@ -55,7 +55,7 @@ type gateHold struct {
 // exclusiveWrites are writes that reach keys they do not name, or several
 // databases, so they take the whole gate.
 var exclusiveWrites = map[string]bool{
-	"SAVE": true, "BGSAVE": true,
+	"SAVE": true, "BGSAVE": true, "SHUTDOWN": true,
 	"EXEC": true, "EVAL": true, "EVALSHA": true, "FCALL": true,
 	"FLUSHALL": true, "FLUSHDB": true, "SWAPDB": true, "MOVE": true,
 	"RENAME": true, "RENAMENX": true, "COPY": true,

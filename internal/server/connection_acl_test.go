@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -106,7 +107,7 @@ func (a *aclSession) do(args ...string) *resp.Value {
 func aclIsOK(v *resp.Value) bool { return v.Type == resp.TypeSimpleString && v.Str == "OK" }
 
 func aclIsNoperm(v *resp.Value) bool {
-	return v.Type == resp.TypeError && v.Err == "NOPERM No permission"
+	return v.Type == resp.TypeError && strings.HasPrefix(v.Err, "NOPERM ")
 }
 
 // The headline requirement: a user declared as

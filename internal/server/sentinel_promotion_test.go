@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cachestorm/cachestorm/internal/config"
 	"github.com/cachestorm/cachestorm/internal/resp"
 )
 
@@ -111,5 +112,35 @@ func TestDebugDigestMatchesAcrossReplication(t *testing.T) {
 	mc.do("HSET", "h", "a", "changed")
 	if got := mc.str("DEBUG", "DIGEST"); got == want {
 		t.Fatal("digest did not change with the data")
+	}
+}
+
+func TestWAITAOF(t *testing.T) {
+	plain := dialRepl(t, startReplServer(t, nil))
+	if got := plain.do("WAITAOF", "1", "0", "0"); got.Type != resp.TypeError {
+		t.Fatalf("WAITAOF 1 without AOF = %+v, want an error", got)
+	}
+	if got := plain.do("WAITAOF", "0", "0", "0"); len(got.Array) != 2 || got.Array[0].Int != 0 {
+		t.Fatalf("WAITAOF 0 0 0 = %+v", got)
+	}
+	dir := t.TempDir()
+	master := startReplServerCfg(t, replTestConfig(t, func(c *config.Config) {
+		c.Persistence.Enabled = true
+		c.Persistence.AOF = true
+		c.Persistence.AOFSync = "no"
+		c.Persistence.DataDir = dir
+		c.Persistence.SnapshotInterval = "0"
+	}))
+	replica := startReplServer(t, nil)
+	mc := dialRepl(t, master)
+	replicate(t, replica, master)
+	waitSynced(t, replica, master)
+	mc.do("SET", "k", "v")
+	got := mc.do("WAITAOF", "1", "1", "5000")
+	if len(got.Array) != 2 || got.Array[0].Int != 1 || got.Array[1].Int != 1 {
+		t.Fatalf("WAITAOF 1 1 = %+v, want [1 1]", got)
+	}
+	if got := dialRepl(t, replica).do("WAITAOF", "0", "0", "0"); got.Type != resp.TypeError {
+		t.Fatalf("WAITAOF on a replica = %+v, want an error", got)
 	}
 }

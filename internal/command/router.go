@@ -54,6 +54,8 @@ type Router struct {
 	serverStatus     func() ServerStatus
 	trackingHooks    *TrackingHooks
 	clientHooks      *ClientHooks
+	shutdown         func(ShutdownOptions) error
+	waitAOF          func(int64, int64, time.Duration, <-chan struct{}) (int64, int64, error)
 }
 
 // commandSpec is the arity, flags and key positions Redis reports for one of

@@ -163,6 +163,9 @@ type Server struct {
 	pause pauseState
 	// monitor holds the MONITOR connections.
 	monitor monitors
+	// shutdownCh is closed by SHUTDOWN; see ShutdownRequested.
+	shutdownCh   chan struct{}
+	shutdownOnce sync.Once
 }
 
 func New(cfg *config.Config) (result *Server, retErr error) {
@@ -437,6 +440,9 @@ func New(cfg *config.Config) (result *Server, retErr error) {
 	s.tracker = newTracker()
 	s.router.SetTrackingHooks(s.tracker.hooks(s))
 	s.router.SetClientHooks(s.clientHooks())
+	s.shutdownCh = make(chan struct{})
+	s.router.SetShutdownHook(s.requestShutdown)
+	s.router.SetWaitAOFHook(s.waitAOF)
 
 	// Every write the router executes goes to the AOF, when it is enabled,
 	// and to the replication stream.

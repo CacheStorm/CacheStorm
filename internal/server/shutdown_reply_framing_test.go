@@ -4,10 +4,13 @@ import (
 	"bufio"
 	"fmt"
 	"net"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/cachestorm/cachestorm/internal/command"
+	"github.com/cachestorm/cachestorm/internal/config"
 	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
 )
@@ -105,9 +108,11 @@ func TestShutdownEmitsExactlyOneReply(t *testing.T) {
 	sdSend(t, c, "SHUTDOWN")
 	sdSend(t, c, "PING")
 
+	// This router has no server behind it, so SHUTDOWN is refused with a
+	// single error reply.
 	first := sdRecv(t, c, r)
-	if first.Type != resp.TypeSimpleString || first.Str != "OK" {
-		t.Fatalf("SHUTDOWN replied %+v, want a single +OK", first)
+	if first.Type != resp.TypeError {
+		t.Fatalf("SHUTDOWN replied %+v, want a single error", first)
 	}
 
 	second := sdRecv(t, c, r)
@@ -116,5 +121,55 @@ func TestShutdownEmitsExactlyOneReply(t *testing.T) {
 			"cmdSHUTDOWN writes +OK and also returns an error, so the connection loop "+
 			"writes a stray second reply that desynchronizes every pipelined command "+
 			"after it", second, second.Type)
+	}
+}
+
+func TestShutdownStopsTheServer(t *testing.T) {
+	s := startReplServer(t, nil)
+	c := dialRepl(t, s)
+	if got := c.do("SHUTDOWN", "SAVE"); got.Type != resp.TypeError {
+		t.Fatalf("SHUTDOWN SAVE without persistence = %+v, want an error", got)
+	}
+	select {
+	case <-s.ShutdownRequested():
+		t.Fatal("a refused SHUTDOWN still requested the stop")
+	default:
+	}
+	if got := c.do("SHUTDOWN", "ABORT"); got.Type != resp.TypeError {
+		t.Fatalf("SHUTDOWN ABORT = %+v", got)
+	}
+	if _, err := c.conn.Write(encodeArgs("SHUTDOWN", "NOSAVE")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-s.ShutdownRequested():
+	case <-time.After(3 * time.Second):
+		t.Fatal("SHUTDOWN did not request the stop")
+	}
+	if _, ok := c.next(2 * time.Second); ok {
+		t.Fatal("SHUTDOWN sent a reply instead of closing the connection")
+	}
+}
+
+func TestShutdownSavesWhenSnapshotsAreConfigured(t *testing.T) {
+	dir := t.TempDir()
+	s := startReplServerCfg(t, replTestConfig(t, func(c *config.Config) {
+		c.Persistence.Enabled = true
+		c.Persistence.AOF = false
+		c.Persistence.DataDir = dir
+		c.Persistence.SnapshotInterval = "1h"
+	}))
+	c := dialRepl(t, s)
+	c.do("SET", "k", "v")
+	if _, err := c.conn.Write(encodeArgs("SHUTDOWN")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-s.ShutdownRequested():
+	case <-time.After(3 * time.Second):
+		t.Fatal("SHUTDOWN did not request the stop")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "dump.rdb")); err != nil {
+		t.Fatalf("SHUTDOWN did not save the snapshot: %v", err)
 	}
 }

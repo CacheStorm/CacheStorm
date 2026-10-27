@@ -572,6 +572,9 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 		if ctx.Handoff != nil {
 			c.handedOff.Store(true)
 		}
+		if ctx.CloseConnection {
+			c.killed.Store(true)
+		}
 		if ctx.Monitor && c.srv != nil && c.subscriber != nil {
 			c.srv.monitor.add(c)
 		}

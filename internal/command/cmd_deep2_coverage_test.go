@@ -1,6 +1,7 @@
 package command
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/cachestorm/cachestorm/internal/store"
@@ -1265,8 +1266,9 @@ func TestDeep2_ServerShutdown(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SHUTDOWN returned %v, want nil so only one reply is written", err)
 	}
-	if got := buf.String(); got != "+OK\r\n" {
-		t.Fatalf("SHUTDOWN wrote %q, want a single +OK", got)
+	// Without a server to stop, SHUTDOWN answers with exactly one error.
+	if got := buf.String(); !strings.HasPrefix(got, "-ERR ") || strings.Count(got, "\r\n") != 1 {
+		t.Fatalf("SHUTDOWN wrote %q, want a single error reply", got)
 	}
 }
 

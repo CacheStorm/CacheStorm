@@ -55,6 +55,11 @@ type Context struct {
 	ReplyMode string
 	// Monitor is set by MONITOR: the connection then receives every command.
 	Monitor bool
+	// CloseConnection asks the connection to close once the command ran,
+	// without a reply of its own (SHUTDOWN).
+	CloseConnection bool
+	// InScript is set for the commands a script runs (InExec is also set).
+	InScript bool
 
 	FromMaster   bool
 	Replaying    bool

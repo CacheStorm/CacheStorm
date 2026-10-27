@@ -425,24 +425,22 @@ func enforceACL(ctx *Context, upperCmd string) bool {
 	// explicitly granting "+acl" (or "+@all") does not become a privilege
 	// escalation. This runs only when ctx.ACLUser != nil, so the default user
 	// keeps full ACL administration.
-	if aclAdminCommands[upperCmd] {
-		_ = ctx.WriteError(acl.ErrPermissionDenied)
-		return true
-	}
-
-	if !user.CanExecuteCommand(upperCmd) {
-		_ = ctx.WriteError(acl.ErrPermissionDenied)
+	if aclAdminCommands[upperCmd] || !user.CanExecuteCommand(upperCmd) {
+		recordACLDenial(ctx, "command", strings.ToLower(upperCmd), user.Name)
+		_ = ctx.Writer.WriteError("NOPERM User " + user.Name + " has no permissions to run the '" + strings.ToLower(upperCmd) + "' command")
 		return true
 	}
 	for _, key := range aclKeysForCommand(upperCmd, ctx.Args) {
 		if !user.CanAccessKey(key) {
-			_ = ctx.WriteError(acl.ErrPermissionDenied)
+			recordACLDenial(ctx, "key", key, user.Name)
+			_ = ctx.Writer.WriteError("NOPERM No permissions to access a key")
 			return true
 		}
 	}
 	for _, channel := range aclChannelsForCommand(upperCmd, ctx.Args) {
 		if !user.CanAccessChannel(channel) {
-			_ = ctx.WriteError(acl.ErrPermissionDenied)
+			recordACLDenial(ctx, "channel", channel, user.Name)
+			_ = ctx.Writer.WriteError("NOPERM No permissions to access a channel")
 			return true
 		}
 	}

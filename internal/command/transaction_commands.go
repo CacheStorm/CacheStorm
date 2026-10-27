@@ -314,6 +314,7 @@ func execQueued(ctx *Context, qc queuedCommand) (*resp.Value, *Context) {
 	// in Redis without redis.setresp(3).
 	sub.Writer.SetRESP3(ctx.Command == "EXEC" && ctx.Writer.IsRESP3())
 	sub.InExec = true
+	sub.InScript = ctx.Command != "EXEC"
 	sub.StartTime = time.Now()
 	sub.propagate = nil
 	sub.propagateSet = false

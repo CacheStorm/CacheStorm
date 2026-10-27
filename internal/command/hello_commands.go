@@ -102,6 +102,7 @@ func helloAuthenticate(ctx *Context, username, password string) error {
 	wrongPass := errors.New("WRONGPASS invalid username-password pair or user is disabled.") //nolint:staticcheck // Redis reply text
 	if username == "default" {
 		if globalRouter != nil && globalRouter.RequirePass() != "" && !globalRouter.ValidatePassword(password) {
+			recordACLDenial(ctx, "auth", "AUTH", username)
 			ctx.SetAuthenticated(false)
 			return wrongPass
 		}
@@ -112,6 +113,7 @@ func helloAuthenticate(ctx *Context, username, password string) error {
 	}
 	user, err := globalACL.Authenticate(username, password)
 	if err != nil {
+		recordACLDenial(ctx, "auth", "AUTH", username)
 		ctx.SetAuthenticated(false)
 		ctx.ACLUser = nil
 		ctx.Username = ""
