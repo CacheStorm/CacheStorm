@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Monitoring: the metrics port serves the full exposition (up, uptime, keys and memory across all databases, hits, misses, evictions, expirations, network bytes); Prometheus scrapes it without credentials, the Compose file mounts `alerts.yml`, and the "instance down" alert uses Prometheus' own `up` series
 
 ### Changed
+- CLIENT TRACKING ON is refused until invalidation messages are implemented; it used to reply OK and never invalidate, so a client using client-side caching would serve stale values indefinitely
 - The built-in sentinel role logs that it is experimental: it tracks masters but does not reconfigure servers on failover. The configuration guide documents Redis Sentinel for automatic failover
 - License: CacheStorm is MIT licensed; LICENSE, README, CONTRIBUTING, the website and the SDK package metadata now agree
 - Configuration files are decoded strictly: an unknown or misspelt key stops startup with its file, line and name. `namespaces`, `plugins.stats`, `plugins.auth` and `persistence.max_aof_size` were never read and are no longer accepted. The legacy-schema `config/example.yaml` is removed; `make setup` and the installers use `config/cachestorm.example.yaml`, and the installers write configuration in the current schema

@@ -1043,7 +1043,9 @@ func cmdClientTracking(ctx *Context) error {
 
 	switch onOff {
 	case "ON":
-		tracking.enabled = true
+		// Invalidation messages are not implemented yet. Accepting ON would
+		// let a client cache values it is never told have changed.
+		return ctx.WriteError(errors.New("ERR client tracking is not supported by this server"))
 	case "OFF":
 		tracking.enabled = false
 	default:
