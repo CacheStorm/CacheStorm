@@ -48,7 +48,9 @@ func TestAdvancedRegistryReadersAreSynchronised(t *testing.T) {
 			setup: [][]string{{"SEM.CREATE", "k", "10"}},
 			// ACQUIRE writes the semaphore's value and waiter count with no
 			// lock, and VALUE reads them with no lock.
-			writer: [][]string{{"SEM.ACQUIRE", "k", "1"}},
+			// SEM.ACQUIRE blocks once the permits run out, so each acquire
+			// is paired with a release.
+			writer: [][]string{{"SEM.ACQUIRE", "k", "1"}, {"SEM.RELEASE", "k", "1"}},
 			reader: [][]string{{"SEM.VALUE", "k"}},
 		},
 	}

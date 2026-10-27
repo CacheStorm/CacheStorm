@@ -20,7 +20,7 @@ func TestExtendedRegistryReadersAreSynchronised(t *testing.T) {
 			// message into the ack-wait map and NACK moves it into the
 			// dead-letter list (maxRetries is 1), so both fields the readers
 			// read keep being written.
-			writer: [][]string{{"MSGQUEUE.PUBLISH", "k", "body"}, {"MSGQUEUE.CONSUME", "k"}, {"MSGQUEUE.NACK", "k", "{id}", "reason"}},
+			writer: [][]string{{"MSGQUEUE.PUBLISH", "k", "body"}, {"MSGQUEUE.CONSUME", "k"}, {"MSGQUEUE.NACK", "k", "{id}"}},
 			reader: [][]string{{"MSGQUEUE.STATS", "k"}, {"MSGQUEUE.DEADLETTER", "k"}},
 		},
 		{

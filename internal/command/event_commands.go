@@ -2,6 +2,8 @@ package command
 
 import (
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -37,7 +39,7 @@ func RegisterEventCommands(router *Router) {
 }
 
 func cmdEVENTEMIT(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+	if ctx.ArgCount() < 1 || (ctx.ArgCount()-1)%2 != 0 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
@@ -45,9 +47,7 @@ func cmdEVENTEMIT(ctx *Context) error {
 	data := make(map[string]interface{})
 
 	for i := 1; i+1 < ctx.ArgCount(); i += 2 {
-		key := ctx.ArgString(i)
-		val := ctx.ArgString(i + 1)
-		data[key] = val
+		data[ctx.ArgString(i)] = ctx.ArgString(i + 1)
 	}
 
 	event := store.GlobalEventManager.Emit(name, data)
@@ -62,41 +62,62 @@ func cmdEVENTEMIT(ctx *Context) error {
 	})
 }
 
+func eventReply(e *store.Event) *resp.Value {
+	keys := make([]string, 0, len(e.Data))
+	for k := range e.Data {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	data := make([]*resp.Value, 0, 2*len(keys))
+	for _, k := range keys {
+		data = append(data, resp.BulkString(k), resp.BulkString(fmt.Sprint(e.Data[k])))
+	}
+	return resp.ArrayValue([]*resp.Value{
+		resp.BulkString("id"),
+		resp.BulkString(e.ID),
+		resp.BulkString("name"),
+		resp.BulkString(e.Name),
+		resp.BulkString("timestamp"),
+		resp.IntegerValue(e.Timestamp),
+		resp.BulkString("data"),
+		resp.ArrayValue(data),
+	})
+}
+
 func cmdEVENTGET(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+	if ctx.ArgCount() < 1 || ctx.ArgCount() > 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
 	name := ctx.ArgString(0)
 	limit := 10
-	if ctx.ArgCount() >= 2 {
-		limit = int(parseInt64(ctx.ArgString(1)))
+	if ctx.ArgCount() == 2 {
+		v, err := strconv.Atoi(ctx.ArgString(1))
+		if err != nil || v < 0 {
+			return ctx.WriteError(ErrNotInteger)
+		}
+		limit = v
 	}
 
 	events := store.GlobalEventManager.GetEvents(name, limit)
 
-	results := make([]*resp.Value, 0)
+	results := make([]*resp.Value, 0, len(events))
 	for _, e := range events {
-		results = append(results, resp.ArrayValue([]*resp.Value{
-			resp.BulkString(e.ID),
-			resp.BulkString(e.Name),
-			resp.IntegerValue(e.Timestamp),
-		}))
+		results = append(results, eventReply(e))
 	}
 
 	return ctx.WriteArray(results)
 }
 
 func cmdEVENTLIST(ctx *Context) error {
+	if ctx.ArgCount() != 0 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
 	events := store.GlobalEventManager.GetEvents("", 100)
 
-	results := make([]*resp.Value, 0)
+	results := make([]*resp.Value, 0, len(events))
 	for _, e := range events {
-		results = append(results, resp.ArrayValue([]*resp.Value{
-			resp.BulkString(e.ID),
-			resp.BulkString(e.Name),
-			resp.IntegerValue(e.Timestamp),
-		}))
+		results = append(results, eventReply(e))
 	}
 
 	return ctx.WriteArray(results)

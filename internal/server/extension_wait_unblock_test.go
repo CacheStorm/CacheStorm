@@ -16,7 +16,10 @@ func TestExtensionWaitsAreUnblockable(t *testing.T) {
 	bid := strconv.FormatInt(b.do("CLIENT", "ID").Int, 10)
 	pid := string(admin.do("PROMISE.CREATE").Bulk)
 	fid := string(admin.do("FUTURE.CREATE").Bulk)
+	admin.do("SEM.CREATE", "unblock-s", "1")
+	admin.do("SEM.ACQUIRE", "unblock-s", "1")
 	waits := [][]string{
+		{"SEM.ACQUIRE", "unblock-s", "1", "0"},
 		{"PROMISE.AWAIT", pid, "0"},
 		{"FUTURE.GET", fid, "0"},
 	}

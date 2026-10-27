@@ -1,8 +1,12 @@
 package command
 
 import (
+	"errors"
 	"fmt"
+	"math"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -69,7 +73,7 @@ func RegisterExtendedCommands(router *Router) {
 
 var (
 	msgQueues   = make(map[string]*MessageQueue)
-	msgQueuesMu sync.RWMutex
+	msgQueuesMu sync.Mutex
 )
 
 type MessageQueue struct {
@@ -83,20 +87,73 @@ type MessageQueue struct {
 type QueuedMessage struct {
 	ID        string
 	Body      string
-	Status    string
 	Retries   int
 	CreatedAt int64
 	AckAt     int64
 }
 
+// reclaimExpired treats every delivery whose ack deadline has passed as a
+// NACK: the message is redelivered, or dead-lettered once it is out of
+// retries. Callers hold msgQueuesMu.
+func (q *MessageQueue) reclaimExpired(now int64) {
+	var expired []*QueuedMessage
+	for _, msg := range q.AckWait {
+		if msg.AckAt <= now {
+			expired = append(expired, msg)
+		}
+	}
+	if len(expired) == 0 {
+		return
+	}
+	sort.Slice(expired, func(i, j int) bool {
+		if expired[i].AckAt != expired[j].AckAt {
+			return expired[i].AckAt < expired[j].AckAt
+		}
+		return expired[i].ID < expired[j].ID
+	})
+	for _, msg := range expired {
+		q.retry(msg)
+	}
+}
+
+// retry takes an unacknowledged message back and reports whether it was
+// dead-lettered rather than queued for redelivery.
+func (q *MessageQueue) retry(msg *QueuedMessage) bool {
+	delete(q.AckWait, msg.ID)
+	msg.AckAt = 0
+	msg.Retries++
+	if msg.Retries >= q.MaxRetries {
+		q.DeadLetters = append(q.DeadLetters, msg)
+		return true
+	}
+	q.Messages = append(q.Messages, msg)
+	return false
+}
+
+// lookupMsgQueue returns the named queue with its expired deliveries already
+// reclaimed. Callers hold msgQueuesMu.
+func lookupMsgQueue(name string) (*MessageQueue, bool) {
+	queue, exists := msgQueues[name]
+	if exists {
+		queue.reclaimExpired(time.Now().UnixMilli())
+	}
+	return queue, exists
+}
+
+var errMsgQueueNotFound = errors.New("ERR queue not found")
+
 func cmdMSGQUEUECREATE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+	if ctx.ArgCount() < 1 || ctx.ArgCount() > 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
 	maxRetries := int64(3)
-	if ctx.ArgCount() >= 2 {
-		maxRetries = parseInt64(ctx.ArgString(1))
+	if ctx.ArgCount() == 2 {
+		v, err := strconv.ParseInt(ctx.ArgString(1), 10, 32)
+		if err != nil || v < 1 {
+			return ctx.WriteError(fmt.Errorf("ERR max retries must be a positive integer"))
+		}
+		maxRetries = v
 	}
 	msgQueuesMu.Lock()
 	msgQueues[name] = &MessageQueue{
@@ -111,118 +168,125 @@ func cmdMSGQUEUECREATE(ctx *Context) error {
 }
 
 func cmdMSGQUEUEPUBLISH(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
+	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
 	body := ctx.ArgString(1)
 	msgQueuesMu.Lock()
-	defer msgQueuesMu.Unlock()
 	queue, exists := msgQueues[name]
 	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR queue not found"))
+		msgQueuesMu.Unlock()
+		return ctx.WriteError(errMsgQueueNotFound)
 	}
 	msg := &QueuedMessage{
 		ID:        generateUUID(),
 		Body:      body,
-		Status:    "pending",
-		Retries:   0,
 		CreatedAt: time.Now().UnixMilli(),
 	}
 	queue.Messages = append(queue.Messages, msg)
+	msgQueuesMu.Unlock()
 	return ctx.WriteBulkString(msg.ID)
 }
 
 func cmdMSGQUEUECONSUME(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+	if ctx.ArgCount() < 1 || ctx.ArgCount() > 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
 	timeout := int64(5000)
-	if ctx.ArgCount() >= 2 {
-		timeout = parseInt64(ctx.ArgString(1))
+	if ctx.ArgCount() == 2 {
+		v, err := strconv.ParseInt(ctx.ArgString(1), 10, 64)
+		if err != nil || v < 1 {
+			return ctx.WriteError(fmt.Errorf("ERR visibility timeout must be a positive integer"))
+		}
+		timeout = v
 	}
 	msgQueuesMu.Lock()
-	defer msgQueuesMu.Unlock()
-	queue, exists := msgQueues[name]
+	queue, exists := lookupMsgQueue(name)
 	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR queue not found"))
+		msgQueuesMu.Unlock()
+		return ctx.WriteError(errMsgQueueNotFound)
 	}
-	for len(queue.Messages) > 0 {
-		msg := queue.Messages[0]
-		queue.Messages = queue.Messages[1:]
-		if msg.Status == "pending" {
-			msg.Status = "processing"
-			msg.AckAt = time.Now().UnixMilli() + timeout
-			queue.AckWait[msg.ID] = msg
-			return ctx.WriteArray([]*resp.Value{
-				resp.BulkString("id"), resp.BulkString(msg.ID),
-				resp.BulkString("body"), resp.BulkString(msg.Body),
-				resp.BulkString("retries"), resp.IntegerValue(int64(msg.Retries)),
-			})
-		}
+	if len(queue.Messages) == 0 {
+		msgQueuesMu.Unlock()
+		return ctx.WriteNull()
 	}
-	return ctx.WriteNull()
+	msg := queue.Messages[0]
+	queue.Messages[0] = nil
+	queue.Messages = queue.Messages[1:]
+	now := time.Now().UnixMilli()
+	if timeout > math.MaxInt64-now {
+		msg.AckAt = math.MaxInt64
+	} else {
+		msg.AckAt = now + timeout
+	}
+	queue.AckWait[msg.ID] = msg
+	reply := []*resp.Value{
+		resp.BulkString("id"), resp.BulkString(msg.ID),
+		resp.BulkString("body"), resp.BulkString(msg.Body),
+		resp.BulkString("retries"), resp.IntegerValue(int64(msg.Retries)),
+	}
+	msgQueuesMu.Unlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdMSGQUEUEACK(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
+	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
 	msgID := ctx.ArgString(1)
 	msgQueuesMu.Lock()
-	defer msgQueuesMu.Unlock()
-	queue, exists := msgQueues[name]
+	queue, exists := lookupMsgQueue(name)
 	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR queue not found"))
+		msgQueuesMu.Unlock()
+		return ctx.WriteError(errMsgQueueNotFound)
 	}
-	if _, ok := queue.AckWait[msgID]; ok {
-		delete(queue.AckWait, msgID)
+	_, ok := queue.AckWait[msgID]
+	delete(queue.AckWait, msgID)
+	msgQueuesMu.Unlock()
+	if ok {
 		return ctx.WriteInteger(1)
 	}
 	return ctx.WriteInteger(0)
 }
 
 func cmdMSGQUEUENACK(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
+	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
 	msgID := ctx.ArgString(1)
 	msgQueuesMu.Lock()
-	defer msgQueuesMu.Unlock()
-	queue, exists := msgQueues[name]
+	queue, exists := lookupMsgQueue(name)
 	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR queue not found"))
+		msgQueuesMu.Unlock()
+		return ctx.WriteError(errMsgQueueNotFound)
 	}
+	reply := int64(0)
 	if msg, ok := queue.AckWait[msgID]; ok {
-		delete(queue.AckWait, msgID)
-		msg.Retries++
-		msg.Status = "pending"
-		if msg.Retries >= queue.MaxRetries {
-			queue.DeadLetters = append(queue.DeadLetters, msg)
-			return ctx.WriteInteger(2)
+		reply = 1
+		if queue.retry(msg) {
+			reply = 2
 		}
-		queue.Messages = append(queue.Messages, msg)
-		return ctx.WriteInteger(1)
 	}
-	return ctx.WriteInteger(0)
+	msgQueuesMu.Unlock()
+	return ctx.WriteInteger(reply)
 }
 
 func cmdMSGQUEUEDEADLETTER(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+	if ctx.ArgCount() != 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
-	msgQueuesMu.RLock()
-	queue, exists := msgQueues[name]
+	msgQueuesMu.Lock()
+	queue, exists := lookupMsgQueue(name)
 	if !exists {
-		reply := fmt.Errorf("ERR queue not found")
-		msgQueuesMu.RUnlock()
-		return ctx.WriteError(reply)
+		msgQueuesMu.Unlock()
+		return ctx.WriteError(errMsgQueueNotFound)
 	}
-	results := make([]*resp.Value, 0)
+	results := make([]*resp.Value, 0, len(queue.DeadLetters))
 	for _, msg := range queue.DeadLetters {
 		results = append(results, resp.ArrayValue([]*resp.Value{
 			resp.BulkString("id"), resp.BulkString(msg.ID),
@@ -230,62 +294,63 @@ func cmdMSGQUEUEDEADLETTER(ctx *Context) error {
 			resp.BulkString("retries"), resp.IntegerValue(int64(msg.Retries)),
 		}))
 	}
-	reply := results
-	msgQueuesMu.RUnlock()
-	return ctx.WriteArray(reply)
+	msgQueuesMu.Unlock()
+	return ctx.WriteArray(results)
 }
 
 func cmdMSGQUEUEREQUEUE(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
+	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
 	msgID := ctx.ArgString(1)
 	msgQueuesMu.Lock()
-	defer msgQueuesMu.Unlock()
-	queue, exists := msgQueues[name]
+	queue, exists := lookupMsgQueue(name)
 	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR queue not found"))
+		msgQueuesMu.Unlock()
+		return ctx.WriteError(errMsgQueueNotFound)
 	}
+	reply := int64(0)
 	for i, msg := range queue.DeadLetters {
 		if msg.ID == msgID {
 			queue.DeadLetters = append(queue.DeadLetters[:i], queue.DeadLetters[i+1:]...)
 			msg.Retries = 0
-			msg.Status = "pending"
 			queue.Messages = append(queue.Messages, msg)
-			return ctx.WriteInteger(1)
+			reply = 1
+			break
 		}
 	}
-	return ctx.WriteInteger(0)
+	msgQueuesMu.Unlock()
+	return ctx.WriteInteger(reply)
 }
 
 func cmdMSGQUEUEPURGE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+	if ctx.ArgCount() != 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
 	msgQueuesMu.Lock()
-	defer msgQueuesMu.Unlock()
-	queue, exists := msgQueues[name]
+	queue, exists := lookupMsgQueue(name)
 	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR queue not found"))
+		msgQueuesMu.Unlock()
+		return ctx.WriteError(errMsgQueueNotFound)
 	}
 	count := len(queue.Messages)
 	queue.Messages = make([]*QueuedMessage, 0)
+	msgQueuesMu.Unlock()
 	return ctx.WriteInteger(int64(count))
 }
 
 func cmdMSGQUEUESTATS(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+	if ctx.ArgCount() != 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
-	msgQueuesMu.RLock()
-	queue, exists := msgQueues[name]
+	msgQueuesMu.Lock()
+	queue, exists := lookupMsgQueue(name)
 	if !exists {
-		reply := fmt.Errorf("ERR queue not found")
-		msgQueuesMu.RUnlock()
-		return ctx.WriteError(reply)
+		msgQueuesMu.Unlock()
+		return ctx.WriteError(errMsgQueueNotFound)
 	}
 	reply := []*resp.Value{
 		resp.BulkString("name"), resp.BulkString(queue.Name),
@@ -294,21 +359,22 @@ func cmdMSGQUEUESTATS(ctx *Context) error {
 		resp.BulkString("dead_letters"), resp.IntegerValue(int64(len(queue.DeadLetters))),
 		resp.BulkString("max_retries"), resp.IntegerValue(int64(queue.MaxRetries)),
 	}
-	msgQueuesMu.RUnlock()
+	msgQueuesMu.Unlock()
 	return ctx.WriteArray(reply)
 }
 
 func cmdMSGQUEUEDELETE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+	if ctx.ArgCount() != 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
 	msgQueuesMu.Lock()
-	defer msgQueuesMu.Unlock()
-	if _, exists := msgQueues[name]; !exists {
+	_, exists := msgQueues[name]
+	delete(msgQueues, name)
+	msgQueuesMu.Unlock()
+	if !exists {
 		return ctx.WriteInteger(0)
 	}
-	delete(msgQueues, name)
 	return ctx.WriteInteger(1)
 }
 
@@ -821,10 +887,84 @@ var (
 )
 
 type DocStore struct {
-	Name    string
-	Docs    map[string]map[string]string
-	Indexes map[string]map[string][]string
+	Name string
+	Docs map[string]map[string]string
+	// Indexes maps an indexed field to value -> set of document ids. It is
+	// kept in step with Docs by every write, so a lookup through it always
+	// agrees with a scan.
+	Indexes map[string]map[string]map[string]struct{}
 }
+
+func newDocStore(name string) *DocStore {
+	return &DocStore{
+		Name:    name,
+		Docs:    make(map[string]map[string]string),
+		Indexes: make(map[string]map[string]map[string]struct{}),
+	}
+}
+
+func (s *DocStore) indexDoc(id string, doc map[string]string) {
+	for field, idx := range s.Indexes {
+		if value, ok := doc[field]; ok {
+			ids := idx[value]
+			if ids == nil {
+				ids = make(map[string]struct{})
+				idx[value] = ids
+			}
+			ids[id] = struct{}{}
+		}
+	}
+}
+
+func (s *DocStore) unindexDoc(id string, doc map[string]string) {
+	for field, idx := range s.Indexes {
+		value, ok := doc[field]
+		if !ok {
+			continue
+		}
+		if ids := idx[value]; ids != nil {
+			delete(ids, id)
+			if len(ids) == 0 {
+				delete(idx, value)
+			}
+		}
+	}
+}
+
+// matching returns the ids of the documents whose field equals value, in id
+// order, through the field's index when there is one.
+func (s *DocStore) matching(field, value string) []string {
+	var ids []string
+	if idx, ok := s.Indexes[field]; ok {
+		for id := range idx[value] {
+			ids = append(ids, id)
+		}
+	} else {
+		for id, doc := range s.Docs {
+			if v, ok := doc[field]; ok && v == value {
+				ids = append(ids, id)
+			}
+		}
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+func docReply(id string, doc map[string]string) []*resp.Value {
+	fields := make([]string, 0, len(doc))
+	for k := range doc {
+		fields = append(fields, k)
+	}
+	sort.Strings(fields)
+	out := make([]*resp.Value, 0, 2+2*len(fields))
+	out = append(out, resp.BulkString("_id"), resp.BulkString(id))
+	for _, k := range fields {
+		out = append(out, resp.BulkString(k), resp.BulkString(doc[k]))
+	}
+	return out
+}
+
+var errDocStoreNotFound = errors.New("ERR doc store not found")
 
 func cmdDOCINSERT(ctx *Context) error {
 	// name, id, then field/value PAIRS. Without this, `DOC.INSERT s d` stored an
@@ -840,24 +980,22 @@ func cmdDOCINSERT(ctx *Context) error {
 		doc[ctx.ArgString(i)] = ctx.ArgString(i + 1)
 	}
 	docStoresMu.Lock()
-	defer docStoresMu.Unlock()
 	store, exists := docStores[name]
 	if !exists {
-		store = &DocStore{Name: name, Docs: make(map[string]map[string]string), Indexes: make(map[string]map[string][]string)}
+		store = newDocStore(name)
 		docStores[name] = store
 	}
-	store.Docs[id] = doc
-	for field, value := range doc {
-		if _, ok := store.Indexes[field]; !ok {
-			store.Indexes[field] = make(map[string][]string)
-		}
-		store.Indexes[field][value] = append(store.Indexes[field][value], id)
+	if old, ok := store.Docs[id]; ok {
+		store.unindexDoc(id, old)
 	}
+	store.Docs[id] = doc
+	store.indexDoc(id, doc)
+	docStoresMu.Unlock()
 	return ctx.WriteBulkString(id)
 }
 
 func cmdDOCFIND(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+	if ctx.ArgCount() != 1 && ctx.ArgCount() != 3 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
@@ -867,75 +1005,43 @@ func cmdDOCFIND(ctx *Context) error {
 		docStoresMu.RUnlock()
 		return ctx.WriteArray([]*resp.Value{})
 	}
-	// Read the index and the documents under the read lock. The lock used to
-	// be released right after the lookup, so the maps were read and
-	// iterated with no lock at all while DOC.INSERT wrote them under the
-	// write lock: concurrent map iteration and map write is a FATAL Go
-	// runtime error.
-	var filterField, filterValue string
-	if ctx.ArgCount() >= 3 {
-		filterField = ctx.ArgString(1)
-		filterValue = ctx.ArgString(2)
-	}
-	results := make([]*resp.Value, 0)
-	if filterField != "" {
-		if idx, ok := store.Indexes[filterField]; ok {
-			if ids, ok2 := idx[filterValue]; ok2 {
-				for _, id := range ids {
-					if doc, ok3 := store.Docs[id]; ok3 {
-						docResult := []*resp.Value{resp.BulkString("_id"), resp.BulkString(id)}
-						for k, v := range doc {
-							docResult = append(docResult, resp.BulkString(k), resp.BulkString(v))
-						}
-						results = append(results, resp.ArrayValue(docResult))
-					}
-				}
-			}
-		}
+	var ids []string
+	if ctx.ArgCount() == 3 {
+		ids = store.matching(ctx.ArgString(1), ctx.ArgString(2))
 	} else {
-		for id, doc := range store.Docs {
-			docResult := []*resp.Value{resp.BulkString("_id"), resp.BulkString(id)}
-			for k, v := range doc {
-				docResult = append(docResult, resp.BulkString(k), resp.BulkString(v))
-			}
-			results = append(results, resp.ArrayValue(docResult))
+		ids = make([]string, 0, len(store.Docs))
+		for id := range store.Docs {
+			ids = append(ids, id)
 		}
+		sort.Strings(ids)
+	}
+	results := make([]*resp.Value, 0, len(ids))
+	for _, id := range ids {
+		results = append(results, resp.ArrayValue(docReply(id, store.Docs[id])))
 	}
 	docStoresMu.RUnlock()
 	return ctx.WriteArray(results)
 }
 
 func cmdDOCFINDONE(ctx *Context) error {
-	if ctx.ArgCount() < 3 {
+	if ctx.ArgCount() != 3 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
-	field := ctx.ArgString(1)
-	value := ctx.ArgString(2)
 	docStoresMu.RLock()
 	store, exists := docStores[name]
 	if !exists {
 		docStoresMu.RUnlock()
 		return ctx.WriteNull()
 	}
-	// Read the index and the document under the read lock. The lock used to
-	// be released right after the lookup, so the maps were read with no lock
-	// at all while DOC.INSERT wrote them under the write lock: concurrent map
-	// read and map write is a FATAL Go runtime error.
-	if idx, ok := store.Indexes[field]; ok {
-		if ids, ok2 := idx[value]; ok2 && len(ids) > 0 {
-			if doc, ok3 := store.Docs[ids[0]]; ok3 {
-				results := []*resp.Value{resp.BulkString("_id"), resp.BulkString(ids[0])}
-				for k, v := range doc {
-					results = append(results, resp.BulkString(k), resp.BulkString(v))
-				}
-				docStoresMu.RUnlock()
-				return ctx.WriteArray(results)
-			}
-		}
+	ids := store.matching(ctx.ArgString(1), ctx.ArgString(2))
+	if len(ids) == 0 {
+		docStoresMu.RUnlock()
+		return ctx.WriteNull()
 	}
+	reply := docReply(ids[0], store.Docs[ids[0]])
 	docStoresMu.RUnlock()
-	return ctx.WriteNull()
+	return ctx.WriteArray(reply)
 }
 
 func cmdDOCUPDATE(ctx *Context) error {
@@ -948,35 +1054,42 @@ func cmdDOCUPDATE(ctx *Context) error {
 	name := ctx.ArgString(0)
 	id := ctx.ArgString(1)
 	docStoresMu.Lock()
-	defer docStoresMu.Unlock()
 	store, exists := docStores[name]
 	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR doc store not found"))
+		docStoresMu.Unlock()
+		return ctx.WriteError(errDocStoreNotFound)
 	}
 	doc, ok := store.Docs[id]
 	if !ok {
+		docStoresMu.Unlock()
 		return ctx.WriteError(fmt.Errorf("ERR document not found"))
 	}
+	store.unindexDoc(id, doc)
 	for i := 2; i+1 < ctx.ArgCount(); i += 2 {
 		doc[ctx.ArgString(i)] = ctx.ArgString(i + 1)
 	}
+	store.indexDoc(id, doc)
+	docStoresMu.Unlock()
 	return ctx.WriteOK()
 }
 
 func cmdDOCDELETE(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
+	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
 	id := ctx.ArgString(1)
 	docStoresMu.Lock()
-	defer docStoresMu.Unlock()
-	store, exists := docStores[name]
-	if !exists {
-		return ctx.WriteInteger(0)
+	removed := false
+	if store, exists := docStores[name]; exists {
+		if doc, ok := store.Docs[id]; ok {
+			store.unindexDoc(id, doc)
+			delete(store.Docs, id)
+			removed = true
+		}
 	}
-	if _, ok := store.Docs[id]; ok {
-		delete(store.Docs, id)
+	docStoresMu.Unlock()
+	if removed {
 		return ctx.WriteInteger(1)
 	}
 	return ctx.WriteInteger(0)
@@ -993,113 +1106,128 @@ func cmdDOCCOUNT(ctx *Context) error {
 		docStoresMu.RUnlock()
 		return ctx.WriteInteger(0)
 	}
-	// Count the documents under the read lock. The lock used to be released
-	// right after the lookup, so the map was read with no lock at all while
-	// DOC.INSERT wrote it under the write lock.
 	count := int64(len(store.Docs))
 	docStoresMu.RUnlock()
 	return ctx.WriteInteger(count)
 }
 
 func docDOCDISTINCT(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
+	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
 	field := ctx.ArgString(1)
 	docStoresMu.RLock()
 	store, exists := docStores[name]
-	docStoresMu.RUnlock()
 	if !exists {
+		docStoresMu.RUnlock()
 		return ctx.WriteArray([]*resp.Value{})
 	}
-	results := make([]*resp.Value, 0)
-	if idx, ok := store.Indexes[field]; ok {
-		for value := range idx {
-			results = append(results, resp.BulkString(value))
+	seen := make(map[string]struct{})
+	for _, doc := range store.Docs {
+		if value, ok := doc[field]; ok {
+			seen[value] = struct{}{}
 		}
+	}
+	docStoresMu.RUnlock()
+	values := make([]string, 0, len(seen))
+	for value := range seen {
+		values = append(values, value)
+	}
+	sort.Strings(values)
+	results := make([]*resp.Value, len(values))
+	for i, value := range values {
+		results[i] = resp.BulkString(value)
 	}
 	return ctx.WriteArray(results)
 }
 
 func cmdDOCAGGREGATE(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
+	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
-	aggType := ctx.ArgString(1)
+	aggType := strings.ToLower(ctx.ArgString(1))
+	if aggType != "count" && aggType != "fields" {
+		return ctx.WriteError(fmt.Errorf("ERR unknown aggregation type"))
+	}
 	docStoresMu.RLock()
 	store, exists := docStores[name]
 	if !exists {
 		docStoresMu.RUnlock()
-		return ctx.WriteInteger(0)
+		if aggType == "count" {
+			return ctx.WriteInteger(0)
+		}
+		return ctx.WriteArray([]*resp.Value{})
 	}
-	// Aggregate under the read lock. The lock used to be released right after
-	// the lookup, so the documents map was iterated with no lock at all while
-	// DOC.INSERT wrote it under the write lock: concurrent map iteration and
-	// map write is a FATAL Go runtime error.
-	switch aggType {
-	case "count":
+	if aggType == "count" {
 		count := int64(len(store.Docs))
 		docStoresMu.RUnlock()
 		return ctx.WriteInteger(count)
-	case "fields":
-		fields := make(map[string]bool)
-		for _, doc := range store.Docs {
-			for field := range doc {
-				fields[field] = true
-			}
-		}
-		docStoresMu.RUnlock()
-		results := make([]*resp.Value, 0)
-		for field := range fields {
-			results = append(results, resp.BulkString(field))
-		}
-		return ctx.WriteArray(results)
-	default:
-		docStoresMu.RUnlock()
-		return ctx.WriteError(fmt.Errorf("ERR unknown aggregation type"))
 	}
+	fields := make(map[string]struct{})
+	for _, doc := range store.Docs {
+		for field := range doc {
+			fields[field] = struct{}{}
+		}
+	}
+	docStoresMu.RUnlock()
+	names := make([]string, 0, len(fields))
+	for field := range fields {
+		names = append(names, field)
+	}
+	sort.Strings(names)
+	results := make([]*resp.Value, len(names))
+	for i, field := range names {
+		results[i] = resp.BulkString(field)
+	}
+	return ctx.WriteArray(results)
 }
 
 func cmdDOCINDEX(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
+	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
 	field := ctx.ArgString(1)
 	docStoresMu.Lock()
-	defer docStoresMu.Unlock()
 	store, exists := docStores[name]
 	if !exists {
-		store = &DocStore{Name: name, Docs: make(map[string]map[string]string), Indexes: make(map[string]map[string][]string)}
+		store = newDocStore(name)
 		docStores[name] = store
 	}
 	if _, ok := store.Indexes[field]; !ok {
-		store.Indexes[field] = make(map[string][]string)
+		idx := make(map[string]map[string]struct{})
 		for id, doc := range store.Docs {
-			if value, exists := doc[field]; exists {
-				store.Indexes[field][value] = append(store.Indexes[field][value], id)
+			if value, ok := doc[field]; ok {
+				if idx[value] == nil {
+					idx[value] = make(map[string]struct{})
+				}
+				idx[value][id] = struct{}{}
 			}
 		}
+		store.Indexes[field] = idx
 	}
+	docStoresMu.Unlock()
 	return ctx.WriteOK()
 }
 
 func cmdDOCDROPINDEX(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
+	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
 	field := ctx.ArgString(1)
 	docStoresMu.Lock()
-	defer docStoresMu.Unlock()
 	store, exists := docStores[name]
 	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR doc store not found"))
+		docStoresMu.Unlock()
+		return ctx.WriteError(errDocStoreNotFound)
 	}
-	if _, ok := store.Indexes[field]; ok {
-		delete(store.Indexes, field)
+	_, ok := store.Indexes[field]
+	delete(store.Indexes, field)
+	docStoresMu.Unlock()
+	if ok {
 		return ctx.WriteInteger(1)
 	}
 	return ctx.WriteInteger(0)

@@ -1,7 +1,12 @@
 package command
 
 import (
+	"errors"
 	"fmt"
+	"hash/fnv"
+	"math"
+	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -312,7 +317,7 @@ func cmdDAGADDNODE(ctx *Context) error {
 }
 
 func cmdDAGADDEDGE(ctx *Context) error {
-	if ctx.ArgCount() < 3 {
+	if ctx.ArgCount() != 3 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
@@ -329,20 +334,49 @@ func cmdDAGADDEDGE(ctx *Context) error {
 	}
 
 	dag.mu.Lock()
-	defer dag.mu.Unlock()
-
 	if !dag.Nodes[from] || !dag.Nodes[to] {
+		dag.mu.Unlock()
 		return ctx.WriteError(fmt.Errorf("ERR node not found"))
 	}
-
+	for _, c := range dag.Edges[from] {
+		if c == to {
+			dag.mu.Unlock()
+			return ctx.WriteOK()
+		}
+	}
+	if from == to || dag.reaches(to, from) {
+		dag.mu.Unlock()
+		return ctx.WriteError(fmt.Errorf("ERR edge would create a cycle"))
+	}
 	dag.Edges[from] = append(dag.Edges[from], to)
 	dag.InDegree[to]++
+	dag.mu.Unlock()
 
 	return ctx.WriteOK()
 }
 
+// reaches reports whether target is reachable from start. Callers hold d.mu.
+func (d *DAG) reaches(start, target string) bool {
+	seen := map[string]bool{start: true}
+	stack := []string{start}
+	for len(stack) > 0 {
+		node := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		if node == target {
+			return true
+		}
+		for _, next := range d.Edges[node] {
+			if !seen[next] {
+				seen[next] = true
+				stack = append(stack, next)
+			}
+		}
+	}
+	return false
+}
+
 func cmdDAGTOPO(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+	if ctx.ArgCount() != 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
@@ -357,44 +391,44 @@ func cmdDAGTOPO(ctx *Context) error {
 	}
 
 	dag.mu.RLock()
-	defer dag.mu.RUnlock()
-
-	inDegree := make(map[string]int)
-	for k, v := range dag.InDegree {
-		inDegree[k] = v
-	}
-
-	queue := make([]string, 0)
+	inDegree := make(map[string]int, len(dag.Nodes))
+	ready := make([]string, 0)
 	for node := range dag.Nodes {
+		inDegree[node] = dag.InDegree[node]
 		if inDegree[node] == 0 {
-			queue = append(queue, node)
+			ready = append(ready, node)
 		}
 	}
+	sort.Strings(ready)
 
-	result := make([]string, 0)
-	for len(queue) > 0 {
-		node := queue[0]
-		queue = queue[1:]
-		result = append(result, node)
-
-		for _, neighbor := range dag.Edges[node] {
-			inDegree[neighbor]--
-			if inDegree[neighbor] == 0 {
-				queue = append(queue, neighbor)
+	// Kahn's algorithm, always taking the smallest ready node so the order is
+	// deterministic.
+	result := make([]*resp.Value, 0, len(dag.Nodes))
+	for len(ready) > 0 {
+		node := ready[0]
+		ready = ready[1:]
+		result = append(result, resp.BulkString(node))
+		for _, child := range dag.Edges[node] {
+			inDegree[child]--
+			if inDegree[child] == 0 {
+				i := sort.SearchStrings(ready, child)
+				ready = append(ready, "")
+				copy(ready[i+1:], ready[i:])
+				ready[i] = child
 			}
 		}
 	}
+	complete := len(result) == len(dag.Nodes)
+	dag.mu.RUnlock()
 
-	results := make([]*resp.Value, len(result))
-	for i, node := range result {
-		results[i] = resp.BulkString(node)
+	if !complete {
+		return ctx.WriteError(fmt.Errorf("ERR DAG contains a cycle"))
 	}
-
-	return ctx.WriteArray(results)
+	return ctx.WriteArray(result)
 }
 
 func cmdDAGPARENTS(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
+	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
@@ -410,8 +444,6 @@ func cmdDAGPARENTS(ctx *Context) error {
 	}
 
 	dag.mu.RLock()
-	defer dag.mu.RUnlock()
-
 	parents := make([]string, 0)
 	for from, edges := range dag.Edges {
 		for _, to := range edges {
@@ -421,6 +453,8 @@ func cmdDAGPARENTS(ctx *Context) error {
 			}
 		}
 	}
+	dag.mu.RUnlock()
+	sort.Strings(parents)
 
 	results := make([]*resp.Value, len(parents))
 	for i, p := range parents {
@@ -431,7 +465,7 @@ func cmdDAGPARENTS(ctx *Context) error {
 }
 
 func cmdDAGCHILDREN(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
+	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
@@ -447,9 +481,9 @@ func cmdDAGCHILDREN(ctx *Context) error {
 	}
 
 	dag.mu.RLock()
-	defer dag.mu.RUnlock()
-
-	children := dag.Edges[node]
+	children := append([]string(nil), dag.Edges[node]...)
+	dag.mu.RUnlock()
+	sort.Strings(children)
 
 	results := make([]*resp.Value, len(children))
 	for i, c := range children {
@@ -1151,19 +1185,73 @@ var (
 	ringsMu sync.RWMutex
 )
 
+const maxRingReplicas = 1024
+
+// HashRing is a consistent-hash ring: every node owns Replicas virtual points
+// on a 64-bit circle, and a key belongs to the first point at or after its
+// own hash. Adding or removing a node only moves the keys of that node's
+// points.
 type HashRing struct {
 	Name     string
 	Nodes    []string
 	Replicas int
+	points   []ringPoint
+}
+
+type ringPoint struct {
+	hash uint64
+	node string
+}
+
+func ringHash(s string) uint64 {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(s))
+	x := h.Sum64()
+	// FNV alone spreads near-identical strings such as "node#1" and "node#2"
+	// poorly across the circle; the splitmix64 finalizer fixes that.
+	x ^= x >> 30
+	x *= 0xbf58476d1ce4e5b9
+	x ^= x >> 27
+	x *= 0x94d049bb133111eb
+	x ^= x >> 31
+	return x
+}
+
+func (r *HashRing) rebuild() {
+	points := make([]ringPoint, 0, len(r.Nodes)*r.Replicas)
+	for _, node := range r.Nodes {
+		for i := 0; i < r.Replicas; i++ {
+			points = append(points, ringPoint{hash: ringHash(node + "#" + strconv.Itoa(i)), node: node})
+		}
+	}
+	sort.Slice(points, func(i, j int) bool {
+		if points[i].hash != points[j].hash {
+			return points[i].hash < points[j].hash
+		}
+		return points[i].node < points[j].node
+	})
+	r.points = points
+}
+
+func (r *HashRing) locate(key string) string {
+	h := ringHash(key)
+	i := sort.Search(len(r.points), func(i int) bool { return r.points[i].hash >= h })
+	if i == len(r.points) {
+		i = 0
+	}
+	return r.points[i].node
 }
 
 func cmdRINGCREATE(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
+	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
 	name := ctx.ArgString(0)
-	replicas := int(parseInt64(ctx.ArgString(1)))
+	replicas, err := strconv.Atoi(ctx.ArgString(1))
+	if err != nil || replicas < 1 || replicas > maxRingReplicas {
+		return ctx.WriteError(fmt.Errorf("ERR replicas must be an integer between 1 and %d", maxRingReplicas))
+	}
 
 	ringsMu.Lock()
 	rings[name] = &HashRing{
@@ -1177,18 +1265,15 @@ func cmdRINGCREATE(ctx *Context) error {
 }
 
 func cmdRINGADD(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
+	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
 	name := ctx.ArgString(0)
 	node := ctx.ArgString(1)
 
-	// The ring is looked up and mutated under a single write lock. Looking it
-	// up under the read lock and mutating it after a separate write lock
-	// left a window in which a RING.CREATE could replace the ring: the
-	// append was then applied to the detached instance, so the node was
-	// silently lost and the reply described a ring that was no longer live.
+	// The ring is looked up and mutated under a single write lock, so a
+	// concurrent RING.CREATE cannot replace it between the two.
 	ringsMu.Lock()
 	ring, exists := rings[name]
 	if !exists {
@@ -1196,9 +1281,13 @@ func cmdRINGADD(ctx *Context) error {
 		return ctx.WriteError(fmt.Errorf("ERR ring not found"))
 	}
 
-	ring.Nodes = append(ring.Nodes, node)
-	// The size is read while the write lock is still held: reading it after
-	// the unlock raced with a concurrent RING.ADD.
+	i := sort.SearchStrings(ring.Nodes, node)
+	if i == len(ring.Nodes) || ring.Nodes[i] != node {
+		ring.Nodes = append(ring.Nodes, "")
+		copy(ring.Nodes[i+1:], ring.Nodes[i:])
+		ring.Nodes[i] = node
+		ring.rebuild()
+	}
 	size := len(ring.Nodes)
 	ringsMu.Unlock()
 
@@ -1206,7 +1295,7 @@ func cmdRINGADD(ctx *Context) error {
 }
 
 func cmdRINGGET(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
+	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
@@ -1215,36 +1304,22 @@ func cmdRINGGET(ctx *Context) error {
 
 	ringsMu.RLock()
 	ring, exists := rings[name]
-
 	if !exists {
-		reply := fmt.Errorf("ERR ring not found")
 		ringsMu.RUnlock()
-		return ctx.WriteError(reply)
+		return ctx.WriteError(fmt.Errorf("ERR ring not found"))
 	}
-
-	if len(ring.Nodes) == 0 {
+	if len(ring.points) == 0 {
 		ringsMu.RUnlock()
 		return ctx.WriteNull()
 	}
-
-	hash := hashKey(key)
-	idx := hash % uint64(len(ring.Nodes))
-
-	reply := ring.Nodes[idx]
+	node := ring.locate(key)
 	ringsMu.RUnlock()
-	return ctx.WriteBulkString(reply)
-}
 
-func hashKey(s string) uint64 {
-	var hash uint64
-	for _, c := range s {
-		hash = hash*31 + uint64(c)
-	}
-	return hash
+	return ctx.WriteBulkString(node)
 }
 
 func cmdRINGNODES(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+	if ctx.ArgCount() != 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
@@ -1252,50 +1327,42 @@ func cmdRINGNODES(ctx *Context) error {
 
 	ringsMu.RLock()
 	ring, exists := rings[name]
-
 	if !exists {
-		reply := fmt.Errorf("ERR ring not found")
 		ringsMu.RUnlock()
-		return ctx.WriteError(reply)
+		return ctx.WriteError(fmt.Errorf("ERR ring not found"))
 	}
-
 	results := make([]*resp.Value, len(ring.Nodes))
 	for i, n := range ring.Nodes {
 		results[i] = resp.BulkString(n)
 	}
-
-	reply := results
 	ringsMu.RUnlock()
-	return ctx.WriteArray(reply)
+
+	return ctx.WriteArray(results)
 }
 
 func cmdRINGREMOVE(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
+	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
 	name := ctx.ArgString(0)
 	node := ctx.ArgString(1)
 
-	// The ring is looked up and mutated under a single write lock, for the
-	// same reason as RING.ADD: a RING.CREATE in the window between the
-	// lookup and the mutation replaced the ring, and the removal was then
-	// applied to the detached instance.
 	ringsMu.Lock()
-	ring, exists := rings[name]
-	if !exists {
-		ringsMu.Unlock()
-		return ctx.WriteInteger(0)
-	}
-	defer ringsMu.Unlock()
-
-	for i, n := range ring.Nodes {
-		if n == node {
+	removed := false
+	if ring, exists := rings[name]; exists {
+		i := sort.SearchStrings(ring.Nodes, node)
+		if i < len(ring.Nodes) && ring.Nodes[i] == node {
 			ring.Nodes = append(ring.Nodes[:i], ring.Nodes[i+1:]...)
-			return ctx.WriteInteger(1)
+			ring.rebuild()
+			removed = true
 		}
 	}
+	ringsMu.Unlock()
 
+	if removed {
+		return ctx.WriteInteger(1)
+	}
 	return ctx.WriteInteger(0)
 }
 
@@ -1305,140 +1372,259 @@ var (
 )
 
 type Semaphore struct {
-	Value   int64
-	Max     int64
+	Value int64
+	Max   int64
+	// Waiters counts the SEM.ACQUIRE calls currently blocked on this
+	// semaphore.
 	Waiters int64
 	mu      sync.Mutex
+	// changed is closed, and replaced, whenever permits are released, so a
+	// blocked SEM.ACQUIRE re-checks the value.
+	changed  chan struct{}
+	replaced bool
+}
+
+func newSemaphore(max int64) *Semaphore {
+	return &Semaphore{Value: max, Max: max, changed: make(chan struct{})}
+}
+
+// signal wakes every blocked acquirer. Callers hold s.mu.
+func (s *Semaphore) signal() {
+	close(s.changed)
+	s.changed = make(chan struct{})
+}
+
+var (
+	errSemNotFound  = errors.New("ERR semaphore not found")
+	errSemCount     = errors.New("ERR permit count must be a positive integer")
+	errSemOverMax   = errors.New("ERR permit count exceeds the semaphore's maximum")
+	errSemOverflow  = errors.New("ERR release would exceed the semaphore's maximum")
+	errSemTimeout   = errors.New("ERR timeout must be a non-negative integer (milliseconds)")
+	errSemCreateMax = errors.New("ERR max must be a positive integer")
+)
+
+func lookupSemaphore(name string) (*Semaphore, bool) {
+	semaphoresMu.RLock()
+	sem, exists := semaphores[name]
+	semaphoresMu.RUnlock()
+	return sem, exists
+}
+
+func parseSemCount(s string) (int64, error) {
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil || n < 1 {
+		return 0, errSemCount
+	}
+	return n, nil
 }
 
 func cmdSEMCREATE(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
+	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
 	name := ctx.ArgString(0)
-	max := parseInt64(ctx.ArgString(1))
+	max, err := strconv.ParseInt(ctx.ArgString(1), 10, 64)
+	if err != nil || max < 1 {
+		return ctx.WriteError(errSemCreateMax)
+	}
 
 	semaphoresMu.Lock()
-	semaphores[name] = &Semaphore{
-		Value: max,
-		Max:   max,
-	}
+	old := semaphores[name]
+	semaphores[name] = newSemaphore(max)
 	semaphoresMu.Unlock()
+
+	if old != nil {
+		old.mu.Lock()
+		old.replaced = true
+		old.signal()
+		old.mu.Unlock()
+	}
 
 	return ctx.WriteOK()
 }
 
+// acquire takes n permits, waiting for them when timeout is not negative
+// (0 waits indefinitely). It reports whether the permits were taken.
+func (s *Semaphore) acquire(ctx *Context, n int64, timeout time.Duration) (bool, error) {
+	s.mu.Lock()
+	if s.replaced {
+		s.mu.Unlock()
+		return false, errSemNotFound
+	}
+	if n > s.Max {
+		s.mu.Unlock()
+		return false, errSemOverMax
+	}
+	if s.Value >= n {
+		s.Value -= n
+		s.mu.Unlock()
+		return true, nil
+	}
+	if timeout < 0 || ctx.InExec {
+		s.mu.Unlock()
+		return false, nil
+	}
+	s.Waiters++
+	changed := s.changed
+	s.mu.Unlock()
+
+	if ctx.BeforeWait != nil {
+		ctx.BeforeWait()
+		defer ctx.AfterWait()
+	}
+	var expired <-chan time.Time
+	if timeout > 0 {
+		timer := time.NewTimer(timeout)
+		defer timer.Stop()
+		expired = timer.C
+	}
+
+	for {
+		stop := false
+		select {
+		case <-changed:
+		case <-expired:
+			stop = true
+		case <-ctx.Done:
+			// The client is gone: permits taken now would never be released.
+			s.mu.Lock()
+			s.Waiters--
+			s.mu.Unlock()
+			return false, nil
+		}
+		s.mu.Lock()
+		if s.replaced {
+			s.Waiters--
+			s.mu.Unlock()
+			return false, errSemNotFound
+		}
+		if s.Value >= n {
+			s.Value -= n
+			s.Waiters--
+			s.mu.Unlock()
+			return true, nil
+		}
+		if stop {
+			s.Waiters--
+			s.mu.Unlock()
+			return false, nil
+		}
+		changed = s.changed
+		s.mu.Unlock()
+	}
+}
+
 func cmdSEMACQUIRE(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
+	if ctx.ArgCount() < 2 || ctx.ArgCount() > 3 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
 	name := ctx.ArgString(0)
-	n := parseInt64(ctx.ArgString(1))
-
-	semaphoresMu.RLock()
-	sem, exists := semaphores[name]
-	semaphoresMu.RUnlock()
-
-	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR semaphore not found"))
+	n, err := parseSemCount(ctx.ArgString(1))
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	timeout := time.Duration(0)
+	if ctx.ArgCount() == 3 {
+		ms, err := strconv.ParseInt(ctx.ArgString(2), 10, 64)
+		if err != nil || ms < 0 || ms > math.MaxInt64/int64(time.Millisecond) {
+			return ctx.WriteError(errSemTimeout)
+		}
+		timeout = time.Duration(ms) * time.Millisecond
 	}
 
-	sem.mu.Lock()
-	defer sem.mu.Unlock()
+	sem, exists := lookupSemaphore(name)
+	if !exists {
+		return ctx.WriteError(errSemNotFound)
+	}
 
-	if sem.Value >= n {
-		sem.Value -= n
+	ok, err := sem.acquire(ctx, n, timeout)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	if ok {
 		return ctx.WriteInteger(1)
 	}
-
-	sem.Waiters++
 	return ctx.WriteInteger(0)
 }
 
 func cmdSEMRELEASE(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
+	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
 	name := ctx.ArgString(0)
-	n := parseInt64(ctx.ArgString(1))
+	n, err := parseSemCount(ctx.ArgString(1))
+	if err != nil {
+		return ctx.WriteError(err)
+	}
 
-	semaphoresMu.RLock()
-	sem, exists := semaphores[name]
-	semaphoresMu.RUnlock()
-
+	sem, exists := lookupSemaphore(name)
 	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR semaphore not found"))
+		return ctx.WriteError(errSemNotFound)
 	}
 
 	sem.mu.Lock()
-	defer sem.mu.Unlock()
-
+	if n > sem.Max-sem.Value {
+		sem.mu.Unlock()
+		return ctx.WriteError(errSemOverflow)
+	}
 	sem.Value += n
-	if sem.Value > sem.Max {
-		sem.Value = sem.Max
-	}
-
-	if sem.Waiters > 0 {
-		sem.Waiters--
-	}
+	sem.signal()
+	sem.mu.Unlock()
 
 	return ctx.WriteOK()
 }
 
 func cmdSEMTRYACQUIRE(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
+	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
 	name := ctx.ArgString(0)
-	n := parseInt64(ctx.ArgString(1))
-
-	semaphoresMu.RLock()
-	sem, exists := semaphores[name]
-	semaphoresMu.RUnlock()
-
-	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR semaphore not found"))
+	n, err := parseSemCount(ctx.ArgString(1))
+	if err != nil {
+		return ctx.WriteError(err)
 	}
 
-	sem.mu.Lock()
-	defer sem.mu.Unlock()
+	sem, exists := lookupSemaphore(name)
+	if !exists {
+		return ctx.WriteError(errSemNotFound)
+	}
 
-	if sem.Value >= n {
-		sem.Value -= n
+	ok, err := sem.acquire(ctx, n, -1)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	if ok {
 		return ctx.WriteInteger(1)
 	}
-
 	return ctx.WriteInteger(0)
 }
 
 func cmdSEMVALUE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+	if ctx.ArgCount() != 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
 	name := ctx.ArgString(0)
 
-	semaphoresMu.RLock()
-	sem, exists := semaphores[name]
-	semaphoresMu.RUnlock()
-
+	sem, exists := lookupSemaphore(name)
 	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR semaphore not found"))
+		return ctx.WriteError(errSemNotFound)
 	}
 
 	sem.mu.Lock()
-	defer sem.mu.Unlock()
-
-	return ctx.WriteArray([]*resp.Value{
+	reply := []*resp.Value{
 		resp.BulkString("value"),
 		resp.IntegerValue(sem.Value),
 		resp.BulkString("max"),
 		resp.IntegerValue(sem.Max),
 		resp.BulkString("waiters"),
 		resp.IntegerValue(sem.Waiters),
-	})
+	}
+	sem.mu.Unlock()
+
+	return ctx.WriteArray(reply)
 }

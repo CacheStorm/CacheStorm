@@ -1,8 +1,12 @@
 package command
 
 import (
+	"errors"
 	"fmt"
+	"math"
 	"regexp"
+	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -674,57 +678,88 @@ func cmdCOUNTERX2LIST(ctx *Context) error {
 }
 
 var (
-	levels   = make(map[string]int64)
+	levels   = make(map[string]*LevelGauge)
 	levelsMu sync.RWMutex
 )
 
+// LevelGauge is a named level bounded by [0, Max].
+type LevelGauge struct {
+	Current int64
+	Max     int64
+}
+
+var errLevelNotFound = errors.New("ERR level not found")
+
 func cmdLEVELCREATE(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
+	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
-	maxLevel := parseInt64(ctx.ArgString(1))
+	maxLevel, err := strconv.ParseInt(ctx.ArgString(1), 10, 64)
+	if err != nil || maxLevel < 0 {
+		return ctx.WriteError(fmt.Errorf("ERR max level must be a non-negative integer"))
+	}
 	levelsMu.Lock()
-	levels[name] = maxLevel
+	levels[name] = &LevelGauge{Max: maxLevel}
 	levelsMu.Unlock()
 	return ctx.WriteOK()
 }
 
 func cmdLEVELDELETE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+	if ctx.ArgCount() != 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
 	levelsMu.Lock()
-	defer levelsMu.Unlock()
-	if _, exists := levels[name]; !exists {
+	_, exists := levels[name]
+	delete(levels, name)
+	levelsMu.Unlock()
+	if !exists {
 		return ctx.WriteInteger(0)
 	}
-	delete(levels, name)
 	return ctx.WriteInteger(1)
 }
 
 func cmdLEVELSET(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
+	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
-	level := parseInt64(ctx.ArgString(1))
+	level, err := strconv.ParseInt(ctx.ArgString(1), 10, 64)
+	if err != nil {
+		return ctx.WriteError(ErrNotInteger)
+	}
 	levelsMu.Lock()
-	defer levelsMu.Unlock()
-	levels[name+"_current"] = level
+	gauge, exists := levels[name]
+	if !exists {
+		levelsMu.Unlock()
+		return ctx.WriteError(errLevelNotFound)
+	}
+	if level < 0 || level > gauge.Max {
+		max := gauge.Max
+		levelsMu.Unlock()
+		return ctx.WriteError(fmt.Errorf("ERR level must be between 0 and %d", max))
+	}
+	gauge.Current = level
+	levelsMu.Unlock()
 	return ctx.WriteOK()
 }
 
 func cmdLEVELGET(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+	if ctx.ArgCount() != 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
 	levelsMu.RLock()
-	current := levels[name+"_current"]
-	max := levels[name]
+	gauge, exists := levels[name]
+	var current, max int64
+	if exists {
+		current, max = gauge.Current, gauge.Max
+	}
 	levelsMu.RUnlock()
+	if !exists {
+		return ctx.WriteError(errLevelNotFound)
+	}
 	return ctx.WriteArray([]*resp.Value{
 		resp.BulkString("current"), resp.IntegerValue(current),
 		resp.BulkString("max"), resp.IntegerValue(max),
@@ -733,15 +768,17 @@ func cmdLEVELGET(ctx *Context) error {
 
 func cmdLEVELLIST(ctx *Context) error {
 	levelsMu.RLock()
-	results := make([]*resp.Value, 0)
+	names := make([]string, 0, len(levels))
 	for name := range levels {
-		if len(name) > 8 && name[len(name)-8:] != "_current" {
-			results = append(results, resp.BulkString(name))
-		}
+		names = append(names, name)
 	}
-	reply := results
 	levelsMu.RUnlock()
-	return ctx.WriteArray(reply)
+	sort.Strings(names)
+	results := make([]*resp.Value, len(names))
+	for i, name := range names {
+		results[i] = resp.BulkString(name)
+	}
+	return ctx.WriteArray(results)
 }
 
 var (
@@ -1706,8 +1743,9 @@ func cmdTOKENLIST(ctx *Context) error {
 }
 
 var (
-	sessionsX    = make(map[string]*SessionX)
-	sessionsXMux sync.RWMutex
+	sessionsX        = make(map[string]*SessionX)
+	sessionsXMux     sync.Mutex
+	sessionsXSweptAt int64
 )
 
 type SessionX struct {
@@ -1718,76 +1756,136 @@ type SessionX struct {
 	ExpiresAt int64
 }
 
+var errSessionXNotFound = errors.New("ERR session not found")
+
+// liveSessionX returns the session if it exists and has not expired, deleting
+// it when it has. Callers hold sessionsXMux.
+func liveSessionX(id string, now int64) (*SessionX, bool) {
+	s, exists := sessionsX[id]
+	if !exists {
+		return nil, false
+	}
+	if s.ExpiresAt <= now {
+		delete(sessionsX, id)
+		return nil, false
+	}
+	return s, true
+}
+
+// sweepSessionsX drops every expired session. Callers hold sessionsXMux.
+func sweepSessionsX(now int64) {
+	sessionsXSweptAt = now
+	for id, s := range sessionsX {
+		if s.ExpiresAt <= now {
+			delete(sessionsX, id)
+		}
+	}
+}
+
 func cmdSESSIONXCREATE(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
+	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	user := ctx.ArgString(0)
-	ttlMs := parseInt64(ctx.ArgString(1))
+	ttlMs, err := strconv.ParseInt(ctx.ArgString(1), 10, 64)
+	if err != nil || ttlMs < 1 {
+		return ctx.WriteError(fmt.Errorf("ERR ttl must be a positive integer (milliseconds)"))
+	}
 	id := generateUUID()
+	now := time.Now().UnixMilli()
+	expiresAt := int64(math.MaxInt64)
+	if ttlMs <= math.MaxInt64-now {
+		expiresAt = now + ttlMs
+	}
 	sessionsXMux.Lock()
-	sessionsX[id] = &SessionX{ID: id, User: user, Data: make(map[string]string), CreatedAt: time.Now().UnixMilli(), ExpiresAt: time.Now().UnixMilli() + ttlMs}
+	if now-sessionsXSweptAt >= 1000 {
+		sweepSessionsX(now)
+	}
+	sessionsX[id] = &SessionX{ID: id, User: user, Data: make(map[string]string), CreatedAt: now, ExpiresAt: expiresAt}
 	sessionsXMux.Unlock()
 	return ctx.WriteBulkString(id)
 }
 
 func cmdSESSIONXDELETE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+	if ctx.ArgCount() != 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	id := ctx.ArgString(0)
 	sessionsXMux.Lock()
-	defer sessionsXMux.Unlock()
-	if _, exists := sessionsX[id]; !exists {
+	_, exists := liveSessionX(id, time.Now().UnixMilli())
+	delete(sessionsX, id)
+	sessionsXMux.Unlock()
+	if !exists {
 		return ctx.WriteInteger(0)
 	}
-	delete(sessionsX, id)
 	return ctx.WriteInteger(1)
 }
 
 func cmdSESSIONXGET(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+	if ctx.ArgCount() != 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	id := ctx.ArgString(0)
-	sessionsXMux.RLock()
-	session, exists := sessionsX[id]
-	sessionsXMux.RUnlock()
+	now := time.Now().UnixMilli()
+	sessionsXMux.Lock()
+	session, exists := liveSessionX(id, now)
 	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR session not found"))
+		sessionsXMux.Unlock()
+		return ctx.WriteError(errSessionXNotFound)
 	}
-	return ctx.WriteArray([]*resp.Value{
+	keys := make([]string, 0, len(session.Data))
+	for k := range session.Data {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	data := make([]*resp.Value, 0, 2*len(keys))
+	for _, k := range keys {
+		data = append(data, resp.BulkString(k), resp.BulkString(session.Data[k]))
+	}
+	reply := []*resp.Value{
 		resp.BulkString("id"), resp.BulkString(session.ID),
 		resp.BulkString("user"), resp.BulkString(session.User),
 		resp.BulkString("created_at"), resp.IntegerValue(session.CreatedAt),
-	})
+		resp.BulkString("expires_at"), resp.IntegerValue(session.ExpiresAt),
+		resp.BulkString("ttl"), resp.IntegerValue(session.ExpiresAt - now),
+		resp.BulkString("data"), resp.ArrayValue(data),
+	}
+	sessionsXMux.Unlock()
+	return ctx.WriteArray(reply)
 }
 
 func cmdSESSIONXSET(ctx *Context) error {
-	if ctx.ArgCount() < 3 {
+	if ctx.ArgCount() < 3 || (ctx.ArgCount()-1)%2 != 0 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	id := ctx.ArgString(0)
-	key := ctx.ArgString(1)
-	value := ctx.ArgString(2)
 	sessionsXMux.Lock()
-	defer sessionsXMux.Unlock()
-	if s, exists := sessionsX[id]; exists {
-		s.Data[key] = value
-		return ctx.WriteOK()
+	s, exists := liveSessionX(id, time.Now().UnixMilli())
+	if !exists {
+		sessionsXMux.Unlock()
+		return ctx.WriteError(errSessionXNotFound)
 	}
-	return ctx.WriteError(fmt.Errorf("ERR session not found"))
+	for i := 1; i+1 < ctx.ArgCount(); i += 2 {
+		s.Data[ctx.ArgString(i)] = ctx.ArgString(i + 1)
+	}
+	sessionsXMux.Unlock()
+	return ctx.WriteOK()
 }
 
 func cmdSESSIONXLIST(ctx *Context) error {
-	sessionsXMux.RLock()
-	results := make([]*resp.Value, 0)
+	sessionsXMux.Lock()
+	sweepSessionsX(time.Now().UnixMilli())
+	ids := make([]string, 0, len(sessionsX))
 	for id := range sessionsX {
-		results = append(results, resp.BulkString(id))
+		ids = append(ids, id)
 	}
-	reply := results
-	sessionsXMux.RUnlock()
-	return ctx.WriteArray(reply)
+	sessionsXMux.Unlock()
+	sort.Strings(ids)
+	results := make([]*resp.Value, len(ids))
+	for i, id := range ids {
+		results[i] = resp.BulkString(id)
+	}
+	return ctx.WriteArray(results)
 }
 
 var (
