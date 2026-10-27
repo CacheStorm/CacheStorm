@@ -88,7 +88,7 @@ export function Footer() {
 
         <div className="border-t py-6 text-center" style={{ borderColor: "var(--color-border)" }}>
           <p className="text-sm" style={{ color: "var(--color-text-tertiary)" }}>
-            &copy; {new Date().getFullYear()} CacheStorm. Open source under the Apache License 2.0.
+            &copy; {new Date().getFullYear()} CacheStorm. Open source under the MIT License.
           </p>
         </div>
       </div>

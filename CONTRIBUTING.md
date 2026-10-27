@@ -78,4 +78,4 @@ Publishing a release is a separate action from preparing or validating a patch.
 
 ## License
 
-The repository [LICENSE](LICENSE) contains Apache License 2.0. License statements in package metadata, the website and the root README currently disagree and must be reconciled before publication; see the roadmap. This guide does not change the license file.
+CacheStorm is released under the [MIT License](LICENSE). By contributing, you agree that your contributions are licensed under the same terms.

@@ -38,4 +38,4 @@ Client capabilities differ. Consult the project review for the confirmed pipelin
 
 [Archived designs and release configuration](./archive/README.md) describe earlier plans, rather than current support commitments. Missing numbered guides are no longer listed as existing documentation.
 
-The repository [LICENSE](../LICENSE) contains Apache License 2.0. Conflicting license statements elsewhere are tracked in the project review.
+CacheStorm is released under the [MIT License](../LICENSE).

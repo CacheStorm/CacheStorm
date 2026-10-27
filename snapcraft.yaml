@@ -6,6 +6,7 @@ description: |
   including distributed systems features, data processing, and modern
   application capabilities.
 
+license: MIT
 grade: stable
 confinement: strict
 base: core22

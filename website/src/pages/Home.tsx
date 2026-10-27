@@ -380,7 +380,7 @@ export function Home() {
             </Link>
           </div>
           <p className="mt-6 text-sm" style={{ color: "var(--color-text-tertiary)" }}>
-            Open source &middot; Apache License 2.0 &middot; Free forever
+            Open source &middot; MIT License &middot; Free forever
           </p>
         </div>
       </section>
