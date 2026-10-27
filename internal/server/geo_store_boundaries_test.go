@@ -12,7 +12,7 @@ import (
 
 func TestACLGeoRadiusChecksDestination(t *testing.T) {
 	a := newACLSession(t)
-	if got := a.do("ACL", "SETUSER", "geo_keys_user", "on", ">pw", "-@all", "+geoadd", "+georadius", "+georadiusbymember", "~user:*"); !aclIsOK(got) {
+	if got := a.do("ACL", "SETUSER", "geo_keys_user", "on", "on", ">pw", "-@all", "+geoadd", "+georadius", "+georadiusbymember", "~user:*"); !aclIsOK(got) {
 		t.Fatalf("ACL setup=%+v", got)
 	}
 	if got := a.do("AUTH", "geo_keys_user", "pw"); !aclIsOK(got) {

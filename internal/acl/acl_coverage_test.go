@@ -81,25 +81,15 @@ func TestCanAccessKeyNoMatch(t *testing.T) {
 	}
 }
 
-// Cover CanAccessKey: empty AllowedKeys (should return true - allow all)
-func TestCanAccessKeyEmptyAllowed(t *testing.T) {
-	user := &User{Permissions: Permission{
-		AllowedKeys: []string{},
-	}}
-
-	if !user.CanAccessKey("anykey") {
-		t.Error("expected access when AllowedKeys is empty")
+// No ~pattern means no key access and no &pattern no channel access, as in
+// Redis 7.
+func TestEmptyPatternsDenyAccess(t *testing.T) {
+	user := &User{}
+	if user.CanAccessKey("anykey") {
+		t.Error("a user without key patterns accessed a key")
 	}
-}
-
-// Cover CanAccessChannel: empty AllowedChannels (should return true - allow all)
-func TestCanAccessChannelEmpty(t *testing.T) {
-	user := &User{Permissions: Permission{
-		AllowedChannels: []string{},
-	}}
-
-	if !user.CanAccessChannel("anychannel") {
-		t.Error("expected access when AllowedChannels is empty")
+	if user.CanAccessChannel("anychannel") {
+		t.Error("a user without channel patterns accessed a channel")
 	}
 }
 
@@ -179,11 +169,11 @@ func TestToACLStringWithPasswords(t *testing.T) {
 	if strings.Contains(s, "nopass") {
 		t.Error("should not contain 'nopass' when user has passwords")
 	}
-	if !strings.Contains(s, "+GET") || !strings.Contains(s, "+SET") {
-		t.Error("expected +GET and +SET in ACL string")
+	if !strings.Contains(s, "+get") || !strings.Contains(s, "+set") {
+		t.Error("expected +get and +set in ACL string")
 	}
-	if !strings.Contains(s, "-FLUSHALL") {
-		t.Error("expected -FLUSHALL in ACL string")
+	if !strings.Contains(s, "-flushall") {
+		t.Error("expected -flushall in ACL string")
 	}
 	if !strings.Contains(s, "~user:*") {
 		t.Error("expected ~user:* in ACL string")
@@ -507,5 +497,42 @@ func TestParseACLRuleAllowNonAllGroup(t *testing.T) {
 func TestMatchKeyPatternMultipleTrailingStars(t *testing.T) {
 	if !matchKeyPattern("abc", "abc***") {
 		t.Error("expected abc*** to match abc")
+	}
+}
+
+func TestSetUserRulesFollowRedis(t *testing.T) {
+	a := NewACL()
+	u, _ := a.CreateUser("r")
+	if err := ParseACLRules([]string{"on", ">one", ">two", "~a:*", "&ch", "+get"}, u); err != nil {
+		t.Fatal(err)
+	}
+	if len(u.Passwords) != 2 {
+		t.Fatalf("> added %d passwords, want 2", len(u.Passwords))
+	}
+	if _, err := a.Authenticate("r", "one"); err != nil {
+		t.Fatal("first password lost after adding a second")
+	}
+	if err := ParseACLRules([]string{"<one"}, u); err != nil || len(u.Passwords) != 1 {
+		t.Fatalf("<one: err %v, passwords %d", err, len(u.Passwords))
+	}
+	if err := ParseACLRules([]string{"resetkeys", "resetchannels"}, u); err != nil || u.CanAccessKey("a:1") || u.CanAccessChannel("ch") {
+		t.Fatal("resetkeys/resetchannels kept access")
+	}
+	if err := ParseACLRules([]string{"allkeys", "allchannels"}, u); err != nil || !u.CanAccessKey("x") || !u.CanAccessChannel("y") {
+		t.Fatal("allkeys/allchannels did not grant access")
+	}
+	if err := ParseACLRules([]string{"reset"}, u); err != nil || u.IsEnabled() || u.CanAccessKey("x") || u.CanExecuteCommand("GET") || len(u.Passwords) != 0 {
+		t.Fatalf("reset left %q", u.ToACLString())
+	}
+	for _, bad := range []string{"bogus", "#abc", "%R~k", "+"} {
+		if err := ParseACLRules([]string{"on", bad}, u); err == nil {
+			t.Errorf("%q was accepted", bad)
+		}
+	}
+	if u.IsEnabled() {
+		t.Fatal("a rejected rule list was partly applied")
+	}
+	if err := ParseACLRules([]string{"%RW~k:*"}, u); err != nil || !u.CanAccessKey("k:1") {
+		t.Fatalf("%%RW~ = %v", err)
 	}
 }

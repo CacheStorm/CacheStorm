@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"errors"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -324,10 +325,6 @@ func (u *User) CanAccessKey(key string) bool {
 	u.mu.RLock()
 	defer u.mu.RUnlock()
 
-	if len(u.Permissions.AllowedKeys) == 0 {
-		return true
-	}
-
 	for _, pattern := range u.Permissions.AllowedKeys {
 		if pattern == "*" || pattern == "~*" {
 			return true
@@ -344,10 +341,6 @@ func (u *User) CanAccessChannel(channel string) bool {
 	u.mu.RLock()
 	defer u.mu.RUnlock()
 
-	if len(u.Permissions.AllowedChannels) == 0 {
-		return true
-	}
-
 	for _, pattern := range u.Permissions.AllowedChannels {
 		if pattern == "*" {
 			return true
@@ -360,113 +353,251 @@ func (u *User) CanAccessChannel(channel string) bool {
 	return false
 }
 
+// ToACLString renders the user as ACL LIST does.
 func (u *User) ToACLString() string {
 	u.mu.RLock()
 	defer u.mu.RUnlock()
 
-	var parts []string
-	parts = append(parts, "user", u.Name)
-
+	parts := []string{"user", u.Name}
 	if u.Enabled {
 		parts = append(parts, "on")
 	} else {
 		parts = append(parts, "off")
 	}
-
 	if u.NoPassword {
 		parts = append(parts, "nopass")
-	} else {
-		for _, pw := range u.Passwords {
-			parts = append(parts, "#"+pw[:16])
-		}
 	}
-
-	if _, ok := u.Permissions.AllowedCommands["*"]; ok {
-		parts = append(parts, "+@all")
-	} else {
-		for cmd := range u.Permissions.AllowedCommands {
-			parts = append(parts, "+"+cmd)
-		}
+	for _, pw := range u.Passwords {
+		parts = append(parts, "#"+pw)
 	}
-
-	for cmd := range u.Permissions.DeniedCommands {
-		parts = append(parts, "-"+cmd)
-	}
-
 	for _, key := range u.Permissions.AllowedKeys {
 		parts = append(parts, "~"+key)
 	}
-
+	if len(u.Permissions.AllowedChannels) == 0 {
+		parts = append(parts, "resetchannels")
+	}
 	for _, ch := range u.Permissions.AllowedChannels {
 		parts = append(parts, "&"+ch)
 	}
-
+	if u.Permissions.AllowedCommands["*"] {
+		parts = append(parts, "+@all")
+	} else {
+		parts = append(parts, "-@all")
+	}
+	parts = append(parts, sortedRules("+", u.Permissions.AllowedCommands)...)
+	parts = append(parts, sortedRules("-", u.Permissions.DeniedCommands)...)
 	return strings.Join(parts, " ")
 }
 
-func ParseACLRule(rule string, user *User) error {
-	parts := strings.Fields(rule)
-
-	// Validate the WHOLE rule before mutating anything, so a rule with an
-	// unknown category changes nothing and reports the error.
-	for _, part := range parts {
-		if len(part) > 2 && (part[0] == '+' || part[0] == '-') && part[1] == '@' {
-			cat := strings.ToLower(part[2:])
-			if cat == "all" {
-				continue
-			}
-			if categoryResolver == nil {
-				return errors.New("ERR Error in ACL SETUSER modifier '" + part + "': Unknown command or category name in ACL")
-			}
-			if _, ok := categoryResolver(cat); !ok {
-				return errors.New("ERR Error in ACL SETUSER modifier '" + part + "': Unknown command or category name in ACL")
-			}
+func sortedRules(sign string, cmds map[string]bool) []string {
+	out := make([]string, 0, len(cmds))
+	for cmd := range cmds {
+		if cmd != "*" {
+			out = append(out, sign+strings.ToLower(cmd))
 		}
 	}
+	sort.Strings(out)
+	return out
+}
 
+// ParseACLRule applies the space-separated rules in rule to user.
+func ParseACLRule(rule string, user *User) error {
+	return ParseACLRules(strings.Fields(rule), user)
+}
+
+// ValidateACLRules checks every rule without applying any, so a SETUSER with
+// one bad rule changes nothing.
+func ValidateACLRules(parts []string) error {
 	for _, part := range parts {
-		switch {
-		case part == "on":
-			user.Enable()
-		case part == "off":
-			user.Disable()
-		case part == "nopass":
-			user.RemovePasswords()
-		case strings.HasPrefix(part, ">"):
-			user.SetPassword(part[1:])
-		case part == "allcommands":
-			user.AllowCommand("*")
-		case part == "nocommands":
-			user.DenyCommand("*")
-		case strings.HasPrefix(part, "+") || strings.HasPrefix(part, "-"):
-			allow := part[0] == '+'
-			cmd := part[1:]
-			if strings.HasPrefix(cmd, "@") {
-				cat := strings.ToLower(cmd[1:])
-				if cat == "all" {
-					cmd = "*"
-				} else {
-					members, _ := categoryResolver(cat)
-					user.mu.Lock()
-					for _, m := range members {
-						user.setCommandLocked(m, allow)
-					}
-					user.mu.Unlock()
-					continue
-				}
-			}
-			if allow {
-				user.AllowCommand(cmd)
-			} else {
-				user.DenyCommand(cmd)
-			}
-		case strings.HasPrefix(part, "~"):
-			user.AllowKey(part[1:])
-		case strings.HasPrefix(part, "&"):
-			user.AllowChannel(part[1:])
+		if err := validateACLRule(part); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+func validateACLRule(part string) error {
+	bad := func(why string) error {
+		return errors.New("ERR Error in ACL SETUSER modifier '" + part + "': " + why)
+	}
+	switch strings.ToLower(part) {
+	case "on", "off", "nopass", "resetpass", "reset", "resetkeys", "resetchannels",
+		"allkeys", "allchannels", "allcommands", "nocommands":
+		return nil
+	}
+	if part == "" {
+		return bad("Syntax error")
+	}
+	switch part[0] {
+	case '>', '<', '~', '&':
+		return nil
+	case '#', '!':
+		if !isPasswordHash(part[1:]) {
+			return bad("The password hash must be exactly 64 characters and contain only lowercase hexadecimal characters")
+		}
+		return nil
+	case '%':
+		perm, _, ok := strings.Cut(part[1:], "~")
+		if !ok || perm == "" {
+			return bad("Syntax error")
+		}
+		if !strings.EqualFold(perm, "RW") && !strings.EqualFold(perm, "WR") {
+			return bad("Read-only or write-only key permissions are not supported")
+		}
+		return nil
+	case '+', '-':
+		if len(part) > 2 && part[1] == '@' {
+			cat := strings.ToLower(part[2:])
+			if cat == "all" {
+				return nil
+			}
+			if categoryResolver == nil {
+				return bad("Unknown command or category name in ACL")
+			}
+			if _, ok := categoryResolver(cat); !ok {
+				return bad("Unknown command or category name in ACL")
+			}
+			return nil
+		}
+		if len(part) == 1 {
+			return bad("Syntax error")
+		}
+		return nil
+	}
+	return bad("Syntax error")
+}
+
+func isPasswordHash(h string) bool {
+	if len(h) != 64 {
+		return false
+	}
+	for i := 0; i < len(h); i++ {
+		c := h[i]
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// ParseACLRules applies rules to user with Redis' ACL SETUSER semantics. The
+// whole list is validated first.
+func ParseACLRules(parts []string, user *User) error {
+	if err := ValidateACLRules(parts); err != nil {
+		return err
+	}
+	for _, part := range parts {
+		user.applyRule(part)
+	}
+	return nil
+}
+
+func (u *User) applyRule(part string) {
+	switch strings.ToLower(part) {
+	case "on":
+		u.Enable()
+		return
+	case "off":
+		u.Disable()
+		return
+	case "nopass":
+		u.RemovePasswords()
+		return
+	case "allcommands":
+		u.AllowCommand("*")
+		return
+	case "nocommands":
+		u.DenyCommand("*")
+		return
+	}
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	p := &u.Permissions
+	switch strings.ToLower(part) {
+	case "resetpass":
+		u.Passwords, u.NoPassword = nil, false
+		return
+	case "reset":
+		u.Passwords, u.NoPassword, u.Enabled = nil, false, false
+		p.AllowedKeys, p.AllowedChannels = nil, nil
+		u.setCommandLocked("*", false)
+		return
+	case "resetkeys":
+		p.AllowedKeys = nil
+		return
+	case "resetchannels":
+		p.AllowedChannels = nil
+		return
+	case "allkeys":
+		p.AllowedKeys = []string{"*"}
+		return
+	case "allchannels":
+		p.AllowedChannels = []string{"*"}
+		return
+	}
+	switch part[0] {
+	case '>':
+		u.addHashLocked(hashPassword(part[1:]))
+	case '#':
+		u.addHashLocked(part[1:])
+	case '<':
+		u.removeHashLocked(hashPassword(part[1:]))
+	case '!':
+		u.removeHashLocked(part[1:])
+	case '~':
+		p.AllowedKeys = addPattern(p.AllowedKeys, part[1:])
+	case '%':
+		_, pattern, _ := strings.Cut(part[1:], "~")
+		p.AllowedKeys = addPattern(p.AllowedKeys, pattern)
+	case '&':
+		p.AllowedChannels = addPattern(p.AllowedChannels, part[1:])
+	case '+', '-':
+		allow := part[0] == '+'
+		cmd := part[1:]
+		if strings.HasPrefix(cmd, "@") {
+			cat := strings.ToLower(cmd[1:])
+			if cat != "all" {
+				members, _ := categoryResolver(cat)
+				for _, m := range members {
+					u.setCommandLocked(m, allow)
+				}
+				return
+			}
+			cmd = "*"
+		}
+		u.setCommandLocked(cmd, allow)
+	}
+}
+
+func (u *User) addHashLocked(h string) {
+	u.NoPassword = false
+	for _, stored := range u.Passwords {
+		if stored == h {
+			return
+		}
+	}
+	u.Passwords = append(u.Passwords, h)
+}
+
+func (u *User) removeHashLocked(h string) {
+	for i, stored := range u.Passwords {
+		if stored == h {
+			u.Passwords = append(u.Passwords[:i:i], u.Passwords[i+1:]...)
+			return
+		}
+	}
+}
+
+func addPattern(patterns []string, p string) []string {
+	if p == "*" {
+		return []string{"*"}
+	}
+	for _, have := range patterns {
+		if have == "*" || have == p {
+			return patterns
+		}
+	}
+	return append(patterns, p)
 }
 
 func hashPassword(password string) string {

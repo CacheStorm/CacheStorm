@@ -48,7 +48,7 @@ func TestACLScriptUndeclaredKeyIsRefused(t *testing.T) {
 	s, router := aclScriptSetup(t)
 	s.Set("other:1", &store.StringValue{Data: []byte("secret")}, store.SetOptions{})
 
-	if out := runACLScript(t, router, s, nil, "ACL", "SETUSER", "runner", ">pw", "on", "-@all", "+eval", "+get", "~user:*"); !strings.Contains(out, "+OK") {
+	if out := runACLScript(t, router, s, nil, "ACL", "SETUSER", "runner", "reset", "on", ">pw", "on", "-@all", "+eval", "+get", "~user:*"); !strings.Contains(out, "+OK") {
 		t.Fatalf("ACL SETUSER runner: %q", out)
 	}
 	runner, ok := globalACL.GetUser("runner")
@@ -140,7 +140,7 @@ func TestACLScriptCommandPermissionIsChecked(t *testing.T) {
 
 	// +eval and +fcall only: no +get, no +flushdb. The key IS in pattern, so
 	// only the command check can refuse the call.
-	if out := runACLScript(t, router, s, nil, "ACL", "SETUSER", "runner", ">pw", "on", "-@all", "+eval", "+fcall", "~user:*"); !strings.Contains(out, "+OK") {
+	if out := runACLScript(t, router, s, nil, "ACL", "SETUSER", "runner", "reset", "on", ">pw", "on", "-@all", "+eval", "+fcall", "~user:*"); !strings.Contains(out, "+OK") {
 		t.Fatalf("ACL SETUSER runner: %q", out)
 	}
 	runner, ok := globalACL.GetUser("runner")

@@ -54,7 +54,7 @@ func TestFCALLFunctionUndeclaredKeyIsRefused(t *testing.T) {
 	s.Set("other:1", &store.StringValue{Data: []byte("secret")}, store.SetOptions{})
 	s.Set("user:1", &store.StringValue{Data: []byte("mine")}, store.SetOptions{})
 
-	if out := runFCALLAs(t, router, s, nil, "ACL", "SETUSER", "runner", ">pw", "on", "-@all", "+fcall", "+function", "+get", "~user:*", "~fclib.*"); !strings.Contains(out, "+OK") {
+	if out := runFCALLAs(t, router, s, nil, "ACL", "SETUSER", "runner", "reset", "on", ">pw", "on", "-@all", "+fcall", "+function", "+get", "~user:*", "~fclib.*"); !strings.Contains(out, "+OK") {
 		t.Fatalf("ACL SETUSER runner: %q", out)
 	}
 	runner, ok := globalACL.GetUser("runner")
@@ -129,7 +129,7 @@ func TestFCALLDeclaredKeysAreTheTopLevelContract(t *testing.T) {
 	s.Set("user:1", &store.StringValue{Data: []byte("mine")}, store.SetOptions{})
 	s.Set("other:1", &store.StringValue{Data: []byte("secret")}, store.SetOptions{})
 
-	if out := runFCALLAs(t, router, s, nil, "ACL", "SETUSER", "runner", ">pw", "on", "-@all", "+fcall", "+function", "+get", "~user:*"); !strings.Contains(out, "+OK") {
+	if out := runFCALLAs(t, router, s, nil, "ACL", "SETUSER", "runner", "reset", "on", ">pw", "on", "-@all", "+fcall", "+function", "+get", "~user:*"); !strings.Contains(out, "+OK") {
 		t.Fatalf("ACL SETUSER runner: %q", out)
 	}
 	runner, _ := globalACL.GetUser("runner")

@@ -259,7 +259,7 @@ func TestACLLogRecordsDenials(t *testing.T) {
 	s := startReplServer(t, nil)
 	admin := dialRepl(t, s)
 	admin.do("ACL", "LOG", "RESET")
-	admin.do("ACL", "SETUSER", "limited", "on", ">pw", "-@all", "+get", "~user:*")
+	admin.do("ACL", "SETUSER", "limited", "on", "on", ">pw", "-@all", "+get", "~user:*")
 	u := dialRepl(t, s)
 	u.do("AUTH", "limited", "pw")
 	if got := u.do("SET", "user:1", "x"); got.Type != resp.TypeError || got.Err != "NOPERM User limited has no permissions to run the 'set' command" {
@@ -305,7 +305,7 @@ func TestACLLogRecordsScriptDenials(t *testing.T) {
 	s := startReplServer(t, nil)
 	admin := dialRepl(t, s)
 	admin.do("ACL", "LOG", "RESET")
-	admin.do("ACL", "SETUSER", "scripter", "on", ">pw", "-@all", "+eval", "+get", "~user:*")
+	admin.do("ACL", "SETUSER", "scripter", "on", "on", ">pw", "-@all", "+eval", "+get", "~user:*")
 	u := dialRepl(t, s)
 	u.do("AUTH", "scripter", "pw")
 	if got := u.do("EVAL", "return redis.call('set', 'user:1', 'x')", "0"); got.Type != resp.TypeError {
@@ -373,10 +373,10 @@ func TestRuntimeStatsAreReal(t *testing.T) {
 func TestACLCategoriesAndCommandIntrospection(t *testing.T) {
 	s := startReplServer(t, nil)
 	admin := dialRepl(t, s)
-	if got := admin.do("ACL", "SETUSER", "reader", "on", ">pw", "~*", "-@all", "+@read", "+@connection"); got.Str != "OK" {
+	if got := admin.do("ACL", "SETUSER", "reader", "on", "on", ">pw", "~*", "-@all", "+@read", "+@connection"); got.Str != "OK" {
 		t.Fatalf("ACL SETUSER with categories = %+v", got)
 	}
-	if got := admin.do("ACL", "SETUSER", "x", "+@bogus"); got.Type != resp.TypeError {
+	if got := admin.do("ACL", "SETUSER", "x", "on", "+@bogus"); got.Type != resp.TypeError {
 		t.Fatalf("unknown category = %+v", got)
 	}
 	admin.do("SET", "k", "v")

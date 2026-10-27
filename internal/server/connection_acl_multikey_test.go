@@ -60,7 +60,7 @@ func newACLMultiKeySession(t *testing.T) *aclSession {
 
 	// The commands are GRANTED; only the key pattern is restrictive. That is
 	// what makes each case test key extraction rather than command permission.
-	if v := a.do("ACL", "SETUSER", aclMultiKeyUser, ">pw", "-@all",
+	if v := a.do("ACL", "SETUSER", aclMultiKeyUser, "reset", "on", ">pw", "-@all",
 		"+get", "+set", "+rename", "+renamenx", "+copy",
 		"+mset", "+mget", "+sort", "+bitop", "+del", "+rpush",
 		"+zadd", "+zunionstore", "+zinterstore", "+zunion", "+zinter",

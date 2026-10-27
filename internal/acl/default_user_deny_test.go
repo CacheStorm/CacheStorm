@@ -19,8 +19,8 @@ func TestParseACLRuleDenyCommandOnDefaultUser(t *testing.T) {
 	if a.DefaultUser.CanExecuteCommand("GET") {
 		t.Fatal("GET should be denied for the default user after -get")
 	}
-	if got := a.DefaultUser.ToACLString(); !strings.Contains(got, "-GET") {
-		t.Fatalf("ToACLString should report the -GET deny, got %q", got)
+	if got := a.DefaultUser.ToACLString(); !strings.Contains(got, "-get") {
+		t.Fatalf("ToACLString should report the -get deny, got %q", got)
 	}
 	// The deny is specific: an unrelated command stays allowed.
 	if !a.DefaultUser.CanExecuteCommand("SET") {

@@ -46,7 +46,7 @@ func seedACLUser(t *testing.T, username, password string, extraRules ...string) 
 	// for the wrong reason. Delete the user first so the seeding starts
 	// from nothing.
 	sess.do("ACL", "DELUSER", username)
-	args := []string{"ACL", "SETUSER", username, ">" + password, "on", "-@all", "+get", "~user:*"}
+	args := []string{"ACL", "SETUSER", username, "reset", "on", ">" + password, "on", "-@all", "+get", "~user:*"}
 	args = append(args, extraRules...)
 	if v := sess.do(args...); !aclIsOK(v) {
 		t.Fatalf("seeding ACL user %s failed: %v", username, v)

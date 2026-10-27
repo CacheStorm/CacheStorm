@@ -16,7 +16,7 @@ func TestSetACLTransportReadIsolationX(t *testing.T) {
 		}
 	}
 	user := "read_isolation_set_user"
-	if v := admin.do("ACL", "SETUSER", user, "on", ">pw", "-@all", "+sunion", "+sinter", "+sdiff", "+sunionstore", "+sinterstore", "+sdiffstore", "+smembers", "+sintercard", "~user:*"); !aclIsOK(v) {
+	if v := admin.do("ACL", "SETUSER", user, "on", "on", ">pw", "-@all", "+sunion", "+sinter", "+sdiff", "+sunionstore", "+sinterstore", "+sdiffstore", "+smembers", "+sintercard", "~user:*"); !aclIsOK(v) {
 		t.Fatal(v)
 	}
 	t.Cleanup(func() { admin.do("ACL", "DELUSER", user) })

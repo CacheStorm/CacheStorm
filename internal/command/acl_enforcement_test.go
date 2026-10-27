@@ -180,9 +180,8 @@ func TestEnforceAclNoUserIsPermissive(t *testing.T) {
 	}
 }
 
-// A user with no key restriction may touch any key — the empty AllowedKeys
-// list must not deny everything.
-func TestEnforceAclEmptyKeyListAllowsAnyKey(t *testing.T) {
+// A user with no ~pattern has no key access, as in Redis.
+func TestEnforceAclEmptyKeyListDeniesKeys(t *testing.T) {
 	a := acl.NewACL()
 	u, err := a.CreateUser("nokeys_user")
 	if err != nil {
@@ -195,8 +194,8 @@ func TestEnforceAclEmptyKeyListAllowsAnyKey(t *testing.T) {
 
 	ctx := aclCtx(t, "GET", "anything:at:all")
 	ctx.ACLUser = u
-	if enforceACL(ctx, "GET") {
-		t.Error("a user with no ~pattern was denied a key, but an empty key list means unrestricted")
+	if !enforceACL(ctx, "GET") {
+		t.Error("a user with no ~pattern was granted a key; as in Redis it has no key access")
 	}
 }
 
@@ -244,7 +243,7 @@ func TestAclChannelsForCommand(t *testing.T) {
 }
 
 // A &channel restriction must be enforced per channel, and a user with no &rule
-// must remain unrestricted.
+// has no channel access.
 func TestEnforceAclChannelRules(t *testing.T) {
 	newChanUser := func(t *testing.T, rule string) *acl.User {
 		t.Helper()
@@ -293,13 +292,14 @@ func TestEnforceAclChannelRules(t *testing.T) {
 		t.Error("SUBSCRIBE news.tech private was permitted, but private is outside &news.*")
 	}
 
-	// No &rule means every channel is allowed.
+	// No &rule means no channel, as Redis 7's default resetchannels.
 	noRule := newChanUser(t, "")
-	if !allowed(noRule, "PUBLISH", "any.channel", "payload") {
-		t.Error("PUBLISH was refused for a user with no &rule, but an empty channel list means unrestricted")
+	if allowed(noRule, "PUBLISH", "any.channel", "payload") {
+		t.Error("PUBLISH was permitted for a user with no &rule")
 	}
-	if !allowed(noRule, "SUBSCRIBE", "anything") {
-		t.Error("SUBSCRIBE was refused for a user with no &rule, but an empty channel list means unrestricted")
+	allChans := newChanUser(t, "allchannels")
+	if !allowed(allChans, "SUBSCRIBE", "anything") {
+		t.Error("SUBSCRIBE was refused for an allchannels user")
 	}
 }
 
@@ -330,7 +330,7 @@ func TestEnforceAclAdminCommandsFollowRules(t *testing.T) {
 	none := ruleUser(t, "-@all +get ~user:*")
 	readOnly := ruleUser(t, "-@all +config|get ~user:*")
 	for _, sub := range [][]string{
-		{"ACL", "SETUSER", "x", "+@all", "~*"},
+		{"ACL", "SETUSER", "x", "on", "+@all", "~*"},
 		{"ACL", "LIST"},
 		{"ACL", "WHOAMI"},
 		{"CONFIG", "GET", "maxmemory"},
@@ -352,7 +352,7 @@ func TestEnforceAclAdminCommandsFollowRules(t *testing.T) {
 	if !refused(readOnly, "CONFIG", "SET", "maxmemory", "1") {
 		t.Error("CONFIG SET was permitted for a user granted only +config|get")
 	}
-	if enforceACL(aclCtx(t, "ACL", "SETUSER", "u", "+@all", "~*"), "ACL") {
+	if enforceACL(aclCtx(t, "ACL", "SETUSER", "u", "on", "+@all", "~*"), "ACL") {
 		t.Error("ACL was refused for a context with no ACLUser")
 	}
 }

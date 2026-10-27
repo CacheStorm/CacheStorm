@@ -1685,6 +1685,13 @@ func cmdACL(ctx *Context) error {
 			return ctx.WriteError(ErrWrongArgCount)
 		}
 		username := ctx.ArgString(1)
+		ruleParts := make([]string, 0, len(ctx.Args)-2)
+		for i := 2; i < len(ctx.Args); i++ {
+			ruleParts = append(ruleParts, string(ctx.Args[i]))
+		}
+		if err := acl.ValidateACLRules(ruleParts); err != nil {
+			return ctx.WriteError(err)
+		}
 		user, exists := globalACL.GetUser(username)
 		if !exists {
 			var err error
@@ -1693,16 +1700,8 @@ func cmdACL(ctx *Context) error {
 				return ctx.WriteError(err)
 			}
 		}
-		ruleParts := make([]string, 0, len(ctx.Args)-2)
-		for i := 2; i < len(ctx.Args); i++ {
-			ruleParts = append(ruleParts, string(ctx.Args[i]))
-		}
-		rule := strings.Join(ruleParts, " ")
-		if err := acl.ParseACLRule(rule, user); err != nil {
+		if err := acl.ParseACLRules(ruleParts, user); err != nil {
 			return ctx.WriteError(err)
-		}
-		if !user.Enabled {
-			user.Enable()
 		}
 		return ctx.WriteOK()
 	case "DELUSER":

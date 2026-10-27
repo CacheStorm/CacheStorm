@@ -127,7 +127,7 @@ func TestACLUserIsEnforcedOnRealConnection(t *testing.T) {
 		t.Fatalf("setup: SET other:1 returned type %v %q, want +OK", v.Type, v.Str)
 	}
 
-	if v := a.do("ACL", "SETUSER", user, ">pw", "-@all", "+get", "~user:*"); !aclIsOK(v) {
+	if v := a.do("ACL", "SETUSER", user, "reset", "on", ">pw", "-@all", "+get", "~user:*"); !aclIsOK(v) {
 		t.Fatalf("setup: ACL SETUSER returned type %v %q, want +OK", v.Type, v.Str)
 	}
 	if v := a.do("AUTH", user, "pw"); !aclIsOK(v) {
@@ -161,7 +161,7 @@ func TestACLAuthWithWrongPasswordGrantsNothing(t *testing.T) {
 	const user = "acl_wrongpw_user"
 	a := newACLSession(t)
 
-	if v := a.do("ACL", "SETUSER", user, ">pw", "-@all", "+get", "~user:*"); !aclIsOK(v) {
+	if v := a.do("ACL", "SETUSER", user, "reset", "on", ">pw", "-@all", "+get", "~user:*"); !aclIsOK(v) {
 		t.Fatalf("setup: ACL SETUSER returned type %v %q, want +OK", v.Type, v.Str)
 	}
 	if v := a.do("AUTH", user, "WRONG"); v.Type != resp.TypeError {
@@ -191,7 +191,7 @@ func TestACLPermissionsPersistAcrossCommands(t *testing.T) {
 	const user = "acl_persist_user"
 	a := newACLSession(t)
 
-	if v := a.do("ACL", "SETUSER", user, ">pw", "-@all", "+get", "~user:*"); !aclIsOK(v) {
+	if v := a.do("ACL", "SETUSER", user, "reset", "on", ">pw", "-@all", "+get", "~user:*"); !aclIsOK(v) {
 		t.Fatalf("setup: ACL SETUSER returned type %v %q, want +OK", v.Type, v.Str)
 	}
 	if v := a.do("AUTH", user, "pw"); !aclIsOK(v) {
@@ -210,7 +210,7 @@ func TestDryrunAgreesWithEnforcement(t *testing.T) {
 	const user = "acl_dryrun_user"
 	a := newACLSession(t)
 
-	if v := a.do("ACL", "SETUSER", user, ">pw", "-@all", "+get", "~user:*"); !aclIsOK(v) {
+	if v := a.do("ACL", "SETUSER", user, "reset", "on", ">pw", "-@all", "+get", "~user:*"); !aclIsOK(v) {
 		t.Fatalf("setup: ACL SETUSER returned type %v %q, want +OK", v.Type, v.Str)
 	}
 
@@ -238,7 +238,7 @@ func TestACLChannelPatternIsEnforcedOnRealConnection(t *testing.T) {
 	const user = "acl_channel_user"
 	a := newACLSession(t)
 
-	if v := a.do("ACL", "SETUSER", user, ">pw", "-@all",
+	if v := a.do("ACL", "SETUSER", user, "reset", "on", ">pw", "-@all",
 		"+publish", "+subscribe", "+psubscribe", "&news.*"); !aclIsOK(v) {
 		t.Fatalf("setup: ACL SETUSER returned type %v %q, want +OK", v.Type, v.Str)
 	}
@@ -279,20 +279,28 @@ func TestACLChannelPatternIsEnforcedOnRealConnection(t *testing.T) {
 	}
 }
 
-// A user with no &rule keeps full access to channels, so a key-restricted user
-// is not newly confined to publishing nowhere.
-func TestACLNoChannelRuleMeansAllChannelsControl(t *testing.T) {
+// As in Redis 7 (acl-pubsub-default resetchannels), a user with no &rule has
+// no channel access, and allchannels grants every channel.
+func TestACLNoChannelRuleMeansNoChannels(t *testing.T) {
 	const user = "acl_nochan_user"
 	a := newACLSession(t)
 
-	if v := a.do("ACL", "SETUSER", user, ">pw", "-@all", "+get", "+publish", "~user:*"); !aclIsOK(v) {
+	if v := a.do("ACL", "SETUSER", user, "reset", "on", ">pw", "-@all", "+get", "+publish", "~user:*"); !aclIsOK(v) {
 		t.Fatalf("setup: ACL SETUSER returned type %v %q, want +OK", v.Type, v.Str)
 	}
 	if v := a.do("AUTH", user, "pw"); !aclIsOK(v) {
 		t.Fatalf("AUTH returned type %v %q, want +OK", v.Type, v.Str)
 	}
+	if v := a.do("PUBLISH", "any.channel.at.all", "hello"); !aclIsNoperm(v) {
+		t.Fatalf("PUBLISH with no &rule returned type %v %q, want NOPERM", v.Type, v.Err)
+	}
+	a.do("AUTH", "default", "")
+	a.do("ACL", "SETUSER", user, "allchannels")
+	if v := a.do("AUTH", user, "pw"); !aclIsOK(v) {
+		t.Fatalf("AUTH returned type %v %q, want +OK", v.Type, v.Str)
+	}
 	if v := a.do("PUBLISH", "any.channel.at.all", "hello"); v.Type != resp.TypeInteger {
-		t.Fatalf("control: PUBLISH with no &rule returned type %v %q, want an integer — a key-restricted user was newly confined to no channels", v.Type, v.Str)
+		t.Fatalf("PUBLISH after allchannels returned type %v %q, want an integer", v.Type, v.Str)
 	}
 }
 
@@ -305,7 +313,7 @@ func TestACLUserGrantedACLMayAdministerACL(t *testing.T) {
 	if v := a.do("SET", "other:1", "topsecret"); !aclIsOK(v) {
 		t.Fatalf("setup: SET other:1 returned type %v %q, want +OK", v.Type, v.Str)
 	}
-	if v := a.do("ACL", "SETUSER", user, ">pw", "-@all", "+get", "+acl", "~user:*"); !aclIsOK(v) {
+	if v := a.do("ACL", "SETUSER", user, "on", "reset", "on", ">pw", "-@all", "+get", "+acl", "~user:*"); !aclIsOK(v) {
 		t.Fatalf("setup: ACL SETUSER returned type %v %q, want +OK", v.Type, v.Str)
 	}
 	if v := a.do("AUTH", user, "pw"); !aclIsOK(v) {
@@ -317,7 +325,7 @@ func TestACLUserGrantedACLMayAdministerACL(t *testing.T) {
 	if v := a.do("ACL", "WHOAMI"); v.Type != resp.TypeBulkString || string(v.Bulk) != user {
 		t.Fatalf("ACL WHOAMI returned type %v %q, want %q", v.Type, v.Bulk, user)
 	}
-	if v := a.do("ACL", "SETUSER", user, "~*"); !aclIsOK(v) {
+	if v := a.do("ACL", "SETUSER", user, "on", "~*"); !aclIsOK(v) {
 		t.Fatalf("ACL SETUSER <self> ~* returned type %v %q, want +OK", v.Type, v.Err)
 	}
 	if v := a.do("GET", "other:1"); v.Type != resp.TypeBulkString || string(v.Bulk) != "topsecret" {
@@ -334,13 +342,13 @@ func TestACLUserWithoutACLGrantIsRefusedControl(t *testing.T) {
 	const user = "acl_noselfadmin_user"
 	a := newACLSession(t)
 
-	if v := a.do("ACL", "SETUSER", user, ">pw", "-@all", "+get", "~user:*"); !aclIsOK(v) {
+	if v := a.do("ACL", "SETUSER", user, "reset", "on", ">pw", "-@all", "+get", "~user:*"); !aclIsOK(v) {
 		t.Fatalf("setup: ACL SETUSER returned type %v %q, want +OK", v.Type, v.Str)
 	}
 	if v := a.do("AUTH", user, "pw"); !aclIsOK(v) {
 		t.Fatalf("AUTH returned type %v %q, want +OK", v.Type, v.Str)
 	}
-	if v := a.do("ACL", "SETUSER", user, "+@all", "~*"); !aclIsNoperm(v) {
+	if v := a.do("ACL", "SETUSER", user, "on", "+@all", "~*"); !aclIsNoperm(v) {
 		t.Fatalf("ACL SETUSER returned type %v %q, want NOPERM", v.Type, v.Err)
 	}
 }
@@ -351,13 +359,13 @@ func TestACLUserWithoutACLGrantIsRefusedControl(t *testing.T) {
 func TestACLConfigFollowsUserRules(t *testing.T) {
 	a := newACLSession(t)
 
-	if v := a.do("ACL", "SETUSER", "cfg_none", ">pw", "-@all", "+get", "~*"); !aclIsOK(v) {
+	if v := a.do("ACL", "SETUSER", "cfg_none", "reset", "on", ">pw", "-@all", "+get", "~*"); !aclIsOK(v) {
 		t.Fatalf("setup: ACL SETUSER cfg_none returned type %v %q", v.Type, v.Str)
 	}
-	if v := a.do("ACL", "SETUSER", "cfg_read", ">pw", "-@all", "+config|get", "+eval", "~*"); !aclIsOK(v) {
+	if v := a.do("ACL", "SETUSER", "cfg_read", "reset", "on", ">pw", "-@all", "+config|get", "+eval", "~*"); !aclIsOK(v) {
 		t.Fatalf("setup: ACL SETUSER cfg_read returned type %v %q", v.Type, v.Str)
 	}
-	if v := a.do("ACL", "SETUSER", "cfg_all", ">pw", "+@all", "~*"); !aclIsOK(v) {
+	if v := a.do("ACL", "SETUSER", "cfg_all", "reset", "on", ">pw", "+@all", "~*"); !aclIsOK(v) {
 		t.Fatalf("setup: ACL SETUSER cfg_all returned type %v %q", v.Type, v.Str)
 	}
 

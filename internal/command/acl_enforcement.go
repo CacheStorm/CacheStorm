@@ -335,6 +335,9 @@ func aclKeysForCommand(cmd string, args [][]byte) []string {
 	if aclNoKeyCommands[cmd] {
 		return nil
 	}
+	if spec, ok := redisCommandSpecs[cmd]; ok && spec.FirstKey == 0 && !commandHasFlag(cmd, "movablekeys") {
+		return nil
+	}
 	if aclSingleKeyCommands[cmd] {
 		if len(args) >= 1 {
 			return toStrings(args[:1])

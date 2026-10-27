@@ -34,7 +34,7 @@ func TestACLUncoveredCommandIsKeyChecked(t *testing.T) {
 		return buf.String()
 	}
 
-	if out := run(nil, "ACL", "SETUSER", "streamer", ">pw", "on", "-@all", "+xadd", "+get", "~user:*"); !strings.Contains(out, "+OK") {
+	if out := run(nil, "ACL", "SETUSER", "streamer", "reset", "on", ">pw", "on", "-@all", "+xadd", "+get", "~user:*"); !strings.Contains(out, "+OK") {
 		t.Fatalf("ACL SETUSER streamer: %q", out)
 	}
 	streamer, ok := globalACL.GetUser("streamer")
