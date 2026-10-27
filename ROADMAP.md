@@ -97,13 +97,13 @@ Durum (25 Ekim 2026): **tamamlandı.** CI; Python, TypeScript ve Go istemcilerin
 
 Öncelik: **P2**, dağıtık kullanım hedefleniyorsa **P0 ürün engeli**. Tahmin: **15–30 iş günü**, tasarıma göre yeniden değerlendirilir.
 
-Durum (25 Ekim 2026): 1. ve 3. maddeler tamamlandı (tek sahip `internal/replication.Manager`; iki/üç sunuculu uçtan uca testler ve `scripts/replication-smoke.sh`). Cluster modu tek düğüm için çalışıyor (27 Ekim 2026, `docs/cluster-design.md` 1. aşama): slot tablosu, `nodes.conf`, CLUSTER komutları ve MOVED/ASK/CROSSSLOT/TRYAGAIN/CLUSTERDOWN yönlendirmeleri. 2. aşama da tamamlandı: cluster bus, gossip, MEET/FORGET ve hata tespiti; `redis-cli --cluster create` üç master ile çalışıyor (`scripts/cluster-smoke.sh`). Replikalar, failover ve yeniden dağıtım sonraki aşamalarda. Tam senkronizasyon function kitaplıklarını (boş kayıt dahil) taşıyor; canlı LOAD/DELETE ve replikanın SIGKILL sonrası AOF kurtarması iki ayrı süreçle doğrulandı. Function kayıtları sunucuya ait; hata yanıtı veren snapshot komutları ve başarısız AOF kaydı senkronizasyonu durduruyor, bu konum devam edilebilir olarak kabul edilmiyor. Başarısız tam snapshot artık canlı veriyi değiştirmeden reddediliyor; yeni veri ayrı alanda hazırlanıp AOF adımından sonra yayımlanıyor. Canlı komut hatası konumu ilerletmiyor, bağlantıyı sonlandırıyor ve tam senkronizasyon gerektiriyor. Canlı komutun hata öncesi kısmi bellek değişikliklerinin ele alınması, 5. madde ve Sentinel ile otomatik failover açık.
+Durum (27 Ekim 2026): **tamamlandı.** Replikasyon tek sahipli `internal/replication.Manager` ile çalışıyor (tam/kısmi senkronizasyon, backlog, ACK, WAIT, TLS). Redis Sentinel ile otomatik failover üç süreçle doğrulanıyor, bağımsız `FAILOVER` komutu master rolünü veri kaybı olmadan bir replikaya devrediyor. Cluster modu `docs/cluster-design.md` içindeki beş aşamanın hepsini tamamladı: slot tablosu ve `nodes.conf`, CLUSTER komutları ve MOVED/ASK/CROSSSLOT/TRYAGAIN/CLUSTERDOWN, gossip'li cluster bus ve hata tespiti, replikalar ile otomatik ve elle failover, `redis-cli --cluster` ile reshard/rebalance/add-node/del-node/fix, isteğe bağlı karşılıklı TLS. `scripts/cluster-smoke.sh` sekiz süreçle oluşturma, failover ve yeniden dağıtımı go-redis trafiği altında CI'da doğruluyor. Operatör kılavuzu `docs/09-cluster.md`.
 
-1. F21 için command katmanındaki replication manager ile `internal/replication.Manager` arasındaki sahipliği birleştir. Config, Start, Stop ve rol değişimleri aynı örneğe ulaşsın.
-2. Cluster, gossip, hash-slot routing ve failover yaşam döngülerini Server'a bağla. Etkinleştirilen ama başlatılamayan özellik açık hata versin.
-3. REPLICAOF/SYNC/PSYNC/backlog/ACK ve yazma yayılımını iki gerçek süreç üzerinde doğrula. Replica read-only, yeniden bağlantı ve ilk senkronizasyonu sınayan testler ekle.
-4. CLUSTER DELSLOTS/SETSLOT/COUNTKEYSINSLOT/GETKEYSINSLOT, MOVED/ASK/CROSSSLOT ve MIGRATE için tamamlanmamış davranışları uygula veya desteklenmiyor hatası döndür.
-5. Üç düğümde node kaybı, ağ bölünmesi, yeniden katılım, eski primary'nin dönüşü ve slot taşımayı veri eşitliğiyle doğrula. Sentinel'in gerçek rol değişimini tetiklediğini kontrol et.
+1. Tamamlandı: replikasyon sahipliği tek yöneticide.
+2. Tamamlandı: cluster, gossip, hash-slot yönlendirme ve failover sunucuya bağlı.
+3. Tamamlandı: REPLICAOF/SYNC/PSYNC/backlog/ACK iki ve üç gerçek süreçle doğrulanıyor.
+4. Tamamlandı: CLUSTER SETSLOT/COUNTKEYSINSLOT/GETKEYSINSLOT, MIGRATE ve RESTORE-ASKING.
+5. Tamamlandı: düğüm kaybı, eski master'ın dönüşü ve slot taşıma veri eşitliğiyle doğrulanıyor. Açık kalanlar: replika göçü, `cluster-replica-no-failover`, Redis'in yeniden katılma gecikmeleri.
 
 Çıkış ölçütü: sadece paket testleri değil, süreçlerin açılıp kapandığı tekrarlanabilir bir kümede veri kaybı/çakışma koşulları ve destek sınırları ölçülür. Bu ölçüt sağlanmadan dağıtık production desteği ilan edilmez.
 
@@ -126,13 +126,12 @@ Durum (25 Ekim 2026): **kısmen tamamlandı.** `maxmemory` artık yerinde büyü
 
 27 Ekim 2026 turu: `BGREWRITEAOF` artık gerçekten AOF'u yeniden yazıyor (önceden yalnızca "started" dönüyordu) ve AOF otomatik olarak küçültülüyor. `CONFIG GET/SET` çalışan sunucuya bağlandı: `maxmemory`, `maxmemory-policy`, `maxmemory-samples`, `maxclients`, `timeout` ve `requirepass` anında etkili; `CONFIG GET` Redis gibi glob eşleşiyor ve çoklu parametre alıyor. Sekiz Redis eviction politikasının hepsi var (volatile-lfu/random/ttl eklendi). Boşta bekleyen istemciler artık 5 dakikada kesilmiyor (Redis `timeout 0`). Lisans MIT.
 
-M1–M4 tamamlandı; replikasyon çalışıyor. Sıradaki işler:
+M1–M5 tamamlandı. Redis 7.4'ün komut tablosundaki her komut kayıtlı; hash alanı süreleri (HEXPIRE ailesi) gerçek Redis ile bayt bayt karşılaştırılıyor. Sıradaki işler:
 
-1. SAVE/BGSAVE, periyodik snapshot ve başlangıçta yükleme bağlandı. Sırada native snapshot yakalama ile tam senkronun yazma duraklamasını ve ek bellek maliyetini ölçüp azaltmak var.
-2. Tamamlandı (25 Ekim 2026): expiry milisaniye olarak saklanıyor; 2262 sınırı kaldırıldı. AOF/RDB roundtrip ve Redis karşılaştırmasıyla doğrulandı.
-3. Tamamlandı (27 Ekim 2026): gerçek Redis Sentinel ile otomatik failover üç CacheStorm süreciyle doğrulandı ve CI'a alındı (`scripts/sentinel-smoke.sh`). Yerleşik sentinel rolü deneysel olarak işaretlendi; sunucuları yeniden yapılandırmıyor.
-4. Tamamlandı (27 Ekim 2026): RESP3 (HELLO 3, push, map, double, null) ve gerçek CLIENT TRACKING (client-side caching). go-redis, redis-py (client-side cache dahil) ve ioredis CI'da.
-5. Pipeline'lı yazmalarda yazma kapısının maliyetini düşürmek (Redis'in %40–85'i).
+1. Keyspace bildirimleri (`notify-keyspace-events`) — devam ediyor.
+2. Native snapshot yakalama ile tam senkronizasyonun yazma duraklamasını ve ek bellek maliyetini ölçüp azaltmak.
+3. Süreç geneli uzantı kayıtlarının (kuyruklar, kilitler, sayaçlar) kalıcılığı ve replikasyonu, ya da bunların açıkça geçici olarak belgelenmesi.
+4. Tek anahtara yoğun pipeline yazmalarında komut başına maliyeti düşürmek (HSET Redis'in ~%63'ü).
 
 AOF snapshot değişimi (25 Ekim 2026): yazarı durdurup yeniden açma kaldırıldı; eşzamanlı append kilit altında sıralanıyor. Hazırlama, yazma, fsync, rename ve directory-sync hataları kalıcı regresyonlarla sınanıyor. Geri alma sonrası append, hard-link bulunmayan dosya sisteminde de doğru dosyaya gidiyor. Geri alma da başarısızsa önceki veri korunuyor, kurtarma yolu bildiriliyor ve writer hata döndürüyor. AOF hataları artık MISCONF/HTTP 503 olarak istemciye taşınıyor; sonraki AOF kapsamındaki yazmalar uygulama öncesi reddediliyor. INFO ve readiness hatayı gösteriyor. Açık: ilk hatalı işlemin bellek/disk belirsizliği, güç kesintisi kurtarması ve Windows çalışma zamanı doğrulaması.
 
