@@ -175,8 +175,11 @@ func (s *Server) stopClusterBus() {
 
 // dropSlotKeys deletes the keys of a slot another node took over, as Redis'
 // delKeysInSlot does, and records the deletions in the AOF and the
-// replication stream.
+// replication stream. It holds the write gate so the deletions are ordered
+// with every other write and its propagation.
 func (s *Server) dropSlotKeys(slot int) {
+	s.LockWrites()
+	defer s.UnlockWrites()
 	for {
 		keys := s.store.KeysInSlot(slot, 1000)
 		if len(keys) == 0 {

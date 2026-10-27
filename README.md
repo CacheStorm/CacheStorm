@@ -62,7 +62,7 @@ A high-performance in-memory data store written in Go. **about 1,200 commands**,
 | **Search** | 12 | Full-text search |
 | **Graph** | 12 | Graph database operations (`GRAPH.QUERY` not implemented) |
 | **Probabilistic** | 20+ | Bloom/Cuckoo filters, Count-Min Sketch |
-| **Distributed** | 100+ | Master-replica replication; multi-master Redis Cluster mode |
+| **Distributed** | 100+ | Master-replica replication; Redis Cluster mode with replicas, failover and resharding |
 | **Caching** | 50+ | Cache warming, invalidation |
 | **Scheduling** | 40+ | Jobs, cron, timers |
 | **Messaging** | 60+ | Pub/Sub, queues, streams |
@@ -88,7 +88,7 @@ A high-performance in-memory data store written in Go. **about 1,200 commands**,
 - **Pub/Sub**: Subscribe, Publish, Pattern Subscribe, Sharded Pub/Sub (Redis 7)
 - **Persistence**: AOF with everysec/always sync policies, auto-replay on startup
 - **Replication**: Redis-style master-replica replication (`REPLICAOF`, PSYNC full and partial resync, read-only replicas, `WAIT`)
-- **Cluster mode** (masters only): `cluster.enabled: true` serves Redis Cluster clients. It covers the slot table, `nodes.conf`, the `CLUSTER` commands, the `MOVED`/`ASK`/`CROSSSLOT`/`TRYAGAIN`/`CLUSTERDOWN` redirections, and a cluster bus with gossip, `CLUSTER MEET`/`FORGET` and failure detection, so `redis-cli --cluster create` builds a multi-master cluster. Replicas, failover and resharding are not there yet; see [docs/cluster-design.md](docs/cluster-design.md)
+- **Cluster mode**: `cluster.enabled: true` runs a Redis Cluster node that unmodified cluster clients and `redis-cli --cluster` work with. It covers the slot table, `nodes.conf`, the `CLUSTER` commands and the `MOVED`/`ASK`/`CROSSSLOT`/`TRYAGAIN`/`CLUSTERDOWN` redirections. A cluster bus provides gossip and failure detection. Replicas get automatic and manual failover, and `reshard`, `rebalance`, `add-node`, `del-node` and `fix` work while clients stay online. See [Running a cluster](docs/09-cluster.md)
 - **Memory Management**: Configurable maxmemory with LRU/LFU/Random eviction + OOM rejection
 - **Access Control**: ACL support with per-command authentication enforcement
 - **Graceful Shutdown**: Connection draining with configurable timeout

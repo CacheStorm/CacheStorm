@@ -9,10 +9,11 @@ Start with the installation and configuration guides. The [project review](./PRO
 - [Command reference](./commands.md)
 - [Command examples](./commands-detailed.md)
 - [Tag-based invalidation](./commands.md#tag-based-invalidation-commands)
+- [Running a cluster](./09-cluster.md)
 - [HTTP API](./07-http-api.md)
 - [Admin UI](./08-admin-ui.md)
 
-The command reference and examples serve different purposes; neither is a Redis conformance certificate. The production router registered **1,596 unique command names** during the 2026-10-20 review. Some commands have incomplete behavior; see the project review before relying on transactions, persistence, SDKs or distributed operation.
+The command reference and examples serve different purposes; neither is a Redis conformance certificate. The production router registers about 1,200 unique command names. Some commands have incomplete behavior; see the project review before relying on transactions, persistence, SDKs or distributed operation.
 
 ## Development and operations
 

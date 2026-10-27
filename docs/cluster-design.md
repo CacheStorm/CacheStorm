@@ -178,8 +178,8 @@ redis-cli moves a slot with `clusterManagerMoveSlot`: `SETSLOT IMPORTING` on the
 - **Tests.** `internal/server/cluster_migration_test.go` migrates a slot holding strings (with and without TTL, integer-encoded), small and large hashes, int and string sets, a sorted set, a list and a stream between two masters of a 3 + 3 cluster, checking ASK/ASKING/TRYAGAIN/RESTORE-ASKING in the middle, the MOVED replies, DUMP and OBJECT ENCODING and TTLs after, the keys on both replicas, the epochs and nodes.conf; it also checks that a master emptied by SETSLOT NODE becomes a replica. `scripts/cluster-smoke.sh` runs reshard, add-node (master and replica), rebalance `--cluster-use-empty-masters`, del-node and fix with redis-cli 7.4 under go-redis ClusterClient traffic.
 - **Not implemented.** Redis' cached MIGRATE connections (each MIGRATE dials the target); `SETSLOT` replication to replicas, which arrived after Redis 7.4.
 
-### Phase 5: hardening
+### Phase 5: hardening (done)
 
 - `scripts/cluster-smoke.sh` brings up 6 nodes and covers create, client traffic, reshard and failover.
 - CI wiring for that script.
-- Documentation: a cluster chapter.
+- Documentation: a cluster chapter, [Running a cluster](./09-cluster.md).

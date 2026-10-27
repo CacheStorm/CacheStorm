@@ -142,7 +142,8 @@ failover, so it is not a replacement for Redis Sentinel.
 
 With `cluster.enabled: true` the server runs as a Redis Cluster node and
 forms clusters of masters and replicas with other CacheStorm nodes, with
-automatic and manual failover. Resharding is not there yet.
+automatic and manual failover and `redis-cli --cluster` resharding. The
+operator guide is [Running a cluster](./09-cluster.md).
 
 - **Identity and nodes.conf.** On first start the node generates a 40-hex
   node ID and a shard ID and writes `nodes.conf` in `persistence.data_dir`.

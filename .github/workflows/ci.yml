@@ -224,6 +224,22 @@ jobs:
       - name: Redis Sentinel failover
         run: scripts/sentinel-smoke.sh
 
+  # Eight CacheStorm processes in cluster mode driven by redis-cli --cluster:
+  # create with replicas, automatic failover, reshard, add-node, rebalance,
+  # del-node and fix, while a go-redis ClusterClient keeps reading and writing.
+  cluster-smoke:
+    name: Cluster smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: redis-cli --cluster workflows
+        run: scripts/cluster-smoke.sh
+
   snapshot-smoke:
     name: Persistence recovery and directory ownership
     runs-on: ubuntu-latest
