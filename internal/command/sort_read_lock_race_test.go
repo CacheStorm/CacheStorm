@@ -181,8 +181,8 @@ func TestSortControlsUncontended(t *testing.T) {
 	}
 	// "w*" has no "->", so each element expands to the plain STRING key
 	// w3/w1/w2 — which do not exist. Every lookup misses, every weight is 0,
-	// and the sort is stable, so the ORIGINAL order (3, 1, 2) is preserved.
-	if got := string(pv.Array[0].Bulk); got != "3" {
-		t.Fatalf("CONTROL FAIL: first BY-sorted element = %q, want 3 (all weights 0, order preserved)", got)
+	// and Redis breaks the ties by the elements themselves: 1, 2, 3.
+	if got := string(pv.Array[0].Bulk); got != "1" {
+		t.Fatalf("CONTROL FAIL: first BY-sorted element = %q, want 1 (all weights 0, ties by element)", got)
 	}
 }

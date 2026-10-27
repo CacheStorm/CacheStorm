@@ -763,6 +763,11 @@ func addLongDouble(x, y *big.Float) (string, bool) {
 	return out, true
 }
 
+var (
+	errLCSWrongType = errors.New("ERR The specified keys must contain string values")
+	errLCSLenAndIdx = errors.New("ERR If you want both the length and indexes, please just use IDX.") //nolint:staticcheck // Redis reply text
+)
+
 func cmdLCS(ctx *Context) error {
 	if ctx.ArgCount() < 2 {
 		return ctx.WriteError(ErrWrongArgCount)
@@ -771,6 +776,23 @@ func cmdLCS(ctx *Context) error {
 	key1 := ctx.ArgString(0)
 	key2 := ctx.ArgString(1)
 
+	var s1, s2 string
+	for i, k := range []string{key1, key2} {
+		entry, ok := ctx.Store.Get(k)
+		if !ok {
+			continue
+		}
+		sv, isStr := entry.Value.(*store.StringValue)
+		if !isStr {
+			return ctx.WriteError(errLCSWrongType)
+		}
+		if i == 0 {
+			s1 = string(sv.Data)
+		} else {
+			s2 = string(sv.Data)
+		}
+	}
+
 	idx := false
 	lenOnly := false
 	minMatchLen := 1
@@ -778,59 +800,27 @@ func cmdLCS(ctx *Context) error {
 
 	for i := 2; i < ctx.ArgCount(); i++ {
 		arg := strings.ToUpper(ctx.ArgString(i))
-		switch arg {
-		case "IDX":
+		switch {
+		case arg == "IDX":
 			idx = true
-		case "LEN":
+		case arg == "LEN":
 			lenOnly = true
-		case "MINMATCHLEN":
+		case arg == "WITHMATCHLEN":
+			withMatchLen = true
+		case arg == "MINMATCHLEN" && i+1 < ctx.ArgCount():
 			i++
-			if i >= ctx.ArgCount() {
-				return ctx.WriteError(ErrSyntaxError)
-			}
-			var err error
-			minMatchLen, err = strconv.Atoi(ctx.ArgString(i))
+			n, err := strconv.ParseInt(ctx.ArgString(i), 10, 64)
 			if err != nil {
 				return ctx.WriteError(ErrNotInteger)
 			}
-			if minMatchLen < 1 {
-				minMatchLen = 1
-			}
-		case "WITHMATCHLEN":
-			withMatchLen = true
+			minMatchLen = int(max(n, 1))
 		default:
 			return ctx.WriteError(ErrSyntaxError)
 		}
 	}
-
-	entry1, exists1 := ctx.Store.Get(key1)
-	entry2, exists2 := ctx.Store.Get(key2)
-
-	if !exists1 || !exists2 {
-		if lenOnly {
-			return ctx.WriteInteger(0)
-		}
-		if idx {
-			// The requested reply shape applies to empty results too.
-			return ctx.WriteArray([]*resp.Value{
-				resp.BulkString("matches"),
-				resp.ArrayValue([]*resp.Value{}),
-				resp.BulkString("len"),
-				resp.IntegerValue(0),
-			})
-		}
-		return ctx.WriteBulkString("")
+	if idx && lenOnly {
+		return ctx.WriteError(errLCSLenAndIdx)
 	}
-
-	strVal1, ok1 := entry1.Value.(*store.StringValue)
-	strVal2, ok2 := entry2.Value.(*store.StringValue)
-
-	if !ok1 || !ok2 {
-		return ctx.WriteError(store.ErrWrongType)
-	}
-
-	s1 := string(strVal1.Data)
-	s2 := string(strVal2.Data)
 
 	if len(s1) == 0 || len(s2) == 0 {
 		if lenOnly {
@@ -908,7 +898,7 @@ func cmdLCS(ctx *Context) error {
 			}
 			matchLen := endI - i
 			if matchLen >= minMatchLen {
-				matches = append([]Match{{A1: i, A2: endI - 1, B1: j, B2: endJ - 1, Len: matchLen}}, matches...)
+				matches = append(matches, Match{A1: i, A2: endI - 1, B1: j, B2: endJ - 1, Len: matchLen})
 			}
 		} else if dp[i-1][j] > dp[i][j-1] {
 			i--

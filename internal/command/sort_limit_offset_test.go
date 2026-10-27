@@ -65,20 +65,18 @@ func seedSortList(t *testing.T) *store.Store {
 	return s
 }
 
-// Redis defines a negative LIMIT offset as a count back from the end. The
-// handler applied the offset only `if offset > 0`, so a negative offset was
-// dropped and the page was taken from the head instead.
+// Redis clamps a negative LIMIT offset to 0 (sortCommandGeneric: start =
+// limit_start < 0 ? 0 : limit_start), so the page starts at the head.
 func TestSortNegativeOffsetCountsFromEnd(t *testing.T) {
 	for _, tc := range []struct {
 		offset string
 		count  string
 		want   []string
 	}{
-		{"-1", "1", []string{"e"}},
-		{"-2", "2", []string{"d", "e"}},
-		{"-3", "1", []string{"c"}},
-		{"-5", "2", []string{}},
-		{"-9", "2", []string{}}, // magnitude exceeds the list
+		{"-1", "1", []string{"a"}},
+		{"-2", "2", []string{"a", "b"}},
+		{"-3", "1", []string{"a"}},
+		{"-9", "2", []string{"a", "b"}},
 	} {
 		s := seedSortList(t)
 		got := sortLimitStrings(sortLimitRun(t, s, "SORT", "l", "ALPHA", "LIMIT", tc.offset, tc.count))
@@ -124,8 +122,8 @@ func TestSortNegativeCountControls(t *testing.T) {
 func TestSortCombinedAndNoLimitControls(t *testing.T) {
 	s := seedSortList(t)
 
-	if got := sortLimitStrings(sortLimitRun(t, s, "SORT", "l", "ALPHA", "LIMIT", "-2", "-1")); !sortLimitEqual(got, []string{"d", "e"}) {
-		t.Fatalf("LIMIT -2 -1 = %v, want [d e]", got)
+	if got := sortLimitStrings(sortLimitRun(t, s, "SORT", "l", "ALPHA", "LIMIT", "-2", "-1")); !sortLimitEqual(got, []string{"a", "b", "c", "d", "e"}) {
+		t.Fatalf("LIMIT -2 -1 = %v, want all five", got)
 	}
 	if got := sortLimitStrings(sortLimitRun(t, s, "SORT", "l", "ALPHA")); !sortLimitEqual(got, []string{"a", "b", "c", "d", "e"}) {
 		t.Fatalf("SORT l ALPHA = %v, want all five", got)

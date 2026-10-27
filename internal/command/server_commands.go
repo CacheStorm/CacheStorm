@@ -1106,11 +1106,18 @@ func doSort(ctx *Context, readOnly bool) error {
 	}
 
 	key := ctx.ArgString(0)
+	entry, exists := ctx.Store.Get(key)
+	if exists {
+		switch entry.Value.(type) {
+		case *store.ListValue, *store.SetValue, *store.SortedSetValue:
+		default:
+			return ctx.WriteError(store.ErrWrongType)
+		}
+	}
 
 	desc := false
 	alpha := false
-	offset := 0
-	count := -1
+	var offset, count int64 = 0, -1
 	storeKey := ""
 	byPattern := ""
 	nosort := false
@@ -1118,58 +1125,44 @@ func doSort(ctx *Context, readOnly bool) error {
 
 	for i := 1; i < ctx.ArgCount(); i++ {
 		arg := strings.ToUpper(ctx.ArgString(i))
-		switch arg {
-		case "DESC":
+		left := ctx.ArgCount() - i - 1
+		switch {
+		case arg == "DESC":
 			desc = true
-		case "ASC":
+		case arg == "ASC":
 			desc = false
-		case "ALPHA":
+		case arg == "ALPHA":
 			alpha = true
-		case "LIMIT":
-			i++
-			if i >= ctx.ArgCount() {
-				return ctx.WriteError(ErrSyntaxError)
-			}
+		case arg == "LIMIT" && left >= 2:
 			var err error
-			offset, err = strconv.Atoi(ctx.ArgString(i))
-			if err != nil {
+			if offset, err = strconv.ParseInt(ctx.ArgString(i+1), 10, 64); err != nil {
 				return ctx.WriteError(ErrNotInteger)
 			}
-			i++
-			if i >= ctx.ArgCount() {
-				return ctx.WriteError(ErrSyntaxError)
-			}
-			count, err = strconv.Atoi(ctx.ArgString(i))
-			if err != nil {
+			if count, err = strconv.ParseInt(ctx.ArgString(i+2), 10, 64); err != nil {
 				return ctx.WriteError(ErrNotInteger)
 			}
-		case "STORE":
+			i += 2
+		case arg == "STORE" && left >= 1 && !readOnly:
+			storeKey = ctx.ArgString(i + 1)
 			i++
-			if i >= ctx.ArgCount() {
-				return ctx.WriteError(ErrSyntaxError)
-			}
-			storeKey = ctx.ArgString(i)
-		case "BY":
-			i++
-			if i >= ctx.ArgCount() {
-				return ctx.WriteError(ErrSyntaxError)
-			}
-			byPattern = ctx.ArgString(i)
-			if strings.EqualFold(byPattern, "nosort") {
+		case arg == "BY" && left >= 1:
+			byPattern = ctx.ArgString(i + 1)
+			// A pattern without '*' cannot name a weight per element, so
+			// Redis does not sort at all.
+			if !strings.Contains(byPattern, "*") {
 				nosort = true
 			}
-		case "GET":
 			i++
-			if i >= ctx.ArgCount() {
-				return ctx.WriteError(ErrSyntaxError)
-			}
-			getPatterns = append(getPatterns, ctx.ArgString(i))
+		case arg == "GET" && left >= 1:
+			getPatterns = append(getPatterns, ctx.ArgString(i+1))
+			i++
+		default:
+			return ctx.WriteError(ErrSyntaxError)
 		}
 	}
 
-	entry, exists := ctx.Store.Get(key)
 	if !exists {
-		if storeKey != "" && !readOnly {
+		if storeKey != "" {
 			sortStoreDelete(ctx, storeKey)
 			return ctx.WriteInteger(0)
 		}
@@ -1177,7 +1170,7 @@ func doSort(ctx *Context, readOnly bool) error {
 	}
 
 	var elements []string
-
+	isSet := false
 	switch v := entry.Value.(type) {
 	// The command handlers mutate these collections under the value write
 	// lock (cmdRPUSH/cmdLPOP, cmdSADD/cmdSREM), so the copy must be taken
@@ -1190,6 +1183,7 @@ func doSort(ctx *Context, readOnly bool) error {
 		}
 		v.RUnlock()
 	case *store.SetValue:
+		isSet = true
 		v.RLock()
 		for member := range v.Members {
 			elements = append(elements, member)
@@ -1200,110 +1194,92 @@ func doSort(ctx *Context, readOnly bool) error {
 		for _, e := range entries {
 			elements = append(elements, e.Member)
 		}
-	default:
-		return ctx.WriteError(errors.New("ERR wrong type for SORT"))
+	}
+	// An unsorted set has no order of its own; Redis sorts it
+	// lexicographically when the result is stored or read by a script, so
+	// the outcome is deterministic.
+	if nosort && isSet && (storeKey != "" || ctx.InScript) {
+		nosort, alpha, byPattern = false, true, ""
 	}
 
-	if byPattern != "" && !nosort {
-		// BY <pattern>: order the elements by the value of the external key
-		// each one expands to, rather than by the element itself. A missing
-		// or non-numeric weight counts as 0, matching Redis.
+	if !nosort {
 		type sortItem struct {
-			elem    string
-			weight  float64
-			sweight string
+			elem   string
+			score  float64
+			cmp    string
+			hasCmp bool
 		}
-		items := make([]sortItem, 0, len(elements))
-		for _, elem := range elements {
+		items := make([]sortItem, len(elements))
+		for i, elem := range elements {
 			it := sortItem{elem: elem}
-			if w, ok := sortLookupValue(ctx, byPattern, elem); ok {
-				it.sweight = w
-				if f, err := strconv.ParseFloat(w, 64); err == nil {
-					it.weight = f
-				}
+			val, ok := elem, true
+			if byPattern != "" {
+				val, ok = sortLookupValue(ctx, byPattern, elem)
 			}
-			items = append(items, it)
-		}
-		if alpha {
-			sort.SliceStable(items, func(i, j int) bool {
-				if desc {
-					return items[i].sweight > items[j].sweight
+			if alpha {
+				it.cmp, it.hasCmp = val, ok
+			} else if ok {
+				f, err := strconv.ParseFloat(strings.TrimLeft(val, " \t\n\v\f\r"), 64)
+				if err != nil || math.IsNaN(f) {
+					return ctx.WriteError(errors.New("ERR One or more scores can't be converted into double"))
 				}
-				return items[i].sweight < items[j].sweight
-			})
-		} else {
-			sort.SliceStable(items, func(i, j int) bool {
-				if desc {
-					return items[i].weight > items[j].weight
-				}
-				return items[i].weight < items[j].weight
-			})
-		}
-		sorted := make([]string, 0, len(items))
-		for _, it := range items {
-			sorted = append(sorted, it.elem)
-		}
-		elements = sorted
-	} else if alpha {
-		if desc {
-			sort.Slice(elements, func(i, j int) bool {
-				return elements[i] > elements[j]
-			})
-		} else {
-			sort.Strings(elements)
-		}
-	} else {
-		floatElements := make([]float64, 0)
-		stringElements := make([]string, 0)
-		for _, elem := range elements {
-			f, err := strconv.ParseFloat(elem, 64)
-			if err != nil {
-				stringElements = append(stringElements, elem)
-			} else {
-				floatElements = append(floatElements, f)
+				it.score = f
 			}
+			items[i] = it
 		}
-
-		if desc {
-			sort.Slice(floatElements, func(i, j int) bool {
-				return floatElements[i] > floatElements[j]
-			})
-		} else {
-			sort.Float64s(floatElements)
+		sort.SliceStable(items, func(i, j int) bool {
+			a, b := items[i], items[j]
+			var c int
+			switch {
+			case !alpha:
+				switch {
+				case a.score < b.score:
+					c = -1
+				case a.score > b.score:
+					c = 1
+				default:
+					c = strings.Compare(a.elem, b.elem)
+				}
+			case byPattern == "":
+				c = strings.Compare(a.elem, b.elem)
+			case !a.hasCmp || !b.hasCmp:
+				switch {
+				case a.hasCmp == b.hasCmp:
+					c = 0
+				case !a.hasCmp:
+					c = -1
+				default:
+					c = 1
+				}
+			default:
+				c = strings.Compare(a.cmp, b.cmp)
+			}
+			if desc {
+				c = -c
+			}
+			return c < 0
+		})
+		for i, it := range items {
+			elements[i] = it.elem
 		}
-
-		sortedElements := make([]string, 0, len(floatElements))
-		for _, f := range floatElements {
-			sortedElements = append(sortedElements, strconv.FormatFloat(f, 'f', -1, 64))
-		}
-		sortedElements = append(sortedElements, stringElements...)
-		elements = sortedElements
 	}
 
-	start := 0
-	end := len(elements)
-
-	// Redis treats a negative LIMIT offset as a count back from the end
-	// (-1 is the last element); a non-negative one is clamped to the list.
-	if offset < 0 {
-		if -offset < len(elements) {
-			start = len(elements) + offset
-		} else {
-			start = len(elements)
-		}
-	} else if offset >= len(elements) {
-		start = len(elements)
-	} else {
-		start = offset
-	}
+	n := int64(len(elements))
+	start := max(offset, 0)
+	end := n - 1
 	if count >= 0 {
-		end = start + count
-		if end > len(elements) {
-			end = len(elements)
-		}
+		end = start + count - 1
 	}
-
-	elements = elements[start:end]
+	if start >= n {
+		start, end = n-1, n-2
+	}
+	if end >= n {
+		end = n - 1
+	}
+	if n == 0 || end < start {
+		start, end = 0, -1
+	}
+	elements = elements[start : end+1]
 
 	// GET <pattern>: project each element through the external key its pattern
 	// expands to, after LIMIT, so paging is decided on the sorted elements.
@@ -1311,9 +1287,6 @@ func doSort(ctx *Context, readOnly bool) error {
 		projected := sortProjectElements(ctx, elements, getPatterns)
 
 		if storeKey != "" {
-			if readOnly {
-				return ctx.WriteError(errors.New("ERR SORT_RO does not support STORE"))
-			}
 			if len(projected) == 0 {
 				sortStoreDelete(ctx, storeKey)
 				return ctx.WriteInteger(0)
@@ -1335,9 +1308,6 @@ func doSort(ctx *Context, readOnly bool) error {
 	}
 
 	if storeKey != "" {
-		if readOnly {
-			return ctx.WriteError(errors.New("ERR SORT_RO does not support STORE"))
-		}
 		if len(elements) == 0 {
 			sortStoreDelete(ctx, storeKey)
 			return ctx.WriteInteger(0)

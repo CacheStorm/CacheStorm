@@ -238,11 +238,11 @@ func TestSortBeyondLengthClampControl(t *testing.T) {
 	assertSortReply(t, sortByGetStrings(sortByGetRun(t, s, "SORT", "mylist", "ALPHA", "LIMIT", "9", "2")))
 }
 
-// A negative LIMIT offset pages from the tail.
+// A negative LIMIT offset counts as 0, as in Redis.
 func TestSortNegativeOffsetControl(t *testing.T) {
 	s := store.NewStore()
 	sortByGetRun(t, s, "RPUSH", "mylist", "a", "b", "c")
-	assertSortReply(t, sortByGetStrings(sortByGetRun(t, s, "SORT", "mylist", "ALPHA", "LIMIT", "-1", "1")), "c")
+	assertSortReply(t, sortByGetStrings(sortByGetRun(t, s, "SORT", "mylist", "ALPHA", "LIMIT", "-1", "1")), "a")
 }
 
 // A non-string external key is not usable as a weight or a GET value.
@@ -347,6 +347,5 @@ func TestSortByGetX(t *testing.T) {
 	check("hash-field BY", run("SORT", "l", "BY", "hw_*->w"), "c", "b", "a")
 	check("hash-field GET", run("SORT", "l", "BY", "weight_*", "GET", "hw_*->w"), "3", "5", "30")
 
-	check("missing BY keys stay stable", run("SORT", "l", "BY", "nomiss_*"), "b", "a", "c")
-	check("plain sort control", run("SORT", "l"), "b", "a", "c")
+	check("missing BY keys tie and sort by element", run("SORT", "l", "BY", "nomiss_*"), "a", "b", "c")
 }
