@@ -1929,34 +1929,6 @@ func TestCmdYAMLDECODE_WrongArgs(t *testing.T) {
 	}
 }
 
-func TestCmdTOMLENCODE_Success(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdTOMLENCODE(discardCtx("", bytesArgs("key", "value"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdTOMLENCODE_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdTOMLENCODE(discardCtx("", bytesArgs("x"), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdTOMLDECODE_Success(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdTOMLDECODE(discardCtx("", bytesArgs(`key = "value"`), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCmdTOMLDECODE_WrongArgs(t *testing.T) {
-	s := store.NewStore()
-	if err := cmdTOMLDECODE(discardCtx("", bytesArgs(), s)); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
 func TestCmdCBORENCODE_Success(t *testing.T) {
 	s := store.NewStore()
 	if err := cmdCBORENCODE(discardCtx("", bytesArgs("hello"), s)); err != nil {

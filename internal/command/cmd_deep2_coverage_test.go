@@ -687,7 +687,7 @@ func TestDeep2_MsgpackEncodeDecode(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Encode then decode
-	encoded := msgpackEncode([]byte("hello world"))
+	encoded, _ := msgpackEncode(nil, "hello world")
 	ctx2 := discardCtx("MSGPACK.DECODE", [][]byte{encoded}, s)
 	if err := cmdMSGPACKDECODE(ctx2); err != nil {
 		t.Fatal(err)
@@ -740,25 +740,13 @@ func TestDeep2_YamlEncodeDecode(t *testing.T) {
 	}
 }
 
-func TestDeep2_TomlEncodeDecode(t *testing.T) {
-	s := store.NewStore()
-	ctx := discardCtx("TOML.ENCODE", bytesArgs("key", "value"), s)
-	if err := cmdTOMLENCODE(ctx); err != nil {
-		t.Fatal(err)
-	}
-	ctx2 := discardCtx("TOML.DECODE", bytesArgs("key = \"value\""), s)
-	if err := cmdTOMLDECODE(ctx2); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestDeep2_CborEncodeDecode(t *testing.T) {
 	s := store.NewStore()
 	ctx := discardCtx("CBOR.ENCODE", bytesArgs("hello"), s)
 	if err := cmdCBORENCODE(ctx); err != nil {
 		t.Fatal(err)
 	}
-	encoded := cborEncode([]byte("hello"))
+	encoded, _ := cborEncode(nil, "hello")
 	ctx2 := discardCtx("CBOR.DECODE", [][]byte{encoded}, s)
 	if err := cmdCBORDECODE(ctx2); err != nil {
 		t.Fatal(err)

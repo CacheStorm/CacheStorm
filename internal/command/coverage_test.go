@@ -11899,21 +11899,6 @@ func TestMatchPatternX(t *testing.T) {
 	}
 }
 
-func TestParseJSONArray(t *testing.T) {
-	arr := parseJSONArray(`["a", "b", "c"]`)
-	if len(arr) != 3 {
-		t.Errorf("parseJSONArray returned %d items, want 3", len(arr))
-	}
-	arr2 := parseJSONArray("not an array")
-	if arr2 != nil {
-		t.Error("parseJSONArray should return nil for invalid input")
-	}
-	arr3 := parseJSONArray(`[]`)
-	if len(arr3) != 0 {
-		t.Errorf("parseJSONArray([]) returned %d items, want 0", len(arr3))
-	}
-}
-
 func TestGoValueToResp(t *testing.T) {
 	if goValueToResp(nil).Type != resp.TypeNull {
 		t.Error("goValueToResp(nil) should return null")

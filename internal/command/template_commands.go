@@ -2,7 +2,13 @@ package command
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"math"
+	"math/big"
+	"net/mail"
+	"net/netip"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -54,13 +60,11 @@ func RegisterTemplateCommands(router *Router) {
 }
 
 func cmdEVALEXPR(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+	if ctx.ArgCount() != 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
-	expr := ctx.ArgString(0)
-
-	result, err := evaluateExpression(expr)
+	result, err := evaluateExpression(ctx.ArgString(0))
 	if err != nil {
 		return ctx.WriteError(err)
 	}
@@ -68,85 +72,208 @@ func cmdEVALEXPR(ctx *Context) error {
 	return ctx.WriteBulkString(result)
 }
 
+var (
+	errExprSyntax    = errors.New("ERR invalid expression")
+	errExprDivZero   = errors.New("ERR division by zero")
+	errExprNonFinite = errors.New("ERR expression result is not a finite number")
+	errExprTooDeep   = errors.New("ERR expression nested too deeply")
+)
+
+const maxExprDepth = 256
+
+// exprParser evaluates arithmetic over float64 with the grammar
+//
+//	expr  = term { ("+" | "-") term }
+//	term  = unary { ("*" | "/" | "%") unary }
+//	unary = ("+" | "-") unary | power
+//	power = atom [ "^" unary ]
+//	atom  = number | "(" expr ")"
+//
+// so "^" binds tighter than unary minus and is right-associative
+// (-2^2 = -4, 2^3^2 = 512) and "%" is the floating-point remainder.
+type exprParser struct {
+	s     string
+	pos   int
+	depth int
+}
+
 func evaluateExpression(expr string) (string, error) {
-	expr = strings.TrimSpace(expr)
-
-	if strings.HasPrefix(expr, "(") && strings.HasSuffix(expr, ")") {
-		expr = expr[1 : len(expr)-1]
+	p := &exprParser{s: expr}
+	v, err := p.expr()
+	if err != nil {
+		return "", err
 	}
-
-	ops := []string{"+", "-", "*", "/", "%", "^"}
-	for _, op := range ops {
-		parts := splitExpr(expr, op)
-		if len(parts) == 2 {
-			left, err := evaluateExpression(parts[0])
-			if err != nil {
-				return "", err
-			}
-			right, err := evaluateExpression(parts[1])
-			if err != nil {
-				return "", err
-			}
-
-			l, err := strconv.ParseFloat(left, 64)
-			if err != nil {
-				return "", err
-			}
-			r, err := strconv.ParseFloat(right, 64)
-			if err != nil {
-				return "", err
-			}
-
-			var result float64
-			switch op {
-			case "+":
-				result = l + r
-			case "-":
-				result = l - r
-			case "*":
-				result = l * r
-			case "/":
-				if r == 0 {
-					return "", fmt.Errorf("division by zero")
-				}
-				result = l / r
-			case "%":
-				result = float64(int64(l) % int64(r))
-			case "^":
-				result = pow(l, r)
-			}
-
-			if result == float64(int64(result)) {
-				return strconv.FormatInt(int64(result), 10), nil
-			}
-			return strconv.FormatFloat(result, 'f', -1, 64), nil
-		}
+	p.skipSpace()
+	if p.pos != len(p.s) {
+		return "", errExprSyntax
 	}
-
-	return expr, nil
+	if math.IsNaN(v) || math.IsInf(v, 0) {
+		return "", errExprNonFinite
+	}
+	if v == 0 {
+		return "0", nil
+	}
+	if v == math.Trunc(v) && math.Abs(v) < 1e21 {
+		return strconv.FormatFloat(v, 'f', -1, 64), nil
+	}
+	return strconv.FormatFloat(v, 'g', -1, 64), nil
 }
 
-func splitExpr(expr, op string) []string {
-	depth := 0
-	for i := len(expr) - 1; i >= 0; i-- {
-		c := expr[i]
-		if c == ')' {
-			depth++
-		} else if c == '(' {
-			depth--
-		} else if depth == 0 && string(c) == op {
-			return []string{expr[:i], expr[i+1:]}
-		}
+func (p *exprParser) skipSpace() {
+	for p.pos < len(p.s) && (p.s[p.pos] == ' ' || p.s[p.pos] == '\t') {
+		p.pos++
 	}
-	return nil
 }
 
-func pow(base, exp float64) float64 {
-	result := 1.0
-	for i := 0; i < int(exp); i++ {
-		result *= base
+func (p *exprParser) peek() byte {
+	p.skipSpace()
+	if p.pos < len(p.s) {
+		return p.s[p.pos]
 	}
-	return result
+	return 0
+}
+
+func (p *exprParser) expr() (float64, error) {
+	p.depth++
+	defer func() { p.depth-- }()
+	if p.depth > maxExprDepth {
+		return 0, errExprTooDeep
+	}
+	v, err := p.term()
+	if err != nil {
+		return 0, err
+	}
+	for {
+		switch p.peek() {
+		case '+':
+			p.pos++
+			r, err := p.term()
+			if err != nil {
+				return 0, err
+			}
+			v += r
+		case '-':
+			p.pos++
+			r, err := p.term()
+			if err != nil {
+				return 0, err
+			}
+			v -= r
+		default:
+			return v, nil
+		}
+	}
+}
+
+func (p *exprParser) term() (float64, error) {
+	v, err := p.unary()
+	if err != nil {
+		return 0, err
+	}
+	for {
+		op := p.peek()
+		if op != '*' && op != '/' && op != '%' {
+			return v, nil
+		}
+		p.pos++
+		r, err := p.unary()
+		if err != nil {
+			return 0, err
+		}
+		switch op {
+		case '*':
+			v *= r
+		case '/':
+			if r == 0 {
+				return 0, errExprDivZero
+			}
+			v /= r
+		default:
+			if r == 0 {
+				return 0, errExprDivZero
+			}
+			v = math.Mod(v, r)
+		}
+	}
+}
+
+func (p *exprParser) unary() (float64, error) {
+	p.depth++
+	defer func() { p.depth-- }()
+	if p.depth > maxExprDepth {
+		return 0, errExprTooDeep
+	}
+	switch p.peek() {
+	case '-':
+		p.pos++
+		v, err := p.unary()
+		return -v, err
+	case '+':
+		p.pos++
+		return p.unary()
+	}
+	return p.power()
+}
+
+func (p *exprParser) power() (float64, error) {
+	base, err := p.atom()
+	if err != nil {
+		return 0, err
+	}
+	if p.peek() != '^' {
+		return base, nil
+	}
+	p.pos++
+	exp, err := p.unary()
+	if err != nil {
+		return 0, err
+	}
+	return math.Pow(base, exp), nil
+}
+
+func (p *exprParser) atom() (float64, error) {
+	c := p.peek()
+	if c == '(' {
+		p.pos++
+		v, err := p.expr()
+		if err != nil {
+			return 0, err
+		}
+		if p.peek() != ')' {
+			return 0, errExprSyntax
+		}
+		p.pos++
+		return v, nil
+	}
+	start := p.pos
+	for p.pos < len(p.s) && (p.s[p.pos] >= '0' && p.s[p.pos] <= '9' || p.s[p.pos] == '.') {
+		p.pos++
+	}
+	if p.pos < len(p.s) && (p.s[p.pos] == 'e' || p.s[p.pos] == 'E') && p.pos > start {
+		save := p.pos
+		p.pos++
+		if p.pos < len(p.s) && (p.s[p.pos] == '+' || p.s[p.pos] == '-') {
+			p.pos++
+		}
+		digits := p.pos
+		for p.pos < len(p.s) && p.s[p.pos] >= '0' && p.s[p.pos] <= '9' {
+			p.pos++
+		}
+		if p.pos == digits {
+			p.pos = save
+		}
+	}
+	if p.pos == start {
+		return 0, errExprSyntax
+	}
+	v, err := strconv.ParseFloat(p.s[start:p.pos], 64)
+	if err != nil {
+		if errors.Is(err, strconv.ErrRange) {
+			return 0, errExprNonFinite
+		}
+		return 0, errExprSyntax
+	}
+	return v, nil
 }
 
 func cmdEVALFORMAT(ctx *Context) error {
@@ -205,96 +332,124 @@ func formatString(format string, args ...interface{}) string {
 }
 
 func cmdEVALJSONPATH(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
+	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
-	jsonStr := ctx.ArgString(0)
-	path := ctx.ArgString(1)
-
-	result := extractJSONPath(jsonStr, path)
-
-	return ctx.WriteBulkString(result)
+	doc, err := decodeOrderedJSON(ctx.Arg(0))
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	v, found, err := extractJSONPath(doc, ctx.ArgString(1))
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	if !found {
+		return ctx.WriteNull()
+	}
+	out, err := encodeOrderedJSON(v)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	return ctx.WriteBulkBytes(out)
 }
 
-func extractJSONPath(jsonStr, path string) string {
-	if path == "$" {
-		return jsonStr
+var (
+	errJSONPathSyntax      = errors.New("ERR invalid JSONPath")
+	errJSONPathUnsupported = errors.New("ERR JSONPath wildcards, recursive descent, slices and filters are not supported")
+)
+
+// extractJSONPath resolves a path made of "$", ".name", "['name']",
+// "[\"name\"]" and "[index]" steps; a negative index counts from the end.
+// found is false when a step names a missing member or element.
+func extractJSONPath(doc any, path string) (any, bool, error) {
+	if path == "" || path[0] != '$' {
+		return nil, false, errJSONPathSyntax
 	}
-
-	if !strings.HasPrefix(path, "$.") {
-		return ""
+	cur, found := doc, true
+	member := func(name string) {
+		if !found {
+			return
+		}
+		obj, ok := cur.(*jsonObject)
+		if !ok {
+			found = false
+			return
+		}
+		cur, found = obj.get(name)
 	}
-
-	path = path[2:]
-	parts := strings.Split(path, ".")
-
-	current := jsonStr
-
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-
-		if strings.HasPrefix(part, "[") && strings.HasSuffix(part, "]") {
-			idxStr := part[1 : len(part)-1]
-			idx := 0
-			for _, c := range idxStr {
-				if c >= '0' && c <= '9' {
-					idx = idx*10 + int(c-'0')
+	for i := 1; i < len(path); {
+		switch path[i] {
+		case '.':
+			i++
+			start := i
+			for i < len(path) && path[i] != '.' && path[i] != '[' {
+				i++
+			}
+			name := path[start:i]
+			if name == "*" || (name == "" && i < len(path) && path[i] == '.') {
+				return nil, false, errJSONPathUnsupported
+			}
+			if name == "" {
+				return nil, false, errJSONPathSyntax
+			}
+			member(name)
+		case '[':
+			i++
+			if i < len(path) && (path[i] == '\'' || path[i] == '"') {
+				quote := path[i]
+				i++
+				var name strings.Builder
+				for i < len(path) && path[i] != quote {
+					if path[i] == '\\' && i+1 < len(path) {
+						i++
+					}
+					name.WriteByte(path[i])
+					i++
 				}
+				if i+1 >= len(path) || path[i+1] != ']' {
+					return nil, false, errJSONPathSyntax
+				}
+				i += 2
+				member(name.String())
+				continue
 			}
-
-			items := parseJSONArray(current)
-			if idx < len(items) {
-				current = items[idx]
-			} else {
-				return ""
+			start := i
+			for i < len(path) && path[i] != ']' {
+				i++
 			}
-		} else {
-			obj := parseJSONObject(current)
-			if val, ok := obj[part]; ok {
-				current = val
-			} else {
-				return ""
+			if i >= len(path) {
+				return nil, false, errJSONPathSyntax
 			}
+			sel := strings.TrimSpace(path[start:i])
+			i++
+			if sel == "*" || strings.ContainsAny(sel, ":?,") {
+				return nil, false, errJSONPathUnsupported
+			}
+			idx, err := strconv.Atoi(sel)
+			if err != nil {
+				return nil, false, errJSONPathSyntax
+			}
+			if !found {
+				continue
+			}
+			arr, ok := cur.([]any)
+			if idx < 0 {
+				idx += len(arr)
+			}
+			if !ok || idx < 0 || idx >= len(arr) {
+				found = false
+				continue
+			}
+			cur = arr[idx]
+		default:
+			return nil, false, errJSONPathSyntax
 		}
 	}
-
-	return current
-}
-
-func parseJSONArray(s string) []string {
-	s = strings.TrimSpace(s)
-	if !strings.HasPrefix(s, "[") || !strings.HasSuffix(s, "]") {
-		return nil
+	if !found {
+		return nil, false, nil
 	}
-
-	s = s[1 : len(s)-1]
-	items := make([]string, 0)
-	depth := 0
-	start := 0
-	inString := false
-
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c == '"' && (i == 0 || s[i-1] != '\\') {
-			inString = !inString
-		} else if !inString {
-			if c == '{' || c == '[' {
-				depth++
-			} else if c == '}' || c == ']' {
-				depth--
-			} else if c == ',' && depth == 0 {
-				items = append(items, strings.TrimSpace(s[start:i]))
-				start = i + 1
-			}
-		}
-	}
-
-	if start < len(s) {
-		items = append(items, strings.TrimSpace(s[start:]))
-	}
-
-	return items
+	return cur, true, nil
 }
 
 func parseJSONObject(s string) map[string]string {
@@ -435,82 +590,104 @@ func cmdEVALREGEXREPLACE(ctx *Context) error {
 }
 
 func cmdVALIDATEEMAIL(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+	if ctx.ArgCount() != 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
-	email := ctx.ArgString(0)
-
-	if isValidEmail(email) {
+	if isValidEmail(ctx.ArgString(0)) {
 		return ctx.WriteInteger(1)
 	}
 	return ctx.WriteInteger(0)
 }
 
+// isValidEmail accepts a bare RFC 5322 addr-spec (no display name, comments
+// or angle brackets) whose domain is a dotted hostname of at most 254 bytes.
 func isValidEmail(email string) bool {
-	atIdx := strings.Index(email, "@")
-	if atIdx <= 0 || atIdx >= len(email)-1 {
+	if len(email) > 254 {
 		return false
 	}
-
-	dotIdx := strings.LastIndex(email[atIdx:], ".")
-	if dotIdx <= 1 || dotIdx >= len(email[atIdx:])-1 {
+	addr, err := mail.ParseAddress(email)
+	if err != nil || addr.Name != "" || addr.Address != email {
 		return false
 	}
+	at := strings.LastIndexByte(email, '@')
+	domain := email[at+1:]
+	return strings.Contains(domain, ".") && isValidHostname(domain)
+}
 
+func isValidHostname(host string) bool {
+	host = strings.TrimSuffix(host, ".")
+	if host == "" || len(host) > 253 {
+		return false
+	}
+	for _, label := range strings.Split(host, ".") {
+		if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for _, r := range label {
+			if r < 0x80 && !(r == '-' || r >= '0' && r <= '9' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z') {
+				return false
+			}
+		}
+	}
 	return true
 }
 
 func cmdVALIDATEURL(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+	if ctx.ArgCount() != 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
-	url := ctx.ArgString(0)
-
-	if isValidURL(url) {
+	if isValidURL(ctx.ArgString(0)) {
 		return ctx.WriteInteger(1)
 	}
 	return ctx.WriteInteger(0)
 }
 
-func isValidURL(url string) bool {
-	return strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://") || strings.HasPrefix(url, "ftp://")
-}
-
-func cmdVALIDATEIP(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	ip := ctx.ArgString(0)
-
-	if isValidIP(ip) {
-		return ctx.WriteInteger(1)
-	}
-	return ctx.WriteInteger(0)
-}
-
-func isValidIP(ip string) bool {
-	parts := strings.Split(ip, ".")
-	if len(parts) != 4 {
-		return false
-	}
-
-	for _, part := range parts {
-		num := 0
-		for _, c := range part {
-			if c < '0' || c > '9' {
-				return false
-			}
-			num = num*10 + int(c-'0')
-		}
-		if num < 0 || num > 255 {
+// isValidURL accepts an absolute URL with an authority ("scheme://host...")
+// whose host is a hostname or IP literal and whose port, if any, is 1-65535.
+func isValidURL(raw string) bool {
+	for _, r := range raw {
+		if r <= ' ' || r == 0x7f {
 			return false
 		}
 	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme == "" || u.Opaque != "" || u.Host == "" {
+		return false
+	}
+	if port := u.Port(); port != "" {
+		p, err := strconv.Atoi(port)
+		if err != nil || p < 1 || p > 65535 {
+			return false
+		}
+	} else if strings.HasSuffix(u.Host, ":") {
+		return false
+	}
+	host := u.Hostname()
+	if strings.HasPrefix(u.Host, "[") {
+		addr, err := netip.ParseAddr(host)
+		return err == nil && addr.Is6()
+	}
+	return isValidHostname(host)
+}
 
-	return true
+func cmdVALIDATEIP(ctx *Context) error {
+	if ctx.ArgCount() != 1 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+
+	if isValidIP(ctx.ArgString(0)) {
+		return ctx.WriteInteger(1)
+	}
+	return ctx.WriteInteger(0)
+}
+
+// isValidIP accepts dotted-decimal IPv4 (no leading zeros) and IPv6,
+// including IPv4-mapped forms, but not IPv6 zones.
+func isValidIP(ip string) bool {
+	addr, err := netip.ParseAddr(ip)
+	return err == nil && addr.Zone() == ""
 }
 
 func cmdVALIDATEJSON(ctx *Context) error {
@@ -675,64 +852,42 @@ func cmdVALIDATELENGTH(ctx *Context) error {
 	return ctx.WriteInteger(0)
 }
 
+// cmdVALIDATERANGE reports whether min <= value <= max (both bounds
+// inclusive). Numbers are compared at 512-bit precision so that integers
+// beyond 2^53 and decimals such as 0.1 compare exactly as written.
 func cmdVALIDATERANGE(ctx *Context) error {
-	if ctx.ArgCount() < 3 {
+	if ctx.ArgCount() != 3 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
-	val, err := parseTemplateFloat(ctx.Arg(0))
-	if err != nil {
-		return ctx.WriteError(err)
+	var nums [3]*big.Float
+	for i := range nums {
+		f, err := parseTemplateFloat(ctx.ArgString(i))
+		if err != nil {
+			return ctx.WriteError(err)
+		}
+		nums[i] = f
 	}
-	min, err := parseTemplateFloat(ctx.Arg(1))
-	if err != nil {
-		return ctx.WriteError(err)
-	}
-	max, err := parseTemplateFloat(ctx.Arg(2))
-	if err != nil {
-		return ctx.WriteError(err)
+	val, min, max := nums[0], nums[1], nums[2]
+	if min.Cmp(max) > 0 {
+		return ctx.WriteError(errors.New("ERR min is greater than max"))
 	}
 
-	if val >= min && val <= max {
+	if val.Cmp(min) >= 0 && val.Cmp(max) <= 0 {
 		return ctx.WriteInteger(1)
 	}
 	return ctx.WriteInteger(0)
 }
 
-func parseTemplateFloat(data []byte) (float64, error) {
-	s := string(data)
-	s = strings.TrimSpace(s)
-
-	var result float64
-	var sign float64 = 1
-	var decimal float64 = 1
-	inDecimal := false
-
-	i := 0
-	if i < len(s) && s[i] == '-' {
-		sign = -1
-		i++
-	} else if i < len(s) && s[i] == '+' {
-		i++
+func parseTemplateFloat(s string) (*big.Float, error) {
+	if f, err := strconv.ParseFloat(s, 64); err != nil || math.IsNaN(f) || math.IsInf(f, 0) {
+		return nil, ErrNotFloat
 	}
-
-	for ; i < len(s); i++ {
-		if s[i] >= '0' && s[i] <= '9' {
-			digit := float64(s[i] - '0')
-			if inDecimal {
-				decimal *= 10
-				result += digit / decimal
-			} else {
-				result = result*10 + digit
-			}
-		} else if s[i] == '.' && !inDecimal {
-			inDecimal = true
-		} else {
-			break
-		}
+	f, _, err := big.ParseFloat(s, 10, 512, big.ToNearestEven)
+	if err != nil {
+		return nil, ErrNotFloat
 	}
-
-	return sign * result, nil
+	return f, nil
 }
 
 func cmdSTRFORMAT(ctx *Context) error {
