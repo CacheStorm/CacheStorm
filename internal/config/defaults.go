@@ -9,7 +9,7 @@ func Default() *Config {
 			Databases:       16,
 			TCPKeepAlive:    300,
 			ReadBufferSize:  4096,
-			WriteBufferSize: 4096,
+			WriteBufferSize: 16384,
 			ProtectedMode:   true,
 		},
 		HTTP: HTTPConfig{
@@ -26,9 +26,6 @@ func Default() *Config {
 			CriticalPct:    85,
 			SampleSize:     5,
 		},
-		Namespaces: map[string]NamespaceConfig{
-			"default": {},
-		},
 		Cluster: ClusterConfig{
 			BindPort: 7946,
 			Replicas: 1,
@@ -41,11 +38,12 @@ func Default() *Config {
 			ReplicaBufferLimit: 64 << 20,
 		},
 		Persistence: PersistenceConfig{
-			AOF:              true,
-			AOFSync:          "everysec",
-			SnapshotInterval: "5m",
-			DataDir:          "/var/lib/cachestorm",
-			MaxAOFSize:       "1gb",
+			AOF:                  true,
+			AOFSync:              "everysec",
+			SnapshotInterval:     "5m",
+			DataDir:              "/var/lib/cachestorm",
+			AOFRewritePercentage: 100,
+			AOFRewriteMinSize:    "64mb",
 		},
 		Plugins: PluginsConfig{
 			Metrics: MetricsPluginConfig{

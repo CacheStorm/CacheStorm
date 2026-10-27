@@ -17,6 +17,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Excluded generated Python/Node files and local audit/tooling artifacts from version control or Docker build context as appropriate.
 - Corrected the root Docker image healthcheck to use `/api/health`.
 
+### Added
+- BGREWRITEAOF rewrites the AOF into the smallest command stream for the current dataset; it used to reply "started" and do nothing, so the AOF grew without bound. The AOF is also rewritten automatically once it is at least `persistence.aof_rewrite_min_size` (64mb) and has grown by `persistence.aof_rewrite_percentage` (100) since the last rewrite, like Redis' auto-aof-rewrite-*. INFO persistence reports the rewrite state and sizes
+- Eviction: the volatile-lfu, volatile-random and volatile-ttl policies, so all eight Redis maxmemory policies are available
+- CONFIG SET maxmemory (with units), maxmemory-policy, maxmemory-samples, maxclients, timeout and requirepass take effect immediately for every database and client; they used to update a bookkeeping table only. CONFIG GET reports the running server's values (maxmemory used to read 0 whatever the configuration), accepts several parameters, and matches each as a glob as Redis does instead of by substring
+- Monitoring: the metrics port serves the full exposition (up, uptime, keys and memory across all databases, hits, misses, evictions, expirations, network bytes); Prometheus scrapes it without credentials, the Compose file mounts `alerts.yml`, and the "instance down" alert uses Prometheus' own `up` series
+
+### Changed
+- License: CacheStorm is MIT licensed; LICENSE, README, CONTRIBUTING, the website and the SDK package metadata now agree
+- Configuration files are decoded strictly: an unknown or misspelt key stops startup with its file, line and name. `namespaces`, `plugins.stats`, `plugins.auth` and `persistence.max_aof_size` were never read and are no longer accepted. The legacy-schema `config/example.yaml` is removed; `make setup` and the installers use `config/cachestorm.example.yaml`, and the installers write configuration in the current schema
+- `server.tcp_keepalive`, `server.read_buffer_size` and `server.write_buffer_size` are applied to client connections; the write buffer default is 16384
+- Idle clients are no longer disconnected after 5 minutes: with `server.read_timeout: "0"` (the default) they stay connected, as with Redis' `timeout 0`
+- The HTTP `/api/info` version comes from the build instead of a hard-coded "0.2.2"; `/api/metrics` counts keys and memory in every database instead of database 0 only
+
 ### Planned
 - Cloud-native commands (object storage, queues, topics)
 - GraphQL API

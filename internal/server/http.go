@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net"
 	"net/http"
 	"net/http/pprof"
@@ -21,6 +20,7 @@ import (
 	"github.com/cachestorm/cachestorm/internal/command"
 	"github.com/cachestorm/cachestorm/internal/logger"
 	"github.com/cachestorm/cachestorm/internal/store"
+	"github.com/cachestorm/cachestorm/internal/version"
 )
 
 // pprof wrapper functions to match http.HandlerFunc signature
@@ -526,7 +526,7 @@ func (h *HTTPServer) handleHealth(w http.ResponseWriter, _ *http.Request) {
 func (h *HTTPServer) handleInfo(w http.ResponseWriter, _ *http.Request) {
 	info := map[string]interface{}{
 		"server": map[string]interface{}{
-			"version":    "0.2.2",
+			"version":    version.Version,
 			"uptime":     time.Since(h.started).String(),
 			"keys":       h.db0().KeyCount(),
 			"memory":     h.db0().MemUsage(),
@@ -543,50 +543,11 @@ func (h *HTTPServer) handleInfo(w http.ResponseWriter, _ *http.Request) {
 
 func (h *HTTPServer) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-
-	keys := h.db0().KeyCount()
-	mem := h.db0().MemUsage()
-	uptime := time.Since(h.started).Seconds()
-
-	var connCount int64
+	var clients int64
 	if h.connCount != nil {
-		connCount = h.connCount()
+		clients = h.connCount()
 	}
-
-	var memMax int64
-	var memPressure float64
-	if mt := h.db0().MemoryTracker(); mt != nil {
-		memMax = mt.Max()
-		memPressure = mt.PressurePercent()
-	}
-
-	fmt.Fprintf(w, "# HELP cachestorm_keys_total Total number of keys stored\n")
-	fmt.Fprintf(w, "# TYPE cachestorm_keys_total gauge\n")
-	fmt.Fprintf(w, "cachestorm_keys_total %d\n", keys)
-
-	fmt.Fprintf(w, "# HELP cachestorm_memory_used_bytes Current memory usage in bytes\n")
-	fmt.Fprintf(w, "# TYPE cachestorm_memory_used_bytes gauge\n")
-	fmt.Fprintf(w, "cachestorm_memory_used_bytes %d\n", mem)
-
-	fmt.Fprintf(w, "# HELP cachestorm_memory_max_bytes Configured maximum memory in bytes\n")
-	fmt.Fprintf(w, "# TYPE cachestorm_memory_max_bytes gauge\n")
-	fmt.Fprintf(w, "cachestorm_memory_max_bytes %d\n", memMax)
-
-	fmt.Fprintf(w, "# HELP cachestorm_memory_pressure_percent Memory pressure percentage\n")
-	fmt.Fprintf(w, "# TYPE cachestorm_memory_pressure_percent gauge\n")
-	fmt.Fprintf(w, "cachestorm_memory_pressure_percent %.2f\n", memPressure)
-
-	fmt.Fprintf(w, "# HELP cachestorm_connected_clients Number of active client connections\n")
-	fmt.Fprintf(w, "# TYPE cachestorm_connected_clients gauge\n")
-	fmt.Fprintf(w, "cachestorm_connected_clients %d\n", connCount)
-
-	fmt.Fprintf(w, "# HELP cachestorm_uptime_seconds Server uptime in seconds\n")
-	fmt.Fprintf(w, "# TYPE cachestorm_uptime_seconds gauge\n")
-	fmt.Fprintf(w, "cachestorm_uptime_seconds %.0f\n", uptime)
-
-	fmt.Fprintf(w, "# HELP cachestorm_up Whether the server is up (always 1)\n")
-	fmt.Fprintf(w, "# TYPE cachestorm_up gauge\n")
-	fmt.Fprintf(w, "cachestorm_up 1\n")
+	writePrometheusMetrics(w, readServerMetrics(h.dbs, h.db0(), clients, h.started))
 }
 
 func (h *HTTPServer) handleKeys(w http.ResponseWriter, r *http.Request) {

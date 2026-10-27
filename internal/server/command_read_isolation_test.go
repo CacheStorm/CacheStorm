@@ -2,11 +2,12 @@ package server
 
 import (
 	"bytes"
+	"sync"
+	"testing"
+
 	"github.com/cachestorm/cachestorm/internal/command"
 	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
-	"sync"
-	"testing"
 )
 
 func tryGateReadWriteX(s *Server, key, value string) bool {

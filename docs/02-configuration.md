@@ -2,10 +2,14 @@
 
 ## Configuration File
 
-CacheStorm uses YAML for configuration. Default locations:
-- `./cachestorm.yaml`
-- `./config/cachestorm.yaml`
-- `/etc/cachestorm/cachestorm.yaml`
+CacheStorm reads the YAML file named by `--config` or, when that flag is
+absent, by the `CACHESTORM_CONFIG` environment variable. Without either it
+starts with the built-in defaults; no other locations are searched.
+
+The loader is strict: an unknown or misspelt key stops startup with an error
+naming the file, line and key, instead of silently leaving the default in
+force. `config/cachestorm.example.yaml` and `config/cachestorm.production.yaml`
+are kept loadable by a test.
 
 ## Full Configuration Reference
 
@@ -15,17 +19,26 @@ server:
   bind: "0.0.0.0"              # Bind address
   port: 6380                    # TCP port
   max_connections: 10000        # Max concurrent connections
-  tcp_keepalive: 300            # TCP keepalive in seconds
-  read_timeout: "30s"           # Read timeout
-  write_timeout: "30s"          # Write timeout
-  read_buffer_size: 4096        # Read buffer size in bytes
-  write_buffer_size: 4096       # Write buffer size in bytes
+  databases: 16                 # SELECT 0 .. databases-1
+  tcp_keepalive: 300            # TCP keepalive period in seconds (0 = off)
+  read_timeout: "0"             # Idle client timeout (0 = never, as Redis timeout 0)
+  write_timeout: "0"            # Reply write timeout (0 = 5m default)
+  read_buffer_size: 4096        # Per-connection read buffer in bytes
+  write_buffer_size: 16384      # Per-connection write buffer in bytes
+  requirepass: ""               # Password for AUTH (empty = no auth)
+  protected_mode: true          # Without a password, serve only loopback clients
+  tls_cert_file: ""             # TLS certificate (empty = plaintext)
+  tls_key_file: ""              # TLS private key
 
 # HTTP/API Configuration
 http:
   enabled: true                 # Enable HTTP server
+  bind: ""                      # Listen address (empty = server.bind)
   port: 8080                    # HTTP port
   password: ""                  # Optional password for admin UI
+  rate_limit: 100               # Requests per client per window
+  rate_window: "1m"             # Rate limit window
+  cors_origin: ""               # Allowed CORS origin (empty = none)
 
 # Memory Management
 memory:
@@ -34,15 +47,6 @@ memory:
   pressure_warning: 70          # Memory warning threshold %
   pressure_critical: 85         # Memory critical threshold %
   eviction_sample_size: 5       # Sample size for eviction
-
-# Namespaces
-namespaces:
-  default:
-    default_ttl: "0"            # Default TTL (0 = no expiry)
-    max_memory: "0"             # Namespace memory limit
-  cache:
-    default_ttl: "1h"
-    max_memory: "512mb"
 
 # Cluster mode is not supported in this release: cluster.enabled: true makes
 # startup fail, and CLUSTER commands answer
@@ -68,21 +72,15 @@ persistence:
   aof_sync: "everysec"          # AOF sync: always, everysec, no
   snapshot_interval: "5m"       # RDB snapshot interval
   data_dir: "/var/lib/cachestorm" # Data directory
-  max_aof_size: "1gb"           # Max AOF file size before rewrite
+  aof_rewrite_percentage: 100   # Auto-rewrite after this much growth (0 = off)
+  aof_rewrite_min_size: "64mb"  # ... once the AOF is at least this large
 
 # Plugins Configuration
 plugins:
-  stats:
-    enabled: true               # Enable stats collection
-
   metrics:
     enabled: true               # Enable Prometheus metrics
     port: 9090                  # Metrics port
     path: "/metrics"            # Metrics endpoint path
-
-  auth:
-    enabled: false              # Enable authentication
-    password: ""                # Auth password
 
   slowlog:
     enabled: true               # Enable slow log
@@ -94,7 +92,32 @@ logging:
   level: "info"                 # Log level: debug, info, warn, error
   format: "json"                # Log format: json, console
   output: "stdout"              # Output: stdout, stderr, or file path
+
+# Sentinel role (off on data servers)
+sentinel:
+  enabled: false
+  id: "sentinel-1"
+  addr: "127.0.0.1"
+  port: 26379
+  quorum: 2
+  down_after: "30s"
+  failover_time: "3m"
+  seeds: []                     # addr:port of other sentinels
 ```
+
+### AOF rewrite
+
+`BGREWRITEAOF` replaces the AOF with the smallest command stream that
+rebuilds the current dataset. With `aof_rewrite_percentage` above zero the
+server also rewrites automatically, as Redis' `auto-aof-rewrite-percentage`
+and `auto-aof-rewrite-min-size` do: once the file is at least
+`aof_rewrite_min_size` and has grown by the percentage since the last
+rewrite (or startup). The rewrite holds the write gate while it encodes and
+syncs the new file, so writes pause for its duration; reads that do not need
+the gate continue. A failed automatic rewrite is retried only after the file
+doubles again. `INFO persistence` reports `aof_rewrite_in_progress`,
+`aof_last_bgrewrite_status`, `aof_rewrites`, `aof_current_size` and
+`aof_base_size`.
 
 
 ### Snapshot and recovery behavior
@@ -167,36 +190,39 @@ server:
 
 ## Environment Variables
 
-All configuration options can be overridden with environment variables:
+These environment variables override the file:
 
 ```bash
-# Server
+export CACHESTORM_CONFIG="/etc/cachestorm/cachestorm.yaml"
 export CACHESTORM_BIND="0.0.0.0"
 export CACHESTORM_PORT="6380"
 export CACHESTORM_MAX_MEMORY="2gb"
 export CACHESTORM_LOG_LEVEL="debug"
-
-# HTTP
-export CACHESTORM_HTTP_PORT="8080"
+export CACHESTORM_REQUIREPASS="secret"
 export CACHESTORM_HTTP_PASSWORD="secret"
+export CACHESTORM_DATA_DIR="/data"
+export CACHESTORM_PROTECTED_MODE="false"
 ```
 
-## Configuration Validation
+The command line also accepts `--bind`, `--port` and `--version`.
 
-```bash
-# Validate configuration
-./cachestorm -config config.yaml -validate
-```
+## Runtime Changes (CONFIG SET)
 
-## Hot Reloading
+These parameters take effect immediately, for every connected client:
 
-Some configuration options can be reloaded without restart:
+| Parameter | Effect |
+|-----------|--------|
+| `maxmemory` | New memory limit; accepts `100mb`, `4gb`, or bytes; `0` removes it |
+| `maxmemory-policy` | Any of the eight Redis policies |
+| `maxmemory-samples` | Keys sampled per eviction (1-64) |
+| `maxclients` | Connection limit for new clients |
+| `timeout` | Idle client timeout in seconds (`0` = never) |
+| `requirepass` | New password; existing authenticated clients stay authenticated |
+| `slowlog-log-slower-than`, `slowlog-max-len` | Slow log threshold (µs) and size |
 
-```redis
-CONFIG SET maxmemory 4gb
-CONFIG SET maxmemory-policy allkeys-lfu
-CONFIG SET slowlog-log-slower-than 5000
-```
+`port`, `bind`, `databases`, `dir`, `appendonly`, `appendfsync`,
+`protected-mode` and `tcp-keepalive` are reported by `CONFIG GET` but are
+immutable at runtime. Runtime changes are not written back to the YAML file.
 
 ## Example Configurations
 

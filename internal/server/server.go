@@ -141,6 +141,17 @@ type Server struct {
 	snapshotLastError error
 	snapshotInterval  time.Duration
 	snapshotWrite     func([]byte) error
+	// The AOF rewrite state is guarded by snapshotMu.
+	aofRewriteRunning    bool
+	aofRewriteLastError  error
+	aofRewriteBase       int64
+	aofRewrites          int64
+	aofRewriteMinSize    int64
+	aofRewritePercentage int64
+	// maxClients and idleTimeout are the live values of maxclients and
+	// timeout, which CONFIG SET can change while clients are connected.
+	maxClients  atomic.Int64
+	idleTimeout atomic.Int64
 }
 
 func New(cfg *config.Config) (result *Server, retErr error) {
@@ -208,17 +219,21 @@ func New(cfg *config.Config) (result *Server, retErr error) {
 		store.GlobalSlowLog.MaxSize = cfg.Plugins.SlowLog.MaxEntries
 	}
 
-	// Configure memory limits and eviction
-	if maxMem, err := config.ParseMemorySize(cfg.Memory.MaxMemory); err == nil && maxMem > 0 {
-		policy := parseEvictionPolicy(cfg.Memory.EvictionPolicy)
-		sampleSize := cfg.Memory.SampleSize
-		if sampleSize <= 0 {
-			sampleSize = 5
-		}
-		s.store.ConfigureMemory(maxMem, policy, cfg.Memory.WarningPct, cfg.Memory.CriticalPct, sampleSize)
+	// Memory tracking is always configured, so CONFIG SET maxmemory can
+	// impose a limit at runtime; a zero limit tracks usage without enforcing.
+	maxMem, err := config.ParseMemorySize(cfg.Memory.MaxMemory)
+	if err != nil || maxMem < 0 {
+		maxMem = 0
+	}
+	policy, ok := store.ParseEvictionPolicy(cfg.Memory.EvictionPolicy)
+	if !ok {
+		policy = store.EvictionAllKeysLRU
+	}
+	s.store.ConfigureMemory(maxMem, policy, cfg.Memory.WarningPct, cfg.Memory.CriticalPct, cfg.Memory.SampleSize)
+	if maxMem > 0 {
 		logger.Info().
 			Int64("max_memory_bytes", maxMem).
-			Str("eviction_policy", cfg.Memory.EvictionPolicy).
+			Str("eviction_policy", policy.String()).
 			Msg("memory limits configured")
 	}
 
@@ -288,6 +303,8 @@ func New(cfg *config.Config) (result *Server, retErr error) {
 	// Database 0 is s.store; the others are created on first use and share
 	// its Pub/Sub hub, memory tracker and hooks, configured above.
 	s.dbs = store.NewDatabases(s.store, cfg.Server.Databases)
+	s.maxClients.Store(int64(cfg.Server.MaxConnections))
+	s.idleTimeout.Store(int64(cfg.Server.ReadTimeoutDuration()))
 	if cfg.Replication.IsReplica() {
 		s.dbs.SetPassiveExpiry(true)
 	}
@@ -399,6 +416,10 @@ func New(cfg *config.Config) (result *Server, retErr error) {
 	if err := s.configureSnapshots(!aofFound); err != nil {
 		return nil, err
 	}
+	if err := s.configureAOFRewrite(); err != nil {
+		return nil, err
+	}
+	s.router.SetConfigHooks(s.configHooks())
 
 	// Every write the router executes goes to the AOF, when it is enabled,
 	// and to the replication stream.
@@ -574,6 +595,7 @@ func (s *Server) Start(_ context.Context) (retErr error) {
 	}
 
 	s.startSnapshotLoop()
+	s.startAOFRewriteLoop()
 
 	startupComplete = true
 	s.started = true
@@ -584,9 +606,10 @@ func (s *Server) Start(_ context.Context) (retErr error) {
 // the configured plugins.metrics.{port,path} and keeps its gauges current.
 func (s *Server) startMetricsServer() {
 	mux := http.NewServeMux()
+	started := time.Now()
 	mux.HandleFunc(s.cfg.Plugins.Metrics.Path, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-		fmt.Fprint(w, s.metricsPlugin.ExportPrometheus())
+		writePrometheusMetrics(w, readServerMetrics(s.dbs, s.store, s.connCount.Load(), started))
 	})
 
 	s.metricsServer = &http.Server{
@@ -669,7 +692,7 @@ func (s *Server) acceptLoop() {
 		backoff = 0
 
 		// Enforce MaxConnections. Redis tells the client why it is refused.
-		maxConns := int64(s.cfg.Server.MaxConnections)
+		maxConns := s.maxClients.Load()
 		if maxConns > 0 && s.connCount.Load() >= maxConns {
 			_ = conn.SetWriteDeadline(time.Now().Add(time.Second))
 			if _, err := conn.Write([]byte("-ERR max number of clients reached\r\n")); err != nil {
@@ -691,14 +714,15 @@ func (s *Server) acceptLoop() {
 		connID := s.connID.Add(1)
 		s.connCount.Add(1)
 		store.GlobalMetrics.RecordConnection()
-		c := NewConnection(connID, conn, s.store, s.router, s.pluginMgr)
+		c := newConnection(connID, conn, s.store, s.router, s.pluginMgr, connectionOptions{
+			keepAlive:       time.Duration(s.cfg.Server.TCPKeepAlive) * time.Second,
+			readBufferSize:  s.cfg.Server.ReadBufferSize,
+			writeBufferSize: s.cfg.Server.WriteBufferSize,
+		})
 		c.dbs = s.dbs
 		c.srv = s
 
 		// Apply configured timeouts
-		if rt := s.cfg.Server.ReadTimeoutDuration(); rt > 0 {
-			c.readTimeout = rt
-		}
 		if wt := s.cfg.Server.WriteTimeoutDuration(); wt > 0 {
 			c.writeTimeout = wt
 		}
@@ -939,21 +963,4 @@ func (s *Server) replayAOF(commands []persistence.Command, loading ...bool) (int
 		}
 	}
 	return db, nil
-}
-
-func parseEvictionPolicy(name string) store.EvictionPolicy {
-	switch name {
-	case "noeviction":
-		return store.EvictionNoEviction
-	case "allkeys-lru":
-		return store.EvictionAllKeysLRU
-	case "allkeys-lfu":
-		return store.EvictionAllKeysLFU
-	case "volatile-lru":
-		return store.EvictionVolatileLRU
-	case "allkeys-random":
-		return store.EvictionAllKeysRandom
-	default:
-		return store.EvictionAllKeysLRU
-	}
 }

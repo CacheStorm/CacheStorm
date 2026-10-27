@@ -113,9 +113,9 @@ Durum (25 Ekim 2026): **kısmen tamamlandı.** `maxmemory` artık yerinde büyü
 
 Öncelik: **P2**. Tahmin: **5–10 iş günü**; ölçüm sonuçlarına göre bölünür.
 
-- `config/example.yaml` ile geçerli şemayı birleştir; önce Makefile ve installer referanslarını taşı. Kalan yoksayılan ayarları (`plugins.stats`, buffer/keepalive ve max_aof_size) uygula ya da şemadan/belgeden kaldır; HTTP CORS/rate ve snapshot_interval artık çalışma zamanına bağlı.
+- [x] (27 Ekim 2026) Eski şemalı `config/example.yaml` kaldırıldı; Makefile ve iki installer geçerli şablona ve geçerli şemaya taşındı. Loader bilinmeyen anahtarı dosya/satır bilgisiyle reddediyor; `config/*.yaml` bir testle yüklenebilir tutuluyor. `tcp_keepalive`, buffer boyutları uygulanıyor; `namespaces` ve `plugins.stats/auth` şemadan çıkarıldı; `max_aof_size` yerine Redis karşılığı `aof_rewrite_percentage`/`aof_rewrite_min_size` geldi.
 - Root Dockerfile ile kullanılan diğer Dockerfile'ları, tekrar üretilebilir build hedefi korunarak ortaklaştır. Cluster Compose örneğinin okunmayan ortam değişkenlerini düzelt.
-- Prometheus/Grafana kurulumunu auth açık sunucuyla doğrula; alert dosyası mount'u, endpoint ve kimlik bilgileri çalışsın.
+- [x] (27 Ekim 2026) Prometheus kimlik gerektirmeyen metrik portunu (`plugins.metrics`) kazıyor; iki uç aynı, tüm veritabanlarını kapsayan çıktıyı veriyor. `alerts.yml` Compose'a bağlandı; tetiklenemeyen `cachestorm_up == 0` alarmı `up{job="cachestorm"} == 0` oldu.
 - Config ve logger başlangıç hatalarını, kapanışı, disk dolmasını, yavaş istemciyi ve uzun süreli bellek kullanımını sınayan işletim testleri ekle.
 - Sabit veri kümesi ve worker/pipeline ayarlarıyla throughput, p50/p95/p99, RSS, allocation ve GC ölç. Store mikrobenchmark'ı ile TCP uçtan uca ölçümü ayrı göster; regresyon eşiklerini ilk güvenilir baseline'dan belirle.
 - `internal/command` içindeki yaklaşık 49 bin satırlık uygulamayı, ölçüm ve kullanım verisine göre çekirdek/opsiyonel uzantılara bölmeyi değerlendir. Kullanılmayan komut ailesini kanıt ve geçiş planı olmadan silme.
@@ -123,6 +123,8 @@ Durum (25 Ekim 2026): **kısmen tamamlandı.** `maxmemory` artık yerinde büyü
 Çıkış ölçütü: kurulum ve izleme belgelerindeki adımlar temiz ortamda çalışır; performans rakamlarının komutu, ortamı ve ham sonucu vardır. Kritik davranışların testleri tamamlandıktan sonra ölçülmüş kapsam için aşamalı hedef belirlenir.
 
 ## Bir sonraki somut değişiklik
+
+27 Ekim 2026 turu: `BGREWRITEAOF` artık gerçekten AOF'u yeniden yazıyor (önceden yalnızca "started" dönüyordu) ve AOF otomatik olarak küçültülüyor. `CONFIG GET/SET` çalışan sunucuya bağlandı: `maxmemory`, `maxmemory-policy`, `maxmemory-samples`, `maxclients`, `timeout` ve `requirepass` anında etkili; `CONFIG GET` Redis gibi glob eşleşiyor ve çoklu parametre alıyor. Sekiz Redis eviction politikasının hepsi var (volatile-lfu/random/ttl eklendi). Boşta bekleyen istemciler artık 5 dakikada kesilmiyor (Redis `timeout 0`). Lisans MIT.
 
 M1–M4 tamamlandı; replikasyon çalışıyor. Sıradaki işler:
 

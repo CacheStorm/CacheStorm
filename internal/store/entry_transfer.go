@@ -91,7 +91,7 @@ func (s *Store) Transfer(srcKey string, dst *Store, dstKey string, options Trans
 			}
 			tooLarge = tooLarge || !dst.memTracker.withinLimit(minimum)
 			unlock()
-			if tooLarge || dst.evictor == nil || dst.evictor.policy == EvictionNoEviction {
+			if tooLarge || !dst.evictor.evicts() {
 				return false, ErrMemoryLimit
 			}
 			if remaining < 0 {

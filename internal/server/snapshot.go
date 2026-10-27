@@ -105,7 +105,7 @@ func (s *Server) snapshotInfo() string {
 	if s.snapshotLastError != nil {
 		status = "err"
 	}
-	return fmt.Sprintf("# Persistence\r\nloading:0\r\nrdb_bgsave_in_progress:%d\r\nrdb_last_save_time:%d\r\nrdb_last_bgsave_status:%s\r\naof_enabled:%d\r\naof_last_write_status:%s\r\n\r\n", running, s.snapshotLastTime, status, aof, aofStatus)
+	return fmt.Sprintf("# Persistence\r\nloading:0\r\nrdb_bgsave_in_progress:%d\r\nrdb_last_save_time:%d\r\nrdb_last_bgsave_status:%s\r\naof_enabled:%d\r\naof_last_write_status:%s\r\n%s\r\n", running, s.snapshotLastTime, status, aof, aofStatus, s.aofRewriteInfo())
 }
 
 func (s *Server) saveSnapshot(background bool) error {

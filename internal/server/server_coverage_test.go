@@ -99,33 +99,6 @@ func newTestHTTPServerNoCORS() *HTTPServer {
 // Helper: creates an HTTPServer with namespace support
 
 // ===========================================================================
-// parseEvictionPolicy coverage
-// ===========================================================================
-func TestParseEvictionPolicy(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		expected store.EvictionPolicy
-	}{
-		{"noeviction", "noeviction", store.EvictionNoEviction},
-		{"allkeys-lru", "allkeys-lru", store.EvictionAllKeysLRU},
-		{"allkeys-lfu", "allkeys-lfu", store.EvictionAllKeysLFU},
-		{"volatile-lru", "volatile-lru", store.EvictionVolatileLRU},
-		{"allkeys-random", "allkeys-random", store.EvictionAllKeysRandom},
-		{"unknown defaults to allkeys-lru", "somethingelse", store.EvictionAllKeysLRU},
-		{"empty defaults to allkeys-lru", "", store.EvictionAllKeysLRU},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := parseEvictionPolicy(tt.input)
-			if got != tt.expected {
-				t.Errorf("parseEvictionPolicy(%q) = %v, want %v", tt.input, got, tt.expected)
-			}
-		})
-	}
-}
-
-// ===========================================================================
 // sessionStore.Valid / sessionStore.Cleanup coverage
 // ===========================================================================
 func TestSessionStoreValid(t *testing.T) {

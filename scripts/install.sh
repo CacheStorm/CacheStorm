@@ -121,17 +121,21 @@ install_docker() {
         cat > "$CONFIG_DIR/cachestorm.yaml" << 'EOF'
 server:
   port: 6380
-  http_port: 8080
   bind: 0.0.0.0
 
-storage:
+http:
+  enabled: true
+  port: 8080
+
+memory:
   max_memory: 1gb
   eviction_policy: allkeys-lru
 
 persistence:
   enabled: true
-  mode: aof
-  aof_fsync: everysec
+  aof: true
+  aof_sync: everysec
+  data_dir: /data
 
 logging:
   level: info
@@ -158,7 +162,7 @@ services:
       - CACHESTORM_CONFIG=/etc/cachestorm/cachestorm.yaml
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/api/health"]
       interval: 30s
       timeout: 3s
       retries: 3
@@ -276,20 +280,24 @@ install_binary() {
 
     # Create default config
     if [ ! -f "$CONFIG_DIR/cachestorm.yaml" ]; then
-        cat > "$CONFIG_DIR/cachestorm.yaml" << 'EOF'
+        cat > "$CONFIG_DIR/cachestorm.yaml" << EOF
 server:
   port: 6380
-  http_port: 8080
   bind: 0.0.0.0
 
-storage:
+http:
+  enabled: true
+  port: 8080
+
+memory:
   max_memory: 1gb
   eviction_policy: allkeys-lru
 
 persistence:
   enabled: true
-  mode: aof
-  aof_fsync: everysec
+  aof: true
+  aof_sync: everysec
+  data_dir: $DATA_DIR/data
 
 logging:
   level: info
@@ -416,20 +424,24 @@ install_source() {
     mkdir -p "$DATA_DIR/data" "$CONFIG_DIR"
 
     if [ ! -f "$CONFIG_DIR/cachestorm.yaml" ]; then
-        cp "$TMP_DIR/cachestorm/config/example.yaml" "$CONFIG_DIR/cachestorm.yaml" 2>/dev/null || cat > "$CONFIG_DIR/cachestorm.yaml" << 'EOF'
+        cp "$TMP_DIR/cachestorm/config/cachestorm.example.yaml" "$CONFIG_DIR/cachestorm.yaml" 2>/dev/null || cat > "$CONFIG_DIR/cachestorm.yaml" << EOF
 server:
   port: 6380
-  http_port: 8080
   bind: 0.0.0.0
 
-storage:
+http:
+  enabled: true
+  port: 8080
+
+memory:
   max_memory: 1gb
   eviction_policy: allkeys-lru
 
 persistence:
   enabled: true
-  mode: aof
-  aof_fsync: everysec
+  aof: true
+  aof_sync: everysec
+  data_dir: $DATA_DIR/data
 
 logging:
   level: info
@@ -649,7 +661,7 @@ main() {
             fi
 
             if command_exists curl; then
-                if curl -s http://localhost:8080/health 2>/dev/null | grep -q "ok"; then
+                if curl -s http://localhost:8080/api/health 2>/dev/null | grep -q "ok"; then
                     echo -e "${GREEN}✓ HTTP API responding${NC}"
                 fi
             fi

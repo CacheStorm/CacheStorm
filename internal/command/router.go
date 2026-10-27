@@ -49,6 +49,8 @@ type Router struct {
 	snapshotSave     func(bool) error
 	snapshotLastSave func() int64
 	snapshotInfo     func() string
+	aofRewrite       func() error
+	configHooks      *ConfigHooks
 }
 
 // commandSpec is the arity, flags and key positions Redis reports for one of
@@ -158,6 +160,19 @@ func (r *Router) snapshotHooks() (func(bool) error, func() int64, func() string)
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.snapshotSave, r.snapshotLastSave, r.snapshotInfo
+}
+
+// SetAOFRewriteHook installs the function BGREWRITEAOF starts a rewrite with.
+func (r *Router) SetAOFRewriteHook(rewrite func() error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.aofRewrite = rewrite
+}
+
+func (r *Router) aofRewriteHook() func() error {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.aofRewrite
 }
 
 func (r *Router) SetRequirePass(password string) {

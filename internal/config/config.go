@@ -1,6 +1,10 @@
 package config
 
 import (
+	"bytes"
+	"errors"
+	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"time"
@@ -9,16 +13,15 @@ import (
 )
 
 type Config struct {
-	Server      ServerConfig               `yaml:"server"`
-	HTTP        HTTPConfig                 `yaml:"http"`
-	Memory      MemoryConfig               `yaml:"memory"`
-	Namespaces  map[string]NamespaceConfig `yaml:"namespaces"`
-	Cluster     ClusterConfig              `yaml:"cluster"`
-	Persistence PersistenceConfig          `yaml:"persistence"`
-	Replication ReplicationConfig          `yaml:"replication"`
-	Plugins     PluginsConfig              `yaml:"plugins"`
-	Logging     LoggingConfig              `yaml:"logging"`
-	Sentinel    SentinelConfig             `yaml:"sentinel"`
+	Server      ServerConfig      `yaml:"server"`
+	HTTP        HTTPConfig        `yaml:"http"`
+	Memory      MemoryConfig      `yaml:"memory"`
+	Cluster     ClusterConfig     `yaml:"cluster"`
+	Persistence PersistenceConfig `yaml:"persistence"`
+	Replication ReplicationConfig `yaml:"replication"`
+	Plugins     PluginsConfig     `yaml:"plugins"`
+	Logging     LoggingConfig     `yaml:"logging"`
+	Sentinel    SentinelConfig    `yaml:"sentinel"`
 }
 
 // SentinelConfig configures the Sentinel subsystem wired up by
@@ -72,7 +75,7 @@ type ServerConfig struct {
 	ReadTimeout     string `yaml:"read_timeout" default:"0"`
 	WriteTimeout    string `yaml:"write_timeout" default:"0"`
 	ReadBufferSize  int    `yaml:"read_buffer_size" default:"4096"`
-	WriteBufferSize int    `yaml:"write_buffer_size" default:"4096"`
+	WriteBufferSize int    `yaml:"write_buffer_size" default:"16384"`
 	RequirePass     string `yaml:"requirepass"`
 	// ProtectedMode refuses clients that do not connect over loopback while
 	// no password is set, as Redis' protected-mode does, so a server started
@@ -102,11 +105,6 @@ type MemoryConfig struct {
 	SampleSize     int    `yaml:"eviction_sample_size" default:"5"`
 }
 
-type NamespaceConfig struct {
-	DefaultTTL string `yaml:"default_ttl" default:"0"`
-	MaxMemory  string `yaml:"max_memory" default:"0"`
-}
-
 type ClusterConfig struct {
 	Enabled       bool     `yaml:"enabled" default:"false"`
 	NodeName      string   `yaml:"node_name"`
@@ -124,7 +122,12 @@ type PersistenceConfig struct {
 	AOFSync          string `yaml:"aof_sync" default:"everysec"`
 	SnapshotInterval string `yaml:"snapshot_interval" default:"5m"`
 	DataDir          string `yaml:"data_dir" default:"/var/lib/cachestorm"`
-	MaxAOFSize       string `yaml:"max_aof_size" default:"1gb"`
+	// AOFRewritePercentage and AOFRewriteMinSize trigger an automatic AOF
+	// rewrite, as Redis' auto-aof-rewrite-percentage/min-size do: once the
+	// file is at least AOFRewriteMinSize and has grown by AOFRewritePercentage
+	// since the last rewrite. A percentage of 0 disables automatic rewrites.
+	AOFRewritePercentage int    `yaml:"aof_rewrite_percentage" default:"100"`
+	AOFRewriteMinSize    string `yaml:"aof_rewrite_min_size" default:"64mb"`
 }
 
 type ReplicationConfig struct {
@@ -185,8 +188,8 @@ func Load(path string) (*Config, error) {
 		if err != nil {
 			return nil, err
 		}
-		if err := yaml.Unmarshal(data, cfg); err != nil {
-			return nil, err
+		if err := decodeStrict(data, cfg); err != nil {
+			return nil, fmt.Errorf("config %s: %w", path, err)
 		}
 	}
 
@@ -246,4 +249,16 @@ func (c *ServerConfig) WriteTimeoutDuration() time.Duration {
 		return 0
 	}
 	return d
+}
+
+// decodeStrict decodes YAML into cfg and refuses keys the schema does not
+// know, so a misspelt or retired setting is reported instead of silently
+// leaving the default in force.
+func decodeStrict(data []byte, cfg *Config) error {
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(cfg); err != nil && !errors.Is(err, io.EOF) {
+		return err
+	}
+	return nil
 }

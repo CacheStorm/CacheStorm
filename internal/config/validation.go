@@ -31,6 +31,15 @@ func Validate(cfg *Config) error {
 	if cfg.Server.Databases < 0 || cfg.Server.Databases > 1<<20 {
 		return fmt.Errorf("invalid databases: %d", cfg.Server.Databases)
 	}
+	if cfg.Server.TCPKeepAlive < 0 {
+		return fmt.Errorf("tcp_keepalive cannot be negative")
+	}
+	if cfg.Server.ReadBufferSize < 0 || cfg.Server.ReadBufferSize > 64<<20 {
+		return fmt.Errorf("invalid read_buffer_size: %d", cfg.Server.ReadBufferSize)
+	}
+	if cfg.Server.WriteBufferSize < 0 || cfg.Server.WriteBufferSize > 64<<20 {
+		return fmt.Errorf("invalid write_buffer_size: %d", cfg.Server.WriteBufferSize)
+	}
 	maxMemory, err := ParseMemorySize(cfg.Memory.MaxMemory)
 	if err != nil || maxMemory < 0 {
 		return fmt.Errorf("invalid max_memory: %s", cfg.Memory.MaxMemory)
@@ -49,11 +58,14 @@ func Validate(cfg *Config) error {
 	}
 
 	validPolicies := map[string]bool{
-		"noeviction":     true,
-		"allkeys-lru":    true,
-		"allkeys-lfu":    true,
-		"volatile-lru":   true,
-		"allkeys-random": true,
+		"noeviction":      true,
+		"allkeys-lru":     true,
+		"allkeys-lfu":     true,
+		"volatile-lru":    true,
+		"allkeys-random":  true,
+		"volatile-lfu":    true,
+		"volatile-random": true,
+		"volatile-ttl":    true,
 	}
 	if !validPolicies[strings.ToLower(cfg.Memory.EvictionPolicy)] {
 		return fmt.Errorf("invalid eviction policy: %s", cfg.Memory.EvictionPolicy)
@@ -65,6 +77,13 @@ func Validate(cfg *Config) error {
 		if err != nil || interval < 0 {
 			return fmt.Errorf("invalid persistence.snapshot_interval: %q", cfg.Persistence.SnapshotInterval)
 		}
+	}
+
+	if cfg.Persistence.AOFRewritePercentage < 0 {
+		return fmt.Errorf("invalid persistence.aof_rewrite_percentage: %d", cfg.Persistence.AOFRewritePercentage)
+	}
+	if size, err := ParseMemorySize(cfg.Persistence.AOFRewriteMinSize); err != nil || size < 0 {
+		return fmt.Errorf("invalid persistence.aof_rewrite_min_size: %q", cfg.Persistence.AOFRewriteMinSize)
 	}
 
 	validLogLevels := map[string]bool{

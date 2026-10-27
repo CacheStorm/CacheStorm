@@ -15,7 +15,7 @@ const (
 )
 
 type MemoryTracker struct {
-	maxMemory    int64
+	maxMemory    atomic.Int64
 	currentUsage atomic.Int64
 	warningPct   float64
 	criticalPct  float64
@@ -23,12 +23,19 @@ type MemoryTracker struct {
 }
 
 func NewMemoryTracker(maxMemory int64, warningPct, criticalPct int) *MemoryTracker {
-	return &MemoryTracker{
-		maxMemory:    maxMemory,
+	mt := &MemoryTracker{
 		warningPct:   float64(warningPct) / 100,
 		criticalPct:  float64(criticalPct) / 100,
 		emergencyPct: 0.95,
 	}
+	mt.maxMemory.Store(maxMemory)
+	return mt
+}
+
+// SetMax changes the memory limit; 0 removes it. Usage is unaffected, so a
+// lower limit is enforced by the next write that needs memory.
+func (mt *MemoryTracker) SetMax(maxMemory int64) {
+	mt.maxMemory.Store(maxMemory)
 }
 
 func (mt *MemoryTracker) Add(bytes int64) {
@@ -44,16 +51,17 @@ func (mt *MemoryTracker) Usage() int64 {
 }
 
 func (mt *MemoryTracker) Max() int64 {
-	return mt.maxMemory
+	return mt.maxMemory.Load()
 }
 
 func (mt *MemoryTracker) Pressure() PressureLevel {
-	if mt.maxMemory == 0 {
+	maxMemory := mt.maxMemory.Load()
+	if maxMemory <= 0 {
 		return PressureNormal
 	}
 
 	usage := mt.currentUsage.Load()
-	pct := float64(usage) / float64(mt.maxMemory)
+	pct := float64(usage) / float64(maxMemory)
 
 	switch {
 	case pct >= mt.emergencyPct:
@@ -68,7 +76,8 @@ func (mt *MemoryTracker) Pressure() PressureLevel {
 }
 
 func (mt *MemoryTracker) CanAllocate(bytes int64) bool {
-	if mt.maxMemory == 0 {
+	maxMemory := mt.maxMemory.Load()
+	if maxMemory <= 0 {
 		return true
 	}
 
@@ -78,18 +87,20 @@ func (mt *MemoryTracker) CanAllocate(bytes int64) bool {
 		return false
 	}
 
-	return float64(newUsage)/float64(mt.maxMemory) < mt.emergencyPct
+	return float64(newUsage)/float64(maxMemory) < mt.emergencyPct
 }
 
 func (mt *MemoryTracker) PressurePercent() float64 {
-	if mt.maxMemory == 0 {
+	maxMemory := mt.maxMemory.Load()
+	if maxMemory <= 0 {
 		return 0
 	}
-	return float64(mt.currentUsage.Load()) / float64(mt.maxMemory) * 100
+	return float64(mt.currentUsage.Load()) / float64(maxMemory) * 100
 }
 
 func (mt *MemoryTracker) withinLimit(usage int64) bool {
-	return mt.maxMemory <= 0 || float64(usage)/float64(mt.maxMemory) < mt.emergencyPct
+	maxMemory := mt.maxMemory.Load()
+	return maxMemory <= 0 || float64(usage)/float64(maxMemory) < mt.emergencyPct
 }
 
 func (mt *MemoryTracker) TryReserve(delta int64) bool {

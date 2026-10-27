@@ -77,7 +77,7 @@ func (s *Store) SetStringBatch(pairs []StringPair, nx bool) (bool, error) {
 		if reserved && !s.memTracker.TryReserve(delta) {
 			tooLarge := !s.memTracker.withinLimit(newMem)
 			unlock()
-			if tooLarge || s.evictor == nil || s.evictor.policy == EvictionNoEviction {
+			if tooLarge || !s.evictor.evicts() {
 				return false, ErrMemoryLimit
 			}
 			if remaining < 0 {

@@ -22,10 +22,19 @@ import (
 )
 
 const (
-	defaultReadTimeout  = 5 * time.Minute
-	defaultWriteTimeout = 5 * time.Minute
-	keepAlivePeriod     = 3 * time.Minute
+	defaultWriteTimeout    = 5 * time.Minute
+	defaultKeepAlivePeriod = 300 * time.Second
+	defaultReadBufferSize  = 4096
+	defaultWriteBufferSize = 16 << 10
 )
+
+// connectionOptions are the per-connection socket settings from the server
+// configuration.
+type connectionOptions struct {
+	keepAlive       time.Duration
+	readBufferSize  int
+	writeBufferSize int
+}
 
 type Connection struct {
 	ID int64
@@ -166,16 +175,40 @@ func (s *replySink) release() error {
 	return err
 }
 
+// idleTimeout is how long the connection may sit idle between commands; the
+// server's live CONFIG timeout wins over the connection's own setting.
+func (c *Connection) idleTimeout() time.Duration {
+	if c.srv != nil {
+		return time.Duration(c.srv.idleTimeout.Load())
+	}
+	return c.readTimeout
+}
+
 func NewConnection(id int64, conn net.Conn, s *store.Store, r *command.Router, pm *plugin.Manager) *Connection {
+	return newConnection(id, conn, s, r, pm, connectionOptions{keepAlive: defaultKeepAlivePeriod})
+}
+
+func newConnection(id int64, conn net.Conn, s *store.Store, r *command.Router, pm *plugin.Manager, opts connectionOptions) *Connection {
 	// Keep-alive needs the raw TCP connection: Handle()'s type assertion
-	// would miss the counting wrapper installed below.
+	// would miss the counting wrapper installed below. A zero period turns
+	// keep-alive off, as Redis' tcp-keepalive 0 does.
 	if tcpConn, ok := conn.(*net.TCPConn); ok {
-		tcpConn.SetKeepAlive(true)
-		tcpConn.SetKeepAlivePeriod(keepAlivePeriod)
+		if opts.keepAlive > 0 {
+			tcpConn.SetKeepAlive(true)
+			tcpConn.SetKeepAlivePeriod(opts.keepAlive)
+		} else {
+			tcpConn.SetKeepAlive(false)
+		}
+	}
+	if opts.readBufferSize <= 0 {
+		opts.readBufferSize = defaultReadBufferSize
+	}
+	if opts.writeBufferSize <= 0 {
+		opts.writeBufferSize = defaultWriteBufferSize
 	}
 
 	cc := &countingConn{Conn: conn}
-	br := bufio.NewReader(cc)
+	br := bufio.NewReaderSize(cc, opts.readBufferSize)
 	sink := &replySink{conn: cc}
 	c := &Connection{
 		ID:           id,
@@ -183,13 +216,12 @@ func NewConnection(id int64, conn net.Conn, s *store.Store, r *command.Router, p
 		bufReader:    br,
 		reader:       resp.NewReader(br),
 		sink:         sink,
-		writer:       resp.NewWriter(bufio.NewWriterSize(sink, 16<<10)),
+		writer:       resp.NewWriter(bufio.NewWriterSize(sink, opts.writeBufferSize)),
 		store:        s,
 		router:       r,
 		plugins:      pm,
 		namespace:    "default",
 		createdAt:    time.Now(),
-		readTimeout:  defaultReadTimeout,
 		writeTimeout: defaultWriteTimeout,
 		transaction:  command.NewTransaction(),
 	}
@@ -216,12 +248,14 @@ func (c *Connection) Handle() {
 		Msg("client connected")
 
 	for {
-		if c.subscribed() {
+		idle := c.idleTimeout()
+		if c.subscribed() || idle <= 0 {
 			// Redis never times out a pub/sub client for idleness: it is
-			// expected to sit silently waiting for messages.
+			// expected to sit silently waiting for messages. Without a
+			// configured read_timeout no client is, as with Redis' timeout 0.
 			c.conn.SetReadDeadline(time.Time{})
 		} else {
-			c.conn.SetReadDeadline(time.Now().Add(c.readTimeout))
+			c.conn.SetReadDeadline(time.Now().Add(idle))
 		}
 		// Checked after the deadline is armed: Drain sets the flag and then
 		// moves the deadline to now, so either this check sees the flag or

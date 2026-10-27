@@ -1697,6 +1697,20 @@ func cmdBGSAVE(ctx *Context) error {
 }
 
 func cmdBGREWRITEAOF(ctx *Context) error {
+	if ctx.ArgCount() != 0 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+	r := ctx.dispatcher()
+	if r == nil {
+		return ctx.WriteError(errors.New("ERR append only file is not enabled"))
+	}
+	rewrite := r.aofRewriteHook()
+	if rewrite == nil {
+		return ctx.WriteError(errors.New("ERR append only file is not enabled"))
+	}
+	if err := rewrite(); err != nil {
+		return ctx.WriteError(err)
+	}
 	return ctx.WriteSimpleString("Background append only file rewriting started")
 }
 

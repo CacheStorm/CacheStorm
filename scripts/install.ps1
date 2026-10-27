@@ -147,17 +147,21 @@ function Install-Docker() {
         @"
 server:
   port: 6379
-  http_port: 8080
   bind: 0.0.0.0
 
-storage:
+http:
+  enabled: true
+  port: 8080
+
+memory:
   max_memory: 1gb
   eviction_policy: allkeys-lru
 
 persistence:
   enabled: true
-  mode: aof
-  aof_fsync: everysec
+  aof: true
+  aof_sync: everysec
+  data_dir: /data
 
 logging:
   level: info
@@ -185,7 +189,7 @@ services:
       - CACHESTORM_CONFIG=/etc/cachestorm/cachestorm.yaml
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/api/health"]
       interval: 30s
       timeout: 3s
       retries: 3
@@ -301,17 +305,21 @@ function Install-Binary() {
             @"
 server:
   port: 6379
-  http_port: 8080
   bind: 0.0.0.0
 
-storage:
+http:
+  enabled: true
+  port: 8080
+
+memory:
   max_memory: 1gb
   eviction_policy: allkeys-lru
 
 persistence:
   enabled: true
-  mode: aof
-  aof_fsync: everysec
+  aof: true
+  aof_sync: everysec
+  data_dir: $DataDir
 
 logging:
   level: info
@@ -424,7 +432,7 @@ function Install-Source() {
         # Create default config
         $configPath = "$ConfigDir\cachestorm.yaml"
         if (-not (Test-Path $configPath)) {
-            Copy-Item -Path ".\config\example.yaml" -Destination $configPath -ErrorAction SilentlyContinue
+            Copy-Item -Path ".\config\cachestorm.example.yaml" -Destination $configPath -ErrorAction SilentlyContinue
         }
 
         # Add to PATH
@@ -528,7 +536,7 @@ function Test-Installation() {
 
                 # Test HTTP API
                 try {
-                    $response = Invoke-RestMethod -Uri "http://localhost:8080/health" -TimeoutSec 5
+                    $response = Invoke-RestMethod -Uri "http://localhost:8080/api/health" -TimeoutSec 5
                     Write-Success "HTTP API responding"
                 }
                 catch {

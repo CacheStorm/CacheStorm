@@ -45,7 +45,7 @@ EXPOSE 6380 8080
 VOLUME ["/data"]
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-    CMD wget -q --spider http://localhost:8080/health || exit 1
+    CMD wget -q --spider http://localhost:8080/api/health || exit 1
 
 ENTRYPOINT ["./cachestorm"]
 CMD ["--config", "/etc/cachestorm/cachestorm.yaml"]

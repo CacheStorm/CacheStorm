@@ -80,6 +80,29 @@ func NewStore() *Store {
 	return s
 }
 
+// MemoryLimit returns the configured memory limit (0 when unlimited) and the
+// eviction policy.
+func (s *Store) MemoryLimit() (int64, EvictionPolicy) {
+	if s.memTracker == nil || s.evictor == nil {
+		return 0, EvictionNoEviction
+	}
+	return s.memTracker.Max(), s.evictor.Policy()
+}
+
+// SetMemoryLimit changes the memory limit, eviction policy and sample size at
+// runtime. Every database shares the tracker and the eviction settings, so
+// calling it on any one of them applies to all. The store must have been set
+// up with ConfigureMemory.
+func (s *Store) SetMemoryLimit(maxMemory int64, policy EvictionPolicy, sampleSize int) bool {
+	if s.memTracker == nil || s.evictor == nil {
+		return false
+	}
+	s.evictor.SetPolicy(policy)
+	s.evictor.SetSampleSize(sampleSize)
+	s.memTracker.SetMax(maxMemory)
+	return true
+}
+
 // ConfigureMemory sets up memory tracking and eviction. Call after NewStore().
 func (s *Store) ConfigureMemory(maxMemory int64, policy EvictionPolicy, warningPct, criticalPct, sampleSize int) {
 	s.memTracker = NewMemoryTracker(maxMemory, warningPct, criticalPct)
@@ -120,7 +143,7 @@ func (s *Store) CheckWriteMemory() error {
 	if mt == nil || mt.Max() <= 0 || mt.Usage() <= mt.Max() {
 		return nil
 	}
-	if s.evictor != nil && s.evictor.policy != EvictionNoEviction {
+	if s.evictor.evicts() {
 		if err := s.evictor.CheckAndEvict(); err != nil {
 			logger.Warn().Err(err).Msg("eviction attempt failed")
 		}

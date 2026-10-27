@@ -154,7 +154,7 @@ setup:
 	go mod download
 	go mod verify
 	@if [ ! -f config.yaml ]; then \
-		cp config/example.yaml config.yaml; \
+		cp config/cachestorm.example.yaml config.yaml; \
 		echo "✓ Created config.yaml"; \
 	fi
 	@echo "✓ Setup complete"

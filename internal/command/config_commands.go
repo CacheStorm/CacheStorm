@@ -2,6 +2,7 @@ package command
 
 import (
 	"errors"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -101,62 +102,101 @@ func cmdCONFIG(ctx *Context) error {
 	}
 }
 
-func cmdConfigGet(ctx *Context) error {
-	if ctx.ArgCount() != 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	pattern := strings.ToLower(ctx.ArgString(1))
-	results := make([]*resp.Value, 0)
-
-	addConfig := func(name, value string) {
-		if pattern == "*" || strings.Contains(strings.ToLower(name), pattern) || matchConfigPattern(name, pattern) {
-			results = append(results, resp.BulkString(name), resp.BulkString(value))
-		}
-	}
-
-	c := globalConfig
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	addConfig("maxmemory", strconv.FormatInt(c.maxMemory, 10))
-	addConfig("maxmemory-policy", c.maxMemoryPolicy)
-	addConfig("maxmemory-samples", strconv.Itoa(c.maxMemorySamples))
-	addConfig("maxclients", strconv.FormatInt(c.maxClients, 10))
-	addConfig("timeout", strconv.Itoa(c.timeout))
-	addConfig("databases", strconv.Itoa(c.databases))
-	addConfig("slowlog-log-slower-than", strconv.FormatInt(c.slowlogLogSlowerThan, 10))
-	addConfig("slowlog-max-len", strconv.Itoa(c.slowlogMaxLen))
-	addConfig("loglevel", c.logLevel)
-	addConfig("daemonize", boolStr(c.daemonize))
-	addConfig("pidfile", c.pidfile)
-	addConfig("port", strconv.Itoa(c.port))
-	addConfig("bind", c.bind)
-	addConfig("protected-mode", boolStr(c.protectedMode))
-	addConfig("tcp-keepalive", strconv.Itoa(c.tcpKeepalive))
-	addConfig("save", strings.Join(c.saveIntervals, " "))
-	addConfig("appendonly", boolStr(c.appendOnly))
-	addConfig("appendfsync", c.appendFsync)
-	addConfig("lfu-decay-time", strconv.Itoa(c.lfuDecayTime))
-	addConfig("lfu-log-factor", strconv.Itoa(c.lfuLogFactor))
-	addConfig("activedefrag", boolStr(c.activedefrag))
-	addConfig("lazy-free-lazy-eviction", boolStr(c.lazyFreeLazyEviction))
-	addConfig("lazy-free-lazy-expire", boolStr(c.lazyFreeLazyExpire))
-	addConfig("lazy-free-lazy-server-del", boolStr(c.lazyFreeLazyServerDel))
-	addConfig("hash-max-listpack-entries", strconv.Itoa(c.hashMaxListpackEntries))
-	addConfig("hash-max-listpack-value", strconv.Itoa(c.hashMaxListpackValue))
-	addConfig("list-max-listpack-size", strconv.Itoa(c.listMaxListpackSize))
-	addConfig("set-max-intset-entries", strconv.FormatInt(c.setMaxIntsetEntries, 10))
-	addConfig("zset-max-listpack-entries", strconv.Itoa(c.zsetMaxListpackEntries))
-
-	return ctx.WriteArray(results)
+// ConfigHooks connect CONFIG GET/SET to the running server. Values returns
+// the live value of every parameter the server owns; Set applies one
+// parameter and reports whether the server owns it.
+type ConfigHooks struct {
+	Values func() map[string]string
+	Set    func(name, value string) (bool, error)
 }
 
-func matchConfigPattern(name, pattern string) bool {
-	if strings.Contains(pattern, "*") {
-		return true
+// SetConfigHooks installs the server's CONFIG hooks.
+func (r *Router) SetConfigHooks(h *ConfigHooks) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.configHooks = h
+}
+
+func (r *Router) getConfigHooks() *ConfigHooks {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.configHooks
+}
+
+func configHooksFor(ctx *Context) *ConfigHooks {
+	if r := ctx.dispatcher(); r != nil {
+		return r.getConfigHooks()
 	}
-	return strings.Contains(name, pattern)
+	return nil
+}
+
+func configValues(ctx *Context) map[string]string {
+	c := globalConfig
+	c.mu.RLock()
+	values := map[string]string{
+		"maxmemory":                 strconv.FormatInt(c.maxMemory, 10),
+		"maxmemory-policy":          c.maxMemoryPolicy,
+		"maxmemory-samples":         strconv.Itoa(c.maxMemorySamples),
+		"maxclients":                strconv.FormatInt(c.maxClients, 10),
+		"timeout":                   strconv.Itoa(c.timeout),
+		"databases":                 strconv.Itoa(c.databases),
+		"slowlog-log-slower-than":   strconv.FormatInt(c.slowlogLogSlowerThan, 10),
+		"slowlog-max-len":           strconv.Itoa(c.slowlogMaxLen),
+		"loglevel":                  c.logLevel,
+		"daemonize":                 boolStr(c.daemonize),
+		"pidfile":                   c.pidfile,
+		"port":                      strconv.Itoa(c.port),
+		"bind":                      c.bind,
+		"protected-mode":            boolStr(c.protectedMode),
+		"tcp-keepalive":             strconv.Itoa(c.tcpKeepalive),
+		"save":                      strings.Join(c.saveIntervals, " "),
+		"appendonly":                boolStr(c.appendOnly),
+		"appendfsync":               c.appendFsync,
+		"lfu-decay-time":            strconv.Itoa(c.lfuDecayTime),
+		"lfu-log-factor":            strconv.Itoa(c.lfuLogFactor),
+		"activedefrag":              boolStr(c.activedefrag),
+		"lazyfree-lazy-eviction":    boolStr(c.lazyFreeLazyEviction),
+		"lazyfree-lazy-expire":      boolStr(c.lazyFreeLazyExpire),
+		"lazyfree-lazy-server-del":  boolStr(c.lazyFreeLazyServerDel),
+		"hash-max-listpack-entries": strconv.Itoa(c.hashMaxListpackEntries),
+		"hash-max-listpack-value":   strconv.Itoa(c.hashMaxListpackValue),
+		"list-max-listpack-size":    strconv.Itoa(c.listMaxListpackSize),
+		"set-max-intset-entries":    strconv.FormatInt(c.setMaxIntsetEntries, 10),
+		"zset-max-listpack-entries": strconv.Itoa(c.zsetMaxListpackEntries),
+	}
+	c.mu.RUnlock()
+	if h := configHooksFor(ctx); h != nil && h.Values != nil {
+		for name, value := range h.Values() {
+			values[name] = value
+		}
+	}
+	return values
+}
+
+// cmdConfigGet answers CONFIG GET parameter [parameter ...]; each parameter
+// is a case-insensitive glob over the parameter names, as in Redis 7.
+func cmdConfigGet(ctx *Context) error {
+	if ctx.ArgCount() < 2 {
+		return ctx.WriteError(ErrWrongArgCount)
+	}
+	values := configValues(ctx)
+	names := make([]string, 0, len(values))
+	for name := range values {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	results := make([]*resp.Value, 0)
+	seen := make(map[string]bool)
+	for i := 1; i < ctx.ArgCount(); i++ {
+		pattern := strings.ToLower(ctx.ArgString(i))
+		for _, name := range names {
+			if !seen[name] && store.MatchPattern(name, pattern) {
+				seen[name] = true
+				results = append(results, resp.BulkString(name), resp.BulkString(values[name]))
+			}
+		}
+	}
+	return ctx.WriteArray(results)
 }
 
 func boolStr(b bool) string {
@@ -191,9 +231,20 @@ func cmdConfigSet(ctx *Context) error {
 		"volatile-ttl":    true,
 	}
 
+	hooks := configHooksFor(ctx)
 	for i := 1; i < ctx.ArgCount(); i += 2 {
 		param := strings.ToLower(ctx.ArgString(i))
 		value := ctx.ArgString(i + 1)
+
+		if hooks != nil && hooks.Set != nil {
+			handled, err := hooks.Set(param, value)
+			if err != nil {
+				return ctx.WriteError(err)
+			}
+			if handled {
+				continue
+			}
+		}
 
 		switch param {
 		case "maxmemory":

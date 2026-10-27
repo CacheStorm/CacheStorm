@@ -4,6 +4,7 @@ import (
 	"math/rand"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cachestorm/cachestorm/internal/logger"
@@ -17,20 +18,57 @@ const (
 	EvictionAllKeysLFU
 	EvictionVolatileLRU
 	EvictionAllKeysRandom
+	EvictionVolatileLFU
+	EvictionVolatileRandom
+	EvictionVolatileTTL
 )
+
+var evictionPolicyNames = map[EvictionPolicy]string{
+	EvictionNoEviction:     "noeviction",
+	EvictionAllKeysLRU:     "allkeys-lru",
+	EvictionAllKeysLFU:     "allkeys-lfu",
+	EvictionVolatileLRU:    "volatile-lru",
+	EvictionAllKeysRandom:  "allkeys-random",
+	EvictionVolatileLFU:    "volatile-lfu",
+	EvictionVolatileRandom: "volatile-random",
+	EvictionVolatileTTL:    "volatile-ttl",
+}
+
+func (p EvictionPolicy) String() string {
+	return evictionPolicyNames[p]
+}
+
+// ParseEvictionPolicy maps a Redis maxmemory-policy name to its policy.
+func ParseEvictionPolicy(name string) (EvictionPolicy, bool) {
+	for p, n := range evictionPolicyNames {
+		if n == name {
+			return p, true
+		}
+	}
+	return EvictionNoEviction, false
+}
 
 // UsesLFU reports whether the store evicts by access frequency, the only
 // policy under which Redis tracks OBJECT FREQ.
 func (s *Store) UsesLFU() bool {
-	return s.evictor != nil && s.evictor.policy == EvictionAllKeysLFU
+	if s.evictor == nil {
+		return false
+	}
+	p := s.evictor.Policy()
+	return p == EvictionAllKeysLFU || p == EvictionVolatileLFU
+}
+
+// evictionSettings are shared by the evictors of every database, so a runtime
+// policy change reaches all of them at once.
+type evictionSettings struct {
+	policy     atomic.Int32
+	sampleSize atomic.Int32
 }
 
 type EvictionController struct {
-	policy     EvictionPolicy
-	maxMemory  int64
+	settings   *evictionSettings
 	store      *Store
 	memTracker *MemoryTracker
-	sampleSize int
 	onEvict    func(key string, entry *Entry)
 	onEvictMu  sync.RWMutex
 	rnd        *rand.Rand
@@ -38,14 +76,49 @@ type EvictionController struct {
 }
 
 func NewEvictionController(policy EvictionPolicy, maxMemory int64, s *Store, mt *MemoryTracker, sampleSize int) *EvictionController {
+	settings := &evictionSettings{}
+	settings.policy.Store(int32(policy))
+	if sampleSize <= 0 {
+		sampleSize = 5
+	}
+	settings.sampleSize.Store(int32(sampleSize))
+	return newEvictionController(settings, s, mt)
+}
+
+func newEvictionController(settings *evictionSettings, s *Store, mt *MemoryTracker) *EvictionController {
 	return &EvictionController{
-		policy:     policy,
-		maxMemory:  maxMemory,
+		settings:   settings,
 		store:      s,
 		memTracker: mt,
-		sampleSize: sampleSize,
 		rnd:        rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
+}
+
+// Policy returns the current eviction policy.
+func (ec *EvictionController) Policy() EvictionPolicy {
+	return EvictionPolicy(ec.settings.policy.Load())
+}
+
+// SetPolicy changes the eviction policy of every database sharing ec's
+// settings.
+func (ec *EvictionController) SetPolicy(p EvictionPolicy) {
+	ec.settings.policy.Store(int32(p))
+}
+
+// SampleSize returns how many keys are sampled per eviction.
+func (ec *EvictionController) SampleSize() int {
+	return int(ec.settings.sampleSize.Load())
+}
+
+// SetSampleSize changes how many keys are sampled per eviction.
+func (ec *EvictionController) SetSampleSize(n int) {
+	if n > 0 {
+		ec.settings.sampleSize.Store(int32(n))
+	}
+}
+
+func (ec *EvictionController) evicts() bool {
+	return ec != nil && ec.Policy() != EvictionNoEviction
 }
 
 func (ec *EvictionController) SetOnEvict(fn func(key string, entry *Entry)) {
@@ -55,7 +128,8 @@ func (ec *EvictionController) SetOnEvict(fn func(key string, entry *Entry)) {
 }
 
 func (ec *EvictionController) CheckAndEvict() error {
-	if ec.maxMemory == 0 {
+	maxMemory := ec.memTracker.Max()
+	if maxMemory <= 0 {
 		return nil
 	}
 
@@ -65,19 +139,19 @@ func (ec *EvictionController) CheckAndEvict() error {
 	case PressureEmergency:
 		logger.Warn().
 			Int64("usage", ec.memTracker.Usage()).
-			Int64("max", ec.maxMemory).
+			Int64("max", maxMemory).
 			Msg("memory pressure emergency, aggressive eviction")
 		ec.evictUntil(0.85)
 	case PressureCritical:
 		logger.Warn().
 			Int64("usage", ec.memTracker.Usage()).
-			Int64("max", ec.maxMemory).
+			Int64("max", maxMemory).
 			Msg("memory pressure critical, evicting keys")
 		ec.evictKeys(100)
 	case PressureWarning:
 		logger.Debug().
 			Int64("usage", ec.memTracker.Usage()).
-			Int64("max", ec.maxMemory).
+			Int64("max", maxMemory).
 			Msg("memory pressure warning, evicting keys")
 		ec.evictKeys(10)
 	}
@@ -86,7 +160,7 @@ func (ec *EvictionController) CheckAndEvict() error {
 }
 
 func (ec *EvictionController) evictUntil(targetPct float64) {
-	target := int64(float64(ec.maxMemory) * targetPct)
+	target := int64(float64(ec.memTracker.Max()) * targetPct)
 	for ec.memTracker.Usage() > target {
 		if !ec.evictOne() {
 			break
@@ -129,13 +203,19 @@ func (ec *EvictionController) evictOne() bool {
 }
 
 func (ec *EvictionController) selectVictim() string {
-	switch ec.policy {
+	switch ec.Policy() {
 	case EvictionAllKeysLRU:
 		return ec.selectLRU()
 	case EvictionAllKeysLFU:
 		return ec.selectLFU()
 	case EvictionVolatileLRU:
-		return ec.selectVolatileLRU()
+		return pickCandidate(ec.sampleVolatileKeys(), func(a, b candidate) bool { return a.lastAccess < b.lastAccess })
+	case EvictionVolatileLFU:
+		return pickCandidate(ec.sampleVolatileKeys(), func(a, b candidate) bool { return a.accessCount < b.accessCount })
+	case EvictionVolatileTTL:
+		return pickCandidate(ec.sampleVolatileKeys(), func(a, b candidate) bool { return a.expiresAt < b.expiresAt })
+	case EvictionVolatileRandom:
+		return pickCandidate(ec.sampleVolatileKeys(), nil)
 	case EvictionAllKeysRandom:
 		return ec.selectRandom()
 	default:
@@ -143,10 +223,28 @@ func (ec *EvictionController) selectVictim() string {
 	}
 }
 
+// pickCandidate returns the candidate that sorts first under less, or the
+// first sampled one when less is nil (the sample is already random).
+func pickCandidate(candidates []candidate, less func(a, b candidate) bool) string {
+	if len(candidates) == 0 {
+		return ""
+	}
+	best := candidates[0]
+	if less != nil {
+		for _, c := range candidates[1:] {
+			if less(c, best) {
+				best = c
+			}
+		}
+	}
+	return best.key
+}
+
 type candidate struct {
 	key         string
 	lastAccess  int64
 	accessCount uint64
+	expiresAt   int64
 }
 
 func (ec *EvictionController) selectLRU() string {
@@ -170,19 +268,6 @@ func (ec *EvictionController) selectLFU() string {
 
 	sort.Slice(candidates, func(i, j int) bool {
 		return candidates[i].accessCount < candidates[j].accessCount
-	})
-
-	return candidates[0].key
-}
-
-func (ec *EvictionController) selectVolatileLRU() string {
-	candidates := ec.sampleVolatileKeys()
-	if len(candidates) == 0 {
-		return ""
-	}
-
-	sort.Slice(candidates, func(i, j int) bool {
-		return candidates[i].lastAccess < candidates[j].lastAccess
 	})
 
 	return candidates[0].key
@@ -214,14 +299,15 @@ func (ec *EvictionController) selectRandom() string {
 }
 
 func (ec *EvictionController) sampleKeys() []candidate {
-	candidates := make([]candidate, 0, ec.sampleSize)
+	sampleSize := ec.SampleSize()
+	candidates := make([]candidate, 0, sampleSize)
 
 	// Sample distinct shards until we have sampleSize candidates (or every
 	// shard has been tried): an empty shard must not consume a sample slot,
 	// otherwise victim selection no-ops under pressure even when evictable
 	// keys exist and the policy cannot enforce max_memory.
 	tried := make(map[int]struct{}, NumShards)
-	for len(candidates) < ec.sampleSize && len(tried) < NumShards {
+	for len(candidates) < sampleSize && len(tried) < NumShards {
 		ec.rndMu.Lock()
 		shardIdx := ec.rnd.Intn(NumShards)
 		ec.rndMu.Unlock()
@@ -248,10 +334,11 @@ func (ec *EvictionController) sampleKeys() []candidate {
 }
 
 func (ec *EvictionController) sampleVolatileKeys() []candidate {
-	candidates := make([]candidate, 0, ec.sampleSize)
+	sampleSize := ec.SampleSize()
+	candidates := make([]candidate, 0, sampleSize)
 
 	tried := make(map[int]struct{}, NumShards)
-	for len(candidates) < ec.sampleSize && len(tried) < NumShards {
+	for len(candidates) < sampleSize && len(tried) < NumShards {
 		ec.rndMu.Lock()
 		shardIdx := ec.rnd.Intn(NumShards)
 		ec.rndMu.Unlock()
@@ -263,10 +350,12 @@ func (ec *EvictionController) sampleVolatileKeys() []candidate {
 
 		shard.mu.RLock()
 		for key, entry := range shard.data {
-			if entry.ExpiresAt.Load() > 0 {
+			if expiresAt := entry.ExpiresAt.Load(); expiresAt > 0 {
 				candidates = append(candidates, candidate{
-					key:        key,
-					lastAccess: entry.LastAccess.Load(),
+					key:         key,
+					lastAccess:  entry.LastAccess.Load(),
+					accessCount: entry.AccessCount.Load(),
+					expiresAt:   expiresAt,
 				})
 				break
 			}

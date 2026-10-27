@@ -2,7 +2,7 @@ groups:
   - name: cachestorm
     rules:
       - alert: CacheStormDown
-        expr: cachestorm_up == 0
+        expr: up{job="cachestorm"} == 0
         for: 1m
         labels:
           severity: critical

@@ -35,6 +35,8 @@ persistence:
   aof: true
   aof_sync: "everysec"
   snapshot_interval: "5m"
+  aof_rewrite_percentage: 100
+  aof_rewrite_min_size: "64mb"
   data_dir: "/data"
 
 replication:
@@ -50,8 +52,6 @@ logging:
   output: "stderr"
 
 plugins:
-  stats:
-    enabled: true
   metrics:
     enabled: true
     port: 9090

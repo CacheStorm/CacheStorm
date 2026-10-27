@@ -2,11 +2,12 @@ package command
 
 import (
 	"bytes"
+	"strings"
+	"testing"
+
 	"github.com/cachestorm/cachestorm/internal/acl"
 	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
-	"strings"
-	"testing"
 )
 
 func TestSetAccessKeysX(t *testing.T) {

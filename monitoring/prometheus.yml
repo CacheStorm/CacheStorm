@@ -10,8 +10,12 @@ scrape_configs:
     static_configs:
       - targets: ['localhost:9090']
 
+  # The metrics port (plugins.metrics) serves the exposition without
+  # credentials, so scraping works when requirepass or the HTTP password is
+  # set. Keep that port off untrusted networks; /api/metrics on the admin
+  # port serves the same text behind the HTTP API's authentication.
   - job_name: 'cachestorm'
     static_configs:
-      - targets: ['cachestorm:8080']
-    metrics_path: /api/metrics
+      - targets: ['cachestorm:9090']
+    metrics_path: /metrics
     scrape_interval: 5s

@@ -18,13 +18,14 @@ server:
   # TCP keepalive in seconds
   tcp_keepalive: 300
 
-  # Buffer sizes
+  # Per-connection socket buffer sizes in bytes
   read_buffer_size: 4096
-  write_buffer_size: 4096
+  write_buffer_size: 16384
 
-  # Timeouts (0 = no timeout)
-  read_timeout: "5m"
-  write_timeout: "5m"
+  # Idle client timeout ("0" = never close idle clients, like Redis timeout 0)
+  read_timeout: "0"
+  # Timeout for writing a reply to a slow client ("0" = 5m default)
+  write_timeout: "0"
 
   # Authentication password (empty = no auth required)
   # Clients must AUTH before running commands when set
@@ -80,6 +81,12 @@ persistence:
   # Snapshot interval
   snapshot_interval: "5m"
 
+  # Automatic AOF rewrite: once the AOF is at least aof_rewrite_min_size and
+  # has grown by aof_rewrite_percentage since the last rewrite, it is
+  # compacted. 0 disables automatic rewrites (BGREWRITEAOF still works).
+  aof_rewrite_percentage: 100
+  aof_rewrite_min_size: "64mb"
+
 # Replication
 replication:
   # Role: master, or replica (follows master_host:master_port)
@@ -102,26 +109,12 @@ logging:
   # Output: stdout, stderr
   output: "stdout"
 
-# Namespace Configuration
-namespaces:
-  default:
-    default_ttl: "0"
-  # cache:
-  #   default_ttl: "1h"
-  # sessions:
-  #   default_ttl: "30m"
-
 # Plugin Configuration
 plugins:
-  stats:
-    enabled: true
   metrics:
     enabled: true
     port: 9090
     path: "/metrics"
-  auth:
-    enabled: false
-    password: ""
   slowlog:
     enabled: true
     threshold: "10ms"

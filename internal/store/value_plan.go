@@ -84,7 +84,7 @@ func (s *Store) applyValuePlan(key string, options *SetOptions, snapshot *Entry,
 		if reserved && !s.memTracker.TryReserve(delta) {
 			tooLarge := !s.memTracker.withinLimit(newMem)
 			unlock()
-			if tooLarge || s.evictor == nil || s.evictor.policy == EvictionNoEviction {
+			if tooLarge || !s.evictor.evicts() {
 				return ErrMemoryLimit
 			}
 			if remaining < 0 {

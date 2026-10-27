@@ -165,7 +165,7 @@ func (s *Store) newSibling() *Store {
 	if s.memTracker != nil {
 		n.memTracker = s.memTracker
 		if s.evictor != nil {
-			n.evictor = NewEvictionController(s.evictor.policy, s.evictor.maxMemory, n, s.memTracker, s.evictor.sampleSize)
+			n.evictor = newEvictionController(s.evictor.settings, n, s.memTracker)
 			n.evictor.SetOnEvict(func(key string, entry *Entry) {
 				n.fireEvict(key, entry.Value)
 			})
