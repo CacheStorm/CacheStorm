@@ -96,6 +96,13 @@ func cmdCONFIG(ctx *Context) error {
 	case "RESETSTAT":
 		return cmdConfigResetStat(ctx)
 	case "REWRITE":
+		h := configHooksFor(ctx)
+		if h == nil || h.Rewrite == nil {
+			return ctx.WriteError(errors.New("ERR The server is running without a config file"))
+		}
+		if err := h.Rewrite(); err != nil {
+			return ctx.WriteError(err)
+		}
 		return ctx.WriteOK()
 	default:
 		return ctx.WriteError(ErrUnknownCommand)
@@ -108,6 +115,9 @@ func cmdCONFIG(ctx *Context) error {
 type ConfigHooks struct {
 	Values func() map[string]string
 	Set    func(name, value string) (bool, error)
+	// Rewrite writes the running configuration back to the file it was
+	// loaded from.
+	Rewrite func() error
 }
 
 // SetConfigHooks installs the server's CONFIG hooks.
@@ -163,6 +173,7 @@ func configValues(ctx *Context) map[string]string {
 		"list-max-listpack-size":    strconv.Itoa(c.listMaxListpackSize),
 		"set-max-intset-entries":    strconv.FormatInt(c.setMaxIntsetEntries, 10),
 		"zset-max-listpack-entries": strconv.Itoa(c.zsetMaxListpackEntries),
+		"latency-monitor-threshold": strconv.FormatInt(LatencyThreshold(), 10),
 	}
 	c.mu.RUnlock()
 	if h := configHooksFor(ctx); h != nil && h.Values != nil {
@@ -309,6 +320,12 @@ func cmdConfigSet(ctx *Context) error {
 			if v, err := strconv.Atoi(value); err == nil {
 				c.lfuLogFactor = v
 			}
+		case "latency-monitor-threshold":
+			v, err := strconv.ParseInt(value, 10, 64)
+			if err != nil || v < 0 {
+				return ctx.WriteError(errors.New("ERR CONFIG SET failed (possibly related to argument 'latency-monitor-threshold') - argument couldn't be parsed into an integer"))
+			}
+			SetLatencyThreshold(v)
 		case "activedefrag":
 			c.activedefrag = value == "yes"
 		default:

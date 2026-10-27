@@ -196,3 +196,58 @@ func TestClientReply(t *testing.T) {
 		t.Fatalf("SET under CLIENT REPLY OFF was not applied: %+v", got)
 	}
 }
+
+func TestLatencyMonitor(t *testing.T) {
+	s := startReplServer(t, nil)
+	c := dialRepl(t, s)
+	c.do("LATENCY", "RESET")
+	if got := c.do("LATENCY", "LATEST"); len(got.Array) != 0 {
+		t.Fatalf("LATENCY LATEST with monitoring off = %+v, want empty", got)
+	}
+	if got := string(c.do("LATENCY", "DOCTOR").Bulk); !strings.Contains(got, "disabled") {
+		t.Fatalf("LATENCY DOCTOR = %q", got)
+	}
+	c.do("CONFIG", "SET", "latency-monitor-threshold", "50")
+	defer c.do("CONFIG", "SET", "latency-monitor-threshold", "0")
+	c.do("EVAL", "local t = redis.call('TIME') local s = tonumber(t[1]) * 1000000 + tonumber(t[2]) repeat t = redis.call('TIME') until tonumber(t[1]) * 1000000 + tonumber(t[2]) - s > 80000 return 1", "0")
+	latest := c.do("LATENCY", "LATEST")
+	if len(latest.Array) != 1 || string(latest.Array[0].Array[0].Bulk) != "command" || latest.Array[0].Array[2].Int < 50 {
+		t.Fatalf("LATENCY LATEST after a slow command = %+v", latest)
+	}
+	if got := c.do("LATENCY", "HISTORY", "command"); len(got.Array) != 1 || got.Array[0].Array[1].Int < 50 {
+		t.Fatalf("LATENCY HISTORY = %+v", got)
+	}
+	if got := c.do("LATENCY", "RESET"); got.Int != 1 {
+		t.Fatalf("LATENCY RESET = %+v", got)
+	}
+}
+
+func TestMonitorStreamsCommands(t *testing.T) {
+	s := startReplServer(t, nil)
+	m := dialRepl(t, s)
+	if got := m.do("MONITOR"); got.Str != "OK" {
+		t.Fatalf("MONITOR = %+v", got)
+	}
+	c := dialRepl(t, s)
+	c.do("SELECT", "2")
+	c.do("SET", "k", "a b\n")
+	c.do("AUTH", "secret")
+	c.do("GET", "k")
+	var lines []string
+	for len(lines) < 3 {
+		v, ok := m.next(3 * time.Second)
+		if !ok {
+			t.Fatalf("MONITOR stopped after %v", lines)
+		}
+		lines = append(lines, v.Str)
+	}
+	if !strings.HasSuffix(lines[0], `"SELECT" "2"`) {
+		t.Fatalf("first MONITOR line = %q", lines[0])
+	}
+	if !strings.Contains(lines[1], "[2 ") || !strings.HasSuffix(lines[1], `"SET" "k" "a b\n"`) {
+		t.Fatalf("SET MONITOR line = %q", lines[1])
+	}
+	if !strings.HasSuffix(lines[2], `"GET" "k"`) {
+		t.Fatalf("AUTH must not be shown; third line = %q", lines[2])
+	}
+}

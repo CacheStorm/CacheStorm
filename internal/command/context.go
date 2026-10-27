@@ -53,6 +53,8 @@ type Context struct {
 	// ReplyMode is set by CLIENT REPLY: "on", "off" or "skip"; empty when
 	// the command did not change it.
 	ReplyMode string
+	// Monitor is set by MONITOR: the connection then receives every command.
+	Monitor bool
 
 	FromMaster   bool
 	Replaying    bool

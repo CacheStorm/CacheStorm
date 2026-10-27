@@ -429,6 +429,7 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 			}
 		}
 		c.noteCommand(cmd, args)
+		c.srv.feedMonitors(c, c.db, c.rawCmd, cmd, args)
 		out := c.writer
 		replyCmd := cmd == "CLIENT" && len(args) > 0 && strings.EqualFold(string(args[0]), "REPLY")
 		suppress := (c.replyOff || c.replySkip) && !replyCmd
@@ -519,6 +520,9 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 			}
 		}
 		elapsed := time.Since(ctx.StartTime)
+		if stopMerge == nil {
+			command.RecordLatency("command", elapsed)
+		}
 		store.GlobalMetrics.RecordCommand(cmd, elapsed.Nanoseconds())
 		store.GlobalSlowLog.AddIfSlow(elapsed, cmd, ctx.Args, ctx.RemoteAddr, ctx.ClientName)
 		if writeCommands[strings.ToUpper(cmd)] {
@@ -567,6 +571,9 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 		}
 		if ctx.Handoff != nil {
 			c.handedOff.Store(true)
+		}
+		if ctx.Monitor && c.srv != nil && c.subscriber != nil {
+			c.srv.monitor.add(c)
 		}
 		c.publishInfo()
 
@@ -658,6 +665,9 @@ func (c *Connection) Close() {
 	// released below.
 	if c.srv != nil && c.srv.tracker != nil {
 		c.srv.tracker.forget(c.ID)
+	}
+	if c.srv != nil {
+		c.srv.monitor.remove(c.ID)
 	}
 	command.UntrackConnection(c.ID)
 	// Release the connection's WATCH registrations.

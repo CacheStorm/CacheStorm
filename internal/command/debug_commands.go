@@ -31,16 +31,12 @@ func cmdDEBUG(ctx *Context) error {
 		return cmdDebugSleep(ctx)
 	case "OBJECT":
 		return cmdDebugObject(ctx)
-	case "RELOAD":
-		return ctx.WriteOK()
-	case "LOADAOF":
-		return ctx.WriteOK()
+	case "RELOAD", "LOADAOF":
+		return ctx.WriteError(fmt.Errorf("ERR DEBUG %s is not supported by this server", subCmd))
 	case "DIGEST":
-		return ctx.WriteBulkString("0000000000000000000000000000000000000000")
+		return ctx.WriteBulkString(datasetDigest(ctx))
 	case "SEGFAULT":
 		return ctx.WriteError(ErrSegfault)
-	case "DSNAPSHOT":
-		return ctx.WriteOK()
 	case "STRUCTSIZE":
 		return ctx.WriteInteger(104)
 	default:

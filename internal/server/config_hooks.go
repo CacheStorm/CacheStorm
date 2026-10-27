@@ -24,7 +24,7 @@ func invalidConfigArgument(name, value string) error {
 
 // configHooks connects CONFIG GET/SET to the running server.
 func (s *Server) configHooks() *command.ConfigHooks {
-	return &command.ConfigHooks{Values: s.configValues, Set: s.configSet}
+	return &command.ConfigHooks{Values: s.configValues, Set: s.configSet, Rewrite: s.rewriteConfig}
 }
 
 func (s *Server) configValues() map[string]string {

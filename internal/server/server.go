@@ -161,6 +161,8 @@ type Server struct {
 	tracker *tracker
 	// pause implements CLIENT PAUSE.
 	pause pauseState
+	// monitor holds the MONITOR connections.
+	monitor monitors
 }
 
 func New(cfg *config.Config) (result *Server, retErr error) {

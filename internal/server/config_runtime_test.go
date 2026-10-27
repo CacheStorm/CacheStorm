@@ -2,6 +2,8 @@ package server
 
 import (
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -141,5 +143,54 @@ func TestConfigSetRequirepass(t *testing.T) {
 	}
 	if got := c.do("CONFIG", "SET", "port", "1234"); got.Type != resp.TypeError {
 		t.Fatalf("CONFIG SET port = %+v, want an immutable-config error", got)
+	}
+}
+
+func TestConfigRewritePersistsRuntimeChanges(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cachestorm.yaml")
+	original := "# top comment\nserver:\n  bind: \"127.0.0.1\"\n  port: 6379\n  # keep me\n  protected_mode: true\nhttp:\n  enabled: false\nplugins:\n  metrics:\n    enabled: false\nlogging:\n  level: \"error\"\n"
+	if err := os.WriteFile(path, []byte(original), 0640); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Server.Port = 0
+	s := startReplServerCfg(t, cfg)
+	c := dialRepl(t, s)
+	c.do("CONFIG", "SET", "maxmemory", "10mb")
+	c.do("CONFIG", "SET", "maxmemory-policy", "allkeys-lfu")
+	c.do("CONFIG", "SET", "timeout", "30")
+	if got := c.do("CONFIG", "REWRITE"); got.Str != "OK" {
+		t.Fatalf("CONFIG REWRITE = %+v", got)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	for _, want := range []string{"# top comment", "# keep me", "eviction_policy: \"allkeys-lfu\""} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("rewritten config lacks %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "requirepass") {
+		t.Fatalf("an unchanged password was written:\n%s", text)
+	}
+	reloaded, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("rewritten config does not load: %v\n%s", err, text)
+	}
+	if reloaded.Memory.MaxMemory != "10485760" || reloaded.Memory.EvictionPolicy != "allkeys-lfu" || reloaded.Server.ReadTimeoutDuration() != 30*time.Second {
+		t.Fatalf("reloaded config = %+v %+v", reloaded.Memory, reloaded.Server)
+	}
+	if info, _ := os.Stat(path); info.Mode().Perm() != 0640 {
+		t.Fatalf("rewrite changed the file mode to %v", info.Mode().Perm())
+	}
+
+	bare := startReplServerCfg(t, replTestConfig(t, nil))
+	if got := dialRepl(t, bare).do("CONFIG", "REWRITE"); got.Type != resp.TypeError {
+		t.Fatalf("CONFIG REWRITE without a file = %+v", got)
 	}
 }

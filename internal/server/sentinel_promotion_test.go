@@ -87,3 +87,29 @@ func TestInfoReportsRedisFields(t *testing.T) {
 		t.Fatalf("INFO cpu = %q", sole)
 	}
 }
+
+func TestDebugDigestMatchesAcrossReplication(t *testing.T) {
+	master := startReplServer(t, nil)
+	replica := startReplServer(t, nil)
+	mc := dialRepl(t, master)
+	if got := mc.str("DEBUG", "DIGEST"); got != strings.Repeat("0", 40) {
+		t.Fatalf("empty dataset digest = %s", got)
+	}
+	mc.do("SET", "s", "v", "PXAT", "16725225600000")
+	mc.do("HSET", "h", "a", "1", "b", "2", "c", "3")
+	mc.do("SADD", "set", "x", "y", "z")
+	mc.do("ZADD", "z", "1", "a", "2", "b")
+	mc.do("RPUSH", "l", "1", "2", "3")
+	mc.do("SELECT", "1")
+	mc.do("SET", "s", "other-db")
+	rc := replicate(t, replica, master)
+	waitSynced(t, replica, master)
+	want := mc.str("DEBUG", "DIGEST")
+	if got := rc.str("DEBUG", "DIGEST"); got != want {
+		t.Fatalf("replica digest %s, master %s", got, want)
+	}
+	mc.do("HSET", "h", "a", "changed")
+	if got := mc.str("DEBUG", "DIGEST"); got == want {
+		t.Fatal("digest did not change with the data")
+	}
+}

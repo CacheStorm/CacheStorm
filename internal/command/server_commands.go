@@ -1659,62 +1659,6 @@ func cmdSLAVEOF(ctx *Context) error {
 	return ctx.WriteOK()
 }
 
-func cmdLATENCY(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	subCmd := strings.ToUpper(ctx.ArgString(0))
-
-	switch subCmd {
-	case "LATEST":
-		return ctx.WriteArray([]*resp.Value{
-			resp.ArrayValue([]*resp.Value{
-				resp.BulkString("command"),
-				resp.IntegerValue(time.Now().UnixMilli() - 60000),
-				resp.IntegerValue(15),
-				resp.IntegerValue(30),
-			}),
-		})
-	case "HISTORY":
-		event := "command"
-		if ctx.ArgCount() > 1 {
-			event = ctx.ArgString(1)
-		}
-		_ = event
-		return ctx.WriteArray([]*resp.Value{
-			resp.IntegerValue(time.Now().UnixMilli() - 5000),
-			resp.IntegerValue(time.Now().UnixMilli() - 10000),
-		})
-	case "RESET":
-		return ctx.WriteInteger(0)
-	case "GRAPH":
-		event := "command"
-		if ctx.ArgCount() > 1 {
-			event = ctx.ArgString(1)
-		}
-		_ = event
-		graph := `1ms - 2ms
-2ms - 5ms
-5ms - 10ms
-10ms - 20ms
-`
-		return ctx.WriteBulkString(graph)
-	case "DOCTOR":
-		return ctx.WriteBulkString("Dave, I have observed latency spikes in the CacheStorm server.\n\nNo obvious performance issues detected.\n")
-	case "HELP":
-		return ctx.WriteArray([]*resp.Value{
-			resp.BulkString("LATEST"),
-			resp.BulkString("HISTORY <event>"),
-			resp.BulkString("RESET [<event>]"),
-			resp.BulkString("GRAPH <event>"),
-			resp.BulkString("DOCTOR"),
-		})
-	default:
-		return ctx.WriteError(errors.New("ERR unknown subcommand '" + subCmd + "'"))
-	}
-}
-
 func cmdSTRALGO(ctx *Context) error {
 	if ctx.ArgCount() < 1 {
 		return ctx.WriteError(ErrWrongArgCount)
@@ -1882,10 +1826,8 @@ func cmdACL(ctx *Context) error {
 			resp.BulkString("keys"),
 			resp.ArrayValue([]*resp.Value{resp.BulkString("~*")}),
 		})
-	case "LOAD":
-		return ctx.WriteOK()
-	case "SAVE":
-		return ctx.WriteOK()
+	case "LOAD", "SAVE":
+		return ctx.Writer.WriteError("ERR This Redis instance is not configured to use an ACL file. You may want to specify users via the ACL SETUSER command and then issue a CONFIG REWRITE (assuming you have a Redis configuration file set) in order to store users in the Redis configuration.")
 	case "LOG":
 		count := 10
 		if ctx.ArgCount() > 1 {
@@ -1957,8 +1899,22 @@ func generatePassword(bits int) string {
 	return string(result)
 }
 
+// cmdMONITOR puts the connection in monitor mode: the server streams every
+// command other clients run to it (see MonitorVisible).
 func cmdMONITOR(ctx *Context) error {
+	ctx.GetSubscriber()
+	ctx.Monitor = true
 	return ctx.WriteOK()
+}
+
+// MonitorVisible reports whether MONITOR shows cmd. As in Redis, admin
+// commands and those that carry credentials are left out.
+func MonitorVisible(cmd string) bool {
+	switch cmd {
+	case "AUTH", "HELLO", "MIGRATE":
+		return false
+	}
+	return !commandHasFlag(cmd, "admin")
 }
 
 func cmdDEBUGSEGFAULT(ctx *Context) error {
