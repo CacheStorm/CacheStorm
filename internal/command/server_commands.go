@@ -16,6 +16,7 @@ import (
 	"github.com/cachestorm/cachestorm/internal/acl"
 	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
+	buildversion "github.com/cachestorm/cachestorm/internal/version"
 )
 
 var globalACL = acl.NewACL()
@@ -111,64 +112,31 @@ func cmdQUIT(ctx *Context) error {
 }
 
 func cmdCOMMAND(ctx *Context) error {
-	if ctx.ArgCount() > 0 {
-		subCmd := strings.ToUpper(ctx.ArgString(0))
-		switch subCmd {
-		case "COUNT":
-			return ctx.WriteInteger(200)
-		case "DOCS":
-			return cmdCommandDocs(ctx)
-		case "GETKEYS":
-			return cmdCommandGetKeys(ctx)
-		case "LIST":
-			commands := []string{
-				"GET", "SET", "DEL", "EXISTS", "KEYS", "EXPIRE", "TTL", "TYPE",
-				"INCR", "DECR", "INCRBY", "DECRBY", "INCRBYFLOAT",
-				"APPEND", "STRLEN", "GETRANGE", "SETRANGE", "GETSET", "GETEX", "GETDEL",
-				"MGET", "MSET", "SETNX", "SUBSTR", "LCS", "COPY",
-				"HSET", "HGET", "HDEL", "HGETALL", "HKEYS", "HVALS", "HEXISTS", "HLEN",
-				"HINCRBY", "HINCRBYFLOAT", "HMGET", "HMSET", "HSETNX", "HSTRLEN",
-				"HRANDFIELD", "HGETDEL", "HGETEX", "HSCAN",
-				"LPUSH", "RPUSH", "LPOP", "RPOP", "LLEN", "LRANGE", "LINDEX", "LSET",
-				"LREM", "LTRIM", "BLPOP", "BRPOP", "BRPOPLPUSH", "RPOPLPUSH",
-				"LMOVE", "LPOS", "LMPOP", "LMPUSH", "LPUSHX", "RPUSHX", "LINSERT",
-				"SADD", "SREM", "SMEMBERS", "SISMEMBER", "SCARD", "SPOP", "SRANDMEMBER",
-				"SMOVE", "SUNION", "SINTER", "SDIFF", "SUNIONSTORE", "SINTERSTORE", "SDIFFSTORE", "SSCAN",
-				"ZADD", "ZCARD", "ZCOUNT", "ZRANGE", "ZRANGEBYSCORE", "ZRANK", "ZREM",
-				"ZSCORE", "ZINCRBY", "ZREVRANGE", "ZREVRANK", "ZREMRANGEBYRANK", "ZREMRANGEBYSCORE",
-				"ZPOPMIN", "ZPOPMAX", "ZRANDMEMBER", "ZMSCORE",
-				"ZUNIONSTORE", "ZINTERSTORE", "ZDIFFSTORE", "ZSCAN",
-				"XADD", "XLEN", "XRANGE", "XREVRANGE", "XREAD", "XDEL", "XTRIM", "XINFO", "XGROUP",
-				"XREADGROUP", "XACK", "XPENDING", "XCLAIM",
-				"GEOADD", "GEODIST", "GEOHASH", "GEOPOS", "GEORADIUS", "GEORADIUSBYMEMBER",
-				"PING", "ECHO", "QUIT", "COMMAND", "INFO", "DBSIZE", "FLUSHDB", "FLUSHALL", "TIME",
-				"CLIENT", "CONFIG", "SCAN", "SORT", "SORT_RO",
-				"SLOWLOG", "WAIT", "ROLE", "LASTSAVE", "LOLWUT", "SHUTDOWN",
-				"SAVE", "BGSAVE", "BGREWRITEAOF", "SLAVEOF", "REPLICAOF", "LATENCY",
-				"STRALGO", "MODULE", "ACL", "MONITOR", "SWAPDB", "SYNC", "PSYNC",
-				"MULTI", "EXEC", "DISCARD", "WATCH", "UNWATCH",
-				"SUBSCRIBE", "UNSUBSCRIBE", "PUBLISH", "PSUBSCRIBE", "PUNSUBSCRIBE", "PUBSUB",
-				"SETBIT", "GETBIT", "BITCOUNT", "BITPOS", "BITOP", "BITFIELD",
-				"PFADD", "PFCOUNT", "PFMERGE",
-				"EVAL", "EVALSHA", "SCRIPT",
-				"SETTAG", "TAGKEYS", "TAGCOUNT", "TAGDEL", "TAGINFO", "INVALIDATE",
-				"NAMESPACES", "NSCREATE", "NSDEL", "NSINFO", "NSKEYS",
-				"CLUSTER", "CLUSTERINFO", "CLUSTERNODES", "CLUSTERSLOTS", "MIGRATE",
-				"DEBUG", "OBJECT", "MEMORY", "HOTKEYS", "MEMINFO",
-				"RENAME", "RENAMENX", "RANDOMKEY", "TOUCH", "DUMP", "RESTORE", "UNLINK",
-				"PERSIST", "PEXPIRE", "EXPIREAT", "PEXPIREAT", "PTTL",
-				"AUTH", "ASKING", "READONLY", "READWRITE",
-			}
-			result := make([]*resp.Value, 0, len(commands))
-			for _, cmd := range commands {
-				result = append(result, resp.BulkString(cmd))
-			}
-			return ctx.WriteArray(result)
-		default:
-			return ctx.WriteError(fmt.Errorf("ERR unknown subcommand '%s'", subCmd))
-		}
+	if ctx.ArgCount() == 0 {
+		return cmdCommandInfo(ctx, nil)
 	}
-	return ctx.WriteArray([]*resp.Value{})
+	subCmd := strings.ToUpper(ctx.ArgString(0))
+	switch subCmd {
+	case "COUNT":
+		return ctx.WriteInteger(int64(len(registeredCommandNames(ctx))))
+	case "DOCS":
+		return cmdCommandDocs(ctx)
+	case "GETKEYS":
+		return cmdCommandGetKeys(ctx)
+	case "INFO":
+		names := make([]string, 0, ctx.ArgCount()-1)
+		for i := 1; i < ctx.ArgCount(); i++ {
+			names = append(names, ctx.ArgString(i))
+		}
+		if len(names) == 0 {
+			names = nil
+		}
+		return cmdCommandInfo(ctx, names)
+	case "LIST":
+		return cmdCommandList(ctx)
+	default:
+		return ctx.WriteError(fmt.Errorf("ERR unknown subcommand '%s'", subCmd))
+	}
 }
 
 func cmdCommandDocs(ctx *Context) error {
@@ -1550,7 +1518,7 @@ func cmdLOLWUT(ctx *Context) error {
 			output.WriteString(".\n")
 		}
 	default:
-		output.WriteString("CacheStorm ver 1.0.0\n")
+		output.WriteString("CacheStorm ver. " + buildversion.Version + "\n")
 		output.WriteString("\n")
 		output.WriteString("High-performance Redis-compatible cache with tag-based invalidation.\n")
 	}
@@ -1774,25 +1742,7 @@ func cmdACL(ctx *Context) error {
 		}
 		return ctx.WriteBulkString("default")
 	case "CAT":
-		return ctx.WriteArray([]*resp.Value{
-			resp.BulkString("admin"),
-			resp.BulkString("bitmap"),
-			resp.BulkString("connection"),
-			resp.BulkString("dangerous"),
-			resp.BulkString("geo"),
-			resp.BulkString("hash"),
-			resp.BulkString("hyperloglog"),
-			resp.BulkString("list"),
-			resp.BulkString("pubsub"),
-			resp.BulkString("read"),
-			resp.BulkString("scripting"),
-			resp.BulkString("set"),
-			resp.BulkString("sortedset"),
-			resp.BulkString("stream"),
-			resp.BulkString("string"),
-			resp.BulkString("transaction"),
-			resp.BulkString("write"),
-		})
+		return cmdACLCat(ctx)
 	case "SETUSER":
 		if ctx.ArgCount() < 2 {
 			return ctx.WriteError(ErrWrongArgCount)

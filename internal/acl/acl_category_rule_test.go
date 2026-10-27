@@ -3,7 +3,11 @@ package acl
 import "testing"
 
 // TestParseACLRuleRejectsUnknownCategory pins the contract that ACL SETUSER must
-// never report success for a rule it silently ignored.
+// never report success for a rule it silently ignored. The category table is
+// installed by the command package; without it (as in this package's tests)
+// every category other than @all is unknown and must be refused, which is the
+// fail-closed path. The categories themselves are tested in the command
+// package.
 //
 // Redis ACL SETUSER accepts +command|all|@category and
 // -command|all|@category, where @category names a whole command group

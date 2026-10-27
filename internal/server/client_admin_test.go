@@ -331,3 +331,45 @@ func TestRuntimeStatsAreReal(t *testing.T) {
 		t.Fatalf("MEMORY PURGE = %+v", got)
 	}
 }
+
+func TestACLCategoriesAndCommandIntrospection(t *testing.T) {
+	s := startReplServer(t, nil)
+	admin := dialRepl(t, s)
+	if got := admin.do("ACL", "SETUSER", "reader", "on", ">pw", "~*", "-@all", "+@read", "+@connection"); got.Str != "OK" {
+		t.Fatalf("ACL SETUSER with categories = %+v", got)
+	}
+	if got := admin.do("ACL", "SETUSER", "x", "+@bogus"); got.Type != resp.TypeError {
+		t.Fatalf("unknown category = %+v", got)
+	}
+	admin.do("SET", "k", "v")
+	r := dialRepl(t, s)
+	r.do("AUTH", "reader", "pw")
+	if got := r.str("GET", "k"); got != "v" {
+		t.Fatalf("GET under +@read = %q", got)
+	}
+	if got := r.do("SET", "k", "w"); got.Type != resp.TypeError || !strings.HasPrefix(got.Err, "NOPERM") {
+		t.Fatalf("SET under -@all +@read = %+v", got)
+	}
+	if got := r.do("CONFIG", "GET", "maxmemory"); got.Type != resp.TypeError || !strings.Contains(got.Err, "config|get") {
+		t.Fatalf("CONFIG GET under +@read = %+v", got)
+	}
+
+	info := admin.do("COMMAND", "INFO", "get", "nosuchcommand")
+	if len(info.Array) != 2 || !info.Array[1].IsNull {
+		t.Fatalf("COMMAND INFO = %+v", info)
+	}
+	get := info.Array[0].Array
+	if string(get[0].Bulk) != "get" || get[1].Int != 2 || get[3].Int != 1 || len(get[6].Array) == 0 {
+		t.Fatalf("COMMAND INFO get = %+v", get)
+	}
+	count := admin.do("COMMAND", "COUNT").Int
+	if all := admin.do("COMMAND"); int64(len(all.Array)) != count || count < 1400 {
+		t.Fatalf("COMMAND has %d entries, COMMAND COUNT says %d", len(all.Array), count)
+	}
+	if got := admin.do("COMMAND", "LIST", "FILTERBY", "ACLCAT", "hyperloglog"); len(got.Array) < 3 {
+		t.Fatalf("COMMAND LIST FILTERBY ACLCAT hyperloglog = %+v", got)
+	}
+	if got := admin.do("ACL", "CAT", "dangerous"); len(got.Array) < 10 {
+		t.Fatalf("ACL CAT dangerous = %+v", got)
+	}
+}

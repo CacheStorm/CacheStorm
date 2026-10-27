@@ -438,9 +438,16 @@ func enforceACL(ctx *Context, upperCmd string) bool {
 	// explicitly granting "+acl" (or "+@all") does not become a privilege
 	// escalation. This runs only when ctx.ACLUser != nil, so the default user
 	// keeps full ACL administration.
-	if aclAdminCommands[upperCmd] || !user.CanExecuteCommand(upperCmd) {
-		recordACLDenial(ctx, "command", strings.ToLower(upperCmd), user.Name)
-		_ = ctx.Writer.WriteError("NOPERM User " + user.Name + " has no permissions to run the '" + strings.ToLower(upperCmd) + "' command")
+	allowed := user.CanExecuteCommand(upperCmd)
+	shown := strings.ToLower(upperCmd)
+	if hasSubcommands(upperCmd) && len(ctx.Args) > 0 {
+		sub := string(ctx.Args[0])
+		allowed = user.CanExecuteSubcommand(upperCmd, sub)
+		shown += "|" + strings.ToLower(sub)
+	}
+	if aclAdminCommands[upperCmd] || !allowed {
+		recordACLDenial(ctx, "command", shown, user.Name)
+		_ = ctx.Writer.WriteError("NOPERM User " + user.Name + " has no permissions to run the '" + shown + "' command")
 		return true
 	}
 	for _, key := range aclKeysForCommand(upperCmd, ctx.Args) {

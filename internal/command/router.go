@@ -61,11 +61,12 @@ type Router struct {
 // commandSpec is the arity, flags and key positions Redis reports for one of
 // its commands (see redis_command_specs.go).
 type commandSpec struct {
-	Arity    int
-	Flags    []string
-	FirstKey int
-	LastKey  int
-	KeyStep  int
+	Arity      int
+	Flags      []string
+	FirstKey   int
+	LastKey    int
+	KeyStep    int
+	Categories []string
 }
 
 // arityError is the Redis reply for a call with the wrong number of

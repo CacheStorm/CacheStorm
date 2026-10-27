@@ -196,28 +196,72 @@ func (u *User) IsNoPassword() bool {
 	return u.NoPassword
 }
 
+// AllowCommand grants cmd, a command or "CMD|SUB" subcommand; "*" or "all"
+// grants every command and clears earlier rules, as +@all does. Granting a
+// whole command also replaces the rules of its subcommands.
 func (u *User) AllowCommand(cmd string) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-
-	if cmd == "*" || cmd == "all" {
-		u.Permissions.AllowedCommands = map[string]bool{"*": true}
-	} else {
-		u.Permissions.AllowedCommands[strings.ToUpper(cmd)] = true
-		delete(u.Permissions.DeniedCommands, strings.ToUpper(cmd))
-	}
+	u.setCommandLocked(cmd, true)
 }
 
+// DenyCommand revokes cmd the way AllowCommand grants it.
 func (u *User) DenyCommand(cmd string) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
+	u.setCommandLocked(cmd, false)
+}
 
-	if cmd == "*" || cmd == "all" {
-		u.Permissions.DeniedCommands = map[string]bool{"*": true}
-	} else {
-		u.Permissions.DeniedCommands[strings.ToUpper(cmd)] = true
-		delete(u.Permissions.AllowedCommands, strings.ToUpper(cmd))
+func (u *User) setCommandLocked(cmd string, allow bool) {
+	p := &u.Permissions
+	if p.AllowedCommands == nil {
+		p.AllowedCommands = make(map[string]bool)
 	}
+	if p.DeniedCommands == nil {
+		p.DeniedCommands = make(map[string]bool)
+	}
+	if cmd == "*" || strings.EqualFold(cmd, "all") {
+		if allow {
+			p.AllowedCommands = map[string]bool{"*": true}
+			p.DeniedCommands = make(map[string]bool)
+		} else {
+			p.DeniedCommands = map[string]bool{"*": true}
+			p.AllowedCommands = make(map[string]bool)
+		}
+		return
+	}
+	cmd = strings.ToUpper(cmd)
+	if !strings.Contains(cmd, "|") {
+		prefix := cmd + "|"
+		for k := range p.AllowedCommands {
+			if strings.HasPrefix(k, prefix) {
+				delete(p.AllowedCommands, k)
+			}
+		}
+		for k := range p.DeniedCommands {
+			if strings.HasPrefix(k, prefix) {
+				delete(p.DeniedCommands, k)
+			}
+		}
+	}
+	if allow {
+		p.AllowedCommands[cmd] = true
+		delete(p.DeniedCommands, cmd)
+	} else {
+		p.DeniedCommands[cmd] = true
+		delete(p.AllowedCommands, cmd)
+	}
+}
+
+// categoryResolver returns the commands and "CMD|SUB" subcommands of an ACL
+// category, and whether the category exists. The command package installs
+// it from Redis' command table.
+var categoryResolver func(category string) ([]string, bool)
+
+// SetCategoryResolver installs the category table used by +@category and
+// -@category rules.
+func SetCategoryResolver(fn func(category string) ([]string, bool)) {
+	categoryResolver = fn
 }
 
 func (u *User) AllowKey(pattern string) {
@@ -230,6 +274,23 @@ func (u *User) AllowChannel(pattern string) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	u.Permissions.AllowedChannels = append(u.Permissions.AllowedChannels, pattern)
+}
+
+// CanExecuteSubcommand reports whether the user may run sub of the container
+// command cmd: a rule for "CMD|SUB" wins over one for CMD.
+func (u *User) CanExecuteSubcommand(cmd, sub string) bool {
+	key := strings.ToUpper(cmd) + "|" + strings.ToUpper(sub)
+	u.mu.RLock()
+	allowed, isAllowed := u.Permissions.AllowedCommands[key]
+	denied, isDenied := u.Permissions.DeniedCommands[key]
+	u.mu.RUnlock()
+	if isAllowed && allowed {
+		return true
+	}
+	if isDenied && denied {
+		return false
+	}
+	return u.CanExecuteCommand(cmd)
 }
 
 func (u *User) CanExecuteCommand(cmd string) bool {
@@ -346,23 +407,20 @@ func (u *User) ToACLString() string {
 func ParseACLRule(rule string, user *User) error {
 	parts := strings.Fields(rule)
 
-	// Validate the WHOLE rule before mutating anything. Applying token by token
-	// and bailing out mid-way left the user half-configured: `ACL SETUSER bob
-	// on >pw +get -@dangerous` would enable bob and grant GET, then fail — the
-	// operator saw an error but the earlier tokens had already taken effect.
-	//
-	// The check that matters here is the command category. Only @all is
-	// implemented, and Redis ACL accepts +@category / -@category for whole
-	// command groups. Those tokens used to fall through the switch and be
-	// discarded, so `ACL SETUSER bob +@all -@dangerous` returned +OK while
-	// leaving FLUSHALL, CONFIG and SHUTDOWN permitted — an operator who wrote
-	// the rule believed those commands were revoked. Ignoring a grant merely
-	// under-permits; ignoring a deny OVER-permits, so unknown categories fail
-	// closed instead of being silently dropped.
+	// Validate the WHOLE rule before mutating anything, so a rule with an
+	// unknown category changes nothing and reports the error.
 	for _, part := range parts {
-		if len(part) > 2 && (part[0] == '+' || part[0] == '-') && part[1] == '@' && part[2:] != "all" {
-			return errors.New("ERR unsupported command category '" + part[2:] +
-				"': only @all is supported")
+		if len(part) > 2 && (part[0] == '+' || part[0] == '-') && part[1] == '@' {
+			cat := strings.ToLower(part[2:])
+			if cat == "all" {
+				continue
+			}
+			if categoryResolver == nil {
+				return errors.New("ERR Error in ACL SETUSER modifier '" + part + "': Unknown command or category name in ACL")
+			}
+			if _, ok := categoryResolver(cat); !ok {
+				return errors.New("ERR Error in ACL SETUSER modifier '" + part + "': Unknown command or category name in ACL")
+			}
 		}
 	}
 
@@ -376,18 +434,29 @@ func ParseACLRule(rule string, user *User) error {
 			user.RemovePasswords()
 		case strings.HasPrefix(part, ">"):
 			user.SetPassword(part[1:])
-		case strings.HasPrefix(part, "+"):
+		case part == "allcommands":
+			user.AllowCommand("*")
+		case part == "nocommands":
+			user.DenyCommand("*")
+		case strings.HasPrefix(part, "+") || strings.HasPrefix(part, "-"):
+			allow := part[0] == '+'
 			cmd := part[1:]
 			if strings.HasPrefix(cmd, "@") {
-				// Validated above: every @category reaching here is "all".
-				user.AllowCommand("*")
-			} else {
-				user.AllowCommand(cmd)
+				cat := strings.ToLower(cmd[1:])
+				if cat == "all" {
+					cmd = "*"
+				} else {
+					members, _ := categoryResolver(cat)
+					user.mu.Lock()
+					for _, m := range members {
+						user.setCommandLocked(m, allow)
+					}
+					user.mu.Unlock()
+					continue
+				}
 			}
-		case strings.HasPrefix(part, "-"):
-			cmd := part[1:]
-			if strings.HasPrefix(cmd, "@") {
-				user.DenyCommand("*")
+			if allow {
+				user.AllowCommand(cmd)
 			} else {
 				user.DenyCommand(cmd)
 			}

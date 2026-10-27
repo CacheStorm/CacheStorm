@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - TENSOR.ADD refuses tensors of different sizes instead of panicking
 - FT.ALIASADD, FT.ALIASUPDATE and FT.ALIASDEL maintain real index aliases and FT.TAGVALS lists a tag field's values; they used to discard their arguments
 - HEAP.STATS, MEMORY.FRAG and STATS.CPU report the Go runtime's real figures, HEAP.GC runs a collection and MEMORY PURGE / MEMORY.PURGE / MEMORY.TRIM return freed memory to the OS; they used to report zeros or do nothing
+- ACL categories: +@category and -@category rules (read, write, admin, dangerous, keyspace, string, hash, ... as in Redis 7.4) and subcommand rules such as +config|get, applied in order as Redis does; allcommands/nocommands; ACL CAT lists the categories and their commands. Only @all used to be accepted. The categories come from Redis' own command table, which tools/cmdspecgen now also captures for subcommands
+- COMMAND, COMMAND INFO, COMMAND COUNT and COMMAND LIST [FILTERBY ACLCAT|PATTERN|MODULE] describe the registered commands in Redis 7's format, with arity, flags, key positions and ACL categories; COMMAND used to return an empty array, COMMAND COUNT 200, COMMAND LIST a hand-written list and COMMAND INFO an error
 - MIGRATE moves keys to another server (CacheStorm or Redis): MIGRATE host port key|"" db timeout [COPY] [REPLACE] [AUTH pw | AUTH2 user pw] [KEYS ...] sends each key as RESTORE with its DUMP payload and remaining TTL and, without COPY, deletes it locally, which the AOF and replicas record as DEL. Redis' own MIGRATE into CacheStorm works too. It used to refuse every call; ACL checks now cover its keys
 - SHUTDOWN stops the server: it saves a snapshot when snapshots are configured (or with SAVE), waits up to 10 seconds for replicas unless NOW is given, refuses to stop on a failed save unless FORCE is given, and closes the connection without a reply. It used to reply OK and keep running
 - WAITAOF fsyncs the local AOF and waits for replicas as WAIT does, answering [local, replicas]; it used to answer [0, 0] whatever happened
@@ -42,6 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Monitoring: the metrics port serves the full exposition (up, uptime, keys and memory across all databases, hits, misses, evictions, expirations, network bytes); Prometheus scrapes it without credentials, the Compose file mounts `alerts.yml`, and the "instance down" alert uses Prometheus' own `up` series
 
 ### Changed
+- LOLWUT reports the build's version instead of "1.0.0"
 - ACL LOAD/SAVE and DEBUG RELOAD/LOADAOF report that they are not available instead of replying OK without doing anything
 - The built-in sentinel role logs that it is experimental: it tracks masters but does not reconfigure servers on failover. The configuration guide documents Redis Sentinel for automatic failover
 - License: CacheStorm is MIT licensed; LICENSE, README, CONTRIBUTING, the website and the SDK package metadata now agree
