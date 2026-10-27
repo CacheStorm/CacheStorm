@@ -97,7 +97,7 @@ func recordAudit(ctx *Context, success bool) {
 			args[i] = auditArg(ctx.Args[i+1])
 		}
 	}
-	store.GlobalAuditLog.Log(ctx.Command, key, args, ctx.RemoteAddr, ctx.Username, success, time.Since(ctx.StartTime).Microseconds())
+	store.GlobalAuditLog.Log(ctx.Command, key, args, ctx.RemoteAddr, ctx.userName(), success, time.Since(ctx.StartTime).Microseconds())
 }
 
 func cmdAUDITLOG(ctx *Context) error {
@@ -116,7 +116,7 @@ func cmdAUDITLOG(ctx *Context) error {
 		args = append(args, ctx.ArgString(i))
 	}
 
-	id := store.GlobalAuditLog.Log(command, key, args, ctx.RemoteAddr, ctx.Username, true, 0)
+	id := store.GlobalAuditLog.Log(command, key, args, ctx.RemoteAddr, ctx.userName(), true, 0)
 
 	return ctx.WriteInteger(id)
 }

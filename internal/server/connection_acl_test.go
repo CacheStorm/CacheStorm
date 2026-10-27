@@ -296,24 +296,12 @@ func TestACLNoChannelRuleMeansAllChannelsControl(t *testing.T) {
 	}
 }
 
-// A restricted user must not be able to administer the ACL system and widen its
-// own permissions.
-//
-// The user is granted "+acl" on purpose: that is the realistic escalation
-// vector, because a user holding ACL access can run
-// `ACL SETUSER self +@all ~*` and defeat every key and command restriction at
-// once. Granting the command is therefore exactly what must not be enough.
-func TestACLRestrictedUserCannotEscalateViaACL(t *testing.T) {
-	const user = "acl_esc_user"
+// As in Redis, ACL administration is an ordinary permission: a user granted
+// "+acl" may run it, including widening its own rules, and the changes apply.
+func TestACLUserGrantedACLMayAdministerACL(t *testing.T) {
+	const user = "acl_admin_user"
 	a := newACLSession(t)
 
-	// Control: the default (unauthenticated) user may still administer ACL.
-	if v := a.do("ACL", "USERS"); v.Type != resp.TypeArray {
-		t.Fatalf("control: ACL USERS as the default user returned type %v, want an array — ACL administration was broken for the default user", v.Type)
-	}
-	if v := a.do("SET", "user:1", "secret"); !aclIsOK(v) {
-		t.Fatalf("setup: SET user:1 returned type %v %q, want +OK", v.Type, v.Str)
-	}
 	if v := a.do("SET", "other:1", "topsecret"); !aclIsOK(v) {
 		t.Fatalf("setup: SET other:1 returned type %v %q, want +OK", v.Type, v.Str)
 	}
@@ -323,37 +311,20 @@ func TestACLRestrictedUserCannotEscalateViaACL(t *testing.T) {
 	if v := a.do("AUTH", user, "pw"); !aclIsOK(v) {
 		t.Fatalf("AUTH %s pw returned type %v %q, want +OK", user, v.Type, v.Str)
 	}
-
-	// 1. The escalation attempt itself must be refused.
-	if v := a.do("ACL", "SETUSER", user, ">pw2", "+@all", "~*"); !aclIsNoperm(v) {
-		t.Fatalf("ACL SETUSER <self> +@all ~* returned type %v %q, want NOPERM — a restricted user can grant itself further permissions", v.Type, v.Err)
-	}
-
-	// 2. No other ACL subcommand may be used either.
-	for _, sub := range [][]string{
-		{"ACL", "DELUSER", "somebody"},
-		{"ACL", "GETUSER", user},
-		{"ACL", "LIST"},
-		{"ACL", "SAVE"},
-		{"ACL", "LOAD"},
-		{"ACL", "WHOAMI"},
-	} {
-		if v := a.do(sub...); !aclIsNoperm(v) {
-			t.Fatalf("%v returned type %v %q, want NOPERM", sub, v.Type, v.Err)
-		}
-	}
-
-	// 3. The refused SETUSER must have changed nothing: the key restriction and
-	// the command restriction must both still be in force. This is the part
-	// that would catch a refused-but-partially-applied escalation.
 	if v := a.do("GET", "other:1"); !aclIsNoperm(v) {
-		t.Fatalf("GET other:1 returned type %v %q, want NOPERM — the refused ACL SETUSER widened the key restriction", v.Type, v.Err)
+		t.Fatalf("GET other:1 before widening returned type %v %q, want NOPERM", v.Type, v.Err)
 	}
-	if v := a.do("SET", "user:1", "hacked"); !aclIsNoperm(v) {
-		t.Fatalf("SET user:1 returned type %v %q, want NOPERM — the refused ACL SETUSER widened the command restriction", v.Type, v.Err)
+	if v := a.do("ACL", "WHOAMI"); v.Type != resp.TypeBulkString || string(v.Bulk) != user {
+		t.Fatalf("ACL WHOAMI returned type %v %q, want %q", v.Type, v.Bulk, user)
 	}
-	if v := a.do("GET", "user:1"); v.Type != resp.TypeBulkString || string(v.Bulk) != "secret" {
-		t.Fatalf("GET user:1 returned type %v %q, want bulk \"secret\"", v.Type, v.Bulk)
+	if v := a.do("ACL", "SETUSER", user, "~*"); !aclIsOK(v) {
+		t.Fatalf("ACL SETUSER <self> ~* returned type %v %q, want +OK", v.Type, v.Err)
+	}
+	if v := a.do("GET", "other:1"); v.Type != resp.TypeBulkString || string(v.Bulk) != "topsecret" {
+		t.Fatalf("GET other:1 after widening returned type %v %q, want bulk \"topsecret\"", v.Type, v.Bulk)
+	}
+	if v := a.do("SET", "other:1", "x"); !aclIsNoperm(v) {
+		t.Fatalf("SET other:1 returned type %v %q, want NOPERM — only the key rule was widened", v.Type, v.Err)
 	}
 }
 
@@ -374,58 +345,41 @@ func TestACLUserWithoutACLGrantIsRefusedControl(t *testing.T) {
 	}
 }
 
-// A user granted "+config" must not be able to reshape server configuration.
-//
-// The named attack, CONFIG SET requirepass "", is refused. It is worth being
-// precise about why: in this implementation requirepass is NOT a settable
-// parameter (cmdConfigSet has no case for it, and no default case either), so
-// that call would silently no-op even without this gate. The command is still
-// refused, because the settable parameters that DO exist — maxmemory,
-// maxclients, appendonly, timeout — are a denial-of-service surface that no key
-// or command pattern can bound.
-func TestACLRestrictedUserCannotRunConfig(t *testing.T) {
-	const user = "acl_config_user"
+// CONFIG follows the user's command and subcommand rules, as in Redis: a user
+// without it is refused, "+config|get" allows reading only, and scripts may
+// never run it.
+func TestACLConfigFollowsUserRules(t *testing.T) {
 	a := newACLSession(t)
 
-	// Control: the default user keeps CONFIG administration.
+	if v := a.do("ACL", "SETUSER", "cfg_none", ">pw", "-@all", "+get", "~*"); !aclIsOK(v) {
+		t.Fatalf("setup: ACL SETUSER cfg_none returned type %v %q", v.Type, v.Str)
+	}
+	if v := a.do("ACL", "SETUSER", "cfg_read", ">pw", "-@all", "+config|get", "+eval", "~*"); !aclIsOK(v) {
+		t.Fatalf("setup: ACL SETUSER cfg_read returned type %v %q", v.Type, v.Str)
+	}
+	if v := a.do("ACL", "SETUSER", "cfg_all", ">pw", "+@all", "~*"); !aclIsOK(v) {
+		t.Fatalf("setup: ACL SETUSER cfg_all returned type %v %q", v.Type, v.Str)
+	}
+
+	a.do("AUTH", "cfg_none", "pw")
+	if v := a.do("CONFIG", "GET", "maxmemory"); !aclIsNoperm(v) {
+		t.Fatalf("CONFIG GET without +config returned type %v %q, want NOPERM", v.Type, v.Err)
+	}
+
+	a.do("AUTH", "cfg_read", "pw")
 	if v := a.do("CONFIG", "GET", "maxmemory"); v.Type != resp.TypeArray {
-		t.Fatalf("control: CONFIG GET as the default user returned type %v, want an array — CONFIG administration was broken for the default user", v.Type)
+		t.Fatalf("CONFIG GET with +config|get returned type %v %q, want an array", v.Type, v.Err)
 	}
-	if v := a.do("SET", "user:1", "secret"); !aclIsOK(v) {
-		t.Fatalf("setup: SET user:1 returned type %v %q, want +OK", v.Type, v.Str)
-	}
-	if v := a.do("ACL", "SETUSER", user, ">pw", "-@all", "+get", "+config", "~user:*"); !aclIsOK(v) {
-		t.Fatalf("setup: ACL SETUSER returned type %v %q, want +OK", v.Type, v.Str)
-	}
-	if v := a.do("AUTH", user, "pw"); !aclIsOK(v) {
-		t.Fatalf("AUTH %s pw returned type %v %q, want +OK", user, v.Type, v.Str)
+	if v := a.do("CONFIG", "SET", "maxmemory", "1000"); !aclIsNoperm(v) {
+		t.Fatalf("CONFIG SET with only +config|get returned type %v %q, want NOPERM", v.Type, v.Err)
 	}
 
-	// 1. The named authentication-removal attempt must be refused.
-	if v := a.do("CONFIG", "SET", "requirepass", ""); !aclIsNoperm(v) {
-		t.Fatalf("CONFIG SET requirepass \"\" returned type %v %q, want NOPERM", v.Type, v.Err)
+	a.do("AUTH", "cfg_all", "pw")
+	if v := a.do("CONFIG", "SET", "maxmemory", "0"); !aclIsOK(v) {
+		t.Fatalf("CONFIG SET with +@all returned type %v %q, want +OK", v.Type, v.Err)
 	}
-
-	// 2. No CONFIG subcommand may be used either, read or write.
-	for _, sub := range [][]string{
-		{"CONFIG", "GET", "maxmemory"},
-		{"CONFIG", "GET", "*"},
-		{"CONFIG", "SET", "maxmemory", "1000"},
-		{"CONFIG", "SET", "maxclients", "1"},
-		{"CONFIG", "SET", "timeout", "0"},
-		{"CONFIG", "RESETSTAT"},
-		{"CONFIG", "REWRITE"},
-	} {
-		if v := a.do(sub...); !aclIsNoperm(v) {
-			t.Fatalf("%v returned type %v %q, want NOPERM", sub, v.Type, v.Err)
-		}
-	}
-
-	// 3. The refusal must be clean: the connection keeps working normally.
-	if v := a.do("GET", "user:1"); v.Type != resp.TypeBulkString || string(v.Bulk) != "secret" {
-		t.Fatalf("GET user:1 returned type %v %q, want bulk \"secret\" — the CONFIG refusal disturbed the connection", v.Type, v.Bulk)
-	}
-	if v := a.do("GET", "other:1"); !aclIsNoperm(v) {
-		t.Fatalf("GET other:1 returned type %v %q, want NOPERM — the ~user:* key restriction was lost", v.Type, v.Err)
+	v := a.do("EVAL", "return redis.call('config', 'get', 'maxmemory')", "0")
+	if v.Type != resp.TypeError || !strings.Contains(v.Err, "not allowed from script") {
+		t.Fatalf("CONFIG from a script returned type %v %q, want the not-allowed-from-script error", v.Type, v.Err)
 	}
 }

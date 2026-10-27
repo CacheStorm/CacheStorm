@@ -213,6 +213,17 @@ func NewConnectionContext(cmd string, args [][]byte, s *store.Store, w *resp.Wri
 	}
 }
 
+// userName is the ACL user the connection runs as.
+func (ctx *Context) userName() string {
+	if ctx.ACLUser != nil {
+		return ctx.ACLUser.Name
+	}
+	if ctx.Username != "" {
+		return ctx.Username
+	}
+	return "default"
+}
+
 // dispatcher returns the router running this command, falling back to the
 // process router for contexts built outside Router.Execute.
 func (ctx *Context) dispatcher() *Router {

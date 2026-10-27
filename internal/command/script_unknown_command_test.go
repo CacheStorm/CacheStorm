@@ -76,8 +76,8 @@ func TestProofAdminCommandFromScriptIsRefused(t *testing.T) {
 	user := scriptNoopUser(t, "-@all", "+eval", "+acl", "~*")
 
 	reply := scriptNoopEval(t, s, user, "return redis.call('acl','users')")
-	if !strings.Contains(reply, "NOPERM") {
-		t.Fatalf("FAIL: the admin-command reservation must refuse ACL from a script even for a +acl user, got %q", reply)
+	if !strings.HasPrefix(reply, "-") {
+		t.Fatalf("FAIL: a script must not run ACL even for a +acl user, got %q", reply)
 	}
 }
 

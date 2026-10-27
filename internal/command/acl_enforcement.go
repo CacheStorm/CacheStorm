@@ -380,27 +380,6 @@ func aclChannelsForCommand(cmd string, args [][]byte) []string {
 	return nil
 }
 
-// aclAdminCommands administer the security and tunables of the server itself.
-// They are reserved for the default user: a connection carrying an ACL user is
-// refused before the command permission check runs, because granting a user ACL
-// access is enough to defeat key- and command-level restrictions entirely —
-// `ACL SETUSER self +@all ~*` widens every rule at once. Refusing the whole
-// command is the safe subset; Redis's finer model, where a user may edit its own
-// rules but never beyond its own permissions, is deliberately not implemented.
-//
-// CONFIG is included for the same reason. A user allowed to run it could reshape
-// maxmemory, maxclients, the append/persistence mode and the server timeout —
-// a denial-of-service surface that no key or command pattern can bound.
-// Note that the specific `CONFIG SET requirepass ""` attack is NOT the reason:
-// requirepass is not a settable parameter in this implementation (cmdConfigSet
-// has no such case, and no default case either, so the call silently no-ops), so
-// authentication cannot be removed this way today. The restriction is
-// defence-in-depth against the settable parameters that do exist.
-var aclAdminCommands = map[string]bool{
-	"ACL":    true,
-	"CONFIG": true,
-}
-
 // AuthenticateACL resolves a username/password pair against the ACL registry
 // that backs the TCP path, so alternative entry points such as the HTTP API
 // can map a client to the same per-user identity. The errors are the ones
@@ -434,10 +413,6 @@ func enforceACL(ctx *Context, upperCmd string) bool {
 		return false
 	}
 
-	// ACL administration is checked before the command permission, so that
-	// explicitly granting "+acl" (or "+@all") does not become a privilege
-	// escalation. This runs only when ctx.ACLUser != nil, so the default user
-	// keeps full ACL administration.
 	allowed := user.CanExecuteCommand(upperCmd)
 	shown := strings.ToLower(upperCmd)
 	if hasSubcommands(upperCmd) && len(ctx.Args) > 0 {
@@ -445,7 +420,7 @@ func enforceACL(ctx *Context, upperCmd string) bool {
 		allowed = user.CanExecuteSubcommand(upperCmd, sub)
 		shown += "|" + strings.ToLower(sub)
 	}
-	if aclAdminCommands[upperCmd] || !allowed {
+	if !allowed {
 		recordACLDenial(ctx, "command", shown, user.Name)
 		_ = ctx.Writer.WriteError("NOPERM User " + user.Name + " has no permissions to run the '" + shown + "' command")
 		return true

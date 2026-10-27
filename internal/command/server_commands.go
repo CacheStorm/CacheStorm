@@ -1669,10 +1669,7 @@ func cmdACL(ctx *Context) error {
 		}
 		return ctx.WriteArray(results)
 	case "WHOAMI":
-		if ctx.Username != "" {
-			return ctx.WriteBulkString(ctx.Username)
-		}
-		return ctx.WriteBulkString("default")
+		return ctx.WriteBulkString(ctx.userName())
 	case "CAT":
 		return cmdACLCat(ctx)
 	case "SETUSER":

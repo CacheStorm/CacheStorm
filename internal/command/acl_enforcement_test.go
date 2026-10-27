@@ -303,10 +303,9 @@ func TestEnforceAclChannelRules(t *testing.T) {
 	}
 }
 
-// ACL administration must be refused for any connection carrying an ACL user,
-// even one explicitly granted "+acl" or "+@all" — otherwise holding the ACL
-// command is a full privilege escalation via `ACL SETUSER self +@all ~*`.
-func TestEnforceAclRefusesAdminCommands(t *testing.T) {
+// ACL and CONFIG follow the user's rules like any other command, as in Redis:
+// granted through +acl, +config, a subcommand or +@all, refused otherwise.
+func TestEnforceAclAdminCommandsFollowRules(t *testing.T) {
 	ruleUser := func(t *testing.T, rules string) *acl.User {
 		t.Helper()
 		a := acl.NewACL()
@@ -320,67 +319,40 @@ func TestEnforceAclRefusesAdminCommands(t *testing.T) {
 		u.Enable()
 		return u
 	}
-
 	refused := func(u *acl.User, cmd string, args ...string) bool {
 		ctx := aclCtx(t, cmd, args...)
 		ctx.ACLUser = u
 		return enforceACL(ctx, cmd)
 	}
 
-	// Granted the ACL command explicitly: still refused.
-	explicit := ruleUser(t, "-@all +get +acl ~user:*")
+	granted := ruleUser(t, "-@all +get +acl +config ~user:*")
+	full := ruleUser(t, "+@all ~user:*")
+	none := ruleUser(t, "-@all +get ~user:*")
+	readOnly := ruleUser(t, "-@all +config|get ~user:*")
 	for _, sub := range [][]string{
 		{"ACL", "SETUSER", "x", "+@all", "~*"},
-		{"ACL", "DELUSER", "somebody"},
-		{"ACL", "GETUSER", "admin_user"},
 		{"ACL", "LIST"},
-		{"ACL", "SAVE"},
-		{"ACL", "LOAD"},
 		{"ACL", "WHOAMI"},
-		{"ACL", "DRYRUN", "admin_user", "set", "k", "v"},
-	} {
-		if !refused(explicit, sub[0], sub[1:]...) {
-			t.Errorf("%v was permitted for a user granted +acl, want NOPERM — a privilege escalation path", sub)
-		}
-	}
-
-	// Granted EVERYTHING via +@all, which includes ACL: still refused. This is
-	// the case the command-permission check alone cannot catch.
-	full := ruleUser(t, "+@all ~user:*")
-	if !refused(full, "ACL", "SETUSER", "admin_user", "+@all", "~*") {
-		t.Error("ACL SETUSER was permitted for a user granted +@all, want NOPERM — +@all must not imply the ability to administer ACL")
-	}
-	// ...but the same user keeps its ordinary command access.
-	if refused(full, "GET", "user:1") {
-		t.Error("GET was refused for a +@all user, but the admin gate must not restrict ordinary commands")
-	}
-
-	// A context with no ACL user is the default user and keeps ACL administration.
-	if enforceACL(aclCtx(t, "ACL", "SETUSER", "u", "+@all", "~*"), "ACL") {
-		t.Error("ACL was refused for a context with no ACLUser, but the default user must retain ACL administration")
-	}
-	if enforceACL(aclCtx(t, "CONFIG", "SET", "requirepass", ""), "CONFIG") {
-		t.Error("CONFIG was refused for a context with no ACLUser, but the default user must retain CONFIG administration")
-	}
-
-	// CONFIG is admin-gated on the same terms as ACL, including for a user
-	// explicitly granted +config or +@all.
-	configUser := ruleUser(t, "-@all +get +config ~user:*")
-	for _, sub := range [][]string{
-		{"CONFIG", "SET", "requirepass", ""},
 		{"CONFIG", "GET", "maxmemory"},
 		{"CONFIG", "SET", "maxmemory", "1000"},
-		{"CONFIG", "REWRITE"},
 	} {
-		if !refused(configUser, sub[0], sub[1:]...) {
-			t.Errorf("%v was permitted for a user granted +config, want NOPERM", sub)
+		if refused(granted, sub[0], sub[1:]...) {
+			t.Errorf("%v was refused for a user granted it", sub)
+		}
+		if refused(full, sub[0], sub[1:]...) {
+			t.Errorf("%v was refused for a +@all user", sub)
+		}
+		if !refused(none, sub[0], sub[1:]...) {
+			t.Errorf("%v was permitted for a user without it", sub)
 		}
 	}
-	if !refused(full, "CONFIG", "SET", "maxmemory", "1000") {
-		t.Error("CONFIG SET was permitted for a user granted +@all, want NOPERM — +@all must not imply the ability to reconfigure the server")
+	if refused(readOnly, "CONFIG", "GET", "maxmemory") {
+		t.Error("CONFIG GET was refused for a +config|get user")
 	}
-	// ...but a +@all user keeps its ordinary command access.
-	if refused(full, "GET", "user:1") {
-		t.Error("GET was refused for a +@all user, but the admin gate must not restrict ordinary commands")
+	if !refused(readOnly, "CONFIG", "SET", "maxmemory", "1") {
+		t.Error("CONFIG SET was permitted for a user granted only +config|get")
+	}
+	if enforceACL(aclCtx(t, "ACL", "SETUSER", "u", "+@all", "~*"), "ACL") {
+		t.Error("ACL was refused for a context with no ACLUser")
 	}
 }
