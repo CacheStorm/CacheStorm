@@ -373,7 +373,7 @@ func TestRuntimeStatsAreReal(t *testing.T) {
 func TestACLCategoriesAndCommandIntrospection(t *testing.T) {
 	s := startReplServer(t, nil)
 	admin := dialRepl(t, s)
-	if got := admin.do("ACL", "SETUSER", "reader", "on", "on", ">pw", "~*", "-@all", "+@read", "+@connection"); got.Str != "OK" {
+	if got := admin.do("ACL", "SETUSER", "reader", "reset", "on", "on", ">pw", "~*", "-@all", "+@read", "+@connection"); got.Str != "OK" {
 		t.Fatalf("ACL SETUSER with categories = %+v", got)
 	}
 	if got := admin.do("ACL", "SETUSER", "x", "on", "+@bogus"); got.Type != resp.TypeError {
