@@ -156,23 +156,26 @@ func (v *HashValue) FieldLive(field string, now int64) bool {
 // holds the value's lock.
 func (v *HashValue) LiveField(field string, now int64) ([]byte, bool) {
 	val, ok := v.Fields[field]
-	if !ok || v.ttl == nil || now <= 0 {
-		return val, ok
-	}
-	if at := v.ttl.at[field]; at != 0 && at <= now {
+	if !ok || v.expiredAt(field, now) {
 		return nil, false
 	}
 	return val, true
+}
+
+// expiredAt reports whether field has an expiry at or before now (> 0).
+func (v *HashValue) expiredAt(field string, now int64) bool {
+	if v.ttl == nil || now <= 0 {
+		return false
+	}
+	at := v.ttl.at[field]
+	return at != 0 && at <= now
 }
 
 // dropExpiredTTL clears field's expiry when it has passed at now, so a
 // write to a field a replica still holds after its expiry creates it
 // afresh. The caller holds the value's write lock.
 func (v *HashValue) dropExpiredTTL(field string, now int64) {
-	if v.ttl == nil || now <= 0 {
-		return
-	}
-	if at := v.ttl.at[field]; at != 0 && at <= now {
+	if v.expiredAt(field, now) {
 		v.clearFieldTTL(field)
 	}
 }

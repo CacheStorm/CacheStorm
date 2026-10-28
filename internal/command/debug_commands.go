@@ -41,9 +41,56 @@ func cmdDEBUG(ctx *Context) error {
 		return ctx.WriteError(ErrSegfault)
 	case "STRUCTSIZE":
 		return ctx.WriteInteger(104)
+	case "POPULATE":
+		return cmdDebugPopulate(ctx)
 	default:
 		return ctx.WriteError(fmt.Errorf("ERR unknown DEBUG subcommand '%s'", subCmd))
 	}
+}
+
+// cmdDebugPopulate is DEBUG POPULATE count [prefix [size]]: it creates the
+// string keys prefix:0 .. prefix:count-1 holding "value:N", padded with zero
+// bytes or cut to size when size is given, and skips keys that exist.
+func cmdDebugPopulate(ctx *Context) error {
+	if ctx.ArgCount() < 2 || ctx.ArgCount() > 4 {
+		return ctx.WriteError(fmt.Errorf("ERR unknown subcommand or wrong number of arguments for '%s'. Try DEBUG HELP.", ctx.ArgString(0))) //nolint:staticcheck // Redis reply text
+	}
+	count, err := debugPositive(ctx.ArgString(1))
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	prefix := "key"
+	if ctx.ArgCount() > 2 {
+		prefix = ctx.ArgString(2)
+	}
+	var size int64
+	if ctx.ArgCount() > 3 {
+		if size, err = debugPositive(ctx.ArgString(3)); err != nil {
+			return ctx.WriteError(err)
+		}
+	}
+	for j := int64(0); j < count; j++ {
+		key := prefix + ":" + strconv.FormatInt(j, 10)
+		val := []byte("value:" + strconv.FormatInt(j, 10))
+		if size > 0 {
+			padded := make([]byte, size)
+			copy(padded, val)
+			val = padded
+		}
+		err := ctx.Store.Set(key, &store.StringValue{Data: val}, store.SetOptions{NX: true})
+		if err != nil && !errors.Is(err, store.ErrKeyExists) {
+			return ctx.WriteError(err)
+		}
+	}
+	return ctx.WriteOK()
+}
+
+func debugPositive(arg string) (int64, error) {
+	n, err := strconv.ParseInt(arg, 10, 64)
+	if err != nil || n < 0 {
+		return 0, errors.New("ERR value is out of range, must be positive")
+	}
+	return n, nil
 }
 
 func cmdDebugSleep(ctx *Context) error {

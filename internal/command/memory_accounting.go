@@ -1,6 +1,12 @@
 package command
 
-import "errors"
+import (
+	"errors"
+	"runtime/metrics"
+	"strings"
+	"sync/atomic"
+	"time"
+)
 
 // errOOM is Redis' reply to a command that may grow memory while used memory
 // is over maxmemory.
@@ -44,11 +50,26 @@ func reaccountWrittenKeys(ctx *Context) {
 // overMemoryFor reports whether cmd must be refused because used memory is
 // over maxmemory and eviction could not bring it back, as Redis refuses
 // commands flagged denyoom before running them.
+//
+// An extension command that may grow memory is refused the same way, and
+// also when the live heap is past the limit: its registry is not counted in
+// used_memory, so it could otherwise grow until the process runs out of
+// memory.
 func overMemoryFor(ctx *Context, cmd string) bool {
-	if ctx.Store == nil || !denyOOMCommands[cmd] {
+	if ctx.Store == nil {
 		return false
 	}
-	return ctx.Store.CheckWriteMemory() != nil
+	if denyOOMCommands[cmd] {
+		return ctx.Store.CheckWriteMemory() != nil
+	}
+	if !extensionMayGrow(cmd) {
+		return false
+	}
+	mt := ctx.Store.MemoryTracker()
+	if mt == nil || mt.Max() <= 0 {
+		return false
+	}
+	return ctx.Store.CheckWriteMemory() != nil || heapOverLimit(mt.Max())
 }
 
 // execDeniedForMemory reports whether an EXEC must be refused for memory: a
@@ -58,9 +79,69 @@ func execDeniedForMemory(ctx *Context) bool {
 		return false
 	}
 	for _, qc := range ctx.Transaction.GetQueued() {
-		if denyOOMCommands[qc.cmd] {
-			return ctx.Store.CheckWriteMemory() != nil
+		if overMemoryFor(ctx, qc.cmd) {
+			return true
 		}
 	}
 	return false
+}
+
+// extensionKeepVerbs are the extension command verbs (the part after the
+// last dot) that read or remove state. Every other extension command may
+// grow it, and most keep it in registries outside the keyspace, which
+// used_memory does not count.
+var extensionKeepVerbs = map[string]bool{
+	"GET": true, "MGET": true, "GETALL": true, "BULKGET": true, "LIST": true, "INFO": true,
+	"STATUS": true, "STATS": true, "CHECK": true, "COUNT": true, "LEN": true, "LENGTH": true,
+	"SIZE": true, "CARD": true, "EXISTS": true, "MEXISTS": true, "PEEK": true, "SEARCH": true,
+	"QUERY": true, "READ": true, "RANGE": true, "REVRANGE": true, "KEYS": true, "VALUES": true,
+	"MIN": true, "MAX": true, "SUM": true, "AVG": true, "MEAN": true, "MEDIAN": true,
+	"CURRENT": true, "STATE": true, "HISTORY": true, "METRICS": true, "USAGE": true,
+	"VERSION": true, "VALIDATE": true, "VERIFY": true, "EXPORT": true, "TTL": true, "TYPE": true,
+	"ENCODE": true, "DECODE": true, "POP": true, "DEL": true, "DELETE": true, "MDEL": true,
+	"BULKDEL": true, "REMOVE": true, "CLEAR": true, "PURGE": true, "RESET": true,
+	"RESETALL": true, "RELEASE": true, "UNLOCK": true, "REVOKE": true, "CANCEL": true,
+	"DEREGISTER": true, "DROPINDEX": true, "TRIM": true, "FLUSH": true, "CLEANUP": true,
+	"DELNODE": true, "DELEDGE": true, "ALIASDEL": true, "ACK": true, "CLOSE": true,
+}
+
+// extensionMayGrow reports whether cmd is an extension command (MODULE.VERB,
+// not one of Redis') that may grow memory.
+func extensionMayGrow(cmd string) bool {
+	dot := strings.LastIndexByte(cmd, '.')
+	if dot < 0 {
+		return false
+	}
+	if _, redis := redisCommandSpecs[cmd]; redis {
+		return false
+	}
+	return !extensionKeepVerbs[cmd[dot+1:]]
+}
+
+// heapSample caches the live heap size so the check costs a runtime/metrics
+// read at most every heapSampleEvery.
+var heapSample struct {
+	at   atomic.Int64
+	live atomic.Uint64
+}
+
+const heapSampleEvery = int64(100 * time.Millisecond)
+
+func liveHeap() uint64 {
+	now := time.Now().UnixNano()
+	if last := heapSample.at.Load(); now-last >= heapSampleEvery && heapSample.at.CompareAndSwap(last, now) {
+		s := []metrics.Sample{{Name: "/gc/heap/live:bytes"}}
+		metrics.Read(s)
+		if s[0].Value.Kind() == metrics.KindUint64 {
+			heapSample.live.Store(s[0].Value.Uint64())
+		}
+	}
+	return heapSample.live.Load()
+}
+
+// heapOverLimit reports whether the live heap is past the room maxmemory
+// leaves for the dataset (the Go memory limit the server derives from it),
+// which only state used_memory does not count can cause.
+func heapOverLimit(max int64) bool {
+	return max > 0 && liveHeap() > uint64(max+max/4+64<<20)
 }

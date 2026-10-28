@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
@@ -476,4 +477,46 @@ func BenchmarkRPUSHOnLargeList(b *testing.B) {
 			}
 		})
 	}
+}
+
+// Extension registries live outside the keyspace, so their growth is refused
+// over maxmemory like a denyoom command, and also when the live heap is past
+// the limit; commands that read or remove state still run.
+func TestMaxmemoryRefusesGrowingExtensionCommands(t *testing.T) {
+	r := newMemAcctRouter()
+	RegisterEventCommands(r)
+	s := store.NewStore()
+	s.ConfigureMemory(64<<10, store.EvictionNoEviction, 70, 85, 5)
+	heapSample.live.Store(0)
+	heapSample.at.Store(time.Now().UnixNano() + int64(time.Hour))
+	t.Cleanup(func() { heapSample.at.Store(0) })
+	memAcctRun(r, s, nil, "QUEUE.CLEAR", "memq")
+	memAcctRun(r, s, nil, "QUEUE.PUSH", "memq", "a")
+
+	val := strings.Repeat("x", 1024)
+	for i := 0; i < 200; i++ {
+		memAcctRun(r, s, nil, "RPUSH", "big", val)
+	}
+	if out := memAcctRun(r, s, nil, "QUEUE.PUSH", "memq", "b"); !strings.HasPrefix(out, "-OOM") {
+		t.Fatalf("QUEUE.PUSH over maxmemory: %q", out)
+	}
+	if out := memAcctRun(r, s, nil, "QUEUE.LEN", "memq"); out != ":1\r\n" {
+		t.Fatalf("QUEUE.LEN over maxmemory: %q", out)
+	}
+	if out := memAcctRun(r, s, nil, "QUEUE.POP", "memq"); !strings.HasPrefix(out, "$1") {
+		t.Fatalf("QUEUE.POP over maxmemory: %q", out)
+	}
+
+	memAcctRun(r, s, nil, "DEL", "big")
+	if out := memAcctRun(r, s, nil, "QUEUE.PUSH", "memq", "c"); out != ":1\r\n" {
+		t.Fatalf("QUEUE.PUSH under maxmemory: %q", out)
+	}
+	heapSample.live.Store(1 << 40)
+	if out := memAcctRun(r, s, nil, "QUEUE.PUSH", "memq", "d"); !strings.HasPrefix(out, "-OOM") {
+		t.Fatalf("QUEUE.PUSH with the heap past the limit: %q", out)
+	}
+	if out := memAcctRun(r, s, nil, "SET", "k", "v"); out != "+OK\r\n" {
+		t.Fatalf("SET is bounded by used_memory only: %q", out)
+	}
+	memAcctRun(r, s, nil, "QUEUE.CLEAR", "memq")
 }

@@ -120,7 +120,7 @@ func (s *Store) ApplyHashPairs(key string, nx bool, args [][]byte) (int, error) 
 			var d int64
 			if old, exists := hash.Fields[string(field)]; exists {
 				d = int64(len(val)) - int64(len(old))
-				if !hash.FieldLive(string(field), now) {
+				if hash.expiredAt(string(field), now) {
 					added++
 				}
 			} else {

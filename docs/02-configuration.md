@@ -297,6 +297,8 @@ memory:
 
 `used_memory` and `maxmemory` count each key's value, name and per-key bookkeeping, including its slot in the keyspace map. The process's RSS is higher, because it also includes client buffers, the Go runtime and the garbage collector's headroom. With `max_memory` set, the `cachestorm` binary gives the Go runtime a soft memory limit of 1.25 × max_memory + 64 MB. The garbage collector then works harder near the limit instead of letting the heap grow to twice the live data. On 600k small keys under a 100 MB limit, this halved RSS (383 MB → 199 MB). `CONFIG SET maxmemory` updates the limit.
 
+State kept by CacheStorm's extension modules (queues, locks, rate limiters and the other `MODULE.VERB` commands that hold registries outside the keyspace) is not counted in `used_memory`. With `max_memory` set, an extension command that may add state is refused with Redis' OOM error when `used_memory` is over the limit, and also when the live Go heap is past 1.25 × max_memory + 64 MB. Extension commands that read or remove state (GET, LIST, LEN, POP, DELETE, CLEAR, RELEASE and similar verbs) keep working.
+
 A `GOMEMLIMIT` environment variable overrides this. `GOGC` tunes the collector as usual: a lower value means a smaller heap and more GC CPU.
 
 ## Time Durations
