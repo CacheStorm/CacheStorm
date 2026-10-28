@@ -68,10 +68,12 @@ func (d *Databases) ReplaceFrom(src *Databases) error {
 			if incoming == nil {
 				shard.data = make(map[string]*Entry)
 				shard.keyCount, shard.memUsage = 0, 0
+				shard.expiring, shard.expSumHi, shard.expSumLo = 0, 0, 0
 			} else {
 				from := incoming.shards[j]
 				from.mu.Lock()
 				shard.data, shard.keyCount, shard.memUsage = from.data, from.keyCount, from.memUsage
+				shard.expiring, shard.expSumHi, shard.expSumLo = from.expiring, from.expSumHi, from.expSumLo
 				for key, entry := range shard.data {
 					entry.loading.Store(&dst.loading)
 					if shard.slots != nil {
@@ -83,6 +85,7 @@ func (d *Databases) ReplaceFrom(src *Databases) error {
 				}
 				from.data = make(map[string]*Entry)
 				from.keyCount, from.memUsage = 0, 0
+				from.expiring, from.expSumHi, from.expSumLo = 0, 0, 0
 				from.mu.Unlock()
 			}
 			delta += shard.memUsage

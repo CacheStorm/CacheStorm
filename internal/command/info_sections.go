@@ -3,6 +3,7 @@ package command
 import (
 	"os"
 	"runtime"
+	"runtime/metrics"
 	"strconv"
 	"strings"
 	"time"
@@ -130,9 +131,8 @@ func infoMemory(w *infoWriter, ctx *Context) {
 		used = dbs.MemUsage()
 	}
 	limit, policy := ctx.Store.MemoryLimit()
-	var ms runtime.MemStats
-	runtime.ReadMemStats(&ms)
-	mem := readMemoryFigures(ctx, used, &ms)
+	ms := readGoMemory()
+	mem := readMemoryFigures(ctx, used, ms)
 	w.section("Memory")
 	w.int("used_memory", used)
 	w.field("used_memory_human", humanBytes(used))
@@ -141,8 +141,8 @@ func infoMemory(w *infoWriter, ctx *Context) {
 	w.int("used_memory_peak", mem.peak)
 	w.field("used_memory_peak_human", humanBytes(mem.peak))
 	w.field("used_memory_peak_perc", mem.peakPerc())
-	w.int("used_memory_heap", int64(ms.HeapAlloc))
-	w.field("used_memory_heap_human", humanBytes(int64(ms.HeapAlloc)))
+	w.int("used_memory_heap", int64(ms.heapAlloc))
+	w.field("used_memory_heap_human", humanBytes(int64(ms.heapAlloc)))
 	w.int("total_system_memory", mem.system)
 	w.field("total_system_memory_human", humanBytes(mem.system))
 	w.int("maxmemory", limit)
@@ -151,7 +151,7 @@ func infoMemory(w *infoWriter, ctx *Context) {
 	w.field("mem_fragmentation_ratio", strconv.FormatFloat(mem.fragmentation(), 'f', 2, 64))
 	w.int("mem_fragmentation_bytes", mem.rss-used)
 	w.field("mem_allocator", "go")
-	w.int("gc_cycles", int64(ms.NumGC))
+	w.int("gc_cycles", int64(ms.numGC))
 	w.end()
 }
 
@@ -183,12 +183,35 @@ type memoryFigures struct {
 	used, rss, peak, system int64
 }
 
-func readMemoryFigures(ctx *Context, used int64, ms *runtime.MemStats) memoryFigures {
+// goMemory is what INFO reads from the Go runtime, through runtime/metrics,
+// which unlike runtime.ReadMemStats does not stop the world.
+type goMemory struct {
+	heapAlloc, mapped, numGC uint64
+}
+
+func readGoMemory() goMemory {
+	s := []metrics.Sample{
+		{Name: "/memory/classes/heap/objects:bytes"},
+		{Name: "/memory/classes/total:bytes"},
+		{Name: "/memory/classes/heap/released:bytes"},
+		{Name: "/gc/cycles/total:gc-cycles"},
+	}
+	metrics.Read(s)
+	u := func(i int) uint64 {
+		if s[i].Value.Kind() == metrics.KindUint64 {
+			return s[i].Value.Uint64()
+		}
+		return 0
+	}
+	return goMemory{heapAlloc: u(0), mapped: u(1) - u(2), numGC: u(3)}
+}
+
+func readMemoryFigures(ctx *Context, used int64, ms goMemory) memoryFigures {
 	m := memoryFigures{used: used, peak: ctx.Store.MemoryPeak(), system: totalSystemMemory()}
 	if rss, ok := processRSS(); ok {
 		m.rss = rss
 	} else {
-		m.rss = int64(ms.Sys - ms.HeapReleased)
+		m.rss = int64(ms.mapped)
 	}
 	if m.peak < used {
 		m.peak = used

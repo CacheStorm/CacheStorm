@@ -3,7 +3,6 @@ package command
 import (
 	"errors"
 	"fmt"
-	"runtime"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -399,9 +398,7 @@ func currentMemoryFigures(ctx *Context) (memoryFigures, int64) {
 	if dbs := ctx.databases(); dbs != nil {
 		used, keys = dbs.MemUsage(), dbs.KeyCount()
 	}
-	var ms runtime.MemStats
-	runtime.ReadMemStats(&ms)
-	return readMemoryFigures(ctx, used, &ms), keys
+	return readMemoryFigures(ctx, used, readGoMemory()), keys
 }
 
 // memoryDoctorReport is MEMORY DOCTOR: Redis' checks for an empty instance,

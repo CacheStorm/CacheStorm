@@ -195,7 +195,7 @@ func cmdSTATSMEMORY(ctx *Context) error {
 	usedMemory := ctx.Store.MemUsage()
 	var ms runtime.MemStats
 	runtime.ReadMemStats(&ms)
-	fig := readMemoryFigures(ctx, usedMemory, &ms)
+	fig := readMemoryFigures(ctx, usedMemory, readGoMemory())
 
 	return ctx.WriteArray([]*resp.Value{
 		resp.BulkString("used_memory"),

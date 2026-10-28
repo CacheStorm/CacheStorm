@@ -1,6 +1,7 @@
 package store
 
 import (
+	"math/bits"
 	"sync"
 	"sync/atomic"
 )
@@ -16,8 +17,12 @@ type Shard struct {
 	data     map[string]*Entry
 	keyCount int64
 	memUsage int64
-	slots    *slotIndex
-	hfe      *hashExpiryIndex
+	// expiring counts the entries with an expiry and expSum adds up their
+	// expiry times (unix ms, 128 bits), for INFO's expires and avg_ttl.
+	expiring           int64
+	expSumHi, expSumLo uint64
+	slots              *slotIndex
+	hfe                *hashExpiryIndex
 }
 
 func NewShard() *Shard {
@@ -52,6 +57,12 @@ func (s *Shard) setLocked(key string, entry *Entry) (int64, *Entry) {
 	entry.loading.Store(s.loading)
 	oldMem := int64(0)
 	old, exists := s.data[key]
+	if old != entry {
+		if exists {
+			s.subExpiry(old.ExpiresAt.Load())
+		}
+		s.addExpiry(entry.ExpiresAt.Load())
+	}
 	if exists {
 		// Credit what was charged for the old entry, not its current size:
 		// in-place changes since the last reaccounting were never charged.
@@ -81,6 +92,7 @@ func (s *Shard) deleteLocked(key string, entry *Entry) int64 {
 	mem := entry.accounted.Load()
 	s.memUsage -= mem
 	s.keyCount--
+	s.subExpiry(entry.ExpiresAt.Load())
 	delete(s.data, key)
 	if s.slots != nil {
 		s.slots.remove(key)
@@ -136,7 +148,9 @@ func (s *Shard) updateExpiry(key string, expiresAt int64) bool {
 	if !exists || entry.IsExpired() {
 		return false
 	}
+	s.subExpiry(entry.ExpiresAt.Load())
 	entry.ExpiresAt.Store(expiresAt)
+	s.addExpiry(expiresAt)
 	return true
 }
 
@@ -149,6 +163,7 @@ func (s *Shard) clearExpiry(key string) bool {
 	if !exists || entry.IsExpired() || entry.ExpiresAt.Load() == 0 {
 		return false
 	}
+	s.subExpiry(entry.ExpiresAt.Load())
 	entry.ExpiresAt.Store(0)
 	return true
 }
@@ -194,6 +209,7 @@ func (s *Shard) Flush() int64 {
 	s.data = make(map[string]*Entry)
 	s.keyCount = 0
 	s.memUsage = 0
+	s.expiring, s.expSumHi, s.expSumLo = 0, 0, 0
 	return freed
 }
 
@@ -205,4 +221,24 @@ func (s *Shard) GetAll() map[string]*Entry {
 		result[k] = v
 	}
 	return result
+}
+
+func (s *Shard) addExpiry(at int64) {
+	if at <= 0 {
+		return
+	}
+	s.expiring++
+	var carry uint64
+	s.expSumLo, carry = bits.Add64(s.expSumLo, uint64(at), 0)
+	s.expSumHi += carry
+}
+
+func (s *Shard) subExpiry(at int64) {
+	if at <= 0 {
+		return
+	}
+	s.expiring--
+	var borrow uint64
+	s.expSumLo, borrow = bits.Sub64(s.expSumLo, uint64(at), 0)
+	s.expSumHi -= borrow
 }

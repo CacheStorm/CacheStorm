@@ -185,28 +185,25 @@ func (s *Store) newSibling() *Store {
 	return n
 }
 
-// ExpiryStats returns how many live keys carry an expiry and their average
-// remaining time to live in milliseconds, for the INFO keyspace section.
+// ExpiryStats returns how many keys carry an expiry and their average
+// remaining time to live in milliseconds, for the INFO keyspace section. As
+// in Redis, a key past its expiry counts until it is removed. It reads
+// per-shard counters, so it costs the same whatever the number of keys.
 func (s *Store) ExpiryStats() (expires int64, avgTTLms int64) {
-	now := time.Now().UnixMilli()
 	var sumHi, sumLo uint64
 	for _, sh := range &s.shards {
 		sh.mu.RLock()
-		for _, e := range sh.data {
-			at := e.ExpiresAt.Load()
-			if at <= 0 || at <= now {
-				continue
-			}
-			expires++
-			var carry uint64
-			sumLo, carry = bits.Add64(sumLo, uint64(at-now), 0)
-			sumHi += carry
-		}
+		expires += sh.expiring
+		var carry uint64
+		sumLo, carry = bits.Add64(sumLo, sh.expSumLo, 0)
+		sumHi += sh.expSumHi + carry
 		sh.mu.RUnlock()
 	}
-	if expires > 0 {
-		average, _ := bits.Div64(sumHi, sumLo, uint64(expires))
-		avgTTLms = int64(average)
+	if expires > 0 && sumHi < uint64(expires) {
+		avgAt, _ := bits.Div64(sumHi, sumLo, uint64(expires))
+		if ttl := int64(avgAt) - time.Now().UnixMilli(); ttl > 0 {
+			avgTTLms = ttl
+		}
 	}
 	return expires, avgTTLms
 }
