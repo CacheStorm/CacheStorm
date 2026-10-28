@@ -282,10 +282,6 @@ func isWriteCommand(cmd string) bool {
 	return false
 }
 
-// touchWrittenKeys bumps the watch version of the keys a write command
-// named, so a WATCH on any of them aborts the watcher's EXEC. Handlers that
-// modify a value in place never pass through Store.Set, so this is what makes
-// every write visible to WATCH.
 // signalWrittenKeys wakes clients blocked on the keys a write command named,
 // as Redis' signalKeyAsReady does. The push commands notify on their own, but
 // other writers that can fill a list or sorted set (LMOVE and RPOPLPUSH into
@@ -305,11 +301,93 @@ func signalWrittenKeys(ctx *Context) {
 	}
 }
 
-func touchWrittenKeys(ctx *Context) {
-	if ctx.writeEffectsHandled || ctx.Store == nil || !ctx.Store.HasWatchedKeys() || !isWriteCommand(ctx.Command) {
+// touchWrittenKeys bumps the watch version of the keys a write command
+// writes, so a WATCH on any of them aborts the watcher's EXEC. Handlers that
+// modify a value in place never pass through Store.Set, so this is what makes
+// every write visible to WATCH.
+//
+// Like Redis' signalModifiedKey it leaves the keys alone when the command
+// changed nothing: it failed, declared that it propagates nothing, or found
+// a key absent and left it so (before records which keys existed).
+func touchWrittenKeys(ctx *Context, before []bool, failed bool) {
+	if failed || ctx.writeEffectsHandled || ctx.Store == nil || !ctx.Store.HasWatchedKeys() || !isWriteCommand(ctx.Command) || streamGroupWrites[ctx.Command] {
 		return
 	}
-	ctx.Store.TouchKeys(aclKeysForCommand(ctx.Command, ctx.Args))
+	if cmds, ok := ctx.Propagation(); ok && len(cmds) == 0 {
+		return
+	}
+	keys := writtenKeys(ctx.Command, ctx.Args)
+	if len(before) == len(keys) {
+		touched := keys[:0:0]
+		for i, k := range keys {
+			if before[i] || ctx.Store.Exists(k) {
+				touched = append(touched, k)
+			}
+		}
+		keys = touched
+	}
+	ctx.Store.TouchKeys(keys)
+}
+
+// writtenKeys returns the keys of a write command that it may modify: the
+// keys its Redis key specs flag RW, OW or RM, leaving out the ones it only
+// reads (the sources of BITOP, SINTERSTORE, ...). A key with no flags, or a
+// command Redis has no key specs for, counts as written.
+func writtenKeys(cmd string, args [][]byte) []string {
+	argv := make([]string, 0, len(args)+1)
+	argv = append(argv, cmd)
+	for _, a := range args {
+		argv = append(argv, string(a))
+	}
+	meta := lookupRedisCommandMeta(argv)
+	if meta == nil || len(meta.keySpecs) == 0 {
+		return aclKeysForCommand(cmd, args)
+	}
+	refs, ok := keysFromSpecs(meta, argv)
+	if !ok {
+		refs = fallbackCommandKeys(meta, argv)
+	}
+	if len(refs) == 0 {
+		return aclKeysForCommand(cmd, args)
+	}
+	keys := make([]string, 0, len(refs))
+	for _, k := range refs {
+		if len(k.flags) == 0 || slicesContainsAny(k.flags, "RW", "OW", "RM") {
+			keys = append(keys, k.name)
+		}
+	}
+	return keys
+}
+
+func slicesContainsAny(flags []string, want ...string) bool {
+	for _, f := range flags {
+		for _, w := range want {
+			if f == w {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// streamGroupWrites change a stream's consumer groups or ID counters, not its
+// entries; Redis does not count them as modifying the key for WATCH.
+var streamGroupWrites = map[string]bool{
+	"XREADGROUP": true, "XCLAIM": true, "XAUTOCLAIM": true, "XACK": true, "XSETID": true,
+}
+
+// watchedKeysBefore records, while a key is watched, which keys a write
+// command names exist before it runs (see touchWrittenKeys).
+func watchedKeysBefore(ctx *Context) []bool {
+	if ctx.Store == nil || !ctx.Store.HasWatchedKeys() || !isWriteCommand(ctx.Command) {
+		return nil
+	}
+	keys := writtenKeys(ctx.Command, ctx.Args)
+	existed := make([]bool, len(keys))
+	for i, k := range keys {
+		existed[i] = ctx.Store.Exists(k)
+	}
+	return existed
 }
 
 // IsWriteCommand reports whether Redis flags cmd as a write command.

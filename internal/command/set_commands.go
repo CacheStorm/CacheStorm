@@ -110,6 +110,8 @@ func cmdSREM(ctx *Context) error {
 
 	if removed > 0 {
 		ctx.notify(store.NotifySet, "srem", key)
+	} else if !isEmpty {
+		ctx.PropagateAs()
 	}
 	if isEmpty {
 		deleteIfEmpty(ctx, key, set)

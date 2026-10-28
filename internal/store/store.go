@@ -356,6 +356,28 @@ func (s *Store) TouchAllWatched() {
 	s.versionMu.Unlock()
 }
 
+// TouchWatchedPresent bumps the watched keys of this store that exist in it
+// or in other, as Redis' touchAllWatchedKeysInDb does on SWAPDB: a watched
+// key missing from both databases is not changed by the swap.
+func (s *Store) TouchWatchedPresent(other *Store) {
+	if s.watching.Load() == 0 {
+		return
+	}
+	s.versionMu.RLock()
+	keys := make([]string, 0, len(s.watchRefs))
+	for k := range s.watchRefs {
+		keys = append(keys, k)
+	}
+	s.versionMu.RUnlock()
+	present := keys[:0]
+	for _, k := range keys {
+		if s.Exists(k) || other.Exists(k) {
+			present = append(present, k)
+		}
+	}
+	s.TouchKeys(present)
+}
+
 // IncrementVersion records a modification of key (see TouchKey).
 func (s *Store) IncrementVersion(key string) {
 	s.TouchKey(key)

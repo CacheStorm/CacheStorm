@@ -240,7 +240,7 @@ GENS = [
     lambda: ["XREAD", "COUNT", "2", "STREAMS", k(), random.choice(["0", "1-1", "$"])],
     lambda: ["LMPOP", random.choice(["0", "1", "x"]), k(), "LEFT"],
     lambda: ["SINTERCARD", random.choice(["0", "3", "x"]), k(), k()],
-    lambda: ["GETEX", k(), random.choice(["EX", "PX", "EXAT"]), random.choice(["0", "-1", "100", "x"])],
+    lambda: ["GETEX", k(), random.choice(["EX", "PX", "EXAT"]), random.choice(["0", "-1", "100000", "x"])],
     lambda: ["SET", k(), v(), random.choice(["EX", "PX"]), random.choice(["0", "-1", "x"])],
     lambda: ["SET", k(), v(), "NX", "XX"],
     lambda: ["BITCOUNT", k(), random.choice(["0", "-2"]), random.choice(["-1", "5"]), random.choice(["BYTE", "BIT", "X"])],
@@ -258,6 +258,43 @@ GENS = [
     lambda: ["ZRANGE", k(), "0", "-1", "WITHSCORES"],
     lambda: ["HGETALL", k()],
     lambda: ["XRANGE", k(), "-", "+"],
+    lambda: ["MULTI"],
+    lambda: ["EXEC"],
+    lambda: ["DISCARD"],
+    lambda: ["WATCH", k()],
+    lambda: ["UNWATCH"],
+    lambda: ["BLPOP", k(), k(), "0.01"],
+    lambda: ["BRPOP", k(), "0.01"],
+    lambda: ["BLMOVE", k(), k(), "LEFT", "RIGHT", "0.01"],
+    lambda: ["BZPOPMIN", k(), "0.01"],
+    lambda: ["BZMPOP", "0.01", "1", k(), "MAX", "COUNT", "2"],
+    lambda: ["BLMPOP", "0.01", "2", k(), k(), "LEFT"],
+    lambda: ["BLPOP", k(), random.choice(["-1", "x", "0.000001"])],
+    lambda: ["EVAL", random.choice(LUA), "1", k()],
+    lambda: ["EVAL_RO", random.choice(LUA), "1", k()],
+    lambda: ["LCS", k(), k(), "IDX"] + random.choice([[], ["MINMATCHLEN", "2"], ["WITHMATCHLEN"]]),
+    lambda: ["SET", k(), random.choice(["12345", "-7", "1e5", " 1", "abcdefghij"])],
+]
+
+LUA = [
+    "return redis.call('incr', KEYS[1])",
+    "return redis.pcall('lpush', KEYS[1], 'x')",
+    "return redis.call('get', KEYS[1])",
+    "return {1, 2, {3, 'x'}, nil, 4}",
+    "return redis.status_reply('FINE')",
+    "return redis.error_reply('MYERR bad')",
+    "return 3.99",
+    "return true",
+    "return false",
+    "return {err='E1 x'}",
+    "return redis.call('hgetall', KEYS[1])",
+    "return redis.call('zrange', KEYS[1], 0, -1, 'WITHSCORES')",
+    "return redis.call('type', KEYS[1])",
+    "return redis.pcall('nosuch')",
+    "return redis.call('set', KEYS[1], 'v', 'GET')",
+    "return tostring(redis.call('exists', KEYS[1]))",
+    "return redis.call('smembers', KEYS[1])",
+    "redis.call('del', KEYS[1]); return redis.call('rpush', KEYS[1], 1, 2.5, 'z')",
 ]
 
 UNORDERED = {"SMEMBERS", "SINTER", "SUNION", "SDIFF", "HGETALL", "HKEYS", "HVALS", "KEYS"}
@@ -289,6 +326,11 @@ def norm(cmd, r):
             return [x if x < 0 else "pos" for x in r]
     if name == "OBJECT":
         return r
+    if name in ("EVAL", "EVAL_RO") and isinstance(r, list):
+        if "hgetall" in cmd[1]:
+            name = "HGETALL"
+        elif "smembers" in cmd[1]:
+            name = "SMEMBERS"
     if name in UNORDERED and isinstance(r, list):
         if name == "HGETALL":
             pairs = sorted(zip(r[0::2], r[1::2]))
@@ -313,14 +355,26 @@ def main():
     a.cmd("FLUSHALL")
     b.cmd("FLUSHALL")
     history = []
+    in_multi = False
+    queued = []
     for i in range(count):
         c = gen()
         ra, rb = a.cmd(*c), b.cmd(*c)
         history.append(c)
-        na, nb = norm(c, ra), norm(c, rb)
+        if c[0] == "EXEC" and isinstance(ra, list) and isinstance(rb, list) and len(ra) == len(queued) == len(rb):
+            na = [norm(q, x) for q, x in zip(queued, ra)]
+            nb = [norm(q, x) for q, x in zip(queued, rb)]
+        else:
+            na, nb = norm(c, ra), norm(c, rb)
+        if in_multi and ra == ("+", "QUEUED"):
+            queued.append(c)
         if full_err and isinstance(ra, tuple) and isinstance(rb, tuple):
             na, nb = ra, rb
-        if na == nb:
+        if c[0] == "MULTI" and ra == ("+", "OK"):
+            in_multi, queued = True, []
+        elif c[0] in ("EXEC", "DISCARD"):
+            in_multi = False
+        if na == nb and not in_multi:
             ta = [a.cmd("TYPE", x) for x in KEYS]
             tb = [b.cmd("TYPE", x) for x in KEYS]
             if ta != tb:

@@ -140,13 +140,19 @@ func TestWatchVersionChangesWhenKeyExpires(t *testing.T) {
 func TestSwapTouchesWatchersOfBothDatabases(t *testing.T) {
 	dbs := NewDatabases(NewStore(), 16)
 	db0, db1 := dbs.DB(0), dbs.DB(1)
+	_ = db0.Set("a", strVal("v"), SetOptions{})
+	_ = db0.Set("b", strVal("v"), SetOptions{})
 	v0 := db0.WatchKey("a")
 	v1 := db1.WatchKey("b")
+	vc := db0.WatchKey("c")
 	if err := dbs.Swap(0, 1); err != nil {
 		t.Fatal(err)
 	}
 	if db0.GetVersion("a") == v0 || db1.GetVersion("b") == v1 {
 		t.Fatal("SWAPDB must abort transactions watching keys of either database")
+	}
+	if db0.GetVersion("c") != vc {
+		t.Fatal("SWAPDB must not touch a watched key missing from both databases")
 	}
 }
 

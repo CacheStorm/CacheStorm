@@ -320,6 +320,7 @@ func execQueued(ctx *Context, qc queuedCommand) (*resp.Value, *Context) {
 	sub.propagateSet = false
 	sub.writeEffectsHandled = false
 
+	before := watchedKeysBefore(&sub)
 	err := def.Handler(&sub)
 	reaccountWrittenKeys(&sub)
 	if ctx.wakeAfter != nil {
@@ -332,7 +333,7 @@ func execQueued(ctx *Context, qc queuedCommand) (*resp.Value, *Context) {
 	} else {
 		signalWrittenKeys(&sub)
 	}
-	touchWrittenKeys(&sub)
+	touchWrittenKeys(&sub, before, err != nil || sub.Writer.Errors() > 0)
 
 	// SELECT inside the transaction switches the database for the commands
 	// queued after it, and for the connection once EXEC returns.

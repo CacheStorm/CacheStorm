@@ -479,6 +479,8 @@ flags:
 		} else {
 			ctx.notify(store.NotifyZSet, "zadd", key)
 		}
+	} else if !empty {
+		ctx.PropagateAs()
 	}
 	if empty {
 		deleteIfEmpty(ctx, key, zset)
@@ -835,6 +837,8 @@ func cmdZREM(ctx *Context) error {
 
 	if removed > 0 {
 		ctx.notify(store.NotifyZSet, "zrem", key)
+	} else if !isEmpty {
+		ctx.PropagateAs()
 	}
 	if isEmpty {
 		deleteIfEmpty(ctx, key, zset)
@@ -862,6 +866,8 @@ func zremRange(ctx *Context, key, event string, pick func(z *store.SortedSetValu
 
 	if len(victims) > 0 {
 		ctx.notify(store.NotifyZSet, event, key)
+	} else if !isEmpty {
+		ctx.PropagateAs()
 	}
 	if isEmpty {
 		deleteIfEmpty(ctx, key, zset)

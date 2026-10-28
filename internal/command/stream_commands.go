@@ -706,6 +706,8 @@ func cmdXDEL(ctx *Context) error {
 	deleted := stream.DeleteIDs(ids)
 	if deleted > 0 {
 		ctx.notify(store.NotifyStream, "xdel", ctx.ArgString(0))
+	} else {
+		ctx.PropagateAs()
 	}
 	return ctx.WriteInteger(deleted)
 }
@@ -728,6 +730,8 @@ func cmdXTRIM(ctx *Context) error {
 	trimmed := stream.TrimStream(a.trim)
 	if trimmed > 0 {
 		ctx.notify(store.NotifyStream, "xtrim", ctx.ArgString(0))
+	} else {
+		ctx.PropagateAs()
 	}
 	return ctx.WriteInteger(trimmed)
 }
@@ -1106,6 +1110,7 @@ func cmdXACK(ctx *Context) error {
 	}
 	groupName := ctx.ArgString(1)
 	if stream == nil || !stream.HasGroup(groupName) {
+		ctx.PropagateAs()
 		return ctx.WriteInteger(0)
 	}
 	ids := make([]store.StreamID, 0, ctx.ArgCount()-2)
@@ -1117,6 +1122,9 @@ func cmdXACK(ctx *Context) error {
 		ids = append(ids, id)
 	}
 	acked, _ := stream.AckIDs(groupName, ids)
+	if acked == 0 {
+		ctx.PropagateAs()
+	}
 	return ctx.WriteInteger(acked)
 }
 

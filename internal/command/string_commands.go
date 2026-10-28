@@ -470,6 +470,7 @@ func cmdSETRANGE(ctx *Context) error {
 	// Writing nothing changes nothing: Redis replies with the current length
 	// and does not create a missing key.
 	if len(value) == 0 {
+		ctx.PropagateAs()
 		return ctx.WriteInteger(int64(len(cur)))
 	}
 	if offset > store.MaxValueSize-int64(len(value)) {

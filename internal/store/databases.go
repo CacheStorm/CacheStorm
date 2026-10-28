@@ -101,8 +101,8 @@ func (d *Databases) Swap(a, b int) error {
 	sb.dbIndex.Store(int32(a))
 	sa.dbIndex.Store(int32(b))
 	d.mu.Unlock()
-	sa.TouchAllWatched()
-	sb.TouchAllWatched()
+	sa.TouchWatchedPresent(sb)
+	sb.TouchWatchedPresent(sa)
 	return nil
 }
 

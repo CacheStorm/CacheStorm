@@ -194,6 +194,8 @@ func cmdHDEL(ctx *Context) error {
 
 	if deleted > 0 {
 		ctx.notify(store.NotifyHash, "hdel", key)
+	} else if !isEmpty {
+		ctx.PropagateAs()
 	}
 	if isEmpty {
 		deleteIfEmpty(ctx, key, hash)

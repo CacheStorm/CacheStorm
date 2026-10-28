@@ -82,6 +82,72 @@ func arityError(cmd string) error {
 	return errors.New("ERR wrong number of arguments for '" + strings.ToLower(cmd) + "' command")
 }
 
+// extensionSubcommands are subcommands CacheStorm adds to a Redis container
+// command; they are left to the handler.
+var extensionSubcommands = map[string]bool{"FUNCTION|CREATE": true}
+
+var (
+	containerMetaOnce sync.Once
+	containerMeta     map[string]*commandMeta
+)
+
+// SubcommandError returns the error Redis gives a container command (CLIENT,
+// XGROUP, ...) before running or queueing it: the subcommand is unknown, or
+// the argument count does not fit it. It is nil for any other call.
+func SubcommandError(cmd string, args [][]byte) error {
+	if len(args) == 0 {
+		return nil
+	}
+	containerMetaOnce.Do(func() {
+		containerMeta = make(map[string]*commandMeta)
+		commandMetaOnce.Do(loadCommandMeta)
+		for name, m := range commandMetaTable {
+			if len(m.subs) > 0 {
+				containerMeta[strings.ToUpper(name)] = m
+			}
+		}
+	})
+	m := containerMeta[cmd]
+	if m == nil {
+		return nil
+	}
+	sub := string(args[0])
+	sm := m.subs[strings.ToLower(sub)]
+	if sm == nil {
+		if extensionSubcommands[cmd+"|"+strings.ToUpper(sub)] {
+			return nil
+		}
+		return errUnknownSubcommand(sub, cmd)
+	}
+	if !arityFits(sm.arity, len(args)+1) {
+		return arityError(sm.name)
+	}
+	return nil
+}
+
+// ArgumentError returns the error Redis gives a call whose argument count
+// does not fit the command, or that names a subcommand it lacks or whose
+// count does not fit; Redis checks these before anything else.
+func ArgumentError(cmd string, args [][]byte) error {
+	if !checkArity(cmd, len(args)) {
+		return arityError(cmd)
+	}
+	return SubcommandError(cmd, args)
+}
+
+// FullName is the name Redis gives a call in its errors: "container|sub"
+// for a subcommand it knows, the command name otherwise, lower case.
+func FullName(cmd string, args [][]byte) string {
+	if len(args) > 0 && SubcommandError(cmd, args) == nil {
+		if m := containerMeta[cmd]; m != nil {
+			if sm := m.subs[strings.ToLower(string(args[0]))]; sm != nil {
+				return sm.name
+			}
+		}
+	}
+	return strings.ToLower(cmd)
+}
+
 // checkArity reports whether args fits the Redis arity of cmd. The arity
 // counts the command name; a negative arity is a minimum. Commands Redis does
 // not have are not checked here.
@@ -457,13 +523,14 @@ func (r *Router) executeHandler(ctx *Context, cmd *CommandDef, capture bool) (er
 	if ctx.Store != nil && ctx.Store.Notifying(store.NotifyKeyMiss) {
 		notifyKeyMisses(ctx)
 	}
+	before := watchedKeysBefore(ctx)
 	err = cmd.Handler(ctx)
 	if auditEnabled() {
 		recordAudit(ctx, err == nil && ctx.Writer.Errors() == errsBefore)
 	}
 	ctx.passWakeup()
 	reaccountWrittenKeys(ctx)
-	touchWrittenKeys(ctx)
+	touchWrittenKeys(ctx, before, err != nil || ctx.Writer.Errors() > errsBefore)
 	signalWrittenKeys(ctx)
 	if err == nil {
 		err = r.record(ctx, db, errsBefore)
@@ -495,17 +562,14 @@ func (r *Router) Execute(ctx *Context) error {
 
 	// Redis rejects a call with the wrong number of arguments before running
 	// or queueing it, and a transaction that queued one is discarded at EXEC.
-	if !checkArity(ctx.Command, len(ctx.Args)) {
-		if ctx.Transaction != nil && ctx.Transaction.IsActive() {
-			ctx.Transaction.Abort()
-		}
-		return ctx.Writer.WriteError(arityError(ctx.Command).Error())
+	if err := ArgumentError(ctx.Command, ctx.Args); err != nil {
+		return reject(ctx, err.Error())
 	}
 
 	// Enforce authentication if requirepass is set
 	upperCmd := strings.ToUpper(ctx.Command)
 	if r.RequirePass() != "" && !ctx.IsAuthenticated() && !noAuthCommands[upperCmd] {
-		return ctx.Writer.WriteError("NOAUTH Authentication required.")
+		return reject(ctx, "NOAUTH Authentication required.")
 	}
 
 	// Enforce the per-connection ACL user's command and key permissions. A
@@ -557,12 +621,35 @@ func (r *Router) Execute(ctx *Context) error {
 	return r.executeHandler(ctx, cmd, capture)
 }
 
+// RejectedReply is the error a command refused before it runs gets: EXEC
+// reports it as the reason its transaction was discarded, as Redis'
+// rejectCommand does.
+func RejectedReply(cmd, msg string) string {
+	if cmd == "EXEC" {
+		return "EXECABORT Transaction discarded because of: " + strings.TrimPrefix(msg, "ERR ")
+	}
+	return msg
+}
+
+// reject answers a command refused before it runs: the transaction in
+// progress fails at EXEC, or is discarded when the refused command is EXEC.
+func reject(ctx *Context, msg string) error {
+	if ctx.Transaction != nil && ctx.Transaction.IsActive() {
+		if ctx.Command == "EXEC" {
+			ctx.Transaction.Clear()
+			ctx.Transaction.ClearWatch()
+		} else {
+			ctx.Transaction.Abort()
+		}
+	}
+	return ctx.Writer.WriteError(RejectedReply(ctx.Command, msg))
+}
+
 // isTransactionControl reports whether cmd runs immediately even inside
-// MULTI: transaction bookkeeping is never queued, and UNWATCH executes
-// immediately because the replay dispatcher has no UNWATCH case.
+// MULTI. UNWATCH is queued, as in Redis.
 func isTransactionControl(cmd string) bool {
 	switch strings.ToUpper(cmd) {
-	case "MULTI", "EXEC", "DISCARD", "WATCH", "UNWATCH", "RESET":
+	case "MULTI", "EXEC", "DISCARD", "WATCH", "RESET":
 		return true
 	}
 	return false

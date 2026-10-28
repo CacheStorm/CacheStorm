@@ -462,6 +462,8 @@ func cmdLREM(ctx *Context) error {
 
 	if removed > 0 {
 		ctx.notify(store.NotifyList, "lrem", key)
+	} else if !empty {
+		ctx.PropagateAs()
 	}
 	if empty {
 		deleteIfEmpty(ctx, key, list)
@@ -590,6 +592,7 @@ func cmdRPOPLPUSH(ctx *Context) error {
 		return ctx.WriteError(err)
 	}
 	if !ok {
+		ctx.PropagateAs()
 		return ctx.WriteNullBulkString()
 	}
 	return ctx.WriteBulkBytes(value)
@@ -616,6 +619,7 @@ func cmdLMOVE(ctx *Context) error {
 		return ctx.WriteError(err)
 	}
 	if !ok {
+		ctx.PropagateAs()
 		return ctx.WriteNullBulkString()
 	}
 	return ctx.WriteBulkBytes(value)

@@ -885,8 +885,13 @@ func (c *Connection) handleSubscribedMode(cmd string, args [][]byte) bool {
 	}
 	store.GlobalMetrics.RecordError()
 	c.conn.SetWriteDeadline(time.Now().Add(c.writeTimeout))
-	c.writer.WriteError("ERR Can't execute '" + strings.ToLower(cmd) +
-		"': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this context")
+	// Redis checks the arguments before the subscribed context.
+	if err := command.ArgumentError(cmd, args); err != nil {
+		c.writer.WriteError(err.Error())
+		return true
+	}
+	c.writer.WriteError(command.RejectedReply(cmd, "ERR Can't execute '"+command.FullName(cmd, args)+
+		"': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this context"))
 	return true
 }
 
