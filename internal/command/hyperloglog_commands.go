@@ -192,8 +192,11 @@ func cmdPFADD(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	updated := false
+	var partial error
 	err := ctx.Store.ApplyValuePlan(ctx.ArgString(0), func(value store.Value) (store.ValuePlan, error) {
-		if value != nil && ctx.ArgCount() == 1 {
+		updated, partial = false, nil
+		current := store.NewSparseHLL()
+		if value != nil {
 			data, err := hllValueBytes(value)
 			if err != nil {
 				return store.ValuePlan{}, err
@@ -201,49 +204,40 @@ func cmdPFADD(ctx *Context) error {
 			if err := store.ValidateHLL(data); err != nil {
 				return store.ValuePlan{}, err
 			}
-			updated = false
-			return store.ValuePlan{}, nil
+			current = data
 		}
-		if value != nil {
-			current, err := hllValueBytes(value)
-			if err != nil {
-				return store.ValuePlan{}, err
-			}
-			if err := store.ValidateHLL(current); err != nil {
-				return store.ValuePlan{}, err
-			}
-			if current[4] == 0 {
-				next, changed, err := store.AddDenseHLL(current, ctx.Args[1:])
-				if err != nil {
-					return store.ValuePlan{}, err
-				}
-				updated = changed
-				if !updated {
-					return store.ValuePlan{}, nil
-				}
-				return hllStringPlan(next), nil
-			}
+		var next []byte
+		var err error
+		if current[4] == 0 {
+			next, updated, err = store.AddDenseHLL(current, ctx.Args[1:])
+		} else {
+			next, updated, err = store.AddSparseHLL(current, ctx.Args[1:])
 		}
-		state, err := decodeHLLValue(value)
 		if err != nil {
-			return store.ValuePlan{}, err
-		}
-		updated = value == nil
-		for _, element := range ctx.Args[1:] {
-			if state.Add(element) {
-				updated = true
+			if !updated {
+				return store.ValuePlan{}, err
 			}
+			// Redis keeps the updates made before the corrupt part, without
+			// propagating them.
+			partial = err
+			return hllStringPlan(next), nil
+		}
+		if value == nil {
+			updated = true
+			next[15] |= 128
 		}
 		if !updated {
 			return store.ValuePlan{}, nil
 		}
-		data, err := state.Encode(true)
-		if err != nil {
-			return store.ValuePlan{}, err
-		}
-		return hllStringPlan(data), nil
+		return hllStringPlan(next), nil
 	})
+	if err == nil {
+		err = partial
+	}
 	if err != nil {
+		if partial != nil {
+			ctx.PropagateAs()
+		}
 		return ctx.WriteError(err)
 	}
 	if !updated {
@@ -332,8 +326,10 @@ func cmdPFMERGE(ctx *Context) error {
 	if ctx.ArgCount() < 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
+	// Redis checks the keys in order, the destination first, so the first
+	// invalid one names the error.
 	sources := &store.HLLState{}
-	for _, key := range ctx.Args[1:] {
+	for _, key := range ctx.Args {
 		entry, ok := ctx.Store.Get(string(key))
 		if !ok {
 			continue

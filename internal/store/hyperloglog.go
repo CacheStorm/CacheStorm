@@ -317,3 +317,201 @@ func AddDenseHLL(data []byte, elements [][]byte) ([]byte, bool, error) {
 	next[15] |= 128
 	return next, true, nil
 }
+
+// hllSparseMaxBytes is Redis' default hll-sparse-max-bytes: a sparse HLL
+// that would grow past it is promoted to dense.
+const hllSparseMaxBytes = 3000
+
+// NewSparseHLL returns the encoding of an empty HLL, as Redis creates one.
+func NewSparseHLL() []byte {
+	data := make([]byte, 18)
+	copy(data, "HYLL")
+	data[4] = 1
+	data[16], data[17] = 0x7f, 0xff
+	return data
+}
+
+func hllValOp(value uint8, run int) byte { return 0x80 | (value-1)<<2 | byte(run-1) }
+
+func hllAppendZero(seq []byte, run int) []byte {
+	if run > 64 {
+		return append(seq, 0x40|byte((run-1)>>8), byte(run-1))
+	}
+	return append(seq, byte(run-1))
+}
+
+// AddSparseHLL adds elements to a sparse HLL the way Redis' hllSparseSet
+// does, editing the opcodes in place: an update reads them only as far as
+// its register, so bytes past it are not checked until the HLL is promoted
+// to dense or counted. When an element meets a corrupt part, the updates made
+// before it are kept, as Redis keeps them, and returned with the error.
+func AddSparseHLL(data []byte, elements [][]byte) ([]byte, bool, error) {
+	if err := ValidateHLL(data); err != nil {
+		return nil, false, err
+	}
+	cur := append([]byte(nil), data...)
+	changed := false
+	for _, element := range elements {
+		hash := HLLHash(element)
+		index := int(hash & (HLLRegisterCount - 1))
+		rank := uint8(bits.TrailingZeros64(hash>>14|uint64(1)<<50) + 1)
+		var r int
+		cur, r = hllSet(cur, index, rank)
+		if r < 0 {
+			return cur, changed, CorruptHLLError()
+		}
+		if r > 0 {
+			changed = true
+			cur[15] |= 128
+		}
+	}
+	return cur, changed, nil
+}
+
+func hllSet(data []byte, index int, count uint8) ([]byte, int) {
+	if data[4] == 0 {
+		return data, hllDenseSet(data, index, count)
+	}
+	if count > 32 {
+		return hllPromote(data, index, count)
+	}
+	end := len(data)
+	p, prev, first, span := 16, -1, 0, 0
+	for p < end {
+		oplen := 1
+		op := data[p]
+		switch {
+		case op&0xc0 == 0:
+			span = int(op&63) + 1
+		case op&0x80 != 0:
+			span = int(op&3) + 1
+		default:
+			next := byte(0)
+			if p+1 < end {
+				next = data[p+1]
+			}
+			span = (int(op&63)<<8 | int(next)) + 1
+			oplen = 2
+		}
+		if index <= first+span-1 {
+			break
+		}
+		prev = p
+		p += oplen
+		first += span
+	}
+	if span == 0 || p >= end {
+		return data, -1
+	}
+	op := data[p]
+	isVal, isXZero := op&0x80 != 0, op&0xc0 == 0x40
+	if isVal {
+		if (op>>2)&31+1 >= count {
+			return data, 0
+		}
+		if span == 1 {
+			data[p] = hllValOp(count, 1)
+			return hllSparseMerge(data, prev), 1
+		}
+	}
+	if !isVal && !isXZero && span == 1 {
+		data[p] = hllValOp(count, 1)
+		return hllSparseMerge(data, prev), 1
+	}
+	seq := make([]byte, 0, 5)
+	last := first + span - 1
+	if isVal {
+		value := (op>>2)&31 + 1
+		if index != first {
+			seq = append(seq, hllValOp(value, index-first))
+		}
+		seq = append(seq, hllValOp(count, 1))
+		if index != last {
+			seq = append(seq, hllValOp(value, last-index))
+		}
+	} else {
+		if index != first {
+			seq = hllAppendZero(seq, index-first)
+		}
+		seq = append(seq, hllValOp(count, 1))
+		if index != last {
+			seq = hllAppendZero(seq, last-index)
+		}
+	}
+	oldlen := 1
+	if isXZero {
+		oldlen = 2
+	}
+	delta := len(seq) - oldlen
+	if delta > 0 && len(data)+delta > hllSparseMaxBytes {
+		return hllPromote(data, index, count)
+	}
+	out := make([]byte, 0, len(data)+delta+1)
+	out = append(out, data[:p]...)
+	out = append(out, seq...)
+	out = append(out, data[min(p+oldlen, end):]...)
+	return hllSparseMerge(out[:len(data)+delta], prev), 1
+}
+
+// hllSparseMerge joins equal adjacent VAL opcodes near an update, scanning
+// at most five opcodes from the one before it, like Redis' hllSparseSet.
+func hllSparseMerge(data []byte, prev int) []byte {
+	p := prev
+	if p < 0 {
+		p = 16
+	}
+	for scan := 5; p < len(data) && scan > 0; scan-- {
+		op := data[p]
+		if op&0xc0 == 0x40 {
+			p += 2
+			continue
+		}
+		if op&0xc0 == 0 {
+			p++
+			continue
+		}
+		if p+1 < len(data) && data[p+1]&0x80 != 0 {
+			next := data[p+1]
+			if (op>>2)&31 == (next>>2)&31 {
+				if run := int(op&3) + int(next&3) + 2; run <= 4 {
+					data[p+1] = hllValOp((op>>2)&31+1, run)
+					data = append(data[:p], data[p+1:]...)
+					continue
+				}
+			}
+		}
+		p++
+	}
+	return data
+}
+
+func hllPromote(data []byte, index int, count uint8) ([]byte, int) {
+	state, err := DecodeHLL(data)
+	if err != nil {
+		return data, -1
+	}
+	state.Dense = true
+	dense, err := state.Encode(false)
+	if err != nil {
+		return data, -1
+	}
+	return dense, hllDenseSet(dense, index, count)
+}
+
+func hllDenseSet(data []byte, index int, count uint8) int {
+	bit := index * 6
+	position, shift := 16+bit/8, uint(bit%8)
+	packed := uint16(data[position])
+	if position+1 < len(data) {
+		packed |= uint16(data[position+1]) << 8
+	}
+	if count <= uint8(packed>>shift)&63 {
+		return 0
+	}
+	packed = packed&^(uint16(63)<<shift) | uint16(count)<<shift
+	data[position] = byte(packed)
+	if shift > 2 {
+		data[position+1] = byte(packed >> 8)
+	}
+	return 1
+}

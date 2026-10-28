@@ -1079,6 +1079,11 @@ func doSort(ctx *Context, readOnly bool) error {
 	if nosort && isSet && (storeKey != "" || ctx.InScript) {
 		nosort, alpha, byPattern = false, true, ""
 	}
+	if nosort && desc && !isSet {
+		for i, j := 0, len(elements)-1; i < j; i, j = i+1, j-1 {
+			elements[i], elements[j] = elements[j], elements[i]
+		}
+	}
 
 	if !nosort {
 		type sortItem struct {

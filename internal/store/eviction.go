@@ -58,6 +58,20 @@ func (s *Store) UsesLFU() bool {
 	return p == EvictionAllKeysLFU || p == EvictionVolatileLFU
 }
 
+// SharesIntegers reports whether Redis would keep small integer strings as
+// shared objects: not under an LRU or LFU policy with maxmemory set, where
+// each value needs its own access clock.
+func (s *Store) SharesIntegers() bool {
+	if s.evictor == nil || s.memTracker == nil || s.memTracker.Max() <= 0 {
+		return true
+	}
+	switch s.evictor.Policy() {
+	case EvictionAllKeysLRU, EvictionVolatileLRU, EvictionAllKeysLFU, EvictionVolatileLFU:
+		return false
+	}
+	return true
+}
+
 // evictionSettings are shared by the evictors of every database, so a runtime
 // policy change reaches all of them at once.
 type evictionSettings struct {

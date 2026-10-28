@@ -207,14 +207,75 @@ GENS = [
     lambda: ["ZRANDMEMBER", k(), "-3"],
     lambda: ["SRANDMEMBER", k(), "-3"],
     lambda: ["DUMP", k()],
+    lambda: ["HVALS", k()],
+    lambda: ["HMSET", k(), random.choice(FIELDS), v(), random.choice(FIELDS), v()],
+    lambda: ["HPEXPIRE", k(), random.choice(["100000", "0"]), "FIELDS", "2", random.choice(FIELDS), random.choice(FIELDS)],
+    lambda: ["HEXPIRETIME", k(), "FIELDS", "1", random.choice(FIELDS)],
+    lambda: ["SPOP", k(), random.choice(["0", "-1"])],
+    lambda: ["ZINTERCARD", "2", k(), k()] + random.choice([[], ["LIMIT", "1"], ["LIMIT", "-1"]]),
+    lambda: ["ZDIFFSTORE", k(), "2", k(), k()],
+    lambda: ["ZINTERSTORE", k(), "2", k(), k(), "WEIGHTS", random.choice(SCORES), "1", "AGGREGATE", random.choice(["SUM", "MIN", "MAX", "X"])],
+    lambda: ["ZREVRANGEBYLEX", k(), random.choice(["+", "[c", "(z"]), random.choice(["-", "[a", "(b"])],
+    lambda: ["ZREMRANGEBYLEX", k(), random.choice(["-", "[a", "(b"]), random.choice(["+", "[c", "(z"])],
+    lambda: ["ZRANGESTORE", k(), k(), random.choice(SCORES), random.choice(SCORES), "BYSCORE"] + random.choice([[], ["REV"], ["LIMIT", "1", "1"]]),
+    lambda: ["ZADD", k(), "GT", "LT", "1", v()],
+    lambda: ["ZADD", k(), "NX", "INCR", random.choice(SCORES), v()],
+    lambda: ["EXPIREAT", k(), random.choice(["1", "9999999999", "x"])],
+    lambda: ["PEXPIRE", k(), random.choice(["100000", "-1"])] + random.choice([[], ["GT"], ["LT"], ["NX", "XX"]]),
+    lambda: ["EXPIRETIME", k()],
+    lambda: ["PFMERGE", k(), k(), k()],
+    lambda: ["PFCOUNT", k(), k()],
+    lambda: ["SETRANGE", k(), random.choice(["5", "20", "x", "-1"]), random.choice(VALS)],
+    lambda: ["GETRANGE", k(), random.choice(["0", "-100", "5"]), random.choice(["-1", "100", "-100"])],
+    lambda: ["XGROUP", "CREATE", k(), "g", random.choice(["$", "0", "x"])] + random.choice([[], ["MKSTREAM"], ["ENTRIESREAD", "1"]]),
+    lambda: ["XREADGROUP", "GROUP", "g", random.choice(["c1", "c2"]), "COUNT", "2", "STREAMS", k(), random.choice([">", "0"])],
+    lambda: ["XACK", k(), "g", random.choice(["1-1", "2-0", "5-0"])],
+    lambda: ["XPENDING", k(), "g"],
+    lambda: ["XPENDING", k(), "g", "-", "+", "10"] + random.choice([[], ["c1"]]),
+    lambda: ["XCLAIM", k(), "g", "c2", "0", random.choice(["1-1", "2-0"])] + random.choice([[], ["JUSTID"], ["FORCE"]]),
+    lambda: ["XAUTOCLAIM", k(), "g", "c2", "0", "0"] + random.choice([[], ["COUNT", "1"], ["JUSTID"]]),
+    lambda: ["XGROUP", random.choice(["DESTROY", "CREATECONSUMER", "DELCONSUMER"]), k(), "g"] + random.choice([[], ["c1"]]),
+    lambda: ["XGROUP", "SETID", k(), "g", random.choice(["0", "$", "1-1"])],
+    lambda: ["XTRIM", k(), "MINID", random.choice(["1-1", "2", "0"])],
+    lambda: ["XREAD", "COUNT", "2", "STREAMS", k(), random.choice(["0", "1-1", "$"])],
+    lambda: ["LMPOP", random.choice(["0", "1", "x"]), k(), "LEFT"],
+    lambda: ["SINTERCARD", random.choice(["0", "3", "x"]), k(), k()],
+    lambda: ["GETEX", k(), random.choice(["EX", "PX", "EXAT"]), random.choice(["0", "-1", "100", "x"])],
+    lambda: ["SET", k(), v(), random.choice(["EX", "PX"]), random.choice(["0", "-1", "x"])],
+    lambda: ["SET", k(), v(), "NX", "XX"],
+    lambda: ["BITCOUNT", k(), random.choice(["0", "-2"]), random.choice(["-1", "5"]), random.choice(["BYTE", "BIT", "X"])],
+    lambda: ["BITPOS", k(), random.choice(["0", "1"]), random.choice(["0", "2", "-1"]), random.choice(["-1", "10"])] + random.choice([[], ["BIT"], ["BYTE"]]),
+    lambda: ["LINSERT", k(), "BEFORE", v(), v()],
+    lambda: ["LPOS", k(), v(), "RANK", random.choice(["1", "-2", "2"]), "COUNT", random.choice(["0", "2"]), "MAXLEN", random.choice(["0", "2"])],
+    lambda: ["SORT", k(), "BY", "nosort"] + random.choice([[], ["DESC"], ["STORE", k()]]),
+    lambda: ["SORT_RO", k()] + random.choice([[], ["ALPHA"]]),
+    lambda: ["RENAME", k(), k()],
+    lambda: ["MOVE", k(), "1"],
+    lambda: ["INCRBYFLOAT", k(), random.choice(["1e308", "-1e308", "0.1", "nan"])],
+    lambda: ["DECR", k()],
+    lambda: ["LRANGE", k(), "0", "-1"],
+    lambda: ["SMEMBERS", k()],
+    lambda: ["ZRANGE", k(), "0", "-1", "WITHSCORES"],
+    lambda: ["HGETALL", k()],
+    lambda: ["XRANGE", k(), "-", "+"],
 ]
 
 UNORDERED = {"SMEMBERS", "SINTER", "SUNION", "SDIFF", "HGETALL", "HKEYS", "HVALS", "KEYS"}
 SKIP_RESULT = {"HRANDFIELD", "ZRANDMEMBER", "SRANDMEMBER"}
 
 
+def auto_ids(r):
+    # IDs that XADD * took from the clock differ by a millisecond or so.
+    if isinstance(r, bytes) and len(r) > 13 and r[:13].isdigit() and r[13:14] == b"-":
+        return b"<ms>" + r[13:]
+    if isinstance(r, list):
+        return [auto_ids(x) for x in r]
+    return r
+
+
 def norm(cmd, r):
     name = cmd[0]
+    r = auto_ids(r)
     if name in SKIP_RESULT and isinstance(r, list):
         return ("list", len(r))
     if name == "XADD" and isinstance(r, bytes) and cmd[-3] in ("*", "2-*"):
@@ -233,6 +294,9 @@ def norm(cmd, r):
             pairs = sorted(zip(r[0::2], r[1::2]))
             return pairs
         return sorted(r, key=lambda x: (x is None, x))
+    if name == "SORT" and "nosort" in cmd and "STORE" not in cmd and isinstance(r, list):
+        # A set has no native order.
+        return sorted(r)
     if name == "SINTERCARD":
         return r
     if isinstance(r, tuple) and r[0] == "-":
@@ -265,7 +329,7 @@ def main():
             print("seed", seed, "step", i, "DIVERGE:", " ".join(c))
             print("  cachestorm:", ra)
             print("  redis     :", rb)
-            for h in history[-8:-1]:
+            for h in history[-int(os.environ.get("FUZZ_HISTORY", "8")):-1]:
                 print("    prev:", " ".join(h))
             return 1
     return 0

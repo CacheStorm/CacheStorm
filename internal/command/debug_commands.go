@@ -3,6 +3,7 @@ package command
 import (
 	"errors"
 	"fmt"
+	"math"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -152,6 +153,9 @@ const (
 	encMaxIntsetEntries       = 512
 	encMaxListpackBytes       = 8192
 	encMaxEmbstrLen           = 44
+	// sharedIntegers is OBJ_SHARED_INTEGERS: Redis keeps one shared object
+	// for each integer below it, reported with refcount INT_MAX.
+	sharedIntegers = 10000
 )
 
 // getEncoding reports the encoding Redis would use for v under its default
@@ -294,6 +298,11 @@ func cmdOBJECT(ctx *Context) error {
 		}
 		return ctx.WriteInteger(int64(entry.AccessCount.Load()))
 	case "REFCOUNT":
+		if sv, ok := entry.Value.(*store.StringValue); ok && ctx.Store.SharesIntegers() {
+			if n, ok := parseRedisInt(sv.Data); ok && n >= 0 && n < sharedIntegers {
+				return ctx.WriteInteger(math.MaxInt32)
+			}
+		}
 		return ctx.WriteInteger(1)
 	default:
 		return ctx.Writer.WriteError("ERR unknown subcommand '" + ctx.ArgString(0) + "'. Try OBJECT HELP.")

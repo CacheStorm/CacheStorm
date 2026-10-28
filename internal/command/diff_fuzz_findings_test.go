@@ -1,0 +1,67 @@
+package command
+
+import (
+	"strconv"
+	"testing"
+
+	"github.com/cachestorm/cachestorm/internal/store"
+)
+
+func TestDiffFuzzFindings(t *testing.T) {
+	r := newMemAcctRouter()
+	RegisterDebugCommands(r)
+	RegisterHyperLogLogCommands(r)
+	s := store.NewStore()
+	run := func(args ...string) string { return memAcctRun(r, s, nil, args...) }
+	run("RPUSH", "l", "-3", "3.5", "2")
+	run("ZADD", "z", "1", "b", "2", "a", "3", "c")
+	run("PFADD", "hll", "a")
+	run("APPEND", "hll", "10")
+	run("HSET", "h", "f", "v")
+	run("SET", "small", "42")
+	run("SET", "big", "10000")
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"SORT", "l", "BY", "nosort", "DESC"}, "*3\r\n$1\r\n2\r\n$3\r\n3.5\r\n$2\r\n-3\r\n"},
+		{[]string{"SORT", "l", "BY", "nosort"}, "*3\r\n$2\r\n-3\r\n$3\r\n3.5\r\n$1\r\n2\r\n"},
+		{[]string{"SORT", "z", "BY", "nosort", "DESC", "LIMIT", "0", "2"}, "*2\r\n$1\r\nc\r\n$1\r\na\r\n"},
+		{[]string{"PFMERGE", "hll", "h"}, "-INVALIDOBJ Corrupted HLL object detected\r\n"},
+		{[]string{"PFMERGE", "h", "hll"}, "-WRONGTYPE Operation against a key holding the wrong kind of value\r\n"},
+		{[]string{"OBJECT", "REFCOUNT", "small"}, ":2147483647\r\n"},
+		{[]string{"OBJECT", "REFCOUNT", "big"}, ":1\r\n"},
+		{[]string{"OBJECT", "REFCOUNT", "l"}, ":1\r\n"},
+	} {
+		if got := run(c.args...); got != c.want {
+			t.Fatalf("%v: got %q, want %q", c.args, got, c.want)
+		}
+	}
+}
+
+func TestPFADDOnCorruptSparseHLLMatchesRedis(t *testing.T) {
+	r := newMemAcctRouter()
+	RegisterHyperLogLogCommands(r)
+	s := store.NewStore()
+	run := func(args ...string) string { return memAcctRun(r, s, nil, args...) }
+	bulk := func(v string) string { return "$" + strconv.Itoa(len(v)) + "\r\n" + v + "\r\n" }
+	const afterAppend = "HYLL\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x80\\{\x80Dv\x80P\xb1\x84I\x8c\x80Bm\x80BZzz"
+	const afterSetRange = "HYLL\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x80\\{\x80D\\Yy\x88E\xa0\x84Y\x1af\x84I\x8c\x80Bm\x80BZzz"
+	run("PFADD", "h", "a", "b")
+	run("APPEND", "h", "zz")
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"PFADD", "h", "c", "d", "e"}, ":1\r\n"},
+		{[]string{"GET", "h"}, bulk(afterAppend)},
+		{[]string{"PFCOUNT", "h"}, "-INVALIDOBJ Corrupted HLL object detected\r\n"},
+		{[]string{"SETRANGE", "h", "20", `\x7f`}, ":35\r\n"},
+		{[]string{"PFADD", "h", "x", "y"}, ":1\r\n"},
+		{[]string{"GET", "h"}, bulk(afterSetRange)},
+	} {
+		if got := run(c.args...); got != c.want {
+			t.Fatalf("%v: got %q, want %q", c.args, got, c.want)
+		}
+	}
+}
