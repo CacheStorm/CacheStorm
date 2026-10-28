@@ -1014,7 +1014,7 @@ func cmdZSCAN(ctx *Context) error {
 	}
 
 	zset.RLock()
-	members, next := collectionScanPage(len(zset.Members), cursor, opts.count, func(emit func(string)) {
+	members, next := collectionScanPage(zset, len(zset.Members), cursor, opts.count, func(emit func(string)) {
 		for m := range zset.Members {
 			emit(m)
 		}
@@ -1150,23 +1150,16 @@ func cmdZRANDMEMBER(ctx *Context) error {
 			return ctx.WriteNullBulkString()
 		}
 		zset.RLock()
-		var picked string
-		found := false
-		if len(zset.Members) > 0 {
-			idx := rand.Intn(len(zset.Members))
-			for m := range zset.Members {
-				if idx == 0 {
-					picked, found = m, true
-					break
-				}
-				idx--
-			}
+		var picked []store.SortedEntry
+		if n := zset.Card(); n > 0 {
+			r := rand.Intn(n)
+			picked = zset.RangeByRank(r, r, false)
 		}
 		zset.RUnlock()
-		if !found {
+		if len(picked) == 0 {
 			return ctx.WriteNullBulkString()
 		}
-		return ctx.WriteBulkString(picked)
+		return ctx.WriteBulkString(picked[0].Member)
 	}
 
 	count, err := parseRandCount(ctx.ArgString(1))
@@ -1193,17 +1186,12 @@ func cmdZRANDMEMBER(ctx *Context) error {
 	}
 
 	zset.RLock()
-	entries := make([]store.SortedEntry, 0, len(zset.Members))
-	for m, s := range zset.Members {
-		entries = append(entries, store.SortedEntry{Member: m, Score: s})
+	picked := randomKeys(zset.Members, count)
+	out := make([]store.SortedEntry, len(picked))
+	for i, m := range picked {
+		out[i] = store.SortedEntry{Member: m, Score: zset.Members[m]}
 	}
 	zset.RUnlock()
-
-	picked := pickRandom(len(entries), count)
-	out := make([]store.SortedEntry, len(picked))
-	for i, idx := range picked {
-		out[i] = entries[idx]
-	}
 	return ctx.Writer.WriteValue(zEntriesValue(ctx, out, withScores))
 }
 
@@ -1221,31 +1209,6 @@ func parseRandCount(arg string) (int64, error) {
 		return 0, errors.New("ERR value is out of range, value must between -9223372036854775807 and 9223372036854775807")
 	}
 	return v, nil
-}
-
-// pickRandom chooses indexes into an n-element collection for a random
-// member reply: distinct ones for a positive count (all of them when count
-// covers the collection), |count| with repetition for a negative count.
-func pickRandom(n int, count int64) []int {
-	if n == 0 || count == 0 {
-		return nil
-	}
-	if count < 0 {
-		reps := -count
-		if reps > maxRandRepeats {
-			reps = maxRandRepeats
-		}
-		out := make([]int, reps)
-		for i := range out {
-			out[i] = rand.Intn(n)
-		}
-		return out
-	}
-	perm := rand.Perm(n)
-	if count < int64(n) {
-		perm = perm[:count]
-	}
-	return perm
 }
 
 // zsetOpSource is a snapshot of one input of ZUNION/ZINTER/ZDIFF; a plain set

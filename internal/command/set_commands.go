@@ -2,7 +2,6 @@ package command
 
 import (
 	"errors"
-	"math/rand"
 	"sort"
 	"strconv"
 	"strings"
@@ -322,23 +321,19 @@ func cmdSRANDMEMBER(ctx *Context) error {
 	}
 
 	set.RLock()
-	members := make([]string, 0, len(set.Members))
-	for member := range set.Members {
-		members = append(members, member)
-	}
-	set.RUnlock()
-
 	if !withCount {
-		if len(members) == 0 {
+		member, ok := randomKey(set.Members)
+		set.RUnlock()
+		if !ok {
 			return ctx.WriteNullBulkString()
 		}
-		return ctx.WriteBulkString(members[rand.Intn(len(members))])
+		return ctx.WriteBulkString(member)
 	}
-
-	picked := pickRandom(len(members), count)
+	picked := randomKeys(set.Members, count)
+	set.RUnlock()
 	result := make([]*resp.Value, len(picked))
-	for i, idx := range picked {
-		result[i] = resp.BulkString(members[idx])
+	for i, m := range picked {
+		result[i] = resp.BulkString(m)
 	}
 	return ctx.WriteArray(result)
 }
@@ -735,7 +730,7 @@ func cmdSSCAN(ctx *Context) error {
 	// SADD/SREM/SMOVE mutate Members under the set's write lock, so the page
 	// is selected under the matching read lock.
 	set.RLock()
-	members, next := collectionScanPage(len(set.Members), cursor, opts.count, func(emit func(string)) {
+	members, next := collectionScanPage(set, len(set.Members), cursor, opts.count, func(emit func(string)) {
 		for m := range set.Members {
 			emit(m)
 		}

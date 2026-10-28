@@ -3,12 +3,13 @@ package command
 import (
 	"container/heap"
 	"errors"
-	"hash/fnv"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
+	"github.com/cachestorm/cachestorm/internal/store"
 )
 
 // SSCAN, HSCAN and ZSCAN walk a collection in the order of a fixed 64-bit
@@ -96,10 +97,16 @@ func parseCollectionScanOptions(ctx *Context, from int, isHash bool) (collection
 	return opts, nil
 }
 
-func collectionScanHash(member string) uint64 {
-	h := fnv.New64a()
-	_, _ = h.Write([]byte(member))
-	return h.Sum64()
+func collectionScanHash(member string) uint64 { return fnv64a(member) }
+
+// fnv64a is FNV-1a over s without the allocations of hash/fnv.
+func fnv64a(s string) uint64 {
+	h := uint64(14695981039346656037)
+	for i := 0; i < len(s); i++ {
+		h ^= uint64(s[i])
+		h *= 1099511628211
+	}
+	return h
 }
 
 // hashMaxHeap is a max-heap of member hashes.
@@ -124,7 +131,63 @@ func (h *hashMaxHeap) Pop() any {
 // The page is every member whose hash lies in [cursor, limit], where limit is
 // the count-th smallest hash at or after the cursor, so members sharing a hash
 // always land on the same page.
-func collectionScanPage(size int, cursor uint64, count int, each func(func(string))) ([]string, uint64) {
+//
+// A large collection's members are sorted by hash once and the order is kept
+// on the value (store.ScanSnapshot) until its membership changes, so the
+// following pages cost a binary search. A scan that resumes after a change
+// pays one pass over the collection per page, as without the snapshot.
+func collectionScanPage(h scanSnapshotHolder, size int, cursor uint64, count int, each func(func(string))) ([]string, uint64) {
+	if size <= collectionScanSmall {
+		return scanPage(size, cursor, count, collectionScanHash, each)
+	}
+	snap := h.LoadScan()
+	if snap == nil && cursor == 0 {
+		snap = buildScanSnapshot(size, each)
+		h.StoreScan(snap)
+	}
+	if snap == nil {
+		return scanPage(size, cursor, count, collectionScanHash, each)
+	}
+	n := len(snap.Hashes)
+	i := sort.Search(n, func(i int) bool { return snap.Hashes[i] >= cursor })
+	end := i + min(count, n-i)
+	for end > i && end < n && snap.Hashes[end] == snap.Hashes[end-1] {
+		end++
+	}
+	if end >= n {
+		return snap.Members[i:end], 0
+	}
+	return snap.Members[i:end], snap.Hashes[end]
+}
+
+// scanSnapshotHolder is a set, hash or sorted set that keeps a scan order.
+type scanSnapshotHolder interface {
+	LoadScan() *store.ScanSnapshot
+	StoreScan(*store.ScanSnapshot)
+}
+
+func buildScanSnapshot(size int, each func(func(string))) *store.ScanSnapshot {
+	type item struct {
+		hash   uint64
+		member string
+	}
+	items := make([]item, 0, size)
+	each(func(m string) { items = append(items, item{collectionScanHash(m), m}) })
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].hash != items[j].hash {
+			return items[i].hash < items[j].hash
+		}
+		return items[i].member < items[j].member
+	})
+	snap := &store.ScanSnapshot{Hashes: make([]uint64, len(items)), Members: make([]string, len(items))}
+	for i, it := range items {
+		snap.Hashes[i], snap.Members[i] = it.hash, it.member
+	}
+	return snap
+}
+
+// scanPage is collectionScanPage with the hash that orders the members.
+func scanPage(size int, cursor uint64, count int, hashOf func(string) uint64, each func(func(string))) ([]string, uint64) {
 	if size <= collectionScanSmall {
 		members := make([]string, 0, size)
 		each(func(m string) { members = append(members, m) })
@@ -133,7 +196,7 @@ func collectionScanPage(size int, cursor uint64, count int, each func(func(strin
 
 	smallest := make(hashMaxHeap, 0, min(count, size))
 	each(func(m string) {
-		h := collectionScanHash(m)
+		h := hashOf(m)
 		if h < cursor {
 			return
 		}
@@ -155,7 +218,7 @@ func collectionScanPage(size int, cursor uint64, count int, each func(func(strin
 	members := make([]string, 0, len(smallest))
 	more := false
 	each(func(m string) {
-		h := collectionScanHash(m)
+		h := hashOf(m)
 		if h < cursor {
 			return
 		}

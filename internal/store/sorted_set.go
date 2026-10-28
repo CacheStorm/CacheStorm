@@ -17,6 +17,7 @@ type SortedSetValue struct {
 	size    sizeCounter
 	index   atomic.Pointer[zskiplist]
 	indexMu sync.Mutex
+	scanCache
 }
 
 func (v *SortedSetValue) Lock()    { v.mu.Lock() }
@@ -116,6 +117,7 @@ func (v *SortedSetValue) Remove(member string) bool {
 	}
 	delete(v.Members, member)
 	v.size.add(-zsetMemberSize(member))
+	v.invalidateScan()
 	return true
 }
 
@@ -142,6 +144,7 @@ func (v *SortedSetValue) Add(member string, score float64) bool {
 	v.Members[member] = score
 	if !exists {
 		v.size.add(zsetMemberSize(member))
+		v.invalidateScan()
 	}
 	return !exists
 }

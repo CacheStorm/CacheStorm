@@ -70,6 +70,7 @@ type HashValue struct {
 	// minExpire is the earliest field expiry (unix ms), 0 when no field has
 	// one, readable without the lock.
 	minExpire atomic.Int64
+	scanCache
 }
 
 func (v *HashValue) Lock()    { v.mu.Lock() }
@@ -122,6 +123,7 @@ func (v *HashValue) SetFieldKeepTTL(field string, val []byte) bool {
 		v.size.add(int64(len(val)) - int64(len(old)))
 	} else {
 		v.size.add(hashFieldSize(field, val))
+		v.invalidateScan()
 	}
 	return !exists
 }
@@ -136,6 +138,7 @@ func (v *HashValue) DeleteField(field string) bool {
 	delete(v.Fields, field)
 	v.size.add(-hashFieldSize(field, old))
 	v.clearFieldTTL(field)
+	v.invalidateScan()
 	return true
 }
 func (v *HashValue) String() string {
@@ -357,6 +360,7 @@ type SetValue struct {
 	mu      sync.RWMutex
 	dead    bool
 	size    sizeCounter
+	scanCache
 }
 
 func (v *SetValue) Lock()    { v.mu.Lock() }
@@ -398,6 +402,7 @@ func (v *SetValue) AddMember(member string) bool {
 	}
 	v.Members[member] = struct{}{}
 	v.size.add(setMemberSize(member))
+	v.invalidateScan()
 	return true
 }
 
@@ -409,6 +414,7 @@ func (v *SetValue) RemoveMember(member string) bool {
 	}
 	delete(v.Members, member)
 	v.size.add(-setMemberSize(member))
+	v.invalidateScan()
 	return true
 }
 
@@ -416,6 +422,7 @@ func (v *SetValue) RemoveMember(member string) bool {
 func (v *SetValue) ClearMembers() {
 	v.Members = make(map[string]struct{})
 	v.size.set(0)
+	v.invalidateScan()
 }
 func (v *SetValue) String() string {
 	v.mu.RLock()

@@ -2,7 +2,6 @@ package command
 
 import (
 	"errors"
-	"hash/fnv"
 	"math"
 	"strconv"
 	"strings"
@@ -47,11 +46,6 @@ func parseRedisInt(b []byte) (int64, bool) {
 
 // scanHash orders the keyspace for SCAN; the top bit is dropped so that the
 // cursor (hash+1) always fits in an unsigned 64-bit integer.
-func scanHash(key string) uint64 {
-	h := fnv.New64a()
-	_, _ = h.Write([]byte(key))
-	return h.Sum64() >> 1
-}
 
 // redisTypeName is the name TYPE reports for v.
 func redisTypeName(v store.Value) string {

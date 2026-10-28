@@ -161,6 +161,7 @@ func (op *hashSetOp) apply() Value {
 	if hash.Fields == nil {
 		hash.Fields = make(map[string][]byte, len(op.keep))
 	}
+	hash.invalidateScan()
 	for k, i := range op.keep {
 		field := string(op.pairs[2*i])
 		hash.clearFieldTTL(field)

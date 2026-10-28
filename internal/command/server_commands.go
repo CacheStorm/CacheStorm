@@ -538,13 +538,11 @@ func cmdKEYS(ctx *Context) error {
 }
 
 func cmdRANDOMKEY(ctx *Context) error {
-	keys := ctx.Store.Keys()
-	if len(keys) == 0 {
+	key, ok := ctx.Store.RandomKey()
+	if !ok {
 		return ctx.WriteNullBulkString()
 	}
-
-	idx := time.Now().UnixNano() % int64(len(keys))
-	return ctx.WriteBulkString(keys[idx])
+	return ctx.WriteBulkString(key)
 }
 
 // matchPattern is Redis' glob matcher (stringmatchlen): *, ?, [abc], [a-z],
@@ -661,54 +659,73 @@ func cmdSCAN(ctx *Context) error {
 		}
 	}
 
-	type scanKey struct {
-		hash  uint64
-		key   string
-		entry *store.Entry
-	}
-	var start uint64
-	if cursor > 0 {
-		start = cursor - 1
-	}
-	candidates := make([]scanKey, 0)
-	for key, entry := range ctx.Store.GetAll() {
-		if h := scanHash(key); h >= start && !entry.IsExpired() {
-			candidates = append(candidates, scanKey{h, key, entry})
-		}
-	}
-	sort.Slice(candidates, func(i, j int) bool {
-		if candidates[i].hash != candidates[j].hash {
-			return candidates[i].hash < candidates[j].hash
-		}
-		return candidates[i].key < candidates[j].key
-	})
-
-	// Take count keys, then the rest of the last key's hash bucket so that a
-	// resumed scan never splits keys that share a hash.
-	end := min(count, len(candidates))
-	for end > 0 && end < len(candidates) && candidates[end].hash == candidates[end-1].hash {
-		end++
-	}
-	next := uint64(0)
-	if end < len(candidates) {
-		next = candidates[end].hash + 1
-	}
-
-	result := make([]*resp.Value, 0, end)
-	for _, c := range candidates[:end] {
-		if pattern != "" && !matchPattern(c.key, pattern) {
+	keys, next := scanKeyspace(ctx.Store, cursor, count, typeName != "")
+	result := make([]*resp.Value, 0, len(keys))
+	for _, k := range keys {
+		if pattern != "" && !matchPattern(k.key, pattern) {
 			continue
 		}
-		if typeName != "" && redisTypeName(c.entry.Value) != typeName {
+		if typeName != "" && redisTypeName(k.entry.Value) != typeName {
 			continue
 		}
-		result = append(result, resp.BulkString(c.key))
+		result = append(result, resp.BulkString(k.key))
 	}
 
 	return ctx.WriteArray([]*resp.Value{
 		resp.BulkString(strconv.FormatUint(next, 10)),
 		resp.ArrayValue(result),
 	})
+}
+
+// SCAN walks the keyspace shard by shard. The cursor's top keyScanShardBits
+// bits name the shard and the rest is the smallest key hash the shard still
+// has to return, so a page costs one pass over a shard instead of the whole
+// keyspace, and a key present for the whole scan is returned exactly once.
+const (
+	keyScanPosBits = 56
+	keyScanPosMask = 1<<keyScanPosBits - 1
+)
+
+func keyScanHash(key string) uint64 { return fnv64a(key) >> (64 - keyScanPosBits) }
+
+type scannedKey struct {
+	key   string
+	entry *store.Entry
+}
+
+// scanKeyspace returns the keys of one SCAN page and the next cursor (0 when
+// the scan is complete); entries are filled in when withEntries is set.
+func scanKeyspace(st *store.Store, cursor uint64, count int, withEntries bool) ([]scannedKey, uint64) {
+	shard, pos := int(cursor>>keyScanPosBits), cursor&keyScanPosMask
+	var out []scannedKey
+	for shard < store.NumShards {
+		var entries map[string]*store.Entry
+		if withEntries {
+			entries = make(map[string]*store.Entry)
+		}
+		page, nextPos := scanPage(st.ShardLen(shard), pos, count-len(out), keyScanHash, func(emit func(string)) {
+			st.EachInShard(shard, func(k string, e *store.Entry) {
+				if entries != nil {
+					entries[k] = e
+				}
+				emit(k)
+			})
+		})
+		for _, k := range page {
+			out = append(out, scannedKey{key: k, entry: entries[k]})
+		}
+		if nextPos != 0 {
+			return out, uint64(shard)<<keyScanPosBits | nextPos
+		}
+		shard, pos = shard+1, 0
+		if len(out) >= count {
+			break
+		}
+	}
+	if shard >= store.NumShards {
+		return out, 0
+	}
+	return out, uint64(shard) << keyScanPosBits
 }
 
 func cmdHOTKEYS(ctx *Context) error {

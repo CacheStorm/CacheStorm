@@ -4,7 +4,6 @@ import (
 	"errors"
 	"math"
 	"math/big"
-	"math/rand"
 	"strconv"
 	"strings"
 
@@ -507,7 +506,7 @@ func cmdHSCAN(ctx *Context) error {
 	}
 
 	hash.RLock()
-	fields, next := collectionScanPage(len(hash.Fields), cursor, opts.count, func(emit func(string)) {
+	fields, next := collectionScanPage(hash, len(hash.Fields), cursor, opts.count, func(emit func(string)) {
 		for f := range hash.Fields {
 			emit(f)
 		}
@@ -543,18 +542,7 @@ func cmdHRANDFIELD(ctx *Context) error {
 			return ctx.WriteNullBulkString()
 		}
 		hash.RLock()
-		var picked string
-		found := false
-		if len(hash.Fields) > 0 {
-			idx := rand.Intn(len(hash.Fields))
-			for f := range hash.Fields {
-				if idx == 0 {
-					picked, found = f, true
-					break
-				}
-				idx--
-			}
-		}
+		picked, found := randomKey(hash.Fields)
 		hash.RUnlock()
 		if !found {
 			return ctx.WriteNullBulkString()
@@ -583,26 +571,19 @@ func cmdHRANDFIELD(ctx *Context) error {
 	}
 
 	hash.RLock()
-	fields := make([]string, 0, len(hash.Fields))
-	values := make([][]byte, 0, len(hash.Fields))
-	for f, v := range hash.Fields {
-		fields = append(fields, f)
-		values = append(values, v)
-	}
-	hash.RUnlock()
-
-	picked := pickRandom(len(fields), count)
+	picked := randomKeys(hash.Fields, count)
 	size := len(picked)
 	if withValues {
 		size *= 2
 	}
 	result := make([]*resp.Value, 0, size)
-	for _, idx := range picked {
-		result = append(result, resp.BulkString(fields[idx]))
+	for _, f := range picked {
+		result = append(result, resp.BulkString(f))
 		if withValues {
-			result = append(result, resp.BulkBytes(values[idx]))
+			result = append(result, resp.BulkBytes(hash.Fields[f]))
 		}
 	}
+	hash.RUnlock()
 	return ctx.WriteArray(result)
 }
 
