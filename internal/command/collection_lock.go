@@ -48,7 +48,7 @@ func lockOrCreate[T lockableCollection](ctx *Context, key string, create func() 
 func lockExisting[T lockableCollection](ctx *Context, key string) (T, error) {
 	var zero T
 	for {
-		entry, exists := ctx.Store.Get(key)
+		entry, exists := ctx.Store.GetForWrite(key)
 		if !exists {
 			return zero, nil
 		}

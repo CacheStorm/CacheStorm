@@ -290,3 +290,70 @@ func mustHash(t *testing.T, s *store.Store, key string) *store.HashValue {
 	}
 	return e.Value.(*store.HashValue)
 }
+
+// On a writable replica a read hides expired fields behind a copy of the
+// hash; a write must still change the stored hash, and treat the expired
+// fields, which only the master deletes, as absent.
+func TestReplicaHashWritesChangeTheStoredHash(t *testing.T) {
+	setup := func(t *testing.T) (*hfeRun, *store.Databases) {
+		r := newHFERun(t)
+		dbs := store.NewDatabases(r.s, 1)
+		r.s = dbs.DB(0)
+		r.want(":3\r\n", "HSET", "h", "gone", "x", "live", "y", "kept", "z")
+		r.want(ints(1), "HPEXPIREAT", "h", strconv.FormatInt(time.Now().UnixMilli()+20, 10), "FIELDS", "1", "gone")
+		r.want(ints(1), "HEXPIRE", "h", "1000", "FIELDS", "1", "kept")
+		time.Sleep(40 * time.Millisecond)
+		dbs.SetPassiveExpiry(true)
+		return r, dbs
+	}
+	cases := []struct {
+		args  []string
+		reply string
+		check [][2]string
+	}{
+		{[]string{"HDEL", "h", "live", "gone"}, ":1\r\n", [][2]string{{"HEXISTS h live", ":0\r\n"}, {"HLEN h", ":1\r\n"}}},
+		{[]string{"HGETDEL", "h", "FIELDS", "2", "live", "gone"}, bulks("y", "<nil>"), [][2]string{{"HEXISTS h live", ":0\r\n"}}},
+		{[]string{"HPERSIST", "h", "FIELDS", "2", "kept", "gone"}, ints(1, -2), [][2]string{{"HTTL h FIELDS 1 kept", ints(-1)}}},
+		{[]string{"HEXPIRE", "h", "5000", "FIELDS", "2", "live", "gone"}, ints(1, -2), [][2]string{{"HTTL h FIELDS 1 live", ints(5000)}}},
+		{[]string{"HGETEX", "h", "PERSIST", "FIELDS", "2", "kept", "gone"}, bulks("z", "<nil>"), [][2]string{{"HTTL h FIELDS 1 kept", ints(-1)}}},
+		{[]string{"HSET", "h", "gone", "v"}, ":1\r\n", [][2]string{{"HTTL h FIELDS 1 gone", ints(-1)}}},
+		{[]string{"HSETNX", "h", "gone", "v"}, ":1\r\n", [][2]string{{"HGET h gone", "$1\r\nv\r\n"}}},
+		{[]string{"HINCRBY", "h", "gone", "5"}, ":5\r\n", [][2]string{{"HTTL h FIELDS 1 gone", ints(-1)}, {"HLEN h", ":3\r\n"}}},
+		{[]string{"HSETEX", "h", "FNX", "EX", "100", "FIELDS", "1", "gone", "v"}, ":1\r\n", [][2]string{{"HGET h gone", "$1\r\nv\r\n"}}},
+	}
+	for _, c := range cases {
+		t.Run(c.args[0], func(t *testing.T) {
+			r, _ := setup(t)
+			r.want(c.reply, c.args...)
+			for _, ch := range c.check {
+				r.want(ch[1], strings.Fields(ch[0])...)
+			}
+		})
+	}
+}
+
+// The master's own HDEL of a field the replica holds past its expiry still
+// deletes it.
+func TestReplicaAppliesTheMastersHDELOfAnExpiredField(t *testing.T) {
+	r := newHFERun(t)
+	dbs := store.NewDatabases(r.s, 1)
+	r.s = dbs.DB(0)
+	r.want(":2\r\n", "HSET", "h", "gone", "x", "live", "y")
+	r.want(ints(1), "HPEXPIREAT", "h", strconv.FormatInt(time.Now().UnixMilli()+20, 10), "FIELDS", "1", "gone")
+	time.Sleep(40 * time.Millisecond)
+	dbs.SetPassiveExpiry(true)
+	dbs.BeginAuthoritativeApply()
+	r.want(":1\r\n", "HDEL", "h", "gone")
+	dbs.EndAuthoritativeApply()
+	entry, ok := r.s.GetForWrite("h")
+	if !ok {
+		t.Fatal("hash missing")
+	}
+	h := entry.Value.(*store.HashValue)
+	h.RLock()
+	n := len(h.Fields)
+	h.RUnlock()
+	if n != 1 {
+		t.Fatalf("stored fields %d, want 1", n)
+	}
+}

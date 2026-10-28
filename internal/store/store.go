@@ -385,6 +385,17 @@ func fnv32a(s string) uint32 {
 }
 
 func (s *Store) Get(key string) (*Entry, bool) {
+	return s.get(key, false)
+}
+
+// GetForWrite is Get for a caller that modifies the value in place. On a
+// replica, where Get hides expired hash fields behind a copy, it returns the
+// stored hash itself; the caller treats fields with HashValue.FieldLive.
+func (s *Store) GetForWrite(key string) (*Entry, bool) {
+	return s.get(key, true)
+}
+
+func (s *Store) get(key string, write bool) (*Entry, bool) {
 	idx := s.shardIndex(key)
 	shard := s.shards[idx]
 
@@ -401,7 +412,7 @@ func (s *Store) Get(key string) (*Entry, bool) {
 		}
 		mem, reaped := s.reapExpired(shard, key, entry)
 		if !reaped {
-			return s.Get(key)
+			return s.get(key, write)
 		}
 		s.trackMemory(-mem)
 		s.DeleteVersion(key) // Clean up version to prevent memory leak
@@ -415,9 +426,9 @@ func (s *Store) Get(key string) (*Entry, bool) {
 	}
 
 	if h, ok := entry.Value.(*HashValue); ok && h.minExpire.Load() != 0 {
-		settled, live, retry := s.settleHashFields(shard, key, entry, h)
+		settled, live, retry := s.settleHashFields(shard, key, entry, h, write)
 		if retry {
-			return s.Get(key)
+			return s.get(key, write)
 		}
 		if !live {
 			GlobalMetrics.RecordMiss()
@@ -712,7 +723,7 @@ func (s *Store) Exists(key string) bool {
 	}
 
 	if h, ok := entry.Value.(*HashValue); ok && h.minExpire.Load() != 0 {
-		_, live, retry := s.settleHashFields(shard, key, entry, h)
+		_, live, retry := s.settleHashFields(shard, key, entry, h, false)
 		if retry {
 			return s.Exists(key)
 		}

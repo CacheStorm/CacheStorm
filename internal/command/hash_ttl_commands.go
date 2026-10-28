@@ -195,12 +195,12 @@ func hexpireGeneric(ctx *Context, unitMS int64, absolute bool) error {
 		return ctx.WriteArray(hfeIntegers(len(fields), -2))
 	}
 	deletes := ctx.Store.HashFieldExpiryDeletes()
-	now := time.Now().UnixMilli()
+	now, clock := time.Now().UnixMilli(), ctx.Store.HashFieldClock()
 	results := make([]*resp.Value, len(fields))
 	var deleted, updated []string
 	for i, fb := range fields {
 		f := string(fb)
-		if _, ok := hash.Fields[f]; !ok {
+		if !hash.FieldLive(f, clock) {
 			results[i] = resp.IntegerValue(-2)
 			continue
 		}
@@ -322,7 +322,7 @@ func cmdHPERSIST(ctx *Context) error {
 	var persisted []string
 	for i, f := range fields {
 		switch {
-		case !hashHasField(hash, f):
+		case !hashHasField(ctx, hash, f):
 			results[i] = resp.IntegerValue(-2)
 		case hash.PersistField(f):
 			persisted = append(persisted, f)
@@ -339,9 +339,8 @@ func cmdHPERSIST(ctx *Context) error {
 	return ctx.WriteArray(results)
 }
 
-func hashHasField(hash *store.HashValue, f string) bool {
-	_, ok := hash.Fields[f]
-	return ok
+func hashHasField(ctx *Context, hash *store.HashValue, f string) bool {
+	return hash.FieldLive(f, ctx.Store.HashFieldClock())
 }
 
 const (
@@ -401,11 +400,11 @@ func cmdHGETEX(ctx *Context) error {
 		return ctx.WriteArray(results)
 	}
 	deletes := ctx.Store.HashFieldExpiryDeletes()
-	now := time.Now().UnixMilli()
+	now, clock := time.Now().UnixMilli(), ctx.Store.HashFieldClock()
 	var deleted, updated, persisted []string
 	for i, f := range fields {
 		val, ok := hash.Fields[f]
-		if !ok {
+		if !ok || !hash.FieldLive(f, clock) {
 			results[i] = resp.NullBulkString()
 			continue
 		}
@@ -585,7 +584,7 @@ func hsetexDelete(ctx *Context, key string, pairs [][]byte, opts store.HashSetEx
 		return true, nil
 	}
 	for i := 0; i < len(pairs); i += 2 {
-		_, exists := hash.Fields[string(pairs[i])]
+		exists := hashHasField(ctx, hash, string(pairs[i]))
 		if (opts.FNX && exists) || (opts.FXX && !exists) {
 			hash.Unlock()
 			return false, nil

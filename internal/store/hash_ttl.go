@@ -134,6 +134,60 @@ func (v *HashValue) FieldExpiries() map[string]int64 {
 	return out
 }
 
+// HashFieldClock is the time, in unix milliseconds, against which a write
+// judges whether a hash field has expired: 0, meaning never, while the store
+// is loading or applying its master's stream, which deletes fields itself.
+func (s *Store) HashFieldClock() int64 {
+	if s.loading.Load() {
+		return 0
+	}
+	return time.Now().UnixMilli()
+}
+
+// FieldLive reports whether field is set and, when now > 0, not past its
+// expiry. Only a replica keeps expired fields, until the master deletes
+// them. The caller holds the value's lock.
+func (v *HashValue) FieldLive(field string, now int64) bool {
+	_, ok := v.LiveField(field, now)
+	return ok
+}
+
+// LiveField returns field's value when FieldLive reports it. The caller
+// holds the value's lock.
+func (v *HashValue) LiveField(field string, now int64) ([]byte, bool) {
+	val, ok := v.Fields[field]
+	if !ok || v.ttl == nil || now <= 0 {
+		return val, ok
+	}
+	if at := v.ttl.at[field]; at != 0 && at <= now {
+		return nil, false
+	}
+	return val, true
+}
+
+// dropExpiredTTL clears field's expiry when it has passed at now, so a
+// write to a field a replica still holds after its expiry creates it
+// afresh. The caller holds the value's write lock.
+func (v *HashValue) dropExpiredTTL(field string, now int64) {
+	if v.ttl == nil || now <= 0 {
+		return
+	}
+	if at := v.ttl.at[field]; at != 0 && at <= now {
+		v.clearFieldTTL(field)
+	}
+}
+
+func (v *HashValue) hasLiveField(now int64) bool {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	for f := range v.Fields {
+		if at := v.FieldExpireAt(f); at == 0 || at > now {
+			return true
+		}
+	}
+	return false
+}
+
 func (v *HashValue) fieldsDue(now int64) bool {
 	m := v.minExpire.Load()
 	return m != 0 && m <= now
@@ -361,13 +415,17 @@ func (s *Store) finishHashReap(key string, entry *Entry, fields []string, delete
 
 // settleHashFields applies lazy field expiry to the hash h stored in entry
 // before a read. It returns the entry the reader should use and whether the
-// key still exists; retry is set when the key changed under it.
-func (s *Store) settleHashFields(shard *Shard, key string, entry *Entry, h *HashValue) (*Entry, bool, bool) {
+// key still exists; retry is set when the key changed under it. A writer on
+// a replica gets the stored hash, expired fields included.
+func (s *Store) settleHashFields(shard *Shard, key string, entry *Entry, h *HashValue, write bool) (*Entry, bool, bool) {
 	now := time.Now().UnixMilli()
 	if !h.fieldsDue(now) || s.loading.Load() {
 		return entry, true, false
 	}
 	if s.passiveExpiry.Load() {
+		if write {
+			return entry, h.hasLiveField(now), false
+		}
 		view := h.liveView(now)
 		if len(view.Fields) == 0 {
 			return nil, false, false

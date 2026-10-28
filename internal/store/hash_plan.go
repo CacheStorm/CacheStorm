@@ -20,6 +20,7 @@ func (s *Store) ApplyHashFields(key string, prepare func(*HashValue) (map[string
 		}
 		hash.SizeOf()
 		hash.Lock()
+		now := s.HashFieldClock()
 		fields, err := prepare(hash)
 		if err != nil || len(fields) == 0 {
 			hash.Unlock()
@@ -41,6 +42,7 @@ func (s *Store) ApplyHashFields(key string, prepare func(*HashValue) (map[string
 		}
 		return ValuePlan{Size: size, Apply: func() Value {
 			for field, data := range fields {
+				hash.dropExpiredTTL(field, now)
 				hash.SetFieldKeepTTL(field, data)
 			}
 			return hash
@@ -70,8 +72,12 @@ func (s *Store) ApplyHashPairs(key string, nx bool, args [][]byte) (int, error) 
 		hash.Lock()
 		added = 0
 		pairs := args
+		var now int64
+		if hash.HasFieldTTLs() {
+			now = s.HashFieldClock()
+		}
 		if nx {
-			if _, exists := hash.Fields[string(pairs[0])]; exists {
+			if hash.FieldLive(string(pairs[0]), now) {
 				hash.Unlock()
 				return ValuePlan{}, nil
 			}
@@ -114,6 +120,9 @@ func (s *Store) ApplyHashPairs(key string, nx bool, args [][]byte) (int, error) 
 			var d int64
 			if old, exists := hash.Fields[string(field)]; exists {
 				d = int64(len(val)) - int64(len(old))
+				if !hash.FieldLive(string(field), now) {
+					added++
+				}
 			} else {
 				d = hashFieldSize(string(field), val)
 				added++
@@ -206,6 +215,7 @@ func (s *Store) ApplyHashSetEx(key string, args [][]byte, o HashSetExOptions) (b
 		}
 		hash.SizeOf()
 		hash.Lock()
+		now := s.HashFieldClock()
 		size := hash.SizeOf()
 		seen := make(map[string]int, len(args)/2)
 		for i := 0; i < len(args); i += 2 {
@@ -213,7 +223,7 @@ func (s *Store) ApplyHashSetEx(key string, args [][]byte, o HashSetExOptions) (b
 		}
 		for field, i := range seen {
 			old, exists := hash.Fields[field]
-			if (o.FNX && exists) || (o.FXX && !exists) {
+			if live := hash.FieldLive(field, now); (o.FNX && live) || (o.FXX && !live) {
 				hash.Unlock()
 				return ValuePlan{}, nil
 			}
@@ -234,6 +244,7 @@ func (s *Store) ApplyHashSetEx(key string, args [][]byte, o HashSetExOptions) (b
 		return ValuePlan{Size: size, Apply: func() Value {
 			for field, i := range seen {
 				if o.KeepTTL {
+					hash.dropExpiredTTL(field, now)
 					hash.SetFieldKeepTTL(field, args[i+1])
 				} else {
 					hash.SetField(field, args[i+1])

@@ -181,9 +181,10 @@ func cmdHDEL(ctx *Context) error {
 	}
 
 	deleted := 0
+	now := ctx.Store.HashFieldClock()
 	for i := 1; i < ctx.ArgCount(); i++ {
 		field := ctx.ArgString(i)
-		if _, exists := hash.Fields[field]; exists {
+		if hash.FieldLive(field, now) {
 			hash.DeleteField(field)
 			deleted++
 		}
@@ -319,7 +320,7 @@ func cmdHINCRBY(ctx *Context) error {
 	var newVal int64
 	err = ctx.Store.ApplyHashFields(ctx.ArgString(0), func(hash *store.HashValue) (map[string][]byte, error) {
 		newVal = incr
-		if current, exists := hash.Fields[field]; exists {
+		if current, exists := hash.LiveField(field, ctx.Store.HashFieldClock()); exists {
 			var err error
 			newVal, err = computeIntIncr(current, incr)
 			if err == ErrNotInteger {
@@ -410,7 +411,7 @@ func cmdHINCRBYFLOAT(ctx *Context) error {
 	var result string
 	err := ctx.Store.ApplyHashFields(ctx.ArgString(0), func(hash *store.HashValue) (map[string][]byte, error) {
 		sum := new(big.Float).SetPrec(longDoublePrec).SetMode(big.ToNearestEven)
-		if current, exists := hash.Fields[field]; exists {
+		if current, exists := hash.LiveField(field, ctx.Store.HashFieldClock()); exists {
 			cur, ok := parseLongDouble(string(current))
 			if !ok {
 				return nil, errHashNotFloat
@@ -635,9 +636,10 @@ func cmdHGETDEL(ctx *Context) error {
 		return ctx.WriteArray(results)
 	}
 	var deleted []string
+	now := ctx.Store.HashFieldClock()
 	for i, f := range fields {
 		value, ok := hash.Fields[f]
-		if !ok {
+		if !ok || !hash.FieldLive(f, now) {
 			results[i] = resp.NullBulkString()
 			continue
 		}
