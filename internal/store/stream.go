@@ -69,6 +69,11 @@ type ConsumerGroup struct {
 	mu          sync.RWMutex
 }
 
+// RLock and RUnlock hold the group for reading, for a caller that walks its
+// pending entries and consumers.
+func (g *ConsumerGroup) RLock()   { g.mu.RLock() }
+func (g *ConsumerGroup) RUnlock() { g.mu.RUnlock() }
+
 func NewConsumerGroup(name string) *ConsumerGroup {
 	return &ConsumerGroup{
 		Name:        name,

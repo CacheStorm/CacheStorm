@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -312,7 +313,9 @@ func TestClusterRedirections(t *testing.T) {
 		t.Fatalf("script with an undeclared foreign key: %s", got)
 	}
 	nodes := c.str("CLUSTER", "NODES")
-	if !strings.Contains(nodes, testOtherID+" 127.0.0.1:6381@16381 master - 0 0 0 disconnected 3999\n") ||
+	// The bus may already have pinged the unreachable node, so ping_sent
+	// is any time.
+	if !regexp.MustCompile(testOtherID+` 127\.0\.0\.1:6381@16381 master - \d+ 0 0 disconnected 3999\n`).MatchString(nodes) ||
 		!strings.Contains(nodes, " myself,master - 0 0 0 connected 0-3998 4000-16383\n") {
 		t.Fatalf("CLUSTER NODES:\n%s", nodes)
 	}

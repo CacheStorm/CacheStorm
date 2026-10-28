@@ -84,5 +84,5 @@ A go-redis `ClusterClient` reads and writes throughout. At the end the script ch
 - **Replica migration:** a replica does not move to a master that has lost its own replicas. Also, `cluster-replica-no-failover` cannot be set.
 - **Startup timing:** Redis waits a few seconds before a restarted node accepts writes, and waits before it rejoins after a partition. CacheStorm does neither: it recomputes the cluster state as soon as something changes.
 - **Connections:** `MIGRATE` opens a new connection each time instead of caching it.
-- **DUMP payloads:** payloads of CacheStorm-only types (streams, JSON and time series) cannot be restored into Redis.
+- **DUMP payloads:** payloads of CacheStorm-only types (JSON and time series) cannot be restored into Redis. Streams use Redis' encoding and move both ways.
 - **Extension registries:** process-wide extension registries, such as queues, locks and counters outside the keyspace, are not partitioned by slot.
