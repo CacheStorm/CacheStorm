@@ -934,11 +934,11 @@ func sortLookupValue(ctx *Context, pattern, elem string) (string, bool) {
 		}
 		return string(v), true
 	}
-	sv, ok := entry.Value.(*store.StringValue)
+	data, ok := stringValueOf(entry.Value)
 	if !ok {
 		return "", false
 	}
-	return string(sv.Data), true
+	return string(data), true
 }
 
 // sortProjectElements applies each GET clause to every element, in the order
@@ -1079,7 +1079,7 @@ func doSort(ctx *Context, readOnly bool) error {
 			}
 			if alpha {
 				it.cmp, it.hasCmp = val, ok
-			} else if ok {
+			} else if ok && val != "" {
 				f, err := strconv.ParseFloat(strings.TrimLeft(val, " \t\n\v\f\r"), 64)
 				if err != nil || math.IsNaN(f) {
 					return ctx.WriteError(errors.New("ERR One or more scores can't be converted into double"))

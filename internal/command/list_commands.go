@@ -333,11 +333,6 @@ func cmdLINDEX(ctx *Context) error {
 	}
 
 	key := ctx.ArgString(0)
-	index, err := strconv.Atoi(ctx.ArgString(1))
-	if err != nil {
-		return ctx.WriteError(ErrNotInteger)
-	}
-
 	list, err := getList(ctx, key)
 	if err != nil {
 		return ctx.WriteError(err)
@@ -345,6 +340,11 @@ func cmdLINDEX(ctx *Context) error {
 	if list == nil {
 		return ctx.WriteNullBulkString()
 	}
+	index64, ok := parseRedisInt(ctx.Arg(1))
+	if !ok {
+		return ctx.WriteError(ErrNotInteger)
+	}
+	index := int(index64)
 
 	list.RLock()
 
@@ -368,10 +368,6 @@ func cmdLSET(ctx *Context) error {
 	}
 
 	key := ctx.ArgString(0)
-	index, err := strconv.Atoi(ctx.ArgString(1))
-	if err != nil {
-		return ctx.WriteError(ErrNotInteger)
-	}
 	value := ctx.Arg(2)
 
 	list, err := lockList(ctx, key)
@@ -381,6 +377,12 @@ func cmdLSET(ctx *Context) error {
 	if list == nil {
 		return ctx.WriteError(errListNoSuchKey)
 	}
+	index64, ok := parseRedisInt(ctx.Arg(1))
+	if !ok {
+		list.Unlock()
+		return ctx.WriteError(ErrNotInteger)
+	}
+	index := int(index64)
 
 	length := len(list.Elements)
 	if index < 0 {

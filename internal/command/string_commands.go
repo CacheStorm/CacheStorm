@@ -782,14 +782,14 @@ func cmdLCS(ctx *Context) error {
 		if !ok {
 			continue
 		}
-		sv, isStr := entry.Value.(*store.StringValue)
+		data, isStr := stringValueOf(entry.Value)
 		if !isStr {
 			return ctx.WriteError(errLCSWrongType)
 		}
 		if i == 0 {
-			s1 = string(sv.Data)
+			s1 = string(data)
 		} else {
-			s2 = string(sv.Data)
+			s2 = string(data)
 		}
 	}
 

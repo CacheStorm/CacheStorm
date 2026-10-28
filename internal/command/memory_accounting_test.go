@@ -71,7 +71,7 @@ func refValueSize(v store.Value) int64 {
 	case *store.SortedSetValue:
 		n := int64(48)
 		for k := range v.Members {
-			n += int64(len(k)) + 96
+			n += int64(len(k)) + 96 + 96
 		}
 		return n
 	case *store.StreamValue:

@@ -429,6 +429,10 @@ func cmdGEORADIUS(ctx *Context) error {
 	}
 
 	key := ctx.ArgString(0)
+	geo, err := getGeo(ctx, key)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
 	lon, err1 := strconv.ParseFloat(ctx.ArgString(1), 64)
 	lat, err2 := strconv.ParseFloat(ctx.ArgString(2), 64)
 	radius, err3 := strconv.ParseFloat(ctx.ArgString(3), 64)
@@ -530,10 +534,6 @@ func cmdGEORADIUS(ctx *Context) error {
 		}
 		return ctx.WriteError(fmt.Errorf("ERR %s is not compatible with WITHDIST, WITHHASH and WITHCOORD options", name))
 	}
-	geo, err := getGeo(ctx, key)
-	if err != nil {
-		return ctx.WriteError(err)
-	}
 	if geo == nil {
 		if storeKey != "" || storeDistKey != "" {
 			if storeKey != "" {
@@ -630,6 +630,10 @@ func cmdGEORADIUSBYMEMBER(ctx *Context) error {
 	}
 
 	key := ctx.ArgString(0)
+	geo, err := getGeo(ctx, key)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
 	member := ctx.ArgString(1)
 	radius, err1 := strconv.ParseFloat(ctx.ArgString(2), 64)
 	if err1 != nil || math.IsNaN(radius) {
@@ -723,10 +727,6 @@ func cmdGEORADIUSBYMEMBER(ctx *Context) error {
 			name = "STOREDIST"
 		}
 		return ctx.WriteError(fmt.Errorf("ERR %s is not compatible with WITHDIST, WITHHASH and WITHCOORD options", name))
-	}
-	geo, err := getGeo(ctx, key)
-	if err != nil {
-		return ctx.WriteError(err)
 	}
 	if geo == nil {
 		if storeKey != "" || storeDistKey != "" {
@@ -827,6 +827,10 @@ func cmdGEOSEARCH(ctx *Context) error {
 	}
 
 	key := ctx.ArgString(0)
+	geo, err := getGeo(ctx, key)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
 
 	var fromLon, fromLat, radius float64
 	var boxHeight float64
@@ -963,10 +967,6 @@ func cmdGEOSEARCH(ctx *Context) error {
 		return ctx.WriteError(ErrSyntaxError)
 	}
 
-	geo, err := getGeo(ctx, key)
-	if err != nil {
-		return ctx.WriteError(err)
-	}
 	if geo == nil {
 		return ctx.WriteArray([]*resp.Value{})
 	}
@@ -1048,6 +1048,10 @@ func cmdGEOSEARCHSTORE(ctx *Context) error {
 
 	destKey := ctx.ArgString(0)
 	srcKey := ctx.ArgString(1)
+	geo, err := getGeo(ctx, srcKey)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
 
 	var fromLon, fromLat, radius float64
 	var boxHeight float64
@@ -1177,10 +1181,6 @@ func cmdGEOSEARCHSTORE(ctx *Context) error {
 		return ctx.WriteError(ErrSyntaxError)
 	}
 
-	geo, err := getGeo(ctx, srcKey)
-	if err != nil {
-		return ctx.WriteError(err)
-	}
 	if geo == nil {
 		return publishGeoResult(ctx, destKey, nil)
 	}

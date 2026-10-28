@@ -13,7 +13,7 @@ const (
 	setBaseSize       = 48
 	setMemberOverhead = 48
 	zsetBaseSize      = 48
-	zsetMemberOverhd  = 16 + 80
+	zsetMemberOverhd  = 16 + 80 + zslIndexOverhead
 	streamBaseSize    = 48
 	streamEntryOverhd = 32
 	streamPairOverhd  = 80

@@ -183,20 +183,6 @@ type zScoreRange struct {
 	minex, maxex bool
 }
 
-func (r zScoreRange) contains(score float64) bool {
-	if r.minex {
-		if score <= r.min {
-			return false
-		}
-	} else if score < r.min {
-		return false
-	}
-	if r.maxex {
-		return score < r.max
-	}
-	return score <= r.max
-}
-
 func parseScoreBound(s string) (float64, bool, error) {
 	ex := strings.HasPrefix(s, "(")
 	if ex {
@@ -261,31 +247,6 @@ func parseZLexRange(minStr, maxStr string) (zLexRange, error) {
 	return zLexRange{min: min, max: max}, nil
 }
 
-func (r zLexRange) contains(member string) bool {
-	switch r.min.inf {
-	case 1:
-		return false
-	case 0:
-		if r.min.ex {
-			if member <= r.min.val {
-				return false
-			}
-		} else if member < r.min.val {
-			return false
-		}
-	}
-	switch r.max.inf {
-	case -1:
-		return false
-	case 0:
-		if r.max.ex {
-			return member < r.max.val
-		}
-		return member <= r.max.val
-	}
-	return true
-}
-
 // zRankWindow maps a Redis start/stop rank pair onto [lo, hi] indexes of an
 // n-element sorted set; ok is false when the window is empty.
 func zRankWindow(n int, start, stop int64) (lo, hi int, ok bool) {
@@ -308,23 +269,30 @@ func zRankWindow(n int, start, stop int64) (lo, hi int, ok bool) {
 	return int(start), int(stop), true
 }
 
-// applyLimit applies a Redis "LIMIT offset count" window to a sorted slice.
-// A negative offset returns no entries, and a negative count means "all remaining".
-func applyLimit(entries []store.SortedEntry, offset, count int) []store.SortedEntry {
-	if offset < 0 || offset >= len(entries) || count == 0 {
+// zRankSlice returns the members at ascending ranks first..last, in
+// descending order when rev is set, after offset and at most limit of them
+// (all when limit < 0). The caller holds the set's lock.
+func zRankSlice(z *store.SortedSetValue, first, last int, rev bool, offset, limit int) []store.SortedEntry {
+	if last < first || offset < 0 || limit == 0 {
 		return nil
 	}
-	end := len(entries)
-	if count > 0 && count < end-offset {
-		end = offset + count
+	n := last - first + 1
+	if offset >= n {
+		return nil
 	}
-	return entries[offset:end]
+	cnt := n - offset
+	if limit > 0 && limit < cnt {
+		cnt = limit
+	}
+	if rev {
+		lo := z.Card() - 1 - last + offset
+		return z.RangeByRank(lo, lo+cnt-1, true)
+	}
+	return z.RangeByRank(first+offset, first+offset+cnt-1, false)
 }
 
-func reverseEntries(entries []store.SortedEntry) {
-	for i, j := 0, len(entries)-1; i < j; i, j = i+1, j-1 {
-		entries[i], entries[j] = entries[j], entries[i]
-	}
+func (b zLexBound) store() store.LexBound {
+	return store.LexBound{Val: b.val, Ex: b.ex, Inf: b.inf}
 }
 
 func sortEntries(entries []store.SortedEntry) {
@@ -570,14 +538,12 @@ func cmdZCOUNT(ctx *Context) error {
 	}
 
 	zset.RLock()
-	count := 0
-	for _, score := range zset.Members {
-		if r.contains(score) {
-			count++
-		}
-	}
+	first, last := zset.ScoreRanks(r.min, r.minex, r.max, r.maxex)
 	zset.RUnlock()
-	return ctx.WriteInteger(int64(count))
+	if last < first {
+		return ctx.WriteInteger(0)
+	}
+	return ctx.WriteInteger(int64(last - first + 1))
 }
 
 func cmdZINCRBY(ctx *Context) error {
@@ -724,29 +690,20 @@ func zrangeGeneric(ctx *Context, storeResult bool, rangeType, dir int) error {
 	var entries []store.SortedEntry
 	if zset != nil {
 		zset.RLock()
-		all := zset.GetAllEntries()
-		zset.RUnlock()
-
-		if rangeType == zrangeRank {
-			if lo, hi, ok := zRankWindow(len(all), start, stop); ok {
-				if rev {
-					reverseEntries(all)
-				}
-				entries = all[lo : hi+1]
+		switch rangeType {
+		case zrangeRank:
+			if lo, hi, ok := zRankWindow(zset.Card(), start, stop); ok {
+				entries = zset.RangeByRank(lo, hi, rev)
 			}
-		} else {
-			if rev {
-				reverseEntries(all)
+		case zrangeScore:
+			first, last := zset.ScoreRanks(scoreRange.min, scoreRange.minex, scoreRange.max, scoreRange.maxex)
+			entries = zRankSlice(zset, first, last, rev, clampInt(offset), clampInt(limit))
+		case zrangeLex:
+			if offset >= 0 && limit != 0 {
+				entries = zset.LexRange(lexRange.min.store(), lexRange.max.store(), rev, clampInt(offset), clampInt(limit))
 			}
-			matched := all[:0]
-			for _, e := range all {
-				if (rangeType == zrangeScore && scoreRange.contains(e.Score)) ||
-					(rangeType == zrangeLex && lexRange.contains(e.Member)) {
-					matched = append(matched, e)
-				}
-			}
-			entries = applyLimit(matched, clampInt(offset), clampInt(limit))
 		}
+		zset.RUnlock()
 	}
 
 	if storeResult {
@@ -828,13 +785,7 @@ func zrankGeneric(ctx *Context, reverse bool) error {
 	score, exists := zset.Members[member]
 	rank := 0
 	if exists {
-		for m, s := range zset.Members {
-			less := s < score || (s == score && m < member)
-			greater := s > score || (s == score && m > member)
-			if (!reverse && less) || (reverse && greater) {
-				rank++
-			}
-		}
+		rank = zset.Rank(member, reverse)
 	}
 	zset.RUnlock()
 	if !exists {
@@ -893,7 +844,7 @@ func cmdZREM(ctx *Context) error {
 
 // zremRange removes the members selected by pick from the zset at key and
 // deletes the key once it is empty.
-func zremRange(ctx *Context, key, event string, pick func(all []store.SortedEntry) []store.SortedEntry) error {
+func zremRange(ctx *Context, key, event string, pick func(z *store.SortedSetValue) []store.SortedEntry) error {
 	zset, err := lockSortedSet(ctx, key)
 	if err != nil {
 		return ctx.WriteError(err)
@@ -902,7 +853,7 @@ func zremRange(ctx *Context, key, event string, pick func(all []store.SortedEntr
 		return ctx.WriteInteger(0)
 	}
 
-	victims := pick(zset.GetAllEntries())
+	victims := pick(zset)
 	for _, e := range victims {
 		zset.Remove(e.Member)
 	}
@@ -927,12 +878,12 @@ func cmdZREMRANGEBYRANK(ctx *Context) error {
 	if err1 != nil || err2 != nil {
 		return ctx.WriteError(ErrNotInteger)
 	}
-	return zremRange(ctx, ctx.ArgString(0), "zremrangebyrank", func(all []store.SortedEntry) []store.SortedEntry {
-		lo, hi, ok := zRankWindow(len(all), start, stop)
+	return zremRange(ctx, ctx.ArgString(0), "zremrangebyrank", func(z *store.SortedSetValue) []store.SortedEntry {
+		lo, hi, ok := zRankWindow(z.Card(), start, stop)
 		if !ok {
 			return nil
 		}
-		return all[lo : hi+1]
+		return z.RangeByRank(lo, hi, false)
 	})
 }
 
@@ -944,14 +895,9 @@ func cmdZREMRANGEBYSCORE(ctx *Context) error {
 	if err != nil {
 		return ctx.WriteError(err)
 	}
-	return zremRange(ctx, ctx.ArgString(0), "zremrangebyscore", func(all []store.SortedEntry) []store.SortedEntry {
-		out := all[:0]
-		for _, e := range all {
-			if r.contains(e.Score) {
-				out = append(out, e)
-			}
-		}
-		return out
+	return zremRange(ctx, ctx.ArgString(0), "zremrangebyscore", func(z *store.SortedSetValue) []store.SortedEntry {
+		first, last := z.ScoreRanks(r.min, r.minex, r.max, r.maxex)
+		return zRankSlice(z, first, last, false, 0, -1)
 	})
 }
 
@@ -963,14 +909,8 @@ func cmdZREMRANGEBYLEX(ctx *Context) error {
 	if err != nil {
 		return ctx.WriteError(err)
 	}
-	return zremRange(ctx, ctx.ArgString(0), "zremrangebylex", func(all []store.SortedEntry) []store.SortedEntry {
-		out := all[:0]
-		for _, e := range all {
-			if r.contains(e.Member) {
-				out = append(out, e)
-			}
-		}
-		return out
+	return zremRange(ctx, ctx.ArgString(0), "zremrangebylex", func(z *store.SortedSetValue) []store.SortedEntry {
+		return z.LexRange(r.min.store(), r.max.store(), false, 0, -1)
 	})
 }
 
@@ -1045,12 +985,7 @@ func cmdZLEXCOUNT(ctx *Context) error {
 	}
 
 	zset.RLock()
-	count := 0
-	for member := range zset.Members {
-		if r.contains(member) {
-			count++
-		}
-	}
+	count := zset.CountLex(r.min.store(), r.max.store())
 	zset.RUnlock()
 	return ctx.WriteInteger(int64(count))
 }
@@ -1122,13 +1057,7 @@ func zpopFrom(ctx *Context, key string, count int, max bool) []store.SortedEntry
 		zset.Unlock()
 		return nil
 	}
-	all := zset.GetAllEntries()
-	if max {
-		reverseEntries(all)
-	}
-	if count < len(all) {
-		all = all[:count]
-	}
+	all := zset.RangeByRank(0, count-1, max)
 	for _, e := range all {
 		zset.Remove(e.Member)
 	}
