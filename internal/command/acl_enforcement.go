@@ -419,33 +419,154 @@ func enforceACL(ctx *Context, upperCmd string) bool {
 		return false
 	}
 
-	allowed := user.CanExecuteCommand(upperCmd)
-	shown := strings.ToLower(upperCmd)
-	if hasSubcommands(upperCmd) && len(ctx.Args) > 0 {
-		sub := string(ctx.Args[0])
-		allowed = user.CanExecuteSubcommand(upperCmd, sub)
-		shown += "|" + strings.ToLower(sub)
-	}
-	if !allowed {
+	denial, item := aclCheck(user, upperCmd, ctx.Args)
+	switch denial {
+	case acl.DeniedCommand:
+		shown := aclShownName(upperCmd, ctx.Args)
 		recordACLDenial(ctx, "command", shown, user.Name)
 		_ = ctx.Writer.WriteError("NOPERM User " + user.Name + " has no permissions to run the '" + shown + "' command")
 		return true
-	}
-	for _, key := range aclKeysForCommand(upperCmd, ctx.Args) {
-		if !user.CanAccessKey(key) {
-			recordACLDenial(ctx, "key", key, user.Name)
-			_ = ctx.Writer.WriteError("NOPERM No permissions to access a key")
-			return true
-		}
-	}
-	for _, channel := range aclChannelsForCommand(upperCmd, ctx.Args) {
-		if !user.CanAccessChannel(channel) {
-			recordACLDenial(ctx, "channel", channel, user.Name)
-			_ = ctx.Writer.WriteError("NOPERM No permissions to access a channel")
-			return true
-		}
+	case acl.DeniedKey:
+		recordACLDenial(ctx, "key", item, user.Name)
+		_ = ctx.Writer.WriteError("NOPERM No permissions to access a key")
+		return true
+	case acl.DeniedChannel:
+		recordACLDenial(ctx, "channel", item, user.Name)
+		_ = ctx.Writer.WriteError("NOPERM No permissions to access a channel")
+		return true
 	}
 	return false
+}
+
+// aclShownName is the command name a NOPERM reply shows: "cmd" or
+// "cmd|sub".
+func aclShownName(upperCmd string, args [][]byte) string {
+	shown := strings.ToLower(upperCmd)
+	if hasSubcommands(upperCmd) && len(args) > 0 {
+		shown += "|" + strings.ToLower(string(args[0]))
+	}
+	return shown
+}
+
+// aclCheck checks whether user may run upperCmd with args, with its keys
+// and channels, across the user's selectors.
+func aclCheck(user *acl.User, upperCmd string, args [][]byte) (acl.Denial, string) {
+	sub := ""
+	if hasSubcommands(upperCmd) && len(args) > 0 {
+		sub = string(args[0])
+	}
+	return user.Check(upperCmd, sub,
+		func() []acl.KeyRef { return aclKeyRefs(upperCmd, args) },
+		func() []acl.ChannelRef { return aclChannelRefs(upperCmd, args) })
+}
+
+// aclKeyRefs returns the keys of a command with the access each needs,
+// taken from Redis' key specs: a key the command reads needs read access, one
+// it inserts, deletes or updates needs write access, and one it neither reads
+// nor changes (EXISTS, TYPE) only has to match a pattern. A command without
+// usable specs needs both on every key aclKeysForCommand finds.
+func aclKeyRefs(upperCmd string, args [][]byte) []acl.KeyRef {
+	argv := make([]string, 0, len(args)+1)
+	argv = append(argv, upperCmd)
+	for _, a := range args {
+		argv = append(argv, string(a))
+	}
+	if flags, ok := aclVariableKeyFlags(upperCmd, args); ok {
+		return []acl.KeyRef{{Name: string(args[0]), Flags: flags}}
+	}
+	var out []acl.KeyRef
+	meta := lookupRedisCommandMeta(argv)
+	if meta != nil {
+		if !commandHasKeys(meta) {
+			return nil
+		}
+		if refs, ok := keysFromSpecs(meta, argv); ok && upperCmd != "SORT" && upperCmd != "SORT_RO" {
+			out = make([]acl.KeyRef, 0, len(refs))
+			for _, r := range refs {
+				out = append(out, acl.KeyRef{Name: r.name, Flags: aclKeyFlags(r.flags)})
+			}
+			return out
+		}
+		for _, r := range keysFromSpecsPartial(meta, argv) {
+			if r.name != "" || upperCmd != "MIGRATE" {
+				out = append(out, acl.KeyRef{Name: r.name, Flags: aclKeyFlags(r.flags)})
+			}
+		}
+	}
+	if upperCmd == "SORT" {
+		for _, k := range storeKeyAfter(args) {
+			out = append(out, acl.KeyRef{Name: k, Flags: acl.KeyWrite})
+		}
+	}
+	// Keys the specs could not place, or SORT's BY and GET patterns, need
+	// both permissions.
+	for _, k := range aclKeysForCommand(upperCmd, args) {
+		found := false
+		for _, r := range out {
+			if r.Name == k {
+				found = true
+				break
+			}
+		}
+		if !found {
+			out = append(out, acl.KeyRef{Name: k, Flags: acl.KeyReadWrite})
+		}
+	}
+	return out
+}
+
+func aclVariableKeyFlags(upperCmd string, args [][]byte) (uint8, bool) {
+	if len(args) == 0 {
+		return 0, false
+	}
+	switch upperCmd {
+	case "SET":
+		for i := 2; i < len(args); i++ {
+			a := args[i]
+			if strings.EqualFold(string(a), "GET") {
+				return acl.KeyReadWrite, true
+			}
+		}
+		return acl.KeyWrite, true
+	case "BITFIELD":
+		for j := 1; j < len(args); j++ {
+			rem := len(args) - j - 1
+			switch op := string(args[j]); {
+			case strings.EqualFold(op, "GET") && rem >= 2:
+				j += 2
+			case (strings.EqualFold(op, "SET") || strings.EqualFold(op, "INCRBY")) && rem >= 3:
+				return acl.KeyReadWrite, true
+			case strings.EqualFold(op, "OVERFLOW") && rem >= 1:
+				j++
+			default:
+				return acl.KeyReadWrite, true
+			}
+		}
+		return acl.KeyRead, true
+	}
+	return 0, false
+}
+
+func aclKeyFlags(specFlags []string) uint8 {
+	var flags uint8
+	for _, f := range specFlags {
+		switch f {
+		case "access":
+			flags |= acl.KeyRead
+		case "insert", "delete", "update":
+			flags |= acl.KeyWrite
+		}
+	}
+	return flags
+}
+
+func aclChannelRefs(upperCmd string, args [][]byte) []acl.ChannelRef {
+	chans := aclChannelsForCommand(upperCmd, args)
+	out := make([]acl.ChannelRef, len(chans))
+	for i, c := range chans {
+		out[i] = acl.ChannelRef{Name: c, Pattern: upperCmd == "PSUBSCRIBE"}
+	}
+	return out
 }
 
 // CommandKeys returns the keys cmd names in args, the same ones the ACL key

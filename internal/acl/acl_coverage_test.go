@@ -62,7 +62,7 @@ func TestCanExecuteCommandNoPermissions(t *testing.T) {
 // Cover CanAccessKey with "~*" pattern
 func TestCanAccessKeyTildeWildcard(t *testing.T) {
 	user := &User{Permissions: Permission{
-		AllowedKeys: []string{"~*"},
+		Keys: rwKeys("~*"),
 	}}
 
 	if !user.CanAccessKey("anykey") {
@@ -73,7 +73,7 @@ func TestCanAccessKeyTildeWildcard(t *testing.T) {
 // Cover CanAccessKey: no patterns match
 func TestCanAccessKeyNoMatch(t *testing.T) {
 	user := &User{Permissions: Permission{
-		AllowedKeys: []string{"user:*"},
+		Keys: rwKeys("user:*"),
 	}}
 
 	if user.CanAccessKey("admin:secret") {
@@ -153,7 +153,7 @@ func TestToACLStringWithPasswords(t *testing.T) {
 		Permissions: Permission{
 			AllowedCommands: map[string]bool{"GET": true, "SET": true},
 			DeniedCommands:  map[string]bool{"FLUSHALL": true},
-			AllowedKeys:     []string{"user:*"},
+			Keys:            rwKeys("user:*"),
 			AllowedChannels: []string{"news:*"},
 			CommandRules:    []string{"+get", "+set", "-flushall"},
 		},
@@ -267,8 +267,8 @@ func TestParseACLRuleAllowKey(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(user.Permissions.AllowedKeys) != 2 {
-		t.Errorf("expected 2 allowed keys, got %d", len(user.Permissions.AllowedKeys))
+	if len(user.Permissions.Keys) != 2 {
+		t.Errorf("expected 2 allowed keys, got %d", len(user.Permissions.Keys))
 	}
 }
 
@@ -383,7 +383,7 @@ func TestMatchKeyPatternBacktrack(t *testing.T) {
 // Cover CanAccessKey with specific pattern match using matchKeyPattern
 func TestCanAccessKeySpecificPattern(t *testing.T) {
 	user := &User{Permissions: Permission{
-		AllowedKeys: []string{"cache:session:*"},
+		Keys: rwKeys("cache:session:*"),
 	}}
 
 	if !user.CanAccessKey("cache:session:abc123") {
@@ -525,7 +525,7 @@ func TestSetUserRulesFollowRedis(t *testing.T) {
 	if err := ParseACLRules([]string{"reset"}, u); err != nil || u.IsEnabled() || u.CanAccessKey("x") || u.CanExecuteCommand("GET") || len(u.Passwords) != 0 {
 		t.Fatalf("reset left %q", u.ToACLString())
 	}
-	for _, bad := range []string{"bogus", "#abc", "%R~k", "+"} {
+	for _, bad := range []string{"bogus", "#abc", "%~k", "%X~k", "%R~", "+", "(on)", "(+get"} {
 		if err := ParseACLRules([]string{"on", bad}, u); err == nil {
 			t.Errorf("%q was accepted", bad)
 		}

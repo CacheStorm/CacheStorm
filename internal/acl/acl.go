@@ -17,10 +17,26 @@ var (
 	ErrPermissionDenied  = errors.New("NOPERM No permission")
 )
 
+// Key permission flags of a key pattern: ~pattern grants both, %R~pattern
+// reads only and %W~pattern writes only.
+const (
+	KeyRead uint8 = 1 << iota
+	KeyWrite
+	KeyReadWrite = KeyRead | KeyWrite
+)
+
+// KeyPattern is a key glob with the access it grants.
+type KeyPattern struct {
+	Pattern string
+	Flags   uint8
+}
+
+// Permission is a Redis ACL selector: the user's root permissions or one of
+// its additional (...) selectors.
 type Permission struct {
 	AllowedCommands map[string]bool
 	DeniedCommands  map[string]bool
-	AllowedKeys     []string
+	Keys            []KeyPattern
 	AllowedChannels []string
 	// CommandRules is the user's command rule history as Redis keeps it
 	// (selector->command_rules): "+cmd", "-cmd", "+cmd|sub" and "+@cat"
@@ -35,7 +51,10 @@ type User struct {
 	NoPassword  bool
 	Passwords   []string
 	Permissions Permission
-	IsDefault   bool
+	// Selectors are the user's additional selectors; a command is allowed
+	// when the root permissions or any selector allows all of it.
+	Selectors []*Permission
+	IsDefault bool
 	// SkipSanitizePayload is the skip-sanitize-payload flag; Redis users
 	// default to sanitize-payload.
 	SkipSanitizePayload bool
@@ -61,7 +80,7 @@ func NewACL() *ACL {
 		Permissions: Permission{
 			AllowedCommands: map[string]bool{"*": true},
 			DeniedCommands:  make(map[string]bool),
-			AllowedKeys:     []string{"*"},
+			Keys:            []KeyPattern{{Pattern: "*", Flags: KeyReadWrite}},
 			AllowedChannels: []string{"*"},
 		},
 	}
@@ -212,32 +231,32 @@ func (u *User) IsNoPassword() bool {
 func (u *User) AllowCommand(cmd string) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	u.setCommandLocked(cmd, true)
+	u.Permissions.setCommand(cmd, true)
 }
 
 // DenyCommand revokes cmd the way AllowCommand grants it.
 func (u *User) DenyCommand(cmd string) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	u.setCommandLocked(cmd, false)
+	u.Permissions.setCommand(cmd, false)
 }
 
-func (u *User) setCommandLocked(cmd string, allow bool) {
-	u.setCommandBitsLocked(cmd, allow)
+func (p *Permission) setCommand(cmd string, allow bool) {
+	p.setCommandBits(cmd, allow)
 	if cmd == "*" || strings.EqualFold(cmd, "all") {
-		u.Permissions.CommandRules = nil
+		p.CommandRules = nil
 		return
 	}
-	u.recordRuleLocked(cmd, allow)
+	p.recordRule(cmd, allow)
 }
 
-// recordRuleLocked appends rule to the command rule history the way Redis'
+// recordRule appends rule to the command rule history the way Redis'
 // ACLUpdateCommandRules does: earlier rules for the same command or category,
 // and for the command's subcommands, are dropped first.
-func (u *User) recordRuleLocked(rule string, allow bool) {
+func (p *Permission) recordRule(rule string, allow bool) {
 	rule = strings.ToLower(rule)
-	kept := make([]string, 0, len(u.Permissions.CommandRules)+1)
-	for _, r := range u.Permissions.CommandRules {
+	kept := make([]string, 0, len(p.CommandRules)+1)
+	for _, r := range p.CommandRules {
 		body := r[1:]
 		if body == rule || strings.HasPrefix(body, rule+"|") {
 			continue
@@ -249,11 +268,10 @@ func (u *User) recordRuleLocked(rule string, allow bool) {
 	} else {
 		kept = append(kept, "-"+rule)
 	}
-	u.Permissions.CommandRules = kept
+	p.CommandRules = kept
 }
 
-func (u *User) setCommandBitsLocked(cmd string, allow bool) {
-	p := &u.Permissions
+func (p *Permission) setCommandBits(cmd string, allow bool) {
 	if p.AllowedCommands == nil {
 		p.AllowedCommands = make(map[string]bool)
 	}
@@ -304,10 +322,11 @@ func SetCategoryResolver(fn func(category string) ([]string, bool)) {
 	categoryResolver = fn
 }
 
+// AllowKey grants read and write access to the keys matching pattern.
 func (u *User) AllowKey(pattern string) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	u.Permissions.AllowedKeys = append(u.Permissions.AllowedKeys, pattern)
+	u.Permissions.Keys = append(u.Permissions.Keys, KeyPattern{Pattern: pattern, Flags: KeyReadWrite})
 }
 
 func (u *User) AllowChannel(pattern string) {
@@ -316,80 +335,188 @@ func (u *User) AllowChannel(pattern string) {
 	u.Permissions.AllowedChannels = append(u.Permissions.AllowedChannels, pattern)
 }
 
-// CanExecuteSubcommand reports whether the user may run sub of the container
-// command cmd: a rule for "CMD|SUB" wins over one for CMD.
-func (u *User) CanExecuteSubcommand(cmd, sub string) bool {
-	key := strings.ToUpper(cmd) + "|" + strings.ToUpper(sub)
-	u.mu.RLock()
-	allowed, isAllowed := u.Permissions.AllowedCommands[key]
-	denied, isDenied := u.Permissions.DeniedCommands[key]
-	u.mu.RUnlock()
-	if isAllowed && allowed {
-		return true
-	}
-	if isDenied && denied {
-		return false
-	}
-	return u.CanExecuteCommand(cmd)
-}
-
-func (u *User) CanExecuteCommand(cmd string) bool {
-	u.mu.RLock()
-	defer u.mu.RUnlock()
-
+// canRun reports whether the selector allows cmd, or its subcommand sub
+// when sub is not empty: a rule for "CMD|SUB" wins over one for CMD.
+func (p *Permission) canRun(cmd, sub string) bool {
 	cmd = strings.ToUpper(cmd)
-
-	if _, denied := u.Permissions.DeniedCommands["*"]; denied {
-		if _, allowed := u.Permissions.AllowedCommands[cmd]; allowed {
+	if sub != "" {
+		key := cmd + "|" + strings.ToUpper(sub)
+		if p.AllowedCommands[key] {
 			return true
 		}
-		return false
-	}
-
-	if _, allowed := u.Permissions.AllowedCommands["*"]; allowed {
-		if _, denied := u.Permissions.DeniedCommands[cmd]; denied {
+		if p.DeniedCommands[key] {
 			return false
 		}
-		return true
 	}
-
-	if _, allowed := u.Permissions.AllowedCommands[cmd]; allowed {
-		return true
+	if p.DeniedCommands["*"] {
+		return p.AllowedCommands[cmd]
 	}
+	if p.AllowedCommands["*"] {
+		return !p.DeniedCommands[cmd]
+	}
+	return p.AllowedCommands[cmd]
+}
 
+func (p *Permission) allKeys() bool {
+	return len(p.Keys) == 1 && p.Keys[0].Flags == KeyReadWrite && (p.Keys[0].Pattern == "*" || p.Keys[0].Pattern == "~*")
+}
+
+func (p *Permission) allChannels() bool {
+	return hasPattern(p.AllowedChannels, "*")
+}
+
+// keyAllowed reports whether a pattern grants every access in flags to key.
+func (p *Permission) keyAllowed(key string, flags uint8) bool {
+	for _, kp := range p.Keys {
+		if kp.Flags&flags != flags {
+			continue
+		}
+		if kp.Pattern == "*" || kp.Pattern == "~*" || matchKeyPattern(key, kp.Pattern) {
+			return true
+		}
+	}
 	return false
 }
 
-func (u *User) CanAccessKey(key string) bool {
-	u.mu.RLock()
-	defer u.mu.RUnlock()
-
-	for _, pattern := range u.Permissions.AllowedKeys {
-		if pattern == "*" || pattern == "~*" {
-			return true
-		}
-		if matchKeyPattern(key, pattern) {
-			return true
-		}
-	}
-
-	return false
-}
-
-func (u *User) CanAccessChannel(channel string) bool {
-	u.mu.RLock()
-	defer u.mu.RUnlock()
-
-	for _, pattern := range u.Permissions.AllowedChannels {
+// channelAllowed checks a channel as Redis does: a PSUBSCRIBE pattern must
+// equal an allowed pattern, a channel must match one.
+func (p *Permission) channelAllowed(channel string, isPattern bool) bool {
+	for _, pattern := range p.AllowedChannels {
 		if pattern == "*" {
 			return true
 		}
-		if matchKeyPattern(channel, pattern) {
+		if isPattern {
+			if pattern == channel {
+				return true
+			}
+		} else if matchKeyPattern(channel, pattern) {
 			return true
 		}
 	}
-
 	return false
+}
+
+func (u *User) eachSelectorLocked(fn func(p *Permission) bool) bool {
+	if fn(&u.Permissions) {
+		return true
+	}
+	for _, s := range u.Selectors {
+		if fn(s) {
+			return true
+		}
+	}
+	return false
+}
+
+// CanExecuteSubcommand reports whether a selector of the user allows sub of
+// the container command cmd.
+func (u *User) CanExecuteSubcommand(cmd, sub string) bool {
+	u.mu.RLock()
+	defer u.mu.RUnlock()
+	return u.eachSelectorLocked(func(p *Permission) bool { return p.canRun(cmd, sub) })
+}
+
+// CanExecuteCommand reports whether a selector of the user allows cmd.
+func (u *User) CanExecuteCommand(cmd string) bool {
+	u.mu.RLock()
+	defer u.mu.RUnlock()
+	return u.eachSelectorLocked(func(p *Permission) bool { return p.canRun(cmd, "") })
+}
+
+// CanAccessKey reports whether a selector of the user may read and write key.
+func (u *User) CanAccessKey(key string) bool {
+	u.mu.RLock()
+	defer u.mu.RUnlock()
+	return u.eachSelectorLocked(func(p *Permission) bool { return p.keyAllowed(key, KeyReadWrite) })
+}
+
+// CanAccessChannel reports whether a selector of the user allows channel.
+func (u *User) CanAccessChannel(channel string) bool {
+	u.mu.RLock()
+	defer u.mu.RUnlock()
+	return u.eachSelectorLocked(func(p *Permission) bool { return p.channelAllowed(channel, false) })
+}
+
+// KeyRef is a key a command names and the access the command needs to it.
+type KeyRef struct {
+	Name  string
+	Flags uint8
+}
+
+// ChannelRef is a channel a command names; Pattern marks a PSUBSCRIBE
+// pattern.
+type ChannelRef struct {
+	Name    string
+	Pattern bool
+}
+
+// Denial is the outcome of a permission check, in Redis' order of
+// relevance.
+type Denial int
+
+const (
+	Allowed Denial = iota
+	DeniedCommand
+	DeniedKey
+	DeniedChannel
+)
+
+// Check reports whether the user may run cmd (with subcommand sub, or "")
+// on the keys and channels it names, as Redis' ACLCheckAllUserCommandPerm
+// does: some selector must allow the command, every key with the access it
+// needs and every channel. When none does, the most relevant denial is
+// returned with the key or channel refused. keys and channels are called at
+// most once, and only when a selector restricts them.
+func (u *User) Check(cmd, sub string, keys func() []KeyRef, channels func() []ChannelRef) (Denial, string) {
+	u.mu.RLock()
+	defer u.mu.RUnlock()
+	var keyList []KeyRef
+	var chanList []ChannelRef
+	keysDone, chansDone := false, false
+	worst, item, worstIdx := DeniedCommand, "", -1
+	note := func(d Denial, what string, idx int) {
+		if d > worst || (d == worst && idx > worstIdx) {
+			worst, item, worstIdx = d, what, idx
+		}
+	}
+	ok := u.eachSelectorLocked(func(p *Permission) bool {
+		if !p.canRun(cmd, sub) {
+			return false
+		}
+		if !p.allKeys() {
+			if !keysDone {
+				keysDone = true
+				if keys != nil {
+					keyList = keys()
+				}
+			}
+			for i, k := range keyList {
+				if !p.keyAllowed(k.Name, k.Flags) {
+					note(DeniedKey, k.Name, i)
+					return false
+				}
+			}
+		}
+		if !p.allChannels() {
+			if !chansDone {
+				chansDone = true
+				if channels != nil {
+					chanList = channels()
+				}
+			}
+			for i, c := range chanList {
+				if !p.channelAllowed(c.Name, c.Pattern) {
+					note(DeniedChannel, c.Name, i)
+					return false
+				}
+			}
+		}
+		return true
+	})
+	if ok {
+		return Allowed, ""
+	}
+	return worst, item
 }
 
 // ToACLString renders the user as ACL LIST does.
@@ -402,15 +529,21 @@ func (u *User) ToACLString() string {
 	for _, pw := range u.Passwords {
 		parts = append(parts, "#"+pw)
 	}
-	p := &u.Permissions
-	if hasPattern(p.AllowedKeys, "*") {
-		parts = append(parts, "~*")
-	} else {
-		for _, key := range p.AllowedKeys {
-			parts = append(parts, "~"+key)
-		}
+	parts = append(parts, u.Permissions.describe())
+	for _, s := range u.Selectors {
+		parts = append(parts, "("+s.describe()+")")
 	}
-	if hasPattern(p.AllowedChannels, "*") {
+	return strings.Join(parts, " ")
+}
+
+// describe renders the selector as Redis' ACLDescribeSelector does: keys,
+// channels, then command rules.
+func (p *Permission) describe() string {
+	parts := make([]string, 0, 4)
+	if keys := p.describeKeys(); keys != "" {
+		parts = append(parts, keys)
+	}
+	if p.allChannels() {
 		parts = append(parts, "&*")
 	} else {
 		parts = append(parts, "resetchannels")
@@ -418,8 +551,44 @@ func (u *User) ToACLString() string {
 			parts = append(parts, "&"+ch)
 		}
 	}
-	parts = append(parts, u.commandRulesLocked())
+	parts = append(parts, p.commandRules())
 	return strings.Join(parts, " ")
+}
+
+func (p *Permission) describeKeys() string {
+	if p.allKeys() {
+		return "~*"
+	}
+	keys := make([]string, len(p.Keys))
+	for i, k := range p.Keys {
+		switch k.Flags {
+		case KeyRead:
+			keys[i] = "%R~" + k.Pattern
+		case KeyWrite:
+			keys[i] = "%W~" + k.Pattern
+		default:
+			keys[i] = "~" + k.Pattern
+		}
+	}
+	return strings.Join(keys, " ")
+}
+
+func (p *Permission) describeChannels() string {
+	if p.allChannels() {
+		return "&*"
+	}
+	chans := make([]string, len(p.AllowedChannels))
+	for i, c := range p.AllowedChannels {
+		chans[i] = "&" + c
+	}
+	return strings.Join(chans, " ")
+}
+
+// SelectorDescription is one selector as ACL GETUSER reports it.
+type SelectorDescription struct {
+	Commands string
+	Keys     string
+	Channels string
 }
 
 // UserDescription is what ACL GETUSER reports for a user.
@@ -429,6 +598,7 @@ type UserDescription struct {
 	Commands  string
 	Keys      string
 	Channels  string
+	Selectors []SelectorDescription
 }
 
 // Describe returns the user's flags, password hashes and permissions as
@@ -439,26 +609,16 @@ func (u *User) Describe() UserDescription {
 	d := UserDescription{
 		Flags:     u.flagsLocked(),
 		Passwords: append([]string{}, u.Passwords...),
-		Commands:  u.commandRulesLocked(),
+		Commands:  u.Permissions.commandRules(),
+		Keys:      u.Permissions.describeKeys(),
+		Channels:  u.Permissions.describeChannels(),
 	}
-	p := &u.Permissions
-	if hasPattern(p.AllowedKeys, "*") {
-		d.Keys = "~*"
-	} else {
-		keys := make([]string, len(p.AllowedKeys))
-		for i, k := range p.AllowedKeys {
-			keys[i] = "~" + k
-		}
-		d.Keys = strings.Join(keys, " ")
-	}
-	if hasPattern(p.AllowedChannels, "*") {
-		d.Channels = "&*"
-	} else {
-		chans := make([]string, len(p.AllowedChannels))
-		for i, c := range p.AllowedChannels {
-			chans[i] = "&" + c
-		}
-		d.Channels = strings.Join(chans, " ")
+	for _, s := range u.Selectors {
+		d.Selectors = append(d.Selectors, SelectorDescription{
+			Commands: s.commandRules(),
+			Keys:     s.describeKeys(),
+			Channels: s.describeChannels(),
+		})
 	}
 	return d
 }
@@ -481,18 +641,18 @@ func (u *User) flagsLocked() []string {
 	return flags
 }
 
-// commandRulesLocked renders the command rules as Redis'
+// commandRules renders the command rules as Redis'
 // ACLDescribeSelectorCommandRules does: +@all or -@all, then the rule
 // history.
-func (u *User) commandRulesLocked() string {
+func (p *Permission) commandRules() string {
 	base := "-@all"
-	if u.Permissions.AllowedCommands["*"] {
+	if p.AllowedCommands["*"] {
 		base = "+@all"
 	}
-	if len(u.Permissions.CommandRules) == 0 {
+	if len(p.CommandRules) == 0 {
 		return base
 	}
-	return base + " " + strings.Join(u.Permissions.CommandRules, " ")
+	return base + " " + strings.Join(p.CommandRules, " ")
 }
 
 func hasPattern(patterns []string, p string) bool {
@@ -509,67 +669,158 @@ func ParseACLRule(rule string, user *User) error {
 	return ParseACLRules(strings.Fields(rule), user)
 }
 
+// MergeSelectorArgs joins the arguments of a "(...)" selector that spans
+// several arguments into one, as Redis' ACLMergeSelectorArguments does.
+func MergeSelectorArgs(parts []string) ([]string, error) {
+	merged := make([]string, 0, len(parts))
+	open := -1
+	var sel string
+	for i, part := range parts {
+		if open == -1 && strings.HasPrefix(part, "(") && !strings.HasSuffix(part, ")") {
+			open, sel = i, part
+			continue
+		}
+		if open != -1 {
+			sel += " " + part
+			if strings.HasSuffix(part, ")") {
+				merged = append(merged, sel)
+				open = -1
+			}
+			continue
+		}
+		merged = append(merged, part)
+	}
+	if open != -1 {
+		return nil, errors.New("ERR Unmatched parenthesis in acl selector starting at '" + parts[open] + "'.")
+	}
+	return merged, nil
+}
+
 // ValidateACLRules checks every rule without applying any, so a SETUSER with
 // one bad rule changes nothing.
 func ValidateACLRules(parts []string) error {
-	for _, part := range parts {
-		if err := validateACLRule(part); err != nil {
-			return err
-		}
-	}
-	return nil
+	_, err := mergeAndValidate(parts)
+	return err
 }
 
-func validateACLRule(part string) error {
-	bad := func(why string) error {
-		return errors.New("ERR Error in ACL SETUSER modifier '" + part + "': " + why)
+func mergeAndValidate(parts []string) ([]string, error) {
+	parts, err := MergeSelectorArgs(parts)
+	if err != nil {
+		return nil, err
 	}
+	for _, part := range parts {
+		if err := validateACLRule(part); err != nil {
+			return nil, err
+		}
+	}
+	return parts, nil
+}
+
+func ruleError(part, why string) error {
+	return errors.New("ERR Error in ACL SETUSER modifier '" + part + "': " + why)
+}
+
+const (
+	errSyntax        = "Syntax error"
+	errUnknownCmd    = "Unknown command or category name in ACL"
+	errBadHash       = "The password hash must be exactly 64 characters and contain only lowercase hexadecimal characters"
+	errNoSuchPass    = "The password you are trying to remove from the user does not exist"
+	errAfterAllKeys  = "Adding a pattern after the * pattern (or the 'allkeys' flag) is not valid and does not have any effect. Try 'resetkeys' to start with an empty list of patterns"
+	errAfterAllChans = "Adding a pattern after the * pattern (or the 'allchannels' flag) is not valid and does not have any effect. Try 'resetchannels' to start with an empty list of channels"
+)
+
+func validateACLRule(part string) error {
 	switch strings.ToLower(part) {
-	case "on", "off", "nopass", "resetpass", "reset", "resetkeys", "resetchannels",
-		"allkeys", "allchannels", "allcommands", "nocommands", "sanitize-payload",
+	case "on", "off", "nopass", "resetpass", "reset", "sanitize-payload",
 		"skip-sanitize-payload", "clearselectors":
 		return nil
 	}
 	if part == "" {
-		return bad("Syntax error")
+		return ruleError(part, errSyntax)
 	}
 	switch part[0] {
-	case '>', '<', '~', '&':
+	case '>', '<':
 		return nil
 	case '#', '!':
 		if !isPasswordHash(part[1:]) {
-			return bad("The password hash must be exactly 64 characters and contain only lowercase hexadecimal characters")
+			return ruleError(part, errBadHash)
 		}
 		return nil
-	case '%':
-		perm, _, ok := strings.Cut(part[1:], "~")
-		if !ok || perm == "" {
-			return bad("Syntax error")
+	case '(':
+		if !strings.HasSuffix(part, ")") {
+			return ruleError(part, errSyntax)
 		}
-		if !strings.EqualFold(perm, "RW") && !strings.EqualFold(perm, "WR") {
-			return bad("Read-only or write-only key permissions are not supported")
-		}
-		return nil
-	case '+', '-':
-		if len(part) > 2 && part[1] == '@' {
-			cat := strings.ToLower(part[2:])
-			if cat == "all" {
-				return nil
+		for _, rule := range strings.Fields(part[1 : len(part)-1]) {
+			if why := validateSelectorRule(rule); why != "" {
+				return ruleError(part, why)
 			}
-			if categoryResolver == nil {
-				return bad("Unknown command or category name in ACL")
-			}
-			if _, ok := categoryResolver(cat); !ok {
-				return bad("Unknown command or category name in ACL")
-			}
-			return nil
-		}
-		if len(part) == 1 {
-			return bad("Syntax error")
 		}
 		return nil
 	}
-	return bad("Syntax error")
+	if why := validateSelectorRule(part); why != "" {
+		return ruleError(part, why)
+	}
+	return nil
+}
+
+// validateSelectorRule checks a rule a selector accepts and returns why it
+// is invalid, or "".
+func validateSelectorRule(part string) string {
+	switch strings.ToLower(part) {
+	case "resetkeys", "resetchannels", "allkeys", "allchannels", "allcommands", "nocommands":
+		return ""
+	}
+	if part == "" {
+		return errSyntax
+	}
+	switch part[0] {
+	case '~', '&':
+		return ""
+	case '%':
+		if _, _, ok := parseKeyPermission(part); !ok {
+			return errSyntax
+		}
+		return ""
+	case '+', '-':
+		if len(part) == 1 {
+			return errSyntax
+		}
+		if part[1] == '@' {
+			cat := strings.ToLower(part[2:])
+			if cat == "all" {
+				return ""
+			}
+			if categoryResolver == nil {
+				return errUnknownCmd
+			}
+			if _, ok := categoryResolver(cat); !ok {
+				return errUnknownCmd
+			}
+		}
+		return ""
+	}
+	return errSyntax
+}
+
+// parseKeyPermission parses %R~pattern, %W~pattern or %RW~pattern.
+func parseKeyPermission(part string) (string, uint8, bool) {
+	var flags uint8
+	for i := 1; i < len(part); i++ {
+		switch {
+		case (part[i] == 'R' || part[i] == 'r') && flags&KeyRead == 0:
+			flags |= KeyRead
+		case (part[i] == 'W' || part[i] == 'w') && flags&KeyWrite == 0:
+			flags |= KeyWrite
+		case part[i] == '~':
+			if flags == 0 || i == len(part)-1 {
+				return "", 0, false
+			}
+			return part[i+1:], flags, true
+		default:
+			return "", 0, false
+		}
+	}
+	return "", 0, false
 }
 
 func isPasswordHash(h string) bool {
@@ -585,85 +836,167 @@ func isPasswordHash(h string) bool {
 	return true
 }
 
-// ParseACLRules applies rules to user with Redis' ACL SETUSER semantics. The
-// whole list is validated first.
+// ParseACLRules applies rules to user with Redis' ACL SETUSER semantics:
+// the rules are applied to a copy of the user, which replaces it only when
+// every rule succeeded.
 func ParseACLRules(parts []string, user *User) error {
-	if err := ValidateACLRules(parts); err != nil {
+	parts, err := mergeAndValidate(parts)
+	if err != nil {
 		return err
 	}
+	user.mu.Lock()
+	defer user.mu.Unlock()
+	work := user.copyLocked()
 	for _, part := range parts {
-		user.applyRule(part)
+		if why := work.applyRule(part); why != "" {
+			return ruleError(part, why)
+		}
 	}
+	user.Enabled, user.NoPassword, user.SkipSanitizePayload = work.Enabled, work.NoPassword, work.SkipSanitizePayload
+	user.Passwords, user.Permissions, user.Selectors = work.Passwords, work.Permissions, work.Selectors
 	return nil
 }
 
-func (u *User) applyRule(part string) {
+func (u *User) copyLocked() *User {
+	c := &User{
+		Name:                u.Name,
+		Enabled:             u.Enabled,
+		NoPassword:          u.NoPassword,
+		SkipSanitizePayload: u.SkipSanitizePayload,
+		Passwords:           append([]string(nil), u.Passwords...),
+		Permissions:         u.Permissions.clone(),
+	}
+	for _, s := range u.Selectors {
+		cs := s.clone()
+		c.Selectors = append(c.Selectors, &cs)
+	}
+	return c
+}
+
+func (p *Permission) clone() Permission {
+	c := Permission{
+		AllowedCommands: make(map[string]bool, len(p.AllowedCommands)),
+		DeniedCommands:  make(map[string]bool, len(p.DeniedCommands)),
+		Keys:            append([]KeyPattern(nil), p.Keys...),
+		AllowedChannels: append([]string(nil), p.AllowedChannels...),
+		CommandRules:    append([]string(nil), p.CommandRules...),
+	}
+	for k, v := range p.AllowedCommands {
+		c.AllowedCommands[k] = v
+	}
+	for k, v := range p.DeniedCommands {
+		c.DeniedCommands[k] = v
+	}
+	return c
+}
+
+// applyRule applies one rule to an unshared user and returns why it failed,
+// or "".
+func (u *User) applyRule(part string) string {
 	switch strings.ToLower(part) {
 	case "on":
-		u.Enable()
-		return
+		u.Enabled = true
+		return ""
 	case "off":
-		u.Disable()
-		return
+		u.Enabled = false
+		return ""
 	case "nopass":
-		u.RemovePasswords()
-		return
-	case "allcommands":
-		u.AllowCommand("*")
-		return
-	case "nocommands":
-		u.DenyCommand("*")
-		return
-	}
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	p := &u.Permissions
-	switch strings.ToLower(part) {
+		u.Passwords, u.NoPassword = nil, true
+		return ""
 	case "resetpass":
 		u.Passwords, u.NoPassword = nil, false
-		return
+		return ""
 	case "sanitize-payload":
 		u.SkipSanitizePayload = false
-		return
+		return ""
 	case "skip-sanitize-payload":
 		u.SkipSanitizePayload = true
-		return
+		return ""
 	case "clearselectors":
-		return
+		u.Selectors = nil
+		return ""
 	case "reset":
 		u.Passwords, u.NoPassword, u.Enabled, u.SkipSanitizePayload = nil, false, false, false
-		p.AllowedKeys, p.AllowedChannels = nil, nil
-		u.setCommandLocked("*", false)
-		return
-	case "resetkeys":
-		p.AllowedKeys = nil
-		return
-	case "resetchannels":
-		p.AllowedChannels = nil
-		return
-	case "allkeys":
-		p.AllowedKeys = []string{"*"}
-		return
-	case "allchannels":
-		p.AllowedChannels = []string{"*"}
-		return
+		u.Selectors = nil
+		u.Permissions.Keys, u.Permissions.AllowedChannels = nil, nil
+		u.Permissions.setCommand("*", false)
+		return ""
 	}
 	switch part[0] {
 	case '>':
-		u.addHashLocked(hashPassword(part[1:]))
+		u.addHash(hashPassword(part[1:]))
+		return ""
 	case '#':
-		u.addHashLocked(part[1:])
+		u.addHash(part[1:])
+		return ""
 	case '<':
-		u.removeHashLocked(hashPassword(part[1:]))
+		return u.removeHash(hashPassword(part[1:]))
 	case '!':
-		u.removeHashLocked(part[1:])
-	case '~':
-		p.AllowedKeys = addPattern(p.AllowedKeys, part[1:])
-	case '%':
-		_, pattern, _ := strings.Cut(part[1:], "~")
-		p.AllowedKeys = addPattern(p.AllowedKeys, pattern)
+		return u.removeHash(part[1:])
+	case '(':
+		sel := Permission{AllowedCommands: map[string]bool{}, DeniedCommands: map[string]bool{}}
+		for _, rule := range strings.Fields(part[1 : len(part)-1]) {
+			if why := sel.applyRule(rule); why != "" {
+				return why
+			}
+		}
+		u.Selectors = append(u.Selectors, &sel)
+		return ""
+	}
+	return u.Permissions.applyRule(part)
+}
+
+// applyRule applies one selector rule and returns why it failed, or "".
+func (p *Permission) applyRule(part string) string {
+	switch strings.ToLower(part) {
+	case "allcommands":
+		p.setCommand("*", true)
+		return ""
+	case "nocommands":
+		p.setCommand("*", false)
+		return ""
+	case "resetkeys":
+		p.Keys = nil
+		return ""
+	case "resetchannels":
+		p.AllowedChannels = nil
+		return ""
+	case "allkeys":
+		p.Keys = []KeyPattern{{Pattern: "*", Flags: KeyReadWrite}}
+		return ""
+	case "allchannels":
+		p.AllowedChannels = []string{"*"}
+		return ""
+	}
+	switch part[0] {
+	case '~', '%':
+		pattern, flags := part[1:], KeyReadWrite
+		if part[0] == '%' {
+			pattern, flags, _ = parseKeyPermission(part)
+		}
+		if p.allKeys() {
+			return errAfterAllKeys
+		}
+		if pattern == "*" && flags == KeyReadWrite {
+			p.Keys = []KeyPattern{{Pattern: "*", Flags: KeyReadWrite}}
+			return ""
+		}
+		for i := range p.Keys {
+			if p.Keys[i].Pattern == pattern {
+				p.Keys[i].Flags |= flags
+				return ""
+			}
+		}
+		p.Keys = append(p.Keys, KeyPattern{Pattern: pattern, Flags: flags})
 	case '&':
-		p.AllowedChannels = addPattern(p.AllowedChannels, part[1:])
+		if p.allChannels() {
+			return errAfterAllChans
+		}
+		if part[1:] == "*" {
+			p.AllowedChannels = []string{"*"}
+		} else if !hasPattern(p.AllowedChannels, part[1:]) {
+			p.AllowedChannels = append(p.AllowedChannels, part[1:])
+		}
 	case '+', '-':
 		allow := part[0] == '+'
 		cmd := part[1:]
@@ -672,18 +1005,21 @@ func (u *User) applyRule(part string) {
 			if cat != "all" {
 				members, _ := categoryResolver(cat)
 				for _, m := range members {
-					u.setCommandBitsLocked(m, allow)
+					p.setCommandBits(m, allow)
 				}
-				u.recordRuleLocked("@"+cat, allow)
-				return
+				p.recordRule("@"+cat, allow)
+				return ""
 			}
 			cmd = "*"
 		}
-		u.setCommandLocked(cmd, allow)
+		p.setCommand(cmd, allow)
+	default:
+		return errSyntax
 	}
+	return ""
 }
 
-func (u *User) addHashLocked(h string) {
+func (u *User) addHash(h string) {
 	u.NoPassword = false
 	for _, stored := range u.Passwords {
 		if stored == h {
@@ -693,25 +1029,14 @@ func (u *User) addHashLocked(h string) {
 	u.Passwords = append(u.Passwords, h)
 }
 
-func (u *User) removeHashLocked(h string) {
+func (u *User) removeHash(h string) string {
 	for i, stored := range u.Passwords {
 		if stored == h {
 			u.Passwords = append(u.Passwords[:i:i], u.Passwords[i+1:]...)
-			return
+			return ""
 		}
 	}
-}
-
-func addPattern(patterns []string, p string) []string {
-	if p == "*" {
-		return []string{"*"}
-	}
-	for _, have := range patterns {
-		if have == "*" || have == p {
-			return patterns
-		}
-	}
-	return append(patterns, p)
+	return errNoSuchPass
 }
 
 func hashPassword(password string) string {

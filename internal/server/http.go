@@ -379,7 +379,10 @@ func restKeyRefused(r *http.Request, key, command string) bool {
 	if user == nil {
 		return false
 	}
-	return !user.CanExecuteCommand(command) || !user.CanAccessKey(key)
+	denial, _ := user.Check(command, "", func() []acl.KeyRef {
+		return []acl.KeyRef{{Name: key, Flags: acl.KeyReadWrite}}
+	}, nil)
+	return denial != acl.Allowed
 }
 
 func (h *HTTPServer) authMiddleware(next http.HandlerFunc) http.HandlerFunc {

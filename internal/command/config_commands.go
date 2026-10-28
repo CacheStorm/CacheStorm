@@ -323,23 +323,29 @@ func cmdConfigSet(ctx *Context) error {
 	defer c.mu.Unlock()
 
 	hooks := configHooksFor(ctx)
-	for i := 1; i < ctx.ArgCount(); i += 2 {
-		param := strings.ToLower(ctx.ArgString(i))
-		value := ctx.ArgString(i + 1)
-
+	apply := func(param, value string) error {
 		if hooks != nil && hooks.Set != nil {
 			handled, err := hooks.Set(param, value)
-			if err != nil {
-				return ctx.WriteError(err)
-			}
-			if handled {
-				continue
+			if err != nil || handled {
+				return err
 			}
 		}
-
-		if err := c.setLocked(ctx, param, value); err != nil {
+		return c.setLocked(ctx, param, value)
+	}
+	// Like Redis, a CONFIG SET of several parameters applies all of them or
+	// none: a failure restores the parameters already set.
+	applied := make([]string, 0, ctx.ArgCount()/2)
+	for i := 1; i < ctx.ArgCount(); i += 2 {
+		param := strings.ToLower(ctx.ArgString(i))
+		if err := apply(param, ctx.ArgString(i+1)); err != nil {
+			for j := len(applied) - 1; j >= 0; j-- {
+				if old, ok := known[applied[j]]; ok {
+					_ = apply(applied[j], old) //nolint:errcheck // the old value was valid when set
+				}
+			}
 			return ctx.WriteError(err)
 		}
+		applied = append(applied, param)
 	}
 
 	return ctx.WriteOK()

@@ -149,3 +149,21 @@ func TestConfigOtherSubCommandsStillWorkControl(t *testing.T) {
 		t.Fatalf("CONFIG NOSUCHTHING returned type %v, want an error", v.Type)
 	}
 }
+
+func TestConfigSetFailureRestoresEarlierPairs(t *testing.T) {
+	s := store.NewStore()
+
+	if v := configSetRun(t, s, "CONFIG", "SET", "timeout", "11", "maxmemory-samples", "7"); v.Type == resp.TypeError {
+		t.Fatalf("setup CONFIG SET returned %q", v.Err)
+	}
+	v := configSetRun(t, s, "CONFIG", "SET", "timeout", "22", "maxmemory-samples", "9", "maxmemory-policy", "bogus")
+	if v.Type != resp.TypeError {
+		t.Fatalf("CONFIG SET with an invalid last pair returned type %v, want an error", v.Type)
+	}
+	if !configSetReports(t, s, "timeout", "11") {
+		t.Fatal("timeout was not restored after the failed CONFIG SET")
+	}
+	if !configSetReports(t, s, "maxmemory-samples", "7") {
+		t.Fatal("maxmemory-samples was not restored after the failed CONFIG SET")
+	}
+}

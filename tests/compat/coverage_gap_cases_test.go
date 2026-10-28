@@ -150,5 +150,17 @@ func adminCases() []Case {
 			c("OBJECT", "BOGUS"), c("OBJECT", "ENCODING"), c("OBJECT", "HELP", "x"), c("ACL", "BOGUS"), c("ACL", "CAT", "a", "b"),
 			c("ACL", "LOG", "x", "y"), c("ACL", "GENPASS", "0"), c("ACL", "GENPASS", "x"), c("ACL", "HELP"), c("CLIENT", "HELP"),
 			c("CLIENT", "NO-TOUCH", "maybe"), c("CLIENT", "SETINFO", "lib-ver", "a b"), c("CLIENT", "SETINFO", "bogus", "x")),
+		k("acl", "selectors-and-key-permissions", c("ACL", "SETUSER", "s", "on", "nopass", "+get", "~a:*", "(+set ~b:*)", "(+del", "%W~c:*", "&ch)"),
+			c("ACL", "LIST"), c("ACL", "GETUSER", "s"), c("ACL", "DRYRUN", "s", "SET", "b:1", "v"), c("ACL", "DRYRUN", "s", "SET", "a:1", "v"),
+			c("ACL", "DRYRUN", "s", "GET", "b:1"), c("ACL", "DRYRUN", "s", "DEL", "c:1"), c("ACL", "DRYRUN", "s", "HSET", "a:1", "f", "v"),
+			c("ACL", "SETUSER", "r", "on", "nopass", "+@all", "%R~r:*", "%W~w:*", "%R~w:*"), c("ACL", "GETUSER", "r"),
+			c("ACL", "DRYRUN", "r", "SET", "w:1", "v"), c("ACL", "DRYRUN", "r", "SET", "w:1", "v", "GET"), c("ACL", "DRYRUN", "r", "SET", "r:1", "v"),
+			c("ACL", "DRYRUN", "r", "COPY", "r:1", "x:1"), c("ACL", "DRYRUN", "r", "EXISTS", "r:1"), c("ACL", "DRYRUN", "r", "SORT", "r:1", "STORE", "w:1"),
+			c("ACL", "DRYRUN", "r", "BITFIELD", "r:1", "GET", "u8", "0"), c("ACL", "DRYRUN", "r", "XREAD", "STREAMS", "r:1", "0"),
+			c("ACL", "DRYRUN", "r", "GEORADIUS", "r:1", "0", "0", "1", "km", "STORE", "w:1"),
+			c("ACL", "SETUSER", "r", "allkeys", "~x"), c("ACL", "SETUSER", "r", "(+get"), c("ACL", "SETUSER", "r", "(on)"),
+			c("ACL", "SETUSER", "r", "<nope"), c("ACL", "SETUSER", "r", "%~x"), c("ACL", "SETUSER", "r", "(+get)", "clearselectors"),
+			c("ACL", "SETUSER", "p", "on", "nopass", "+@all", "&news:*"), c("ACL", "DRYRUN", "p", "PSUBSCRIBE", "news:*"),
+			c("ACL", "DRYRUN", "p", "PSUBSCRIBE", "news:a*"), c("ACL", "DELUSER", "s", "r", "p")),
 	}
 }

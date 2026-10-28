@@ -256,13 +256,25 @@ type commandKeyRef struct {
 // a spec cannot be applied (an incomplete spec, a bad key count), so the
 // caller falls back to the command's own key extraction.
 func keysFromSpecs(m *commandMeta, argv []string) (keys []commandKeyRef, ok bool) {
+	return keysFromSpecsMode(m, argv, false)
+}
+
+// keysFromSpecsPartial is keysFromSpecs that skips the specs it cannot
+// apply and keeps the keys of incomplete ones, as Redis'
+// GET_KEYSPEC_RETURN_PARTIAL does.
+func keysFromSpecsPartial(m *commandMeta, argv []string) []commandKeyRef {
+	keys, _ := keysFromSpecsMode(m, argv, true)
+	return keys
+}
+
+func keysFromSpecsMode(m *commandMeta, argv []string, partial bool) (keys []commandKeyRef, ok bool) {
 	argc := len(argv)
 	for i := range m.keySpecs {
 		spec := &m.keySpecs[i]
 		if spec.hasFlag("not_key") {
 			continue
 		}
-		if spec.hasFlag("variable_flags") {
+		if spec.hasFlag("variable_flags") && !partial {
 			return nil, false
 		}
 		first := 0
@@ -292,6 +304,9 @@ func keysFromSpecs(m *commandMeta, argv []string) (keys []commandKeyRef, ok bool
 				continue
 			}
 		default:
+			if partial {
+				continue
+			}
 			return nil, false
 		}
 		var last, step int
@@ -309,19 +324,28 @@ func keysFromSpecs(m *commandMeta, argv []string) (keys []commandKeyRef, ok bool
 		case "keynum":
 			step = spec.keyStep
 			if spec.keyNumIdx >= argc-first {
+				if partial {
+					continue
+				}
 				return nil, false
 			}
 			n, err := strconv.ParseInt(argv[first+spec.keyNumIdx], 10, 64)
 			if err != nil || n < 0 || n > int64(argc) {
+				if partial {
+					continue
+				}
 				return nil, false
 			}
 			first += spec.firstKey
 			last = first + int(n) - 1
 		default:
+			if partial {
+				continue
+			}
 			return nil, false
 		}
 		if last >= argc || last < first || first >= argc {
-			if spec.fkType == "keynum" && last == first-1 {
+			if partial || (spec.fkType == "keynum" && last == first-1) {
 				continue
 			}
 			return nil, false
@@ -332,7 +356,7 @@ func keysFromSpecs(m *commandMeta, argv []string) (keys []commandKeyRef, ok bool
 		for j := first; j <= last; j += step {
 			keys = append(keys, commandKeyRef{name: argv[j], flags: spec.flags})
 		}
-		if spec.hasFlag("incomplete") {
+		if spec.hasFlag("incomplete") && !partial {
 			return nil, false
 		}
 	}

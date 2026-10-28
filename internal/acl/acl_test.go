@@ -270,7 +270,7 @@ func TestUserToACLString(t *testing.T) {
 		NoPassword: true,
 		Permissions: Permission{
 			AllowedCommands: map[string]bool{"*": true},
-			AllowedKeys:     []string{"*"},
+			Keys:            rwKeys("*"),
 		},
 	}
 
@@ -444,4 +444,12 @@ func TestParseACLRuleAllowChannel(t *testing.T) {
 	if len(user.Permissions.AllowedChannels) != 1 {
 		t.Error("expected 1 allowed channel")
 	}
+}
+
+func rwKeys(patterns ...string) []KeyPattern {
+	out := make([]KeyPattern, len(patterns))
+	for i, p := range patterns {
+		out[i] = KeyPattern{Pattern: p, Flags: KeyReadWrite}
+	}
+	return out
 }

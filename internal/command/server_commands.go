@@ -1660,13 +1660,21 @@ func aclGetUserValue(user *acl.User) *resp.Value {
 	for i, p := range d.Passwords {
 		passwords[i] = resp.BulkString(p)
 	}
+	selectors := make([]*resp.Value, len(d.Selectors))
+	for i, sel := range d.Selectors {
+		selectors[i] = resp.PairsValue([]*resp.Value{
+			resp.BulkString("commands"), resp.BulkString(sel.Commands),
+			resp.BulkString("keys"), resp.BulkString(sel.Keys),
+			resp.BulkString("channels"), resp.BulkString(sel.Channels),
+		})
+	}
 	return resp.PairsValue([]*resp.Value{
 		resp.BulkString("flags"), resp.SetValue(flags),
 		resp.BulkString("passwords"), resp.ArrayValue(passwords),
 		resp.BulkString("commands"), resp.BulkString(d.Commands),
 		resp.BulkString("keys"), resp.BulkString(d.Keys),
 		resp.BulkString("channels"), resp.BulkString(d.Channels),
-		resp.BulkString("selectors"), resp.ArrayValue([]*resp.Value{}),
+		resp.BulkString("selectors"), resp.ArrayValue(selectors),
 	})
 }
 
@@ -1703,22 +1711,14 @@ func aclDryRun(ctx *Context) error {
 		return ctx.WriteError(arityError(shown))
 	}
 	args := ctx.Args[3:]
-	allowed := user.CanExecuteCommand(name)
-	if hasSubcommands(name) && len(args) > 0 {
-		allowed = user.CanExecuteSubcommand(name, string(args[0]))
-	}
-	if !allowed {
+	denial, item := aclCheck(user, name, args)
+	switch denial {
+	case acl.DeniedCommand:
 		return ctx.WriteBulkString("User " + user.Name + " has no permissions to run the '" + shown + "' command")
-	}
-	for _, key := range aclKeysForCommand(name, args) {
-		if !user.CanAccessKey(key) {
-			return ctx.WriteBulkString("User " + user.Name + " has no permissions to access the '" + key + "' key")
-		}
-	}
-	for _, ch := range aclChannelsForCommand(name, args) {
-		if !user.CanAccessChannel(ch) {
-			return ctx.WriteBulkString("User " + user.Name + " has no permissions to access the '" + ch + "' channel")
-		}
+	case acl.DeniedKey:
+		return ctx.WriteBulkString("User " + user.Name + " has no permissions to access the '" + item + "' key")
+	case acl.DeniedChannel:
+		return ctx.WriteBulkString("User " + user.Name + " has no permissions to access the '" + item + "' channel")
 	}
 	return ctx.WriteOK()
 }

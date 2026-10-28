@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/cachestorm/cachestorm/internal/acl"
 	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
 )
@@ -73,27 +74,26 @@ func scriptGuard(ctx *Context) ScriptCallGuard {
 	}
 	return func(cmd string, args []string) error {
 		upper := strings.ToUpper(cmd)
-		shown := strings.ToLower(upper)
 		// Command permission: a script runs as the invoking user, so a
 		// command the user cannot run at the top level must not run from
 		// inside a script either — redis.call('get', ...) without +get, or a
 		// key-less redis.call('flushdb'), otherwise bypass the user's grants
 		// entirely. The bypass set mirrors enforceACL: a client must always
 		// be able to probe and authenticate.
-		allowed := aclBypassCommands[upper] || user.CanExecuteCommand(upper)
-		if hasSubcommands(upper) && len(args) > 0 {
-			allowed = aclBypassCommands[upper] || user.CanExecuteSubcommand(upper, args[0])
-			shown += "|" + strings.ToLower(args[0])
+		if aclBypassCommands[upper] {
+			return nil
 		}
-		if !allowed {
-			denied("command", shown)
+		denial, item := aclCheck(user, upper, stringArgsToBytes(args))
+		switch denial {
+		case acl.DeniedCommand:
+			denied("command", aclShownName(upper, stringArgsToBytes(args)))
 			return fmt.Errorf("NOPERM script attempted to execute the '%s' command which is not allowed", upper)
-		}
-		for _, key := range aclKeysForCommand(upper, stringArgsToBytes(args)) {
-			if !user.CanAccessKey(key) {
-				denied("key", key)
-				return fmt.Errorf("NOPERM script attempted to use a key which is not allowed")
-			}
+		case acl.DeniedKey:
+			denied("key", item)
+			return fmt.Errorf("NOPERM script attempted to use a key which is not allowed")
+		case acl.DeniedChannel:
+			denied("channel", item)
+			return fmt.Errorf("NOPERM script attempted to use a channel which is not allowed")
 		}
 		return nil
 	}
