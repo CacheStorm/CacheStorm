@@ -93,6 +93,7 @@ func (v *HashValue) SetFieldExpireAt(field string, at int64) {
 	v.ttl.at[field] = at
 	heap.Push(&v.ttl.heap, fieldTTLItem{at: at, field: field})
 	v.minExpire.Store(v.ttl.settle())
+	v.orderPlaceLocked(field, at)
 }
 
 // PersistField removes field's expiry and reports whether it had one. The
@@ -107,6 +108,7 @@ func (v *HashValue) PersistField(field string) bool {
 	delete(v.ttl.at, field)
 	v.size.add(-hashFieldTTLOverhead)
 	v.minExpire.Store(v.ttl.settle())
+	v.orderPlaceLocked(field, 0)
 	return true
 }
 
@@ -258,12 +260,18 @@ func (v *HashValue) cloneTTLsLocked(dst *HashValue) {
 func (v *HashValue) liveView(now int64) *HashValue {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
-	out := &HashValue{Fields: make(map[string][]byte, len(v.Fields))}
-	for f, val := range v.Fields {
+	out := &HashValue{Fields: make(map[string][]byte, len(v.Fields)), big: v.big}
+	var order []string
+	v.Range(func(f string, val []byte) bool {
 		if at := v.FieldExpireAt(f); at != 0 && at <= now {
-			continue
+			return true
 		}
 		out.Fields[f] = val
+		order = append(order, f)
+		return true
+	})
+	if !v.big {
+		out.order = order
 	}
 	if v.ttl != nil {
 		out.ttl = &hashFieldTTLs{at: make(map[string]int64)}

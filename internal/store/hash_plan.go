@@ -162,6 +162,31 @@ func (op *hashSetOp) apply() Value {
 		hash.Fields = make(map[string][]byte, len(op.keep))
 	}
 	hash.invalidateScan()
+	if !hash.big {
+		// The listpack sees the pairs one by one: a new field goes last, and
+		// so does an existing one whose expiry the write clears.
+		var seen map[string]bool
+		for i := 0; 2*i+1 < len(op.pairs); i++ {
+			field := string(op.pairs[2*i])
+			hash.noteLengthsLocked(field, op.pairs[2*i+1])
+			if seen[field] {
+				continue
+			}
+			_, exists := hash.Fields[field]
+			if exists && hash.FieldExpireAt(field) == 0 {
+				continue
+			}
+			if seen == nil {
+				seen = make(map[string]bool)
+			}
+			seen[field] = true
+			if exists {
+				hash.orderPlaceLocked(field, 0)
+			} else {
+				hash.orderAppendLocked(field)
+			}
+		}
+	}
 	for k, i := range op.keep {
 		field := string(op.pairs[2*i])
 		hash.clearFieldTTL(field)

@@ -279,19 +279,19 @@ func (w *RDBWriter) writeValue(f io.Writer, v store.Value, valueType int) error 
 		}
 	case *store.HashValue:
 		vt.RLock()
-		fields := make(map[string][]byte, len(vt.Fields))
-		for field, value := range vt.Fields {
-			fields[field] = value
+		fields := make([][2]string, 0, len(vt.Fields))
+		for _, field := range hashFieldOrder(vt) {
+			fields = append(fields, [2]string{field, string(vt.Fields[field])})
 		}
 		vt.RUnlock()
 		if err := w.writeLength(f, len(fields)); err != nil {
 			return err
 		}
-		for field, value := range fields {
-			if err := w.writeString(f, field); err != nil {
+		for _, fv := range fields {
+			if err := w.writeString(f, fv[0]); err != nil {
 				return err
 			}
-			if err := w.writeString(f, string(value)); err != nil {
+			if err := w.writeString(f, fv[1]); err != nil {
 				return err
 			}
 		}

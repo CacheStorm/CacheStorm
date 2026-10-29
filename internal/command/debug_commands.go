@@ -147,13 +147,10 @@ func cmdDebugObject(ctx *Context) error {
 // Redis 7.4's default thresholds for its compact encodings.
 const (
 	encMaxListpackEntries = 128
-	// hash-max-listpack-entries is 512 in Redis 7.4, unlike the set and
-	// zset limits.
-	encMaxHashListpackEntries = 512
-	encMaxListpackValue       = 64
-	encMaxIntsetEntries       = 512
-	encMaxListpackBytes       = 8192
-	encMaxEmbstrLen           = 44
+	encMaxListpackValue   = 64
+	encMaxIntsetEntries   = 512
+	encMaxListpackBytes   = 8192
+	encMaxEmbstrLen       = 44
 	// sharedIntegers is OBJ_SHARED_INTEGERS: Redis keeps one shared object
 	// for each integer below it, reported with refcount INT_MAX.
 	sharedIntegers = 10000
@@ -177,13 +174,8 @@ func getEncoding(v store.Value) string {
 	case *store.HashValue:
 		val.RLock()
 		defer val.RUnlock()
-		if len(val.Fields) > encMaxHashListpackEntries {
+		if val.Big() {
 			return "hashtable"
-		}
-		for f, x := range val.Fields {
-			if len(f) > encMaxListpackValue || len(x) > encMaxListpackValue {
-				return "hashtable"
-			}
 		}
 		if val.FieldTTLsUsed() {
 			return "listpackex"

@@ -156,9 +156,10 @@ func cmdHGETALL(ctx *Context) error {
 
 	hash.RLock()
 	results := make([]*resp.Value, 0, len(hash.Fields)*2)
-	for field, value := range hash.Fields {
+	hash.Range(func(field string, value []byte) bool {
 		results = append(results, resp.BulkString(field), resp.BulkBytes(value))
-	}
+		return true
+	})
 
 	reply := results
 	hash.RUnlock()
@@ -267,9 +268,10 @@ func cmdHKEYS(ctx *Context) error {
 
 	hash.RLock()
 	keys := make([]*resp.Value, 0, len(hash.Fields))
-	for field := range hash.Fields {
+	hash.Range(func(field string, _ []byte) bool {
 		keys = append(keys, resp.BulkString(field))
-	}
+		return true
+	})
 
 	reply := keys
 	hash.RUnlock()
@@ -292,9 +294,10 @@ func cmdHVALS(ctx *Context) error {
 
 	hash.RLock()
 	vals := make([]*resp.Value, 0, len(hash.Fields))
-	for _, value := range hash.Fields {
+	hash.Range(func(_ string, value []byte) bool {
 		vals = append(vals, resp.BulkBytes(value))
-	}
+		return true
+	})
 
 	reply := vals
 	hash.RUnlock()
@@ -508,11 +511,21 @@ func cmdHSCAN(ctx *Context) error {
 	}
 
 	hash.RLock()
-	fields, next := collectionScanPage(hash, len(hash.Fields), cursor, opts.count, func(emit func(string)) {
-		for f := range hash.Fields {
-			emit(f)
-		}
-	})
+	var fields []string
+	var next uint64
+	if !hash.Big() {
+		// A listpack hash is returned whole, in its order, as Redis does.
+		hash.Range(func(f string, _ []byte) bool {
+			fields = append(fields, f)
+			return true
+		})
+	} else {
+		fields, next = collectionScanPage(hash, len(hash.Fields), cursor, opts.count, func(emit func(string)) {
+			for f := range hash.Fields {
+				emit(f)
+			}
+		})
+	}
 	items := make([]*resp.Value, 0, len(fields)*2)
 	for _, f := range fields {
 		if opts.match && !matchPattern(f, opts.pattern) {
@@ -573,7 +586,26 @@ func cmdHRANDFIELD(ctx *Context) error {
 	}
 
 	hash.RLock()
-	picked := randomKeys(hash.Fields, count)
+	var picked []string
+	if count > 0 && count >= int64(len(hash.Fields)) || count > 0 && !hash.Big() && !hash.FieldTTLsUsed() {
+		// The whole hash, or for a listpack hash a sample, comes in the
+		// hash's order, as Redis returns them.
+		chosen := map[string]bool(nil)
+		if count < int64(len(hash.Fields)) {
+			chosen = make(map[string]bool, count)
+			for _, f := range randomKeys(hash.Fields, count) {
+				chosen[f] = true
+			}
+		}
+		hash.Range(func(f string, _ []byte) bool {
+			if chosen == nil || chosen[f] {
+				picked = append(picked, f)
+			}
+			return true
+		})
+	} else {
+		picked = randomKeys(hash.Fields, count)
+	}
 	size := len(picked)
 	if withValues {
 		size *= 2

@@ -64,7 +64,7 @@ func cmdRESTORELegacy(ctx *Context) error {
 				}
 				kv := strings.SplitN(pair, "=", 2)
 				if len(kv) == 2 {
-					hv.Fields[kv[0]] = []byte(kv[1])
+					hv.SetField(kv[0], []byte(kv[1]))
 				}
 			}
 		}

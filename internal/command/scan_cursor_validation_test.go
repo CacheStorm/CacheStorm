@@ -126,7 +126,7 @@ func TestScanPagingAndErrorControls(t *testing.T) {
 	// A large one pages: COUNT 2 returns two pairs and a cursor, and the
 	// cursor loop visits every field exactly once.
 	hash := store.NewStore()
-	const fields = 300
+	const fields = 600 // more than hash-max-listpack-entries
 	for i := 0; i < fields; i++ {
 		scanCursorRun(t, hash, "HSET", "h", fmt.Sprintf("f%d", i), "v")
 	}

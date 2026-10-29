@@ -70,6 +70,10 @@ type HashValue struct {
 	// minExpire is the earliest field expiry (unix ms), 0 when no field has
 	// one, readable without the lock.
 	minExpire atomic.Int64
+	// order lists the fields in Redis' listpack order while big is false
+	// (see hash_order.go).
+	order []string
+	big   bool
 	scanCache
 }
 
@@ -106,8 +110,13 @@ func (v *HashValue) SizeOf() int64 {
 // HSET does, and reports whether the field is new. The caller holds the
 // value's write lock.
 func (v *HashValue) SetField(field string, val []byte) bool {
+	hadTTL := v.FieldExpireAt(field) != 0
 	v.clearFieldTTL(field)
-	return v.SetFieldKeepTTL(field, val)
+	added := v.SetFieldKeepTTL(field, val)
+	if hadTTL && !added {
+		v.orderPlaceLocked(field, 0)
+	}
+	return added
 }
 
 // SetFieldKeepTTL stores val under field keeping the field's expiry, as
@@ -119,9 +128,11 @@ func (v *HashValue) SetFieldKeepTTL(field string, val []byte) bool {
 	}
 	old, exists := v.Fields[field]
 	v.Fields[field] = val
+	v.noteLengthsLocked(field, val)
 	if exists {
 		v.size.add(int64(len(val)) - int64(len(old)))
 	} else {
+		v.orderAppendLocked(field)
 		v.size.add(hashFieldSize(field, val))
 		v.invalidateScan()
 	}
@@ -136,6 +147,7 @@ func (v *HashValue) DeleteField(field string) bool {
 		return false
 	}
 	delete(v.Fields, field)
+	v.orderRemoveLocked(field)
 	v.size.add(-hashFieldSize(field, old))
 	v.clearFieldTTL(field)
 	v.invalidateScan()
@@ -156,11 +168,14 @@ func (v *HashValue) String() string {
 func (v *HashValue) Clone() Value {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
-	cloned := &HashValue{Fields: make(map[string][]byte, len(v.Fields))}
+	cloned := &HashValue{Fields: make(map[string][]byte, len(v.Fields)), big: v.big}
 	for k, val := range v.Fields {
 		cv := make([]byte, len(val))
 		copy(cv, val)
 		cloned.Fields[k] = cv
+	}
+	if v.order != nil {
+		cloned.order = append([]string(nil), v.order...)
 	}
 	v.cloneTTLsLocked(cloned)
 	return cloned

@@ -84,12 +84,7 @@ func EncodeDump(value store.Value) ([]byte, error) {
 		}
 		out = append(out, 4)
 		out = appendDumpLength(out, uint64(len(v.Fields)))
-		keys := make([]string, 0, len(v.Fields))
-		for k := range v.Fields {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
+		for _, k := range hashFieldOrder(v) {
 			str(k)
 			str(string(v.Fields[k]))
 		}
@@ -394,6 +389,7 @@ func (d *dumpDecoder) value() store.Value {
 	case 4:
 		n := d.count()
 		v := &store.HashValue{Fields: make(map[string][]byte)}
+		order := make([]string, 0, n)
 		for i := 0; i < n && d.err == nil; i++ {
 			key := d.str()
 			s := d.str()
@@ -401,10 +397,12 @@ func (d *dumpDecoder) value() store.Value {
 				d.err = ErrDumpFormat
 			}
 			v.Fields[key] = []byte(s)
+			order = append(order, key)
 		}
 		if n == 0 {
 			d.err = ErrDumpFormat
 		}
+		v.SetOrder(order)
 		return v
 	case dumpTypeHashMetadata, dumpTypeHashListpackEx:
 		return d.hashWithTTLs(typ)
@@ -448,12 +446,15 @@ func (d *dumpDecoder) value() store.Value {
 				return nil
 			}
 			v := &store.HashValue{Fields: make(map[string][]byte)}
+			order := make([]string, 0, len(items)/2)
 			for i := 0; i < len(items); i += 2 {
 				if _, ok := v.Fields[items[i]]; ok {
 					d.err = ErrDumpFormat
 				}
 				v.Fields[items[i]] = []byte(items[i+1])
+				order = append(order, items[i])
 			}
+			v.SetOrder(order)
 			return v
 		default:
 			if len(items)%2 != 0 {

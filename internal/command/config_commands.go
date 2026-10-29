@@ -459,8 +459,10 @@ func (c *Config) setLocked(ctx *Context, param, value string) error {
 		switch param {
 		case "hash-max-listpack-entries":
 			c.hashMaxListpackEntries = int(v)
+			store.SetHashListpackLimits(v, int64(c.hashMaxListpackValue))
 		case "hash-max-listpack-value":
 			c.hashMaxListpackValue = int(v)
+			store.SetHashListpackLimits(int64(c.hashMaxListpackEntries), v)
 		case "set-max-intset-entries":
 			c.setMaxIntsetEntries = v
 		default:
