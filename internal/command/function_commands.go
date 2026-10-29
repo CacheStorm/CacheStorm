@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	lua "github.com/yuin/gopher-lua"
+	lua "github.com/cachestorm/cachestorm/third_party/gopherlua"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
@@ -311,15 +311,15 @@ func collectLoadedFunctions(body string) (*functionCollector, error) {
 	redisTable.RawSetString("register_function", coll.luaFunc(L))
 	installLoadTimeHelpers(L, redisTable)
 	L.SetGlobal("redis", redisTable)
-	protectGlobals(L)
 	// The load-time redis table has no redis.call & co; reading one fails
 	// the way Redis reports it.
-	if mt, ok := redisTable.Metatable.(*lua.LTable); ok {
-		mt.RawSetString("__index", L.NewFunction(func(L *lua.LState) int {
-			L.RaiseError("Script attempted to access nonexistent global variable '%s'", L.ToString(2))
-			return 0
-		}))
-	}
+	mt := L.NewTable()
+	mt.RawSetString("__index", L.NewFunction(func(L *lua.LState) int {
+		L.RaiseError("Script attempted to access nonexistent global variable '%s'", L.ToString(2))
+		return 0
+	}))
+	L.SetMetatable(redisTable, mt)
+	protectGlobals(L)
 
 	tctx, cancel := context.WithTimeout(context.Background(), luaScriptTimeout)
 	defer cancel()
@@ -720,6 +720,9 @@ func runFunction(ctx *Context, lib *Library, fn *Function, keys, args []string, 
 
 	coll := newFunctionCollector(!lib.Loaded)
 	L.SetField(L.GetGlobal("redis"), "register_function", coll.luaFunc(L))
+	if lib.Loaded {
+		protectGlobals(L)
+	}
 
 	chunk, err := L.Load(strings.NewReader(code), luaChunkFunction)
 	if err != nil {

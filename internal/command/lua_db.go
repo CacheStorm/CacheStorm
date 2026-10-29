@@ -1,7 +1,7 @@
 package command
 
 import (
-	lua "github.com/yuin/gopher-lua"
+	lua "github.com/cachestorm/cachestorm/third_party/gopherlua"
 )
 
 // scriptSelect is SELECT called from a script: it changes the database of the

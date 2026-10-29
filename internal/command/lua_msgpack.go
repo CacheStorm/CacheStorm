@@ -6,7 +6,7 @@ import (
 	"math"
 	"sort"
 
-	lua "github.com/yuin/gopher-lua"
+	lua "github.com/cachestorm/cachestorm/third_party/gopherlua"
 )
 
 // cmsgpackMaxNesting is lua-cmsgpack's LUACMSGPACK_MAX_NESTING: deeper

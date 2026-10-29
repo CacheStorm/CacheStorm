@@ -145,7 +145,7 @@ linters:
           - errcheck
         path: test_client\.go
     paths:
-      - third_party$
+      - third_party/
       - builtin$
       - examples$
 issues:
@@ -165,6 +165,6 @@ formatters:
   exclusions:
     generated: lax
     paths:
-      - third_party$
+      - third_party/
       - builtin$
       - examples$

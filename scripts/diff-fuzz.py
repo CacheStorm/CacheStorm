@@ -295,6 +295,13 @@ LUA = [
     "return tostring(redis.call('exists', KEYS[1]))",
     "return redis.call('smembers', KEYS[1])",
     "redis.call('del', KEYS[1]); return redis.call('rpush', KEYS[1], 1, 2.5, 'z')",
+    "return tostring(tonumber(redis.call('get', KEYS[1])))",
+    "return redis.call('set', KEYS[1], tostring(1/3) .. (2^53))",
+    "return string.format('%5.2f|%d|%x|%q', 1/3, 7, -1, redis.call('type', KEYS[1])['ok'])",
+    "return struct.unpack('>I2', redis.call('get', KEYS[1]) or 'zz')",
+    "local v = redis.call('get', KEYS[1]) return v + 1",
+    "local t = redis.call('lrange', KEYS[1], 0, -1) table.sort(t) return t",
+    "math.randomseed(#KEYS[1]) return {math.random(100), tostring(math.random())}",
 ]
 
 UNORDERED = {"SMEMBERS", "SINTER", "SUNION", "SDIFF", "HGETALL", "HKEYS", "HVALS", "KEYS"}

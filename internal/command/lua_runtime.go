@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	lua "github.com/yuin/gopher-lua"
+	lua "github.com/cachestorm/cachestorm/third_party/gopherlua"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
 )
@@ -153,6 +153,26 @@ func (r *scriptRun) luaCallFunc(raise bool) lua.LGFunction {
 		L.Push(v)
 		return 1
 	}
+}
+
+// luaACLCheckCmd implements redis.acl_check_cmd: whether the script's user
+// may run the command with these arguments.
+func (r *scriptRun) luaACLCheckCmd(L *lua.LState) int {
+	argv, argErr := luaCallArgs(L)
+	if argErr != "" {
+		raiseLuaErr(L, argErr)
+	}
+	if r.router != nil {
+		name := CanonicalName(argv[0])
+		if _, ok := r.router.Get(name); !ok {
+			raiseLuaErr(L, "ERR Invalid command passed to redis.acl_check_cmd()")
+		}
+		if !checkArity(name, len(argv)-1) {
+			raiseLuaErr(L, "ERR Wrong number of args for redis.acl_check_cmd()")
+		}
+	}
+	L.Push(lua.LBool(r.guard == nil || r.guard(argv[0], argv[1:]) == nil))
+	return 1
 }
 
 // call runs one redis.call / redis.pcall and returns its reply converted to

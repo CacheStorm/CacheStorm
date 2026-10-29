@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	lua "github.com/yuin/gopher-lua"
+	lua "github.com/cachestorm/cachestorm/third_party/gopherlua"
 
 	"github.com/cachestorm/cachestorm/internal/store"
 )
@@ -123,6 +123,7 @@ func (e *ScriptEngine) newState(keys []string, args []string, guard ScriptCallGu
 		shapeScriptGlobals(L)
 		L.SetField(redisTable, "call", L.NewFunction(run.luaCallFunc(true)))
 		L.SetField(redisTable, "pcall", L.NewFunction(run.luaCallFunc(false)))
+		L.SetField(redisTable, "acl_check_cmd", L.NewFunction(run.luaACLCheckCmd))
 	} else {
 		e.installLegacyCall(L, redisTable, guard)
 	}

@@ -10,18 +10,19 @@ import (
 	"strconv"
 	"strings"
 
-	lua "github.com/yuin/gopher-lua"
+	lua "github.com/cachestorm/cachestorm/third_party/gopherlua"
 )
 
 // cjsonMaxDepth is lua-cjson's default encode/decode nesting limit.
 const cjsonMaxDepth = 1000
 
 // openRedisLibs installs the libraries Redis exposes to scripts besides the
-// redis table: cjson, bit and cmsgpack.
+// redis table: cjson, bit, cmsgpack and struct.
 func openRedisLibs(L *lua.LState) {
 	openCJSON(L)
 	openBit(L)
 	openCMsgpack(L)
+	openStruct(L)
 }
 
 func openCJSON(L *lua.LState) {

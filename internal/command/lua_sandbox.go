@@ -3,7 +3,7 @@ package command
 import (
 	"time"
 
-	lua "github.com/yuin/gopher-lua"
+	lua "github.com/cachestorm/cachestorm/third_party/gopherlua"
 )
 
 // shapeScriptGlobals makes the global environment of a client script look
@@ -110,25 +110,40 @@ func redisPcall(L *lua.LState) int {
 	return results + 1
 }
 
-// protectGlobals makes reading an undefined global and creating a new global
-// or library field errors, as Redis does for scripts.
+// protectGlobals makes reading an undefined global an error and, as Redis'
+// luaSetTableProtectionRecursively does, every table reachable from the
+// globals readonly, except KEYS and ARGV.
 func protectGlobals(L *lua.LState) {
-	readonly := L.NewFunction(func(L *lua.LState) int {
-		L.RaiseError("Attempt to modify a readonly table")
-		return 0
-	})
-	for _, lib := range []string{"redis", "string", "table", "math", "cjson", "bit", "cmsgpack", "os", "coroutine"} {
-		if tbl, ok := L.GetGlobal(lib).(*lua.LTable); ok && tbl.Metatable == lua.LNil {
-			mt := L.NewTable()
-			mt.RawSetString("__newindex", readonly)
-			L.SetMetatable(tbl, mt)
-		}
-	}
+	globals := L.Get(lua.GlobalsIndex).(*lua.LTable)
 	mt := L.NewTable()
 	mt.RawSetString("__index", L.NewFunction(func(L *lua.LState) int {
 		L.RaiseError("Script attempted to access nonexistent global variable '%s'", L.ToString(2))
 		return 0
 	}))
-	mt.RawSetString("__newindex", readonly)
-	L.SetMetatable(L.Get(lua.GlobalsIndex), mt)
+	L.SetMetatable(globals, mt)
+	skip := map[*lua.LTable]bool{}
+	for _, name := range []string{"KEYS", "ARGV"} {
+		if tbl, ok := globals.RawGetString(name).(*lua.LTable); ok {
+			skip[tbl] = true
+		}
+	}
+	setReadOnlyRecursively(globals, skip)
+	if smt, ok := L.GetMetatable(lua.LString("")).(*lua.LTable); ok {
+		setReadOnlyRecursively(smt, skip)
+	}
+}
+
+func setReadOnlyRecursively(tbl *lua.LTable, skip map[*lua.LTable]bool) {
+	if tbl.ReadOnly() || skip[tbl] {
+		return
+	}
+	tbl.SetReadOnly(true)
+	tbl.ForEach(func(_, v lua.LValue) {
+		if t, ok := v.(*lua.LTable); ok {
+			setReadOnlyRecursively(t, skip)
+		}
+	})
+	if mt, ok := tbl.Metatable.(*lua.LTable); ok {
+		setReadOnlyRecursively(mt, skip)
+	}
 }
