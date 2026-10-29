@@ -538,10 +538,9 @@ func (s *Store) GetOrCreate(key string, create func() Value) (Value, bool, error
 	}
 	var result Value
 	created := false
-	shard := s.shards[s.shardIndex(key)]
 	err = s.applyValuePlan(key, nil, nil, func(current Value) (ValuePlan, error) {
 		if current != nil {
-			shard.data[key].Touch()
+			// The empty plan records the access.
 			GlobalMetrics.RecordHit()
 			result = current
 			created = false
