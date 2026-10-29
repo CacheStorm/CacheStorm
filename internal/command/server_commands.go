@@ -438,7 +438,7 @@ func cmdPEXPIRETIME(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	key := ctx.ArgString(0)
-	entry, exists := ctx.Store.Get(key)
+	entry, exists := ctx.Store.Peek(key)
 	if !exists {
 		return ctx.WriteInteger(-2)
 	}
@@ -453,7 +453,7 @@ func cmdEXPIRETIME(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	key := ctx.ArgString(0)
-	entry, exists := ctx.Store.Get(key)
+	entry, exists := ctx.Store.Peek(key)
 	if !exists {
 		return ctx.WriteInteger(-2)
 	}
@@ -584,8 +584,7 @@ func cmdTOUCH(ctx *Context) error {
 	touched := int64(0)
 	for i := 0; i < ctx.ArgCount(); i++ {
 		key := ctx.ArgString(i)
-		if entry, exists := ctx.Store.Get(key); exists {
-			entry.Touch()
+		if _, exists := ctx.Store.Get(key); exists {
 			touched++
 		}
 	}
@@ -761,7 +760,7 @@ func cmdHOTKEYS(ctx *Context) error {
 	for _, key := range keys {
 		entry, exists := ctx.Store.Get(key)
 		if exists {
-			hotKeys = append(hotKeys, hotKey{key: key, access: entry.AccessCount.Load()})
+			hotKeys = append(hotKeys, hotKey{key: key, access: uint64(entry.LFUCount())})
 		}
 	}
 

@@ -154,7 +154,7 @@ func TestSetMoveEvictionReleasesLocksAndReselects(t *testing.T) {
 			t.Fatal(err)
 		}
 		victim, _ := s.Get("victim")
-		victim.LastAccess.Store(0)
+		victim.SetIdleSeconds(1 << 30)
 		calls := 0
 		s.SetHooks(StoreHooks{OnEvict: func(key string, _ interface{}) {
 			calls++

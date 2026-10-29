@@ -295,7 +295,7 @@ func cmdKEYFREQ(ctx *Context) error {
 		return ctx.WriteNull()
 	}
 
-	return ctx.WriteInteger(int64(entry.AccessCount.Load()))
+	return ctx.WriteInteger(int64(entry.LFUCount()))
 }
 
 func cmdKEYIDLETIME(ctx *Context) error {
@@ -310,8 +310,5 @@ func cmdKEYIDLETIME(ctx *Context) error {
 		return ctx.WriteNull()
 	}
 
-	idleNs := time.Now().UnixNano() - entry.LastAccess.Load()
-	idleSec := idleNs / 1e9
-
-	return ctx.WriteInteger(idleSec)
+	return ctx.WriteInteger(entry.IdleSeconds())
 }

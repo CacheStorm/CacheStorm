@@ -150,7 +150,7 @@ func TestSetAdmissionEvictsForFinalDeltaAndKeepsMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	victim, _ := s.Get("victim")
-	victim.LastAccess.Store(0)
+	victim.SetIdleSeconds(1 << 30)
 	if err := s.Set("target", &StringValue{Data: make([]byte, 700)}, SetOptions{KeepTTL: true, Tags: []string{"new"}}); err != nil {
 		t.Fatal(err)
 	}
@@ -265,10 +265,10 @@ func TestGetOrCreateRacedPublicationTouchesExistingEntry(t *testing.T) {
 		t.Fatal(err)
 	}
 	entry, _ := s.GetShard("key").Get("key")
-	before := entry.AccessCount.Load()
+	entry.SetLFUCount(lfuInitVal)
 	close(release)
 	got := <-result
-	if got.err != nil || got.created || got.value != actual || entry.AccessCount.Load() != before+1 {
-		t.Fatalf("raced result=%+v accesses=%d want=%d", got, entry.AccessCount.Load(), before+1)
+	if got.err != nil || got.created || got.value != actual || entry.LFUCount() != lfuInitVal+1 {
+		t.Fatalf("raced result=%+v counter=%d want=%d", got, entry.LFUCount(), lfuInitVal+1)
 	}
 }

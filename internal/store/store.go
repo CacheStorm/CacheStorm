@@ -412,17 +412,23 @@ func fnv32a(s string) uint32 {
 }
 
 func (s *Store) Get(key string) (*Entry, bool) {
-	return s.get(key, false)
+	return s.get(key, false, true)
+}
+
+// Peek is Get without recording an access, for the commands Redis looks keys
+// up for with LOOKUP_NOTOUCH (TYPE, TTL and its kin, OBJECT).
+func (s *Store) Peek(key string) (*Entry, bool) {
+	return s.get(key, false, false)
 }
 
 // GetForWrite is Get for a caller that modifies the value in place. On a
 // replica, where Get hides expired hash fields behind a copy, it returns the
 // stored hash itself; the caller treats fields with HashValue.FieldLive.
 func (s *Store) GetForWrite(key string) (*Entry, bool) {
-	return s.get(key, true)
+	return s.get(key, true, true)
 }
 
-func (s *Store) get(key string, write bool) (*Entry, bool) {
+func (s *Store) get(key string, write, touch bool) (*Entry, bool) {
 	idx := s.shardIndex(key)
 	shard := s.shards[idx]
 
@@ -439,7 +445,7 @@ func (s *Store) get(key string, write bool) (*Entry, bool) {
 		}
 		mem, reaped := s.reapExpired(shard, key, entry)
 		if !reaped {
-			return s.get(key, write)
+			return s.get(key, write, touch)
 		}
 		s.trackMemory(-mem)
 		s.DeleteVersion(key) // Clean up version to prevent memory leak
@@ -455,7 +461,7 @@ func (s *Store) get(key string, write bool) (*Entry, bool) {
 	if h, ok := entry.Value.(*HashValue); ok && h.minExpire.Load() != 0 {
 		settled, live, retry := s.settleHashFields(shard, key, entry, h, write)
 		if retry {
-			return s.get(key, write)
+			return s.get(key, write, touch)
 		}
 		if !live {
 			GlobalMetrics.RecordMiss()
@@ -464,7 +470,9 @@ func (s *Store) get(key string, write bool) (*Entry, bool) {
 		entry = settled
 	}
 
-	entry.Touch()
+	if touch {
+		entry.Touch()
+	}
 	GlobalMetrics.RecordHit()
 	return entry, true
 }
@@ -761,7 +769,7 @@ func (s *Store) Exists(key string) bool {
 }
 
 func (s *Store) Type(key string) DataType {
-	entry, exists := s.Get(key)
+	entry, exists := s.Peek(key)
 	if !exists {
 		return DataType(0)
 	}
@@ -777,7 +785,7 @@ func (s *Store) TTL(key string) time.Duration {
 }
 
 func (s *Store) TTLMillis(key string) int64 {
-	entry, exists := s.Get(key)
+	entry, exists := s.Peek(key)
 	if !exists {
 		return -2
 	}
@@ -806,6 +814,9 @@ func (s *Store) SetExpiresAt(key string, expiresAt int64) bool {
 // Persist removes the key's expiry. It reports true only when the key exists
 // and had an expiry to remove, which is what PERSIST replies.
 func (s *Store) Persist(key string) bool {
+	if entry, ok := s.shards[s.shardIndex(key)].Get(key); ok && !entry.IsExpired() {
+		entry.Touch()
+	}
 	// ExpiresAt 0 clears the expiry; any stale wheel schedule for this key
 	// later fires as a no-op (expireKey only removes actually-expired keys).
 	if !s.shards[s.shardIndex(key)].clearExpiry(key) {

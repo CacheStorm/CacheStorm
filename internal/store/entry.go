@@ -488,14 +488,13 @@ type Entry struct {
 	Value   Value
 	// tags is nil for the many keys without tags, so an entry without them
 	// carries one pointer instead of a slice header.
-	tags        atomic.Pointer[[]string]
-	LastAccess  atomic.Int64
-	AccessCount atomic.Uint64
+	tags atomic.Pointer[[]string]
+	// access is the key's last access and LFU counter (see access.go).
+	access atomic.Uint64
 	// ExpiresAt is atomic because Entry has no lock of its own and Shard.Get
 	// hands out a live pointer, releasing the shard lock on return -- so a
 	// reader holding that pointer is outside the shard lock while
-	// updateExpiry writes this field inside it. It sits beside LastAccess and
-	// AccessCount, which were converted for the same reason.
+	// updateExpiry writes this field inside it.
 	ExpiresAt atomic.Int64
 	// accounted is the footprint (MemoryUsage plus key overhead) the shard
 	// last charged for this entry. Removal credits exactly this much, and
@@ -505,7 +504,7 @@ type Entry struct {
 
 func NewEntry(value Value) *Entry {
 	e := &Entry{Value: value}
-	e.LastAccess.Store(time.Now().UnixNano())
+	e.access.Store(newAccess(time.Now().Unix()))
 	return e
 }
 
@@ -532,8 +531,7 @@ func (e *Entry) SetTags(tags []string) {
 func (e *Entry) rehome() *Entry {
 	n := &Entry{Value: e.Value}
 	n.tags.Store(e.tags.Load())
-	n.LastAccess.Store(e.LastAccess.Load())
-	n.AccessCount.Store(e.AccessCount.Load())
+	n.access.Store(e.access.Load())
 	n.ExpiresAt.Store(e.ExpiresAt.Load())
 	return n
 }
@@ -549,9 +547,9 @@ func (e *Entry) IsExpired() bool {
 }
 
 // EntryOverhead is what a key costs besides its name, value and tags: the
-// 64-byte Entry and its slot in the shard's map (measured at about 32 bytes
+// 56-byte Entry and its slot in the shard's map (measured at about 32 bytes
 // per key on a heap profile of a million small strings).
-const EntryOverhead = 96
+const EntryOverhead = 88
 
 func entryMetadataSize(tags []string) int64 {
 	size := int64(EntryOverhead)
@@ -563,11 +561,6 @@ func entryMetadataSize(tags []string) int64 {
 
 func (e *Entry) MemoryUsage() int64 {
 	return entryMetadataSize(e.TagList()) + e.Value.SizeOf()
-}
-
-func (e *Entry) Touch() {
-	e.LastAccess.Store(time.Now().UnixNano())
-	e.AccessCount.Add(1)
 }
 
 func (e *Entry) SetTTL(ttl time.Duration) {

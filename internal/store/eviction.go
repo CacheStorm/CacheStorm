@@ -337,8 +337,8 @@ func (ec *EvictionController) sampleKeys() []candidate {
 		for key, entry := range shard.data {
 			candidates = append(candidates, candidate{
 				key:         key,
-				lastAccess:  entry.LastAccess.Load(),
-				accessCount: entry.AccessCount.Load(),
+				lastAccess:  entry.LastAccess(),
+				accessCount: uint64(entry.LFUCount()),
 			})
 			break
 		}
@@ -368,8 +368,8 @@ func (ec *EvictionController) sampleVolatileKeys() []candidate {
 			if expiresAt := entry.ExpiresAt.Load(); expiresAt > 0 {
 				candidates = append(candidates, candidate{
 					key:         key,
-					lastAccess:  entry.LastAccess.Load(),
-					accessCount: entry.AccessCount.Load(),
+					lastAccess:  entry.LastAccess(),
+					accessCount: uint64(entry.LFUCount()),
 					expiresAt:   expiresAt,
 				})
 				break

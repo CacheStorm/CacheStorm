@@ -66,7 +66,7 @@ func getBitmap(ctx *Context, key string) *BitmapValue {
 // bitmapWrongType reports whether key holds a value that is not a string, so
 // the bitmap readers reply WRONGTYPE instead of treating it as empty.
 func bitmapWrongType(ctx *Context, key string) bool {
-	entry, exists := ctx.Store.Get(key)
+	entry, exists := ctx.Store.Peek(key)
 	if !exists {
 		return false
 	}

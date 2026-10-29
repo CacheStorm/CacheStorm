@@ -160,7 +160,7 @@ func TestRestoreFrequencyUsesConfiguredLFUPolicy(t *testing.T) {
 		t.Fatal(got.Err)
 	}
 	entry, ok := s.GetShard("k").Get("k")
-	if !ok || entry.AccessCount.Load() != 200 {
+	if !ok || entry.LFUCount() != 200 {
 		t.Fatal("frequency was not restored")
 	}
 }

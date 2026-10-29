@@ -227,7 +227,7 @@ func TestTransferEvictionRetriesOutsideEntryLocks(t *testing.T) {
 			}
 		}
 		victim, _ := s.Get("victim")
-		victim.LastAccess.Store(0)
+		victim.SetIdleSeconds(1 << 30)
 		var evictions int
 		s.SetHooks(StoreHooks{OnEvict: func(key string, _ interface{}) {
 			evictions++

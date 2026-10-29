@@ -137,9 +137,9 @@ func cmdDebugObject(ctx *Context) error {
 	sb.WriteString(" serializedlength:")
 	sb.WriteString(strconv.FormatInt(int64(len(key)), 10))
 	sb.WriteString(" lru:")
-	sb.WriteString(strconv.FormatInt(entry.LastAccess.Load()/1000000, 10))
+	sb.WriteString(strconv.FormatInt(entry.LastAccess()&(1<<24-1), 10))
 	sb.WriteString(" lru_seconds_idle:")
-	sb.WriteString(strconv.FormatInt(int64(time.Since(time.Unix(0, entry.LastAccess.Load())).Seconds()), 10))
+	sb.WriteString(strconv.FormatInt(entry.IdleSeconds(), 10))
 
 	return ctx.WriteSimpleString(sb.String())
 }
@@ -289,13 +289,12 @@ func cmdOBJECT(ctx *Context) error {
 	case "ENCODING":
 		return ctx.WriteBulkString(getEncoding(entry.Value))
 	case "IDLETIME":
-		idleSeconds := int64(time.Since(time.Unix(0, entry.LastAccess.Load())).Seconds())
-		return ctx.WriteInteger(idleSeconds)
+		return ctx.WriteInteger(entry.IdleSeconds())
 	case "FREQ":
 		if !ctx.Store.UsesLFU() {
 			return ctx.WriteError(errObjectFreqNoLFU)
 		}
-		return ctx.WriteInteger(int64(entry.AccessCount.Load()))
+		return ctx.WriteInteger(int64(entry.LFUCount()))
 	case "REFCOUNT":
 		if sv, ok := entry.Value.(*store.StringValue); ok && ctx.Store.SharesIntegers() {
 			if n, ok := parseRedisInt(sv.Data); ok && n >= 0 && n < sharedIntegers {

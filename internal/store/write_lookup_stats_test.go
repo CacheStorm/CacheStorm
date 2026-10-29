@@ -21,13 +21,12 @@ func TestWriteLookupDoesNotCountKeyspaceHits(t *testing.T) {
 	}
 
 	entry, _ := s.Get("h")
-	before := entry.LastAccess.Load()
-	time.Sleep(2 * time.Millisecond)
+	entry.SetIdleSeconds(100)
 	if _, err := s.ApplyHashPairs("h", false, [][]byte{[]byte("f"), []byte("w")}); err != nil {
 		t.Fatal(err)
 	}
-	if after := entry.LastAccess.Load(); after <= before {
-		t.Fatalf("a write left the access time at %d, want it refreshed", after)
+	if idle := entry.IdleSeconds(); idle != 0 {
+		t.Fatalf("a write left the key idle %d seconds, want it refreshed", idle)
 	}
 
 	expirations := GlobalMetrics.TotalExpirations.Load()

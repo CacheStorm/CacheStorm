@@ -67,6 +67,7 @@ func (s *Store) applyValuePlan(key string, options *SetOptions, snapshot *Entry,
 		}
 		if options != nil {
 			if options.NX && live {
+				previous.Touch()
 				shard.mu.Unlock()
 				return ErrKeyExists
 			}
@@ -93,6 +94,10 @@ func (s *Store) applyValuePlan(key string, options *SetOptions, snapshot *Entry,
 			return err
 		}
 		if plan.Apply == nil && plan.op == nil {
+			// A write that changes nothing still looked the key up.
+			if live {
+				previous.Touch()
+			}
 			unlock()
 			return nil
 		}
@@ -146,6 +151,9 @@ func (s *Store) applyValuePlan(key string, options *SetOptions, snapshot *Entry,
 			entry.Value = value
 		} else if options != nil {
 			entry = NewEntry(value)
+			if live {
+				entry.inheritAccess(previous)
+			}
 			entry.SetTags(tags)
 			if options.KeepTTL {
 				if live {

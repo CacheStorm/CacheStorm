@@ -318,7 +318,7 @@ func incrBy(ctx *Context, incr int64) error {
 	}
 
 	key := ctx.ArgString(0)
-	entry, exists := ctx.Store.Get(key)
+	entry, exists := ctx.Store.Peek(key)
 
 	if exists {
 		data, ok := stringValueOf(entry.Value)
@@ -355,7 +355,7 @@ func cmdAPPEND(ctx *Context) error {
 	key := ctx.ArgString(0)
 	suffix := ctx.Arg(1)
 
-	entry, exists := ctx.Store.Get(key)
+	entry, exists := ctx.Store.Peek(key)
 	var newData []byte
 	enc := store.StringEncAuto
 	if !exists {
@@ -473,7 +473,7 @@ func cmdSETRANGE(ctx *Context) error {
 	}
 	value := ctx.Arg(2)
 
-	entry, exists := ctx.Store.Get(key)
+	entry, exists := ctx.Store.Peek(key)
 	var cur []byte
 	var curValue store.Value
 	if exists {
@@ -696,7 +696,7 @@ func cmdINCRBYFLOAT(ctx *Context) error {
 	}
 
 	key := ctx.ArgString(0)
-	entry, exists := ctx.Store.Get(key)
+	entry, exists := ctx.Store.Peek(key)
 	current := new(big.Float).SetPrec(longDoublePrec)
 	if exists {
 		data, ok := stringValueOf(entry.Value)

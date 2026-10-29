@@ -12,7 +12,7 @@ func TestNewEntry(t *testing.T) {
 		t.Fatal("expected entry, got nil")
 	}
 
-	if entry.LastAccess.Load() == 0 {
+	if entry.LastAccess() == 0 || entry.LFUCount() != lfuInitVal {
 		t.Error("expected LastAccess to be set")
 	}
 }
@@ -47,18 +47,15 @@ func TestEntrySetTTL(t *testing.T) {
 
 func TestEntryTouch(t *testing.T) {
 	entry := NewEntry(&StringValue{Data: []byte("test")})
-	oldAccess := entry.LastAccess.Load()
-	oldCount := entry.AccessCount.Load()
-
-	time.Sleep(1 * time.Millisecond)
+	entry.SetIdleSeconds(100)
 	entry.Touch()
 
-	if entry.LastAccess.Load() <= oldAccess {
+	if entry.IdleSeconds() != 0 {
 		t.Error("expected LastAccess to be updated")
 	}
 
-	if entry.AccessCount.Load() != oldCount+1 {
-		t.Errorf("expected AccessCount to increment")
+	if entry.LFUCount() != lfuInitVal+1 {
+		t.Errorf("expected the LFU counter to increment from its initial value")
 	}
 }
 

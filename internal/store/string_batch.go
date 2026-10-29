@@ -98,6 +98,9 @@ func (s *Store) SetStringBatch(pairs []StringPair, nx bool) (bool, error) {
 		for _, key := range keys {
 			shard := s.shards[s.shardIndex(key)]
 			entry := NewEntry(values[key])
+			if previous := shard.data[key]; previous != nil && !previous.IsExpired() {
+				entry.inheritAccess(previous)
+			}
 			if notifyNew {
 				if previous := shard.data[key]; previous == nil || previous.IsExpired() {
 					if created == nil {

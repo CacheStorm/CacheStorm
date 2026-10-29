@@ -111,10 +111,10 @@ func cmdRESTORE(ctx *Context) error {
 	}
 	if entry, exists := ctx.Store.GetShard(key).Get(key); exists {
 		if freq >= 0 && ctx.Store.UsesLFU() {
-			entry.AccessCount.Store(uint64(freq))
+			entry.SetLFUCount(uint8(freq))
 		}
 		if idle >= 0 && !ctx.Store.UsesLFU() {
-			entry.LastAccess.Store(time.Now().Add(-time.Duration(min(idle, int64(1<<24)-1)) * time.Second).UnixNano())
+			entry.SetIdleSeconds(min(idle, int64(1<<24)-1))
 		}
 	}
 	args := [][]byte{[]byte(key), strconv.AppendInt(nil, deadline, 10), ctx.Arg(2), []byte("REPLACE"), []byte("ABSTTL")}

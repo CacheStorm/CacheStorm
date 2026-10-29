@@ -286,15 +286,14 @@ func TestSetValueMethods(t *testing.T) {
 
 func TestEntryTouchMethod(t *testing.T) {
 	e := NewEntry(&StringValue{Data: []byte("v")})
-	created := e.LastAccess.Load()
-	time.Sleep(time.Millisecond)
+	e.SetIdleSeconds(100)
 	e.Touch()
 
-	if e.LastAccess.Load() <= created {
+	if e.IdleSeconds() != 0 {
 		t.Error("LastAccess should be updated")
 	}
-	if e.AccessCount.Load() != 1 {
-		t.Errorf("AccessCount should be 1, got %d", e.AccessCount.Load())
+	if e.LFUCount() != lfuInitVal+1 {
+		t.Errorf("LFU counter should be %d, got %d", lfuInitVal+1, e.LFUCount())
 	}
 }
 

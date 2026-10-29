@@ -477,6 +477,7 @@ func (c *Config) setLocked(ctx *Context, param, value string) error {
 		default:
 			c.lfuLogFactor = int(v)
 		}
+		store.SetLFUParams(int64(c.lfuLogFactor), int64(c.lfuDecayTime))
 	case "hash-max-listpack-entries", "hash-max-listpack-value", "set-max-intset-entries", "zset-max-listpack-entries":
 		var v int64
 		if param == "hash-max-listpack-value" {

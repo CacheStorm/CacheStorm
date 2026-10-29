@@ -83,7 +83,7 @@ func TestValuePlanEvictionRetriesPreservingLiveMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	victim, _ := s.Get("victim")
-	victim.LastAccess.Store(0)
+	victim.SetIdleSeconds(1 << 30)
 	var preparations int
 	if err := s.ApplyValuePlan("target", func(value Value) (ValuePlan, error) {
 		preparations++

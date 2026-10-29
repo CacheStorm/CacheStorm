@@ -3,6 +3,7 @@ package store
 import (
 	"math"
 	"sync/atomic"
+	"time"
 )
 
 var storeOrder atomic.Uint64
@@ -27,7 +28,11 @@ func lockTransferShards(src *Store, srcKey string, dst *Store, dstKey string) fu
 }
 
 func (s *Store) Transfer(srcKey string, dst *Store, dstKey string, options TransferOptions) (bool, error) {
-	if _, ok := s.Get(srcKey); !ok {
+	lookup := s.Peek
+	if options.Copy {
+		lookup = s.Get
+	}
+	if _, ok := lookup(srcKey); !ok {
 		return false, ErrKeyNotFound
 	}
 	if len(dstKey) > MaxKeySize {
@@ -107,6 +112,9 @@ func (s *Store) Transfer(srcKey string, dst *Store, dstKey string, options Trans
 			continue
 		}
 		entry := source.rehome()
+		// Like Redis' dbAdd, a key that arrives under a new name starts its
+		// access history afresh.
+		entry.access.Store(newAccess(time.Now().Unix()))
 		entry.SetTags(append([]string(nil), source.TagList()...))
 		if options.Copy {
 			entry = NewEntry(source.Value.Clone())

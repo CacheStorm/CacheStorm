@@ -48,6 +48,6 @@ func TestAudit50R14X(t *testing.T) {
 	checkAudit50R14X(t, "no expiry TTL", time.Duration(-1), entry.TTL())
 	entry.Touch()
 	entry.Touch()
-	checkAudit50R14X(t, "access counter", uint64(2), entry.AccessCount.Load())
+	checkAudit50R14X(t, "access counter", true, entry.LFUCount() >= lfuInitVal+1)
 
 }
