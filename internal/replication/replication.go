@@ -258,6 +258,14 @@ func (m *Manager) Role() Role {
 	return m.role
 }
 
+// MasterAddr returns the master's host and port while the server is a
+// replica; ok is false on a master.
+func (m *Manager) MasterAddr() (host string, port int, ok bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.masterHost, m.masterPort, m.role == RoleReplica
+}
+
 // ReadOnly reports whether client writes must be refused: the server is a
 // read-only replica.
 func (m *Manager) ReadOnly() bool {

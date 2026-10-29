@@ -6,6 +6,7 @@ import (
 	"math"
 	"math/bits"
 	"sync"
+	"sync/atomic"
 )
 
 const HLLRegisterCount = 1 << 14
@@ -318,9 +319,14 @@ func AddDenseHLL(data []byte, elements [][]byte) ([]byte, bool, error) {
 	return next, true, nil
 }
 
-// hllSparseMaxBytes is Redis' default hll-sparse-max-bytes: a sparse HLL
-// that would grow past it is promoted to dense.
-const hllSparseMaxBytes = 3000
+// hllSparseMaxBytes is hll-sparse-max-bytes: a sparse HLL that would grow
+// past it is promoted to dense.
+var hllSparseMaxBytes atomic.Int64
+
+func init() { hllSparseMaxBytes.Store(3000) }
+
+// SetHLLSparseMaxBytes sets hll-sparse-max-bytes.
+func SetHLLSparseMaxBytes(n int64) { hllSparseMaxBytes.Store(n) }
 
 // NewSparseHLL returns the encoding of an empty HLL, as Redis creates one.
 func NewSparseHLL() []byte {
@@ -443,7 +449,7 @@ func hllSet(data []byte, index int, count uint8) ([]byte, int) {
 		oldlen = 2
 	}
 	delta := len(seq) - oldlen
-	if delta > 0 && len(data)+delta > hllSparseMaxBytes {
+	if delta > 0 && int64(len(data)+delta) > hllSparseMaxBytes.Load() {
 		return hllPromote(data, index, count)
 	}
 	out := make([]byte, 0, len(data)+delta+1)

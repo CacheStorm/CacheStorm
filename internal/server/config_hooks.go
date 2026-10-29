@@ -31,7 +31,22 @@ func (s *Server) configValues() map[string]string {
 	if appendfsync == "" {
 		appendfsync = "everysec"
 	}
+	replicaof := ""
+	if s.repl != nil {
+		if host, port, ok := s.repl.MasterAddr(); ok {
+			replicaof = host + " " + strconv.Itoa(port)
+		}
+	}
+	rc := s.cfg.Replication
 	return map[string]string{
+		"cluster-enabled":             configYesNo(s.cfg.Cluster.Enabled),
+		"replicaof":                   replicaof,
+		"masterauth":                  rc.MasterAuth,
+		"repl-backlog-size":           strconv.Itoa(rc.BacklogSize),
+		"repl-timeout":                strconv.Itoa(rc.ReplTimeout),
+		"replica-read-only":           configYesNo(rc.ReadOnly),
+		"replica-announce-ip":         rc.ReplicaAnnounceIP,
+		"replica-announce-port":       strconv.Itoa(rc.ReplicaAnnouncePort),
 		"maxmemory":                   strconv.FormatInt(limit, 10),
 		"maxmemory-policy":            policy.String(),
 		"maxmemory-samples":           strconv.Itoa(samples),
@@ -120,6 +135,12 @@ func (s *Server) configSet(name, value string) (bool, error) {
 		return true, command.ConfigSetError(name, "can't set immutable config")
 	case "dir", "dbfilename":
 		return true, command.ConfigSetError(name, "can't set protected config")
+	case "masterauth", "repl-backlog-size", "repl-timeout", "replica-read-only", "replica-announce-ip", "replica-announce-port":
+		// The replication settings are read when replication starts.
+		if err := command.ValidateConfigParam(name, value); err != nil {
+			return true, err
+		}
+		return true, command.ConfigSetError(name, "can't set immutable config")
 	case "bind", "databases", "appendfilename":
 		return true, command.ConfigSetError(name, "can't set immutable config")
 	}

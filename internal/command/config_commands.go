@@ -44,6 +44,11 @@ type Config struct {
 	listMaxListpackSize    int
 	setMaxIntsetEntries    int64
 	zsetMaxListpackEntries int
+	setMaxListpackEntries  int64
+	setMaxListpackValue    int64
+	// params holds the values CONFIG SET gave the parameters in
+	// configParams.
+	params map[string]string
 }
 
 var globalConfig = &Config{
@@ -76,6 +81,8 @@ var globalConfig = &Config{
 	listMaxListpackSize:    -2,
 	setMaxIntsetEntries:    512,
 	zsetMaxListpackEntries: 128,
+	setMaxListpackEntries:  128,
+	setMaxListpackValue:    64,
 }
 
 func RegisterConfigCommands(router *Router) {
@@ -254,6 +261,9 @@ func configValues(ctx *Context) map[string]string {
 		"latency-tracking":                  boolStr(commandStats.tracking.Load()),
 		"latency-tracking-info-percentiles": formatLatencyPercentiles(),
 	}
+	for name, p := range configParams {
+		values[name] = c.paramValueLocked(name, p)
+	}
 	c.mu.RUnlock()
 	if ctx.Store != nil {
 		values["notify-keyspace-events"] = store.FormatNotifyFlags(ctx.Store.NotifyFlags())
@@ -262,6 +272,9 @@ func configValues(ctx *Context) map[string]string {
 		for name, value := range h.Values() {
 			values[name] = value
 		}
+	}
+	for alias, name := range configAliases {
+		values[alias] = values[name]
 	}
 	return values
 }
@@ -292,6 +305,16 @@ func cmdConfigGet(ctx *Context) error {
 	return ctx.Writer.WriteValue(resp.PairsValue(results))
 }
 
+// configParamName is the lower-case name of a CONFIG SET parameter, with an
+// alias resolved to the parameter it names.
+func configParamName(name string) string {
+	name = strings.ToLower(name)
+	if canonical, ok := configAliases[name]; ok {
+		return canonical
+	}
+	return name
+}
+
 func boolStr(b bool) string {
 	if b {
 		return "yes"
@@ -311,7 +334,7 @@ func cmdConfigSet(ctx *Context) error {
 	known := configValues(ctx)
 	seen := make(map[string]bool, ctx.ArgCount()/2)
 	for i := 1; i < ctx.ArgCount(); i += 2 {
-		param := strings.ToLower(ctx.ArgString(i))
+		param := configParamName(ctx.ArgString(i))
 		if _, ok := known[param]; !ok && !configSettable[param] {
 			return ctx.WriteError(errors.New("ERR Unknown option or number of arguments for CONFIG SET - '" + ctx.ArgString(i) + "'"))
 		}
@@ -339,8 +362,11 @@ func cmdConfigSet(ctx *Context) error {
 	// none: a failure restores the parameters already set.
 	applied := make([]string, 0, ctx.ArgCount()/2)
 	for i := 1; i < ctx.ArgCount(); i += 2 {
-		param := strings.ToLower(ctx.ArgString(i))
+		param := configParamName(ctx.ArgString(i))
 		if err := apply(param, ctx.ArgString(i+1)); err != nil {
+			if given := strings.ToLower(ctx.ArgString(i)); given != param {
+				err = errors.New(strings.Replace(err.Error(), "argument '"+param+"')", "argument '"+given+"')", 1))
+			}
 			for j := len(applied) - 1; j >= 0; j-- {
 				if old, ok := known[applied[j]]; ok {
 					_ = apply(applied[j], old) //nolint:errcheck // the old value was valid when set
@@ -452,9 +478,21 @@ func (c *Config) setLocked(ctx *Context, param, value string) error {
 			c.lfuLogFactor = int(v)
 		}
 	case "hash-max-listpack-entries", "hash-max-listpack-value", "set-max-intset-entries", "zset-max-listpack-entries":
-		v, err := ParseConfigInt(param, value, 0, configLongMax)
-		if err != nil {
-			return err
+		var v int64
+		if param == "hash-max-listpack-value" {
+			u, ok := redisMemtoull(value)
+			if !ok {
+				return ConfigSetError(param, "argument must be a memory value")
+			}
+			if u > configLongMax {
+				return ConfigSetError(param, "argument must be between 0 and 9223372036854775807 inclusive")
+			}
+			v = int64(u)
+		} else {
+			var err error
+			if v, err = ParseConfigInt(param, value, 0, configLongMax); err != nil {
+				return err
+			}
 		}
 		switch param {
 		case "hash-max-listpack-entries":
@@ -465,7 +503,7 @@ func (c *Config) setLocked(ctx *Context, param, value string) error {
 			store.SetHashListpackLimits(int64(c.hashMaxListpackEntries), v)
 		case "set-max-intset-entries":
 			c.setMaxIntsetEntries = v
-			store.SetSetEncodingLimits(v, encMaxListpackEntries, encMaxListpackValue)
+			store.SetSetEncodingLimits(v, c.setMaxListpackEntries, c.setMaxListpackValue)
 		default:
 			c.zsetMaxListpackEntries = int(v)
 			_, value := store.ZsetListpackLimits()
@@ -518,6 +556,9 @@ func (c *Config) setLocked(ctx *Context, param, value string) error {
 	case "save":
 		c.saveIntervals = strings.Fields(value)
 	default:
+		if p, ok := configParams[param]; ok {
+			return c.setParamLocked(param, value, p)
+		}
 		return errors.New("ERR Unknown option or number of arguments for CONFIG SET - '" + param + "'")
 	}
 	return nil

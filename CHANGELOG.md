@@ -189,6 +189,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Authentication: only AUTH, HELLO, QUIT and RESET run before a requirepass client authenticates, the commands Redis flags `no_auth`. PING and COMMAND were exempt too, so an unauthenticated client could probe the server
 
 ### Fixed
+- CONFIG GET and CONFIG SET know every Redis 7.4 parameter, including the old `*-ziplist-*` and `slave*` aliases, with Redis' defaults, value formats (memory units, `hz` clamped to 500, `client-output-buffer-limit` merged per class) and errors, immutable parameters included. `set-max-listpack-entries`, `set-max-listpack-value`, `zset-max-listpack-value`, `hll-sparse-max-bytes` and `acllog-max-len` take effect; `cluster-enabled`, `replicaof` and the replication settings show the running configuration, and the replication settings, which CacheStorm reads when replication starts, are refused as immutable after Redis' validation. `hash-max-listpack-value` takes a memory value, as in Redis
 - GEOPOS, GEODIST and GEOHASH look up only the members asked for; each call copied the whole set, so on a 200,000-member set 2,000 GEOPOS calls took 141 seconds (now 0.006)
 - SINTERCARD stops at LIMIT and no longer copies the smallest set (2,000 calls over a 100,000-member set with LIMIT 5: 30 seconds, now 0.006)
 - BITCOUNT and BITPOS read a bitmap SETBIT or BITFIELD wrote in place instead of copying all of it, so a small range of a large bitmap costs what the range does

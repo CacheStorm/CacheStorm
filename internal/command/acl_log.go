@@ -10,9 +10,6 @@ import (
 	"github.com/cachestorm/cachestorm/internal/resp"
 )
 
-// aclLogMaxLen is acllog-max-len: how many ACL LOG entries are kept.
-const aclLogMaxLen = 128
-
 // aclLogGroupWindow is how long a repeated denial adds to the existing entry
 // instead of starting a new one, as in Redis.
 const aclLogGroupWindow = 60 * time.Second
@@ -86,8 +83,8 @@ func recordACLDenial(ctx *Context, reason, object, username string) {
 		username: username, clientInfo: clientInfo, created: now, updated: now}
 	aclLog.nextID++
 	aclLog.entries = append([]*aclLogEntry{e}, aclLog.entries...)
-	if len(aclLog.entries) > aclLogMaxLen {
-		aclLog.entries = aclLog.entries[:aclLogMaxLen]
+	if limit := int(aclLogMaxLenValue.Load()); len(aclLog.entries) > limit {
+		aclLog.entries = aclLog.entries[:limit]
 	}
 }
 

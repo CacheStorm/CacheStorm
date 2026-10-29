@@ -41,8 +41,8 @@ func TestConfigGetReportsTheRunningConfiguration(t *testing.T) {
 	if exact := configPairs(t, c.do("CONFIG", "GET", "maxmemory")); len(exact) != 1 {
 		t.Fatalf("CONFIG GET maxmemory matched %v, want only maxmemory", exact)
 	}
-	if glob := configPairs(t, c.do("CONFIG", "GET", "maxmemory*")); len(glob) != 3 {
-		t.Fatalf("CONFIG GET maxmemory* matched %v, want the three maxmemory parameters", glob)
+	if glob := configPairs(t, c.do("CONFIG", "GET", "maxmemory*")); len(glob) != 5 {
+		t.Fatalf("CONFIG GET maxmemory* matched %v, want Redis' five maxmemory parameters", glob)
 	}
 }
 
