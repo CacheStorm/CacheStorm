@@ -193,6 +193,7 @@ func (c *Connection) endBlocking() bool {
 	c.blockMu.Lock()
 	defer c.blockMu.Unlock()
 	c.unblockCh = nil
+	c.blocked.Store(false)
 	return c.unblockErr
 }
 
