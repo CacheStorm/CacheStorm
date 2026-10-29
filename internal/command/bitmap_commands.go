@@ -153,6 +153,25 @@ func bitmapBytes(ctx *Context, key string) ([]byte, bool, error) {
 	return nil, true, store.ErrWrongType
 }
 
+// readBitmap runs fn on key's string bytes, read-locked rather than copied,
+// and reports whether the key exists; err is WRONGTYPE for a key of another
+// type.
+func readBitmap(ctx *Context, key string, fn func(data []byte) int64) (int64, bool, error) {
+	entry, ok := ctx.Store.Get(key)
+	if !ok {
+		return 0, false, nil
+	}
+	switch v := entry.Value.(type) {
+	case *BitmapValue:
+		v.mu.RLock()
+		defer v.mu.RUnlock()
+		return fn(v.Data), true, nil
+	case *store.StringValue:
+		return fn(v.Data), true, nil
+	}
+	return 0, true, store.ErrWrongType
+}
+
 // bitRange resolves a BITCOUNT/BITPOS start/end pair over totlen bytes, as
 // Redis does: in BIT mode the range is in bits and the edge bytes get masks
 // for the bits outside it.
@@ -218,36 +237,36 @@ func cmdBITCOUNT(ctx *Context) error {
 			}
 		}
 	}
-	data, ok, err := bitmapBytes(ctx, ctx.ArgString(0))
+	count, _, err := readBitmap(ctx, ctx.ArgString(0), func(data []byte) int64 {
+		start, end := start, end
+		var firstMask, lastMask byte
+		if n >= 3 {
+			if start < 0 && end < 0 && start > end {
+				return 0
+			}
+			start, end, firstMask, lastMask = bitRange(start, end, int64(len(data)), isBit)
+		} else {
+			start, end = 0, int64(len(data))-1
+		}
+		if start > end {
+			return 0
+		}
+		count := 0
+		for _, b := range data[start : end+1] {
+			count += bits.OnesCount8(b)
+		}
+		if firstMask != 0 {
+			count -= bits.OnesCount8(data[start] & firstMask)
+		}
+		if lastMask != 0 {
+			count -= bits.OnesCount8(data[end] & lastMask)
+		}
+		return int64(count)
+	})
 	if err != nil {
 		return ctx.WriteError(err)
 	}
-	if !ok {
-		return ctx.WriteInteger(0)
-	}
-	var firstMask, lastMask byte
-	if n >= 3 {
-		if start < 0 && end < 0 && start > end {
-			return ctx.WriteInteger(0)
-		}
-		start, end, firstMask, lastMask = bitRange(start, end, int64(len(data)), isBit)
-	} else {
-		start, end = 0, int64(len(data))-1
-	}
-	if start > end {
-		return ctx.WriteInteger(0)
-	}
-	count := 0
-	for _, b := range data[start : end+1] {
-		count += bits.OnesCount8(b)
-	}
-	if firstMask != 0 {
-		count -= bits.OnesCount8(data[start] & firstMask)
-	}
-	if lastMask != 0 {
-		count -= bits.OnesCount8(data[end] & lastMask)
-	}
-	return ctx.WriteInteger(int64(count))
+	return ctx.WriteInteger(count)
 }
 
 func cmdBITPOS(ctx *Context) error {
@@ -283,7 +302,37 @@ func cmdBITPOS(ctx *Context) error {
 	case n != 2:
 		return ctx.WriteError(ErrSyntaxError)
 	}
-	data, ok, err := bitmapBytes(ctx, ctx.ArgString(0))
+	pos, ok, err := readBitmap(ctx, ctx.ArgString(0), func(data []byte) int64 {
+		start, end, firstMask, lastMask := bitRange(start, end, int64(len(data)), isBit)
+		if start > end {
+			return -1
+		}
+		want := bit == 1
+		for i := start; i <= end; i++ {
+			b := data[i]
+			var outside byte
+			if i == start {
+				outside |= firstMask
+			}
+			if i == end {
+				outside |= lastMask
+			}
+			if want {
+				b &^= outside
+			} else {
+				b |= outside
+			}
+			for j := 0; j < 8; j++ {
+				if (b&(0x80>>j) != 0) == want {
+					return i*8 + int64(j)
+				}
+			}
+		}
+		if want || endGiven {
+			return -1
+		}
+		return (end + 1) * 8
+	})
 	if err != nil {
 		return ctx.WriteError(err)
 	}
@@ -293,35 +342,7 @@ func cmdBITPOS(ctx *Context) error {
 		}
 		return ctx.WriteInteger(0)
 	}
-	start, end, firstMask, lastMask := bitRange(start, end, int64(len(data)), isBit)
-	if start > end {
-		return ctx.WriteInteger(-1)
-	}
-	want := bit == 1
-	for i := start; i <= end; i++ {
-		b := data[i]
-		var outside byte
-		if i == start {
-			outside |= firstMask
-		}
-		if i == end {
-			outside |= lastMask
-		}
-		if want {
-			b &^= outside
-		} else {
-			b |= outside
-		}
-		for j := 0; j < 8; j++ {
-			if (b&(0x80>>j) != 0) == want {
-				return ctx.WriteInteger(i*8 + int64(j))
-			}
-		}
-	}
-	if want || endGiven {
-		return ctx.WriteInteger(-1)
-	}
-	return ctx.WriteInteger((end + 1) * 8)
+	return ctx.WriteInteger(pos)
 }
 
 func cmdBITOP(ctx *Context) error {

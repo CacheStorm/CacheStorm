@@ -2,6 +2,7 @@ package command
 
 import (
 	"errors"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -460,60 +461,38 @@ func cmdSINTERCARD(ctx *Context) error {
 		return ctx.WriteError(ErrSyntaxError)
 	}
 
-	// The shared set-operations lock: a concurrent MoveSetMember takes it
-	// exclusively, so this multi-set read can never observe the move
-	// half-applied.
-	ctx.Store.SetOpsRLock()
-	sets := make([]*store.SetValue, 0, numKeys)
-	missing := false
-	for i := 1; i <= int(numKeys); i++ {
-		set, err := getSet(ctx, ctx.ArgString(i))
-		if err != nil {
-			ctx.Store.SetOpsRUnlock()
-			return ctx.WriteError(err)
-		}
-		if set == nil {
-			missing = true
-			continue
-		}
-		sets = append(sets, set)
+	keys := make([]string, numKeys)
+	for i := range keys {
+		keys[i] = ctx.ArgString(i + 1)
 	}
-
+	src, err := openSetOpSources(ctx, keys)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	defer src.close()
 	count := int64(0)
-	if !missing {
-		// Start from the smallest set and filter it through the others, one
-		// lock at a time.
-		smallest, smallestLen := 0, -1
-		for i, s := range sets {
-			s.RLock()
-			size := len(s.Members)
-			s.RUnlock()
-			if smallestLen < 0 || size < smallestLen {
-				smallest, smallestLen = i, size
-			}
-		}
-		sets[0], sets[smallest] = sets[smallest], sets[0]
-		sets[0].RLock()
-		result := make(map[string]struct{}, len(sets[0].Members))
-		for m := range sets[0].Members {
-			result[m] = struct{}{}
-		}
-		sets[0].RUnlock()
-		for _, s := range sets[1:] {
-			s.RLock()
-			for m := range result {
-				if _, ok := s.Members[m]; !ok {
-					delete(result, m)
-				}
-			}
-			s.RUnlock()
-		}
-		count = int64(len(result))
-		if limit > 0 && count > limit {
-			count = limit
+	for _, set := range src.sets {
+		if set == nil {
+			return ctx.WriteInteger(0)
 		}
 	}
-	ctx.Store.SetOpsRUnlock()
+	sets := append([]*store.SetValue(nil), src.sets...)
+	sort.SliceStable(sets, func(i, j int) bool { return len(sets[i].Members) < len(sets[j].Members) })
+	for m := range sets[0].Members {
+		found := true
+		for _, other := range sets[1:] {
+			if _, ok := other.Members[m]; !ok {
+				found = false
+				break
+			}
+		}
+		if found {
+			count++
+			if count == limit {
+				break
+			}
+		}
+	}
 	return ctx.WriteInteger(count)
 }
 

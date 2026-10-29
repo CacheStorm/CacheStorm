@@ -42,6 +42,22 @@ func stringValueOf(v store.Value) ([]byte, bool) {
 	return nil, false
 }
 
+// growString returns cur with room for n bytes, to be appended to. Like
+// Redis' sds it grows a string APPEND or SETRANGE extends by doubling it, up
+// to a megabyte at a time, so a string built by repeated appends costs
+// linear time; it appends in place only to a buffer such a command made, as
+// the bytes past a published string's length are then nobody else's.
+func growString(v store.Value, cur []byte, n int) []byte {
+	if sv, ok := v.(*store.StringValue); ok && sv.Enc == store.StringEncRaw && cap(cur) >= n {
+		return cur
+	}
+	room := n + min(n, 1<<20)
+	if int64(room) > store.MaxValueSize {
+		room = n
+	}
+	return append(make([]byte, 0, room), cur...)
+}
+
 func RegisterStringCommands(router *Router) {
 	router.Register(&CommandDef{Name: "SET", Handler: cmdSET})
 	router.Register(&CommandDef{Name: "GET", Handler: cmdGET})
@@ -341,23 +357,22 @@ func cmdAPPEND(ctx *Context) error {
 
 	entry, exists := ctx.Store.Get(key)
 	var newData []byte
+	enc := store.StringEncAuto
 	if !exists {
 		newData = suffix
 	} else {
+		enc = store.StringEncRaw
 		cur, ok := stringValueOf(entry.Value)
 		if !ok {
 			return ctx.WriteError(store.ErrWrongType)
 		}
-		newData = make([]byte, 0, len(cur)+len(suffix))
-		newData = append(newData, cur...)
-		newData = append(newData, suffix...)
+		if int64(len(cur))+int64(len(suffix)) > store.MaxValueSize {
+			return ctx.WriteError(errStringTooLong)
+		}
+		newData = append(growString(entry.Value, cur, len(cur)+len(suffix)), suffix...)
 	}
 
-	if int64(len(newData)) > store.MaxValueSize {
-		return ctx.WriteError(errStringTooLong)
-	}
-
-	if err := ctx.Store.Set(key, &store.StringValue{Data: newData}, store.SetOptions{KeepTTL: true}); err != nil {
+	if err := ctx.Store.Set(key, &store.StringValue{Data: newData, Enc: enc}, store.SetOptions{KeepTTL: true}); err != nil {
 		return ctx.WriteError(err)
 	}
 	ctx.notify(store.NotifyString, "append", key)
@@ -460,12 +475,13 @@ func cmdSETRANGE(ctx *Context) error {
 
 	entry, exists := ctx.Store.Get(key)
 	var cur []byte
+	var curValue store.Value
 	if exists {
 		data, ok := stringValueOf(entry.Value)
 		if !ok {
 			return ctx.WriteError(store.ErrWrongType)
 		}
-		cur = data
+		cur, curValue = data, entry.Value
 	}
 	// Writing nothing changes nothing: Redis replies with the current length
 	// and does not create a missing key.
@@ -478,10 +494,17 @@ func cmdSETRANGE(ctx *Context) error {
 	}
 
 	newLen := max(int(offset)+len(value), len(cur))
-	data := make([]byte, newLen)
-	copy(data, cur)
-	copy(data[offset:], value)
-	if err := ctx.Store.Set(key, &store.StringValue{Data: data}, store.SetOptions{KeepTTL: true}); err != nil {
+	var data []byte
+	if int(offset) >= len(cur) {
+		data = growString(curValue, cur, newLen)
+		data = append(data, make([]byte, int(offset)-len(cur))...)
+		data = append(data, value...)
+	} else {
+		data = make([]byte, newLen)
+		copy(data, cur)
+		copy(data[offset:], value)
+	}
+	if err := ctx.Store.Set(key, &store.StringValue{Data: data, Enc: store.StringEncRaw}, store.SetOptions{KeepTTL: true}); err != nil {
 		return ctx.WriteError(err)
 	}
 	ctx.notify(store.NotifyString, "setrange", key)
@@ -694,7 +717,7 @@ func cmdINCRBYFLOAT(ctx *Context) error {
 		return ctx.WriteError(ErrFloatOverflow)
 	}
 	opts := store.SetOptions{KeepTTL: true}
-	if err := ctx.Store.Set(key, &store.StringValue{Data: []byte(formatted)}, opts); err != nil {
+	if err := ctx.Store.Set(key, &store.StringValue{Data: []byte(formatted), Enc: store.StringEncNoInt}, opts); err != nil {
 		return ctx.WriteError(err)
 	}
 	ctx.notify(store.NotifyString, "incrbyfloat", key)

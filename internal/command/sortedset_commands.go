@@ -437,6 +437,14 @@ flags:
 		return ctx.WriteInteger(0)
 	}
 
+	maxLen := 0
+	if len(zset.Members) == 0 {
+		for j := 0; j < pairs; j++ {
+			maxLen = max(maxLen, len(ctx.Arg(i+2*j+1)))
+		}
+	}
+	zset.NoteAdd(pairs, maxLen)
+
 	added, updated, processed := 0, 0, 0
 	var lastScore float64
 	for j := 0; j < pairs; j++ {

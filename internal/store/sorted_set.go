@@ -18,6 +18,7 @@ type SortedSetValue struct {
 	index   atomic.Pointer[zskiplist]
 	indexMu sync.Mutex
 	scanCache
+	big bool
 }
 
 func (v *SortedSetValue) Lock()    { v.mu.Lock() }
@@ -61,7 +62,7 @@ func (v *SortedSetValue) String() string {
 func (v *SortedSetValue) Clone() Value {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
-	cloned := &SortedSetValue{Members: make(map[string]float64, len(v.Members))}
+	cloned := &SortedSetValue{Members: make(map[string]float64, len(v.Members)), big: v.big}
 	for k, score := range v.Members {
 		cloned.Members[k] = score
 	}
@@ -145,6 +146,7 @@ func (v *SortedSetValue) Add(member string, score float64) bool {
 	if !exists {
 		v.size.add(zsetMemberSize(member))
 		v.invalidateScan()
+		v.noteAddLocked(len(v.Members), len(member))
 	}
 	return !exists
 }
@@ -248,10 +250,6 @@ func (b LexBound) lteMax(member string) bool {
 	return member <= b.Val
 }
 
-// zsetListpackEntries is the size up to which Redis keeps a sorted set as a
-// listpack and walks it in order for a lexicographic range.
-const zsetListpackEntries = 128
-
 // LexRange returns the members of a lexicographic range in Redis' order: it
 // assumes all members share a score, and with mixed scores returns what
 // Redis does — the run of members, in (score, member) order, that starts at
@@ -302,7 +300,7 @@ func (v *SortedSetValue) CountLex(min, max LexBound) int {
 	if z.length == 0 || !min.gteMin(z.tail.member) || !max.lteMax(z.first().member) {
 		return 0
 	}
-	if len(v.Members) > zsetListpackEntries {
+	if v.Skiplist() {
 		first := z.countBefore(func(n *zslNode) bool { return !min.gteMin(n.member) })
 		last := z.countBefore(func(n *zslNode) bool { return max.lteMax(n.member) })
 		if last < first {
@@ -318,7 +316,7 @@ func (v *SortedSetValue) CountLex(min, max LexBound) int {
 }
 
 func (v *SortedSetValue) firstNotBelow(z *zskiplist, min LexBound) *zslNode {
-	if len(v.Members) > zsetListpackEntries {
+	if v.Skiplist() {
 		return z.byRank(z.countBefore(func(n *zslNode) bool { return !min.gteMin(n.member) }) + 1)
 	}
 	for x := z.first(); x != nil; x = x.level[0].forward {
@@ -330,7 +328,7 @@ func (v *SortedSetValue) firstNotBelow(z *zskiplist, min LexBound) *zslNode {
 }
 
 func (v *SortedSetValue) lastNotAbove(z *zskiplist, max LexBound) *zslNode {
-	if len(v.Members) > zsetListpackEntries {
+	if v.Skiplist() {
 		return z.byRank(z.countBefore(func(n *zslNode) bool { return max.lteMax(n.member) }))
 	}
 	for x := z.tail; x != nil; x = x.backward {

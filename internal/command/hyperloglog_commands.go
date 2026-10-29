@@ -183,7 +183,9 @@ func decodeHLLValue(value store.Value) (*store.HLLState, error) {
 	return store.DecodeHLL(data)
 }
 func hllStringPlan(data []byte) store.ValuePlan {
-	return store.ValuePlan{Size: int64(len(data)) + 24, Apply: func() store.Value { return &store.StringValue{Data: data} }}
+	return store.ValuePlan{Size: int64(len(data)) + 24, Apply: func() store.Value {
+		return &store.StringValue{Data: data[:len(data):len(data)], Enc: store.StringEncRaw}
+	}}
 }
 
 func cmdPFADD(ctx *Context) error {

@@ -49,7 +49,19 @@ type Value interface {
 
 type StringValue struct {
 	Data []byte
+	Enc  StringEncoding
 }
+
+// StringEncoding records how a command built a string, for OBJECT ENCODING:
+// Redis stores a value it was given as an int or embstr when it can, but a
+// string changed in place is raw and INCRBYFLOAT's result is never an int.
+type StringEncoding uint8
+
+const (
+	StringEncAuto StringEncoding = iota
+	StringEncRaw
+	StringEncNoInt
+)
 
 func (v *StringValue) Type() DataType { return DataTypeString }
 func (v *StringValue) SizeOf() int64  { return int64(len(v.Data)) + 24 }
@@ -57,7 +69,7 @@ func (v *StringValue) String() string { return string(v.Data) }
 func (v *StringValue) Clone() Value {
 	cloned := make([]byte, len(v.Data))
 	copy(cloned, v.Data)
-	return &StringValue{Data: cloned}
+	return &StringValue{Data: cloned, Enc: v.Enc}
 }
 
 type HashValue struct {

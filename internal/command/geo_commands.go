@@ -27,36 +27,33 @@ func RegisterGeoCommands(router *Router) {
 	router.Register(&CommandDef{Name: "GEOSEARCHSTORE", Handler: cmdGEOSEARCHSTORE})
 }
 
-type geoReadValue struct {
-	*store.GeoValue
-	scores map[string]float64
-}
-
-func getGeo(ctx *Context, key string) (*geoReadValue, error) {
+// geoPoints looks up the positions of members of the geo set at key; ok is
+// false when the key is missing.
+func geoPoints(ctx *Context, key string, members ...string) (points map[string]store.GeoPoint, ok bool, err error) {
 	entry, exists := ctx.Store.Get(key)
 	if !exists {
-		return nil, nil
+		return nil, false, nil
 	}
-	result := &geoReadValue{GeoValue: store.NewGeoValue(), scores: make(map[string]float64)}
+	points = make(map[string]store.GeoPoint, len(members))
 	switch value := entry.Value.(type) {
 	case *store.GeoValue:
-		result.GeoValue = value
-		value.RLock()
-		for member, point := range value.Points {
-			result.scores[member] = store.GeoScore(point.Lon, point.Lat)
+		for _, member := range members {
+			if point, found := value.Get(member); found {
+				points[member] = point
+			}
 		}
-		value.RUnlock()
 	case *store.SortedSetValue:
 		value.RLock()
-		for member, score := range value.Members {
-			result.Points[member] = store.GeoPointFromScore(score)
-			result.scores[member] = score
+		for _, member := range members {
+			if score, found := value.Members[member]; found {
+				points[member] = store.GeoPointFromScore(score)
+			}
 		}
 		value.RUnlock()
 	default:
-		return nil, store.ErrWrongType
+		return nil, false, store.ErrWrongType
 	}
-	return result, nil
+	return points, true, nil
 }
 
 func cmdGEOADD(ctx *Context) error {
@@ -162,6 +159,12 @@ options:
 				defer zset.RUnlock()
 			}
 			updates := make(map[string]float64, len(points))
+			maxLen := 0
+			for i := range points {
+				if zset == nil {
+					maxLen = max(maxLen, len(ctx.Arg(argIdx+i*3+2)))
+				}
+			}
 			for i, point := range points {
 				member := ctx.ArgString(argIdx + i*3 + 2)
 				score := store.GeoScore(point.Lon, point.Lat)
@@ -187,28 +190,33 @@ options:
 				return store.ValuePlan{}, nil
 			}
 			return store.ValuePlan{Size: size, Apply: func() store.Value {
-				result := &store.SortedSetValue{Members: make(map[string]float64)}
-				if zset != nil {
-					zset.RLock()
-					for member, score := range zset.Members {
-						result.Add(member, score)
-					}
-					zset.RUnlock()
+				target := zset
+				if _, shared := value.(*store.SortedSetValue); shared {
+					target.Lock()
+					defer target.Unlock()
+				} else if target == nil {
+					target = &store.SortedSetValue{Members: make(map[string]float64, len(updates))}
 				}
+				target.NoteAdd(len(points), maxLen)
 				for member, score := range updates {
-					result.Add(member, score)
+					target.Add(member, score)
 				}
-				return result
+				return target
 			}}, nil
 		})
 		if err != nil {
 			return ctx.WriteError(err)
 		}
 	}
+	return geoAddReply(ctx, key, added, changed, ch)
+}
+
+func geoAddReply(ctx *Context, key string, added, changed int, ch bool) error {
 	if added+changed == 0 {
 		ctx.PropagateAs()
 	} else {
 		ctx.notify(store.NotifyZSet, "zadd", key)
+		ctx.Store.KeyNotifier().NotifyKey(key)
 	}
 
 	if ch {
@@ -314,15 +322,15 @@ func cmdGEODIST(ctx *Context) error {
 	if !ok {
 		return ctx.WriteError(errUnsupportedGeoUnit)
 	}
-	geo, err := getGeo(ctx, ctx.ArgString(0))
+	geo, exists, err := geoPoints(ctx, ctx.ArgString(0), ctx.ArgString(1), ctx.ArgString(2))
 	if err != nil {
 		return ctx.WriteError(err)
 	}
-	if geo == nil {
+	if !exists {
 		return ctx.WriteNull()
 	}
-	a, okA := geo.Get(ctx.ArgString(1))
-	b, okB := geo.Get(ctx.ArgString(2))
+	a, okA := geo[ctx.ArgString(1)]
+	b, okB := geo[ctx.ArgString(2)]
 	if !okA || !okB {
 		return ctx.WriteNull()
 	}
@@ -349,11 +357,15 @@ func cmdGEOHASH(ctx *Context) error {
 
 	key := ctx.ArgString(0)
 
-	geo, err := getGeo(ctx, key)
+	members := make([]string, ctx.ArgCount()-1)
+	for i := range members {
+		members[i] = ctx.ArgString(i + 1)
+	}
+	geo, exists, err := geoPoints(ctx, key, members...)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
-	if geo == nil {
+	if !exists {
 		results := make([]*resp.Value, ctx.ArgCount()-1)
 		for i := range results {
 			results[i] = resp.NullValue()
@@ -364,7 +376,7 @@ func cmdGEOHASH(ctx *Context) error {
 	results := make([]*resp.Value, 0, ctx.ArgCount()-1)
 	for i := 1; i < ctx.ArgCount(); i++ {
 		member := ctx.ArgString(i)
-		point, exists := geo.Get(member)
+		point, exists := geo[member]
 		if !exists {
 			results = append(results, resp.NullValue())
 		} else {
@@ -383,11 +395,15 @@ func cmdGEOPOS(ctx *Context) error {
 
 	key := ctx.ArgString(0)
 
-	geo, err := getGeo(ctx, key)
+	members := make([]string, ctx.ArgCount()-1)
+	for i := range members {
+		members[i] = ctx.ArgString(i + 1)
+	}
+	geo, exists, err := geoPoints(ctx, key, members...)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
-	if geo == nil {
+	if !exists {
 		results := make([]*resp.Value, ctx.ArgCount()-1)
 		for i := range results {
 			results[i] = resp.NullArray()
@@ -398,7 +414,7 @@ func cmdGEOPOS(ctx *Context) error {
 	results := make([]*resp.Value, 0, ctx.ArgCount()-1)
 	for i := 1; i < ctx.ArgCount(); i++ {
 		member := ctx.ArgString(i)
-		point, exists := geo.Get(member)
+		point, exists := geo[member]
 		if !exists {
 			results = append(results, resp.NullArray())
 		} else {

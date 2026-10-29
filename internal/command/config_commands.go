@@ -468,6 +468,8 @@ func (c *Config) setLocked(ctx *Context, param, value string) error {
 			store.SetSetEncodingLimits(v, encMaxListpackEntries, encMaxListpackValue)
 		default:
 			c.zsetMaxListpackEntries = int(v)
+			_, value := store.ZsetListpackLimits()
+			store.SetZsetListpackLimits(v, value)
 		}
 	case "list-max-listpack-size":
 		v, err := ParseConfigInt(param, value, configIntMin, configIntMax)

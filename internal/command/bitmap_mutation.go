@@ -136,8 +136,14 @@ func bitmapValuePlan(current store.Value, data []byte, length int, apply func([]
 		} else {
 			bm = &BitmapValue{}
 		}
-		if !existing || len(bm.Data) < length {
-			grown := make([]byte, length)
+		switch {
+		case existing && len(bm.Data) >= length:
+		case existing && cap(bm.Data) >= length:
+			n := len(bm.Data)
+			bm.Data = bm.Data[:length]
+			clear(bm.Data[n:])
+		default:
+			grown := make([]byte, length, length+min(length, 1<<20))
 			copy(grown, data)
 			bm.Data = grown
 		}

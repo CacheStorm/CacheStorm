@@ -164,7 +164,10 @@ const (
 func getEncoding(v store.Value) string {
 	switch val := v.(type) {
 	case *store.StringValue:
-		if _, ok := parseRedisInt(val.Data); ok {
+		if val.Enc == store.StringEncRaw {
+			return "raw"
+		}
+		if _, ok := parseRedisInt(val.Data); ok && val.Enc != store.StringEncNoInt {
 			return "int"
 		}
 		if len(val.Data) <= encMaxEmbstrLen {
@@ -222,7 +225,7 @@ func getEncoding(v store.Value) string {
 	case *store.SortedSetValue:
 		val.RLock()
 		defer val.RUnlock()
-		if len(val.Members) > encMaxListpackEntries {
+		if val.Skiplist() {
 			return "skiplist"
 		}
 		for m := range val.Members {

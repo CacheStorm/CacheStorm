@@ -103,7 +103,7 @@ func TestGeoAddMemoryAdmissionPrecedesGrowth(t *testing.T) {
 	}
 }
 
-func TestGeoAddNoOpAndPublishedSnapshot(t *testing.T) {
+func TestGeoAddNoOpAndInPlaceUpdate(t *testing.T) {
 	s := store.NewStore()
 	s.ConfigureMemory(0, store.EvictionNoEviction, 70, 90, 5)
 	r := NewRouter()
@@ -129,8 +129,8 @@ func TestGeoAddNoOpAndPublishedSnapshot(t *testing.T) {
 	}
 	after, _ := s.Get("geo")
 	point := before.Value.(*store.SortedSetValue).Members["seed"]
-	if before.Value == after.Value || point != store.GeoScore(0, 0) || records != 1 || s.GetVersion("geo") == version {
-		t.Fatal("publication changed previous snapshot or missed effect tracking")
+	if before.Value != after.Value || point != store.GeoScore(2, 2) || records != 1 || s.GetVersion("geo") == version {
+		t.Fatal("update was not applied in place or missed effect tracking")
 	}
 	if s.MemUsage() != s.MemoryTracker().Usage() || !bytes.Contains([]byte(after.Value.String()), []byte("binary")) {
 		t.Fatal("published data or accounting mismatch")
