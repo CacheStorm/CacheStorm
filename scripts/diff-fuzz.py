@@ -337,8 +337,16 @@ def auto_ids(r):
     return r
 
 
+# FUZZ_ORDER=1 compares the order of hash and set replies too: the fuzzer's
+# collections are small enough for Redis' listpack and intset encodings, whose
+# order CacheStorm follows.
+KEEP_ORDER = os.environ.get("FUZZ_ORDER") == "1"
+
+
 def unordered3(r):
     # RESP3 maps and sets have no order.
+    if KEEP_ORDER:
+        return r
     if isinstance(r, tuple) and r and r[0] == "map":
         return ("map", sorted(((unordered3(k), unordered3(v)) for k, v in r[1]), key=repr))
     if isinstance(r, tuple) and r and r[0] == "set":
@@ -371,12 +379,12 @@ def norm(cmd, r):
             name = "HGETALL"
         elif "smembers" in cmd[1]:
             name = "SMEMBERS"
-    if name in UNORDERED and isinstance(r, list):
+    if name in UNORDERED and isinstance(r, list) and not (KEEP_ORDER and name != "KEYS"):
         if name == "HGETALL":
             pairs = sorted(zip(r[0::2], r[1::2]))
             return pairs
         return sorted(r, key=lambda x: (x is None, x))
-    if name == "SORT" and "nosort" in cmd and "STORE" not in cmd and isinstance(r, list):
+    if name == "SORT" and "nosort" in cmd and "STORE" not in cmd and isinstance(r, list) and not KEEP_ORDER:
         # A set has no native order.
         return sorted(r)
     if name == "SINTERCARD":

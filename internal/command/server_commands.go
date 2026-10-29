@@ -1088,9 +1088,10 @@ func doSort(ctx *Context, readOnly bool) error {
 	case *store.SetValue:
 		isSet = true
 		v.RLock()
-		for member := range v.Members {
+		v.Range(func(member string) bool {
 			elements = append(elements, member)
-		}
+			return true
+		})
 		v.RUnlock()
 	case *store.SortedSetValue:
 		entries := v.GetSortedRange(0, -1, false, false)
