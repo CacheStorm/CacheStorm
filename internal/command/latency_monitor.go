@@ -162,7 +162,7 @@ func cmdLATENCY(ctx *Context) error {
 		for _, s := range ev.history() {
 			b.WriteString(strconv.FormatInt(now-s.at, 10) + "s ago: " + strconv.FormatInt(s.ms, 10) + " ms\n")
 		}
-		return ctx.WriteBulkString(b.String())
+		return ctx.WriteVerbatim(b.String())
 	case "DOCTOR":
 		var b strings.Builder
 		threshold := latencyMonitor.threshold.Load()
@@ -187,7 +187,7 @@ func cmdLATENCY(ctx *Context) error {
 				b.WriteString("\nSlow commands are listed by SLOWLOG GET.\n")
 			}
 		}
-		return ctx.WriteBulkString(b.String())
+		return ctx.WriteVerbatim(b.String())
 	case "HISTOGRAM":
 		return ctx.Writer.WriteValue(resp.PairsValue([]*resp.Value{}))
 	case "HELP":

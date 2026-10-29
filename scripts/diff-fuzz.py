@@ -43,6 +43,26 @@ class Conn:
             if n < 0:
                 return None
             return [self.read() for _ in range(n)]
+        # RESP3 types keep a tag so a type difference is a difference.
+        if t == b"_":
+            return ("null",)
+        if t == b"#":
+            return ("bool", body == b"t")
+        if t == b",":
+            return ("double", body.decode())
+        if t == b"(":
+            return ("big", body.decode())
+        if t in (b"=", b"!"):
+            d = self.f.read(int(body) + 2)[:-2]
+            return ("verbatim" if t == b"=" else "-", d.decode(errors="replace"))
+        if t in (b"%", b"|"):
+            n = int(body)
+            items = [(self.read(), self.read()) for _ in range(n)]
+            if t == b"|":
+                return ("attr", items, self.read())
+            return ("map", items)
+        if t in (b"~", b">"):
+            return ("set" if t == b"~" else "push", [self.read() for _ in range(int(body))])
         raise RuntimeError("bad reply %r" % line)
 
 
@@ -317,9 +337,22 @@ def auto_ids(r):
     return r
 
 
+def unordered3(r):
+    # RESP3 maps and sets have no order.
+    if isinstance(r, tuple) and r and r[0] == "map":
+        return ("map", sorted(((unordered3(k), unordered3(v)) for k, v in r[1]), key=repr))
+    if isinstance(r, tuple) and r and r[0] == "set":
+        return ("set", sorted((unordered3(x) for x in r[1]), key=repr))
+    if isinstance(r, list):
+        return [unordered3(x) for x in r]
+    return r
+
+
 def norm(cmd, r):
     name = cmd[0]
-    r = auto_ids(r)
+    r = unordered3(auto_ids(r))
+    if name in SKIP_RESULT and isinstance(r, tuple) and r[0] in ("map", "set"):
+        return (r[0], len(r[1]))
     if name in SKIP_RESULT and isinstance(r, list):
         return ("list", len(r))
     if name == "XADD" and isinstance(r, bytes) and cmd[-3] in ("*", "2-*"):
@@ -369,6 +402,9 @@ def main():
     full_err = len(sys.argv) > 3 and sys.argv[3] == "full"
     random.seed(seed)
     a, b = Conn(int(os.environ.get("CACHESTORM_PORT", "6390"))), Conn(int(os.environ.get("REDIS_PORT", "6391")))
+    if os.environ.get("FUZZ_RESP3"):
+        a.cmd("HELLO", "3")
+        b.cmd("HELLO", "3")
     a.cmd("FLUSHALL")
     b.cmd("FLUSHALL")
     subs = None
@@ -404,7 +440,7 @@ def main():
             na, nb = norm(c, ra), norm(c, rb)
         if in_multi and ra == ("+", "QUEUED"):
             queued.append(c)
-        if full_err and isinstance(ra, tuple) and isinstance(rb, tuple):
+        if full_err and isinstance(ra, tuple) and isinstance(rb, tuple) and ra[0] == rb[0] == "-":
             na, nb = ra, rb
         if c[0] == "MULTI" and ra == ("+", "OK"):
             in_multi, queued = True, []

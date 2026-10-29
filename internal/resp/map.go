@@ -20,31 +20,16 @@ func (r *Reader) readMap() (*Value, error) {
 	r.depth++
 	defer func() { r.depth-- }()
 
-	values := make(map[string]*Value)
-	for i := uint64(0); i < count; i++ {
-		key, err := r.ReadValue()
+	// The pairs keep the server's order and key types.
+	pairs := make([]*Value, 0, 2*count)
+	for i := uint64(0); i < 2*count; i++ {
+		v, err := r.ReadValue()
 		if err != nil {
 			return nil, err
 		}
-		var name string
-		switch key.Type {
-		case TypeSimpleString:
-			name = key.Str
-		case TypeBulkString:
-			if key.IsNull {
-				return nil, ErrInvalidFormat
-			}
-			name = string(key.Bulk)
-		default:
-			return nil, ErrInvalidFormat
-		}
-		value, err := r.ReadValue()
-		if err != nil {
-			return nil, err
-		}
-		values[name] = value
+		pairs = append(pairs, v)
 	}
-	return MapValue(values), nil
+	return PairsValue(pairs), nil
 }
 
 func (w *Writer) writeMapNoFlush(values map[string]*Value) error {

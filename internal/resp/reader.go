@@ -69,6 +69,21 @@ func (r *Reader) ReadValue() (*Value, error) {
 			return nil, err
 		}
 		return DoubleValue(string(line)), nil
+	case TypeBoolean:
+		line, err := r.readLine()
+		if err != nil {
+			return nil, err
+		}
+		if len(line) != 1 || line[0] != 't' && line[0] != 'f' {
+			return nil, ErrInvalidFormat
+		}
+		return BooleanValue(line[0] == 't'), nil
+	case TypeBigNumber:
+		line, err := r.readLine()
+		if err != nil {
+			return nil, err
+		}
+		return BigNumberValue(string(line)), nil
 	case TypeVerbatim:
 		v, err := r.readBulkString()
 		if err != nil || v.IsNull || len(v.Bulk) < 4 || v.Bulk[3] != ':' {
@@ -81,6 +96,13 @@ func (r *Reader) ReadValue() (*Value, error) {
 			return nil, ErrInvalidFormat
 		}
 		v.Type = TypePush
+		return v, nil
+	case TypeSet:
+		v, err := r.readArray()
+		if err != nil || v.IsNull {
+			return nil, ErrInvalidFormat
+		}
+		v.Type = TypeSet
 		return v, nil
 	case TypeMap:
 		return r.readMap()

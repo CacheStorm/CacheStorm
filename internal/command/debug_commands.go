@@ -326,7 +326,7 @@ func cmdMEMORY(ctx *Context) error {
 	case "MALLOC-STATS":
 		return ctx.WriteSimpleString("allocator: go runtime")
 	case "DOCTOR":
-		return ctx.WriteBulkString(memoryDoctorReport(ctx))
+		return ctx.WriteVerbatim(memoryDoctorReport(ctx))
 	case "PURGE":
 		debug.FreeOSMemory()
 		return ctx.WriteOK()

@@ -155,6 +155,20 @@ func (r *scriptRun) luaCallFunc(raise bool) lua.LGFunction {
 	}
 }
 
+// luaSetResp implements redis.setresp: the protocol the commands the script
+// runs reply in.
+func (r *scriptRun) luaSetResp(L *lua.LState) int {
+	if L.GetTop() != 1 {
+		raiseLuaErr(L, "ERR redis.setresp() requires one argument.")
+	}
+	v := L.ToInt(1)
+	if v != 2 && v != 3 {
+		raiseLuaErr(L, "ERR RESP version must be 2 or 3.")
+	}
+	r.ctx.scriptRESP3 = v == 3
+	return 0
+}
+
 // luaACLCheckCmd implements redis.acl_check_cmd: whether the script's user
 // may run the command with these arguments.
 func (r *scriptRun) luaACLCheckCmd(L *lua.LState) int {
@@ -233,7 +247,7 @@ func (r *scriptRun) call(L *lua.LState) (lua.LValue, bool) {
 	if reply.Type == resp.TypeError {
 		return luaErrTable(L, reply.Err), true
 	}
-	return respToLua(L, reply), false
+	return respToLua(L, reply, r.ctx.scriptRESP3), false
 }
 
 // legacyCall serves redis.call for a script run without a router (a handler
@@ -275,7 +289,7 @@ func commandHasFlag(cmd, flag string) bool {
 // respToLua converts a command reply to Lua the way Redis does for RESP2:
 // integers become numbers, bulk strings strings, a null bulk or array false,
 // arrays tables, a status {ok=...} and an error {err=...}.
-func respToLua(L *lua.LState, v *resp.Value) lua.LValue {
+func respToLua(L *lua.LState, v *resp.Value, resp3 bool) lua.LValue {
 	if v == nil {
 		return lua.LFalse
 	}
@@ -293,33 +307,90 @@ func respToLua(L *lua.LState, v *resp.Value) lua.LValue {
 		return tbl
 	case resp.TypeError:
 		return luaErrTable(L, v.Err)
+	case resp.TypeNull:
+		if resp3 {
+			return lua.LNil
+		}
+		return lua.LFalse
 	case resp.TypeArray, resp.TypeSet:
 		if v.IsNull {
+			if resp3 {
+				return lua.LNil
+			}
 			return lua.LFalse
+		}
+		if resp3 && v.Type == resp.TypeSet {
+			// Redis' RESP3 set: {set={member=true, ...}}.
+			members := L.CreateTable(0, len(v.Array))
+			for _, item := range v.Array {
+				members.RawSet(respToLua(L, item, resp3), lua.LTrue)
+			}
+			tbl := L.CreateTable(0, 1)
+			tbl.RawSetString("set", members)
+			return tbl
 		}
 		tbl := L.CreateTable(len(v.Array), 0)
 		for _, item := range v.Array {
-			tbl.Append(respToLua(L, item))
+			tbl.Append(respToLua(L, item, resp3))
 		}
 		return tbl
 	case resp.TypeMap:
-		if v.Map == nil {
-			tbl := L.CreateTable(len(v.Array), 0)
-			for _, item := range v.Array {
-				tbl.Append(respToLua(L, item))
+		pairs := v.Array
+		if v.Map != nil {
+			keys := make([]string, 0, len(v.Map))
+			for k := range v.Map {
+				keys = append(keys, k)
 			}
+			sort.Strings(keys)
+			pairs = make([]*resp.Value, 0, 2*len(keys))
+			for _, k := range keys {
+				pairs = append(pairs, resp.BulkString(k), v.Map[k])
+			}
+		}
+		if resp3 {
+			// Redis' RESP3 map: {map={key=value, ...}}.
+			fields := L.CreateTable(0, len(pairs)/2)
+			for i := 0; i+1 < len(pairs); i += 2 {
+				fields.RawSet(respToLua(L, pairs[i], resp3), respToLua(L, pairs[i+1], resp3))
+			}
+			tbl := L.CreateTable(0, 1)
+			tbl.RawSetString("map", fields)
 			return tbl
 		}
-		keys := make([]string, 0, len(v.Map))
-		for k := range v.Map {
-			keys = append(keys, k)
+		tbl := L.CreateTable(len(pairs), 0)
+		for _, item := range pairs {
+			tbl.Append(respToLua(L, item, resp3))
 		}
-		sort.Strings(keys)
-		tbl := L.CreateTable(2*len(keys), 0)
-		for _, k := range keys {
-			tbl.Append(lua.LString(k))
-			tbl.Append(respToLua(L, v.Map[k]))
+		return tbl
+	case resp.TypeDouble:
+		f, err := strconv.ParseFloat(v.Str, 64)
+		if err != nil {
+			f = math.NaN()
 		}
+		if !resp3 {
+			return lua.LString(v.Str)
+		}
+		tbl := L.CreateTable(0, 1)
+		tbl.RawSetString("double", lua.LNumber(f))
+		return tbl
+	case resp.TypeBoolean:
+		return lua.LBool(v.Int != 0)
+	case resp.TypeBigNumber:
+		if !resp3 {
+			return lua.LString(v.Str)
+		}
+		tbl := L.CreateTable(0, 1)
+		tbl.RawSetString("big_number", lua.LString(v.Str))
+		return tbl
+	case resp.TypeVerbatim:
+		if !resp3 {
+			return lua.LString(v.Bulk)
+		}
+		inner := L.CreateTable(0, 2)
+		inner.RawSetString("format", lua.LString(v.Str))
+		inner.RawSetString("string", lua.LString(v.Bulk))
+		tbl := L.CreateTable(0, 1)
+		tbl.RawSetString("verbatim_string", inner)
 		return tbl
 	default:
 		return lua.LFalse
@@ -330,11 +401,15 @@ func respToLua(L *lua.LState, v *resp.Value) lua.LValue {
 // a number becomes an integer (truncated), a string a bulk string, true 1,
 // false and nil a null, {ok=...} a status, {err=...} an error, and any other
 // table an array that stops at the first nil.
-func luaToResp(v lua.LValue, name string, depth int) *resp.Value {
+func luaToResp(v lua.LValue, name string, depth int, resp3 bool) *resp.Value {
 	switch val := v.(type) {
 	case lua.LString:
 		return resp.BulkString(string(val))
 	case lua.LBool:
+		if resp3 {
+			// After redis.setresp(3) a Lua boolean is a RESP3 boolean.
+			return resp.BooleanValue(bool(val))
+		}
 		if bool(val) {
 			return resp.IntegerValue(1)
 		}
@@ -352,7 +427,31 @@ func luaToResp(v lua.LValue, name string, depth int) *resp.Value {
 			return resp.SimpleString(string(ok))
 		}
 		if d, isNum := val.RawGetString("double").(lua.LNumber); isNum {
-			return resp.BulkString(strconv.FormatFloat(float64(d), 'g', 17, 64))
+			return resp.DoubleValue(formatReplyDouble(float64(d)))
+		}
+		if n, isStr := val.RawGetString("big_number").(lua.LString); isStr {
+			return resp.BigNumberValue(string(n))
+		}
+		if m, isTbl := val.RawGetString("map").(*lua.LTable); isTbl {
+			var pairs []*resp.Value
+			m.ForEach(func(k, v lua.LValue) {
+				pairs = append(pairs, luaToResp(k, name, depth+1, resp3), luaToResp(v, name, depth+1, resp3))
+			})
+			return resp.PairsValue(append([]*resp.Value{}, pairs...))
+		}
+		if set, isTbl := val.RawGetString("set").(*lua.LTable); isTbl {
+			members := []*resp.Value{}
+			set.ForEach(func(k, _ lua.LValue) {
+				members = append(members, luaToResp(k, name, depth+1, resp3))
+			})
+			return resp.SetValue(members)
+		}
+		if vs, isTbl := val.RawGetString("verbatim_string").(*lua.LTable); isTbl {
+			format, okF := vs.RawGetString("format").(lua.LString)
+			text, okS := vs.RawGetString("string").(lua.LString)
+			if okF && okS {
+				return resp.VerbatimValue(string(format), string(text))
+			}
 		}
 		items := make([]*resp.Value, 0, val.Len())
 		for i := 1; ; i++ {
@@ -360,12 +459,26 @@ func luaToResp(v lua.LValue, name string, depth int) *resp.Value {
 			if item == lua.LNil {
 				break
 			}
-			items = append(items, luaToResp(item, name, depth+1))
+			items = append(items, luaToResp(item, name, depth+1, resp3))
 		}
 		return resp.ArrayValue(items)
 	default:
 		return resp.NullValue()
 	}
+}
+
+// formatReplyDouble formats a double reply as Redis' addReplyDouble does: the
+// shortest text that reads back as the same value, and inf, -inf or nan.
+func formatReplyDouble(f float64) string {
+	switch {
+	case math.IsInf(f, 1):
+		return "inf"
+	case math.IsInf(f, -1):
+		return "-inf"
+	case math.IsNaN(f):
+		return "nan"
+	}
+	return strconv.FormatFloat(f, 'g', -1, 64)
 }
 
 // luaNumberToInt truncates like Redis' (long long) cast; a value out of range
@@ -437,7 +550,7 @@ func (r *scriptRun) finish(L *lua.LState, tctx context.Context, err error) *resp
 	}
 	ret := L.Get(-1)
 	L.Pop(1)
-	return luaToResp(ret, r.name, 0)
+	return luaToResp(ret, r.name, 0, r.ctx.scriptRESP3)
 }
 
 // luaCompileError renders a gopher-lua syntax error close to Redis'

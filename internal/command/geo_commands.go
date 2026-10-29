@@ -412,8 +412,8 @@ func cmdGEOPOS(ctx *Context) error {
 			results = append(results, resp.NullArray())
 		} else {
 			results = append(results, resp.ArrayValue([]*resp.Value{
-				resp.BulkString(geoPositionString(point.Lon)),
-				resp.BulkString(geoPositionString(point.Lat)),
+				resp.DoubleValue(geoPositionString(point.Lon)),
+				resp.DoubleValue(geoPositionString(point.Lat)),
 			}))
 		}
 	}
@@ -611,8 +611,8 @@ func cmdGEORADIUS(ctx *Context) error {
 			}
 			if withCoord {
 				entry = append(entry, resp.ArrayValue([]*resp.Value{
-					resp.BulkString(geoPositionString(r.point.Lon)),
-					resp.BulkString(geoPositionString(r.point.Lat)),
+					resp.DoubleValue(geoPositionString(r.point.Lon)),
+					resp.DoubleValue(geoPositionString(r.point.Lat)),
 				}))
 			}
 			respResults = append(respResults, resp.ArrayValue(entry))
@@ -810,8 +810,8 @@ func cmdGEORADIUSBYMEMBER(ctx *Context) error {
 			}
 			if withCoord {
 				entry = append(entry, resp.ArrayValue([]*resp.Value{
-					resp.BulkString(geoPositionString(r.point.Lon)),
-					resp.BulkString(geoPositionString(r.point.Lat)),
+					resp.DoubleValue(geoPositionString(r.point.Lon)),
+					resp.DoubleValue(geoPositionString(r.point.Lat)),
 				}))
 			}
 			respResults = append(respResults, resp.ArrayValue(entry))
@@ -1031,8 +1031,8 @@ func cmdGEOSEARCH(ctx *Context) error {
 		}
 		if withCoord {
 			entry = append(entry, resp.ArrayValue([]*resp.Value{
-				resp.BulkString(geoPositionString(r.point.Lon)),
-				resp.BulkString(geoPositionString(r.point.Lat)),
+				resp.DoubleValue(geoPositionString(r.point.Lon)),
+				resp.DoubleValue(geoPositionString(r.point.Lat)),
 			}))
 		}
 		respResults = append(respResults, resp.ArrayValue(entry))

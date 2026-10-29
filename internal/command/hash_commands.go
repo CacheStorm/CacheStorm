@@ -579,10 +579,16 @@ func cmdHRANDFIELD(ctx *Context) error {
 		size *= 2
 	}
 	result := make([]*resp.Value, 0, size)
+	pairs := withValues && ctx.Writer.IsRESP3()
 	for _, f := range picked {
-		result = append(result, resp.BulkString(f))
-		if withValues {
-			result = append(result, resp.BulkBytes(hash.Fields[f]))
+		switch {
+		case pairs:
+			// RESP3 replies with one [field, value] array per pick.
+			result = append(result, resp.ArrayValue([]*resp.Value{resp.BulkString(f), resp.BulkBytes(hash.Fields[f])}))
+		case withValues:
+			result = append(result, resp.BulkString(f), resp.BulkBytes(hash.Fields[f]))
+		default:
+			result = append(result, resp.BulkString(f))
 		}
 	}
 	hash.RUnlock()

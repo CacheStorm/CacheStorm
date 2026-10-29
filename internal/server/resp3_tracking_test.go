@@ -22,11 +22,11 @@ func (c *replClient) next(wait time.Duration) (*resp.Value, bool) {
 func hello3(t *testing.T, c *replClient) {
 	t.Helper()
 	got := c.do("HELLO", "3")
-	if got.Type != resp.TypeMap || got.Map != nil && got.Map["proto"] == nil {
+	if got.Type != resp.TypeMap || got.Field("proto") == nil {
 		t.Fatalf("HELLO 3 = %+v", got)
 	}
-	if got.Map["proto"].Int != 3 {
-		t.Fatalf("HELLO 3 proto = %+v", got.Map["proto"])
+	if got.Field("proto").Int != 3 {
+		t.Fatalf("HELLO 3 proto = %+v", got.Field("proto"))
 	}
 }
 
@@ -66,7 +66,7 @@ func TestRESP3Replies(t *testing.T) {
 		t.Fatalf("GET of a missing key in RESP3 = %+v, want the RESP3 null", got)
 	}
 	c.do("HSET", "h", "f", "v")
-	if got := c.do("HGETALL", "h"); got.Type != resp.TypeMap || string(got.Map["f"].Bulk) != "v" {
+	if got := c.do("HGETALL", "h"); got.Type != resp.TypeMap || got.Field("f") == nil || string(got.Field("f").Bulk) != "v" {
 		t.Fatalf("HGETALL in RESP3 = %+v, want a map", got)
 	}
 	if got := c.do("HELLO", "2"); got.Type != resp.TypeArray {
@@ -134,7 +134,7 @@ func TestTrackingDefaultModeRESP3(t *testing.T) {
 		t.Fatalf("FLUSHALL invalidated %v, want a null key list", keys)
 	}
 	info := c.do("CLIENT", "TRACKINGINFO")
-	if info.Type != resp.TypeMap || string(info.Map["flags"].Array[0].Bulk) != "on" {
+	if info.Type != resp.TypeMap || info.Field("flags") == nil || string(info.Field("flags").Array[0].Bulk) != "on" {
 		t.Fatalf("CLIENT TRACKINGINFO = %+v", info)
 	}
 	c.do("CLIENT", "TRACKING", "OFF")

@@ -131,7 +131,7 @@ func cmdSMEMBERS(ctx *Context) error {
 		return ctx.WriteError(err)
 	}
 	if set == nil {
-		return ctx.WriteArray([]*resp.Value{})
+		return ctx.WriteSet([]*resp.Value{})
 	}
 
 	set.RLock()
@@ -142,7 +142,7 @@ func cmdSMEMBERS(ctx *Context) error {
 
 	reply := members
 	set.RUnlock()
-	return ctx.WriteArray(reply)
+	return ctx.WriteSet(reply)
 }
 
 func cmdSISMEMBER(ctx *Context) error {
@@ -219,7 +219,7 @@ func cmdSPOP(ctx *Context) error {
 		if !withCount {
 			return ctx.WriteNullBulkString()
 		}
-		return ctx.WriteArray([]*resp.Value{})
+		return ctx.WriteSet([]*resp.Value{})
 	}
 
 	if !withCount {
@@ -253,7 +253,7 @@ func cmdSPOP(ctx *Context) error {
 		}
 		deleteIfEmpty(ctx, key, set)
 		propagateSREM(ctx, key, popped...)
-		return ctx.WriteArray(members)
+		return ctx.WriteSet(members)
 	}
 
 	members := make([]*resp.Value, 0, count)
@@ -274,7 +274,7 @@ func cmdSPOP(ctx *Context) error {
 	}
 
 	propagateSREM(ctx, key, popped...)
-	return ctx.WriteArray(members)
+	return ctx.WriteSet(members)
 }
 
 // propagateSREM records an SPOP as the SREM of the members it popped: SPOP
@@ -413,7 +413,7 @@ func cmdSUNION(ctx *Context) error {
 
 	reply := members
 	ctx.Store.SetOpsRUnlock()
-	return ctx.WriteArray(reply)
+	return ctx.WriteSet(reply)
 }
 
 func cmdSINTER(ctx *Context) error {
@@ -467,7 +467,7 @@ func cmdSINTER(ctx *Context) error {
 
 	reply := members
 	ctx.Store.SetOpsRUnlock()
-	return ctx.WriteArray(reply)
+	return ctx.WriteSet(reply)
 }
 
 func cmdSDIFF(ctx *Context) error {
@@ -514,7 +514,7 @@ func cmdSDIFF(ctx *Context) error {
 
 	reply := members
 	ctx.Store.SetOpsRUnlock()
-	return ctx.WriteArray(reply)
+	return ctx.WriteSet(reply)
 }
 
 func cmdSUNIONSTORE(ctx *Context) error {

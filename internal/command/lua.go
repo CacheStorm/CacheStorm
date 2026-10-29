@@ -124,6 +124,7 @@ func (e *ScriptEngine) newState(keys []string, args []string, guard ScriptCallGu
 		L.SetField(redisTable, "call", L.NewFunction(run.luaCallFunc(true)))
 		L.SetField(redisTable, "pcall", L.NewFunction(run.luaCallFunc(false)))
 		L.SetField(redisTable, "acl_check_cmd", L.NewFunction(run.luaACLCheckCmd))
+		L.SetField(redisTable, "setresp", L.NewFunction(run.luaSetResp))
 	} else {
 		e.installLegacyCall(L, redisTable, guard)
 	}

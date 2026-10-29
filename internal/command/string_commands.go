@@ -829,12 +829,12 @@ func cmdLCS(ctx *Context) error {
 		}
 		if idx {
 			// The requested reply shape applies to empty results too.
-			return ctx.WriteArray([]*resp.Value{
+			return ctx.WriteValue(resp.PairsValue([]*resp.Value{
 				resp.BulkString("matches"),
 				resp.ArrayValue([]*resp.Value{}),
 				resp.BulkString("len"),
 				resp.IntegerValue(0),
-			})
+			}))
 		}
 		return ctx.WriteBulkString("")
 	}
@@ -929,5 +929,5 @@ func cmdLCS(ctx *Context) error {
 	}
 	result = append(result, resp.ArrayValue(matchArray), resp.BulkString("len"), resp.IntegerValue(int64(lcsLen)))
 
-	return ctx.WriteArray(result)
+	return ctx.WriteValue(resp.PairsValue(result))
 }

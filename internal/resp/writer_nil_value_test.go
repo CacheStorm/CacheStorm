@@ -47,7 +47,7 @@ func TestWriterRejectsNilValueTrees(t *testing.T) {
 			"null array": NullArray(),
 			"empty":      ArrayValue([]*Value{}),
 			"nested": ArrayValue([]*Value{ArrayValue([]*Value{NullValue(), NullBulkString(), NullArray()}),
-				MapValue(map[string]*Value{"k": BulkBytes([]byte{0, '\r', '\n', 255})}), IntegerValue(7)}),
+				PairsValue([]*Value{BulkString("k"), BulkBytes([]byte{0, '\r', '\n', 255})}), IntegerValue(7)}),
 		} {
 			t.Run(mode+"/"+name, func(t *testing.T) {
 				var output bytes.Buffer

@@ -830,7 +830,7 @@ func cmdXINFO(ctx *Context) error {
 					inactive = 0
 				}
 			}
-			out = append(out, resp.ArrayValue([]*resp.Value{
+			out = append(out, resp.PairsValue([]*resp.Value{
 				resp.BulkString("name"), resp.BulkString(c.Name),
 				resp.BulkString("pending"), resp.IntegerValue(c.Pending),
 				resp.BulkString("idle"), resp.IntegerValue(idle),
@@ -843,7 +843,7 @@ func cmdXINFO(ctx *Context) error {
 		groups := stream.GroupsInfo()
 		out := make([]*resp.Value, 0, len(groups))
 		for _, g := range groups {
-			out = append(out, resp.ArrayValue([]*resp.Value{
+			out = append(out, resp.PairsValue([]*resp.Value{
 				resp.BulkString("name"), resp.BulkString(g.Name),
 				resp.BulkString("consumers"), resp.IntegerValue(g.Consumers),
 				resp.BulkString("pending"), resp.IntegerValue(g.Pending),
@@ -906,7 +906,7 @@ func cmdXINFO(ctx *Context) error {
 			resp.BulkString("first-entry"), edge(info.First),
 			resp.BulkString("last-entry"), edge(info.Last),
 		)
-		return ctx.WriteArray(out)
+		return ctx.WriteValue(resp.PairsValue(out))
 	}
 	groups := make([]*resp.Value, 0, len(info.GroupInfos))
 	for _, g := range info.GroupInfos {
@@ -925,7 +925,7 @@ func cmdXINFO(ctx *Context) error {
 					resp.BulkString(p.ID), resp.IntegerValue(p.DeliveryTS), resp.IntegerValue(p.Deliveries),
 				}))
 			}
-			consumers = append(consumers, resp.ArrayValue([]*resp.Value{
+			consumers = append(consumers, resp.PairsValue([]*resp.Value{
 				resp.BulkString("name"), resp.BulkString(c.Name),
 				resp.BulkString("seen-time"), resp.IntegerValue(c.SeenTime),
 				resp.BulkString("active-time"), resp.IntegerValue(c.ActiveTime),
@@ -933,7 +933,7 @@ func cmdXINFO(ctx *Context) error {
 				resp.BulkString("pending"), resp.ArrayValue(cpel),
 			}))
 		}
-		groups = append(groups, resp.ArrayValue([]*resp.Value{
+		groups = append(groups, resp.PairsValue([]*resp.Value{
 			resp.BulkString("name"), resp.BulkString(g.Name),
 			resp.BulkString("last-delivered-id"), resp.BulkString(g.LastID),
 			resp.BulkString("entries-read"), entriesReadValue(g.EntriesRead),
@@ -947,7 +947,7 @@ func cmdXINFO(ctx *Context) error {
 		resp.BulkString("entries"), streamEntriesValue(info.Entries),
 		resp.BulkString("groups"), resp.ArrayValue(groups),
 	)
-	return ctx.WriteArray(out)
+	return ctx.WriteValue(resp.PairsValue(out))
 }
 
 func entriesReadValue(n int64) *resp.Value {

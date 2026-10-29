@@ -182,7 +182,7 @@ func (t *tracker) info(id int64) *resp.Value {
 	tc, ok := t.clients[id]
 	if !ok {
 		return resp.PairsValue([]*resp.Value{
-			resp.BulkString("flags"), resp.ArrayValue([]*resp.Value{resp.BulkString("off")}),
+			resp.BulkString("flags"), resp.SetValue([]*resp.Value{resp.BulkString("off")}),
 			resp.BulkString("redirect"), resp.IntegerValue(-1),
 			resp.BulkString("prefixes"), resp.ArrayValue([]*resp.Value{}),
 		})
@@ -202,7 +202,7 @@ func (t *tracker) info(id int64) *resp.Value {
 		prefixes = append(prefixes, resp.BulkString(p))
 	}
 	return resp.PairsValue([]*resp.Value{
-		resp.BulkString("flags"), resp.ArrayValue(flags),
+		resp.BulkString("flags"), resp.SetValue(flags),
 		resp.BulkString("redirect"), resp.IntegerValue(redirect),
 		resp.BulkString("prefixes"), resp.ArrayValue(prefixes),
 	})

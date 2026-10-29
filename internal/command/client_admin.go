@@ -147,21 +147,21 @@ func parseClientFilter(ctx *Context, start int, kill bool) (ClientFilter, error)
 func cmdClientList(ctx *Context) error {
 	h := clientHooksFor(ctx)
 	if h == nil {
-		return ctx.WriteBulkString("id=" + strconv.FormatInt(ctx.ClientID, 10) + " name=" + ctx.ClientName + "\n")
+		return ctx.WriteVerbatim("id=" + strconv.FormatInt(ctx.ClientID, 10) + " name=" + ctx.ClientName + "\n")
 	}
 	f, err := parseClientFilter(ctx, 1, false)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
-	return ctx.WriteBulkString(h.List(ctx.ClientID, f))
+	return ctx.WriteVerbatim(h.List(ctx.ClientID, f))
 }
 
 func cmdClientInfo(ctx *Context) error {
 	h := clientHooksFor(ctx)
 	if h == nil {
-		return ctx.WriteBulkString("id=" + strconv.FormatInt(ctx.ClientID, 10) + " name=" + ctx.ClientName + "\n")
+		return ctx.WriteVerbatim("id=" + strconv.FormatInt(ctx.ClientID, 10) + " name=" + ctx.ClientName + "\n")
 	}
-	return ctx.WriteBulkString(h.List(ctx.ClientID, ClientFilter{IDs: []int64{ctx.ClientID}}))
+	return ctx.WriteVerbatim(h.List(ctx.ClientID, ClientFilter{IDs: []int64{ctx.ClientID}}))
 }
 
 func cmdClientKill(ctx *Context) error {

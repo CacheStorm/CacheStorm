@@ -879,13 +879,13 @@ func handleFunctionList(ctx *Context, registry *FunctionRegistry) error {
 			for _, f := range fn.Flags {
 				flags = append(flags, resp.SimpleString(f))
 			}
-			fnList = append(fnList, resp.ArrayValue([]*resp.Value{
+			fnList = append(fnList, resp.PairsValue([]*resp.Value{
 				resp.BulkString("name"),
 				resp.BulkString(fnName),
 				resp.BulkString("description"),
 				desc,
 				resp.BulkString("flags"),
-				resp.ArrayValue(flags),
+				resp.SetValue(flags),
 			}))
 		}
 
@@ -900,7 +900,7 @@ func handleFunctionList(ctx *Context, registry *FunctionRegistry) error {
 		if withCode {
 			libInfo = append(libInfo, resp.BulkString("library_code"), resp.BulkString(lib.Code))
 		}
-		result = append(result, resp.ArrayValue(libInfo))
+		result = append(result, resp.PairsValue(libInfo))
 	}
 
 	return ctx.WriteArray(result)
@@ -1040,20 +1040,20 @@ func handleFunctionStats(ctx *Context, registry *FunctionRegistry) error {
 	}
 	registry.mu.RUnlock()
 
-	return ctx.WriteArray([]*resp.Value{
+	return ctx.WriteValue(resp.PairsValue([]*resp.Value{
 		resp.BulkString("running_script"),
 		resp.NullBulkString(),
 		resp.BulkString("engines"),
-		resp.ArrayValue([]*resp.Value{
+		resp.PairsValue([]*resp.Value{
 			resp.BulkString("LUA"),
-			resp.ArrayValue([]*resp.Value{
+			resp.PairsValue([]*resp.Value{
 				resp.BulkString("libraries_count"),
 				resp.IntegerValue(int64(libCount)),
 				resp.BulkString("functions_count"),
 				resp.IntegerValue(int64(fnCount)),
 			}),
 		}),
-	})
+	}))
 }
 
 func handleFunctionFlush(ctx *Context, registry *FunctionRegistry) error {

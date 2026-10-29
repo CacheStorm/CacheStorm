@@ -23,6 +23,12 @@ const (
 	// TypeVerbatim is a RESP3 verbatim string; Str holds its three-letter
 	// format and Bulk its text. A RESP2 writer encodes it as a bulk string.
 	TypeVerbatim Type = '='
+	// TypeBigNumber is a RESP3 big number; Str holds its digits. A RESP2
+	// writer encodes it as a bulk string.
+	TypeBigNumber Type = '('
+	// TypeBoolean is a RESP3 boolean held in Int (1 or 0). A RESP2 writer
+	// encodes it as that integer.
+	TypeBoolean Type = '#'
 )
 
 type Value struct {
@@ -90,6 +96,38 @@ func PairsValue(pairs []*Value) *Value {
 }
 
 // DoubleValue is a RESP3 double whose text is s, as Redis formats it.
+// Field returns the value of a map reply's string key, whether the map holds
+// a Go map or ordered pairs, or nil.
+func (v *Value) Field(key string) *Value {
+	if v == nil || v.Type != TypeMap {
+		return nil
+	}
+	if v.Map != nil {
+		return v.Map[key]
+	}
+	for i := 0; i+1 < len(v.Array); i += 2 {
+		k := v.Array[i]
+		if k.Type == TypeBulkString && string(k.Bulk) == key || k.Type == TypeSimpleString && k.Str == key {
+			return v.Array[i+1]
+		}
+	}
+	return nil
+}
+
+// BooleanValue is a RESP3 boolean reply, the integer 1 or 0 for RESP2.
+func BooleanValue(b bool) *Value {
+	v := &Value{Type: TypeBoolean}
+	if b {
+		v.Int = 1
+	}
+	return v
+}
+
+// BigNumberValue is a RESP3 big number reply of digits.
+func BigNumberValue(digits string) *Value {
+	return &Value{Type: TypeBigNumber, Str: digits}
+}
+
 func DoubleValue(s string) *Value {
 	return &Value{Type: TypeDouble, Str: s}
 }

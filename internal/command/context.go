@@ -67,6 +67,9 @@ type Context struct {
 	ResetConnection bool
 	// InScript is set for the commands a script runs (InExec is also set).
 	InScript bool
+	// scriptRESP3 is set on a script's context by redis.setresp(3): the
+	// commands it runs reply in RESP3.
+	scriptRESP3 bool
 
 	FromMaster   bool
 	Replaying    bool
@@ -422,6 +425,17 @@ func (ctx *Context) WriteNullBulkString() error {
 
 func (ctx *Context) WriteArray(items []*resp.Value) error {
 	return ctx.Writer.WriteArray(items)
+}
+
+// WriteVerbatim writes text as a RESP3 verbatim "txt" string, a bulk string
+// for a RESP2 client.
+func (ctx *Context) WriteVerbatim(text string) error {
+	return ctx.Writer.WriteVerbatim("txt", text)
+}
+
+// WriteSet writes items as a RESP3 set, an array for a RESP2 client.
+func (ctx *Context) WriteSet(items []*resp.Value) error {
+	return ctx.Writer.WriteValue(resp.SetValue(items))
 }
 
 // Safe map accessors to prevent panics from type assertions

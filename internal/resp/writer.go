@@ -66,7 +66,7 @@ func (w *Writer) WriteValue(v *Value) error {
 			return w.WriteNullArray()
 		}
 		return w.WriteArray(v.Array)
-	case TypeMap, TypePush, TypeSet, TypeDouble, TypeVerbatim:
+	case TypeMap, TypePush, TypeSet, TypeDouble, TypeVerbatim, TypeBigNumber, TypeBoolean:
 		if err := w.WriteValueNoFlush(v); err != nil {
 			return err
 		}
@@ -259,7 +259,18 @@ func (w *Writer) WriteValueNoFlush(v *Value) error {
 			}
 		}
 		return nil
-	case TypeDouble:
+	case TypeBoolean:
+		if !w.resp3.Load() {
+			w.wr.WriteByte(byte(TypeInteger))
+			w.wr.WriteString(strconv.FormatInt(v.Int, 10))
+		} else if v.Int != 0 {
+			w.wr.WriteString("#t")
+		} else {
+			w.wr.WriteString("#f")
+		}
+		_, err := w.wr.WriteString("\r\n")
+		return err
+	case TypeDouble, TypeBigNumber:
 		if !w.resp3.Load() {
 			w.wr.WriteByte(byte(TypeBulkString))
 			w.wr.WriteString(strconv.Itoa(len(v.Str)))
@@ -268,7 +279,7 @@ func (w *Writer) WriteValueNoFlush(v *Value) error {
 			_, err := w.wr.WriteString("\r\n")
 			return err
 		}
-		w.wr.WriteByte(byte(TypeDouble))
+		w.wr.WriteByte(byte(v.Type))
 		w.wr.WriteString(v.Str)
 		_, err := w.wr.WriteString("\r\n")
 		return err

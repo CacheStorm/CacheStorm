@@ -249,7 +249,7 @@ func cmdINFO(ctx *Context) error {
 		sb.WriteString(keyspaceInfo(ctx))
 	}
 
-	return ctx.WriteBulkString(sb.String())
+	return ctx.WriteVerbatim(sb.String())
 }
 
 func cmdTIME(ctx *Context) error {
@@ -1440,7 +1440,7 @@ func cmdLOLWUT(ctx *Context) error {
 		output.WriteString("High-performance Redis-compatible cache with tag-based invalidation.\n")
 	}
 
-	return ctx.WriteBulkString(output.String())
+	return ctx.WriteVerbatim(output.String())
 }
 
 // ShutdownOptions are the modifiers of SHUTDOWN.

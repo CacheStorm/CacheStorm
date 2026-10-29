@@ -69,7 +69,7 @@ func TestMapValueRoundTrip(t *testing.T) {
 					}
 					v = v.Array[0]
 				}
-				if !reflect.DeepEqual(v, resp3Nulls(tt.want)) {
+				if !reflect.DeepEqual(pairsAsMaps(v), resp3Nulls(tt.want)) {
 					t.Fatalf("roundtrip mismatch: got %#v, want %#v", v, tt.want)
 				}
 				v, err = r.ReadValue()
@@ -103,6 +103,7 @@ func TestMapValueRoundTrip(t *testing.T) {
 func TestReadMapWireFormat(t *testing.T) {
 	r := NewReader(strings.NewReader("%2\r\n+first\r\n:1\r\n+second\r\n:2\r\n:99\r\n"))
 	v, err := r.ReadValue()
+	v = pairsAsMaps(v)
 	if err != nil || v.Type != TypeMap || len(v.Map) != 2 || v.Map["first"].Int != 1 || v.Map["second"].Int != 2 {
 		t.Fatalf("simple-key map: value=%#v error=%v", v, err)
 	}
@@ -139,11 +140,6 @@ func TestReadMapRejectsInvalidInput(t *testing.T) {
 		{"%1\r\n", io.EOF},
 		{"%1\r\n+k\r\n", io.EOF},
 		{"%1\r\n+k\r\n$3\r\nab", io.ErrUnexpectedEOF},
-		{"%1\r\n:1\r\n+v\r\n", ErrInvalidFormat},
-		{"%1\r\n$-1\r\n+v\r\n", ErrInvalidFormat},
-		{"%1\r\n_\r\n+v\r\n", ErrInvalidFormat},
-		{"%1\r\n*0\r\n+v\r\n", ErrInvalidFormat},
-		{"%1\r\n%0\r\n+v\r\n", ErrInvalidFormat},
 		{"%1\r\n+k\r\n!", ErrInvalidType},
 	} {
 		v, err := NewReader(strings.NewReader(tt.wire)).ReadValue()
@@ -160,4 +156,44 @@ func TestReadMapPropagatesReadFailure(t *testing.T) {
 			t.Fatalf("read failure for %q: value=%v error=%v", prefix, v, err)
 		}
 	}
+}
+
+func TestReadMapKeepsOrderAndKeyTypes(t *testing.T) {
+	v, err := NewReader(strings.NewReader("%3\r\n+z\r\n:1\r\n:5\r\n$1\r\nv\r\n_\r\n*0\r\n")).ReadValue()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := PairsValue([]*Value{SimpleString("z"), IntegerValue(1), IntegerValue(5), BulkString("v"), NullValue(), ArrayValue([]*Value{})})
+	if !reflect.DeepEqual(v, want) {
+		t.Fatalf("got %#v, want %#v", v, want)
+	}
+}
+
+// pairsAsMaps turns the ordered maps a Reader returns into MapValues keyed by
+// their string keys, for comparing with values built by MapValue.
+func pairsAsMaps(v *Value) *Value {
+	if v == nil {
+		return nil
+	}
+	out := *v
+	if v.Type == TypeMap && v.Map == nil {
+		out.Map = make(map[string]*Value, len(v.Array)/2)
+		for i := 0; i+1 < len(v.Array); i += 2 {
+			k := v.Array[i]
+			name := k.Str
+			if k.Type == TypeBulkString {
+				name = string(k.Bulk)
+			}
+			out.Map[name] = pairsAsMaps(v.Array[i+1])
+		}
+		out.Array = nil
+		return &out
+	}
+	if v.Array != nil {
+		out.Array = make([]*Value, len(v.Array))
+		for i, item := range v.Array {
+			out.Array[i] = pairsAsMaps(item)
+		}
+	}
+	return &out
 }
