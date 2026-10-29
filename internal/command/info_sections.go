@@ -171,7 +171,7 @@ func infoStats(w *infoWriter, st ServerStatus) {
 	w.int("evicted_keys", m.TotalEvictions.Load())
 	w.int("keyspace_hits", m.TotalHits.Load())
 	w.int("keyspace_misses", m.TotalMisses.Load())
-	w.int("total_error_replies", m.TotalErrors.Load())
+	w.int("total_error_replies", commandStats.totalErrors.Load())
 	w.int("total_reads_processed", m.TotalReads.Load())
 	w.int("total_writes_processed", m.TotalWrites.Load())
 	w.end()

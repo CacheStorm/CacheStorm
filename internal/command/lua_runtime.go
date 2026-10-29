@@ -202,7 +202,7 @@ func (r *scriptRun) call(L *lua.LState) (lua.LValue, bool) {
 	if r.guard != nil {
 		if err := r.guard(argv[0], argv[1:]); err != nil {
 			r.aclErr = err
-			return luaErrTable(L, err.Error()), true
+			return r.rejectCall(L, CanonicalName(argv[0]), argv[1:], err.Error()), true
 		}
 	}
 	if r.router == nil {
@@ -214,17 +214,17 @@ func (r *scriptRun) call(L *lua.LState) (lua.LValue, bool) {
 		return luaErrTable(L, "ERR Unknown Redis command called from script"), true
 	}
 	if !checkArity(name, len(argv)-1) {
-		return luaErrTable(L, "ERR Wrong number of args calling Redis command from script"), true
+		return r.rejectCall(L, name, argv[1:], "ERR Wrong number of args calling Redis command from script"), true
 	}
 	if scriptForbidden(name) {
-		return luaErrTable(L, "ERR This Redis command is not allowed from script"), true
+		return r.rejectCall(L, name, argv[1:], "ERR This Redis command is not allowed from script"), true
 	}
 	if r.readOnly && commandHasFlag(name, "write") {
-		return luaErrTable(L, "ERR Write commands are not allowed from read-only scripts."), true
+		return r.rejectCall(L, name, argv[1:], "ERR Write commands are not allowed from read-only scripts."), true
 	}
 
 	if !r.wrote && overMemoryFor(r.ctx, name) {
-		return luaErrTable(L, errOOM.Error()), true
+		return r.rejectCall(L, name, argv[1:], errOOM.Error()), true
 	}
 
 	args := make([][]byte, len(argv)-1)
@@ -232,10 +232,10 @@ func (r *scriptRun) call(L *lua.LState) (lua.LValue, bool) {
 		args[i] = []byte(a)
 	}
 	if msg := r.clusterScriptCheck(name, args); msg != "" {
-		return luaErrTable(L, msg), true
+		return r.rejectCall(L, name, argv[1:], msg), true
 	}
 	if r.ctx.ReplicaReadOnly && name != "PFCOUNT" && (commandHasFlag(name, "write") || r.router.Persisted(name, args)) {
-		return luaErrTable(L, "READONLY You can't write against a read only replica."), true
+		return r.rejectCall(L, name, argv[1:], "READONLY You can't write against a read only replica."), true
 	}
 	reply, recorded := runQueuedCommand(r.ctx, queuedCommand{cmd: name, args: args})
 	if len(recorded) > 0 {
@@ -245,9 +245,30 @@ func (r *scriptRun) call(L *lua.LState) (lua.LValue, bool) {
 		r.wrote = true
 	}
 	if reply.Type == resp.TypeError {
-		return luaErrTable(L, reply.Err), true
+		return countedErrTable(L, reply.Err), true
 	}
 	return respToLua(L, reply, r.ctx.scriptRESP3), false
+}
+
+// rejectCall refuses a redis.call before the command runs: the error is
+// counted now, and the command's rejected calls, as Redis' scriptCall does.
+func (r *scriptRun) rejectCall(L *lua.LState, name string, argv []string, msg string) *lua.LTable {
+	args := make([][]byte, len(argv))
+	for i, a := range argv {
+		args[i] = []byte(a)
+	}
+	recordRejected(name, args)
+	countErrorReply(msg)
+	return countedErrTable(L, msg)
+}
+
+// countedErrTable is the error table of a redis.call error already counted
+// in the error statistics; the flag keeps the script's reply from counting it
+// again.
+func countedErrTable(L *lua.LState, msg string) *lua.LTable {
+	tbl := luaErrTable(L, msg)
+	tbl.RawSetString("ignore_errors_stats_update", lua.LTrue)
+	return tbl
 }
 
 // legacyCall serves redis.call for a script run without a router (a handler
@@ -502,7 +523,9 @@ func luaErrReply(tbl *lua.LTable, name string) *resp.Value {
 	if hasSrc && hasLine {
 		msg = fmt.Sprintf("%s script: %s, on %s:%d.", msg, name, string(src), int64(line))
 	}
-	return resp.ErrorValue(msg)
+	v := resp.ErrorValue(msg)
+	v.Counted = tbl.RawGetString("ignore_errors_stats_update") == lua.LTrue
+	return v
 }
 
 // errHandler is the message handler for the script's protected call. Like
@@ -534,7 +557,9 @@ func (r *scriptRun) errHandler(L *lua.LState) *lua.LFunction {
 // finish converts the outcome of the script's protected call to a reply.
 func (r *scriptRun) finish(L *lua.LState, tctx context.Context, err error) *resp.Value {
 	if r.aclErr != nil {
-		return resp.ErrorValue(r.aclErr.Error())
+		v := resp.ErrorValue(r.aclErr.Error())
+		v.Counted = true
+		return v
 	}
 	if err != nil {
 		if tctx.Err() != nil {

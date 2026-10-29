@@ -177,7 +177,8 @@ var configSettable = map[string]bool{
 	"maxmemory": true, "maxmemory-policy": true, "maxmemory-samples": true, "maxclients": true,
 	"timeout": true, "slowlog-log-slower-than": true, "slowlog-max-len": true, "loglevel": true,
 	"appendonly": true, "appendfsync": true, "tcp-keepalive": true, "lfu-decay-time": true,
-	"lfu-log-factor": true, "latency-monitor-threshold": true, "activedefrag": true,
+	"lfu-log-factor": true, "latency-monitor-threshold": true, "latency-tracking": true,
+	"latency-tracking-info-percentiles": true, "activedefrag": true,
 	"notify-keyspace-events": true, "lazyfree-lazy-eviction": true, "lazyfree-lazy-expire": true,
 	"lazyfree-lazy-server-del": true, "hash-max-listpack-entries": true, "hash-max-listpack-value": true,
 	"list-max-listpack-size": true, "set-max-intset-entries": true, "zset-max-listpack-entries": true,
@@ -220,36 +221,38 @@ func configValues(ctx *Context) map[string]string {
 	c := globalConfig
 	c.mu.RLock()
 	values := map[string]string{
-		"maxmemory":                 strconv.FormatInt(c.maxMemory, 10),
-		"maxmemory-policy":          c.maxMemoryPolicy,
-		"maxmemory-samples":         strconv.Itoa(c.maxMemorySamples),
-		"maxclients":                strconv.FormatInt(c.maxClients, 10),
-		"timeout":                   strconv.Itoa(c.timeout),
-		"databases":                 strconv.Itoa(c.databases),
-		"slowlog-log-slower-than":   strconv.FormatInt(c.slowlogLogSlowerThan, 10),
-		"slowlog-max-len":           strconv.Itoa(c.slowlogMaxLen),
-		"loglevel":                  c.logLevel,
-		"daemonize":                 boolStr(c.daemonize),
-		"pidfile":                   c.pidfile,
-		"port":                      strconv.Itoa(c.port),
-		"bind":                      c.bind,
-		"protected-mode":            boolStr(c.protectedMode),
-		"tcp-keepalive":             strconv.Itoa(c.tcpKeepalive),
-		"save":                      strings.Join(c.saveIntervals, " "),
-		"appendonly":                boolStr(c.appendOnly),
-		"appendfsync":               c.appendFsync,
-		"lfu-decay-time":            strconv.Itoa(c.lfuDecayTime),
-		"lfu-log-factor":            strconv.Itoa(c.lfuLogFactor),
-		"activedefrag":              boolStr(c.activedefrag),
-		"lazyfree-lazy-eviction":    boolStr(c.lazyFreeLazyEviction),
-		"lazyfree-lazy-expire":      boolStr(c.lazyFreeLazyExpire),
-		"lazyfree-lazy-server-del":  boolStr(c.lazyFreeLazyServerDel),
-		"hash-max-listpack-entries": strconv.Itoa(c.hashMaxListpackEntries),
-		"hash-max-listpack-value":   strconv.Itoa(c.hashMaxListpackValue),
-		"list-max-listpack-size":    strconv.Itoa(c.listMaxListpackSize),
-		"set-max-intset-entries":    strconv.FormatInt(c.setMaxIntsetEntries, 10),
-		"zset-max-listpack-entries": strconv.Itoa(c.zsetMaxListpackEntries),
-		"latency-monitor-threshold": strconv.FormatInt(LatencyThreshold(), 10),
+		"maxmemory":                         strconv.FormatInt(c.maxMemory, 10),
+		"maxmemory-policy":                  c.maxMemoryPolicy,
+		"maxmemory-samples":                 strconv.Itoa(c.maxMemorySamples),
+		"maxclients":                        strconv.FormatInt(c.maxClients, 10),
+		"timeout":                           strconv.Itoa(c.timeout),
+		"databases":                         strconv.Itoa(c.databases),
+		"slowlog-log-slower-than":           strconv.FormatInt(c.slowlogLogSlowerThan, 10),
+		"slowlog-max-len":                   strconv.Itoa(c.slowlogMaxLen),
+		"loglevel":                          c.logLevel,
+		"daemonize":                         boolStr(c.daemonize),
+		"pidfile":                           c.pidfile,
+		"port":                              strconv.Itoa(c.port),
+		"bind":                              c.bind,
+		"protected-mode":                    boolStr(c.protectedMode),
+		"tcp-keepalive":                     strconv.Itoa(c.tcpKeepalive),
+		"save":                              strings.Join(c.saveIntervals, " "),
+		"appendonly":                        boolStr(c.appendOnly),
+		"appendfsync":                       c.appendFsync,
+		"lfu-decay-time":                    strconv.Itoa(c.lfuDecayTime),
+		"lfu-log-factor":                    strconv.Itoa(c.lfuLogFactor),
+		"activedefrag":                      boolStr(c.activedefrag),
+		"lazyfree-lazy-eviction":            boolStr(c.lazyFreeLazyEviction),
+		"lazyfree-lazy-expire":              boolStr(c.lazyFreeLazyExpire),
+		"lazyfree-lazy-server-del":          boolStr(c.lazyFreeLazyServerDel),
+		"hash-max-listpack-entries":         strconv.Itoa(c.hashMaxListpackEntries),
+		"hash-max-listpack-value":           strconv.Itoa(c.hashMaxListpackValue),
+		"list-max-listpack-size":            strconv.Itoa(c.listMaxListpackSize),
+		"set-max-intset-entries":            strconv.FormatInt(c.setMaxIntsetEntries, 10),
+		"zset-max-listpack-entries":         strconv.Itoa(c.zsetMaxListpackEntries),
+		"latency-monitor-threshold":         strconv.FormatInt(LatencyThreshold(), 10),
+		"latency-tracking":                  boolStr(commandStats.tracking.Load()),
+		"latency-tracking-info-percentiles": formatLatencyPercentiles(),
 	}
 	c.mu.RUnlock()
 	if ctx.Store != nil {
@@ -475,6 +478,18 @@ func (c *Config) setLocked(ctx *Context, param, value string) error {
 			return err
 		}
 		SetLatencyThreshold(v)
+	case "latency-tracking":
+		v, err := ParseConfigBool(param, value)
+		if err != nil {
+			return err
+		}
+		commandStats.tracking.Store(v)
+	case "latency-tracking-info-percentiles":
+		ps, msg := parseLatencyPercentiles(value)
+		if msg != "" {
+			return ConfigSetError(param, msg)
+		}
+		commandStats.percentiles.Store(&ps)
 	case "notify-keyspace-events":
 		flags, ok := store.ParseNotifyFlags(value)
 		if !ok {
@@ -509,6 +524,7 @@ func cmdConfigResetStat(ctx *Context) error {
 	// counter keeps climbing, so a client that trusts the +OK keeps reading
 	// stale, ever-growing statistics from INFO/STATSALL.
 	store.GlobalMetrics.Reset()
+	resetCommandStats()
 	ctx.Store.ResetMemoryPeak()
 	return ctx.WriteOK()
 }

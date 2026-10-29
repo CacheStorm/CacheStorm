@@ -524,7 +524,10 @@ func (r *Router) executeHandler(ctx *Context, cmd *CommandDef, capture bool) (er
 		notifyKeyMisses(ctx)
 	}
 	before := watchedKeysBefore(ctx)
+	ctx.waited = 0
+	start := time.Now()
 	err = cmd.Handler(ctx)
+	recordCall(ctx.Command, ctx.Args, time.Since(start)-ctx.waited, err != nil || ctx.Writer.Errors() > errsBefore)
 	if auditEnabled() {
 		recordAudit(ctx, err == nil && ctx.Writer.Errors() == errsBefore)
 	}
@@ -563,12 +566,14 @@ func (r *Router) Execute(ctx *Context) error {
 	// Redis rejects a call with the wrong number of arguments before running
 	// or queueing it, and a transaction that queued one is discarded at EXEC.
 	if err := ArgumentError(ctx.Command, ctx.Args); err != nil {
+		recordRejected(ctx.Command, ctx.Args)
 		return reject(ctx, err.Error())
 	}
 
 	// Enforce authentication if requirepass is set
 	upperCmd := strings.ToUpper(ctx.Command)
 	if r.RequirePass() != "" && !ctx.IsAuthenticated() && !noAuthCommands[upperCmd] {
+		recordRejected(ctx.Command, ctx.Args)
 		return reject(ctx, "NOAUTH Authentication required.")
 	}
 
@@ -578,12 +583,14 @@ func (r *Router) Execute(ctx *Context) error {
 	// reply, so the router must stop on the bool and return nil — returning
 	// the error would make the caller write a second reply.
 	if enforceACL(ctx, upperCmd) {
+		recordRejected(ctx.Command, ctx.Args)
 		return nil
 	}
 
 	// Cluster mode: a command whose keys this node does not serve is
 	// answered with a redirection instead of running or being queued.
 	if r.cluster != nil && r.clusterRedirect(ctx, asking) {
+		recordRejected(ctx.Command, ctx.Args)
 		return nil
 	}
 
@@ -592,12 +599,14 @@ func (r *Router) Execute(ctx *Context) error {
 	// command discards the transaction it was sent in, and an EXEC whose
 	// transaction queued one is refused as a whole.
 	if overMemoryFor(ctx, ctx.Command) {
+		recordRejected(ctx.Command, ctx.Args)
 		if ctx.Transaction != nil && ctx.Transaction.IsActive() {
 			ctx.Transaction.Abort()
 		}
 		return ctx.Writer.WriteError(errOOM.Error())
 	}
 	if ctx.Command == "EXEC" && ctx.Transaction != nil && ctx.Transaction.IsActive() && execDeniedForMemory(ctx) {
+		recordRejected(ctx.Command, ctx.Args)
 		ctx.Transaction.Clear()
 		ctx.Transaction.ClearWatch()
 		return ctx.Writer.WriteError(errExecAbortOOM.Error())
@@ -605,6 +614,7 @@ func (r *Router) Execute(ctx *Context) error {
 
 	capture, checkErr := r.checkWrite(ctx)
 	if checkErr != nil {
+		recordRejected(ctx.Command, ctx.Args)
 		if ctx.Transaction != nil && ctx.Transaction.IsActive() {
 			ctx.Transaction.Abort()
 		}

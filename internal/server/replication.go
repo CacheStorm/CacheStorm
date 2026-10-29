@@ -398,6 +398,7 @@ func (s *Server) refuseOnReplica(ctx *command.Context) bool {
 	if ctx.Transaction != nil && ctx.Transaction.IsActive() {
 		ctx.Transaction.Abort()
 	}
+	command.RecordRejected(ctx.Command, ctx.Args)
 	_ = ctx.Writer.WriteError(readOnlyReplicaError)
 	return true
 }

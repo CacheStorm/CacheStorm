@@ -321,7 +321,12 @@ func execQueued(ctx *Context, qc queuedCommand) (*resp.Value, *Context) {
 	sub.writeEffectsHandled = false
 
 	before := watchedKeysBefore(&sub)
+	sub.waited = 0
 	err := def.Handler(&sub)
+	recordCall(qc.cmd, qc.args, time.Since(sub.StartTime)-sub.waited, err != nil || sub.Writer.Errors() > 0)
+	if err != nil {
+		countErrorReply(err.Error())
+	}
 	reaccountWrittenKeys(&sub)
 	if ctx.wakeAfter != nil {
 		// Blocked clients are served once the whole transaction ran, so none

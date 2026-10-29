@@ -100,6 +100,10 @@ type Context struct {
 	BeforeWait func()
 	AfterWait  func()
 
+	// waited is how long the running command blocked waiting for data,
+	// which its command statistics leave out as Redis does.
+	waited time.Duration
+
 	// ReplicaReadOnly is set when the command runs on a read-only replica:
 	// a script may run, but every write it attempts is refused.
 	ReplicaReadOnly bool
@@ -297,6 +301,7 @@ func (ctx *Context) waitForKeysReady(keys []string, timeout time.Duration, ready
 	if ctx.InExec {
 		return "", false
 	}
+	defer func(start time.Time) { ctx.waited += time.Since(start) }(time.Now())
 	if ctx.BeforeWait != nil {
 		ctx.BeforeWait()
 		defer ctx.AfterWait()
@@ -326,6 +331,7 @@ func (ctx *Context) waitForStreamKeys(keys []string, timeout time.Duration, read
 	if ctx.InExec {
 		return "", false
 	}
+	defer func(start time.Time) { ctx.waited += time.Since(start) }(time.Now())
 	if ctx.BeforeWait != nil {
 		ctx.BeforeWait()
 		defer ctx.AfterWait()

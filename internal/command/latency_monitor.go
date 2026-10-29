@@ -189,16 +189,28 @@ func cmdLATENCY(ctx *Context) error {
 		}
 		return ctx.WriteVerbatim(b.String())
 	case "HISTOGRAM":
-		return ctx.Writer.WriteValue(resp.PairsValue([]*resp.Value{}))
+		return latencyHistogramReply(ctx)
 	case "HELP":
-		return ctx.WriteArray([]*resp.Value{
-			resp.BulkString("LATEST"),
-			resp.BulkString("HISTORY <event>"),
-			resp.BulkString("RESET [<event> ...]"),
-			resp.BulkString("GRAPH <event>"),
-			resp.BulkString("DOCTOR"),
-		})
+		return ctx.WriteArray(helpReply(latencyHelp))
 	default:
 		return ctx.WriteError(errors.New("ERR unknown subcommand '" + ctx.ArgString(0) + "'. Try LATENCY HELP."))
 	}
 }
+
+const latencyHelp = `LATENCY <subcommand> [<arg> [value] [opt] ...]. Subcommands are:
+DOCTOR
+    Return a human readable latency analysis report.
+GRAPH <event>
+    Return an ASCII latency graph for the <event> class.
+HISTORY <event>
+    Return time-latency samples for the <event> class.
+LATEST
+    Return the latest latency samples for all events.
+RESET [<event> ...]
+    Reset latency data of one or more <event> classes.
+    (default: reset all data for all event classes)
+HISTOGRAM [COMMAND ...]
+    Return a cumulative distribution of latencies in the format of a histogram for the specified command names.
+    If no commands are specified then all histograms are replied.
+HELP
+    Print this help.`

@@ -176,15 +176,22 @@ func cmdCOMMAND(ctx *Context) error {
 func cmdINFO(ctx *Context) error {
 	r := ctx.dispatcher()
 	sections := make(map[string]bool)
+	all, defaults := false, ctx.ArgCount() == 0
 	for i := 0; i < ctx.ArgCount(); i++ {
 		switch name := strings.ToLower(ctx.ArgString(i)); name {
-		case "all", "everything", "default":
+		case "all", "everything":
+			all = true
+		case "default":
+			defaults = true
 		default:
 			sections[name] = true
 		}
 	}
 	want := func(name string) bool {
-		return len(sections) == 0 || sections[name]
+		if all || sections[name] {
+			return true
+		}
+		return defaults && name != "commandstats" && name != "latencystats"
 	}
 
 	port := globalConfig.port
@@ -235,6 +242,23 @@ func cmdINFO(ctx *Context) error {
 
 	if want("cpu") {
 		infoCPU(&w)
+	}
+
+	if want("modules") {
+		w.section("Modules")
+		w.end()
+	}
+
+	if want("commandstats") {
+		infoCommandStats(&w)
+	}
+
+	if want("errorstats") {
+		infoErrorStats(&w)
+	}
+
+	if want("latencystats") {
+		infoLatencyStats(&w)
 	}
 
 	if want("cluster") {

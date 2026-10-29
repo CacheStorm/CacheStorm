@@ -53,6 +53,9 @@ func (w *Writer) WriteValue(v *Value) error {
 	case TypeSimpleString:
 		return w.WriteSimpleString(v.Str)
 	case TypeError:
+		if v.Counted {
+			return w.writeError(v.Err)
+		}
 		return w.WriteError(v.Err)
 	case TypeInteger:
 		return w.WriteInteger(v.Int)
@@ -91,7 +94,21 @@ func (w *Writer) WriteSimpleString(s string) error {
 	return w.wr.Flush()
 }
 
+// errorHook, when set, sees every error reply a writer writes, for the error
+// statistics.
+var errorHook func(msg string)
+
+// SetErrorHook installs the function told about every error reply written.
+func SetErrorHook(fn func(msg string)) { errorHook = fn }
+
 func (w *Writer) WriteError(s string) error {
+	if errorHook != nil {
+		errorHook(s)
+	}
+	return w.writeError(s)
+}
+
+func (w *Writer) writeError(s string) error {
 	w.errors++
 	if err := w.wr.WriteByte(byte(TypeError)); err != nil {
 		return err

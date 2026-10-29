@@ -40,6 +40,9 @@ type Value struct {
 	Map    map[string]*Value
 	IsNull bool
 	Err    string
+	// Counted marks an error reply already counted in the error statistics,
+	// such as a script's error raised from a failed redis.call.
+	Counted bool
 }
 
 func SimpleString(s string) *Value {
