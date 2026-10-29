@@ -465,6 +465,7 @@ func (c *Config) setLocked(ctx *Context, param, value string) error {
 			store.SetHashListpackLimits(int64(c.hashMaxListpackEntries), v)
 		case "set-max-intset-entries":
 			c.setMaxIntsetEntries = v
+			store.SetSetEncodingLimits(v, encMaxListpackEntries, encMaxListpackValue)
 		default:
 			c.zsetMaxListpackEntries = int(v)
 		}

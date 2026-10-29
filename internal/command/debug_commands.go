@@ -195,6 +195,9 @@ func getEncoding(v store.Value) string {
 	case *store.SetValue:
 		val.RLock()
 		defer val.RUnlock()
+		if enc := val.Encoding(); enc != "" {
+			return enc
+		}
 		if len(val.Members) <= encMaxIntsetEntries {
 			allInts := true
 			for m := range val.Members {

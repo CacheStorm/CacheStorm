@@ -375,6 +375,10 @@ type SetValue struct {
 	mu      sync.RWMutex
 	dead    bool
 	size    sizeCounter
+	// enc and order are the encoding Redis would hold the set in and, for
+	// an intset or listpack, its member order (see set_order.go).
+	enc   setEncoding
+	order []string
 	scanCache
 }
 
@@ -415,6 +419,7 @@ func (v *SetValue) AddMember(member string) bool {
 	if _, exists := v.Members[member]; exists {
 		return false
 	}
+	v.orderAddLocked(member)
 	v.Members[member] = struct{}{}
 	v.size.add(setMemberSize(member))
 	v.invalidateScan()
@@ -428,6 +433,7 @@ func (v *SetValue) RemoveMember(member string) bool {
 		return false
 	}
 	delete(v.Members, member)
+	v.orderRemoveLocked(member)
 	v.size.add(-setMemberSize(member))
 	v.invalidateScan()
 	return true
@@ -436,6 +442,7 @@ func (v *SetValue) RemoveMember(member string) bool {
 // ClearMembers empties the set. The caller holds the value's write lock.
 func (v *SetValue) ClearMembers() {
 	v.Members = make(map[string]struct{})
+	v.enc, v.order = setEncNone, nil
 	v.size.set(0)
 	v.invalidateScan()
 }
@@ -454,9 +461,12 @@ func (v *SetValue) String() string {
 func (v *SetValue) Clone() Value {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
-	cloned := &SetValue{Members: make(map[string]struct{}, len(v.Members))}
+	cloned := &SetValue{Members: make(map[string]struct{}, len(v.Members)), enc: v.enc}
 	for k := range v.Members {
 		cloned.Members[k] = struct{}{}
+	}
+	if v.order != nil {
+		cloned.order = append([]string(nil), v.order...)
 	}
 	return cloned
 }

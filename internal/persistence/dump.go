@@ -57,12 +57,7 @@ func EncodeDump(value store.Value) ([]byte, error) {
 		}
 		out = append(out, 2)
 		out = appendDumpLength(out, uint64(len(v.Members)))
-		keys := make([]string, 0, len(v.Members))
-		for k := range v.Members {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
+		for _, k := range v.SaveOrder() {
 			str(k)
 		}
 	case *store.HashValue:
@@ -337,18 +332,20 @@ func (d *dumpDecoder) value() store.Value {
 		return v
 	case 2:
 		n := d.count()
-		v := &store.SetValue{Members: make(map[string]struct{})}
+		seen := make(map[string]struct{}, n)
+		members := make([]string, 0, n)
 		for i := 0; i < n && d.err == nil; i++ {
 			s := d.str()
-			if _, ok := v.Members[s]; ok {
+			if _, ok := seen[s]; ok {
 				d.err = ErrDumpFormat
 			}
-			v.Members[s] = struct{}{}
+			seen[s] = struct{}{}
+			members = append(members, s)
 		}
 		if n == 0 {
 			d.err = ErrDumpFormat
 		}
-		return v
+		return store.NewLoadedSet(members)
 	case 3, 5:
 		n := d.count()
 		v := &store.SortedSetValue{Members: make(map[string]float64)}
@@ -438,6 +435,11 @@ func (d *dumpDecoder) value() store.Value {
 					d.err = ErrDumpFormat
 				}
 				v.Members[s] = struct{}{}
+			}
+			if typ == 20 {
+				v.SetListpackOrder(items)
+			} else {
+				v = store.NewLoadedSet(items)
 			}
 			return v
 		case 9, 13, 16:

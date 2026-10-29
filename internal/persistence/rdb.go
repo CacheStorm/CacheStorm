@@ -264,15 +264,12 @@ func (w *RDBWriter) writeValue(f io.Writer, v store.Value, valueType int) error 
 		}
 	case *store.SetValue:
 		vt.RLock()
-		members := make(map[string]struct{}, len(vt.Members))
-		for m := range vt.Members {
-			members[m] = struct{}{}
-		}
+		members := vt.SaveOrder()
 		vt.RUnlock()
 		if err := w.writeLength(f, len(members)); err != nil {
 			return err
 		}
-		for member := range members {
+		for _, member := range members {
 			if err := w.writeString(f, member); err != nil {
 				return err
 			}
@@ -663,15 +660,15 @@ func (r *RDBReader) readEntry(f io.Reader, valueType byte, expiresAtMS int64, ta
 		if err != nil {
 			return err
 		}
-		members := make(map[string]struct{})
+		members := make([]string, 0, length)
 		for i := 0; i < length; i++ {
 			member, err := r.readString(f)
 			if err != nil {
 				return err
 			}
-			members[member] = struct{}{}
+			members = append(members, member)
 		}
-		value = &store.SetValue{Members: members}
+		value = store.NewLoadedSet(members)
 
 	case 3:
 		length, err := r.readLength(f)

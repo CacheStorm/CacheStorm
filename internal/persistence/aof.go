@@ -851,10 +851,7 @@ func (rw *AOFRewriter) writeValueCommands(w *bufio.Writer, key string, value sto
 
 	case *store.SetValue:
 		vt.RLock()
-		members := make([]string, 0, len(vt.Members))
-		for member := range vt.Members {
-			members = append(members, member)
-		}
+		members := vt.SaveOrder()
 		vt.RUnlock()
 		return rw.writeBatched(w, "SADD", key, 1, members)
 

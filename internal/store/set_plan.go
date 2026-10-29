@@ -15,10 +15,18 @@ func (s *Store) AddSetMembers(key string, members []string) (int, error) {
 		}
 		set.SizeOf()
 		set.Lock()
-		fresh := make(map[string]struct{}, len(members))
+		if len(members) > 0 {
+			set.PrepareAdd(members[0], len(members))
+		}
+		seen := make(map[string]struct{}, len(members))
+		fresh := make([]string, 0, len(members))
 		for _, member := range members {
-			if _, exists := set.Members[member]; !exists {
-				fresh[member] = struct{}{}
+			if _, exists := set.Members[member]; exists {
+				continue
+			}
+			if _, dup := seen[member]; !dup {
+				seen[member] = struct{}{}
+				fresh = append(fresh, member)
 			}
 		}
 		added = len(fresh)
@@ -27,7 +35,7 @@ func (s *Store) AddSetMembers(key string, members []string) (int, error) {
 			return ValuePlan{}, nil
 		}
 		size := set.SizeOf()
-		for member := range fresh {
+		for _, member := range fresh {
 			n := setMemberSize(member)
 			if n > math.MaxInt64-size {
 				set.Unlock()
@@ -36,7 +44,7 @@ func (s *Store) AddSetMembers(key string, members []string) (int, error) {
 			size += n
 		}
 		return ValuePlan{Size: size, Apply: func() Value {
-			for member := range fresh {
+			for _, member := range fresh {
 				set.AddMember(member)
 			}
 			return set

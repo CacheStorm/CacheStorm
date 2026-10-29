@@ -86,7 +86,7 @@ func cmdRESTORELegacy(ctx *Context) error {
 			items := strings.Split(data, ",")
 			for _, item := range items {
 				if item != "" {
-					sv.Members[item] = struct{}{}
+					sv.AddMember(item)
 				}
 			}
 		}

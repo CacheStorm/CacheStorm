@@ -2,7 +2,6 @@ package command
 
 import (
 	"errors"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -46,17 +45,6 @@ func getSet(ctx *Context, key string) (*store.SetValue, error) {
 		return nil, store.ErrWrongType
 	}
 
-	return set, nil
-}
-
-func getSetOrEmpty(ctx *Context, key string) (*store.SetValue, error) {
-	set, err := getSet(ctx, key)
-	if err != nil {
-		return nil, err
-	}
-	if set == nil {
-		return &store.SetValue{Members: make(map[string]struct{})}, nil
-	}
 	return set, nil
 }
 
@@ -135,12 +123,7 @@ func cmdSMEMBERS(ctx *Context) error {
 	}
 
 	set.RLock()
-	members := make([]*resp.Value, 0, len(set.Members))
-	for member := range set.Members {
-		members = append(members, resp.BulkString(member))
-	}
-
-	reply := members
+	reply := setMembersReply(set)
 	set.RUnlock()
 	return ctx.WriteSet(reply)
 }
@@ -240,12 +223,18 @@ func cmdSPOP(ctx *Context) error {
 	}
 
 	if count >= len(set.Members) {
-		members := make([]*resp.Value, 0, len(set.Members))
+		// Redis replies with the union of the set alone.
+		whole := store.NewIntsetSet()
+		set.Range(func(m string) bool {
+			whole.AddMember(m)
+			return true
+		})
+		members := setMembersReply(whole)
 		popped := make([]string, 0, len(set.Members))
-		for member := range set.Members {
-			members = append(members, resp.BulkString(member))
-			popped = append(popped, member)
-		}
+		whole.Range(func(m string) bool {
+			popped = append(popped, m)
+			return true
+		})
 		set.ClearMembers()
 		set.Unlock()
 		if len(popped) > 0 {
@@ -331,7 +320,34 @@ func cmdSRANDMEMBER(ctx *Context) error {
 		}
 		return ctx.WriteBulkString(member)
 	}
-	picked := randomKeys(set.Members, count)
+	var picked []string
+	switch {
+	case count >= int64(len(set.Members)):
+		// The whole set, as the union of the set alone.
+		whole := store.NewIntsetSet()
+		set.Range(func(m string) bool {
+			whole.AddMember(m)
+			return true
+		})
+		whole.Range(func(m string) bool {
+			picked = append(picked, m)
+			return true
+		})
+	case count > 0 && set.Encoding() == "listpack":
+		// A sample of a listpack comes in the listpack's order.
+		chosen := make(map[string]bool, count)
+		for _, m := range randomKeys(set.Members, count) {
+			chosen[m] = true
+		}
+		set.Range(func(m string) bool {
+			if chosen[m] {
+				picked = append(picked, m)
+			}
+			return true
+		})
+	default:
+		picked = randomKeys(set.Members, count)
+	}
 	set.RUnlock()
 	result := make([]*resp.Value, len(picked))
 	for i, m := range picked {
@@ -360,352 +376,6 @@ func cmdSMOVE(ctx *Context) error {
 	return ctx.WriteInteger(0)
 }
 
-func cmdSUNION(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(arityError(ctx.Command))
-	}
-
-	// The shared set-operations lock: a concurrent MoveSetMember takes it
-	// exclusively, so this multi-set snapshot can never observe the move
-	// half-applied.
-	ctx.Store.SetOpsRLock()
-
-	// Resolve every source set, then lock them all simultaneously in
-	// deterministic key order. Holding every lock at once makes the union
-	// an atomic multi-set snapshot: a concurrent SMOVE (which acquires the
-	// same locks in the same order) can never be observed half-applied.
-	type keyedSet struct {
-		key string
-		set *store.SetValue
-	}
-	sets := make([]keyedSet, 0, ctx.ArgCount())
-	for i := 0; i < ctx.ArgCount(); i++ {
-		key := ctx.ArgString(i)
-		set, err := getSetOrEmpty(ctx, key)
-		if err != nil {
-			replyErr := err
-			ctx.Store.SetOpsRUnlock()
-			return ctx.WriteError(replyErr)
-		}
-		sets = append(sets, keyedSet{key: key, set: set})
-	}
-	sort.Slice(sets, func(i, j int) bool { return sets[i].key < sets[j].key })
-	for _, ks := range sets {
-		ks.set.RLock()
-	}
-	defer func() {
-		for _, ks := range sets {
-			ks.set.RUnlock()
-		}
-	}()
-
-	result := make(map[string]struct{})
-	for _, ks := range sets {
-		for member := range ks.set.Members {
-			result[member] = struct{}{}
-		}
-	}
-
-	members := make([]*resp.Value, 0, len(result))
-	for member := range result {
-		members = append(members, resp.BulkString(member))
-	}
-
-	reply := members
-	ctx.Store.SetOpsRUnlock()
-	return ctx.WriteSet(reply)
-}
-
-func cmdSINTER(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(arityError(ctx.Command))
-	}
-
-	// The shared set-operations lock: a concurrent MoveSetMember takes it
-	// exclusively, so this multi-set read can never observe the move
-	// half-applied.
-	ctx.Store.SetOpsRLock()
-	firstSet, err := getSetOrEmpty(ctx, ctx.ArgString(0))
-	if err != nil {
-		replyErr := err
-		ctx.Store.SetOpsRUnlock()
-		return ctx.WriteError(replyErr)
-	}
-
-	firstSet.RLock()
-	result := make(map[string]struct{})
-	for member := range firstSet.Members {
-		result[member] = struct{}{}
-	}
-	firstSet.RUnlock()
-
-	for i := 1; i < ctx.ArgCount(); i++ {
-		set, err := getSet(ctx, ctx.ArgString(i))
-		if err != nil {
-			replyErr := err
-			ctx.Store.SetOpsRUnlock()
-			return ctx.WriteError(replyErr)
-		}
-		if set == nil {
-			clear(result)
-			continue
-		}
-
-		set.RLock()
-		for member := range result {
-			if _, exists := set.Members[member]; !exists {
-				delete(result, member)
-			}
-		}
-		set.RUnlock()
-	}
-
-	members := make([]*resp.Value, 0, len(result))
-	for member := range result {
-		members = append(members, resp.BulkString(member))
-	}
-
-	reply := members
-	ctx.Store.SetOpsRUnlock()
-	return ctx.WriteSet(reply)
-}
-
-func cmdSDIFF(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(arityError(ctx.Command))
-	}
-
-	// The shared set-operations lock: a concurrent MoveSetMember takes it
-	// exclusively, so this multi-set read can never observe the move
-	// half-applied.
-	ctx.Store.SetOpsRLock()
-	firstSet, err := getSetOrEmpty(ctx, ctx.ArgString(0))
-	if err != nil {
-		replyErr := err
-		ctx.Store.SetOpsRUnlock()
-		return ctx.WriteError(replyErr)
-	}
-
-	result := make(map[string]struct{})
-	firstSet.RLock()
-	for member := range firstSet.Members {
-		result[member] = struct{}{}
-	}
-	firstSet.RUnlock()
-
-	for i := 1; i < ctx.ArgCount(); i++ {
-		set, err := getSetOrEmpty(ctx, ctx.ArgString(i))
-		if err != nil {
-			replyErr := err
-			ctx.Store.SetOpsRUnlock()
-			return ctx.WriteError(replyErr)
-		}
-		set.RLock()
-		for member := range set.Members {
-			delete(result, member)
-		}
-		set.RUnlock()
-	}
-
-	members := make([]*resp.Value, 0, len(result))
-	for member := range result {
-		members = append(members, resp.BulkString(member))
-	}
-
-	reply := members
-	ctx.Store.SetOpsRUnlock()
-	return ctx.WriteSet(reply)
-}
-
-func cmdSUNIONSTORE(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(arityError(ctx.Command))
-	}
-
-	// The shared set-operations lock: a concurrent MoveSetMember takes it
-	// exclusively, so this multi-set read can never observe the move
-	// half-applied.
-	ctx.writeEffectsHandled = true
-	ctx.Store.SetOpsRLock()
-	dstKey := ctx.ArgString(0)
-	result := make(map[string]struct{})
-
-	for i := 1; i < ctx.ArgCount(); i++ {
-		set, err := getSetOrEmpty(ctx, ctx.ArgString(i))
-		if err != nil {
-			replyErr := err
-			ctx.Store.SetOpsRUnlock()
-			return ctx.WriteError(replyErr)
-		}
-		set.RLock()
-		for member := range set.Members {
-			result[member] = struct{}{}
-		}
-		set.RUnlock()
-	}
-
-	if len(result) == 0 {
-		if ctx.Store.Delete(dstKey) {
-			ctx.notify(store.NotifyGeneric, "del", dstKey)
-			ctx.Store.KeyNotifier().NotifyKey(dstKey)
-		} else {
-			ctx.PropagateAs()
-		}
-		reply := int64(0)
-		ctx.Store.SetOpsRUnlock()
-		return ctx.WriteInteger(reply)
-	}
-
-	dstSet := &store.SetValue{Members: result}
-	if err := ctx.Store.Set(dstKey, dstSet, store.SetOptions{}); err != nil {
-		replyErr := err
-		ctx.Store.SetOpsRUnlock()
-		return ctx.WriteError(replyErr)
-	}
-	ctx.notify(store.NotifySet, "sunionstore", dstKey)
-
-	reply := int64(int64(len(result)))
-	ctx.Store.SetOpsRUnlock()
-	return ctx.WriteInteger(reply)
-}
-
-func cmdSINTERSTORE(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(arityError(ctx.Command))
-	}
-
-	// The shared set-operations lock: a concurrent MoveSetMember takes it
-	// exclusively, so this multi-set read can never observe the move
-	// half-applied.
-	ctx.writeEffectsHandled = true
-	ctx.Store.SetOpsRLock()
-	dstKey := ctx.ArgString(0)
-
-	firstSet, err := getSetOrEmpty(ctx, ctx.ArgString(1))
-	if err != nil {
-		replyErr := err
-		ctx.Store.SetOpsRUnlock()
-		return ctx.WriteError(replyErr)
-	}
-
-	result := make(map[string]struct{})
-	firstSet.RLock()
-	for member := range firstSet.Members {
-		result[member] = struct{}{}
-	}
-	firstSet.RUnlock()
-
-	for i := 2; i < ctx.ArgCount(); i++ {
-		set, err := getSet(ctx, ctx.ArgString(i))
-		if err != nil {
-			replyErr := err
-			ctx.Store.SetOpsRUnlock()
-			return ctx.WriteError(replyErr)
-		}
-		if set == nil {
-			clear(result)
-			continue
-		}
-
-		set.RLock()
-		for member := range result {
-			if _, exists := set.Members[member]; !exists {
-				delete(result, member)
-			}
-		}
-		set.RUnlock()
-	}
-
-	if len(result) == 0 {
-		if ctx.Store.Delete(dstKey) {
-			ctx.notify(store.NotifyGeneric, "del", dstKey)
-			ctx.Store.KeyNotifier().NotifyKey(dstKey)
-		} else {
-			ctx.PropagateAs()
-		}
-		reply := int64(0)
-		ctx.Store.SetOpsRUnlock()
-		return ctx.WriteInteger(reply)
-	}
-
-	dstSet := &store.SetValue{Members: result}
-	if err := ctx.Store.Set(dstKey, dstSet, store.SetOptions{}); err != nil {
-		replyErr := err
-		ctx.Store.SetOpsRUnlock()
-		return ctx.WriteError(replyErr)
-	}
-	ctx.notify(store.NotifySet, "sinterstore", dstKey)
-
-	reply := int64(int64(len(result)))
-	ctx.Store.SetOpsRUnlock()
-	return ctx.WriteInteger(reply)
-}
-
-func cmdSDIFFSTORE(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(arityError(ctx.Command))
-	}
-
-	// The shared set-operations lock: a concurrent MoveSetMember takes it
-	// exclusively, so this multi-set read can never observe the move
-	// half-applied.
-	ctx.writeEffectsHandled = true
-	ctx.Store.SetOpsRLock()
-	dstKey := ctx.ArgString(0)
-
-	firstSet, err := getSetOrEmpty(ctx, ctx.ArgString(1))
-	if err != nil {
-		replyErr := err
-		ctx.Store.SetOpsRUnlock()
-		return ctx.WriteError(replyErr)
-	}
-
-	result := make(map[string]struct{})
-	firstSet.RLock()
-	for member := range firstSet.Members {
-		result[member] = struct{}{}
-	}
-	firstSet.RUnlock()
-
-	for i := 2; i < ctx.ArgCount(); i++ {
-		set, err := getSetOrEmpty(ctx, ctx.ArgString(i))
-		if err != nil {
-			replyErr := err
-			ctx.Store.SetOpsRUnlock()
-			return ctx.WriteError(replyErr)
-		}
-		set.RLock()
-		for member := range set.Members {
-			delete(result, member)
-		}
-		set.RUnlock()
-	}
-
-	if len(result) == 0 {
-		if ctx.Store.Delete(dstKey) {
-			ctx.notify(store.NotifyGeneric, "del", dstKey)
-			ctx.Store.KeyNotifier().NotifyKey(dstKey)
-		} else {
-			ctx.PropagateAs()
-		}
-		reply := int64(0)
-		ctx.Store.SetOpsRUnlock()
-		return ctx.WriteInteger(reply)
-	}
-
-	dstSet := &store.SetValue{Members: result}
-	if err := ctx.Store.Set(dstKey, dstSet, store.SetOptions{}); err != nil {
-		replyErr := err
-		ctx.Store.SetOpsRUnlock()
-		return ctx.WriteError(replyErr)
-	}
-	ctx.notify(store.NotifySet, "sdiffstore", dstKey)
-
-	reply := int64(int64(len(result)))
-	ctx.Store.SetOpsRUnlock()
-	return ctx.WriteInteger(reply)
-}
-
 func cmdSSCAN(ctx *Context) error {
 	if ctx.ArgCount() < 2 {
 		return ctx.WriteError(arityError(ctx.Command))
@@ -732,11 +402,21 @@ func cmdSSCAN(ctx *Context) error {
 	// SADD/SREM/SMOVE mutate Members under the set's write lock, so the page
 	// is selected under the matching read lock.
 	set.RLock()
-	members, next := collectionScanPage(set, len(set.Members), cursor, opts.count, func(emit func(string)) {
-		for m := range set.Members {
-			emit(m)
-		}
-	})
+	var members []string
+	var next uint64
+	if enc := set.Encoding(); enc == "intset" || enc == "listpack" {
+		// A compact set is returned whole, in its order, as Redis does.
+		set.Range(func(m string) bool {
+			members = append(members, m)
+			return true
+		})
+	} else {
+		members, next = collectionScanPage(set, len(set.Members), cursor, opts.count, func(emit func(string)) {
+			for m := range set.Members {
+				emit(m)
+			}
+		})
+	}
 	set.RUnlock()
 
 	items := make([]*resp.Value, 0, len(members))
