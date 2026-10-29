@@ -23,6 +23,8 @@ type Shard struct {
 	expSumHi, expSumLo uint64
 	slots              *slotIndex
 	hfe                *hashExpiryIndex
+	// scan orders the keys for SCAN while the shard is being scanned.
+	scan *keyScanIndex
 }
 
 func NewShard() *Shard {
@@ -73,6 +75,7 @@ func (s *Shard) setLocked(key string, entry *Entry) (int64, *Entry) {
 		if s.slots != nil {
 			s.slots.add(key)
 		}
+		s.noteAddLocked(key)
 	}
 
 	newMem := footprint(key, entry)
@@ -207,6 +210,7 @@ func (s *Shard) Flush() int64 {
 		}
 	}
 	s.data = make(map[string]*Entry)
+	s.scan = nil
 	s.keyCount = 0
 	s.memUsage = 0
 	s.expiring, s.expSumHi, s.expSumLo = 0, 0, 0

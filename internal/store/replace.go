@@ -60,6 +60,7 @@ func (d *Databases) ReplaceFrom(src *Databases) error {
 				}
 			}
 			delta -= shard.memUsage
+			shard.scan = nil
 			if shard.slots != nil {
 				for key := range shard.data {
 					shard.slots.remove(key)
@@ -84,6 +85,7 @@ func (d *Databases) ReplaceFrom(src *Databases) error {
 					}
 				}
 				from.data = make(map[string]*Entry)
+				from.scan = nil
 				from.keyCount, from.memUsage = 0, 0
 				from.expiring, from.expSumHi, from.expSumLo = 0, 0, 0
 				from.mu.Unlock()

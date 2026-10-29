@@ -702,16 +702,11 @@ func cmdSCAN(ctx *Context) error {
 	})
 }
 
-// SCAN walks the keyspace shard by shard. The cursor's top keyScanShardBits
-// bits name the shard and the rest is the smallest key hash the shard still
-// has to return, so a page costs one pass over a shard instead of the whole
-// keyspace, and a key present for the whole scan is returned exactly once.
-const (
-	keyScanPosBits = 56
-	keyScanPosMask = 1<<keyScanPosBits - 1
-)
-
-func keyScanHash(key string) uint64 { return fnv64a(key) >> (64 - keyScanPosBits) }
+// SCAN walks the keyspace shard by shard. The cursor's top bits name the
+// shard and the rest is the smallest key hash the shard still has to return
+// (see store.ScanShard), so a key present for the whole scan is returned
+// exactly once.
+const keyScanPosMask = 1<<store.ScanPosBits - 1
 
 type scannedKey struct {
 	key   string
@@ -721,26 +716,19 @@ type scannedKey struct {
 // scanKeyspace returns the keys of one SCAN page and the next cursor (0 when
 // the scan is complete); entries are filled in when withEntries is set.
 func scanKeyspace(st *store.Store, cursor uint64, count int, withEntries bool) ([]scannedKey, uint64) {
-	shard, pos := int(cursor>>keyScanPosBits), cursor&keyScanPosMask
+	shard, pos := int(cursor>>store.ScanPosBits), cursor&keyScanPosMask
 	var out []scannedKey
 	for shard < store.NumShards {
-		var entries map[string]*store.Entry
-		if withEntries {
-			entries = make(map[string]*store.Entry)
-		}
-		page, nextPos := scanPage(st.ShardLen(shard), pos, count-len(out), keyScanHash, func(emit func(string)) {
-			st.EachInShard(shard, func(k string, e *store.Entry) {
-				if entries != nil {
-					entries[k] = e
-				}
-				emit(k)
-			})
-		})
-		for _, k := range page {
-			out = append(out, scannedKey{key: k, entry: entries[k]})
+		keys, entries, nextPos := st.ScanShard(shard, pos, count-len(out), withEntries)
+		for i, k := range keys {
+			sk := scannedKey{key: k}
+			if withEntries {
+				sk.entry = entries[i]
+			}
+			out = append(out, sk)
 		}
 		if nextPos != 0 {
-			return out, uint64(shard)<<keyScanPosBits | nextPos
+			return out, uint64(shard)<<store.ScanPosBits | nextPos
 		}
 		shard, pos = shard+1, 0
 		if len(out) >= count {
@@ -750,7 +738,7 @@ func scanKeyspace(st *store.Store, cursor uint64, count int, withEntries bool) (
 	if shard >= store.NumShards {
 		return out, 0
 	}
-	return out, uint64(shard) << keyScanPosBits
+	return out, uint64(shard) << store.ScanPosBits
 }
 
 func cmdHOTKEYS(ctx *Context) error {
