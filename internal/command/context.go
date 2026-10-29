@@ -231,6 +231,22 @@ func NewConnectionContext(cmd string, args [][]byte, s *store.Store, w *resp.Wri
 	}
 }
 
+// ResetConnectionContext makes ctx the context of a new command on a
+// connection, as NewConnectionContext does, so a connection can reuse one
+// Context for all its commands. Nothing may keep ctx once its command ran.
+func ResetConnectionContext(ctx *Context, cmd string, args [][]byte, s *store.Store, w *resp.Writer, clientID int64, remoteAddr string, tx *Transaction) {
+	*ctx = Context{
+		Command:     cmd,
+		Args:        args,
+		Store:       s,
+		Writer:      w,
+		StartTime:   time.Now(),
+		Transaction: tx,
+		ClientID:    clientID,
+		RemoteAddr:  remoteAddr,
+	}
+}
+
 // userName is the ACL user the connection runs as.
 func (ctx *Context) userName() string {
 	if ctx.ACLUser != nil {

@@ -38,6 +38,12 @@ type connectionOptions struct {
 
 type Connection struct {
 	ID int64
+	// ctx is the context of the running command, reset for each one.
+	ctx command.Context
+	// waitHold is the gate hold a blocking command releases while it
+	// waits; beforeWait and afterWait, made once, release and retake it.
+	waitHold              *gateHold
+	beforeWait, afterWait func()
 	// sink holds replies while a command runs; see replySink.
 	sink *replySink
 	// draining is set when the server shuts down: the connection finishes the
@@ -517,7 +523,8 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 		if c.remoteAddr == "" {
 			c.remoteAddr = c.conn.RemoteAddr().String()
 		}
-		ctx := command.NewConnectionContext(cmd, args, st, out, c.ID, c.remoteAddr, c.transaction)
+		ctx := &c.ctx
+		command.ResetConnectionContext(ctx, cmd, args, st, out, c.ID, c.remoteAddr, c.transaction)
 		ctx.DB = c.db
 		ctx.DBs = c.dbs
 		// Share the subscriber across commands so PubSub state persists
@@ -580,9 +587,12 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 					want.lock()
 					c.heldGate = want
 				}
-				h := c.heldGate
-				ctx.BeforeWait = func() { h.unlock(); c.gateWaiting = true }
-				ctx.AfterWait = func() { h.lock(); c.gateWaiting = false }
+				c.waitHold = c.heldGate
+				if c.beforeWait == nil {
+					c.beforeWait = func() { c.waitHold.unlock(); c.gateWaiting = true }
+					c.afterWait = func() { c.waitHold.lock(); c.gateWaiting = false }
+				}
+				ctx.BeforeWait, ctx.AfterWait = c.beforeWait, c.afterWait
 			} else {
 				c.releaseGate()
 			}

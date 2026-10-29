@@ -11,6 +11,10 @@ func (ctx *Context) propagateDelete(key string) {
 }
 
 func (ctx *Context) propagateSetX(key string, value []byte, when int64) {
+	if when == 0 && ctx.Command == "SET" && len(ctx.Args) == 2 && !ctx.propagateSet {
+		// A plain SET is recorded as it was sent.
+		return
+	}
 	args := [][]byte{[]byte(key), value}
 	if when != 0 {
 		args = append(args, []byte("PXAT"), strconv.AppendInt(nil, when, 10))

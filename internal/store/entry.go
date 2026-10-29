@@ -523,7 +523,8 @@ func (e *Entry) SetTags(tags []string) {
 		e.tags.Store(nil)
 		return
 	}
-	e.tags.Store(&tags)
+	held := tags
+	e.tags.Store(&held)
 }
 
 // rehome returns a new entry for the same value with the same metadata, to
