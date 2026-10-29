@@ -28,6 +28,10 @@ type PubSub struct {
 type Subscriber struct {
 	ID int64
 	ch chan []byte
+	// ready is signalled after a frame is queued. A reader waits on it and
+	// takes the frames themselves only while it holds its connection's write
+	// lock, so frames are written in the order they were published.
+	ready chan struct{}
 
 	mu        sync.Mutex
 	closed    bool
@@ -91,6 +95,7 @@ func NewSubscriber(id int64) *Subscriber {
 	return &Subscriber{
 		ID:         id,
 		ch:         make(chan []byte, int(subscriberQueueSize.Load())),
+		ready:      make(chan struct{}, 1),
 		channelSet: make(map[string]struct{}),
 		patternSet: make(map[string]struct{}),
 		shardSet:   make(map[string]struct{}),
@@ -120,6 +125,10 @@ func (s *Subscriber) Send(frame []byte) bool {
 	select {
 	case s.ch <- frame:
 		s.pendingBytes.Add(int64(len(frame)))
+		select {
+		case s.ready <- struct{}{}:
+		default:
+		}
 		s.mu.Unlock()
 		return true
 	default:
@@ -173,6 +182,12 @@ func (s *Subscriber) DropCount() int64 {
 	return s.dropCount.Load()
 }
 
+// Ready is signalled when frames may be waiting in Channel, and closed with
+// the subscriber.
+func (s *Subscriber) Ready() <-chan struct{} {
+	return s.ready
+}
+
 // Channel yields encoded RESP frames (message, pmessage, smessage) ready to be
 // written to the client verbatim. It is closed when the subscriber is closed.
 func (s *Subscriber) Channel() <-chan []byte {
@@ -186,6 +201,7 @@ func (s *Subscriber) Close() {
 	if !s.closed {
 		s.closed = true
 		close(s.ch)
+		close(s.ready)
 	}
 }
 

@@ -191,11 +191,13 @@ func bitmapBitfield(ctx *Context) error {
 	}
 	var results []*resp.Value
 	var propagated [][]byte
-	changed := false
+	// written is Redis' "changes": a write that succeeded and changed a bit
+	// or grew the string. Growth by failed writes alone sends no event.
+	changed, written := false, false
 	err = ctx.Store.ApplyValuePlan(ctx.ArgString(0), func(current store.Value) (store.ValuePlan, error) {
 		results = results[:0]
 		propagated = [][]byte{ctx.Arg(0)}
-		changed = false
+		changed, written = false, false
 		return prepareBitmapValue(current, func(data []byte) (store.ValuePlan, error) {
 			length := max(len(data), growTo)
 			changed = length > len(data)
@@ -262,6 +264,9 @@ func bitmapBitfield(ctx *Context) error {
 				if old != next {
 					changed = true
 				}
+				if old != next || length > len(data) {
+					written = true
+				}
 				size := int((inner + int64(parseEncoding(op.encoding)) + 7) / 8)
 				for j := 0; j < size; j++ {
 					patches[start+j] = scratch[j]
@@ -288,7 +293,7 @@ func bitmapBitfield(ctx *Context) error {
 	if err != nil {
 		return ctx.WriteError(err)
 	}
-	if changed {
+	if written {
 		ctx.notify(store.NotifyString, "setbit", ctx.ArgString(0))
 	}
 	if !changed {

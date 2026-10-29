@@ -65,3 +65,33 @@ func TestPFADDOnCorruptSparseHLLMatchesRedis(t *testing.T) {
 		}
 	}
 }
+
+func TestBITFIELDNotifiesLikeRedis(t *testing.T) {
+	r := newMemAcctRouter()
+	RegisterStringCommands(r)
+	RegisterBitmapCommands(r)
+	s := store.NewStore()
+	sub := store.NewSubscriber(1)
+	s.GetPubSub().PSubscribe(sub, "*")
+	defer s.GetPubSub().RemoveSubscriber(sub)
+	s.SetNotifyFlags(store.NotifyKeyevent | store.NotifyString)
+	run := func(args ...string) string { return memAcctRun(r, s, nil, args...) }
+	run("SET", "k", "a")
+	_ = hgetdelEvents(sub)
+	for _, c := range []struct {
+		args   []string
+		events int
+	}{
+		{[]string{"BITFIELD", "k", "SET", "u8", "0", "97"}, 0},
+		{[]string{"BITFIELD", "k", "INCRBY", "u8", "0", "0"}, 0},
+		{[]string{"BITFIELD", "k", "OVERFLOW", "FAIL", "INCRBY", "u2", "100", "5"}, 0},
+		{[]string{"BITFIELD", "k", "INCRBY", "u4", "200", "0"}, 1},
+		{[]string{"BITFIELD", "k", "SET", "u8", "0", "98"}, 1},
+		{[]string{"BITFIELD", "new", "OVERFLOW", "FAIL", "INCRBY", "u2", "0", "5"}, 0},
+	} {
+		run(c.args...)
+		if got := hgetdelEvents(sub); len(got) != c.events {
+			t.Fatalf("%v: events %q, want %d setbit", c.args, got, c.events)
+		}
+	}
+}

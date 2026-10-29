@@ -353,6 +353,16 @@ def norm(cmd, r):
     return r
 
 
+def drain(sc):
+    out = []
+    sc.s.sendall(b"*1\r\n$4\r\nPING\r\n")
+    while True:
+        m = sc.read()
+        if m == [b"pong", b""]:
+            return out
+        out.append((m[2], m[3]))
+
+
 def main():
     seed = int(sys.argv[1])
     count = int(sys.argv[2])
@@ -361,6 +371,16 @@ def main():
     a, b = Conn(int(os.environ.get("CACHESTORM_PORT", "6390"))), Conn(int(os.environ.get("REDIS_PORT", "6391")))
     a.cmd("FLUSHALL")
     b.cmd("FLUSHALL")
+    subs = None
+    if os.environ.get("FUZZ_NOTIFY"):
+        # Keyspace notifications are compared too: each subscriber is
+        # drained up to the reply of a PING sent after the command.
+        subs = []
+        for c, port in ((a, os.environ.get("CACHESTORM_PORT", "6390")), (b, os.environ.get("REDIS_PORT", "6391"))):
+            c.cmd("CONFIG", "SET", "notify-keyspace-events", "KEA")
+            sc = Conn(int(port))
+            sc.cmd("PSUBSCRIBE", "__key*__:*")
+            subs.append(sc)
     history = []
     in_multi = False
     queued = []
@@ -368,6 +388,15 @@ def main():
         c = gen()
         ra, rb = a.cmd(*c), b.cmd(*c)
         history.append(c)
+        if subs:
+            events = [drain(sc) for sc in subs]
+            if events[0] != events[1]:
+                print("seed", seed, "step", i, "NOTIFY DIVERGE:", " ".join(c))
+                print("  cachestorm:", events[0])
+                print("  redis     :", events[1])
+                for h in history[-int(os.environ.get("FUZZ_HISTORY", "8")):-1]:
+                    print("    prev:", " ".join(h))
+                return 1
         if c[0] == "EXEC" and isinstance(ra, list) and isinstance(rb, list) and len(ra) == len(queued) == len(rb):
             na = [norm(q, x) for q, x in zip(queued, ra)]
             nb = [norm(q, x) for q, x in zip(queued, rb)]

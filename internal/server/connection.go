@@ -469,9 +469,12 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 	{
 		// Frames queued before this command was read go out ahead of its
 		// reply, as they would have in Redis's output buffer.
-		if c.subscriber != nil {
-			if err := c.writePendingLocked(c.subscriber, nil); err != nil {
+		for sub := c.subscriber; sub != nil; {
+			if err := c.writePendingLocked(sub); err != nil {
 				return true
+			}
+			if len(sub.Channel()) == 0 || sub.IsOverflowed() {
+				break
 			}
 		}
 
@@ -919,6 +922,8 @@ func (c *Connection) startDelivery(sub *store.Subscriber) {
 
 func (c *Connection) deliver(sub *store.Subscriber, stop <-chan struct{}, done chan<- struct{}) {
 	defer close(done)
+	// Frames are taken from the queue only under writeMu, here and in the
+	// command loop, so neither can write a later frame before an earlier one.
 	frames := sub.Channel()
 	for {
 		select {
@@ -926,38 +931,42 @@ func (c *Connection) deliver(sub *store.Subscriber, stop <-chan struct{}, done c
 			return
 		case <-sub.Overflowed():
 			return
-		case frame, ok := <-frames:
-			if !ok {
-				return
+		case _, ok := <-sub.Ready():
+			for {
+				c.writeMu.Lock()
+				err := c.writePendingLocked(sub)
+				more := len(frames) > 0 && !sub.IsOverflowed()
+				c.writeMu.Unlock()
+				if err != nil {
+					c.conn.Close()
+					return
+				}
+				if !more {
+					break
+				}
 			}
-			c.writeMu.Lock()
-			err := c.writePendingLocked(sub, frame)
-			c.writeMu.Unlock()
-			if err != nil {
-				c.conn.Close()
+			if !ok {
 				return
 			}
 		}
 	}
 }
 
-// writePendingLocked writes first (when non-nil) and then whatever else is
-// already queued, up to pushBatchLimit frames, with a single flush. Caller
-// holds writeMu.
-func (c *Connection) writePendingLocked(sub *store.Subscriber, first []byte) error {
+// writePendingLocked writes the frames already queued, up to pushBatchLimit,
+// with a single flush. Caller holds writeMu.
+func (c *Connection) writePendingLocked(sub *store.Subscriber) error {
 	if c.pushBuf == nil || sub.IsOverflowed() {
 		return nil
 	}
-	if first == nil {
-		select {
-		case f, ok := <-sub.Channel():
-			if !ok {
-				return nil
-			}
-			first = f
-		default:
+	var first []byte
+	select {
+	case f, ok := <-sub.Channel():
+		if !ok {
 			return nil
 		}
+		first = f
+	default:
+		return nil
 	}
 	// Anything the command loop left buffered goes out first.
 	if err := c.writer.Flush(); err != nil {
