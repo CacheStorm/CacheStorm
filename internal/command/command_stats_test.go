@@ -99,3 +99,19 @@ func TestCommandAndErrorStats(t *testing.T) {
 		t.Errorf("CONFIG RESETSTAT kept error stats:\n%s", got)
 	}
 }
+
+func TestDirtyCountsSuccessfulWrites(t *testing.T) {
+	h := newLuaHarness(t)
+	start := Dirty()
+	h.do("SET", "d", "1")
+	h.do("GET", "d")
+	h.do("LPUSH", "d", "x")
+	h.do("APPEND", "d", "2")
+	if got := Dirty() - start; got != 2 {
+		t.Fatalf("dirty grew by %d, want 2", got)
+	}
+	SaveDone(2)
+	if Dirty() != start {
+		t.Fatalf("SaveDone left %d, want %d", Dirty(), start)
+	}
+}

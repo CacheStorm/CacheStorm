@@ -46,6 +46,7 @@ func (s *Server) startAOFRewrite() error {
 		return errAOFRewriteRunning
 	}
 	s.aofRewriteRunning = true
+	s.aofRewriteStarted = time.Now()
 	s.snapshotWG.Add(1)
 	go func() {
 		defer s.snapshotWG.Done()
@@ -71,9 +72,13 @@ func (s *Server) rewriteAOFLocked() error {
 	s.snapshotMu.Lock()
 	s.aofRewriteRunning = false
 	s.aofRewriteLastError = err
+	s.aofRewriteTook = time.Since(start)
 	if err == nil {
 		s.aofRewriteBase = size
 		s.aofRewrites++
+		s.aofRewriteFailures = 0
+	} else {
+		s.aofRewriteFailures++
 	}
 	s.snapshotMu.Unlock()
 	if err == nil {
@@ -132,19 +137,4 @@ func (s *Server) startAOFRewriteLoop() {
 			}
 		}
 	}()
-}
-
-func (s *Server) aofRewriteInfo() string {
-	if s.aof == nil {
-		return ""
-	}
-	running, status := 0, "ok"
-	if s.aofRewriteRunning {
-		running = 1
-	}
-	if s.aofRewriteLastError != nil {
-		status = "err"
-	}
-	return fmt.Sprintf("aof_rewrite_in_progress:%d\r\naof_rewrite_scheduled:0\r\naof_last_bgrewrite_status:%s\r\naof_rewrites:%d\r\naof_current_size:%d\r\naof_base_size:%d\r\n",
-		running, status, s.aofRewrites, s.aof.Size(), s.aofRewriteBase)
 }

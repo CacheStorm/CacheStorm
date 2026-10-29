@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
@@ -45,9 +46,24 @@ func aclLogContext(ctx *Context) string {
 	}
 }
 
+// aclDenied counts ACL denials by kind, INFO's acl_access_denied_*.
+var aclDenied struct {
+	auth, cmd, key, channel atomic.Int64
+}
+
 // recordACLDenial adds a denied command, key, channel or authentication to
 // ACL LOG.
 func recordACLDenial(ctx *Context, reason, object, username string) {
+	switch reason {
+	case "auth":
+		aclDenied.auth.Add(1)
+	case "command":
+		aclDenied.cmd.Add(1)
+	case "key":
+		aclDenied.key.Add(1)
+	case "channel":
+		aclDenied.channel.Add(1)
+	}
 	if username == "" {
 		username = "default"
 	}

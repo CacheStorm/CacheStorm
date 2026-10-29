@@ -135,9 +135,10 @@ func TestPubSubNumPat(t *testing.T) {
 	ps.PSubscribe(sub1, "news:*", "sports:*")
 	ps.PSubscribe(sub2, "news:*")
 
+	// Redis counts distinct patterns, not subscriptions.
 	count := ps.NumPat()
-	if count != 3 {
-		t.Errorf("expected 3 pattern subscriptions, got %d", count)
+	if count != 2 {
+		t.Errorf("expected 2 patterns, got %d", count)
 	}
 }
 

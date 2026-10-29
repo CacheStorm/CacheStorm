@@ -147,7 +147,7 @@ cmd "$REPLICA_PORT" SET local 1 | grep -q '^-READONLY' || fail "replica accepted
 cmd "$MASTER_PORT" INFO replication | grep -q 'connected_slaves:1' || fail "master INFO: no replica"
 cmd "$REPLICA_PORT" INFO server | grep -q "tcp_port:$REPLICA_PORT" || fail "INFO tcp_port is not the real port"
 
-full_before="$(cmd "$MASTER_PORT" INFO replication | awk -F: '/^sync_full:/{print $2}')"
+full_before="$(cmd "$MASTER_PORT" INFO stats | awk -F: '/^sync_full:/{print $2}')"
 kill -TERM "$replica_pid"
 wait "$replica_pid"
 pids=("${pids[0]}")
@@ -160,8 +160,8 @@ pids+=("$replica_pid")
 wait_for "checkpoint partial restart" "cmd $REPLICA_PORT INFO replication | grep -q master_link_status:up"
 wait_for "checkpoint live data" "[ \"\$(cmd $REPLICA_PORT GET live | tail -1)\" = 44 ]"
 [ ! -e "$WORK/replica-data/replication.state" ] || fail "startup did not consume checkpoint"
-[ "$(cmd "$MASTER_PORT" INFO replication | awk -F: '/^sync_full:/{print $2}')" = "$full_before" ] || fail "matching checkpoint unnecessarily required full sync"
-partial="$(cmd "$MASTER_PORT" INFO replication | awk -F: '/^sync_partial_ok:/{print $2}')"
+[ "$(cmd "$MASTER_PORT" INFO stats | awk -F: '/^sync_full:/{print $2}')" = "$full_before" ] || fail "matching checkpoint unnecessarily required full sync"
+partial="$(cmd "$MASTER_PORT" INFO stats | awk -F: '/^sync_partial_ok:/{print $2}')"
 [ "$partial" -gt 0 ] || fail "clean restart did not use partial sync"
 
 kill -KILL "$replica_pid"
@@ -174,9 +174,9 @@ replica_pid=$!
 pids+=("$replica_pid")
 wait_for "stale checkpoint restart" "cmd $REPLICA_PORT INFO replication | grep -q master_link_status:up"
 wait_for "stale checkpoint repaired data" "[ \"\$(cmd $REPLICA_PORT GET live | tail -1)\" = 45 ]"
-full_after="$(cmd "$MASTER_PORT" INFO replication | awk -F: '/^sync_full:/{print $2}')"
+full_after="$(cmd "$MASTER_PORT" INFO stats | awk -F: '/^sync_full:/{print $2}')"
 [ "$full_after" -gt "$full_before" ] || fail "stale checkpoint did not require full sync"
-[ "$(cmd "$MASTER_PORT" INFO replication | awk -F: '/^sync_partial_ok:/{print $2}')" = "$partial" ] || fail "stale checkpoint resumed from the wrong offset"
+[ "$(cmd "$MASTER_PORT" INFO stats | awk -F: '/^sync_partial_ok:/{print $2}')" = "$partial" ] || fail "stale checkpoint resumed from the wrong offset"
 
 cmd "$REPLICA_PORT" REPLICAOF NO ONE | grep -q '^+OK' || fail "REPLICAOF NO ONE"
 cmd "$REPLICA_PORT" SET local 1 | grep -q '^+OK' || fail "promoted replica refused a write"

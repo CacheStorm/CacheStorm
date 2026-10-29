@@ -143,13 +143,21 @@ type Server struct {
 	snapshotClosing   bool
 	snapshotLastTime  int64
 	snapshotLastError error
-	snapshotInterval  time.Duration
-	snapshotWrite     func([]byte) error
+	// snapshotStarted, snapshotTook and rdbSaves are what INFO persistence
+	// reports about saves; snapshotTook is -1 before the first one.
+	snapshotStarted  time.Time
+	snapshotTook     time.Duration
+	rdbSaves         int64
+	snapshotInterval time.Duration
+	snapshotWrite    func([]byte) error
 	// The AOF rewrite state is guarded by snapshotMu.
 	aofRewriteRunning    bool
 	aofRewriteLastError  error
 	aofRewriteBase       int64
 	aofRewrites          int64
+	aofRewriteStarted    time.Time
+	aofRewriteTook       time.Duration
+	aofRewriteFailures   int64
 	aofRewriteMinSize    int64
 	aofRewritePercentage int64
 	// maxClients and idleTimeout are the live values of maxclients and
@@ -198,6 +206,9 @@ func New(cfg *config.Config) (result *Server, retErr error) {
 		store:  store.NewStore(),
 		router: command.NewRouter(),
 		stopCh: make(chan struct{}),
+
+		snapshotTook:   -1,
+		aofRewriteTook: -1,
 	}
 
 	s.dataLease = lease

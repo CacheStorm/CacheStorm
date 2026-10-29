@@ -557,16 +557,20 @@ func (ps *PubSub) ShardNumSub(channels ...string) map[string]int {
 	return countSubs(ps.shards, channels)
 }
 
-// NumPat counts pattern subscriptions across all clients.
+// NumPat counts the distinct patterns clients are subscribed to, as Redis'
+// PUBSUB NUMPAT does.
 func (ps *PubSub) NumPat() int {
 	ps.mu.RLock()
 	defer ps.mu.RUnlock()
+	return len(ps.patterns)
+}
 
-	count := 0
-	for _, subs := range ps.patterns {
-		count += len(subs)
-	}
-	return count
+// Counts returns how many channels, patterns and shard channels have
+// subscribers, and how many clients are subscribed to any.
+func (ps *PubSub) Counts() (channels, patterns, shards, clients int) {
+	ps.mu.RLock()
+	defer ps.mu.RUnlock()
+	return len(ps.channels), len(ps.patterns), len(ps.shards), len(ps.subscribers)
 }
 
 // RemoveSubscriber closes the subscriber and drops every subscription it holds.

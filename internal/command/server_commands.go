@@ -207,10 +207,10 @@ func cmdINFO(ctx *Context) error {
 	}
 	var w infoWriter
 	if want("server") {
-		infoServer(&w, st, port, ctx.serverMode())
+		infoServer(&w, &st, port, ctx.serverMode())
 	}
 	if want("clients") {
-		infoClients(&w, st)
+		infoClients(&w, &st, ctx)
 	}
 	if want("memory") {
 		infoMemory(&w, ctx)
@@ -225,7 +225,7 @@ func cmdINFO(ctx *Context) error {
 	}
 
 	if want("stats") {
-		infoStats(&w, st)
+		infoStats(&w, &st, ctx)
 	}
 
 	if want("replication") {
@@ -273,7 +273,8 @@ func cmdINFO(ctx *Context) error {
 		sb.WriteString(keyspaceInfo(ctx))
 	}
 
-	return ctx.WriteVerbatim(sb.String())
+	// Sections are separated by a blank line, with none after the last.
+	return ctx.WriteVerbatim(strings.TrimSuffix(sb.String(), "\r\n"))
 }
 
 func cmdTIME(ctx *Context) error {

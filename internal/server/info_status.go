@@ -74,7 +74,7 @@ func newRunID() string {
 
 func (s *Server) serverStatus() command.ServerStatus {
 	ops, in, out := s.rates.rates()
-	return command.ServerStatus{
+	st := command.ServerStatus{
 		RunID:            s.runID,
 		Started:          s.startedAt,
 		ConfigFile:       s.cfg.SourceFile,
@@ -86,6 +86,14 @@ func (s *Server) serverStatus() command.ServerStatus {
 		OutputKbps:       out,
 		RejectedConns:    s.rejectedConns.Load(),
 	}
+	if s.tracker != nil {
+		st.TrackingClients = s.tracker.tracking.Load()
+		st.TrackingKeys, st.TrackingItems, st.TrackingPrefixes = s.tracker.stats()
+	}
+	if s.repl != nil {
+		st.SyncFull, st.SyncPartialOK, st.SyncPartialErr = s.repl.SyncStats()
+	}
+	return st
 }
 
 func (s *Server) blockedClients() int64 {

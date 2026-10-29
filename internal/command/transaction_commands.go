@@ -8,6 +8,7 @@ import (
 	"math"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
@@ -98,6 +99,9 @@ func (t *Transaction) ClearWatch() {
 	watched := t.watchedKeys
 	t.watchedKeys = make(map[watchedKey]int64)
 	t.mu.Unlock()
+	if len(watched) > 0 {
+		watchingClients.Add(-1)
+	}
 	for wk := range watched {
 		if wk.db != nil {
 			wk.db.UnwatchKey(wk.key)
@@ -124,7 +128,18 @@ func (t *Transaction) Start() {
 func (t *Transaction) Watch(key string, version int64) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	t.noteWatchLocked()
 	t.watchedKeys[watchedKey{key: key}] = version
+}
+
+// watchingClients counts the transactions watching keys, INFO's
+// watching_clients.
+var watchingClients atomic.Int64
+
+func (t *Transaction) noteWatchLocked() {
+	if len(t.watchedKeys) == 0 {
+		watchingClients.Add(1)
+	}
 }
 
 // WatchIn watches key in database db: any modification of the key in that
@@ -137,6 +152,7 @@ func (t *Transaction) WatchIn(db *store.Store, key string) {
 	if _, ok := t.watchedKeys[wk]; ok {
 		return
 	}
+	t.noteWatchLocked()
 	t.watchedKeys[wk] = db.WatchKey(key)
 }
 

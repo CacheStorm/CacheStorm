@@ -291,6 +291,11 @@ func (s *Store) WatchKey(key string) int64 {
 	return s.versions[key]
 }
 
+// WatchedKeys reports how many distinct keys are watched in this database.
+func (s *Store) WatchedKeys() int64 {
+	return s.watching.Load()
+}
+
 // UnwatchKey drops one WATCH registration taken by WatchKey.
 func (s *Store) UnwatchKey(key string) {
 	s.versionMu.Lock()

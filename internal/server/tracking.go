@@ -208,6 +208,17 @@ func (t *tracker) info(id int64) *resp.Value {
 	})
 }
 
+// stats returns the tracking table's size as INFO reports it: keys tracked,
+// client/key pairs and BCAST prefixes.
+func (t *tracker) stats() (keys, items, prefixes int64) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for _, ids := range t.keys {
+		items += int64(len(ids))
+	}
+	return int64(len(t.keys)), items, int64(len(t.bcast))
+}
+
 // active reports whether any client has tracking on.
 func (t *tracker) active() bool {
 	return t.tracking.Load() > 0

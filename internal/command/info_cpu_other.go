@@ -11,6 +11,10 @@ func infoCPU(w *infoWriter) {
 	w.section("CPU")
 	w.field("used_cpu_sys", "0.000000")
 	w.field("used_cpu_user", "0.000000")
+	w.field("used_cpu_sys_children", "0.000000")
+	w.field("used_cpu_user_children", "0.000000")
+	w.field("used_cpu_sys_main_thread", "0.000000")
+	w.field("used_cpu_user_main_thread", "0.000000")
 	w.int("goroutines", int64(runtime.NumGoroutine()))
 	w.end()
 }

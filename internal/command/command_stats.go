@@ -149,6 +149,30 @@ func init() {
 	resp.SetErrorHook(countErrorReply)
 }
 
+// dirty counts the writes since the last successful save, INFO's
+// rdb_changes_since_last_save.
+var dirty atomic.Int64
+
+// writeFlagged holds the commands Redis flags write.
+var writeFlagged = func() map[string]bool {
+	m := make(map[string]bool)
+	for name, spec := range redisCommandSpecs {
+		for _, f := range spec.Flags {
+			if f == "write" {
+				m[name] = true
+			}
+		}
+	}
+	return m
+}()
+
+// Dirty returns the number of writes since the last successful save.
+func Dirty() int64 { return dirty.Load() }
+
+// SaveDone takes the writes a successful save covered, the Dirty value read
+// when it started, off the count.
+func SaveDone(covered int64) { dirty.Add(-covered) }
+
 // statKey names the statistics a call of cmd counts towards: "CMD", or
 // "CMD|SUB" for a container command. An unknown subcommand counts nowhere.
 func statKey(cmd string, args [][]byte) string {
@@ -194,6 +218,9 @@ func recordCall(cmd string, args [][]byte, d time.Duration, failed bool) {
 		return
 	}
 	usec := int64(d / time.Microsecond)
+	if !failed && writeFlagged[cmd] {
+		dirty.Add(1)
+	}
 	st.calls.Add(1)
 	st.usec.Add(usec)
 	if failed {
@@ -238,6 +265,10 @@ func countErrorReply(msg string) {
 // resetCommandStats is CONFIG RESETSTAT's part for the command and error
 // statistics.
 func resetCommandStats() {
+	aclDenied.auth.Store(0)
+	aclDenied.cmd.Store(0)
+	aclDenied.key.Store(0)
+	aclDenied.channel.Store(0)
 	commandStats.mu.Lock()
 	commandStats.all.Store(&map[string]*commandStat{})
 	commandStats.mu.Unlock()

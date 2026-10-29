@@ -21,7 +21,11 @@ type Metrics struct {
 	TotalErrors       atomic.Int64
 	TotalBytesIn      atomic.Int64
 	TotalBytesOut     atomic.Int64
-	StartTime         time.Time
+	// ReadEvents and WriteEvents count the socket reads and writes that
+	// moved data, INFO's total_reads_processed and total_writes_processed.
+	ReadEvents  atomic.Int64
+	WriteEvents atomic.Int64
+	StartTime   time.Time
 	// commands maps a command name to its statistics. The map is never
 	// modified once published: a new command copies it under mu, so the
 	// per-command path reads it without a lock.
@@ -179,10 +183,12 @@ func (m *Metrics) RecordError() {
 }
 
 func (m *Metrics) RecordBytesIn(n int64) {
+	m.ReadEvents.Add(1)
 	m.TotalBytesIn.Add(n)
 }
 
 func (m *Metrics) RecordBytesOut(n int64) {
+	m.WriteEvents.Add(1)
 	m.TotalBytesOut.Add(n)
 }
 
@@ -239,6 +245,8 @@ func (m *Metrics) Reset() {
 	m.TotalConnections.Store(0)
 	m.TotalCommands.Store(0)
 	m.TotalReads.Store(0)
+	m.ReadEvents.Store(0)
+	m.WriteEvents.Store(0)
 	m.TotalWrites.Store(0)
 	m.TotalHits.Store(0)
 	m.TotalMisses.Store(0)

@@ -324,6 +324,13 @@ func (kn *KeyNotifier) NotifyKey(key string) {
 	kn.mu.Unlock()
 }
 
+// WaitedKeys reports how many keys clients are blocked on.
+func (kn *KeyNotifier) WaitedKeys() int {
+	kn.mu.Lock()
+	defer kn.mu.Unlock()
+	return len(kn.waiters)
+}
+
 // WaiterCount reports how many clients are blocked on key.
 func (kn *KeyNotifier) WaiterCount(key string) int {
 	kn.mu.Lock()

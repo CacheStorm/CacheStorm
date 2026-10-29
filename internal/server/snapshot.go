@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/cachestorm/cachestorm/internal/command"
@@ -118,25 +119,81 @@ func (s *Server) lastSnapshotTime() int64 {
 	return s.snapshotLastTime
 }
 
+func boolInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
 func (s *Server) snapshotInfo() string {
 	s.snapshotMu.Lock()
 	defer s.snapshotMu.Unlock()
-	running, aof := 0, 0
-	if s.snapshotRunning {
-		running = 1
-	}
-	if s.aof != nil {
-		aof = 1
-	}
-	status := "ok"
-	aofStatus := "ok"
-	if s.persistenceError() != nil {
-		aofStatus = "err"
-	}
+	status, aofStatus, rewriteStatus := "ok", "ok", "ok"
 	if s.snapshotLastError != nil {
 		status = "err"
 	}
-	return fmt.Sprintf("# Persistence\r\nloading:0\r\nrdb_bgsave_in_progress:%d\r\nrdb_last_save_time:%d\r\nrdb_last_bgsave_status:%s\r\naof_enabled:%d\r\naof_last_write_status:%s\r\n%s\r\n", running, s.snapshotLastTime, status, aof, aofStatus, s.aofRewriteInfo())
+	if s.persistenceError() != nil {
+		aofStatus = "err"
+	}
+	if s.aofRewriteLastError != nil {
+		rewriteStatus = "err"
+	}
+	seconds := func(d time.Duration) int64 {
+		if d < 0 {
+			return -1
+		}
+		return int64(d / time.Second)
+	}
+	current := func(running bool, started time.Time) int64 {
+		if !running {
+			return -1
+		}
+		return int64(time.Since(started) / time.Second)
+	}
+	var b strings.Builder
+	field := func(name string, value any) { fmt.Fprintf(&b, "%s:%v\r\n", name, value) }
+	b.WriteString("# Persistence\r\n")
+	field("loading", 0)
+	field("async_loading", 0)
+	field("current_cow_peak", 0)
+	field("current_cow_size", 0)
+	field("current_cow_size_age", 0)
+	field("current_fork_perc", "0.00")
+	field("current_save_keys_processed", 0)
+	field("current_save_keys_total", 0)
+	field("rdb_changes_since_last_save", command.Dirty())
+	field("rdb_bgsave_in_progress", boolInt(s.snapshotRunning))
+	field("rdb_last_save_time", s.snapshotLastTime)
+	field("rdb_last_bgsave_status", status)
+	field("rdb_last_bgsave_time_sec", seconds(s.snapshotTook))
+	field("rdb_current_bgsave_time_sec", current(s.snapshotRunning, s.snapshotStarted))
+	field("rdb_saves", s.rdbSaves)
+	field("rdb_last_cow_size", 0)
+	field("rdb_last_load_keys_expired", 0)
+	field("rdb_last_load_keys_loaded", 0)
+	field("aof_enabled", boolInt(s.aof != nil))
+	field("aof_rewrite_in_progress", boolInt(s.aofRewriteRunning))
+	field("aof_rewrite_scheduled", 0)
+	field("aof_last_rewrite_time_sec", seconds(s.aofRewriteTook))
+	field("aof_current_rewrite_time_sec", current(s.aofRewriteRunning, s.aofRewriteStarted))
+	field("aof_last_bgrewrite_status", rewriteStatus)
+	field("aof_rewrites", s.aofRewrites)
+	field("aof_rewrites_consecutive_failures", s.aofRewriteFailures)
+	field("aof_last_write_status", aofStatus)
+	field("aof_last_cow_size", 0)
+	field("module_fork_in_progress", 0)
+	field("module_fork_last_cow_size", 0)
+	if s.aof != nil {
+		field("aof_current_size", s.aof.Size())
+		field("aof_base_size", s.aofRewriteBase)
+		field("aof_pending_rewrite", 0)
+		field("aof_buffer_length", 0)
+		field("aof_pending_bio_fsync", 0)
+		field("aof_delayed_fsync", 0)
+	}
+	b.WriteString("\r\n")
+	return b.String()
 }
 
 func (s *Server) saveSnapshot(background bool) error {
@@ -154,15 +211,20 @@ func (s *Server) saveSnapshot(background bool) error {
 		return errors.New("ERR Background save already in progress")
 	}
 	s.snapshotRunning = true
+	s.snapshotStarted = time.Now()
 	s.snapshotWG.Add(1)
 	write := s.snapshotWrite
 	s.snapshotMu.Unlock()
+	covered := command.Dirty()
 	finish := func(err error) {
 		s.snapshotMu.Lock()
 		s.snapshotRunning = false
 		s.snapshotLastError = err
+		s.snapshotTook = time.Since(s.snapshotStarted)
 		if err == nil {
 			s.snapshotLastTime = time.Now().Unix()
+			s.rdbSaves++
+			command.SaveDone(covered)
 		}
 		s.snapshotMu.Unlock()
 		s.snapshotWG.Done()
