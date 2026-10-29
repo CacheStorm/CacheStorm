@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/bits"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -378,26 +379,87 @@ func cmdMemoryUsage(ctx *Context) error {
 
 func cmdMemoryStats(ctx *Context) error {
 	m, keys := currentMemoryFigures(ctx)
-	perKey := int64(0)
+	ms := readGoMemory()
+	_, evalBytes, _, _, functionBytes := scriptMemory(ctx)
+	allocated, active, resident := int64(ms.heapAlloc), int64(ms.heapAlloc+ms.heapUnused), int64(ms.mapped)
+	ratio := func(a, b int64) float64 {
+		if b <= 0 {
+			return 0
+		}
+		return float64(a) / float64(b)
+	}
+	double := func(f float64) *resp.Value { return resp.DoubleValue(strconv.FormatFloat(f, 'f', -1, 64)) }
+	integer := resp.IntegerValue
+	out := []*resp.Value{
+		resp.BulkString("peak.allocated"), integer(m.peak),
+		resp.BulkString("total.allocated"), integer(m.used),
+		resp.BulkString("startup.allocated"), integer(0),
+		resp.BulkString("replication.backlog"), integer(0),
+		resp.BulkString("clients.slaves"), integer(0),
+		resp.BulkString("clients.normal"), integer(0),
+		resp.BulkString("cluster.links"), integer(0),
+		resp.BulkString("aof.buffer"), integer(0),
+		resp.BulkString("lua.caches"), integer(evalBytes),
+		resp.BulkString("functions.caches"), integer(functionBytes),
+	}
+	// The per-database overhead is what Redis' dictionaries would take for
+	// the same keys: a bucket array sized to a power of two and an entry per
+	// key.
+	dictBytes := func(n int64) int64 {
+		if n == 0 {
+			return 0
+		}
+		return 8<<bits.Len64(uint64(n-1)) + 24*n
+	}
+	var overhead int64
+	ctx.databases().ForEach(func(index int, s *store.Store) {
+		n := s.KeyCount()
+		if n == 0 {
+			return
+		}
+		expires, _ := s.ExpiryStats()
+		main, exp := dictBytes(n), dictBytes(expires)
+		overhead += main + exp
+		out = append(out, resp.BulkString("db."+strconv.Itoa(index)), resp.PairsValue([]*resp.Value{
+			resp.BulkString("overhead.hashtable.main"), integer(main),
+			resp.BulkString("overhead.hashtable.expires"), integer(exp),
+		}))
+	})
+	dataset := max(m.used-overhead, 0)
+	perKey, datasetPerc, peakPerc := int64(0), 0.0, 100.0
 	if keys > 0 {
 		perKey = m.used / keys
 	}
-	peakPerc := 100.0
+	if m.used > 0 {
+		datasetPerc = float64(dataset) * 100 / float64(m.used)
+	}
 	if m.peak > 0 {
 		peakPerc = float64(m.used) * 100 / float64(m.peak)
 	}
-	double := func(f float64) *resp.Value { return resp.DoubleValue(strconv.FormatFloat(f, 'f', -1, 64)) }
-	return ctx.Writer.WriteValue(resp.PairsValue([]*resp.Value{
-		resp.BulkString("peak.allocated"), resp.IntegerValue(m.peak),
-		resp.BulkString("total.allocated"), resp.IntegerValue(m.used),
-		resp.BulkString("keys.count"), resp.IntegerValue(keys),
-		resp.BulkString("keys.bytes-per-key"), resp.IntegerValue(perKey),
-		resp.BulkString("dataset.bytes"), resp.IntegerValue(m.used),
+	out = append(out,
+		resp.BulkString("overhead.db.hashtable.lut"), integer(0),
+		resp.BulkString("overhead.db.hashtable.rehashing"), integer(0),
+		resp.BulkString("overhead.total"), integer(overhead),
+		resp.BulkString("db.dict.rehashing.count"), integer(0),
+		resp.BulkString("keys.count"), integer(keys),
+		resp.BulkString("keys.bytes-per-key"), integer(perKey),
+		resp.BulkString("dataset.bytes"), integer(dataset),
+		resp.BulkString("dataset.percentage"), double(datasetPerc),
 		resp.BulkString("peak.percentage"), double(peakPerc),
-		resp.BulkString("allocator.resident"), resp.IntegerValue(m.rss),
+		resp.BulkString("allocator.allocated"), integer(allocated),
+		resp.BulkString("allocator.active"), integer(active),
+		resp.BulkString("allocator.resident"), integer(resident),
+		resp.BulkString("allocator.muzzy"), integer(0),
+		resp.BulkString("allocator-fragmentation.ratio"), double(ratio(active, allocated)),
+		resp.BulkString("allocator-fragmentation.bytes"), integer(active-allocated),
+		resp.BulkString("allocator-rss.ratio"), double(ratio(resident, active)),
+		resp.BulkString("allocator-rss.bytes"), integer(resident-active),
+		resp.BulkString("rss-overhead.ratio"), double(ratio(m.rss, resident)),
+		resp.BulkString("rss-overhead.bytes"), integer(m.rss-resident),
 		resp.BulkString("fragmentation"), double(m.fragmentation()),
-		resp.BulkString("fragmentation.bytes"), resp.IntegerValue(m.rss - m.used),
-	}))
+		resp.BulkString("fragmentation.bytes"), integer(m.rss-m.used),
+	)
+	return ctx.Writer.WriteValue(resp.PairsValue(out))
 }
 
 // currentMemoryFigures reads the memory figures and the key count across

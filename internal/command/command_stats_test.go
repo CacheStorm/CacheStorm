@@ -115,3 +115,20 @@ func TestDirtyCountsSuccessfulWrites(t *testing.T) {
 		t.Fatalf("SaveDone left %d, want %d", Dirty(), start)
 	}
 }
+
+func TestMemoryStatsFields(t *testing.T) {
+	h := newLuaHarness(t)
+	RegisterDebugCommands(h.router)
+	h.do("SET", "a", "1")
+	got := h.do("MEMORY", "STATS")
+	var names []string
+	for _, line := range strings.Split(got, "\r\n") {
+		if strings.ContainsAny(line, "abcdefghijklmnopqrstuvwxyz") && !strings.HasPrefix(line, "$") {
+			names = append(names, line)
+		}
+	}
+	want := "peak.allocated total.allocated startup.allocated replication.backlog clients.slaves clients.normal cluster.links aof.buffer lua.caches functions.caches db.0 overhead.hashtable.main overhead.hashtable.expires overhead.db.hashtable.lut overhead.db.hashtable.rehashing overhead.total db.dict.rehashing.count keys.count keys.bytes-per-key dataset.bytes dataset.percentage peak.percentage allocator.allocated allocator.active allocator.resident allocator.muzzy allocator-fragmentation.ratio allocator-fragmentation.bytes allocator-rss.ratio allocator-rss.bytes rss-overhead.ratio rss-overhead.bytes fragmentation fragmentation.bytes"
+	if strings.Join(names, " ") != want {
+		t.Fatalf("MEMORY STATS fields:\n got: %s\nwant: %s", strings.Join(names, " "), want)
+	}
+}
