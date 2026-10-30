@@ -199,8 +199,8 @@ func TestSubscriberOverflowMarksAndNotifies(t *testing.T) {
 
 func TestSubscriberPendingBytesBound(t *testing.T) {
 	prevQ, prevB := SetSubscriberLimits(0, 100)
+	defer SetSubscriberLimits(prevQ, prevB)
 	sub := NewSubscriber(1)
-	SetSubscriberLimits(prevQ, prevB)
 
 	payload := make([]byte, 60)
 	if !sub.Send(payload) {
@@ -216,8 +216,8 @@ func TestSubscriberPendingBytesBound(t *testing.T) {
 
 func TestSubscriberDeliveredReleasesBytes(t *testing.T) {
 	prevQ, prevB := SetSubscriberLimits(0, 100)
+	defer SetSubscriberLimits(prevQ, prevB)
 	sub := NewSubscriber(1)
-	SetSubscriberLimits(prevQ, prevB)
 
 	payload := make([]byte, 60)
 	for i := 0; i < 5; i++ {
@@ -225,6 +225,38 @@ func TestSubscriberDeliveredReleasesBytes(t *testing.T) {
 			t.Fatalf("send %d rejected although the consumer keeps up", i)
 		}
 		sub.Delivered(<-sub.Channel())
+	}
+}
+
+func TestSubscriberSoftLimitNeedsItsSeconds(t *testing.T) {
+	prev := *pubsubLimits.Load()
+	defer SetPubsubOutputLimits(prev.hard, prev.soft, prev.softSeconds)
+	SetPubsubOutputLimits(0, 100, 5)
+	sub := NewSubscriber(1)
+
+	payload := make([]byte, 60)
+	for i := 0; i < 3; i++ {
+		if !sub.Send(payload) {
+			t.Fatalf("send %d over the soft limit rejected before its seconds passed", i)
+		}
+	}
+	sub.mu.Lock()
+	sub.softSince -= 6
+	sub.mu.Unlock()
+	if sub.Send(payload) || !sub.IsOverflowed() {
+		t.Fatal("subscriber over the soft limit for longer than its seconds kept")
+	}
+
+	other := NewSubscriber(2)
+	other.Send(payload)
+	other.Send(payload)
+	other.mu.Lock()
+	other.softSince -= 6
+	other.mu.Unlock()
+	other.Delivered(<-other.Channel())
+	other.Delivered(<-other.Channel())
+	if !other.Send(payload) || other.IsOverflowed() {
+		t.Fatal("subscriber back under the soft limit disconnected")
 	}
 }
 

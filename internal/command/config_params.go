@@ -41,6 +41,8 @@ type configParam struct {
 	check func(name, value string) (string, error)
 	// apply hands a new numeric value to the code it configures.
 	apply func(v int64)
+	// applyText is apply for a parameter that is not a number.
+	applyText func(v string)
 }
 
 const defaultOutputBufferLimit = "normal 0 0 0 slave 268435456 67108864 60 pubsub 33554432 8388608 60"
@@ -87,7 +89,7 @@ var configParams = map[string]*configParam{
 	"bind-source-addr":                    stringParam(""),
 	"bio-cpulist":                         immutableParam(""),
 	"busy-reply-threshold":                intParam("5000", 0, configLongMax),
-	"client-output-buffer-limit":          {kind: cfgSpecial, def: defaultOutputBufferLimit, check: checkOutputBufferLimit},
+	"client-output-buffer-limit":          {kind: cfgSpecial, def: defaultOutputBufferLimit, check: checkOutputBufferLimit, applyText: applyOutputBufferLimit},
 	"client-query-buffer-limit":           memParam("1073741824", 1<<20, configLongMax),
 	"cluster-allow-pubsubshard-when-down": boolParam("yes"),
 	"cluster-allow-reads-when-down":       boolParam("no"),
@@ -317,6 +319,9 @@ func (c *Config) setParamLocked(name, value string, p *configParam) error {
 	if p.apply != nil {
 		p.apply(n)
 	}
+	if p.applyText != nil {
+		p.applyText(shown)
+	}
 	return nil
 }
 
@@ -363,7 +368,7 @@ func ValidateConfigParam(name, value string) error {
 	c := globalConfig
 	old, had := c.params[name]
 	cp := *p
-	cp.apply = nil
+	cp.apply, cp.applyText = nil, nil
 	if err := c.setParamLocked(name, value, &cp); err != nil {
 		return err
 	}
@@ -526,6 +531,24 @@ func checkShutdownFlags(name, value string) (string, error) {
 		return "default", nil
 	}
 	return strings.Join(out, " "), nil
+}
+
+// applyOutputBufferLimit hands the pubsub class's limits, as
+// checkOutputBufferLimit normalised them, to the subscriber queues.
+func applyOutputBufferLimit(v string) {
+	f := strings.Fields(v)
+	for i := 0; i+3 < len(f); i += 4 {
+		if f[i] != "pubsub" {
+			continue
+		}
+		hard, errH := strconv.ParseUint(f[i+1], 10, 64)
+		soft, errS := strconv.ParseUint(f[i+2], 10, 64)
+		secs, errT := strconv.ParseInt(f[i+3], 10, 64)
+		if errH != nil || errS != nil || errT != nil {
+			return
+		}
+		store.SetPubsubOutputLimits(int64(min(hard, math.MaxInt64)), int64(min(soft, math.MaxInt64)), secs)
+	}
 }
 
 // checkOutputBufferLimit applies client-output-buffer-limit's class/hard/

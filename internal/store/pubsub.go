@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 type PubSub struct {
@@ -45,7 +46,9 @@ type Subscriber struct {
 	nShards    atomic.Int64
 
 	pendingBytes atomic.Int64
-	maxBytes     int64
+	// softSince is when the pending bytes went over the soft limit, in unix
+	// seconds, or 0. It is guarded by mu.
+	softSince int64
 
 	overflowed   atomic.Bool
 	overflowCh   chan struct{}
@@ -53,31 +56,43 @@ type Subscriber struct {
 	onOverflow   func()
 }
 
-// subscriberQueueSize and subscriberMaxPendingBytes bound one subscriber's
-// undelivered frames. Redis disconnects a pub/sub client whose output buffer
-// passes client-output-buffer-limit (32mb hard by default); a subscriber that
-// overflows either bound here is marked overflowed so its connection closes,
-// instead of silently losing messages.
+// subscriberQueueSize and pubsubLimits bound one subscriber's undelivered
+// frames. Like Redis with client-output-buffer-limit pubsub, a subscriber
+// whose pending bytes pass the hard limit, or stay over the soft limit for
+// longer than its seconds, is marked overflowed so its connection closes,
+// instead of silently losing messages. The limits apply to existing
+// subscribers too; the queue size only to new ones.
 var (
-	subscriberQueueSize       atomic.Int64
-	subscriberMaxPendingBytes atomic.Int64
+	subscriberQueueSize atomic.Int64
+	pubsubLimits        atomic.Pointer[outputLimits]
 )
+
+type outputLimits struct {
+	hard, soft, softSeconds int64
+}
 
 func init() {
 	subscriberQueueSize.Store(4096)
-	subscriberMaxPendingBytes.Store(32 << 20)
+	pubsubLimits.Store(&outputLimits{hard: 32 << 20, soft: 8 << 20, softSeconds: 60})
 }
 
-// SetSubscriberLimits changes the queue bounds for subscribers created after
-// the call and returns the previous values. A value <= 0 leaves that bound as
-// it was.
+// SetPubsubOutputLimits sets the pending-bytes limits of every subscriber;
+// a zero limit is no limit.
+func SetPubsubOutputLimits(hard, soft, softSeconds int64) {
+	pubsubLimits.Store(&outputLimits{hard: hard, soft: soft, softSeconds: softSeconds})
+}
+
+// SetSubscriberLimits changes the queue size for subscribers created after
+// the call and the hard pending-bytes limit, and returns the previous values.
+// A value <= 0 leaves that bound as it was.
 func SetSubscriberLimits(queueSize int, maxPendingBytes int64) (int, int64) {
-	prevQ, prevB := int(subscriberQueueSize.Load()), subscriberMaxPendingBytes.Load()
+	lim := pubsubLimits.Load()
+	prevQ, prevB := int(subscriberQueueSize.Load()), lim.hard
 	if queueSize > 0 {
 		subscriberQueueSize.Store(int64(queueSize))
 	}
 	if maxPendingBytes > 0 {
-		subscriberMaxPendingBytes.Store(maxPendingBytes)
+		SetPubsubOutputLimits(maxPendingBytes, lim.soft, lim.softSeconds)
 	}
 	return prevQ, prevB
 }
@@ -99,7 +114,6 @@ func NewSubscriber(id int64) *Subscriber {
 		channelSet: make(map[string]struct{}),
 		patternSet: make(map[string]struct{}),
 		shardSet:   make(map[string]struct{}),
-		maxBytes:   subscriberMaxPendingBytes.Load(),
 		overflowCh: make(chan struct{}),
 	}
 }
@@ -117,7 +131,7 @@ func (s *Subscriber) Send(frame []byte) bool {
 		s.dropCount.Add(1)
 		return false
 	}
-	if s.maxBytes > 0 && s.pendingBytes.Load()+int64(len(frame)) > s.maxBytes {
+	if s.overLimitLocked(s.pendingBytes.Load() + int64(len(frame))) {
 		s.mu.Unlock()
 		s.overflow()
 		return false
@@ -136,6 +150,23 @@ func (s *Subscriber) Send(frame []byte) bool {
 		s.overflow()
 		return false
 	}
+}
+
+func (s *Subscriber) overLimitLocked(used int64) bool {
+	lim := pubsubLimits.Load()
+	if lim.hard > 0 && used > lim.hard {
+		return true
+	}
+	if lim.soft <= 0 || used <= lim.soft {
+		s.softSince = 0
+		return false
+	}
+	now := time.Now().Unix()
+	if s.softSince == 0 {
+		s.softSince = now
+		return false
+	}
+	return now-s.softSince > lim.softSeconds
 }
 
 func (s *Subscriber) overflow() {

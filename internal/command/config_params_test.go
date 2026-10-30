@@ -3,6 +3,8 @@ package command
 import (
 	"strings"
 	"testing"
+
+	"github.com/cachestorm/cachestorm/internal/store"
 )
 
 // TestConfigParamsMatchRedis pins CONFIG GET and SET for the parameters kept
@@ -15,7 +17,7 @@ func TestConfigParamsMatchRedis(t *testing.T) {
 	RegisterDebugCommands(h.router)
 	saved := globalConfig.params
 	t.Cleanup(func() {
-		h.do("CONFIG", "SET", "set-max-listpack-entries", "128", "hll-sparse-max-bytes", "3000", "acllog-max-len", "128")
+		h.do("CONFIG", "SET", "set-max-listpack-entries", "128", "hll-sparse-max-bytes", "3000", "acllog-max-len", "128", "client-output-buffer-limit", defaultOutputBufferLimit)
 		globalConfig.mu.Lock()
 		globalConfig.params = saved
 		globalConfig.mu.Unlock()
@@ -55,5 +57,21 @@ func TestConfigParamsMatchRedis(t *testing.T) {
 	}
 	if got := h.do("CONFIG", "GET", "*"); strings.Count(got, "\r\n$") < 2*len(configParams) {
 		t.Errorf("CONFIG GET * lists %d bulk strings", strings.Count(got, "\r\n$"))
+	}
+}
+
+func TestConfigOutputBufferLimitDrivesSubscribers(t *testing.T) {
+	h := newLuaHarness(t)
+	RegisterConfigCommands(h.router)
+	t.Cleanup(func() { h.do("CONFIG", "SET", "client-output-buffer-limit", defaultOutputBufferLimit) })
+	if got := h.do("CONFIG", "SET", "client-output-buffer-limit", "pubsub 1000 0 0"); got != "+OK\r\n" {
+		t.Fatalf("CONFIG SET = %q", got)
+	}
+	if _, hard := store.SetSubscriberLimits(0, 0); hard != 1000 {
+		t.Fatalf("subscriber hard limit = %d, want 1000", hard)
+	}
+	sub := store.NewSubscriber(1)
+	if sub.Send(make([]byte, 1001)) || !sub.IsOverflowed() {
+		t.Fatal("frame past the configured pubsub hard limit accepted")
 	}
 }
