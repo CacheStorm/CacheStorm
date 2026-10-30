@@ -52,15 +52,28 @@ func GeoHashString(point GeoPoint) string {
 }
 
 func GeoDistanceMeters(a, b GeoPoint) float64 {
+	return geoDistance(a, b, math.Sin, math.Cos, math.Asin)
+}
+
+// GeoDistanceMetersExact is GeoDistanceMeters to the last bit of Redis'
+// result, as STOREDIST stores it; see geo_math.go.
+func GeoDistanceMetersExact(a, b GeoPoint) float64 {
+	return geoDistance(a, b, geoSin, geoCos, geoAsin)
+}
+
+// geoDistance is Redis' geohashGetDistance.
+func geoDistance(a, b GeoPoint, sin, cos, asin func(float64) float64) float64 {
 	const radius = 6372797.560856
 	const radians = math.Pi / 180
-	v := math.Sin((b.Lon*radians - a.Lon*radians) / 2)
+	v := sin((b.Lon*radians - a.Lon*radians) / 2)
 	if v == 0 {
 		return radius * math.Abs(b.Lat*radians-a.Lat*radians)
 	}
-	u := math.Sin((b.Lat*radians - a.Lat*radians) / 2)
-	x := u*u + math.Cos(a.Lat*radians)*math.Cos(b.Lat*radians)*v*v
-	return 2 * radius * math.Asin(math.Sqrt(min(1, max(0, x))))
+	u := sin((b.Lat*radians - a.Lat*radians) / 2)
+	// The conversions keep the compiler from fusing these into FMAs, which
+	// Redis' build does not use.
+	x := float64(u*u) + float64(float64(float64(cos(a.Lat*radians)*cos(b.Lat*radians))*v)*v)
+	return 2 * radius * asin(math.Sqrt(min(1, max(0, x))))
 }
 
 func (v *GeoValue) SortedSet() (*SortedSetValue, bool) {

@@ -583,7 +583,7 @@ func geoSearchGeneric(ctx *Context, src int, flags int) error {
 		for _, h := range hits {
 			score := h.score
 			if storeDist {
-				score = h.dist / shape.conversion
+				score = store.GeoDistanceMetersExact(store.GeoPoint{Lon: shape.lon, Lat: shape.lat}, h.point) / shape.conversion
 			}
 			dest.Add(h.member, score)
 		}
