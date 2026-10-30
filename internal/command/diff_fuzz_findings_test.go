@@ -39,6 +39,42 @@ func TestDiffFuzzFindings(t *testing.T) {
 	}
 }
 
+func TestSortConvertsSortedSetsAndParsesBeforeTheTypeCheck(t *testing.T) {
+	r := newMemAcctRouter()
+	RegisterDebugCommands(r)
+	s := store.NewStore()
+	run := func(args ...string) string { return memAcctRun(r, s, nil, args...) }
+	run("ZADD", "z", "1.5", "xyz", "2", "-3")
+	run("SET", "s", "x")
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"SORT", "s", "FOO"}, "-ERR syntax error\r\n"},
+		{[]string{"SORT", "z", "FOO"}, "-ERR syntax error\r\n"},
+		{[]string{"OBJECT", "ENCODING", "z"}, "$8\r\nlistpack\r\n"},
+		{[]string{"SORT", "s"}, "-WRONGTYPE Operation against a key holding the wrong kind of value\r\n"},
+		{[]string{"SORT_RO", "z", "ALPHA"}, "*2\r\n$2\r\n-3\r\n$3\r\nxyz\r\n"},
+		{[]string{"OBJECT", "ENCODING", "z"}, "$8\r\nskiplist\r\n"},
+	} {
+		if got := run(c.args...); got != c.want {
+			t.Fatalf("%v: got %q, want %q", c.args, got, c.want)
+		}
+	}
+	// A skiplist's ZREMRANGEBYLEX skips the overlap check, so with mixed
+	// scores what it removes depends on the nodes' random levels, as in Redis.
+	seen := map[string]bool{}
+	for range 200 {
+		run("DEL", "z")
+		run("ZADD", "z", "1.5", "xyz", "2", "-3")
+		run("SORT", "z", "ALPHA")
+		seen[run("ZREMRANGEBYLEX", "z", "(b", "(z")] = true
+	}
+	if len(seen) != 2 || !seen[":0\r\n"] || !seen[":2\r\n"] {
+		t.Fatalf("ZREMRANGEBYLEX on a skiplist removed %v, want both :0 and :2", seen)
+	}
+}
+
 func TestPFADDOnCorruptSparseHLLMatchesRedis(t *testing.T) {
 	r := newMemAcctRouter()
 	RegisterHyperLogLogCommands(r)

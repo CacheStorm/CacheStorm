@@ -40,6 +40,10 @@ func (v *SortedSetValue) Skiplist() bool {
 	return v.big || int64(len(v.Members)) > zsetListpackEntries.Load()
 }
 
+// ConvertToSkiplist makes the set a skiplist, as Redis' zsetConvert. The
+// caller holds the value's write lock.
+func (v *SortedSetValue) ConvertToSkiplist() { v.big = true }
+
 // NoteAdd is ZADD's zsetTypeCreate and zsetTypeMaybeConvert: a command adding
 // n members makes the set a skiplist when they could not all fit a listpack,
 // whatever it ends up adding, and so does a member of maxLen bytes, which

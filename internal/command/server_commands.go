@@ -996,14 +996,6 @@ func doSort(ctx *Context, readOnly bool) error {
 	}
 
 	key := ctx.ArgString(0)
-	entry, exists := ctx.Store.Get(key)
-	if exists {
-		switch entry.Value.(type) {
-		case *store.ListValue, *store.SetValue, *store.SortedSetValue:
-		default:
-			return ctx.WriteError(store.ErrWrongType)
-		}
-	}
 
 	desc := false
 	alpha := false
@@ -1051,6 +1043,15 @@ func doSort(ctx *Context, readOnly bool) error {
 		}
 	}
 
+	// Redis looks the key up once the options parsed.
+	entry, exists := ctx.Store.Get(key)
+	if exists {
+		switch entry.Value.(type) {
+		case *store.ListValue, *store.SetValue, *store.SortedSetValue:
+		default:
+			return ctx.WriteError(store.ErrWrongType)
+		}
+	}
 	if !exists {
 		if storeKey != "" {
 			sortStoreDelete(ctx, storeKey)
@@ -1081,6 +1082,10 @@ func doSort(ctx *Context, readOnly bool) error {
 		})
 		v.RUnlock()
 	case *store.SortedSetValue:
+		// Redis converts a sorted set it sorts to a skiplist for good.
+		v.Lock()
+		v.ConvertToSkiplist()
+		v.Unlock()
 		entries := v.GetSortedRange(0, -1, false, false)
 		for _, e := range entries {
 			elements = append(elements, e.Member)

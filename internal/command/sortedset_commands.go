@@ -924,7 +924,7 @@ func cmdZREMRANGEBYLEX(ctx *Context) error {
 		return ctx.WriteError(err)
 	}
 	return zremRange(ctx, ctx.ArgString(0), "zremrangebylex", func(z *store.SortedSetValue) []store.SortedEntry {
-		return z.LexRange(r.min.store(), r.max.store(), false, 0, -1)
+		return z.LexRemoveRange(r.min.store(), r.max.store())
 	})
 }
 

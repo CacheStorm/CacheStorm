@@ -261,6 +261,24 @@ func (v *SortedSetValue) LexRange(min, max LexBound, reverse bool, offset, limit
 	if z.length == 0 || !min.gteMin(z.tail.member) || !max.lteMax(z.first().member) {
 		return nil
 	}
+	return v.lexRun(z, min, max, reverse, offset, limit)
+}
+
+// LexRemoveRange returns the members ZREMRANGEBYLEX removes: LexRange's, but
+// a skiplist, as Redis' zslDeleteRangeByLex, skips the check that the range
+// overlaps the set's first and last members.
+func (v *SortedSetValue) LexRemoveRange(min, max LexBound) []SortedEntry {
+	if !v.Skiplist() {
+		return v.LexRange(min, max, false, 0, -1)
+	}
+	z := v.ordered()
+	if z.length == 0 {
+		return nil
+	}
+	return v.lexRun(z, min, max, false, 0, -1)
+}
+
+func (v *SortedSetValue) lexRun(z *zskiplist, min, max LexBound, reverse bool, offset, limit int) []SortedEntry {
 	var out []SortedEntry
 	emit := func(x *zslNode) bool {
 		if offset > 0 {
