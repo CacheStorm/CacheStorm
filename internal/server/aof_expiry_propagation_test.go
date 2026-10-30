@@ -65,7 +65,8 @@ func TestAOFExpiryHistoryDoesNotDiscardEarlierMutations(t *testing.T) {
 			s, _ := aofTxStart(t, cfg)
 			c := &aofSession{t: t, s: s, tx: command.NewTransaction()}
 			c.do("HSET", "h", "before", "one")
-			deadline := time.Now().Add(200 * time.Millisecond).UnixMilli()
+			// Long enough for the steps below to finish before it under -race.
+			deadline := time.Now().Add(time.Second).UnixMilli()
 			c.do("PEXPIREAT", "h", strconv.FormatInt(deadline, 10))
 			c.do("HSET", "h", "after", "two")
 			key, db := "h", 0
