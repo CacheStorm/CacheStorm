@@ -516,6 +516,7 @@ func (c *Config) setLocked(ctx *Context, param, value string) error {
 			return err
 		}
 		c.listMaxListpackSize = int(v)
+		store.SetListMaxListpackSize(v)
 	case "latency-monitor-threshold":
 		v, err := ParseConfigInt(param, value, 0, configLongMax)
 		if err != nil {

@@ -205,17 +205,35 @@ type ListValue struct {
 	backing [][]byte
 	head    int
 	size    sizeCounter
+	// shape is how Redis would hold the list, for OBJECT ENCODING; nil
+	// until a write needs it (see list_encoding.go).
+	shape *listShape
 }
 
-// PushFront prepends items so that items[0] becomes the new head. Prepending
+// PushFront prepends items so that items[0] becomes the new head, as LPUSH
+// of the items in reverse order does. Prepending
 // to a plain slice copies the whole list each time, which made a list built
 // by LPUSH quadratic; the headroom kept before Elements makes it amortised
 // constant. The caller holds the value's lock.
 func (v *ListValue) PushFront(items ...[]byte) {
-	n := len(items)
-	if n == 0 {
+	if len(items) == 0 {
 		return
 	}
+	s := v.shapeLocked()
+	s.grow(argBytes(items), len(items))
+	for i := len(items) - 1; i >= 0; i-- {
+		s.push(items[i], true)
+	}
+	v.pushElems(true, items...)
+}
+
+func (v *ListValue) pushElems(front bool, items ...[]byte) {
+	if !front {
+		v.Elements = append(v.Elements, items...)
+		v.size.add(sumListElems(items))
+		return
+	}
+	n := len(items)
 	v.size.add(sumListElems(items))
 	if v.head >= n && v.headroomValid() {
 		v.head -= n
@@ -249,6 +267,30 @@ func (v *ListValue) headroomValid() bool {
 // slots are cleared so the popped values can be collected, and they become
 // headroom for later PushFront calls. The caller holds the value's lock.
 func (v *ListValue) PopFront(n int) [][]byte {
+	return v.pop(n, true)
+}
+
+func (v *ListValue) pop(n int, front bool) [][]byte {
+	if n <= 0 || len(v.Elements) == 0 {
+		return nil
+	}
+	s := v.shapeLocked()
+	out := v.popElems(n, front)
+	if front {
+		s.popFront(out)
+	} else {
+		s.popBack(out)
+	}
+	if len(v.Elements) > 0 {
+		s.toListpack(true)
+	}
+	return out
+}
+
+func (v *ListValue) popElems(n int, front bool) [][]byte {
+	if !front {
+		return v.popBackElems(n)
+	}
 	if n > len(v.Elements) {
 		n = len(v.Elements)
 	}
@@ -276,6 +318,10 @@ func (v *ListValue) PopFront(n int) [][]byte {
 // PopBack removes and returns up to n elements from the tail, last element
 // first. The vacated slots are cleared. The caller holds the value's lock.
 func (v *ListValue) PopBack(n int) [][]byte {
+	return v.pop(n, false)
+}
+
+func (v *ListValue) popBackElems(n int) [][]byte {
 	if n > len(v.Elements) {
 		n = len(v.Elements)
 	}
@@ -325,15 +371,26 @@ func sumListElems(elems [][]byte) int64 {
 	return n
 }
 
-// PushBack appends items. The caller holds the value's write lock.
+// PushBack appends items, as RPUSH does. The caller holds the value's write
+// lock.
 func (v *ListValue) PushBack(items ...[]byte) {
-	v.Elements = append(v.Elements, items...)
-	v.size.add(sumListElems(items))
+	if len(items) == 0 {
+		return
+	}
+	s := v.shapeLocked()
+	s.grow(argBytes(items), len(items))
+	for _, el := range items {
+		s.push(el, false)
+	}
+	v.pushElems(false, items...)
 }
 
-// SetAt replaces the element at index i, which must be in range. The caller
-// holds the value's write lock.
+// SetAt replaces the element at index i, which must be in range, as LSET
+// does after TryGrow. The caller holds the value's write lock.
 func (v *ListValue) SetAt(i int, el []byte) {
+	s := v.shapeLocked()
+	s.replace(v.Elements, i, el)
+	s.toListpack(true)
 	old := v.Elements[i]
 	v.Elements[i] = el
 	v.size.add(int64(len(el)) - int64(len(old)))
@@ -343,6 +400,12 @@ func (v *ListValue) SetAt(i int, el []byte) {
 // with start <= stop, as LTRIM does. It costs O(removed elements). The caller
 // holds the value's write lock.
 func (v *ListValue) Trim(start, stop int) {
+	s := v.shapeLocked()
+	s.popFront(v.Elements[:start])
+	for i := len(v.Elements) - 1; i > stop; i-- {
+		s.popBack(v.Elements[i : i+1])
+	}
+	s.toListpack(true)
 	removed := sumListElems(v.Elements[:start]) + sumListElems(v.Elements[stop+1:])
 	clear(v.Elements[:start])
 	clear(v.Elements[stop+1:])
@@ -355,7 +418,7 @@ func (v *ListValue) Trim(start, stop int) {
 // which those commands already pay to build elems. The caller holds the
 // value's write lock.
 func (v *ListValue) ReplaceElements(elems [][]byte) {
-	v.Elements = elems
+	v.Elements, v.shape = elems, nil
 	v.size.set(sumListElems(elems))
 }
 func (v *ListValue) String() string {
@@ -378,6 +441,9 @@ func (v *ListValue) Clone() Value {
 		cel := make([]byte, len(el))
 		copy(cel, el)
 		cloned.Elements[i] = cel
+	}
+	if v.shape != nil && v.shape.count == len(v.Elements) {
+		cloned.shape = v.shape.clone()
 	}
 	return cloned
 }

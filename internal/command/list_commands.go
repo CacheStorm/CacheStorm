@@ -73,7 +73,13 @@ func listPush(ctx *Context, left bool) error {
 				elements[i] = ctx.Arg(i + 1)
 			}
 		}
-		return &store.ListValue{Elements: elements}
+		list := &store.ListValue{}
+		if left {
+			list.PushFront(elements...)
+		} else {
+			list.PushBack(elements...)
+		}
+		return list
 	})
 	if err != nil {
 		return ctx.WriteError(err)
@@ -383,6 +389,7 @@ func cmdLSET(ctx *Context) error {
 		return ctx.WriteError(ErrNotInteger)
 	}
 	index := int(index64)
+	list.TryGrow(value)
 
 	length := len(list.Elements)
 	if index < 0 {
@@ -419,44 +426,26 @@ func cmdLREM(ctx *Context) error {
 		return ctx.WriteInteger(0)
 	}
 
-	removed := 0
-	newElements := make([][]byte, 0, len(list.Elements))
-
-	if count == 0 {
-		for _, elem := range list.Elements {
-			if bytes.Equal(elem, value) {
-				removed++
-			} else {
-				newElements = append(newElements, elem)
-			}
-		}
-	} else if count > 0 {
-		for _, elem := range list.Elements {
-			if removed < count && bytes.Equal(elem, value) {
-				removed++
-			} else {
-				newElements = append(newElements, elem)
+	var idx []int
+	if count >= 0 {
+		for i, elem := range list.Elements {
+			if (count == 0 || len(idx) < count) && bytes.Equal(elem, value) {
+				idx = append(idx, i)
 			}
 		}
 	} else {
-		// Build in forward order then reverse to avoid O(n^2) prepend
-		kept := make([][]byte, 0, len(list.Elements))
-		for i := len(list.Elements) - 1; i >= 0; i-- {
-			elem := list.Elements[i]
-			if removed < -count && bytes.Equal(elem, value) {
-				removed++
-			} else {
-				kept = append(kept, elem)
+		for i := len(list.Elements) - 1; i >= 0 && len(idx) < -count; i-- {
+			if bytes.Equal(list.Elements[i], value) {
+				idx = append(idx, i)
 			}
 		}
-		// Reverse kept to restore original order
-		for i, j := 0, len(kept)-1; i < j; i, j = i+1, j-1 {
-			kept[i], kept[j] = kept[j], kept[i]
+		for i, j := 0, len(idx)-1; i < j; i, j = i+1, j-1 {
+			idx[i], idx[j] = idx[j], idx[i]
 		}
-		newElements = kept
 	}
+	removed := len(idx)
 
-	list.ReplaceElements(newElements)
+	list.DeleteAt(idx)
 	empty := len(list.Elements) == 0
 	list.Unlock()
 
@@ -496,6 +485,7 @@ func cmdLINSERT(ctx *Context) error {
 
 	defer list.Unlock()
 
+	list.TryGrow(value)
 	pivotIdx := -1
 	for i, elem := range list.Elements {
 		if bytes.Equal(elem, pivot) {
@@ -508,19 +498,7 @@ func cmdLINSERT(ctx *Context) error {
 		return ctx.WriteInteger(-1)
 	}
 
-	newElements := make([][]byte, 0, len(list.Elements)+1)
-
-	if position == "BEFORE" {
-		newElements = append(newElements, list.Elements[:pivotIdx]...)
-		newElements = append(newElements, value)
-		newElements = append(newElements, list.Elements[pivotIdx:]...)
-	} else {
-		newElements = append(newElements, list.Elements[:pivotIdx+1]...)
-		newElements = append(newElements, value)
-		newElements = append(newElements, list.Elements[pivotIdx+1:]...)
-	}
-
-	list.ReplaceElements(newElements)
+	list.InsertAt(pivotIdx, value, position == "AFTER")
 	ctx.notify(store.NotifyList, "linsert", key)
 	return ctx.WriteInteger(int64(len(list.Elements)))
 }
@@ -710,20 +688,18 @@ func parseBlockTimeout(arg string) (time.Duration, error) {
 	return time.Duration(tval) * time.Millisecond, nil
 }
 
-// pushToList adds value at the head (left) or tail of the list at key,
-// creating the list when the key is missing.
+// pushToList adds value, popped from a list, at the head (left) or tail of
+// the list at key, creating the list when the key is missing.
 func pushToList(ctx *Context, key string, value []byte, left bool) error {
 	list, created, err := lockOrInstall(ctx, key, func() *store.ListValue {
-		return &store.ListValue{Elements: [][]byte{value}}
+		list := &store.ListValue{}
+		list.PushMoved(value, left)
+		return list
 	})
 	if err != nil || created {
 		return err
 	}
-	if left {
-		list.PushFront(value)
-	} else {
-		list.PushBack(value)
-	}
+	list.PushMoved(value, left)
 	list.Unlock()
 	ctx.Store.KeyNotifier().NotifyKey(key)
 	return nil
@@ -752,26 +728,21 @@ func tryListMove(ctx *Context, srcKey, dstKey, whereFrom, whereTo string) ([]byt
 		return nil, false, nil
 	}
 
-	var value []byte
-	if whereFrom == "LEFT" {
-		value = srcList.PopFront(1)[0]
-	} else {
-		value = srcList.PopBack(1)[0]
-	}
-
 	if srcKey == dstKey {
-		// Rotating a list in place: push back under the same lock.
-		if whereTo == "LEFT" {
-			srcList.PushFront(value)
-		} else {
-			srcList.PushBack(value)
-		}
+		// Rotating a list in place, under the same lock.
+		value := srcList.Rotate(whereFrom == "LEFT", whereTo == "LEFT")
 		srcList.Unlock()
 		ctx.notify(store.NotifyList, pushEvent(whereTo == "LEFT"), dstKey)
 		ctx.notify(store.NotifyList, popEvent(whereFrom == "LEFT"), srcKey)
 		return value, true, nil
 	}
 
+	var value []byte
+	if whereFrom == "LEFT" {
+		value = srcList.PopFront(1)[0]
+	} else {
+		value = srcList.PopBack(1)[0]
+	}
 	srcEmpty := len(srcList.Elements) == 0
 	srcList.Unlock()
 	srcDeleted := srcEmpty && ctx.Store.DeleteIfEmpty(srcKey, srcList)

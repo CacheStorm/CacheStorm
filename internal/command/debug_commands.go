@@ -149,7 +149,6 @@ const (
 	encMaxListpackEntries = 128
 	encMaxListpackValue   = 64
 	encMaxIntsetEntries   = 512
-	encMaxListpackBytes   = 8192
 	encMaxEmbstrLen       = 44
 	// sharedIntegers is OBJ_SHARED_INTEGERS: Redis keeps one shared object
 	// for each integer below it, reported with refcount INT_MAX.
@@ -187,14 +186,7 @@ func getEncoding(v store.Value) string {
 	case *store.ListValue:
 		val.RLock()
 		defer val.RUnlock()
-		total := 0
-		for _, el := range val.Elements {
-			total += len(el) + 2
-		}
-		if total <= encMaxListpackBytes {
-			return "listpack"
-		}
-		return "quicklist"
+		return val.Encoding()
 	case *store.SetValue:
 		val.RLock()
 		defer val.RUnlock()
