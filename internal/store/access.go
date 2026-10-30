@@ -3,7 +3,6 @@ package store
 import (
 	"math/rand/v2"
 	"sync/atomic"
-	"time"
 )
 
 // An entry's access word keeps what Redis keeps in an object's 24 lru bits,
@@ -75,7 +74,7 @@ func lfuLogIncr(counter uint64) uint64 {
 // Touch records an access to the key: its last access time and Redis' LFU
 // counter.
 func (e *Entry) Touch() {
-	now := time.Now().Unix()
+	now := nowUnix()
 	nowMin := lfuMinutes(now)
 	for {
 		old := e.access.Load()
@@ -99,12 +98,12 @@ func (e *Entry) LastAccess() int64 { return int64(e.access.Load() >> 24) }
 
 // IdleSeconds is how long ago the key was last accessed, as OBJECT IDLETIME
 // reports it.
-func (e *Entry) IdleSeconds() int64 { return max(time.Now().Unix()-e.LastAccess(), 0) }
+func (e *Entry) IdleSeconds() int64 { return max(nowUnix()-e.LastAccess(), 0) }
 
 // LFUCount is the key's LFU counter as OBJECT FREQ reports it, decayed to
 // now.
 func (e *Entry) LFUCount() uint8 {
-	return uint8(lfuDecr(e.access.Load(), lfuMinutes(time.Now().Unix())))
+	return uint8(lfuDecr(e.access.Load(), lfuMinutes(nowUnix())))
 }
 
 // SetIdleSeconds makes the key last accessed idle seconds ago, as RESTORE's
@@ -112,7 +111,7 @@ func (e *Entry) LFUCount() uint8 {
 func (e *Entry) SetIdleSeconds(idle int64) {
 	for {
 		old := e.access.Load()
-		if e.access.CompareAndSwap(old, packAccess(time.Now().Unix()-idle, 0, 0)|old&0xFFFFFF) {
+		if e.access.CompareAndSwap(old, packAccess(nowUnix()-idle, 0, 0)|old&0xFFFFFF) {
 			return
 		}
 	}
@@ -120,7 +119,7 @@ func (e *Entry) SetIdleSeconds(idle int64) {
 
 // SetLFUCount sets the key's LFU counter, as RESTORE's FREQ does.
 func (e *Entry) SetLFUCount(counter uint8) {
-	now := time.Now().Unix()
+	now := nowUnix()
 	for {
 		old := e.access.Load()
 		if e.access.CompareAndSwap(old, old&^0xFFFFFF|lfuMinutes(now)<<8|uint64(counter)) {

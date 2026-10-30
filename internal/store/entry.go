@@ -570,7 +570,7 @@ type Entry struct {
 
 func NewEntry(value Value) *Entry {
 	e := &Entry{Value: value}
-	e.access.Store(newAccess(time.Now().Unix()))
+	e.access.Store(newAccess(nowUnix()))
 	return e
 }
 

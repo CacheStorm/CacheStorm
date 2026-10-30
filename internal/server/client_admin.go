@@ -45,7 +45,7 @@ func (c *Connection) setClientFlags(noEvict, noTouch int8) {
 
 // noteCommand records the command the connection is about to run, which
 // CLIENT LIST shows as cmd, including for the client running CLIENT LIST.
-func (c *Connection) noteCommand(cmd string, args [][]byte) {
+func (c *Connection) noteCommand(cmd string, args [][]byte, now time.Time) {
 	sub := ""
 	if len(args) > 0 {
 		switch cmd {
@@ -56,7 +56,7 @@ func (c *Connection) noteCommand(cmd string, args [][]byte) {
 	c.info.mu.Lock()
 	c.info.lastCmd = cmd
 	c.info.lastSub = sub
-	c.info.lastUsed = time.Now()
+	c.info.lastUsed = now
 	c.info.mu.Unlock()
 }
 

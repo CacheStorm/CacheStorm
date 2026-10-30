@@ -3,6 +3,7 @@ package command
 import (
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/cachestorm/cachestorm/internal/acl"
 )
@@ -325,26 +326,16 @@ func aclKeysForCommand(cmd string, args [][]byte) []string {
 		return toStrings(args[2 : 2+n])
 	}
 
-	if aclMSETCommands[cmd] {
+	switch keyShapeOf(cmd) {
+	case keyShapeMSET:
 		keys := make([]string, 0, (len(args)+1)/2)
 		for i := 0; i+1 < len(args); i += 2 {
 			keys = append(keys, string(args[i]))
 		}
 		return keys
-	}
-	if aclAllArgsCommands[cmd] {
+	case keyShapeAll:
 		return toStrings(args)
-	}
-	if aclNoKeyCommands[cmd] {
-		return nil
-	}
-	if spec, ok := redisCommandSpecs[cmd]; ok && spec.FirstKey == 0 && !commandHasFlag(cmd, "movablekeys") {
-		return nil
-	}
-	if aclSingleKeyCommands[cmd] {
-		if len(args) >= 1 {
-			return toStrings(args[:1])
-		}
+	case keyShapeNone:
 		return nil
 	}
 	// Fail closed for a command the tables do not classify. Falling through
@@ -352,11 +343,49 @@ func aclKeysForCommand(cmd string, args [][]byte) []string {
 	// key through an unlisted command — XADD was the proof (round r27). Data
 	// commands overwhelmingly take the key as their first argument, so that
 	// is the safe assumption; a command that truly takes no keys belongs in
-	// aclNoKeyCommands, which returned above.
+	// aclNoKeyCommands.
 	if len(args) >= 1 {
 		return toStrings(args[:1])
 	}
 	return nil
+}
+
+type keyShape uint8
+
+const (
+	keyShapeFirst keyShape = iota
+	keyShapeMSET
+	keyShapeAll
+	keyShapeNone
+)
+
+// keyShapes caches keyShapeOf: the tables it reads never change, and a
+// command's keys are worked out for every command a connection runs.
+var keyShapes sync.Map
+
+// keyShapeOf classifies where the keys of a command the switch in
+// aclKeysForCommand does not name sit in its arguments.
+func keyShapeOf(cmd string) keyShape {
+	if v, ok := keyShapes.Load(cmd); ok {
+		return v.(keyShape)
+	}
+	shape := keyShapeFirst
+	switch {
+	case aclMSETCommands[cmd]:
+		shape = keyShapeMSET
+	case aclAllArgsCommands[cmd]:
+		shape = keyShapeAll
+	case aclNoKeyCommands[cmd]:
+		shape = keyShapeNone
+	default:
+		if spec, ok := redisCommandSpecs[cmd]; ok && spec.FirstKey == 0 && !commandHasFlag(cmd, "movablekeys") {
+			shape = keyShapeNone
+		}
+	}
+	if _, ok := redisCommandSpecs[cmd]; ok || aclSingleKeyCommands[cmd] || shape != keyShapeFirst {
+		keyShapes.Store(cmd, shape)
+	}
+	return shape
 }
 
 // aclChannelsForCommand returns the channels a pub/sub command names, for

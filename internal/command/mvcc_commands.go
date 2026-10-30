@@ -690,11 +690,15 @@ func UntrackConnection(id int64) {
 // BumpConnectionCommand records that a connection issued one more command.
 // The counters are atomic, so every command takes only the registry's read
 // lock instead of serialising all connections on its write lock.
-func BumpConnectionCommand(id int64) {
+func BumpConnectionCommand(id int64) { BumpConnectionCommandAt(id, time.Now()) }
+
+// BumpConnectionCommandAt counts a command against the connection, which
+// was last active at now.
+func BumpConnectionCommandAt(id int64, now time.Time) {
 	connectionsMu.RLock()
 	if c, exists := connections[id]; exists {
 		c.Commands.Add(1)
-		c.LastActive.Store(time.Now().UnixMilli())
+		c.LastActive.Store(now.UnixMilli())
 	}
 	connectionsMu.RUnlock()
 }

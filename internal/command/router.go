@@ -525,9 +525,8 @@ func (r *Router) executeHandler(ctx *Context, cmd *CommandDef, capture bool) (er
 	}
 	before := watchedKeysBefore(ctx)
 	ctx.waited = 0
-	start := time.Now()
 	err = cmd.Handler(ctx)
-	recordCall(ctx.Command, ctx.Args, time.Since(start)-ctx.waited, err != nil || ctx.Writer.Errors() > errsBefore)
+	recordCall(ctx.Command, ctx.Args, time.Since(ctx.StartTime)-ctx.waited, err != nil || ctx.Writer.Errors() > errsBefore)
 	if auditEnabled() {
 		recordAudit(ctx, err == nil && ctx.Writer.Errors() == errsBefore)
 	}

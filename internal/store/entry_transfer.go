@@ -3,7 +3,6 @@ package store
 import (
 	"math"
 	"sync/atomic"
-	"time"
 )
 
 var storeOrder atomic.Uint64
@@ -114,7 +113,7 @@ func (s *Store) Transfer(srcKey string, dst *Store, dstKey string, options Trans
 		entry := source.rehome()
 		// Like Redis' dbAdd, a key that arrives under a new name starts its
 		// access history afresh.
-		entry.access.Store(newAccess(time.Now().Unix()))
+		entry.access.Store(newAccess(nowUnix()))
 		entry.SetTags(append([]string(nil), source.TagList()...))
 		if options.Copy {
 			entry = NewEntry(source.Value.Clone())

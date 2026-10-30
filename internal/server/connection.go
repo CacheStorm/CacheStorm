@@ -499,7 +499,8 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 				st = db
 			}
 		}
-		c.noteCommand(cmd, args)
+		now := time.Now()
+		c.noteCommand(cmd, args, now)
 		c.srv.feedMonitors(c, c.db, c.rawCmd, cmd, args)
 		out := c.writer
 		replyCmd := cmd == "CLIENT" && len(args) > 0 && strings.EqualFold(string(args[0]), "REPLY")
@@ -511,8 +512,9 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 		if !replyCmd {
 			c.replySkip = false
 		}
+		blocking := blockingCommands[cmd]
 		var captured *bytes.Buffer
-		if blockingCommands[strings.ToUpper(cmd)] && !suppress {
+		if blocking && !suppress {
 			captured = &bytes.Buffer{}
 			out = resp.NewWriter(captured)
 			out.SetRESP3(c.writer.IsRESP3())
@@ -524,7 +526,7 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 			c.remoteAddr = c.conn.RemoteAddr().String()
 		}
 		ctx := &c.ctx
-		command.ResetConnectionContext(ctx, cmd, args, st, out, c.ID, c.remoteAddr, c.transaction)
+		command.ResetConnectionContext(ctx, cmd, args, st, out, c.ID, c.remoteAddr, c.transaction, now)
 		ctx.DB = c.db
 		ctx.DBs = c.dbs
 		// Share the subscriber across commands so PubSub state persists
@@ -552,7 +554,7 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 
 		var stopWatch func()
 		var stopMerge func()
-		if blockingCommands[strings.ToUpper(cmd)] {
+		if blocking {
 			var gone <-chan struct{}
 			gone, stopWatch = c.watchDisconnect()
 			ctx.Done, stopMerge = mergeDone(gone, c.beginBlocking())
@@ -630,13 +632,14 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 				c.writer.WriteError(err.Error())
 			}
 		}
-		elapsed := time.Since(ctx.StartTime)
+		end := time.Now()
+		elapsed := end.Sub(ctx.StartTime)
 		if stopMerge == nil {
 			command.RecordLatency("command", elapsed)
 		}
 		store.GlobalMetrics.RecordCommand(cmd, elapsed.Nanoseconds())
 		store.GlobalSlowLog.AddIfSlow(elapsed, cmd, ctx.Args, ctx.RemoteAddr, ctx.ClientName)
-		if writeCommands[strings.ToUpper(cmd)] {
+		if writeCommands[cmd] {
 			store.GlobalMetrics.RecordWrite()
 		} else {
 			store.GlobalMetrics.RecordRead()
@@ -713,7 +716,7 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 
 		// Count the command against the connection so CONNECTION.INFO can
 		// report it.
-		command.BumpConnectionCommand(c.ID)
+		command.BumpConnectionCommandAt(c.ID, end)
 
 		// Replies go out once the pipeline the client sent has been served,
 		// so a pipeline of N commands costs one socket write instead of N.
