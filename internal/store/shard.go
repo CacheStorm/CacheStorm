@@ -3,7 +3,6 @@ package store
 import (
 	"math/bits"
 	"sync"
-	"sync/atomic"
 )
 
 const (
@@ -12,7 +11,7 @@ const (
 )
 
 type Shard struct {
-	loading  *atomic.Bool
+	plain    *entryMeta
 	mu       sync.RWMutex
 	data     map[string]*Entry
 	keyCount int64
@@ -56,7 +55,7 @@ func footprint(key string, entry *Entry) int64 {
 // setLocked installs entry under key and returns the memory delta and the
 // entry it replaced, if any. The caller holds s.mu.
 func (s *Shard) setLocked(key string, entry *Entry) (int64, *Entry) {
-	entry.loading.Store(s.loading)
+	entry.bind(s.plain)
 	oldMem := int64(0)
 	old, exists := s.data[key]
 	if old != entry {

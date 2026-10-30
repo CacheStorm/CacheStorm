@@ -5,7 +5,7 @@ func (s *Store) BeginLoading() {
 	for _, shard := range &s.shards {
 		shard.mu.Lock()
 		for _, entry := range shard.data {
-			entry.loading.Store(&s.loading)
+			entry.bind(s.plain)
 		}
 		shard.mu.Unlock()
 	}

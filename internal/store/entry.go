@@ -484,11 +484,11 @@ func (v *SetValue) Clone() Value {
 }
 
 type Entry struct {
-	loading atomic.Pointer[atomic.Bool]
-	Value   Value
-	// tags is nil for the many keys without tags, so an entry without them
-	// carries one pointer instead of a slice header.
-	tags atomic.Pointer[[]string]
+	Value Value
+	// meta holds what few entries need: the owning store's loading flag and
+	// the key's tags. Untagged entries of a store share one, so the field
+	// costs a pointer and Entry fits a 48-byte allocation.
+	meta atomic.Pointer[entryMeta]
 	// access is the key's last access and LFU counter (see access.go).
 	access atomic.Uint64
 	// ExpiresAt is atomic because Entry has no lock of its own and Shard.Get
@@ -508,36 +508,69 @@ func NewEntry(value Value) *Entry {
 	return e
 }
 
+type entryMeta struct {
+	loading *atomic.Bool
+	tags    []string
+}
+
 // TagList returns the entry's tags; the caller must not modify the slice.
 func (e *Entry) TagList() []string {
-	if p := e.tags.Load(); p != nil {
-		return *p
+	if m := e.meta.Load(); m != nil {
+		return m.tags
 	}
 	return nil
 }
 
-// SetTags replaces the entry's tags.
+// SetTags replaces the entry's tags. Callers hold the shard lock or own an
+// entry not yet installed.
 func (e *Entry) SetTags(tags []string) {
+	var loading *atomic.Bool
+	if m := e.meta.Load(); m != nil {
+		loading = m.loading
+	}
 	if len(tags) == 0 {
-		e.tags.Store(nil)
+		tags = nil
+		if loading == nil {
+			e.meta.Store(nil)
+			return
+		}
+	}
+	e.meta.Store(&entryMeta{loading: loading, tags: tags})
+}
+
+// bind ties the entry to the store whose untagged entries share plain.
+func (e *Entry) bind(plain *entryMeta) {
+	m := e.meta.Load()
+	if m == plain {
 		return
 	}
-	held := tags
-	e.tags.Store(&held)
+	if m == nil || len(m.tags) == 0 {
+		e.meta.Store(plain)
+		return
+	}
+	var loading *atomic.Bool
+	if plain != nil {
+		loading = plain.loading
+	}
+	if m.loading != loading {
+		e.meta.Store(&entryMeta{loading: loading, tags: m.tags})
+	}
 }
 
 // rehome returns a new entry for the same value with the same metadata, to
 // be installed under another key.
 func (e *Entry) rehome() *Entry {
 	n := &Entry{Value: e.Value}
-	n.tags.Store(e.tags.Load())
+	if tags := e.TagList(); len(tags) > 0 {
+		n.meta.Store(&entryMeta{tags: tags})
+	}
 	n.access.Store(e.access.Load())
 	n.ExpiresAt.Store(e.ExpiresAt.Load())
 	return n
 }
 
 func (e *Entry) IsExpired() bool {
-	if loading := e.loading.Load(); loading != nil && loading.Load() {
+	if m := e.meta.Load(); m != nil && m.loading != nil && m.loading.Load() {
 		return false
 	}
 	if expiresAt := e.ExpiresAt.Load(); expiresAt != 0 {
@@ -547,9 +580,9 @@ func (e *Entry) IsExpired() bool {
 }
 
 // EntryOverhead is what a key costs besides its name, value and tags: the
-// 56-byte Entry and its slot in the shard's map (measured at about 32 bytes
+// 48-byte Entry and its slot in the shard's map (measured at about 32 bytes
 // per key on a heap profile of a million small strings).
-const EntryOverhead = 88
+const EntryOverhead = 80
 
 func entryMetadataSize(tags []string) int64 {
 	size := int64(EntryOverhead)

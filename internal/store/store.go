@@ -45,6 +45,7 @@ type Store struct {
 	order         uint64
 	passiveExpiry atomic.Bool
 	loading       atomic.Bool
+	plain         *entryMeta
 	dbIndex       atomic.Int32
 	shards        [NumShards]*Shard
 	tagIndex      *TagIndex
@@ -74,11 +75,12 @@ func NewStore() *Store {
 		versions:    make(map[string]int64),
 		watchRefs:   make(map[string]int),
 	}
+	s.plain = &entryMeta{loading: &s.loading}
 	s.expiry = NewTimingWheel(s)
 	s.hfe = newHashExpiryIndex()
 	for i := 0; i < NumShards; i++ {
 		s.shards[i] = NewShard()
-		s.shards[i].loading = &s.loading
+		s.shards[i].plain = s.plain
 		s.shards[i].hfe = s.hfe
 	}
 	return s

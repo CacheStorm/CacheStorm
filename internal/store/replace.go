@@ -76,7 +76,7 @@ func (d *Databases) ReplaceFrom(src *Databases) error {
 				shard.data, shard.keyCount, shard.memUsage = from.data, from.keyCount, from.memUsage
 				shard.expiring, shard.expSumHi, shard.expSumLo = from.expiring, from.expSumHi, from.expSumLo
 				for key, entry := range shard.data {
-					entry.loading.Store(&dst.loading)
+					entry.bind(dst.plain)
 					if shard.slots != nil {
 						shard.slots.add(key)
 					}
