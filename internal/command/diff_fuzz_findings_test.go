@@ -131,3 +131,42 @@ func TestBITFIELDNotifiesLikeRedis(t *testing.T) {
 		}
 	}
 }
+
+func TestSPOPKeepingFewMembersRebuildsTheSet(t *testing.T) {
+	r := newMemAcctRouter()
+	RegisterDebugCommands(r)
+	s := store.NewStore()
+	run := func(args ...string) string { return memAcctRun(r, s, nil, args...) }
+	sadd := func(key string, n int, prefix string) {
+		args := []string{"SADD", key}
+		for i := range n {
+			args = append(args, prefix+strconv.Itoa(i))
+		}
+		run(args...)
+	}
+	sadd("ht", 600, "")
+	sadd("is", 12, "")
+	sadd("lp", 12, "m")
+	for _, c := range []struct {
+		key   string
+		count string
+		enc   string
+	}{{"ht", "590", "listpack"}, {"is", "10", "intset"}, {"lp", "10", "listpack"}} {
+		run("SPOP", c.key, c.count)
+		if got := run("OBJECT", "ENCODING", c.key); got != "$"+strconv.Itoa(len(c.enc))+"\r\n"+c.enc+"\r\n" {
+			t.Fatalf("%s after SPOP: encoding %q, want %s", c.key, got, c.enc)
+		}
+	}
+	entry, _ := s.Get("lp")
+	set := entry.Value.(*store.SetValue)
+	var order []string
+	set.Range(func(m string) bool { order = append(order, m); return true })
+	if len(order) != 2 {
+		t.Fatalf("listpack kept %v, want two members", order)
+	}
+	first, _ := strconv.Atoi(order[0][1:])
+	second, _ := strconv.Atoi(order[1][1:])
+	if first >= second {
+		t.Fatalf("listpack kept %v, want insertion order", order)
+	}
+}

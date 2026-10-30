@@ -126,6 +126,22 @@ func NewIntsetSet() *SetValue {
 	return &SetValue{Members: make(map[string]struct{}), enc: setEncIntset}
 }
 
+// KeepOnly is the third strategy of Redis' SPOP with a count: the set is
+// rebuilt as a new set holding keep, the members it keeps — an intset when it
+// was one, otherwise a listpack filled in keep's order that converts as it
+// grows. The caller holds the value's write lock.
+func (v *SetValue) KeepOnly(keep []string) {
+	enc := setEncListpack
+	if v.enc == setEncIntset {
+		enc = setEncIntset
+	}
+	v.ClearMembers()
+	v.enc = enc
+	for _, m := range keep {
+		v.AddMember(m)
+	}
+}
+
 func (v *SetValue) convertLocked() {
 	v.enc = setEncHashtable
 	v.order = nil

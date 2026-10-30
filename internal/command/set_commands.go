@@ -2,6 +2,7 @@ package command
 
 import (
 	"errors"
+	"math/rand"
 	"sort"
 	"strconv"
 	"strings"
@@ -246,6 +247,10 @@ func cmdSPOP(ctx *Context) error {
 		return ctx.WriteSet(members)
 	}
 
+	if remaining := len(set.Members) - count; remaining*spopMoveStrategyMul <= count {
+		return spopKeepRemaining(ctx, key, set, remaining)
+	}
+
 	members := make([]*resp.Value, 0, count)
 	popped := make([]string, 0, count)
 	i := 0
@@ -263,6 +268,45 @@ func cmdSPOP(ctx *Context) error {
 		ctx.notify(store.NotifySet, "spop", key)
 	}
 
+	propagateSREM(ctx, key, popped...)
+	return ctx.WriteSet(members)
+}
+
+// spopMoveStrategyMul is Redis' SPOP_MOVE_STRATEGY_MUL: SPOP pops the
+// members it returns one by one unless it keeps at most a fifth of that many.
+const spopMoveStrategyMul = 5
+
+// spopKeepRemaining is the third strategy of Redis' SPOP with a count: it
+// picks the remaining members at random, rebuilds the set from them and
+// returns the rest in the old set's order. A listpack keeps its order.
+// The caller holds set's write lock, which this releases.
+func spopKeepRemaining(ctx *Context, key string, set *store.SetValue, remaining int) error {
+	all := make([]string, 0, len(set.Members))
+	set.Range(func(m string) bool {
+		all = append(all, m)
+		return true
+	})
+	picked := rand.Perm(len(all))[:remaining]
+	if set.Encoding() == "listpack" {
+		sort.Ints(picked)
+	}
+	keep := make([]string, remaining)
+	kept := make(map[string]bool, remaining)
+	for i, idx := range picked {
+		keep[i] = all[idx]
+		kept[all[idx]] = true
+	}
+	members := make([]*resp.Value, 0, len(all)-remaining)
+	popped := make([]string, 0, len(all)-remaining)
+	for _, m := range all {
+		if !kept[m] {
+			members = append(members, resp.BulkString(m))
+			popped = append(popped, m)
+		}
+	}
+	set.KeepOnly(keep)
+	set.Unlock()
+	ctx.notify(store.NotifySet, "spop", key)
 	propagateSREM(ctx, key, popped...)
 	return ctx.WriteSet(members)
 }
