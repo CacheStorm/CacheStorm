@@ -157,6 +157,9 @@ type dumpDecoder struct {
 	pos      int
 	err      error
 	expanded int
+	// allExpired is set when a hash failed to decode because every field
+	// had expired, which an RDB load skips as Redis does.
+	allExpired bool
 }
 
 func (d *dumpDecoder) take(n int) []byte {

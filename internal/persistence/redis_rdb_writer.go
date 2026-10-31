@@ -2,7 +2,10 @@ package persistence
 
 import (
 	"encoding/binary"
+	"errors"
+	"fmt"
 	"io"
+	"sort"
 	"strconv"
 	"time"
 
@@ -18,20 +21,76 @@ type RedisRDBInfo struct {
 	StreamDB int
 	ReplID   string
 	Offset   int64
+	// Extensions keeps what Redis has no type for, for a snapshot CacheStorm
+	// loads again: JSON documents and time series as module values, and key
+	// tags as an aux field before the key, which Redis ignores. Without it
+	// those keys are left out and the tags dropped.
+	Extensions bool
+	// Aux holds extra aux fields; Redis ignores the ones it does not know.
+	Aux map[string]string
+	// IdleTimes saves each key's idle time, LFU its LFU counter, as Redis
+	// does under an LRU or LFU maxmemory policy.
+	IdleTimes, LFU bool
+}
+
+// The module types CacheStorm's extension values are saved as. A module type
+// id is its 9-character name in a 64-symbol alphabet followed by a 10-bit
+// encoding version; Redis refuses a file with module values it has no module
+// for, naming the type.
+var (
+	rdbModuleJSON       = rdbModuleID("CStorm-JS", 1)
+	rdbModuleTimeSeries = rdbModuleID("CStorm-TS", 1)
+)
+
+const (
+	rdbTypeModule2       = 7
+	rdbModuleOpcodeEOF   = 0
+	rdbModuleOpcodeStr   = 5
+	rdbTagsAux           = "cachestorm-tags"
+	rdbModuleIDAlphabet  = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+	redisRDBHeader       = "REDIS0011"
+	redisRDBTrailerBytes = 9
+)
+
+func rdbModuleID(name string, encver uint64) uint64 {
+	var id uint64
+	for i := 0; i < len(name); i++ {
+		for j := 0; j < len(rdbModuleIDAlphabet); j++ {
+			if rdbModuleIDAlphabet[j] == name[i] {
+				id = id<<6 | uint64(j)
+			}
+		}
+	}
+	return id<<10 | encver
 }
 
 // WriteRedisRDB writes src as an RDB file in Redis' own format, which Redis
 // and its tools (redis-check-rdb, replicas, migration tools) load. Values
-// Redis has no type for (JSON documents, time series) are left out; it
-// returns how many keys it left out. The version is 11, or 12 when a hash
-// has field expirations, which only Redis 7.4 can load.
+// Redis has no type for (JSON documents, time series) are left out unless
+// info.Extensions is set; it returns how many keys it left out. The version
+// is 11, or 12 when a hash has field expirations, which only Redis 7.4 can
+// load.
 func WriteRedisRDB(w io.Writer, src EntryStreamer, info RedisRDBInfo) (int, error) {
-	var body []byte
+	out, skipped, err := EncodeRedisRDB(src, info)
+	if err != nil {
+		return skipped, err
+	}
+	if err := SealRDBChecksum(out); err != nil {
+		return skipped, err
+	}
+	_, err = w.Write(out)
+	return skipped, err
+}
+
+// EncodeRedisRDB encodes src like WriteRedisRDB but leaves the checksum
+// trailer zero, for SealRDBChecksum to fill once the dataset is released.
+func EncodeRedisRDB(src EntryStreamer, info RedisRDBInfo) ([]byte, int, error) {
+	out := []byte(redisRDBHeader)
 	version := uint16(11)
 	aux := func(k, v string) {
-		body = append(body, 0xFA)
-		body = appendRDBString(body, k)
-		body = appendRDBString(body, v)
+		out = append(out, 0xFA)
+		out = appendRDBString(out, k)
+		out = appendRDBString(out, v)
 	}
 	aux("redis-ver", "7.4.0")
 	aux("redis-bits", "64")
@@ -42,9 +101,17 @@ func WriteRedisRDB(w io.Writer, src EntryStreamer, info RedisRDBInfo) (int, erro
 		aux("repl-id", info.ReplID)
 		aux("repl-offset", strconv.FormatInt(info.Offset, 10))
 	}
+	extra := make([]string, 0, len(info.Aux))
+	for k := range info.Aux {
+		extra = append(extra, k)
+	}
+	sort.Strings(extra)
+	for _, k := range extra {
+		aux(k, info.Aux[k])
+	}
 	for _, code := range info.Functions {
-		body = append(body, rdbOpcodeFunction2)
-		body = appendRDBString(body, code)
+		out = append(out, rdbOpcodeFunction2)
+		out = appendRDBString(out, code)
 	}
 	skipped, selected := 0, -1
 	err := src.ForEachEntry(func(db int, key string, e interface{}) error {
@@ -53,38 +120,99 @@ func WriteRedisRDB(w io.Writer, src EntryStreamer, info RedisRDBInfo) (int, erro
 			return nil
 		}
 		payload, err := EncodeDump(entry.Value)
-		if err != nil || len(payload) < 11 || payload[0] >= dumpTypeStream {
+		if err != nil {
+			// An empty collection, or a hash whose fields all expired, is no
+			// key.
+			if info.Extensions && !errors.Is(err, ErrDumpFormat) {
+				return fmt.Errorf("key %q: %w", key, err)
+			}
+			skipped++
+			return nil
+		}
+		typ := payload[0]
+		var module uint64
+		switch typ {
+		case dumpTypeJSON:
+			module = rdbModuleJSON
+		case dumpTypeTimeSeries:
+			module = rdbModuleTimeSeries
+		}
+		if module != 0 && !info.Extensions {
 			skipped++
 			return nil
 		}
 		if db != selected {
-			body = append(body, 0xFE)
-			body = appendDumpLength(body, uint64(db))
+			out = append(out, 0xFE)
+			out = appendDumpLength(out, uint64(db))
 			selected = db
 		}
+		if tags := entry.TagList(); info.Extensions && len(tags) > 0 {
+			enc := appendDumpLength(nil, uint64(len(tags)))
+			for _, tag := range tags {
+				enc = appendRDBString(enc, tag)
+			}
+			aux(rdbTagsAux, string(enc))
+		}
 		if at := entry.ExpiresAt.Load(); at > 0 {
-			body = append(body, 0xFC)
-			body = binary.LittleEndian.AppendUint64(body, uint64(at))
+			out = append(out, 0xFC)
+			out = binary.LittleEndian.AppendUint64(out, uint64(at))
+		}
+		if info.LFU {
+			out = append(out, 0xF9, entry.LFUCount())
+		} else if info.IdleTimes {
+			out = append(out, 0xF8)
+			out = appendDumpLength(out, uint64(entry.IdleSeconds()))
+		}
+		body := payload[1 : len(payload)-10]
+		if module != 0 {
+			out = append(out, rdbTypeModule2)
+			out = appendRDBString(out, key)
+			out = appendDumpLength(out, module)
+			out = appendDumpLength(out, rdbModuleOpcodeStr)
+			out = append(out, body...)
+			out = appendDumpLength(out, rdbModuleOpcodeEOF)
+			return nil
 		}
 		version = max(version, binary.LittleEndian.Uint16(payload[len(payload)-10:]))
-		body = append(body, payload[0])
-		body = appendRDBString(body, key)
-		body = append(body, payload[1:len(payload)-10]...)
+		out = append(out, typ)
+		out = appendRDBString(out, key)
+		out = append(out, body...)
 		return nil
 	})
 	if err != nil {
-		return skipped, err
+		return nil, skipped, err
 	}
-	out := make([]byte, 0, len(body)+18)
-	out = append(out, "REDIS00"...)
-	out = strconv.AppendUint(out, uint64(version), 10)
-	out = append(out, body...)
+	copy(out[5:9], fmt.Sprintf("%04d", version))
 	out = append(out, 0xFF)
-	out = binary.LittleEndian.AppendUint64(out, rdbChecksum(0, out))
-	_, err = w.Write(out)
-	return skipped, err
+	out = append(out, make([]byte, redisRDBTrailerBytes-1)...)
+	return out, skipped, nil
 }
 
 func appendRDBString(dst []byte, s string) []byte {
 	return append(appendDumpLength(dst, uint64(len(s))), s...)
+}
+
+// moduleValue reads a module value of CacheStorm's own module types; it
+// returns nil without an error for another module's.
+func (d *dumpDecoder) moduleValue() store.Value {
+	id, _ := d.length()
+	var kind byte
+	switch id {
+	case rdbModuleJSON:
+		kind = dumpTypeJSON
+	case rdbModuleTimeSeries:
+		kind = dumpTypeTimeSeries
+	default:
+		return nil
+	}
+	if op, _ := d.length(); op != rdbModuleOpcodeStr {
+		d.err = ErrDumpFormat
+		return nil
+	}
+	value := d.valueOf(kind)
+	if op, _ := d.length(); op != rdbModuleOpcodeEOF {
+		d.err = ErrDumpFormat
+		return nil
+	}
+	return value
 }

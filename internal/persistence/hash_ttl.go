@@ -235,6 +235,7 @@ func (d *dumpDecoder) hashWithTTLs(typ byte) store.Value {
 	}
 	h := newHashWithTTLs(fields, values, ttls)
 	if h == nil {
+		d.allExpired = true
 		d.err = ErrDumpFormat
 		return nil
 	}

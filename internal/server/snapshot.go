@@ -13,6 +13,7 @@ import (
 	"github.com/cachestorm/cachestorm/internal/command"
 	"github.com/cachestorm/cachestorm/internal/logger"
 	"github.com/cachestorm/cachestorm/internal/persistence"
+	"github.com/cachestorm/cachestorm/internal/replication"
 	"github.com/cachestorm/cachestorm/internal/resp"
 )
 
@@ -241,18 +242,26 @@ func (s *Server) saveSnapshot(background bool) error {
 		finish(err)
 		return fmt.Errorf("ERR snapshot functions: %w", err)
 	}
-	aux := map[string]string{"cachestorm-functions": string(functions)}
+	var aux map[string]string
 	if searchCmds := s.SearchCommands(); len(searchCmds) > 0 {
-		aux[snapshotSearchAux] = string(persistence.EncodeCommands(searchCmds))
+		aux = map[string]string{snapshotSearchAux: string(persistence.EncodeCommands(searchCmds))}
 	}
-	var data bytes.Buffer
+	// The snapshot is in Redis' RDB format, so Redis and its tools load it.
 	// The checksum is computed after the encoder returns, so a background
 	// save holds the write gate only while the dataset is encoded.
-	writer := persistence.NewRDBWriterForDatabases(s.dbs, persistence.RDBConfig{Version: persistence.RDBVersion11, AuxFields: aux})
-	if err := writer.Encode(&data); err != nil {
+	db0 := s.dbs.DB(0)
+	encoded, _, err := persistence.EncodeRedisRDB(replication.DBSource{DBs: s.dbs}, persistence.RedisRDBInfo{
+		Functions:  persistence.FunctionCodes(functions),
+		Extensions: true,
+		Aux:        aux,
+		IdleTimes:  db0.UsesLRU(),
+		LFU:        db0.UsesLFU(),
+	})
+	if err != nil {
 		finish(err)
 		return fmt.Errorf("ERR snapshot failed: %w", err)
 	}
+	data := bytes.NewBuffer(encoded)
 	store := write
 	write = func(data []byte) error {
 		if err := persistence.SealRDBChecksum(data); err != nil {

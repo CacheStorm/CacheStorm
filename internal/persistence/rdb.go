@@ -600,16 +600,38 @@ func (r *RDBReader) readRDB(f io.Reader) error {
 				return fmt.Errorf("pre-GA function format not supported")
 			case 0xF7:
 				return fmt.Errorf("RDB module data is not supported")
+			case 0xFA:
+				key, err := r.readString(f)
+				if err != nil {
+					return err
+				}
+				value, err := r.readString(f)
+				if err != nil {
+					return err
+				}
+				if key != rdbTagsAux {
+					r.AuxFields[key] = value
+					continue
+				}
+				d := &dumpDecoder{data: []byte(value)}
+				pendingTags = make([]string, d.count())
+				for i := range pendingTags {
+					pendingTags[i] = d.str()
+				}
+				if d.err != nil || d.pos != len(d.data) {
+					return fmt.Errorf("corrupt %s aux field", rdbTagsAux)
+				}
+				continue
 			case 0xFF:
 				if len(r.functions) > 0 {
 					r.AuxFields["cachestorm-functions"] = string(EncodeFunctionDump(r.functions))
 				}
-			case 0xFA, 0xFB, 0xFC, 0xFD, 0xFE:
+			case 0xFB, 0xFC, 0xFD, 0xFE:
 			default:
-				if err := r.readRedisEntry(f, opcode, pendingExpiryMS, pendingIdle, pendingFreq); err != nil {
+				if err := r.readRedisEntry(f, opcode, pendingExpiryMS, pendingIdle, pendingFreq, pendingTags); err != nil {
 					return err
 				}
-				pendingExpiryMS, pendingIdle, pendingFreq = 0, -1, -1
+				pendingExpiryMS, pendingIdle, pendingFreq, pendingTags = 0, -1, -1, nil
 				continue
 			}
 		}
@@ -1015,7 +1037,7 @@ func readPlainString(br *bytes.Reader) (string, error) {
 
 // readRedisEntry loads a key of a Redis file: its value is in Redis' RDB
 // encoding, which the DUMP payload decoder reads in place.
-func (r *RDBReader) readRedisEntry(f io.Reader, valueType byte, expiresAtMS, idle int64, freq int) error {
+func (r *RDBReader) readRedisEntry(f io.Reader, valueType byte, expiresAtMS, idle int64, freq int, tags []string) error {
 	br, ok := f.(*bytes.Reader)
 	if !ok || r.body == nil {
 		return fmt.Errorf("a Redis RDB file must be loaded with Load")
@@ -1024,21 +1046,32 @@ func (r *RDBReader) readRedisEntry(f io.Reader, valueType byte, expiresAtMS, idl
 	if err != nil {
 		return err
 	}
+	d := &dumpDecoder{data: r.body, pos: len(r.body) - br.Len()}
+	var value store.Value
 	switch valueType {
-	case 6, 7:
+	case rdbTypeModule2:
+		value = d.moduleValue()
+		if value == nil && d.err == nil {
+			return fmt.Errorf("RDB module values are not supported (key %q)", key)
+		}
+	case 6:
 		return fmt.Errorf("RDB module values are not supported (key %q)", key)
 	case 22, 23:
 		return fmt.Errorf("pre-GA hash field expiration format not supported (key %q)", key)
+	default:
+		value = d.valueOf(valueType)
 	}
-	d := &dumpDecoder{data: r.body, pos: len(r.body) - br.Len()}
-	value := d.valueOf(valueType)
+	if d.allExpired {
+		_, err := br.Seek(int64(d.pos), io.SeekStart)
+		return err
+	}
 	if d.err != nil || value == nil {
 		return fmt.Errorf("RDB value of key %q (type %d) is corrupt or unsupported", key, valueType)
 	}
 	if _, err := br.Seek(int64(d.pos), io.SeekStart); err != nil {
 		return err
 	}
-	opts := store.SetOptions{}
+	opts := store.SetOptions{Tags: tags}
 	if expiresAtMS > 0 {
 		if expiresAtMS <= time.Now().UnixMilli() {
 			return nil

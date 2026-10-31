@@ -58,6 +58,16 @@ func (s *Store) UsesLFU() bool {
 	return p == EvictionAllKeysLFU || p == EvictionVolatileLFU
 }
 
+// UsesLRU reports whether the store evicts by idle time, the policies under
+// which Redis saves each key's idle time in an RDB file.
+func (s *Store) UsesLRU() bool {
+	if s.evictor == nil {
+		return false
+	}
+	p := s.evictor.Policy()
+	return p == EvictionAllKeysLRU || p == EvictionVolatileLRU
+}
+
 // SharesIntegers reports whether Redis would keep small integer strings as
 // shared objects: not under an LRU or LFU policy with maxmemory set, where
 // each value needs its own access clock.

@@ -64,3 +64,71 @@ func TestWriteRedisRDBLoadsBack(t *testing.T) {
 		t.Fatalf("functions = %q", codes)
 	}
 }
+
+func TestRedisRDBExtensionsLoadBack(t *testing.T) {
+	ts := store.NewTimeSeriesValue(0)
+	ts.Samples = append(ts.Samples, store.TimeSeriesSample{Timestamp: 1000, Value: 5.5})
+	tagged := store.NewEntry(&store.StringValue{Data: []byte("v")})
+	tagged.SetTags([]string{"red", "blue"})
+	hot := store.NewEntry(&store.StringValue{Data: []byte("h")})
+	hot.SetLFUCount(42)
+	gone := &store.HashValue{Fields: map[string][]byte{"f": []byte("v")}}
+	gone.SetFieldExpireAt("f", 1)
+	src := entryList{
+		{0, "j", store.NewEntry(&store.JSONValue{Data: []byte(`{"a":[1,2]}`)})},
+		{0, "ts", store.NewEntry(ts)},
+		{0, "tagged", tagged},
+		{0, "hot", hot},
+		{1, "gone", store.NewEntry(gone)},
+	}
+	out, skipped, err := EncodeRedisRDB(src, RedisRDBInfo{Extensions: true, LFU: true, Aux: map[string]string{"cachestorm-search": "x"}})
+	if err != nil || skipped != 1 {
+		t.Fatalf("EncodeRedisRDB skipped %d, %v; want the expired hash left out", skipped, err)
+	}
+	if err := SealRDBChecksum(out); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(out, []byte{rdbTypeModule2, 1, 'j'}) {
+		t.Fatal("JSON document must be saved as a module value")
+	}
+	base := store.NewStore()
+	lfu, _ := store.ParseEvictionPolicy("allkeys-lfu")
+	base.ConfigureMemory(0, lfu, 80, 95, 5)
+	dbs := store.NewDatabases(base, 16)
+	r := NewRDBReaderForDatabases(dbs)
+	if err := r.LoadBytes(out); err != nil {
+		t.Fatal(err)
+	}
+	db := dbs.DB(0)
+	if e, ok := db.Get("j"); !ok || string(e.Value.(*store.JSONValue).Data) != `{"a":[1,2]}` {
+		t.Fatal("JSON document lost")
+	}
+	if e, ok := db.Get("ts"); !ok || len(e.Value.(*store.TimeSeriesValue).Samples) != 1 {
+		t.Fatal("time series lost")
+	}
+	if e, ok := db.Get("tagged"); !ok || strings.Join(e.TagList(), ",") != "red,blue" {
+		t.Fatal("tags lost")
+	}
+	if e, ok := db.GetShard("hot").Get("hot"); !ok || e.LFUCount() != 42 {
+		t.Fatalf("LFU counter lost: %d (saved %d)", e.LFUCount(), hot.LFUCount())
+	}
+	if r.AuxFields["cachestorm-search"] != "x" {
+		t.Fatal("extra aux field lost")
+	}
+}
+
+func TestRedisRDBRefusesOtherModules(t *testing.T) {
+	out, _, err := EncodeRedisRDB(entryList{{0, "j", store.NewEntry(&store.JSONValue{Data: []byte(`1`)})}}, RedisRDBInfo{Extensions: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := bytes.Index(out, []byte{rdbTypeModule2, 1, 'j'}) + 3
+	copy(out[i:], appendDumpLength(nil, rdbModuleID("ReJSON-RL", 3)))
+	if err := SealRDBChecksum(out); err != nil {
+		t.Fatal(err)
+	}
+	r := NewRDBReaderForDatabases(store.NewDatabases(store.NewStore(), 16))
+	if err := r.LoadBytes(out); err == nil || !strings.Contains(err.Error(), "module values are not supported") {
+		t.Fatalf("LoadBytes = %v", err)
+	}
+}

@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- `dump.rdb` snapshots are written in Redis' RDB format, so Redis 7.4 and RDB tools load them. JSON documents and time series are saved as `CStorm-JS`/`CStorm-TS` module values, key tags and search indexes as aux fields, and idle times or LFU counters as Redis saves them; older CacheStorm snapshots still load. Loading an RDB skips a hash whose fields have all expired instead of failing.
 - Docs: the cluster guide describes replica migration and the rejoin delays instead of listing them as missing. The persistence guide explains that CacheStorm loads Redis 7.4 `dump.rdb` files and that `redis-cli --rdb` produces a file Redis can load
 - ROADMAP: the Redis compatibility status reflects RESP3 support and the current 561-case compatibility report
 - Removed the `website/` directory and its GitHub Pages workflow; the website is maintained in a separate repository
