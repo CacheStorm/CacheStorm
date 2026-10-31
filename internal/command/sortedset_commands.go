@@ -101,62 +101,6 @@ func formatZScore(f float64) string {
 	return fpconvDtoa(f)
 }
 
-// fpconvDtoa mirrors the layout rules of Redis' fpconv_dtoa.
-func fpconvDtoa(f float64) string {
-	neg := f < 0
-	if neg {
-		f = -f
-	}
-	e := strconv.FormatFloat(f, 'e', -1, 64)
-	mant, expPart, _ := strings.Cut(e, "e")
-	digits := strings.Replace(mant, ".", "", 1)
-	exp10, err := strconv.Atoi(expPart)
-	if err != nil {
-		return e
-	}
-	nd := len(digits)
-	k := exp10 - (nd - 1)
-	absExp := exp10
-	if absExp < 0 {
-		absExp = -absExp
-	}
-
-	var b strings.Builder
-	if neg {
-		b.WriteByte('-')
-	}
-	switch {
-	case k >= 0 && absExp < nd+7:
-		b.WriteString(digits)
-		b.WriteString(strings.Repeat("0", k))
-	case k < 0 && (k > -7 || absExp < 4):
-		offset := nd + k
-		if offset <= 0 {
-			b.WriteString("0.")
-			b.WriteString(strings.Repeat("0", -offset))
-			b.WriteString(digits)
-		} else {
-			b.WriteString(digits[:offset])
-			b.WriteByte('.')
-			b.WriteString(digits[offset:])
-		}
-	default:
-		b.WriteByte(digits[0])
-		if nd > 1 {
-			b.WriteByte('.')
-			b.WriteString(digits[1:])
-		}
-		b.WriteByte('e')
-		if exp10 < 0 {
-			b.WriteByte('-')
-		} else {
-			b.WriteByte('+')
-		}
-		b.WriteString(strconv.Itoa(absExp))
-	}
-	return b.String()
-}
-
 // cHexFloat adds the binary exponent Go requires to a hexadecimal float
 // written without one ("0x10"), which C's strtod accepts.
 func cHexFloat(s string) string {
