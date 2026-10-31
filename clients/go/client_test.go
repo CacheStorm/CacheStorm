@@ -164,6 +164,10 @@ func (s *fakeServer) reply(c net.Conn, args []string) (string, bool) {
 			return "$-1\r\n", true
 		}
 		return bulk(v), true
+	case "BYE":
+		// Replies, then closes the connection as an idle timeout would.
+		_, _ = io.WriteString(c, "+BYE\r\n")
+		return "", false
 	case "BADCMD":
 		return "-ERR unknown command 'BADCMD'\r\n", true
 	case "MIXED":
@@ -335,6 +339,25 @@ func TestSetGetRoundTrip(t *testing.T) {
 	}
 	if got, _ := c.Get(ctx, "f"); got != "0.5" {
 		t.Fatalf("float encoded as %q", got)
+	}
+}
+
+func TestIdleConnectionClosedByServerIsReplaced(t *testing.T) {
+	s := newFakeServer(t)
+	c := newClient(t, s.addr())
+	ctx := context.Background()
+	if err := c.Set(ctx, "k", "v", 0); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := c.Do(ctx, "BYE"); err != nil || got != "BYE" {
+		t.Fatalf("BYE: %v %v", got, err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if got, err := c.Get(ctx, "k"); err != nil || got != "v" {
+		t.Fatalf("GET after the server closed the idle connection: %q, %v", got, err)
+	}
+	if n := s.conns.Load(); n != 2 {
+		t.Fatalf("%d connections, want 2", n)
 	}
 }
 

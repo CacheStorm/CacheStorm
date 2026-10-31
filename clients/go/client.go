@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 )
 
@@ -576,18 +577,24 @@ func (p *pool) Get(ctx context.Context) (*conn, error) {
 	if err := p.waitTurn(ctx); err != nil {
 		return nil, err
 	}
-	cn, stale, err := p.popIdle()
-	for _, s := range stale {
-		s.Close()
+	for {
+		cn, stale, err := p.popIdle()
+		for _, s := range stale {
+			s.Close()
+		}
+		if err != nil {
+			p.releaseTurn()
+			return nil, err
+		}
+		if cn == nil {
+			break
+		}
+		if cn.alive() {
+			return cn, nil
+		}
+		p.remove(cn)
 	}
-	if err != nil {
-		p.releaseTurn()
-		return nil, err
-	}
-	if cn != nil {
-		return cn, nil
-	}
-	cn, err = p.dial(ctx)
+	cn, err := p.dial(ctx)
 	if err != nil {
 		p.releaseTurn()
 		return nil, p.mapErr(ctx, err)
@@ -718,6 +725,18 @@ type conn struct {
 }
 
 var errConnBroken = errors.New("cachestorm: connection is broken")
+
+// alive reports whether an idle connection can take a command: nothing is
+// left unread and, where the platform can tell, the server has not closed it.
+func (c *conn) alive() bool {
+	if c.reader.Buffered() > 0 {
+		return false
+	}
+	if sc, ok := c.netConn.(syscall.Conn); ok {
+		return connCheck(sc)
+	}
+	return true
+}
 
 func (c *conn) deadline(ctx context.Context, timeout time.Duration) time.Time {
 	var t time.Time
