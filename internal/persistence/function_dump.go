@@ -54,3 +54,13 @@ func DecodeFunctionDump(payload []byte) ([]string, error) {
 	}
 	return codes, nil
 }
+
+// FunctionCodes returns the library codes of a FUNCTION DUMP payload in
+// Redis' format, or nil for another payload.
+func FunctionCodes(payload []byte) []string {
+	codes, err := DecodeFunctionDump(payload)
+	if err != nil {
+		return nil
+	}
+	return codes
+}

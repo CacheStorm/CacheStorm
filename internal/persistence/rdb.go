@@ -497,6 +497,22 @@ func (r *RDBReader) Load(path string) error {
 	if err != nil {
 		return fmt.Errorf("failed to open file: %w", err)
 	}
+	if err := r.loadBytes(data); err != nil {
+		return err
+	}
+	logger.Info().Str("path", path).Msg("RDB loaded successfully")
+	return nil
+}
+
+// LoadBytes loads an RDB file held in memory, such as the one a master
+// sends a replica.
+func (r *RDBReader) LoadBytes(data []byte) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.loadBytes(data)
+}
+
+func (r *RDBReader) loadBytes(data []byte) error {
 	if len(data) < 18 {
 		return r.readRDB(bytes.NewReader(data))
 	}
@@ -511,11 +527,7 @@ func (r *RDBReader) Load(path string) error {
 	}
 	r.body = body
 	defer func() { r.body = nil }()
-	if err := r.readRDB(bytes.NewReader(body)); err != nil {
-		return err
-	}
-	logger.Info().Str("path", path).Msg("RDB loaded successfully")
-	return nil
+	return r.readRDB(bytes.NewReader(body))
 }
 
 func (r *RDBReader) readRDB(f io.Reader) error {

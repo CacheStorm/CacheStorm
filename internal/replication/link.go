@@ -14,6 +14,8 @@ import (
 
 	"github.com/cachestorm/cachestorm/internal/command"
 	"github.com/cachestorm/cachestorm/internal/logger"
+	"github.com/cachestorm/cachestorm/internal/persistence"
+	"github.com/cachestorm/cachestorm/internal/store"
 )
 
 // Master link states, as ROLE reports them.
@@ -270,7 +272,14 @@ func (l *link) session() (bool, error) {
 		if err := send(parts...); err != nil {
 			return "", err
 		}
-		return readLine(br)
+		// A Redis master sends bare newlines to keep the link alive while
+		// it prepares a full resynchronization.
+		for {
+			line, err := readLine(br)
+			if err != nil || line != "" {
+				return line, err
+			}
+		}
 	}
 
 	if m.cfg.MasterAuth != "" {
@@ -312,7 +321,7 @@ func (l *link) session() (bool, error) {
 			return false, fmt.Errorf("master refused REPLCONF ip-address: %s", reply)
 		}
 	}
-	if reply, err = call("REPLCONF", "capa", "eof", "capa", "psync2"); err != nil {
+	if reply, err = call("REPLCONF", "capa", "eof", "capa", "psync2", "capa", capaCacheStorm); err != nil {
 		return false, err
 	}
 	if !strings.HasPrefix(reply, "+") {
@@ -466,9 +475,55 @@ func (m *Manager) applyFromMaster(args [][]byte, raw []byte) (bool, error) {
 	return getack, nil
 }
 
-// loadSnapshot replaces the dataset with the master's snapshot.
+// loadRDBSnapshot loads a master's RDB into staging: its keys, its function
+// libraries and the database its stream continues in, which it returns.
+func loadRDBSnapshot(data []byte, staging *store.Databases, replay *command.Router) (int, error) {
+	reader := persistence.NewRDBReaderForDatabases(staging)
+	if err := reader.LoadBytes(data); err != nil {
+		return 0, fmt.Errorf("loading the master's RDB: %w", err)
+	}
+	if functions := reader.AuxFields["cachestorm-functions"]; functions != "" {
+		ctx := command.NewContext("FUNCTION", [][]byte{[]byte("RESTORE"), []byte(functions), []byte("FLUSH")}, staging.DB(0), nil)
+		ctx.DBs = staging
+		ctx.Replaying = true
+		if err := replay.ExecuteSilent(ctx); err != nil || ctx.Writer.Errors() > 0 {
+			return 0, fmt.Errorf("loading the master's functions failed")
+		}
+	}
+	if tracker := staging.DB(0).MemoryTracker(); tracker != nil && tracker.Max() > 0 && tracker.Usage() > tracker.Max() {
+		return 0, fmt.Errorf("snapshot exceeds maxmemory")
+	}
+	db, err := strconv.Atoi(reader.AuxFields["repl-stream-db"])
+	if err != nil || !staging.Valid(db) {
+		db = 0
+	}
+	return db, nil
+}
+
+// readUntilMark reads a diskless RDB transfer: everything up to the 40-byte
+// mark the master announced with $EOF:.
+func readUntilMark(br *bufio.Reader, mark string) ([]byte, error) {
+	if len(mark) != 40 {
+		return nil, fmt.Errorf("%w: bad EOF mark %q", errProtocol, truncate(mark))
+	}
+	var data []byte
+	for {
+		b, err := br.ReadByte()
+		if err != nil {
+			return nil, err
+		}
+		data = append(data, b)
+		if b == mark[39] && len(data) >= 40 && string(data[len(data)-40:]) == mark {
+			return data[:len(data)-40], nil
+		}
+	}
+}
+
+// loadSnapshot replaces the dataset with the master's snapshot: CacheStorm's
+// command stream, or an RDB in Redis' format.
 func (m *Manager) loadSnapshot(br *bufio.Reader, replid string, offset int64) error {
 	var size int64
+	var rdb []byte
 	for {
 		line, err := readLine(br)
 		if err != nil {
@@ -477,10 +532,26 @@ func (m *Manager) loadSnapshot(br *bufio.Reader, replid string, offset int64) er
 		if line == "" {
 			continue
 		}
+		if mark, ok := strings.CutPrefix(line, "$EOF:"); ok {
+			// A Redis master's diskless sync: the RDB ends with the mark.
+			if rdb, err = readUntilMark(br, mark); err != nil {
+				return err
+			}
+			size = int64(len(rdb))
+			break
+		}
 		if size, err = parseBulkHeader(line); err != nil {
 			return err
 		}
 		break
+	}
+	if rdb == nil {
+		if head, err := br.Peek(int(min(size, 5))); err == nil && string(head) == "REDIS" {
+			rdb = make([]byte, size)
+			if _, err := io.ReadFull(br, rdb); err != nil {
+				return err
+			}
+		}
 	}
 
 	m.mu.Lock()
@@ -499,10 +570,16 @@ func (m *Manager) loadSnapshot(br *bufio.Reader, replid string, offset int64) er
 		"SET", "HSET", "HPEXPIREAT", "RPUSH", "SADD", "ZADD", "GEOADD", "JSON.SET", "XGROUP", "XADD", "XSETID", "XCLAIM", "TS.CREATE", "TS.ADD", "ADDTAG", "PEXPIREAT", "SELECT", "FUNCTION",
 		"FT.CREATE", "FT.ADD", "FT.ALIASADD",
 	})
-	payload := bufio.NewReaderSize(io.LimitReader(br, size), 64*1024)
 	db := 0
+	if rdb != nil {
+		var err error
+		if db, err = loadRDBSnapshot(rdb, staging, replay); err != nil {
+			return err
+		}
+	}
+	payload := bufio.NewReaderSize(io.LimitReader(br, size), 64*1024)
 	var applied int64
-	for {
+	for rdb == nil {
 		args, raw, err := readCommand(payload)
 		if err != nil {
 			if errors.Is(err, io.EOF) && applied == size {

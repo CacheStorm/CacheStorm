@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"net"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -15,6 +16,10 @@ import (
 	"github.com/cachestorm/cachestorm/internal/persistence"
 	"github.com/cachestorm/cachestorm/internal/store"
 )
+
+// capaCacheStorm is the REPLCONF capa a CacheStorm replica announces to
+// take the full resynchronization as CacheStorm's command stream.
+const capaCacheStorm = "cachestorm"
 
 // Replica states, as INFO reports them.
 const (
@@ -32,6 +37,11 @@ type replica struct {
 	addr string
 	ip   string
 	port int
+	// cachestorm is set for a replica that announced REPLCONF capa
+	// cachestorm: it takes the snapshot as CacheStorm's command stream,
+	// which carries what Redis' RDB cannot. Others get an RDB in Redis'
+	// format.
+	cachestorm bool
 
 	mu      sync.Mutex
 	cond    *sync.Cond
@@ -166,6 +176,7 @@ func (m *Manager) attach(conn net.Conn, conf *command.ReplicaConf, req syncReque
 		if conf.IP != "" {
 			r.ip = conf.IP
 		}
+		r.cachestorm = slices.Contains(conf.Capa, capaCacheStorm)
 	}
 	r.lastAck.Store(time.Now().UnixNano())
 
@@ -234,50 +245,9 @@ func (m *Manager) continuableLocked(req syncRequest) ([]byte, bool) {
 // the snapshot's offset, and sends +FULLRESYNC and the snapshot.
 func (m *Manager) fullSync(r *replica, legacy bool) error {
 	var snap bytes.Buffer
-	m.host.LockWrites()
-	m.mu.Lock()
-	invalid := m.role == RoleReplica && !m.cached
-	replicaSource := m.role == RoleReplica
-	m.mu.Unlock()
-	if invalid {
-		m.host.UnlockWrites()
-		return fmt.Errorf("replica has no synchronized dataset")
-	}
-	functions, err := m.host.FunctionPayload()
-	if replicaSource {
-		m.dbs.BeginAuthoritativeApply()
-	}
-	if err == nil {
-		err = persistence.WriteSnapshot(&snap, DBSource{DBs: m.dbs, Functions: functions, Search: m.host.SearchCommands()})
-	}
-	if replicaSource {
-		m.dbs.EndAuthoritativeApply()
-	}
+	replid, offset, err := m.snapshotFor(r, &snap)
 	if err != nil {
-		m.host.UnlockWrites()
 		return err
-	}
-	m.mu.Lock()
-	if m.stopped {
-		m.mu.Unlock()
-		m.host.UnlockWrites()
-		return fmt.Errorf("server is stopping")
-	}
-	m.createBacklogLocked()
-	replid, offset := m.replid, m.offset
-	db := m.streamDB
-	if m.role == RoleReplica {
-		db = m.linkDB
-	}
-	r.state = stateSendBulk
-	m.replicas[r] = struct{}{}
-	m.mu.Unlock()
-	m.host.UnlockWrites()
-
-	// The stream continues in the database it was in at the snapshot, so the
-	// snapshot ends by selecting it.
-	if db > 0 {
-		snap.Write(encodeCommand("SELECT", strconv.Itoa(db)))
 	}
 
 	var header []byte
@@ -298,6 +268,62 @@ func (m *Manager) fullSync(r *replica, legacy bool) error {
 	logger.Info().Str("replica", r.addr).Int64("offset", offset).
 		Int("bytes", snap.Len()).Msg("full resynchronization sent")
 	return nil
+}
+
+// snapshotFor encodes the dataset for r with writes locked and attaches r
+// at the snapshot's offset. A CacheStorm replica gets the command stream an
+// AOF rewrite writes, ending by selecting the stream's database; any other
+// gets an RDB in Redis' format, whose aux fields name the stream's position
+// and database. It returns that position.
+func (m *Manager) snapshotFor(r *replica, snap *bytes.Buffer) (string, int64, error) {
+	m.host.LockWrites()
+	defer m.host.UnlockWrites()
+	m.mu.Lock()
+	invalid := m.role == RoleReplica && !m.cached
+	replicaSource := m.role == RoleReplica
+	m.mu.Unlock()
+	if invalid {
+		return "", 0, fmt.Errorf("replica has no synchronized dataset")
+	}
+	functions, err := m.host.FunctionPayload()
+	if err != nil {
+		return "", 0, err
+	}
+	if replicaSource {
+		m.dbs.BeginAuthoritativeApply()
+		defer m.dbs.EndAuthoritativeApply()
+	}
+	if r.cachestorm {
+		if err := persistence.WriteSnapshot(snap, DBSource{DBs: m.dbs, Functions: functions, Search: m.host.SearchCommands()}); err != nil {
+			return "", 0, err
+		}
+	}
+	m.mu.Lock()
+	if m.stopped {
+		m.mu.Unlock()
+		return "", 0, fmt.Errorf("server is stopping")
+	}
+	m.createBacklogLocked()
+	replid, offset := m.replid, m.offset
+	db := m.streamDB
+	if m.role == RoleReplica {
+		db = m.linkDB
+	}
+	r.state = stateSendBulk
+	m.replicas[r] = struct{}{}
+	m.mu.Unlock()
+	if r.cachestorm {
+		if db > 0 {
+			snap.Write(encodeCommand("SELECT", strconv.Itoa(db)))
+		}
+		return replid, offset, nil
+	}
+	skipped, err := persistence.WriteRedisRDB(snap, DBSource{DBs: m.dbs}, persistence.RedisRDBInfo{
+		Functions: persistence.FunctionCodes(functions), StreamDB: db, ReplID: replid, Offset: offset})
+	if skipped > 0 {
+		logger.Warn().Int("keys", skipped).Str("replica", r.addr).Msg("keys Redis has no type for were left out of the RDB")
+	}
+	return replid, offset, err
 }
 
 func hostOf(addr string) string {
