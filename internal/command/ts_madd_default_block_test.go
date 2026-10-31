@@ -11,11 +11,9 @@ import (
 )
 
 func TestTSMAddDefaultBlockX(t *testing.T) {
-	previousManager := tsManager
-	tsManager = store.NewTimeSeriesManager()
-	t.Cleanup(func() { tsManager = previousManager })
 	router := NewRouter()
 	RegisterTSCommands(router)
+	st := store.NewStore()
 	run := func(t *testing.T, name string, args ...string) *resp.Value {
 		t.Helper()
 		raw := make([][]byte, len(args))
@@ -23,7 +21,7 @@ func TestTSMAddDefaultBlockX(t *testing.T) {
 			raw[i] = []byte(arg)
 		}
 		var output bytes.Buffer
-		if err := router.Execute(NewContext(name, raw, nil, resp.NewWriter(&output))); err != nil {
+		if err := router.Execute(NewContext(name, raw, st, resp.NewWriter(&output))); err != nil {
 			t.Fatal(err)
 		}
 		value, err := resp.NewReader(&output).ReadValue()

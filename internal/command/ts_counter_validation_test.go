@@ -35,8 +35,7 @@ func newTSCounterRouter() *Router {
 	return router
 }
 
-// All TS handlers share the package-level tsManager, so isolation comes from
-// a unique series key per test rather than from swapping the manager.
+// Isolation comes from a unique series key per test.
 var tsCounterStore = store.NewStore()
 
 func runTSCounter(t *testing.T, router *Router, args ...string) string {
@@ -67,7 +66,6 @@ func tsCounterLatest(t *testing.T, router *Router, key string) string {
 // A non-numeric increment must be rejected and must NOT move the counter.
 // Before the fix it replied with a timestamp and left the value unchanged.
 func TestTSIncrByRejectsNonNumericIncrement(t *testing.T) {
-	withFreshTSManager(t)
 	router := newTSCounterRouter()
 	runTSCounter(t, router, "TS.ADD", "ts:incr:garbage", "1000", "10")
 
@@ -92,7 +90,6 @@ func TestTSIncrByRejectsNonNumericIncrement(t *testing.T) {
 
 // TSDECRBY feeds the same parser and must reject rather than subtract 0.
 func TestTSDecrByRejectsNonNumericDecrement(t *testing.T) {
-	withFreshTSManager(t)
 	router := newTSCounterRouter()
 	runTSCounter(t, router, "TS.ADD", "ts:decr:garbage", "1000", "10")
 
@@ -110,7 +107,6 @@ func TestTSDecrByRejectsNonNumericDecrement(t *testing.T) {
 // without TIMESTAMP stamps "now", so the series can no longer be re-seeded at
 // a fixed past timestamp.
 func TestTSIncrDecrByAcceptsValidValues(t *testing.T) {
-	withFreshTSManager(t)
 	cases := []struct {
 		name   string
 		cmd    string
@@ -142,7 +138,6 @@ func TestTSIncrDecrByAcceptsValidValues(t *testing.T) {
 
 // The TIMESTAMP argument keeps its lenient parse: 0 means "use now".
 func TestTSIncrByKeepsNowTimestampSentinel(t *testing.T) {
-	withFreshTSManager(t)
 	router := newTSCounterRouter()
 	runTSCounter(t, router, "TS.ADD", "ts:auto", "1000", "10")
 

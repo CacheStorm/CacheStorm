@@ -46,27 +46,12 @@ func runTSValue(t *testing.T, router *Router, args ...string) string {
 	return out.String()
 }
 
-// tsValueStore backs the helper above. The TS handlers share the package-level
-// tsManager, so isolation comes from a unique key per test rather than from
-// swapping the manager.
+// tsValueStore backs the helper above; each test uses its own keys.
 var tsValueStore = store.NewStore()
-
-// withFreshTSManager gives the test its own time-series manager. The TS
-// handlers share the package-level tsManager, so a series written by an
-// earlier test (or by an earlier -count iteration) is still there: TS.ADD
-// then reports a duplicate timestamp, and a counter starts from the value
-// the previous iteration left. The previous manager is restored afterwards.
-func withFreshTSManager(t *testing.T) {
-	t.Helper()
-	previous := tsManager
-	tsManager = store.NewTimeSeriesManager()
-	t.Cleanup(func() { tsManager = previous })
-}
 
 // A non-numeric value must be rejected and must NOT leave a sample behind.
 // Before the fix TS.ADD replied ":1000" and stored a zero sample.
 func TestTSAddRejectsNonNumericValue(t *testing.T) {
-	withFreshTSManager(t)
 	router := newTSValueRouter()
 
 	reply := runTSValue(t, router, "TS.ADD", "ts:add:garbage", "1000", "abc")
@@ -78,22 +63,21 @@ func TestTSAddRejectsNonNumericValue(t *testing.T) {
 	}
 
 	// The rejected write must not have created the series or a zero sample.
-	if got := runTSValue(t, router, "TS.RANGE", "ts:add:garbage", "-", "+"); !strings.HasPrefix(got, "*0") {
-		t.Fatalf("TS.RANGE after the rejected add = %q, want an empty array — no sample may be written", got)
+	if got := runTSValue(t, router, "TS.RANGE", "ts:add:garbage", "-", "+"); !strings.Contains(got, "key does not exist") {
+		t.Fatalf("TS.RANGE after the rejected add = %q, want no series — nothing may be written", got)
 	}
 }
 
 // TS.MADD feeds the same parser and must reject rather than store 0.
 func TestTSMAddRejectsNonNumericValue(t *testing.T) {
-	withFreshTSManager(t)
 	router := newTSValueRouter()
 
 	reply := runTSValue(t, router, "TS.MADD", "ts:madd:garbage", "1000", "zzz")
 	if !strings.HasPrefix(reply, "-") {
 		t.Fatalf("TS.MADD with value %q = %q, want a float error", "zzz", reply)
 	}
-	if got := runTSValue(t, router, "TS.RANGE", "ts:madd:garbage", "-", "+"); !strings.HasPrefix(got, "*0") {
-		t.Fatalf("TS.RANGE after the rejected madd = %q, want an empty array", got)
+	if got := runTSValue(t, router, "TS.RANGE", "ts:madd:garbage", "-", "+"); !strings.Contains(got, "key does not exist") {
+		t.Fatalf("TS.RANGE after the rejected madd = %q, want no series", got)
 	}
 }
 
@@ -102,7 +86,6 @@ func TestTSMAddRejectsNonNumericValue(t *testing.T) {
 // (round 8's BLOCK policy), so reusing one key would fail on the policy, not
 // on the value parsing this test is about.
 func TestTSAddAcceptsValidValues(t *testing.T) {
-	withFreshTSManager(t)
 	for _, tc := range []struct{ name, value, want string }{
 		{name: "positive", value: "5", want: "5"},
 		{name: "negative", value: "-2", want: "-2"},
@@ -125,16 +108,10 @@ func TestTSAddAcceptsValidValues(t *testing.T) {
 // The timestamp keeps its "*" auto-timestamp sentinel. parseInt64("*") is 0,
 // so the timestamp must stay unvalidated even though the value is now strict.
 func TestTSAddKeepsAutoTimestamp(t *testing.T) {
-	withFreshTSManager(t)
 	router := newTSValueRouter()
 
-	// This series name is unique to this test. tsManager is a package global
-	// shared by every test in the package, so reusing a series another test has
-	// written to means "*" resolves against a non-empty series: ts_counter_
-	// validation_test.go's TS.INCRBY ... TIMESTAMP 0 leaves a sample at now-ms,
-	// and "*" then resolves to 0, which the duplicate-timestamp guard rejects as
-	// non-increasing. That failure was about shared state, not about the
-	// sentinel, so the fix is an isolated series rather than a relaxed assertion.
+	// This series name is unique to this test, so "*" resolves against an
+	// empty series.
 	reply := runTSValue(t, router, "TS.ADD", "ts:autosentinel", "*", "5")
 	if strings.HasPrefix(reply, "-") {
 		t.Fatalf("TS.ADD with timestamp %q was rejected: %q — the auto-timestamp sentinel must keep working", "*", reply)

@@ -53,14 +53,6 @@ func tsRetRouter(t *testing.T) *Router {
 	router := NewRouter()
 	RegisterTSCommands(router)
 	RegisterKeyCommands(router)
-	// tsManager is a PACKAGE GLOBAL (var tsManager = store.NewTimeSeriesManager()),
-	// so time-series state is shared across every store in the test binary. A
-	// per-case store.NewStore() therefore does NOT isolate series, and counts
-	// leak between cases. Reset it per test, exactly as the script tests must
-	// reset the package-global scriptEngine.
-	saved := tsManager
-	tsManager = store.NewTimeSeriesManager()
-	t.Cleanup(func() { tsManager = saved })
 	return router
 }
 

@@ -201,16 +201,9 @@ func (r *Router) ForkForReplay(s *store.Store, allowed []string) *Router {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	n := &Router{commands: make(map[string]*CommandDef), duplicates: make(map[string]struct{}), functionRegistry: NewFunctionRegistry(s), searchIndexes: search.NewIndexManager()}
-	timeSeries := store.NewTimeSeriesManager()
 	for _, name := range allowed {
 		if def := r.commands[name]; def != nil {
 			copyDef := *def
-			switch name {
-			case "TS.CREATE":
-				copyDef.Handler = replayTimeSeries(timeSeries, createTimeSeriesWith)
-			case "TS.ADD":
-				copyDef.Handler = replayTimeSeries(timeSeries, addTimeSeriesWith)
-			}
 			n.commands[name] = &copyDef
 		}
 	}

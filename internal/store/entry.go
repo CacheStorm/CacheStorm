@@ -17,6 +17,8 @@ const (
 	DataTypeSortedSet
 	DataTypeStream
 	DataTypeGeo
+	DataTypeJSON
+	DataTypeTimeSeries
 )
 
 func (dt DataType) String() string {
@@ -35,6 +37,10 @@ func (dt DataType) String() string {
 		return "stream"
 	case DataTypeGeo:
 		return "geo"
+	case DataTypeJSON:
+		return "ReJSON-RL"
+	case DataTypeTimeSeries:
+		return "TSDB-TYPE"
 	default:
 		return "unknown"
 	}

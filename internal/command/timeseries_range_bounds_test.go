@@ -44,16 +44,11 @@ func tsRangeRun(t *testing.T, s *store.Store, router *Router, cmd string, args .
 	return buf.String()
 }
 
-// tsRangeRouter resets the package-global tsManager, which is otherwise shared
-// across every store in the test binary; without this, series leak between tests.
 func tsRangeRouter(t *testing.T) *Router {
 	t.Helper()
 	router := NewRouter()
 	RegisterTSCommands(router)
 	RegisterKeyCommands(router)
-	saved := tsManager
-	tsManager = store.NewTimeSeriesManager()
-	t.Cleanup(func() { tsManager = saved })
 	return router
 }
 
@@ -152,8 +147,8 @@ func TestTSRangeControlsUncontended(t *testing.T) {
 	}
 
 	s2 := store.NewStore()
-	if n := tsRangeLen(t, s2, router, "TS.RANGE", "nope", "-", "+"); n != 0 {
-		t.Fatalf("CONTROL FAIL: TS.RANGE on a missing key returned %d samples, want 0", n)
+	if got := tsRangeRun(t, s2, router, "TS.RANGE", "nope", "-", "+"); got != "-ERR TSDB: the key does not exist\r\n" {
+		t.Fatalf("CONTROL FAIL: TS.RANGE on a missing key returned %q", got)
 	}
 
 	s3 := store.NewStore()

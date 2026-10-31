@@ -24,8 +24,8 @@ func TestNewJSONValueInvalid(t *testing.T) {
 
 func TestJSONValueType(t *testing.T) {
 	jv, _ := NewJSONValue("test")
-	if jv.Type() != DataTypeString {
-		t.Errorf("expected DataTypeString, got %v", jv.Type())
+	if jv.Type() != DataTypeJSON || jv.Type().String() != "ReJSON-RL" {
+		t.Errorf("expected ReJSON-RL, got %v", jv.Type())
 	}
 }
 

@@ -429,8 +429,8 @@ func TestTimeSeriesValue(t *testing.T) {
 	ts := NewTimeSeriesValue(time.Hour)
 
 	t.Run("Type", func(t *testing.T) {
-		if ts.Type() != DataTypeString {
-			t.Errorf("type = %v, want %v", ts.Type(), DataTypeString)
+		if ts.Type() != DataTypeTimeSeries {
+			t.Errorf("type = %v, want %v", ts.Type(), DataTypeTimeSeries)
 		}
 	})
 
@@ -633,62 +633,6 @@ func TestTimeSeriesValue(t *testing.T) {
 		emptyTs := NewTimeSeriesValue(0)
 		if emptyTs.Aggregation(0, 1000, "avg", 100) != nil {
 			t.Error("empty aggregation should be nil")
-		}
-	})
-}
-
-func TestTimeSeriesManager(t *testing.T) {
-	m := NewTimeSeriesManager()
-
-	t.Run("Create", func(t *testing.T) {
-		labels := map[string]string{"sensor": "temp"}
-		err := m.Create("key1", time.Hour, labels)
-		if err != nil {
-			t.Errorf("create should succeed: %v", err)
-		}
-
-		err = m.Create("key1", time.Hour, labels)
-		if err != nil {
-			t.Errorf("create duplicate should return nil: %v", err)
-		}
-	})
-
-	t.Run("Get", func(t *testing.T) {
-		ts, ok := m.Get("key1")
-		if !ok || ts == nil {
-			t.Error("should get timeseries")
-		}
-
-		_, ok = m.Get("nonexistent")
-		if ok {
-			t.Error("nonexistent should not exist")
-		}
-	})
-
-	t.Run("QueryByLabels", func(t *testing.T) {
-		m.Create("key2", time.Hour, map[string]string{"type": "cpu", "host": "server1"})
-		m.Create("key3", time.Hour, map[string]string{"type": "cpu", "host": "server2"})
-
-		keys := m.QueryByLabels(map[string]string{"type": "cpu"}, "")
-		if len(keys) != 2 {
-			t.Errorf("keys length = %d, want 2", len(keys))
-		}
-
-		keys = m.QueryByLabels(map[string]string{"host": "server1"}, "")
-		if len(keys) != 1 {
-			t.Errorf("keys length = %d, want 1", len(keys))
-		}
-	})
-
-	t.Run("Delete", func(t *testing.T) {
-		if !m.Delete("key2") {
-			t.Error("delete should succeed")
-		}
-		if m.Delete("key2") {
-			t.Error("second delete should fail")
-		}
-		if m.Delete("nonexistent") {
-			t.Error("delete nonexistent should fail")
 		}
 	})
 }

@@ -7,13 +7,14 @@ import (
 	"testing"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
+	"github.com/cachestorm/cachestorm/internal/store"
 )
 
 func TestTSRangeAggregationCountX(t *testing.T) {
 	router := NewRouter()
 	RegisterTSCommands(router)
+	st := store.NewStore()
 	key := t.Name()
-	t.Cleanup(func() { tsManager.Delete(key) })
 	run := func(t *testing.T, name string, args ...string) *resp.Value {
 		t.Helper()
 		raw := make([][]byte, len(args))
@@ -21,7 +22,7 @@ func TestTSRangeAggregationCountX(t *testing.T) {
 			raw[i] = []byte(arg)
 		}
 		var output bytes.Buffer
-		if err := router.Execute(NewContext(name, raw, nil, resp.NewWriter(&output))); err != nil {
+		if err := router.Execute(NewContext(name, raw, st, resp.NewWriter(&output))); err != nil {
 			t.Fatal(err)
 		}
 		value, err := resp.NewReader(&output).ReadValue()

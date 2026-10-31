@@ -411,6 +411,8 @@ TS.INFO key [DEBUG]
 TS.QUERYINDEX filter [filter ...]
 ```
 
+Time series are ordinary keys of type `TSDB-TYPE`: they live in the selected database, expire, are deleted, renamed and flushed like any key, and are saved in snapshots, the AOF and replicated. Reading a missing series is an error (`ERR TSDB: the key does not exist`), and `TS.CREATE` on an existing key fails. `TS.QUERYINDEX` takes RedisTimeSeries filters (`label=value`, `label!=value`, `label=`, `label!=`, `label=(v1,v2)`); at least one must be a `label=value` matcher. It scans the database's keys.
+
 ---
 
 ## Search Commands

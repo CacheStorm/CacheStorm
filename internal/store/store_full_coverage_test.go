@@ -2713,40 +2713,6 @@ func TestWorkflowStatus_String(t *testing.T) {
 	}
 }
 
-func TestTimeSeriesManager_Operations(t *testing.T) {
-	m := NewTimeSeriesManager()
-
-	err := m.Create("ts1", 0, map[string]string{"env": "prod"})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Create duplicate should not error
-	err = m.Create("ts1", 0, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	ts, ok := m.Get("ts1")
-	if !ok || ts == nil {
-		t.Fatal("expected to find ts1")
-	}
-
-	keys := m.QueryByLabels(map[string]string{"env": "prod"}, "")
-	if len(keys) != 1 {
-		t.Fatalf("expected 1, got %d", len(keys))
-	}
-
-	ok = m.Delete("ts1")
-	if !ok {
-		t.Fatal("expected true")
-	}
-	ok = m.Delete("ts1")
-	if ok {
-		t.Fatal("expected false for already deleted")
-	}
-}
-
 func TestSortedSetValue_RemoveRangeByRank_ClampedNegatives(t *testing.T) {
 	ss := &SortedSetValue{Members: map[string]float64{
 		"a": 1, "b": 2, "c": 3,

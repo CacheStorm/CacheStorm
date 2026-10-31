@@ -34,7 +34,7 @@ func NewTimeSeriesValue(retention time.Duration) *TimeSeriesValue {
 	}
 }
 
-func (v *TimeSeriesValue) Type() DataType { return DataTypeString }
+func (v *TimeSeriesValue) Type() DataType { return DataTypeTimeSeries }
 
 func (v *TimeSeriesValue) SizeOf() int64 {
 	v.mu.RLock()
@@ -394,95 +394,6 @@ func (v *TimeSeriesValue) Aggregation(from, to int64, aggType string, bucketSize
 	sort.Slice(result, func(i, j int) bool {
 		return result[i].Timestamp < result[j].Timestamp
 	})
-
-	return result
-}
-
-type TimeSeriesManager struct {
-	mu      sync.RWMutex
-	series  map[string]*TimeSeriesValue
-	byLabel map[string]map[string][]string
-}
-
-func NewTimeSeriesManager() *TimeSeriesManager {
-	return &TimeSeriesManager{
-		series:  make(map[string]*TimeSeriesValue),
-		byLabel: make(map[string]map[string][]string),
-	}
-}
-
-func (m *TimeSeriesManager) Create(key string, retention time.Duration, labels map[string]string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if _, exists := m.series[key]; exists {
-		return nil
-	}
-
-	ts := NewTimeSeriesValue(retention)
-	ts.SetLabels(labels)
-	m.series[key] = ts
-
-	for k, v := range labels {
-		if m.byLabel[k] == nil {
-			m.byLabel[k] = make(map[string][]string)
-		}
-		m.byLabel[k][v] = append(m.byLabel[k][v], key)
-	}
-
-	return nil
-}
-
-func (m *TimeSeriesManager) Get(key string) (*TimeSeriesValue, bool) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	ts, ok := m.series[key]
-	return ts, ok
-}
-
-func (m *TimeSeriesManager) Delete(key string) bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	ts, exists := m.series[key]
-	if !exists {
-		return false
-	}
-
-	for k, v := range ts.Labels {
-		if keys, ok := m.byLabel[k][v]; ok {
-			newKeys := make([]string, 0)
-			for _, k2 := range keys {
-				if k2 != key {
-					newKeys = append(newKeys, k2)
-				}
-			}
-			m.byLabel[k][v] = newKeys
-		}
-	}
-
-	delete(m.series, key)
-	return true
-}
-
-func (m *TimeSeriesManager) QueryByLabels(labels map[string]string, filter string) []string {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	result := make([]string, 0)
-	for key, ts := range m.series {
-		match := true
-		for k, v := range labels {
-			value, exists := ts.Labels[k]
-			if !exists || value != v {
-				match = false
-				break
-			}
-		}
-		if match {
-			result = append(result, key)
-		}
-	}
 
 	return result
 }

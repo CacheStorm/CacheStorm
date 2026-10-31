@@ -27,7 +27,7 @@ func NewJSONValue(data interface{}) (*JSONValue, error) {
 	return &JSONValue{Data: b}, nil
 }
 
-func (v *JSONValue) Type() DataType { return DataTypeString }
+func (v *JSONValue) Type() DataType { return DataTypeJSON }
 
 func (v *JSONValue) SizeOf() int64 {
 	v.mu.RLock()

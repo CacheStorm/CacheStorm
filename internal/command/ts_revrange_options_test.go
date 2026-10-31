@@ -11,11 +11,9 @@ import (
 )
 
 func TestTSRevRangeOptionsX(t *testing.T) {
-	previousManager := tsManager
-	tsManager = store.NewTimeSeriesManager()
-	t.Cleanup(func() { tsManager = previousManager })
 	router := NewRouter()
 	RegisterTSCommands(router)
+	st := store.NewStore()
 	run := func(t *testing.T, name string, args ...string) *resp.Value {
 		t.Helper()
 		raw := make([][]byte, len(args))
@@ -23,7 +21,7 @@ func TestTSRevRangeOptionsX(t *testing.T) {
 			raw[i] = []byte(arg)
 		}
 		var output bytes.Buffer
-		if err := router.Execute(NewContext(name, raw, nil, resp.NewWriter(&output))); err != nil {
+		if err := router.Execute(NewContext(name, raw, st, resp.NewWriter(&output))); err != nil {
 			t.Fatal(err)
 		}
 		value, err := resp.NewReader(&output).ReadValue()
@@ -71,16 +69,15 @@ func TestTSRevRangeOptionsX(t *testing.T) {
 		{"AGGREGATION avg buckets", []string{"1000", "2100", "AGGREGATION", "avg", "1000"}, [][2]string{{"2000", "7"}, {"1000", "5"}}},
 		{"AGGREGATION with COUNT limits buckets", []string{"1000", "2100", "AGGREGATION", "sum", "1000", "COUNT", "1"}, [][2]string{{"2000", "14"}}},
 		{"COUNT before AGGREGATION order", []string{"1000", "2100", "COUNT", "1", "AGGREGATION", "sum", "1000"}, [][2]string{{"2000", "14"}}},
-		{"missing key", []string{"1000", "2100", "COUNT", "1"}, [][2]string{}},
 		{"empty range", []string{"3000", "4000", "AGGREGATION", "sum", "1000", "COUNT", "1"}, [][2]string{}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			args := append([]string{"rev"}, tc.args...)
-			if tc.name == "missing key" {
-				args = append([]string{"absent"}, tc.args...)
-			}
 			check(t, run(t, "TS.REVRANGE", args...), tc.want)
 		})
+	}
+	if got := run(t, "TS.REVRANGE", "absent", "1000", "2100"); got.Type != resp.TypeError {
+		t.Fatalf("TS.REVRANGE on a missing key = %v, want an error", got)
 	}
 	check(t, run(t, "TS.RANGE", "rev", "1000", "2100"), [][2]string{{"1000", "8"}, {"1100", "2"}, {"1200", "5"}, {"2000", "4"}, {"2100", "10"}})
 }

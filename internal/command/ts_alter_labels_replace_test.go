@@ -10,11 +10,9 @@ import (
 )
 
 func TestTSAlterLabelsReplaceX(t *testing.T) {
-	previousManager := tsManager
-	tsManager = store.NewTimeSeriesManager()
-	t.Cleanup(func() { tsManager = previousManager })
 	router := NewRouter()
 	RegisterTSCommands(router)
+	st := store.NewStore()
 	run := func(t *testing.T, name string, args ...string) *resp.Value {
 		t.Helper()
 		raw := make([][]byte, len(args))
@@ -22,7 +20,7 @@ func TestTSAlterLabelsReplaceX(t *testing.T) {
 			raw[i] = []byte(arg)
 		}
 		var output bytes.Buffer
-		if err := router.Execute(NewContext(name, raw, nil, resp.NewWriter(&output))); err != nil {
+		if err := router.Execute(NewContext(name, raw, st, resp.NewWriter(&output))); err != nil {
 			t.Fatal(err)
 		}
 		value, err := resp.NewReader(&output).ReadValue()
@@ -105,7 +103,7 @@ func TestTSAlterLabelsReplaceX(t *testing.T) {
 			if retention.Type != resp.TypeInteger || retention.Int != tc.retention {
 				t.Errorf("retention changed unexpectedly: %v, want %d", retention, tc.retention)
 			}
-			matches := run(t, "TS.QUERYINDEX", "obsolete", "old")
+			matches := run(t, "TS.QUERYINDEX", "obsolete=old")
 			if matches.Type != resp.TypeArray {
 				t.Fatalf("malformed query reply: %v", matches)
 			}

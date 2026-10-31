@@ -6,11 +6,13 @@ import (
 	"testing"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
+	"github.com/cachestorm/cachestorm/internal/store"
 )
 
 func TestTSAlterZeroRetentionX(t *testing.T) {
 	router := NewRouter()
 	RegisterTSCommands(router)
+	st := store.NewStore()
 	run := func(t *testing.T, name string, args ...string) *resp.Value {
 		t.Helper()
 		raw := make([][]byte, len(args))
@@ -18,7 +20,7 @@ func TestTSAlterZeroRetentionX(t *testing.T) {
 			raw[i] = []byte(arg)
 		}
 		var output bytes.Buffer
-		if err := router.Execute(NewContext(name, raw, nil, resp.NewWriter(&output))); err != nil {
+		if err := router.Execute(NewContext(name, raw, st, resp.NewWriter(&output))); err != nil {
 			t.Fatal(err)
 		}
 		value, err := resp.NewReader(&output).ReadValue()
@@ -71,7 +73,6 @@ func TestTSAlterZeroRetentionX(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			key := t.Name()
-			t.Cleanup(func() { tsManager.Delete(key) })
 			checkOK(t, run(t, "TS.CREATE", key, "RETENTION", fmt.Sprint(tc.initial), "LABELS", "brand", "original"))
 			before := field(t, run(t, "TS.INFO", key), "retentionTime")
 			if before.Type != resp.TypeInteger || before.Int != tc.initial {

@@ -305,7 +305,7 @@ The AOF writer's snapshot replacement keeps appends serialized while preparing a
 - JSON documents and time series are saved as module values of the types `CStorm-JS` and `CStorm-TS`. Redis refuses to load such a file ("no matching module type 'CStorm-JS'"), just as it would refuse a RedisJSON file without the module.
 - Key tags go in an aux field before the key, and search indexes in a `cachestorm-search` aux field; Redis ignores both.
 
-CacheStorm still loads snapshots in its older native format. `redis-cli --rdb` also returns a Redis-format RDB, but leaves CacheStorm-only types out with a warning, so the file always loads in Redis. Application state held outside the keyspace requires separate persistence support; this snapshot does not claim to persist every extension's process-global registry.
+CacheStorm still loads snapshots in its older native format. `redis-cli --rdb` also returns a Redis-format RDB, but leaves CacheStorm-only types out with a warning, so the file always loads in Redis.
 
 ## Eviction Policies
 

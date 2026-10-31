@@ -1,8 +1,10 @@
 package command
 
 import (
+	"errors"
 	"fmt"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -11,7 +13,47 @@ import (
 	"github.com/cachestorm/cachestorm/internal/store"
 )
 
-var tsManager = store.NewTimeSeriesManager()
+var (
+	errTSKeyExists  = errors.New("ERR TSDB: key already exists")
+	errTSKeyMissing = errors.New("ERR TSDB: the key does not exist")
+	errTSMatcher    = errors.New("ERR TSDB: please provide at least one matcher")
+	errTSFilter     = errors.New("ERR TSDB: failed parsing labels")
+)
+
+// getTimeSeries returns the time series at key, nil when the key is absent.
+func getTimeSeries(ctx *Context, key string) (*store.TimeSeriesValue, error) {
+	entry, exists := ctx.Store.Get(key)
+	if !exists {
+		return nil, nil
+	}
+	ts, ok := entry.Value.(*store.TimeSeriesValue)
+	if !ok {
+		return nil, store.ErrWrongType
+	}
+	return ts, nil
+}
+
+// timeSeriesFor returns the time series at key, creating it with retention
+// and labels when the key is absent.
+func timeSeriesFor(ctx *Context, key string, retention time.Duration, labels map[string]string) (*store.TimeSeriesValue, error) {
+	ts, err := getTimeSeries(ctx, key)
+	if err != nil || ts != nil {
+		return ts, err
+	}
+	ts = store.NewTimeSeriesValue(retention)
+	ts.SetLabels(labels)
+	if err := ctx.Store.Set(key, ts, store.SetOptions{}); err != nil {
+		return nil, err
+	}
+	return ts, nil
+}
+
+// timeSeriesWritten accounts for samples changed in place: the key's memory
+// and its watchers.
+func timeSeriesWritten(ctx *Context, key string) {
+	ctx.Store.Reaccount(key)
+	ctx.Store.TouchKeys([]string{key})
+}
 
 func RegisterTSCommands(router *Router) {
 	router.Register(&CommandDef{Name: "TS.CREATE", Handler: cmdTSCREATE})
@@ -28,9 +70,7 @@ func RegisterTSCommands(router *Router) {
 	router.Register(&CommandDef{Name: "TS.DECRBY", Handler: cmdTSDECRBY})
 }
 
-func cmdTSCREATE(ctx *Context) error { return createTimeSeriesWith(ctx, tsManager) }
-
-func createTimeSeriesWith(ctx *Context, manager *store.TimeSeriesManager) error {
+func cmdTSCREATE(ctx *Context) error {
 	if ctx.ArgCount() < 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
@@ -69,7 +109,10 @@ func createTimeSeriesWith(ctx *Context, manager *store.TimeSeriesManager) error 
 		}
 	}
 
-	if err := manager.Create(key, retention, labels); err != nil {
+	if existing, err := getTimeSeries(ctx, key); err != nil || existing != nil {
+		return ctx.WriteError(errTSKeyExists)
+	}
+	if _, err := timeSeriesFor(ctx, key, retention, labels); err != nil {
 		return ctx.WriteError(err)
 	}
 	return ctx.WriteOK()
@@ -84,22 +127,26 @@ func cmdTSDEL(ctx *Context) error {
 	from := parseTSBound(ctx.ArgString(1))
 	to := parseTSBound(ctx.ArgString(2))
 
-	ts, ok := tsManager.Get(key)
-	if !ok {
-		return ctx.WriteInteger(0)
+	ts, err := getTimeSeries(ctx, key)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	if ts == nil {
+		return ctx.WriteError(errTSKeyMissing)
 	}
 
 	deleted := 0
 	for _, sample := range ts.Range(from, to) {
 		deleted += ts.Delete(sample.Timestamp)
 	}
+	if deleted > 0 {
+		timeSeriesWritten(ctx, key)
+	}
 
 	return ctx.WriteInteger(int64(deleted))
 }
 
-func cmdTSADD(ctx *Context) error { return addTimeSeriesWith(ctx, tsManager) }
-
-func addTimeSeriesWith(ctx *Context, manager *store.TimeSeriesManager) error {
+func cmdTSADD(ctx *Context) error {
 	if ctx.ArgCount() < 3 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
@@ -155,14 +202,6 @@ func addTimeSeriesWith(ctx *Context, manager *store.TimeSeriesManager) error {
 		}
 	}
 
-	ts, ok := manager.Get(key)
-	if !ok {
-		if err := manager.Create(key, retention, labels); err != nil {
-			return ctx.WriteError(err)
-		}
-		ts, _ = manager.Get(key)
-	}
-
 	policy := store.DuplicateReject
 	if onDuplicate != "" {
 		var ok bool
@@ -171,10 +210,15 @@ func addTimeSeriesWith(ctx *Context, manager *store.TimeSeriesManager) error {
 		}
 	}
 
+	ts, err := timeSeriesFor(ctx, key, retention, labels)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
 	written, resultTs := ts.AddWithPolicy(timestamp, value, policy)
 	if !written {
 		return ctx.WriteError(fmt.Errorf("TSDB: duplicate timestamp"))
 	}
+	timeSeriesWritten(ctx, key)
 	return ctx.WriteInteger(resultTs)
 }
 
@@ -195,18 +239,15 @@ func cmdTSMADD(ctx *Context) error {
 			return ctx.WriteError(ErrNotFloat)
 		}
 
-		ts, ok := tsManager.Get(key)
-		if !ok {
-			if err := tsManager.Create(key, 0, nil); err != nil {
-				return ctx.WriteError(err)
-			}
-			ts, _ = tsManager.Get(key)
+		ts, err := timeSeriesFor(ctx, key, 0, nil)
+		if err != nil {
+			return ctx.WriteError(err)
 		}
-
 		written, resultTs := ts.AddWithPolicy(timestamp, value, store.DuplicateReject)
 		if !written {
 			return ctx.WriteError(fmt.Errorf("TSDB: duplicate timestamp"))
 		}
+		timeSeriesWritten(ctx, key)
 		results = append(results, resp.IntegerValue(resultTs))
 	}
 
@@ -246,9 +287,12 @@ func cmdTSRANGE(ctx *Context) error {
 		}
 	}
 
-	ts, ok := tsManager.Get(key)
-	if !ok {
-		return ctx.WriteArray([]*resp.Value{})
+	ts, err := getTimeSeries(ctx, key)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	if ts == nil {
+		return ctx.WriteError(errTSKeyMissing)
 	}
 
 	var samples []store.TimeSeriesSample
@@ -307,9 +351,12 @@ func cmdTSREVRANGE(ctx *Context) error {
 		}
 	}
 
-	ts, ok := tsManager.Get(key)
-	if !ok {
-		return ctx.WriteArray([]*resp.Value{})
+	ts, err := getTimeSeries(ctx, key)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	if ts == nil {
+		return ctx.WriteError(errTSKeyMissing)
 	}
 
 	var samples []store.TimeSeriesSample
@@ -341,9 +388,12 @@ func cmdTSGET(ctx *Context) error {
 
 	key := ctx.ArgString(0)
 
-	ts, ok := tsManager.Get(key)
-	if !ok {
-		return ctx.WriteArray([]*resp.Value{})
+	ts, err := getTimeSeries(ctx, key)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	if ts == nil {
+		return ctx.WriteError(errTSKeyMissing)
 	}
 
 	latest := ts.Latest()
@@ -364,9 +414,12 @@ func cmdTSINFO(ctx *Context) error {
 
 	key := ctx.ArgString(0)
 
-	ts, ok := tsManager.Get(key)
-	if !ok {
-		return ctx.WriteError(fmt.Errorf("ERR key does not exist"))
+	ts, err := getTimeSeries(ctx, key)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	if ts == nil {
+		return ctx.WriteError(errTSKeyMissing)
 	}
 
 	first := ts.First()
@@ -412,21 +465,93 @@ func cmdTSQUERYINDEX(ctx *Context) error {
 	if ctx.ArgCount() < 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
-
-	labels := make(map[string]string)
-	for i := 0; i+1 < ctx.ArgCount(); i += 2 {
-		labelKey := ctx.ArgString(i)
-		labelVal := ctx.ArgString(i + 1)
-		labels[labelKey] = labelVal
+	filters := make([]tsFilter, 0, ctx.ArgCount())
+	positive := false
+	for i := 0; i < ctx.ArgCount(); i++ {
+		f, ok := parseTSFilter(ctx.ArgString(i))
+		if !ok {
+			return ctx.WriteError(errTSFilter)
+		}
+		positive = positive || (!f.negate && len(f.values) > 0)
+		filters = append(filters, f)
+	}
+	if !positive {
+		return ctx.WriteError(errTSMatcher)
 	}
 
-	keys := tsManager.QueryByLabels(labels, "")
+	keys := make([]string, 0)
+	err := ctx.Store.ForEachLive(func(key string, entry *store.Entry) error {
+		ts, ok := entry.Value.(*store.TimeSeriesValue)
+		if !ok {
+			return nil
+		}
+		labels := ts.GetLabels()
+		for _, f := range filters {
+			if !f.matches(labels) {
+				return nil
+			}
+		}
+		keys = append(keys, key)
+		return nil
+	})
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	sort.Strings(keys)
 	results := make([]*resp.Value, 0, len(keys))
 	for _, k := range keys {
 		results = append(results, resp.BulkString(k))
 	}
 
 	return ctx.WriteArray(results)
+}
+
+// tsFilter is one RedisTimeSeries label filter: label=value, label!=value,
+// label= (no such label), label!= (has the label), or a value list in
+// parentheses.
+type tsFilter struct {
+	label  string
+	values []string
+	negate bool
+}
+
+func parseTSFilter(s string) (tsFilter, bool) {
+	i := strings.IndexByte(s, '=')
+	if i <= 0 {
+		return tsFilter{}, false
+	}
+	f := tsFilter{label: s[:i]}
+	if s[i-1] == '!' {
+		f.label, f.negate = s[:i-1], true
+		if f.label == "" {
+			return tsFilter{}, false
+		}
+	}
+	value := s[i+1:]
+	switch {
+	case value == "":
+	case strings.HasPrefix(value, "(") && strings.HasSuffix(value, ")"):
+		for _, v := range strings.Split(value[1:len(value)-1], ",") {
+			if v = strings.TrimSpace(v); v != "" {
+				f.values = append(f.values, v)
+			}
+		}
+	default:
+		f.values = []string{value}
+	}
+	return f, true
+}
+
+func (f tsFilter) matches(labels map[string]string) bool {
+	value, has := labels[f.label]
+	if len(f.values) == 0 {
+		return has == f.negate
+	}
+	in := false
+	for _, v := range f.values {
+		in = in || (has && v == value)
+	}
+	return in != f.negate
 }
 
 func cmdTSALTER(ctx *Context) error {
@@ -478,9 +603,12 @@ func cmdTSALTER(ctx *Context) error {
 		}
 	}
 
-	ts, ok := tsManager.Get(key)
-	if !ok {
-		return ctx.WriteError(fmt.Errorf("ERR key does not exist"))
+	ts, err := getTimeSeries(ctx, key)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	if ts == nil {
+		return ctx.WriteError(errTSKeyMissing)
 	}
 
 	if retention > 0 || clearRetention {
@@ -490,6 +618,7 @@ func cmdTSALTER(ctx *Context) error {
 	if replaceLabels {
 		ts.ReplaceLabels(labels)
 	}
+	timeSeriesWritten(ctx, key)
 
 	return ctx.WriteOK()
 }
@@ -519,12 +648,9 @@ func cmdTSINCRBY(ctx *Context) error {
 		}
 	}
 
-	ts, ok := tsManager.Get(key)
-	if !ok {
-		if err := tsManager.Create(key, 0, nil); err != nil {
-			return ctx.WriteError(err)
-		}
-		ts, _ = tsManager.Get(key)
+	ts, err := timeSeriesFor(ctx, key, 0, nil)
+	if err != nil {
+		return ctx.WriteError(err)
 	}
 
 	latest := ts.Latest()
@@ -543,6 +669,7 @@ func cmdTSINCRBY(ctx *Context) error {
 	}
 
 	_, result := ts.AddWithPolicy(timestamp, newValue, store.DuplicateLast)
+	timeSeriesWritten(ctx, key)
 	return ctx.WriteInteger(result)
 }
 
@@ -570,12 +697,9 @@ func cmdTSDECRBY(ctx *Context) error {
 		}
 	}
 
-	ts, ok := tsManager.Get(key)
-	if !ok {
-		if err := tsManager.Create(key, 0, nil); err != nil {
-			return ctx.WriteError(err)
-		}
-		ts, _ = tsManager.Get(key)
+	ts, err := timeSeriesFor(ctx, key, 0, nil)
+	if err != nil {
+		return ctx.WriteError(err)
 	}
 
 	latest := ts.Latest()
@@ -594,6 +718,7 @@ func cmdTSDECRBY(ctx *Context) error {
 	}
 
 	_, result := ts.AddWithPolicy(timestamp, newValue, store.DuplicateLast)
+	timeSeriesWritten(ctx, key)
 	return ctx.WriteInteger(result)
 }
 

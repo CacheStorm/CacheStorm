@@ -689,7 +689,7 @@ func cmdSCAN(ctx *Context) error {
 		if pattern != "" && !matchPattern(k.key, pattern) {
 			continue
 		}
-		if typeName != "" && redisTypeName(k.entry.Value) != typeName {
+		if typeName != "" && !strings.EqualFold(redisTypeName(k.entry.Value), typeName) {
 			continue
 		}
 		result = append(result, resp.BulkString(k.key))
