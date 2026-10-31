@@ -92,8 +92,8 @@ func TestProbabilisticSizeArgumentsAreValidated(t *testing.T) {
 		name string
 		args []string
 	}{
-		{"zero capacity", []string{"prob-bf-zero", "0"}},
-		{"non-numeric capacity", []string{"prob-bf-nan", "abc"}},
+		{"zero capacity", []string{"prob-bf-zero", "0.01", "0"}},
+		{"non-numeric capacity", []string{"prob-bf-nan", "0.01", "abc"}},
 	} {
 		out, p := probSizeRun(t, router, s, "BF.RESERVE", tc.args...)
 		if p != nil {
@@ -110,22 +110,22 @@ func TestProbabilisticSizeArgumentsAreValidated(t *testing.T) {
 		}
 	}
 
-	// --- CMS.INIT depth / width ---
+	// --- CMS.INITBYDIM width / depth ---
 	for _, tc := range []struct {
 		name string
 		args []string
 	}{
-		{"zero depth", []string{"prob-cms-depth0", "0", "100"}},
-		{"zero width", []string{"prob-cms-width0", "5", "0"}},
-		{"non-numeric depth", []string{"prob-cms-nan", "abc", "100"}},
+		{"zero depth", []string{"prob-cms-depth0", "100", "0"}},
+		{"zero width", []string{"prob-cms-width0", "0", "5"}},
+		{"non-numeric depth", []string{"prob-cms-nan", "100", "abc"}},
 	} {
-		out, p := probSizeRun(t, router, s, "CMS.INIT", tc.args...)
+		out, p := probSizeRun(t, router, s, "CMS.INITBYDIM", tc.args...)
 		if p != nil {
 			t.Errorf("CMS.INIT %v panicked: %v", tc.args, p)
 			continue
 		}
-		if !strings.HasPrefix(out, "-ERR") {
-			t.Errorf("CMS.INIT %v was accepted (reply %q); depth and width must be positive integers", tc.args, out)
+		if !strings.HasPrefix(out, "-CMS: invalid") {
+			t.Errorf("CMS.INITBYDIM %v was accepted (reply %q); depth and width must be positive integers", tc.args, out)
 		}
 		// A refused CMS.INIT must not leave a sketch that panics the next
 		// command touching the same key.
@@ -147,7 +147,7 @@ func TestProbabilisticSizeArgumentsAreValidated(t *testing.T) {
 			t.Errorf("TOPK.RESERVE %v panicked: %v", tc.args, p)
 			continue
 		}
-		if !strings.HasPrefix(out, "-ERR") {
+		if !strings.HasPrefix(out, "-TopK: invalid k") {
 			t.Errorf("TOPK.RESERVE %v was accepted (reply %q); topk must be a positive integer", tc.args, out)
 		}
 		// A refused TOPK.RESERVE must not leave a top-k that panics the next
@@ -164,14 +164,14 @@ func TestProbabilisticSizeArgumentsAreValidated(t *testing.T) {
 	}{
 		{"zero capacity", []string{"prob-cf-cap0", "0"}},
 		{"non-numeric capacity", []string{"prob-cf-nan", "abc"}},
-		{"zero bucket size", []string{"prob-cf-bucket0", "1000", "0"}},
+		{"zero bucket size", []string{"prob-cf-bucket0", "1000", "BUCKETSIZE", "0"}},
 	} {
 		out, p := probSizeRun(t, router, s, "CF.RESERVE", tc.args...)
 		if p != nil {
 			t.Errorf("CF.RESERVE %v panicked: %v", tc.args, p)
 			continue
 		}
-		if !strings.HasPrefix(out, "-ERR") {
+		if !strings.HasPrefix(out, "-") || strings.Contains(out, "wrong number") {
 			t.Errorf("CF.RESERVE %v was accepted (reply %q); capacity and bucket size must be positive integers", tc.args, out)
 		}
 		// A refused CF.RESERVE must not leave a broken filter behind that
@@ -182,7 +182,7 @@ func TestProbabilisticSizeArgumentsAreValidated(t *testing.T) {
 	}
 
 	// --- control: the ordinary valid-input path must keep working ---
-	out, p := probSizeRun(t, router, s, "BF.RESERVE", "prob-bf-ok", "1000")
+	out, p := probSizeRun(t, router, s, "BF.RESERVE", "prob-bf-ok", "0.01", "1000")
 	if p != nil {
 		t.Errorf("control BF.RESERVE panicked: %v", p)
 	} else if !strings.HasPrefix(out, "+OK") {
@@ -211,7 +211,7 @@ func TestBFReserveNegativeCapacityIsRefused(t *testing.T) {
 	router := NewRouter()
 	RegisterProbabilisticCommands(router)
 
-	out, p, timedOut := probSizeRunBounded(t, router, s, 5*time.Second, "BF.RESERVE", "prob-bf-neg", "-1")
+	out, p, timedOut := probSizeRunBounded(t, router, s, 5*time.Second, "BF.RESERVE", "prob-bf-neg", "0.01", "-1")
 	if timedOut {
 		t.Fatalf("BF.RESERVE with a negative capacity never returned")
 	}
@@ -223,7 +223,7 @@ func TestBFReserveNegativeCapacityIsRefused(t *testing.T) {
 
 	// The refused reserve must not have stranded the probabilistic mutex:
 	// the next probabilistic command still has to answer.
-	out, p, timedOut = probSizeRunBounded(t, router, s, 5*time.Second, "BF.RESERVE", "prob-bf-neg-2", "1000")
+	out, p, timedOut = probSizeRunBounded(t, router, s, 5*time.Second, "BF.RESERVE", "prob-bf-neg-2", "0.01", "1000")
 	if timedOut {
 		t.Fatalf("BF.RESERVE blocked forever after a refused negative capacity; the probabilistic mutex was stranded")
 	}

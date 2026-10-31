@@ -22,8 +22,9 @@ type RedisRDBInfo struct {
 	ReplID   string
 	Offset   int64
 	// Extensions keeps what Redis has no type for, for a snapshot CacheStorm
-	// loads again: JSON documents and time series as module values, and key
-	// tags as an aux field before the key, which Redis ignores. Without it
+	// loads again: JSON documents, time series and the probabilistic
+	// structures as module values, and key tags as an aux field before the
+	// key, which Redis ignores. Without it
 	// those keys are left out and the tags dropped.
 	Extensions bool
 	// Aux holds extra aux fields; Redis ignores the ones it does not know.
@@ -37,10 +38,15 @@ type RedisRDBInfo struct {
 // id is its 9-character name in a 64-symbol alphabet followed by a 10-bit
 // encoding version; Redis refuses a file with module values it has no module
 // for, naming the type.
-var (
-	rdbModuleJSON       = rdbModuleID("CStorm-JS", 1)
-	rdbModuleTimeSeries = rdbModuleID("CStorm-TS", 1)
-)
+var rdbModules = map[byte]uint64{
+	dumpTypeJSON:           rdbModuleID("CStorm-JS", 1),
+	dumpTypeTimeSeries:     rdbModuleID("CStorm-TS", 1),
+	store.ExtensionBloom:   rdbModuleID("CStorm-BF", 1),
+	store.ExtensionCuckoo:  rdbModuleID("CStorm-CF", 1),
+	store.ExtensionCMS:     rdbModuleID("CStorm-CM", 1),
+	store.ExtensionTopK:    rdbModuleID("CStorm-TK", 1),
+	store.ExtensionTDigest: rdbModuleID("CStorm-TD", 1),
+}
 
 const (
 	rdbTypeModule2       = 7
@@ -130,13 +136,7 @@ func EncodeRedisRDB(src EntryStreamer, info RedisRDBInfo) ([]byte, int, error) {
 			return nil
 		}
 		typ := payload[0]
-		var module uint64
-		switch typ {
-		case dumpTypeJSON:
-			module = rdbModuleJSON
-		case dumpTypeTimeSeries:
-			module = rdbModuleTimeSeries
-		}
+		module := rdbModules[typ]
 		if module != 0 && !info.Extensions {
 			skipped++
 			return nil
@@ -197,12 +197,12 @@ func appendRDBString(dst []byte, s string) []byte {
 func (d *dumpDecoder) moduleValue() store.Value {
 	id, _ := d.length()
 	var kind byte
-	switch id {
-	case rdbModuleJSON:
-		kind = dumpTypeJSON
-	case rdbModuleTimeSeries:
-		kind = dumpTypeTimeSeries
-	default:
+	for typ, module := range rdbModules {
+		if module == id {
+			kind = typ
+		}
+	}
+	if kind == 0 {
 		return nil
 	}
 	if op, _ := d.length(); op != rdbModuleOpcodeStr {

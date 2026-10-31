@@ -19,6 +19,11 @@ const (
 	DataTypeGeo
 	DataTypeJSON
 	DataTypeTimeSeries
+	DataTypeBloom
+	DataTypeCuckoo
+	DataTypeCMS
+	DataTypeTopK
+	DataTypeTDigest
 )
 
 func (dt DataType) String() string {
@@ -41,6 +46,16 @@ func (dt DataType) String() string {
 		return "ReJSON-RL"
 	case DataTypeTimeSeries:
 		return "TSDB-TYPE"
+	case DataTypeBloom:
+		return "MBbloom--"
+	case DataTypeCuckoo:
+		return "MBbloomCF"
+	case DataTypeCMS:
+		return "CMSk-TYPE"
+	case DataTypeTopK:
+		return "TopK-TYPE"
+	case DataTypeTDigest:
+		return "TDIS-TYPE"
 	default:
 		return "unknown"
 	}

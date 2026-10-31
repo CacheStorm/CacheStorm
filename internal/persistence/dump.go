@@ -21,8 +21,9 @@ const maxDumpString = 512 << 20
 
 // The value types Redis has no RDB encoding for that CacheStorm serves are
 // dumped under private type bytes, so DUMP/RESTORE and MIGRATE move them
-// between CacheStorm nodes whole: a JSON document and a time series. Redis
-// refuses these payloads. Streams are dumped in Redis' own encoding;
+// between CacheStorm nodes whole: a JSON document, a time series, and the
+// store's extension values (store.ExtensionBloom and on). Redis refuses
+// these payloads. Streams are dumped in Redis' own encoding;
 // dumpTypeStream is still read for payloads older CacheStorm versions wrote.
 const (
 	dumpTypeStream     = 200
@@ -122,6 +123,13 @@ func EncodeDump(value store.Value) ([]byte, error) {
 		}
 		out = append(out, dumpTypeTimeSeries)
 		str(data.String())
+	case store.ExtensionValue:
+		data, err := v.MarshalBinary()
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, v.ExtensionType())
+		str(string(data))
 	default:
 		raw, ok := value.(store.RedisStringValue)
 		if !ok {
@@ -552,7 +560,15 @@ func (d *dumpDecoder) valueOf(typ byte) store.Value {
 		}
 		return v
 	default:
-		d.err = ErrDumpFormat
-		return nil
+		data := d.str()
+		if d.err != nil {
+			return nil
+		}
+		v, ok, err := store.DecodeExtension(typ, []byte(data))
+		if !ok || err != nil {
+			d.err = ErrDumpFormat
+			return nil
+		}
+		return v
 	}
 }

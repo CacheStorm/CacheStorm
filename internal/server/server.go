@@ -76,6 +76,11 @@ var writeCommands = map[string]bool{
 	"JSON.ARRAPPEND": true, "JSON.STRAPPEND": true,
 	"TS.ADD": true, "TS.CREATE": true, "TS.DEL": true, "TS.ALTER": true,
 	"TS.INCRBY": true, "TS.DECRBY": true, "TS.MADD": true,
+	"BF.RESERVE": true, "BF.ADD": true, "BF.MADD": true, "BF.INSERT": true,
+	"CF.RESERVE": true, "CF.ADD": true, "CF.ADDNX": true, "CF.INSERT": true, "CF.INSERTNX": true, "CF.DEL": true,
+	"CMS.INITBYDIM": true, "CMS.INITBYPROB": true, "CMS.INCRBY": true, "CMS.MERGE": true,
+	"TOPK.RESERVE": true, "TOPK.ADD": true, "TOPK.INCRBY": true,
+	"TDIGEST.CREATE": true, "TDIGEST.ADD": true, "TDIGEST.RESET": true, "TDIGEST.MERGE": true,
 	"FT.CREATE": true, "FT.DROPINDEX": true, "FT.ADD": true, "FT.DEL": true,
 	"FT.ALIASADD": true, "FT.ALIASDEL": true, "FT.ALIASUPDATE": true,
 }

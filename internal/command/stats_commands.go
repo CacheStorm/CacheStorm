@@ -1,6 +1,7 @@
 package command
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"math"
@@ -45,8 +46,6 @@ func RegisterStatsCommands(router *Router) {
 }
 
 var (
-	tdigests     = make(map[string]*tdigestSketch)
-	tdigestsMu   sync.RWMutex
 	samplers     = make(map[string]*store.ReservoirSampler)
 	samplersMu   sync.RWMutex
 	histograms   = make(map[string]*store.Histogram)
@@ -80,6 +79,93 @@ type tdigestSketch struct {
 	max               float64
 	totalCompressions int64
 }
+
+func (td *tdigestSketch) Type() store.DataType { return store.DataTypeTDigest }
+func (td *tdigestSketch) String() string       { return "tdigest" }
+func (td *tdigestSketch) ExtensionType() byte  { return store.ExtensionTDigest }
+
+func (td *tdigestSketch) SizeOf() int64 {
+	td.mu.Lock()
+	defer td.mu.Unlock()
+	return int64(cap(td.means)+cap(td.weights)+cap(td.pendingMeans)+cap(td.pendingWeights))*8 + 128
+}
+
+func (td *tdigestSketch) Clone() store.Value {
+	td.mu.Lock()
+	defer td.mu.Unlock()
+	return &tdigestSketch{
+		compression:       td.compression,
+		means:             append([]float64(nil), td.means...),
+		weights:           append([]float64(nil), td.weights...),
+		pendingMeans:      append([]float64(nil), td.pendingMeans...),
+		pendingWeights:    append([]float64(nil), td.pendingWeights...),
+		mergedWeight:      td.mergedWeight,
+		unmergedWeight:    td.unmergedWeight,
+		min:               td.min,
+		max:               td.max,
+		totalCompressions: td.totalCompressions,
+	}
+}
+
+func (td *tdigestSketch) MarshalBinary() ([]byte, error) {
+	td.mu.Lock()
+	defer td.mu.Unlock()
+	out := binary.LittleEndian.AppendUint64(nil, uint64(td.compression))
+	out = binary.LittleEndian.AppendUint64(out, uint64(td.totalCompressions))
+	for _, f := range []float64{td.mergedWeight, td.unmergedWeight, td.min, td.max} {
+		out = binary.LittleEndian.AppendUint64(out, math.Float64bits(f))
+	}
+	for _, list := range [][]float64{td.means, td.weights, td.pendingMeans, td.pendingWeights} {
+		out = binary.LittleEndian.AppendUint64(out, uint64(len(list)))
+		for _, f := range list {
+			out = binary.LittleEndian.AppendUint64(out, math.Float64bits(f))
+		}
+	}
+	return out, nil
+}
+
+func decodeTDigest(data []byte) (store.Value, error) {
+	next := func() (uint64, bool) {
+		if len(data) < 8 {
+			return 0, false
+		}
+		v := binary.LittleEndian.Uint64(data)
+		data = data[8:]
+		return v, true
+	}
+	var head [6]uint64
+	for i := range head {
+		v, ok := next()
+		if !ok {
+			return nil, store.ErrExtensionFormat
+		}
+		head[i] = v
+	}
+	if int64(head[0]) <= 0 || head[0] > 1<<20 {
+		return nil, store.ErrExtensionFormat
+	}
+	td := &tdigestSketch{compression: int64(head[0]), totalCompressions: int64(head[1]),
+		mergedWeight: math.Float64frombits(head[2]), unmergedWeight: math.Float64frombits(head[3]),
+		min: math.Float64frombits(head[4]), max: math.Float64frombits(head[5])}
+	lists := []*[]float64{&td.means, &td.weights, &td.pendingMeans, &td.pendingWeights}
+	for _, list := range lists {
+		n, ok := next()
+		if !ok || n > uint64(len(data))/8 {
+			return nil, store.ErrExtensionFormat
+		}
+		*list = make([]float64, n)
+		for i := range *list {
+			v, _ := next()
+			(*list)[i] = math.Float64frombits(v)
+		}
+	}
+	if len(data) != 0 || len(td.means) != len(td.weights) || len(td.pendingMeans) != len(td.pendingWeights) {
+		return nil, store.ErrExtensionFormat
+	}
+	return td, nil
+}
+
+func init() { store.RegisterExtension(store.ExtensionTDigest, decodeTDigest) }
 
 func newTDigestSketch(compression int64) *tdigestSketch {
 	td := &tdigestSketch{compression: compression}
@@ -409,17 +495,36 @@ func parseTDigestCompression(b []byte) (int64, error) {
 	return c, nil
 }
 
-func withTDigest(ctx *Context, fn func(td *tdigestSketch) *resp.Value) error {
-	tdigestsMu.RLock()
-	td, exists := tdigests[ctx.ArgString(0)]
+// getTDigest returns the t-digest at key, nil when the key is absent.
+func getTDigest(ctx *Context, key string) (*tdigestSketch, error) {
+	entry, exists := ctx.Store.Get(key)
 	if !exists {
-		tdigestsMu.RUnlock()
+		return nil, nil
+	}
+	td, ok := entry.Value.(*tdigestSketch)
+	if !ok {
+		return nil, store.ErrWrongType
+	}
+	return td, nil
+}
+
+// withTDigest runs fn on the t-digest the command names; a TDIGEST.ADD or
+// TDIGEST.RESET changes it in place.
+func withTDigest(ctx *Context, fn func(td *tdigestSketch) *resp.Value) error {
+	key := ctx.ArgString(0)
+	td, err := getTDigest(ctx, key)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	if td == nil {
 		return ctx.WriteError(errTDigestNoKey)
 	}
 	td.mu.Lock()
 	reply := fn(td)
 	td.mu.Unlock()
-	tdigestsMu.RUnlock()
+	if ctx.Command == "TDIGEST.ADD" || ctx.Command == "TDIGEST.RESET" {
+		valueWritten(ctx, key)
+	}
 	return ctx.WriteValue(reply)
 }
 
@@ -452,14 +557,14 @@ func cmdTDIGESTCREATE(ctx *Context) error {
 		compression = c
 	}
 
-	tdigestsMu.Lock()
-	if _, exists := tdigests[key]; exists {
-		tdigestsMu.Unlock()
+	if existing, err := getTDigest(ctx, key); err != nil {
+		return ctx.WriteError(err)
+	} else if existing != nil {
 		return ctx.WriteError(errTDigestKeyExists)
 	}
-	tdigests[key] = newTDigestSketch(compression)
-	tdigestsMu.Unlock()
-
+	if err := ctx.Store.Set(key, newTDigestSketch(compression), store.SetOptions{}); err != nil {
+		return ctx.WriteError(err)
+	}
 	return ctx.WriteOK()
 }
 
@@ -692,14 +797,15 @@ func cmdTDIGESTMERGE(ctx *Context) error {
 		}
 	}
 
-	tdigestsMu.Lock()
 	sources := make([]*tdigestSketch, 0, numKeys+1)
 	seen := make(map[string]bool, numKeys)
 	maxCompression := int64(0)
 	for _, k := range srcKeys {
-		src, exists := tdigests[k]
-		if !exists {
-			tdigestsMu.Unlock()
+		src, err := getTDigest(ctx, k)
+		if err != nil {
+			return ctx.WriteError(err)
+		}
+		if src == nil {
 			return ctx.WriteError(errTDigestNoKey)
 		}
 		if src.compression > maxCompression {
@@ -710,7 +816,11 @@ func cmdTDIGESTMERGE(ctx *Context) error {
 			sources = append(sources, src)
 		}
 	}
-	dest, destExists := tdigests[destKey]
+	dest, err := getTDigest(ctx, destKey)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	destExists := dest != nil
 	if destExists && !override && !seen[destKey] {
 		sources = append(sources, dest)
 	}
@@ -736,9 +846,9 @@ func cmdTDIGESTMERGE(ctx *Context) error {
 		src.mu.Unlock()
 	}
 	merged.compressLocked()
-	tdigests[destKey] = merged
-	tdigestsMu.Unlock()
-
+	if err := ctx.Store.Set(destKey, merged, store.SetOptions{KeepTTL: true}); err != nil {
+		return ctx.WriteError(err)
+	}
 	return ctx.WriteOK()
 }
 

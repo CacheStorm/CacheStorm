@@ -48,9 +48,9 @@ func timeSeriesFor(ctx *Context, key string, retention time.Duration, labels map
 	return ts, nil
 }
 
-// timeSeriesWritten accounts for samples changed in place: the key's memory
-// and its watchers.
-func timeSeriesWritten(ctx *Context, key string) {
+// valueWritten accounts for a value changed in place: the key's memory and
+// its watchers.
+func valueWritten(ctx *Context, key string) {
 	ctx.Store.Reaccount(key)
 	ctx.Store.TouchKeys([]string{key})
 }
@@ -140,7 +140,7 @@ func cmdTSDEL(ctx *Context) error {
 		deleted += ts.Delete(sample.Timestamp)
 	}
 	if deleted > 0 {
-		timeSeriesWritten(ctx, key)
+		valueWritten(ctx, key)
 	}
 
 	return ctx.WriteInteger(int64(deleted))
@@ -218,7 +218,7 @@ func cmdTSADD(ctx *Context) error {
 	if !written {
 		return ctx.WriteError(fmt.Errorf("TSDB: duplicate timestamp"))
 	}
-	timeSeriesWritten(ctx, key)
+	valueWritten(ctx, key)
 	return ctx.WriteInteger(resultTs)
 }
 
@@ -247,7 +247,7 @@ func cmdTSMADD(ctx *Context) error {
 		if !written {
 			return ctx.WriteError(fmt.Errorf("TSDB: duplicate timestamp"))
 		}
-		timeSeriesWritten(ctx, key)
+		valueWritten(ctx, key)
 		results = append(results, resp.IntegerValue(resultTs))
 	}
 
@@ -618,7 +618,7 @@ func cmdTSALTER(ctx *Context) error {
 	if replaceLabels {
 		ts.ReplaceLabels(labels)
 	}
-	timeSeriesWritten(ctx, key)
+	valueWritten(ctx, key)
 
 	return ctx.WriteOK()
 }
@@ -669,7 +669,7 @@ func cmdTSINCRBY(ctx *Context) error {
 	}
 
 	_, result := ts.AddWithPolicy(timestamp, newValue, store.DuplicateLast)
-	timeSeriesWritten(ctx, key)
+	valueWritten(ctx, key)
 	return ctx.WriteInteger(result)
 }
 
@@ -718,7 +718,7 @@ func cmdTSDECRBY(ctx *Context) error {
 	}
 
 	_, result := ts.AddWithPolicy(timestamp, newValue, store.DuplicateLast)
-	timeSeriesWritten(ctx, key)
+	valueWritten(ctx, key)
 	return ctx.WriteInteger(result)
 }
 

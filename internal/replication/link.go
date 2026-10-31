@@ -567,7 +567,7 @@ func (m *Manager) loadSnapshot(br *bufio.Reader, replid string, offset int64) er
 	staging := m.dbs.NewStaging()
 	staging.BeginAuthoritativeApply()
 	replay := m.router.ForkForReplay(staging.DB(0), []string{
-		"SET", "HSET", "HPEXPIREAT", "RPUSH", "SADD", "ZADD", "GEOADD", "JSON.SET", "XGROUP", "XADD", "XSETID", "XCLAIM", "TS.CREATE", "TS.ADD", "ADDTAG", "PEXPIREAT", "SELECT", "FUNCTION",
+		"SET", "HSET", "HPEXPIREAT", "RPUSH", "SADD", "ZADD", "GEOADD", "JSON.SET", "XGROUP", "XADD", "XSETID", "XCLAIM", "TS.CREATE", "TS.ADD", "ADDTAG", "PEXPIREAT", "SELECT", "FUNCTION", "RESTORE",
 		"FT.CREATE", "FT.ADD", "FT.ALIASADD",
 	})
 	db := 0

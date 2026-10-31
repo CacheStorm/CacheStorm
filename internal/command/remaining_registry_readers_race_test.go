@@ -134,7 +134,7 @@ func TestRemainingRegistryReadersAreSynchronised(t *testing.T) {
 			register: RegisterProbabilisticCommands,
 			registryFamilyCase: registryFamilyCase{
 				name:  "countminsketch",
-				setup: [][]string{{"CMS.INIT", "k", "4", "100"}},
+				setup: [][]string{{"CMS.INITBYDIM", "k", "100", "4"}},
 				// INCRBY bumps the sketch's counters; QUERY reads them with
 				// no lock.
 				writer: [][]string{{"CMS.INCRBY", "k", "item", "1"}},

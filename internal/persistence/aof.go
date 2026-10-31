@@ -824,6 +824,15 @@ func (rw *AOFRewriter) writeBatched(w *bufio.Writer, name, key string, width int
 // writeValueCommands emits router-executable commands that reconstruct the
 // typed value on AOF replay, instead of flattening every type to SET.
 func (rw *AOFRewriter) writeValueCommands(w *bufio.Writer, key string, value store.Value) error {
+	// Values with no commands that rebuild them in one step are restored
+	// from their DUMP payload.
+	if _, ok := value.(store.ExtensionValue); ok {
+		payload, err := EncodeDump(value)
+		if err != nil {
+			return err
+		}
+		return rw.writeCommand(w, "RESTORE", key, "0", string(payload))
+	}
 	switch vt := value.(type) {
 	case *store.StringValue:
 		return rw.writeKeyValue(w, "SET", key, vt.Data)

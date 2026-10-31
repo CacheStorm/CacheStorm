@@ -32,7 +32,7 @@ var aclNoKeyCommands = map[string]bool{
 	"REPLICAOF": true, "RESET": true, "ROLE": true, "SAVE": true, "SCAN": true,
 	"SCRIPT": true, "SELECT": true, "SHUTDOWN": true, "SLAVEOF": true, "SLOWLOG": true,
 	"SUBSCRIBE": true, "SWAPDB": true, "TIME": true, "UNSUBSCRIBE": true,
-	"UNWATCH": true, "WAIT": true, "RANDOMKEY": true,
+	"UNWATCH": true, "WAIT": true, "RANDOMKEY": true, "TS.QUERYINDEX": true,
 }
 
 // aclSingleKeyCommands take the key as their first argument.
@@ -213,6 +213,25 @@ func aclKeysForCommand(cmd string, args [][]byte) []string {
 		return append(keys, sortLookupKeys(args)...)
 	case "SINTERCARD":
 		return keysAfterNumkeys(args, 0)
+	case "CMS.MERGE", "TDIGEST.MERGE":
+		// CMS.MERGE destination numkeys source [source ...] [WEIGHTS ...]
+		if len(args) < 1 {
+			return nil
+		}
+		return append([]string{string(args[0])}, keysAfterNumkeys(args, 1)...)
+	case "TS.MADD", "JSON.MSET":
+		// TS.MADD key timestamp value [key timestamp value ...]
+		var keys []string
+		for i := 0; i < len(args); i += 3 {
+			keys = append(keys, string(args[i]))
+		}
+		return keys
+	case "JSON.MGET":
+		// JSON.MGET key [key ...] path
+		if len(args) < 2 {
+			return nil
+		}
+		return toStrings(args[:len(args)-1])
 	case "SINTER", "SDIFF", "SUNION", "SDIFFSTORE", "SINTERSTORE", "SUNIONSTORE":
 		return toStrings(args)
 	case "MIGRATE":
@@ -375,7 +394,8 @@ func keyShapeOf(cmd string) keyShape {
 		shape = keyShapeMSET
 	case aclAllArgsCommands[cmd]:
 		shape = keyShapeAll
-	case aclNoKeyCommands[cmd]:
+	case aclNoKeyCommands[cmd], strings.HasPrefix(cmd, "FT."):
+		// A search index is named by its first argument, which is no key.
 		shape = keyShapeNone
 	default:
 		if spec, ok := redisCommandSpecs[cmd]; ok && spec.FirstKey == 0 && !commandHasFlag(cmd, "movablekeys") {

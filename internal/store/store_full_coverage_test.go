@@ -2125,59 +2125,6 @@ func TestGeoValue_StringMultiple(t *testing.T) {
 // probabilistic.go coverage tests
 // =============================
 
-func TestNewBloomFilter_EdgeCases(t *testing.T) {
-	// Very small size with high false positive rate
-	bf := NewBloomFilter(10, 0.9)
-	if bf == nil {
-		t.Fatal("expected non-nil")
-	}
-
-	// Size that yields k > 20
-	bf = NewBloomFilter(100000, 0.001)
-	if bf == nil {
-		t.Fatal("expected non-nil")
-	}
-	if bf.k > 20 {
-		t.Fatalf("expected k capped at 20, got %d", bf.k)
-	}
-}
-
-func TestCuckooFilter_AddUntilFull(t *testing.T) {
-	cf := NewCuckooFilter(4, 2)
-	// Add items until the filter is full (kicks exhausted)
-	added := 0
-	for i := 0; i < 100; i++ {
-		item := []byte(strings.Repeat("item", i+1))
-		if cf.Add(item) {
-			added++
-		}
-	}
-	// Should have added some but eventually failed
-	if added == 100 {
-		t.Fatal("expected some inserts to fail for small filter")
-	}
-}
-
-func TestTopK_ListWithCount_EdgeCases(t *testing.T) {
-	tk := NewTopK(2)
-	tk.Add("a", 10)
-	tk.Add("b", 5)
-	tk.Add("c", 15)
-
-	result := tk.ListWithCount()
-	if len(result) != 2 {
-		t.Fatalf("expected 2, got %d", len(result))
-	}
-	// First should be highest count
-	if result[0]["item"] != "c" {
-		t.Fatalf("expected 'c' first, got %v", result[0]["item"])
-	}
-}
-
-// =============================
-// tag_index.go coverage tests
-// =============================
-
 func TestTagIndex_Unlink_EmptyChildren(t *testing.T) {
 	ti := NewTagIndex()
 	ti.Link("parent", "child1")
@@ -3266,15 +3213,6 @@ func TestEvictionController_EvictOne_WithOnEvict(t *testing.T) {
 }
 
 // probabilistic.go:351 - CuckooFilter Add: buckets[i2][0] == 0 check
-func TestCuckooFilter_AddWithKicks(t *testing.T) {
-	cf := NewCuckooFilter(8, 1)
-	// With bucket size 1, kicks will happen more quickly
-	for i := 0; i < 20; i++ {
-		cf.Add([]byte{byte(i)})
-	}
-}
-
-// Cover the store Set with eviction retry succeeding
 func TestStore_SetWithEvictionRetry(t *testing.T) {
 	s := NewStore()
 	s.ConfigureMemory(200, EvictionAllKeysRandom, 50, 60, 5)
@@ -3550,26 +3488,6 @@ func TestCircuitBreaker_OpenNotExpired(t *testing.T) {
 }
 
 // probabilistic.go:351 - CuckooFilter Add: neither i1 nor i2 has space initially
-func TestCuckooFilter_AddForcesKick(t *testing.T) {
-	// Use bucket size 1, small size to force kick path
-	cf := NewCuckooFilter(2, 1)
-	results := make([]bool, 0)
-	for i := 0; i < 10; i++ {
-		results = append(results, cf.Add([]byte{byte(i), byte(i + 50)}))
-	}
-	// Some should succeed, some may fail
-	hasSuccess := false
-	for _, r := range results {
-		if r {
-			hasSuccess = true
-		}
-	}
-	if !hasSuccess {
-		t.Fatal("expected at least some insertions to succeed")
-	}
-}
-
-// keynotify.go:39 - WaitForKey zero timeout: non-blocking check that succeeds
 func TestKeyNotifier_WaitForKey_ZeroTimeout_PreNotified(t *testing.T) {
 	kn := NewKeyNotifier()
 
@@ -3624,15 +3542,6 @@ func TestCircuitBreaker_AllowHalfOpen(t *testing.T) {
 }
 
 // probabilistic.go:351 - CuckooFilter: force kick scenario where i2 bucket is empty
-func TestCuckooFilter_KickFromI1(t *testing.T) {
-	cf := NewCuckooFilter(16, 1) // small but safe size
-	// Add items until kicks are forced
-	for i := 0; i < 30; i++ {
-		cf.Add([]byte{byte(i), byte(i*7 + 3)})
-	}
-}
-
-// store.go:341 - GetTTL: remaining < 0 (set ExpiresAt to near-future, wait, check)
 func TestStore_GetTTL_RemainingNegative(t *testing.T) {
 	s := NewStore()
 	entry := NewEntry(&StringValue{Data: []byte("val")})
