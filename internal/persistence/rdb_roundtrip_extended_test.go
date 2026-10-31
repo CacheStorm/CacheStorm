@@ -21,10 +21,7 @@ func TestRDBSaveLoadRoundTripExtendedTypes(t *testing.T) {
 	geo.Add("catania", 15.087269, 37.502669)
 	src.Set("geo:sicily", geo, store.SetOptions{})
 
-	jsonVal, err := store.NewJSONValue(map[string]interface{}{"name": "doc", "count": float64(42)})
-	if err != nil {
-		t.Fatalf("NewJSONValue failed: %v", err)
-	}
+	jsonVal := store.MustParseJSONValue(`{"name":"doc","count":42}`)
 	src.Set("json:doc", jsonVal, store.SetOptions{})
 
 	stream := store.NewStreamValue(1000)
@@ -91,8 +88,8 @@ func TestRDBSaveLoadRoundTripExtendedTypes(t *testing.T) {
 	if !ok {
 		t.Fatalf("json:doc type = %T, want *store.JSONValue", jsonEntry.Value)
 	}
-	if !bytes.Equal(jsonOut.Data, jsonVal.Data) {
-		t.Fatalf("json data mismatch: got %s, want %s", jsonOut.Data, jsonVal.Data)
+	if !bytes.Equal(jsonOut.Bytes(), jsonVal.Bytes()) {
+		t.Fatalf("json data mismatch: got %s, want %s", jsonOut.Bytes(), jsonVal.Bytes())
 	}
 
 	// Stream: entries, IDs, fields, and bounds survive; groups start empty.

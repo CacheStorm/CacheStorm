@@ -114,6 +114,8 @@ func TestModuleCommandKeys(t *testing.T) {
 		{"TS.QUERYINDEX sensor=temp", ""},
 		{"FT.SEARCH idx hello", ""},
 		{"BF.ADD k x", "k"},
+		{"JSON.DEBUG MEMORY k $", "k"},
+		{"JSON.DEBUG HELP", ""},
 	} {
 		args := strings.Fields(c.cmd)
 		if got := strings.Join(CommandKeys(args[0], bytesArgs(args[1:]...)), " "); got != c.want {

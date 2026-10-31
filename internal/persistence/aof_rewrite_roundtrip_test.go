@@ -57,10 +57,7 @@ func TestAOFRewriteRoundTripPreservesTypes(t *testing.T) {
 	geo.Add("catania", 15.087269, 37.502669)
 	src.Set("geo:sicily", geo, store.SetOptions{})
 
-	jsonVal, err := store.NewJSONValue(map[string]interface{}{"name": "doc", "count": float64(42)})
-	if err != nil {
-		t.Fatalf("NewJSONValue failed: %v", err)
-	}
+	jsonVal := store.MustParseJSONValue(`{"name":"doc","count":42}`)
 	src.Set("json:doc", jsonVal, store.SetOptions{})
 
 	stream := store.NewStreamValue(1000)
@@ -208,14 +205,14 @@ func TestAOFRewriteRoundTripPreservesTypes(t *testing.T) {
 		t.Fatalf("json:doc type = %T, want *store.JSONValue", jsonEntry.Value)
 	}
 	var got, want interface{}
-	if err := json.Unmarshal(jsonOut.Data, &got); err != nil {
+	if err := json.Unmarshal(jsonOut.Bytes(), &got); err != nil {
 		t.Fatalf("loaded JSON unmarshal failed: %v", err)
 	}
-	if err := json.Unmarshal(jsonVal.Data, &want); err != nil {
+	if err := json.Unmarshal(jsonVal.Bytes(), &want); err != nil {
 		t.Fatalf("source JSON unmarshal failed: %v", err)
 	}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("json document mismatch: got %s, want %s", jsonOut.Data, jsonVal.Data)
+		t.Fatalf("json document mismatch: got %s, want %s", jsonOut.Bytes(), jsonVal.Bytes())
 	}
 
 	// Stream: entries, IDs, fields survive; MaxLen/groups are runtime state.

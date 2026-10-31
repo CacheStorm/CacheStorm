@@ -108,11 +108,8 @@ func EncodeDump(value store.Value) ([]byte, error) {
 	case *store.StreamValue:
 		out = appendDumpStream(out, v)
 	case *store.JSONValue:
-		v.RLock()
-		data := string(v.Data)
-		v.RUnlock()
 		out = append(out, dumpTypeJSON)
-		str(data)
+		str(string(v.Bytes()))
 	case *store.TimeSeriesValue:
 		var data bytes.Buffer
 		v.RLock()
@@ -544,7 +541,12 @@ func (d *dumpDecoder) valueOf(typ byte) store.Value {
 		if d.err != nil {
 			return nil
 		}
-		return &store.JSONValue{Data: []byte(data)}
+		v, err := store.ParseJSONValue([]byte(data))
+		if err != nil {
+			d.err = ErrDumpFormat
+			return nil
+		}
+		return v
 	case dumpTypeTimeSeries:
 		data := d.str()
 		if d.err != nil {

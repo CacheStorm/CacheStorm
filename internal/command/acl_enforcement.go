@@ -226,6 +226,12 @@ func aclKeysForCommand(cmd string, args [][]byte) []string {
 			keys = append(keys, string(args[i]))
 		}
 		return keys
+	case "JSON.DEBUG":
+		// JSON.DEBUG MEMORY key [path]
+		if len(args) >= 2 && strings.EqualFold(string(args[0]), "MEMORY") {
+			return []string{string(args[1])}
+		}
+		return nil
 	case "JSON.MGET":
 		// JSON.MGET key [key ...] path
 		if len(args) < 2 {

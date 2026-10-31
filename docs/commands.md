@@ -376,20 +376,37 @@ ACL SAVE
 
 ## JSON Commands
 
+These follow RedisJSON, the JSON module built into Redis 8, and were checked against Redis 8.2. A document is a key of type `ReJSON-RL`, saved, replicated and expired like any key.
+
+A path that starts with `$` is JSONPath: `.key`, `['key']`, `["a","b"]`, `*`, `..` (descendants), `[n]` and negative indexes, `[n,m]`, slices `[start:end:step]`, and filters such as `[?(@.price < 10 && @.tag == 'x')]` with `==`, `!=`, `<`, `<=`, `>`, `>=`, `=~` (regular expression), `&&` and `||`. Such a path answers per match: JSON.GET returns a JSON array of the matches, other commands an array with one reply per match (nil for a match of the wrong type). Any other path is the legacy syntax (`.a.b[0]`, `a.b`, `.` for the document) and answers for its first match, with an error when nothing matches.
+
+Documents keep their keys in insertion order; deleting a key moves the last key into its place, as RedisJSON does. Integers and floats stay distinct (`1` and `1.0`), integer arithmetic wraps at 64 bits like RedisJSON's, and floats print as RedisJSON prints them (`1e16`, `0.000015`, `1e-6`). Values nest at most 128 levels.
+
 ```
 JSON.SET key path value [NX|XX]
 JSON.GET key [INDENT indent] [NEWLINE newline] [SPACE space] [path [path ...]]
-JSON.DEL key [path]
 JSON.MGET key [key ...] path
+JSON.MSET key path value [key path value ...]
+JSON.MERGE key path value                # RFC 7386 merge patch
+JSON.DEL key [path]
+JSON.FORGET key [path]
 JSON.TYPE key [path]
 JSON.NUMINCRBY key path number
 JSON.NUMMULTBY key path number
-JSON.STRAPPEND key path value
+JSON.STRAPPEND key [path] value
 JSON.STRLEN key [path]
 JSON.ARRAPPEND key path value [value ...]
+JSON.ARRINDEX key path value [start [stop]]
+JSON.ARRINSERT key path index value [value ...]
 JSON.ARRLEN key [path]
+JSON.ARRPOP key [path [index]]
+JSON.ARRTRIM key path start stop
 JSON.OBJKEYS key [path]
 JSON.OBJLEN key [path]
+JSON.TOGGLE key path
+JSON.CLEAR key [path]
+JSON.RESP key [path]
+JSON.DEBUG MEMORY key [path] | HELP
 ```
 
 ---

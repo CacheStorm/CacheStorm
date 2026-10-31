@@ -333,10 +333,7 @@ func (w *RDBWriter) writeValue(f io.Writer, v store.Value, valueType int) error 
 			}
 		}
 	case *store.JSONValue:
-		vt.RLock()
-		data := make([]byte, len(vt.Data))
-		copy(data, vt.Data)
-		vt.RUnlock()
+		data := vt.Bytes()
 		if err := w.writeLength(f, len(data)); err != nil {
 			return err
 		}
@@ -863,7 +860,10 @@ func (r *RDBReader) readEntry(f io.Reader, valueType byte, expiresAtMS int64, ta
 		if err != nil {
 			return err
 		}
-		value = &store.JSONValue{Data: []byte(data)}
+		value, err = store.ParseJSONValue([]byte(data))
+		if err != nil {
+			return fmt.Errorf("RDB JSON value of key %q: %w", key, err)
+		}
 
 	case 7:
 		length, err := r.readLength(f)

@@ -1,157 +1,250 @@
 package command
 
 import (
+	"bytes"
+	"strings"
 	"testing"
 
+	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
 )
 
-func TestAllJSONCommands(t *testing.T) {
-	s := store.NewStore()
+// The expected replies were recorded from Redis 8.2, whose JSON commands
+// are RedisJSON's. Replies Redis orders by hash (several JSON.GET paths)
+// or estimates (JSON.DEBUG MEMORY) are left out.
+func TestJSONRepliesMatchRedisJSON(t *testing.T) {
 	router := NewRouter()
 	RegisterJSONCommands(router)
-
-	tests := []struct {
-		name  string
-		cmd   string
-		args  [][]byte
-		setup func()
+	RegisterStringCommands(router)
+	RegisterKeyCommands(router)
+	st := store.NewStore()
+	for _, c := range []struct {
+		args []string
+		want string
 	}{
-		{"JSON.SET object", "JSON.SET", [][]byte{[]byte("json1"), []byte("$"), []byte(`{"name":"John","age":30}`)}, nil},
-		{"JSON.SET nested", "JSON.SET", [][]byte{[]byte("json2"), []byte("$"), []byte(`{"user":{"name":"Alice","contacts":{"email":"alice@example.com"}}}`)}, nil},
-		{"JSON.SET array", "JSON.SET", [][]byte{[]byte("json3"), []byte("$"), []byte(`[1,2,3,4,5]`)}, nil},
-		{"JSON.GET root", "JSON.GET", [][]byte{[]byte("json4")}, func() {
-			jsonVal, _ := store.NewJSONValue(map[string]interface{}{"name": "Bob", "age": 25})
-			s.Set("json4", jsonVal, store.SetOptions{})
-		}},
-		{"JSON.GET with path", "JSON.GET", [][]byte{[]byte("json5"), []byte("$.name")}, func() {
-			jsonVal, _ := store.NewJSONValue(map[string]interface{}{"name": "Charlie", "age": 35})
-			s.Set("json5", jsonVal, store.SetOptions{})
-		}},
-		{"JSON.GET multiple paths", "JSON.GET", [][]byte{[]byte("json6"), []byte("$.name"), []byte("$.age")}, func() {
-			jsonVal, _ := store.NewJSONValue(map[string]interface{}{"name": "David", "age": 40})
-			s.Set("json6", jsonVal, store.SetOptions{})
-		}},
-		{"JSON.DEL", "JSON.DEL", [][]byte{[]byte("json7")}, func() {
-			jsonVal, _ := store.NewJSONValue(map[string]interface{}{"test": "data"})
-			s.Set("json7", jsonVal, store.SetOptions{})
-		}},
-		{"JSON.DEL path", "JSON.DEL", [][]byte{[]byte("json8"), []byte("$.name")}, func() {
-			jsonVal, _ := store.NewJSONValue(map[string]interface{}{"name": "Eve", "age": 28})
-			s.Set("json8", jsonVal, store.SetOptions{})
-		}},
-		{"JSON.TYPE", "JSON.TYPE", [][]byte{[]byte("json9")}, func() {
-			jsonVal, _ := store.NewJSONValue(map[string]interface{}{"type": "test"})
-			s.Set("json9", jsonVal, store.SetOptions{})
-		}},
-		{"JSON.TYPE with path", "JSON.TYPE", [][]byte{[]byte("json10"), []byte("$.name")}, func() {
-			jsonVal, _ := store.NewJSONValue(map[string]interface{}{"name": "Frank"})
-			s.Set("json10", jsonVal, store.SetOptions{})
-		}},
-		{"JSON.NUMINCRBY", "JSON.NUMINCRBY", [][]byte{[]byte("json11"), []byte("$.counter"), []byte("5")}, func() {
-			jsonVal, _ := store.NewJSONValue(map[string]interface{}{"counter": 10})
-			s.Set("json11", jsonVal, store.SetOptions{})
-		}},
-		{"JSON.NUMMULTBY", "JSON.NUMMULTBY", [][]byte{[]byte("json12"), []byte("$.value"), []byte("2")}, func() {
-			jsonVal, _ := store.NewJSONValue(map[string]interface{}{"value": 5})
-			s.Set("json12", jsonVal, store.SetOptions{})
-		}},
-		{"JSON.STRAPPEND", "JSON.STRAPPEND", [][]byte{[]byte("json13"), []byte("$.text"), []byte(`" World"`)}, func() {
-			jsonVal, _ := store.NewJSONValue(map[string]interface{}{"text": "Hello"})
-			s.Set("json13", jsonVal, store.SetOptions{})
-		}},
-		{"JSON.STRLEN", "JSON.STRLEN", [][]byte{[]byte("json14"), []byte("$.text")}, func() {
-			jsonVal, _ := store.NewJSONValue(map[string]interface{}{"text": "Hello World"})
-			s.Set("json14", jsonVal, store.SetOptions{})
-		}},
-		{"JSON.ARRAPPEND", "JSON.ARRAPPEND", [][]byte{[]byte("json15"), []byte("$.items"), []byte("4"), []byte("5")}, func() {
-			jsonVal, _ := store.NewJSONValue(map[string]interface{}{"items": []int{1, 2, 3}})
-			s.Set("json15", jsonVal, store.SetOptions{})
-		}},
-		{"JSON.ARRLEN", "JSON.ARRLEN", [][]byte{[]byte("json17"), []byte("$.items")}, func() {
-			jsonVal, _ := store.NewJSONValue(map[string]interface{}{"items": []int{1, 2, 3, 4, 5}})
-			s.Set("json17", jsonVal, store.SetOptions{})
-		}},
-		{"JSON.OBJKEYS", "JSON.OBJKEYS", [][]byte{[]byte("json16")}, func() {
-			jsonVal, _ := store.NewJSONValue(map[string]interface{}{"name": "Grace", "age": 32, "city": "NYC"})
-			s.Set("json16", jsonVal, store.SetOptions{})
-		}},
-		{"JSON.OBJLEN", "JSON.OBJLEN", [][]byte{[]byte("json17")}, func() {
-			jsonVal, _ := store.NewJSONValue(map[string]interface{}{"a": 1, "b": 2, "c": 3})
-			s.Set("json17", jsonVal, store.SetOptions{})
-		}},
-		{"JSON.MGET", "JSON.MGET", [][]byte{[]byte("json18"), []byte("json19"), []byte("$")}, func() {
-			jsonVal1, _ := store.NewJSONValue(map[string]interface{}{"data": "value1"})
-			s.Set("json18", jsonVal1, store.SetOptions{})
-			jsonVal2, _ := store.NewJSONValue(map[string]interface{}{"data": "value2"})
-			s.Set("json19", jsonVal2, store.SetOptions{})
-		}},
+		{[]string{"json.set", "d", "$", "{\"a\":{\"b\":[1,{\"c\":2}],\"s\":\"hi\",\"n\":1},\"x\":[{\"c\":3},{\"c\":\"str\"}],\"arr\":[1,2,3,2],\"t\":true,\"e\":[],\"o\":{}}"}, "+OK\r\n"},
+		{[]string{"json.get", "d", "$['a']['s']"}, "$6\r\n[\"hi\"]\r\n"},
+		{[]string{"json.get", "d", "$[\"a\"].s"}, "$6\r\n[\"hi\"]\r\n"},
+		{[]string{"json.get", "d", "$.a['s','n']"}, "$8\r\n[\"hi\",1]\r\n"},
+		{[]string{"json.get", "d", "$.arr[-1]"}, "$3\r\n[2]\r\n"},
+		{[]string{"json.get", "d", "$.arr[1:3]"}, "$5\r\n[2,3]\r\n"},
+		{[]string{"json.get", "d", "$.arr[::2]"}, "$5\r\n[1,3]\r\n"},
+		{[]string{"json.get", "d", "$.arr[-2:]"}, "$5\r\n[3,2]\r\n"},
+		{[]string{"json.get", "d", "$.x[?(@.c=='str')]"}, "$13\r\n[{\"c\":\"str\"}]\r\n"},
+		{[]string{"json.get", "d", "$.x[?(@.c>=3 || @.c=='str')].c"}, "$9\r\n[3,\"str\"]\r\n"},
+		{[]string{"json.get", "d", "$.arr[?(@>1)]"}, "$7\r\n[2,3,2]\r\n"},
+		{[]string{"json.get", "d", "$.x[?@.c]"}, "$21\r\n[{\"c\":3},{\"c\":\"str\"}]\r\n"},
+		{[]string{"json.get", "d", "$.x[?(@.c =~ 's.*')]"}, "$13\r\n[{\"c\":\"str\"}]\r\n"},
+		{[]string{"json.get", "d", "$.x[?(!@.c)]"}, "-Error occurred at position 6, Error at position 6: expected one of the following: single_filter\r\n"},
+		{[]string{"json.get", "d", "INDENT", "\t", "NEWLINE", "\n", "SPACE", " ", "$.a"}, "$72\r\n[\n\t{\n\t\t\"b\": [\n\t\t\t1,\n\t\t\t{\n\t\t\t\t\"c\": 2\n\t\t\t}\n\t\t],\n\t\t\"s\": \"hi\",\n\t\t\"n\": 1\n\t}\n]\r\n"},
+		{[]string{"json.strlen", "d", "$..s"}, "*1\r\n:2\r\n"},
+		{[]string{"json.strlen", "d", ".a.s"}, ":2\r\n"},
+		{[]string{"json.strlen", "d"}, "-WRONGTYPE wrong type of path value - expected string\r\n"},
+		{[]string{"json.strlen", "d", "$.nope"}, "*0\r\n"},
+		{[]string{"json.strappend", "d", "$.a.s", "\"!\""}, "*1\r\n:3\r\n"},
+		{[]string{"json.strappend", "d", ".a.s", "\"?\""}, ":4\r\n"},
+		{[]string{"json.strappend", "d", "$.a.s", "x"}, "-ERR expected value at line 1 column 1\r\n"},
+		{[]string{"json.strappend", "d", "\"z\""}, "-ERR Path does not exist or not a string\r\n"},
+		{[]string{"json.arrappend", "d", "$.arr", "5", "\"six\""}, "*1\r\n:6\r\n"},
+		{[]string{"json.arrappend", "d", ".arr", "7"}, ":7\r\n"},
+		{[]string{"json.arrappend", "d", "$..b", "0"}, "*1\r\n:3\r\n"},
+		{[]string{"json.arrappend", "d", ".a", "1"}, "-ERR Path does not exist or not an array\r\n"},
+		{[]string{"json.arrappend", "d", "$.arr", "bad"}, "-expected value at line 1 column 1\r\n"},
+		{[]string{"json.arrindex", "d", "$.arr", "2"}, "*1\r\n:1\r\n"},
+		{[]string{"json.arrindex", "d", "$.arr", "2", "2"}, "*1\r\n:3\r\n"},
+		{[]string{"json.arrindex", "d", "$.arr", "2", "1", "2"}, "*1\r\n:1\r\n"},
+		{[]string{"json.arrindex", "d", ".arr", "\"six\""}, ":5\r\n"},
+		{[]string{"json.arrindex", "d", "$.a", "1"}, "*1\r\n$-1\r\n"},
+		{[]string{"json.arrindex", "d", ".a", "1"}, "-WRONGTYPE wrong type of path value - expected array\r\n"},
+		{[]string{"json.arrindex", "d", "$.arr", "{"}, "-ERR EOF while parsing an object at line 1 column 1\r\n"},
+		{[]string{"json.arrinsert", "d", "$.arr", "0", "\"first\""}, "*1\r\n:8\r\n"},
+		{[]string{"json.arrinsert", "d", ".arr", "-1", "9"}, ":9\r\n"},
+		{[]string{"json.arrinsert", "d", "$.arr", "100", "9"}, "-ERR index out of bounds\r\n"},
+		{[]string{"json.arrinsert", "d", "$.arr", "-100", "9"}, "-ERR index out of bounds\r\n"},
+		{[]string{"json.arrinsert", "d", "$.a", "0", "9"}, "*1\r\n$-1\r\n"},
+		{[]string{"json.get", "d", "$.arr"}, "$31\r\n[[\"first\",1,2,3,2,5,\"six\",9,7]]\r\n"},
+		{[]string{"json.arrpop", "d", "$.arr"}, "*1\r\n$1\r\n7\r\n"},
+		{[]string{"json.arrpop", "d", ".arr", "0"}, "$7\r\n\"first\"\r\n"},
+		{[]string{"json.arrpop", "d", "$.arr", "-2"}, "*1\r\n$5\r\n\"six\"\r\n"},
+		{[]string{"json.arrpop", "d", "$.e"}, "*1\r\n$-1\r\n"},
+		{[]string{"json.arrpop", "d", ".e"}, "$-1\r\n"},
+		{[]string{"json.arrpop", "d", "$.a"}, "*1\r\n$-1\r\n"},
+		{[]string{"json.arrpop", "d", ".a"}, "-ERR Path does not exist or not an array\r\n"},
+		{[]string{"json.arrpop", "d", "$.arr", "x"}, "*1\r\n$1\r\n9\r\n"},
+		{[]string{"json.arrtrim", "d", "$.arr", "1", "2"}, "*1\r\n:2\r\n"},
+		{[]string{"json.arrtrim", "d", ".arr", "0", "0"}, ":1\r\n"},
+		{[]string{"json.arrtrim", "d", "$.arr", "5", "9"}, "*1\r\n:0\r\n"},
+		{[]string{"json.arrtrim", "d", "$.a", "0", "1"}, "*1\r\n$-1\r\n"},
+		{[]string{"json.get", "d", "$.arr"}, "$4\r\n[[]]\r\n"},
+		{[]string{"json.objkeys", "d", "$..a"}, "*1\r\n*3\r\n$1\r\nb\r\n$1\r\ns\r\n$1\r\nn\r\n"},
+		{[]string{"json.objkeys", "d", "$.x[*]"}, "*2\r\n*1\r\n$1\r\nc\r\n*1\r\n$1\r\nc\r\n"},
+		{[]string{"json.objkeys", "d", ".a"}, "*3\r\n$1\r\nb\r\n$1\r\ns\r\n$1\r\nn\r\n"},
+		{[]string{"json.objkeys", "d"}, "*6\r\n$1\r\na\r\n$1\r\nx\r\n$3\r\narr\r\n$1\r\nt\r\n$1\r\ne\r\n$1\r\no\r\n"},
+		{[]string{"json.objlen", "d", "$..*"}, "*17\r\n:3\r\n$-1\r\n$-1\r\n$-1\r\n$-1\r\n:0\r\n$-1\r\n$-1\r\n$-1\r\n$-1\r\n:1\r\n$-1\r\n$-1\r\n:1\r\n:1\r\n$-1\r\n$-1\r\n"},
+		{[]string{"json.objlen", "d", ".a"}, ":3\r\n"},
+		{[]string{"json.objlen", "d"}, ":6\r\n"},
+		{[]string{"json.toggle", "d", "$.t"}, "*1\r\n:0\r\n"},
+		{[]string{"json.toggle", "d", ".t"}, "$4\r\ntrue\r\n"},
+		{[]string{"json.toggle", "d", "$.a"}, "*1\r\n$-1\r\n"},
+		{[]string{"json.toggle", "d", ".a"}, "-ERR Path does not exist or not a bool\r\n"},
+		{[]string{"json.clear", "d", "$.a"}, ":1\r\n"},
+		{[]string{"json.get", "d", "$.a"}, "$4\r\n[{}]\r\n"},
+		{[]string{"json.clear", "d", "$.x[0].c"}, ":1\r\n"},
+		{[]string{"json.clear", "d", "$.t"}, ":0\r\n"},
+		{[]string{"json.clear", "d"}, ":1\r\n"},
+		{[]string{"json.get", "d"}, "$2\r\n{}\r\n"},
+		{[]string{"json.clear", "nokey"}, "-ERR could not perform this operation on a key that doesn't exist\r\n"},
+		{[]string{"json.set", "m", "$", "{\"a\":{\"b\":1,\"c\":2},\"l\":[1]}"}, "+OK\r\n"},
+		{[]string{"json.merge", "m", "$", "{\"a\":{\"b\":null,\"d\":3},\"l\":{\"x\":1}}"}, "+OK\r\n"},
+		{[]string{"json.get", "m"}, "$31\r\n{\"a\":{\"c\":2,\"d\":3},\"l\":{\"x\":1}}\r\n"},
+		{[]string{"json.merge", "m", "$.a", "5"}, "+OK\r\n"},
+		{[]string{"json.get", "m"}, "$19\r\n{\"a\":5,\"l\":{\"x\":1}}\r\n"},
+		{[]string{"json.merge", "new", "$", "{\"q\":1}"}, "+OK\r\n"},
+		{[]string{"json.merge", "new2", "$.a", "1"}, "-ERR new objects must be created at the root\r\n"},
+		{[]string{"json.merge", "m", ".nope", "{\"x\":1}"}, "+OK\r\n"},
+		{[]string{"json.get", "m"}, "$34\r\n{\"a\":5,\"l\":{\"x\":1},\"nope\":{\"x\":1}}\r\n"},
+		{[]string{"json.merge", "m", "$.zz.y", "1"}, "$-1\r\n"},
+		{[]string{"json.resp", "m"}, "*7\r\n+{\r\n$1\r\na\r\n:5\r\n$1\r\nl\r\n*3\r\n+{\r\n$1\r\nx\r\n:1\r\n$4\r\nnope\r\n*3\r\n+{\r\n$1\r\nx\r\n:1\r\n"},
+		{[]string{"json.resp", "m", "$.a"}, "*1\r\n:5\r\n"},
+		{[]string{"json.set", "r", "$", "[1,1.5,\"s\",true,false,null,{\"k\":[]}]"}, "+OK\r\n"},
+		{[]string{"json.resp", "r"}, "*8\r\n+[\r\n:1\r\n$3\r\n1.5\r\n$1\r\ns\r\n+true\r\n+false\r\n$-1\r\n*3\r\n+{\r\n$1\r\nk\r\n*1\r\n+[\r\n"},
+		{[]string{"json.resp", "r", "$[*]"}, "*7\r\n:1\r\n$3\r\n1.5\r\n$1\r\ns\r\n+true\r\n+false\r\n$-1\r\n*3\r\n+{\r\n$1\r\nk\r\n*1\r\n+[\r\n"},
+		{[]string{"json.debug", "help"}, "*2\r\n$42\r\nMEMORY <key> [path] - reports memory usage\r\n$34\r\nHELP                - this message\r\n"},
+		{[]string{"json.set", "nn", "$", "1"}, "+OK\r\n"},
+		{[]string{"json.numincrby", "nn", "$", "1"}, "$3\r\n[2]\r\n"},
+		{[]string{"json.numincrby", "nn", ".", "1"}, "$1\r\n3\r\n"},
+		{[]string{"json.nummultby", "nn", "$", "2.5"}, "$5\r\n[7.5]\r\n"},
+		{[]string{"json.nummultby", "nn", "$", "2"}, "$6\r\n[15.0]\r\n"},
+		{[]string{"json.get", "nn"}, "$4\r\n15.0\r\n"},
+		{[]string{"json.numincrby", "nn", "$", "9223372036854775807"}, "$22\r\n[9.223372036854776e18]\r\n"},
+		{[]string{"json.set", "big", "$", "9223372036854775807"}, "+OK\r\n"},
+		{[]string{"json.numincrby", "big", "$", "1"}, "$22\r\n[-9223372036854775808]\r\n"},
+		{[]string{"json.get", "big"}, "$20\r\n-9223372036854775808\r\n"},
+		{[]string{"json.set", "k", "$", "1", "NX"}, "+OK\r\n"},
+		{[]string{"json.set", "k", "$", "2", "NX"}, "$-1\r\n"},
+		{[]string{"json.set", "k", "$", "3", "XX"}, "+OK\r\n"},
+		{[]string{"json.set", "k2", "$", "3", "XX"}, "$-1\r\n"},
+		{[]string{"json.get", "k"}, "$1\r\n3\r\n"},
+		{[]string{"json.set", "k", "$", "1", "FOO"}, "-ERR syntax error\r\n"},
+		{[]string{"json.set", "k", "$"}, "-ERR wrong number of arguments for 'json.set' command\r\n"},
+		{[]string{"json.set", "k", "$", "{\"a\":1}"}, "+OK\r\n"},
+		{[]string{"json.set", "k", "$.b", "2", "NX"}, "+OK\r\n"},
+		{[]string{"json.set", "k", "$.a", "2", "NX"}, "$-1\r\n"},
+		{[]string{"json.set", "k", "$.b", "3", "XX"}, "+OK\r\n"},
+		{[]string{"json.get", "k"}, "$13\r\n{\"a\":1,\"b\":3}\r\n"},
+		{[]string{"json.mget", "k", "d", "nokey", "$.a"}, "*3\r\n$3\r\n[1]\r\n$2\r\n[]\r\n$-1\r\n"},
+		{[]string{"json.mget", "k", "d", ".a"}, "*2\r\n$1\r\n1\r\n$-1\r\n"},
+		{[]string{"json.mget", "k"}, "-ERR wrong number of arguments for 'json.mget' command\r\n"},
+		{[]string{"json.mset", "k", "$.c", "1", "k3", "$", "2"}, "+OK\r\n"},
+		{[]string{"json.mset", "k", "$.c"}, "-ERR wrong number of arguments for 'json.mset' command\r\n"},
+		{[]string{"json.mset", "k", "$.c", "bad"}, "-expected value at line 1 column 1\r\n"},
+		{[]string{"json.mset", "k", "$.z.y", "1"}, "+OK\r\n"},
+		{[]string{"json.get", "k"}, "$19\r\n{\"a\":1,\"b\":3,\"c\":1}\r\n"},
+		{[]string{"json.set", "str", "$", "\"x\""}, "+OK\r\n"},
+		{[]string{"json.get", "str", "$.a"}, "$2\r\n[]\r\n"},
+		{[]string{"json.type", "str"}, "$6\r\nstring\r\n"},
+		{[]string{"json.type", "d", "$..*"}, "*0\r\n"},
+		{[]string{"json.del", "d", "$"}, ":1\r\n"},
+		{[]string{"exists", "d"}, ":0\r\n"},
+		{[]string{"set", "plain", "v"}, "+OK\r\n"},
+		{[]string{"json.get", "plain"}, "-Existing key has wrong Redis type\r\n"},
+		{[]string{"json.set", "plain", "$", "1"}, "-Existing key has wrong Redis type\r\n"},
+		{[]string{"json.set", "plain2", "$", "{\"a\":1"}, "-EOF while parsing an object at line 1 column 6\r\n"},
+		{[]string{"json.set", "plain3", "$", "[1,]"}, "-trailing comma at line 1 column 4\r\n"},
+		{[]string{"json.set", "plain4", "$", "01"}, "-invalid number at line 1 column 2\r\n"},
+		{[]string{"json.set", "plain5", "$", "nan"}, "-expected ident at line 1 column 2\r\n"},
+		{[]string{"json.set", "d", "$", "{\"a\":{\"s\":\"hi\",\"n\":1},\"arr\":[1,2,3],\"t\":true,\"o\":{\"x\":1,\"y\":2,\"z\":3}}"}, "+OK\r\n"},
+		{[]string{"json.get", "d", "a.nope"}, "-ERR Path does not exist\r\n"},
+		{[]string{"json.arrindex", "nokey", "$", "1"}, "-ERR Path does not exist\r\n"},
+		{[]string{"json.arrindex", "d", "$.arr", "1", "x"}, "-Couldn't parse as integer\r\n"},
+		{[]string{"json.arrindex", "d", ".nope", "1"}, "-ERR Path does not exist\r\n"},
+		{[]string{"json.arrindex", "d", "$.arr", "1", "0", "0"}, "*1\r\n:0\r\n"},
+		{[]string{"json.arrindex", "d", "$.arr", "3", "-1"}, "*1\r\n:2\r\n"},
+		{[]string{"json.arrindex", "d", "$.arr", "3", "0", "-1"}, "*1\r\n:-1\r\n"},
+		{[]string{"json.strlen", "d", ".nope"}, "-ERR Path does not exist\r\n"},
+		{[]string{"json.strlen", "nokey"}, "$-1\r\n"},
+		{[]string{"json.objlen", "d", ".a.s"}, "-WRONGTYPE wrong type of path value - expected object\r\n"},
+		{[]string{"json.objlen", "d", "$.nope"}, "*0\r\n"},
+		{[]string{"json.objkeys", "d", ".nope"}, "$-1\r\n"},
+		{[]string{"json.objkeys", "d", ".a.s"}, "-ERR Path does not exist or not an object\r\n"},
+		{[]string{"json.arrlen", "d", ".nope"}, "-ERR Path does not exist\r\n"},
+		{[]string{"json.arrlen", "d", "$.nope"}, "*0\r\n"},
+		{[]string{"json.numincrby", "d", "$.a.n", "\"x\""}, "-bad input number\r\n"},
+		{[]string{"json.numincrby", "nokey", "$", "1"}, "-ERR could not perform this operation on a key that doesn't exist\r\n"},
+		{[]string{"json.numincrby", "d", "$.nope", "1"}, "$2\r\n[]\r\n"},
+		{[]string{"json.numincrby", "d", "$.a.s", "1"}, "$6\r\n[null]\r\n"},
+		{[]string{"json.numincrby", "d", ".a.n", "1e308"}, "$5\r\n1e308\r\n"},
+		{[]string{"json.nummultby", "d", ".a.n", "1e308"}, "-result is not a number\r\n"},
+		{[]string{"json.nummultby", "d", ".a.n", "1e308"}, "-result is not a number\r\n"},
+		{[]string{"json.arrinsert", "d", "$.arr", "x", "1"}, "-Couldn't parse as integer\r\n"},
+		{[]string{"json.arrinsert", "d", "$.arr", "0", "bad"}, "-expected value at line 1 column 1\r\n"},
+		{[]string{"json.arrinsert", "nokey", "$", "0", "1"}, "-ERR could not perform this operation on a key that doesn't exist\r\n"},
+		{[]string{"json.arrinsert", "d", ".a", "0", "1"}, "-ERR Path does not exist or not an array\r\n"},
+		{[]string{"json.arrappend", "nokey", "$", "1"}, "-ERR could not perform this operation on a key that doesn't exist\r\n"},
+		{[]string{"json.arrappend", "d", "$.nope", "1"}, "*0\r\n"},
+		{[]string{"json.arrtrim", "d", "$.arr", "x", "1"}, "-Couldn't parse as integer\r\n"},
+		{[]string{"json.arrtrim", "nokey", "$", "0", "1"}, "-ERR could not perform this operation on a key that doesn't exist\r\n"},
+		{[]string{"json.arrtrim", "d", ".a", "0", "1"}, "-ERR Path does not exist or not an array\r\n"},
+		{[]string{"json.arrpop", "nokey"}, "-ERR could not perform this operation on a key that doesn't exist\r\n"},
+		{[]string{"json.arrpop", "d", "$.nope"}, "*0\r\n"},
+		{[]string{"json.arrpop", "d", "$.arr", "100"}, "*1\r\n$1\r\n3\r\n"},
+		{[]string{"json.arrpop", "d", "$.arr", "-100"}, "*1\r\n$1\r\n1\r\n"},
+		{[]string{"json.get", "d", "$.arr"}, "$5\r\n[[2]]\r\n"},
+		{[]string{"json.toggle", "nokey", "$"}, "-ERR could not perform this operation on a key that doesn't exist\r\n"},
+		{[]string{"json.toggle", "d", "$.nope"}, "*0\r\n"},
+		{[]string{"json.clear", "d", ".a"}, ":1\r\n"},
+		{[]string{"json.get", "d"}, "$51\r\n{\"a\":{},\"arr\":[2],\"t\":true,\"o\":{\"x\":1,\"y\":2,\"z\":3}}\r\n"},
+		{[]string{"json.debug", "foo"}, "-ERR unknown subcommand - try `JSON.DEBUG HELP`\r\n"},
+		{[]string{"json.merge", "d", "$", "bad"}, "-expected value at line 1 column 1\r\n"},
+		{[]string{"json.merge", "d", "$.o", "null"}, "+OK\r\n"},
+		{[]string{"json.get", "d"}, "$36\r\n{\"a\":{},\"arr\":[2],\"t\":true,\"o\":null}\r\n"},
+		{[]string{"json.merge", "d", "$", "null"}, "+OK\r\n"},
+		{[]string{"exists", "d"}, ":1\r\n"},
+		{[]string{"json.set", "d", "$", "{\"a\":{\"s\":\"hi\",\"n\":1},\"arr\":[1,2,3],\"t\":true,\"o\":{\"x\":1,\"y\":2,\"z\":3}}"}, "+OK\r\n"},
+		{[]string{"json.del", "d", "$.o.x"}, ":1\r\n"},
+		{[]string{"json.get", "d", "$.o"}, "$15\r\n[{\"z\":3,\"y\":2}]\r\n"},
+		{[]string{"json.set", "d", "$.o.x", "9"}, "+OK\r\n"},
+		{[]string{"json.del", "d", "$.o[*]"}, ":3\r\n"},
+		{[]string{"json.get", "d", "$.o"}, "$4\r\n[{}]\r\n"},
+		{[]string{"json.set", "w", "$", "{\"a\":1,\"b\":2,\"c\":3,\"d\":4}"}, "+OK\r\n"},
+		{[]string{"json.del", "w", "$['a','c']"}, ":2\r\n"},
+		{[]string{"json.get", "w"}, "$13\r\n{\"d\":4,\"b\":2}\r\n"},
+		{[]string{"json.set", "w", "$", "[0,1,2,3,4,5]"}, "+OK\r\n"},
+		{[]string{"json.del", "w", "$[1,3]"}, ":2\r\n"},
+		{[]string{"json.get", "w"}, "$9\r\n[0,2,4,5]\r\n"},
+		{[]string{"json.set", "u", "$", "[1,1.0]"}, "+OK\r\n"},
+		{[]string{"json.arrindex", "u", "$", "1.0"}, "*1\r\n:1\r\n"},
+		{[]string{"json.arrindex", "u", "$", "1"}, "*1\r\n:0\r\n"},
+		{[]string{"json.set", "s", "$", "\"h\u00e9llo\""}, "+OK\r\n"},
+		{[]string{"json.strlen", "s"}, ":6\r\n"},
+		{[]string{"json.strappend", "s", "\"\u00fc\""}, ":8\r\n"},
+		{[]string{"json.objlen", "nokey"}, "$-1\r\n"},
+		{[]string{"json.type", "d", "$"}, "*1\r\n$6\r\nobject\r\n"},
+		{[]string{"json.resp", "nokey"}, "$-1\r\n"},
+		{[]string{"json.forget", "nokey"}, ":0\r\n"},
+		{[]string{"json.set", "x", "$.a", "1"}, "-ERR new objects must be created at the root\r\n"},
+		{[]string{"json.set", "x", ".", "1"}, "+OK\r\n"},
+		{[]string{"json.set", "x", "..a", "1"}, "-Err wrong static path\r\n"},
+		{[]string{"json.set", "d", "$", "{\"a\":1}"}, "+OK\r\n"},
+		{[]string{"json.set", "d", "a", "2"}, "+OK\r\n"},
+		{[]string{"json.set", "d", "b", "3"}, "+OK\r\n"},
+		{[]string{"json.get", "d"}, "$13\r\n{\"a\":2,\"b\":3}\r\n"},
+		{[]string{"json.set", "d", "$.a.b", "1"}, "$-1\r\n"},
+		{[]string{"json.set", "d", "$..a", "7"}, "+OK\r\n"},
+		{[]string{"json.get", "d"}, "$13\r\n{\"a\":7,\"b\":3}\r\n"},
+	} {
+		if strings.EqualFold(c.args[0], "flushall") {
+			st.Flush()
+			continue
+		}
+		var out bytes.Buffer
+		ctx := NewContext(strings.ToUpper(c.args[0]), bytesArgs(c.args[1:]...), st, resp.NewWriter(&out))
+		if err := router.Execute(ctx); err != nil {
+			t.Fatalf("%v: %v", c.args, err)
+		}
+		ctx.Writer.Flush()
+		if out.String() != c.want {
+			t.Errorf("%v = %q, want %q", c.args, out.String(), c.want)
+		}
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if tt.setup != nil {
-				tt.setup()
-			}
-
-			handler, ok := router.Get(tt.cmd)
-			if !ok {
-				t.Fatalf("Command %s not found", tt.cmd)
-			}
-
-			ctx := newTestContext(tt.cmd, tt.args, s)
-			if err := handler.Handler(ctx); err != nil {
-				t.Errorf("Unexpected error: %v", err)
-			}
-		})
-	}
-}
-
-func TestJSONValueOperations(t *testing.T) {
-	t.Run("JSON Value Creation", func(t *testing.T) {
-		data := map[string]interface{}{
-			"name":  "Test",
-			"value": 123,
-		}
-		jsonVal, err := store.NewJSONValue(data)
-		if err != nil {
-			t.Errorf("NewJSONValue failed: %v", err)
-		}
-		if jsonVal == nil {
-			t.Fatal("NewJSONValue returned nil")
-		}
-	})
-
-	t.Run("JSON Value Get", func(t *testing.T) {
-		data := map[string]interface{}{"key": "value"}
-		jsonVal, _ := store.NewJSONValue(data)
-
-		result, err := jsonVal.Get()
-		if err != nil {
-			t.Errorf("Get failed: %v", err)
-		}
-		if result == nil {
-			t.Error("Get returned nil")
-		}
-	})
-
-	t.Run("JSON Value String", func(t *testing.T) {
-		data := map[string]interface{}{"name": "Alice"}
-		jsonVal, _ := store.NewJSONValue(data)
-
-		str := jsonVal.String()
-		if str == "" {
-			t.Error("String returned empty")
-		}
-	})
-
-	t.Run("JSON Value Clone", func(t *testing.T) {
-		data := map[string]interface{}{"data": "test"}
-		jsonVal, _ := store.NewJSONValue(data)
-
-		cloned := jsonVal.Clone()
-		if cloned == nil {
-			t.Error("Clone returned nil")
-		}
-	})
 }

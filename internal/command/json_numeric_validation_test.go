@@ -53,11 +53,11 @@ func TestJSONNumMultByRejectsNonNumericMultiplier(t *testing.T) {
 	if !strings.HasPrefix(reply, "-") {
 		t.Fatalf("JSON.NUMMULTBY k $ abc = %q, want a float error", reply)
 	}
-	if !strings.Contains(reply, "not a valid float") {
-		t.Errorf("error %q does not name the float contract", reply)
+	if !strings.Contains(reply, "expected value") {
+		t.Errorf("error %q does not report the bad number as RedisJSON does", reply)
 	}
 
-	if got := runJSONArith(t, router, s, "JSON.GET", "k", "$"); got != "$2\r\n10\r\n" {
+	if got := runJSONArith(t, router, s, "JSON.GET", "k", "."); got != "$2\r\n10\r\n" {
 		t.Fatalf("stored value = %q, want %q — the failed multiply must not write", got, "$2\\r\\n10\\r\\n")
 	}
 }
@@ -71,7 +71,7 @@ func TestJSONNumIncrByRejectsNonNumericIncrement(t *testing.T) {
 	if !strings.HasPrefix(reply, "-") {
 		t.Fatalf("JSON.NUMINCRBY k $ xyz = %q, want a float error", reply)
 	}
-	if got := runJSONArith(t, router, s, "JSON.GET", "k", "$"); got != "$2\r\n10\r\n" {
+	if got := runJSONArith(t, router, s, "JSON.GET", "k", "."); got != "$2\r\n10\r\n" {
 		t.Fatalf("stored value = %q, want %q — the failed increment must not write", got, "$2\\r\\n10\\r\\n")
 	}
 }
@@ -82,10 +82,10 @@ func TestJSONNumMultByStillMultipliesValidInput(t *testing.T) {
 	router, s := newJSONArithRouter()
 	runJSONArith(t, router, s, "JSON.SET", "ctl", "$", "10")
 
-	if reply := runJSONArith(t, router, s, "JSON.NUMMULTBY", "ctl", "$", "2"); reply != "$2\r\n20\r\n" {
-		t.Fatalf("JSON.NUMMULTBY ctl $ 2 = %q, want %q", reply, "$2\\r\\n20\\r\\n")
+	if reply := runJSONArith(t, router, s, "JSON.NUMMULTBY", "ctl", "$", "2"); reply != "$4\r\n[20]\r\n" {
+		t.Fatalf("JSON.NUMMULTBY ctl $ 2 = %q, want %q", reply, "$4\\r\\n[20]\\r\\n")
 	}
-	if got := runJSONArith(t, router, s, "JSON.GET", "ctl", "$"); got != "$2\r\n20\r\n" {
+	if got := runJSONArith(t, router, s, "JSON.GET", "ctl", "."); got != "$2\r\n20\r\n" {
 		t.Fatalf("stored value = %q, want %q", got, "$2\\r\\n20\\r\\n")
 	}
 }
@@ -103,7 +103,7 @@ func TestJSONNumOpsAcceptWellFormedFloats(t *testing.T) {
 	}{
 		{name: "negative multiplier", op: "JSON.NUMMULTBY", arg: "-2", seed: "10", wantBack: "$3\r\n-20\r\n"},
 		{name: "fractional increment", op: "JSON.NUMINCRBY", arg: "0.5", seed: "10", wantBack: "$4\r\n10.5\r\n"},
-		{name: "exponent multiplier", op: "JSON.NUMMULTBY", arg: "1e2", seed: "2", wantBack: "$3\r\n200\r\n"},
+		{name: "exponent multiplier", op: "JSON.NUMMULTBY", arg: "1e2", seed: "2", wantBack: "$5\r\n200.0\r\n"},
 	}
 
 	for _, tc := range cases {
@@ -115,7 +115,7 @@ func TestJSONNumOpsAcceptWellFormedFloats(t *testing.T) {
 			if strings.HasPrefix(reply, "-") {
 				t.Fatalf("%s %s was rejected: %q", tc.op, tc.arg, reply)
 			}
-			if got := runJSONArith(t, router, s, "JSON.GET", "k", "$"); got != tc.wantBack {
+			if got := runJSONArith(t, router, s, "JSON.GET", "k", "."); got != tc.wantBack {
 				t.Fatalf("stored value = %q, want %q", got, tc.wantBack)
 			}
 		})

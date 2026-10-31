@@ -168,7 +168,7 @@ func TestRestoreFrequencyUsesConfiguredLFUPolicy(t *testing.T) {
 // A time series or JSON document must not be dumped as a string: it travels
 // under its own private type and comes back as the same type.
 func TestDumpKeepsNonRedisTypes(t *testing.T) {
-	for _, value := range []store.Value{store.NewTimeSeriesValue(0), &store.JSONValue{Data: []byte(`{"k":"v"}`)}} {
+	for _, value := range []store.Value{store.NewTimeSeriesValue(0), store.MustParseJSONValue(`{"k":"v"}`)} {
 		s := store.NewStore()
 		if err := s.Set("k", value, store.SetOptions{}); err != nil {
 			t.Fatal(err)

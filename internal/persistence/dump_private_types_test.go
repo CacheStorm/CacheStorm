@@ -21,7 +21,7 @@ func TestDumpPrivateTypesRoundTrip(t *testing.T) {
 	}
 	ts := store.NewTimeSeriesValue(0)
 	ts.AddWithLabels(1000, 1.5, map[string]string{"a": "b"})
-	for _, value := range []store.Value{stream, store.NewStreamValue(0), ts, &store.JSONValue{Data: []byte(`{"k":"v"}`)}} {
+	for _, value := range []store.Value{stream, store.NewStreamValue(0), ts, store.MustParseJSONValue(`{"k":"v"}`)} {
 		payload, err := EncodeDump(value)
 		if err != nil {
 			t.Fatalf("%T: %v", value, err)

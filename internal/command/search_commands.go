@@ -242,6 +242,9 @@ func cmdFTSEARCH(ctx *Context) error {
 	return ctx.WriteArray(results)
 }
 
+// errFTScore is RediSearch's reply to a score outside [0, 1].
+var errFTScore = errors.New("ERR Score must be between 0 and 1")
+
 func cmdFTADD(ctx *Context) error {
 	if ctx.ArgCount() < 3 {
 		return ctx.WriteError(ErrWrongArgCount)
@@ -249,7 +252,10 @@ func cmdFTADD(ctx *Context) error {
 
 	indexName := ctx.ArgString(0)
 	docID := ctx.ArgString(1)
-	score := parseJSONFloat(ctx.ArgString(2))
+	score, err := strconv.ParseFloat(ctx.ArgString(2), 64)
+	if err != nil || score < 0 || score > 1 {
+		return ctx.WriteError(errFTScore)
+	}
 
 	fields := make(map[string]string)
 	replace := false

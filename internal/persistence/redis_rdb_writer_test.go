@@ -31,7 +31,7 @@ func TestWriteRedisRDBLoadsBack(t *testing.T) {
 	src := entryList{
 		{0, "s", expiring},
 		{0, "l", store.NewEntry(&store.ListValue{Elements: [][]byte{[]byte("x"), []byte("y")}})},
-		{0, "j", store.NewEntry(&store.JSONValue{Data: []byte(`{"a":1}`)})},
+		{0, "j", store.NewEntry(store.MustParseJSONValue(`{"a":1}`))},
 		{2, "h", store.NewEntry(hash)},
 	}
 	var out bytes.Buffer
@@ -75,7 +75,7 @@ func TestRedisRDBExtensionsLoadBack(t *testing.T) {
 	gone := &store.HashValue{Fields: map[string][]byte{"f": []byte("v")}}
 	gone.SetFieldExpireAt("f", 1)
 	src := entryList{
-		{0, "j", store.NewEntry(&store.JSONValue{Data: []byte(`{"a":[1,2]}`)})},
+		{0, "j", store.NewEntry(store.MustParseJSONValue(`{"a":[1,2]}`))},
 		{0, "ts", store.NewEntry(ts)},
 		{0, "tagged", tagged},
 		{0, "hot", hot},
@@ -100,7 +100,7 @@ func TestRedisRDBExtensionsLoadBack(t *testing.T) {
 		t.Fatal(err)
 	}
 	db := dbs.DB(0)
-	if e, ok := db.Get("j"); !ok || string(e.Value.(*store.JSONValue).Data) != `{"a":[1,2]}` {
+	if e, ok := db.Get("j"); !ok || string(e.Value.(*store.JSONValue).Bytes()) != `{"a":[1,2]}` {
 		t.Fatal("JSON document lost")
 	}
 	if e, ok := db.Get("ts"); !ok || len(e.Value.(*store.TimeSeriesValue).Samples) != 1 {
@@ -118,7 +118,7 @@ func TestRedisRDBExtensionsLoadBack(t *testing.T) {
 }
 
 func TestRedisRDBRefusesOtherModules(t *testing.T) {
-	out, _, err := EncodeRedisRDB(entryList{{0, "j", store.NewEntry(&store.JSONValue{Data: []byte(`1`)})}}, RedisRDBInfo{Extensions: true})
+	out, _, err := EncodeRedisRDB(entryList{{0, "j", store.NewEntry(store.MustParseJSONValue(`1`))}}, RedisRDBInfo{Extensions: true})
 	if err != nil {
 		t.Fatal(err)
 	}

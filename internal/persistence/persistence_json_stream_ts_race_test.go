@@ -11,7 +11,7 @@ import (
 )
 
 func TestPersistenceJSONStreamTSValueRaceX(t *testing.T) {
-	jsonVal := &store.JSONValue{Data: []byte(`{"a":1}`)}
+	jsonVal := store.MustParseJSONValue(`{"a":1}`)
 	streamVal := &store.StreamValue{
 		Entries: []*store.StreamEntry{{ID: "1-0", Fields: map[string][]byte{"f": []byte("v")}}},
 		LastID:  "1-0",
@@ -28,10 +28,9 @@ func TestPersistenceJSONStreamTSValueRaceX(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := 0; i < iterations; i++ {
-			if err := jsonVal.Set(map[string]interface{}{"i": i}); err != nil {
-				t.Error(err)
-				return
-			}
+			jsonVal.Lock()
+			jsonVal.Root = &store.JNode{Kind: store.JInt, Int: int64(i)}
+			jsonVal.Unlock()
 			if _, err := streamVal.Add(fmt.Sprintf("%d-0", 2+i), map[string][]byte{"f": []byte(fmt.Sprint(i))}); err != nil {
 				t.Error(err)
 				return

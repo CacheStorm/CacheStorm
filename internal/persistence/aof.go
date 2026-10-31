@@ -887,11 +887,7 @@ func (rw *AOFRewriter) writeValueCommands(w *bufio.Writer, key string, value sto
 		return rw.writeCommand(w, "GEOADD", args...)
 
 	case *store.JSONValue:
-		vt.RLock()
-		data := make([]byte, len(vt.Data))
-		copy(data, vt.Data)
-		vt.RUnlock()
-		return rw.writeCommand(w, "JSON.SET", key, "$", string(data))
+		return rw.writeCommand(w, "JSON.SET", key, "$", string(vt.Bytes()))
 
 	case *store.StreamValue:
 		vt.RLock()

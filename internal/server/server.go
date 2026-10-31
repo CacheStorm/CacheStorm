@@ -71,9 +71,9 @@ var writeCommands = map[string]bool{
 	// Scripting mutates through redis.call inside the handler, so the script is
 	// the only replayable record of the effect.
 	"EVAL": true, "EVALSHA": true, "FCALL": true,
-	"JSON.SET": true, "JSON.DEL": true, "JSON.MSET": true,
-	"JSON.NUMINCRBY": true, "JSON.NUMMULTBY": true,
-	"JSON.ARRAPPEND": true, "JSON.STRAPPEND": true,
+	"JSON.SET": true, "JSON.DEL": true, "JSON.FORGET": true, "JSON.MSET": true, "JSON.MERGE": true,
+	"JSON.NUMINCRBY": true, "JSON.NUMMULTBY": true, "JSON.TOGGLE": true, "JSON.CLEAR": true,
+	"JSON.ARRAPPEND": true, "JSON.ARRINSERT": true, "JSON.ARRPOP": true, "JSON.ARRTRIM": true, "JSON.STRAPPEND": true,
 	"TS.ADD": true, "TS.CREATE": true, "TS.DEL": true, "TS.ALTER": true,
 	"TS.INCRBY": true, "TS.DECRBY": true, "TS.MADD": true,
 	"BF.RESERVE": true, "BF.ADD": true, "BF.MADD": true, "BF.INSERT": true,
