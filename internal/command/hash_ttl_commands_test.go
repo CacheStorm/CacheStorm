@@ -136,10 +136,12 @@ func TestHTTLFamily(t *testing.T) {
 	r.want(ints(1), "HPEXPIREAT", "h", "4102444800500", "FIELDS", "1", "a")
 	r.want(ints(4102444801, -1, -2), "HEXPIRETIME", "h", "FIELDS", "3", "a", "b", "c")
 	r.want(ints(4102444800500), "HPEXPIRETIME", "h", "FIELDS", "1", "a")
+	before := time.Now().UnixMilli()
 	reply, _ := r.do("HPTTL", "h", "FIELDS", "1", "a")
+	after := time.Now().UnixMilli()
 	ms, _ := strconv.ParseInt(strings.TrimSpace(strings.Split(reply, ":")[1]), 10, 64)
-	if want := int64(4102444800500) - time.Now().UnixMilli(); ms < want-1000 || ms > want {
-		t.Fatalf("HPTTL %d, want about %d", ms, want)
+	if ms < 4102444800500-after || ms > 4102444800500-before {
+		t.Fatalf("HPTTL %d, want between %d and %d", ms, 4102444800500-after, 4102444800500-before)
 	}
 	r.want(errReply("ERR Number of fields must be a positive integer"), "HTTL", "h", "FIELDS", "0", "a")
 	r.want(errReply("ERR The `numfields` parameter must match the number of arguments"), "HTTL", "h", "FIELDS", "2", "a")
