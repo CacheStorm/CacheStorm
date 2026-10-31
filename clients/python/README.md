@@ -119,6 +119,7 @@ keys = client.tag_keys('user')
 ## Known Limitations
 
 - Pub/Sub does not reconnect. If its connection drops, the listener stops; create a new `PubSub` and subscribe again. Send failures raise `ConnectionError`.
+- The client reconnects on the next command after its connection drops, running `AUTH`/`SELECT` again. A connection the server closed while idle is detected and replaced before the command is sent. A command whose connection breaks while it is in flight raises `ConnectionError` and is not resent.
 - Pipelines and Pub/Sub use the connection pool, not the client's own socket. Pooled connections run `AUTH`/`SELECT` with the client's `password`/`db` when created and are health-checked on checkout.
 - Only RESP2 replies are supported.
 

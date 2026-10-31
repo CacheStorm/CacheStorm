@@ -16,14 +16,22 @@ class FakeSocket:
         self.sent = b""
         self.timeout = None
         self.closed = False
+        self.dead = False
 
     def settimeout(self, timeout):
         self.timeout = timeout
 
+    def setblocking(self, flag):
+        pass
+
     def sendall(self, data):
         self.sent += data
 
-    def recv(self, size):
+    def recv(self, size, flags=0):
+        if flags:
+            if self.dead:
+                return b""
+            raise BlockingIOError
         if not self.chunks:
             return b""
         return self.chunks.pop(0)
@@ -99,6 +107,20 @@ class SyncClientTest(unittest.TestCase):
         self.assertTrue(sock.closed)
         self.assertIsNone(client._sock)
         self.assertEqual(client._buffer, b"")
+
+    def test_idle_connection_closed_by_server_is_replaced_before_sending(self):
+        first, second = FakeSocket([b"+OK\r\n", b"+OK\r\n"]), FakeSocket([b"+OK\r\n", b"$1\r\nv\r\n"])
+        client = CacheStormClient(password="pw")
+        patcher = patch("socket.create_connection", side_effect=[first, second])
+        create_connection = patcher.start()
+        self.addCleanup(patcher.stop)
+        self.assertTrue(client.set("k", "v"))
+        first.dead = True
+        self.assertEqual(client.get("k"), b"v")
+        self.assertEqual(create_connection.call_count, 2)
+        self.assertTrue(first.closed)
+        self.assertNotIn(b"GET", first.sent)
+        self.assertEqual(second.sent, b"*2\r\n$4\r\nAUTH\r\n$2\r\npw\r\n*2\r\n$3\r\nGET\r\n$1\r\nk\r\n")
 
     def test_eof_before_any_reply_raises_connection_error(self):
         client, _ = self.make_client([])

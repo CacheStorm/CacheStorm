@@ -12,7 +12,7 @@ from .exceptions import (
     ResponseError,
     TimeoutError,
 )
-from .pool import ConnectionPool
+from .pool import ConnectionPool, socket_is_healthy
 from .pipeline import Pipeline
 from .pubsub import PubSub
 from .protocol import encode_resp, decode_resp, IncompleteResponse
@@ -100,6 +100,10 @@ class CacheStormClient:
     def execute_command(self, *args) -> Any:
         """Execute a command."""
         data = encode_resp(list(args))
+        # A connection the server closed while idle is replaced before the
+        # command is sent, so the command is not lost and runs once.
+        if self._sock is not None and not self._buffer and not socket_is_healthy(self._sock, self.socket_timeout):
+            self.close()
         self.connect()
 
         with self._lock:

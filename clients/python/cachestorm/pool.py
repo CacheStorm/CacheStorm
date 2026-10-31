@@ -10,6 +10,21 @@ from .exceptions import ConnectionError, TimeoutError
 from .protocol import IncompleteResponse, encode_resp, decode_resp
 
 
+def socket_is_healthy(connection, timeout) -> bool:
+    """Cheap liveness check: a non-blocking peek must find no data."""
+    try:
+        connection.setblocking(False)
+        try:
+            connection.recv(1, socket.MSG_PEEK)
+        finally:
+            connection.settimeout(timeout)
+    except BlockingIOError:
+        return True
+    except (socket.error, ValueError):
+        return False
+    return False
+
+
 class ConnectionPool:
     """Thread-safe connection pool."""
 
@@ -106,18 +121,7 @@ class ConnectionPool:
             raise
 
     def _is_healthy(self, connection) -> bool:
-        """Cheap liveness check: a non-blocking peek must find no data."""
-        try:
-            connection.setblocking(False)
-            try:
-                data = connection.recv(1, socket.MSG_PEEK)
-            finally:
-                connection.settimeout(self.socket_timeout)
-        except BlockingIOError:
-            return True
-        except (socket.error, ValueError):
-            return False
-        return False
+        return socket_is_healthy(connection, self.socket_timeout)
 
     def get_connection(self, timeout: Optional[float] = None):
         """Get a healthy connection from the pool."""

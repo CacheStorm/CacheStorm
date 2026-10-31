@@ -200,6 +200,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Authentication: only AUTH, HELLO, QUIT and RESET run before a requirepass client authenticates, the commands Redis flags `no_auth`. PING and COMMAND were exempt too, so an unauthenticated client could probe the server
 
 ### Fixed
+- Python client: a connection the server closed while idle (timeout, CLIENT KILL, restart) is detected before the next command is sent and replaced, with AUTH and SELECT run again. Before, that command failed with "Connection closed by server", and only the one after it reconnected
 - Cluster: a master that comes back from the minority side of a partition waits `cluster-node-timeout` (clamped to 0.5–5 s) before it serves writes again. A master restarted from `nodes.conf` next to other nodes waits 2 s. Before, both served writes right away, before learning that a replica had been promoted in their place. These are Redis' rejoin and writable delays
 - The commands of one MULTI/EXEC or one script see a single time, as Redis' commandTimeSnapshot: XADD * in a transaction or script gives its entries the same millisecond with rising sequence numbers instead of reading the clock for each.
 - Sorted-set scores are formatted with a port of Redis' fpconv_dtoa (Grisu2), which does not always pick the shortest digits: ZSCORE, ZRANGE WITHSCORES and the other score replies differed from Redis for about one score in two thousand (0.047801217303879207, not 0.04780121730387921); 20,000 random scores now match.
