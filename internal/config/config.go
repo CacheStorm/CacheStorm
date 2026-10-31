@@ -133,6 +133,13 @@ type ClusterConfig struct {
 	AllowReadsWhenDown  bool   `yaml:"allow_reads_when_down" default:"false"`
 	// ReplicaValidityFactor is cluster-replica-validity-factor.
 	ReplicaValidityFactor int `yaml:"replica_validity_factor" default:"10"`
+	// ReplicaNoFailover is cluster-replica-no-failover: this node never
+	// fails over its master on its own.
+	ReplicaNoFailover bool `yaml:"replica_no_failover" default:"false"`
+	// AllowReplicaMigration and MigrationBarrier are
+	// cluster-allow-replica-migration and cluster-migration-barrier.
+	AllowReplicaMigration bool `yaml:"allow_replica_migration" default:"true"`
+	MigrationBarrier      int  `yaml:"migration_barrier" default:"1"`
 	// TLS is tls-cluster: the cluster bus and MIGRATE use mutual TLS with
 	// server.tls_cert_file, tls_key_file and tls_ca_cert_file.
 	TLS bool `yaml:"tls"`

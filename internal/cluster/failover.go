@@ -23,6 +23,9 @@ const (
 	// mfPauseMult is CLUSTER_MF_PAUSE_MULT: the master pauses its writers
 	// for mfTimeout times this.
 	mfPauseMult = 2
+	// replicaMigrationDelay is CLUSTER_SLAVE_MIGRATION_DELAY: how long a
+	// master must stay without a working replica before one migrates to it.
+	replicaMigrationDelay = 5000
 )
 
 // failoverState is the election state of a replica, as Redis keeps it in
@@ -446,5 +449,87 @@ func (c *Cluster) sampleReplication(opts BusOptions) {
 	}
 	if opts.ReplDataAge != nil {
 		c.dataAge.Store(opts.ReplDataAge().Milliseconds())
+	}
+}
+
+// handleReplicaMigrationLocked is the replica migration of clusterCron and
+// clusterHandleSlaveMigration: when a master serving slots has lost all its
+// working replicas, a replica of the master with the most working replicas
+// (more than cluster-migration-barrier) moves over to it. Of those replicas
+// the one with the smallest node ID moves, after the orphan has waited
+// replicaMigrationDelay.
+func (c *Cluster) handleReplicaMigrationLocked(now int64) {
+	me := c.myself
+	okReplicas := make(map[*Node]int)
+	replicas := make(map[*Node][]*Node)
+	for _, n := range c.nodes {
+		if !n.replica() {
+			continue
+		}
+		master := c.nodes[n.MasterID]
+		if master == nil || master.replica() {
+			continue
+		}
+		master.migrateTo = true
+		replicas[master] = append(replicas[master], n)
+		if n.Flags&FlagFail == 0 {
+			okReplicas[master]++
+		}
+	}
+	orphaned, maxReplicas, mine := false, 0, 0
+	for _, n := range c.nodes {
+		if n == me || n.replica() || n.Flags&(FlagNoAddr|FlagHandshake|FlagFail) != 0 {
+			continue
+		}
+		ok := okReplicas[n]
+		if ok == 0 && n.numSlots > 0 && n.migrateTo {
+			orphaned = true
+		}
+		maxReplicas = max(maxReplicas, ok)
+		if n.ID == me.MasterID {
+			mine = ok
+		}
+	}
+	if !orphaned || maxReplicas < 2 || mine != maxReplicas || !c.opts.AllowReplicaMigration || !c.ok {
+		return
+	}
+	master := c.nodes[me.MasterID]
+	if master == nil {
+		return
+	}
+	working := 0
+	for _, r := range replicas[master] {
+		if !r.failing() {
+			working++
+		}
+	}
+	if working <= c.opts.MigrationBarrier {
+		return
+	}
+	var target *Node
+	candidate := me
+	for _, n := range c.nodes {
+		orphan := !n.replica() && n.Flags&FlagFail == 0 && n.migrateTo && okReplicas[n] == 0
+		if orphan {
+			if target == nil && n.numSlots > 0 {
+				target = n
+			}
+			if n.orphanedTime == 0 {
+				n.orphanedTime = now
+			}
+		} else {
+			n.orphanedTime = 0
+		}
+		if !n.replica() && okReplicas[n] == maxReplicas {
+			for _, r := range replicas[n] {
+				if r.ID < candidate.ID {
+					candidate = r
+				}
+			}
+		}
+	}
+	if target != nil && candidate == me && now-target.orphanedTime > replicaMigrationDelay {
+		logger.Info().Str("master", target.ID).Msg("cluster: migrating to an orphaned master")
+		c.setMyMasterLocked(target)
 	}
 }

@@ -31,6 +31,8 @@ func Default() *Config {
 			NodeTimeout:           15000,
 			RequireFullCoverage:   true,
 			ReplicaValidityFactor: 10,
+			AllowReplicaMigration: true,
+			MigrationBarrier:      1,
 		},
 		Replication: ReplicationConfig{
 			Role:               "master",

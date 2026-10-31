@@ -33,8 +33,11 @@ func (s *Server) openCluster() error {
 		return err
 	}
 	c, created, err := cluster.Open(filepath.Join(dir, cc.ConfigFile), cluster.Options{
-		RequireFullCoverage: cc.RequireFullCoverage,
-		AllowReadsWhenDown:  cc.AllowReadsWhenDown,
+		RequireFullCoverage:   cc.RequireFullCoverage,
+		AllowReadsWhenDown:    cc.AllowReadsWhenDown,
+		ReplicaNoFailover:     cc.ReplicaNoFailover,
+		AllowReplicaMigration: cc.AllowReplicaMigration,
+		MigrationBarrier:      cc.MigrationBarrier,
 	})
 	if err != nil {
 		return err

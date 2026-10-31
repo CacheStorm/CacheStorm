@@ -95,6 +95,11 @@ type Node struct {
 	meet         bool
 	replOffset   int64
 	votedTime    int64
+	// migrateTo is CLUSTER_NODE_MIGRATE_TO: this master has had replicas,
+	// so a replica may migrate to it once it has none. orphanedTime is
+	// when it was first seen without a working replica.
+	migrateTo    bool
+	orphanedTime int64
 }
 
 func (n *Node) failing() bool { return n.Flags&(FlagFail|FlagPFail) != 0 }
@@ -118,6 +123,12 @@ func (n *Node) addr() Addr { return Addr{ID: n.ID, IP: n.IP, Port: n.Port} }
 type Options struct {
 	RequireFullCoverage bool
 	AllowReadsWhenDown  bool
+	// ReplicaNoFailover, AllowReplicaMigration and MigrationBarrier are
+	// cluster-replica-no-failover, cluster-allow-replica-migration and
+	// cluster-migration-barrier.
+	ReplicaNoFailover     bool
+	AllowReplicaMigration bool
+	MigrationBarrier      int
 }
 
 // Cluster is the cluster state of this node.
@@ -191,6 +202,7 @@ func New(path string, opts Options) *Cluster {
 	c := &Cluster{path: path, opts: opts, nodes: make(map[string]*Node)}
 	c.myself = &Node{ID: NewID(), ShardID: NewID(), Flags: FlagMyself | FlagMaster}
 	c.nodes[c.myself.ID] = c.myself
+	c.updateMyselfFlagsLocked()
 	c.updateStateLocked()
 	return c
 }
@@ -213,9 +225,40 @@ func Open(path string, opts Options) (c *Cluster, created bool, err error) {
 	}
 	c.path, c.opts = path, opts
 	c.mu.Lock()
+	c.updateMyselfFlagsLocked()
 	c.updateStateLocked()
 	c.mu.Unlock()
 	return c, false, nil
+}
+
+// updateMyselfFlagsLocked is clusterUpdateMyselfFlags: the nofailover flag
+// follows cluster-replica-no-failover.
+func (c *Cluster) updateMyselfFlagsLocked() {
+	f := c.myself.Flags &^ FlagNoFailover
+	if c.opts.ReplicaNoFailover {
+		f |= FlagNoFailover
+	}
+	if f != c.myself.Flags {
+		c.myself.Flags = f
+		c.todoSave = true
+	}
+}
+
+// Options returns the cluster settings in effect.
+func (c *Cluster) Options() Options {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.opts
+}
+
+// UpdateOptions changes the cluster settings at run time, as CONFIG SET
+// does.
+func (c *Cluster) UpdateOptions(update func(*Options)) {
+	c.mu.Lock()
+	defer c.unlockAndSave()
+	update(&c.opts)
+	c.updateMyselfFlagsLocked()
+	c.updateStateLocked()
 }
 
 // Path returns the nodes.conf path.

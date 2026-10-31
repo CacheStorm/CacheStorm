@@ -25,6 +25,9 @@ cluster:
   require_full_coverage: true
   allow_reads_when_down: false
   replica_validity_factor: 10
+  replica_no_failover: false
+  allow_replica_migration: true
+  migration_barrier: 1
 ```
 
 In cluster mode only database 0 exists, as in Redis: `SELECT` with any other index fails.

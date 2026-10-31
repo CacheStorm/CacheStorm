@@ -222,6 +222,9 @@ func validateCluster(cfg *Config) error {
 	if c.ReplicaValidityFactor < 0 {
 		return fmt.Errorf("invalid cluster replica_validity_factor: %d", c.ReplicaValidityFactor)
 	}
+	if c.MigrationBarrier < 0 {
+		return fmt.Errorf("invalid cluster migration_barrier: %d", c.MigrationBarrier)
+	}
 	for name, port := range map[string]int{"bus_port": c.BusPort, "announce_port": c.AnnouncePort, "announce_bus_port": c.AnnounceBusPort} {
 		if port < 0 || port > 65535 {
 			return fmt.Errorf("invalid cluster %s: %d", name, port)

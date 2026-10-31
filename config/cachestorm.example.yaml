@@ -116,6 +116,9 @@ cluster:
   # announce_ip: ""
   # require_full_coverage: true
   # allow_reads_when_down: false
+  # replica_no_failover: false
+  # allow_replica_migration: true
+  # migration_barrier: 1
 
 # Logging Configuration
 logging:

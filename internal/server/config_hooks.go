@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/cachestorm/cachestorm/internal/cluster"
 	"github.com/cachestorm/cachestorm/internal/command"
 	"github.com/cachestorm/cachestorm/internal/config"
 	"github.com/cachestorm/cachestorm/internal/store"
@@ -38,7 +39,7 @@ func (s *Server) configValues() map[string]string {
 		}
 	}
 	rc := s.cfg.Replication
-	return map[string]string{
+	values := map[string]string{
 		"cluster-enabled":             configYesNo(s.cfg.Cluster.Enabled),
 		"replicaof":                   replicaof,
 		"masterauth":                  rc.MasterAuth,
@@ -66,6 +67,22 @@ func (s *Server) configValues() map[string]string {
 		"auto-aof-rewrite-percentage": strconv.FormatInt(s.aofRewritePercentage.Load(), 10),
 		"auto-aof-rewrite-min-size":   strconv.FormatInt(s.aofRewriteMinSize.Load(), 10),
 	}
+	if c := s.router.Cluster(); c != nil {
+		cc, opts := s.cfg.Cluster, c.Options()
+		values["cluster-config-file"] = cc.ConfigFile
+		values["cluster-node-timeout"] = strconv.Itoa(cc.NodeTimeout)
+		values["cluster-port"] = strconv.Itoa(cc.BusPort)
+		values["cluster-announce-ip"] = cc.AnnounceIP
+		values["cluster-announce-port"] = strconv.Itoa(cc.AnnouncePort)
+		values["cluster-announce-bus-port"] = strconv.Itoa(cc.AnnounceBusPort)
+		values["cluster-replica-validity-factor"] = strconv.Itoa(cc.ReplicaValidityFactor)
+		values["cluster-require-full-coverage"] = configYesNo(opts.RequireFullCoverage)
+		values["cluster-allow-reads-when-down"] = configYesNo(opts.AllowReadsWhenDown)
+		values["cluster-replica-no-failover"] = configYesNo(opts.ReplicaNoFailover)
+		values["cluster-allow-replica-migration"] = configYesNo(opts.AllowReplicaMigration)
+		values["cluster-migration-barrier"] = strconv.Itoa(opts.MigrationBarrier)
+	}
+	return values
 }
 
 func (s *Server) configSet(name, value string) (bool, error) {
@@ -155,6 +172,49 @@ func (s *Server) configSet(name, value string) (bool, error) {
 			return true, err
 		}
 		return true, command.ConfigSetError(name, "can't set immutable config")
+	case "cluster-require-full-coverage", "cluster-allow-reads-when-down", "cluster-replica-no-failover",
+		"cluster-allow-replica-migration", "cluster-migration-barrier", "cluster-config-file", "cluster-node-timeout",
+		"cluster-port", "cluster-announce-ip", "cluster-announce-port", "cluster-announce-bus-port",
+		"cluster-replica-validity-factor":
+		// Without cluster mode these are plain stored parameters.
+		c := s.router.Cluster()
+		if c == nil {
+			return false, nil
+		}
+		if err := command.ValidateConfigParam(name, value); err != nil {
+			return true, err
+		}
+		var update func(*cluster.Options)
+		switch name {
+		case "cluster-migration-barrier":
+			n, err := command.ParseConfigInt(name, value, 0, 1<<31-1)
+			if err != nil {
+				return true, err
+			}
+			update = func(o *cluster.Options) { o.MigrationBarrier = int(n) }
+		case "cluster-require-full-coverage", "cluster-allow-reads-when-down", "cluster-replica-no-failover", "cluster-allow-replica-migration":
+			yes, err := command.ParseConfigBool(name, value)
+			if err != nil {
+				return true, err
+			}
+			update = func(o *cluster.Options) {
+				switch name {
+				case "cluster-require-full-coverage":
+					o.RequireFullCoverage = yes
+				case "cluster-allow-reads-when-down":
+					o.AllowReadsWhenDown = yes
+				case "cluster-replica-no-failover":
+					o.ReplicaNoFailover = yes
+				default:
+					o.AllowReplicaMigration = yes
+				}
+			}
+		default:
+			// The bus reads these when it starts.
+			return true, command.ConfigSetError(name, "can't set immutable config")
+		}
+		c.UpdateOptions(update)
+		return true, nil
 	case "bind", "databases", "appendfilename":
 		return true, command.ConfigSetError(name, "can't set immutable config")
 	}

@@ -63,6 +63,9 @@ cluster:
   require_full_coverage: true   # down while any slot is unassigned
   allow_reads_when_down: false  # serve reads while the cluster is down
   replica_validity_factor: 10   # as cluster-replica-validity-factor; 0 = no data age limit
+  replica_no_failover: false    # as cluster-replica-no-failover: never start an automatic failover
+  allow_replica_migration: true # as cluster-allow-replica-migration
+  migration_barrier: 1          # as cluster-migration-barrier
   tls: false                    # tls-cluster: mutual TLS on the bus (needs server.tls_* and tls_ca_cert_file)
 
 # Replication Configuration (master-replica, Redis semantics)
@@ -221,6 +224,14 @@ operator guide is [Running a cluster](./09-cluster.md).
   writers, lets the replica catch up with the master's offset and then runs
   the election, so no acknowledged write is lost. `FORCE` skips the
   master, and `TAKEOVER` also skips the vote, taking a new epoch on its own.
+  A replica with `replica_no_failover` only fails over manually.
+- **Replica migration.** When a master serving slots loses its last working
+  replica, and another master has more than `migration_barrier` working
+  replicas, the replica of that master with the smallest node ID becomes a
+  replica of the orphaned master after 5 s, as in Redis. `CONFIG SET`
+  changes `cluster-replica-no-failover`, `cluster-allow-replica-migration`,
+  `cluster-migration-barrier`, `cluster-require-full-coverage` and
+  `cluster-allow-reads-when-down` at run time.
 - `REPLICAOF` is refused in cluster mode, and `replication.role: replica`
   cannot be combined with it.
 

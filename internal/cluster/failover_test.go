@@ -123,3 +123,72 @@ func TestReplicaRankAndSlots(t *testing.T) {
 		t.Fatalf("slot state %+v", st)
 	}
 }
+
+func TestReplicaMigration(t *testing.T) {
+	setup := func(opts Options, myID string) (*Cluster, *Node, *Node) {
+		c := New("", opts)
+		c.bus = &bus{timeout: 1000}
+		c.mu.Lock()
+		me := c.myself
+		delete(c.nodes, me.ID)
+		me.ID = strings.Repeat(myID, 40)
+		c.nodes[me.ID] = me
+		node := func(id string, flags Flags, master string) *Node {
+			n := &Node{ID: strings.Repeat(id, 40), Flags: flags, MasterID: master}
+			c.addNodeLocked(n)
+			return n
+		}
+		rich := node("a", FlagMaster, "")
+		c.addSlotLocked(rich, 0)
+		orphan := node("b", FlagMaster, "")
+		c.addSlotLocked(orphan, 1)
+		orphan.migrateTo = true
+		node("5", FlagSlave, rich.ID)
+		node("6", FlagSlave, rich.ID)
+		me.Flags = FlagMyself | FlagSlave
+		me.MasterID = rich.ID
+		c.updateStateLocked()
+		return c, me, orphan
+	}
+	now := nowMs()
+
+	c, me, orphan := setup(Options{AllowReplicaMigration: true, MigrationBarrier: 1}, "1")
+	c.handleReplicaMigrationLocked(now)
+	if me.MasterID == orphan.ID || orphan.orphanedTime != now {
+		t.Fatalf("migrated before the delay, orphaned at %d", orphan.orphanedTime)
+	}
+	c.handleReplicaMigrationLocked(now + replicaMigrationDelay + 1)
+	if me.MasterID != orphan.ID || !c.roleDirty {
+		t.Fatal("the replica with the smallest ID did not migrate to the orphaned master")
+	}
+	c.mu.Unlock()
+
+	for _, tc := range []struct {
+		name string
+		opts Options
+		id   string
+	}{
+		{"migration disabled", Options{AllowReplicaMigration: false, MigrationBarrier: 1}, "1"},
+		{"barrier not exceeded", Options{AllowReplicaMigration: true, MigrationBarrier: 3}, "1"},
+		{"not the smallest ID", Options{AllowReplicaMigration: true, MigrationBarrier: 1}, "9"},
+	} {
+		c, me, orphan := setup(tc.opts, tc.id)
+		c.handleReplicaMigrationLocked(now)
+		c.handleReplicaMigrationLocked(now + replicaMigrationDelay + 1)
+		if me.MasterID == orphan.ID {
+			t.Fatalf("%s: the replica migrated", tc.name)
+		}
+		c.mu.Unlock()
+	}
+}
+
+func TestReplicaNoFailoverFlag(t *testing.T) {
+	c := New("", Options{ReplicaNoFailover: true})
+	if c.myself.Flags&FlagNoFailover == 0 {
+		t.Fatal("cluster-replica-no-failover did not set the nofailover flag")
+	}
+	c.UpdateOptions(func(o *Options) { o.ReplicaNoFailover, o.MigrationBarrier = false, 4 })
+	if c.myself.Flags&FlagNoFailover != 0 || c.Options().MigrationBarrier != 4 {
+		t.Fatal("clearing cluster-replica-no-failover kept the flag")
+	}
+}

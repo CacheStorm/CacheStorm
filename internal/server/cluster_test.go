@@ -472,3 +472,43 @@ func TestClusterCorruptNodesConf(t *testing.T) {
 		t.Fatal("started with a corrupt nodes.conf")
 	}
 }
+
+func TestClusterConfigSettings(t *testing.T) {
+	s, c := startClusterServer(t, t.TempDir(), func(cfg *config.Config) {
+		cfg.Cluster.RequireFullCoverage = false
+		cfg.Cluster.MigrationBarrier = 2
+	})
+	for _, tc := range [][2]string{
+		{"cluster-require-full-coverage", "[cluster-require-full-coverage no]"},
+		{"cluster-migration-barrier", "[cluster-migration-barrier 2]"},
+		{"cluster-allow-replica-migration", "[cluster-allow-replica-migration yes]"},
+		{"cluster-replica-no-failover", "[cluster-replica-no-failover no]"},
+	} {
+		if got := c.str("CONFIG", "GET", tc[0]); got != tc[1] {
+			t.Fatalf("CONFIG GET %s = %s", tc[0], got)
+		}
+	}
+	for _, args := range [][]string{
+		{"cluster-replica-no-failover", "yes"},
+		{"cluster-allow-replica-migration", "no"},
+		{"cluster-migration-barrier", "3"},
+		{"cluster-require-full-coverage", "yes"},
+	} {
+		if got := c.str("CONFIG", "SET", args[0], args[1]); got != "OK" {
+			t.Fatalf("CONFIG SET %v = %s", args, got)
+		}
+	}
+	opts := s.router.Cluster().Options()
+	if !opts.ReplicaNoFailover || opts.AllowReplicaMigration || opts.MigrationBarrier != 3 || !opts.RequireFullCoverage {
+		t.Fatalf("options after CONFIG SET: %+v", opts)
+	}
+	if got := c.str("CLUSTER", "NODES"); !strings.Contains(got, "myself,master,nofailover") {
+		t.Fatalf("CLUSTER NODES = %s", got)
+	}
+	if got := c.str("CONFIG", "SET", "cluster-migration-barrier", "-1"); !strings.HasPrefix(got, "ERR:") {
+		t.Fatalf("negative barrier accepted: %s", got)
+	}
+	if got := c.str("CONFIG", "SET", "cluster-node-timeout", "100"); !strings.Contains(got, "immutable") {
+		t.Fatalf("CONFIG SET cluster-node-timeout = %s", got)
+	}
+}

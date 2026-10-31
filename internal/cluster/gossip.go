@@ -311,6 +311,9 @@ func (c *Cluster) setMasterLocked(n *Node) {
 	if !n.replica() && n.Flags&FlagMaster != 0 {
 		return
 	}
+	if n.replica() && n != c.myself {
+		n.migrateTo = true
+	}
 	n.Flags = n.Flags&^FlagSlave | FlagMaster
 	n.MasterID = ""
 	c.todoSave = true
@@ -738,6 +741,7 @@ func (c *Cluster) cron(b *bus) {
 	if c.myself.replica() {
 		c.handleManualFailoverLocked()
 		c.handleReplicaFailoverLocked(now)
+		c.handleReplicaMigrationLocked(now)
 	}
 	if b.iteration%10 == 0 {
 		c.roleDirty = true
