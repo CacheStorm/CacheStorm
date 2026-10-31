@@ -63,7 +63,7 @@ Durum (31 Ekim 2026): **büyük ölçüde tamamlandı.** `tests/compat` Redis 7.
 
 ## M3 SDK doğruluğu ve dağıtımı
 
-Durum (25 Ekim 2026): **tamamlandı.** F23–F27 düzeltildi ve kalıcı testlere alındı (Python 80, TypeScript 32, Go 16 test). Python `pyproject.toml` ile wheel/sdist üretiyor; TypeScript gerçek devDependency'ler ve lockfile kullanıyor. Ayrıca go-redis v9, redis-py 5 ve ioredis 5 `scripts/client-smoke.sh` ile CI'da sınanıyor. Açık: otomatik yeniden bağlanma, paketlerin npm/PyPI'ye yayımlanması.
+Durum (25 Ekim 2026): **tamamlandı.** F23–F27 düzeltildi ve kalıcı testlere alındı (Python 80, TypeScript 32, Go 16 test). Python `pyproject.toml` ile wheel/sdist üretiyor; TypeScript gerçek devDependency'ler ve lockfile kullanıyor. Ayrıca go-redis v9, redis-py 5 ve ioredis 5 `scripts/client-smoke.sh` ile CI'da sınanıyor. TypeScript istemcisi kopan bağlantıyı sonraki komutta yeniden kuruyor (31 Ekim 2026). Açık: Python istemcisinde yeniden bağlanmanın gözden geçirilmesi, paketlerin npm/PyPI'ye yayımlanması.
 
 Öncelik: **P1**. Tahmin: **8–15 iş günü**. Bağımsız codec işleri M1 sürerken başlayabilir.
 

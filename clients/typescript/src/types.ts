@@ -5,6 +5,14 @@ export interface CacheStormClientOptions {
   database?: number;
   connectTimeout?: number;
   commandTimeout?: number;
+  /**
+   * Reconnect when a command is sent after the connection dropped. AUTH and
+   * SELECT run again; commands that were in flight when it dropped are not
+   * resent. Default true.
+   */
+  reconnect?: boolean;
+  /** Connection attempts per reconnect, with exponential backoff. Default 3. */
+  reconnectAttempts?: number;
 }
 
 export interface SetOptions {

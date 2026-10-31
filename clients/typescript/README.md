@@ -7,12 +7,13 @@ Official TypeScript/JavaScript client for CacheStorm - High-Performance Redis-Co
 - Full TypeScript support with type definitions
 - Promise-based API over a single pipelined connection
 - AUTH and SELECT on connect (`password`, `database` options)
+- Reconnects on the next command after the connection drops, replaying AUTH and SELECT (`reconnect`, default `true`; `reconnectAttempts`, default 3, with exponential backoff; emits `reconnect`). Commands that were in flight when it dropped fail and are not resent. Pub/Sub connections do not reconnect
 - Pipeline support (one write, replies in order)
 - Pub/Sub on a dedicated connection (SUBSCRIBE, PSUBSCRIBE)
 - Binary-safe reads with `getBuffer`
 - CacheStorm-specific features (tags, invalidation)
 
-Not implemented: connection pooling, automatic retry/reconnection and namespaces. The `pool`, `retry` and `namespace` options throw instead of being silently ignored. Bulk replies are decoded as UTF-8 strings except through `getBuffer`, and integers are returned as JavaScript numbers. See the [verified review and roadmap](../../docs/PROJECT_REVIEW.md).
+Not implemented: connection pooling, retrying failed commands and namespaces. The `pool`, `retry` and `namespace` options throw instead of being silently ignored. Bulk replies are decoded as UTF-8 strings except through `getBuffer`, and integers are returned as JavaScript numbers. See the [verified review and roadmap](../../docs/PROJECT_REVIEW.md).
 
 ## Installation
 

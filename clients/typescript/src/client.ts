@@ -30,6 +30,10 @@ export class CacheStormClient extends EventEmitter {
   private pending: PendingRequest[] = [];
   private decoder = new RespDecoder({ returnBuffers: true });
   private pushHandler: PushHandler | null = null;
+  // wasConnected allows reconnecting; quit and a failed first connect leave
+  // it false. reconnecting is the reconnect in progress.
+  private wasConnected = false;
+  private reconnecting: Promise<void> | null = null;
 
   private get currentCommand(): PendingRequest | null {
     return this.pending[0] ?? null;
@@ -53,6 +57,8 @@ export class CacheStormClient extends EventEmitter {
       database: options.database ?? 0,
       connectTimeout: options.connectTimeout ?? 10000,
       commandTimeout: options.commandTimeout ?? 5000,
+      reconnect: options.reconnect ?? true,
+      reconnectAttempts: options.reconnectAttempts ?? 3,
     };
   }
 
@@ -82,6 +88,7 @@ export class CacheStormClient extends EventEmitter {
             clearTimeout(timeout);
             if (settled) return;
             settled = true;
+            this.wasConnected = true;
             this.emit('connect');
             resolve();
           },
@@ -139,12 +146,14 @@ export class CacheStormClient extends EventEmitter {
   }
 
   async quit(): Promise<void> {
+    this.wasConnected = false;
     if (!this.connected) return;
     const socket = this.socket;
     try {
       await this.sendCommand(['QUIT']);
     } catch {
     } finally {
+      this.connected = false;
       socket?.end();
     }
   }
@@ -344,8 +353,12 @@ export class CacheStormClient extends EventEmitter {
     return new Pipeline(this);
   }
 
-  sendCommands(commands: Command[], options: { returnBuffers?: boolean } = {}): Promise<unknown>[] {
+  sendCommands(commands: Command[], options: { returnBuffers?: boolean } = {}, retry = true): Promise<unknown>[] {
     if (!this.connected || !this.socket) {
+      if (retry && this.wasConnected && this.options.reconnect && commands.length > 0) {
+        const sent = this.reconnect().then(() => this.sendCommands(commands, options, false));
+        return commands.map((_, i) => sent.then(promises => promises[i]));
+      }
       return commands.map(() => Promise.reject(new Error('Not connected')));
     }
     if (commands.length === 0) return [];
@@ -353,6 +366,31 @@ export class CacheStormClient extends EventEmitter {
     const promises = commands.map(command => this.enqueue(command, options.returnBuffers ?? false));
     this.socket.write(Buffer.concat(commands.map(command => this.encodeResp(command))));
     return promises;
+  }
+
+  private reconnect(): Promise<void> {
+    if (!this.reconnecting) {
+      this.reconnecting = (async () => {
+        let lastError: unknown = new Error('Not connected');
+        for (let attempt = 0; attempt < Math.max(1, this.options.reconnectAttempts); attempt++) {
+          if (attempt > 0) {
+            await new Promise(resolve => setTimeout(resolve, Math.min(100 * 2 ** (attempt - 1), 2000)));
+          }
+          if (!this.wasConnected) break;
+          try {
+            await this.connect();
+            this.emit('reconnect');
+            return;
+          } catch (err) {
+            lastError = err;
+          }
+        }
+        throw lastError;
+      })().finally(() => {
+        this.reconnecting = null;
+      });
+    }
+    return this.reconnecting;
   }
 
   private async sendCommand(command: Command): Promise<unknown> {
@@ -442,7 +480,7 @@ export class CacheStormClient extends EventEmitter {
     }
   }
 
-  duplicate(): CacheStormClient {
-    return new CacheStormClient(this.options);
+  duplicate(overrides: CacheStormClientOptions = {}): CacheStormClient {
+    return new CacheStormClient({ ...this.options, ...overrides });
   }
 }

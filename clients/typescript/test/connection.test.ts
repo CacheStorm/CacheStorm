@@ -164,3 +164,49 @@ test('hgetall handles null and rejects malformed replies', async () => {
   internal.handleResponse(Buffer.from('*1\r\n$1\r\na\r\n'));
   await assert.rejects(odd, ProtocolError);
 });
+
+test('a command after the connection dropped reconnects and replays AUTH and SELECT', async () => {
+  const server = await startFakeServer({ password: 's3cret' });
+  const client = new CacheStormClient({ host: '127.0.0.1', port: server.port, password: 's3cret', database: 2 });
+  let reconnects = 0;
+  client.on('reconnect', () => reconnects++);
+  try {
+    await client.connect();
+    let closed = false;
+    client.once('close', () => { closed = true; });
+    server.dropClients();
+    await waitFor(() => closed);
+    server.commands.length = 0;
+    assert.equal(await client.set('k', 'v'), 'OK');
+    assert.deepEqual(server.commands, [['AUTH', 's3cret'], ['SELECT', '2'], ['SET', 'k', 'v']]);
+    assert.equal(reconnects, 1);
+  } finally {
+    await client.quit();
+    await server.close();
+  }
+});
+
+test('no reconnect after quit, with reconnect off, or when the server stays down', async () => {
+  const server = await startFakeServer();
+  const client = new CacheStormClient({ host: '127.0.0.1', port: server.port });
+  await client.connect();
+  await client.quit();
+  await assert.rejects(client.set('k', 'v'), /Not connected/);
+
+  const manual = new CacheStormClient({ host: '127.0.0.1', port: server.port, reconnect: false });
+  await manual.connect();
+  let closed = false;
+  manual.once('close', () => { closed = true; });
+  server.dropClients();
+  await waitFor(() => closed);
+  await assert.rejects(manual.set('k', 'v'), /Not connected/);
+
+  const doomed = new CacheStormClient({ host: '127.0.0.1', port: server.port, reconnectAttempts: 2 });
+  doomed.on('error', () => {});
+  await doomed.connect();
+  closed = false;
+  doomed.once('close', () => { closed = true; });
+  await server.close();
+  await waitFor(() => closed);
+  await assert.rejects(doomed.set('k', 'v'), /ECONNREFUSED/);
+});

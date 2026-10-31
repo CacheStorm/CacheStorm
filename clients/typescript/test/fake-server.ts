@@ -5,6 +5,7 @@ import { RespDecoder } from '../src/resp';
 export interface FakeServer {
   port: number;
   commands: string[][];
+  dropClients(): void;
   close(): Promise<void>;
 }
 
@@ -115,6 +116,9 @@ export async function startFakeServer(options: { password?: string; binary?: Buf
   return {
     port: (server.address() as AddressInfo).port,
     commands,
+    dropClients: () => {
+      for (const socket of sockets) socket.destroy();
+    },
     close: () =>
       new Promise<void>(resolve => {
         for (const socket of sockets) socket.destroy();

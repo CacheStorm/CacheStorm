@@ -111,7 +111,9 @@ export class PubSub extends EventEmitter {
   private connect(): Promise<CacheStormClient> {
     if (this.connection) return Promise.resolve(this.connection);
     if (!this.connecting) {
-      const connection = this.client.duplicate();
+      // A dropped subscription connection is reported, not silently
+      // replaced by one that has no subscriptions.
+      const connection = this.client.duplicate({ reconnect: false });
       connection.setPushHandler(reply => this.onPush(reply));
       connection.on('error', err => {
         if (this.listenerCount('error') > 0) this.emit('error', err);
