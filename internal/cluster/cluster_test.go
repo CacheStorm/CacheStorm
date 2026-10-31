@@ -234,3 +234,59 @@ func TestClaimSlot(t *testing.T) {
 		t.Fatalf("%+v %+v", c.Slot(5), c.Slot(10))
 	}
 }
+
+func TestRejoinAndWritableDelays(t *testing.T) {
+	c := New("", Options{})
+	c.bus = &bus{timeout: 1000}
+	c.mu.Lock()
+	c.addSlotLocked(c.myself, 0)
+	others := []*Node{{ID: otherID, Flags: FlagMaster}, {ID: strings.Repeat("2", 40), Flags: FlagMaster}}
+	for i, n := range others {
+		c.addNodeLocked(n)
+		c.addSlotLocked(n, i+1)
+	}
+	c.updateStateLocked()
+	if !c.ok {
+		t.Fatal("a cluster with every master reachable must be ok")
+	}
+	for _, n := range others {
+		n.Flags |= FlagPFail
+	}
+	c.updateStateLocked()
+	if c.ok || c.minorityTime == 0 {
+		t.Fatal("a master in the minority must be down")
+	}
+	for _, n := range others {
+		n.Flags &^= FlagPFail
+	}
+	c.updateStateLocked()
+	if c.ok {
+		t.Fatal("a master back from the minority served writes before the rejoin delay")
+	}
+	c.minorityTime -= minRejoinDelay*2 + 1
+	c.updateStateLocked()
+	if !c.ok {
+		t.Fatal("the rejoin delay did not end")
+	}
+	c.mu.Unlock()
+
+	path := filepath.Join(t.TempDir(), "nodes.conf")
+	conf := c.Config()
+	if err := os.WriteFile(path, []byte(conf), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reopened, _, err := Open(path, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reopened.Healthy() {
+		t.Fatal("a master restarted next to other nodes served writes before the writable delay")
+	}
+	reopened.mu.Lock()
+	reopened.writableAt = 0
+	reopened.updateStateLocked()
+	reopened.mu.Unlock()
+	if !reopened.Healthy() {
+		t.Fatal("the writable delay did not end")
+	}
+}

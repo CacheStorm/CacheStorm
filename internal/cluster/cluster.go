@@ -147,6 +147,11 @@ type Cluster struct {
 	lastVoteEpoch uint64
 	ok            bool
 	size          int
+	// minorityTime is when this node last saw fewer than a majority of the
+	// masters reachable; writableAt is when a master restarted from
+	// nodes.conf may first serve writes.
+	minorityTime int64
+	writableAt   int64
 
 	ipLearnable bool
 	blacklist   map[string]int64
@@ -224,6 +229,7 @@ func Open(path string, opts Options) (c *Cluster, created bool, err error) {
 		return nil, false, fmt.Errorf("cluster config %s: %w", path, err)
 	}
 	c.path, c.opts = path, opts
+	c.writableAt = nowMs() + writableDelay
 	c.mu.Lock()
 	c.updateMyselfFlagsLocked()
 	c.updateStateLocked()
@@ -336,6 +342,11 @@ func (c *Cluster) Healthy() bool {
 }
 
 func (c *Cluster) updateStateLocked() {
+	now := nowMs()
+	master := !c.myself.replica()
+	if master && !c.ok && now < c.writableAt && len(c.nodes) > 1 {
+		return
+	}
 	ok := true
 	if c.opts.RequireFullCoverage {
 		for _, n := range &c.owner {
@@ -354,10 +365,23 @@ func (c *Cluster) updateStateLocked() {
 			}
 		}
 	}
+	c.size = size
 	if reachable < size/2+1 {
 		ok = false
+		if size > 0 {
+			c.minorityTime = now
+		}
 	}
-	c.ok, c.size = ok, size
+	if ok && !c.ok && master && c.minorityTime != 0 {
+		delay := int64(maxRejoinDelay)
+		if c.bus != nil {
+			delay = min(max(c.bus.timeout, minRejoinDelay), maxRejoinDelay)
+		}
+		if now-c.minorityTime < delay {
+			return
+		}
+	}
+	c.ok = ok
 }
 
 func (c *Cluster) addSlotLocked(n *Node, slot int) {

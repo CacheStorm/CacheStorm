@@ -103,7 +103,7 @@ Durum (27 Ekim 2026): **tamamlandı.** Replikasyon tek sahipli `internal/replica
 2. Tamamlandı: cluster, gossip, hash-slot yönlendirme ve failover sunucuya bağlı.
 3. Tamamlandı: REPLICAOF/SYNC/PSYNC/backlog/ACK iki ve üç gerçek süreçle doğrulanıyor.
 4. Tamamlandı: CLUSTER SETSLOT/COUNTKEYSINSLOT/GETKEYSINSLOT, MIGRATE ve RESTORE-ASKING.
-5. Tamamlandı: düğüm kaybı, eski master'ın dönüşü ve slot taşıma veri eşitliğiyle doğrulanıyor. Replika göçü (`cluster-migration-barrier`, `cluster-allow-replica-migration`) ve `cluster-replica-no-failover` 31 Ekim 2026'da eklendi. Açık kalan: Redis'in yeniden katılma gecikmeleri.
+5. Tamamlandı: düğüm kaybı, eski master'ın dönüşü ve slot taşıma veri eşitliğiyle doğrulanıyor. Replika göçü (`cluster-migration-barrier`, `cluster-allow-replica-migration`) ve `cluster-replica-no-failover` 31 Ekim 2026'da eklendi. Redis'in yeniden katılma gecikmeleri de eklendi.
 
 Çıkış ölçütü: sadece paket testleri değil, süreçlerin açılıp kapandığı tekrarlanabilir bir kümede veri kaybı/çakışma koşulları ve destek sınırları ölçülür. Bu ölçüt sağlanmadan dağıtık production desteği ilan edilmez.
 

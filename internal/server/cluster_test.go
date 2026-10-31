@@ -285,7 +285,13 @@ func TestClusterRedirections(t *testing.T) {
 	if got := c.str("CLUSTER", "SETSLOT", "3999", "BOGUS"); got != "ERR:ERR Invalid CLUSTER SETSLOT action or number of arguments. Try CLUSTER HELP" {
 		t.Fatalf("SETSLOT bad action: %s", got)
 	}
+	// A master restarted from nodes.conf next to other nodes serves writes
+	// only after writableDelay, as in Redis.
 	info := c.str("CLUSTER", "INFO")
+	for deadline := time.Now().Add(5 * time.Second); !strings.Contains(info, "cluster_state:ok\r\n") && time.Now().Before(deadline); {
+		time.Sleep(50 * time.Millisecond)
+		info = c.str("CLUSTER", "INFO")
+	}
 	if !strings.Contains(info, "cluster_known_nodes:2\r\n") || !strings.Contains(info, "cluster_size:2\r\n") || !strings.Contains(info, "cluster_state:ok\r\n") {
 		t.Fatalf("CLUSTER INFO:\n%s", info)
 	}

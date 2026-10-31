@@ -232,6 +232,10 @@ operator guide is [Running a cluster](./09-cluster.md).
   changes `cluster-replica-no-failover`, `cluster-allow-replica-migration`,
   `cluster-migration-barrier`, `cluster-require-full-coverage` and
   `cluster-allow-reads-when-down` at run time.
+- **Rejoin delays.** A master that was in the minority waits `node_timeout`
+  (between 0.5 s and 5 s) after it sees a majority again before it serves
+  writes, and a master restarted from `nodes.conf` next to other nodes waits
+  2 s, so either one learns about a failover first, as in Redis.
 - `REPLICAOF` is refused in cluster mode, and `replication.role: replica`
   cannot be combined with it.
 

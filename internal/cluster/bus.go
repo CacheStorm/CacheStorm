@@ -25,6 +25,13 @@ const (
 	failUndoMult     = 2
 	pongClockSkewMs  = 500
 	minHandshakeTime = time.Second
+	// minRejoinDelay and maxRejoinDelay bound how long a master that was in
+	// the minority waits, once it sees a majority again, before it serves
+	// writes (CLUSTER_MIN/MAX_REJOIN_DELAY); writableDelay is how long a
+	// master restarted from nodes.conf waits (CLUSTER_WRITABLE_DELAY).
+	minRejoinDelay = 500
+	maxRejoinDelay = 5000
+	writableDelay  = 2000
 )
 
 func nowMs() int64 { return time.Now().UnixMilli() }
