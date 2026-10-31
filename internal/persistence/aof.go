@@ -824,9 +824,11 @@ func (rw *AOFRewriter) writeBatched(w *bufio.Writer, name, key string, width int
 // writeValueCommands emits router-executable commands that reconstruct the
 // typed value on AOF replay, instead of flattening every type to SET.
 func (rw *AOFRewriter) writeValueCommands(w *bufio.Writer, key string, value store.Value) error {
-	// Values with no commands that rebuild them in one step are restored
-	// from their DUMP payload.
-	if _, ok := value.(store.ExtensionValue); ok {
+	// Values with no commands that rebuild them in one step (a time series
+	// with its settings and compaction rules, the probabilistic structures)
+	// are restored from their DUMP payload.
+	_, isSeries := value.(*store.TimeSeriesValue)
+	if _, ok := value.(store.ExtensionValue); ok || isSeries {
 		payload, err := EncodeDump(value)
 		if err != nil {
 			return err
@@ -930,50 +932,6 @@ func (rw *AOFRewriter) writeValueCommands(w *bufio.Writer, key string, value sto
 		// stream already present.
 		if err := rw.writeStreamGroups(w, key, vt); err != nil {
 			return err
-		}
-		return nil
-
-	case *store.TimeSeriesValue:
-		vt.RLock()
-		retentionMS := int64(vt.Retention / time.Millisecond)
-		labels := make(map[string]string, len(vt.Labels))
-		for k, val := range vt.Labels {
-			labels[k] = val
-		}
-		samples := make([]store.TimeSeriesSample, len(vt.Samples))
-		copy(samples, vt.Samples)
-		vt.RUnlock()
-		createArgs := []string{key}
-		if retentionMS > 0 {
-			createArgs = append(createArgs, "RETENTION", strconv.FormatInt(retentionMS, 10))
-		}
-		if len(labels) > 0 {
-			createArgs = append(createArgs, "LABELS")
-			for k, val := range labels {
-				createArgs = append(createArgs, k, val)
-			}
-		}
-		if err := rw.writeCommand(w, "TS.CREATE", createArgs...); err != nil {
-			return err
-		}
-		for _, sample := range samples {
-			addArgs := []string{
-				key,
-				strconv.FormatInt(sample.Timestamp, 10),
-				strconv.FormatFloat(sample.Value, 'f', -1, 64),
-			}
-			// LABELS must come last: cmdTSADD reads label key/value pairs from
-			// the keyword to the end of the argument list, so anything after it
-			// would be swallowed as another label.
-			if len(sample.Labels) > 0 {
-				addArgs = append(addArgs, "LABELS")
-				for k, val := range sample.Labels {
-					addArgs = append(addArgs, k, val)
-				}
-			}
-			if err := rw.writeCommand(w, "TS.ADD", addArgs...); err != nil {
-				return err
-			}
 		}
 		return nil
 

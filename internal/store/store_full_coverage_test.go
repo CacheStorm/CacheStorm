@@ -1178,68 +1178,6 @@ func TestConsumerGroup_GetPending(t *testing.T) {
 // timeseries.go coverage tests
 // =============================
 
-func TestTimeSeries_AddWithLabels_ZeroTimestamp(t *testing.T) {
-	ts := NewTimeSeriesValue(0)
-	ts.AddWithLabels(0, 42.0, map[string]string{"env": "prod"})
-	if ts.Len() != 1 {
-		t.Fatalf("expected 1, got %d", ts.Len())
-	}
-	labels := ts.GetLabels()
-	if labels["env"] != "prod" {
-		t.Fatalf("expected 'prod', got %s", labels["env"])
-	}
-}
-
-func TestTimeSeries_Add_WithRetention(t *testing.T) {
-	ts := NewTimeSeriesValue(time.Millisecond)
-	ts.Add(time.Now().Add(-2*time.Second).UnixMilli(), 1.0)
-	// Trigger retention cleanup by adding new sample
-	time.Sleep(2 * time.Millisecond)
-	ts.Add(0, 2.0)
-	if ts.Len() < 1 {
-		t.Fatal("expected at least 1 sample")
-	}
-}
-
-func TestTimeSeries_RangeWithCount(t *testing.T) {
-	ts := NewTimeSeriesValue(0)
-	now := time.Now().UnixMilli()
-	ts.Add(now, 1.0)
-	ts.Add(now+1, 2.0)
-	ts.Add(now+2, 3.0)
-
-	// With count
-	samples := ts.RangeWithCount(now, now+2, 2)
-	if len(samples) != 2 {
-		t.Fatalf("expected 2, got %d", len(samples))
-	}
-
-	// Count 0 (no limit)
-	samples = ts.RangeWithCount(now, now+2, 0)
-	if len(samples) != 3 {
-		t.Fatalf("expected 3, got %d", len(samples))
-	}
-
-	// Count > samples
-	samples = ts.RangeWithCount(now, now+2, 100)
-	if len(samples) != 3 {
-		t.Fatalf("expected 3, got %d", len(samples))
-	}
-}
-
-func TestTimeSeries_Aggregation_Default(t *testing.T) {
-	ts := NewTimeSeriesValue(0)
-	now := int64(1000)
-	ts.Add(now, 10)
-	ts.Add(now+1, 20)
-
-	// Default aggregation type (unknown type falls to default)
-	result := ts.Aggregation(now, now+1, "unknown_type", 1000)
-	if len(result) != 1 {
-		t.Fatalf("expected 1 bucket, got %d", len(result))
-	}
-}
-
 // =============================
 // timing_wheel.go coverage tests
 // =============================
@@ -2361,23 +2299,6 @@ func TestStreamValue_String_MultipleFields(t *testing.T) {
 	s := sv.String()
 	if !strings.Contains(s, "1-0") {
 		t.Fatalf("expected '1-0' in string, got %s", s)
-	}
-}
-
-// timeseries.go:255 - Aggregation: min check
-func TestTimeSeries_Aggregation_MinCheck(t *testing.T) {
-	ts := NewTimeSeriesValue(0)
-	now := int64(1000)
-	ts.Add(now, 10)
-	ts.Add(now+1, 5)
-	ts.Add(now+2, 20)
-
-	result := ts.Aggregation(now, now+2, "min", 1000)
-	if len(result) != 1 {
-		t.Fatalf("expected 1, got %d", len(result))
-	}
-	if result[0].Value != 5 {
-		t.Fatalf("expected min 5, got %f", result[0].Value)
 	}
 }
 

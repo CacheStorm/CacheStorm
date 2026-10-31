@@ -33,6 +33,7 @@ var aclNoKeyCommands = map[string]bool{
 	"SCRIPT": true, "SELECT": true, "SHUTDOWN": true, "SLAVEOF": true, "SLOWLOG": true,
 	"SUBSCRIBE": true, "SWAPDB": true, "TIME": true, "UNSUBSCRIBE": true,
 	"UNWATCH": true, "WAIT": true, "RANDOMKEY": true, "TS.QUERYINDEX": true,
+	"TS.MGET": true, "TS.MRANGE": true, "TS.MREVRANGE": true,
 }
 
 // aclSingleKeyCommands take the key as their first argument.
@@ -226,6 +227,12 @@ func aclKeysForCommand(cmd string, args [][]byte) []string {
 			keys = append(keys, string(args[i]))
 		}
 		return keys
+	case "TS.CREATERULE", "TS.DELETERULE":
+		// TS.CREATERULE sourceKey destKey ...
+		if len(args) < 2 {
+			return nil
+		}
+		return toStrings(args[:2])
 	case "JSON.DEBUG":
 		// JSON.DEBUG MEMORY key [path]
 		if len(args) >= 2 && strings.EqualFold(string(args[0]), "MEMORY") {

@@ -103,6 +103,7 @@ func TestAOFRewriteRoundTripPreservesTypes(t *testing.T) {
 	command.RegisterJSONCommands(router)
 	command.RegisterStreamCommands(router)
 	command.RegisterTSCommands(router)
+	command.RegisterKeyCommands(router)
 
 	for i, cmd := range commands {
 		var respBuf bytes.Buffer

@@ -1,7 +1,12 @@
 package persistence
 
 import (
+	"bufio"
+	"bytes"
+	"fmt"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/cachestorm/cachestorm/internal/store"
 )
@@ -20,7 +25,8 @@ func TestDumpPrivateTypesRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	ts := store.NewTimeSeriesValue(0)
-	ts.AddWithLabels(1000, 1.5, map[string]string{"a": "b"})
+	ts.SetLabels([]string{"a"}, []string{"b"})
+	ts.Upsert(1000, 1.5, "") //nolint:errcheck
 	for _, value := range []store.Value{stream, store.NewStreamValue(0), ts, store.MustParseJSONValue(`{"k":"v"}`)} {
 		payload, err := EncodeDump(value)
 		if err != nil {
@@ -54,4 +60,36 @@ func mustDump(t *testing.T, v store.Value) []byte {
 		t.Fatal(err)
 	}
 	return b
+}
+
+func TestTimeSeriesSettingsSurviveDumpAndAOF(t *testing.T) {
+	ts := store.NewTimeSeriesValue(5 * time.Second)
+	ts.SetLabels([]string{"z", "a"}, []string{"1", "2"})
+	ts.DuplicatePolicy, ts.ChunkSize, ts.IgnoreMaxTimeDiff, ts.IgnoreMaxValDiff = "SUM", 128, 10, 0.5
+	ts.Rules = []store.TSRule{{Dest: "dst", Aggregation: "avg", Bucket: 10, Open: []store.TimeSeriesSample{{Timestamp: 1, Value: 2}}}}
+	ts.SourceKey = "src"
+	ts.Upsert(1, 2, "") //nolint:errcheck
+	payload, err := EncodeDump(ts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	back, err := DecodeDump(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := back.(*store.TimeSeriesValue)
+	if got.Policy() != "SUM" || got.ChunkSize != 128 || got.IgnoreMaxValDiff != 0.5 || got.SourceKey != "src" ||
+		len(got.Rules) != 1 || len(got.Rules[0].Open) != 1 || got.Retention != 5*time.Second ||
+		fmt.Sprint(got.LabelList()) != "[[z 1] [a 2]]" || len(got.Samples) != 1 {
+		t.Fatalf("decoded series = %+v", got)
+	}
+	var out bytes.Buffer
+	w := bufio.NewWriter(&out)
+	if err := (&AOFRewriter{}).writeValueCommands(w, "k", ts); err != nil {
+		t.Fatal(err)
+	}
+	w.Flush()
+	if !strings.Contains(out.String(), "RESTORE") {
+		t.Fatalf("a time series must be rewritten as RESTORE, got %q", out.String())
+	}
 }

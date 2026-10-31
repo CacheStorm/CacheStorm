@@ -75,7 +75,7 @@ var writeCommands = map[string]bool{
 	"JSON.NUMINCRBY": true, "JSON.NUMMULTBY": true, "JSON.TOGGLE": true, "JSON.CLEAR": true,
 	"JSON.ARRAPPEND": true, "JSON.ARRINSERT": true, "JSON.ARRPOP": true, "JSON.ARRTRIM": true, "JSON.STRAPPEND": true,
 	"TS.ADD": true, "TS.CREATE": true, "TS.DEL": true, "TS.ALTER": true,
-	"TS.INCRBY": true, "TS.DECRBY": true, "TS.MADD": true,
+	"TS.INCRBY": true, "TS.DECRBY": true, "TS.MADD": true, "TS.CREATERULE": true, "TS.DELETERULE": true,
 	"BF.RESERVE": true, "BF.ADD": true, "BF.MADD": true, "BF.INSERT": true,
 	"CF.RESERVE": true, "CF.ADD": true, "CF.ADDNX": true, "CF.INSERT": true, "CF.INSERTNX": true, "CF.DEL": true,
 	"CMS.INITBYDIM": true, "CMS.INITBYPROB": true, "CMS.INCRBY": true, "CMS.MERGE": true,

@@ -309,8 +309,6 @@ const (
 	maxExpireAtMillis  = 9223372036854 // MaxInt64 / time.Millisecond
 )
 
-var errInvalidExpireTime = errors.New("ERR invalid expire time")
-
 const (
 	expireFlagNX = 1 << iota
 	expireFlagXX

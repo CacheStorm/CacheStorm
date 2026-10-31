@@ -35,7 +35,9 @@ func TestPersistenceJSONStreamTSValueRaceX(t *testing.T) {
 				t.Error(err)
 				return
 			}
-			tsVal.Add(int64(100+i), float64(i))
+			tsVal.Lock()
+			tsVal.Upsert(int64(100+i), float64(i), "") //nolint:errcheck
+			tsVal.Unlock()
 		}
 	}()
 	go func() {
@@ -77,7 +79,7 @@ func TestPersistenceJSONStreamTSValueRaceX(t *testing.T) {
 	if streamLen != 1+iterations {
 		t.Fatalf("FAIL post-join control: stream=%d, want %d", streamLen, 1+iterations)
 	}
-	if latest := tsVal.Latest(); latest == nil || latest.Timestamp != int64(100+iterations-1) {
+	if latest, ok := tsVal.Last(); !ok || latest.Timestamp != int64(100+iterations-1) {
 		t.Fatalf("FAIL post-join control: latest=%v", latest)
 	}
 	var final bytes.Buffer

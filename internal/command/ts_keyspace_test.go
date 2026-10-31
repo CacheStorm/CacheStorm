@@ -39,7 +39,7 @@ func TestTimeSeriesLiveInTheKeyspace(t *testing.T) {
 		{{"TS.QUERYINDEX", "room!="}, {"-ERR TSDB: please provide at least one matcher\r\n"}},
 		{{"TS.QUERYINDEX", "sensor"}, {"-ERR TSDB: failed parsing labels\r\n"}},
 		{{"SET", "s", "v"}, {"+OK\r\n"}},
-		{{"TS.ADD", "s", "1", "1"}, {"-WRONGTYPE Operation against a key holding the wrong kind of value\r\n"}},
+		{{"TS.ADD", "s", "1", "1"}, {"-ERR TSDB: the key is not a TSDB key\r\n"}},
 		{{"GET", "temp:2"}, {"-WRONGTYPE Operation against a key holding the wrong kind of value\r\n"}},
 		{{"DEL", "temp:2"}, {":1\r\n"}},
 		{{"TS.GET", "temp:2"}, {"-ERR TSDB: the key does not exist\r\n"}},

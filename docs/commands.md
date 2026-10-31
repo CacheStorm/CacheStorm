@@ -413,22 +413,29 @@ JSON.DEBUG MEMORY key [path] | HELP
 
 ## Time Series Commands
 
+These follow RedisTimeSeries, the time series module built into Redis 8, and were checked against Redis 8.2. A series is a key of type `TSDB-TYPE`: it lives in the selected database, expires, is deleted, renamed and flushed like any key, and is saved in snapshots and the AOF (with its settings and compaction rules) and replicated.
+
 ```
-TS.CREATE key [RETENTION retentionTime] [ENCODING encoding] [CHUNK_SIZE size] [DUPLICATE_POLICY policy] [LABELS label value [label value ...]]
-TS.ALTER key [RETENTION retentionTime] [CHUNK_SIZE size] [DUPLICATE_POLICY policy] [LABELS label value [label value ...]]
-TS.ADD key timestamp value [RETENTION retentionTime] [ENCODING encoding] [CHUNK_SIZE size] [ON_DUPLICATE policy] [LABELS label value [label value ...]]
+TS.CREATE key [RETENTION ms] [ENCODING COMPRESSED|UNCOMPRESSED] [CHUNK_SIZE size] [DUPLICATE_POLICY policy] [IGNORE maxTimeDiff maxValDiff] [LABELS label value ...]
+TS.ALTER key [RETENTION ms] [CHUNK_SIZE size] [DUPLICATE_POLICY policy] [IGNORE maxTimeDiff maxValDiff] [LABELS label value ...]
+TS.ADD key timestamp|* value [RETENTION ms] [ENCODING ...] [CHUNK_SIZE size] [DUPLICATE_POLICY policy] [ON_DUPLICATE policy] [IGNORE ...] [LABELS ...]
 TS.MADD key timestamp value [key timestamp value ...]
-TS.INCRBY key value [TIMESTAMP timestamp] [RETENTION retentionTime] [UNCOMPRESSED]
-TS.DECRBY key value [TIMESTAMP timestamp] [RETENTION retentionTime] [UNCOMPRESSED]
+TS.INCRBY key addend [TIMESTAMP timestamp] [RETENTION ms] [UNCOMPRESSED] [CHUNK_SIZE size] [LABELS ...]
+TS.DECRBY key subtrahend [TIMESTAMP timestamp] [...]
 TS.DEL key fromTimestamp toTimestamp
-TS.RANGE key fromTimestamp toTimestamp [COUNT count] [AGGREGATION aggregationType timeBucket [BUCKETTIMESTAMP bt] [EMPTY]]
-TS.REVRANGE key fromTimestamp toTimestamp [COUNT count] [AGGREGATION aggregationType timeBucket [BUCKETTIMESTAMP bt] [EMPTY]]
-TS.GET key
+TS.GET key [LATEST]
+TS.MGET [LATEST] [WITHLABELS | SELECTED_LABELS label ...] FILTER filter ...
+TS.RANGE key from to [LATEST] [FILTER_BY_TS ts ...] [FILTER_BY_VALUE min max] [COUNT count] [[ALIGN align] AGGREGATION aggregator bucketDuration [BUCKETTIMESTAMP -|+|~] [EMPTY]]
+TS.REVRANGE key from to [same options]
+TS.MRANGE from to [range options] [WITHLABELS | SELECTED_LABELS label ...] FILTER filter ... [GROUPBY label REDUCE reducer]
+TS.MREVRANGE from to [same options]
+TS.CREATERULE sourceKey destKey AGGREGATION aggregator bucketDuration [alignTimestamp]
+TS.DELETERULE sourceKey destKey
 TS.INFO key [DEBUG]
-TS.QUERYINDEX filter [filter ...]
+TS.QUERYINDEX filter ...
 ```
 
-Time series are ordinary keys of type `TSDB-TYPE`: they live in the selected database, expire, are deleted, renamed and flushed like any key, and are saved in snapshots, the AOF and replicated. Reading a missing series is an error (`ERR TSDB: the key does not exist`), and `TS.CREATE` on an existing key fails. `TS.QUERYINDEX` takes RedisTimeSeries filters (`label=value`, `label!=value`, `label=`, `label!=`, `label=(v1,v2)`); at least one must be a `label=value` matcher. It scans the database's keys.
+Samples stay in timestamp order; an older sample is inserted in place unless it falls outside the retention period. A duplicate timestamp follows the series' `DUPLICATE_POLICY` (`BLOCK` by default; `FIRST`, `LAST`, `MIN`, `MAX`, `SUM`) or `ON_DUPLICATE`. Aggregators are `avg`, `sum`, `min`, `max`, `range`, `count`, `first`, `last`, `std.p`, `std.s`, `var.p`, `var.s` and `twa`. A compaction rule aggregates the source's samples per bucket into the destination when a sample of a later bucket arrives. Filters are `label=value`, `label!=value`, `label=`, `label!=` and `label=(v1,v2)`; at least one must be a `label=value` matcher, and `TS.MGET`, `TS.MRANGE` and `TS.QUERYINDEX` scan the database's keys. Sample values reply as simple strings in RedisTimeSeries' format (`1.5`, `5E-1`, `1E16`), in RESP3 as well.
 
 ---
 

@@ -116,6 +116,8 @@ func TestModuleCommandKeys(t *testing.T) {
 		{"BF.ADD k x", "k"},
 		{"JSON.DEBUG MEMORY k $", "k"},
 		{"JSON.DEBUG HELP", ""},
+		{"TS.CREATERULE a b AGGREGATION avg 10", "a b"},
+		{"TS.MRANGE - + FILTER a=b", ""},
 	} {
 		args := strings.Fields(c.cmd)
 		if got := strings.Join(CommandKeys(args[0], bytesArgs(args[1:]...)), " "); got != c.want {
