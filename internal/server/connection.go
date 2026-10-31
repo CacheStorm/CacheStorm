@@ -37,7 +37,12 @@ type connectionOptions struct {
 }
 
 type Connection struct {
-	ID int64
+	// fd is the socket's file descriptor, -1 when it has none (CLIENT LIST);
+	// readBufSize and writeBufSize are the sizes of its buffers.
+	fd           int
+	readBufSize  int
+	writeBufSize int
+	ID           int64
 	// ctx is the context of the running command, reset for each one.
 	ctx command.Context
 	// waitHold is the gate hold a blocking command releases while it
@@ -356,6 +361,9 @@ func newConnection(id int64, conn net.Conn, s *store.Store, r *command.Router, p
 		createdAt:    time.Now(),
 		writeTimeout: defaultWriteTimeout,
 		transaction:  command.NewTransaction(),
+		fd:           socketFD(conn),
+		readBufSize:  opts.readBufferSize,
+		writeBufSize: opts.writeBufferSize,
 	}
 	c.info.multi = -1
 	// Keep-alive was set on the raw TCP connection above, before this wrapper,

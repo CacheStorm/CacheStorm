@@ -56,6 +56,18 @@ func TestClientListAndInfo(t *testing.T) {
 	if other == nil || other["flags"] != "P" || other["sub"] != "1" {
 		t.Fatalf("subscriber CLIENT LIST line = %v", other)
 	}
+	if fd, _ := strconv.Atoi(mine["fd"]); fd <= 0 || mine["rbs"] == "0" || mine["tot-mem"] == "0" {
+		t.Fatalf("fd, rbs and tot-mem are not filled in: %v", mine)
+	}
+	a.do("WATCH", "w1", "w2")
+	a.do("MULTI")
+	a.do("SET", "k", "abc")
+	observer := dialRepl(t, s)
+	line := clientLines(t, observer.do("CLIENT", "LIST", "ID", aid))[0]
+	if line["watch"] != "2" || line["multi"] != "1" || line["multi-mem"] != "7" {
+		t.Fatalf("watch, multi and multi-mem of a client in MULTI: %v", line)
+	}
+	a.do("DISCARD")
 	if got := clientLines(t, a.do("CLIENT", "LIST", "TYPE", "pubsub")); len(got) != 1 || got[0]["id"] == aid {
 		t.Fatalf("CLIENT LIST TYPE pubsub = %v", got)
 	}

@@ -156,7 +156,7 @@ func (c *Connection) listLine(now time.Time, redirect int64) string {
 	b.WriteString("id=" + strconv.FormatInt(c.ID, 10))
 	b.WriteString(" addr=" + c.conn.RemoteAddr().String())
 	b.WriteString(" laddr=" + c.conn.LocalAddr().String())
-	b.WriteString(" fd=-1 name=" + info.name)
+	b.WriteString(" fd=" + strconv.Itoa(c.fd) + " name=" + info.name)
 	b.WriteString(" age=" + strconv.FormatInt(int64(now.Sub(c.createdAt)/time.Second), 10))
 	b.WriteString(" idle=" + strconv.FormatInt(int64(now.Sub(info.lastUsed)/time.Second), 10))
 	b.WriteString(" flags=" + flags)
@@ -165,7 +165,14 @@ func (c *Connection) listLine(now time.Time, redirect int64) string {
 	b.WriteString(" psub=" + strconv.FormatInt(psub, 10))
 	b.WriteString(" ssub=" + strconv.FormatInt(ssub, 10))
 	b.WriteString(" multi=" + strconv.Itoa(info.multi))
-	b.WriteString(" watch=0 qbuf=0 qbuf-free=0 argv-mem=0 multi-mem=0 rbs=0 rbp=0 obl=0 oll=0 omem=0 tot-mem=0 events=r")
+	watched, multiMem := 0, int64(0)
+	if c.transaction != nil {
+		watched, multiMem = c.transaction.Footprint()
+	}
+	rbs := strconv.Itoa(c.readBufSize)
+	b.WriteString(" watch=" + strconv.Itoa(watched) + " qbuf=0 qbuf-free=0 argv-mem=0")
+	b.WriteString(" multi-mem=" + strconv.FormatInt(multiMem, 10) + " rbs=" + rbs + " rbp=" + rbs + " obl=0 oll=0 omem=0")
+	b.WriteString(" tot-mem=" + strconv.FormatInt(int64(c.readBufSize+c.writeBufSize)+multiMem, 10) + " events=r")
 	b.WriteString(" cmd=" + info.lastCmd)
 	b.WriteString(" user=" + info.user)
 	if redirect < 0 {

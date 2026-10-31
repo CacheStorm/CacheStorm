@@ -176,6 +176,20 @@ func (t *Transaction) CheckWatchedVersions(getVersion func(key string) int64) bo
 	return true
 }
 
+// Footprint returns the number of watched keys and the bytes of the queued
+// commands, for CLIENT LIST's watch and multi-mem.
+func (t *Transaction) Footprint() (watched int, queuedBytes int64) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for _, qc := range t.queued {
+		queuedBytes += int64(len(qc.cmd))
+		for _, a := range qc.args {
+			queuedBytes += int64(len(a))
+		}
+	}
+	return len(t.watchedKeys), queuedBytes
+}
+
 func (t *Transaction) HasWatchedKeys() bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
