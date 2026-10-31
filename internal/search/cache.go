@@ -1,8 +1,10 @@
 package search
 
 import (
+	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"weak"
 
 	"github.com/cachestorm/cachestorm/internal/store"
@@ -23,73 +25,79 @@ type docCache struct {
 	built   bool
 	dirty   map[string]struct{}
 	stats   *Stats
-	// The postings: documents by term stem, by token (for prefixes) and by
-	// tag value of each TAG field.
-	stems  map[string]docSet
-	tokens map[string]docSet
-	tags   map[string]map[string]docSet
+	// The postings: documents by term stem, and by tag value of each TAG
+	// field (by schema position). A document frequency is a posting's
+	// length.
+	stems map[string][]*Document
+	tags  map[int]map[string][]*Document
+	// bytes estimates the memory the cache holds, for INFO search.
+	bytes atomic.Int64
 }
 
 type docSet map[*Document]struct{}
 
 func (c *docCache) reset() {
+	c.bytes.Store(0)
 	c.docs = make(map[string]*Document)
-	c.stats = NewStats(nil)
-	c.stems = make(map[string]docSet)
-	c.tokens = make(map[string]docSet)
-	c.tags = make(map[string]map[string]docSet)
+	c.stems = make(map[string][]*Document)
+	c.tags = make(map[int]map[string][]*Document)
+	c.stats = &Stats{df: func(stem string) int { return len(c.stems[stem]) }}
 }
 
-func addPosting(m map[string]docSet, k string, d *Document) {
-	set := m[k]
-	if set == nil {
-		set = make(docSet)
-		m[k] = set
-	}
-	set[d] = struct{}{}
+func addPosting(m map[string][]*Document, k string, d *Document) {
+	m[k] = append(m[k], d)
 }
 
-func dropPosting(m map[string]docSet, k string, d *Document) {
-	if set := m[k]; set != nil {
-		delete(set, d)
-		if len(set) == 0 {
-			delete(m, k)
+func dropPosting(m map[string][]*Document, k string, d *Document) {
+	list := m[k]
+	for i, x := range list {
+		if x == d {
+			list[i] = list[len(list)-1]
+			list[len(list)-1] = nil
+			list = list[:len(list)-1]
+			break
 		}
+	}
+	if len(list) == 0 {
+		delete(m, k)
+	} else {
+		m[k] = list
 	}
 }
 
 // index adds (add) or removes a document and its postings.
-func (c *docCache) index(d *Document, add bool) {
+func (c *docCache) index(idx *Index, d *Document, add bool) {
 	if add {
 		c.docs[d.Key] = d
 		c.stats.add(d, 1)
+		c.bytes.Add(d.size())
 	} else {
 		delete(c.docs, d.Key)
 		c.stats.add(d, -1)
+		c.bytes.Add(-d.size())
 	}
-	for st := range d.terms {
+	d.stemSet(func(st string) {
 		if add {
 			addPosting(c.stems, st, d)
 		} else {
 			dropPosting(c.stems, st, d)
 		}
-	}
-	for _, toks := range d.tokens {
-		for _, t := range toks {
-			if add {
-				addPosting(c.tokens, t, d)
-			} else {
-				dropPosting(c.tokens, t, d)
-			}
+	})
+	for i := range idx.Fields {
+		if idx.Fields[i].Type != FieldTag {
+			continue
 		}
-	}
-	for field, tags := range d.tags {
-		m := c.tags[field]
+		m := c.tags[i]
 		if m == nil {
-			m = make(map[string]docSet)
-			c.tags[field] = m
+			m = make(map[string][]*Document)
+			c.tags[i] = m
 		}
-		for _, t := range tags {
+		seen := make(map[string]bool)
+		for _, t := range d.fields[i].strs {
+			if seen[t] {
+				continue
+			}
+			seen[t] = true
 			if add {
 				addPosting(m, t, d)
 			} else {
@@ -186,8 +194,8 @@ func (c *docCache) syncLocked(idx *Index, st *store.Store) {
 		c.reset()
 		st.ForEachLive(func(key string, entry *store.Entry) error { //nolint:errcheck // the callback never fails
 			if idx.Covers(key) {
-				if doc, ok := idx.Load(key, entry); ok {
-					c.index(doc, true)
+				if doc, ok := idx.Load(key, entry, false); ok {
+					c.index(idx, doc, true)
 				}
 			}
 			return nil
@@ -201,17 +209,17 @@ func (c *docCache) syncLocked(idx *Index, st *store.Store) {
 
 func (c *docCache) refreshLocked(idx *Index, st *store.Store, key string) *Document {
 	if old, ok := c.docs[key]; ok {
-		c.index(old, false)
+		c.index(idx, old, false)
 	}
 	entry, ok := st.Peek(key)
 	if !ok {
 		return nil
 	}
-	doc, ok := idx.Load(key, entry)
+	doc, ok := idx.Load(key, entry, false)
 	if !ok {
 		return nil
 	}
-	c.index(doc, true)
+	c.index(idx, doc, true)
 	return doc
 }
 
@@ -267,33 +275,38 @@ func (idx *Index) Search(st *store.Store, n Node, opts QueryOptions) []Hit {
 // candidates returns a superset of the documents n can match; all is true
 // when the postings cannot narrow it.
 func (c *docCache) candidates(idx *Index, n Node) (docSet, bool) {
+	union := func(out docSet, list []*Document) {
+		for _, d := range list {
+			out[d] = struct{}{}
+		}
+	}
 	switch n := n.(type) {
 	case emptyNode:
 		return docSet{}, false
 	case *termNode:
 		if n.phrase != nil {
 			var out docSet
-			for _, w := range n.phrase {
-				out = intersect(out, c.stems[Stem(w)], out == nil)
-			}
-			return out, false
-		}
-		if n.prefix {
-			out := make(docSet)
-			for t, set := range c.tokens {
-				if strings.HasPrefix(t, n.text) {
-					for d := range set {
-						out[d] = struct{}{}
-					}
-				}
+			for i, w := range n.phrase {
+				set := make(docSet)
+				union(set, c.stems[Stem(w)])
+				out = intersect(out, set, i == 0)
 			}
 			return out, false
 		}
 		out := make(docSet)
-		for _, k := range []string{n.stem, Stem(n.text)} {
-			for d := range c.stems[k] {
-				out[d] = struct{}{}
+		if n.prefix {
+			// A token with the prefix has a stem that has it too, or that
+			// the prefix extends.
+			for st, list := range c.stems {
+				if strings.HasPrefix(st, n.text) || strings.HasPrefix(n.text, st) {
+					union(out, list)
+				}
 			}
+			return out, false
+		}
+		union(out, c.stems[n.stem])
+		if st := Stem(n.text); st != n.stem {
+			union(out, c.stems[st])
 		}
 		return out, false
 	case *tagNode:
@@ -308,11 +321,13 @@ func (c *docCache) candidates(idx *Index, n Node) (docSet, bool) {
 			if !f.CaseSensitive {
 				want = strings.ToLower(want)
 			}
-			for t, set := range c.tags[f.Name] {
-				if t == want || prefix && strings.HasPrefix(t, want) {
-					for d := range set {
-						out[d] = struct{}{}
-					}
+			if !prefix {
+				union(out, c.tags[f.pos][want])
+				continue
+			}
+			for t, list := range c.tags[f.pos] {
+				if strings.HasPrefix(t, want) {
+					union(out, list)
 				}
 			}
 		}
@@ -347,11 +362,7 @@ func (c *docCache) candidates(idx *Index, n Node) (docSet, bool) {
 // intersect returns a ∩ b; first means a is not set yet.
 func intersect(a, b docSet, first bool) docSet {
 	if first {
-		out := make(docSet, len(b))
-		for d := range b {
-			out[d] = struct{}{}
-		}
-		return out
+		return b
 	}
 	out := make(docSet)
 	small, large := a, b
@@ -364,4 +375,78 @@ func intersect(a, b docSet, first bool) docSet {
 		}
 	}
 	return out
+}
+
+// Content returns the key's document as it is now, with its content for a
+// reply; nil when the key is gone.
+func (idx *Index) Content(st *store.Store, key string) *Document {
+	entry, ok := st.Peek(key)
+	if !ok {
+		return nil
+	}
+	doc, ok := idx.Load(key, entry, true)
+	if !ok {
+		return nil
+	}
+	return doc
+}
+
+// Summary returns the number of documents, distinct terms and term
+// postings of the index in st, for FT.INFO.
+func (idx *Index) Summary(st *store.Store) (docs, terms, records int) {
+	c := idx.cache(st)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.syncLocked(idx, st)
+	for _, list := range c.stems {
+		records += len(list)
+	}
+	return len(c.docs), len(c.stems), records
+}
+
+// TagValues returns the distinct values of a TAG field in st, sorted.
+func (idx *Index) TagValues(st *store.Store, f *Field) []string {
+	c := idx.cache(st)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.syncLocked(idx, st)
+	out := make([]string, 0, len(c.tags[f.pos]))
+	for t := range c.tags[f.pos] {
+		if t != "" {
+			out = append(out, t)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// size estimates the memory a cached document and its postings take.
+func (d *Document) size() int64 {
+	n := int64(128 + len(d.Key))
+	for _, f := range d.fields {
+		n += 96 + int64(len(f.nums))*8
+		for i, t := range f.strs {
+			n += 16 + int64(len(t))
+			if i < len(f.stems) {
+				n += 16 + 8
+			}
+		}
+		for _, r := range f.raw {
+			n += 16 + int64(len(r))
+		}
+	}
+	return n
+}
+
+// MemoryUsage estimates the memory the index's caches hold.
+func (idx *Index) MemoryUsage() int64 {
+	idx.cacheSet.mu.Lock()
+	defer idx.cacheSet.mu.Unlock()
+	var n int64
+	for k, c := range idx.cacheSet.caches {
+		if k.Value() != nil {
+			n += c.bytes.Load()
+		}
+	}
+	return n
 }

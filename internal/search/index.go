@@ -44,6 +44,7 @@ type Field struct {
 	Separator     byte
 	CaseSensitive bool
 	path          *store.JSONPath
+	pos           int
 }
 
 // Index is an index definition. Args are the FT.CREATE arguments after the
@@ -223,6 +224,7 @@ func parseSchema(args []string, json bool) ([]Field, error) {
 			i++
 		}
 	done:
+		f.pos = len(fields)
 		if json {
 			p, err := store.ParseJSONPath(f.Identifier)
 			if err != nil {

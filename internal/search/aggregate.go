@@ -26,12 +26,7 @@ func (r *Row) Get(name string) (string, bool) {
 		}
 	}
 	if r.doc != nil {
-		if v, ok := r.doc.Value(name); ok {
-			return v, true
-		}
-		if v, ok := r.doc.HashField(name); ok {
-			return v, true
-		}
+		return FieldValue(r.idx, r.doc, name)
 	}
 	return "", false
 }
@@ -93,6 +88,12 @@ func FieldValue(idx *Index, doc *Document, name string) (string, bool) {
 		return "", false
 	}
 	if f := idx.Field(name); f != nil {
+		if raw := doc.fields[f.pos].raw; len(raw) > 0 {
+			return raw[0], true
+		}
+		if nums := doc.fields[f.pos].nums; f.Type == FieldNumeric && len(nums) > 0 {
+			return FormatNumber(nums[0]), true
+		}
 		return doc.HashField(f.Identifier)
 	}
 	return doc.HashField(name)

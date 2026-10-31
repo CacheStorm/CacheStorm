@@ -12,106 +12,132 @@ import (
 	"github.com/cachestorm/cachestorm/internal/store"
 )
 
-// Document is a key as an index reads it: the hash fields in their order
-// (or the JSON document) and the values of each schema field.
+// Document is a key as an index reads it. The indexed form keeps what
+// queries match on: each schema field's tokens and stems, numbers and tags,
+// and the raw value of SORTABLE fields. A full document (Content) also
+// holds the hash fields in their order or the JSON document, for replies.
 type Document struct {
 	Key    string
 	Fields [][2]string
 	JSON   *store.JNode
-	values map[string][]string
-	tokens map[string][]string
-	stems  map[string][]string
-	terms  map[string]bool
-	nums   map[string][]float64
-	tags   map[string][]string
-	length int
+	full   bool
+	fields []docField
+	length int32
 	// entry and value are what the document was read from, to tell when
 	// the key changed since.
 	entry *store.Entry
 	value store.Value
 }
 
+// docField is one schema field of a document, by position in the schema.
+type docField struct {
+	strs  []string // TEXT tokens, TAG tags
+	stems []string // TEXT stems, sharing the token when unchanged
+	nums  []float64
+	raw   []string // full documents and SORTABLE fields
+}
+
 // Load reads key's value as idx indexes it; ok is false when the value is
-// not of the index's type.
-func (idx *Index) Load(key string, entry *store.Entry) (*Document, bool) {
+// not of the index's type. full keeps the content for replies.
+func (idx *Index) Load(key string, entry *store.Entry, full bool) (*Document, bool) {
 	value := entry.Value
-	doc := &Document{Key: key, values: make(map[string][]string), entry: entry, value: value}
+	doc := &Document{Key: key, entry: entry, value: value, full: full, fields: make([]docField, len(idx.Fields))}
+	values := make([][]string, len(idx.Fields))
 	switch v := value.(type) {
 	case *store.HashValue:
 		if idx.JSON {
 			return nil, false
 		}
 		v.RLock()
-		v.Range(func(f string, val []byte) bool {
-			doc.Fields = append(doc.Fields, [2]string{f, string(val)})
-			return true
-		})
-		v.RUnlock()
-		for _, f := range idx.Fields {
-			for _, kv := range doc.Fields {
-				if kv[0] == f.Identifier {
-					doc.values[f.Name] = []string{kv[1]}
-				}
+		if full {
+			v.Range(func(f string, val []byte) bool {
+				doc.Fields = append(doc.Fields, [2]string{f, string(val)})
+				return true
+			})
+		}
+		for i, f := range idx.Fields {
+			if val, ok := v.Fields[f.Identifier]; ok {
+				values[i] = []string{string(val)}
 			}
 		}
+		v.RUnlock()
 	case *store.JSONValue:
 		if !idx.JSON {
 			return nil, false
 		}
 		v.RLock()
-		doc.JSON = v.Root.Clone()
-		v.RUnlock()
-		for _, f := range idx.Fields {
-			for _, m := range f.path.Eval(doc.JSON) {
-				doc.values[f.Name] = append(doc.values[f.Name], jsonScalars(m.Node)...)
+		root := v.Root
+		for i, f := range idx.Fields {
+			for _, m := range f.path.Eval(root) {
+				values[i] = append(values[i], jsonScalars(m.Node)...)
 			}
 		}
+		if full {
+			doc.JSON = root.Clone()
+		}
+		v.RUnlock()
 	default:
 		return nil, false
 	}
-	doc.tokens = make(map[string][]string)
-	doc.stems = make(map[string][]string)
-	doc.terms = make(map[string]bool)
-	doc.nums = make(map[string][]float64)
-	doc.tags = make(map[string][]string)
-	for _, f := range idx.Fields {
+	for i := range idx.Fields {
+		f := &idx.Fields[i]
+		df := &doc.fields[i]
+		if full || f.Sortable {
+			df.raw = values[i]
+		}
 		switch f.Type {
 		case FieldNumeric:
-			for _, raw := range doc.values[f.Name] {
-				if v, err := strconv.ParseFloat(raw, 64); err == nil {
-					doc.nums[f.Name] = append(doc.nums[f.Name], v)
+			for _, raw := range values[i] {
+				if n, err := strconv.ParseFloat(raw, 64); err == nil {
+					df.nums = append(df.nums, n)
 				}
 			}
-			continue
+		case FieldGeo:
+			for _, raw := range values[i] {
+				lonText, latText, ok := strings.Cut(raw, ",")
+				lon, err1 := strconv.ParseFloat(strings.TrimSpace(lonText), 64)
+				lat, err2 := strconv.ParseFloat(strings.TrimSpace(latText), 64)
+				if ok && err1 == nil && err2 == nil {
+					df.nums = append(df.nums, lon, lat)
+				}
+			}
 		case FieldTag:
-			for _, raw := range doc.values[f.Name] {
+			for _, raw := range values[i] {
 				for _, tag := range strings.Split(raw, string(f.Separator)) {
 					tag = strings.TrimSpace(tag)
 					if !f.CaseSensitive {
 						tag = strings.ToLower(tag)
 					}
-					doc.tags[f.Name] = append(doc.tags[f.Name], tag)
+					df.strs = append(df.strs, tag)
 				}
 			}
-			continue
 		case FieldText:
-		default:
-			continue
-		}
-		for _, v := range doc.values[f.Name] {
-			toks := Tokenize(v)
-			doc.tokens[f.Name] = append(doc.tokens[f.Name], toks...)
-			for _, t := range toks {
-				st := Stem(t)
-				doc.stems[f.Name] = append(doc.stems[f.Name], st)
-				doc.terms[st] = true
-				if !idx.Stopwords[t] {
-					doc.length++
+			for _, raw := range values[i] {
+				toks := Tokenize(raw)
+				df.strs = append(df.strs, toks...)
+				for _, t := range toks {
+					df.stems = append(df.stems, Stem(t))
+					if !idx.Stopwords[t] {
+						doc.length++
+					}
 				}
 			}
 		}
 	}
 	return doc, true
+}
+
+// stemSet calls fn once for each distinct stem of the document.
+func (d *Document) stemSet(fn func(stem string)) {
+	seen := make(map[string]struct{})
+	for _, f := range d.fields {
+		for _, st := range f.stems {
+			if _, ok := seen[st]; !ok {
+				seen[st] = struct{}{}
+				fn(st)
+			}
+		}
+	}
 }
 
 // jsonScalars are the indexable values of a JSON match: a scalar, or the
@@ -135,15 +161,7 @@ func jsonScalars(n *store.JNode) []string {
 	}
 }
 
-// Value returns the first value of a field, by attribute.
-func (d *Document) Value(name string) (string, bool) {
-	if v := d.values[name]; len(v) > 0 {
-		return v[0], true
-	}
-	return "", false
-}
-
-// HashField returns a hash field of the document.
+// HashField returns a hash field of a full document.
 func (d *Document) HashField(name string) (string, bool) {
 	for _, kv := range d.Fields {
 		if kv[0] == name {
@@ -627,7 +645,7 @@ func (idx *Index) Match(n Node, doc *Document, opts QueryOptions, stats *Stats) 
 		if f == nil || f.Type != FieldNumeric {
 			return false, 0
 		}
-		for _, v := range doc.nums[f.Name] {
+		for _, v := range doc.fields[f.pos].nums {
 			if (v > n.lo || v == n.lo && !n.loExcl) && (v < n.hi || v == n.hi && !n.hiExcl) {
 				return true, 0
 			}
@@ -638,7 +656,7 @@ func (idx *Index) Match(n Node, doc *Document, opts QueryOptions, stats *Stats) 
 		if f == nil || f.Type != FieldTag {
 			return false, 0
 		}
-		for _, tag := range doc.tags[f.Name] {
+		for _, tag := range doc.fields[f.pos].strs {
 			for _, want := range n.values {
 				prefix := strings.HasSuffix(want, "*")
 				want = strings.TrimSuffix(want, "*")
@@ -656,11 +674,9 @@ func (idx *Index) Match(n Node, doc *Document, opts QueryOptions, stats *Stats) 
 		if f == nil || f.Type != FieldGeo {
 			return false, 0
 		}
-		for _, raw := range doc.values[f.Name] {
-			lonText, latText, ok := strings.Cut(raw, ",")
-			lon, err1 := strconv.ParseFloat(strings.TrimSpace(lonText), 64)
-			lat, err2 := strconv.ParseFloat(strings.TrimSpace(latText), 64)
-			if ok && err1 == nil && err2 == nil && haversineKm(n.lon, n.lat, lon, lat) <= n.radiusKm {
+		coords := doc.fields[f.pos].nums
+		for i := 0; i+1 < len(coords); i += 2 {
+			if haversineKm(n.lon, n.lat, coords[i], coords[i+1]) <= n.radiusKm {
 				return true, 0
 			}
 		}
@@ -716,12 +732,10 @@ func (idx *Index) termMatches(f *Field, token, stem, term, termStem string, pref
 // occurrences, each weighted by its field's weight, as RediSearch's
 // BM25STD scorer counts them.
 func (idx *Index) matchTerm(n *termNode, doc *Document, opts QueryOptions, stats *Stats) (bool, float64) {
-	if n.phrase == nil && !n.prefix && !doc.terms[n.stem] && !doc.terms[Stem(n.text)] {
-		return false, 0
-	}
 	weighted := 0.0
 	for _, f := range idx.textFields(n.fields) {
-		toks, stems := doc.tokens[f.Name], doc.stems[f.Name]
+		df := &doc.fields[f.pos]
+		toks, stems := df.strs, df.stems
 		if n.phrase != nil {
 			for i := 0; i+len(n.phrase) <= len(toks); i++ {
 				all := true
@@ -750,33 +764,18 @@ func (idx *Index) matchTerm(n *termNode, doc *Document, opts QueryOptions, stats
 	return true, stats.bm25(doc, term, weighted)
 }
 
-// Stats are the corpus figures BM25 scoring needs.
+// Stats are the corpus figures BM25 scoring needs; df is a stem's
+// document frequency.
 type Stats struct {
-	Docs    int
-	AvgLen  float64
-	DocFreq map[string]int
-	total   int
+	Docs   int
+	AvgLen float64
+	total  int
+	df     func(stem string) int
 }
 
-// NewStats gathers the corpus statistics of docs.
-func NewStats(docs []*Document) *Stats {
-	s := &Stats{DocFreq: make(map[string]int)}
-	for _, d := range docs {
-		s.add(d, 1)
-	}
-	return s
-}
-
-// add counts doc in (sign 1) or out (sign -1) of the corpus.
 func (s *Stats) add(d *Document, sign int) {
 	s.Docs += sign
-	s.total += sign * d.length
-	for t := range d.terms {
-		s.DocFreq[t] += sign
-		if s.DocFreq[t] <= 0 {
-			delete(s.DocFreq, t)
-		}
-	}
+	s.total += sign * int(d.length)
 	s.AvgLen = 0
 	if s.Docs > 0 {
 		s.AvgLen = float64(s.total) / float64(s.Docs)
@@ -785,10 +784,10 @@ func (s *Stats) add(d *Document, sign int) {
 
 func (s *Stats) bm25(doc *Document, term string, tf float64) float64 {
 	const k1, b = 1.2, 0.75
-	if s == nil || s.Docs == 0 {
+	if s == nil || s.Docs == 0 || s.df == nil {
 		return tf
 	}
-	n := float64(s.DocFreq[Stem(term)])
+	n := float64(s.df(Stem(term)))
 	idf := math.Log(1 + (float64(s.Docs)-n+0.5)/(n+0.5))
 	norm := 1.0
 	if s.AvgLen > 0 {

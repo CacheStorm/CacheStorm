@@ -145,25 +145,7 @@ func cmdFTINFO(ctx *Context) error {
 		}
 		attrs = append(attrs, resp.ArrayValue(a))
 	}
-	docs := indexDocuments(ctx, idx, nil)
-	terms := make(map[string]bool)
-	records := 0
-	for _, d := range docs {
-		for _, f := range idx.Fields {
-			if f.Type != search.FieldText {
-				if _, ok := d.Value(f.Name); ok {
-					records++
-				}
-				continue
-			}
-			if v, ok := d.Value(f.Name); ok {
-				for _, t := range search.Tokenize(v) {
-					terms[t] = true
-					records++
-				}
-			}
-		}
-	}
+	docs, terms, records := idx.Summary(ctx.Store)
 	return ctx.WriteArray([]*resp.Value{
 		resp.SimpleString("index_name"), resp.SimpleString(idx.Name),
 		resp.SimpleString("index_options"), resp.ArrayValue([]*resp.Value{}),
@@ -173,9 +155,9 @@ func cmdFTINFO(ctx *Context) error {
 			resp.SimpleString("default_score"), resp.BulkString(search.FormatNumber(idx.Score)),
 		}),
 		resp.SimpleString("attributes"), resp.ArrayValue(attrs),
-		resp.SimpleString("num_docs"), resp.IntegerValue(int64(len(docs))),
-		resp.SimpleString("max_doc_id"), resp.IntegerValue(int64(len(docs))),
-		resp.SimpleString("num_terms"), resp.IntegerValue(int64(len(terms))),
+		resp.SimpleString("num_docs"), resp.IntegerValue(int64(docs)),
+		resp.SimpleString("max_doc_id"), resp.IntegerValue(int64(docs)),
+		resp.SimpleString("num_terms"), resp.IntegerValue(int64(terms)),
 		resp.SimpleString("num_records"), resp.IntegerValue(int64(records)),
 		resp.SimpleString("indexing"), resp.IntegerValue(0),
 		resp.SimpleString("percent_indexed"), resp.BulkString("1"),
@@ -380,6 +362,13 @@ func cmdFTSEARCH(ctx *Context) error {
 		for i := range hits {
 			h := &hits[i]
 			h.sortKey, h.sortOK = search.FieldValue(idx, h.doc, req.sortBy)
+			if !h.sortOK {
+				// Only SORTABLE fields are kept in the index; others are
+				// read from the key.
+				if full := idx.Content(ctx.Store, h.doc.Key); full != nil {
+					h.sortKey, h.sortOK = search.FieldValue(idx, full, req.sortBy)
+				}
+			}
 			if f, err := strconv.ParseFloat(h.sortKey, 64); err == nil {
 				h.sortNum, h.isNum = f, true
 			}
@@ -421,7 +410,7 @@ func cmdFTSEARCH(ctx *Context) error {
 		h := hits[i]
 		// The documents returned are read again if their key changed in a
 		// way no command reported.
-		if h.doc = idx.Fresh(ctx.Store, h.doc); h.doc == nil {
+		if h.doc = idx.Content(ctx.Store, h.doc.Key); h.doc == nil {
 			continue
 		}
 		out = append(out, resp.BulkString(h.doc.Key))
@@ -518,7 +507,7 @@ func cmdFTAGGREGATE(ctx *Context) error {
 	sort.Slice(found, func(i, j int) bool { return found[i].Doc.Key < found[j].Doc.Key })
 	var rows []*search.Row
 	for _, h := range found {
-		if d := idx.Fresh(ctx.Store, h.Doc); d != nil {
+		if d := idx.Content(ctx.Store, h.Doc.Key); d != nil {
 			rows = append(rows, idx.NewRow(d))
 		}
 	}
@@ -676,25 +665,7 @@ func cmdFTTAGVALS(ctx *Context) error {
 	if f == nil || f.Type != search.FieldTag {
 		return ctx.WriteError(errors.New("No such field `" + ctx.ArgString(1) + "`")) //nolint:staticcheck // RediSearch's reply text
 	}
-	seen := make(map[string]bool)
-	for _, d := range indexDocuments(ctx, idx, nil) {
-		if v, ok := d.Value(f.Name); ok {
-			for _, tag := range strings.Split(v, string(f.Separator)) {
-				tag = strings.TrimSpace(tag)
-				if !f.CaseSensitive {
-					tag = strings.ToLower(tag)
-				}
-				if tag != "" {
-					seen[tag] = true
-				}
-			}
-		}
-	}
-	tags := make([]string, 0, len(seen))
-	for t := range seen {
-		tags = append(tags, t)
-	}
-	sort.Strings(tags)
+	tags := idx.TagValues(ctx.Store, f)
 	out := make([]*resp.Value, len(tags))
 	for i, t := range tags {
 		out[i] = resp.BulkString(t)
@@ -819,7 +790,7 @@ func cmdFTGET(ctx *Context) error {
 	if !exists {
 		return ctx.WriteNullBulkString()
 	}
-	doc, ok := idx.Load(ctx.ArgString(1), entry)
+	doc, ok := idx.Load(ctx.ArgString(1), entry, true)
 	if !ok {
 		return ctx.WriteNullBulkString()
 	}
