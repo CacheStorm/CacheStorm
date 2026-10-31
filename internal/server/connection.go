@@ -357,6 +357,7 @@ func newConnection(id int64, conn net.Conn, s *store.Store, r *command.Router, p
 		writeTimeout: defaultWriteTimeout,
 		transaction:  command.NewTransaction(),
 	}
+	c.info.multi = -1
 	// Keep-alive was set on the raw TCP connection above, before this wrapper,
 	// so the deadline refresh sits between the byte counters and the socket.
 	// The wrapper reads Connection.writeTimeout live, so the configured timeout

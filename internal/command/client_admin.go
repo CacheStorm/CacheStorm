@@ -191,8 +191,11 @@ func cmdClientPause(ctx *Context) error {
 		return ctx.WriteError(arityError("client|pause"))
 	}
 	ms, err := strconv.ParseInt(ctx.ArgString(1), 10, 64)
-	if err != nil || ms < 0 {
+	if err != nil {
 		return ctx.WriteError(errors.New("ERR timeout is not an integer or out of range"))
+	}
+	if ms < 0 {
+		return ctx.WriteError(errors.New("ERR timeout is negative"))
 	}
 	writesOnly := false
 	if ctx.ArgCount() == 3 {
@@ -201,7 +204,7 @@ func cmdClientPause(ctx *Context) error {
 			writesOnly = true
 		case "ALL":
 		default:
-			return ctx.WriteError(ErrSyntaxError)
+			return ctx.WriteError(errors.New("ERR CLIENT PAUSE mode must be WRITE or ALL"))
 		}
 	}
 	if h := clientHooksFor(ctx); h != nil {

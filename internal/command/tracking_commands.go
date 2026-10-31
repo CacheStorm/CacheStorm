@@ -72,6 +72,9 @@ func cmdClientTracking(ctx *Context) error {
 			if i+1 >= ctx.ArgCount() {
 				return ctx.WriteError(ErrSyntaxError)
 			}
+			if opts.Redirect != 0 {
+				return ctx.WriteError(errors.New("ERR A client can only redirect to a single other client"))
+			}
 			id, err := strconv.ParseInt(ctx.ArgString(i+1), 10, 64)
 			if err != nil {
 				return ctx.WriteError(ErrNotInteger)
@@ -105,15 +108,6 @@ func cmdClientTracking(ctx *Context) error {
 	}
 	if h == nil {
 		return ctx.WriteError(errTrackingUnsupported)
-	}
-	if len(opts.Prefixes) > 0 && !opts.BCast {
-		return ctx.WriteError(errors.New("ERR PREFIX option requires BCAST mode to be enabled"))
-	}
-	if opts.OptIn && opts.OptOut {
-		return ctx.WriteError(errors.New("ERR You can't use both OPTIN and OPTOUT"))
-	}
-	if opts.BCast && (opts.OptIn || opts.OptOut) {
-		return ctx.WriteError(errors.New("ERR OPTIN and OPTOUT are not compatible with BCAST"))
 	}
 	if err := h.Enable(ctx.ClientID, ctx.GetSubscriber(), opts); err != nil {
 		return ctx.WriteError(err)

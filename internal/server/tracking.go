@@ -2,6 +2,8 @@ package server
 
 import (
 	"errors"
+	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -95,30 +97,73 @@ func (t *tracker) enable(s *Server, id int64, opts command.TrackingOptions) erro
 			return errors.New("ERR The client ID you want redirect to does not exist")
 		}
 	}
-	t.disableLocked(id)
-	tc := &trackedClient{
-		id:       id,
-		redirect: opts.Redirect,
-		bcast:    opts.BCast,
-		prefixes: opts.Prefixes,
-		optIn:    opts.OptIn,
-		optOut:   opts.OptOut,
-		noLoop:   opts.NoLoop,
+	// Redis' checks, in its order, against the options and the client's
+	// current tracking state.
+	tc := t.clients[id]
+	if len(opts.Prefixes) > 0 && !opts.BCast {
+		return errors.New("ERR PREFIX option requires BCAST mode to be enabled")
 	}
-	t.clients[id] = tc
-	t.tracking.Store(int64(len(t.clients)))
+	if tc != nil && tc.bcast != opts.BCast {
+		return errors.New("ERR You can't switch BCAST mode on/off before disabling tracking for this client, and then re-enabling it with a different mode.") //nolint:staticcheck // Redis reply text
+	}
+	if opts.BCast && (opts.OptIn || opts.OptOut) {
+		return errors.New("ERR OPTIN and OPTOUT are not compatible with BCAST")
+	}
+	if opts.OptIn && opts.OptOut {
+		return errors.New("ERR You can't specify both OPTIN mode and OPTOUT mode")
+	}
+	if tc != nil && (opts.OptIn && tc.optOut || opts.OptOut && tc.optIn) {
+		return errors.New("ERR You can't switch OPTIN/OPTOUT mode before disabling tracking for this client, and then re-enabling it with a different mode.") //nolint:staticcheck // Redis reply text
+	}
+	if opts.BCast {
+		if err := prefixCollision(tc, opts.Prefixes); err != nil {
+			return err
+		}
+	}
+	if tc == nil {
+		tc = &trackedClient{id: id}
+		t.clients[id] = tc
+		t.tracking.Store(int64(len(t.clients)))
+	}
+	// Re-enabling keeps the client's prefixes and adds the new ones.
+	tc.redirect, tc.bcast = opts.Redirect, opts.BCast
+	tc.optIn, tc.optOut, tc.noLoop = opts.OptIn, opts.OptOut, opts.NoLoop
 	if tc.bcast {
-		prefixes := tc.prefixes
+		prefixes := opts.Prefixes
 		if len(prefixes) == 0 {
 			prefixes = []string{""}
 		}
 		for _, p := range prefixes {
+			if i, found := slices.BinarySearch(tc.prefixes, p); !found {
+				tc.prefixes = slices.Insert(tc.prefixes, i, p)
+			}
 			set := t.bcast[p]
 			if set == nil {
 				set = make(map[int64]struct{})
 				t.bcast[p] = set
 			}
 			set[id] = struct{}{}
+		}
+	}
+	return nil
+}
+
+// prefixCollision is Redis' checkPrefixCollisionsOrReply: no two prefixes
+// of a client may be one a prefix of the other.
+func prefixCollision(tc *trackedClient, prefixes []string) error {
+	overlap := func(a, b string) bool { return strings.HasPrefix(a, b) || strings.HasPrefix(b, a) }
+	for i, p := range prefixes {
+		if tc != nil {
+			for _, old := range tc.prefixes {
+				if overlap(old, p) {
+					return fmt.Errorf("ERR Prefix '%s' overlaps with an existing prefix '%s'. Prefixes for a single client must not overlap.", p, old) //nolint:staticcheck // Redis reply text
+				}
+			}
+		}
+		for _, q := range prefixes[i+1:] {
+			if overlap(p, q) {
+				return fmt.Errorf("ERR Prefix '%s' overlaps with another provided prefix '%s'. Prefixes for a single client must not overlap.", p, q) //nolint:staticcheck // Redis reply text
+			}
 		}
 	}
 	return nil

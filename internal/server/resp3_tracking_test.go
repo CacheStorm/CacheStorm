@@ -266,3 +266,36 @@ func TestTrackingAfterAnEarlierError(t *testing.T) {
 		t.Fatalf("invalidated %v", keys)
 	}
 }
+
+func TestTrackingReenableFollowsRedis(t *testing.T) {
+	s := startReplServer(t, nil)
+	c := dialRepl(t, s)
+	for _, step := range []struct {
+		args []string
+		err  string
+	}{
+		{[]string{"CLIENT", "TRACKING", "on", "BCAST", "PREFIX", "a", "PREFIX", "ab"}, "ERR Prefix 'a' overlaps with another provided prefix 'ab'. Prefixes for a single client must not overlap."},
+		{[]string{"CLIENT", "TRACKING", "on", "BCAST", "PREFIX", "b", "PREFIX", "a"}, ""},
+		{[]string{"CLIENT", "TRACKING", "on", "BCAST", "PREFIX", "bc"}, "ERR Prefix 'bc' overlaps with an existing prefix 'b'. Prefixes for a single client must not overlap."},
+		{[]string{"CLIENT", "TRACKING", "on", "BCAST", "PREFIX", "c"}, ""},
+		{[]string{"CLIENT", "TRACKING", "on"}, "ERR You can't switch BCAST mode on/off before disabling tracking for this client, and then re-enabling it with a different mode."},
+		{[]string{"CLIENT", "TRACKING", "off"}, ""},
+		{[]string{"CLIENT", "TRACKING", "on", "OPTIN"}, ""},
+		{[]string{"CLIENT", "TRACKING", "on", "OPTOUT"}, "ERR You can't switch OPTIN/OPTOUT mode before disabling tracking for this client, and then re-enabling it with a different mode."},
+		{[]string{"CLIENT", "TRACKING", "on", "OPTIN", "OPTOUT"}, "ERR You can't specify both OPTIN mode and OPTOUT mode"},
+		{[]string{"CLIENT", "PAUSE", "10", "FOO"}, "ERR CLIENT PAUSE mode must be WRITE or ALL"},
+		{[]string{"CLIENT", "PAUSE", "-1"}, "ERR timeout is negative"},
+	} {
+		got := c.do(step.args...)
+		if step.err == "" && got.Type == resp.TypeError || step.err != "" && got.Err != step.err {
+			t.Fatalf("%v = %+v, want error %q", step.args, got, step.err)
+		}
+	}
+	c.do("CLIENT", "TRACKING", "off")
+	c.do("CLIENT", "TRACKING", "on", "BCAST", "PREFIX", "b", "PREFIX", "a")
+	c.do("CLIENT", "TRACKING", "on", "BCAST", "PREFIX", "c")
+	info := c.do("CLIENT", "TRACKINGINFO")
+	if p := info.Array[5]; len(p.Array) != 3 || string(p.Array[0].Bulk) != "a" || string(p.Array[2].Bulk) != "c" {
+		t.Fatalf("TRACKINGINFO prefixes = %+v, want a, b, c", p)
+	}
+}
