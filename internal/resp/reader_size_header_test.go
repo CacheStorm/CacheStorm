@@ -41,7 +41,7 @@ func TestReadSizeHeaderRejectsSigns(t *testing.T) {
 		"*+2\r\n$3\r\nGET\r\n$1\r\nk\r\n": ErrArrayTooLarge,
 		"*2\r\n$+3\r\nGET\r\n$1\r\nk\r\n": ErrBulkStringTooBig,
 		"*2\r\n$3\r\nGET\r\n$-0\r\n\r\n":  ErrBulkStringTooBig,
-		"*1\r\n*+0\r\n":                   ErrInvalidFormat,
+		"*1\r\n*+0\r\n":                   ExpectedBulkError('*'),
 		"%1\r\n+k\r\n$+0\r\n\r\n":         ErrInvalidFormat,
 	} {
 		if cmd, args, err := NewReader(strings.NewReader(wire)).ReadCommand(); cmd != "" || args != nil || err != want {

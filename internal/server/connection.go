@@ -852,10 +852,12 @@ func isProtocolError(err error) bool {
 	switch err {
 	case resp.ErrInvalidFormat, resp.ErrInvalidType, resp.ErrLineTooLong,
 		resp.ErrUnbalancedQuote, resp.ErrBulkStringTooBig, resp.ErrArrayTooLarge,
-		resp.ErrUnauthenticatedMultibulk, resp.ErrUnauthenticatedBulk:
+		resp.ErrUnauthenticatedMultibulk, resp.ErrUnauthenticatedBulk,
+		resp.ErrInlineTooBig, resp.ErrMultibulkCountTooBig, resp.ErrBulkCountTooBig:
 		return true
 	}
-	return false
+	var expected resp.ExpectedBulkError
+	return errors.As(err, &expected)
 }
 
 func isClosedError(err error) bool {

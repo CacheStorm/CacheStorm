@@ -216,8 +216,8 @@ func TestReadCommandWithIntegerArg(t *testing.T) {
 	input := "*2\r\n$3\r\nGET\r\n:42\r\n"
 	r := NewReader(strings.NewReader(input))
 	cmd, args, err := r.ReadCommand()
-	if err != ErrInvalidFormat || cmd != "" || args != nil {
-		t.Fatalf("expected empty command, nil args, ErrInvalidFormat; got command=%q args=%q error=%v", cmd, args, err)
+	if err != ExpectedBulkError(':') || cmd != "" || args != nil {
+		t.Fatalf("expected empty command, nil args, ExpectedBulkError; got command=%q args=%q error=%v", cmd, args, err)
 	}
 }
 

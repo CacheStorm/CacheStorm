@@ -65,19 +65,20 @@ func TestReadCommandIsNotInline(t *testing.T) {
 func TestReadCommandRejectsNestedArrayWithoutRecursing(t *testing.T) {
 	payload := strings.Repeat("*1\r\n", 5_000_000)
 	_, _, err := NewReader(strings.NewReader(payload)).ReadClientCommand()
-	if err != ErrInvalidFormat {
-		t.Fatalf("nested arrays: err %v, want ErrInvalidFormat", err)
+	if err != ExpectedBulkError('*') {
+		t.Fatalf("nested arrays: err %v, want ExpectedBulkError('*')", err)
 	}
 }
 
 func TestReadCommandBoundsLineLength(t *testing.T) {
-	for _, payload := range []string{
-		strings.Repeat("A", MaxInlineSize+1),
-		"*" + strings.Repeat("1", MaxInlineSize+1),
+	for payload, want := range map[string]error{
+		strings.Repeat("A", MaxInlineSize+1):             ErrInlineTooBig,
+		"*" + strings.Repeat("1", MaxInlineSize+1):       ErrMultibulkCountTooBig,
+		"*1\r\n$" + strings.Repeat("1", MaxInlineSize+1): ErrBulkCountTooBig,
 	} {
 		_, _, err := NewReader(strings.NewReader(payload)).ReadClientCommand()
-		if err != ErrLineTooLong {
-			t.Fatalf("over-long line: err %v, want ErrLineTooLong", err)
+		if err != want {
+			t.Fatalf("over-long line: err %v, want %v", err, want)
 		}
 	}
 }

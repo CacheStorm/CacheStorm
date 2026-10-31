@@ -21,7 +21,17 @@ var (
 	ErrUnauthenticatedBulk      = errors.New("unauthenticated bulk length")
 	// ErrQueryBufferLimit is a command larger than client-query-buffer-limit.
 	ErrQueryBufferLimit = errors.New("query buffer limit reached")
+	// ErrInlineTooBig, ErrMultibulkCountTooBig and ErrBulkCountTooBig are a
+	// line of a client command longer than MaxInlineSize.
+	ErrInlineTooBig         = errors.New("too big inline request")
+	ErrMultibulkCountTooBig = errors.New("too big mbulk count string")
+	ErrBulkCountTooBig      = errors.New("too big bulk count string")
 )
+
+// ExpectedBulkError is a command element that is not a bulk string.
+type ExpectedBulkError byte
+
+func (e ExpectedBulkError) Error() string { return "expected '$', got '" + string(rune(e)) + "'" }
 
 const (
 	MaxBulkStringSize = 512 * 1024 * 1024
@@ -168,7 +178,7 @@ func (r *Reader) ReadCommand() (string, [][]byte, error) {
 		if b != byte(TypeArray) {
 			return "", nil, ErrInvalidFormat
 		}
-		cmd, args, err := r.readMultiBulk()
+		cmd, args, err := r.readMultiBulk(false)
 		if err == errEmptyCommand {
 			continue
 		}
@@ -189,7 +199,7 @@ func (r *Reader) ReadClientCommand() (string, [][]byte, error) {
 		var cmd string
 		var args [][]byte
 		if b == byte(TypeArray) {
-			cmd, args, err = r.readMultiBulk()
+			cmd, args, err = r.readMultiBulk(true)
 		} else {
 			if err := r.rd.UnreadByte(); err != nil {
 				return "", nil, err
@@ -213,8 +223,14 @@ var (
 	ErrUnbalancedQuote = errors.New("unbalanced quotes in request")
 )
 
-func (r *Reader) readMultiBulk() (string, [][]byte, error) {
+// readMultiBulk reads a multibulk command. A client command is held to
+// proto-max-bulk-len, client-query-buffer-limit and, before the client
+// authenticates, Redis' unauthenticated limits; an AOF command is not.
+func (r *Reader) readMultiBulk(client bool) (string, [][]byte, error) {
 	line, err := r.readBoundedLine(true)
+	if err == ErrLineTooLong {
+		return "", nil, ErrMultibulkCountTooBig
+	}
 	if err != nil {
 		return "", nil, err
 	}
@@ -235,7 +251,8 @@ func (r *Reader) readMultiBulk() (string, [][]byte, error) {
 	if count > math.MaxInt32 {
 		return "", nil, ErrArrayTooLarge
 	}
-	if r.unauthenticated && count > unauthMaxArgs {
+	unauth := client && r.unauthenticated
+	if unauth && count > unauthMaxArgs {
 		return "", nil, ErrUnauthenticatedMultibulk
 	}
 
@@ -243,16 +260,19 @@ func (r *Reader) readMultiBulk() (string, [][]byte, error) {
 	// a header the peer chose. size counts the command's bytes against
 	// client-query-buffer-limit.
 	args := make([][]byte, 0, min(count, 16))
-	size, limit := int64(len(line)), queryBufferLimit.Load()
+	size, limit, maxBulk := int64(len(line)), int64(math.MaxInt64), int64(MaxBulkStringSize)
+	if client {
+		limit, maxBulk = queryBufferLimit.Load(), protoMaxBulkLen.Load()
+	}
 	for i := int64(0); i < count; i++ {
 		b, err := r.rd.ReadByte()
 		if err != nil {
 			return "", nil, unexpectedEOF(err)
 		}
 		if b != byte(TypeBulkString) {
-			return "", nil, ErrInvalidFormat
+			return "", nil, ExpectedBulkError(b)
 		}
-		arg, err := r.readCommandBulk(limit - size)
+		arg, err := r.readCommandBulk(limit-size, maxBulk, unauth)
 		if err != nil {
 			return "", nil, unexpectedEOF(err)
 		}
@@ -269,16 +289,19 @@ func (r *Reader) readMultiBulk() (string, [][]byte, error) {
 // readCommandBulk reads one bulk-string argument. A large argument is read
 // in chunks, so the memory held grows with the bytes actually received and a
 // header announcing 512 MB costs nothing until the data arrives.
-func (r *Reader) readCommandBulk(room int64) ([]byte, error) {
+func (r *Reader) readCommandBulk(room, maxBulk int64, unauth bool) ([]byte, error) {
 	line, err := r.readBoundedLine(true)
+	if err == ErrLineTooLong {
+		return nil, ErrBulkCountTooBig
+	}
 	if err != nil {
 		return nil, err
 	}
 	size, ok := parseDecimal(line)
-	if !ok || size > protoMaxBulkLen.Load() {
+	if !ok || size > maxBulk {
 		return nil, ErrBulkStringTooBig
 	}
-	if r.unauthenticated && size > unauthMaxBulk {
+	if unauth && size > unauthMaxBulk {
 		return nil, ErrUnauthenticatedBulk
 	}
 	if size > room {
@@ -308,6 +331,9 @@ func (r *Reader) readCommandBulk(room int64) ([]byte, error) {
 
 func (r *Reader) readInline() (string, [][]byte, error) {
 	line, err := r.readBoundedLine(false)
+	if err == ErrLineTooLong {
+		return "", nil, ErrInlineTooBig
+	}
 	if err != nil {
 		return "", nil, err
 	}

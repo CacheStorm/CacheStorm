@@ -29,7 +29,7 @@ func TestReadCommandRejectsNonBulkElements(t *testing.T) {
 			t.Run(name+"/"+position, func(t *testing.T) {
 				r := NewReader(strings.NewReader(wire + "*1\r\n$4\r\nPING\r\n"))
 				cmd, args, err := r.ReadCommand()
-				want := ErrInvalidFormat
+				var want error = ExpectedBulkError(element[0])
 				if name == "null bulk" {
 					want = ErrBulkStringTooBig
 				}

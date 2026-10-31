@@ -57,3 +57,17 @@ func TestReadClientCommandLimits(t *testing.T) {
 		t.Fatalf("an argument over proto-max-bulk-len: %v", err)
 	}
 }
+
+func TestReadCommandIgnoresClientLimits(t *testing.T) {
+	defer SetQueryBufferLimit(1 << 30)
+	defer SetProtoMaxBulkLen(MaxBulkStringSize)
+	SetQueryBufferLimit(1 << 20)
+	SetProtoMaxBulkLen(1 << 20)
+	value := strings.Repeat("v", 2<<20)
+	wire := "*3\r\n$3\r\nSET\r\n$1\r\nk\r\n$" + strconv.Itoa(len(value)) + "\r\n" + value + "\r\n"
+	r := NewReader(strings.NewReader(wire))
+	r.SetUnauthenticated(true)
+	if _, args, err := r.ReadCommand(); err != nil || len(args) != 2 {
+		t.Fatalf("an AOF command over the client limits: %v", err)
+	}
+}
