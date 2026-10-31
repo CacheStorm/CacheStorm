@@ -368,8 +368,14 @@ func (s *Server) storeHooks() store.StoreHooks {
 		OnEvict:         s.pluginMgr.RunEvictHooks,
 		OnExpire:        s.pluginMgr.RunExpireHooks,
 		OnTagInvalidate: s.pluginMgr.RunTagInvalidateHooks,
-		OnExpireLocked:  s.recordRemoval,
-		OnEvictLocked:   s.recordRemoval,
+		OnExpireLocked: func(st *store.Store, key string) {
+			s.recordRemoval(st, key)
+			s.router.TouchSearchKey(st, key)
+		},
+		OnEvictLocked: func(st *store.Store, key string) {
+			s.recordRemoval(st, key)
+			s.router.TouchSearchKey(st, key)
+		},
 		ExpiryGuard: func(_ *store.Store, key string) func() {
 			return s.gate.acquireKey(key).unlock
 		},

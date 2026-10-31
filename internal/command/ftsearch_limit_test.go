@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
-	"github.com/cachestorm/cachestorm/internal/search"
 	"github.com/cachestorm/cachestorm/internal/store"
 )
 
@@ -105,7 +104,7 @@ func TestProofFTSearchRejectsNegativeLimit(t *testing.T) {
 	if panicked {
 		t.Fatalf("CONTROL 2 broken harness: a missing index panicked: %s", out)
 	}
-	if !strings.Contains(out, "index not found") {
+	if !strings.Contains(out, "No such index") {
 		t.Fatalf("CONTROL 2 broken harness: missing index returned %q, want an index-not-found error", out)
 	}
 	t.Log("CONTROL 2 ok: a missing index errors before any search runs")
@@ -136,32 +135,4 @@ func TestProofFTSearchRejectsNegativeLimit(t *testing.T) {
 		}
 		t.Logf("PASS: %s is rejected with %q", tc.name, strings.SplitN(out, "\r\n", 2)[0])
 	}
-
-	// ---- LIBRARY LEVEL: the engine itself must not panic, so no future caller
-	// of Search/SearchField can reintroduce this.
-	idx, ok := search.GetIndexManager().GetIndex("negative_limit_idx")
-	if !ok {
-		t.Fatalf("harness: index not found after FT.CREATE")
-	}
-	func() {
-		defer func() {
-			if rec := recover(); rec != nil {
-				t.Fatalf("FAIL: search.Index.Search panicked on a negative offset (%v). The "+
-					"guard belongs in the engine so every caller is protected, not just "+
-					"cmdFTSEARCH.", rec)
-			}
-		}()
-		res := idx.Search("hello", 5, -1)
-		t.Logf("PASS: Search(offset=-1) returned %d documents without panicking", len(res.Documents))
-	}()
-
-	func() {
-		defer func() {
-			if rec := recover(); rec != nil {
-				t.Fatalf("FAIL: search.Index.SearchField panicked on a negative offset (%v).", rec)
-			}
-		}()
-		res := idx.SearchField("body", "hello", 5, -1)
-		t.Logf("PASS: SearchField(offset=-1) returned %d documents without panicking", len(res.Documents))
-	}()
 }

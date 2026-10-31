@@ -42,6 +42,9 @@ type SetOptions struct {
 }
 
 type Store struct {
+	// generation changes when the store's contents are replaced wholesale
+	// (a flush, a replica's full copy), for caches built over its keys.
+	generation    atomic.Uint64
 	order         uint64
 	passiveExpiry atomic.Bool
 	loading       atomic.Bool
@@ -876,7 +879,12 @@ func (s *Store) Keys() []string {
 	return keys
 }
 
+// Generation identifies the store's contents: it changes when they are
+// replaced wholesale rather than key by key.
+func (s *Store) Generation() uint64 { return s.generation.Load() }
+
 func (s *Store) Flush() {
+	defer s.generation.Add(1)
 	keyCount := s.KeyCount()
 	if s.watching.Load() > 0 {
 		s.versionMu.Lock()

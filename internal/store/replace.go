@@ -116,6 +116,7 @@ func (d *Databases) ReplaceFrom(src *Databases) error {
 			shard.mu.Unlock()
 		}
 		dst.TouchAllWatched()
+		dst.generation.Add(1)
 	}
 	d.mu.Unlock()
 	for _, item := range notifications {

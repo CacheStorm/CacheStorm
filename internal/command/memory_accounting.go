@@ -44,7 +44,13 @@ func reaccountWrittenKeys(ctx *Context) {
 	if ctx.Store == nil || readonlyCommands[ctx.Command] {
 		return
 	}
-	ctx.Store.Reaccount(ctx.CommandKeys()...)
+	keys := ctx.CommandKeys()
+	ctx.Store.Reaccount(keys...)
+	for _, idx := range searchIndexesFor(ctx).All() {
+		for _, k := range keys {
+			idx.Touch(ctx.Store, k)
+		}
+	}
 }
 
 // overMemoryFor reports whether cmd must be refused because used memory is

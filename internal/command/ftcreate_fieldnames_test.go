@@ -112,18 +112,9 @@ func TestProofFTCreateAcceptsFieldNamesWithKeywordPrefixes(t *testing.T) {
 		t.Logf("PASS: %s kept every field (%v)", tc.name, tc.want)
 	}
 
-	// ---- BOUNDARY: the exact modifier tokens must STILL terminate the schema,
-	// so this fix does not silently swallow the keyword's own syntax.
-	for _, kw := range []string{"ON", "PREFIX", "STOPWORDS", "prefix", "StopWords"} {
-		idx := "k_" + kw
-		out := ftExec(s, r, "FT.CREATE", idx, "SCHEMA", "title", "TEXT", kw, "1", "title")
-		if out != "+OK\r\n" {
-			t.Fatalf("BOUNDARY FAIL: FT.CREATE with the exact keyword %q returned %q, want +OK", kw, out)
-		}
-		info := ftExec(s, r, "FT.INFO", idx)
-		if !strings.Contains(info, "title") {
-			t.Fatalf("BOUNDARY FAIL: the exact keyword %q swallowed the preceding field; FT.INFO=%q", kw, info)
-		}
+	// Redis reads everything after SCHEMA as fields, so a field may be named
+	// like a keyword.
+	if out := ftExec(s, r, "FT.CREATE", "k_on", "SCHEMA", "ON", "TEXT", "title", "TEXT"); out != "+OK\r\n" {
+		t.Fatalf("a field named ON was refused: %q", out)
 	}
-	t.Log("PASS: the exact modifier tokens still terminate the schema as intended")
 }

@@ -233,6 +233,12 @@ func aclKeysForCommand(cmd string, args [][]byte) []string {
 			return nil
 		}
 		return toStrings(args[:2])
+	case "FT.ADD", "FT.DEL", "FT.GET":
+		// FT.ADD index docId ...: the document is a key
+		if len(args) < 2 {
+			return nil
+		}
+		return []string{string(args[1])}
 	case "JSON.DEBUG":
 		// JSON.DEBUG MEMORY key [path]
 		if len(args) >= 2 && strings.EqualFold(string(args[0]), "MEMORY") {

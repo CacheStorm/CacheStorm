@@ -441,21 +441,28 @@ Samples stay in timestamp order; an older sample is inserted in place unless it 
 
 ## Search Commands
 
+These follow RediSearch, the search module built into Redis 8, and were checked against Redis 8.2. An index covers the HASH keys (or, with `ON JSON`, the JSON documents) under its prefixes, in the selected database: a document is searchable as soon as it is written and disappears when its key is deleted, expires or is evicted. Index definitions and aliases are saved in snapshots and the AOF and replicated; the documents are the keys themselves.
+
 ```
-FT.CREATE index [ON HASH|JSON] [PREFIX count prefix [prefix ...]] [SCHEMA field type [field type ...]]
+FT.CREATE index [ON HASH|JSON] [PREFIX count prefix ...] [LANGUAGE lang] [SCORE score] [STOPWORDS count word ...]
+    SCHEMA {identifier [AS attribute] {TEXT [WEIGHT w] [NOSTEM] | NUMERIC | TAG [SEPARATOR c] [CASESENSITIVE] | GEO} [SORTABLE] [NOINDEX]} ...
 FT.DROPINDEX index [DD]
-FT.ADD index docId score [NOSAVE] [REPLACE] [PARTIAL] [LANGUAGE lang] [PAYLOAD payload] [FIELDS field value [field value ...]]
-FT.DEL index docId [DD]
-FT.GET index docId
-FT.SEARCH index query [NOCONTENT] [VERBATIM] [NOSTOPWORDS] [WITHSCORES] [WITHPAYLOADS] [WITHSORTKEYS] [FILTER numericField min max [FILTER numericField min max ...]] [GEOFILTER geoField lon lat radius M|KM|MI|FT] [INKEYS count key [key ...]] [INFIELDS count field [field ...]] [RETURN count field [field ...]] [SUMMARIZE [FIELDS count field [field ...]] [FRAGS num] [LEN fragsize] [SEPARATOR separator]] [HIGHLIGHT [FIELDS count field [field ...]] [TAGS open close]] [SLOP slop] [TIMEOUT timeout] [LIMIT offset num]
-FT.AGGREGATE index query [VERBATIM] [LOAD count field [field ...]] [GROUPBY nargs property [property ...] [REDUCE func nargs arg [arg ...] [AS name]] [REDUCE ...]] [SORTBY nargs [property [ASC|DESC] [property [ASC|DESC] ...]] [MAX num] [AS name]] [APPLY expr AS name] [FILTER expr] [LIMIT offset num] [QUERY_EXECUTION_TIME] [TIMEOUT timeout]
+FT.SEARCH index query [NOCONTENT] [VERBATIM] [NOSTOPWORDS] [WITHSCORES] [WITHSORTKEYS] [FILTER field min max] [GEOFILTER field lon lat radius m|km|mi|ft]
+    [INKEYS count key ...] [INFIELDS count field ...] [RETURN count field [AS name] ...] [SORTBY field [ASC|DESC]] [LIMIT offset num] [PARAMS count name value ...] [DIALECT n]
+FT.AGGREGATE index query [VERBATIM] [LOAD count field ... | LOAD *] [GROUPBY count property ... [REDUCE fn count arg ... [AS name]] ...]
+    [SORTBY count property [ASC|DESC] ... [MAX n]] [APPLY expression AS name] [FILTER expression] [LIMIT offset num] [PARAMS count name value ...]
+FT.EXPLAIN index query
 FT.TAGVALS index field
-FT.ALIASADD name index
-FT.ALIASDEL name
-FT.ALIASUPDATE name index
+FT.ALIASADD alias index
+FT.ALIASUPDATE alias index
+FT.ALIASDEL alias
 FT.INFO index
 FT._LIST
 ```
+
+The query language is RediSearch's: terms (all must match), `a|b`, `-term`, `"exact phrase"`, `prefix*`, parentheses, `@field:term`, `@a|b:(...)`, `@num:[min max]` with `(` for exclusive bounds and `-inf`/`+inf`, `@tag:{a | b}`, `@geo:[lon lat radius unit]`, `*` for every document, and `$name` parameters. `|` binds tighter than the implicit AND, as in RediSearch's default dialect. Terms are lower-cased, English stop words are dropped and words are stemmed (`worlds` finds `world`) unless `VERBATIM`. Results are ranked with BM25, field weights included; documents with equal scores come in key order (Redis orders them by internal document id). Aggregation reducers are `COUNT`, `COUNT_DISTINCT`, `COUNT_DISTINCTISH`, `SUM`, `AVG`, `MIN`, `MAX`, `STDDEV`, `QUANTILE`, `TOLIST` and `FIRST_VALUE`; `APPLY` and `FILTER` take arithmetic, comparisons, `&&`, `||`, `!` and `upper`, `lower`, `abs`, `floor`, `ceil`, `sqrt`, `log`, `log2`, `exp`, `strlen`, `substr`, `exists`, `contains` and `startswith`.
+
+Each index keeps a parsed copy of its documents and term and tag postings, built on the first query and updated as keys are written, so a query reads only the documents its terms and tags select; a numeric or geo filter alone, or a query that matches most documents, still examines every document of the index. VECTOR fields are accepted in a schema but not searched. `FT.ADD`, `FT.DEL` and `FT.GET`, which RediSearch 2 removed, remain for old AOF files: `FT.ADD` writes the document as a hash at its id.
 
 ---
 

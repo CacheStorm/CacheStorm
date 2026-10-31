@@ -36,6 +36,7 @@ func (s *Server) recordRemoval(st *store.Store, key string) {
 // and the replication stream, and invalidates tracking clients' caches of
 // the key. It is called with the key's shard lock held.
 func (s *Server) recordFieldRemoval(st *store.Store, key string, fields []string) {
+	s.router.TouchSearchKey(st, key)
 	dbIndex := -1
 	for db := 0; db < s.dbs.Count(); db++ {
 		if s.dbs.Existing(db) == st {

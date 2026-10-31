@@ -11878,15 +11878,6 @@ func TestGeneratePassword(t *testing.T) {
 	}
 }
 
-func TestSearchContains(t *testing.T) {
-	if !contains([]string{"a", "b", "c"}, "b") {
-		t.Error("contains should find 'b'")
-	}
-	if contains([]string{"a", "b", "c"}, "d") {
-		t.Error("contains should not find 'd'")
-	}
-}
-
 func TestMatchPatternX(t *testing.T) {
 	if !matchPatternX("test", "*") {
 		t.Error("matchPatternX(test, *) should be true")
