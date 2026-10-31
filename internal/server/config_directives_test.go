@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -57,7 +58,7 @@ func TestConfigSetSaveChangesTheSnapshotInterval(t *testing.T) {
 	if got := c.str("CONFIG", "SET", "save", "3600 1 1 1"); got != "OK" {
 		t.Fatalf("CONFIG SET save: %s", got)
 	}
-	if got := c.str("CONFIG", "GET", "save"); got != "[save 1 1]" {
+	if got := c.str("CONFIG", "GET", "save"); got != "[save 3600 1 1 1]" {
 		t.Fatalf("CONFIG GET save after CONFIG SET = %s", got)
 	}
 	c.str("SET", "k", "v")
@@ -82,4 +83,31 @@ func TestConfigSetSaveChangesTheSnapshotInterval(t *testing.T) {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+func TestSaveRulesNeedChangesAndTime(t *testing.T) {
+	s := &Server{}
+	rules, err := parseSaveRules("3600 1 60 10000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.saveRules.Store(&rules)
+	now := time.Now()
+	s.snapshotLastAt = now.Add(-2 * time.Minute)
+	if s.saveDue(now, 9999) || !s.saveDue(now, 10000) {
+		t.Fatal("the 60 10000 rule must wait for 10000 changes")
+	}
+	s.snapshotLastAt = now.Add(-2 * time.Hour)
+	if s.saveDue(now, 0) || !s.saveDue(now, 1) {
+		t.Fatal("the 3600 1 rule must fire after an hour with one change")
+	}
+	s.snapshotLastError, s.snapshotStarted = errors.New("disk full"), now.Add(-time.Second)
+	if s.saveDue(now, 1) {
+		t.Fatal("a failed save must block the next one for 5 seconds")
+	}
+	for _, bad := range []string{"60", "0 1", "60 -1", "x 1"} {
+		if _, err := parseSaveRules(bad); err == nil {
+			t.Fatalf("parseSaveRules(%q) accepted", bad)
+		}
+	}
 }

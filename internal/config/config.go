@@ -150,7 +150,11 @@ type PersistenceConfig struct {
 	AOF              bool   `yaml:"aof" default:"true"`
 	AOFSync          string `yaml:"aof_sync" default:"everysec"`
 	SnapshotInterval string `yaml:"snapshot_interval" default:"5m"`
-	DataDir          string `yaml:"data_dir" default:"/var/lib/cachestorm"`
+	// Save holds Redis save rules ("3600 1 300 100"): a snapshot once a
+	// rule's number of writes happened within its seconds. When set it
+	// replaces SnapshotInterval.
+	Save    string `yaml:"save"`
+	DataDir string `yaml:"data_dir" default:"/var/lib/cachestorm"`
 	// AOFRewritePercentage and AOFRewriteMinSize trigger an automatic AOF
 	// rewrite, as Redis' auto-aof-rewrite-percentage/min-size do: once the
 	// file is at least AOFRewriteMinSize and has grown by AOFRewritePercentage

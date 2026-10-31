@@ -27,10 +27,7 @@ A config file whose name ends in `.conf` is read as a `redis.conf`, with its com
 - **Run-time settings.** Every other directive goes through `CONFIG SET` once the server exists, with the same validation. A `user` line becomes `ACL SETUSER`.
 - **Ignored and refused directives.** A parameter Redis reads only at startup that CacheStorm does not use, such as `tcp-backlog` or `pidfile`, is ignored with a warning when it differs from the default. An unknown directive or an invalid value stops startup with the file and line, or the option, that caused it. `include`, `rename-command`, `aclfile`, `loadmodule` and `daemonize yes` are refused.
 
-Persistence works differently from Redis in two ways:
-
-- **Snapshots are off unless you ask.** Redis snapshots by default; CacheStorm starts snapshots only for a `save` rule and the append-only file only for `appendonly yes`.
-- **`save` rules become an interval.** CacheStorm snapshots on a fixed interval: the seconds of the most frequent rule. `save ""` turns snapshots off. `CONFIG SET save` changes the interval at run time.
+Persistence follows Redis' rules. A `redis.conf` without `save` lines gets Redis' default rules (`3600 1 300 100 60 10000`). A rule `save <seconds> <changes>` takes a snapshot once at least `<changes>` writes happened and `<seconds>` passed since the last save. `save ""` stops periodic snapshots, but SAVE and BGSAVE still work and `dump.rdb` is still loaded at startup. The append-only file is on only for `appendonly yes`. Without a `redis.conf` or a `save` option, persistence stays off, as CacheStorm's own configuration has it.
 
 ## Full Configuration Reference
 
@@ -107,7 +104,8 @@ persistence:
   enabled: false                # Enable persistence
   aof: true                     # Enable AOF
   aof_sync: "everysec"          # AOF sync: always, everysec, no
-  snapshot_interval: "5m"       # RDB snapshot interval
+  snapshot_interval: "5m"       # Snapshot every interval when there were writes
+  save: ""                      # Redis save rules, e.g. "3600 1 300 100"; replace snapshot_interval
   data_dir: "/var/lib/cachestorm" # Data directory
   aof_rewrite_percentage: 100   # Auto-rewrite after this much growth (0 = off)
   aof_rewrite_min_size: "64mb"  # ... once the AOF is at least this large
@@ -285,9 +283,11 @@ The lock file remains after exit; its presence does not mean a process owns the 
 
 With `persistence.enabled: true`, `SAVE` writes `<data_dir>/dump.rdb` synchronously. It captures every numbered database, expiry timestamps, key tags, stream entries and consumer-group state, function libraries, and search indexes with their documents and aliases. It also flushes AOF when AOF is enabled. The snapshot file and its directory are synced before a successful SAVE reply.
 
-`BGSAVE` captures the same consistent state while writes are paused, then releases writes and performs disk I/O in a background worker. The capture uses additional memory proportional to the encoded dataset; it is not a fork or copy-on-write snapshot. A second SAVE/BGSAVE is rejected while that worker is active. `LASTSAVE` advances only after successful completion. `INFO persistence` exposes `rdb_bgsave_in_progress` and `rdb_last_bgsave_status`. Shutdown waits for an already-running snapshot worker; it does not implicitly create a fresh snapshot for unsaved changes.
+`BGSAVE` captures the same consistent state while writes are paused, then releases writes and performs disk I/O in a background worker. The capture uses additional memory proportional to the encoded dataset; it is not a fork or copy-on-write snapshot. A second SAVE/BGSAVE is rejected while that worker is active. `LASTSAVE` advances only after successful completion. `INFO persistence` exposes `rdb_bgsave_in_progress` and `rdb_last_bgsave_status`. Shutdown waits for an already-running snapshot worker.
 
-`snapshot_interval: "5m"` starts periodic background saves while the server runs. Set it to `"0"` or an empty string to disable periodic saves while retaining explicit SAVE/BGSAVE. Invalid or negative intervals prevent startup.
+`snapshot_interval: "5m"` starts a background save every interval in which there were writes, the same as the rule `save 300 1`. `save: "3600 1 300 100"` sets Redis save rules instead, and `CONFIG SET save` changes them at run time. Set the interval to `"0"` or an empty string, or `save` to `""` with `CONFIG SET`, to disable periodic saves while retaining explicit SAVE/BGSAVE. Invalid or negative values prevent startup.
+
+With save rules configured, SHUTDOWN and a SIGTERM or SIGINT save a snapshot before the server exits, as in Redis. If that snapshot fails, a signal leaves the server running and logs the error; a second signal stops it without saving.
 
 Startup prefers `appendonly.aof` when it exists, including an empty AOF. Otherwise it loads `dump.rdb` if present; if AOF is enabled, it seeds a new AOF from that restored dataset before accepting writes. New snapshots carry a CRC64 checksum; corruption or a truncated snapshot stops startup. Older snapshots with a zero checksum remain readable.
 
@@ -386,7 +386,7 @@ These parameters take effect immediately, for every connected client:
 | `requirepass` | New password; existing authenticated clients stay authenticated |
 | `slowlog-log-slower-than`, `slowlog-max-len` | Slow log threshold (µs) and size |
 | `notify-keyspace-events` | Keyspace notification classes (`K E g $ l s h z x e t m d n A`); see "Keyspace notifications" in commands-detailed.md |
-| `save` | Snapshot interval, as `<seconds> <changes>` rules (the most frequent rule wins); `""` stops snapshots. Needs `persistence.enabled` |
+| `save` | Save rules, `<seconds> <changes>` pairs as in Redis; `""` stops periodic snapshots. Needs `persistence.enabled` |
 
 `port`, `bind`, `databases`, `dir`, `appendonly`, `appendfsync`,
 `protected-mode` and `tcp-keepalive` are reported by `CONFIG GET` but are

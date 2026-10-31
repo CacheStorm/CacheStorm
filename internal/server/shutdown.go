@@ -26,7 +26,7 @@ func (s *Server) ShutdownRequested() <-chan struct{} {
 // asked for, waits for replicas to catch up unless NOW is given, and signals
 // ShutdownRequested. A failed save refuses the shutdown unless FORCE.
 func (s *Server) requestShutdown(o command.ShutdownOptions) error {
-	wantSave := o.Save || (s.cfg.Persistence.Enabled && s.snapshotEvery.Load() > 0)
+	wantSave := o.Save || (s.cfg.Persistence.Enabled && len(s.currentSaveRules()) > 0)
 	if wantSave && !o.NoSave {
 		var err error
 		if !s.cfg.Persistence.Enabled {
@@ -49,9 +49,17 @@ func (s *Server) requestShutdown(o command.ShutdownOptions) error {
 			}
 		}
 	}
-	logger.Info().Msg("SHUTDOWN requested by a client")
+	logger.Info().Msg("shutting down")
 	s.shutdownOnce.Do(func() { close(s.shutdownCh) })
 	return nil
+}
+
+// ShutdownSignal handles SIGTERM or SIGINT as Redis does: like SHUTDOWN
+// without arguments, it saves a snapshot when save rules are configured and
+// gives replicas a chance to catch up. When the snapshot fails it returns an
+// error and the server keeps running.
+func (s *Server) ShutdownSignal() error {
+	return s.requestShutdown(command.ShutdownOptions{})
 }
 
 // waitAOF is WAITAOF: the local AOF is flushed and fsynced, so every write

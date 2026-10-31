@@ -65,6 +65,10 @@ var directiveAliases = map[string]string{
 	"cluster-slave-no-failover":     "cluster-replica-no-failover",
 }
 
+// RedisDefaultSave is the save rule Redis uses when its configuration has
+// none.
+var RedisDefaultSave = Directive{Name: "save", Args: []string{"3600", "1", "300", "100", "60", "10000"}, Source: "Redis default"}
+
 // ApplyDirectives applies the directives the server reads at startup and
 // returns the rest, which CONFIG SET or ACL SETUSER apply once the server
 // exists.
@@ -308,12 +312,15 @@ func (c *Config) applyDirective(d Directive) (bool, error) {
 	return false, nil
 }
 
-// applySave maps Redis' "save <seconds> <changes> ..." rules onto the
-// snapshot interval: snapshots run every <seconds> of the most frequent
-// rule. An empty rule turns snapshots off.
+// applySave keeps Redis' "save <seconds> <changes> ..." rules, which the
+// server applies as Redis does. An empty rule turns periodic snapshots off;
+// as in Redis, SAVE and BGSAVE still work and dump.rdb is still loaded at
+// startup.
 func (c *Config) applySave(args []string) error {
 	if len(args) == 0 {
+		c.Persistence.Enabled = true
 		c.Persistence.SnapshotInterval = "0"
+		c.Persistence.Save = ""
 		return nil
 	}
 	if len(args)%2 != 0 {
@@ -332,5 +339,6 @@ func (c *Config) applySave(args []string) error {
 	}
 	c.Persistence.Enabled = true
 	c.Persistence.SnapshotInterval = strconv.Itoa(shortest) + "s"
+	c.Persistence.Save = strings.Join(args, " ")
 	return nil
 }

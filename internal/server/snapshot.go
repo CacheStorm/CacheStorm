@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -23,18 +24,28 @@ func (s *Server) snapshotPath() string {
 }
 
 func (s *Server) configureSnapshots(restore bool) error {
-	s.snapshotLastTime = time.Now().Unix()
+	s.snapshotLastAt = time.Now()
+	s.snapshotLastTime = s.snapshotLastAt.Unix()
 	s.router.SetSnapshotHooks(s.saveSnapshot, s.lastSnapshotTime, s.snapshotInfo)
 	if !s.cfg.Persistence.Enabled {
 		return nil
 	}
-	if interval := s.cfg.Persistence.SnapshotInterval; interval != "" {
+	var rules []saveRule
+	if save := s.cfg.Persistence.Save; save != "" {
 		var err error
-		s.snapshotInterval, err = time.ParseDuration(interval)
-		if err != nil || s.snapshotInterval < 0 {
+		if rules, err = parseSaveRules(save); err != nil {
+			return fmt.Errorf("invalid persistence.save: %q", save)
+		}
+	} else if interval := s.cfg.Persistence.SnapshotInterval; interval != "" {
+		every, err := time.ParseDuration(interval)
+		if err != nil || every < 0 {
 			return fmt.Errorf("invalid persistence.snapshot_interval: %q", interval)
 		}
+		if every > 0 {
+			rules = []saveRule{{every: every, changes: 1}}
+		}
 	}
+	s.saveRules.Store(&rules)
 	path := s.snapshotPath()
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
@@ -224,6 +235,7 @@ func (s *Server) saveSnapshot(background bool) error {
 		s.snapshotLastError = err
 		s.snapshotTook = time.Since(s.snapshotStarted)
 		if err == nil {
+			s.snapshotLastAt = s.snapshotStarted
 			s.snapshotLastTime = time.Now().Unix()
 			s.rdbSaves++
 			command.SaveDone(covered)
@@ -287,6 +299,62 @@ func (s *Server) saveSnapshot(background bool) error {
 	return nil
 }
 
+// saveRule is one Redis save rule: snapshot once at least changes writes
+// happened and every has passed since the last save.
+type saveRule struct {
+	every   time.Duration
+	changes int64
+}
+
+func parseSaveRules(value string) ([]saveRule, error) {
+	fields := strings.Fields(value)
+	if len(fields)%2 != 0 {
+		return nil, errors.New("invalid save parameters")
+	}
+	rules := make([]saveRule, 0, len(fields)/2)
+	for i := 0; i < len(fields); i += 2 {
+		secs, err1 := strconv.ParseInt(fields[i], 10, 64)
+		changes, err2 := strconv.ParseInt(fields[i+1], 10, 64)
+		if err1 != nil || err2 != nil || secs < 1 || secs > math.MaxInt64/int64(time.Second) || changes < 0 {
+			return nil, errors.New("invalid save parameters")
+		}
+		rules = append(rules, saveRule{every: time.Duration(secs) * time.Second, changes: changes})
+	}
+	return rules, nil
+}
+
+func (s *Server) currentSaveRules() []saveRule {
+	if rules := s.saveRules.Load(); rules != nil {
+		return *rules
+	}
+	return nil
+}
+
+// saveRetryDelay is how long a failed background save blocks the next one
+// the save rules start, as Redis' CONFIG_BGSAVE_RETRY_DELAY.
+const saveRetryDelay = 5 * time.Second
+
+// saveDue reports whether a save rule asks for a snapshot now, after dirty
+// writes, as Redis' serverCron decides.
+func (s *Server) saveDue(now time.Time, dirty int64) bool {
+	rules := s.currentSaveRules()
+	if len(rules) == 0 {
+		return false
+	}
+	s.snapshotMu.Lock()
+	last, started, failed := s.snapshotLastAt, s.snapshotStarted, s.snapshotLastError != nil
+	s.snapshotMu.Unlock()
+	if failed && now.Sub(started) < saveRetryDelay {
+		return false
+	}
+	for _, r := range rules {
+		if dirty >= r.changes && now.Sub(last) >= r.every {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Server) periodicSnapshot() {
 	s.gate.global.Lock()
 	defer s.gate.global.Unlock()
@@ -299,19 +367,26 @@ func (s *Server) startSnapshotLoop() {
 	if !s.cfg.Persistence.Enabled {
 		return
 	}
-	s.snapshotEvery.Store(int64(s.snapshotInterval))
 	s.snapshotReset = make(chan struct{}, 1)
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		// An interval of zero leaves the timer stopped until CONFIG SET save
-		// sets one.
+		// The rules are checked ten times a second, as Redis' serverCron
+		// does at its default hz, or at each rule's own pace when that is
+		// finer. Without rules the timer stays stopped until CONFIG SET save
+		// sets some.
 		timer := time.NewTimer(time.Hour)
 		timer.Stop()
 		arm := func() {
-			if every := time.Duration(s.snapshotEvery.Load()); every > 0 {
-				timer.Reset(every)
+			rules := s.currentSaveRules()
+			if len(rules) == 0 {
+				return
 			}
+			tick := 100 * time.Millisecond
+			for _, r := range rules {
+				tick = min(tick, max(r.every/2, time.Millisecond))
+			}
+			timer.Reset(tick)
 		}
 		arm()
 		defer timer.Stop()
@@ -322,39 +397,29 @@ func (s *Server) startSnapshotLoop() {
 			case <-s.snapshotReset:
 				timer.Stop()
 				arm()
-			case <-timer.C:
-				s.periodicSnapshot()
+			case now := <-timer.C:
+				if s.saveDue(now, command.Dirty()) {
+					s.periodicSnapshot()
+				}
 				arm()
 			}
 		}
 	}()
 }
 
-// setSnapshotRules applies CONFIG SET save: snapshots run every <seconds> of
-// the most frequent rule, and an empty value stops them.
+// setSnapshotRules applies CONFIG SET save.
 func (s *Server) setSnapshotRules(value string) error {
-	fields := strings.Fields(value)
-	if len(fields)%2 != 0 {
+	rules, err := parseSaveRules(value)
+	if err != nil {
 		return command.ConfigSetError("save", "Invalid save parameters")
 	}
-	shortest := int64(0)
-	for i := 0; i < len(fields); i += 2 {
-		secs, err1 := strconv.ParseInt(fields[i], 10, 64)
-		changes, err2 := strconv.ParseInt(fields[i+1], 10, 64)
-		if err1 != nil || err2 != nil || secs < 1 || changes < 0 {
-			return command.ConfigSetError("save", "Invalid save parameters")
-		}
-		if shortest == 0 || secs < shortest {
-			shortest = secs
-		}
-	}
 	if s.snapshotReset == nil {
-		if shortest == 0 {
+		if len(rules) == 0 {
 			return nil
 		}
 		return command.ConfigSetError("save", "snapshots need persistence.enabled")
 	}
-	s.snapshotEvery.Store(int64(time.Duration(shortest) * time.Second))
+	s.saveRules.Store(&rules)
 	select {
 	case s.snapshotReset <- struct{}{}:
 	default:
@@ -362,12 +427,16 @@ func (s *Server) setSnapshotRules(value string) error {
 	return nil
 }
 
-// snapshotRules is CONFIG GET save: the snapshot interval as a Redis rule.
+// snapshotRules is CONFIG GET save.
 func (s *Server) snapshotRules() string {
-	if every := time.Duration(s.snapshotEvery.Load()); every > 0 {
-		return strconv.FormatInt(int64(every/time.Second), 10) + " 1"
+	var b strings.Builder
+	for _, r := range s.currentSaveRules() {
+		if b.Len() > 0 {
+			b.WriteByte(' ')
+		}
+		fmt.Fprintf(&b, "%d %d", max(int64(r.every/time.Second), 1), r.changes)
 	}
-	return ""
+	return b.String()
 }
 
 func (s *Server) stopSnapshots() {

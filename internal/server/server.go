@@ -145,13 +145,15 @@ type Server struct {
 	snapshotLastError error
 	// snapshotStarted, snapshotTook and rdbSaves are what INFO persistence
 	// reports about saves; snapshotTook is -1 before the first one.
-	snapshotStarted  time.Time
-	snapshotTook     time.Duration
-	rdbSaves         int64
-	snapshotInterval time.Duration
-	// snapshotEvery is the snapshot interval in effect, which CONFIG SET
-	// save changes; snapshotReset wakes the loop to pick it up.
-	snapshotEvery atomic.Int64
+	snapshotStarted time.Time
+	snapshotTook    time.Duration
+	rdbSaves        int64
+	// snapshotLastAt is when the last successful save started, which the
+	// save rules measure from.
+	snapshotLastAt time.Time
+	// saveRules are the save rules in effect, which CONFIG SET save
+	// changes; snapshotReset wakes the loop to pick them up.
+	saveRules     atomic.Pointer[[]saveRule]
 	snapshotReset chan struct{}
 	snapshotWrite func([]byte) error
 	// The AOF rewrite state is guarded by snapshotMu.

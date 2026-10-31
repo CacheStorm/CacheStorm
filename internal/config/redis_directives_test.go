@@ -59,7 +59,7 @@ func TestApplyDirectives(t *testing.T) {
 	if c.Server.Port != 7001 || c.Server.Bind != "0.0.0.0" || c.Server.RequirePass != "pw" || c.Memory.MaxMemory != "1gb" {
 		t.Fatalf("server and memory settings: %+v %+v", c.Server, c.Memory)
 	}
-	if !c.Persistence.Enabled || !c.Persistence.AOF || c.Persistence.SnapshotInterval != "300s" || c.Persistence.DataDir != "/data" {
+	if !c.Persistence.Enabled || !c.Persistence.AOF || c.Persistence.SnapshotInterval != "300s" || c.Persistence.Save != "900 1 300 10" || c.Persistence.DataDir != "/data" {
 		t.Fatalf("persistence settings: %+v", c.Persistence)
 	}
 	if !c.Replication.IsReplica() || c.Replication.MasterHost != "10.0.0.1" || c.Replication.MasterPort != 6379 {
@@ -76,8 +76,8 @@ func TestApplyDirectives(t *testing.T) {
 	if _, err := c.ApplyDirectives([]Directive{{Name: "save", Args: []string{"60", "1"}}, {Name: "save", Args: []string{""}}}); err != nil {
 		t.Fatal(err)
 	}
-	if c.Persistence.Enabled || c.Persistence.SnapshotInterval != "0" {
-		t.Fatalf("an empty save rule kept snapshots on: %+v", c.Persistence)
+	if !c.Persistence.Enabled || c.Persistence.SnapshotInterval != "0" || c.Persistence.Save != "" || c.Persistence.AOF {
+		t.Fatalf("an empty save rule must stop periodic snapshots but keep SAVE: %+v", c.Persistence)
 	}
 
 	for _, bad := range []Directive{

@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- Save rules work as in Redis: `save <seconds> <changes>` snapshots once that many writes happened in that time (a new `persistence.save` setting; `snapshot_interval` now skips intervals without writes), `CONFIG GET save` returns the rules as set, and a `redis.conf` without `save` lines gets Redis' default rules. `save ""` keeps SAVE, BGSAVE and loading `dump.rdb` at startup working.
 - `dump.rdb` snapshots are written in Redis' RDB format, so Redis 7.4 and RDB tools load them. JSON documents and time series are saved as `CStorm-JS`/`CStorm-TS` module values, key tags and search indexes as aux fields, and idle times or LFU counters as Redis saves them; older CacheStorm snapshots still load. Loading an RDB skips a hash whose fields have all expired instead of failing.
 - Docs: the cluster guide describes replica migration and the rejoin delays instead of listing them as missing. The persistence guide explains that CacheStorm loads Redis 7.4 `dump.rdb` files and that `redis-cli --rdb` produces a file Redis can load
 - ROADMAP: the Redis compatibility status reflects RESP3 support and the current 561-case compatibility report
@@ -203,6 +204,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Authentication: only AUTH, HELLO, QUIT and RESET run before a requirepass client authenticates, the commands Redis flags `no_auth`. PING and COMMAND were exempt too, so an unauthenticated client could probe the server
 
 ### Fixed
+- SIGTERM and SIGINT save a snapshot before exiting when save rules are configured, as SHUTDOWN does and as Redis does; writes since the last periodic snapshot were lost on `docker stop` or a service stop. A failed snapshot keeps the server running until a second signal.
 - Time series are keys of the keyspace (`TYPE` reports `TSDB-TYPE`), not a process-wide registry: they are per database, expire, are deleted and flushed, survive snapshots and replicate in full syncs. Reading a missing series and `TS.CREATE` on an existing key return RedisTimeSeries' errors, and `TS.QUERYINDEX` takes RedisTimeSeries filters. `TYPE` reports `ReJSON-RL` for JSON documents, and `SCAN ... TYPE` matches type names without regard to case.
 - CLIENT LIST and CLIENT INFO report the socket's `fd`, the read buffer size as `rbs`/`rbp`, the watched keys as `watch`, the queued commands' bytes as `multi-mem` and the buffers' total as `tot-mem`. Before, each was a fixed 0 or -1, so tools that look for the clients using the most memory saw nothing
 - Protocol errors use Redis' texts: "too big inline request", "too big mbulk count string", "too big bulk count string" and "expected '$', got 'x'". The client limits (proto-max-bulk-len, client-query-buffer-limit, unauthenticated limits) apply to client commands only, not to AOF replay

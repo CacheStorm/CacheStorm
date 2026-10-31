@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -102,10 +103,24 @@ func main() {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
-	select {
-	case <-sigCh:
-		logger.Info().Msg("shutdown signal received")
-	case <-srv.ShutdownRequested():
+	// As in Redis, a signal saves a snapshot first when save rules are
+	// configured; if that fails the server keeps running, and a second
+	// signal stops it without one.
+	for stopping, saveFailed := false, false; !stopping; {
+		select {
+		case <-sigCh:
+			logger.Info().Msg("shutdown signal received")
+			if saveFailed {
+				stopping = true
+			} else if err := srv.ShutdownSignal(); err != nil {
+				saveFailed = true
+				logger.Error().Msg("not shutting down: the snapshot failed; send the signal again to stop without one")
+			} else {
+				stopping = true
+			}
+		case <-srv.ShutdownRequested():
+			stopping = true
+		}
 	}
 	signal.Stop(sigCh)
 
@@ -125,7 +140,8 @@ func main() {
 // for CONFIG SET once the server exists.
 func loadConfig(path string, redisArgs []string) (*config.Config, []config.Directive, error) {
 	var directives []config.Directive
-	if strings.HasSuffix(path, ".conf") {
+	redisConf := strings.HasSuffix(path, ".conf")
+	if redisConf {
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return nil, nil, err
@@ -140,6 +156,10 @@ func loadConfig(path string, redisArgs []string) (*config.Config, []config.Direc
 		return nil, nil, err
 	}
 	directives = append(directives, args...)
+	// A redis.conf without save rules gets Redis' default ones.
+	if redisConf && !slices.ContainsFunc(directives, func(d config.Directive) bool { return d.Name == "save" }) {
+		directives = append([]config.Directive{config.RedisDefaultSave}, directives...)
+	}
 	cfg, err := config.Load(path)
 	if err != nil {
 		return nil, nil, err

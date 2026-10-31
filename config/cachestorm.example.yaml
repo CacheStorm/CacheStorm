@@ -86,8 +86,12 @@ persistence:
   # Data directory for AOF/RDB files
   data_dir: "/var/lib/cachestorm"
 
-  # Snapshot interval
+  # Snapshot every interval in which there were writes
   snapshot_interval: "5m"
+
+  # Redis save rules instead of the interval: snapshot once <changes> writes
+  # happened within <seconds>
+  # save: "3600 1 300 100 60 10000"
 
   # Automatic AOF rewrite: once the AOF is at least aof_rewrite_min_size and
   # has grown by aof_rewrite_percentage since the last rewrite, it is

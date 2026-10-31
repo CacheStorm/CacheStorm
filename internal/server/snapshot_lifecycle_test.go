@@ -215,6 +215,8 @@ func TestSnapshotPeriodicWriterAndStop(t *testing.T) {
 			close(release)
 		}
 	})
+	// The rule needs a write to fire.
+	dialRepl(t, s).do("SET", "k", "v")
 	select {
 	case <-entered:
 	case <-time.After(5 * time.Second):
