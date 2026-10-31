@@ -130,7 +130,9 @@ func TestAOFRewritesAutomaticallyAfterGrowth(t *testing.T) {
 }
 
 func TestAOFRewriteDueThresholds(t *testing.T) {
-	s := &Server{aofRewriteMinSize: 100, aofRewritePercentage: 100, aofRewriteBase: 100}
+	s := &Server{aofRewriteBase: 100}
+	s.aofRewriteMinSize.Store(100)
+	s.aofRewritePercentage.Store(100)
 	cases := []struct {
 		size    int64
 		failed  bool
@@ -154,7 +156,7 @@ func TestAOFRewriteDueThresholds(t *testing.T) {
 			t.Errorf("size=%d failed=%v running=%v: due=%v, want %v", c.size, c.failed, c.running, got, c.want)
 		}
 	}
-	s.aofRewritePercentage = 0
+	s.aofRewritePercentage.Store(0)
 	s.aofRewriteLastError = nil
 	s.aofRewriteRunning = false
 	if s.aofRewriteDueForSize(1 << 30) {

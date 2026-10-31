@@ -18,15 +18,15 @@ var errAOFRewriteRunning = errors.New("ERR Background append only file rewriting
 // configureAOFRewrite installs the BGREWRITEAOF hook and reads the automatic
 // rewrite thresholds. It is called once the AOF writer exists.
 func (s *Server) configureAOFRewrite() error {
-	if s.aof == nil {
-		return nil
-	}
 	minSize, err := config.ParseMemorySize(s.cfg.Persistence.AOFRewriteMinSize)
 	if err != nil || minSize < 0 {
 		return fmt.Errorf("invalid persistence.aof_rewrite_min_size: %q", s.cfg.Persistence.AOFRewriteMinSize)
 	}
-	s.aofRewriteMinSize = minSize
-	s.aofRewritePercentage = int64(s.cfg.Persistence.AOFRewritePercentage)
+	s.aofRewriteMinSize.Store(minSize)
+	s.aofRewritePercentage.Store(int64(s.cfg.Persistence.AOFRewritePercentage))
+	if s.aof == nil {
+		return nil
+	}
 	s.aofRewriteBase = s.aof.Size()
 	s.router.SetAOFRewriteHook(s.startAOFRewrite)
 	return nil
@@ -94,13 +94,14 @@ func (s *Server) aofRewriteDue() bool {
 }
 
 func (s *Server) aofRewriteDueForSize(size int64) bool {
-	if s.aofRewritePercentage <= 0 {
+	percentage := s.aofRewritePercentage.Load()
+	if percentage <= 0 {
 		return false
 	}
 	s.snapshotMu.Lock()
 	base, running, failed := s.aofRewriteBase, s.aofRewriteRunning, s.aofRewriteLastError != nil
 	s.snapshotMu.Unlock()
-	if running || size < s.aofRewriteMinSize {
+	if running || size < s.aofRewriteMinSize.Load() {
 		return false
 	}
 	if base <= 0 {
@@ -111,11 +112,11 @@ func (s *Server) aofRewriteDueForSize(size int64) bool {
 		// persistent failure (disk full) does not rewrite in a tight loop.
 		return size >= base*2
 	}
-	return (size-base)*100/base >= s.aofRewritePercentage
+	return (size-base)*100/base >= percentage
 }
 
 func (s *Server) startAOFRewriteLoop() {
-	if s.aof == nil || s.aofRewritePercentage <= 0 {
+	if s.aof == nil {
 		return
 	}
 	s.wg.Add(1)

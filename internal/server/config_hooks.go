@@ -63,8 +63,8 @@ func (s *Server) configValues() map[string]string {
 		"appendfilename":              "appendonly.aof",
 		"dbfilename":                  "dump.rdb",
 		"dir":                         s.persistenceDirectory(),
-		"auto-aof-rewrite-percentage": strconv.FormatInt(s.aofRewritePercentage, 10),
-		"auto-aof-rewrite-min-size":   strconv.FormatInt(s.aofRewriteMinSize, 10),
+		"auto-aof-rewrite-percentage": strconv.FormatInt(s.aofRewritePercentage.Load(), 10),
+		"auto-aof-rewrite-min-size":   strconv.FormatInt(s.aofRewriteMinSize.Load(), 10),
 	}
 }
 
@@ -88,6 +88,20 @@ func (s *Server) configSet(name, value string) (bool, error) {
 		policy, _ := store.ParseEvictionPolicy(v)
 		limit, _ := s.store.MemoryLimit()
 		s.store.SetMemoryLimit(limit, policy, 0)
+		return true, nil
+	case "auto-aof-rewrite-percentage":
+		n, err := command.ParseConfigInt(name, value, 0, 1<<31-1)
+		if err != nil {
+			return true, err
+		}
+		s.aofRewritePercentage.Store(n)
+		return true, nil
+	case "auto-aof-rewrite-min-size":
+		size, err := config.ParseMemorySize(value)
+		if err != nil || size < 0 {
+			return true, command.ConfigSetError(name, "argument must be a memory value")
+		}
+		s.aofRewriteMinSize.Store(size)
 		return true, nil
 	case "maxmemory-samples":
 		n, err := command.ParseConfigInt(name, value, 1, 64)

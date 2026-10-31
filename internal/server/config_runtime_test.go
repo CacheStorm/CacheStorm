@@ -194,3 +194,22 @@ func TestConfigRewritePersistsRuntimeChanges(t *testing.T) {
 		t.Fatalf("CONFIG REWRITE without a file = %+v", got)
 	}
 }
+
+func TestConfigAOFRewriteThresholdsWithoutAOF(t *testing.T) {
+	s := startReplServerCfg(t, replTestConfig(t, func(c *config.Config) {
+		c.Persistence.AOF = false
+	}))
+	c := dialRepl(t, s)
+	got := configPairs(t, c.do("CONFIG", "GET", "auto-aof-rewrite-*"))
+	if got["auto-aof-rewrite-percentage"] != "100" || got["auto-aof-rewrite-min-size"] != "67108864" {
+		t.Fatalf("CONFIG GET = %v, want the configured thresholds", got)
+	}
+	c.do("CONFIG", "SET", "auto-aof-rewrite-percentage", "50", "auto-aof-rewrite-min-size", "1mb")
+	got = configPairs(t, c.do("CONFIG", "GET", "auto-aof-rewrite-*"))
+	if got["auto-aof-rewrite-percentage"] != "50" || got["auto-aof-rewrite-min-size"] != "1048576" {
+		t.Fatalf("CONFIG GET after SET = %v", got)
+	}
+	if r := c.do("CONFIG", "SET", "auto-aof-rewrite-min-size", "abc"); r.Type != resp.TypeError {
+		t.Fatalf("CONFIG SET min-size abc = %+v", r)
+	}
+}

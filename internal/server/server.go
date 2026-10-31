@@ -158,8 +158,8 @@ type Server struct {
 	aofRewriteStarted    time.Time
 	aofRewriteTook       time.Duration
 	aofRewriteFailures   int64
-	aofRewriteMinSize    int64
-	aofRewritePercentage int64
+	aofRewriteMinSize    atomic.Int64
+	aofRewritePercentage atomic.Int64
 	// maxClients and idleTimeout are the live values of maxclients and
 	// timeout, which CONFIG SET can change while clients are connected.
 	maxClients  atomic.Int64

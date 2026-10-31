@@ -194,6 +194,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Authentication: only AUTH, HELLO, QUIT and RESET run before a requirepass client authenticates, the commands Redis flags `no_auth`. PING and COMMAND were exempt too, so an unauthenticated client could probe the server
 
 ### Fixed
+- CONFIG GET auto-aof-rewrite-percentage and auto-aof-rewrite-min-size report the configured thresholds when AOF is off instead of 0, and CONFIG SET changes both at runtime, as in Redis; the automatic rewrite check runs whenever AOF is on, so a threshold raised from 0 takes effect.
+- The HPTTL test bounds the reply by the clock read before and after the command, so a millisecond tick during the call no longer fails it.
 - GEOSEARCHSTORE and GEORADIUS STOREDIST store the distance Redis stores to the last bit: Go's math.Sin, Cos and Asin are often one unit in the last place away from glibc's correctly rounded results, so the stored scores differed from Redis' for about 40% of members; the stored distance is now evaluated in double-double precision and rounded once (0.3% still differ where glibc itself misrounds). Searches keep the fast path.
 - The AOF expiry-history test gives its key a one-second deadline, so the steps it runs before the key expires finish in time on slow race-detector runs.
 - SPOP with a count that leaves at most a fifth as many members as it pops rebuilds the set from the members it keeps, as Redis' third SPOP strategy: an intset stays an intset, a listpack keeps its order, and a hash table becomes a listpack again when the rest fits.
