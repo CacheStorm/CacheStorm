@@ -52,6 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Corrected the root Docker image healthcheck to use `/api/health`.
 
 ### Added
+- CacheStorm loads RDB files written by Redis (up to RDB 12, Redis 7.4): every type in its listpack, intset, quicklist, hash-table and skiplist encodings, streams with consumer groups, hash field expirations, expiries, LRU idle times and LFU counters, function libraries and every database, so a Redis dump.rdb dropped into the data directory migrates a dataset. CacheStorm's own snapshots, whose type numbers and long lengths differ from Redis', now start with a cachestorm-rdb aux field; older ones are still recognized.
 - Scripts have Lua's `struct` library (`struct.pack`, `struct.unpack`, `struct.size`) and `redis.acl_check_cmd`, as in Redis
 - `scripts/diff-fuzz.py`: a differential fuzzer that sends the same random sequence of string, list, set, hash, sorted set, geo, bitmap, HyperLogLog and stream commands to CacheStorm and a Redis 7.4 and stops at the first reply or key-type difference
 - DEBUG POPULATE count [prefix [size]] as in Redis 7.4: creates the string keys prefix:0 .. prefix:count-1 holding `value:N` (zero-padded or cut to size), skipping existing keys, with Redis' error replies

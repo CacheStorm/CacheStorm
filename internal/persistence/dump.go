@@ -315,8 +315,10 @@ func DecodeDump(payload []byte) (store.Value, error) {
 	return value, nil
 }
 
-func (d *dumpDecoder) value() store.Value {
-	typ := d.byte()
+func (d *dumpDecoder) value() store.Value { return d.valueOf(d.byte()) }
+
+// valueOf decodes a value of RDB type typ.
+func (d *dumpDecoder) valueOf(typ byte) store.Value {
 	switch typ {
 	case 0:
 		return &store.StringValue{Data: []byte(d.str())}

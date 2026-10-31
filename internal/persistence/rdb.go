@@ -103,6 +103,7 @@ func (w *RDBWriter) writeHeader(f io.Writer) error {
 		key   string
 		value string
 	}{
+		{rdbFormatAux, "1"},
 		{"redis-ver", "7.0.0"},
 		{"redis-bits", "64"},
 		{"ctime", fmt.Sprintf("%d", time.Now().Unix())},
@@ -468,6 +469,13 @@ type RDBReader struct {
 	store     *store.Store
 	dbs       *store.Databases
 	mu        sync.Mutex
+	// body is the file Load read, which a Redis file's values are decoded
+	// from in place; redis is set once the aux fields show the file was
+	// written by Redis, whose type numbers and opcodes differ from
+	// CacheStorm's; functions are the library codes a Redis file holds.
+	body      []byte
+	redis     bool
+	functions []string
 }
 
 func NewRDBReader(s *store.Store) *RDBReader {
@@ -501,6 +509,8 @@ func (r *RDBReader) Load(path string) error {
 		r.dbs.FlushAll()
 		r.store = r.dbs.DB(0)
 	}
+	r.body = body
+	defer func() { r.body = nil }()
 	if err := r.readRDB(bytes.NewReader(body)); err != nil {
 		return err
 	}
@@ -524,16 +534,20 @@ func (r *RDBReader) readRDB(f io.Reader) error {
 		return fmt.Errorf("invalid RDB version: %v", err)
 	}
 
-	if version < 5 || version > 11 {
+	if version < 5 || version > 12 {
 		return fmt.Errorf("unsupported RDB version: %d", version)
 	}
 
 	r.AuxFields = make(map[string]string)
+	r.redis, r.functions = false, nil
+	decided := false
 
-	// Expiry (unix ms) from a preceding 0xFC/0xFD opcode; applies to the
-	// next entry only.
+	// Expiry (unix ms) from a preceding 0xFC/0xFD opcode, and in a Redis
+	// file the key's idle time (0xF8) or LFU counter (0xF9); they apply to
+	// the next entry only.
 	var pendingExpiryMS int64
 	var pendingTags []string
+	pendingIdle, pendingFreq := int64(-1), -1
 
 	for {
 		opcode, err := r.readByte(f)
@@ -542,6 +556,50 @@ func (r *RDBReader) readRDB(f io.Reader) error {
 				return io.ErrUnexpectedEOF
 			}
 			return err
+		}
+		if !decided {
+			decided = true
+			r.redis = writtenByRedis(version, opcode, f)
+		}
+		if r.redis {
+			switch opcode {
+			case 0xF8:
+				idle, err := r.readLength(f)
+				if err != nil {
+					return err
+				}
+				pendingIdle = int64(idle)
+				continue
+			case 0xF9:
+				freq, err := r.readByte(f)
+				if err != nil {
+					return err
+				}
+				pendingFreq = int(freq)
+				continue
+			case rdbOpcodeFunction2:
+				code, err := r.readString(f)
+				if err != nil {
+					return err
+				}
+				r.functions = append(r.functions, code)
+				continue
+			case rdbOpcodeFunctionPreGA:
+				return fmt.Errorf("pre-GA function format not supported")
+			case 0xF7:
+				return fmt.Errorf("RDB module data is not supported")
+			case 0xFF:
+				if len(r.functions) > 0 {
+					r.AuxFields["cachestorm-functions"] = string(EncodeFunctionDump(r.functions))
+				}
+			case 0xFA, 0xFB, 0xFC, 0xFD, 0xFE:
+			default:
+				if err := r.readRedisEntry(f, opcode, pendingExpiryMS, pendingIdle, pendingFreq); err != nil {
+					return err
+				}
+				pendingExpiryMS, pendingIdle, pendingFreq = 0, -1, -1
+				continue
+			}
 		}
 
 		switch opcode {
@@ -907,6 +965,88 @@ func (r *RDBReader) readEntry(f io.Reader, valueType byte, expiresAtMS int64, ta
 	return r.store.Set(key, value, opts)
 }
 
+// rdbFormatAux is the aux field CacheStorm's snapshots start with: their
+// type numbers, opcodes and long lengths differ from Redis' RDB format.
+const rdbFormatAux = "cachestorm-rdb"
+
+// writtenByRedis reports, from the file's first opcode, whether an RDB file
+// came from Redis rather than CacheStorm. Both start with an aux field;
+// CacheStorm's is rdbFormatAux, or, before it wrote one, redis-ver 7.0.0 in
+// a version Redis 7.0.0 did not write (it wrote 10). A file without aux
+// fields is CacheStorm's. f is not consumed.
+func writtenByRedis(version int, opcode byte, f io.Reader) bool {
+	br, ok := f.(*bytes.Reader)
+	if opcode != 0xFA || !ok {
+		return false
+	}
+	pos := br.Size() - int64(br.Len())
+	defer br.Seek(pos, io.SeekStart) //nolint:errcheck // seeking back within the buffer
+	key, err := readPlainString(br)
+	if err != nil || key == rdbFormatAux {
+		return false
+	}
+	value, err := readPlainString(br)
+	return err != nil || key != "redis-ver" || value != "7.0.0" || version == 10
+}
+
+// readPlainString reads a short length-prefixed string, as both formats
+// write the first aux field.
+func readPlainString(br *bytes.Reader) (string, error) {
+	n, err := br.ReadByte()
+	if err != nil || n >= 64 {
+		return "", fmt.Errorf("not a short string")
+	}
+	buf := make([]byte, n)
+	_, err = io.ReadFull(br, buf)
+	return string(buf), err
+}
+
+// readRedisEntry loads a key of a Redis file: its value is in Redis' RDB
+// encoding, which the DUMP payload decoder reads in place.
+func (r *RDBReader) readRedisEntry(f io.Reader, valueType byte, expiresAtMS, idle int64, freq int) error {
+	br, ok := f.(*bytes.Reader)
+	if !ok || r.body == nil {
+		return fmt.Errorf("a Redis RDB file must be loaded with Load")
+	}
+	key, err := r.readString(f)
+	if err != nil {
+		return err
+	}
+	switch valueType {
+	case 6, 7:
+		return fmt.Errorf("RDB module values are not supported (key %q)", key)
+	case 22, 23:
+		return fmt.Errorf("pre-GA hash field expiration format not supported (key %q)", key)
+	}
+	d := &dumpDecoder{data: r.body, pos: len(r.body) - br.Len()}
+	value := d.valueOf(valueType)
+	if d.err != nil || value == nil {
+		return fmt.Errorf("RDB value of key %q (type %d) is corrupt or unsupported", key, valueType)
+	}
+	if _, err := br.Seek(int64(d.pos), io.SeekStart); err != nil {
+		return err
+	}
+	opts := store.SetOptions{}
+	if expiresAtMS > 0 {
+		if expiresAtMS <= time.Now().UnixMilli() {
+			return nil
+		}
+		opts.ExpireAtMS = expiresAtMS
+	}
+	if err := r.store.Set(key, value, opts); err != nil {
+		return err
+	}
+	if entry, ok := r.store.GetShard(key).Get(key); ok {
+		if freq >= 0 && r.store.UsesLFU() {
+			entry.SetLFUCount(uint8(freq))
+		}
+		if idle >= 0 && !r.store.UsesLFU() {
+			entry.SetIdleSeconds(min(idle, int64(1<<24)-1))
+		}
+	}
+	return nil
+}
+
 func (r *RDBReader) readByte(f io.Reader) (byte, error) {
 	buf := make([]byte, 1)
 	_, err := io.ReadFull(f, buf)
@@ -931,6 +1071,26 @@ func (r *RDBReader) readLength(f io.Reader) (int, error) {
 		}
 		return int(b&0x3F)<<8 | int(b2), nil
 	case 2:
+		if r.redis {
+			size := 4
+			if b == 0x81 {
+				size = 8
+			} else if b != 0x80 {
+				return 0, fmt.Errorf("unsupported length encoding: %#x", b)
+			}
+			buf := make([]byte, size)
+			if _, err := io.ReadFull(f, buf); err != nil {
+				return 0, err
+			}
+			var n uint64
+			for _, c := range buf {
+				n = n<<8 | uint64(c)
+			}
+			if n > maxDumpString {
+				return 0, fmt.Errorf("RDB length %d out of range", n)
+			}
+			return int(n), nil
+		}
 		// The length byte carries the 0x80 marker plus the top 7 bits of the
 		// length; three more bytes follow (4 bytes total, matching the writer).
 		buf := make([]byte, 3)
@@ -944,6 +1104,19 @@ func (r *RDBReader) readLength(f io.Reader) (int, error) {
 }
 
 func (r *RDBReader) readString(f io.Reader) (string, error) {
+	if r.redis {
+		if br, ok := f.(*bytes.Reader); ok && r.body != nil {
+			// Redis encodes strings as integers or LZF; the DUMP decoder
+			// reads them in place.
+			d := &dumpDecoder{data: r.body, pos: len(r.body) - br.Len()}
+			s := d.str()
+			if d.err != nil {
+				return "", d.err
+			}
+			_, err := br.Seek(int64(d.pos), io.SeekStart)
+			return s, err
+		}
+	}
 	length, err := r.readLength(f)
 	if err != nil {
 		return "", err

@@ -977,10 +977,10 @@ func TestReadRDBUnsupportedVersion(t *testing.T) {
 	}
 
 	path2 := filepath.Join(tmpDir, "new_ver.rdb")
-	os.WriteFile(path2, []byte("REDIS0012"), 0644)
+	os.WriteFile(path2, []byte("REDIS0013"), 0644)
 	err = reader.Load(path2)
 	if err == nil || !strings.Contains(err.Error(), "unsupported RDB version") {
-		t.Errorf("expected 'unsupported RDB version' for v12, got: %v", err)
+		t.Errorf("expected 'unsupported RDB version' for v13, got: %v", err)
 	}
 }
 
