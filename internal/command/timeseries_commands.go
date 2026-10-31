@@ -54,6 +54,11 @@ var (
 	errTSRuleMissing      = errors.New("ERR TSDB: compaction rule does not exist")
 	errTSGroupByReducer   = errors.New("ERR TSDB: failed parsing reducer")
 	errTSSelectedWithBoth = errors.New("ERR TSDB: cannot accept WITHLABELS and SELECT_LABELS together")
+	errTSSrcHasSource     = errors.New("ERR TSDB: the source key already has a source rule")
+	errTSDestHasDest      = errors.New("ERR TSDB: the destination key already has a dst rule")
+	errTSMissingFilter    = errors.New("ERR TSDB: missing FILTER argument")
+	errTSFilterNoLabels   = errors.New("ERR TSDB: missing labels for filter argument")
+	errTSGroupByOrder     = errors.New("ERR TSDB: GROUPBY should always come after filter")
 )
 
 func RegisterTSCommands(router *Router) {
@@ -288,9 +293,15 @@ func parseTSValue(s string) (float64, bool) {
 // rules; policy overrides the series' duplicate policy when set.
 func addSample(ctx *Context, key string, ts *store.TimeSeriesValue, at int64, value float64, policy string) (int64, error) {
 	ts.Lock()
+	last, had := ts.Last()
+	ignored := ts.Ignores(at, value, policy)
 	reply, err := ts.Upsert(at, value, policy)
-	var closed []tsClosedBucket
-	if err == nil {
+	var closed, recomputed []tsClosedBucket
+	switch {
+	case err != nil || ignored:
+	case had && at <= last.Timestamp:
+		recomputed = upsertRules(ts, at, last.Timestamp)
+	default:
 		closed = feedRules(ts, at, value)
 	}
 	ts.Unlock()
@@ -305,6 +316,9 @@ func addSample(ctx *Context, key string, ts *store.TimeSeriesValue, at int64, va
 		}
 		addSample(ctx, c.dest, dest, c.start, c.value, "LAST") //nolint:errcheck // a compaction is best effort, as in RedisTimeSeries
 	}
+	for _, c := range recomputed {
+		upsertCompacted(ctx, c)
+	}
 	return reply, nil
 }
 
@@ -314,9 +328,171 @@ type tsClosedBucket struct {
 	value float64
 }
 
+// upsertCompacted overwrites a recomputed bucket in a rule's destination,
+// without feeding the destination's own rules, as RedisTimeSeries does.
+func upsertCompacted(ctx *Context, c tsClosedBucket) {
+	dest, err := getTimeSeries(ctx, c.dest, errTSNotTSDB)
+	if err != nil || dest == nil {
+		return
+	}
+	dest.Lock()
+	_, err = dest.Upsert(c.start, c.value, "LAST")
+	dest.Unlock()
+	if err == nil {
+		valueWritten(ctx, c.dest)
+	}
+}
+
+// ruleBucketValue aggregates the series' samples in the rule's bucket at
+// start; ok is false when the bucket has none.
+func ruleBucketValue(ts *store.TimeSeriesValue, r *store.TSRule, start int64) (float64, bool) {
+	norm := max(start, 0)
+	in := ts.Range(norm, start+r.Bucket-1)
+	if len(in) == 0 {
+		return 0, false
+	}
+	if r.Aggregation != "twa" {
+		return store.TSAggregate(r.Aggregation, in), true
+	}
+	var prev, next *store.TimeSeriesSample
+	if p, ok := tsBefore(ts.Samples, norm); ok && norm > 0 {
+		prev = &p
+	}
+	if n, ok := tsFrom(ts.Samples, start+r.Bucket); ok {
+		next = &n
+	}
+	return twaBucket(in, prev, next, norm, start+r.Bucket, false), true
+}
+
+// openRuleBucket makes the series' samples from start to end the rule's
+// open bucket and reports whether there were none.
+func openRuleBucket(ts *store.TimeSeriesValue, r *store.TSRule, start, end int64) bool {
+	norm := max(start, 0)
+	r.Open = ts.Range(norm, end)
+	r.Prev = nil
+	if p, ok := tsBefore(ts.Samples, norm); ok && norm > 0 {
+		r.Prev = &p
+	}
+	return len(r.Open) == 0
+}
+
+// upsertRules recomputes the compaction a sample at or before the newest one
+// changed: the open bucket, or an already closed bucket in the destination.
+func upsertRules(ts *store.TimeSeriesValue, at, last int64) []tsClosedBucket {
+	var out []tsClosedBucket
+	for i := range ts.Rules {
+		r := &ts.Rules[i]
+		cur := store.TSBucketStart(last, r.Bucket, r.Align)
+		if at >= max(cur, 0) {
+			openRuleBucket(ts, r, cur, cur+r.Bucket-1)
+			continue
+		}
+		start := store.TSBucketStart(at, r.Bucket, r.Align)
+		if v, ok := ruleBucketValue(ts, r, start); ok {
+			out = append(out, tsClosedBucket{r.Dest, max(start, 0), v})
+		}
+	}
+	return out
+}
+
+// tsRuleDeletion is what TS.DEL changes in a rule's destination: buckets to
+// recompute, a range of buckets to delete, and whether the open bucket lost
+// all its samples, so the destination's last bucket reopens.
+type tsRuleDeletion struct {
+	rule         int
+	upserts      []tsClosedBucket
+	from, to     int64
+	reopenLatest bool
+}
+
+// deleteRules recomputes the compaction after the samples from..to were
+// deleted from a series whose newest sample was at last.
+func deleteRules(ts *store.TimeSeriesValue, from, to, last int64) []tsRuleDeletion {
+	var out []tsRuleDeletion
+	for i := range ts.Rules {
+		r := &ts.Rules[i]
+		d := tsRuleDeletion{rule: i, from: 1, to: 0}
+		cur := store.TSBucketStart(last, r.Bucket, r.Align)
+		curNorm := max(cur, 0)
+		if from >= curNorm {
+			d.reopenLatest = openRuleBucket(ts, r, cur, cur+r.Bucket-1)
+			out = append(out, d)
+			continue
+		}
+		start := store.TSBucketStart(from, r.Bucket, r.Align)
+		end := store.TSBucketStart(to, r.Bucket, r.Align)
+		if v, ok := ruleBucketValue(ts, r, start); ok {
+			d.from = start + r.Bucket
+			d.upserts = append(d.upserts, tsClosedBucket{r.Dest, max(start, 0), v})
+		} else {
+			d.from = max(start, 0)
+		}
+		switch v, ok := ruleBucketValue(ts, r, end); {
+		case to >= curNorm:
+			d.reopenLatest = openRuleBucket(ts, r, cur, math.MaxInt64)
+			d.to = max(end-r.Bucket, 0)
+		case ok:
+			d.to = max(end-r.Bucket, 0)
+			d.upserts = append(d.upserts, tsClosedBucket{r.Dest, max(end, 0), v})
+		default:
+			d.to = max(end, 0)
+		}
+		out = append(out, d)
+	}
+	return out
+}
+
+// deleteSamples is TS.DEL on a series, recomputing its compaction rules;
+// deleting buckets from a destination cascades to that series' own rules.
+func deleteSamples(ctx *Context, key string, ts *store.TimeSeriesValue, from, to int64, depth int) int {
+	ts.Lock()
+	last, had := ts.Last()
+	deleted := ts.DeleteRange(from, to)
+	var changes []tsRuleDeletion
+	if had {
+		changes = deleteRules(ts, from, to, last.Timestamp)
+	}
+	rules := append([]store.TSRule(nil), ts.Rules...)
+	ts.Unlock()
+	if deleted > 0 {
+		valueWritten(ctx, key)
+	}
+	for _, d := range changes {
+		r := rules[d.rule]
+		for _, c := range d.upserts {
+			upsertCompacted(ctx, c)
+		}
+		dest, err := getTimeSeries(ctx, r.Dest, errTSNotTSDB)
+		if err != nil || dest == nil {
+			continue
+		}
+		if d.to >= d.from && depth < 8 {
+			deleteSamples(ctx, r.Dest, dest, d.from, d.to, depth+1)
+		}
+		if !d.reopenLatest {
+			continue
+		}
+		reopened := int64(0)
+		dest.Lock()
+		if n := len(dest.Samples); n > 0 && dest.Samples[0].Timestamp < last.Timestamp {
+			reopened = dest.Samples[n-1].Timestamp
+			dest.DeleteRange(reopened, reopened)
+		}
+		dest.Unlock()
+		valueWritten(ctx, r.Dest)
+		ts.Lock()
+		if d.rule < len(ts.Rules) && ts.Rules[d.rule].Dest == r.Dest {
+			start := max(store.TSBucketStart(reopened, r.Bucket, r.Align), 0)
+			openRuleBucket(ts, &ts.Rules[d.rule], start, start+r.Bucket-1)
+		}
+		ts.Unlock()
+	}
+	return deleted
+}
+
 // feedRules adds a sample to each compaction rule's open bucket; a sample
 // in a later bucket closes the open one, whose aggregate goes to the rule's
-// destination. Samples for buckets already closed are not compacted again.
+// destination.
 func feedRules(ts *store.TimeSeriesValue, at int64, value float64) []tsClosedBucket {
 	var closed []tsClosedBucket
 	for i := range ts.Rules {
@@ -328,7 +504,16 @@ func feedRules(ts *store.TimeSeriesValue, at int64, value float64) []tsClosedBuc
 			case start < open:
 				continue
 			case start > open:
-				closed = append(closed, tsClosedBucket{r.Dest, open, store.TSAggregate(r.Aggregation, r.Open)})
+				var v float64
+				if r.Aggregation == "twa" {
+					next := store.TimeSeriesSample{Timestamp: at, Value: value}
+					v = twaBucket(r.Open, r.Prev, &next, max(open, 0), open+r.Bucket, false)
+				} else {
+					v = store.TSAggregate(r.Aggregation, r.Open)
+				}
+				closed = append(closed, tsClosedBucket{r.Dest, max(open, 0), v})
+				last := r.Open[len(r.Open)-1]
+				r.Prev = &last
 				r.Open = r.Open[:0]
 			}
 		}
@@ -490,34 +675,71 @@ func cmdTSDEL(ctx *Context) error {
 	if ts == nil {
 		return ctx.WriteError(errTSKeyMissing)
 	}
-	ts.Lock()
-	deleted := ts.DeleteRange(from, to)
-	ts.Unlock()
-	if deleted > 0 {
-		valueWritten(ctx, key)
+	return ctx.WriteInteger(int64(deleteSamples(ctx, key, ts, from, to, 0)))
+}
+
+// tsDouble is a sample value as RedisTimeSeries replies with it: a simple
+// string for RESP2 and a double for RESP3.
+func tsDouble(resp3 bool, f float64) *resp.Value {
+	if resp3 {
+		return resp.DoubleValue(fpconvDtoa(f))
 	}
-	return ctx.WriteInteger(int64(deleted))
+	return resp.SimpleString(store.FormatTSValue(f))
 }
 
-func tsSampleReply(s store.TimeSeriesSample) *resp.Value {
-	return resp.ArrayValue([]*resp.Value{resp.IntegerValue(s.Timestamp), resp.SimpleString(store.FormatTSValue(s.Value))})
+func tsSampleReply(resp3 bool, s store.TimeSeriesSample) *resp.Value {
+	return resp.ArrayValue([]*resp.Value{resp.IntegerValue(s.Timestamp), tsDouble(resp3, s.Value)})
 }
 
-func tsSamplesReply(samples []store.TimeSeriesSample) *resp.Value {
+func tsSamplesReply(resp3 bool, samples []store.TimeSeriesSample) *resp.Value {
 	out := make([]*resp.Value, len(samples))
 	for i, s := range samples {
-		out[i] = tsSampleReply(s)
+		out[i] = tsSampleReply(resp3, s)
 	}
 	return resp.ArrayValue(out)
 }
 
-func tsLastReply(ts *store.TimeSeriesValue) *resp.Value {
+func tsLastReply(resp3 bool, ts *store.TimeSeriesValue) *resp.Value {
 	ts.RLock()
 	defer ts.RUnlock()
 	if last, ok := ts.Last(); ok {
-		return tsSampleReply(last)
+		return tsSampleReply(resp3, last)
 	}
 	return resp.ArrayValue([]*resp.Value{})
+}
+
+// tsPairs is a list of label pairs: a map for RESP3 and an array of
+// two-element arrays for RESP2.
+func tsPairs(resp3 bool, pairs [][2]*resp.Value) *resp.Value {
+	if resp3 {
+		flat := make([]*resp.Value, 0, 2*len(pairs))
+		for _, p := range pairs {
+			flat = append(flat, p[0], p[1])
+		}
+		return resp.PairsValue(flat)
+	}
+	out := make([]*resp.Value, len(pairs))
+	for i, p := range pairs {
+		out[i] = resp.ArrayValue(p[:])
+	}
+	return resp.ArrayValue(out)
+}
+
+// tsMultiReply is the reply of TS.MGET and TS.MRANGE: a map from key to its
+// entry for RESP3 and an array of [key, entry...] for RESP2.
+func tsMultiReply(ctx *Context, keys []string, entries [][]*resp.Value) error {
+	if ctx.Writer.IsRESP3() {
+		flat := make([]*resp.Value, 0, 2*len(keys))
+		for i, k := range keys {
+			flat = append(flat, resp.BulkString(k), resp.ArrayValue(entries[i]))
+		}
+		return ctx.WriteValue(resp.PairsValue(flat))
+	}
+	out := make([]*resp.Value, len(keys))
+	for i, k := range keys {
+		out[i] = resp.ArrayValue(append([]*resp.Value{resp.BulkString(k)}, entries[i]...))
+	}
+	return ctx.WriteArray(out)
 }
 
 func cmdTSGET(ctx *Context) error {
@@ -531,7 +753,7 @@ func cmdTSGET(ctx *Context) error {
 	if ts == nil {
 		return ctx.WriteError(errTSKeyMissing)
 	}
-	return ctx.WriteValue(tsLastReply(ts))
+	return ctx.WriteValue(tsLastReply(ctx.Writer.IsRESP3(), ts))
 }
 
 // tsRangeQuery is a TS.RANGE or TS.MRANGE query.
@@ -566,6 +788,11 @@ func parseTSRange(ctx *Context, at int, multi bool) (*tsRangeQuery, error) {
 		return nil, err
 	}
 	n := ctx.ArgCount()
+	if multi {
+		if n, err = parseTSMultiTail(ctx, at+2, q); err != nil {
+			return nil, err
+		}
+	}
 	alignText := ""
 	for i := at + 2; i < n; i++ {
 		switch strings.ToUpper(ctx.ArgString(i)) {
@@ -700,6 +927,59 @@ func parseTSRange(ctx *Context, at int, multi bool) (*tsRangeQuery, error) {
 	return q, nil
 }
 
+// parseTSMultiTail reads the FILTER and GROUPBY tail of TS.MRANGE, which
+// RedisTimeSeries requires last, and returns where the other options end.
+func parseTSMultiTail(ctx *Context, from int, q *tsRangeQuery) (int, error) {
+	n := ctx.ArgCount()
+	filterAt := -1
+	for i := from; i < n && filterAt < 0; i++ {
+		switch strings.ToUpper(ctx.ArgString(i)) {
+		case "FILTER":
+			filterAt = i
+		case "GROUPBY":
+			for j := i + 1; j < n; j++ {
+				if strings.EqualFold(ctx.ArgString(j), "FILTER") {
+					return 0, errTSGroupByOrder
+				}
+			}
+		}
+	}
+	if filterAt < 0 {
+		return 0, errTSMissingFilter
+	}
+	end := n
+	for i := filterAt + 1; i < n; i++ {
+		if strings.EqualFold(ctx.ArgString(i), "GROUPBY") {
+			end = i
+			break
+		}
+	}
+	if end == filterAt+1 {
+		return 0, errTSFilterNoLabels
+	}
+	for i := filterAt + 1; i < end; i++ {
+		f, ok := parseTSFilter(ctx.ArgString(i))
+		if !ok {
+			return 0, errTSFilter
+		}
+		q.filters = append(q.filters, f)
+	}
+	if end < n {
+		if end+4 != n {
+			return 0, arityError(ctx.Command)
+		}
+		if !strings.EqualFold(ctx.ArgString(end+2), "REDUCE") {
+			return 0, errTSGroupByReducer
+		}
+		q.groupBy = ctx.ArgString(end + 1)
+		q.reducer = strings.ToLower(ctx.ArgString(end + 3))
+		if _, ok := store.ParseTSAggregation(q.reducer); !ok || q.reducer == "first" || q.reducer == "last" || q.reducer == "twa" {
+			return 0, errTSGroupByReducer
+		}
+	}
+	return filterAt, nil
+}
+
 func tsMultiKeyword(s string) bool {
 	switch strings.ToUpper(s) {
 	case "FILTER", "GROUPBY", "WITHLABELS", "SELECTED_LABELS", "COUNT", "AGGREGATION", "ALIGN", "FILTER_BY_TS", "FILTER_BY_VALUE", "LATEST", "EMPTY", "BUCKETTIMESTAMP":
@@ -711,8 +991,8 @@ func tsMultiKeyword(s string) bool {
 // run answers the query for one series, newest first when rev.
 func (q *tsRangeQuery) run(ts *store.TimeSeriesValue, rev bool) []store.TimeSeriesSample {
 	ts.RLock()
+	defer ts.RUnlock()
 	samples := ts.Range(q.from, q.to)
-	ts.RUnlock()
 	if len(q.filterTS) > 0 || q.filterMin != nil {
 		kept := samples[:0]
 		for _, s := range samples {
@@ -726,8 +1006,12 @@ func (q *tsRangeQuery) run(ts *store.TimeSeriesValue, rev bool) []store.TimeSeri
 		}
 		samples = kept
 	}
-	if q.agg != "" {
-		samples = q.aggregate(samples)
+	switch q.agg {
+	case "":
+	case "twa":
+		samples = q.aggregateTWA(ts.Samples, samples, rev)
+	default:
+		samples = q.aggregate(samples, rev)
 	}
 	if rev {
 		for i, j := 0, len(samples)-1; i < j; i, j = i+1, j-1 {
@@ -749,15 +1033,25 @@ func containsInt64(list []int64, v int64) bool {
 	return false
 }
 
-func (q *tsRangeQuery) aggregate(samples []store.TimeSeriesSample) []store.TimeSeriesSample {
-	shift := int64(0)
+func (q *tsRangeQuery) bucketShift() int64 {
 	switch q.bucketTS {
 	case "end":
-		shift = q.bucket
+		return q.bucket
 	case "mid":
-		shift = q.bucket / 2
+		return q.bucket / 2
 	}
+	return 0
+}
+
+// aggregate buckets the samples. A reverse query feeds each bucket newest
+// first, as RedisTimeSeries does: sums accumulate in that order and "last"
+// is the oldest sample. With EMPTY, a gap gets the aggregation's empty
+// value, which for "last" is the previous bucket's value. A bucket that
+// ALIGN starts before 0 is reported at 0.
+func (q *tsRangeQuery) aggregate(samples []store.TimeSeriesSample, rev bool) []store.TimeSeriesSample {
+	shift := q.bucketShift()
 	var out []store.TimeSeriesSample
+	var bucket []store.TimeSeriesSample
 	next := int64(math.MinInt64)
 	for i := 0; i < len(samples); {
 		start := store.TSBucketStart(samples[i].Timestamp, q.bucket, q.align)
@@ -766,15 +1060,160 @@ func (q *tsRangeQuery) aggregate(samples []store.TimeSeriesSample) []store.TimeS
 			j++
 		}
 		if q.empty && next != math.MinInt64 {
+			empty := store.TSAggregate(q.agg, nil)
+			if q.agg == "last" && len(out) > 0 {
+				empty = out[len(out)-1].Value
+			}
 			for gap := next; gap < start; gap += q.bucket {
-				out = append(out, store.TimeSeriesSample{Timestamp: gap + shift, Value: store.TSAggregate(q.agg, nil)})
+				out = append(out, store.TimeSeriesSample{Timestamp: max(gap, 0) + shift, Value: empty})
 			}
 		}
-		out = append(out, store.TimeSeriesSample{Timestamp: start + shift, Value: store.TSAggregate(q.agg, samples[i:j])})
+		bucket = samples[i:j]
+		if rev {
+			bucket = append(bucket[:0:0], bucket...)
+			reverseSamples(bucket)
+		}
+		out = append(out, store.TimeSeriesSample{Timestamp: max(start, 0) + shift, Value: store.TSAggregate(q.agg, bucket)})
 		next = start + q.bucket
 		i = j
 	}
 	return out
+}
+
+// tsBefore returns the last of the sorted samples older than t.
+func tsBefore(all []store.TimeSeriesSample, t int64) (store.TimeSeriesSample, bool) {
+	i := sort.Search(len(all), func(i int) bool { return all[i].Timestamp >= t })
+	if i == 0 {
+		return store.TimeSeriesSample{}, false
+	}
+	return all[i-1], true
+}
+
+// tsFrom returns the first of the sorted samples at t or later.
+func tsFrom(all []store.TimeSeriesSample, t int64) (store.TimeSeriesSample, bool) {
+	i := sort.Search(len(all), func(i int) bool { return all[i].Timestamp >= t })
+	if i == len(all) {
+		return store.TimeSeriesSample{}, false
+	}
+	return all[i], true
+}
+
+// aggregateTWA is RedisTimeSeries' time-weighted average: each bucket's
+// samples are extended to the bucket edges by interpolating with the
+// neighbouring samples, which may lie outside the query range. With EMPTY,
+// a bucket with no samples gets the mean of the line between the samples
+// around it, when there are samples on both sides. Unlike RedisTimeSeries,
+// which fills buckets up to the end of an open range until it runs out of
+// memory, filling stops at the series' last sample.
+func (q *tsRangeQuery) aggregateTWA(all, samples []store.TimeSeriesSample, rev bool) []store.TimeSeriesSample {
+	shift := q.bucketShift()
+	edges := func(start int64) (int64, int64) {
+		return max(start, 0, q.from), min(start+q.bucket, q.to)
+	}
+	var out []store.TimeSeriesSample
+	limit := q.to
+	if len(all) > 0 && limit == math.MaxInt64 {
+		limit = all[len(all)-1].Timestamp
+	}
+	fill := func(first, last int64) {
+		last = min(last, store.TSBucketStart(limit, q.bucket, q.align))
+		ta, _ := edges(first)
+		before, ok := tsBefore(all, ta)
+		after, ok2 := tsFrom(all, ta)
+		if !ok || !ok2 {
+			return
+		}
+		dv, dt := after.Value-before.Value, float64(after.Timestamp-before.Timestamp)
+		for b := first; b <= last; b += q.bucket {
+			ta, tb := edges(b)
+			va := before.Value + float64(ta-before.Timestamp)*dv/dt
+			vb := before.Value + float64(tb-before.Timestamp)*dv/dt
+			out = append(out, store.TimeSeriesSample{Timestamp: max(b, 0) + shift, Value: (va + vb) / 2.0})
+		}
+	}
+	if len(samples) == 0 {
+		if q.empty {
+			fill(store.TSBucketStart(q.from, q.bucket, q.align), store.TSBucketStart(q.to, q.bucket, q.align))
+		}
+		return out
+	}
+	var prev *store.TimeSeriesSample
+	if p, ok := tsBefore(all, samples[0].Timestamp); ok {
+		prev = &p
+	}
+	next := store.TSBucketStart(q.from, q.bucket, q.align)
+	for i := 0; i < len(samples); {
+		start := store.TSBucketStart(samples[i].Timestamp, q.bucket, q.align)
+		j := i
+		for j < len(samples) && samples[j].Timestamp < start+q.bucket {
+			j++
+		}
+		if q.empty && next < start {
+			fill(next, start-q.bucket)
+		}
+		var after *store.TimeSeriesSample
+		if j < len(samples) {
+			after = &samples[j]
+		} else if n, ok := tsFrom(all, samples[j-1].Timestamp+1); ok {
+			after = &n
+		}
+		ta, tb := edges(start)
+		out = append(out, store.TimeSeriesSample{Timestamp: max(start, 0) + shift, Value: twaBucket(samples[i:j], prev, after, ta, tb, rev)})
+		prev = &samples[j-1]
+		next = start + q.bucket
+		i = j
+	}
+	if q.empty {
+		// RedisTimeSeries resumes after the last bucket's reported
+		// timestamp, so a BUCKETTIMESTAMP other than start skips buckets.
+		next = store.TSBucketStart(out[len(out)-1].Timestamp, q.bucket, q.align) + q.bucket
+		if last := store.TSBucketStart(q.to, q.bucket, q.align); next <= last {
+			fill(next, last)
+		}
+	}
+	return out
+}
+
+// twaBucket is the time-weighted average of in over [ta, tb]. Its terms are
+// summed in the order RedisTimeSeries iterates, newest first when rev, so
+// the result matches it to the last bit.
+func twaBucket(in []store.TimeSeriesSample, prev, next *store.TimeSeriesSample, ta, tb int64, rev bool) float64 {
+	terms := make([]float64, 0, len(in)+1)
+	first, last := in[0].Timestamp, in[len(in)-1].Timestamp
+	if prev != nil {
+		v1, v2, t1, t2 := prev.Value, in[0].Value, prev.Timestamp, in[0].Timestamp
+		vab := v1 + float64(ta-t1)*(v2-v1)/float64(t2-t1)
+		terms = append(terms, (vab+v2)*float64(t2-ta)/2.0)
+		first = ta
+	}
+	for i := 1; i < len(in); i++ {
+		terms = append(terms, (in[i-1].Value+in[i].Value)*float64(in[i].Timestamp-in[i-1].Timestamp)/2.0)
+	}
+	if next != nil {
+		v1, v2, t1, t2 := in[len(in)-1].Value, next.Value, in[len(in)-1].Timestamp, next.Timestamp
+		vab := v1 + float64(tb-t1)*(v2-v1)/float64(t2-t1)
+		terms = append(terms, (vab+v1)*float64(tb-t1)/2.0)
+		last = tb
+	}
+	if first == last {
+		if rev {
+			return in[0].Value
+		}
+		return in[len(in)-1].Value
+	}
+	res := 0.0
+	for i := range terms {
+		if rev {
+			res += terms[len(terms)-1-i]
+		} else {
+			res += terms[i]
+		}
+	}
+	span := last - first
+	if span < 0 {
+		span = -span
+	}
+	return res / float64(span)
 }
 
 func tsRange(ctx *Context, rev bool) error {
@@ -792,7 +1231,7 @@ func tsRange(ctx *Context, rev bool) error {
 	if ts == nil {
 		return ctx.WriteError(errTSKeyMissing)
 	}
-	return ctx.WriteValue(tsSamplesReply(q.run(ts, rev)))
+	return ctx.WriteValue(tsSamplesReply(ctx.Writer.IsRESP3(), q.run(ts, rev)))
 }
 
 func cmdTSRANGE(ctx *Context) error    { return tsRange(ctx, false) }
@@ -832,25 +1271,35 @@ func matchingSeries(ctx *Context, filters []tsFilter) ([]string, map[string]*sto
 }
 
 // labelsReply is the labels part of TS.MGET and TS.MRANGE.
-func labelsReply(ts *store.TimeSeriesValue, all bool, selected []string) *resp.Value {
+func labelsReply(resp3 bool, ts *store.TimeSeriesValue, all bool, selected []string) *resp.Value {
 	ts.RLock()
 	defer ts.RUnlock()
-	out := []*resp.Value{}
+	return selectLabels(resp3, ts.LabelList(), all, selected)
+}
+
+func selectLabels(resp3 bool, labels [][2]string, all bool, selected []string) *resp.Value {
+	var out [][2]*resp.Value
 	switch {
 	case all:
-		for _, kv := range ts.LabelList() {
-			out = append(out, resp.ArrayValue([]*resp.Value{resp.BulkString(kv[0]), resp.BulkString(kv[1])}))
+		for _, kv := range labels {
+			out = append(out, [2]*resp.Value{resp.BulkString(kv[0]), resp.BulkString(kv[1])})
 		}
 	case len(selected) > 0:
 		for _, k := range selected {
 			value := resp.NullBulkString()
-			if v, ok := ts.Labels[k]; ok {
-				value = resp.BulkString(v)
+			if resp3 {
+				value = resp.NullValue()
 			}
-			out = append(out, resp.ArrayValue([]*resp.Value{resp.BulkString(k), value}))
+			for _, kv := range labels {
+				if kv[0] == k {
+					value = resp.BulkString(kv[1])
+					break
+				}
+			}
+			out = append(out, [2]*resp.Value{resp.BulkString(k), value})
 		}
 	}
-	return resp.ArrayValue(out)
+	return tsPairs(resp3, out)
 }
 
 func cmdTSMGET(ctx *Context) error {
@@ -888,12 +1337,13 @@ func cmdTSMGET(ctx *Context) error {
 	if err != nil {
 		return ctx.WriteError(err)
 	}
-	out := make([]*resp.Value, 0, len(keys))
-	for _, k := range keys {
+	resp3 := ctx.Writer.IsRESP3()
+	entries := make([][]*resp.Value, len(keys))
+	for i, k := range keys {
 		ts := series[k]
-		out = append(out, resp.ArrayValue([]*resp.Value{resp.BulkString(k), labelsReply(ts, withLabels, selected), tsLastReply(ts)}))
+		entries[i] = []*resp.Value{labelsReply(resp3, ts, withLabels, selected), tsLastReply(resp3, ts)}
 	}
-	return ctx.WriteArray(out)
+	return tsMultiReply(ctx, keys, entries)
 }
 
 func reverseSamples(s []store.TimeSeriesSample) {
@@ -903,7 +1353,7 @@ func reverseSamples(s []store.TimeSeriesSample) {
 }
 
 func tsMRange(ctx *Context, rev bool) error {
-	if ctx.ArgCount() < 4 {
+	if ctx.ArgCount() < 3 {
 		return ctx.WriteError(arityError(ctx.Command))
 	}
 	q, err := parseTSRange(ctx, 0, true)
@@ -917,13 +1367,22 @@ func tsMRange(ctx *Context, rev bool) error {
 	if err != nil {
 		return ctx.WriteError(err)
 	}
+	resp3 := ctx.Writer.IsRESP3()
 	if q.groupBy == "" {
-		out := make([]*resp.Value, 0, len(keys))
-		for _, k := range keys {
-			ts := series[k]
-			out = append(out, resp.ArrayValue([]*resp.Value{resp.BulkString(k), labelsReply(ts, q.withLabels, q.selectedLabels), tsSamplesReply(q.run(ts, rev))}))
+		var aggregators []*resp.Value
+		if q.agg != "" {
+			aggregators = []*resp.Value{resp.BulkString(q.agg)}
 		}
-		return ctx.WriteArray(out)
+		entries := make([][]*resp.Value, len(keys))
+		for i, k := range keys {
+			ts := series[k]
+			entries[i] = []*resp.Value{labelsReply(resp3, ts, q.withLabels, q.selectedLabels)}
+			if resp3 {
+				entries[i] = append(entries[i], resp.PairsValue([]*resp.Value{resp.BulkString("aggregators"), resp.ArrayValue(aggregators)}))
+			}
+			entries[i] = append(entries[i], tsSamplesReply(resp3, q.run(ts, rev)))
+		}
+		return tsMultiReply(ctx, keys, entries)
 	}
 	groups := make(map[string][]string)
 	var values []string
@@ -941,7 +1400,8 @@ func tsMRange(ctx *Context, rev bool) error {
 		groups[v] = append(groups[v], k)
 	}
 	sort.Strings(values)
-	out := make([]*resp.Value, 0, len(values))
+	names := make([]string, 0, len(values))
+	entries := make([][]*resp.Value, 0, len(values))
 	for _, v := range values {
 		byTS := make(map[int64][]store.TimeSeriesSample)
 		var stamps []int64
@@ -964,17 +1424,26 @@ func tsMRange(ctx *Context, rev bool) error {
 		if q.count > 0 && len(reduced) > q.count {
 			reduced = reduced[:q.count]
 		}
-		labels := []*resp.Value{}
-		if q.withLabels {
-			labels = []*resp.Value{
-				resp.ArrayValue([]*resp.Value{resp.BulkString(q.groupBy), resp.BulkString(v)}),
-				resp.ArrayValue([]*resp.Value{resp.BulkString("__reducer__"), resp.BulkString(q.reducer)}),
-				resp.ArrayValue([]*resp.Value{resp.BulkString("__source__"), resp.BulkString(strings.Join(groups[v], ","))}),
-			}
+		groupLabels := [][2]string{{q.groupBy, v}, {"__reducer__", q.reducer}, {"__source__", strings.Join(groups[v], ",")}}
+		names = append(names, q.groupBy+"="+v)
+		if !resp3 {
+			entries = append(entries, []*resp.Value{selectLabels(false, groupLabels, q.withLabels, q.selectedLabels), tsSamplesReply(false, reduced)})
+			continue
 		}
-		out = append(out, resp.ArrayValue([]*resp.Value{resp.BulkString(q.groupBy + "=" + v), resp.ArrayValue(labels), tsSamplesReply(reduced)}))
+		labels := selectLabels(true, groupLabels[:1], q.withLabels, nil)
+		if len(q.selectedLabels) > 0 {
+			labels = selectLabels(true, groupLabels, false, q.selectedLabels)
+		}
+		sources := make([]*resp.Value, len(groups[v]))
+		for i, k := range groups[v] {
+			sources[i] = resp.BulkString(k)
+		}
+		entries = append(entries, []*resp.Value{labels,
+			resp.PairsValue([]*resp.Value{resp.BulkString("reducers"), resp.ArrayValue([]*resp.Value{resp.BulkString(q.reducer)})}),
+			resp.PairsValue([]*resp.Value{resp.BulkString("sources"), resp.ArrayValue(sources)}),
+			tsSamplesReply(true, reduced)})
 	}
-	return ctx.WriteArray(out)
+	return tsMultiReply(ctx, names, entries)
 }
 
 func cmdTSMRANGE(ctx *Context) error    { return tsMRange(ctx, false) }
@@ -999,18 +1468,27 @@ func cmdTSINFO(ctx *Context) error {
 	if ts.Uncompressed {
 		chunkType = "uncompressed"
 	}
-	labels := []*resp.Value{}
-	for _, kv := range ts.LabelList() {
-		labels = append(labels, resp.ArrayValue([]*resp.Value{resp.BulkString(kv[0]), resp.BulkString(kv[1])}))
-	}
+	resp3 := ctx.Writer.IsRESP3()
 	source := resp.NullBulkString()
 	if ts.SourceKey != "" {
 		source = resp.BulkString(ts.SourceKey)
 	}
 	rules := []*resp.Value{}
 	for _, r := range ts.Rules {
-		rules = append(rules, resp.ArrayValue([]*resp.Value{resp.BulkString(r.Dest), resp.IntegerValue(r.Bucket),
-			resp.SimpleString(strings.ToUpper(r.Aggregation)), resp.IntegerValue(r.Align)}))
+		rule := []*resp.Value{resp.IntegerValue(r.Bucket), resp.SimpleString(strings.ToUpper(r.Aggregation)), resp.IntegerValue(r.Align)}
+		if resp3 {
+			rules = append(rules, resp.BulkString(r.Dest), resp.ArrayValue(rule))
+		} else {
+			rules = append(rules, resp.ArrayValue(append([]*resp.Value{resp.BulkString(r.Dest)}, rule...)))
+		}
+	}
+	rulesReply := resp.ArrayValue(rules)
+	if resp3 {
+		rulesReply = resp.PairsValue(rules)
+	}
+	ignoreValDiff := resp.BulkString(strconv.FormatFloat(ts.IgnoreMaxValDiff, 'f', -1, 64))
+	if resp3 {
+		ignoreValDiff = resp.DoubleValue(fpconvDtoa(ts.IgnoreMaxValDiff))
 	}
 	reply := []*resp.Value{
 		resp.SimpleString("totalSamples"), resp.IntegerValue(info.Samples),
@@ -1022,11 +1500,11 @@ func cmdTSINFO(ctx *Context) error {
 		resp.SimpleString("chunkSize"), resp.IntegerValue(info.ChunkSize),
 		resp.SimpleString("chunkType"), resp.SimpleString(chunkType),
 		resp.SimpleString("duplicatePolicy"), resp.SimpleString(strings.ToLower(ts.Policy())),
-		resp.SimpleString("labels"), resp.ArrayValue(labels),
+		resp.SimpleString("labels"), selectLabels(resp3, ts.LabelList(), true, nil),
 		resp.SimpleString("sourceKey"), source,
-		resp.SimpleString("rules"), resp.ArrayValue(rules),
+		resp.SimpleString("rules"), rulesReply,
 		resp.SimpleString("ignoreMaxTimeDiff"), resp.IntegerValue(ts.IgnoreMaxTimeDiff),
-		resp.SimpleString("ignoreMaxValDiff"), resp.BulkString(strconv.FormatFloat(ts.IgnoreMaxValDiff, 'f', -1, 64)),
+		resp.SimpleString("ignoreMaxValDiff"), ignoreValDiff,
 	}
 	if ctx.ArgCount() == 2 && strings.EqualFold(ctx.ArgString(1), "DEBUG") {
 		start, end := int64(-1), int64(-1)
@@ -1034,16 +1512,22 @@ func cmdTSINFO(ctx *Context) error {
 			start, end = info.First, info.Last
 		}
 		size := info.ChunkSize * info.ChunkCount
+		perSample := float64(size) / math.Max(float64(info.Samples), 1)
+		perSampleReply := resp.BulkString(strconv.FormatFloat(perSample, 'f', -1, 64))
+		if resp3 {
+			perSampleReply = resp.DoubleValue(fpconvDtoa(perSample))
+		}
+		chunk := []*resp.Value{
+			resp.SimpleString("startTimestamp"), resp.IntegerValue(start),
+			resp.SimpleString("endTimestamp"), resp.IntegerValue(end),
+			resp.SimpleString("samples"), resp.IntegerValue(info.Samples),
+			resp.SimpleString("size"), resp.IntegerValue(size),
+			resp.SimpleString("bytesPerSample"), perSampleReply,
+		}
 		reply = append(reply, resp.SimpleString("keySelfName"), resp.BulkString(key),
-			resp.SimpleString("Chunks"), resp.ArrayValue([]*resp.Value{resp.ArrayValue([]*resp.Value{
-				resp.SimpleString("startTimestamp"), resp.IntegerValue(start),
-				resp.SimpleString("endTimestamp"), resp.IntegerValue(end),
-				resp.SimpleString("samples"), resp.IntegerValue(info.Samples),
-				resp.SimpleString("size"), resp.IntegerValue(size),
-				resp.SimpleString("bytesPerSample"), resp.BulkString(strconv.FormatFloat(float64(size)/math.Max(float64(info.Samples), 1), 'f', -1, 64)),
-			})}))
+			resp.SimpleString("Chunks"), resp.ArrayValue([]*resp.Value{resp.PairsValue(chunk)}))
 	}
-	return ctx.WriteArray(reply)
+	return ctx.WriteValue(resp.PairsValue(reply))
 }
 
 func cmdTSCREATERULE(ctx *Context) error {
@@ -1085,10 +1569,20 @@ func cmdTSCREATERULE(ctx *Context) error {
 	if err != nil {
 		return ctx.WriteError(err)
 	}
+	src.RLock()
+	srcHasSource := src.SourceKey != ""
+	src.RUnlock()
+	if srcHasSource {
+		return ctx.WriteError(errTSSrcHasSource)
+	}
 	dest.Lock()
-	if dest.SourceKey != "" {
+	if dest.SourceKey != "" || len(dest.Rules) > 0 {
+		err := errTSDestHasSource
+		if dest.SourceKey == "" {
+			err = errTSDestHasDest
+		}
 		dest.Unlock()
-		return ctx.WriteError(errTSDestHasSource)
+		return ctx.WriteError(err)
 	}
 	dest.SourceKey = srcKey
 	dest.Unlock()
@@ -1155,7 +1649,7 @@ func cmdTSQUERYINDEX(ctx *Context) error {
 	for _, k := range keys {
 		results = append(results, resp.BulkString(k))
 	}
-	return ctx.WriteArray(results)
+	return ctx.WriteValue(resp.SetValue(results))
 }
 
 // tsFilter is one RedisTimeSeries label filter: label=value, label!=value,

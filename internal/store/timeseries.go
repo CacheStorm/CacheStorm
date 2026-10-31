@@ -38,13 +38,16 @@ type TimeSeriesValue struct {
 }
 
 // TSRule is a compaction rule: samples are aggregated per bucket into the
-// series Dest. Open holds the samples of the bucket not yet closed.
+// series Dest. Open holds the samples of the bucket not yet closed, and
+// Prev the last sample of the bucket closed before it, which a "twa" rule
+// interpolates from.
 type TSRule struct {
 	Dest        string
 	Aggregation string
 	Bucket      int64
 	Align       int64
 	Open        []TimeSeriesSample
+	Prev        *TimeSeriesSample
 }
 
 // TSDefaultChunkSize is a series' default CHUNK_SIZE.
@@ -186,6 +189,17 @@ func (v *TimeSeriesValue) Last() (TimeSeriesSample, bool) {
 	return v.Samples[len(v.Samples)-1], true
 }
 
+// Ignores reports whether IGNORE drops a sample as too close to the newest
+// one. The caller holds the lock.
+func (v *TimeSeriesValue) Ignores(ts int64, value float64, policy string) bool {
+	if policy == "" {
+		policy = v.Policy()
+	}
+	last, ok := v.Last()
+	return ok && policy == "LAST" && ts >= last.Timestamp && ts-last.Timestamp <= v.IgnoreMaxTimeDiff &&
+		math.Abs(value-last.Value) <= v.IgnoreMaxValDiff && (v.IgnoreMaxTimeDiff > 0 || v.IgnoreMaxValDiff > 0)
+}
+
 // Upsert adds a sample under policy (the series' own when empty) and
 // returns the timestamp TS.ADD replies with. The caller holds the lock.
 func (v *TimeSeriesValue) Upsert(ts int64, value float64, policy string) (int64, error) {
@@ -196,8 +210,7 @@ func (v *TimeSeriesValue) Upsert(ts int64, value float64, policy string) (int64,
 		if v.Retention > 0 && ts < last.Timestamp-v.Retention.Milliseconds() {
 			return 0, ErrTSRetention
 		}
-		if policy == "LAST" && ts >= last.Timestamp && ts-last.Timestamp <= v.IgnoreMaxTimeDiff &&
-			math.Abs(value-last.Value) <= v.IgnoreMaxValDiff && (v.IgnoreMaxTimeDiff > 0 || v.IgnoreMaxValDiff > 0) {
+		if v.Ignores(ts, value, policy) {
 			return last.Timestamp, nil
 		}
 	}
@@ -312,14 +325,16 @@ func TSAggregate(agg string, samples []TimeSeriesSample) float64 {
 		if sample && n < 2 {
 			return 0
 		}
-		mean, sq := sum/n, 0.0
+		sum2 := 0.0
 		for _, s := range samples {
-			sq += (s.Value - mean) * (s.Value - mean)
+			sum2 += s.Value * s.Value
 		}
+		mean := sum / n
+		v := (sum2 - 2*sum*sum/n + mean*mean*n) / n
 		if sample {
-			return sq / (n - 1)
+			return v * n / (n - 1)
 		}
-		return sq / n
+		return v
 	}
 	switch agg {
 	case "avg":
