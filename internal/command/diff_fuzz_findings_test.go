@@ -2,6 +2,7 @@ package command
 
 import (
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/cachestorm/cachestorm/internal/store"
@@ -168,5 +169,37 @@ func TestSPOPKeepingFewMembersRebuildsTheSet(t *testing.T) {
 	second, _ := strconv.Atoi(order[1][1:])
 	if first >= second {
 		t.Fatalf("listpack kept %v, want insertion order", order)
+	}
+}
+
+func TestACLCommandRulesAndDefaultUserFollowRedis(t *testing.T) {
+	r := newMemAcctRouter()
+	RegisterServerCommands(r)
+	s := store.NewStore()
+	run := func(args ...string) string { return memAcctRun(r, s, nil, args...) }
+	defer run("ACL", "DELUSER", "acltest")
+	for rule, why := range map[string]string{
+		"-get|foo":       "Unknown command or category name in ACL",
+		"+config|get|x":  "Allowing first-arg of a subcommand is not supported",
+		"+config|":       "Syntax error",
+		"+config|nosuch": "Unknown command or category name in ACL",
+		"-nosuch":        "Unknown command or category name in ACL",
+		"+GET":           "",
+		"+select|0":      "",
+		"-CONFIG|GET":    "",
+	} {
+		want := "+OK\r\n"
+		if why != "" {
+			want = "-ERR Error in ACL SETUSER modifier '" + rule + "': " + why + "\r\n"
+		}
+		if got := run("ACL", "SETUSER", "acltest", rule); got != want {
+			t.Fatalf("ACL SETUSER %s = %q, want %q", rule, got, want)
+		}
+	}
+	if got := run("ACL", "DELUSER", "acltest", "default"); got != "-ERR The 'default' user cannot be removed\r\n" {
+		t.Fatalf("ACL DELUSER default = %q", got)
+	}
+	if got := run("ACL", "CAT"); !strings.HasPrefix(got, "*21\r\n$8\r\nkeyspace\r\n$4\r\nread\r\n") {
+		t.Fatalf("ACL CAT = %q, want Redis' category order", got)
 	}
 }

@@ -1640,6 +1640,11 @@ func cmdACL(ctx *Context) error {
 		if ctx.ArgCount() < 2 {
 			return ctx.WriteError(ErrWrongArgCount)
 		}
+		for i := 1; i < ctx.ArgCount(); i++ {
+			if ctx.ArgString(i) == "default" {
+				return ctx.WriteError(errors.New("ERR The 'default' user cannot be removed"))
+			}
+		}
 		deleted := int64(0)
 		for i := 1; i < ctx.ArgCount(); i++ {
 			username := ctx.ArgString(i)

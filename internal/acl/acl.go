@@ -322,6 +322,52 @@ func SetCategoryResolver(fn func(category string) ([]string, bool)) {
 	categoryResolver = fn
 }
 
+// commandResolver reports whether a command exists and whether it is a
+// container whose subcommands rules may name; with sub set, whether the
+// container has that subcommand. The command package installs it.
+var commandResolver func(cmd, sub string) (known, container, subKnown bool)
+
+// SetCommandResolver installs the command table +command and -command rules
+// are checked against.
+func SetCommandResolver(fn func(cmd, sub string) (known, container, subKnown bool)) {
+	commandResolver = fn
+}
+
+// commandRuleError is why ACLSetSelector refuses the command a +name or
+// -name rule names, or "": an unknown command, a subcommand of a
+// subcommand, an empty subcommand, or, for -, a first argument of a command
+// without subcommands.
+func commandRuleError(allow bool, name string) string {
+	if commandResolver == nil {
+		return ""
+	}
+	name = strings.ToLower(name)
+	i := strings.LastIndexByte(name, '|')
+	if i < 0 {
+		if known, _, _ := commandResolver(name, ""); !known {
+			return errUnknownCmd
+		}
+		return ""
+	}
+	cmd, sub := name[:i], name[i+1:]
+	if j := strings.IndexByte(cmd, '|'); j >= 0 {
+		if _, _, ok := commandResolver(cmd[:j], cmd[j+1:]); ok && allow {
+			return errFirstArgSub
+		}
+		return errUnknownCmd
+	}
+	known, container, subKnown := commandResolver(cmd, sub)
+	switch {
+	case !known:
+		return errUnknownCmd
+	case allow && sub == "":
+		return errSyntax
+	case (container || !allow) && !subKnown:
+		return errUnknownCmd
+	}
+	return ""
+}
+
 // AllowKey grants read and write access to the keys matching pattern.
 func (u *User) AllowKey(pattern string) {
 	u.mu.Lock()
@@ -723,6 +769,7 @@ func ruleError(part, why string) error {
 const (
 	errSyntax        = "Syntax error"
 	errUnknownCmd    = "Unknown command or category name in ACL"
+	errFirstArgSub   = "Allowing first-arg of a subcommand is not supported"
 	errBadHash       = "The password hash must be exactly 64 characters and contain only lowercase hexadecimal characters"
 	errNoSuchPass    = "The password you are trying to remove from the user does not exist"
 	errAfterAllKeys  = "Adding a pattern after the * pattern (or the 'allkeys' flag) is not valid and does not have any effect. Try 'resetkeys' to start with an empty list of patterns"
@@ -796,8 +843,9 @@ func validateSelectorRule(part string) string {
 			if _, ok := categoryResolver(cat); !ok {
 				return errUnknownCmd
 			}
+			return ""
 		}
-		return ""
+		return commandRuleError(part[0] == '+', part[1:])
 	}
 	return errSyntax
 }

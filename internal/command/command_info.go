@@ -485,19 +485,38 @@ func init() {
 		members, ok := aclCategoryMembers[category]
 		return members, ok
 	})
+	acl.SetCommandResolver(aclResolveCommand)
 }
+
+// aclResolveCommand tells ACL rules which commands exist: Redis' command
+// table and the commands the process registered.
+func aclResolveCommand(cmd, sub string) (known, container, subKnown bool) {
+	upper := strings.ToUpper(cmd)
+	_, known = redisCommandSpecs[upper]
+	if !known && globalRouter != nil {
+		_, known = globalRouter.Get(upper)
+	}
+	container = hasSubcommands(upper)
+	if container && sub != "" {
+		_, subKnown = redisSubcommandCategories[upper+"|"+strings.ToUpper(sub)]
+	}
+	return known, container, subKnown
+}
+
+// aclCategoryOrder is the order of Redis' ACLCommandCategories table, which
+// ACL CAT lists.
+var aclCategoryOrder = []string{"keyspace", "read", "write", "set", "sortedset", "list", "hash", "string", "bitmap",
+	"hyperloglog", "geo", "stream", "pubsub", "admin", "fast", "slow", "blocking", "dangerous", "connection",
+	"transaction", "scripting"}
 
 // cmdACLCat implements ACL CAT [category].
 func cmdACLCat(ctx *Context) error {
 	if ctx.ArgCount() == 1 {
-		cats := make([]string, 0, len(aclCategoryMembers))
-		for c := range aclCategoryMembers {
-			cats = append(cats, c)
-		}
-		sort.Strings(cats)
-		out := make([]*resp.Value, len(cats))
-		for i, c := range cats {
-			out[i] = resp.BulkString(c)
+		out := make([]*resp.Value, 0, len(aclCategoryOrder))
+		for _, c := range aclCategoryOrder {
+			if _, ok := aclCategoryMembers[c]; ok {
+				out = append(out, resp.BulkString(c))
+			}
 		}
 		return ctx.WriteArray(out)
 	}
