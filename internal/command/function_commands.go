@@ -17,6 +17,7 @@ import (
 
 	lua "github.com/cachestorm/cachestorm/third_party/gopherlua"
 
+	"github.com/cachestorm/cachestorm/internal/persistence"
 	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
 )
@@ -906,8 +907,10 @@ func handleFunctionList(ctx *Context, registry *FunctionRegistry) error {
 	return ctx.WriteArray(result)
 }
 
-// functionDumpMagic starts a FUNCTION DUMP payload: a version byte, then for
-// each library its name, whether it came from FUNCTION LOAD, and its code.
+// functionDumpMagic starts the FUNCTION DUMP payload of a registry holding
+// libraries FUNCTION LOAD did not create, which Redis' payload cannot carry:
+// a version byte, then for each library its name, whether it came from
+// FUNCTION LOAD, and its code. Other registries dump in Redis' format.
 const functionDumpMagic = "CSFN\x01"
 
 func handleFunctionDump(ctx *Context, registry *FunctionRegistry) error {
@@ -916,6 +919,15 @@ func handleFunctionDump(ctx *Context, registry *FunctionRegistry) error {
 
 func (registry *FunctionRegistry) DumpPayload() []byte {
 	libs := registry.ListLibraries("")
+	codes := make([]string, 0, len(libs))
+	for _, lib := range libs {
+		if lib.Loaded {
+			codes = append(codes, lib.Code)
+		}
+	}
+	if len(codes) == len(libs) {
+		return persistence.EncodeFunctionDump(codes)
+	}
 	var buf bytes.Buffer
 	buf.WriteString(functionDumpMagic)
 	for _, lib := range libs {
@@ -958,33 +970,13 @@ func handleFunctionRestore(ctx *Context, registry *FunctionRegistry) error {
 			return ctx.WriteError(replyError("ERR Wrong restore policy given, value should be either FLUSH, APPEND or REPLACE."))
 		}
 	}
-	payload := ctx.Args[1]
-	if !bytes.HasPrefix(payload, []byte(functionDumpMagic)) {
-		return ctx.WriteError(errFunctionPayload)
+	decode := decodeRedisFunctionDump
+	if bytes.HasPrefix(ctx.Args[1], []byte(functionDumpMagic)) {
+		decode = decodeCSFunctionDump
 	}
-	var libs []*Library
-	for pos := len(functionDumpMagic); pos < len(payload); {
-		name, next, ok := readDumpString(payload, pos)
-		if !ok || next >= len(payload) {
-			return ctx.WriteError(errFunctionPayload)
-		}
-		loaded := payload[next] == 1
-		code, after, ok := readDumpString(payload, next+1)
-		if !ok {
-			return ctx.WriteError(errFunctionPayload)
-		}
-		pos = after
-		var lib *Library
-		var err error
-		if loaded {
-			lib, err = buildLoadedLibrary(code)
-		} else {
-			lib, err = buildCreatedLibrary(name, code)
-		}
-		if err != nil {
-			return ctx.WriteError(err)
-		}
-		libs = append(libs, lib)
+	libs, err := decode(ctx.Args[1])
+	if err != nil {
+		return ctx.WriteError(err)
 	}
 
 	registry.mu.Lock()
@@ -1014,6 +1006,50 @@ func handleFunctionRestore(ctx *Context, registry *FunctionRegistry) error {
 		}
 	}
 	return ctx.WriteOK()
+}
+
+func decodeRedisFunctionDump(payload []byte) ([]*Library, error) {
+	codes, err := persistence.DecodeFunctionDump(payload)
+	if err != nil {
+		return nil, err
+	}
+	libs := make([]*Library, 0, len(codes))
+	for _, code := range codes {
+		lib, err := buildLoadedLibrary(code)
+		if err != nil {
+			return nil, err
+		}
+		libs = append(libs, lib)
+	}
+	return libs, nil
+}
+
+func decodeCSFunctionDump(payload []byte) ([]*Library, error) {
+	var libs []*Library
+	for pos := len(functionDumpMagic); pos < len(payload); {
+		name, next, ok := readDumpString(payload, pos)
+		if !ok || next >= len(payload) {
+			return nil, errFunctionPayload
+		}
+		loaded := payload[next] == 1
+		code, after, ok := readDumpString(payload, next+1)
+		if !ok {
+			return nil, errFunctionPayload
+		}
+		pos = after
+		var lib *Library
+		var err error
+		if loaded {
+			lib, err = buildLoadedLibrary(code)
+		} else {
+			lib, err = buildCreatedLibrary(name, code)
+		}
+		if err != nil {
+			return nil, err
+		}
+		libs = append(libs, lib)
+	}
+	return libs, nil
 }
 
 func copyLibraries(m map[string]*Library) map[string]*Library {
