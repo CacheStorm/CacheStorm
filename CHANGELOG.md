@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- ROADMAP: the Redis compatibility status reflects RESP3 support and the current 561-case compatibility report
 - Removed the `website/` directory and its GitHub Pages workflow; the website is maintained in a separate repository
 - Per-command bookkeeping shares one clock read for the connection's last-command time, the command start and its stats, key access times come from a once-per-100ms unix-second clock (as Redis' LRU clock), and a command's key positions are classified once per command name instead of through six table lookups per call; pipelined single-key throughput rises about 4%.
 - **CI actions on Node 24**: checkout, setup-go, setup-node, setup-python, upload-artifact, golangci-lint-action and the Pages actions move to the majors that run on Node 24, ahead of GitHub removing Node 20 from its runners.

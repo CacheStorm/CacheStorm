@@ -48,7 +48,7 @@ Durum (25 Ekim 2026): **tamamlandı.** EXEC kuyruğu kayıtlı handler'larla ça
 
 ## M2 Redis sözleşmeleri ve komut envanteri
 
-Durum (25 Ekim 2026): **büyük ölçüde tamamlandı.** `tests/compat` Redis 7.4'e karşı 346 vakada farkları ölçüyor: 345 eşleşiyor, kalan Lua hata metni farkı [raporda](tests/compat/REPORT.md). Komut metadata'sı (arity, bayraklar, anahtar konumları) Redis'in kendi COMMAND çıktısından `tools/cmdspecgen` ile üretiliyor ve router, ACL anahtar çıkarımı, OOM kontrolü bu tabloyu kullanıyor. RESP2 varsayılan; HELLO 2 destekleniyor, RESP3 `NOPROTO` ile reddediliyor. Expiry milisaniye olarak saklanıyor; 2262 sınırı kaldırıldı. Açık: RESP3, gopher-lua hata metinleri.
+Durum (31 Ekim 2026): **büyük ölçüde tamamlandı.** `tests/compat` Redis 7.4'e karşı 561 vakada farkları ölçüyor: 559 eşleşiyor, kalan iki fark [raporda](tests/compat/REPORT.md) kasıtlı olarak belgelenmiş. Komut metadata'sı (arity, bayraklar, anahtar konumları, COMMAND DOCS) Redis'in kendi COMMAND çıktısından `tools/cmdspecgen` ile üretiliyor ve router, ACL anahtar çıkarımı, OOM kontrolü bu tabloyu kullanıyor. RESP2 ve RESP3 (HELLO 3, push mesajları, CLIENT TRACKING) destekleniyor. Expiry milisaniye olarak saklanıyor; 2262 sınırı kaldırıldı. `scripts/diff-fuzz.py` düz, RESP3 ve keyspace bildirim modlarında Redis'e karşı rastgele komut dizileri karşılaştırıyor.
 
 Öncelik: **P1**. Tahmin: **5–10 iş günü**. M1 ile ortak komut yürütme tasarımını kullanır.
 
