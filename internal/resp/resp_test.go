@@ -268,8 +268,8 @@ func TestReadCommandWithNilArg(t *testing.T) {
 	r := NewReader(bytes.NewReader([]byte(input)))
 
 	cmd, args, err := r.ReadCommand()
-	if err != ErrInvalidFormat || cmd != "" || args != nil {
-		t.Fatalf("expected empty command, nil args, ErrInvalidFormat; got command=%q args=%q error=%v", cmd, args, err)
+	if err != ErrBulkStringTooBig || cmd != "" || args != nil {
+		t.Fatalf("expected empty command, nil args, ErrBulkStringTooBig; got command=%q args=%q error=%v", cmd, args, err)
 	}
 }
 

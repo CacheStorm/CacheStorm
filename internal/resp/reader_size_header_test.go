@@ -37,9 +37,15 @@ func TestReadSizeHeaderRejectsSigns(t *testing.T) {
 			}
 		}
 	}
-	for _, wire := range []string{"*+2\r\n$3\r\nGET\r\n$1\r\nk\r\n", "*2\r\n$+3\r\nGET\r\n$1\r\nk\r\n", "*2\r\n$3\r\nGET\r\n$-0\r\n\r\n", "*1\r\n*+0\r\n", "%1\r\n+k\r\n$+0\r\n\r\n"} {
-		if cmd, args, err := NewReader(strings.NewReader(wire)).ReadCommand(); cmd != "" || args != nil || err != ErrInvalidFormat {
-			t.Errorf("ReadCommand(%q): command=%q args=%q error=%v", wire, cmd, args, err)
+	for wire, want := range map[string]error{
+		"*+2\r\n$3\r\nGET\r\n$1\r\nk\r\n": ErrArrayTooLarge,
+		"*2\r\n$+3\r\nGET\r\n$1\r\nk\r\n": ErrBulkStringTooBig,
+		"*2\r\n$3\r\nGET\r\n$-0\r\n\r\n":  ErrBulkStringTooBig,
+		"*1\r\n*+0\r\n":                   ErrInvalidFormat,
+		"%1\r\n+k\r\n$+0\r\n\r\n":         ErrInvalidFormat,
+	} {
+		if cmd, args, err := NewReader(strings.NewReader(wire)).ReadCommand(); cmd != "" || args != nil || err != want {
+			t.Errorf("ReadCommand(%q): command=%q args=%q error=%v, want %v", wire, cmd, args, err, want)
 		}
 	}
 }

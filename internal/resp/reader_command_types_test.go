@@ -29,8 +29,12 @@ func TestReadCommandRejectsNonBulkElements(t *testing.T) {
 			t.Run(name+"/"+position, func(t *testing.T) {
 				r := NewReader(strings.NewReader(wire + "*1\r\n$4\r\nPING\r\n"))
 				cmd, args, err := r.ReadCommand()
-				if err != ErrInvalidFormat || cmd != "" || args != nil {
-					t.Fatalf("ReadCommand(%q): got command=%q args=%q error=%v, want empty command, nil args, ErrInvalidFormat", wire, cmd, args, err)
+				want := ErrInvalidFormat
+				if name == "null bulk" {
+					want = ErrBulkStringTooBig
+				}
+				if err != want || cmd != "" || args != nil {
+					t.Fatalf("ReadCommand(%q): got command=%q args=%q error=%v, want empty command, nil args, %v", wire, cmd, args, err, want)
 				}
 			})
 		}

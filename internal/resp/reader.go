@@ -5,20 +5,52 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"math"
 	"strconv"
+	"sync/atomic"
 )
 
 var (
 	ErrInvalidType      = errors.New("invalid RESP type")
 	ErrInvalidFormat    = errors.New("invalid RESP format")
-	ErrBulkStringTooBig = errors.New("bulk string exceeds maximum size")
-	ErrArrayTooLarge    = errors.New("array exceeds maximum element count")
+	ErrBulkStringTooBig = errors.New("invalid bulk length")
+	ErrArrayTooLarge    = errors.New("invalid multibulk length")
+	// ErrUnauthenticatedMultibulk and ErrUnauthenticatedBulk refuse a large
+	// command from a client that has yet to authenticate, as Redis does.
+	ErrUnauthenticatedMultibulk = errors.New("unauthenticated multibulk length")
+	ErrUnauthenticatedBulk      = errors.New("unauthenticated bulk length")
+	// ErrQueryBufferLimit is a command larger than client-query-buffer-limit.
+	ErrQueryBufferLimit = errors.New("query buffer limit reached")
 )
 
 const (
 	MaxBulkStringSize = 512 * 1024 * 1024
-	MaxArrayElements  = 1048576 // 1M elements max per array
+	// MaxArrayElements bounds the aggregates of a reply; a client command
+	// may have up to math.MaxInt32 arguments, as in Redis.
+	MaxArrayElements = 1048576
+	// unauthMaxArgs and unauthMaxBulk are Redis' limits on a command from a
+	// client that must authenticate first.
+	unauthMaxArgs = 10
+	unauthMaxBulk = 16384
 )
+
+// protoMaxBulkLen and queryBufferLimit are proto-max-bulk-len and
+// client-query-buffer-limit for client commands.
+var (
+	protoMaxBulkLen  atomic.Int64
+	queryBufferLimit atomic.Int64
+)
+
+func init() {
+	protoMaxBulkLen.Store(MaxBulkStringSize)
+	queryBufferLimit.Store(1 << 30)
+}
+
+// SetProtoMaxBulkLen sets the largest argument a client command may have.
+func SetProtoMaxBulkLen(n int64) { protoMaxBulkLen.Store(n) }
+
+// SetQueryBufferLimit sets the largest command a client may send.
+func SetQueryBufferLimit(n int64) { queryBufferLimit.Store(n) }
 
 type Reader struct {
 	rd *bufio.Reader
@@ -26,7 +58,14 @@ type Reader struct {
 	// refuses to go deeper than MaxNestingDepth so a peer cannot drive the
 	// recursion into a stack overflow.
 	depth int
+	// unauthenticated applies the limits on a client that has to
+	// authenticate before it may run commands.
+	unauthenticated bool
 }
+
+// SetUnauthenticated tells the reader whether the client still has to
+// authenticate, which limits the size of its commands.
+func (r *Reader) SetUnauthenticated(v bool) { r.unauthenticated = v }
 
 // MaxNestingDepth bounds how deeply arrays and maps may nest in a reply.
 const MaxNestingDepth = 128
@@ -182,24 +221,29 @@ func (r *Reader) readMultiBulk() (string, [][]byte, error) {
 	if len(line) > 0 && line[0] == '-' {
 		// A zero or negative count is skipped, as Redis does.
 		if _, ok := parseDecimal(line[1:]); !ok {
-			return "", nil, ErrInvalidFormat
+			return "", nil, ErrArrayTooLarge
 		}
 		return "", nil, errEmptyCommand
 	}
 	count, ok := parseDecimal(line)
 	if !ok {
-		return "", nil, ErrInvalidFormat
+		return "", nil, ErrArrayTooLarge
 	}
 	if count == 0 {
 		return "", nil, errEmptyCommand
 	}
-	if count > MaxArrayElements {
+	if count > math.MaxInt32 {
 		return "", nil, ErrArrayTooLarge
+	}
+	if r.unauthenticated && count > unauthMaxArgs {
+		return "", nil, ErrUnauthenticatedMultibulk
 	}
 
 	// Grow the argument slice as arguments arrive instead of sizing it from
-	// a header the peer chose.
+	// a header the peer chose. size counts the command's bytes against
+	// client-query-buffer-limit.
 	args := make([][]byte, 0, min(count, 16))
+	size, limit := int64(len(line)), queryBufferLimit.Load()
 	for i := int64(0); i < count; i++ {
 		b, err := r.rd.ReadByte()
 		if err != nil {
@@ -208,11 +252,16 @@ func (r *Reader) readMultiBulk() (string, [][]byte, error) {
 		if b != byte(TypeBulkString) {
 			return "", nil, ErrInvalidFormat
 		}
-		arg, err := r.readCommandBulk()
+		arg, err := r.readCommandBulk(limit - size)
 		if err != nil {
 			return "", nil, unexpectedEOF(err)
 		}
 		args = append(args, arg)
+		// "$<len>\r\n<arg>\r\n", as the bytes Redis' query buffer holds.
+		size += int64(len(arg)) + int64(len(strconv.Itoa(len(arg)))) + 5
+		if size > limit {
+			return "", nil, ErrQueryBufferLimit
+		}
 	}
 	return string(args[0]), args[1:], nil
 }
@@ -220,17 +269,20 @@ func (r *Reader) readMultiBulk() (string, [][]byte, error) {
 // readCommandBulk reads one bulk-string argument. A large argument is read
 // in chunks, so the memory held grows with the bytes actually received and a
 // header announcing 512 MB costs nothing until the data arrives.
-func (r *Reader) readCommandBulk() ([]byte, error) {
+func (r *Reader) readCommandBulk(room int64) ([]byte, error) {
 	line, err := r.readBoundedLine(true)
 	if err != nil {
 		return nil, err
 	}
 	size, ok := parseDecimal(line)
-	if !ok {
-		return nil, ErrInvalidFormat
-	}
-	if size > MaxBulkStringSize {
+	if !ok || size > protoMaxBulkLen.Load() {
 		return nil, ErrBulkStringTooBig
+	}
+	if r.unauthenticated && size > unauthMaxBulk {
+		return nil, ErrUnauthenticatedBulk
+	}
+	if size > room {
+		return nil, ErrQueryBufferLimit
 	}
 
 	const chunk = 1 << 20

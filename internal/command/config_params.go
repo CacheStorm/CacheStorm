@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
 )
 
@@ -90,7 +91,7 @@ var configParams = map[string]*configParam{
 	"bio-cpulist":                         immutableParam(""),
 	"busy-reply-threshold":                intParam("5000", 0, configLongMax),
 	"client-output-buffer-limit":          {kind: cfgSpecial, def: defaultOutputBufferLimit, check: checkOutputBufferLimit, applyText: applyOutputBufferLimit},
-	"client-query-buffer-limit":           memParam("1073741824", 1<<20, configLongMax),
+	"client-query-buffer-limit":           {kind: cfgMemory, def: "1073741824", lo: 1 << 20, hi: configLongMax, apply: resp.SetQueryBufferLimit},
 	"cluster-allow-pubsubshard-when-down": boolParam("yes"),
 	"cluster-allow-reads-when-down":       boolParam("no"),
 	"cluster-allow-replica-migration":     boolParam("yes"),
@@ -142,7 +143,7 @@ var configParams = map[string]*configParam{
 	"oom-score-adj-values":                {kind: cfgSpecial, def: "0 200 800", check: checkOOMScoreAdjValues},
 	"proc-title-template":                 {kind: cfgString, def: "{title} {listen-addr} {server-mode}", check: checkProcTitleTemplate},
 	"propagation-error-behavior":          enumParam("ignore", "ignore", "panic", "panic-on-replicas"),
-	"proto-max-bulk-len":                  memParam("536870912", 1<<20, configLongMax),
+	"proto-max-bulk-len":                  {kind: cfgMemory, def: "536870912", lo: 1 << 20, hi: configLongMax, apply: resp.SetProtoMaxBulkLen},
 	"rdb-del-sync-files":                  boolParam("no"),
 	"rdb-save-incremental-fsync":          boolParam("yes"),
 	"rdbchecksum":                         immutableParam("yes"),

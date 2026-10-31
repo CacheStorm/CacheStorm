@@ -81,6 +81,18 @@ wait_check_ok() {
 	return 1
 }
 
+# wait_state_ok waits until the node on port $1 reports cluster_state:ok. A
+# master that saw a minority of the masters while the cluster formed waits
+# its rejoin delay first, as in Redis.
+wait_state_ok() {
+	for _ in $(seq 1 50); do
+		rcli -p "$1" cluster info | grep -q "cluster_state:ok" && return 0
+		sleep 0.2
+	done
+	echo "node $1 is not in the ok state" >&2
+	return 1
+}
+
 addrs=()
 for p in "${ports[@]}"; do addrs+=("127.0.0.1:$p"); done
 echo "--- redis-cli --cluster create --cluster-replicas 1"
@@ -93,8 +105,8 @@ grep -q "keys in 3 masters" "$work/check.out"
 [ "$(grep -c '^S: ' "$work/check.out")" = 3 ]
 
 for p in "${ports[@]}"; do
+	wait_state_ok "$p"
 	info="$(rcli -p "$p" cluster info)"
-	grep -q "cluster_state:ok" <<<"$info"
 	grep -q "cluster_known_nodes:6" <<<"$info"
 	grep -q "cluster_size:3" <<<"$info"
 done
@@ -156,7 +168,7 @@ echo "--- redis-cli --cluster check after the failover"
 wait_check_ok "${ports[0]}"
 for p in "${ports[@]}"; do
 	[ "$p" = "$victim" ] && continue
-	rcli -p "$p" cluster info | grep -q "cluster_state:ok"
+	wait_state_ok "$p"
 done
 
 echo "--- the keys survived"

@@ -406,6 +406,7 @@ func (c *Connection) Handle() {
 				c.releaseGate()
 			}
 		}
+		c.reader.SetUnauthenticated(!c.authenticated && c.router.RequirePass() != "")
 		cmd, args, err := c.reader.ReadClientCommand()
 		if err != nil {
 			// Replies kept for a pipeline go out before the connection
@@ -422,6 +423,10 @@ func (c *Connection) Handle() {
 				return
 			}
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				return
+			}
+			if err == resp.ErrQueryBufferLimit {
+				logger.Warn().Int64("conn_id", c.ID).Str("addr", c.RemoteAddr()).Msg("closing client that reached max query buffer length (client-query-buffer-limit)")
 				return
 			}
 			if isProtocolError(err) {
@@ -846,7 +851,8 @@ func (c *Connection) RemoteAddr() string {
 func isProtocolError(err error) bool {
 	switch err {
 	case resp.ErrInvalidFormat, resp.ErrInvalidType, resp.ErrLineTooLong,
-		resp.ErrUnbalancedQuote, resp.ErrBulkStringTooBig, resp.ErrArrayTooLarge:
+		resp.ErrUnbalancedQuote, resp.ErrBulkStringTooBig, resp.ErrArrayTooLarge,
+		resp.ErrUnauthenticatedMultibulk, resp.ErrUnauthenticatedBulk:
 		return true
 	}
 	return false
