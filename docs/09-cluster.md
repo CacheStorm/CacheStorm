@@ -79,10 +79,13 @@ For planned maintenance, run `CLUSTER FAILOVER` on a replica. It pauses the mast
 
 A go-redis `ClusterClient` reads and writes throughout. At the end the script checks that no write was lost and that no command failed.
 
+## Replica migration and rejoin delays
+
+When a master serving slots loses its last working replica, a replica of the master with the most working replicas (more than `cluster-migration-barrier`, default 1) moves to it after 5 s. Of those replicas, the one with the smallest node ID moves. `cluster-allow-replica-migration no` turns this off. A replica with `cluster-replica-no-failover yes` never starts an automatic failover; `CLUSTER FAILOVER` still works on it. All three settings change at run time with `CONFIG SET`.
+
+A master that was on the minority side of a partition waits `cluster-node-timeout` (clamped to 0.5–5 s) after it sees a majority again before it serves writes. A master restarted from `nodes.conf` next to other nodes waits 2 s. In both cases the node first learns whether a replica took its place. Redis applies the same delays.
+
 ## Limitations
 
-- **Replica migration:** a replica does not move to a master that has lost its own replicas. Also, `cluster-replica-no-failover` cannot be set.
-- **Startup timing:** Redis waits a few seconds before a restarted node accepts writes, and waits before it rejoins after a partition. CacheStorm does neither: it recomputes the cluster state as soon as something changes.
-- **Connections:** `MIGRATE` opens a new connection each time instead of caching it.
 - **DUMP payloads:** payloads of CacheStorm-only types (JSON and time series) cannot be restored into Redis. Streams use Redis' encoding and move both ways.
 - **Extension registries:** process-wide extension registries, such as queues, locks and counters outside the keyspace, are not partitioned by slot.

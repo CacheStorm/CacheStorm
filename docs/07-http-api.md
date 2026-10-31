@@ -486,4 +486,10 @@ Access-Control-Allow-Headers: Content-Type, Authorization
 
 ## Rate Limiting
 
-Currently not implemented. Coming in future versions.
+Each client IP may make `http.rate_limit` requests (default 100) per `http.rate_window` (default `1m`), counted over a sliding window. CORS preflight (`OPTIONS`) requests are not counted. A request over the limit gets `429 Too Many Requests`:
+
+```json
+{"error": true, "status": 429, "reason": "rate limit exceeded"}
+```
+
+The client IP is the TCP peer address; `X-Forwarded-For` is ignored, so behind a reverse proxy every client shares the proxy's budget.

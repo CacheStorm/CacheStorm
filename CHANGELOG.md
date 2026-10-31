@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- Docs: the cluster guide describes replica migration and the rejoin delays instead of listing them as missing. The persistence guide explains that CacheStorm loads Redis 7.4 `dump.rdb` files and that `redis-cli --rdb` produces a file Redis can load
 - ROADMAP: the Redis compatibility status reflects RESP3 support and the current 561-case compatibility report
 - Removed the `website/` directory and its GitHub Pages workflow; the website is maintained in a separate repository
 - Per-command bookkeeping shares one clock read for the connection's last-command time, the command start and its stats, key access times come from a once-per-100ms unix-second clock (as Redis' LRU clock), and a command's key positions are classified once per command name instead of through six table lookups per call; pipelined single-key throughput rises about 4%.
