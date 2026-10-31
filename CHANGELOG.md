@@ -201,6 +201,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Authentication: only AUTH, HELLO, QUIT and RESET run before a requirepass client authenticates, the commands Redis flags `no_auth`. PING and COMMAND were exempt too, so an unauthenticated client could probe the server
 
 ### Fixed
+- OBJECT IDLETIME under an LFU maxmemory policy fails with Redis' "An LFU maxmemory policy is selected, idle time not tracked" error instead of answering 0
 - Go client: on Unix systems, a pooled connection the server closed while it was idle is detected with a non-blocking peek when it is taken from the pool, and replaced. Before, the next command on it failed with EOF. The README no longer claims that CacheStorm does not deliver published messages; `ReceiveMessage` receives them
 - Python client: a connection the server closed while idle (timeout, CLIENT KILL, restart) is detected before the next command is sent and replaced, with AUTH and SELECT run again. Before, that command failed with "Connection closed by server", and only the one after it reconnected
 - Cluster: a master that comes back from the minority side of a partition waits `cluster-node-timeout` (clamped to 0.5–5 s) before it serves writes again. A master restarted from `nodes.conf` next to other nodes waits 2 s. Before, both served writes right away, before learning that a replica had been promoted in their place. These are Redis' rejoin and writable delays

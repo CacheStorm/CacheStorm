@@ -236,6 +236,9 @@ func getEncoding(v store.Value) string {
 var errObjectFreqNoLFU = errors.New("ERR An LFU maxmemory policy is not selected, access frequency not tracked. " + //nolint:staticcheck // Redis reply text
 	"Please note that when switching between policies at runtime LRU and LFU data will take some time to adjust.")
 
+var errObjectIdleTimeLFU = errors.New("ERR An LFU maxmemory policy is selected, idle time not tracked. " + //nolint:staticcheck // Redis reply text
+	"Please note that when switching between policies at runtime LRU and LFU data will take some time to adjust.")
+
 const objectHelp = `OBJECT <subcommand> [<arg> [value] [opt] ...]. Subcommands are:
 ENCODING <key>
     Return the kind of internal representation used in order to store the value
@@ -281,6 +284,9 @@ func cmdOBJECT(ctx *Context) error {
 	case "ENCODING":
 		return ctx.WriteBulkString(getEncoding(entry.Value))
 	case "IDLETIME":
+		if ctx.Store.UsesLFU() {
+			return ctx.WriteError(errObjectIdleTimeLFU)
+		}
 		return ctx.WriteInteger(entry.IdleSeconds())
 	case "FREQ":
 		if !ctx.Store.UsesLFU() {

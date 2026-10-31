@@ -36,6 +36,7 @@ func TestLFUCounterFollowsRedis(t *testing.T) {
 		{[]string{"OBJECT", "FREQ", "k"}, ":9\r\n"},
 		{[]string{"RENAME", "k", "r"}, ""},
 		{[]string{"OBJECT", "FREQ", "r"}, ":5\r\n"},
+		{[]string{"OBJECT", "IDLETIME", "r"}, "-ERR An LFU maxmemory policy is selected, idle time not tracked."},
 	} {
 		got := h.do(c.args...)
 		if c.want != "" && !strings.Contains(got, c.want) {
