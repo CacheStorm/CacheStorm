@@ -203,3 +203,25 @@ func TestACLCommandRulesAndDefaultUserFollowRedis(t *testing.T) {
 		t.Fatalf("ACL CAT = %q, want Redis' category order", got)
 	}
 }
+
+func TestXADDInATransactionSharesItsMillisecond(t *testing.T) {
+	r := newMemAcctRouter()
+	RegisterStreamCommands(r)
+	RegisterTransactionCommands(r)
+	RegisterDebugCommands(r)
+	s := store.NewStore()
+	tx := NewTransaction()
+	memAcctRun(r, s, tx, "MULTI")
+	memAcctRun(r, s, tx, "XADD", "s", "*", "a", "1")
+	memAcctRun(r, s, tx, "DEBUG", "SLEEP", "0.005")
+	memAcctRun(r, s, tx, "XADD", "s", "*", "a", "2")
+	reply := memAcctRun(r, s, tx, "EXEC")
+	ids := strings.Split(reply, "\r\n")
+	if len(ids) < 6 {
+		t.Fatalf("EXEC = %q", reply)
+	}
+	first, second := ids[2], ids[5]
+	if ms := strings.TrimSuffix(first, "-0"); !strings.HasSuffix(first, "-0") || second != ms+"-1" {
+		t.Fatalf("XADD * in one EXEC gave %s and %s, want one millisecond", first, second)
+	}
+}

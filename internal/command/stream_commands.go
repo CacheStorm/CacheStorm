@@ -303,7 +303,7 @@ func cmdXADD(ctx *Context) error {
 		created = true
 	}
 
-	entry, trimmed, err := stream.XAddTrim(a.id, pairs, a.trim, uint64(time.Now().UnixMilli()))
+	entry, trimmed, err := stream.XAddTrim(a.id, pairs, a.trim, uint64(ctx.nowMS()))
 	if err != nil {
 		return ctx.WriteError(err)
 	}
@@ -320,7 +320,7 @@ func cmdXADD(ctx *Context) error {
 			if !ok {
 				return ctx.WriteError(store.ErrWrongType)
 			}
-			if entry, trimmed, err = existing.XAddTrim(a.id, pairs, a.trim, uint64(time.Now().UnixMilli())); err != nil {
+			if entry, trimmed, err = existing.XAddTrim(a.id, pairs, a.trim, uint64(ctx.nowMS())); err != nil {
 				return ctx.WriteError(err)
 			}
 		}

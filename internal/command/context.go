@@ -26,6 +26,11 @@ var (
 var subscriberID atomic.Int64
 
 type Context struct {
+	// timeSnapshot is the unix millisecond the commands of a transaction or
+	// script all see, as Redis' commandTimeSnapshot: set when the first of
+	// them runs.
+	timeSnapshot int64
+
 	Command       string
 	Args          [][]byte
 	Store         *store.Store
@@ -245,6 +250,15 @@ func ResetConnectionContext(ctx *Context, cmd string, args [][]byte, s *store.St
 		ClientID:    clientID,
 		RemoteAddr:  remoteAddr,
 	}
+}
+
+// nowMS is the command's time in unix milliseconds: the snapshot of the
+// transaction or script it runs in, or the clock.
+func (ctx *Context) nowMS() int64 {
+	if ctx.timeSnapshot != 0 {
+		return ctx.timeSnapshot
+	}
+	return time.Now().UnixMilli()
 }
 
 // userName is the ACL user the connection runs as.

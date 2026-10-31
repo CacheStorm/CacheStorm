@@ -321,6 +321,9 @@ func execQueued(ctx *Context, qc queuedCommand) (*resp.Value, *Context) {
 		return resp.ErrorValue("ERR unknown command '" + qc.cmd + "'"), nil
 	}
 
+	if ctx.timeSnapshot == 0 {
+		ctx.timeSnapshot = time.Now().UnixMilli()
+	}
 	var output bytes.Buffer
 	sub := *ctx
 	sub.Command = qc.cmd
