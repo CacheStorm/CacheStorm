@@ -149,7 +149,11 @@ type Server struct {
 	snapshotTook     time.Duration
 	rdbSaves         int64
 	snapshotInterval time.Duration
-	snapshotWrite    func([]byte) error
+	// snapshotEvery is the snapshot interval in effect, which CONFIG SET
+	// save changes; snapshotReset wakes the loop to pick it up.
+	snapshotEvery atomic.Int64
+	snapshotReset chan struct{}
+	snapshotWrite func([]byte) error
 	// The AOF rewrite state is guarded by snapshotMu.
 	aofRewriteRunning    bool
 	aofRewriteLastError  error

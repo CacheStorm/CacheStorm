@@ -11,6 +11,27 @@ naming the file, line and key, instead of silently leaving the default in
 force. `config/cachestorm.example.yaml` and `config/cachestorm.production.yaml`
 are kept loadable by a test.
 
+### Redis-style options and redis.conf
+
+CacheStorm takes the same command line as `redis-server`:
+
+```bash
+cachestorm [config-file] [--option value ...]
+cachestorm --port 6379 --requirepass secret --maxmemory 1gb --maxmemory-policy allkeys-lru
+cachestorm /etc/redis/redis.conf --appendonly yes
+```
+
+A config file whose name ends in `.conf` is read as a `redis.conf`, with its comments, quoting and repeated `save` lines. Any other file is YAML. Options on the command line are applied after the file, so they win, as with Redis.
+
+- **Startup settings.** These directives are applied before the server starts: `port`, `bind` (the first address; `*` means all), `protected-mode`, `requirepass`, `databases`, `maxclients`, `tcp-keepalive`, `notify-keyspace-events`, `maxmemory`, `maxmemory-policy` and `maxmemory-samples`. So are `appendonly`, `appendfsync`, `dir`, `save`, `loglevel` and `logfile`, as well as `replicaof` (or `slaveof`), `masterauth`, the `replica-*` and `repl-*` settings, and the `cluster-*` settings.
+- **Run-time settings.** Every other directive goes through `CONFIG SET` once the server exists, with the same validation. A `user` line becomes `ACL SETUSER`.
+- **Ignored and refused directives.** A parameter Redis reads only at startup that CacheStorm does not use, such as `tcp-backlog` or `pidfile`, is ignored with a warning when it differs from the default. An unknown directive or an invalid value stops startup with the file and line, or the option, that caused it. `include`, `rename-command`, `aclfile`, `loadmodule` and `daemonize yes` are refused.
+
+Persistence works differently from Redis in two ways:
+
+- **Snapshots are off unless you ask.** Redis snapshots by default; CacheStorm starts snapshots only for a `save` rule and the append-only file only for `appendonly yes`.
+- **`save` rules become an interval.** CacheStorm snapshots on a fixed interval: the seconds of the most frequent rule. `save ""` turns snapshots off. `CONFIG SET save` changes the interval at run time.
+
 ## Full Configuration Reference
 
 ```yaml
@@ -344,7 +365,7 @@ export CACHESTORM_DATA_DIR="/data"
 export CACHESTORM_PROTECTED_MODE="false"
 ```
 
-The command line also accepts `--bind`, `--port` and `--version`.
+The command line also accepts `--config`, `--bind`, `--port`, `--version` and any Redis directive as `--name value` (see "Redis-style options and redis.conf").
 
 ## Runtime Changes (CONFIG SET)
 
@@ -360,6 +381,7 @@ These parameters take effect immediately, for every connected client:
 | `requirepass` | New password; existing authenticated clients stay authenticated |
 | `slowlog-log-slower-than`, `slowlog-max-len` | Slow log threshold (µs) and size |
 | `notify-keyspace-events` | Keyspace notification classes (`K E g $ l s h z x e t m d n A`); see "Keyspace notifications" in commands-detailed.md |
+| `save` | Snapshot interval, as `<seconds> <changes>` rules (the most frequent rule wins); `""` stops snapshots. Needs `persistence.enabled` |
 
 `port`, `bind`, `databases`, `dir`, `appendonly`, `appendfsync`,
 `protected-mode` and `tcp-keepalive` are reported by `CONFIG GET` but are

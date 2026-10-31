@@ -26,7 +26,7 @@ func (s *Server) ShutdownRequested() <-chan struct{} {
 // asked for, waits for replicas to catch up unless NOW is given, and signals
 // ShutdownRequested. A failed save refuses the shutdown unless FORCE.
 func (s *Server) requestShutdown(o command.ShutdownOptions) error {
-	wantSave := o.Save || (s.cfg.Persistence.Enabled && s.snapshotInterval > 0)
+	wantSave := o.Save || (s.cfg.Persistence.Enabled && s.snapshotEvery.Load() > 0)
 	if wantSave && !o.NoSave {
 		var err error
 		if !s.cfg.Persistence.Enabled {

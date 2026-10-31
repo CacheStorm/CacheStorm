@@ -66,6 +66,7 @@ func (s *Server) configValues() map[string]string {
 		"dir":                         s.persistenceDirectory(),
 		"auto-aof-rewrite-percentage": strconv.FormatInt(s.aofRewritePercentage.Load(), 10),
 		"auto-aof-rewrite-min-size":   strconv.FormatInt(s.aofRewriteMinSize.Load(), 10),
+		"save":                        s.snapshotRules(),
 	}
 	if c := s.router.Cluster(); c != nil {
 		cc, opts := s.cfg.Cluster, c.Options()
@@ -215,6 +216,8 @@ func (s *Server) configSet(name, value string) (bool, error) {
 		}
 		c.UpdateOptions(update)
 		return true, nil
+	case "save":
+		return true, s.setSnapshotRules(value)
 	case "bind", "databases", "appendfilename":
 		return true, command.ConfigSetError(name, "can't set immutable config")
 	}

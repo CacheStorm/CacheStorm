@@ -707,3 +707,17 @@ func HasCompleteCommand(buf []byte) bool {
 	}
 	return true
 }
+
+// SplitArgs splits line into arguments with Redis' quoting rules, as an
+// inline command or a redis.conf line uses them.
+func SplitArgs(line string) ([]string, error) {
+	parts, err := splitInlineArgs([]byte(line))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, len(parts))
+	for i, p := range parts {
+		out[i] = string(p)
+	}
+	return out, nil
+}

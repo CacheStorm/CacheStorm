@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -286,23 +287,78 @@ func (s *Server) periodicSnapshot() {
 }
 
 func (s *Server) startSnapshotLoop() {
-	if !s.cfg.Persistence.Enabled || s.snapshotInterval <= 0 {
+	if !s.cfg.Persistence.Enabled {
 		return
 	}
+	s.snapshotEvery.Store(int64(s.snapshotInterval))
+	s.snapshotReset = make(chan struct{}, 1)
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		ticker := time.NewTicker(s.snapshotInterval)
-		defer ticker.Stop()
+		// An interval of zero leaves the timer stopped until CONFIG SET save
+		// sets one.
+		timer := time.NewTimer(time.Hour)
+		timer.Stop()
+		arm := func() {
+			if every := time.Duration(s.snapshotEvery.Load()); every > 0 {
+				timer.Reset(every)
+			}
+		}
+		arm()
+		defer timer.Stop()
 		for {
 			select {
 			case <-s.stopCh:
 				return
-			case <-ticker.C:
+			case <-s.snapshotReset:
+				timer.Stop()
+				arm()
+			case <-timer.C:
 				s.periodicSnapshot()
+				arm()
 			}
 		}
 	}()
+}
+
+// setSnapshotRules applies CONFIG SET save: snapshots run every <seconds> of
+// the most frequent rule, and an empty value stops them.
+func (s *Server) setSnapshotRules(value string) error {
+	fields := strings.Fields(value)
+	if len(fields)%2 != 0 {
+		return command.ConfigSetError("save", "Invalid save parameters")
+	}
+	shortest := int64(0)
+	for i := 0; i < len(fields); i += 2 {
+		secs, err1 := strconv.ParseInt(fields[i], 10, 64)
+		changes, err2 := strconv.ParseInt(fields[i+1], 10, 64)
+		if err1 != nil || err2 != nil || secs < 1 || changes < 0 {
+			return command.ConfigSetError("save", "Invalid save parameters")
+		}
+		if shortest == 0 || secs < shortest {
+			shortest = secs
+		}
+	}
+	if s.snapshotReset == nil {
+		if shortest == 0 {
+			return nil
+		}
+		return command.ConfigSetError("save", "snapshots need persistence.enabled")
+	}
+	s.snapshotEvery.Store(int64(time.Duration(shortest) * time.Second))
+	select {
+	case s.snapshotReset <- struct{}{}:
+	default:
+	}
+	return nil
+}
+
+// snapshotRules is CONFIG GET save: the snapshot interval as a Redis rule.
+func (s *Server) snapshotRules() string {
+	if every := time.Duration(s.snapshotEvery.Load()); every > 0 {
+		return strconv.FormatInt(int64(every/time.Second), 10) + " 1"
+	}
+	return ""
 }
 
 func (s *Server) stopSnapshots() {
