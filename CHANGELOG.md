@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- Removed the `website/` directory and its GitHub Pages workflow; the website is maintained in a separate repository
 - Per-command bookkeeping shares one clock read for the connection's last-command time, the command start and its stats, key access times come from a once-per-100ms unix-second clock (as Redis' LRU clock), and a command's key positions are classified once per command name instead of through six table lookups per call; pipelined single-key throughput rises about 4%.
 - **CI actions on Node 24**: checkout, setup-go, setup-node, setup-python, upload-artifact, golangci-lint-action and the Pages actions move to the majors that run on Node 24, ahead of GitHub removing Node 20 from its runners.
 - **Memory per key**: an entry keeps its store's loading flag and its tags behind one pointer that untagged keys of a store share, so `Entry` fits a 48-byte allocation instead of 64; the `cachestorm` binary also runs with `GOGC=50` unless the environment sets `GOGC`, collecting at one and a half times the live heap instead of twice. A million small strings went from 287MB to 228MB RSS with no measurable throughput cost.

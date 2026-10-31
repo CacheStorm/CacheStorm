@@ -1,10 +1,10 @@
 # Contributing to CacheStorm
 
-CacheStorm is a Go server with separate Go, Python and TypeScript clients and a React documentation website. Read the [project review](docs/PROJECT_REVIEW.md) and [roadmap](ROADMAP.md) before starting a feature or compatibility change.
+CacheStorm is a Go server with separate Go, Python and TypeScript clients. The documentation website lives in a separate repository. Read the [project review](docs/PROJECT_REVIEW.md) and [roadmap](ROADMAP.md) before starting a feature or compatibility change.
 
 ## Development requirements
 
-Use the Go version required by [go.mod](go.mod), currently **1.26.9**. The website workflow uses Node.js 22 and npm. The Python client uses Python's standard library; its packaging and supported-version policy remain roadmap work.
+Use the Go version required by [go.mod](go.mod), currently **1.26.9**. The Python client uses Python's standard library; its packaging and supported-version policy remain roadmap work.
 
 ```bash
 go mod download
@@ -42,15 +42,7 @@ Coverage measures executed statements. It does not establish command compatibili
 
 Some tests under `tests/` skip when no server listens on localhost:6380. Others start their own server. Check skips before describing an integration run as complete. Nested Go example modules are excluded from root `go test ./...`; their module metadata currently needs maintenance.
 
-Build the website separately:
-
-```bash
-cd website
-npm ci
-npm run build
-```
-
-SDK build and test gates are tracked separately in the roadmap. The TypeScript SDK's declared `jest` and `eslint` commands currently lack corresponding dependencies and checked-in tests. Do not describe the website build as an SDK test.
+SDK build and test gates are tracked separately in the roadmap. The TypeScript SDK's declared `jest` and `eslint` commands currently lack corresponding dependencies and checked-in tests.
 
 ## Code changes
 

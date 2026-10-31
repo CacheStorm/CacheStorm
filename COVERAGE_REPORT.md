@@ -52,7 +52,7 @@ The review's profile and output are retained locally under `.temp_files/project_
 
 The 2026-10-20 race run also passed: `go test -race ./internal/... -count=1 -timeout=180s`.
 
-Some persistence and replication tests contain unconditional skips. External-server integration tests can skip when localhost:6380 is unavailable. Nested Go example modules, the Python and TypeScript clients and website behavior are not exercised by the root Go test command.
+Some persistence and replication tests contain unconditional skips. External-server integration tests can skip when localhost:6380 is unavailable. Nested Go example modules, the Python and TypeScript clients are not exercised by the root Go test command.
 
 The [project review](docs/PROJECT_REVIEW.md) reproduces acknowledged transaction writes disappearing on replay, incomplete EXEC dispatch and disconnected distributed configuration despite a passing suite. It also records SDK defects. The [roadmap](ROADMAP.md) prioritizes regression tests for these guarantees before raising headline coverage targets.
 
