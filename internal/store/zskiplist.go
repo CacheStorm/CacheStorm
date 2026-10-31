@@ -25,9 +25,6 @@ type zslLevel struct {
 
 const (
 	zslMaxLevel = 32
-	// zslIndexOverhead is what a member's skiplist node adds to the size of
-	// the set: the node and its level array.
-	zslIndexOverhead = 96
 )
 
 func newZskiplist() *zskiplist {

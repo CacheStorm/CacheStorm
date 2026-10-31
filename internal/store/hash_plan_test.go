@@ -117,7 +117,7 @@ func TestHashPlanHoldsValueLockThroughAdmission(t *testing.T) {
 
 func TestHashPlanReservesSharedBudgetAcrossDatabases(t *testing.T) {
 	s := NewStore()
-	s.ConfigureMemory(2048, EvictionNoEviction, 70, 90, 5)
+	s.ConfigureMemory(3000, EvictionNoEviction, 70, 90, 5)
 	dbs := NewDatabases(s, 2)
 	start := make(chan struct{})
 	results := make(chan error, 16)
@@ -151,7 +151,7 @@ func TestHashPlanReservesSharedBudgetAcrossDatabases(t *testing.T) {
 
 func TestHashPlanEvictionReentersAndReselects(t *testing.T) {
 	s := NewStore()
-	s.ConfigureMemory(1024, EvictionAllKeysLRU, 70, 90, 128)
+	s.ConfigureMemory(1600, EvictionAllKeysLRU, 70, 90, 128)
 	if err := s.Set("h", &HashValue{Fields: map[string][]byte{"f": []byte("old")}}, SetOptions{}); err != nil {
 		t.Fatal(err)
 	}

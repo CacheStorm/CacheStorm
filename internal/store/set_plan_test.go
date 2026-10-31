@@ -10,7 +10,7 @@ import (
 
 func TestSetPlanIdentityDuplicatesAndKeys(t *testing.T) {
 	s := NewStore()
-	s.ConfigureMemory(1024, EvictionNoEviction, 70, 90, 5)
+	s.ConfigureMemory(2048, EvictionNoEviction, 70, 90, 5)
 	set := &SetValue{Members: map[string]struct{}{"kept": {}}}
 	if err := s.Set("s", set, SetOptions{Tags: []string{"tag"}, ExpireAtMS: 4102444800000}); err != nil {
 		t.Fatal(err)
@@ -47,7 +47,7 @@ func TestSetPlanIdentityDuplicatesAndKeys(t *testing.T) {
 
 func TestSetPlanSharedBudgetAndLoading(t *testing.T) {
 	s := NewStore()
-	s.ConfigureMemory(2048, EvictionNoEviction, 70, 90, 5)
+	s.ConfigureMemory(2600, EvictionNoEviction, 70, 90, 5)
 	dbs := NewDatabases(s, 2)
 	start := make(chan struct{})
 	results := make(chan error, 16)
@@ -121,7 +121,7 @@ func TestSetMoveAdmissionMetadataAndDuplicateDestination(t *testing.T) {
 
 func TestSetMoveRejectedGrowthAndSourceCredit(t *testing.T) {
 	s := NewStore()
-	s.ConfigureMemory(1024, EvictionNoEviction, 70, 90, 5)
+	s.ConfigureMemory(1300, EvictionNoEviction, 70, 90, 5)
 	member := strings.Repeat("m", 700)
 	if err := s.Set("s", &SetValue{Members: map[string]struct{}{member: {}}}, SetOptions{Tags: []string{"tag"}, ExpireAtMS: 4102444800000}); err != nil {
 		t.Fatal(err)
@@ -145,7 +145,7 @@ func TestSetMoveRejectedGrowthAndSourceCredit(t *testing.T) {
 func TestSetMoveEvictionReleasesLocksAndReselects(t *testing.T) {
 	for _, remove := range []bool{false, true} {
 		s := NewStore()
-		s.ConfigureMemory(1100, EvictionAllKeysLRU, 70, 90, 128)
+		s.ConfigureMemory(1700, EvictionAllKeysLRU, 70, 90, 128)
 		member := strings.Repeat("m", 500)
 		if _, err := s.AddSetMembers("s", []string{member, "n"}); err != nil {
 			t.Fatal(err)
@@ -251,7 +251,7 @@ func TestSetMoveExpiredSourceInvalidatesWatch(t *testing.T) {
 
 func TestSetMoveErrorsReleaseLocks(t *testing.T) {
 	s := NewStore()
-	s.ConfigureMemory(1024, EvictionNoEviction, 70, 90, 5)
+	s.ConfigureMemory(2048, EvictionNoEviction, 70, 90, 5)
 	if _, err := s.AddSetMembers("s", []string{"m"}); err != nil {
 		t.Fatal(err)
 	}

@@ -51,27 +51,27 @@ func memAcctRun(r *Router, s *store.Store, tx *Transaction, args ...string) stri
 func refValueSize(v store.Value) int64 {
 	switch v := v.(type) {
 	case *store.ListValue:
-		n := int64(24)
+		n := int64(165)
 		for _, el := range v.Elements {
-			n += int64(len(el)) + 24
+			n += int64(len(el)) + 47
 		}
 		return n
 	case *store.HashValue:
-		n := int64(48)
+		n := int64(450)
 		for k, val := range v.Fields {
-			n += int64(len(k)) + int64(len(val)) + 80
+			n += int64(len(k)) + int64(len(val)) + 88
 		}
 		return n
 	case *store.SetValue:
-		n := int64(48)
+		n := int64(337)
 		for k := range v.Members {
-			n += int64(len(k)) + 48
+			n += int64(len(k)) + 45
 		}
 		return n
 	case *store.SortedSetValue:
-		n := int64(48)
+		n := int64(930)
 		for k := range v.Members {
-			n += int64(len(k)) + 96 + 96
+			n += int64(len(k)) + 122
 		}
 		return n
 	case *store.StreamValue:

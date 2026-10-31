@@ -9,7 +9,7 @@ import (
 
 func TestSetMoveCreditX(t *testing.T) {
 	s := store.NewStore()
-	s.ConfigureMemory(1024, store.EvictionNoEviction, 70, 90, 5)
+	s.ConfigureMemory(2000, store.EvictionNoEviction, 70, 90, 5)
 	r := NewRouter()
 	RegisterSetCommands(r)
 	member := strings.Repeat("m", 700)

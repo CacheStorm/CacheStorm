@@ -17,7 +17,7 @@ func TestSetAdmissionPersistenceX(t *testing.T) {
 		for _, mode := range []string{"direct", "exec", "lua", "rewrite"} {
 			t.Run(kind+"/"+mode, func(t *testing.T) {
 				cfg := aofTxConfig(t)
-				cfg.Memory.MaxMemory, cfg.Memory.EvictionPolicy = "1024", "noeviction"
+				cfg.Memory.MaxMemory, cfg.Memory.EvictionPolicy = "1400", "noeviction"
 				cfg.Server.Bind, cfg.Server.Port = "127.0.0.1", 0
 				s := startReplServerCfg(t, cfg)
 				c := dialRepl(t, s)

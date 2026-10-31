@@ -301,7 +301,8 @@ func TestReplicaAOFPartialRestartCanPersistExpiredPhysicalValue(t *testing.T) {
 func TestAOFRejectedNXDoesNotCreateKeyAfterExpiry(t *testing.T) {
 	cfg := aofTxConfig(t)
 	s, run := aofTxStart(t, cfg)
-	deadline := time.Now().Add(100 * time.Millisecond).UnixMilli()
+	// The key must outlive the NX attempt, slow as a race-detector run is.
+	deadline := time.Now().Add(time.Second).UnixMilli()
 	if got := run("SET", "k", "original", "PXAT", strconv.FormatInt(deadline, 10)); got != "+OK\r\n" {
 		t.Fatal(got)
 	}

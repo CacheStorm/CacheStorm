@@ -12,7 +12,7 @@ func TestSetWritesReportStoreRejection(t *testing.T) {
 	for _, cmd := range []string{"SADD", "SUNIONSTORE", "SINTERSTORE", "SDIFFSTORE"} {
 		t.Run(cmd, func(t *testing.T) {
 			s := store.NewStore()
-			s.ConfigureMemory(1000, store.EvictionNoEviction, 70, 85, 5)
+			s.ConfigureMemory(2000, store.EvictionNoEviction, 70, 85, 5)
 			for key, value := range map[string]store.Value{
 				"src": &store.SetValue{Members: map[string]struct{}{"a": {}}},
 				"dst": &store.StringValue{Data: []byte("keep")},
@@ -21,11 +21,11 @@ func TestSetWritesReportStoreRejection(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			size := 949 - s.MemoryTracker().Usage() - (store.EntryOverhead + 24 + int64(len("filler")) + 16)
+			size := 1899 - s.MemoryTracker().Usage() - (store.EntryOverhead + 24 + int64(len("filler")) + 16)
 			if err := s.Set("filler", &store.StringValue{Data: make([]byte, size)}, store.SetOptions{}); err != nil {
 				t.Fatal(err)
 			}
-			if s.MemoryTracker().Usage() != 949 {
+			if s.MemoryTracker().Usage() != 1899 {
 				t.Fatal("memory-pressure setup changed")
 			}
 			before, _ := s.Get("dst")
@@ -50,7 +50,7 @@ func TestSetWritesReportStoreRejection(t *testing.T) {
 				if got := runSetAuditX(t, s, "SISMEMBER", "src", "a"); got != ":1\r\n" {
 					t.Fatal("source changed")
 				}
-				if s.MemoryTracker().Usage() != 949 {
+				if s.MemoryTracker().Usage() != 1899 {
 					t.Fatal("rejected write changed accounting")
 				}
 			}

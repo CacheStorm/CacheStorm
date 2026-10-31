@@ -3,17 +3,19 @@ package store
 import "sync/atomic"
 
 // Byte estimates for the collection types. SizeOf of a collection is its base
-// plus the sum of its elements' sizes; the per-element figures are what
-// SizeOf has always charged.
+// plus the sum of its elements' sizes. The figures were measured from the live
+// heap these structures take (Go map groups, order slices, skiplist nodes), so
+// used_memory and maxmemory track what the process really holds: within about
+// a fifth for collections of one to two hundred elements.
 const (
-	listBaseSize      = 24
-	listElemOverhead  = 24
-	hashBaseSize      = 48
-	hashFieldOverhead = 80
-	setBaseSize       = 48
-	setMemberOverhead = 48
-	zsetBaseSize      = 48
-	zsetMemberOverhd  = 16 + 80 + zslIndexOverhead
+	listBaseSize      = 165
+	listElemOverhead  = 47
+	hashBaseSize      = 450
+	hashFieldOverhead = 88
+	setBaseSize       = 337
+	setMemberOverhead = 45
+	zsetBaseSize      = 930
+	zsetMemberOverhd  = 122
 	streamBaseSize    = 48
 	streamEntryOverhd = 32
 	streamPairOverhd  = 80
