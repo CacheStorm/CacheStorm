@@ -1,6 +1,7 @@
 package store
 
 import (
+	"encoding/binary"
 	"errors"
 	"math"
 	"math/bits"
@@ -31,26 +32,79 @@ type BloomLayer struct {
 // ErrBloomFull is returned when a non-scaling filter holds its capacity.
 var ErrBloomFull = errors.New("ERR non scaling filter is full")
 
+// newBloomLayer sizes a filter as RedisBloom's bloom_init does with
+// BLOOM_OPT_NOROUND: entries*bpe bits rounded up to whole 64-bit words.
 func newBloomLayer(capacity uint64, errorRate float64) *BloomLayer {
-	bpe := -math.Log(errorRate) / (math.Ln2 * math.Ln2)
-	nbits := max(uint64(math.Ceil(float64(capacity)*bpe)), 64)
-	nbits = (nbits + 63) / 64 * 64
+	bpe := math.Abs(math.Log(errorRate) / 0.480453013918201)
+	nbits := max(uint64(float64(capacity)*bpe), 1)
+	if nbits%64 != 0 {
+		nbits = (nbits/64 + 1) * 64
+	}
 	return &BloomLayer{
 		Bits:     make([]uint64, nbits/64),
 		NBits:    nbits,
-		Hashes:   uint32(max(math.Ceil(math.Ln2*bpe), 1)),
+		Hashes:   uint32(math.Ceil(0.693147180559945 * bpe)),
 		Capacity: capacity,
 	}
 }
 
-// NewBloomValue returns an empty filter for capacity items at errorRate.
-func NewBloomValue(capacity uint64, errorRate float64, expansion uint32) *BloomValue {
-	return &BloomValue{Filters: []*BloomLayer{newBloomLayer(capacity, errorRate)}, ErrorRate: errorRate, Expansion: expansion}
+// bloomTightening is RedisBloom's ERROR_TIGHTENING_RATIO: a scaling
+// filter's first layer has half the requested error rate and each later
+// one half of the one before.
+const bloomTightening = 0.5
+
+// layerErrorRate is the error rate of layer i of a filter created with
+// errorRate.
+func layerErrorRate(errorRate float64, i int, scaling bool) float64 {
+	if scaling {
+		i++
+	}
+	return errorRate * math.Pow(bloomTightening, float64(i))
 }
 
-func (l *BloomLayer) has(h1, h2 uint64) bool {
+// bloomErrorRateCap is RedisBloom's BF_ERROR_RATE_CAP: a higher requested
+// error rate is lowered to it.
+const bloomErrorRateCap = 0.25
+
+// NewBloomValue returns an empty filter for capacity items at errorRate.
+func NewBloomValue(capacity uint64, errorRate float64, expansion uint32) *BloomValue {
+	errorRate = min(errorRate, bloomErrorRateCap)
+	first := newBloomLayer(capacity, layerErrorRate(errorRate, 0, expansion > 0))
+	return &BloomValue{Filters: []*BloomLayer{first}, ErrorRate: errorRate, Expansion: expansion}
+}
+
+// murmurHash64A is MurmurHash64A as RedisBloom's 64-bit filters use it.
+func murmurHash64A(data []byte, seed uint64) uint64 {
+	const m = 0xc6a4a7935bd1e995
+	h := seed ^ uint64(len(data))*m
+	for ; len(data) >= 8; data = data[8:] {
+		k := binary.LittleEndian.Uint64(data)
+		k *= m
+		k ^= k >> 47
+		k *= m
+		h ^= k
+		h *= m
+	}
+	if len(data) > 0 {
+		for i := len(data) - 1; i >= 0; i-- {
+			h ^= uint64(data[i]) << (8 * i)
+		}
+		h *= m
+	}
+	h ^= h >> 47
+	h *= m
+	h ^= h >> 47
+	return h
+}
+
+func bloomHashes(item []byte) (uint64, uint64) {
+	a := murmurHash64A(item, 0xc6a4a7935bd1e995)
+	return a, murmurHash64A(item, a)
+}
+
+func (l *BloomLayer) has(a, b uint64) bool {
 	for i := uint64(0); i < uint64(l.Hashes); i++ {
-		bit := (h1 + i*h2) % l.NBits
+		bit := (a + i*b) % l.NBits
 		if l.Bits[bit/64]&(1<<(bit%64)) == 0 {
 			return false
 		}
@@ -58,9 +112,9 @@ func (l *BloomLayer) has(h1, h2 uint64) bool {
 	return true
 }
 
-func (l *BloomLayer) set(h1, h2 uint64) {
+func (l *BloomLayer) set(a, b uint64) {
 	for i := uint64(0); i < uint64(l.Hashes); i++ {
-		bit := (h1 + i*h2) % l.NBits
+		bit := (a + i*b) % l.NBits
 		l.Bits[bit/64] |= 1 << (bit % 64)
 	}
 }
@@ -68,7 +122,7 @@ func (l *BloomLayer) set(h1, h2 uint64) {
 // Add adds item and reports whether it was new; an item the filter may
 // already hold is not added again.
 func (b *BloomValue) Add(item []byte) (bool, error) {
-	h1, h2 := itemHashes(item)
+	h1, h2 := bloomHashes(item)
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	for _, l := range b.Filters {
@@ -81,9 +135,7 @@ func (b *BloomValue) Add(item []byte) (bool, error) {
 		if b.Expansion == 0 {
 			return false, ErrBloomFull
 		}
-		// Each new filter is larger and, as in RedisBloom, has half the
-		// error rate of the one before, so the total stays bounded.
-		rate := b.ErrorRate * math.Pow(0.5, float64(len(b.Filters)))
+		rate := layerErrorRate(b.ErrorRate, len(b.Filters), true)
 		last = newBloomLayer(last.Capacity*uint64(b.Expansion), max(rate, math.SmallestNonzeroFloat64))
 		b.Filters = append(b.Filters, last)
 	}
@@ -94,7 +146,7 @@ func (b *BloomValue) Add(item []byte) (bool, error) {
 
 // Exists reports whether the filter may hold item.
 func (b *BloomValue) Exists(item []byte) bool {
-	h1, h2 := itemHashes(item)
+	h1, h2 := bloomHashes(item)
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	for _, l := range b.Filters {
@@ -114,11 +166,11 @@ type BloomInfo struct {
 func (b *BloomValue) Info() BloomInfo {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	info := BloomInfo{Filters: uint64(len(b.Filters)), Expansion: b.Expansion, Size: 96}
+	info := BloomInfo{Filters: uint64(len(b.Filters)), Expansion: b.Expansion, Size: 32}
 	for _, l := range b.Filters {
 		info.Capacity += l.Capacity
 		info.Items += l.Count
-		info.Size += uint64(len(l.Bits))*8 + 48
+		info.Size += uint64(len(l.Bits))*8 + 64
 	}
 	return info
 }
@@ -210,166 +262,253 @@ func newCuckooLayer(numBuckets uint64, bucketSize uint8) *CuckooLayer {
 	return &CuckooLayer{NumBuckets: numBuckets, Slots: make([]byte, numBuckets*uint64(bucketSize))}
 }
 
-// CuckooBuckets is the bucket count of a filter for capacity items: a power
-// of two, as in RedisBloom.
-func CuckooBuckets(capacity uint64, bucketSize uint8) uint64 {
-	n := max((capacity+uint64(bucketSize)-1)/uint64(bucketSize), 1)
+// nextPow2 is RedisBloom's getNextN2; 0 stays 0.
+func nextPow2(n uint64) uint64 {
+	if n == 0 {
+		return 0
+	}
 	return 1 << bits.Len64(n-1)
 }
 
+// CuckooBuckets is the bucket count of a filter for capacity items, as
+// RedisBloom's CuckooFilter_Init computes it.
+func CuckooBuckets(capacity uint64, bucketSize uint8) uint64 {
+	return max(nextPow2(capacity/uint64(bucketSize)), 1)
+}
+
+// NewCuckooValue returns an empty filter; expansion is rounded up to a power
+// of two as RedisBloom does.
 func NewCuckooValue(capacity uint64, bucketSize uint8, maxIterations, expansion uint16) *CuckooValue {
 	return &CuckooValue{
 		Filters:       []*CuckooLayer{newCuckooLayer(CuckooBuckets(capacity, bucketSize), bucketSize)},
 		BucketSize:    bucketSize,
 		MaxIterations: maxIterations,
-		Expansion:     expansion,
+		Expansion:     uint16(nextPow2(uint64(expansion))),
 	}
 }
 
-func cuckooFingerprint(item []byte) (uint8, uint64) {
-	h1, h2 := itemHashes(item)
-	return uint8(h2%255 + 1), h1
+// cuckooLookup is RedisBloom's LookupParams for item: its fingerprint and
+// its two bucket hashes.
+type cuckooLookup struct {
+	fp     uint8
+	h1, h2 uint64
 }
 
-func cuckooAlt(i uint64, fp uint8) uint64 {
-	return i ^ (uint64(fp) * 0x5bd1e995)
+func cuckooAlt(fp uint8, i uint64) uint64 {
+	return i ^ uint64(fp)*0x5bd1e995
 }
 
-func (l *CuckooLayer) bucket(i uint64, size uint8) []byte {
-	i &= l.NumBuckets - 1
+func newCuckooLookup(item []byte) cuckooLookup {
+	h := murmurHash64A(item, 0)
+	fp := uint8(h%255 + 1)
+	return cuckooLookup{fp: fp, h1: h, h2: cuckooAlt(fp, h)}
+}
+
+func (l *CuckooLayer) bucket(h uint64, size uint8) []byte {
+	i := h % l.NumBuckets
 	return l.Slots[i*uint64(size) : (i+1)*uint64(size)]
 }
 
-func (l *CuckooLayer) count(fp uint8, h uint64, size uint8) uint64 {
+func bucketCount(b []byte, fp uint8) uint64 {
 	var n uint64
-	i1 := h & (l.NumBuckets - 1)
-	i2 := cuckooAlt(i1, fp) & (l.NumBuckets - 1)
-	for _, s := range l.bucket(i1, size) {
+	for _, s := range b {
 		if s == fp {
 			n++
 		}
 	}
-	if i2 != i1 {
-		for _, s := range l.bucket(i2, size) {
-			if s == fp {
-				n++
-			}
-		}
-	}
 	return n
 }
 
-func (l *CuckooLayer) remove(fp uint8, h uint64, size uint8) bool {
-	i1 := h & (l.NumBuckets - 1)
-	for _, i := range []uint64{i1, cuckooAlt(i1, fp)} {
+func bucketFree(b []byte) int {
+	for j, s := range b {
+		if s == 0 {
+			return j
+		}
+	}
+	return -1
+}
+
+func bucketRemove(b []byte, fp uint8) bool {
+	for j, s := range b {
+		if s == fp {
+			b[j] = 0
+			return true
+		}
+	}
+	return false
+}
+
+func (l *CuckooLayer) find(k cuckooLookup, size uint8) bool {
+	return bucketCount(l.bucket(k.h1, size), k.fp) > 0 || bucketCount(l.bucket(k.h2, size), k.fp) > 0
+}
+
+// place puts the fingerprint in a free slot of either bucket.
+func (l *CuckooLayer) place(k cuckooLookup, size uint8) bool {
+	for _, h := range []uint64{k.h1, k.h2} {
+		if b := l.bucket(h, size); bucketFree(b) >= 0 {
+			b[bucketFree(b)] = k.fp
+			return true
+		}
+	}
+	return false
+}
+
+// kickInsert is RedisBloom's Filter_KOInsert: it evicts fingerprints along
+// one path and, when that does not free a slot, walks the path back.
+func (l *CuckooLayer) kickInsert(k cuckooLookup, size uint8, maxIterations uint16) bool {
+	fp, victim, i := k.fp, 0, k.h1%l.NumBuckets
+	for n := uint16(0); n < maxIterations; n++ {
 		b := l.bucket(i, size)
-		for j, s := range b {
-			if s == fp {
-				b[j] = 0
+		fp, b[victim] = b[victim], fp
+		i = cuckooAlt(fp, i) % l.NumBuckets
+		if nb := l.bucket(i, size); bucketFree(nb) >= 0 {
+			nb[bucketFree(nb)] = fp
+			return true
+		}
+		victim = (victim + 1) % int(size)
+	}
+	for n := uint16(0); n < maxIterations; n++ {
+		victim = (victim + int(size) - 1) % int(size)
+		i = cuckooAlt(fp, i) % l.NumBuckets
+		b := l.bucket(i, size)
+		fp, b[victim] = b[victim], fp
+	}
+	return false
+}
+
+func (c *CuckooValue) grow() {
+	growth := uint64(math.Pow(float64(c.Expansion), float64(len(c.Filters))))
+	c.Filters = append(c.Filters, newCuckooLayer(c.Filters[0].NumBuckets*growth, c.BucketSize))
+}
+
+func (c *CuckooValue) insert(k cuckooLookup) bool {
+	for {
+		for i := len(c.Filters) - 1; i >= 0; i-- {
+			if c.Filters[i].place(k, c.BucketSize) {
+				c.Inserted++
 				return true
 			}
 		}
-	}
-	return false
-}
-
-func placeFree(b []byte, fp uint8) bool {
-	for j, s := range b {
-		if s == 0 {
-			b[j] = fp
+		if c.Filters[len(c.Filters)-1].kickInsert(k, c.BucketSize, c.MaxIterations) {
+			c.Inserted++
 			return true
 		}
-	}
-	return false
-}
-
-// insert places fp, kicking fingerprints to their other bucket up to
-// maxIterations times; when that fails the kicks are undone.
-func (l *CuckooLayer) insert(fp uint8, h uint64, size uint8, maxIterations uint16) bool {
-	i1 := h & (l.NumBuckets - 1)
-	i2 := cuckooAlt(i1, fp) & (l.NumBuckets - 1)
-	if placeFree(l.bucket(i1, size), fp) || placeFree(l.bucket(i2, size), fp) {
-		return true
-	}
-	type kick struct {
-		bucket uint64
-		slot   int
-		old    uint8
-	}
-	var kicks []kick
-	i := i1
-	if rand.IntN(2) == 1 {
-		i = i2
-	}
-	for n := uint16(0); n < maxIterations; n++ {
-		b := l.bucket(i, size)
-		slot := rand.IntN(int(size))
-		kicks = append(kicks, kick{i, slot, b[slot]})
-		fp, b[slot] = b[slot], fp
-		i = cuckooAlt(i, fp) & (l.NumBuckets - 1)
-		if placeFree(l.bucket(i, size), fp) {
-			return true
+		if c.Expansion == 0 || len(c.Filters) >= math.MaxUint16 {
+			return false
 		}
+		c.grow()
 	}
-	for k := len(kicks) - 1; k >= 0; k-- {
-		l.bucket(kicks[k].bucket, size)[kicks[k].slot] = kicks[k].old
-	}
-	return false
 }
 
 // Add adds item, a second copy too when it is already present; nx adds it
-// only when absent and reports whether it did.
+// only when absent and reports whether it did. A full filter that cannot
+// expand returns ErrCuckooFull.
 func (c *CuckooValue) Add(item []byte, nx bool) (bool, error) {
-	fp, h := cuckooFingerprint(item)
+	k := newCuckooLookup(item)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if nx {
 		for _, l := range c.Filters {
-			if l.count(fp, h, c.BucketSize) > 0 {
+			if l.find(k, c.BucketSize) {
 				return false, nil
 			}
 		}
 	}
-	last := c.Filters[len(c.Filters)-1]
-	if !last.insert(fp, h, c.BucketSize, c.MaxIterations) {
-		if c.Expansion == 0 {
-			return false, ErrCuckooFull
-		}
-		last = newCuckooLayer(last.NumBuckets*uint64(1<<bits.Len16(c.Expansion-1)), c.BucketSize)
-		if !last.insert(fp, h, c.BucketSize, c.MaxIterations) {
-			return false, ErrCuckooFull
-		}
-		c.Filters = append(c.Filters, last)
+	if !c.insert(k) {
+		return false, ErrCuckooFull
 	}
-	c.Inserted++
 	return true, nil
 }
 
-// Count returns how many copies of item the filter may hold.
+// NumFilters returns how many filters the cuckoo filter has.
+func (c *CuckooValue) NumFilters() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return len(c.Filters)
+}
+
+// Count returns how many copies of item the filter may hold, counting both
+// buckets even when they are the same one, as RedisBloom does.
 func (c *CuckooValue) Count(item []byte) uint64 {
-	fp, h := cuckooFingerprint(item)
+	k := newCuckooLookup(item)
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	var n uint64
 	for _, l := range c.Filters {
-		n += l.count(fp, h, c.BucketSize)
+		n += bucketCount(l.bucket(k.h1, c.BucketSize), k.fp) + bucketCount(l.bucket(k.h2, c.BucketSize), k.fp)
 	}
 	return n
 }
 
-// Delete removes one copy of item and reports whether there was one.
-func (c *CuckooValue) Delete(item []byte) bool {
-	fp, h := cuckooFingerprint(item)
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	for i := len(c.Filters) - 1; i >= 0; i-- {
-		if c.Filters[i].remove(fp, h, c.BucketSize) {
-			c.Inserted--
-			c.Deleted++
+// Exists reports whether the filter may hold item.
+func (c *CuckooValue) Exists(item []byte) bool {
+	k := newCuckooLookup(item)
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	for _, l := range c.Filters {
+		if l.find(k, c.BucketSize) {
 			return true
 		}
 	}
 	return false
+}
+
+// Delete removes one copy of item and reports whether there was one; once
+// deletions pass a tenth of the items, later filters are compacted into
+// earlier ones.
+func (c *CuckooValue) Delete(item []byte) bool {
+	k := newCuckooLookup(item)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for i := len(c.Filters) - 1; i >= 0; i-- {
+		l := c.Filters[i]
+		if bucketRemove(l.bucket(k.h1, c.BucketSize), k.fp) || bucketRemove(l.bucket(k.h2, c.BucketSize), k.fp) {
+			c.Inserted--
+			c.Deleted++
+			if len(c.Filters) > 1 && float64(c.Deleted) > float64(c.Inserted)*0.10 {
+				c.compact()
+			}
+			return true
+		}
+	}
+	return false
+}
+
+// compact is RedisBloom's CuckooFilter_Compact without cont: it moves
+// fingerprints of the newest filters into older ones, dropping a newest
+// filter it empties, until one cannot be emptied.
+func (c *CuckooValue) compact() {
+	for fi := len(c.Filters) - 1; fi > 0; fi-- {
+		l := c.Filters[fi]
+		ok := true
+		for bi := uint64(0); bi < l.NumBuckets; bi++ {
+			b := l.Slots[bi*uint64(c.BucketSize) : (bi+1)*uint64(c.BucketSize)]
+			for si, fp := range b {
+				if fp == 0 {
+					continue
+				}
+				k := cuckooLookup{fp: fp, h1: bi, h2: cuckooAlt(fp, bi)}
+				moved := false
+				for _, older := range c.Filters[:fi] {
+					if older.place(k, c.BucketSize) {
+						b[si] = 0
+						moved = true
+						break
+					}
+				}
+				if !moved {
+					ok = false
+				}
+			}
+		}
+		if !ok {
+			break
+		}
+		if fi == len(c.Filters)-1 {
+			c.Filters = c.Filters[:fi]
+		}
+	}
+	c.Deleted = 0
 }
 
 // CuckooInfo is what CF.INFO reports.
@@ -383,11 +522,11 @@ func (c *CuckooValue) Info() CuckooInfo {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	info := CuckooInfo{Filters: uint64(len(c.Filters)), Inserted: c.Inserted, Deleted: c.Deleted,
-		BucketSize: c.BucketSize, Expansion: c.Expansion, MaxIterations: c.MaxIterations, Size: 56}
+		BucketSize: c.BucketSize, Expansion: c.Expansion, MaxIterations: c.MaxIterations, Size: 40}
 	for _, l := range c.Filters {
-		info.Buckets += l.NumBuckets
-		info.Size += uint64(len(l.Slots))
+		info.Size += 16 + uint64(len(l.Slots))
 	}
+	info.Buckets = c.Filters[0].NumBuckets
 	return info
 }
 
@@ -458,69 +597,107 @@ type CMSValue struct {
 	Count    uint64
 }
 
-// ErrCMSOverflow is reported for an increment past a counter's maximum,
-// which leaves the counter at the maximum.
+// ErrCMSOverflow is reported when an increment leaves an item's estimate at
+// the counters' maximum.
 var ErrCMSOverflow = errors.New("CMS: INCRBY overflow")
 
 func NewCMSValue(width, depth uint32) *CMSValue {
 	return &CMSValue{Width: width, Depth: depth, Counters: make([]uint32, uint64(width)*uint64(depth))}
 }
 
-func (m *CMSValue) cell(row uint32, h1, h2 uint64) int {
-	return int(uint64(row)*uint64(m.Width) + (h1+uint64(row)*h2)%uint64(m.Width))
+func (m *CMSValue) cell(row uint32, item []byte) int {
+	return int(uint64(row)*uint64(m.Width) + uint64(murmurHash2(item, row)%m.Width))
 }
 
-// IncrBy adds incr to item and returns its new estimate.
+// IncrBy adds incr to item, saturating counters, and returns its new
+// estimate; an estimate at the counters' maximum is ErrCMSOverflow, as in
+// RedisBloom.
 func (m *CMSValue) IncrBy(item []byte, incr uint64) (uint64, error) {
-	h1, h2 := itemHashes(item)
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	var err error
-	least := uint64(math.MaxUint32)
+	least := uint64(math.MaxUint64)
 	for row := uint32(0); row < m.Depth; row++ {
-		c := &m.Counters[m.cell(row, h1, h2)]
-		sum := uint64(*c) + incr
-		if sum > math.MaxUint32 {
-			sum, err = math.MaxUint32, ErrCMSOverflow
-		}
-		*c = uint32(sum)
-		least = min(least, sum)
+		c := &m.Counters[m.cell(row, item)]
+		*c = uint32(min(uint64(*c)+incr, math.MaxUint32))
+		least = min(least, uint64(*c))
 	}
 	m.Count += incr
-	return least, err
+	if least == math.MaxUint32 {
+		return least, ErrCMSOverflow
+	}
+	return least, nil
 }
 
 // Query returns item's estimated count.
 func (m *CMSValue) Query(item []byte) uint64 {
-	h1, h2 := itemHashes(item)
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	least := uint64(math.MaxUint32)
+	least := uint64(math.MaxUint64)
 	for row := uint32(0); row < m.Depth; row++ {
-		least = min(least, uint64(m.Counters[m.cell(row, h1, h2)]))
+		least = min(least, uint64(m.Counters[m.cell(row, item)]))
 	}
 	return least
 }
 
+// ErrCMSMergeOverflow is a merge whose weighted sums leave a counter's range.
+var ErrCMSMergeOverflow = errors.New("CMS: MERGE overflow")
+
 // Merge replaces m's counters with the weighted sum of srcs, which must
-// have m's dimensions.
-func (m *CMSValue) Merge(srcs []*CMSValue, weights []int64) {
+// have m's dimensions; a sum below zero or past a counter's maximum fails
+// the whole merge, as in RedisBloom.
+func (m *CMSValue) Merge(srcs []*CMSValue, weights []int64) error {
 	counters := make([]int64, len(m.Counters))
 	var count int64
+	overflow := false
 	for i, s := range srcs {
 		s.mu.RLock()
 		for j, c := range s.Counters {
-			counters[j] += int64(c) * weights[i]
+			mul, ok := mulInt64(int64(c), weights[i])
+			if !ok {
+				overflow = true
+			} else if counters[j], ok = addInt64(counters[j], mul); !ok {
+				overflow = true
+			}
 		}
-		count += int64(s.Count) * weights[i]
+		mul, ok := mulInt64(int64(s.Count), weights[i])
+		if !ok {
+			overflow = true
+		} else if count, ok = addInt64(count, mul); !ok {
+			overflow = true
+		}
 		s.mu.RUnlock()
+	}
+	for _, c := range counters {
+		if c < 0 || c > math.MaxUint32 {
+			overflow = true
+		}
+	}
+	if overflow || count < 0 {
+		return ErrCMSMergeOverflow
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for j, c := range counters {
-		m.Counters[j] = uint32(min(max(c, 0), math.MaxUint32))
+		m.Counters[j] = uint32(c)
 	}
-	m.Count = uint64(max(count, 0))
+	m.Count = uint64(count)
+	return nil
+}
+
+func mulInt64(a, b int64) (int64, bool) {
+	if a == 0 || b == 0 {
+		return 0, true
+	}
+	if (a == -1 && b == math.MinInt64) || (b == -1 && a == math.MinInt64) {
+		return 0, false
+	}
+	c := a * b
+	return c, c/b == a
+}
+
+func addInt64(a, b int64) (int64, bool) {
+	c := a + b
+	return c, (c > a) == (b > 0)
 }
 
 // Total returns the sum of every increment, CMS.INFO's count.
@@ -594,22 +771,107 @@ type TopKBucket struct {
 type TopKItem struct {
 	Item  string
 	Count uint32
+	Used  bool
 }
 
 func NewTopKValue(k, width, depth uint32, decay float64) *TopKValue {
 	return &TopKValue{K: k, Width: width, Depth: depth, Decay: decay, Buckets: make([]TopKBucket, uint64(width)*uint64(depth))}
 }
 
+// murmurHash2 is Austin Appleby's 32-bit MurmurHash2, which RedisBloom's
+// TopK hashes items with.
+func murmurHash2(data []byte, seed uint32) uint32 {
+	const m = 0x5bd1e995
+	h := seed ^ uint32(len(data))
+	for ; len(data) >= 4; data = data[4:] {
+		k := uint32(data[0]) | uint32(data[1])<<8 | uint32(data[2])<<16 | uint32(data[3])<<24
+		k *= m
+		k ^= k >> 24
+		k *= m
+		h = h*m ^ k
+	}
+	switch len(data) {
+	case 3:
+		h ^= uint32(data[2]) << 16
+		fallthrough
+	case 2:
+		h ^= uint32(data[1]) << 8
+		fallthrough
+	case 1:
+		h ^= uint32(data[0])
+		h *= m
+	}
+	h ^= h >> 13
+	h *= m
+	h ^= h >> 15
+	return h
+}
+
+const topkFingerprintSeed = 1919
+
+// heap returns the top list as RedisBloom keeps it: a min-heap of K slots
+// by count; an unused slot has count 0, and so can a used one.
+func (t *TopKValue) heap() []TopKItem {
+	if uint32(len(t.Top)) < t.K {
+		t.Top = append(t.Top, make([]TopKItem, int(t.K)-len(t.Top))...)
+		for i := len(t.Top)/2 - 1; i >= 0; i-- {
+			topkSiftDown(t.Top, i)
+		}
+	}
+	return t.Top
+}
+
+// topkSiftDown is RedisBloom's heapifyDown: ties move the start down.
+func topkSiftDown(h []TopKItem, start int) {
+	n := len(h)
+	if n < 2 || (n-2)/2 < start {
+		return
+	}
+	child := 2*start + 1
+	if child+1 < n && h[child].Count > h[child+1].Count {
+		child++
+	}
+	if h[child].Count > h[start].Count {
+		return
+	}
+	top := h[start]
+	for {
+		h[start] = h[child]
+		start = child
+		if (n-2)/2 < child {
+			break
+		}
+		child = 2*child + 1
+		if child+1 < n && h[child].Count > h[child+1].Count {
+			child++
+		}
+		if h[child].Count >= top.Count {
+			break
+		}
+	}
+	h[start] = top
+}
+
+func (t *TopKValue) heapIndex(name string) int {
+	for i := len(t.Top) - 1; i >= 0; i-- {
+		if t.Top[i].Used && t.Top[i].Item == name {
+			return i
+		}
+	}
+	return -1
+}
+
 // Add adds incr to item and returns the item it pushed out of the top list,
 // if any.
 func (t *TopKValue) Add(item []byte, incr uint32) (string, bool) {
-	h1, h2 := itemHashes(item)
-	fp := uint32(h2>>32) | 1
+	fp := murmurHash2(item, topkFingerprintSeed)
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	h := t.heap()
+	heapMin := h[0].Count
 	var count uint32
 	for row := uint32(0); row < t.Depth; row++ {
-		b := &t.Buckets[uint64(row)*uint64(t.Width)+(h1+uint64(row)*h2)%uint64(t.Width)]
+		b := &t.Buckets[uint64(row)*uint64(t.Width)+uint64(murmurHash2(item, row)%t.Width)]
 		switch {
 		case b.Count == 0:
 			b.Fp, b.Count = fp, incr
@@ -632,66 +894,59 @@ func (t *TopKValue) Add(item []byte, incr uint32) (string, bool) {
 			count = max(count, b.Count)
 		}
 	}
+	if count < heapMin {
+		return "", false
+	}
 	name := string(item)
-	for i := range t.Top {
-		if t.Top[i].Item == name {
-			t.Top[i].Count = max(t.Top[i].Count, count)
-			return "", false
-		}
-	}
-	if count == 0 {
+	if i := t.heapIndex(name); i >= 0 {
+		h[i].Count = count
+		topkSiftDown(h, i)
 		return "", false
 	}
-	if uint32(len(t.Top)) < t.K {
-		t.Top = append(t.Top, TopKItem{name, count})
-		return "", false
-	}
-	least := 0
-	for i := range t.Top {
-		if t.Top[i].Count < t.Top[least].Count {
-			least = i
-		}
-	}
-	if count < t.Top[least].Count {
-		return "", false
-	}
-	dropped := t.Top[least].Item
-	t.Top[least] = TopKItem{name, count}
-	return dropped, true
+	dropped, had := h[0].Item, h[0].Used
+	h[0] = TopKItem{name, count, true}
+	topkSiftDown(h, 0)
+	return dropped, had
 }
 
 // Query reports whether item is in the top list.
 func (t *TopKValue) Query(item []byte) bool {
-	name := string(item)
 	t.mu.RLock()
 	defer t.mu.RUnlock()
-	for _, it := range t.Top {
-		if it.Item == name {
-			return true
-		}
-	}
-	return false
+	return t.heapIndex(string(item)) >= 0
 }
 
-// Count returns item's estimated count.
+// Count returns item's estimated count as RedisBloom does: for an item in
+// the top list only counters at or above the list's minimum count.
 func (t *TopKValue) Count(item []byte) uint32 {
-	h1, h2 := itemHashes(item)
-	fp := uint32(h2>>32) | 1
+	fp := murmurHash2(item, topkFingerprintSeed)
 	t.mu.RLock()
 	defer t.mu.RUnlock()
+	var heapMin uint32
+	inHeap := t.heapIndex(string(item)) >= 0
+	if len(t.Top) > 0 && uint32(len(t.Top)) == t.K {
+		heapMin = t.Top[0].Count
+	}
 	var count uint32
 	for row := uint32(0); row < t.Depth; row++ {
-		if b := t.Buckets[uint64(row)*uint64(t.Width)+(h1+uint64(row)*h2)%uint64(t.Width)]; b.Fp == fp {
+		b := t.Buckets[uint64(row)*uint64(t.Width)+uint64(murmurHash2(item, row)%t.Width)]
+		if b.Fp == fp && (!inHeap || b.Count >= heapMin) {
 			count = max(count, b.Count)
 		}
 	}
 	return count
 }
 
-// List returns the top items, heaviest first.
+// List returns the top items, heaviest first and ties in heap order, as
+// RedisBloom sorts its heap.
 func (t *TopKValue) List() []TopKItem {
 	t.mu.RLock()
-	list := append([]TopKItem(nil), t.Top...)
+	list := make([]TopKItem, 0, len(t.Top))
+	for _, it := range t.Top {
+		if it.Count > 0 {
+			list = append(list, it)
+		}
+	}
 	t.mu.RUnlock()
 	sort.SliceStable(list, func(i, j int) bool { return list[i].Count > list[j].Count })
 	return list
@@ -736,6 +991,7 @@ func (t *TopKValue) MarshalBinary() ([]byte, error) {
 	for _, it := range t.Top {
 		w.bytes([]byte(it.Item))
 		w.u32(it.Count)
+		w.u8(boolByte(it.Used))
 	}
 	return w.b, nil
 }
@@ -751,12 +1007,12 @@ func decodeTopK(data []byte) (Value, error) {
 	for i := range t.Buckets {
 		t.Buckets[i] = TopKBucket{Fp: r.u32(), Count: r.u32()}
 	}
-	n := r.count(12)
+	n := r.count(13)
 	if n > uint64(t.K) {
 		return nil, ErrExtensionFormat
 	}
 	for i := uint64(0); i < n && r.err == nil; i++ {
-		t.Top = append(t.Top, TopKItem{Item: string(r.bytes()), Count: r.u32()})
+		t.Top = append(t.Top, TopKItem{Item: string(r.bytes()), Count: r.u32(), Used: r.u8() != 0})
 	}
 	if err := r.done(); err != nil {
 		return nil, err

@@ -1,11 +1,9 @@
 package command
 
 import (
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"math"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -53,444 +51,45 @@ var (
 )
 
 var (
-	errTDigestNoKey       = errors.New("ERR T-Digest: key does not exist")
-	errTDigestKeyExists   = errors.New("ERR T-Digest: key already exists")
-	errTDigestCompression = errors.New("ERR T-Digest: error parsing compression parameter")
-	errTDigestValue       = errors.New("ERR T-Digest: error parsing val parameter")
-	errTDigestQuantile    = errors.New("ERR T-Digest: quantile should be in [0,1]")
-	errTDigestRank        = errors.New("ERR T-Digest: rank needs to be non negative")
-	errTDigestNumKeys     = errors.New("ERR T-Digest: numkeys needs to be a positive integer")
-	errTDigestCut         = errors.New("ERR T-Digest: low_cut_percentile and high_cut_percentile should be in [0,1]")
-	errTDigestCutOrder    = errors.New("ERR T-Digest: low_cut_percentile should be lower than high_cut_percentile")
+	errTDigestNoKey           = errors.New("ERR T-Digest: key does not exist")
+	errTDigestKeyExists       = errors.New("ERR T-Digest: key already exists")
+	errTDigestCompression     = errors.New("ERR T-Digest: error parsing compression parameter")
+	errTDigestValue           = errors.New("ERR T-Digest: error parsing val parameter")
+	errTDigestQuantile        = errors.New("ERR T-Digest: quantile should be in [0,1]")
+	errTDigestRank            = errors.New("ERR T-Digest: rank needs to be non negative")
+	errTDigestNumKeys         = errors.New("ERR T-Digest: numkeys needs to be a positive integer")
+	errTDigestNumKeysParse    = errors.New("ERR T-Digest: error parsing numkeys")
+	errTDigestCut             = errors.New("ERR T-Digest: low_cut_percentile and high_cut_percentile should be in [0,1]")
+	errTDigestCutOrder        = errors.New("ERR T-Digest: low_cut_percentile should be lower than high_cut_percentile")
+	errTDigestFinite          = errors.New("ERR T-Digest: val parameter needs to be a finite number")
+	errTDigestCompressionSign = errors.New("ERR T-Digest: compression parameter needs to be a positive integer")
+	errTDigestQuantileParse   = errors.New("ERR T-Digest: error parsing quantile")
+	errTDigestCDFParse        = errors.New("ERR T-Digest: error parsing cdf")
+	errTDigestValueParse      = errors.New("ERR T-Digest: error parsing value")
+	errTDigestRankParse       = errors.New("ERR T-Digest: error parsing rank")
+	errTDigestLowCutParse     = errors.New("ERR T-Digest: error parsing low_cut_percentile")
+	errTDigestHighCutParse    = errors.New("ERR T-Digest: error parsing high_cut_percentile")
+	errTDigestKeyword         = errors.New("ERR T-Digest: wrong keyword")
 )
 
 const tdigestDefaultCompression = 100
 
-type tdigestSketch struct {
-	mu                sync.Mutex
-	compression       int64
-	means             []float64
-	weights           []float64
-	pendingMeans      []float64
-	pendingWeights    []float64
-	mergedWeight      float64
-	unmergedWeight    float64
-	min               float64
-	max               float64
-	totalCompressions int64
-}
-
-func (td *tdigestSketch) Type() store.DataType { return store.DataTypeTDigest }
-func (td *tdigestSketch) String() string       { return "tdigest" }
-func (td *tdigestSketch) ExtensionType() byte  { return store.ExtensionTDigest }
-
-func (td *tdigestSketch) SizeOf() int64 {
-	td.mu.Lock()
-	defer td.mu.Unlock()
-	return int64(cap(td.means)+cap(td.weights)+cap(td.pendingMeans)+cap(td.pendingWeights))*8 + 128
-}
-
-func (td *tdigestSketch) Clone() store.Value {
-	td.mu.Lock()
-	defer td.mu.Unlock()
-	return &tdigestSketch{
-		compression:       td.compression,
-		means:             append([]float64(nil), td.means...),
-		weights:           append([]float64(nil), td.weights...),
-		pendingMeans:      append([]float64(nil), td.pendingMeans...),
-		pendingWeights:    append([]float64(nil), td.pendingWeights...),
-		mergedWeight:      td.mergedWeight,
-		unmergedWeight:    td.unmergedWeight,
-		min:               td.min,
-		max:               td.max,
-		totalCompressions: td.totalCompressions,
+// tdigestDouble is a double as RedisBloom replies with it, formatted by
+// Redis' fpconv (Grisu2), which is not always the shortest form.
+func tdigestDouble(ctx *Context, v float64) *resp.Value {
+	if ctx.Writer.IsRESP3() {
+		return resp.DoubleValue(fpconvDtoa(v))
 	}
-}
-
-func (td *tdigestSketch) MarshalBinary() ([]byte, error) {
-	td.mu.Lock()
-	defer td.mu.Unlock()
-	out := binary.LittleEndian.AppendUint64(nil, uint64(td.compression))
-	out = binary.LittleEndian.AppendUint64(out, uint64(td.totalCompressions))
-	for _, f := range []float64{td.mergedWeight, td.unmergedWeight, td.min, td.max} {
-		out = binary.LittleEndian.AppendUint64(out, math.Float64bits(f))
-	}
-	for _, list := range [][]float64{td.means, td.weights, td.pendingMeans, td.pendingWeights} {
-		out = binary.LittleEndian.AppendUint64(out, uint64(len(list)))
-		for _, f := range list {
-			out = binary.LittleEndian.AppendUint64(out, math.Float64bits(f))
-		}
-	}
-	return out, nil
-}
-
-func decodeTDigest(data []byte) (store.Value, error) {
-	next := func() (uint64, bool) {
-		if len(data) < 8 {
-			return 0, false
-		}
-		v := binary.LittleEndian.Uint64(data)
-		data = data[8:]
-		return v, true
-	}
-	var head [6]uint64
-	for i := range head {
-		v, ok := next()
-		if !ok {
-			return nil, store.ErrExtensionFormat
-		}
-		head[i] = v
-	}
-	if int64(head[0]) <= 0 || head[0] > 1<<20 {
-		return nil, store.ErrExtensionFormat
-	}
-	td := &tdigestSketch{compression: int64(head[0]), totalCompressions: int64(head[1]),
-		mergedWeight: math.Float64frombits(head[2]), unmergedWeight: math.Float64frombits(head[3]),
-		min: math.Float64frombits(head[4]), max: math.Float64frombits(head[5])}
-	lists := []*[]float64{&td.means, &td.weights, &td.pendingMeans, &td.pendingWeights}
-	for _, list := range lists {
-		n, ok := next()
-		if !ok || n > uint64(len(data))/8 {
-			return nil, store.ErrExtensionFormat
-		}
-		*list = make([]float64, n)
-		for i := range *list {
-			v, _ := next()
-			(*list)[i] = math.Float64frombits(v)
-		}
-	}
-	if len(data) != 0 || len(td.means) != len(td.weights) || len(td.pendingMeans) != len(td.pendingWeights) {
-		return nil, store.ErrExtensionFormat
-	}
-	return td, nil
-}
-
-func init() { store.RegisterExtension(store.ExtensionTDigest, decodeTDigest) }
-
-func newTDigestSketch(compression int64) *tdigestSketch {
-	td := &tdigestSketch{compression: compression}
-	td.resetLocked()
-	return td
-}
-
-func (td *tdigestSketch) capacity() int {
-	return int(6*td.compression + 10)
-}
-
-func (td *tdigestSketch) resetLocked() {
-	td.means = td.means[:0]
-	td.weights = td.weights[:0]
-	td.pendingMeans = td.pendingMeans[:0]
-	td.pendingWeights = td.pendingWeights[:0]
-	td.mergedWeight = 0
-	td.unmergedWeight = 0
-	td.min = math.Inf(1)
-	td.max = math.Inf(-1)
-	td.totalCompressions = 0
-}
-
-func (td *tdigestSketch) total() float64 {
-	return td.mergedWeight + td.unmergedWeight
-}
-
-func (td *tdigestSketch) addLocked(v, w float64) {
-	if v < td.min {
-		td.min = v
-	}
-	if v > td.max {
-		td.max = v
-	}
-	td.pendingMeans = append(td.pendingMeans, v)
-	td.pendingWeights = append(td.pendingWeights, w)
-	td.unmergedWeight += w
-	if len(td.means)+len(td.pendingMeans) >= td.capacity() {
-		td.compressLocked()
-	}
-}
-
-func (td *tdigestSketch) scaleK(q float64) float64 {
-	return float64(td.compression) / (2 * math.Pi) * math.Asin(2*q-1)
-}
-
-func (td *tdigestSketch) compressLocked() {
-	if len(td.pendingMeans) == 0 {
-		return
-	}
-	n := len(td.means) + len(td.pendingMeans)
-	means := append(append(make([]float64, 0, n), td.means...), td.pendingMeans...)
-	weights := append(append(make([]float64, 0, n), td.weights...), td.pendingWeights...)
-	idx := make([]int, n)
-	for i := range idx {
-		idx[i] = i
-	}
-	sort.SliceStable(idx, func(a, b int) bool { return means[idx[a]] < means[idx[b]] })
-
-	total := td.total()
-	outMeans := make([]float64, 0, n)
-	outWeights := make([]float64, 0, n)
-	curMean, curWeight := means[idx[0]], weights[idx[0]]
-	soFar := 0.0
-	for _, j := range idx[1:] {
-		m, w := means[j], weights[j]
-		if td.scaleK(math.Min(1, (soFar+curWeight+w)/total))-td.scaleK(soFar/total) <= 1 {
-			curWeight += w
-			curMean += (m - curMean) * w / curWeight
-			continue
-		}
-		soFar += curWeight
-		outMeans = append(outMeans, curMean)
-		outWeights = append(outWeights, curWeight)
-		curMean, curWeight = m, w
-	}
-	outMeans = append(outMeans, curMean)
-	outWeights = append(outWeights, curWeight)
-
-	td.means = outMeans
-	td.weights = outWeights
-	td.pendingMeans = td.pendingMeans[:0]
-	td.pendingWeights = td.pendingWeights[:0]
-	td.mergedWeight = total
-	td.unmergedWeight = 0
-	td.totalCompressions++
-}
-
-func tdWeightedAverage(x1, w1, x2, w2 float64) float64 {
-	if x1 > x2 {
-		x1, w1, x2, w2 = x2, w2, x1, w1
-	}
-	v := (x1*w1 + x2*w2) / (w1 + w2)
-	return math.Max(x1, math.Min(v, x2))
-}
-
-func (td *tdigestSketch) quantileLocked(q float64) float64 {
-	td.compressLocked()
-	n := len(td.means)
-	if n == 0 {
-		return math.NaN()
-	}
-	if q <= 0 {
-		return td.min
-	}
-	if q >= 1 {
-		return td.max
-	}
-	if n == 1 {
-		return td.means[0]
-	}
-	total := td.mergedWeight
-	index := q * total
-	if index < 1 {
-		return td.min
-	}
-	if td.weights[0] > 2 && index < td.weights[0]/2 {
-		return td.min + (index-1)/(td.weights[0]/2-1)*(td.means[0]-td.min)
-	}
-	if index > total-1 {
-		return td.max
-	}
-	last := n - 1
-	if td.weights[last] > 2 && total-index <= td.weights[last]/2 {
-		return td.max - (total-index-1)/(td.weights[last]/2-1)*(td.max-td.means[last])
-	}
-	soFar := td.weights[0] / 2
-	for i := 0; i < last; i++ {
-		dw := (td.weights[i] + td.weights[i+1]) / 2
-		if soFar+dw > index {
-			leftUnit := 0.0
-			if td.weights[i] == 1 {
-				if index-soFar < 0.5 {
-					return td.means[i]
-				}
-				leftUnit = 0.5
-			}
-			rightUnit := 0.0
-			if td.weights[i+1] == 1 {
-				if soFar+dw-index <= 0.5 {
-					return td.means[i+1]
-				}
-				rightUnit = 0.5
-			}
-			z1 := index - soFar - leftUnit
-			z2 := soFar + dw - index - rightUnit
-			return tdWeightedAverage(td.means[i], z2, td.means[i+1], z1)
-		}
-		soFar += dw
-	}
-	z1 := index - soFar
-	z2 := td.weights[last]/2 - z1
-	return tdWeightedAverage(td.means[last], z2, td.max, z1)
-}
-
-func (td *tdigestSketch) cdfLocked(x float64) float64 {
-	td.compressLocked()
-	n := len(td.means)
-	if n == 0 {
-		return math.NaN()
-	}
-	if x < td.min {
-		return 0
-	}
-	if x > td.max {
-		return 1
-	}
-	total := td.mergedWeight
-	if n == 1 {
-		if td.max-td.min == 0 {
-			return 0.5
-		}
-		return (x - td.min) / (td.max - td.min)
-	}
-	if x < td.means[0] {
-		if td.means[0]-td.min > 0 {
-			if x == td.min {
-				return 0.5 / total
-			}
-			return (1 + (x-td.min)/(td.means[0]-td.min)*(td.weights[0]/2-1)) / total
-		}
-		return 0
-	}
-	last := n - 1
-	if x > td.means[last] {
-		if td.max-td.means[last] > 0 {
-			if x == td.max {
-				return 1 - 0.5/total
-			}
-			dq := (1 + (td.max-x)/(td.max-td.means[last])*(td.weights[last]/2-1)) / total
-			return 1 - dq
-		}
-		return 1
-	}
-	soFar := 0.0
-	for i := 0; i < last; i++ {
-		if td.means[i] == x {
-			dw := 0.0
-			for i < n && td.means[i] == x {
-				dw += td.weights[i]
-				i++
-			}
-			return (soFar + dw/2) / total
-		}
-		if td.means[i] <= x && x < td.means[i+1] {
-			if td.means[i+1]-td.means[i] > 0 {
-				leftExcluded, rightExcluded := 0.0, 0.0
-				if td.weights[i] == 1 {
-					if td.weights[i+1] == 1 {
-						return (soFar + 1) / total
-					}
-					leftExcluded = 0.5
-				} else if td.weights[i+1] == 1 {
-					rightExcluded = 0.5
-				}
-				dw := (td.weights[i] + td.weights[i+1]) / 2
-				base := soFar + td.weights[i]/2 + leftExcluded
-				return (base + (dw-leftExcluded-rightExcluded)*(x-td.means[i])/(td.means[i+1]-td.means[i])) / total
-			}
-			return (soFar + (td.weights[i]+td.weights[i+1])/2) / total
-		}
-		soFar += td.weights[i]
-	}
-	return 1 - 0.5/total
-}
-
-func (td *tdigestSketch) rankLocked(v float64, reverse bool) int64 {
-	total := td.total()
-	if total == 0 {
-		return -2
-	}
-	if v < td.min {
-		if reverse {
-			return int64(total)
-		}
-		return -1
-	}
-	if v > td.max {
-		if reverse {
-			return -1
-		}
-		return int64(total)
-	}
-	abs := td.cdfLocked(v) * total
-	if reverse {
-		return int64(total - math.Round(abs))
-	}
-	if abs-math.Floor(abs) > 0.5 {
-		return int64(math.Ceil(abs))
-	}
-	return int64(math.Floor(abs))
-}
-
-func (td *tdigestSketch) byRankLocked(rank float64, reverse bool) float64 {
-	total := td.total()
-	if total == 0 {
-		return math.NaN()
-	}
-	if rank >= total {
-		if reverse {
-			return math.Inf(-1)
-		}
-		return math.Inf(1)
-	}
-	if reverse {
-		return td.quantileLocked((total - rank - 1) / total)
-	}
-	return td.quantileLocked(rank / total)
-}
-
-func (td *tdigestSketch) trimmedMeanLocked(low, high float64) float64 {
-	td.compressLocked()
-	total := td.mergedWeight
-	if total == 0 {
-		return math.NaN()
-	}
-	left, right := low*total, high*total
-	var sum, weight, cum float64
-	for i, m := range td.means {
-		start, end := cum, cum+td.weights[i]
-		cum = end
-		overlap := math.Min(end, right) - math.Max(start, left)
-		if overlap > 0 {
-			sum += m * overlap
-			weight += overlap
-		}
-	}
-	if weight == 0 {
-		return math.NaN()
-	}
-	return sum / weight
-}
-
-func (td *tdigestSketch) meanLocked() float64 {
-	td.compressLocked()
-	if td.mergedWeight == 0 {
-		return math.NaN()
-	}
-	var sum float64
-	for i, m := range td.means {
-		sum += m * td.weights[i]
-	}
-	return sum / td.mergedWeight
-}
-
-func formatTDigestFloat(v float64) string {
-	switch {
-	case math.IsNaN(v):
-		return "nan"
-	case math.IsInf(v, 1):
-		return "inf"
-	case math.IsInf(v, -1):
-		return "-inf"
-	}
-	return strconv.FormatFloat(v, 'g', -1, 64)
-}
-
-func tdigestDouble(v float64) *resp.Value {
-	return resp.BulkString(formatTDigestFloat(v))
+	return resp.BulkString(fpconvDtoa(v))
 }
 
 func parseTDigestCompression(b []byte) (int64, error) {
 	c, err := strconv.ParseInt(string(b), 10, 64)
-	if err != nil || c <= 0 || c > 1<<20 {
+	if err != nil || c > 1<<20 {
 		return 0, errTDigestCompression
+	}
+	if c <= 0 {
+		return 0, errTDigestCompressionSign
 	}
 	return c, nil
 }
@@ -542,13 +141,13 @@ func parseTDigestFloats(ctx *Context, from int, errParse error) ([]float64, erro
 
 func cmdTDIGESTCREATE(ctx *Context) error {
 	if ctx.ArgCount() != 1 && ctx.ArgCount() != 3 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 	key := ctx.ArgString(0)
 	compression := int64(tdigestDefaultCompression)
 	if ctx.ArgCount() == 3 {
 		if !strings.EqualFold(ctx.ArgString(1), "COMPRESSION") {
-			return ctx.WriteError(ErrSyntaxError)
+			return ctx.WriteError(errTDigestKeyword)
 		}
 		c, err := parseTDigestCompression(ctx.Arg(2))
 		if err != nil {
@@ -570,15 +169,22 @@ func cmdTDIGESTCREATE(ctx *Context) error {
 
 func cmdTDIGESTADD(ctx *Context) error {
 	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 	values, err := parseTDigestFloats(ctx, 1, errTDigestValue)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
+	for _, v := range values {
+		if math.IsInf(v, 0) {
+			return ctx.WriteError(errTDigestFinite)
+		}
+	}
 	return withTDigest(ctx, func(td *tdigestSketch) *resp.Value {
 		for _, v := range values {
-			td.addLocked(v, 1)
+			if err := td.addLocked(v, 1); err != nil {
+				return resp.ErrorValue(err.Error())
+			}
 		}
 		return resp.SimpleString("OK")
 	})
@@ -586,9 +192,9 @@ func cmdTDIGESTADD(ctx *Context) error {
 
 func cmdTDIGESTQUANTILE(ctx *Context) error {
 	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
-	qs, err := parseTDigestFloats(ctx, 1, errTDigestQuantile)
+	qs, err := parseTDigestFloats(ctx, 1, errTDigestQuantileParse)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
@@ -598,9 +204,17 @@ func cmdTDIGESTQUANTILE(ctx *Context) error {
 		}
 	}
 	return withTDigest(ctx, func(td *tdigestSketch) *resp.Value {
+		vals := make([]float64, len(qs))
+		for i := 0; i < len(qs); i++ {
+			start := i
+			for i < len(qs)-1 && qs[i] <= qs[i+1] {
+				i++
+			}
+			td.quantilesLocked(qs[start:i+1], vals[start:i+1])
+		}
 		out := make([]*resp.Value, len(qs))
-		for i, q := range qs {
-			out[i] = tdigestDouble(td.quantileLocked(q))
+		for i, v := range vals {
+			out[i] = tdigestDouble(ctx, v)
 		}
 		return resp.ArrayValue(out)
 	})
@@ -608,16 +222,16 @@ func cmdTDIGESTQUANTILE(ctx *Context) error {
 
 func cmdTDIGESTCDF(ctx *Context) error {
 	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
-	vals, err := parseTDigestFloats(ctx, 1, errTDigestValue)
+	vals, err := parseTDigestFloats(ctx, 1, errTDigestCDFParse)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
 	return withTDigest(ctx, func(td *tdigestSketch) *resp.Value {
 		out := make([]*resp.Value, len(vals))
 		for i, v := range vals {
-			out[i] = tdigestDouble(td.cdfLocked(v))
+			out[i] = tdigestDouble(ctx, td.cdfLocked(v))
 		}
 		return resp.ArrayValue(out)
 	})
@@ -625,9 +239,9 @@ func cmdTDIGESTCDF(ctx *Context) error {
 
 func tdigestRankCmd(ctx *Context, reverse bool) error {
 	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
-	vals, err := parseTDigestFloats(ctx, 1, errTDigestValue)
+	vals, err := parseTDigestFloats(ctx, 1, errTDigestValueParse)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
@@ -650,12 +264,15 @@ func cmdTDIGESTREVRANK(ctx *Context) error {
 
 func tdigestByRankCmd(ctx *Context, reverse bool) error {
 	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 	ranks := make([]float64, 0, ctx.ArgCount()-1)
 	for i := 1; i < ctx.ArgCount(); i++ {
 		r, err := strconv.ParseInt(ctx.ArgString(i), 10, 64)
-		if err != nil || r < 0 {
+		if err != nil {
+			return ctx.WriteError(errTDigestRankParse)
+		}
+		if r < 0 {
 			return ctx.WriteError(errTDigestRank)
 		}
 		ranks = append(ranks, float64(r))
@@ -663,7 +280,7 @@ func tdigestByRankCmd(ctx *Context, reverse bool) error {
 	return withTDigest(ctx, func(td *tdigestSketch) *resp.Value {
 		out := make([]*resp.Value, len(ranks))
 		for i, r := range ranks {
-			out[i] = tdigestDouble(td.byRankLocked(r, reverse))
+			out[i] = tdigestDouble(ctx, td.byRankLocked(r, reverse))
 		}
 		return resp.ArrayValue(out)
 	})
@@ -679,13 +296,16 @@ func cmdTDIGESTBYREVRANK(ctx *Context) error {
 
 func cmdTDIGESTTRIMMEDMEAN(ctx *Context) error {
 	if ctx.ArgCount() != 3 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
-	cuts, err := parseTDigestFloats(ctx, 1, errTDigestCut)
-	if err != nil {
-		return ctx.WriteError(err)
+	low, err := strconv.ParseFloat(ctx.ArgString(1), 64)
+	if err != nil || math.IsNaN(low) {
+		return ctx.WriteError(errTDigestLowCutParse)
 	}
-	low, high := cuts[0], cuts[1]
+	high, err := strconv.ParseFloat(ctx.ArgString(2), 64)
+	if err != nil || math.IsNaN(high) {
+		return ctx.WriteError(errTDigestHighCutParse)
+	}
 	if low < 0 || low > 1 || high < 0 || high > 1 {
 		return ctx.WriteError(errTDigestCut)
 	}
@@ -693,66 +313,67 @@ func cmdTDIGESTTRIMMEDMEAN(ctx *Context) error {
 		return ctx.WriteError(errTDigestCutOrder)
 	}
 	return withTDigest(ctx, func(td *tdigestSketch) *resp.Value {
-		return tdigestDouble(td.trimmedMeanLocked(low, high))
+		return tdigestDouble(ctx, td.trimmedMeanLocked(low, high))
 	})
 }
 
 func cmdTDIGESTMEAN(ctx *Context) error {
 	if ctx.ArgCount() != 1 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 	return withTDigest(ctx, func(td *tdigestSketch) *resp.Value {
-		return tdigestDouble(td.meanLocked())
+		return tdigestDouble(ctx, td.meanLocked())
 	})
 }
 
 func cmdTDIGESTMIN(ctx *Context) error {
 	if ctx.ArgCount() != 1 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 	return withTDigest(ctx, func(td *tdigestSketch) *resp.Value {
 		if td.total() == 0 {
-			return tdigestDouble(math.NaN())
+			return tdigestDouble(ctx, math.NaN())
 		}
-		return tdigestDouble(td.min)
+		return tdigestDouble(ctx, td.min)
 	})
 }
 
 func cmdTDIGESTMAX(ctx *Context) error {
 	if ctx.ArgCount() != 1 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 	return withTDigest(ctx, func(td *tdigestSketch) *resp.Value {
 		if td.total() == 0 {
-			return tdigestDouble(math.NaN())
+			return tdigestDouble(ctx, math.NaN())
 		}
-		return tdigestDouble(td.max)
+		return tdigestDouble(ctx, td.max)
 	})
 }
 
 func cmdTDIGESTINFO(ctx *Context) error {
 	if ctx.ArgCount() != 1 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 	return withTDigest(ctx, func(td *tdigestSketch) *resp.Value {
 		capacity := int64(td.capacity())
-		return resp.ArrayValue([]*resp.Value{
-			resp.BulkString("Compression"), resp.IntegerValue(td.compression),
-			resp.BulkString("Capacity"), resp.IntegerValue(capacity),
-			resp.BulkString("Merged nodes"), resp.IntegerValue(int64(len(td.means))),
-			resp.BulkString("Unmerged nodes"), resp.IntegerValue(int64(len(td.pendingMeans))),
-			resp.BulkString("Merged weight"), resp.IntegerValue(int64(td.mergedWeight)),
-			resp.BulkString("Unmerged weight"), resp.IntegerValue(int64(td.unmergedWeight)),
-			resp.BulkString("Observations"), resp.IntegerValue(int64(td.total())),
-			resp.BulkString("Total compressions"), resp.IntegerValue(td.totalCompressions),
-			resp.BulkString("Memory usage"), resp.IntegerValue(int64(cap(td.means)+cap(td.weights)+cap(td.pendingMeans)+cap(td.pendingWeights))*8 + 128),
+		label := resp.SimpleString
+		return resp.PairsValue([]*resp.Value{
+			label("Compression"), resp.IntegerValue(td.compression),
+			label("Capacity"), resp.IntegerValue(capacity),
+			label("Merged nodes"), resp.IntegerValue(int64(td.mergedNodes)),
+			label("Unmerged nodes"), resp.IntegerValue(int64(td.unmergedNodes())),
+			label("Merged weight"), resp.IntegerValue(td.mergedWeight),
+			label("Unmerged weight"), resp.IntegerValue(td.unmergedWeight),
+			label("Observations"), resp.IntegerValue(td.total()),
+			label("Total compressions"), resp.IntegerValue(td.totalCompressions),
+			label("Memory usage"), resp.IntegerValue(8 + 16*capacity),
 		})
 	})
 }
 
 func cmdTDIGESTRESET(ctx *Context) error {
 	if ctx.ArgCount() != 1 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 	return withTDigest(ctx, func(td *tdigestSketch) *resp.Value {
 		td.resetLocked()
@@ -760,92 +381,101 @@ func cmdTDIGESTRESET(ctx *Context) error {
 	})
 }
 
+// cmdTDIGESTMERGE is RedisBloom's TDIGEST.MERGE: a new digest of the
+// destination's compression (or COMPRESSION, or the largest source's) takes
+// the destination's centroids unless OVERRIDE, then each source's in order.
 func cmdTDIGESTMERGE(ctx *Context) error {
 	if ctx.ArgCount() < 3 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(arityError(ctx.Command))
 	}
 	destKey := ctx.ArgString(0)
-	numKeys, err := strconv.Atoi(ctx.ArgString(1))
-	if err != nil || numKeys <= 0 {
-		return ctx.WriteError(errTDigestNumKeys)
-	}
-	if 2+numKeys > ctx.ArgCount() {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-	srcKeys := make([]string, numKeys)
-	for i := range srcKeys {
-		srcKeys[i] = ctx.ArgString(2 + i)
-	}
-	compression := int64(0)
-	override := false
-	for i := 2 + numKeys; i < ctx.ArgCount(); i++ {
-		switch strings.ToUpper(ctx.ArgString(i)) {
-		case "COMPRESSION":
-			if i+1 >= ctx.ArgCount() {
-				return ctx.WriteError(ErrSyntaxError)
-			}
-			c, err := parseTDigestCompression(ctx.Arg(i + 1))
-			if err != nil {
-				return ctx.WriteError(err)
-			}
-			compression = c
-			i++
-		case "OVERRIDE":
-			override = true
-		default:
-			return ctx.WriteError(ErrSyntaxError)
-		}
-	}
-
-	sources := make([]*tdigestSketch, 0, numKeys+1)
-	seen := make(map[string]bool, numKeys)
-	maxCompression := int64(0)
-	for _, k := range srcKeys {
-		src, err := getTDigest(ctx, k)
-		if err != nil {
-			return ctx.WriteError(err)
-		}
-		if src == nil {
-			return ctx.WriteError(errTDigestNoKey)
-		}
-		if src.compression > maxCompression {
-			maxCompression = src.compression
-		}
-		if !seen[k] {
-			seen[k] = true
-			sources = append(sources, src)
-		}
-	}
 	dest, err := getTDigest(ctx, destKey)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
-	destExists := dest != nil
-	if destExists && !override && !seen[destKey] {
-		sources = append(sources, dest)
+	numKeys, err := strconv.ParseInt(ctx.ArgString(1), 10, 64)
+	if err != nil {
+		return ctx.WriteError(errTDigestNumKeysParse)
 	}
-	if compression == 0 {
-		if destExists && !override {
-			compression = dest.compression
-		} else {
-			compression = maxCompression
+	if numKeys <= 0 {
+		return ctx.WriteError(errTDigestNumKeys)
+	}
+	if numKeys > int64(ctx.ArgCount()-2) {
+		return ctx.WriteError(arityError(ctx.Command))
+	}
+	var compression int64
+	if dest != nil {
+		compression = dest.compression
+	}
+	useMax, override := dest == nil, false
+	if rest := ctx.Args[2+numKeys:]; len(rest) > 0 {
+		compressionAt, overrideAt := -1, -1
+		for i, a := range rest {
+			switch {
+			case compressionAt < 0 && strings.EqualFold(string(a), "COMPRESSION"):
+				compressionAt = i
+			case overrideAt < 0 && strings.EqualFold(string(a), "OVERRIDE"):
+				overrideAt = i
+			}
+		}
+		if compressionAt >= 0 {
+			useMax = false
+			if compressionAt+1 >= len(rest) {
+				return ctx.WriteError(arityError(ctx.Command))
+			}
+			if compression, err = parseTDigestCompression(rest[compressionAt+1]); err != nil {
+				return ctx.WriteError(err)
+			}
+		}
+		if overrideAt >= 0 {
+			override = true
+			if compressionAt < 0 {
+				useMax, compression = true, 0
+			}
+		}
+		if compressionAt < 0 && overrideAt < 0 {
+			return ctx.WriteError(errTDigestKeyword)
 		}
 	}
-
+	sources := make([]*tdigestSketch, numKeys)
+	for i := range sources {
+		k := ctx.ArgString(2 + i)
+		if k == destKey {
+			if dest == nil {
+				return ctx.WriteError(errTDigestNoKey)
+			}
+			sources[i] = dest
+		} else {
+			src, err := getTDigest(ctx, k)
+			if err != nil {
+				return ctx.WriteError(err)
+			}
+			if src == nil {
+				return ctx.WriteError(errTDigestNoKey)
+			}
+			sources[i] = src
+		}
+		if useMax {
+			compression = max(compression, sources[i].compression)
+		}
+	}
 	merged := newTDigestSketch(compression)
+	if dest != nil && !override {
+		dest.mu.Lock()
+		err := merged.mergeFrom(dest)
+		dest.mu.Unlock()
+		if err != nil {
+			return ctx.WriteError(err)
+		}
+	}
 	for _, src := range sources {
 		src.mu.Lock()
-		src.compressLocked()
-		for i, m := range src.means {
-			merged.addLocked(m, src.weights[i])
-		}
-		if src.total() > 0 {
-			merged.min = math.Min(merged.min, src.min)
-			merged.max = math.Max(merged.max, src.max)
-		}
+		err := merged.mergeFrom(src)
 		src.mu.Unlock()
+		if err != nil {
+			return ctx.WriteError(err)
+		}
 	}
-	merged.compressLocked()
 	if err := ctx.Store.Set(destKey, merged, store.SetOptions{KeepTTL: true}); err != nil {
 		return ctx.WriteError(err)
 	}

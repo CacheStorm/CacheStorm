@@ -557,23 +557,27 @@ func cmdJSONTYPE(ctx *Context) error {
 	if err != nil {
 		return ctx.WriteError(err)
 	}
-	if jv == nil {
-		return ctx.WriteNullBulkString()
-	}
-	jv.RLock()
-	defer jv.RUnlock()
-	matches := path.Eval(jv.Root)
-	if path.Legacy {
-		if len(matches) == 0 {
-			return ctx.WriteNullBulkString()
+	reply := resp.NullBulkString()
+	if jv != nil {
+		jv.RLock()
+		matches := path.Eval(jv.Root)
+		if path.Legacy {
+			if len(matches) > 0 {
+				reply = resp.BulkString(matches[0].Node.TypeName())
+			}
+		} else {
+			replies := make([]*resp.Value, len(matches))
+			for i, m := range matches {
+				replies[i] = resp.BulkString(m.Node.TypeName())
+			}
+			reply = resp.ArrayValue(replies)
 		}
-		return ctx.WriteBulkString(matches[0].Node.TypeName())
+		jv.RUnlock()
 	}
-	replies := make([]*resp.Value, len(matches))
-	for i, m := range matches {
-		replies[i] = resp.BulkString(m.Node.TypeName())
+	if ctx.Writer.IsRESP3() {
+		reply = resp.ArrayValue([]*resp.Value{reply})
 	}
-	return ctx.WriteArray(replies)
+	return ctx.WriteValue(reply)
 }
 
 // jsonWriteTargets loads the document a write command on (key, path)
@@ -631,6 +635,17 @@ func jsonNumOp(ctx *Context, mult bool) error {
 	})
 	if opErr != nil {
 		return ctx.WriteError(opErr)
+	}
+	if resp3 := ctx.Writer.IsRESP3(); resp3 {
+		out := make([]*resp.Value, len(results))
+		for i, n := range results {
+			if n == nil {
+				out[i] = resp.NullBulkString()
+			} else {
+				out[i] = jsonNumber(resp3, n)
+			}
+		}
+		return ctx.WriteArray(out)
 	}
 	if !path.Legacy {
 		return ctx.WriteValue(jsonArrayBulk(results))
@@ -764,28 +779,42 @@ func cmdJSONOBJKEYS(ctx *Context) error {
 }
 
 // jsonResp is JSON.RESP's form of n.
-func jsonResp(n *store.JNode) *resp.Value {
+// jsonNumber is a number as RedisJSON replies with it: integers stay
+// integers, anything else is a double.
+func jsonNumber(resp3 bool, n *store.JNode) *resp.Value {
+	if n.Kind == store.JInt {
+		return resp.IntegerValue(n.Int)
+	}
+	f := n.Float
+	if n.Kind == store.JUint {
+		f = float64(n.Uint)
+	}
+	if resp3 {
+		return resp.DoubleValue(fpconvDtoa(f))
+	}
+	return resp.BulkString(fpconvDtoa(f))
+}
+
+func jsonResp(resp3 bool, n *store.JNode) *resp.Value {
 	switch n.Kind {
 	case store.JNull:
 		return resp.NullBulkString()
 	case store.JBool:
 		return resp.SimpleString(strconv.FormatBool(n.Bool))
-	case store.JInt:
-		return resp.IntegerValue(n.Int)
-	case store.JUint, store.JFloat:
-		return jsonBulk(n)
+	case store.JInt, store.JUint, store.JFloat:
+		return jsonNumber(resp3, n)
 	case store.JString:
 		return resp.BulkString(n.Str)
 	case store.JArray:
 		out := []*resp.Value{resp.SimpleString("[")}
 		for _, v := range n.Arr {
-			out = append(out, jsonResp(v))
+			out = append(out, jsonResp(resp3, v))
 		}
 		return resp.ArrayValue(out)
 	default:
 		out := []*resp.Value{resp.SimpleString("{")}
 		for i, k := range n.Keys {
-			out = append(out, resp.BulkString(k), jsonResp(n.Vals[i]))
+			out = append(out, resp.BulkString(k), jsonResp(resp3, n.Vals[i]))
 		}
 		return resp.ArrayValue(out)
 	}
@@ -795,7 +824,10 @@ func cmdJSONRESP(ctx *Context) error {
 	if ctx.ArgCount() < 1 || ctx.ArgCount() > 2 {
 		return ctx.WriteError(arityError(ctx.Command))
 	}
-	return jsonRead(ctx, 1, errJSONPathMissing, errJSONPathMissing, jsonResp)
+	resp3 := ctx.Writer.IsRESP3()
+	return jsonRead(ctx, 1, errJSONPathMissing, errJSONPathMissing, func(n *store.JNode) *resp.Value {
+		return jsonResp(resp3, n)
+	})
 }
 
 func cmdJSONDEBUG(ctx *Context) error {

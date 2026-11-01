@@ -55,7 +55,9 @@ func TestProbabilisticRepliesMatchRedisBloom(t *testing.T) {
 		{"CF.MEXISTS nokey a b", "*2\r\n:0\r\n:0\r\n"},
 		{"CF.INFO c", "*16\r\n+Size\r\n:72\r\n+Number of buckets\r\n:8\r\n+Number of filters\r\n:1\r\n+Number of items inserted\r\n:1\r\n+Number of items deleted\r\n:1\r\n+Bucket size\r\n:2\r\n+Expansion rate\r\n:1\r\n+Max iterations\r\n:20\r\n"},
 		{"CF.RESERVE cf2 2 BUCKETSIZE 1 MAXITERATIONS 1 EXPANSION 0", "+OK\r\n"},
-		{"CF.INSERT cf2 ITEMS 1 2 3", "*3\r\n:1\r\n:1\r\n-Filter is full\r\n"},
+		{"CF.INSERT cf2 ITEMS 1 2 3", "*3\r\n:1\r\n:1\r\n:-1\r\n"},
+		{"CF.INSERTNX cf2 ITEMS 4 5", "*2\r\n:-1\r\n:-1\r\n"},
+		{"CF.ADD cf2 9", "-Filter is full\r\n"},
 		{"TYPE c", "+MBbloomCF\r\n"},
 
 		{"CMS.INITBYDIM m 0 5", "-CMS: invalid width\r\n"},

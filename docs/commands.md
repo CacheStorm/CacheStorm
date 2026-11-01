@@ -491,11 +491,11 @@ GRAPH.QUERY graphName query
 
 ## Probabilistic Commands
 
-These follow RedisBloom, the probabilistic module built into Redis 8: the same syntax, replies and error texts (some of which, as in RedisBloom, carry no `ERR` prefix). Each structure is a key of its own type (`TYPE` reports `MBbloom--`, `MBbloomCF`, `CMSk-TYPE`, `TopK-TYPE` and `TDIS-TYPE` for t-digests). They live in the selected database, expire, are deleted and flushed like any key, and are saved in snapshots and the AOF, replicated, and moved by DUMP/RESTORE and MIGRATE. Hashes are deterministic, so a filter answers the same after a restart; they differ from RedisBloom's, so which item a top-k list drops on a tie, or which rare item is a false positive, can differ from Redis. One structure may take at most 512 MB; a larger request fails with `ERR Insufficient memory to create filter`.
+These follow RedisBloom, the probabilistic module built into Redis 8: the same syntax, replies and error texts (some of which, as in RedisBloom, carry no `ERR` prefix). Each structure is a key of its own type (`TYPE` reports `MBbloom--`, `MBbloomCF`, `CMSk-TYPE`, `TopK-TYPE` and `TDIS-TYPE` for t-digests). They live in the selected database, expire, are deleted and flushed like any key, and are saved in snapshots and the AOF, replicated, and moved by DUMP/RESTORE and MIGRATE. The structures are RedisBloom's own: the same MurmurHash functions, sizes, layouts, eviction and compression, so each false positive, each item a top-k list drops and each t-digest centroid is the one Redis 8.2 gives (top-k decay draws random numbers, so with a decay below 1 the drops can still differ). RESP3 clients get booleans, maps and doubles where RedisBloom sends them. One structure may take at most 512 MB; a larger request fails with `ERR Insufficient memory to create filter`.
 
 ### Bloom Filter
 
-A scalable filter: when the newest sub-filter holds its capacity, a larger one (by the expansion factor, 2 by default) with half the error rate is added. `NONSCALING` or `EXPANSION 0` makes a full filter refuse new items. `BF.ADD`/`BF.MADD` create a filter of capacity 100 at error rate 0.01 when the key is absent.
+A scalable filter: the first sub-filter has half the requested error rate (capped at 0.25) and, when the newest holds its capacity, a larger one (by the expansion factor, 2 by default) with half the error rate of the last is added. `NONSCALING` or `EXPANSION 0` makes a full filter refuse new items. `BF.ADD`/`BF.MADD` create a filter of capacity 100 at error rate 0.01 when the key is absent.
 
 ```
 BF.RESERVE key error_rate capacity [EXPANSION expansion] [NONSCALING]
@@ -510,7 +510,7 @@ BF.INFO key [CAPACITY | SIZE | FILTERS | ITEMS | EXPANSION]
 
 ### Cuckoo Filter
 
-One-byte fingerprints in buckets of `BUCKETSIZE` (2 by default); the bucket count is rounded up to a power of two. When an item finds no place after `MAXITERATIONS` relocations, a filter `EXPANSION` times larger is added, or with `EXPANSION 0` the add fails with `Filter is full`. `CF.ADD` creates a filter of capacity 1000 when the key is absent.
+One-byte fingerprints in buckets of `BUCKETSIZE` (2 by default); the bucket count is capacity divided by the bucket size, rounded to a power of two, and the expansion is rounded up to one too. When an item finds no place after `MAXITERATIONS` relocations, a filter `EXPANSION` times larger is added, or with `EXPANSION 0` the add fails with `Filter is full` (`CF.INSERT` and `CF.INSERTNX` reply `-1` for that item instead). Deleting compacts later filters into earlier ones once deletions pass a tenth of the items; a filter may have at most 32 sub-filters. `CF.ADD` creates a filter of capacity 1000 when the key is absent.
 
 ```
 CF.RESERVE key capacity [BUCKETSIZE bucketsize] [MAXITERATIONS maxiterations] [EXPANSION expansion]
@@ -527,7 +527,7 @@ CF.INFO key
 
 ### Count-Min Sketch
 
-32-bit counters; an increment past the maximum leaves the counter there and reports `CMS: INCRBY overflow` for that item.
+32-bit counters; an increment past the maximum leaves the counter there, and an item whose estimate reaches the maximum is reported as `CMS: INCRBY overflow`. A `CMS.MERGE` whose weighted sums leave the counters' range fails with `CMS: MERGE overflow` and changes nothing.
 
 ```
 CMS.INITBYDIM key width depth
@@ -540,7 +540,7 @@ CMS.INFO key
 
 ### Top-K
 
-HeavyKeeper with `depth` rows of `width` decaying counters (defaults 8, 7 and 0.9). `TOPK.ADD` and `TOPK.INCRBY` reply with the item each addition pushed out of the list, or nil.
+HeavyKeeper with `depth` rows of `width` decaying counters (defaults 8, 7 and 0.9) and RedisBloom's min-heap of the `topk` items. `TOPK.ADD` and `TOPK.INCRBY` reply with the item each addition pushed out of the list, or nil. `TOPK.COUNT` of a listed item counts only the counters at or above the list's smallest count.
 
 ```
 TOPK.RESERVE key topk [width depth decay]
@@ -1239,7 +1239,7 @@ VECTOR.STATS name
 
 ## T-Digest Commands
 
-Streaming quantile sketches using RedisBloom syntax and replies (doubles as bulk strings). A missing key is an error. A t-digest is a key of type `TDIS-TYPE`, saved, replicated and expired like the other probabilistic structures.
+Streaming quantile sketches using RedisBloom syntax, replies and error texts (doubles as bulk strings, or RESP3 doubles), computed as RedisBloom's t-digest computes them. A missing key is an error. A t-digest is a key of type `TDIS-TYPE`, saved, replicated and expired like the other probabilistic structures.
 
 ```
 TDIGEST.CREATE key [COMPRESSION compression]   # default 100; error if key exists; OK

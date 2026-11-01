@@ -3,7 +3,6 @@ package store
 import (
 	"encoding/binary"
 	"errors"
-	"hash/fnv"
 	"math"
 )
 
@@ -46,21 +45,6 @@ func DecodeExtension(t byte, data []byte) (v Value, ok bool, err error) {
 	}
 	v, err = decode(data)
 	return v, true, err
-}
-
-// itemHashes returns two independent 64-bit hashes of item, which the
-// probabilistic structures combine into as many as they need. They are
-// stable across processes, so a saved structure answers the same after a
-// restart.
-func itemHashes(item []byte) (uint64, uint64) {
-	h := fnv.New64a()
-	h.Write(item) //nolint:errcheck // hash writes cannot fail
-	h1 := h.Sum64()
-	h2 := h1 + 0x9e3779b97f4a7c15
-	h2 = (h2 ^ h2>>30) * 0xbf58476d1ce4e5b9
-	h2 = (h2 ^ h2>>27) * 0x94d049bb133111eb
-	h2 ^= h2 >> 31
-	return h1, h2 | 1
 }
 
 // binWriter and binReader encode the extension values: little-endian fixed
@@ -132,4 +116,11 @@ func (r *binReader) done() error {
 		return ErrExtensionFormat
 	}
 	return r.err
+}
+
+func boolByte(b bool) uint8 {
+	if b {
+		return 1
+	}
+	return 0
 }

@@ -20,54 +20,56 @@ const probabilisticMaxBytes = 512 * 1024 * 1024
 
 //nolint:staticcheck // RedisBloom's reply texts
 var (
-	errBloomNotFound      = errors.New("ERR not found")
-	errBloomExists        = errors.New("ERR item exists")
-	errBloomErrorRate     = errors.New("ERR bad error rate")
-	errBloomErrorRange    = errors.New("ERR error rate must be in the range (0.000000, 1.000000)")
-	errBloomCapacity      = errors.New("ERR bad capacity")
-	errBloomCapacityRange = errors.New("ERR capacity must be in the range [1, 1073741824]")
-	errBloomExpansion     = errors.New("ERR bad expansion")
-	errBloomExpansionRng  = errors.New("ERR expansion must be in the range [0, 32768]")
-	errBloomNonScaling    = errors.New("Nonscaling filters cannot expand")
-	errBloomInfoField     = errors.New("Invalid information value")
-	errBloomBadCapacity   = errors.New("Bad capacity")
-	errBloomBadErrorRate  = errors.New("Bad error rate")
-	errBloomBadExpansion  = errors.New("Bad expansion")
-	errBloomUnknownArg    = errors.New("Unknown argument received")
-	errSketchTooLarge     = errors.New("ERR Insufficient memory to create filter")
-	errCuckooNotFound     = errors.New("Not found")
-	errCuckooCapacity     = errors.New("Capacity must be in the range [2 * BUCKETSIZE, 1073741824]")
-	errCuckooBucketParse  = errors.New("Couldn't parse BUCKETSIZE")
-	errCuckooBucketSize   = errors.New("BUCKETSIZE: value must be in the range [1, 255]")
-	errCuckooIterParse    = errors.New("Couldn't parse MAXITERATIONS")
-	errCuckooIterations   = errors.New("MAXITERATIONS: value must be in the range [1, 65535]")
-	errCuckooExpParse     = errors.New("Couldn't parse EXPANSION")
-	errCuckooExpansion    = errors.New("EXPANSION: value must be in the range [0, 32768]")
-	errCMSNoKey           = errors.New("CMS: key does not exist")
-	errCMSExists          = errors.New("CMS: key already exists")
-	errCMSWidth           = errors.New("CMS: invalid width")
-	errCMSDepth           = errors.New("CMS: invalid depth")
-	errCMSOverestimation  = errors.New("CMS: invalid overestimation value")
-	errCMSProb            = errors.New("CMS: invalid prob value")
-	errCMSNumber          = errors.New("CMS: Cannot parse number")
-	errCMSNegative        = errors.New("CMS: Number cannot be negative")
-	errCMSKeys            = errors.New("CMS: wrong number of keys")
-	errCMSKeysWeights     = errors.New("CMS: wrong number of keys/weights")
-	errCMSWeight          = errors.New("CMS: invalid weight value")
-	errCMSDims            = errors.New("CMS: width/depth is not equal")
-	errTopKNoKey          = errors.New("TopK: key does not exist")
-	errTopKExists         = errors.New("TopK: key already exists")
-	errTopKK              = errors.New("TopK: invalid k")
-	errTopKWidth          = errors.New("TopK: invalid width")
-	errTopKDepth          = errors.New("TopK: invalid depth")
-	errTopKDecay          = errors.New("TopK: invalid decay value. must be '<= 1' & '> 0'")
-	errTopKIncrement      = errors.New("TopK: increment must be an integer greater or equal to 0                            and smaller or equal to 100,000")
-	errTopKWithCount      = errors.New("WITHCOUNT keyword expected")
+	errBloomNotFound       = errors.New("ERR not found")
+	errBloomExists         = errors.New("ERR item exists")
+	errBloomErrorRate      = errors.New("ERR bad error rate")
+	errBloomErrorRange     = errors.New("ERR error rate must be in the range (0.000000, 1.000000)")
+	errBloomCapacity       = errors.New("ERR bad capacity")
+	errBloomCapacityRange  = errors.New("ERR capacity must be in the range [1, 1073741824]")
+	errBloomExpansion      = errors.New("ERR bad expansion")
+	errBloomExpansionRng   = errors.New("ERR expansion must be in the range [0, 32768]")
+	errBloomNonScaling     = errors.New("Nonscaling filters cannot expand")
+	errBloomInfoField      = errors.New("Invalid information value")
+	errBloomBadCapacity    = errors.New("Bad capacity")
+	errBloomBadErrorRate   = errors.New("Bad error rate")
+	errBloomBadExpansion   = errors.New("Bad expansion")
+	errBloomUnknownArg     = errors.New("Unknown argument received")
+	errSketchTooLarge      = errors.New("ERR Insufficient memory to create filter")
+	errCuckooNotFound      = errors.New("Not found")
+	errCuckooCapacity      = errors.New("Capacity must be in the range [2 * BUCKETSIZE, 1073741824]")
+	errCuckooBucketParse   = errors.New("Couldn't parse BUCKETSIZE")
+	errCuckooBucketSize    = errors.New("BUCKETSIZE: value must be in the range [1, 255]")
+	errCuckooIterParse     = errors.New("Couldn't parse MAXITERATIONS")
+	errCuckooIterations    = errors.New("MAXITERATIONS: value must be in the range [1, 65535]")
+	errCuckooExpParse      = errors.New("Couldn't parse EXPANSION")
+	errCuckooExpansion     = errors.New("EXPANSION: value must be in the range [0, 32768]")
+	errCMSNoKey            = errors.New("CMS: key does not exist")
+	errCMSExists           = errors.New("CMS: key already exists")
+	errCMSWidth            = errors.New("CMS: invalid width")
+	errCMSDepth            = errors.New("CMS: invalid depth")
+	errCMSOverestimation   = errors.New("CMS: invalid overestimation value")
+	errCMSProb             = errors.New("CMS: invalid prob value")
+	errCMSNumber           = errors.New("CMS: Cannot parse number")
+	errCMSNegative         = errors.New("CMS: Number cannot be negative")
+	errCMSKeys             = errors.New("CMS: wrong number of keys")
+	errCMSKeysWeights      = errors.New("CMS: wrong number of keys/weights")
+	errCMSWeight           = errors.New("CMS: invalid weight value")
+	errCMSDims             = errors.New("CMS: width/depth is not equal")
+	errTopKNoKey           = errors.New("TopK: key does not exist")
+	errTopKExists          = errors.New("TopK: key already exists")
+	errTopKK               = errors.New("TopK: invalid k")
+	errTopKWidth           = errors.New("TopK: invalid width")
+	errTopKDepth           = errors.New("TopK: invalid depth")
+	errTopKDecay           = errors.New("TopK: invalid decay value. must be '<= 1' & '> 0'")
+	errCuckooMaxExpansions = errors.New("Maximum expansions reached") //nolint:staticcheck // RedisBloom's reply text
+	errTopKIncrement       = errors.New("TopK: increment must be an integer greater or equal to 0                            and smaller or equal to 100,000")
+	errTopKWithCount       = errors.New("WITHCOUNT keyword expected")
 )
 
 const (
 	bloomDefaultCapacity  = 100
 	bloomDefaultErrorRate = 0.01
+	cuckooMaxExpansions   = 32
 	bloomDefaultExpansion = 2
 	cuckooDefaultCapacity = 1000
 	topkDefaultWidth      = 8
@@ -239,7 +241,7 @@ func bloomAdd(ctx *Context, key string, items [][]byte, create func() (*store.Bl
 			replies = append(replies, resp.ErrorValue(err.Error()))
 			break
 		}
-		replies = append(replies, resp.IntegerValue(boolInt64(added)))
+		replies = append(replies, resp.BooleanValue(added))
 	}
 	valueWritten(ctx, key)
 	if single {
@@ -337,7 +339,7 @@ func bloomExists(ctx *Context, items [][]byte, single bool) error {
 	exists = exists && err == nil
 	replies := make([]*resp.Value, len(items))
 	for i, item := range items {
-		replies[i] = resp.IntegerValue(boolInt64(exists && bf.Exists(item)))
+		replies[i] = resp.BooleanValue(exists && bf.Exists(item))
 	}
 	if single {
 		return ctx.WriteValue(replies[0])
@@ -389,6 +391,9 @@ func cmdBFINFO(ctx *Context) error {
 		want := strings.ToUpper(ctx.ArgString(1))
 		for _, f := range fields {
 			if f.name == want {
+				if ctx.Writer.IsRESP3() {
+					return ctx.WriteValue(resp.PairsValue([]*resp.Value{resp.SimpleString(f.label), f.value}))
+				}
 				return ctx.WriteArray([]*resp.Value{f.value})
 			}
 		}
@@ -398,7 +403,7 @@ func cmdBFINFO(ctx *Context) error {
 	for _, f := range fields {
 		reply = append(reply, resp.SimpleString(f.label), f.value)
 	}
-	return ctx.WriteArray(reply)
+	return ctx.WriteValue(resp.PairsValue(reply))
 }
 
 func cmdBFCARD(ctx *Context) error {
@@ -503,14 +508,25 @@ func cuckooAdd(ctx *Context, key string, items [][]byte, create func() (*store.C
 			return ctx.WriteError(err)
 		}
 	}
+	if cf.NumFilters() >= cuckooMaxExpansions {
+		return ctx.WriteError(errCuckooMaxExpansions)
+	}
 	replies := make([]*resp.Value, 0, len(items))
 	for _, item := range items {
 		added, err := cf.Add(item, nx)
-		if err != nil {
-			replies = append(replies, resp.ErrorValue(err.Error()))
-			continue
+		switch {
+		case err != nil && single:
+			valueWritten(ctx, key)
+			return ctx.WriteError(err)
+		case err != nil && !nx && ctx.Writer.IsRESP3():
+			replies = append(replies, resp.BooleanValue(false))
+		case err != nil:
+			replies = append(replies, resp.IntegerValue(-1))
+		case nx && !single:
+			replies = append(replies, resp.IntegerValue(boolInt64(added)))
+		default:
+			replies = append(replies, resp.BooleanValue(added))
 		}
-		replies = append(replies, resp.IntegerValue(boolInt64(added)))
 	}
 	valueWritten(ctx, key)
 	if single {
@@ -586,9 +602,10 @@ func cuckooCounts(ctx *Context, exists bool, single bool) error {
 			n = cf.Count(item)
 		}
 		if exists {
-			n = min(n, 1)
+			replies[i] = resp.BooleanValue(n > 0)
+		} else {
+			replies[i] = resp.IntegerValue(int64(n))
 		}
-		replies[i] = resp.IntegerValue(int64(n))
 	}
 	if single {
 		return ctx.WriteValue(replies[0])
@@ -633,7 +650,7 @@ func cmdCFDEL(ctx *Context) error {
 	if deleted {
 		valueWritten(ctx, key)
 	}
-	return ctx.WriteInteger(boolInt64(deleted))
+	return ctx.WriteValue(resp.BooleanValue(deleted))
 }
 
 func cmdCFINFO(ctx *Context) error {
@@ -648,7 +665,7 @@ func cmdCFINFO(ctx *Context) error {
 		return ctx.WriteError(errBloomNotFound)
 	}
 	info := cf.Info()
-	return ctx.WriteArray([]*resp.Value{
+	return ctx.WriteValue(resp.PairsValue([]*resp.Value{
 		resp.SimpleString("Size"), resp.IntegerValue(int64(info.Size)),
 		resp.SimpleString("Number of buckets"), resp.IntegerValue(int64(info.Buckets)),
 		resp.SimpleString("Number of filters"), resp.IntegerValue(int64(info.Filters)),
@@ -657,7 +674,7 @@ func cmdCFINFO(ctx *Context) error {
 		resp.SimpleString("Bucket size"), resp.IntegerValue(int64(info.BucketSize)),
 		resp.SimpleString("Expansion rate"), resp.IntegerValue(int64(info.Expansion)),
 		resp.SimpleString("Max iterations"), resp.IntegerValue(int64(info.MaxIterations)),
-	})
+	}))
 }
 
 // createCMS stores a new sketch at key unless the key exists, of any type.
@@ -702,7 +719,7 @@ func cmdCMSINITBYPROB(ctx *Context) error {
 		return ctx.WriteError(errCMSProb)
 	}
 	width := int64(math.Ceil(2 / overestimation))
-	depth := int64(math.Ceil(math.Log(prob) / math.Log(0.5)))
+	depth := int64(math.Ceil(float64(log10f(prob) / log10f(0.5))))
 	return createCMS(ctx, ctx.ArgString(0), width, depth)
 }
 
@@ -810,7 +827,9 @@ func cmdCMSMERGE(ctx *Context) error {
 			return ctx.WriteError(errCMSDims)
 		}
 	}
-	dest.Merge(srcs, weights)
+	if err := dest.Merge(srcs, weights); err != nil {
+		return ctx.WriteError(err)
+	}
 	valueWritten(ctx, destKey)
 	return ctx.WriteOK()
 }
@@ -823,11 +842,11 @@ func cmdCMSINFO(ctx *Context) error {
 	if err != nil {
 		return ctx.WriteError(err)
 	}
-	return ctx.WriteArray([]*resp.Value{
+	return ctx.WriteValue(resp.PairsValue([]*resp.Value{
 		resp.SimpleString("width"), resp.IntegerValue(int64(m.Width)),
 		resp.SimpleString("depth"), resp.IntegerValue(int64(m.Depth)),
 		resp.SimpleString("count"), resp.IntegerValue(int64(m.Total())),
-	})
+	}))
 }
 
 func cmdTOPKRESERVE(ctx *Context) error {
@@ -930,7 +949,7 @@ func cmdTOPKQUERY(ctx *Context) error {
 	}
 	replies := make([]*resp.Value, ctx.ArgCount()-1)
 	for i := range replies {
-		replies[i] = resp.IntegerValue(boolInt64(t.Query(ctx.Arg(1 + i))))
+		replies[i] = resp.BooleanValue(t.Query(ctx.Arg(1 + i)))
 	}
 	return ctx.WriteArray(replies)
 }
@@ -980,10 +999,16 @@ func cmdTOPKINFO(ctx *Context) error {
 	if err != nil {
 		return ctx.WriteError(err)
 	}
-	return ctx.WriteArray([]*resp.Value{
+	return ctx.WriteValue(resp.PairsValue([]*resp.Value{
 		resp.SimpleString("k"), resp.IntegerValue(int64(t.K)),
 		resp.SimpleString("width"), resp.IntegerValue(int64(t.Width)),
 		resp.SimpleString("depth"), resp.IntegerValue(int64(t.Depth)),
-		resp.SimpleString("decay"), resp.BulkString(strconv.FormatFloat(t.Decay, 'g', -1, 64)),
-	})
+		resp.SimpleString("decay"), resp.DoubleValue(strconv.FormatFloat(t.Decay, 'g', -1, 64)),
+	}))
+}
+
+// log10f is C's single-precision log10, which RedisBloom sizes a sketch
+// from probabilities with.
+func log10f(x float64) float32 {
+	return float32(math.Log10(float64(float32(x))))
 }
