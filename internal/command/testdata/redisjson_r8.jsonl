@@ -1,0 +1,599 @@
+{"cmd": ["FLUSHALL"], "want": null}
+{"cmd": ["JSON.SET", "k1", "$", "{\"a\": -7.392, \"b\": [12345678901234567890, 1.5e+300, {}], \"c\": 12345678901234567890}"], "want": "+OK\r\n"}
+{"cmd": ["JSON.SET", "k2", "$", "{\"a\": [{\"d\": {\"d\": 1.5e+300, \"e\": true, \"c\": null}, \"e\": -1}, {\"c\": [1.5e+300], \"d\": {\"f\": false, \"d\": false, \"e\": null}, \"a\": 12345678901234567890}, 40], \"b\": [], \"c\": {\"f\": null}}"], "want": "+OK\r\n"}
+{"cmd": ["JSON.SET", "k3", "$", "{\"a\": [12345678901234567890], \"b\": null, \"c\": {\"b\": \"s4\", \"e\": {\"a\": {\"c\": 7.231, \"b\": 97, \"a\": 10, \"e\": null}}}}"], "want": "+OK\r\n"}
+{"cmd": ["JSON.STRLEN", "k1", "$..[0]"], "want": "*1\r\n$-1\r\n"}
+{"cmd": ["JSON.SET", "k1", "$", "{\"a\": true, \"b\": false, \"c\": 1.5e+300}"], "want": "+OK\r\n"}
+{"cmd": ["JSON.DEL", "k3", "$..a"], "want": ":2\r\n"}
+{"cmd": ["JSON.SET", "k3", ".a.b", "{\"e\": [{\"e\": 12345678901234567890, \"a\": false, \"f\": 62}, true, false]}"], "want": "$-1\r\n"}
+{"cmd": ["JSON.DEL", "k1", "$.a[0]"], "want": ":0\r\n"}
+{"cmd": ["JSON.STRAPPEND", "k1", "$[-1]", "\"zz\""], "want": "*0\r\n"}
+{"cmd": ["JSON.SET", "k2", "$.a[1:3]", "[]", "NX"], "want": "-Err wrong static path\r\n"}
+{"cmd": ["JSON.GET", "k2"], "want": "$153\r\n{\"a\":[{\"d\":{\"d\":1.5e300,\"e\":true,\"c\":null},\"e\":-1},{\"c\":[1.5e300],\"d\":{\"f\":false,\"d\":false,\"e\":null},\"a\":12345678901234567890},40],\"b\":[],\"c\":{\"f\":null}}\r\n"}
+{"cmd": ["JSON.ARRINDEX", "k3", "$.a[0]", "6.0"], "want": "*0\r\n"}
+{"cmd": ["JSON.ARRAPPEND", "k2", "$.a.b", "{\"c\": [{\"b\": -3.0}, {\"a\": \"s5\"}, null, {\"f\": false, \"c\": 69, \"b\": true}]}", "{\"c\": 1.3, \"b\": \"s4\"}"], "want": "*0\r\n"}
+{"cmd": ["JSON.CLEAR", "k3", "$.a.b"], "want": ":0\r\n"}
+{"cmd": ["JSON.MERGE", "k2", "a", "12345678901234567890"], "want": "+OK\r\n"}
+{"cmd": ["JSON.TYPE", "k3", "$"], "want": "*1\r\n$6\r\nobject\r\n"}
+{"cmd": ["JSON.TOGGLE", "k1", "$..[0]"], "want": "*0\r\n"}
+{"cmd": ["JSON.NUMINCRBY", "k2", "$.nope", "-3"], "want": "$2\r\n[]\r\n"}
+{"cmd": ["JSON.OBJKEYS", "k2", "$..*"], "want": "*4\r\n$-1\r\n$-1\r\n*1\r\n$1\r\nf\r\n$-1\r\n"}
+{"cmd": ["JSON.TOGGLE", "k2", "$.f"], "want": "*0\r\n"}
+{"cmd": ["JSON.MERGE", "k2", ".a.b", "[1.5e+300, [{\"d\": true, \"f\": -8.0}, true, {\"e\": 12345678901234567890}], null, [[null, \"s2\", -3.0, 25], false]]"], "want": "$-1\r\n"}
+{"cmd": ["JSON.ARRPOP", "k3", "$.a[?@>3]"], "want": "*0\r\n"}
+{"cmd": ["JSON.RESP", "k3", "$[-1]"], "want": "*0\r\n"}
+{"cmd": ["JSON.GET", "k1", "$.nope"], "want": "$2\r\n[]\r\n"}
+{"cmd": ["JSON.GET", "k2", "$.a.b"], "want": "$2\r\n[]\r\n"}
+{"cmd": ["JSON.ARRTRIM", "k3", "$.a.b", "-1", "4"], "want": "*0\r\n"}
+{"cmd": ["JSON.ARRPOP", "k2", "a", "0"], "want": "-ERR Path does not exist or not an array\r\n"}
+{"cmd": ["JSON.ARRLEN", "k1", "$..[0]"], "want": "*0\r\n"}
+{"cmd": ["JSON.GET", "k3"], "want": "$32\r\n{\"c\":{\"b\":\"s4\",\"e\":{}},\"b\":null}\r\n"}
+{"cmd": ["JSON.ARRTRIM", "k3", "$.c[*]", "-1", "1"], "want": "*2\r\n$-1\r\n$-1\r\n"}
+{"cmd": ["JSON.SET", "k3", "$", "{\"a\": false, \"b\": 12345678901234567890, \"c\": []}"], "want": "+OK\r\n"}
+{"cmd": ["JSON.ARRTRIM", "k3", "a", "-1", "5"], "want": "-ERR Path does not exist or not an array\r\n"}
+{"cmd": ["JSON.STRLEN", "k2", "$"], "want": "*1\r\n$-1\r\n"}
+{"cmd": ["JSON.GET", "k1", "b"], "want": "$5\r\nfalse\r\n"}
+{"cmd": ["JSON.MERGE", "k1", "$.b", "[false, {\"a\": [], \"f\": -5.7}]"], "want": "+OK\r\n"}
+{"cmd": ["JSON.GET", "k2"], "want": "$48\r\n{\"a\":12345678901234567890,\"b\":[],\"c\":{\"f\":null}}\r\n"}
+{"cmd": ["JSON.TYPE", "k3", "$..c"], "want": "*1\r\n$5\r\narray\r\n"}
+{"cmd": ["JSON.ARRPOP", "k3", "$..a"], "want": "*1\r\n$-1\r\n"}
+{"cmd": ["JSON.TOGGLE", "k2", "$.*"], "want": "*3\r\n$-1\r\n$-1\r\n$-1\r\n"}
+{"cmd": ["JSON.SET", "k2", "$", "{\"a\": [-9.0], \"b\": false, \"c\": 7.0}"], "want": "+OK\r\n"}
+{"cmd": ["JSON.ARRPOP", "k3", "$"], "want": "*1\r\n$-1\r\n"}
+{"cmd": ["JSON.ARRLEN", "k2", "$[-1]"], "want": "*0\r\n"}
+{"cmd": ["JSON.NUMINCRBY", "k1", "nope", "1"], "want": "-ERR Path does not exist or does not contains a number\r\n"}
+{"cmd": ["JSON.ARRINSERT", "k2", "$[?@.b]", "-3", "[{\"c\": {}}]"], "want": "*0\r\n"}
+{"cmd": ["JSON.STRAPPEND", "k1", "a", "\"zz\""], "want": "-ERR Path does not exist or not a string\r\n"}
+{"cmd": ["JSON.ARRTRIM", "k1", "$.a[0]", "-2", "0"], "want": "*0\r\n"}
+{"cmd": ["JSON.STRLEN", "k2", "$..*"], "want": "*4\r\n$-1\r\n$-1\r\n$-1\r\n$-1\r\n"}
+{"cmd": ["JSON.TYPE", "k2", "$..*"], "want": "*4\r\n$5\r\narray\r\n$7\r\nboolean\r\n$6\r\nnumber\r\n$6\r\nnumber\r\n"}
+{"cmd": ["JSON.OBJLEN", "k1", "$..a"], "want": "*2\r\n$-1\r\n$-1\r\n"}
+{"cmd": ["JSON.ARRAPPEND", "k2", "$.b", "{\"a\": {}, \"e\": null, \"b\": true}", "{\"b\": [], \"c\": [58, {}]}"], "want": "*1\r\n$-1\r\n"}
+{"cmd": ["JSON.MERGE", "k3", ".a.b", "true"], "want": "$-1\r\n"}
+{"cmd": ["JSON.NUMMULTBY", "k2", "nope", "-1"], "want": "-ERR Path does not exist or does not contains a number\r\n"}
+{"cmd": ["JSON.MGET", "k1", "k2", "k3", "b"], "want": "*3\r\n$25\r\n[false,{\"a\":[],\"f\":-5.7}]\r\n$5\r\nfalse\r\n$20\r\n12345678901234567890\r\n"}
+{"cmd": ["JSON.SET", "k1", "$", "{\"a\": 34, \"b\": [], \"c\": {\"e\": {\"e\": 1.5e+300, \"b\": 69}}}"], "want": "+OK\r\n"}
+{"cmd": ["JSON.TYPE", "k3", "$.a[1:3]"], "want": "*0\r\n"}
+{"cmd": ["JSON.ARRLEN", "k3", "a"], "want": "-ERR Path does not exist or not an array\r\n"}
+{"cmd": ["JSON.ARRPOP", "k1", "$..[0]", "1"], "want": "*0\r\n"}
+{"cmd": ["JSON.DEL", "k1", "$.a[0]"], "want": ":0\r\n"}
+{"cmd": ["JSON.SET", "k2", "$.a[1:3]", "-2.1", "NX"], "want": "-Err wrong static path\r\n"}
+{"cmd": ["JSON.NUMMULTBY", "k1", "a", "2"], "want": "$2\r\n68\r\n"}
+{"cmd": ["JSON.TOGGLE", "k2", "$..a"], "want": "*1\r\n$-1\r\n"}
+{"cmd": ["JSON.MERGE", "k2", "$.a[1:3]", "[[-9.915, [1.5e+300], 12345678901234567890], \"s5\", [\"s3\", {\"c\": true, \"b\": -1.4}, 1.5e+300, -9.861]]"], "want": "-Err wrong static path\r\n"}
+{"cmd": ["JSON.SET", "k2", "$", "{\"a\": true, \"b\": 1.5e+300, \"c\": [{\"e\": {\"e\": true, \"f\": true}, \"a\": [-3.0, 1.5e+300, \"s8\"], \"d\": 1.5e+300, \"c\": [true, 12345678901234567890]}, 12345678901234567890, {\"c\": -8.0, \"d\": []}, {}]}"], "want": "+OK\r\n"}
+{"cmd": ["JSON.ARRPOP", "k1", "$.*", "-2"], "want": "*3\r\n$-1\r\n$-1\r\n$-1\r\n"}
+{"cmd": ["JSON.SET", "k1", "$", "{\"a\": \"s5\", \"b\": 12345678901234567890, \"c\": {\"c\": \"s8\"}}"], "want": "+OK\r\n"}
+{"cmd": ["JSON.TYPE", "k1", "a"], "want": "$6\r\nstring\r\n"}
+{"cmd": ["JSON.STRLEN", "k1", "$.a[1:3]"], "want": "*0\r\n"}
+{"cmd": ["JSON.DEL", "k2", "$..*"], "want": ":3\r\n"}
+{"cmd": ["JSON.SET", "k2", "$.nope", "{\"b\": 12345678901234567890, \"d\": 12345678901234567890}", "NX"], "want": "-ERR new objects must be created at the root\r\n"}
+{"cmd": ["JSON.OBJKEYS", "k1", "$.b"], "want": "*1\r\n$-1\r\n"}
+{"cmd": ["JSON.OBJKEYS", "k1", "$[0]"], "want": "*0\r\n"}
+{"cmd": ["JSON.MGET", "k1", "k2", "k3", "$"], "want": "*3\r\n$52\r\n[{\"a\":\"s5\",\"b\":12345678901234567890,\"c\":{\"c\":\"s8\"}}]\r\n$-1\r\n$45\r\n[{\"a\":false,\"b\":12345678901234567890,\"c\":[]}]\r\n"}
+{"cmd": ["JSON.ARRPOP", "k2", "$[0]", "-1"], "want": "-ERR could not perform this operation on a key that doesn't exist\r\n"}
+{"cmd": ["JSON.SET", "k2", "a", "{}"], "want": "-ERR new objects must be created at the root\r\n"}
+{"cmd": ["JSON.SET", "k2", "$", "{\"a\": [[null, 7, [12345678901234567890, false, -4.0]], -8.0, {}], \"b\": true, \"c\": [[{\"d\": \"s1\", \"a\": false}], 1.5e+300, true, false]}"], "want": "+OK\r\n"}
+{"cmd": ["JSON.OBJKEYS", "k1", "$..a"], "want": "*1\r\n$-1\r\n"}
+{"cmd": ["JSON.SET", "k1", "$", "{\"a\": 7.3, \"b\": {\"b\": {\"e\": 46, \"a\": \"s7\", \"c\": 12345678901234567890}, \"a\": {\"d\": -8.0}, \"e\": \"s7\"}, \"c\": {}}"], "want": "+OK\r\n"}
+{"cmd": ["JSON.SET", "k1", "$..a", "12345678901234567890"], "want": "+OK\r\n"}
+{"cmd": ["JSON.ARRPOP", "k3", "a"], "want": "-ERR Path does not exist or not an array\r\n"}
+{"cmd": ["JSON.TYPE", "k1", "$.f"], "want": "*0\r\n"}
+{"cmd": ["JSON.TYPE", "k3", "$[0]"], "want": "*0\r\n"}
+{"cmd": ["JSON.ARRTRIM", "k2", "$.a[?@>3]", "2", "4"], "want": "*0\r\n"}
+{"cmd": ["JSON.SET", "k3", "$.*", "\"s5\"", "XX"], "want": "+OK\r\n"}
+{"cmd": ["JSON.GET", "k1", "$"], "want": "$138\r\n[{\"a\":12345678901234567890,\"b\":{\"b\":{\"e\":46,\"a\":12345678901234567890,\"c\":12345678901234567890},\"a\":12345678901234567890,\"e\":\"s7\"},\"c\":{}}]\r\n"}
+{"cmd": ["JSON.STRAPPEND", "k2", "$.a[?@>3]", "\"zz\""], "want": "*0\r\n"}
+{"cmd": ["JSON.TOGGLE", "k2", "b"], "want": "$5\r\nfalse\r\n"}
+{"cmd": ["JSON.ARRINDEX", "k2", "$[-1]", "true"], "want": "*0\r\n"}
+{"cmd": ["JSON.MERGE", "k1", "$[?@.b]", "9.6"], "want": "+OK\r\n"}
+{"cmd": ["JSON.ARRTRIM", "k2", "nope", "-3", "-3"], "want": "-ERR Path does not exist or not an array\r\n"}
+{"cmd": ["JSON.TOGGLE", "k2", "$..*"], "want": "*19\r\n$-1\r\n:1\r\n$-1\r\n$-1\r\n$-1\r\n$-1\r\n$-1\r\n$-1\r\n$-1\r\n$-1\r\n:1\r\n$-1\r\n$-1\r\n$-1\r\n:0\r\n:1\r\n$-1\r\n$-1\r\n:1\r\n"}
+{"cmd": ["JSON.MGET", "k1", "k2", "k3", "$.*"], "want": "*3\r\n$29\r\n[12345678901234567890,9.6,{}]\r\n$101\r\n[[[null,7,[12345678901234567890,true,-4.0]],-8.0,{}],true,[[{\"d\":\"s1\",\"a\":true}],1.5e300,false,true]]\r\n$16\r\n[\"s5\",\"s5\",\"s5\"]\r\n"}
+{"cmd": ["JSON.GET", "k2", ".a.b"], "want": "-ERR Path does not exist\r\n"}
+{"cmd": ["JSON.NUMINCRBY", "k2", "b", "1"], "want": "-ERR Path does not exist or does not contains a number\r\n"}
+{"cmd": ["JSON.STRAPPEND", "k2", "$.nope", "\"zz\""], "want": "*0\r\n"}
+{"cmd": ["JSON.NUMINCRBY", "k2", "$..c", "2.5"], "want": "$6\r\n[null]\r\n"}
+{"cmd": ["JSON.CLEAR", "k1", "nope"], "want": ":0\r\n"}
+{"cmd": ["JSON.ARRTRIM", "k3", "$..[0]", "-2", "1"], "want": "*0\r\n"}
+{"cmd": ["JSON.NUMINCRBY", "k2", "$..[0]", "1e3"], "want": "$43\r\n[null,null,1.2345678901234567e19,null,null]\r\n"}
+{"cmd": ["JSON.MGET", "k1", "k2", "k3", ".a.b"], "want": "*3\r\n$-1\r\n$-1\r\n$-1\r\n"}
+{"cmd": ["JSON.ARRPOP", "k1", "$.f", "1"], "want": "*0\r\n"}
+{"cmd": ["JSON.RESP", "k3", "$"], "want": "*1\r\n*7\r\n+{\r\n$1\r\na\r\n$2\r\ns5\r\n$1\r\nb\r\n$2\r\ns5\r\n$1\r\nc\r\n$2\r\ns5\r\n"}
+{"cmd": ["JSON.SET", "k1", "$..c", "[\"s4\", \"s9\", {\"f\": false, \"c\": 12345678901234567890}]", "XX"], "want": "+OK\r\n"}
+{"cmd": ["JSON.ARRLEN", "k2", ".a.b"], "want": "-ERR Path does not exist\r\n"}
+{"cmd": ["JSON.TOGGLE", "k2", "$..[0]"], "want": "*5\r\n$-1\r\n$-1\r\n$-1\r\n$-1\r\n$-1\r\n"}
+{"cmd": ["JSON.ARRTRIM", "k1", ".a.b", "-3", "5"], "want": "-ERR Path does not exist or not an array\r\n"}
+{"cmd": ["JSON.SET", "k1", "$", "{\"a\": 1.5e+300, \"b\": 3.203, \"c\": [1.5e+300, true, []]}"], "want": "+OK\r\n"}
+{"cmd": ["JSON.ARRLEN", "k1", "$[-1]"], "want": "*0\r\n"}
+{"cmd": ["JSON.ARRPOP", "k1", "$", "0"], "want": "*1\r\n$-1\r\n"}
+{"cmd": ["JSON.ARRTRIM", "k1", "$[?@.b]", "-2", "-3"], "want": "*0\r\n"}
+{"cmd": ["JSON.ARRPOP", "k1", ".a.b", "2"], "want": "-ERR Path does not exist or not an array\r\n"}
+{"cmd": ["JSON.GET", "k1", "$.a[1:3]"], "want": "$2\r\n[]\r\n"}
+{"cmd": ["JSON.NUMINCRBY", "k3", "$", "1e3"], "want": "$6\r\n[null]\r\n"}
+{"cmd": ["JSON.SET", "k1", "nope", "1.5e+300"], "want": "+OK\r\n"}
+{"cmd": ["JSON.DEL", "k1", "nope"], "want": ":1\r\n"}
+{"cmd": ["JSON.STRAPPEND", "k2", "$.a[?@>3]", "\"zz\""], "want": "*0\r\n"}
+{"cmd": ["JSON.GET", "k2", "$..c"], "want": "$44\r\n[[[{\"d\":\"s1\",\"a\":true}],1.5e300,false,true]]\r\n"}
+{"cmd": ["JSON.MSET", "k1", "a", "false"], "want": "+OK\r\n"}
+{"cmd": ["JSON.TYPE", "k2", "$[-1]"], "want": "*0\r\n"}
+{"cmd": ["JSON.ARRPOP", "k3", ".a.b", "1"], "want": "-ERR Path does not exist or not an array\r\n"}
+{"cmd": ["JSON.MERGE", "k2", "nope", "\"s6\""], "want": "+OK\r\n"}
+{"cmd": ["JSON.ARRLEN", "k1", "$.a"], "want": "*1\r\n$-1\r\n"}
+{"cmd": ["JSON.STRAPPEND", "k3", "$", "\"zz\""], "want": "*1\r\n$-1\r\n"}
+{"cmd": ["JSON.MSET", "k2", "$.nope", "[]"], "want": "+OK\r\n"}
+{"cmd": ["JSON.GET", "k1"], "want": "$43\r\n{\"a\":false,\"b\":3.203,\"c\":[1.5e300,true,[]]}\r\n"}
+{"cmd": ["JSON.MSET", "k2", "$..[0]", "-0.0"], "want": "+OK\r\n"}
+{"cmd": ["JSON.GET", "k3"], "want": "$28\r\n{\"a\":\"s5\",\"b\":\"s5\",\"c\":\"s5\"}\r\n"}
+{"cmd": ["JSON.SET", "k3", "nope", "\"s0\""], "want": "+OK\r\n"}
+{"cmd": ["JSON.GET", "k1"], "want": "$43\r\n{\"a\":false,\"b\":3.203,\"c\":[1.5e300,true,[]]}\r\n"}
+{"cmd": ["JSON.GET", "k2"], "want": "$69\r\n{\"a\":[-0.0,-8.0,{}],\"b\":true,\"c\":[-0.0,1.5e300,false,true],\"nope\":[]}\r\n"}
+{"cmd": ["JSON.GET", "k3"], "want": "$40\r\n{\"a\":\"s5\",\"b\":\"s5\",\"c\":\"s5\",\"nope\":\"s0\"}\r\n"}
+{"cmd": ["FLUSHALL"], "want": null}
+{"cmd": ["JSON.SET", "k1", "$", "{\"a\": -2.0, \"b\": 8.0, \"c\": 3}"], "want": "+OK\r\n"}
+{"cmd": ["JSON.SET", "k2", "$", "{\"a\": {}, \"b\": {\"a\": [1.5e+300, 1.418, [true]], \"d\": [{\"e\": \"s5\"}, {\"a\": null, \"f\": 1.6, \"c\": 12345678901234567890}, 12345678901234567890], \"c\": \"s4\", \"f\": \"s1\"}, \"c\": false}"], "want": "+OK\r\n"}
+{"cmd": ["JSON.SET", "k3", "$", "{\"a\": {\"f\": {\"b\": 12345678901234567890}, \"e\": null}, \"b\": [{\"e\": 12345678901234567890, \"d\": 12345678901234567890}, {\"e\": 62}], \"c\": {\"f\": {\"e\": []}}}"], "want": "+OK\r\n"}
+{"cmd": ["JSON.STRAPPEND", "k1", "$.a.b", "\"zz\""], "want": "*0\r\n"}
+{"cmd": ["JSON.RESP", "k2", "$.a[?@>3]"], "want": "*0\r\n"}
+{"cmd": ["JSON.ARRPOP", "k3", "b", "1"], "want": "$8\r\n{\"e\":62}\r\n"}
+{"cmd": ["JSON.MSET", "k2", "a", "null"], "want": "+OK\r\n"}
+{"cmd": ["JSON.OBJLEN", "k2", "$.b"], "want": "*1\r\n:4\r\n"}
+{"cmd": ["JSON.RESP", "k3", "a"], "want": "*5\r\n+{\r\n$1\r\nf\r\n*3\r\n+{\r\n$1\r\nb\r\n$20\r\n12345678901234567000\r\n$1\r\ne\r\n$-1\r\n"}
+{"cmd": ["JSON.CLEAR", "k2", "$[0]"], "want": ":0\r\n"}
+{"cmd": ["JSON.ARRINDEX", "k1", ".a.b", "1.5e+300"], "want": "-ERR Path does not exist\r\n"}
+{"cmd": ["JSON.STRAPPEND", "k1", "b", "\"zz\""], "want": "-ERR Path does not exist or not a string\r\n"}
+{"cmd": ["JSON.SET", "k1", "$", "{\"a\": [], \"b\": {}, \"c\": true}"], "want": "+OK\r\n"}
+{"cmd": ["JSON.MERGE", "k2", "$[0]", "1.5e+300"], "want": "-ERR array index out of range\r\n"}
+{"cmd": ["JSON.DEL", "k1", "$[0]"], "want": ":0\r\n"}
+{"cmd": ["JSON.STRAPPEND", "k2", "$.a", "\"zz\""], "want": "*1\r\n$-1\r\n"}
+{"cmd": ["JSON.DEL", "k1", "a"], "want": ":1\r\n"}
+{"cmd": ["JSON.STRLEN", "k3", "$.f"], "want": "*0\r\n"}
+{"cmd": ["JSON.MGET", "k1", "k2", "k3", "$[0]"], "want": "*3\r\n$2\r\n[]\r\n$2\r\n[]\r\n$2\r\n[]\r\n"}
+{"cmd": ["JSON.SET", "k1", "$", "{\"a\": 12345678901234567890, \"b\": {\"d\": [-5, {\"e\": true, \"c\": null, \"f\": 83}, [true], \"s4\"], \"e\": true}, \"c\": {\"c\": \"s2\"}}"], "want": "+OK\r\n"}
+{"cmd": ["JSON.STRLEN", "k3", "$..[0]"], "want": "*1\r\n$-1\r\n"}
+{"cmd": ["JSON.GET", "k2"], "want": "$153\r\n{\"a\":null,\"b\":{\"a\":[1.5e300,1.418,[true]],\"d\":[{\"e\":\"s5\"},{\"a\":null,\"f\":1.6,\"c\":12345678901234567890},12345678901234567890],\"c\":\"s4\",\"f\":\"s1\"},\"c\":false}\r\n"}
+{"cmd": ["JSON.SET", "k2", "$", "{\"a\": false, \"b\": {\"b\": 12345678901234567890, \"c\": 22}, \"c\": 12345678901234567890}"], "want": "+OK\r\n"}
+{"cmd": ["JSON.MERGE", "k2", ".a.b", "{}"], "want": "$-1\r\n"}
+{"cmd": ["JSON.ARRPOP", "k2", "nope"], "want": "-ERR Path does not exist or not an array\r\n"}
+{"cmd": ["JSON.SET", "k2", ".a.b", "[97, {}, [{\"a\": 12345678901234567890, \"d\": \"s0\"}, 12345678901234567890, true], [{\"b\": 12345678901234567890, \"f\": \"s0\", \"d\": \"s8\"}, true]]", "XX"], "want": "$-1\r\n"}
+{"cmd": ["JSON.ARRINSERT", "k1", "$[0]", "-1", "[]"], "want": "*0\r\n"}
+{"cmd": ["JSON.ARRINSERT", "k3", "$..[0]", "3", "[{}, {\"f\": 1.5e+300}, 1.5e+300]"], "want": "*1\r\n$-1\r\n"}
+{"cmd": ["JSON.SET", "k1", "$.nope", "{\"c\": false, \"f\": true, \"b\": 41}"], "want": "+OK\r\n"}
+{"cmd": ["JSON.ARRPOP", "k1", "$"], "want": "*1\r\n$-1\r\n"}
+{"cmd": ["JSON.SET", "k1", "$", "{\"a\": {\"c\": null}, \"b\": false, \"c\": {}}"], "want": "+OK\r\n"}
+{"cmd": ["JSON.SET", "k1", "$.a[?@>3]", "{\"a\": 1.5e+300, \"c\": {\"a\": [true, true, null, true]}}", "NX"], "want": "-Err wrong static path\r\n"}
+{"cmd": ["JSON.RESP", "k3", "$[-1]"], "want": "*0\r\n"}
+{"cmd": ["JSON.OBJKEYS", "k3", "$..*"], "want": "*11\r\n*2\r\n$1\r\nf\r\n$1\r\ne\r\n$-1\r\n*1\r\n$1\r\nf\r\n*1\r\n$1\r\nb\r\n$-1\r\n$-1\r\n*2\r\n$1\r\ne\r\n$1\r\nd\r\n$-1\r\n$-1\r\n*1\r\n$1\r\ne\r\n$-1\r\n"}
+{"cmd": ["JSON.GET", "k2", "$[-1]"], "want": "$2\r\n[]\r\n"}
+{"cmd": ["JSON.NUMMULTBY", "k1", "$.a", "0.5"], "want": "$6\r\n[null]\r\n"}
+{"cmd": ["JSON.MSET", "k1", "$.a[1:3]", "[true, -5.577, [[1.5e+300, false, \"s6\"], {\"d\": 12345678901234567890, \"e\": 7.7, \"b\": \"s9\"}, false, [\"s3\", -6.2]], 1.0]"], "want": "-Err wrong static path\r\n"}
+{"cmd": ["JSON.CLEAR", "k3", "$..a"], "want": ":1\r\n"}
+{"cmd": ["JSON.SET", "k3", "$.a", "false"], "want": "+OK\r\n"}
+{"cmd": ["JSON.ARRLEN", "k2", "$..[0]"], "want": "*0\r\n"}
+{"cmd": ["JSON.STRAPPEND", "k1", "$.a[1:3]", "\"zz\""], "want": "*0\r\n"}
+{"cmd": ["JSON.DEL", "k2", "$[-1]"], "want": ":0\r\n"}
+{"cmd": ["JSON.GET", "k3"], "want": "$88\r\n{\"a\":false,\"b\":[{\"e\":12345678901234567890,\"d\":12345678901234567890}],\"c\":{\"f\":{\"e\":[]}}}\r\n"}
+{"cmd": ["JSON.TYPE", "k3", "b"], "want": "$5\r\narray\r\n"}
+{"cmd": ["JSON.NUMINCRBY", "k2", "$.b", "2.5"], "want": "$6\r\n[null]\r\n"}
+{"cmd": ["JSON.NUMMULTBY", "k3", "$.a[0]", "-1"], "want": "$2\r\n[]\r\n"}
+{"cmd": ["JSON.ARRINSERT", "k2", "$.*", "0", "-1.305"], "want": "*3\r\n$-1\r\n$-1\r\n$-1\r\n"}
+{"cmd": ["JSON.ARRINSERT", "k1", "$.a[1:3]", "-1", "1.5e+300"], "want": "*0\r\n"}
+{"cmd": ["JSON.TYPE", "k3", "$..[0]"], "want": "*1\r\n$6\r\nobject\r\n"}
+{"cmd": ["JSON.ARRAPPEND", "k2", "nope", "{\"d\": [-1.041]}", "[-5.2, [[\"s7\", \"s8\", true], 12345678901234567890, true], 12345678901234567890]"], "want": "-ERR Path does not exist or not an array\r\n"}
+{"cmd": ["JSON.CLEAR", "k3", "$"], "want": ":1\r\n"}
+{"cmd": ["JSON.OBJKEYS", "k1", "$"], "want": "*1\r\n*3\r\n$1\r\na\r\n$1\r\nb\r\n$1\r\nc\r\n"}
+{"cmd": ["JSON.SET", "k2", "$.a.b", "false"], "want": "$-1\r\n"}
+{"cmd": ["JSON.CLEAR", "k1", "$.a[?@>3]"], "want": ":0\r\n"}
+{"cmd": ["JSON.MSET", "k3", "$.a[1:3]", "[\"s2\"]"], "want": "-Err wrong static path\r\n"}
+{"cmd": ["JSON.TOGGLE", "k2", "$.*"], "want": "*3\r\n:1\r\n$-1\r\n$-1\r\n"}
+{"cmd": ["JSON.ARRAPPEND", "k3", "$.a", "4.0", "[\"s9\", 12345678901234567890]"], "want": "*0\r\n"}
+{"cmd": ["JSON.GET", "k1", "$[-1]"], "want": "$2\r\n[]\r\n"}
+{"cmd": ["JSON.NUMMULTBY", "k1", "a", "-1"], "want": "-ERR Path does not exist or does not contains a number\r\n"}
+{"cmd": ["JSON.TOGGLE", "k2", "$.nope"], "want": "*0\r\n"}
+{"cmd": ["JSON.MSET", "k2", "$[0]", "\"s4\""], "want": "-ERR array index out of range\r\n"}
+{"cmd": ["JSON.DEL", "k3", "$"], "want": ":1\r\n"}
+{"cmd": ["JSON.OBJKEYS", "k2", "$[-1]"], "want": "*0\r\n"}
+{"cmd": ["JSON.TYPE", "k1", "b"], "want": "$7\r\nboolean\r\n"}
+{"cmd": ["JSON.MERGE", "k2", "$.a[?@>3]", "{\"f\": 12345678901234567890}"], "want": "-Err wrong static path\r\n"}
+{"cmd": ["JSON.NUMINCRBY", "k2", "$.b", "1"], "want": "$6\r\n[null]\r\n"}
+{"cmd": ["JSON.SET", "k2", "$.a", "[{\"e\": {\"a\": 1.5e+300}, \"a\": {}, \"d\": [], \"f\": {\"a\": true, \"d\": \"s7\", \"f\": null}}, [\"s1\", [\"s9\"], [74, 0.3, 12345678901234567890], [\"s5\", true, \"s9\"]]]"], "want": "+OK\r\n"}
+{"cmd": ["JSON.ARRINSERT", "k3", "$[?@.b]", "1", "\"s6\""], "want": "-ERR could not perform this operation on a key that doesn't exist\r\n"}
+{"cmd": ["JSON.ARRAPPEND", "k3", "nope", "[12345678901234567890, false, [1.5e+300, [12345678901234567890, 12345678901234567890], 98], \"s0\"]", "12345678901234567890"], "want": "-ERR could not perform this operation on a key that doesn't exist\r\n"}
+{"cmd": ["JSON.ARRTRIM", "k2", ".a.b", "0", "1"], "want": "-ERR Path does not exist or not an array\r\n"}
+{"cmd": ["JSON.SET", "k1", "$.f", "10.0"], "want": "+OK\r\n"}
+{"cmd": ["JSON.SET", "k3", "$[?@.b]", "1.5e+300"], "want": "-ERR new objects must be created at the root\r\n"}
+{"cmd": ["JSON.MGET", "k1", "k2", "k3", "$.a[?@>3]"], "want": "*3\r\n$2\r\n[]\r\n$2\r\n[]\r\n$-1\r\n"}
+{"cmd": ["JSON.ARRPOP", "k2", "a"], "want": "$60\r\n[\"s1\",[\"s9\"],[74,0.3,12345678901234567890],[\"s5\",true,\"s9\"]]\r\n"}
+{"cmd": ["JSON.NUMMULTBY", "k2", "$.f", "2"], "want": "$2\r\n[]\r\n"}
+{"cmd": ["JSON.ARRINSERT", "k3", "$.a[?@>3]", "2", "{\"b\": false, \"d\": {\"e\": [false, 1.5e+300]}}"], "want": "-ERR could not perform this operation on a key that doesn't exist\r\n"}
+{"cmd": ["JSON.ARRLEN", "k3", "nope"], "want": "$-1\r\n"}
+{"cmd": ["JSON.ARRPOP", "k1", "$..c"], "want": "*2\r\n$-1\r\n$-1\r\n"}
+{"cmd": ["JSON.ARRINSERT", "k3", "$..[0]", "-2", "{\"c\": {\"a\": -1.1}}"], "want": "-ERR could not perform this operation on a key that doesn't exist\r\n"}
+{"cmd": ["JSON.GET", "k3", "$.a.b"], "want": "$-1\r\n"}
+{"cmd": ["JSON.NUMMULTBY", "k2", "$..[0]", "2"], "want": "$6\r\n[null]\r\n"}
+{"cmd": ["JSON.ARRTRIM", "k2", "$.c[*]", "1", "0"], "want": "*0\r\n"}
+{"cmd": ["JSON.ARRTRIM", "k1", "$.c[*]", "2", "0"], "want": "*0\r\n"}
+{"cmd": ["JSON.OBJKEYS", "k1", "$.*"], "want": "*4\r\n*1\r\n$1\r\nc\r\n$-1\r\n*0\r\n$-1\r\n"}
+{"cmd": ["JSON.ARRLEN", "k2", "$..a"], "want": "*4\r\n:1\r\n$-1\r\n$-1\r\n$-1\r\n"}
+{"cmd": ["JSON.SET", "k3", "$.a[0]", "[{\"f\": [6.0, null, 5.0], \"a\": {\"d\": 12345678901234567890, \"f\": null}}, {}, true, {\"b\": {}, \"d\": {\"a\": \"s4\"}}]", "XX"], "want": "$-1\r\n"}
+{"cmd": ["JSON.ARRINDEX", "k1", "$.*", "-9.0"], "want": "*4\r\n$-1\r\n$-1\r\n$-1\r\n$-1\r\n"}
+{"cmd": ["JSON.DEL", "k1", "$..*"], "want": ":4\r\n"}
+{"cmd": ["JSON.OBJLEN", "k3", "$[-1]"], "want": "-ERR Path does not exist or not an object\r\n"}
+{"cmd": ["JSON.ARRPOP", "k1", "$.a.b", "-1"], "want": "-ERR could not perform this operation on a key that doesn't exist\r\n"}
+{"cmd": ["JSON.TYPE", "k2", "$.nope"], "want": "*0\r\n"}
+{"cmd": ["JSON.RESP", "k1", "nope"], "want": "$-1\r\n"}
+{"cmd": ["JSON.MGET", "k1", "k2", "k3", "$"], "want": "*3\r\n$-1\r\n$139\r\n[{\"a\":[{\"e\":{\"a\":1.5e300},\"a\":{},\"d\":[],\"f\":{\"a\":true,\"d\":\"s7\",\"f\":null}}],\"b\":{\"b\":12345678901234567890,\"c\":22},\"c\":12345678901234567890}]\r\n$-1\r\n"}
+{"cmd": ["JSON.TOGGLE", "k2", "$.a[1:3]"], "want": "*0\r\n"}
+{"cmd": ["JSON.NUMINCRBY", "k1", "$.c[*]", "1e3"], "want": "-ERR could not perform this operation on a key that doesn't exist\r\n"}
+{"cmd": ["JSON.GET", "k3"], "want": "$-1\r\n"}
+{"cmd": ["JSON.OBJLEN", "k1", "$.a[?@>3]"], "want": "-ERR Path does not exist or not an object\r\n"}
+{"cmd": ["JSON.GET", "k3"], "want": "$-1\r\n"}
+{"cmd": ["JSON.CLEAR", "k2", "$.f"], "want": ":0\r\n"}
+{"cmd": ["JSON.MERGE", "k2", "$.a[?@>3]", "{}"], "want": "-Err wrong static path\r\n"}
+{"cmd": ["JSON.ARRINDEX", "k2", "nope", "30"], "want": "-ERR Path does not exist\r\n"}
+{"cmd": ["JSON.NUMMULTBY", "k1", "a", "2"], "want": "-ERR could not perform this operation on a key that doesn't exist\r\n"}
+{"cmd": ["JSON.TOGGLE", "k3", "$[0]"], "want": "-ERR could not perform this operation on a key that doesn't exist\r\n"}
+{"cmd": ["JSON.MERGE", "k1", "$.a[?@>3]", "{\"c\": {\"d\": {}}, \"b\": {\"f\": {}, \"a\": -1.0, \"e\": [false, \"s0\", 1.5e+300, null]}}"], "want": "-ERR new objects must be created at the root\r\n"}
+{"cmd": ["JSON.NUMINCRBY", "k1", "$", "1"], "want": "-ERR could not perform this operation on a key that doesn't exist\r\n"}
+{"cmd": ["JSON.MSET", "k2", "$..*", "-1"], "want": "+OK\r\n"}
+{"cmd": ["JSON.DEL", "k1", "$[-1]"], "want": ":0\r\n"}
+{"cmd": ["JSON.NUMINCRBY", "k2", "$..a", "-3"], "want": "$4\r\n[-4]\r\n"}
+{"cmd": ["JSON.ARRLEN", "k2", "$[0]"], "want": "*0\r\n"}
+{"cmd": ["JSON.MGET", "k1", "k2", "k3", "$.c[*]"], "want": "*3\r\n$-1\r\n$2\r\n[]\r\n$-1\r\n"}
+{"cmd": ["JSON.ARRINSERT", "k2", "$.*", "-2", "[]"], "want": "*3\r\n$-1\r\n$-1\r\n$-1\r\n"}
+{"cmd": ["JSON.ARRINDEX", "k2", "$.a[0]", "1.5e+300"], "want": "*0\r\n"}
+{"cmd": ["JSON.STRAPPEND", "k2", "$..[0]", "\"zz\""], "want": "*0\r\n"}
+{"cmd": ["JSON.NUMMULTBY", "k2", "$[0]", "0.5"], "want": "$2\r\n[]\r\n"}
+{"cmd": ["JSON.ARRPOP", "k2", "$.a", "-1"], "want": "*1\r\n$-1\r\n"}
+{"cmd": ["JSON.ARRPOP", "k3", "$.b"], "want": "-ERR could not perform this operation on a key that doesn't exist\r\n"}
+{"cmd": ["JSON.DEL", "k1", "$[-1]"], "want": ":0\r\n"}
+{"cmd": ["JSON.GET", "k1"], "want": "$-1\r\n"}
+{"cmd": ["JSON.GET", "k2"], "want": "$22\r\n{\"a\":-4,\"b\":-1,\"c\":-1}\r\n"}
+{"cmd": ["JSON.GET", "k3"], "want": "$-1\r\n"}
+{"cmd": ["FLUSHALL"], "want": null}
+{"cmd": ["HELLO", "3"], "want": null}
+{"cmd": ["JSON.SET", "k1", "$", "{\"a\": [{\"d\": -0.9}, {\"b\": [], \"a\": []}, true, 1.5e+300], \"b\": null, \"c\": \"s1\"}"], "want": "+OK\r\n"}
+{"cmd": ["JSON.SET", "k2", "$", "{\"a\": \"s7\", \"b\": [1.5e+300], \"c\": false}"], "want": "+OK\r\n"}
+{"cmd": ["JSON.SET", "k3", "$", "{\"a\": {}, \"b\": 9.917, \"c\": null}"], "want": "+OK\r\n"}
+{"cmd": ["JSON.NUMINCRBY", "k2", "b", "1e3"], "want": "*1\r\n_\r\n"}
+{"cmd": ["JSON.SET", "k3", "$[?@.b]", "false"], "want": "-Err wrong static path\r\n"}
+{"cmd": ["JSON.OBJKEYS", "k3", "$"], "want": "*1\r\n*3\r\n$1\r\na\r\n$1\r\nb\r\n$1\r\nc\r\n"}
+{"cmd": ["JSON.TOGGLE", "k3", "$.a"], "want": "*1\r\n_\r\n"}
+{"cmd": ["JSON.ARRINSERT", "k1", "b", "2", "{\"d\": -3.126, \"a\": 1.5e+300, \"f\": null}"], "want": "-ERR Path does not exist or not an array\r\n"}
+{"cmd": ["JSON.MSET", "k3", "b", "1.5e+300"], "want": "+OK\r\n"}
+{"cmd": ["JSON.TOGGLE", "k2", "$.nope"], "want": "*0\r\n"}
+{"cmd": ["JSON.ARRPOP", "k1", "$.a"], "want": "*1\r\n$7\r\n1.5e300\r\n"}
+{"cmd": ["JSON.ARRINDEX", "k3", "$.c[*]", "true"], "want": "*0\r\n"}
+{"cmd": ["JSON.SET", "k3", "$", "{\"a\": 12345678901234567890, \"b\": {\"e\": 24}, \"c\": {\"a\": null, \"c\": 1.5e+300, \"f\": 12345678901234567890}}"], "want": "+OK\r\n"}
+{"cmd": ["JSON.SET", "k3", "$..*", "null"], "want": "+OK\r\n"}
+{"cmd": ["JSON.ARRPOP", "k1", "$.a.b"], "want": "*0\r\n"}
+{"cmd": ["JSON.GET", "k3"], "want": "$28\r\n{\"a\":null,\"b\":null,\"c\":null}\r\n"}
+{"cmd": ["JSON.STRLEN", "k1", "nope"], "want": "-ERR Path does not exist\r\n"}
+{"cmd": ["JSON.MSET", "k2", "$.nope", "\"s1\""], "want": "+OK\r\n"}
+{"cmd": ["JSON.SET", "k1", "$", "false", "NX"], "want": "_\r\n"}
+{"cmd": ["JSON.OBJLEN", "k1", "$[?@.b]"], "want": "*0\r\n"}
+{"cmd": ["JSON.OBJLEN", "k1", "$.c[*]"], "want": "*0\r\n"}
+{"cmd": ["JSON.ARRPOP", "k2", "$[?@.b]", "-1"], "want": "*0\r\n"}
+{"cmd": ["JSON.GET", "k1"], "want": "$57\r\n{\"a\":[{\"d\":-0.9},{\"b\":[],\"a\":[]},true],\"b\":null,\"c\":\"s1\"}\r\n"}
+{"cmd": ["JSON.STRAPPEND", "k1", ".a.b", "\"zz\""], "want": "-ERR Path does not exist or not a string\r\n"}
+{"cmd": ["JSON.ARRAPPEND", "k2", ".a.b", "{\"f\": \"s1\", \"e\": [{\"e\": 92, \"b\": 2.568, \"c\": true}, \"s9\", 61], \"c\": true}", "[[], {\"f\": \"s7\"}, {\"e\": -2.7, \"a\": [null], \"d\": {}}, [{\"f\": \"s2\", \"a\": -3.0, \"d\": null, \"b\": 1.5e+300}, true]]"], "want": "-ERR Path does not exist or not an array\r\n"}
+{"cmd": ["JSON.OBJLEN", "k3", "$..[0]"], "want": "*0\r\n"}
+{"cmd": ["JSON.MGET", "k1", "k2", "k3", "b"], "want": "*3\r\n$4\r\nnull\r\n$9\r\n[1.5e300]\r\n$4\r\nnull\r\n"}
+{"cmd": ["JSON.DEL", "k2", "$.a.b"], "want": ":0\r\n"}
+{"cmd": ["JSON.DEL", "k2", "$.a[1:3]"], "want": ":0\r\n"}
+{"cmd": ["JSON.STRLEN", "k2", "$..a"], "want": "*1\r\n:2\r\n"}
+{"cmd": ["JSON.GET", "k3", "a"], "want": "$4\r\nnull\r\n"}
+{"cmd": ["JSON.CLEAR", "k2", "b"], "want": ":1\r\n"}
+{"cmd": ["JSON.OBJKEYS", "k3", "$.a[?@>3]"], "want": "*0\r\n"}
+{"cmd": ["JSON.ARRLEN", "k3", "$.b"], "want": "*1\r\n_\r\n"}
+{"cmd": ["JSON.GET", "k1"], "want": "$57\r\n{\"a\":[{\"d\":-0.9},{\"b\":[],\"a\":[]},true],\"b\":null,\"c\":\"s1\"}\r\n"}
+{"cmd": ["JSON.STRLEN", "k1", ".a.b"], "want": "-ERR Path does not exist\r\n"}
+{"cmd": ["JSON.OBJLEN", "k2", "$.c[*]"], "want": "*0\r\n"}
+{"cmd": ["JSON.ARRPOP", "k1", "a"], "want": "$4\r\ntrue\r\n"}
+{"cmd": ["JSON.SET", "k2", "nope", "{\"d\": 4.299, \"e\": [\"s4\", \"s0\"]}", "XX"], "want": "+OK\r\n"}
+{"cmd": ["JSON.TYPE", "k3", "nope"], "want": "*1\r\n_\r\n"}
+{"cmd": ["JSON.STRAPPEND", "k3", "$..c", "\"zz\""], "want": "*1\r\n_\r\n"}
+{"cmd": ["JSON.OBJKEYS", "k2", "a"], "want": "-ERR Path does not exist or not an object\r\n"}
+{"cmd": ["JSON.TYPE", "k3", "$[0]"], "want": "*1\r\n*0\r\n"}
+{"cmd": ["JSON.GET", "k3", "$.c[*]"], "want": "$2\r\n[]\r\n"}
+{"cmd": ["JSON.TYPE", "k3", "$..c"], "want": "*1\r\n*1\r\n$4\r\nnull\r\n"}
+{"cmd": ["JSON.ARRINDEX", "k1", "nope", "false"], "want": "-ERR Path does not exist\r\n"}
+{"cmd": ["JSON.ARRPOP", "k1", "$[0]"], "want": "*0\r\n"}
+{"cmd": ["JSON.DEL", "k3", "$.a.b"], "want": ":0\r\n"}
+{"cmd": ["JSON.RESP", "k3", "$.a[?@>3]"], "want": "*0\r\n"}
+{"cmd": ["JSON.ARRPOP", "k2", "$[0]", "0"], "want": "*0\r\n"}
+{"cmd": ["JSON.SET", "k2", "nope", "null"], "want": "+OK\r\n"}
+{"cmd": ["JSON.CLEAR", "k2", "$.*"], "want": ":0\r\n"}
+{"cmd": ["JSON.SET", "k3", "$.a", "\"s6\"", "NX"], "want": "_\r\n"}
+{"cmd": ["JSON.ARRLEN", "k1", "$..a"], "want": "*2\r\n:2\r\n:0\r\n"}
+{"cmd": ["JSON.STRAPPEND", "k3", "$.c[*]", "\"zz\""], "want": "*0\r\n"}
+{"cmd": ["JSON.CLEAR", "k1", "b"], "want": ":0\r\n"}
+{"cmd": ["JSON.ARRAPPEND", "k3", "$.b", "[7.112, false, -5.7, {}]", "true"], "want": "*1\r\n_\r\n"}
+{"cmd": ["JSON.GET", "k3"], "want": "$28\r\n{\"a\":null,\"b\":null,\"c\":null}\r\n"}
+{"cmd": ["JSON.TOGGLE", "k2", "$..[0]"], "want": "*0\r\n"}
+{"cmd": ["JSON.SET", "k1", "$.c[*]", "12345678901234567890"], "want": "-Err wrong static path\r\n"}
+{"cmd": ["JSON.ARRTRIM", "k3", ".a.b", "-2", "-2"], "want": "-ERR Path does not exist or not an array\r\n"}
+{"cmd": ["JSON.NUMINCRBY", "k3", "$.b", "-3"], "want": "*1\r\n_\r\n"}
+{"cmd": ["JSON.STRAPPEND", "k3", "b", "\"zz\""], "want": "-ERR Path does not exist or not a string\r\n"}
+{"cmd": ["JSON.SET", "k3", "$", "{\"a\": [null, null], \"b\": 7.0, \"c\": {}}"], "want": "+OK\r\n"}
+{"cmd": ["JSON.TOGGLE", "k3", "$.f"], "want": "*0\r\n"}
+{"cmd": ["JSON.MSET", "k2", "$", "false"], "want": "+OK\r\n"}
+{"cmd": ["JSON.CLEAR", "k2", "$.nope"], "want": ":0\r\n"}
+{"cmd": ["JSON.NUMINCRBY", "k2", ".a.b", "1"], "want": "*0\r\n"}
+{"cmd": ["JSON.OBJLEN", "k1", ".a.b"], "want": "_\r\n"}
+{"cmd": ["JSON.SET", "k2", "$.*", "[\"s9\", 1.5e+300]", "XX"], "want": "_\r\n"}
+{"cmd": ["JSON.GET", "k1"], "want": "$52\r\n{\"a\":[{\"d\":-0.9},{\"b\":[],\"a\":[]}],\"b\":null,\"c\":\"s1\"}\r\n"}
+{"cmd": ["JSON.MERGE", "k1", "$..c", "1.5e+300"], "want": "+OK\r\n"}
+{"cmd": ["JSON.OBJKEYS", "k1", "$.a[?@>3]"], "want": "*0\r\n"}
+{"cmd": ["JSON.CLEAR", "k1", "$[-1]"], "want": ":0\r\n"}
+{"cmd": ["JSON.MSET", "k1", "$.a", "[90, [30, {\"a\": 49}, 1.5e+300, 1.5e+300]]"], "want": "+OK\r\n"}
+{"cmd": ["JSON.ARRAPPEND", "k2", "$[?@.b]", "63", "true"], "want": "*0\r\n"}
+{"cmd": ["JSON.CLEAR", "k2", "$.c[*]"], "want": ":0\r\n"}
+{"cmd": ["JSON.ARRTRIM", "k1", "b", "-1", "-1"], "want": "-ERR Path does not exist or not an array\r\n"}
+{"cmd": ["JSON.SET", "k3", "$.a[?@>3]", "[9]", "NX"], "want": "-Err wrong static path\r\n"}
+{"cmd": ["JSON.ARRTRIM", "k3", "$.a[0]", "0", "1"], "want": "*1\r\n_\r\n"}
+{"cmd": ["JSON.GET", "k1", "$.nope"], "want": "$2\r\n[]\r\n"}
+{"cmd": ["JSON.SET", "k1", "$", "{\"a\": [93], \"b\": [{\"d\": 12345678901234567890}, 4.476, 29], \"c\": {\"d\": null}}"], "want": "+OK\r\n"}
+{"cmd": ["JSON.MSET", "k1", "$..a", "[[12345678901234567890, {\"a\": true, \"b\": 3.9}], {\"a\": 3.524}, {\"f\": {}, \"e\": true, \"a\": []}]"], "want": "+OK\r\n"}
+{"cmd": ["JSON.RESP", "k1", "$.*"], "want": "*3\r\n*4\r\n+[\r\n*3\r\n+[\r\n,12345678901234567000\r\n*5\r\n+{\r\n$1\r\na\r\n+true\r\n$1\r\nb\r\n,3.9\r\n*3\r\n+{\r\n$1\r\na\r\n,3.524\r\n*7\r\n+{\r\n$1\r\nf\r\n*1\r\n+{\r\n$1\r\ne\r\n+true\r\n$1\r\na\r\n*1\r\n+[\r\n*4\r\n+[\r\n*3\r\n+{\r\n$1\r\nd\r\n,12345678901234567000\r\n,4.476\r\n:29\r\n*3\r\n+{\r\n$1\r\nd\r\n_\r\n"}
+{"cmd": ["JSON.STRLEN", "k3", "$.a[0]"], "want": "*1\r\n_\r\n"}
+{"cmd": ["JSON.TYPE", "k3", "$.a[1:3]"], "want": "*1\r\n*1\r\n$4\r\nnull\r\n"}
+{"cmd": ["JSON.RESP", "k3", ".a.b"], "want": "-ERR Path does not exist\r\n"}
+{"cmd": ["JSON.OBJKEYS", "k1", "$.a[0]"], "want": "*1\r\n_\r\n"}
+{"cmd": ["JSON.CLEAR", "k2", "$.a[?@>3]"], "want": ":0\r\n"}
+{"cmd": ["JSON.NUMINCRBY", "k3", "$.a.b", "1"], "want": "*0\r\n"}
+{"cmd": ["JSON.STRLEN", "k3", "$.nope"], "want": "*0\r\n"}
+{"cmd": ["JSON.GET", "k3", "$.f"], "want": "$2\r\n[]\r\n"}
+{"cmd": ["JSON.OBJKEYS", "k3", "$.a.b"], "want": "*0\r\n"}
+{"cmd": ["JSON.STRLEN", "k2", "b"], "want": "-ERR Path does not exist\r\n"}
+{"cmd": ["JSON.ARRPOP", "k2", "$.c[*]"], "want": "*0\r\n"}
+{"cmd": ["JSON.TOGGLE", "k3", "$[-1]"], "want": "*0\r\n"}
+{"cmd": ["JSON.MGET", "k1", "k2", "k3", ".a.b"], "want": "*3\r\n_\r\n_\r\n_\r\n"}
+{"cmd": ["JSON.ARRPOP", "k1", "$..[0]", "0"], "want": "*3\r\n$20\r\n12345678901234567890\r\n_\r\n_\r\n"}
+{"cmd": ["JSON.ARRPOP", "k1", "$[-1]", "-2"], "want": "*0\r\n"}
+{"cmd": ["JSON.ARRLEN", "k2", "$"], "want": "*1\r\n_\r\n"}
+{"cmd": ["JSON.ARRINSERT", "k3", "$[0]", "0", "{\"d\": [\"s4\"], \"b\": false, \"c\": {\"f\": \"s5\", \"a\": {\"d\": 12345678901234567890, \"a\": true}, \"c\": []}, \"a\": null}"], "want": "*0\r\n"}
+{"cmd": ["JSON.SET", "k3", "$", "{\"a\": 12345678901234567890, \"b\": {}, \"c\": {\"b\": false, \"a\": 12345678901234567890, \"c\": {\"c\": [\"s6\"], \"e\": 12345678901234567890, \"f\": {\"f\": 12345678901234567890, \"e\": 7.0, \"d\": 1.5e+300}}, \"d\": \"s6\"}}"], "want": "+OK\r\n"}
+{"cmd": ["JSON.TYPE", "k1", "$..*"], "want": "*1\r\n*18\r\n$5\r\narray\r\n$5\r\narray\r\n$6\r\nobject\r\n$5\r\narray\r\n$6\r\nobject\r\n$6\r\nobject\r\n$6\r\nobject\r\n$7\r\nboolean\r\n$6\r\nnumber\r\n$6\r\nnumber\r\n$6\r\nobject\r\n$7\r\nboolean\r\n$5\r\narray\r\n$6\r\nobject\r\n$6\r\nnumber\r\n$7\r\ninteger\r\n$7\r\ninteger\r\n$4\r\nnull\r\n"}
+{"cmd": ["JSON.DEL", "k2", "$.a[?@>3]"], "want": ":0\r\n"}
+{"cmd": ["JSON.ARRINSERT", "k1", "$.c[*]", "-2", "[\"s6\"]"], "want": "*1\r\n_\r\n"}
+{"cmd": ["JSON.RESP", "k2", "$.a[0]"], "want": "*0\r\n"}
+{"cmd": ["JSON.MERGE", "k2", "$", "[\"s3\", 12345678901234567890]"], "want": "+OK\r\n"}
+{"cmd": ["JSON.OBJLEN", "k1", "$.a[0]"], "want": "*1\r\n_\r\n"}
+{"cmd": ["JSON.MERGE", "k3", "$[0]", "[false, null]"], "want": "-ERR array index out of range\r\n"}
+{"cmd": ["JSON.GET", "k2"], "want": "$27\r\n[\"s3\",12345678901234567890]\r\n"}
+{"cmd": ["JSON.SET", "k2", "$.c[*]", "1.5e+300", "XX"], "want": "_\r\n"}
+{"cmd": ["JSON.MSET", "k3", "$[0]", "{\"a\": {\"e\": {\"e\": false, \"a\": \"s3\", \"f\": \"s0\"}}, \"c\": false, \"f\": [{}], \"e\": \"s6\"}"], "want": "-ERR array index out of range\r\n"}
+{"cmd": ["JSON.ARRINDEX", "k2", "$.f", "\"s2\""], "want": "*0\r\n"}
+{"cmd": ["JSON.GET", "k2", "$[?@.b]"], "want": "$2\r\n[]\r\n"}
+{"cmd": ["JSON.ARRINSERT", "k1", "$.a[1:3]", "-1", "false"], "want": "*2\r\n_\r\n_\r\n"}
+{"cmd": ["JSON.OBJKEYS", "k2", "$.a[1:3]"], "want": "*0\r\n"}
+{"cmd": ["JSON.OBJLEN", "k3", "$..*"], "want": "*14\r\n_\r\n:0\r\n:4\r\n_\r\n_\r\n:3\r\n_\r\n_\r\n_\r\n:3\r\n_\r\n_\r\n_\r\n_\r\n"}
+{"cmd": ["JSON.DEL", "k2", "$[-1]"], "want": ":1\r\n"}
+{"cmd": ["JSON.ARRINDEX", "k2", "$.nope", "\"s9\""], "want": "*0\r\n"}
+{"cmd": ["JSON.GET", "k2", "$.f"], "want": "$2\r\n[]\r\n"}
+{"cmd": ["JSON.DEL", "k1", "b"], "want": ":1\r\n"}
+{"cmd": ["JSON.STRLEN", "k3", "$.a[0]"], "want": "*0\r\n"}
+{"cmd": ["JSON.ARRLEN", "k2", "$..a"], "want": "*0\r\n"}
+{"cmd": ["JSON.ARRPOP", "k3", "$.b"], "want": "*1\r\n_\r\n"}
+{"cmd": ["JSON.GET", "k1"], "want": "$80\r\n{\"a\":[[{\"a\":true,\"b\":3.9}],{\"a\":3.524},{\"f\":{},\"e\":true,\"a\":[]}],\"c\":{\"d\":null}}\r\n"}
+{"cmd": ["JSON.GET", "k2"], "want": "$6\r\n[\"s3\"]\r\n"}
+{"cmd": ["JSON.GET", "k3"], "want": "$176\r\n{\"a\":12345678901234567890,\"b\":{},\"c\":{\"b\":false,\"a\":12345678901234567890,\"c\":{\"c\":[\"s6\"],\"e\":12345678901234567890,\"f\":{\"f\":12345678901234567890,\"e\":7.0,\"d\":1.5e300}},\"d\":\"s6\"}}\r\n"}
+{"cmd": ["FLUSHALL"], "want": null}
+{"cmd": ["JSON.SET", "k", "$", "{\"a\":90,\"b\":[1,5,9],\"c\":{\"x\":4,\"y\":1},\"s\":\"str\"}"], "want": "+OK\r\n"}
+{"cmd": ["JSON.GET", "k", "$.a[?@>3]"], "want": "$4\r\n[90]\r\n"}
+{"cmd": ["JSON.GET", "k", "$.a[?@<3]"], "want": "$2\r\n[]\r\n"}
+{"cmd": ["JSON.GET", "k", "$.b[?@>3]"], "want": "$5\r\n[5,9]\r\n"}
+{"cmd": ["JSON.GET", "k", "$.c[?@>3]"], "want": "$3\r\n[4]\r\n"}
+{"cmd": ["JSON.GET", "k", "$.s[?@==\"str\"]"], "want": "$7\r\n[\"str\"]\r\n"}
+{"cmd": ["JSON.GET", "k", "$[?@.x>3]"], "want": "$15\r\n[{\"x\":4,\"y\":1}]\r\n"}
+{"cmd": ["JSON.GET", "k", "$.a[*]"], "want": "$2\r\n[]\r\n"}
+{"cmd": ["JSON.GET", "k", "$.a[0]"], "want": "$2\r\n[]\r\n"}
+{"cmd": ["JSON.GET", "k", "$.c[0]"], "want": "$2\r\n[]\r\n"}
+{"cmd": ["JSON.GET", "k", "$..[?@>3]"], "want": "$19\r\n[90,90,5,9,5,9,4,4]\r\n"}
+{"cmd": ["JSON.SET", "k", "$[0]", "1"], "want": "-ERR array index out of range\r\n"}
+{"cmd": ["JSON.SET", "k", "$.b[5]", "1"], "want": "-ERR array index out of range\r\n"}
+{"cmd": ["JSON.SET", "k", "$.b[-9]", "1"], "want": "+OK\r\n"}
+{"cmd": ["JSON.SET", "k", "$.a.x", "1"], "want": "_\r\n"}
+{"cmd": ["JSON.SET", "k", "$.a[0]", "1"], "want": "-ERR array index out of range\r\n"}
+{"cmd": ["JSON.SET", "k", "$.c.z.w", "1"], "want": "_\r\n"}
+{"cmd": ["JSON.SET", "k", "$.c[*]", "1"], "want": "+OK\r\n"}
+{"cmd": ["JSON.SET", "k", "$.q[*]", "1"], "want": "-Err wrong static path\r\n"}
+{"cmd": ["JSON.SET", "k", "$..zz", "1"], "want": "-Err wrong static path\r\n"}
+{"cmd": ["JSON.SET", "k", "$.c.new", "1"], "want": "+OK\r\n"}
+{"cmd": ["JSON.SET", "k", "$.b[?@>100]", "1"], "want": "-Err wrong static path\r\n"}
+{"cmd": ["JSON.SET", "k", "$.nope.x", "1"], "want": "_\r\n"}
+{"cmd": ["JSON.SET", "k", "nope.x", "1"], "want": "_\r\n"}
+{"cmd": ["JSON.SET", "k", "$.b[0:1]", "7"], "want": "+OK\r\n"}
+{"cmd": ["JSON.GET", "k"], "want": "$56\r\n{\"a\":90,\"b\":[7,5,9],\"c\":{\"x\":1,\"y\":1,\"new\":1},\"s\":\"str\"}\r\n"}
+{"cmd": ["JSON.MERGE", "k", "$.zz", "1"], "want": "+OK\r\n"}
+{"cmd": ["JSON.MERGE", "k", "$.zz.y", "1"], "want": "_\r\n"}
+{"cmd": ["JSON.MERGE", "k", "$..yy", "1"], "want": "-Err wrong static path\r\n"}
+{"cmd": ["JSON.MERGE", "k", "$[0]", "1"], "want": "-ERR array index out of range\r\n"}
+{"cmd": ["JSON.MSET", "k", "$.ww", "1"], "want": "+OK\r\n"}
+{"cmd": ["JSON.MSET", "k", "$.ww.q", "1"], "want": "+OK\r\n"}
+{"cmd": ["JSON.MSET", "k", "$..ww", "1"], "want": "+OK\r\n"}
+{"cmd": ["JSON.GET", "k"], "want": "$70\r\n{\"a\":90,\"b\":[7,5,9],\"c\":{\"x\":1,\"y\":1,\"new\":1},\"s\":\"str\",\"zz\":1,\"ww\":1}\r\n"}
+{"cmd": ["FLUSHALL"], "want": null}
+{"cmd": ["JSON.SET", "k", "$", "{\"a\":90,\"b\":[1,5,9],\"c\":{\"x\":4}}"], "want": "+OK\r\n"}
+{"cmd": ["JSON.GET", "k", "$.b[-9]"], "want": "$3\r\n[1]\r\n"}
+{"cmd": ["JSON.GET", "k", "$.b[-3]"], "want": "$3\r\n[1]\r\n"}
+{"cmd": ["JSON.GET", "k", "$.b[9]"], "want": "$2\r\n[]\r\n"}
+{"cmd": ["JSON.GET", "k", "b[-9]"], "want": "$1\r\n1\r\n"}
+{"cmd": ["JSON.GET", "k", "$.b[0,1]"], "want": "$5\r\n[1,5]\r\n"}
+{"cmd": ["JSON.SET", "k", "$.b[0,7]", "3"], "want": "+OK\r\n"}
+{"cmd": ["JSON.SET", "k", "$.c.x", "5", "NX"], "want": "_\r\n"}
+{"cmd": ["JSON.SET", "k", "$.c.z", "5", "NX"], "want": "+OK\r\n"}
+{"cmd": ["JSON.SET", "k", "$.c[*]", "5", "NX"], "want": "-Err wrong static path\r\n"}
+{"cmd": ["JSON.SET", "k", "$.b[0]", "5", "NX"], "want": "_\r\n"}
+{"cmd": ["JSON.SET", "k", "$.b[7]", "5", "NX"], "want": "-ERR array index out of range\r\n"}
+{"cmd": ["JSON.SET", "k", "$.b[7]", "5", "XX"], "want": "_\r\n"}
+{"cmd": ["JSON.SET", "k", "$.zz", "5", "XX"], "want": "_\r\n"}
+{"cmd": ["JSON.SET", "k", "$.a.q", "5"], "want": "_\r\n"}
+{"cmd": ["JSON.SET", "k", "$.b.q", "5"], "want": "_\r\n"}
+{"cmd": ["JSON.SET", "k", "$", "5", "NX"], "want": "_\r\n"}
+{"cmd": ["JSON.SET", "k", "$['c']['y']", "6"], "want": "+OK\r\n"}
+{"cmd": ["JSON.SET", "k", "$.c[\"w\"]", "6"], "want": "+OK\r\n"}
+{"cmd": ["JSON.GET", "k"], "want": "$50\r\n{\"a\":90,\"b\":[3,5,9],\"c\":{\"x\":4,\"z\":5,\"y\":6,\"w\":6}}\r\n"}
+{"cmd": ["JSON.MSET", "k", "$.c.m", "1", "k", "$..x", "2"], "want": "+OK\r\n"}
+{"cmd": ["JSON.MSET", "k", "$.c.m", "1", "k", "$..nope", "2"], "want": "-Err wrong static path\r\n"}
+{"cmd": ["JSON.GET", "k"], "want": "$56\r\n{\"a\":90,\"b\":[3,5,9],\"c\":{\"x\":2,\"z\":5,\"y\":6,\"w\":6,\"m\":1}}\r\n"}
+{"cmd": ["JSON.ARRAPPEND", "k", "$.b[-9]", "4"], "want": "*1\r\n_\r\n"}
+{"cmd": ["JSON.GET", "k", "$.b"], "want": "$9\r\n[[3,5,9]]\r\n"}
+{"cmd": ["FLUSHALL"], "want": null}
+{"cmd": ["JSON.STRLEN", "nokey"], "want": "_\r\n"}
+{"cmd": ["JSON.STRLEN", "nokey", "$"], "want": "-ERR could not perform this operation on a key that doesn't exist\r\n"}
+{"cmd": ["JSON.STRLEN", "nokey", "$.a"], "want": "-ERR could not perform this operation on a key that doesn't exist\r\n"}
+{"cmd": ["JSON.STRLEN", "nokey", "a"], "want": "_\r\n"}
+{"cmd": ["JSON.STRLEN", "nokey", "."], "want": "_\r\n"}
+{"cmd": ["JSON.ARRLEN", "nokey"], "want": "_\r\n"}
+{"cmd": ["JSON.ARRLEN", "nokey", "$"], "want": "-ERR could not perform this operation on a key that doesn't exist\r\n"}
+{"cmd": ["JSON.ARRLEN", "nokey", "$.a"], "want": "-ERR could not perform this operation on a key that doesn't exist\r\n"}
+{"cmd": ["JSON.ARRLEN", "nokey", "a"], "want": "_\r\n"}
+{"cmd": ["JSON.ARRLEN", "nokey", "."], "want": "_\r\n"}
+{"cmd": ["JSON.OBJLEN", "nokey"], "want": "_\r\n"}
+{"cmd": ["JSON.OBJLEN", "nokey", "$"], "want": "-ERR Path does not exist or not an object\r\n"}
+{"cmd": ["JSON.OBJLEN", "nokey", "$.a"], "want": "-ERR Path does not exist or not an object\r\n"}
+{"cmd": ["JSON.OBJLEN", "nokey", "a"], "want": "_\r\n"}
+{"cmd": ["JSON.OBJLEN", "nokey", "."], "want": "_\r\n"}
+{"cmd": ["JSON.OBJKEYS", "nokey"], "want": "_\r\n"}
+{"cmd": ["JSON.OBJKEYS", "nokey", "$"], "want": "-ERR could not perform this operation on a key that doesn't exist\r\n"}
+{"cmd": ["JSON.OBJKEYS", "nokey", "$.a"], "want": "-ERR could not perform this operation on a key that doesn't exist\r\n"}
+{"cmd": ["JSON.OBJKEYS", "nokey", "a"], "want": "_\r\n"}
+{"cmd": ["JSON.OBJKEYS", "nokey", "."], "want": "_\r\n"}
+{"cmd": ["JSON.TYPE", "nokey"], "want": "*1\r\n_\r\n"}
+{"cmd": ["JSON.TYPE", "nokey", "$"], "want": "*1\r\n_\r\n"}
+{"cmd": ["JSON.TYPE", "nokey", "$.a"], "want": "*1\r\n_\r\n"}
+{"cmd": ["JSON.TYPE", "nokey", "a"], "want": "*1\r\n_\r\n"}
+{"cmd": ["JSON.TYPE", "nokey", "."], "want": "*1\r\n_\r\n"}
+{"cmd": ["JSON.GET", "nokey"], "want": "_\r\n"}
+{"cmd": ["JSON.GET", "nokey", "$"], "want": "_\r\n"}
+{"cmd": ["JSON.GET", "nokey", "$.a"], "want": "_\r\n"}
+{"cmd": ["JSON.GET", "nokey", "a"], "want": "_\r\n"}
+{"cmd": ["JSON.GET", "nokey", "."], "want": "_\r\n"}
+{"cmd": ["JSON.RESP", "nokey"], "want": "_\r\n"}
+{"cmd": ["JSON.RESP", "nokey", "$"], "want": "_\r\n"}
+{"cmd": ["JSON.RESP", "nokey", "$.a"], "want": "_\r\n"}
+{"cmd": ["JSON.RESP", "nokey", "a"], "want": "_\r\n"}
+{"cmd": ["JSON.RESP", "nokey", "."], "want": "_\r\n"}
+{"cmd": ["JSON.ARRINDEX", "nokey", "1"], "want": "-ERR wrong number of arguments for 'json.arrindex' command\r\n"}
+{"cmd": ["JSON.ARRINDEX", "nokey", "$", "1"], "want": "-ERR Path does not exist\r\n"}
+{"cmd": ["JSON.ARRINDEX", "nokey", "$.a", "1"], "want": "-ERR Path does not exist\r\n"}
+{"cmd": ["JSON.ARRINDEX", "nokey", "a", "1"], "want": "-ERR Path does not exist\r\n"}
+{"cmd": ["JSON.ARRINDEX", "nokey", ".", "1"], "want": "-ERR Path does not exist\r\n"}
+{"cmd": ["JSON.ARRPOP", "nokey"], "want": "-ERR could not perform this operation on a key that doesn't exist\r\n"}
+{"cmd": ["JSON.ARRPOP", "nokey", "$"], "want": "-ERR could not perform this operation on a key that doesn't exist\r\n"}
+{"cmd": ["JSON.ARRPOP", "nokey", "$.a"], "want": "-ERR could not perform this operation on a key that doesn't exist\r\n"}
+{"cmd": ["JSON.ARRPOP", "nokey", "a"], "want": "-ERR could not perform this operation on a key that doesn't exist\r\n"}
+{"cmd": ["JSON.ARRPOP", "nokey", "."], "want": "-ERR could not perform this operation on a key that doesn't exist\r\n"}
+{"cmd": ["JSON.CLEAR", "nokey"], "want": "-ERR could not perform this operation on a key that doesn't exist\r\n"}
+{"cmd": ["JSON.CLEAR", "nokey", "$"], "want": "-ERR could not perform this operation on a key that doesn't exist\r\n"}
+{"cmd": ["JSON.CLEAR", "nokey", "$.a"], "want": "-ERR could not perform this operation on a key that doesn't exist\r\n"}
+{"cmd": ["JSON.CLEAR", "nokey", "a"], "want": "-ERR could not perform this operation on a key that doesn't exist\r\n"}
+{"cmd": ["JSON.CLEAR", "nokey", "."], "want": "-ERR could not perform this operation on a key that doesn't exist\r\n"}
+{"cmd": ["JSON.TOGGLE", "nokey"], "want": "-ERR wrong number of arguments for 'json.toggle' command\r\n"}
+{"cmd": ["JSON.TOGGLE", "nokey", "$"], "want": "-ERR could not perform this operation on a key that doesn't exist\r\n"}
+{"cmd": ["JSON.TOGGLE", "nokey", "$.a"], "want": "-ERR could not perform this operation on a key that doesn't exist\r\n"}
+{"cmd": ["JSON.TOGGLE", "nokey", "a"], "want": "-ERR could not perform this operation on a key that doesn't exist\r\n"}
+{"cmd": ["JSON.TOGGLE", "nokey", "."], "want": "-ERR could not perform this operation on a key that doesn't exist\r\n"}
+{"cmd": ["JSON.DEL", "nokey"], "want": ":0\r\n"}
+{"cmd": ["JSON.DEL", "nokey", "$"], "want": ":0\r\n"}
+{"cmd": ["JSON.DEL", "nokey", "$.a"], "want": ":0\r\n"}
+{"cmd": ["JSON.DEL", "nokey", "a"], "want": ":0\r\n"}
+{"cmd": ["JSON.DEL", "nokey", "."], "want": ":0\r\n"}
+{"cmd": ["JSON.STRAPPEND", "nokey", "\"x\""], "want": "-ERR could not perform this operation on a key that doesn't exist\r\n"}
+{"cmd": ["JSON.STRAPPEND", "nokey", "$", "\"x\""], "want": "-ERR could not perform this operation on a key that doesn't exist\r\n"}
+{"cmd": ["JSON.STRAPPEND", "nokey", "$.a", "\"x\""], "want": "-ERR could not perform this operation on a key that doesn't exist\r\n"}
+{"cmd": ["JSON.STRAPPEND", "nokey", "a", "\"x\""], "want": "-ERR could not perform this operation on a key that doesn't exist\r\n"}
+{"cmd": ["JSON.STRAPPEND", "nokey", ".", "\"x\""], "want": "-ERR could not perform this operation on a key that doesn't exist\r\n"}
+{"cmd": ["JSON.ARRAPPEND", "nokey", "1"], "want": "-ERR wrong number of arguments for 'json.arrappend' command\r\n"}
+{"cmd": ["JSON.ARRAPPEND", "nokey", "$", "1"], "want": "-ERR could not perform this operation on a key that doesn't exist\r\n"}
+{"cmd": ["JSON.ARRAPPEND", "nokey", "$.a", "1"], "want": "-ERR could not perform this operation on a key that doesn't exist\r\n"}
+{"cmd": ["JSON.ARRAPPEND", "nokey", "a", "1"], "want": "-ERR could not perform this operation on a key that doesn't exist\r\n"}
+{"cmd": ["JSON.ARRAPPEND", "nokey", ".", "1"], "want": "-ERR could not perform this operation on a key that doesn't exist\r\n"}
+{"cmd": ["JSON.ARRTRIM", "nokey", "0", "1"], "want": "-ERR wrong number of arguments for 'json.arrtrim' command\r\n"}
+{"cmd": ["JSON.ARRTRIM", "nokey", "$", "0", "1"], "want": "-ERR could not perform this operation on a key that doesn't exist\r\n"}
+{"cmd": ["JSON.ARRTRIM", "nokey", "$.a", "0", "1"], "want": "-ERR could not perform this operation on a key that doesn't exist\r\n"}
+{"cmd": ["JSON.ARRTRIM", "nokey", "a", "0", "1"], "want": "-ERR could not perform this operation on a key that doesn't exist\r\n"}
+{"cmd": ["JSON.ARRTRIM", "nokey", ".", "0", "1"], "want": "-ERR could not perform this operation on a key that doesn't exist\r\n"}
+{"cmd": ["JSON.NUMINCRBY", "nokey", "1"], "want": "-ERR wrong number of arguments for 'json.numincrby' command\r\n"}
+{"cmd": ["JSON.NUMINCRBY", "nokey", "$", "1"], "want": "-ERR could not perform this operation on a key that doesn't exist\r\n"}
+{"cmd": ["JSON.NUMINCRBY", "nokey", "$.a", "1"], "want": "-ERR could not perform this operation on a key that doesn't exist\r\n"}
+{"cmd": ["JSON.NUMINCRBY", "nokey", "a", "1"], "want": "-ERR could not perform this operation on a key that doesn't exist\r\n"}
+{"cmd": ["JSON.NUMINCRBY", "nokey", ".", "1"], "want": "-ERR could not perform this operation on a key that doesn't exist\r\n"}
+{"cmd": ["JSON.SET", "k", "$", "{\"a\":{\"b\":1},\"s\":\"x\",\"r\":[1]}"], "want": "+OK\r\n"}
+{"cmd": ["JSON.STRLEN", "k", "$.nope"], "want": "*0\r\n"}
+{"cmd": ["JSON.STRLEN", "k", "$[-1]"], "want": "*0\r\n"}
+{"cmd": ["JSON.STRLEN", "k", "$.a[1:3]"], "want": "*0\r\n"}
+{"cmd": ["JSON.STRLEN", "k", "$..zz"], "want": "*0\r\n"}
+{"cmd": ["JSON.STRLEN", "k", "nope"], "want": "-ERR Path does not exist\r\n"}
+{"cmd": ["JSON.STRLEN", "k", ".a.b"], "want": "-WRONGTYPE wrong type of path value - expected string\r\n"}
+{"cmd": ["JSON.STRLEN", "k", "$.a"], "want": "*1\r\n_\r\n"}
+{"cmd": ["JSON.STRLEN", "k", "$.s"], "want": "*1\r\n:1\r\n"}
+{"cmd": ["JSON.STRLEN", "k", "$.r"], "want": "*1\r\n_\r\n"}
+{"cmd": ["JSON.ARRLEN", "k", "$.nope"], "want": "*0\r\n"}
+{"cmd": ["JSON.ARRLEN", "k", "$[-1]"], "want": "*0\r\n"}
+{"cmd": ["JSON.ARRLEN", "k", "$.a[1:3]"], "want": "*0\r\n"}
+{"cmd": ["JSON.ARRLEN", "k", "$..zz"], "want": "*0\r\n"}
+{"cmd": ["JSON.ARRLEN", "k", "nope"], "want": "-ERR Path does not exist\r\n"}
+{"cmd": ["JSON.ARRLEN", "k", ".a.b"], "want": "-ERR Path does not exist or not an array\r\n"}
+{"cmd": ["JSON.ARRLEN", "k", "$.a"], "want": "*1\r\n_\r\n"}
+{"cmd": ["JSON.ARRLEN", "k", "$.s"], "want": "*1\r\n_\r\n"}
+{"cmd": ["JSON.ARRLEN", "k", "$.r"], "want": "*1\r\n:1\r\n"}
+{"cmd": ["JSON.OBJLEN", "k", "$.nope"], "want": "*0\r\n"}
+{"cmd": ["JSON.OBJLEN", "k", "$[-1]"], "want": "*0\r\n"}
+{"cmd": ["JSON.OBJLEN", "k", "$.a[1:3]"], "want": "*0\r\n"}
+{"cmd": ["JSON.OBJLEN", "k", "$..zz"], "want": "*0\r\n"}
+{"cmd": ["JSON.OBJLEN", "k", "nope"], "want": "_\r\n"}
+{"cmd": ["JSON.OBJLEN", "k", ".a.b"], "want": "-WRONGTYPE wrong type of path value - expected object\r\n"}
+{"cmd": ["JSON.OBJLEN", "k", "$.a"], "want": "*1\r\n:1\r\n"}
+{"cmd": ["JSON.OBJLEN", "k", "$.s"], "want": "*1\r\n_\r\n"}
+{"cmd": ["JSON.OBJLEN", "k", "$.r"], "want": "*1\r\n_\r\n"}
+{"cmd": ["JSON.OBJKEYS", "k", "$.nope"], "want": "*0\r\n"}
+{"cmd": ["JSON.OBJKEYS", "k", "$[-1]"], "want": "*0\r\n"}
+{"cmd": ["JSON.OBJKEYS", "k", "$.a[1:3]"], "want": "*0\r\n"}
+{"cmd": ["JSON.OBJKEYS", "k", "$..zz"], "want": "*0\r\n"}
+{"cmd": ["JSON.OBJKEYS", "k", "nope"], "want": "_\r\n"}
+{"cmd": ["JSON.OBJKEYS", "k", ".a.b"], "want": "-ERR Path does not exist or not an object\r\n"}
+{"cmd": ["JSON.OBJKEYS", "k", "$.a"], "want": "*1\r\n*1\r\n$1\r\nb\r\n"}
+{"cmd": ["JSON.OBJKEYS", "k", "$.s"], "want": "*1\r\n_\r\n"}
+{"cmd": ["JSON.OBJKEYS", "k", "$.r"], "want": "*1\r\n_\r\n"}
+{"cmd": ["FLUSHALL"], "want": null}
+{"cmd": ["JSON.SET", "a", "$", "{\"q\":2,\"r\":1}"], "want": "+OK\r\n"}
+{"cmd": ["JSON.DEL", "a", "$.q"], "want": ":1\r\n"}
+{"cmd": ["JSON.GET", "a"], "want": "$7\r\n{\"r\":1}\r\n"}
+{"cmd": ["JSON.DEL", "a", "$.r"], "want": ":1\r\n"}
+{"cmd": ["EXISTS", "a"], "want": ":0\r\n"}
+{"cmd": ["JSON.SET", "a", "$", "{\"x\":{\"q\":1}}"], "want": "+OK\r\n"}
+{"cmd": ["JSON.DEL", "a", "$.x.q"], "want": ":1\r\n"}
+{"cmd": ["JSON.GET", "a"], "want": "$8\r\n{\"x\":{}}\r\n"}
+{"cmd": ["JSON.SET", "a", "$", "[1]"], "want": "+OK\r\n"}
+{"cmd": ["JSON.DEL", "a", "$[0]"], "want": ":1\r\n"}
+{"cmd": ["EXISTS", "a"], "want": ":0\r\n"}
+{"cmd": ["JSON.SET", "a", "$", "[1]"], "want": "+OK\r\n"}
+{"cmd": ["JSON.ARRPOP", "a"], "want": "$1\r\n1\r\n"}
+{"cmd": ["EXISTS", "a"], "want": ":1\r\n"}
+{"cmd": ["JSON.SET", "a", "$", "{\"q\":1}"], "want": "+OK\r\n"}
+{"cmd": ["JSON.CLEAR", "a"], "want": ":1\r\n"}
+{"cmd": ["EXISTS", "a"], "want": ":1\r\n"}
+{"cmd": ["JSON.SET", "a", "$", "{\"q\":1}"], "want": "+OK\r\n"}
+{"cmd": ["JSON.DEL", "a", "q"], "want": ":1\r\n"}
+{"cmd": ["EXISTS", "a"], "want": ":0\r\n"}
+{"cmd": ["JSON.SET", "a", "$", "{\"q\":1,\"w\":2}"], "want": "+OK\r\n"}
+{"cmd": ["JSON.DEL", "a", "$.*"], "want": ":2\r\n"}
+{"cmd": ["EXISTS", "a"], "want": ":0\r\n"}
+{"cmd": ["JSON.SET", "a", "$", "{}"], "want": "+OK\r\n"}
+{"cmd": ["JSON.DEL", "a", "$.x"], "want": ":0\r\n"}
+{"cmd": ["EXISTS", "a"], "want": ":1\r\n"}
+{"cmd": ["JSON.SET", "a", "$", "[[1]]"], "want": "+OK\r\n"}
+{"cmd": ["JSON.DEL", "a", "$[0][0]"], "want": ":1\r\n"}
+{"cmd": ["JSON.GET", "a"], "want": "$4\r\n[[]]\r\n"}
+{"cmd": ["JSON.SET", "a", "$", "{\"q\":1}"], "want": "+OK\r\n"}
+{"cmd": ["JSON.FORGET", "a", "$.q"], "want": ":1\r\n"}
+{"cmd": ["EXISTS", "a"], "want": ":0\r\n"}
+{"cmd": ["JSON.SET", "a", "$", "{\"q\":1}"], "want": "+OK\r\n"}
+{"cmd": ["JSON.DEL", "a", "."], "want": ":1\r\n"}
+{"cmd": ["EXISTS", "a"], "want": ":0\r\n"}
+{"cmd": ["JSON.SET", "a", "$", "[1,2]"], "want": "+OK\r\n"}
+{"cmd": ["JSON.DEL", "a", "$.*"], "want": ":2\r\n"}
+{"cmd": ["EXISTS", "a"], "want": ":0\r\n"}

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -438,6 +439,95 @@ type JSONMatch struct {
 	Parent *JNode
 	Key    string
 	Index  int
+	// Path is the keys and indexes from the root, set by EvalPaths.
+	Path []JSONStep
+}
+
+// JSONStep is one key, or one array index, of a JSONMatch's path.
+type JSONStep struct {
+	Key     string
+	Index   int
+	IsIndex bool
+}
+
+func (m JSONMatch) childKey(n, c *JNode, k string) JSONMatch {
+	out := JSONMatch{Node: c, Parent: n, Key: k}
+	if m.Path != nil {
+		out.Path = append(append(make([]JSONStep, 0, len(m.Path)+1), m.Path...), JSONStep{Key: k})
+	}
+	return out
+}
+
+func (m JSONMatch) childIndex(n, c *JNode, i int) JSONMatch {
+	out := JSONMatch{Node: c, Parent: n, Index: i}
+	if m.Path != nil {
+		out.Path = append(append(make([]JSONStep, 0, len(m.Path)+1), m.Path...), JSONStep{Index: i, IsIndex: true})
+	}
+	return out
+}
+
+// TopLevel drops the matches nested in another match, keeping one match
+// per value, as RedisJSON's prepare_paths_for_updating does before it
+// deletes or replaces values.
+func TopLevel(matches []JSONMatch) []JSONMatch {
+	if len(matches) < 2 {
+		return matches
+	}
+	seen := make(map[string]bool, len(matches))
+	keyOf := func(p []JSONStep) string {
+		var b strings.Builder
+		for _, st := range p {
+			if st.IsIndex {
+				fmt.Fprintf(&b, "[%d]", st.Index)
+			} else {
+				b.WriteString("." + strconv.Quote(st.Key))
+			}
+		}
+		return b.String()
+	}
+	for _, m := range matches {
+		seen[keyOf(m.Path)] = true
+	}
+	out := matches[:0:0]
+	kept := make(map[string]bool, len(matches))
+	for _, m := range matches {
+		k := keyOf(m.Path)
+		nested := false
+		for i := range m.Path {
+			if seen[keyOf(m.Path[:i])] {
+				nested = true
+				break
+			}
+		}
+		if !nested && !kept[k] {
+			kept[k] = true
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// EvalPaths is Eval with each match's Path filled in.
+func (path *JSONPath) EvalPaths(root *JNode) []JSONMatch {
+	return evalFrom(root, JSONMatch{Node: root, Path: []JSONStep{}}, path.steps)
+}
+
+// Follow finds m's path again in root, as RedisJSON reaches each value it
+// writes; false when an earlier write removed it.
+func (m JSONMatch) Follow(root *JNode) (JSONMatch, bool) {
+	cur := JSONMatch{Node: root, Path: m.Path}
+	for _, st := range m.Path {
+		n := cur.Node
+		switch {
+		case st.IsIndex && n.Kind == JArray && st.Index < len(n.Arr):
+			cur = JSONMatch{Node: n.Arr[st.Index], Parent: n, Index: st.Index, Path: m.Path}
+		case !st.IsIndex && n.Kind == JObject && n.Get(st.Key) != nil:
+			cur = JSONMatch{Node: n.Get(st.Key), Parent: n, Key: st.Key, Path: m.Path}
+		default:
+			return JSONMatch{}, false
+		}
+	}
+	return cur, true
 }
 
 // Eval returns the values path selects in root, in RedisJSON's order.
@@ -446,14 +536,18 @@ func (path *JSONPath) Eval(root *JNode) []JSONMatch {
 }
 
 func evalSteps(root, doc *JNode, steps []jpStep) []JSONMatch {
-	cur := []JSONMatch{{Node: doc}}
+	return evalFrom(root, JSONMatch{Node: doc}, steps)
+}
+
+func evalFrom(root *JNode, start JSONMatch, steps []jpStep) []JSONMatch {
+	cur := []JSONMatch{start}
 	for _, step := range steps {
 		var next []JSONMatch
 		for _, m := range cur {
 			if step.deep {
-				next = deepApply(root, m.Node, step, next)
+				next = deepApply(root, m, step, next)
 			} else {
-				next = applyStep(root, m.Node, step, next)
+				next = applyStep(root, m, step, next)
 			}
 		}
 		cur = next
@@ -463,68 +557,80 @@ func evalSteps(root, doc *JNode, steps []jpStep) []JSONMatch {
 
 // deepApply applies step to n and every value under it: a node's own
 // matches first, then each child's, as RedisJSON orders a descendant search.
-func deepApply(root, n *JNode, step jpStep, out []JSONMatch) []JSONMatch {
-	out = applyStep(root, n, step, out)
+func deepApply(root *JNode, m JSONMatch, step jpStep, out []JSONMatch) []JSONMatch {
+	out = applyStep(root, m, step, out)
+	n := m.Node
 	switch n.Kind {
 	case JArray:
-		for _, c := range n.Arr {
-			out = deepApply(root, c, step, out)
+		for i, c := range n.Arr {
+			out = deepApply(root, m.childIndex(n, c, i), step, out)
 		}
 	case JObject:
-		for _, c := range n.Vals {
-			out = deepApply(root, c, step, out)
+		for i, c := range n.Vals {
+			out = deepApply(root, m.childKey(n, c, n.Keys[i]), step, out)
 		}
 	}
 	return out
 }
 
-func applyStep(root, n *JNode, step jpStep, out []JSONMatch) []JSONMatch {
+// applyStep applies step to the value m holds. As in RedisJSON, an index
+// below the start of an array selects its first element, and a filter on a
+// value that is not a container tests the value itself.
+func applyStep(root *JNode, m JSONMatch, step jpStep, out []JSONMatch) []JSONMatch {
+	n := m.Node
 	switch step.kind {
 	case jpKeys:
 		if n.Kind == JObject {
 			for _, k := range step.keys {
 				if v := n.Get(k); v != nil {
-					out = append(out, JSONMatch{Node: v, Parent: n, Key: k})
+					out = append(out, m.childKey(n, v, k))
 				}
 			}
 		}
 	case jpWildcard:
-		out = appendChildren(n, out, nil)
+		out = appendChildren(m, out, nil)
 	case jpIndexes:
 		if n.Kind == JArray {
 			for _, i := range step.indexes {
 				if i < 0 {
-					i += len(n.Arr)
+					i = max(i+len(n.Arr), 0)
 				}
-				if i >= 0 && i < len(n.Arr) {
-					out = append(out, JSONMatch{Node: n.Arr[i], Parent: n, Index: i})
+				if i < len(n.Arr) {
+					out = append(out, m.childIndex(n, n.Arr[i], i))
 				}
 			}
 		}
 	case jpSlice:
 		if n.Kind == JArray {
 			for _, i := range sliceIndexes(len(n.Arr), step.slice) {
-				out = append(out, JSONMatch{Node: n.Arr[i], Parent: n, Index: i})
+				out = append(out, m.childIndex(n, n.Arr[i], i))
 			}
 		}
 	case jpFilter:
-		out = appendChildren(n, out, func(c *JNode) bool { return evalFilter(root, c, step.filter) })
+		if n.Kind != JArray && n.Kind != JObject {
+			if evalFilter(root, n, step.filter) {
+				out = append(out, m)
+			}
+			break
+		}
+		out = appendChildren(m, out, func(c *JNode) bool { return evalFilter(root, c, step.filter) })
 	}
 	return out
 }
 
-func appendChildren(n *JNode, out []JSONMatch, keep func(*JNode) bool) []JSONMatch {
+func appendChildren(m JSONMatch, out []JSONMatch, keep func(*JNode) bool) []JSONMatch {
+	n := m.Node
 	switch n.Kind {
 	case JArray:
 		for i, c := range n.Arr {
 			if keep == nil || keep(c) {
-				out = append(out, JSONMatch{Node: c, Parent: n, Index: i})
+				out = append(out, m.childIndex(n, c, i))
 			}
 		}
 	case JObject:
 		for i, c := range n.Vals {
 			if keep == nil || keep(c) {
-				out = append(out, JSONMatch{Node: c, Parent: n, Key: n.Keys[i]})
+				out = append(out, m.childKey(n, c, n.Keys[i]))
 			}
 		}
 	}
@@ -648,32 +754,38 @@ func compareJSON(a, b *JNode, op string) bool {
 	return false
 }
 
-// SetTargets returns where JSON.SET writes: the existing values the path
-// selects, or else, when its last step names one key, that key in each
-// object its other steps select (a nil node marks a new key). An index past
-// an array's end is ErrJSONIndexRange.
-func (path *JSONPath) SetTargets(root *JNode) ([]JSONMatch, error) {
-	if matches := path.Eval(root); len(matches) > 0 || len(path.steps) == 0 {
-		return matches, nil
-	}
-	last := path.steps[len(path.steps)-1]
-	parents := evalSteps(root, root, path.steps[:len(path.steps)-1])
-	if last.kind == jpIndexes && !last.deep {
-		for _, p := range parents {
-			if p.Node.Kind == JArray {
-				return nil, ErrJSONIndexRange
-			}
+// ErrJSONStaticPath is a write to a path that selects nothing and is not
+// static, so there is nowhere to create the value.
+var ErrJSONStaticPath = errors.New("Err wrong static path") //nolint:staticcheck // RedisJSON's reply text
+
+// UpdateTargets is RedisJSON's find_paths for JSON.SET, JSON.MERGE and
+// JSON.MSET: the values path selects (none with nx), or else where a value
+// can be created, a match with a nil Node naming a parent and key that is
+// added only when the parent is an object without that key. xx creates
+// nothing; a path that is not static, or that ends in an array index, is
+// an error.
+func (path *JSONPath) UpdateTargets(root *JNode, nx, xx bool) ([]JSONMatch, error) {
+	if !nx {
+		if matches := path.EvalPaths(root); len(matches) > 0 {
+			return matches, nil
 		}
+	}
+	if xx || len(path.steps) == 0 {
 		return nil, nil
 	}
-	if last.kind != jpKeys || last.deep || len(last.keys) != 1 {
+	if !path.Static() {
+		return nil, ErrJSONStaticPath
+	}
+	last := path.steps[len(path.steps)-1]
+	if last.kind == jpIndexes {
+		if len(path.Eval(root)) == 0 {
+			return nil, ErrJSONIndexRange
+		}
 		return nil, nil
 	}
 	var out []JSONMatch
-	for _, p := range parents {
-		if p.Node.Kind == JObject {
-			out = append(out, JSONMatch{Parent: p.Node, Key: last.keys[0]})
-		}
+	for _, p := range evalSteps(root, root, path.steps[:len(path.steps)-1]) {
+		out = append(out, JSONMatch{Parent: p.Node, Key: last.keys[0]})
 	}
 	return out, nil
 }

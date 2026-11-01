@@ -18,14 +18,31 @@ import (
 // structures must be bit-for-bit the same as RedisBloom's for every false
 // positive, eviction and centroid to agree.
 func TestSketchesReplayRedisBloomCorpus(t *testing.T) {
-	f, err := os.Open("testdata/redisbloom_r8.jsonl")
+	router := NewRouter()
+	RegisterProbabilisticCommands(router)
+	RegisterStatsCommands(router)
+	replayRedisCorpus(t, router, "testdata/redisbloom_r8.jsonl")
+}
+
+// testdata/redisjson_r8.jsonl holds random JSON commands, and probes of
+// paths that select nothing, overlap or name missing keys, with Redis 8.2's
+// (RedisJSON 8.2.9) replies. JSON.GET with several paths is left out: its
+// object's key order is a hash order that varies between Redis calls.
+func TestJSONReplaysRedisJSONCorpus(t *testing.T) {
+	router := NewRouter()
+	RegisterJSONCommands(router)
+	RegisterStringCommands(router)
+	RegisterKeyCommands(router)
+	replayRedisCorpus(t, router, "testdata/redisjson_r8.jsonl")
+}
+
+func replayRedisCorpus(t *testing.T, router *Router, file string) {
+	t.Helper()
+	f, err := os.Open(file)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer f.Close()
-	router := NewRouter()
-	RegisterProbabilisticCommands(router)
-	RegisterStatsCommands(router)
 	st := store.NewStore()
 	resp3 := false
 	sc := bufio.NewScanner(f)

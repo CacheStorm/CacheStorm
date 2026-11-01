@@ -58,3 +58,33 @@ func TestJSONRepliesMatchRedisJSONOnRESP2AndRESP3(t *testing.T) {
 		}
 	}
 }
+
+func TestJSONDelDropsADocumentItEmpties(t *testing.T) {
+	router := NewRouter()
+	RegisterJSONCommands(router)
+	RegisterStringCommands(router)
+	RegisterKeyCommands(router)
+	st := store.NewStore()
+	run := func(args ...string) *resp.Value { return tsRun(t, router, st, false, args...) }
+	for _, c := range []struct {
+		doc, path string
+		deleted   int64
+		exists    bool
+	}{
+		{`{"q":1}`, "$.q", 1, false},
+		{`{"q":1,"r":2}`, "$.q", 1, true},
+		{`[1,2]`, "$.*", 2, false},
+		{`{"x":{"q":1}}`, "$.x.q", 1, true},
+		{`{}`, "$.x", 0, true},
+		{`{"q":1}`, "q", 1, false},
+	} {
+		run("JSON.SET", "d", "$", c.doc)
+		if v := run("JSON.DEL", "d", c.path); v.Int != c.deleted {
+			t.Fatalf("JSON.DEL %s %s = %d, want %d", c.doc, c.path, v.Int, c.deleted)
+		}
+		if v := run("EXISTS", "d"); (v.Int == 1) != c.exists {
+			t.Fatalf("after JSON.DEL %s %s EXISTS = %d", c.doc, c.path, v.Int)
+		}
+		run("DEL", "d")
+	}
+}

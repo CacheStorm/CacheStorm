@@ -19,7 +19,7 @@ var (
 	errJSONWrongKeyType   = errors.New("Existing key has wrong Redis type")
 	errJSONNoKey          = errors.New("ERR could not perform this operation on a key that doesn't exist")
 	errJSONRootOnly       = errors.New("ERR new objects must be created at the root")
-	errJSONStaticPath     = errors.New("Err wrong static path")
+	errJSONStaticPath     = store.ErrJSONStaticPath
 	errJSONPathMissing    = errors.New("ERR Path does not exist")
 	errJSONNotNumber      = errors.New("ERR Path does not exist or does not contains a number")
 	errJSONNotString      = errors.New("ERR Path does not exist or not a string")
@@ -98,6 +98,49 @@ func jsonArrayBulk(nodes []*store.JNode) *resp.Value {
 		}
 	}
 	return resp.BulkBytes(append(out, ']'))
+}
+
+// jsonApplyTargets writes what value returns for each of UpdateTargets'
+// targets, adding a key only to an object that lacks it, as RedisJSON's
+// dict_add does, and skipping a value an earlier target removed; it
+// reports whether anything changed.
+func jsonApplyTargets(jv *store.JSONValue, targets []store.JSONMatch, value func(old *store.JNode) *store.JNode) bool {
+	changed := false
+	for _, m := range targets {
+		if m.Node == nil && m.Parent != nil {
+			if m.Parent.Kind != store.JObject || m.Parent.Get(m.Key) != nil {
+				continue
+			}
+		} else if m.Path != nil {
+			cur, ok := m.Follow(jv.Root)
+			if !ok {
+				continue
+			}
+			m = cur
+		}
+		jv.Root = replaceMatch(jv.Root, m, value(m.Node))
+		changed = true
+	}
+	return changed
+}
+
+// jsonWrongType is RedisJSON's error for a value an earlier write in the
+// same command changed to another type.
+func jsonWrongType(want store.JKind) error {
+	name := map[store.JKind]string{store.JArray: "array", store.JString: "string", store.JBool: "bool"}[want]
+	return errors.New("WRONGTYPE wrong type of path value - expected " + name)
+}
+
+// jsonOnceThenClones hands out v the first time and copies of it after.
+func jsonOnceThenClones(v *store.JNode) func(*store.JNode) *store.JNode {
+	used := false
+	return func(*store.JNode) *store.JNode {
+		if used {
+			return v.Clone()
+		}
+		used = true
+		return v
+	}
 }
 
 // replaceMatch puts v where m sits; it returns the new document root.
@@ -192,29 +235,17 @@ func cmdJSONSET(ctx *Context) error {
 	}
 	var reply *resp.Value
 	jsonWrite(ctx, key, jv, func() bool {
-		targets, err := path.SetTargets(jv.Root)
+		targets, err := path.UpdateTargets(jv.Root, nx, xx)
 		if err != nil {
 			reply = resp.ErrorValue(err.Error())
 			return false
 		}
-		if len(targets) == 0 {
-			reply = resp.NullBulkString()
-			return false
+		changed := jsonApplyTargets(jv, store.TopLevel(targets), jsonOnceThenClones(value))
+		reply = resp.NullBulkString()
+		if changed {
+			reply = resp.SimpleString("OK")
 		}
-		exists := targets[0].Node != nil || targets[0].Parent == nil
-		if (nx && exists) || (xx && !exists) {
-			reply = resp.NullBulkString()
-			return false
-		}
-		for i, m := range targets {
-			v := value
-			if i > 0 {
-				v = value.Clone()
-			}
-			jv.Root = replaceMatch(jv.Root, m, v)
-		}
-		reply = resp.SimpleString("OK")
-		return true
+		return changed
 	})
 	return ctx.WriteValue(reply)
 }
@@ -399,6 +430,13 @@ func cmdJSONMSET(ctx *Context) error {
 			if err := jsonRootOnly(path); err != nil {
 				return ctx.WriteError(err)
 			}
+		} else if !path.IsRoot() {
+			jv.RLock()
+			_, err := path.UpdateTargets(jv.Root, false, false)
+			jv.RUnlock()
+			if err != nil {
+				return ctx.WriteError(err)
+			}
 		}
 		triples = append(triples, triple{ctx.ArgString(i), path, value, jv})
 	}
@@ -414,18 +452,11 @@ func cmdJSONMSET(ctx *Context) error {
 			continue
 		}
 		jsonWrite(ctx, t.key, jv, func() bool {
-			targets, err := t.path.SetTargets(jv.Root)
-			if err != nil || len(targets) == 0 {
+			targets, err := t.path.UpdateTargets(jv.Root, false, false)
+			if err != nil {
 				return false
 			}
-			for i, m := range targets {
-				v := t.value
-				if i > 0 {
-					v = t.value.Clone()
-				}
-				jv.Root = replaceMatch(jv.Root, m, v)
-			}
-			return true
+			return jsonApplyTargets(jv, store.TopLevel(targets), jsonOnceThenClones(t.value))
 		})
 	}
 	return ctx.WriteOK()
@@ -478,16 +509,22 @@ func cmdJSONMERGE(ctx *Context) error {
 	}
 	var reply *resp.Value
 	jsonWrite(ctx, key, jv, func() bool {
-		targets, err := path.SetTargets(jv.Root)
-		if err != nil || len(targets) == 0 {
-			reply = resp.NullBulkString()
+		targets, err := path.UpdateTargets(jv.Root, false, false)
+		if err != nil {
+			reply = resp.ErrorValue(err.Error())
 			return false
 		}
-		for _, m := range targets {
-			jv.Root = replaceMatch(jv.Root, m, mergePatch(m.Node, patch))
+		changed := jsonApplyTargets(jv, targets, func(old *store.JNode) *store.JNode {
+			if old == nil {
+				return patch.Clone()
+			}
+			return mergePatch(old, patch)
+		})
+		reply = resp.NullBulkString()
+		if changed {
+			reply = resp.SimpleString("OK")
 		}
-		reply = resp.SimpleString("OK")
-		return true
+		return changed
 	})
 	return ctx.WriteValue(reply)
 }
@@ -514,7 +551,7 @@ func cmdJSONDEL(ctx *Context) error {
 	}
 	deleted := 0
 	jsonWrite(ctx, key, jv, func() bool {
-		matches := path.Eval(jv.Root)
+		matches := store.TopLevel(path.EvalPaths(jv.Root))
 		// Array elements go by identity, so removing one does not shift
 		// the positions of the others; object keys go in match order.
 		doomed := make(map[*store.JNode]bool)
@@ -542,6 +579,16 @@ func cmdJSONDEL(ctx *Context) error {
 		}
 		return deleted > 0
 	})
+	if deleted > 0 {
+		jv.RLock()
+		root := jv.Root
+		empty := (root.Kind == store.JArray && len(root.Arr) == 0) || (root.Kind == store.JObject && len(root.Keys) == 0)
+		jv.RUnlock()
+		if empty {
+			// RedisJSON drops a document that a deletion left empty.
+			ctx.Store.Delete(key)
+		}
+	}
 	return ctx.WriteInteger(int64(deleted))
 }
 
@@ -617,10 +664,19 @@ func jsonNumOp(ctx *Context, mult bool) error {
 	var opErr error
 	jsonWrite(ctx, key, jv, func() bool {
 		changed := false
-		for _, m := range path.Eval(jv.Root) {
+		for _, m := range path.EvalPaths(jv.Root) {
 			if !m.Node.IsNumber() {
 				results = append(results, nil)
 				continue
+			}
+			cur, ok := m.Follow(jv.Root)
+			if !ok {
+				opErr = errJSONPathMissing
+				return changed
+			}
+			if m = cur; !m.Node.IsNumber() {
+				opErr = errJSONNotNumber
+				return changed
 			}
 			n, err := store.JSONArith(m.Node, by, mult)
 			if err != nil {
@@ -676,13 +732,22 @@ func cmdJSONSTRAPPEND(ctx *Context) error {
 	if suffix.Kind != store.JString {
 		return ctx.WriteError(errJSONNotString)
 	}
-	return jsonModify(ctx, pathArg, errJSONNotString, func(_ *store.JSONValue, m store.JSONMatch) *resp.Value {
+	return jsonModify(ctx, pathArg, errJSONNotString, store.JString, func(_ *store.JSONValue, m store.JSONMatch) *resp.Value {
 		if m.Node.Kind != store.JString {
 			return nil
 		}
 		m.Node.Str += suffix.Str
 		return resp.IntegerValue(int64(len(m.Node.Str)))
 	})
+}
+
+// jsonMissingKeyErrors are RedisJSON's replies to a JSONPath query of a
+// missing key, where a legacy path gets nil.
+var jsonMissingKeyErrors = map[string]error{
+	"JSON.STRLEN":  errJSONNoKey,
+	"JSON.ARRLEN":  errJSONNoKey,
+	"JSON.OBJKEYS": errJSONNoKey,
+	"JSON.OBJLEN":  errJSONNotObject,
 }
 
 // jsonRead runs a read-only per-match command: missing keys reply nil, a
@@ -699,6 +764,9 @@ func jsonRead(ctx *Context, pathArg int, missingLegacy, wrongLegacy error, fn fu
 		return ctx.WriteError(err)
 	}
 	if jv == nil {
+		if e := jsonMissingKeyErrors[ctx.Command]; e != nil && !path.Legacy {
+			return ctx.WriteError(e)
+		}
 		return ctx.WriteNullBulkString()
 	}
 	jv.RLock()
@@ -846,6 +914,9 @@ func cmdJSONDEBUG(ctx *Context) error {
 		}
 		sub := NewContext(ctx.Command, ctx.Args[1:], ctx.Store, ctx.Writer)
 		if jv, err := getJSON(sub, sub.ArgString(0)); err == nil && jv == nil {
+			if p, err := parseJSONPathArg(sub, 1); err == nil && !p.Legacy {
+				return ctx.WriteArray(nil)
+			}
 			return ctx.WriteInteger(0)
 		}
 		return jsonRead(sub, 1, errJSONPathMissing, errJSONPathMissing, func(n *store.JNode) *resp.Value {
@@ -857,7 +928,7 @@ func cmdJSONDEBUG(ctx *Context) error {
 
 // jsonModify runs a per-match write command: fn changes one match and
 // replies for it, nil for a match of the wrong kind.
-func jsonModify(ctx *Context, pathArg int, legacyErr error, fn func(jv *store.JSONValue, m store.JSONMatch) *resp.Value) error {
+func jsonModify(ctx *Context, pathArg int, legacyErr error, want store.JKind, fn func(jv *store.JSONValue, m store.JSONMatch) *resp.Value) error {
 	key := ctx.ArgString(0)
 	jv, path, err := jsonWriteTargets(ctx, pathArg)
 	if err != nil {
@@ -865,11 +936,27 @@ func jsonModify(ctx *Context, pathArg int, legacyErr error, fn func(jv *store.JS
 	}
 	var matches []store.JSONMatch
 	var replies []*resp.Value
+	var opErr error
 	jsonWrite(ctx, key, jv, func() bool {
-		matches = path.Eval(jv.Root)
+		matches = path.EvalPaths(jv.Root)
 		changed := false
 		for _, m := range matches {
-			r := fn(jv, m)
+			var r *resp.Value
+			if m.Node.Kind == want {
+				cur, ok := m.Follow(jv.Root)
+				if !ok {
+					opErr = errJSONPathMissing
+					return changed
+				}
+				if cur.Node.Kind != want {
+					opErr = jsonWrongType(want)
+					return changed
+				}
+				if r = fn(jv, cur); r != nil && r.Type == resp.TypeError {
+					opErr = errors.New(r.Err)
+					return changed
+				}
+			}
 			if r == nil {
 				r = resp.NullBulkString()
 			} else {
@@ -879,6 +966,9 @@ func jsonModify(ctx *Context, pathArg int, legacyErr error, fn func(jv *store.JS
 		}
 		return changed
 	})
+	if opErr != nil {
+		return ctx.WriteError(opErr)
+	}
 	i := 0
 	return perMatch(ctx, path, matches, func(store.JSONMatch) *resp.Value { i++; return replies[i-1] }, legacyErr)
 }
@@ -903,7 +993,7 @@ func cmdJSONARRAPPEND(ctx *Context) error {
 	if err != nil {
 		return ctx.WriteError(err)
 	}
-	return jsonModify(ctx, 1, errJSONNotArray, func(_ *store.JSONValue, m store.JSONMatch) *resp.Value {
+	return jsonModify(ctx, 1, errJSONNotArray, store.JArray, func(_ *store.JSONValue, m store.JSONMatch) *resp.Value {
 		if m.Node.Kind != store.JArray {
 			return nil
 		}
@@ -933,27 +1023,13 @@ func cmdJSONARRINSERT(ctx *Context) error {
 		}
 		return at, at >= 0 && at <= len(n.Arr)
 	}
-	jv, err := getJSON(ctx, ctx.ArgString(0))
-	if err == nil && jv != nil {
-		path, perr := parseJSONPathArg(ctx, 1)
-		if perr == nil {
-			jv.RLock()
-			for _, m := range path.Eval(jv.Root) {
-				if _, ok := position(m.Node); m.Node.Kind == store.JArray && !ok {
-					jv.RUnlock()
-					return ctx.WriteError(errJSONIndexBounds)
-				}
-			}
-			jv.RUnlock()
-		}
-	}
-	return jsonModify(ctx, 1, errJSONNotArray, func(_ *store.JSONValue, m store.JSONMatch) *resp.Value {
+	return jsonModify(ctx, 1, errJSONNotArray, store.JArray, func(_ *store.JSONValue, m store.JSONMatch) *resp.Value {
 		if m.Node.Kind != store.JArray {
 			return nil
 		}
 		at, ok := position(m.Node)
 		if !ok {
-			return nil
+			return resp.ErrorValue(errJSONIndexBounds.Error())
 		}
 		inserted := make([]*store.JNode, 0, len(m.Node.Arr)+len(values))
 		inserted = append(inserted, m.Node.Arr[:at]...)
@@ -1034,11 +1110,21 @@ func cmdJSONARRPOP(ctx *Context) error {
 	}
 	var replies []*resp.Value
 	var notArray bool
+	var opErr error
 	jsonWrite(ctx, key, jv, func() bool {
 		changed := false
-		for _, m := range path.Eval(jv.Root) {
+		for _, m := range path.EvalPaths(jv.Root) {
 			if m.Node.Kind != store.JArray {
 				notArray = true
+				replies = append(replies, resp.NullBulkString())
+				continue
+			}
+			cur, ok := m.Follow(jv.Root)
+			if !ok {
+				opErr = errJSONPathMissing
+				return changed
+			}
+			if m = cur; m.Node.Kind != store.JArray {
 				replies = append(replies, resp.NullBulkString())
 				continue
 			}
@@ -1059,6 +1145,9 @@ func cmdJSONARRPOP(ctx *Context) error {
 		}
 		return changed
 	})
+	if opErr != nil {
+		return ctx.WriteError(opErr)
+	}
 	if !path.Legacy {
 		return ctx.WriteArray(replies)
 	}
@@ -1077,7 +1166,7 @@ func cmdJSONARRTRIM(ctx *Context) error {
 	if err1 != nil || err2 != nil {
 		return ctx.WriteError(errJSONParseInteger)
 	}
-	return jsonModify(ctx, 1, errJSONNotArray, func(_ *store.JSONValue, m store.JSONMatch) *resp.Value {
+	return jsonModify(ctx, 1, errJSONNotArray, store.JArray, func(_ *store.JSONValue, m store.JSONMatch) *resp.Value {
 		if m.Node.Kind != store.JArray {
 			return nil
 		}
@@ -1110,11 +1199,21 @@ func cmdJSONTOGGLE(ctx *Context) error {
 	}
 	var replies []*resp.Value
 	var last *store.JNode
+	var opErr error
 	jsonWrite(ctx, key, jv, func() bool {
-		for _, m := range path.Eval(jv.Root) {
+		for _, m := range path.EvalPaths(jv.Root) {
 			if m.Node.Kind != store.JBool {
 				replies = append(replies, resp.NullBulkString())
 				continue
+			}
+			cur, ok := m.Follow(jv.Root)
+			if !ok {
+				opErr = errJSONPathMissing
+				break
+			}
+			if m = cur; m.Node.Kind != store.JBool {
+				opErr = jsonWrongType(store.JBool)
+				break
 			}
 			m.Node.Bool = !m.Node.Bool
 			last = m.Node
@@ -1122,6 +1221,9 @@ func cmdJSONTOGGLE(ctx *Context) error {
 		}
 		return last != nil
 	})
+	if opErr != nil {
+		return ctx.WriteError(opErr)
+	}
 	if !path.Legacy {
 		return ctx.WriteArray(replies)
 	}
@@ -1141,8 +1243,18 @@ func cmdJSONCLEAR(ctx *Context) error {
 		return ctx.WriteError(err)
 	}
 	cleared := 0
+	var opErr error
 	jsonWrite(ctx, key, jv, func() bool {
-		for _, m := range path.Eval(jv.Root) {
+		for _, m := range path.EvalPaths(jv.Root) {
+			if !jsonClearable(m.Node) {
+				continue
+			}
+			cur, ok := m.Follow(jv.Root)
+			if !ok {
+				opErr = errJSONPathMissing
+				break
+			}
+			m = cur
 			switch m.Node.Kind {
 			case store.JArray:
 				m.Node.Arr = []*store.JNode{}
@@ -1157,5 +1269,26 @@ func cmdJSONCLEAR(ctx *Context) error {
 		}
 		return cleared > 0
 	})
+	if opErr != nil {
+		return ctx.WriteError(opErr)
+	}
 	return ctx.WriteInteger(int64(cleared))
+}
+
+// jsonClearable is what JSON.CLEAR counts: a non-empty array or object, or
+// a number other than zero.
+func jsonClearable(n *store.JNode) bool {
+	switch n.Kind {
+	case store.JArray:
+		return len(n.Arr) > 0
+	case store.JObject:
+		return len(n.Keys) > 0
+	case store.JInt:
+		return n.Int != 0
+	case store.JUint:
+		return n.Uint != 0
+	case store.JFloat:
+		return n.Float != 0
+	}
+	return false
 }
