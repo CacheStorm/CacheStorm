@@ -221,6 +221,7 @@ func (o *tsOptions) apply(ts *store.TimeSeriesValue, creating bool) {
 // createSeries stores a new series at key with o's settings.
 func createSeries(ctx *Context, key string, o *tsOptions) (*store.TimeSeriesValue, error) {
 	ts := store.NewTimeSeriesValue(0)
+	tsCreateDefaults(ts)
 	o.apply(ts, true)
 	if err := ctx.Store.Set(key, ts, store.SetOptions{}); err != nil {
 		return nil, err
@@ -547,6 +548,7 @@ func cmdTSADD(ctx *Context) error {
 		if ts, err = createSeries(ctx, key, o); err != nil {
 			return ctx.WriteError(err)
 		}
+		applyCompactionPolicy(ctx, key, ts)
 	}
 	reply, err := addSample(ctx, key, ts, at, value, o.onDuplicate)
 	if err != nil {
@@ -619,6 +621,7 @@ func tsIncrBy(ctx *Context, sign float64) error {
 		if ts, err = createSeries(ctx, key, o); err != nil {
 			return ctx.WriteError(err)
 		}
+		applyCompactionPolicy(ctx, key, ts)
 	}
 	ts.RLock()
 	last, hasLast := ts.Last()
@@ -1499,7 +1502,7 @@ func cmdTSINFO(ctx *Context) error {
 		resp.SimpleString("chunkCount"), resp.IntegerValue(info.ChunkCount),
 		resp.SimpleString("chunkSize"), resp.IntegerValue(info.ChunkSize),
 		resp.SimpleString("chunkType"), resp.SimpleString(chunkType),
-		resp.SimpleString("duplicatePolicy"), resp.SimpleString(strings.ToLower(ts.Policy())),
+		resp.SimpleString("duplicatePolicy"), duplicatePolicyReply(ts),
 		resp.SimpleString("labels"), selectLabels(resp3, ts.LabelList(), true, nil),
 		resp.SimpleString("sourceKey"), source,
 		resp.SimpleString("rules"), rulesReply,
@@ -1592,6 +1595,13 @@ func cmdTSCREATERULE(ctx *Context) error {
 	valueWritten(ctx, srcKey)
 	valueWritten(ctx, destKey)
 	return ctx.WriteOK()
+}
+
+func duplicatePolicyReply(ts *store.TimeSeriesValue) *resp.Value {
+	if ts.DuplicatePolicy == store.TSNoPolicy {
+		return resp.NullBulkString()
+	}
+	return resp.SimpleString(strings.ToLower(ts.Policy()))
 }
 
 func cmdTSDELETERULE(ctx *Context) error {

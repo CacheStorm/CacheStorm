@@ -170,7 +170,8 @@ func cmdBFRESERVE(ctx *Context) error {
 	if !ok {
 		return ctx.WriteError(errBloomCapacity)
 	}
-	expansion, nonScaling := int64(bloomDefaultExpansion), false
+	_, _, expansion := bloomDefaults()
+	nonScaling := false
 	for i := 3; i < ctx.ArgCount(); i++ {
 		switch strings.ToUpper(ctx.ArgString(i)) {
 		case "NONSCALING":
@@ -258,7 +259,8 @@ func boolInt64(b bool) int64 {
 }
 
 func defaultBloom() (*store.BloomValue, error) {
-	return newBloom(bloomDefaultCapacity, bloomDefaultErrorRate, bloomDefaultExpansion)
+	capacity, errorRate, expansion := bloomDefaults()
+	return newBloom(capacity, errorRate, expansion)
 }
 
 func cmdBFADD(ctx *Context) error {
@@ -279,7 +281,7 @@ func cmdBFINSERT(ctx *Context) error {
 	if ctx.ArgCount() < 3 {
 		return ctx.WriteError(arityError(ctx.Command))
 	}
-	capacity, errorRate, expansion := int64(bloomDefaultCapacity), bloomDefaultErrorRate, int64(bloomDefaultExpansion)
+	capacity, errorRate, expansion := bloomDefaults()
 	noCreate, nonScaling := false, false
 	var items [][]byte
 	for i := 1; i < ctx.ArgCount() && items == nil; i++ {
@@ -440,8 +442,9 @@ func newCuckoo(capacity, bucketSize, maxIterations, expansion int64) (*store.Cuc
 	return store.NewCuckooValue(uint64(capacity), uint8(bucketSize), uint16(maxIterations), uint16(expansion)), nil
 }
 
-func defaultCuckoo(capacity int64) func() (*store.CuckooValue, error) {
-	return func() (*store.CuckooValue, error) { return newCuckoo(capacity, 2, 20, 1) }
+func defaultCuckoo() (*store.CuckooValue, error) {
+	capacity, bucketSize, maxIterations, expansion, _ := cuckooDefaults()
+	return newCuckoo(capacity, bucketSize, maxIterations, expansion)
 }
 
 func cmdCFRESERVE(ctx *Context) error {
@@ -453,7 +456,7 @@ func cmdCFRESERVE(ctx *Context) error {
 	if !ok {
 		return ctx.WriteError(errBloomBadCapacity)
 	}
-	bucketSize, maxIterations, expansion := int64(2), int64(20), int64(1)
+	_, bucketSize, maxIterations, expansion, _ := cuckooDefaults()
 	for i := 2; i < ctx.ArgCount(); i += 2 {
 		v, ok := parseIntArg(ctx.Arg(i + 1))
 		switch strings.ToUpper(ctx.ArgString(i)) {
@@ -508,7 +511,7 @@ func cuckooAdd(ctx *Context, key string, items [][]byte, create func() (*store.C
 			return ctx.WriteError(err)
 		}
 	}
-	if cf.NumFilters() >= cuckooMaxExpansions {
+	if _, _, _, _, maxExpansions := cuckooDefaults(); int64(cf.NumFilters()) >= maxExpansions {
 		return ctx.WriteError(errCuckooMaxExpansions)
 	}
 	replies := make([]*resp.Value, 0, len(items))
@@ -539,21 +542,22 @@ func cmdCFADD(ctx *Context) error {
 	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(arityError(ctx.Command))
 	}
-	return cuckooAdd(ctx, ctx.ArgString(0), ctx.Args[1:], defaultCuckoo(cuckooDefaultCapacity), false, true)
+	return cuckooAdd(ctx, ctx.ArgString(0), ctx.Args[1:], defaultCuckoo, false, true)
 }
 
 func cmdCFADDNX(ctx *Context) error {
 	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(arityError(ctx.Command))
 	}
-	return cuckooAdd(ctx, ctx.ArgString(0), ctx.Args[1:], defaultCuckoo(cuckooDefaultCapacity), true, true)
+	return cuckooAdd(ctx, ctx.ArgString(0), ctx.Args[1:], defaultCuckoo, true, true)
 }
 
 func cuckooInsert(ctx *Context, nx bool) error {
 	if ctx.ArgCount() < 3 {
 		return ctx.WriteError(arityError(ctx.Command))
 	}
-	capacity, noCreate := int64(cuckooDefaultCapacity), false
+	capacity, _, _, _, _ := cuckooDefaults()
+	noCreate := false
 	var items [][]byte
 	for i := 1; i < ctx.ArgCount() && items == nil; i++ {
 		switch strings.ToUpper(ctx.ArgString(i)) {
@@ -579,7 +583,10 @@ func cuckooInsert(ctx *Context, nx bool) error {
 	if items == nil {
 		return ctx.WriteError(arityError(ctx.Command))
 	}
-	create := defaultCuckoo(capacity)
+	create := func() (*store.CuckooValue, error) {
+		_, bucketSize, maxIterations, expansion, _ := cuckooDefaults()
+		return newCuckoo(capacity, bucketSize, maxIterations, expansion)
+	}
 	if noCreate {
 		create = nil
 	}

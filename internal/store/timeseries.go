@@ -142,11 +142,15 @@ func ParseTSDuplicatePolicy(s string) (string, bool) {
 
 // Policy returns the series' duplicate policy, BLOCK by default.
 func (v *TimeSeriesValue) Policy() string {
-	if v.DuplicatePolicy == "" {
+	if v.DuplicatePolicy == "" || v.DuplicatePolicy == TSNoPolicy {
 		return "BLOCK"
 	}
 	return v.DuplicatePolicy
 }
+
+// TSNoPolicy marks a series that has no duplicate policy of its own, as
+// the compactions RedisTimeSeries' compaction policy creates.
+const TSNoPolicy = "NONE"
 
 // SetLabels replaces the labels, keeping the order they are given in.
 func (v *TimeSeriesValue) SetLabels(keys []string, values []string) {

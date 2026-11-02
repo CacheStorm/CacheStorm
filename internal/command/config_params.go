@@ -44,6 +44,11 @@ type configParam struct {
 	apply func(v int64)
 	// applyText is apply for a parameter that is not a number.
 	applyText func(v string)
+	// get gives the value of a parameter another command also sets.
+	get func() string
+	// strict reads an integer as Redis' string2ll does, as module
+	// parameters are read: no sign but '-' and no leading zeros.
+	strict bool
 }
 
 const defaultOutputBufferLimit = "normal 0 0 0 slave 268435456 67108864 60 pubsub 33554432 8388608 60"
@@ -257,6 +262,9 @@ func setZsetListpackValue(v int64) {
 // paramValueLocked is the value CONFIG GET shows for a registry parameter.
 // The caller holds c.mu.
 func (c *Config) paramValueLocked(name string, p *configParam) string {
+	if p.get != nil {
+		return p.get()
+	}
 	if v, ok := c.params[name]; ok {
 		return v
 	}
@@ -279,6 +287,9 @@ func (c *Config) setParamLocked(name, value string, p *configParam) error {
 		}
 		shown = boolStr(b)
 	case cfgInt:
+		if p.strict && !redisBloomInt.MatchString(value) {
+			return ConfigSetError(name, "argument couldn't be parsed into an integer")
+		}
 		v, err := ParseConfigInt(name, value, p.lo, p.hi)
 		if err != nil {
 			return err

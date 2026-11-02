@@ -3,7 +3,7 @@
 CacheStorm registers about 1,200 commands across 50+ modules: the Redis 7.4 command set plus CacheStorm extensions. Compatibility with Redis is measured by the differential harness in `tests/compat`.
 
 Every command name in this reference is verified against the registered command
-set: 1,238 documented, 0 phantoms, 0 missing.
+set: 1,289 documented, 0 phantoms, 0 missing.
 
 Counts in the table below are the commands listed in each section; `SET` and `COMMAND` are also repeated
 under Tag-Based Invalidation and Command Help but counted only once, under Core Redis.
@@ -45,7 +45,7 @@ under Tag-Based Invalidation and Command Help but counted only once, under Core 
 | [Service Discovery](#service-discovery-commands) | 8 | Service registration and discovery |
 | [Profiles](#profile-commands) | 5 | User profile records |
 | [Extended families](#extended-command-families) | 509 | 58 unprefixed commands and 101 further families |
-| **Total registered** | **1,238** | |
+| **Total registered** | **1,289** | |
 
 ---
 
@@ -372,6 +372,8 @@ ACL LOAD
 ACL SAVE
 ```
 
+Redis 8's module parameters are there too: `search-*` (the RediSearch settings `FT.CONFIG` reads and writes, kept in step with it), `ts-*` (RedisTimeSeries: the retention, chunk size, duplicate policy, encoding and ignore thresholds new series take, and `ts-compaction-policy`, whose rules `TS.ADD` and `TS.INCRBY` give the series they create) and `bf-*`/`cf-*` (RedisBloom: the error rate, capacity, bucket size, iterations and expansions of the filters `BF.ADD` and `CF.ADD` create), with Redis 8.2's defaults, ranges and errors.
+
 ---
 
 ## JSON Commands
@@ -463,6 +465,7 @@ FT.AGGREGATE index query [VERBATIM] [ADDSCORES] [LOAD count field [AS name] ... 
 FT.CURSOR READ index cursor [COUNT n] | DEL index cursor | GC index 0
 FT.SYNUPDATE index group [SKIPINITIALSCAN] term ...
 FT.SYNDUMP index
+FT.SYNADD index term ...                 # refused, as in Redis 8.2: FT.SYNUPDATE replaces it
 FT.SPELLCHECK index query [DISTANCE 1-4] [TERMS INCLUDE|EXCLUDE dict] ... [DIALECT n] [PARAMS count name value ...]
 FT.DICTADD dict term [term ...]
 FT.DICTDEL dict term [term ...]
@@ -2774,4 +2777,4 @@ WINDOW.GET
 
 *Last updated: 2026-10-12*
 *CacheStorm v0.3.0*
-*Total Commands: 1,238 (verified against the registered command set)*
+*Total Commands: 1,289 (verified against the registered command set)*

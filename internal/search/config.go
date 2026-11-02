@@ -139,6 +139,17 @@ func ConfigSet(name string, args []string) (excess bool, err error) {
 	return len(args) > 1, nil
 }
 
+// ConfigValue returns an FT.CONFIG option's value, false when it has none.
+func ConfigValue(name string) (string, bool) {
+	if v := configValue(name); v != nil {
+		return *v, true
+	}
+	return "", false
+}
+
+// SetConfigValue sets an FT.CONFIG option, which the caller has checked.
+func SetConfigValue(name, v string) { setConfig(name, v) }
+
 func setConfig(name, v string) {
 	configMu.Lock()
 	defer configMu.Unlock()
