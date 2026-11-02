@@ -28,6 +28,8 @@ const (
 )
 
 type rsResult struct {
+	// term is a term reader's term, which matched_terms() lists.
+	term      string
 	children  []*rsResult
 	docID     int64
 	weight    float64

@@ -880,6 +880,9 @@ func cmdFTAGGREGATE(ctx *Context) error {
 	if !ok {
 		return ctx.WriteError(errNoSuchIndex(ctx.ArgString(0)))
 	}
+	if err := aggregateUnknownArg(ctx); err != nil {
+		return ctx.WriteError(err)
+	}
 	opts := search.QueryOptions{Params: map[string]string{}}
 	var cursor cursorSettings
 	n := ctx.ArgCount()
@@ -914,6 +917,12 @@ func cmdFTAGGREGATE(ctx *Context) error {
 	if err != nil {
 		return ctx.WriteError(err)
 	}
+	for i := 2; i < n; i++ {
+		if w := strings.ToUpper(ctx.ArgString(i)); (w == "APPLY" || w == "FILTER") && i+1 < n &&
+			strings.Contains(strings.ToLower(ctx.ArgString(i+1)), "matched_terms") {
+			opts.MatchedTerms = true
+		}
+	}
 	found, err := idx.Search(ctx.Store, query, opts)
 	if err != nil {
 		return ctx.WriteError(err)
@@ -937,6 +946,9 @@ func cmdFTAGGREGATE(ctx *Context) error {
 		if d := idx.Content(ctx.Store, h.Doc.Key); d != nil {
 			r := idx.NewRow(d)
 			r.SetDocID(int64(i + 1))
+			if opts.MatchedTerms {
+				r.SetMatchedTerms(h.Terms)
+			}
 			for _, y := range h.Yields {
 				r.Set(y[0], y[1])
 			}
@@ -1988,4 +2000,145 @@ func (r *Router) TouchSearchKey(st *store.Store, key string) {
 	for _, idx := range m.All() {
 		idx.Touch(st, key)
 	}
+}
+
+// aggregateUnknownArg walks FT.AGGREGATE's arguments as RediSearch's
+// parser does: the query's own options, then the steps and the options
+// any step may take; a word neither knows is an unknown argument, at its
+// position after the query. Malformed arguments are left to the steps,
+// which report them.
+func aggregateUnknownArg(ctx *Context) error {
+	args := ctx.Args[1:]
+	n := len(args)
+	i := 1
+	counted := func() bool {
+		if i+1 >= n+1 || i+1 > n-1 {
+			return false
+		}
+		c, err := strconv.Atoi(string(args[i+1]))
+		if err != nil || c < 0 || i+2+c > n {
+			return false
+		}
+		i += 2 + c
+		return true
+	}
+	common := func(word string) (handled, ok bool) {
+		switch word {
+		case "LIMIT":
+			if i+2 >= n {
+				return true, false
+			}
+			i += 3
+		case "SORTBY":
+			if !counted() {
+				return true, false
+			}
+			if i+1 < n && strings.EqualFold(string(args[i]), "MAX") {
+				i += 2
+			}
+		case "TIMEOUT", "DIALECT", "FORMAT":
+			if i+1 >= n {
+				return true, false
+			}
+			i += 2
+		case "WITHCURSOR":
+			i++
+			for i < n {
+				w := strings.ToUpper(string(args[i]))
+				if w != "COUNT" && w != "MAXIDLE" {
+					break
+				}
+				if i+1 >= n {
+					return true, false
+				}
+				i += 2
+			}
+		case "_NUM_SSTRING", "WITHRAWIDS":
+			i++
+		case "PARAMS", "_REQUIRED_FIELDS", "_INDEX_PREFIXES":
+			if !counted() {
+				return true, false
+			}
+		default:
+			return false, true
+		}
+		return true, true
+	}
+	// The query's options.
+	for i < n {
+		word := strings.ToUpper(string(args[i]))
+		switch word {
+		case "INFIELDS", "INKEYS", "RETURN":
+			if !counted() {
+				return nil
+			}
+			continue
+		case "SLOP", "LANGUAGE", "EXPANDER", "SCORER", "PAYLOAD":
+			if i+1 >= n {
+				return nil
+			}
+			i += 2
+			continue
+		case "INORDER", "VERBATIM", "WITHSCORES", "ADDSCORES", "WITHSORTKEYS", "WITHPAYLOADS", "NOCONTENT",
+			"NOSTOPWORDS", "EXPLAINSCORE", "WITHCOUNT", "WITHOUTCOUNT":
+			i++
+			continue
+		case "SUMMARIZE", "HIGHLIGHT":
+			return nil
+		}
+		handled, ok := common(word)
+		if !ok {
+			return nil
+		}
+		if !handled {
+			break
+		}
+	}
+	// The steps.
+	for i < n {
+		word := strings.ToUpper(string(args[i]))
+		handled, ok := common(word)
+		if !ok {
+			return nil
+		}
+		if handled {
+			continue
+		}
+		switch word {
+		case "GROUPBY":
+			if !counted() {
+				return nil
+			}
+			for i < n && strings.EqualFold(string(args[i]), "REDUCE") {
+				i++
+				if !counted() {
+					return nil
+				}
+				if i+1 < n && strings.EqualFold(string(args[i]), "AS") {
+					i += 2
+				}
+			}
+		case "APPLY":
+			if i+3 >= n || !strings.EqualFold(string(args[i+2]), "AS") {
+				return nil
+			}
+			i += 4
+		case "FILTER":
+			if i+1 >= n {
+				return nil
+			}
+			i += 2
+		case "LOAD":
+			if i+1 < n && string(args[i+1]) == "*" {
+				i += 2
+				continue
+			}
+			if !counted() {
+				return nil
+			}
+		default:
+			return fmt.Errorf("Unknown argument `%s` at position %d for <main>", args[i], i) //nolint:staticcheck // RediSearch's reply text
+		}
+	}
+	return nil
 }

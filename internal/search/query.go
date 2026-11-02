@@ -327,6 +327,8 @@ type QueryOptions struct {
 	NoStopwords bool
 	InFields    []string
 	Params      map[string]string
+	// MatchedTerms has Search list each hit's matched terms.
+	MatchedTerms bool
 }
 
 // ErrSyntax is a query syntax error, in RediSearch's words.

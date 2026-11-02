@@ -140,7 +140,7 @@ func (e *scoreEngine) reader(term string, mask uint64, weight float64) rsIter {
 		return nil
 	}
 	r := newTermReader(e.entries(docs, term, false), mask, weight, e.stats.idf(len(docs)))
-	r.profTerm = term
+	r.profTerm, r.cur.term = term, term
 	return e.wrap(r)
 }
 
@@ -150,7 +150,7 @@ func (e *scoreEngine) tagReader(f *Field, value string, weight float64) rsIter {
 		return nil
 	}
 	r := newTermReader(e.entries(docs, value, true), math.MaxUint64, weight, e.stats.idf(len(docs)))
-	r.profType, r.profTerm = "TAG", value
+	r.profType, r.profTerm, r.cur.term = "TAG", value, value
 	return e.wrap(r)
 }
 
@@ -321,6 +321,43 @@ func (e *scoreEngine) tag(n *qnode) rsIter {
 	u := newUnionIter(its, false, n.weight)
 	u.queryType = "TAG"
 	return e.wrap(u)
+}
+
+// matchedTerms reads the root to its end and lists, for each document,
+// the terms of its result's term readers in tree order, as RediSearch's
+// IndexResult_GetMatchedTerms does.
+func (e *scoreEngine) matchedTerms(root *qnode) map[*Document][]string {
+	it := e.build(root, allFields)
+	out := make(map[*Document][]string)
+	if it == nil {
+		return out
+	}
+	var collect func(r *rsResult, terms []string) []string
+	collect = func(r *rsResult, terms []string) []string {
+		switch {
+		case r.typ&(resUnion|resIntersect) != 0:
+			for _, c := range r.children {
+				terms = collect(c, terms)
+			}
+		case r.typ == resTerm && r.term != "":
+			terms = append(terms, r.term)
+		}
+		return terms
+	}
+	for {
+		rc, r := it.read()
+		if rc == readEOF {
+			return out
+		}
+		if rc != readOK || r == nil {
+			continue
+		}
+		if d := e.doc(r.docID); d != nil {
+			if _, seen := out[d]; !seen {
+				out[d] = collect(r, nil)
+			}
+		}
+	}
 }
 
 // scores reads the root to its end and scores each document it returns.

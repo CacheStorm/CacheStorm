@@ -42,7 +42,9 @@ func SortRowsTop(rows []*Row, keys []SortKey, keep int) []*Row {
 	}
 	out := make([]*Row, 0, h.count())
 	for h.count() > 0 {
-		out = append(out, h.popMax().row)
+		r := h.popMax().row
+		r.terms, r.hasTerms = nil, false
+		out = append(out, r)
 	}
 	return out
 }

@@ -315,6 +315,8 @@ type Hit struct {
 	Score    float64
 	Distance float64
 	Yields   [][2]string
+	// Terms are the query terms the document matched, when asked for.
+	Terms []string
 }
 
 // Search runs a query over the index's documents in st: the postings give
@@ -362,6 +364,12 @@ func (idx *Index) Search(st *store.Store, n Node, opts QueryOptions) ([]Hit, err
 	} else {
 		for d := range cand {
 			match(d)
+		}
+	}
+	if opts.MatchedTerms && len(hits) > 0 {
+		terms := newScoreEngine(idx, c, c.stats).matchedTerms(root)
+		for i := range hits {
+			hits[i].Terms = terms[hits[i].Doc]
 		}
 	}
 	if needsEngine(root) && len(hits) > 0 {

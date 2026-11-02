@@ -1211,7 +1211,7 @@ func init() {
 		"substr":        {3, 3, fnSubstr},
 		"format":        {1, -1, fnFormat},
 		"split":         {1, 3, fnSplit},
-		"matched_terms": {0, 1, func(*exprEval, []xval) (xval, int) { return xval{t: xNull}, evalOK }},
+		"matched_terms": {0, 1, fnMatchedTerms},
 		"to_number":     {1, 1, fnToNumber},
 		"to_str":        {1, 1, func(_ *exprEval, a []xval) (xval, int) { return a[0].toString(), evalOK }},
 		"exists":        {1, 1, fnExists},
@@ -1607,4 +1607,25 @@ func decodeGeoScore(f float64) (store.GeoPoint, bool) {
 		f = math.Inf(-1)
 	}
 	return store.GeoPointFromScore(f), true
+}
+
+// fnMatchedTerms lists the query terms the row's document matched, at most
+// 100 or the argument when it is 1 to 100; null without an index result.
+func fnMatchedTerms(ev *exprEval, a []xval) (xval, int) {
+	limit := 100
+	if len(a) == 1 {
+		if d, ok := a[0].toNumber(); ok && d >= 1 && d <= 100 {
+			limit = int(d)
+		}
+	}
+	r := ev.row
+	if r == nil || !r.hasTerms || len(r.terms) == 0 {
+		return xval{t: xNull}, evalOK
+	}
+	terms := r.terms[:min(limit, len(r.terms))]
+	out := make([]xval, len(terms))
+	for i, t := range terms {
+		out[i] = xstr(t)
+	}
+	return xval{t: xArr, arr: out}, evalOK
 }

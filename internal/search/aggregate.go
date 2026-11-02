@@ -27,7 +27,14 @@ type Row struct {
 	numv map[string]float64
 	// docID orders a document's row as RediSearch's document id does.
 	docID int64
+	// terms are the query terms the row's document matched; a sorter
+	// drops them with the rest of its index result.
+	terms    []string
+	hasTerms bool
 }
+
+// SetMatchedTerms gives the row its document's matched query terms.
+func (r *Row) SetMatchedTerms(terms []string) { r.terms, r.hasTerms = terms, true }
 
 // SetDocID gives the row its document's place in the index's order, from 1.
 func (r *Row) SetDocID(id int64) { r.docID = id }
