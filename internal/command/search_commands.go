@@ -389,10 +389,6 @@ func parseDialect(s string) int {
 	return 1
 }
 
-func errMissingProperty(name string) error {
-	return errors.New("Could not find the value for a parameter name, consider using EXISTS if applicable for " + name) //nolint:staticcheck // RediSearch's reply text
-}
-
 // parseLimit reads the offset and count after LIMIT at args[i].
 func parseLimit(ctx *Context, i int) (offset, num int, err error) {
 	if i+2 >= ctx.ArgCount() {
@@ -968,12 +964,29 @@ func cmdFTAGGREGATE(ctx *Context) error {
 	// rows stream through the steps, so an error stops the reply where
 	// the row comes, unless a GROUPBY or SORTBY needs every row first.
 	failed := make(map[*search.Row]error)
+	// RediSearch's evaluator keeps its first error from row to row; a
+	// query replies with it when it is set once the first row comes out,
+	// or once a GROUPBY or SORTBY has read every row. statusAt holds the
+	// error set after each row's last evaluation.
+	state := &search.EvalState{}
+	statusAt := make(map[*search.Row]error)
+	evalFailed := func(r *search.Row) {
+		err := state.Err()
+		if err == nil {
+			err = errors.New("Generic error evaluating expression") //nolint:staticcheck // RediSearch's reply text
+		}
+		failed[r] = err
+	}
 	barrier := func() error {
 		for _, r := range rows {
 			if err, ok := failed[r]; ok {
 				return err
 			}
 		}
+		if err := state.Err(); err != nil {
+			return err
+		}
+		clear(statusAt)
 		return nil
 	}
 	for i := 2; i < n; i++ {
@@ -1091,73 +1104,96 @@ func cmdFTAGGREGATE(ctx *Context) error {
 				from := min(arr.offset, len(rows))
 				rows = rows[from:min(from+arr.limit, len(rows))]
 			}
-		case "APPLY":
-			if i+3 >= n || !strings.EqualFold(ctx.ArgString(i+2), "AS") {
-				return ctx.WriteError(errors.New("Bad arguments for APPLY: AS is required")) //nolint:staticcheck // RediSearch's reply text
+		case "APPLY", "FILTER":
+			// A run of APPLY and FILTER steps streams each row through
+			// all of them before the next row, as RediSearch's evaluator
+			// does; its error status carries from row to row.
+			type evalStep struct {
+				expr   *search.Expr
+				name   string
+				filter bool
+				trace  filterTrace
+				in     int
 			}
-			expr, err := search.ParseExpr(ctx.ArgString(i + 1))
-			if err != nil {
-				return ctx.WriteError(err)
+			var steps []*evalStep
+			for i < n {
+				word := strings.ToUpper(ctx.ArgString(i))
+				if word != "APPLY" && word != "FILTER" {
+					break
+				}
+				if word == "APPLY" && (i+3 >= n || !strings.EqualFold(ctx.ArgString(i+2), "AS")) {
+					return ctx.WriteError(errors.New("Bad arguments for APPLY: AS is required")) //nolint:staticcheck // RediSearch's reply text
+				}
+				if word == "FILTER" && i+1 >= n {
+					return ctx.WriteError(errors.New("Bad arguments for FILTER: Expected an argument, but none provided")) //nolint:staticcheck // RediSearch's reply text
+				}
+				expr, err := search.ParseExpr(ctx.ArgString(i + 1))
+				if err != nil {
+					return ctx.WriteError(err)
+				}
+				if err := pipeline.readExpr(rows, expr); err != nil {
+					return ctx.WriteError(err)
+				}
+				step := &evalStep{expr: expr, filter: word == "FILTER", trace: filterTrace{failAt: -1}}
+				if step.filter {
+					i += 2
+				} else {
+					step.name = ctx.ArgString(i + 3)
+					pipeline.add(step.name)
+					i += 4
+				}
+				steps = append(steps, step)
 			}
-			if err := pipeline.readExpr(rows, expr); err != nil {
-				return ctx.WriteError(err)
-			}
-			name := ctx.ArgString(i + 3)
-			pipeline.add(name)
+			i--
+			kept := rows[:0]
+		stream:
 			for _, r := range rows {
 				if _, ok := failed[r]; ok {
-					continue
-				}
-				if missing, ok := expr.Missing(r); ok {
-					failed[r] = errMissingProperty(missing)
-					continue
-				}
-				if v, f, num := expr.EvalTyped(r); num {
-					r.SetFloat(name, f)
-				} else {
-					r.Set(name, v)
-				}
-			}
-			i += 3
-		case "FILTER":
-			if i+1 >= n {
-				return ctx.WriteError(errors.New("Bad arguments for FILTER: Expected an argument, but none provided")) //nolint:staticcheck // RediSearch's reply text
-			}
-			expr, err := search.ParseExpr(ctx.ArgString(i + 1))
-			if err != nil {
-				return ctx.WriteError(err)
-			}
-			if err := pipeline.readExpr(rows, expr); err != nil {
-				return ctx.WriteError(err)
-			}
-			kept := rows[:0]
-			trace := filterTrace{failAt: -1}
-			for pos, r := range rows {
-				if _, ok := failed[r]; ok {
-					if trace.failAt < 0 {
-						trace.failAt = pos
+					for _, st := range steps {
+						if st.filter && st.trace.failAt < 0 {
+							st.trace.failAt = st.in
+						}
 					}
 					kept = append(kept, r)
 					continue
 				}
-				if missing, ok := expr.Missing(r); ok {
-					failed[r] = errMissingProperty(missing)
-					if trace.failAt < 0 {
-						trace.failAt = pos
+				for _, st := range steps {
+					pos := st.in
+					st.in++
+					if !st.filter {
+						if !st.expr.Apply(r, st.name, state) {
+							evalFailed(r)
+							kept = append(kept, r)
+							continue stream
+						}
+						statusAt[r] = state.Err()
+						continue
 					}
-					kept = append(kept, r)
-					continue
+					keep, ok := st.expr.Keep(r, state)
+					if !ok {
+						evalFailed(r)
+						if st.trace.failAt < 0 {
+							st.trace.failAt = pos
+						}
+						kept = append(kept, r)
+						continue stream
+					}
+					statusAt[r] = state.Err()
+					if !keep {
+						continue stream
+					}
+					st.trace.passed = append(st.trace.passed, pos)
 				}
-				if expr.Truthy(r) {
-					trace.passed = append(trace.passed, pos)
-					kept = append(kept, r)
-				}
+				kept = append(kept, r)
 			}
 			rows = kept
 			if ctx.aggTrace != nil {
-				ctx.aggTrace.filters = append(ctx.aggTrace.filters, trace)
+				for _, st := range steps {
+					if st.filter {
+						ctx.aggTrace.filters = append(ctx.aggTrace.filters, st.trace)
+					}
+				}
 			}
-			i++
 		case "PARAMS":
 			_, last, err := countedArgs(ctx, i)
 			if err != nil {
@@ -1178,7 +1214,7 @@ func cmdFTAGGREGATE(ctx *Context) error {
 	for i, h := range found {
 		hits[i] = h.Doc
 	}
-	agg := &aggregation{idx: idx, hits: hits, order: pipeline.order, rows: rows, read: read, docs: docs, failed: failed, found: len(found), next: offset, end: len(rows), limitEnd: -1}
+	agg := &aggregation{idx: idx, hits: hits, order: pipeline.order, rows: rows, read: read, docs: docs, failed: failed, statusAt: statusAt, finalStatus: state.Err(), found: len(found), next: offset, end: len(rows), limitEnd: -1}
 	if limit >= 0 {
 		agg.end, agg.limitEnd = min(len(rows), offset+limit), offset+limit
 	}
@@ -1211,21 +1247,25 @@ func cmdFTAGGREGATE(ctx *Context) error {
 // once the query ran out of documents. A gathered reply sends its total
 // once.
 type aggregation struct {
-	idx      *search.Index
-	order    []string
-	rows     []*search.Row
-	docs     map[*search.Row]*search.Document
-	hits     []*search.Document
-	read     map[*search.Row]int
-	failed   map[*search.Row]error
-	found    int
-	next     int
-	end      int
-	limitEnd int
-	pos      int
-	ranked   bool
-	total    int
-	sent     bool
+	idx    *search.Index
+	order  []string
+	rows   []*search.Row
+	docs   map[*search.Row]*search.Document
+	hits   []*search.Document
+	read   map[*search.Row]int
+	failed map[*search.Row]error
+	// statusAt and finalStatus are the evaluator's error after each row
+	// and at the end, which the first reply sends instead of rows.
+	statusAt    map[*search.Row]error
+	finalStatus error
+	found       int
+	next        int
+	end         int
+	limitEnd    int
+	pos         int
+	ranked      bool
+	total       int
+	sent        bool
 }
 
 // chunk replies with up to n rows and reports whether rows remain.
@@ -1249,6 +1289,14 @@ func (a *aggregation) chunk(ctx *Context, n int) (*resp.Value, bool, error) {
 			}
 			to, warning = i, err
 			break
+		}
+	}
+	if first && (warning == nil || to > from) {
+		switch {
+		case to > from && a.statusAt[a.rows[from]] != nil:
+			return nil, false, a.statusAt[a.rows[from]]
+		case to == from && warning == nil && a.finalStatus != nil:
+			return nil, false, a.finalStatus
 		}
 	}
 	full := warning == nil && to-from == n

@@ -28,6 +28,7 @@ type cell struct {
 	present bool
 	num     bool
 	null    bool
+	lit     bool
 	isArr   bool
 	arr     []cell
 }
@@ -45,7 +46,7 @@ func (r *Row) cell(field string) cell {
 		return cell{v: v, present: true, isArr: true, arr: r.arrays[name]}
 	}
 	f, num := r.Number(name)
-	return cell{v: v, f: f, present: true, num: num}
+	return cell{v: v, f: f, present: true, num: num, lit: r.lit[name]}
 }
 
 // number is RSValue_ToNumber: a number, or a string strtod reads whole.
@@ -56,19 +57,7 @@ func (c cell) number() (float64, bool) {
 	if c.num {
 		return c.f, true
 	}
-	s := strings.TrimLeft(c.v, " \t\n\v\f\r")
-	if s == "" {
-		return 0, true
-	}
-	f, err := strconv.ParseFloat(s, 64)
-	if err != nil {
-		var ne *strconv.NumError
-		if errors.As(err, &ne) && ne.Err == strconv.ErrRange && f != 0 && !math.IsInf(f, 0) {
-			return f, true
-		}
-		return 0, false
-	}
-	return f, true
+	return parseCNumber(c.v)
 }
 
 func (c cell) hash(seed uint64) uint64 {

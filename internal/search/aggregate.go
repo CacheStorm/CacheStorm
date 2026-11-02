@@ -1,7 +1,6 @@
 package search
 
 import (
-	"errors"
 	"math"
 	"sort"
 	"strconv"
@@ -19,6 +18,8 @@ type Row struct {
 	// items joined by NULs, replied as arrays.
 	lists map[string]bool
 	nulls map[string]bool
+	// lit marks strings RediSearch made itself rather than read.
+	lit map[string]bool
 	// arrays hold the items of the lists.
 	arrays map[string][]cell
 	// numv holds, at full precision, the values that are numbers to
@@ -104,6 +105,13 @@ func (r *Row) setList(name string, items []cell) {
 // IsNull reports whether a row value is null: a GROUPBY key the rows lack.
 func (r *Row) IsNull(name string) bool { return r.nulls[name] }
 
+func (r *Row) markLiteral(name string) {
+	if r.lit == nil {
+		r.lit = make(map[string]bool)
+	}
+	r.lit[name] = true
+}
+
 func (r *Row) markNull(name string) {
 	if r.nulls == nil {
 		r.nulls = make(map[string]bool)
@@ -128,6 +136,7 @@ func (r *Row) Get(name string) (string, bool) {
 // Set adds or replaces a row value.
 func (r *Row) Set(name, value string) {
 	delete(r.numv, name)
+	delete(r.lit, name)
 	delete(r.lists, name)
 	delete(r.arrays, name)
 	for i, n := range r.Names {
@@ -382,429 +391,15 @@ func FormatNumber(f float64) string {
 		return "-inf"
 	}
 	if math.IsNaN(f) {
+		if math.Signbit(f) {
+			return "-nan"
+		}
 		return "nan"
 	}
-	if f == math.Trunc(f) && math.Abs(f) < 1<<63 {
+	if f == math.Trunc(f) && (math.Abs(f) < 1<<63 || f == -1<<63) {
 		return strconv.FormatInt(int64(f), 10)
 	}
 	return strconv.FormatFloat(f, 'g', 12, 64)
-}
-
-// Expr is a parsed APPLY or FILTER expression.
-type Expr struct {
-	root exprNode
-}
-
-type exprNode interface{ eval(r *Row) value }
-
-type value struct {
-	num   float64
-	str   string
-	isNum bool
-	null  bool
-}
-
-func numValue(f float64) value { return value{num: f, isNum: true} }
-
-func (v value) number() (float64, bool) {
-	if v.isNum {
-		return v.num, true
-	}
-	f, err := strconv.ParseFloat(v.str, 64)
-	return f, err == nil
-}
-
-func (v value) String() string {
-	if v.null {
-		return ""
-	}
-	if v.isNum {
-		return FormatNumber(v.num)
-	}
-	return v.str
-}
-
-func (v value) truthy() bool {
-	if v.null {
-		return false
-	}
-	if f, ok := v.number(); ok {
-		return f != 0
-	}
-	return v.str != ""
-}
-
-type (
-	litNode   struct{ v value }
-	fieldNode struct{ name string }
-	unaryOp   struct {
-		op string
-		x  exprNode
-	}
-	binaryOp struct {
-		op   string
-		l, r exprNode
-	}
-	callNode struct {
-		fn   string
-		args []exprNode
-	}
-)
-
-func (n litNode) eval(*Row) value { return n.v }
-func (n fieldNode) eval(r *Row) value {
-	if v, ok := r.Get(n.name); ok {
-		return value{str: v}
-	}
-	return value{null: true}
-}
-func (n unaryOp) eval(r *Row) value {
-	x := n.x.eval(r)
-	if n.op == "!" {
-		return numValue(b2f(!x.truthy()))
-	}
-	f, _ := x.number()
-	return numValue(-f)
-}
-
-func b2f(b bool) float64 {
-	if b {
-		return 1
-	}
-	return 0
-}
-
-func (n binaryOp) eval(r *Row) value {
-	l := n.l.eval(r)
-	switch n.op {
-	case "&&":
-		return numValue(b2f(l.truthy() && n.r.eval(r).truthy()))
-	case "||":
-		return numValue(b2f(l.truthy() || n.r.eval(r).truthy()))
-	}
-	rv := n.r.eval(r)
-	switch n.op {
-	case "==", "!=", "<", "<=", ">", ">=":
-		var c int
-		x, okX := l.number()
-		y, okY := rv.number()
-		if okX && okY {
-			c = CompareValues(FormatNumber(x), FormatNumber(y))
-			if x < y {
-				c = -1
-			} else if x > y {
-				c = 1
-			}
-		} else {
-			c = strings.Compare(l.String(), rv.String())
-		}
-		res := map[string]bool{"==": c == 0, "!=": c != 0, "<": c < 0, "<=": c <= 0, ">": c > 0, ">=": c >= 0}[n.op]
-		return numValue(b2f(res))
-	}
-	x, okX := l.number()
-	y, okY := rv.number()
-	if !okX || !okY {
-		return value{null: true}
-	}
-	switch n.op {
-	case "+":
-		return numValue(x + y)
-	case "-":
-		return numValue(x - y)
-	case "*":
-		return numValue(x * y)
-	case "/":
-		return numValue(x / y)
-	case "%":
-		return numValue(float64(int64(x) % int64(math.Max(1, y))))
-	case "^":
-		return numValue(math.Pow(x, y))
-	}
-	return value{null: true}
-}
-
-func (n callNode) eval(r *Row) value {
-	args := make([]value, len(n.args))
-	for i, a := range n.args {
-		args[i] = a.eval(r)
-	}
-	num := func(i int) float64 {
-		if i < len(args) {
-			f, _ := args[i].number()
-			return f
-		}
-		return 0
-	}
-	str := func(i int) string {
-		if i < len(args) {
-			return args[i].String()
-		}
-		return ""
-	}
-	switch n.fn {
-	case "upper":
-		return value{str: strings.ToUpper(str(0))}
-	case "lower":
-		return value{str: strings.ToLower(str(0))}
-	case "abs":
-		return numValue(math.Abs(num(0)))
-	case "floor":
-		return numValue(math.Floor(num(0)))
-	case "ceil":
-		return numValue(math.Ceil(num(0)))
-	case "sqrt":
-		return numValue(math.Sqrt(num(0)))
-	case "log":
-		return numValue(math.Log(num(0)))
-	case "log2":
-		return numValue(math.Log2(num(0)))
-	case "exp":
-		return numValue(math.Exp(num(0)))
-	case "strlen":
-		return numValue(float64(len(str(0))))
-	case "exists":
-		return numValue(b2f(len(args) > 0 && !args[0].null))
-	case "contains":
-		return numValue(float64(strings.Count(str(0), str(1))))
-	case "startswith":
-		return numValue(b2f(strings.HasPrefix(str(0), str(1))))
-	case "substr":
-		s := str(0)
-		off, n := int(num(1)), int(num(2))
-		if off < 0 {
-			off += len(s)
-		}
-		off = min(max(off, 0), len(s))
-		end := len(s)
-		if len(args) > 2 && n >= 0 {
-			end = min(off+n, len(s))
-		}
-		return value{str: s[off:end]}
-	}
-	return value{null: true}
-}
-
-// Eval returns the expression's value for r as a string.
-func (e *Expr) Eval(r *Row) string { return e.root.eval(r).String() }
-
-// EvalTyped evaluates the expression and returns the number RediSearch
-// holds when the result is one.
-func (e *Expr) EvalTyped(r *Row) (string, float64, bool) {
-	if f, ok := e.root.(fieldNode); ok {
-		v, _ := r.Get(f.name)
-		n, isNum := r.Number(f.name)
-		return v, n, isNum
-	}
-	v := e.root.eval(r)
-	return v.String(), v.num, v.isNum && !v.null
-}
-
-// Missing returns a property the expression reads that r lacks, which
-// RediSearch refuses to evaluate; exists() may read anything.
-func (e *Expr) Missing(r *Row) (string, bool) { return missingField(e.root, r) }
-
-func missingField(n exprNode, r *Row) (string, bool) {
-	switch n := n.(type) {
-	case fieldNode:
-		if _, ok := r.Get(n.name); !ok {
-			return n.name, true
-		}
-	case unaryOp:
-		return missingField(n.x, r)
-	case binaryOp:
-		if name, ok := missingField(n.l, r); ok {
-			return name, true
-		}
-		return missingField(n.r, r)
-	case callNode:
-		if n.fn == "exists" {
-			return "", false
-		}
-		for _, a := range n.args {
-			if name, ok := missingField(a, r); ok {
-				return name, true
-			}
-		}
-	}
-	return "", false
-}
-
-// Truthy reports whether a FILTER expression holds for r.
-func (e *Expr) Truthy(r *Row) bool { return e.root.eval(r).truthy() }
-
-type exprParser struct {
-	s   string
-	pos int
-}
-
-// ParseExpr parses an APPLY or FILTER expression.
-func ParseExpr(s string) (*Expr, error) {
-	p := &exprParser{s: s}
-	n, err := p.binary(0)
-	if err != nil {
-		return nil, err
-	}
-	p.space()
-	if p.pos < len(p.s) {
-		return nil, errors.New("Syntax error at offset " + strconv.Itoa(p.pos) + " near " + p.s[p.pos:]) //nolint:staticcheck // RediSearch's reply text
-	}
-	return &Expr{root: n}, nil
-}
-
-func (p *exprParser) space() {
-	for p.pos < len(p.s) && p.s[p.pos] == ' ' {
-		p.pos++
-	}
-}
-
-var exprLevels = [][]string{{"||"}, {"&&"}, {"==", "!=", "<=", ">=", "<", ">"}, {"+", "-"}, {"*", "/", "%"}, {"^"}}
-
-func (p *exprParser) binary(level int) (exprNode, error) {
-	if level == len(exprLevels) {
-		return p.unary()
-	}
-	left, err := p.binary(level + 1)
-	if err != nil {
-		return nil, err
-	}
-	for {
-		p.space()
-		matched := ""
-		for _, op := range exprLevels[level] {
-			if strings.HasPrefix(p.s[p.pos:], op) {
-				matched = op
-				break
-			}
-		}
-		if matched == "" {
-			return left, nil
-		}
-		p.pos += len(matched)
-		right, err := p.binary(level + 1)
-		if err != nil {
-			return nil, err
-		}
-		left = binaryOp{op: matched, l: left, r: right}
-	}
-}
-
-func (p *exprParser) unary() (exprNode, error) {
-	p.space()
-	if p.pos < len(p.s) && (p.s[p.pos] == '!' || p.s[p.pos] == '-') {
-		op := string(p.s[p.pos])
-		p.pos++
-		x, err := p.unary()
-		if err != nil {
-			return nil, err
-		}
-		return unaryOp{op: op, x: x}, nil
-	}
-	return p.primary()
-}
-
-func (p *exprParser) primary() (exprNode, error) {
-	p.space()
-	if p.pos >= len(p.s) {
-		return nil, errors.New("Syntax error: unexpected end of expression") //nolint:staticcheck // RediSearch's reply text
-	}
-	c := p.s[p.pos]
-	switch {
-	case c == '(':
-		p.pos++
-		n, err := p.binary(0)
-		if err != nil {
-			return nil, err
-		}
-		p.space()
-		if p.pos >= len(p.s) || p.s[p.pos] != ')' {
-			return nil, errors.New("Syntax error: missing )") //nolint:staticcheck // RediSearch's reply text
-		}
-		p.pos++
-		return n, nil
-	case c == '@':
-		p.pos++
-		start := p.pos
-		for p.pos < len(p.s) && (isIdentByte(p.s[p.pos]) || p.s[p.pos] == '.' || p.s[p.pos] == '$') {
-			p.pos++
-		}
-		return fieldNode{name: p.s[start:p.pos]}, nil
-	case c == '\'' || c == '"':
-		end := strings.IndexByte(p.s[p.pos+1:], c)
-		if end < 0 {
-			return nil, errors.New("Syntax error: unterminated string") //nolint:staticcheck // RediSearch's reply text
-		}
-		v := p.s[p.pos+1 : p.pos+1+end]
-		p.pos += end + 2
-		return litNode{value{str: v}}, nil
-	case c >= '0' && c <= '9' || c == '.':
-		start := p.pos
-		for p.pos < len(p.s) && strings.IndexByte("0123456789.eE", p.s[p.pos]) >= 0 {
-			p.pos++
-		}
-		f, err := strconv.ParseFloat(p.s[start:p.pos], 64)
-		if err != nil {
-			return nil, errors.New("Syntax error: bad number") //nolint:staticcheck // RediSearch's reply text
-		}
-		return litNode{numValue(f)}, nil
-	case isIdentByte(c):
-		start := p.pos
-		for p.pos < len(p.s) && isIdentByte(p.s[p.pos]) {
-			p.pos++
-		}
-		name := strings.ToLower(p.s[start:p.pos])
-		p.space()
-		if p.pos >= len(p.s) || p.s[p.pos] != '(' {
-			return nil, errors.New("Syntax error: unknown symbol " + name) //nolint:staticcheck // RediSearch's reply text
-		}
-		p.pos++
-		var args []exprNode
-		for {
-			p.space()
-			if p.pos < len(p.s) && p.s[p.pos] == ')' {
-				p.pos++
-				break
-			}
-			a, err := p.binary(0)
-			if err != nil {
-				return nil, err
-			}
-			args = append(args, a)
-			p.space()
-			if p.pos < len(p.s) && p.s[p.pos] == ',' {
-				p.pos++
-			}
-		}
-		return callNode{fn: name, args: args}, nil
-	}
-	return nil, errors.New("Syntax error at offset " + strconv.Itoa(p.pos)) //nolint:staticcheck // RediSearch's reply text
-}
-
-func isIdentByte(c byte) bool {
-	return c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
-}
-
-// Properties returns the properties the expression reads, in the order
-// RediSearch resolves them.
-func (e *Expr) Properties() []string {
-	var out []string
-	var walk func(n exprNode)
-	walk = func(n exprNode) {
-		switch n := n.(type) {
-		case fieldNode:
-			out = append(out, n.name)
-		case unaryOp:
-			walk(n.x)
-		case binaryOp:
-			walk(n.l)
-			walk(n.r)
-		case callNode:
-			for _, a := range n.args {
-				walk(a)
-			}
-		}
-	}
-	walk(e.root)
-	return out
 }
 
 // Yields returns the fields a query's vector clauses return distances as.

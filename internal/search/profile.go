@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"math"
 	"strconv"
-	"strings"
 
 	"github.com/cachestorm/cachestorm/internal/store"
 )
@@ -135,24 +134,4 @@ func numericRangeTerm(lo, hi float64) string {
 		return strconv.FormatFloat(f, 'g', 6, 64)
 	}
 	return fmt.Sprintf("%s - %s", g(lo), g(hi))
-}
-
-// ProfileExprType is how FT.PROFILE names an APPLY or FILTER step, by its
-// expression's root.
-func ProfileExprType(e *Expr) string {
-	switch n := e.root.(type) {
-	case fieldNode:
-		return "Property " + n.name
-	case callNode:
-		return "Function " + n.fn
-	case unaryOp:
-		return "Inverted"
-	case binaryOp:
-		switch n.op {
-		case "+", "-", "*", "/", "%", "^":
-			return "Operator " + n.op
-		}
-		return "Predicate " + n.op
-	}
-	return "Literal " + strings.TrimSpace(e.root.eval(nil).String())
 }

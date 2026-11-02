@@ -79,12 +79,12 @@ func (p *pipelineKeys) read(rows []*search.Row, name string, load bool) bool {
 }
 
 func (p *pipelineKeys) readExpr(rows []*search.Row, expr *search.Expr) error {
-	for _, name := range expr.Properties() {
+	return expr.Lookup(func(name string) error {
 		if !p.read(rows, name, false) {
 			return errors.New("Property `" + name + "` not loaded nor in pipeline") //nolint:staticcheck // RediSearch's reply text
 		}
-	}
-	return nil
+		return nil
+	})
 }
 
 // group checks a GROUPBY's properties and reducers and starts the group's

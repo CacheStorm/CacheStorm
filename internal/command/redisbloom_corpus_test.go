@@ -134,6 +134,22 @@ func TestSearchReplaysGroupByCorpus(t *testing.T) {
 	replayRedisCorpus(t, router, "testdata/redisearch_groupby_r8.jsonl")
 }
 
+// testdata/redisearch_expr_r8.jsonl holds random APPLY and FILTER
+// expressions, well formed or not, on documents with numbers, strings and
+// missing fields, with Redis 8.2's replies: values and types, syntax and
+// lookup errors as RediSearch's parser reports them, and the evaluator's
+// error status as it carries from row to row.
+func TestSearchReplaysExpressionCorpus(t *testing.T) {
+	router := NewRouter()
+	RegisterSearchCommands(router)
+	RegisterHashCommands(router)
+	RegisterStringCommands(router)
+	RegisterKeyCommands(router)
+	search.GetIndexManager().Reset()
+	t.Cleanup(search.GetIndexManager().Reset)
+	replayRedisCorpus(t, router, "testdata/redisearch_expr_r8.jsonl")
+}
+
 // testdata/redisearch_suggest_r8.jsonl holds auto-complete dictionaries
 // built and queried at random (scores, INCR, payloads, deletes, fuzzy and
 // case-folded prefixes) with Redis 8.2's replies. TRIM is left out where it

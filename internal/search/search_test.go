@@ -117,14 +117,19 @@ func TestAggregateExpressions(t *testing.T) {
 	r.Set("price", "20")
 	r.Set("name", "Bob")
 	for expr, want := range map[string]string{
-		"@price*2": "40", "@price/8": "2.5", "(@price+1)%7": "0", "@price>10 && @price<30": "1",
-		"upper(@name)": "BOB", "strlen(@name)": "3", "substr(@name, 1, 2)": "ob", "!exists(@missing)": "1",
+		"@price*2": "40", "@price/8": "2.5", "(@price + 1)%7": "0", "@price>10 && @price<30": "1",
+		"upper(@name)": "BOB", "strlen(@name)": "3", "substr(@name, 1, 2)": "ob", "!exists(@missing)": "1", "format('%s-%s', @name, @price)": "Bob-20",
+		"timefmt(1700000000, '%Y-%m-%d')": "2023-11-14", "case(@price > 30, 'high', 'low')": "low",
 	} {
 		e, err := ParseExpr(expr)
 		if err != nil {
 			t.Fatalf("%s: %v", expr, err)
 		}
-		if got := e.Eval(r); got != want {
+		var st EvalState
+		if !e.Apply(r, "out", &st) {
+			t.Fatalf("%s: %v", expr, st.Err())
+		}
+		if got, _ := r.Value("out"); got != want {
 			t.Errorf("%s = %q, want %q", expr, got, want)
 		}
 	}
