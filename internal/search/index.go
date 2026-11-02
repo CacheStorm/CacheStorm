@@ -332,6 +332,8 @@ type IndexManager struct {
 
 	cursorOnce sync.Once
 	cursors    *cursorList
+
+	dicts map[string]map[string]bool
 }
 
 // All returns the indexes; it is cheap when there are none.
@@ -457,7 +459,7 @@ func (m *IndexManager) Commands() [][]string {
 	for _, a := range sortedKeys(m.aliases) {
 		out = append(out, []string{"FT.ALIASADD", a, m.aliases[a]})
 	}
-	return out
+	return append(out, m.dictCommandsLocked()...)
 }
 
 func sortedKeys[V any](m map[string]V) []string {
@@ -475,6 +477,7 @@ func (m *IndexManager) Reset() {
 	m.mu.Lock()
 	m.indexes = make(map[string]*Index)
 	m.aliases = make(map[string]string)
+	m.dicts = nil
 	m.count.Store(0)
 	m.mu.Unlock()
 }

@@ -311,3 +311,45 @@ func TestSynonymsSurviveRestartAndReplicate(t *testing.T) {
 	waitSynced(t, replica, master)
 	check(r)
 }
+
+func TestSpellCheckDictsSurviveRestartAndReplicate(t *testing.T) {
+	seed := func(c *replClient) {
+		c.do("FT.DICTADD", "words", "hello", "Wrld", "gone")
+		c.do("FT.DICTDEL", "words", "gone")
+		c.do("FT.DICTADD", "other", "x")
+	}
+	check := func(c *replClient) {
+		t.Helper()
+		if got := c.str("FT.DICTDUMP", "words"); got != "[Wrld hello]" {
+			t.Fatalf("FT.DICTDUMP words = %s", got)
+		}
+		if got := c.str("FT.DICTDUMP", "other"); got != "[x]" {
+			t.Fatalf("FT.DICTDUMP other = %s", got)
+		}
+	}
+	cfg := aofRewriteConfig(t, t.TempDir(), func(c *config.Config) { c.Persistence.AOFRewritePercentage = 0 })
+	s := startReplServerCfg(t, cfg)
+	c := dialRepl(t, s)
+	seed(c)
+	check(c)
+	stopReplServer(s)
+	s = startReplServerCfg(t, cfg)
+	c = dialRepl(t, s)
+	check(c)
+	c.do("BGREWRITEAOF")
+	waitAOFRewrites(t, s, 1)
+	stopReplServer(s)
+	c = dialRepl(t, startReplServerCfg(t, cfg))
+	check(c)
+	c.do("FLUSHALL")
+	if got := c.str("FT.DICTDUMP", "words"); got != "[]" {
+		t.Fatalf("FLUSHALL kept the dictionary: %s", got)
+	}
+
+	master := startReplServer(t, nil)
+	replica := startReplServer(t, nil)
+	r := replicate(t, replica, master)
+	seed(dialRepl(t, master))
+	waitSynced(t, replica, master)
+	check(r)
+}

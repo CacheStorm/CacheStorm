@@ -73,6 +73,21 @@ func TestSearchReplaysVectorCorpus(t *testing.T) {
 	replayRedisCorpus(t, router, "testdata/redisearch_vectors_r8.jsonl")
 }
 
+// testdata/redisearch_spellcheck_r8.jsonl holds FT.SPELLCHECK on random
+// documents, with misspelt terms, distances 1 to 4 and INCLUDE and
+// EXCLUDE dictionaries, and FT.DICTADD, FT.DICTDEL and FT.DICTDUMP, with
+// Redis 8.2's replies.
+func TestSearchReplaysSpellCheckCorpus(t *testing.T) {
+	router := NewRouter()
+	RegisterSearchCommands(router)
+	RegisterHashCommands(router)
+	RegisterStringCommands(router)
+	RegisterKeyCommands(router)
+	search.GetIndexManager().Reset()
+	t.Cleanup(search.GetIndexManager().Reset)
+	replayRedisCorpus(t, router, "testdata/redisearch_spellcheck_r8.jsonl")
+}
+
 // testdata/redisearch_scoring_r8.jsonl holds random documents and
 // queries whose scores depend on how RediSearch's iterators visit them:
 // unions of stems and synonyms inside intersections, negations, optional

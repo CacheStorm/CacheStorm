@@ -1,0 +1,942 @@
+{"cmd": ["FLUSHALL"]}
+{"cmd": ["FT.CREATE", "i", "ON", "HASH", "PREFIX", "1", "d:", "SCHEMA", "t", "TEXT", "b", "TEXT", "NOSTEM", "g", "TAG"], "want": "+OK\r\n"}
+{"cmd": ["HSET", "d:1", "t", "hello world running", "b", "helping hand", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["HSET", "d:2", "t", "help me", "b", "yellow", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["HSET", "d:3", "t", "hell no", "b", "held", "g", "green"], "want": ":3\r\n"}
+{"cmd": ["FT.SPELLCHECK", "i", "helo"], "want": "*1\r\n*3\r\n+TERM\r\n$4\r\nhelo\r\n*4\r\n*2\r\n$18\r\n0.3333333333333333\r\n$4\r\nheld\r\n*2\r\n$18\r\n0.3333333333333333\r\n$4\r\nhell\r\n*2\r\n$18\r\n0.3333333333333333\r\n$5\r\nhello\r\n*2\r\n$18\r\n0.3333333333333333\r\n$4\r\nhelp\r\n"}
+{"cmd": ["FT.SPELLCHECK", "i", "helo", "DISTANCE", "2"], "want": "*1\r\n*3\r\n+TERM\r\n$4\r\nhelo\r\n*4\r\n*2\r\n$18\r\n0.3333333333333333\r\n$4\r\nheld\r\n*2\r\n$18\r\n0.3333333333333333\r\n$4\r\nhell\r\n*2\r\n$18\r\n0.3333333333333333\r\n$5\r\nhello\r\n*2\r\n$18\r\n0.3333333333333333\r\n$4\r\nhelp\r\n"}
+{"cmd": ["FT.SPELLCHECK", "i", "helo wrld"], "want": "*2\r\n*3\r\n+TERM\r\n$4\r\nhelo\r\n*4\r\n*2\r\n$18\r\n0.3333333333333333\r\n$4\r\nheld\r\n*2\r\n$18\r\n0.3333333333333333\r\n$4\r\nhell\r\n*2\r\n$18\r\n0.3333333333333333\r\n$5\r\nhello\r\n*2\r\n$18\r\n0.3333333333333333\r\n$4\r\nhelp\r\n*3\r\n+TERM\r\n$4\r\nwrld\r\n*1\r\n*2\r\n$18\r\n0.3333333333333333\r\n$5\r\nworld\r\n"}
+{"cmd": ["FT.SPELLCHECK", "i", "hello"], "want": "*0\r\n"}
+{"cmd": ["FT.SPELLCHECK", "i", "@b:helo"], "want": "*1\r\n*3\r\n+TERM\r\n$4\r\nhelo\r\n*1\r\n*2\r\n$18\r\n0.3333333333333333\r\n$4\r\nheld\r\n"}
+{"cmd": ["FT.SPELLCHECK", "i", "@g:{rad}"], "want": "*1\r\n*3\r\n+TERM\r\n$3\r\nrad\r\n*0\r\n"}
+{"cmd": ["FT.SPELLCHECK", "i", "runing", "DISTANCE", "2"], "want": "*1\r\n*3\r\n+TERM\r\n$6\r\nruning\r\n*1\r\n*2\r\n$18\r\n0.3333333333333333\r\n$7\r\nrunning\r\n"}
+{"cmd": ["FT.SPELLCHECK", "i", "Helo"], "want": "*1\r\n*3\r\n+TERM\r\n$4\r\nhelo\r\n*4\r\n*2\r\n$18\r\n0.3333333333333333\r\n$4\r\nheld\r\n*2\r\n$18\r\n0.3333333333333333\r\n$4\r\nhell\r\n*2\r\n$18\r\n0.3333333333333333\r\n$5\r\nhello\r\n*2\r\n$18\r\n0.3333333333333333\r\n$4\r\nhelp\r\n"}
+{"cmd": ["FT.SPELLCHECK", "i", "helo", "FULLSCOREINFO"], "want": "*2\r\n:3\r\n*3\r\n+TERM\r\n$4\r\nhelo\r\n*4\r\n*2\r\n$1\r\n1\r\n$4\r\nheld\r\n*2\r\n$1\r\n1\r\n$4\r\nhell\r\n*2\r\n$1\r\n1\r\n$5\r\nhello\r\n*2\r\n$1\r\n1\r\n$4\r\nhelp\r\n"}
+{"cmd": ["FT.SPELLCHECK", "i", "hello", "FULLSCOREINFO"], "want": "*2\r\n:3\r\n*3\r\n+TERM\r\n$5\r\nhello\r\n+term exists in index\r\n"}
+{"cmd": ["FT.DICTADD", "dict", "helo", "Hellx", "xyz"], "want": ":3\r\n"}
+{"cmd": ["FT.DICTADD", "dict", "helo"], "want": ":0\r\n"}
+{"cmd": ["FT.DICTDUMP", "dict"], "want": "*3\r\n$5\r\nHellx\r\n$4\r\nhelo\r\n$3\r\nxyz\r\n"}
+{"cmd": ["FT.SPELLCHECK", "i", "helo", "TERMS", "EXCLUDE", "dict"], "want": "*0\r\n"}
+{"cmd": ["FT.SPELLCHECK", "i", "helx", "TERMS", "INCLUDE", "dict"], "want": "*1\r\n*3\r\n+TERM\r\n$4\r\nhelx\r\n*5\r\n*2\r\n$18\r\n0.3333333333333333\r\n$4\r\nheld\r\n*2\r\n$18\r\n0.3333333333333333\r\n$4\r\nhell\r\n*2\r\n$18\r\n0.3333333333333333\r\n$4\r\nhelp\r\n*2\r\n$1\r\n0\r\n$4\r\nhelo\r\n*2\r\n$1\r\n0\r\n$5\r\nHellx\r\n"}
+{"cmd": ["FT.SPELLCHECK", "i", "helx", "TERMS", "INCLUDE", "nodict"], "want": "-Dict does not exist: nodict\r\n"}
+{"cmd": ["FT.SPELLCHECK", "i", "helx", "TERMS", "FOO", "dict"], "want": "-bad format, exclude/include operation was not given\r\n"}
+{"cmd": ["FT.SPELLCHECK", "i", "helx", "TERMS", "INCLUDE"], "want": "-TERM arg is given but no TERM params comes after\r\n"}
+{"cmd": ["FT.SPELLCHECK", "i", "helx", "DISTANCE", "0"], "want": "-bad distance given, distance must be a natural number between 1 to 4\r\n"}
+{"cmd": ["FT.SPELLCHECK", "i", "helx", "DISTANCE", "5"], "want": "-bad distance given, distance must be a natural number between 1 to 4\r\n"}
+{"cmd": ["FT.SPELLCHECK", "i", "helx", "DISTANCE"], "want": "-DISTANCE arg is given but no DISTANCE comes after\r\n"}
+{"cmd": ["FT.SPELLCHECK", "nosuch", "helx"], "want": "-nosuch: no such index\r\n"}
+{"cmd": ["FT.SPELLCHECK", "i"], "want": "-ERR wrong number of arguments for 'FT.SPELLCHECK' command\r\n"}
+{"cmd": ["FT.SPELLCHECK", "i", "-helo|wrld ~yelow"], "want": "*3\r\n*3\r\n+TERM\r\n$4\r\nhelo\r\n*4\r\n*2\r\n$18\r\n0.3333333333333333\r\n$4\r\nheld\r\n*2\r\n$18\r\n0.3333333333333333\r\n$4\r\nhell\r\n*2\r\n$18\r\n0.3333333333333333\r\n$5\r\nhello\r\n*2\r\n$18\r\n0.3333333333333333\r\n$4\r\nhelp\r\n*3\r\n+TERM\r\n$4\r\nwrld\r\n*1\r\n*2\r\n$18\r\n0.3333333333333333\r\n$5\r\nworld\r\n*3\r\n+TERM\r\n$5\r\nyelow\r\n*1\r\n*2\r\n$18\r\n0.3333333333333333\r\n$6\r\nyellow\r\n"}
+{"cmd": ["FT.SPELLCHECK", "i", "\"helo wrld\""], "want": "*2\r\n*3\r\n+TERM\r\n$4\r\nhelo\r\n*4\r\n*2\r\n$18\r\n0.3333333333333333\r\n$4\r\nheld\r\n*2\r\n$18\r\n0.3333333333333333\r\n$4\r\nhell\r\n*2\r\n$18\r\n0.3333333333333333\r\n$5\r\nhello\r\n*2\r\n$18\r\n0.3333333333333333\r\n$4\r\nhelp\r\n*3\r\n+TERM\r\n$4\r\nwrld\r\n*1\r\n*2\r\n$18\r\n0.3333333333333333\r\n$5\r\nworld\r\n"}
+{"cmd": ["FT.SPELLCHECK", "i", "hel*"], "want": "*0\r\n"}
+{"cmd": ["FT.SPELLCHECK", "i", "%helo%"], "want": "*0\r\n"}
+{"cmd": ["FT.DICTDEL", "dict", "helo", "nope"], "want": ":1\r\n"}
+{"cmd": ["FT.DICTDUMP", "dict"], "want": "*2\r\n$5\r\nHellx\r\n$3\r\nxyz\r\n"}
+{"cmd": ["FT.DICTDUMP", "nodict"], "want": "*0\r\n"}
+{"cmd": ["FT.DICTDEL", "dict", "Hellx", "xyz"], "want": ":2\r\n"}
+{"cmd": ["FT.DICTDUMP", "dict"], "want": "*0\r\n"}
+{"cmd": ["FT.DICTADD", "dict"], "want": "-ERR wrong number of arguments for '_FT.DICTADD' command\r\n"}
+{"cmd": ["FT.DICTDEL", "dict"], "want": "-ERR wrong number of arguments for '_FT.DICTDEL' command\r\n"}
+{"cmd": ["FT.DICTDUMP"], "want": "-ERR wrong number of arguments for 'FT.DICTDUMP' command\r\n"}
+{"cmd": ["FT.DICTADD", "d2", "b", "a", "c", "B", "ab"], "want": ":5\r\n"}
+{"cmd": ["FT.DICTDUMP", "d2"], "want": "*5\r\n$1\r\nB\r\n$1\r\na\r\n$2\r\nab\r\n$1\r\nb\r\n$1\r\nc\r\n"}
+{"cmd": ["FT.DICTDUMP", "d2"], "want": "*5\r\n$1\r\nB\r\n$1\r\na\r\n$2\r\nab\r\n$1\r\nb\r\n$1\r\nc\r\n"}
+{"cmd": ["FT.SPELLCHECK", "i", "helo wrld"], "want": "*2\r\n*3\r\n+TERM\r\n$4\r\nhelo\r\n*4\r\n*2\r\n$18\r\n0.3333333333333333\r\n$4\r\nheld\r\n*2\r\n$18\r\n0.3333333333333333\r\n$4\r\nhell\r\n*2\r\n$18\r\n0.3333333333333333\r\n$5\r\nhello\r\n*2\r\n$18\r\n0.3333333333333333\r\n$4\r\nhelp\r\n*3\r\n+TERM\r\n$4\r\nwrld\r\n*1\r\n*2\r\n$18\r\n0.3333333333333333\r\n$5\r\nworld\r\n"}
+{"cmd": ["FT.SPELLCHECK", "i", "hello", "FULLSCOREINFO"], "want": "*2\r\n:3\r\n*3\r\n+TERM\r\n$5\r\nhello\r\n+term exists in index\r\n"}
+{"cmd": ["FT.SPELLCHECK", "i", "helo", "FULLSCOREINFO"], "want": "*2\r\n:3\r\n*3\r\n+TERM\r\n$4\r\nhelo\r\n*4\r\n*2\r\n$1\r\n1\r\n$4\r\nheld\r\n*2\r\n$1\r\n1\r\n$4\r\nhell\r\n*2\r\n$1\r\n1\r\n$5\r\nhello\r\n*2\r\n$1\r\n1\r\n$4\r\nhelp\r\n"}
+{"cmd": ["FLUSHALL"]}
+{"cmd": ["FT.DICTDUMP", "d2"], "want": "*0\r\n"}
+{"cmd": ["FLUSHALL"]}
+{"cmd": ["FT.CREATE", "i", "ON", "HASH", "PREFIX", "1", "d:", "SCHEMA", "t", "TEXT", "NOSTEM"], "want": "+OK\r\n"}
+{"cmd": ["HSET", "d:1", "t", "held"], "want": ":1\r\n"}
+{"cmd": ["FT.SPELLCHECK", "i", "foxes", "DISTANCE", "4"], "want": "*1\r\n*3\r\n+TERM\r\n$5\r\nfoxes\r\n*1\r\n*2\r\n$1\r\n1\r\n$4\r\nheld\r\n"}
+{"cmd": ["FT.SPELLCHECK", "i", "foxes", "DISTANCE", "3"], "want": "*1\r\n*3\r\n+TERM\r\n$5\r\nfoxes\r\n*0\r\n"}
+{"cmd": ["FT.SPELLCHECK", "i", "fozes", "DISTANCE", "4"], "want": "*1\r\n*3\r\n+TERM\r\n$5\r\nfozes\r\n*1\r\n*2\r\n$1\r\n1\r\n$4\r\nheld\r\n"}
+{"cmd": ["FT.SPELLCHECK", "i", "abcde", "DISTANCE", "4"], "want": "*1\r\n*3\r\n+TERM\r\n$5\r\nabcde\r\n*1\r\n*2\r\n$1\r\n1\r\n$4\r\nheld\r\n"}
+{"cmd": ["FT.SPELLCHECK", "i", "abcdef", "DISTANCE", "4"], "want": "*1\r\n*3\r\n+TERM\r\n$6\r\nabcdef\r\n*0\r\n"}
+{"cmd": ["FT.SPELLCHECK", "i", "abcdefg", "DISTANCE", "4"], "want": "*1\r\n*3\r\n+TERM\r\n$7\r\nabcdefg\r\n*0\r\n"}
+{"cmd": ["FT.SPELLCHECK", "i", "abcde", "DISTANCE", "3"], "want": "*1\r\n*3\r\n+TERM\r\n$5\r\nabcde\r\n*0\r\n"}
+{"cmd": ["FT.SPELLCHECK", "i", "abcd", "DISTANCE", "3"], "want": "*1\r\n*3\r\n+TERM\r\n$4\r\nabcd\r\n*1\r\n*2\r\n$1\r\n1\r\n$4\r\nheld\r\n"}
+{"cmd": ["FT.SPELLCHECK", "i", "abcd", "DISTANCE", "2"], "want": "*1\r\n*3\r\n+TERM\r\n$4\r\nabcd\r\n*0\r\n"}
+{"cmd": ["FT.SPELLCHECK", "i", "abc", "DISTANCE", "2"], "want": "*1\r\n*3\r\n+TERM\r\n$3\r\nabc\r\n*0\r\n"}
+{"cmd": ["FT.SPELLCHECK", "i", "abc", "DISTANCE", "1"], "want": "*1\r\n*3\r\n+TERM\r\n$3\r\nabc\r\n*0\r\n"}
+{"cmd": ["FT.SPELLCHECK", "i", "ab", "DISTANCE", "1"], "want": "*1\r\n*3\r\n+TERM\r\n$2\r\nab\r\n*0\r\n"}
+{"cmd": ["FT.SPELLCHECK", "i", "xelx", "DISTANCE", "2"], "want": "*1\r\n*3\r\n+TERM\r\n$4\r\nxelx\r\n*1\r\n*2\r\n$1\r\n1\r\n$4\r\nheld\r\n"}
+{"cmd": ["FT.SPELLCHECK", "i", "xexx", "DISTANCE", "2"], "want": "*1\r\n*3\r\n+TERM\r\n$4\r\nxexx\r\n*0\r\n"}
+{"cmd": ["FT.SPELLCHECK", "i", "zzzzzz", "DISTANCE", "4"], "want": "*1\r\n*3\r\n+TERM\r\n$6\r\nzzzzzz\r\n*0\r\n"}
+{"cmd": ["FT.SPELLCHECK", "i", "zzzzz", "DISTANCE", "4"], "want": "*1\r\n*3\r\n+TERM\r\n$5\r\nzzzzz\r\n*0\r\n"}
+{"cmd": ["FT.SPELLCHECK", "i", "zzzz", "DISTANCE", "4"], "want": "*1\r\n*3\r\n+TERM\r\n$4\r\nzzzz\r\n*1\r\n*2\r\n$1\r\n1\r\n$4\r\nheld\r\n"}
+{"cmd": ["FT.SPELLCHECK", "i", "zzz", "DISTANCE", "2"], "want": "*1\r\n*3\r\n+TERM\r\n$3\r\nzzz\r\n*0\r\n"}
+{"cmd": ["FLUSHALL"]}
+{"cmd": ["FT.CREATE", "i", "ON", "HASH", "PREFIX", "1", "d:", "SCHEMA", "t", "TEXT"], "want": "+OK\r\n"}
+{"cmd": ["HSET", "d:1", "t", "cat hat"], "want": ":1\r\n"}
+{"cmd": ["FT.EXPLAIN", "i", "help at"], "want": "$35\r\nUNION {\n  help\n  +help(expanded)\n}\n\r\n"}
+{"cmd": ["FT.EXPLAIN", "i", "at"], "want": "$8\r\n<empty>\n\r\n"}
+{"cmd": ["FT.SPELLCHECK", "i", "at"], "want": "*1\r\n*3\r\n+TERM\r\n$2\r\nat\r\n*2\r\n*2\r\n$1\r\n1\r\n$3\r\ncat\r\n*2\r\n$1\r\n1\r\n$3\r\nhat\r\n"}
+{"cmd": ["FT.SPELLCHECK", "i", "the"], "want": "*1\r\n*3\r\n+TERM\r\n$3\r\nthe\r\n*0\r\n"}
+{"cmd": ["FT.SPELLCHECK", "i", "help the"], "want": "*2\r\n*3\r\n+TERM\r\n$4\r\nhelp\r\n*0\r\n*3\r\n+TERM\r\n$3\r\nthe\r\n*0\r\n"}
+{"cmd": ["FT.SEARCH", "i", "at"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["FT.EXPLAIN", "i", "the"], "want": "$8\r\n<empty>\n\r\n"}
+{"cmd": ["FT.SPELLCHECK", "i", "@t:at"], "want": "*1\r\n*3\r\n+TERM\r\n$2\r\nat\r\n*2\r\n*2\r\n$1\r\n1\r\n$3\r\ncat\r\n*2\r\n$1\r\n1\r\n$3\r\nhat\r\n"}
+{"cmd": ["FT.SPELLCHECK", "i", "at", "DIALECT", "2"], "want": "*1\r\n*3\r\n+TERM\r\n$2\r\nat\r\n*2\r\n*2\r\n$1\r\n1\r\n$3\r\ncat\r\n*2\r\n$1\r\n1\r\n$3\r\nhat\r\n"}
+{"cmd": ["FT.SPELLCHECK", "i", "help at", "DIALECT", "2"], "want": "*2\r\n*3\r\n+TERM\r\n$4\r\nhelp\r\n*0\r\n*3\r\n+TERM\r\n$2\r\nat\r\n*2\r\n*2\r\n$1\r\n1\r\n$3\r\ncat\r\n*2\r\n$1\r\n1\r\n$3\r\nhat\r\n"}
+{"cmd": ["flushall"]}
+{"cmd": ["hello", "3"]}
+{"cmd": ["ft.create", "idx", "ON", "HASH", "PREFIX", "1", "d:", "SCHEMA", "t", "TEXT", "b", "TEXT", "g", "TAG"], "want": "+OK\r\n"}
+{"cmd": ["hset", "d:1", "t", "fox", "b", "fox hell dogs", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:2", "t", "fox", "b", "", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:3", "t", "held national national run", "b", "quickly happiness nation happy help", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:4", "t", "run run run", "b", "hello run dogs world jumping", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:5", "t", "foxes", "b", "national", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:6", "t", "hello happy dog happy", "b", "happy national quickly cat run", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["ft.dictadd", "dict0", "NATION"], "want": ":1\r\n"}
+{"cmd": ["ft.dictadd", "dict1", "FOX", "happy", "NATIONAL", "natcon", "FOX"], "want": ":4\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "runx zjumped", "TERMS", "EXCLUDE", "dict0"], "want": "%1\r\n+results\r\n%2\r\n$4\r\nrunx\r\n*1\r\n%1\r\n$3\r\nrun\r\n,0.5\r\n$7\r\nzjumped\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "-run fox fox", "TERMS", "INCLUDE", "dict1"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "-hello run rhn", "DISTANCE", "2"], "want": "%1\r\n+results\r\n%1\r\n$3\r\nrhn\r\n*1\r\n%1\r\n$3\r\nrun\r\n,0.5\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "cats rmn happness", "TERMS", "EXCLUDE", "dict0", "TERMS", "INCLUDE", "dict1"], "want": "%1\r\n+results\r\n%3\r\n$4\r\ncats\r\n*1\r\n%1\r\n$3\r\ncat\r\n,0.16666666666666666\r\n$3\r\nrmn\r\n*1\r\n%1\r\n$3\r\nrun\r\n,0.5\r\n$8\r\nhappness\r\n*1\r\n%1\r\n$9\r\nhappiness\r\n,0.16666666666666666\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:world hell runs", "DISTANCE", "1", "TERMS", "EXCLUDE", "dict1"], "want": "%1\r\n+results\r\n%1\r\n$4\r\nruns\r\n*1\r\n%1\r\n$3\r\nrun\r\n,0.5\r\n"}
+{"cmd": ["ft.dictdump", "dict0"], "want": "~1\r\n$6\r\nNATION\r\n"}
+{"cmd": ["ft.dictdel", "dict0", "quick", "eelp"], "want": ":0\r\n"}
+{"cmd": ["ft.dictdump", "dict1"], "want": "~4\r\n$3\r\nFOX\r\n$8\r\nNATIONAL\r\n$5\r\nhappy\r\n$6\r\nnatcon\r\n"}
+{"cmd": ["ft.dictdel", "dict1", "hello", "runso"], "want": ":0\r\n"}
+{"cmd": ["flushall"]}
+{"cmd": ["ft.create", "idx", "ON", "HASH", "PREFIX", "1", "d:", "SCHEMA", "t", "TEXT", "b", "TEXT", "g", "TAG"], "want": "+OK\r\n"}
+{"cmd": ["ft.synupdate", "idx", "g1", "running", "dog"], "want": "+OK\r\n"}
+{"cmd": ["hset", "d:1", "t", "happiness held jumping", "b", "runs help world jumped", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:2", "t", "nation foxes dog hello", "b", "foxes happiness runs", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:3", "t", "quickly cats dogs", "b", "foxes jumped hello", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:4", "t", "happy run", "b", "cats", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "nation jumped word"], "want": "%1\r\n+results\r\n%1\r\n$4\r\nword\r\n*1\r\n%1\r\n$5\r\nworld\r\n,0.25\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "quickly help"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "cat word running", "DISTANCE", "1", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:4\r\n+results\r\n%3\r\n$3\r\ncat\r\n*2\r\n%1\r\n$4\r\n+cat\r\n,2\r\n%1\r\n$4\r\ncats\r\n,2\r\n$4\r\nword\r\n*1\r\n%1\r\n$5\r\nworld\r\n,1\r\n$7\r\nrunning\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:rtns natihonal dog", "DISTANCE", "1", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:4\r\n+results\r\n%3\r\n$4\r\nrtns\r\n*1\r\n%1\r\n$4\r\nruns\r\n,2\r\n$9\r\nnatihonal\r\n*0\r\n$3\r\ndog\r\n-term exists in index\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "iun foxs ahappy", "DISTANCE", "1"], "want": "%1\r\n+results\r\n%3\r\n$3\r\niun\r\n*1\r\n%1\r\n$3\r\nrun\r\n,0.25\r\n$4\r\nfoxs\r\n*1\r\n%1\r\n$5\r\nfoxes\r\n,0.5\r\n$6\r\nahappy\r\n*1\r\n%1\r\n$5\r\nhappy\r\n,0.25\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "running jump"], "want": "%1\r\n+results\r\n%2\r\n$7\r\nrunning\r\n*0\r\n$4\r\njump\r\n*1\r\n%1\r\n$5\r\n+jump\r\n,0.5\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "-@b:held iword"], "want": "%1\r\n+results\r\n%1\r\n$5\r\niword\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:rxuns held happiness", "DISTANCE", "1"], "want": "%1\r\n+results\r\n%1\r\n$5\r\nrxuns\r\n*1\r\n%1\r\n$4\r\nruns\r\n,0.5\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "rdun", "DISTANCE", "4"], "want": "%1\r\n+results\r\n%1\r\n$4\r\nrdun\r\n*14\r\n%1\r\n$4\r\n+cat\r\n,0.5\r\n%1\r\n$4\r\n+fox\r\n,0.5\r\n%1\r\n$5\r\n+jump\r\n,0.5\r\n%1\r\n$4\r\n+run\r\n,0.5\r\n%1\r\n$4\r\ncats\r\n,0.5\r\n%1\r\n$4\r\nruns\r\n,0.5\r\n%1\r\n$4\r\n+dog\r\n,0.25\r\n%1\r\n$3\r\nrun\r\n,0.25\r\n%1\r\n$3\r\ndog\r\n,0.25\r\n%1\r\n$4\r\ndogs\r\n,0.25\r\n%1\r\n$4\r\nheld\r\n,0.25\r\n%1\r\n$4\r\nhelp\r\n,0.25\r\n%1\r\n$5\r\nworld\r\n,0.25\r\n%1\r\n$3\r\n~g1\r\n,0.25\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "-nation", "DISTANCE", "2"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "-runner world runer"], "want": "%1\r\n+results\r\n%2\r\n$6\r\nrunner\r\n*0\r\n$5\r\nruner\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "eld happy dog", "DISTANCE", "1"], "want": "%1\r\n+results\r\n%1\r\n$3\r\neld\r\n*1\r\n%1\r\n$4\r\nheld\r\n,0.25\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:runving"], "want": "%1\r\n+results\r\n%1\r\n$7\r\nrunving\r\n*0\r\n"}
+{"cmd": ["flushall"]}
+{"cmd": ["hello", "3"]}
+{"cmd": ["ft.create", "idx", "ON", "HASH", "PREFIX", "1", "d:", "SCHEMA", "t", "TEXT", "b", "TEXT", "g", "TAG"], "want": "+OK\r\n"}
+{"cmd": ["ft.synupdate", "idx", "g1", "held", "fox"], "want": "+OK\r\n"}
+{"cmd": ["hset", "d:1", "t", "fox", "b", "hello happy", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:2", "t", "hello hello fox dogs", "b", "jump happy hell jump foxes", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:3", "t", "world", "b", "", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["ft.dictadd", "dict0", "HELD"], "want": ":1\r\n"}
+{"cmd": ["ft.dictadd", "dict1", "NATION", "runs", "national", "DOG"], "want": ":4\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "run hesld", "TERMS", "INCLUDE", "dict1"], "want": "%1\r\n+results\r\n%2\r\n$3\r\nrun\r\n*1\r\n%1\r\n$4\r\nruns\r\n,0\r\n$5\r\nhesld\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "running quick runnr", "TERMS", "INCLUDE", "dict1"], "want": "%1\r\n+results\r\n%3\r\n$7\r\nrunning\r\n*0\r\n$5\r\nquick\r\n*0\r\n$5\r\nrunnr\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "-@b:un cat", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%2\r\n$2\r\nun\r\n*0\r\n$3\r\ncat\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "foxes cat", "TERMS", "EXCLUDE", "dict0"], "want": "%1\r\n+results\r\n%1\r\n$3\r\ncat\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "-hell held", "DISTANCE", "1", "TERMS", "EXCLUDE", "dict1"], "want": "%1\r\n+results\r\n%1\r\n$4\r\nheld\r\n*1\r\n%1\r\n$4\r\nhell\r\n,0.3333333333333333\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "cats helj happy", "DISTANCE", "1", "TERMS", "EXCLUDE", "dict0"], "want": "%1\r\n+results\r\n%2\r\n$4\r\ncats\r\n*0\r\n$4\r\nhelj\r\n*1\r\n%1\r\n$4\r\nhell\r\n,0.3333333333333333\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "qkuickly", "DISTANCE", "1", "TERMS", "INCLUDE", "dict0", "TERMS", "INCLUDE", "dict1"], "want": "%1\r\n+results\r\n%1\r\n$8\r\nqkuickly\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "hel quickly", "TERMS", "EXCLUDE", "dict0", "TERMS", "INCLUDE", "dict1"], "want": "%1\r\n+results\r\n%2\r\n$3\r\nhel\r\n*1\r\n%1\r\n$4\r\nhell\r\n,0.3333333333333333\r\n$7\r\nquickly\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:foxes national help", "DISTANCE", "2"], "want": "%1\r\n+results\r\n%2\r\n$8\r\nnational\r\n*0\r\n$4\r\nhelp\r\n*2\r\n%1\r\n$5\r\nhello\r\n,0.6666666666666666\r\n%1\r\n$4\r\nhell\r\n,0.3333333333333333\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "-foxes", "TERMS", "INCLUDE", "dict0", "TERMS", "EXCLUDE", "dict1"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:fx happy hell", "DISTANCE", "4", "TERMS", "EXCLUDE", "dict0", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:3\r\n+results\r\n%3\r\n$2\r\nfx\r\n*4\r\n%1\r\n$4\r\n+fox\r\n,1\r\n%1\r\n$5\r\nfoxes\r\n,1\r\n%1\r\n$4\r\nhell\r\n,1\r\n%1\r\n$4\r\njump\r\n,1\r\n$5\r\nhappy\r\n-term exists in index\r\n$4\r\nhell\r\n-term exists in index\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "-dnational", "TERMS", "INCLUDE", "dict1"], "want": "%1\r\n+results\r\n%1\r\n$9\r\ndnational\r\n*1\r\n%1\r\n$8\r\nnational\r\n,0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "-@b:help dgg", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:3\r\n+results\r\n%2\r\n$4\r\nhelp\r\n*1\r\n%1\r\n$4\r\nhell\r\n,1\r\n$3\r\ndgg\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "held runs", "DISTANCE", "4", "TERMS", "INCLUDE", "dict0", "TERMS", "EXCLUDE", "dict1"], "want": "%1\r\n+results\r\n%1\r\n$4\r\nheld\r\n*12\r\n%1\r\n$3\r\nfox\r\n,0.6666666666666666\r\n%1\r\n$5\r\nhappy\r\n,0.6666666666666666\r\n%1\r\n$5\r\nhello\r\n,0.6666666666666666\r\n%1\r\n$3\r\n~g1\r\n,0.6666666666666666\r\n%1\r\n$5\r\nfoxes\r\n,0.3333333333333333\r\n%1\r\n$4\r\nhell\r\n,0.3333333333333333\r\n%1\r\n$4\r\n+dog\r\n,0.3333333333333333\r\n%1\r\n$4\r\n+fox\r\n,0.3333333333333333\r\n%1\r\n$4\r\ndogs\r\n,0.3333333333333333\r\n%1\r\n$4\r\njump\r\n,0.3333333333333333\r\n%1\r\n$5\r\nworld\r\n,0.3333333333333333\r\n%1\r\n$4\r\nHELD\r\n,0\r\n"}
+{"cmd": ["ft.dictdump", "dict0"], "want": "~1\r\n$4\r\nHELD\r\n"}
+{"cmd": ["ft.dictdel", "dict0", "running", "quieck"], "want": ":0\r\n"}
+{"cmd": ["ft.dictdump", "dict1"], "want": "~4\r\n$3\r\nDOG\r\n$6\r\nNATION\r\n$8\r\nnational\r\n$4\r\nruns\r\n"}
+{"cmd": ["ft.dictdel", "dict1", "run", "cass"], "want": ":0\r\n"}
+{"cmd": ["flushall"]}
+{"cmd": ["hello", "3"]}
+{"cmd": ["ft.create", "idx", "ON", "HASH", "PREFIX", "1", "d:", "SCHEMA", "t", "TEXT", "b", "TEXT", "NOSTEM", "g", "TAG"], "want": "+OK\r\n"}
+{"cmd": ["ft.synupdate", "idx", "g1", "jump", "running"], "want": "+OK\r\n"}
+{"cmd": ["hset", "d:1", "t", "dogs", "b", "cat national runs happy", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:2", "t", "happiness national jumped", "b", "", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:3", "t", "run hell", "b", "happiness jumping", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["ft.dictadd", "dict0", "DOGS", "RUNNING", "help"], "want": ":3\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "held", "DISTANCE", "1", "TERMS", "EXCLUDE", "dict0"], "want": "%1\r\n+results\r\n%1\r\n$4\r\nheld\r\n*1\r\n%1\r\n$4\r\nhell\r\n,0.3333333333333333\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "word jumping", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%1\r\n$4\r\nword\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:ruzns", "DISTANCE", "1", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%1\r\n$5\r\nruzns\r\n*1\r\n%1\r\n$4\r\nruns\r\n,0.3333333333333333\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "cat jump", "DISTANCE", "2", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%1\r\n$4\r\njump\r\n*2\r\n%1\r\n$5\r\n+jump\r\n,0.3333333333333333\r\n%1\r\n$6\r\njumped\r\n,0.3333333333333333\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "jumped", "DISTANCE", "1", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "unner"], "want": "%1\r\n+results\r\n%1\r\n$5\r\nunner\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "-national happy", "DISTANCE", "2"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "happiness", "DISTANCE", "3", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "hel running"], "want": "%1\r\n+results\r\n%2\r\n$3\r\nhel\r\n*1\r\n%1\r\n$4\r\nhell\r\n,0.3333333333333333\r\n$7\r\nrunning\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "jumping cats mhappiness"], "want": "%1\r\n+results\r\n%2\r\n$4\r\ncats\r\n*1\r\n%1\r\n$3\r\ncat\r\n,0.3333333333333333\r\n$10\r\nmhappiness\r\n*1\r\n%1\r\n$9\r\nhappiness\r\n,0.6666666666666666\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "nation gdogs", "DISTANCE", "4"], "want": "%1\r\n+results\r\n%2\r\n$6\r\nnation\r\n*3\r\n%1\r\n$8\r\nnational\r\n,0.6666666666666666\r\n%1\r\n$7\r\n+nation\r\n,0.3333333333333333\r\n%1\r\n$3\r\ncat\r\n,0.3333333333333333\r\n$5\r\ngdogs\r\n*3\r\n%1\r\n$4\r\n+dog\r\n,0.3333333333333333\r\n%1\r\n$4\r\ndogs\r\n,0.3333333333333333\r\n%1\r\n$4\r\nruns\r\n,0.3333333333333333\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "-@b:foxes", "TERMS", "EXCLUDE", "dict0"], "want": "%1\r\n+results\r\n%1\r\n$5\r\nfoxes\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "-cat", "TERMS", "EXCLUDE", "dict0"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.dictdump", "dict0"], "want": "~3\r\n$4\r\nDOGS\r\n$7\r\nRUNNING\r\n$4\r\nhelp\r\n"}
+{"cmd": ["ft.dictdel", "dict0", "national", "fox"], "want": ":0\r\n"}
+{"cmd": ["flushall"]}
+{"cmd": ["ft.create", "idx", "ON", "HASH", "PREFIX", "1", "d:", "SCHEMA", "t", "TEXT", "b", "TEXT", "g", "TAG"], "want": "+OK\r\n"}
+{"cmd": ["hset", "d:1", "t", "quickly", "b", "hell", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:2", "t", "runner dog", "b", "happy dogs hello", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:3", "t", "run nation", "b", "quick", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:4", "t", "national dogs", "b", "national", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:5", "t", "held held", "b", "jump jump run", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:6", "t", "national jumping", "b", "jumped", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:7", "t", "jumping hello world", "b", "jumping jumped word jumping dogs", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:8", "t", "dog", "b", "jumped jump happiness", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:9", "t", "cat held help", "b", "", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:10", "t", "running cat dog", "b", "fox word", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "-run dog", "DISTANCE", "2"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "dog", "DISTANCE", "3"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "cats"], "want": "%1\r\n+results\r\n%1\r\n$4\r\ncats\r\n*1\r\n%1\r\n$3\r\ncat\r\n,0.2\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:wjrld nption", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:10\r\n+results\r\n%2\r\n$5\r\nwjrld\r\n*0\r\n$6\r\nnption\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:hell fox juvmping", "DISTANCE", "4"], "want": "%1\r\n+results\r\n%1\r\n$8\r\njuvmping\r\n*3\r\n%1\r\n$6\r\njumped\r\n,0.3\r\n%1\r\n$4\r\njump\r\n,0.2\r\n%1\r\n$7\r\njumping\r\n,0.2\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:fox fjx", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:10\r\n+results\r\n%2\r\n$3\r\nfox\r\n-term exists in index\r\n$3\r\nfjx\r\n*1\r\n%1\r\n$3\r\nfox\r\n,1\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "happiness runnxng"], "want": "%1\r\n+results\r\n%1\r\n$7\r\nrunnxng\r\n*1\r\n%1\r\n$7\r\nrunning\r\n,0.1\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "hakpiness happiness"], "want": "%1\r\n+results\r\n%1\r\n$9\r\nhakpiness\r\n*1\r\n%1\r\n$9\r\nhappiness\r\n,0.1\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "hely dog", "DISTANCE", "3"], "want": "%1\r\n+results\r\n%1\r\n$4\r\nhely\r\n*5\r\n%1\r\n$4\r\nheld\r\n,0.2\r\n%1\r\n$5\r\nhello\r\n,0.2\r\n%1\r\n$4\r\nhell\r\n,0.1\r\n%1\r\n$4\r\nhelp\r\n,0.1\r\n%1\r\n$5\r\nhappy\r\n,0.1\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "-world cat", "DISTANCE", "4"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "runs", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:10\r\n+results\r\n%1\r\n$4\r\nruns\r\n*1\r\n%1\r\n$3\r\nrun\r\n,2\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "quickly"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["flushall"]}
+{"cmd": ["ft.create", "idx", "ON", "HASH", "PREFIX", "1", "d:", "SCHEMA", "t", "TEXT", "b", "TEXT", "g", "TAG"], "want": "+OK\r\n"}
+{"cmd": ["hset", "d:1", "t", "run", "b", "world", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:2", "t", "national nation dog cats", "b", "", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:3", "t", "jumping nation quick hello", "b", "world runner jumping help", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:4", "t", "world held world", "b", "", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:5", "t", "running dog quick", "b", "quickly word", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:6", "t", "word hell", "b", "runner runs", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "-vfox cat"], "want": "%1\r\n+results\r\n%2\r\n$4\r\nvfox\r\n*0\r\n$3\r\ncat\r\n*2\r\n%1\r\n$4\r\n+cat\r\n,0.16666666666666666\r\n%1\r\n$4\r\ncats\r\n,0.16666666666666666\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "dogs"], "want": "%1\r\n+results\r\n%1\r\n$4\r\ndogs\r\n*1\r\n%1\r\n$3\r\ndog\r\n,0.3333333333333333\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "hell foxes jumped", "DISTANCE", "4"], "want": "%1\r\n+results\r\n%2\r\n$5\r\nfoxes\r\n*8\r\n%1\r\n$5\r\nworld\r\n,0.5\r\n%1\r\n$4\r\nword\r\n,0.3333333333333333\r\n%1\r\n$3\r\ndog\r\n,0.3333333333333333\r\n%1\r\n$4\r\ncats\r\n,0.16666666666666666\r\n%1\r\n$4\r\nheld\r\n,0.16666666666666666\r\n%1\r\n$4\r\nhell\r\n,0.16666666666666666\r\n%1\r\n$4\r\nhelp\r\n,0.16666666666666666\r\n%1\r\n$4\r\nruns\r\n,0.16666666666666666\r\n$6\r\njumped\r\n*3\r\n%1\r\n$6\r\nrunner\r\n,0.3333333333333333\r\n%1\r\n$5\r\n+jump\r\n,0.16666666666666666\r\n%1\r\n$7\r\njumping\r\n,0.16666666666666666\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "quickly", "DISTANCE", "4"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:natoon", "DISTANCE", "3", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:6\r\n+results\r\n%1\r\n$6\r\nnatoon\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "quick happiness world"], "want": "%1\r\n+results\r\n%1\r\n$9\r\nhappiness\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "word cats", "DISTANCE", "4"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "word", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:6\r\n+results\r\n%1\r\n$4\r\nword\r\n-term exists in index\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:quick", "DISTANCE", "2"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "-eeld", "DISTANCE", "1"], "want": "%1\r\n+results\r\n%1\r\n$4\r\neeld\r\n*1\r\n%1\r\n$4\r\nheld\r\n,0.16666666666666666\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "jumped hell fox", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:6\r\n+results\r\n%3\r\n$6\r\njumped\r\n*0\r\n$4\r\nhell\r\n-term exists in index\r\n$3\r\nfox\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "-@b:running quickly"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:jumped og word", "DISTANCE", "2"], "want": "%1\r\n+results\r\n%2\r\n$6\r\njumped\r\n*0\r\n$2\r\nog\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:running fxes"], "want": "%1\r\n+results\r\n%1\r\n$4\r\nfxes\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "jumped", "DISTANCE", "4", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:6\r\n+results\r\n%1\r\n$6\r\njumped\r\n*3\r\n%1\r\n$6\r\nrunner\r\n,2\r\n%1\r\n$5\r\n+jump\r\n,1\r\n%1\r\n$7\r\njumping\r\n,1\r\n"}
+{"cmd": ["flushall"]}
+{"cmd": ["ft.create", "idx", "ON", "HASH", "PREFIX", "1", "d:", "SCHEMA", "t", "TEXT", "b", "TEXT", "NOSTEM", "g", "TAG"], "want": "+OK\r\n"}
+{"cmd": ["hset", "d:1", "t", "dog", "b", "runs foxes jumping runs", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:2", "t", "quick running happy running", "b", "quick runs help runner", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:3", "t", "help", "b", "dogs runs happy runs", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "jup rudnner", "DISTANCE", "4"], "want": "%1\r\n+results\r\n%2\r\n$3\r\njup\r\n*8\r\n%1\r\n$4\r\nruns\r\n,1\r\n%1\r\n$5\r\nhappy\r\n,0.6666666666666666\r\n%1\r\n$4\r\nhelp\r\n,0.6666666666666666\r\n%1\r\n$4\r\n+run\r\n,0.3333333333333333\r\n%1\r\n$3\r\ndog\r\n,0.3333333333333333\r\n%1\r\n$4\r\ndogs\r\n,0.3333333333333333\r\n%1\r\n$7\r\njumping\r\n,0.3333333333333333\r\n%1\r\n$5\r\nquick\r\n,0.3333333333333333\r\n$7\r\nrudnner\r\n*3\r\n%1\r\n$4\r\nruns\r\n,1\r\n%1\r\n$6\r\nrunner\r\n,0.3333333333333333\r\n%1\r\n$7\r\nrunning\r\n,0.3333333333333333\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "dog happyz"], "want": "%1\r\n+results\r\n%1\r\n$6\r\nhappyz\r\n*1\r\n%1\r\n$5\r\nhappy\r\n,0.6666666666666666\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "-foxes jumeed"], "want": "%1\r\n+results\r\n%1\r\n$6\r\njumeed\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:help runing"], "want": "%1\r\n+results\r\n%1\r\n$6\r\nruning\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "world run", "DISTANCE", "3", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:3\r\n+results\r\n%2\r\n$5\r\nworld\r\n*0\r\n$3\r\nrun\r\n*4\r\n%1\r\n$4\r\nruns\r\n,3\r\n%1\r\n$6\r\nrunner\r\n,1\r\n%1\r\n$4\r\n+run\r\n,1\r\n%1\r\n$3\r\ndog\r\n,1\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:dogs", "DISTANCE", "2"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "-dog fhappy pworld", "DISTANCE", "3"], "want": "%1\r\n+results\r\n%2\r\n$6\r\nfhappy\r\n*2\r\n%1\r\n$5\r\nhappy\r\n,0.6666666666666666\r\n%1\r\n$6\r\n+happi\r\n,0.3333333333333333\r\n$6\r\npworld\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "national dogs", "DISTANCE", "2"], "want": "%1\r\n+results\r\n%1\r\n$8\r\nnational\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "ats", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:3\r\n+results\r\n%1\r\n$3\r\nats\r\n*0\r\n"}
+{"cmd": ["flushall"]}
+{"cmd": ["hello", "3"]}
+{"cmd": ["ft.create", "idx", "ON", "HASH", "PREFIX", "1", "d:", "SCHEMA", "t", "TEXT", "b", "TEXT", "g", "TAG"], "want": "+OK\r\n"}
+{"cmd": ["ft.synupdate", "idx", "g1", "word", "runs"], "want": "+OK\r\n"}
+{"cmd": ["hset", "d:1", "t", "happy foxes", "b", "dogs", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:2", "t", "quickly", "b", "quickly dogs fox", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:3", "t", "dogs running", "b", "happy national run", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["ft.dictadd", "dict0", "quick", "dogs", "runer", "fuox", "NATION"], "want": ":5\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "hnllo hell", "DISTANCE", "3", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:3\r\n+results\r\n%2\r\n$5\r\nhnllo\r\n*0\r\n$4\r\nhell\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:run quick jumped", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%2\r\n$5\r\nquick\r\n*2\r\n%1\r\n$6\r\n+quick\r\n,0.3333333333333333\r\n%1\r\n$5\r\nquick\r\n,0\r\n$6\r\njumped\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "national", "DISTANCE", "4", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "-ord nationae", "DISTANCE", "2", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%2\r\n$3\r\nord\r\n*0\r\n$8\r\nnationae\r\n*2\r\n%1\r\n$8\r\nnational\r\n,0.3333333333333333\r\n%1\r\n$6\r\nNATION\r\n,0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "cata jumped", "DISTANCE", "2", "TERMS", "EXCLUDE", "dict0"], "want": "%1\r\n+results\r\n%2\r\n$4\r\ncata\r\n*0\r\n$6\r\njumped\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "nation helrl", "DISTANCE", "3", "TERMS", "INCLUDE", "dict0", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:3\r\n+results\r\n%2\r\n$6\r\nnation\r\n*3\r\n%1\r\n$7\r\n+nation\r\n,1\r\n%1\r\n$8\r\nnational\r\n,1\r\n%1\r\n$6\r\nNATION\r\n,0\r\n$5\r\nhelrl\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "rnner wod"], "want": "%1\r\n+results\r\n%2\r\n$5\r\nrnner\r\n*0\r\n$3\r\nwod\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "hapry running hello"], "want": "%1\r\n+results\r\n%2\r\n$5\r\nhapry\r\n*1\r\n%1\r\n$5\r\nhappy\r\n,0.6666666666666666\r\n$5\r\nhello\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "jumping help dogs", "DISTANCE", "4", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%2\r\n$7\r\njumping\r\n*1\r\n%1\r\n$7\r\nrunning\r\n,0.3333333333333333\r\n$4\r\nhelp\r\n*11\r\n%1\r\n$4\r\n+dog\r\n,1\r\n%1\r\n$4\r\ndogs\r\n,1\r\n%1\r\n$6\r\n+happi\r\n,0.6666666666666666\r\n%1\r\n$5\r\nhappy\r\n,0.6666666666666666\r\n%1\r\n$4\r\n+fox\r\n,0.3333333333333333\r\n%1\r\n$4\r\n+run\r\n,0.3333333333333333\r\n%1\r\n$3\r\nfox\r\n,0.3333333333333333\r\n%1\r\n$5\r\nfoxes\r\n,0.3333333333333333\r\n%1\r\n$3\r\nrun\r\n,0.3333333333333333\r\n%1\r\n$4\r\nfuox\r\n,0\r\n%1\r\n$5\r\nruner\r\n,0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "held", "TERMS", "EXCLUDE", "dict0"], "want": "%1\r\n+results\r\n%1\r\n$4\r\nheld\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "happy", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "runninbg runner", "DISTANCE", "1", "TERMS", "EXCLUDE", "dict0"], "want": "%1\r\n+results\r\n%2\r\n$8\r\nrunninbg\r\n*1\r\n%1\r\n$7\r\nrunning\r\n,0.3333333333333333\r\n$6\r\nrunner\r\n*0\r\n"}
+{"cmd": ["ft.dictdump", "dict0"], "want": "~5\r\n$6\r\nNATION\r\n$4\r\ndogs\r\n$4\r\nfuox\r\n$5\r\nquick\r\n$5\r\nruner\r\n"}
+{"cmd": ["ft.dictdel", "dict0", "hell", "runninb"], "want": ":0\r\n"}
+{"cmd": ["flushall"]}
+{"cmd": ["ft.create", "idx", "ON", "HASH", "PREFIX", "1", "d:", "SCHEMA", "t", "TEXT", "b", "TEXT", "g", "TAG"], "want": "+OK\r\n"}
+{"cmd": ["ft.synupdate", "idx", "g1", "world", "run"], "want": "+OK\r\n"}
+{"cmd": ["hset", "d:1", "t", "held running cats hello", "b", "word runs nation dogs", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:2", "t", "nation quick jumped jumped", "b", "runs", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:3", "t", "foxes help", "b", "", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:4", "t", "nation runner cat jumping", "b", "happy nation quick running national", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:5", "t", "dogs happiness", "b", "runs jumping", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:6", "t", "quick", "b", "", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:7", "t", "jump run happy quick", "b", "runner held run runner national", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "un foxe", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:7\r\n+results\r\n%2\r\n$2\r\nun\r\n*1\r\n%1\r\n$3\r\nrun\r\n,1\r\n$4\r\nfoxe\r\n*1\r\n%1\r\n$5\r\nfoxes\r\n,1\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "-jumpy happyiness runner", "DISTANCE", "1"], "want": "%1\r\n+results\r\n%2\r\n$5\r\njumpy\r\n*1\r\n%1\r\n$4\r\njump\r\n,0.14285714285714285\r\n$10\r\nhappyiness\r\n*1\r\n%1\r\n$9\r\nhappiness\r\n,0.14285714285714285\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "holp", "DISTANCE", "3", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:7\r\n+results\r\n%1\r\n$4\r\nholp\r\n*7\r\n%1\r\n$4\r\ndogs\r\n,2\r\n%1\r\n$5\r\nhappy\r\n,2\r\n%1\r\n$4\r\nheld\r\n,2\r\n%1\r\n$5\r\nhello\r\n,1\r\n%1\r\n$4\r\nhelp\r\n,1\r\n%1\r\n$4\r\njump\r\n,1\r\n%1\r\n$4\r\nword\r\n,1\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "jumpingi", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:7\r\n+results\r\n%1\r\n$8\r\njumpingi\r\n*1\r\n%1\r\n$7\r\njumping\r\n,2\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "-fox running"], "want": "%1\r\n+results\r\n%1\r\n$3\r\nfox\r\n*1\r\n%1\r\n$4\r\n+fox\r\n,0.14285714285714285\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "word un runs"], "want": "%1\r\n+results\r\n%1\r\n$2\r\nun\r\n*1\r\n%1\r\n$3\r\nrun\r\n,0.14285714285714285\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "cats running"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "held", "DISTANCE", "2", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:7\r\n+results\r\n%1\r\n$4\r\nheld\r\n-term exists in index\r\n"}
+{"cmd": ["flushall"]}
+{"cmd": ["ft.create", "idx", "ON", "HASH", "PREFIX", "1", "d:", "SCHEMA", "t", "TEXT", "b", "TEXT", "g", "TAG"], "want": "+OK\r\n"}
+{"cmd": ["hset", "d:1", "t", "fox happiness hell jumped", "b", "", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:2", "t", "cats running happy nation", "b", "runs quick", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:3", "t", "dogs quick cat", "b", "happiness quickly jumped world cat", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:4", "t", "jump quickly national", "b", "quickly", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:5", "t", "runs help run happy", "b", "jumping", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["ft.dictadd", "dict0", "hello", "CATS", "runs"], "want": ":3\r\n"}
+{"cmd": ["ft.dictadd", "dict1", "DOGS", "national", "junmped"], "want": ":3\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "quickly fox", "TERMS", "EXCLUDE", "dict0", "TERMS", "EXCLUDE", "dict1"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:jumped held quickly", "DISTANCE", "4", "TERMS", "INCLUDE", "dict0", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:5\r\n+results\r\n%3\r\n$6\r\njumped\r\n-term exists in index\r\n$4\r\nheld\r\n*6\r\n%1\r\n$4\r\n+run\r\n,2\r\n%1\r\n$4\r\nruns\r\n,2\r\n%1\r\n$3\r\ncat\r\n,1\r\n%1\r\n$5\r\nworld\r\n,1\r\n%1\r\n$4\r\nCATS\r\n,0\r\n%1\r\n$5\r\nhello\r\n,0\r\n$7\r\nquickly\r\n-term exists in index\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "run runner", "DISTANCE", "4"], "want": "%1\r\n+results\r\n%1\r\n$6\r\nrunner\r\n*5\r\n%1\r\n$4\r\n+run\r\n,0.4\r\n%1\r\n$6\r\njumped\r\n,0.4\r\n%1\r\n$4\r\nruns\r\n,0.4\r\n%1\r\n$3\r\nrun\r\n,0.2\r\n%1\r\n$7\r\nrunning\r\n,0.2\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "quick hkell", "TERMS", "INCLUDE", "dict1"], "want": "%1\r\n+results\r\n%1\r\n$5\r\nhkell\r\n*1\r\n%1\r\n$4\r\nhell\r\n,0.2\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "cappy dog", "DISTANCE", "1", "TERMS", "INCLUDE", "dict1"], "want": "%1\r\n+results\r\n%2\r\n$5\r\ncappy\r\n*1\r\n%1\r\n$5\r\nhappy\r\n,0.4\r\n$3\r\ndog\r\n*2\r\n%1\r\n$4\r\n+dog\r\n,0.2\r\n%1\r\n$4\r\ndogs\r\n,0.2\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "quickly jumping", "TERMS", "EXCLUDE", "dict1"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "dlg"], "want": "%1\r\n+results\r\n%1\r\n$3\r\ndlg\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "fox running"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:hell", "DISTANCE", "2", "TERMS", "EXCLUDE", "dict0", "TERMS", "INCLUDE", "dict1"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "jumping jumping national", "TERMS", "EXCLUDE", "dict0"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:held hello quickly", "DISTANCE", "4"], "want": "%1\r\n+results\r\n%2\r\n$4\r\nheld\r\n*4\r\n%1\r\n$4\r\n+run\r\n,0.4\r\n%1\r\n$4\r\nruns\r\n,0.4\r\n%1\r\n$3\r\ncat\r\n,0.2\r\n%1\r\n$5\r\nworld\r\n,0.2\r\n$5\r\nhello\r\n*1\r\n%1\r\n$5\r\nworld\r\n,0.2\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "-cats", "TERMS", "INCLUDE", "dict0", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:5\r\n+results\r\n%1\r\n$4\r\ncats\r\n-term exists in index\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:dog humped", "TERMS", "INCLUDE", "dict0", "TERMS", "EXCLUDE", "dict1", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:5\r\n+results\r\n%2\r\n$3\r\ndog\r\n*0\r\n$6\r\nhumped\r\n*1\r\n%1\r\n$6\r\njumped\r\n,2\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "national", "DISTANCE", "2", "TERMS", "EXCLUDE", "dict1"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "nation runner", "DISTANCE", "2", "TERMS", "INCLUDE", "dict1"], "want": "%1\r\n+results\r\n%1\r\n$6\r\nrunner\r\n*0\r\n"}
+{"cmd": ["ft.dictdump", "dict0"], "want": "~3\r\n$4\r\nCATS\r\n$5\r\nhello\r\n$4\r\nruns\r\n"}
+{"cmd": ["ft.dictdel", "dict0", "dogs", "rword"], "want": ":0\r\n"}
+{"cmd": ["ft.dictdump", "dict1"], "want": "~3\r\n$4\r\nDOGS\r\n$7\r\njunmped\r\n$8\r\nnational\r\n"}
+{"cmd": ["ft.dictdel", "dict1", "hell", "national"], "want": ":1\r\n"}
+{"cmd": ["flushall"]}
+{"cmd": ["ft.create", "idx", "ON", "HASH", "PREFIX", "1", "d:", "SCHEMA", "t", "TEXT", "b", "TEXT", "g", "TAG"], "want": "+OK\r\n"}
+{"cmd": ["hset", "d:1", "t", "foxes help jumping jumped", "b", "fox hell held jumped", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:2", "t", "cat jump running hello", "b", "hell runs held dogs quickly", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:3", "t", "held run", "b", "running runs runs jumping", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:4", "t", "national", "b", "cats quickly help", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:5", "t", "hell cat", "b", "run world running", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:6", "t", "quick hello running", "b", "happiness cats national happy foxes", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:7", "t", "running", "b", "national runner dogs runner", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:8", "t", "running run world run", "b", "jumping", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:9", "t", "dogs word dogs quick", "b", "", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["ft.dictadd", "dict0", "nktional", "qick"], "want": ":2\r\n"}
+{"cmd": ["ft.dictadd", "dict1", "JUMPED"], "want": ":1\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:hell", "DISTANCE", "3"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:jumpinug", "DISTANCE", "1", "TERMS", "EXCLUDE", "dict1"], "want": "%1\r\n+results\r\n%1\r\n$8\r\njumpinug\r\n*1\r\n%1\r\n$7\r\njumping\r\n,0.3333333333333333\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "held", "TERMS", "INCLUDE", "dict0", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:9\r\n+results\r\n%1\r\n$4\r\nheld\r\n-term exists in index\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "cyat", "DISTANCE", "4"], "want": "%1\r\n+results\r\n%1\r\n$4\r\ncyat\r\n*17\r\n%1\r\n$4\r\n+run\r\n,0.6666666666666666\r\n%1\r\n$4\r\n+dog\r\n,0.3333333333333333\r\n%1\r\n$4\r\ndogs\r\n,0.3333333333333333\r\n%1\r\n$4\r\nheld\r\n,0.3333333333333333\r\n%1\r\n$4\r\nhell\r\n,0.3333333333333333\r\n%1\r\n$3\r\nrun\r\n,0.3333333333333333\r\n%1\r\n$4\r\n+cat\r\n,0.2222222222222222\r\n%1\r\n$4\r\n+fox\r\n,0.2222222222222222\r\n%1\r\n$4\r\nhelp\r\n,0.2222222222222222\r\n%1\r\n$4\r\nruns\r\n,0.2222222222222222\r\n%1\r\n$3\r\ncat\r\n,0.2222222222222222\r\n%1\r\n$4\r\ncats\r\n,0.2222222222222222\r\n%1\r\n$5\r\nquick\r\n,0.2222222222222222\r\n%1\r\n$5\r\nhappy\r\n,0.1111111111111111\r\n%1\r\n$3\r\nfox\r\n,0.1111111111111111\r\n%1\r\n$4\r\njump\r\n,0.1111111111111111\r\n%1\r\n$4\r\nword\r\n,0.1111111111111111\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "runnr", "DISTANCE", "4", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%1\r\n$5\r\nrunnr\r\n*8\r\n%1\r\n$4\r\n+run\r\n,0.6666666666666666\r\n%1\r\n$7\r\nrunning\r\n,0.6666666666666666\r\n%1\r\n$3\r\nrun\r\n,0.3333333333333333\r\n%1\r\n$4\r\nruns\r\n,0.2222222222222222\r\n%1\r\n$5\r\nquick\r\n,0.2222222222222222\r\n%1\r\n$6\r\nrunner\r\n,0.1111111111111111\r\n%1\r\n$4\r\njump\r\n,0.1111111111111111\r\n%1\r\n$4\r\nword\r\n,0.1111111111111111\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "happy", "DISTANCE", "1", "TERMS", "EXCLUDE", "dict0", "TERMS", "INCLUDE", "dict1", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:9\r\n+results\r\n%1\r\n$5\r\nhappy\r\n-term exists in index\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "jump run", "TERMS", "INCLUDE", "dict0", "TERMS", "EXCLUDE", "dict1"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "hello"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "running run", "TERMS", "INCLUDE", "dict1"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "word quickly", "DISTANCE", "1", "TERMS", "INCLUDE", "dict0", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:9\r\n+results\r\n%2\r\n$4\r\nword\r\n-term exists in index\r\n$7\r\nquickly\r\n-term exists in index\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "world doe quickly", "TERMS", "EXCLUDE", "dict0"], "want": "%1\r\n+results\r\n%1\r\n$3\r\ndoe\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "happy", "DISTANCE", "1"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "fox", "DISTANCE", "4"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.dictdump", "dict0"], "want": "~2\r\n$8\r\nnktional\r\n$4\r\nqick\r\n"}
+{"cmd": ["ft.dictdel", "dict0", "held", "quicklc"], "want": ":0\r\n"}
+{"cmd": ["ft.dictdump", "dict1"], "want": "~1\r\n$6\r\nJUMPED\r\n"}
+{"cmd": ["ft.dictdel", "dict1", "runs", "happness"], "want": ":0\r\n"}
+{"cmd": ["flushall"]}
+{"cmd": ["ft.create", "idx", "ON", "HASH", "PREFIX", "1", "d:", "SCHEMA", "t", "TEXT", "b", "TEXT", "g", "TAG"], "want": "+OK\r\n"}
+{"cmd": ["hset", "d:1", "t", "run dog fox happiness", "b", "quickly word held happy hello", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:2", "t", "quickly dog", "b", "cats", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:3", "t", "help", "b", "running", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:4", "t", "world dogs running", "b", "", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["ft.dictadd", "dict0", "RUNNER", "quickk", "foxes", "world", "RUN"], "want": ":5\r\n"}
+{"cmd": ["ft.dictadd", "dict1", "DOGS"], "want": ":1\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:happilness", "DISTANCE", "1", "TERMS", "EXCLUDE", "dict0", "TERMS", "INCLUDE", "dict1"], "want": "%1\r\n+results\r\n%1\r\n$10\r\nhappilness\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:word", "DISTANCE", "1", "TERMS", "EXCLUDE", "dict1"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "-word qfickly", "DISTANCE", "3", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%1\r\n$7\r\nqfickly\r\n*2\r\n%1\r\n$7\r\nquickly\r\n,0.5\r\n%1\r\n$6\r\nquickk\r\n,0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "world", "TERMS", "EXCLUDE", "dict0", "TERMS", "EXCLUDE", "dict1"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "runs", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%1\r\n$4\r\nruns\r\n*1\r\n%1\r\n$3\r\nrun\r\n,0.25\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "jump", "DISTANCE", "1"], "want": "%1\r\n+results\r\n%1\r\n$4\r\njump\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "nationl dog", "DISTANCE", "2"], "want": "%1\r\n+results\r\n%1\r\n$7\r\nnationl\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "word word", "TERMS", "INCLUDE", "dict1", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:4\r\n+results\r\n%2\r\n$4\r\nword\r\n-term exists in index\r\n$4\r\nword\r\n-term exists in index\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "-cas jumped", "DISTANCE", "4", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%2\r\n$3\r\ncas\r\n*13\r\n%1\r\n$4\r\n+run\r\n,0.5\r\n%1\r\n$3\r\ndog\r\n,0.5\r\n%1\r\n$4\r\n+cat\r\n,0.25\r\n%1\r\n$4\r\n+dog\r\n,0.25\r\n%1\r\n$4\r\ndogs\r\n,0.25\r\n%1\r\n$4\r\ncats\r\n,0.25\r\n%1\r\n$3\r\nfox\r\n,0.25\r\n%1\r\n$5\r\nhappy\r\n,0.25\r\n%1\r\n$4\r\nheld\r\n,0.25\r\n%1\r\n$4\r\nhelp\r\n,0.25\r\n%1\r\n$3\r\nrun\r\n,0.25\r\n%1\r\n$4\r\nword\r\n,0.25\r\n%1\r\n$5\r\nfoxes\r\n,0\r\n$6\r\njumped\r\n*1\r\n%1\r\n$6\r\nRUNNER\r\n,0\r\n"}
+{"cmd": ["ft.dictdump", "dict0"], "want": "~5\r\n$3\r\nRUN\r\n$6\r\nRUNNER\r\n$5\r\nfoxes\r\n$6\r\nquickk\r\n$5\r\nworld\r\n"}
+{"cmd": ["ft.dictdel", "dict0", "happy", "cts"], "want": ":0\r\n"}
+{"cmd": ["ft.dictdump", "dict1"], "want": "~1\r\n$4\r\nDOGS\r\n"}
+{"cmd": ["ft.dictdel", "dict1", "run", "iog"], "want": ":0\r\n"}
+{"cmd": ["flushall"]}
+{"cmd": ["hello", "3"]}
+{"cmd": ["ft.create", "idx", "ON", "HASH", "PREFIX", "1", "d:", "SCHEMA", "t", "TEXT", "b", "TEXT", "g", "TAG"], "want": "+OK\r\n"}
+{"cmd": ["hset", "d:1", "t", "world jump", "b", "hell", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:2", "t", "jump running", "b", "jumping nation cat run", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:3", "t", "world held", "b", "", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:4", "t", "running happiness", "b", "nation quick jump", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["ft.dictadd", "dict0", "world", "HELD"], "want": ":2\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "nation jumped held", "DISTANCE", "2"], "want": "%1\r\n+results\r\n%1\r\n$6\r\njumped\r\n*1\r\n%1\r\n$4\r\njump\r\n,0.75\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "hell dog word", "DISTANCE", "3"], "want": "%1\r\n+results\r\n%2\r\n$3\r\ndog\r\n*3\r\n%1\r\n$3\r\ncat\r\n,0.25\r\n%1\r\n$4\r\nheld\r\n,0.25\r\n%1\r\n$3\r\nrun\r\n,0.25\r\n$4\r\nword\r\n*3\r\n%1\r\n$5\r\nworld\r\n,0.5\r\n%1\r\n$4\r\nheld\r\n,0.25\r\n%1\r\n$3\r\nrun\r\n,0.25\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "wrrd"], "want": "%1\r\n+results\r\n%1\r\n$4\r\nwrrd\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "hefp wrld"], "want": "%1\r\n+results\r\n%2\r\n$4\r\nhefp\r\n*0\r\n$4\r\nwrld\r\n*1\r\n%1\r\n$5\r\nworld\r\n,0.5\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "jump cat"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "fox", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%1\r\n$3\r\nfox\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "qunick jumping", "DISTANCE", "1"], "want": "%1\r\n+results\r\n%1\r\n$6\r\nqunick\r\n*1\r\n%1\r\n$5\r\nquick\r\n,0.25\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "fox", "DISTANCE", "2", "TERMS", "INCLUDE", "dict0", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:4\r\n+results\r\n%1\r\n$3\r\nfox\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:dogs", "DISTANCE", "4"], "want": "%1\r\n+results\r\n%1\r\n$4\r\ndogs\r\n*4\r\n%1\r\n$4\r\njump\r\n,0.75\r\n%1\r\n$3\r\ncat\r\n,0.25\r\n%1\r\n$4\r\nhell\r\n,0.25\r\n%1\r\n$3\r\nrun\r\n,0.25\r\n"}
+{"cmd": ["ft.dictdump", "dict0"], "want": "~2\r\n$4\r\nHELD\r\n$5\r\nworld\r\n"}
+{"cmd": ["ft.dictdel", "dict0", "quick", "russ"], "want": ":0\r\n"}
+{"cmd": ["flushall"]}
+{"cmd": ["hello", "3"]}
+{"cmd": ["ft.create", "idx", "ON", "HASH", "PREFIX", "1", "d:", "SCHEMA", "t", "TEXT", "b", "TEXT", "g", "TAG"], "want": "+OK\r\n"}
+{"cmd": ["hset", "d:1", "t", "nation happiness cat", "b", "running world quickly cat quickly", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:2", "t", "dogs national runner happiness", "b", "cats", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:3", "t", "dog hell hell", "b", "jump jumped hello world", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:4", "t", "jumped run hell", "b", "", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:5", "t", "run running happiness", "b", "dogs", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["ft.dictadd", "dict0", "HELP", "FOX", "held", "running"], "want": ":4\r\n"}
+{"cmd": ["ft.dictadd", "dict1", "FOXES"], "want": ":1\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "cat quickly", "DISTANCE", "4", "TERMS", "INCLUDE", "dict0", "TERMS", "EXCLUDE", "dict1"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "word", "TERMS", "EXCLUDE", "dict0", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:5\r\n+results\r\n%1\r\n$4\r\nword\r\n*1\r\n%1\r\n$5\r\nworld\r\n,2\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "-fdx help ioxes", "DISTANCE", "3", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%3\r\n$3\r\nfdx\r\n*6\r\n%1\r\n$4\r\n+dog\r\n,0.4\r\n%1\r\n$3\r\nrun\r\n,0.4\r\n%1\r\n$3\r\ncat\r\n,0.2\r\n%1\r\n$3\r\ndog\r\n,0.2\r\n%1\r\n$3\r\nFOX\r\n,0\r\n%1\r\n$4\r\nheld\r\n,0\r\n$4\r\nhelp\r\n*5\r\n%1\r\n$4\r\nhell\r\n,0.4\r\n%1\r\n$5\r\nhello\r\n,0.2\r\n%1\r\n$4\r\njump\r\n,0.2\r\n%1\r\n$4\r\nheld\r\n,0\r\n%1\r\n$4\r\nHELP\r\n,0\r\n$5\r\nioxes\r\n*2\r\n%1\r\n$4\r\ndogs\r\n,0.4\r\n%1\r\n$3\r\nFOX\r\n,0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "natibn fopxes", "TERMS", "INCLUDE", "dict0", "TERMS", "EXCLUDE", "dict1"], "want": "%1\r\n+results\r\n%2\r\n$6\r\nnatibn\r\n*1\r\n%1\r\n$6\r\nnation\r\n,0.2\r\n$6\r\nfopxes\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:rdnning fox", "DISTANCE", "1", "TERMS", "EXCLUDE", "dict0"], "want": "%1\r\n+results\r\n%1\r\n$7\r\nrdnning\r\n*1\r\n%1\r\n$7\r\nrunning\r\n,0.4\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "hppy hell"], "want": "%1\r\n+results\r\n%1\r\n$4\r\nhppy\r\n*0\r\n"}
+{"cmd": ["ft.dictdump", "dict0"], "want": "~4\r\n$3\r\nFOX\r\n$4\r\nHELP\r\n$4\r\nheld\r\n$7\r\nrunning\r\n"}
+{"cmd": ["ft.dictdel", "dict0", "fox", "cas"], "want": ":0\r\n"}
+{"cmd": ["ft.dictdump", "dict1"], "want": "~1\r\n$5\r\nFOXES\r\n"}
+{"cmd": ["ft.dictdel", "dict1", "runs", "orld"], "want": ":0\r\n"}
+{"cmd": ["flushall"]}
+{"cmd": ["ft.create", "idx", "ON", "HASH", "PREFIX", "1", "d:", "SCHEMA", "t", "TEXT", "b", "TEXT", "NOSTEM", "g", "TAG"], "want": "+OK\r\n"}
+{"cmd": ["hset", "d:1", "t", "run runs", "b", "jump word dog happy runner", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:2", "t", "word dog happiness dogs", "b", "dog happy", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:3", "t", "cats happy cat", "b", "foxes quick happy help quickly", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:4", "t", "running quickly help dog", "b", "help cats word", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["ft.dictadd", "dict0", "nationa", "nation", "foxes", "NATION"], "want": ":4\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "foxes jumped"], "want": "%1\r\n+results\r\n%1\r\n$6\r\njumped\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "-fox dos", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:4\r\n+results\r\n%2\r\n$3\r\nfox\r\n*0\r\n$3\r\ndos\r\n*2\r\n%1\r\n$3\r\ndog\r\n,3\r\n%1\r\n$4\r\ndogs\r\n,1\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "help running", "DISTANCE", "3"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:quick", "DISTANCE", "4", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "run foxes", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "hbppy nation cats", "DISTANCE", "1", "TERMS", "INCLUDE", "dict0", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:4\r\n+results\r\n%3\r\n$5\r\nhbppy\r\n*1\r\n%1\r\n$5\r\nhappy\r\n,3\r\n$6\r\nnation\r\n*2\r\n%1\r\n$6\r\nNATION\r\n,0\r\n%1\r\n$7\r\nnationa\r\n,0\r\n$4\r\ncats\r\n-term exists in index\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "word", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "nation held national", "DISTANCE", "2", "TERMS", "EXCLUDE", "dict0"], "want": "%1\r\n+results\r\n%2\r\n$4\r\nheld\r\n*1\r\n%1\r\n$4\r\nhelp\r\n,0.5\r\n$8\r\nnational\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "running runs jumped", "DISTANCE", "4"], "want": "%1\r\n+results\r\n%1\r\n$6\r\njumped\r\n*2\r\n%1\r\n$4\r\njump\r\n,0.25\r\n%1\r\n$6\r\nrunner\r\n,0.25\r\n"}
+{"cmd": ["ft.dictdump", "dict0"], "want": "~4\r\n$6\r\nNATION\r\n$5\r\nfoxes\r\n$6\r\nnation\r\n$7\r\nnationa\r\n"}
+{"cmd": ["ft.dictdel", "dict0", "jumped", "quik"], "want": ":0\r\n"}
+{"cmd": ["flushall"]}
+{"cmd": ["ft.create", "idx", "ON", "HASH", "PREFIX", "1", "d:", "SCHEMA", "t", "TEXT", "b", "TEXT", "g", "TAG"], "want": "+OK\r\n"}
+{"cmd": ["hset", "d:1", "t", "quick", "b", "word happiness happy hell happy", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:2", "t", "cat cats world", "b", "nation", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:3", "t", "run happy held", "b", "run jump", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:4", "t", "quickly", "b", "held hell word", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:5", "t", "cat dog", "b", "quick running", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:6", "t", "quick foxes hell jumped", "b", "cat help runs cat", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:7", "t", "foxes", "b", "happy fox", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:8", "t", "cat cats quickly", "b", "running jumped word", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:9", "t", "quickly", "b", "run fox word", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["ft.dictadd", "dict0", "running", "world", "held", "RUNNER", "DOGS"], "want": ":5\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "jump", "DISTANCE", "2", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:9\r\n+results\r\n%1\r\n$4\r\njump\r\n-term exists in index\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "happiness", "DISTANCE", "3", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "worrd runner", "DISTANCE", "4", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%2\r\n$5\r\nworrd\r\n*10\r\n%1\r\n$4\r\nword\r\n,0.4444444444444444\r\n%1\r\n$4\r\n+run\r\n,0.3333333333333333\r\n%1\r\n$3\r\nfox\r\n,0.2222222222222222\r\n%1\r\n$5\r\nfoxes\r\n,0.2222222222222222\r\n%1\r\n$4\r\nheld\r\n,0.2222222222222222\r\n%1\r\n$3\r\nrun\r\n,0.2222222222222222\r\n%1\r\n$5\r\nworld\r\n,0.1111111111111111\r\n%1\r\n$4\r\nruns\r\n,0.1111111111111111\r\n%1\r\n$3\r\ndog\r\n,0.1111111111111111\r\n%1\r\n$4\r\nDOGS\r\n,0\r\n$6\r\nrunner\r\n*6\r\n%1\r\n$4\r\n+run\r\n,0.3333333333333333\r\n%1\r\n$6\r\njumped\r\n,0.2222222222222222\r\n%1\r\n$3\r\nrun\r\n,0.2222222222222222\r\n%1\r\n$7\r\nrunning\r\n,0.2222222222222222\r\n%1\r\n$4\r\nruns\r\n,0.1111111111111111\r\n%1\r\n$6\r\nRUNNER\r\n,0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "dog jumping"], "want": "%1\r\n+results\r\n%1\r\n$7\r\njumping\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "-happy jumping"], "want": "%1\r\n+results\r\n%1\r\n$7\r\njumping\r\n*0\r\n"}
+{"cmd": ["ft.dictdump", "dict0"], "want": "~5\r\n$4\r\nDOGS\r\n$6\r\nRUNNER\r\n$4\r\nheld\r\n$7\r\nrunning\r\n$5\r\nworld\r\n"}
+{"cmd": ["ft.dictdel", "dict0", "cats", "runs"], "want": ":0\r\n"}
+{"cmd": ["flushall"]}
+{"cmd": ["ft.create", "idx", "ON", "HASH", "PREFIX", "1", "d:", "SCHEMA", "t", "TEXT", "b", "TEXT", "g", "TAG"], "want": "+OK\r\n"}
+{"cmd": ["hset", "d:1", "t", "national word", "b", "hello world happiness runner run", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:2", "t", "nation quick happiness foxes", "b", "hell world", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:3", "t", "jump hello runs jump", "b", "jump", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:4", "t", "cats hello", "b", "", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:5", "t", "cat", "b", "running foxes fox", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:6", "t", "world quick", "b", "cats run quick dog", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:tox", "DISTANCE", "3", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:6\r\n+results\r\n%1\r\n$3\r\ntox\r\n*7\r\n%1\r\n$4\r\n+cat\r\n,2\r\n%1\r\n$4\r\n+fox\r\n,2\r\n%1\r\n$4\r\ncats\r\n,2\r\n%1\r\n$5\r\nfoxes\r\n,2\r\n%1\r\n$3\r\nrun\r\n,2\r\n%1\r\n$3\r\nfox\r\n,1\r\n%1\r\n$3\r\ndog\r\n,1\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "happinesss", "DISTANCE", "2"], "want": "%1\r\n+results\r\n%1\r\n$10\r\nhappinesss\r\n*1\r\n%1\r\n$9\r\nhappiness\r\n,0.3333333333333333\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "runs nation jumping"], "want": "%1\r\n+results\r\n%1\r\n$7\r\njumping\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "nation juemped hello", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:6\r\n+results\r\n%3\r\n$6\r\nnation\r\n-term exists in index\r\n$7\r\njuemped\r\n*0\r\n$5\r\nhello\r\n-term exists in index\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "dogs runnng"], "want": "%1\r\n+results\r\n%2\r\n$4\r\ndogs\r\n*1\r\n%1\r\n$3\r\ndog\r\n,0.16666666666666666\r\n$6\r\nrunnng\r\n*1\r\n%1\r\n$7\r\nrunning\r\n,0.16666666666666666\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "help", "DISTANCE", "4", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:6\r\n+results\r\n%1\r\n$4\r\nhelp\r\n*16\r\n%1\r\n$5\r\nhello\r\n,3\r\n%1\r\n$5\r\nworld\r\n,3\r\n%1\r\n$4\r\n+cat\r\n,2\r\n%1\r\n$4\r\n+fox\r\n,2\r\n%1\r\n$6\r\n+happi\r\n,2\r\n%1\r\n$4\r\n+run\r\n,2\r\n%1\r\n$4\r\ncats\r\n,2\r\n%1\r\n$5\r\nfoxes\r\n,2\r\n%1\r\n$3\r\nrun\r\n,2\r\n%1\r\n$4\r\nhell\r\n,1\r\n%1\r\n$4\r\nword\r\n,1\r\n%1\r\n$3\r\ncat\r\n,1\r\n%1\r\n$3\r\nfox\r\n,1\r\n%1\r\n$4\r\nruns\r\n,1\r\n%1\r\n$3\r\ndog\r\n,1\r\n%1\r\n$4\r\njump\r\n,1\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:natpional help", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:6\r\n+results\r\n%2\r\n$9\r\nnatpional\r\n*0\r\n$4\r\nhelp\r\n*1\r\n%1\r\n$4\r\nhell\r\n,1\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:hlppy dog elp"], "want": "%1\r\n+results\r\n%2\r\n$5\r\nhlppy\r\n*0\r\n$3\r\nelp\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "quickly hello", "DISTANCE", "4"], "want": "%1\r\n+results\r\n%1\r\n$7\r\nquickly\r\n*1\r\n%1\r\n$5\r\nquick\r\n,0.3333333333333333\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "juping word", "DISTANCE", "1"], "want": "%1\r\n+results\r\n%1\r\n$6\r\njuping\r\n*0\r\n"}
+{"cmd": ["flushall"]}
+{"cmd": ["hello", "3"]}
+{"cmd": ["ft.create", "idx", "ON", "HASH", "PREFIX", "1", "d:", "SCHEMA", "t", "TEXT", "b", "TEXT", "g", "TAG"], "want": "+OK\r\n"}
+{"cmd": ["ft.synupdate", "idx", "g1", "jumping", "fox"], "want": "+OK\r\n"}
+{"cmd": ["hset", "d:1", "t", "fox cat", "b", "happiness jumping happiness", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:2", "t", "cats", "b", "world national jumped happy", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:3", "t", "jumping nation", "b", "help foxes", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:4", "t", "jumping word cat happiness", "b", "", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:5", "t", "happy national nation dogs", "b", "dog help help foxes", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:6", "t", "held word cat", "b", "runner cat fox help", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:7", "t", "fox world", "b", "jumped jumping jumping hell world", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:8", "t", "quick foxes", "b", "help runner word", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:9", "t", "hello cats world", "b", "fox running fox jump", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "happ", "DISTANCE", "1"], "want": "%1\r\n+results\r\n%1\r\n$4\r\nhapp\r\n*1\r\n%1\r\n$5\r\nhappy\r\n,0.2222222222222222\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:dogs", "DISTANCE", "4"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "jump wor", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:9\r\n+results\r\n%2\r\n$4\r\njump\r\n-term exists in index\r\n$3\r\nwor\r\n*1\r\n%1\r\n$4\r\nword\r\n,3\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "hello dogs held", "DISTANCE", "3"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "ox fioxes", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:9\r\n+results\r\n%2\r\n$2\r\nox\r\n*1\r\n%1\r\n$3\r\nfox\r\n,4\r\n$6\r\nfioxes\r\n*1\r\n%1\r\n$5\r\nfoxes\r\n,3\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "rucner dogs"], "want": "%1\r\n+results\r\n%1\r\n$6\r\nrucner\r\n*1\r\n%1\r\n$6\r\nrunner\r\n,0.2222222222222222\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "happiness hapiness", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:9\r\n+results\r\n%2\r\n$9\r\nhappiness\r\n-term exists in index\r\n$8\r\nhapiness\r\n*1\r\n%1\r\n$9\r\nhappiness\r\n,2\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "national fxes", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:9\r\n+results\r\n%2\r\n$8\r\nnational\r\n-term exists in index\r\n$4\r\nfxes\r\n*1\r\n%1\r\n$5\r\nfoxes\r\n,3\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "hell dogs quicly", "DISTANCE", "3"], "want": "%1\r\n+results\r\n%1\r\n$6\r\nquicly\r\n*1\r\n%1\r\n$5\r\nquick\r\n,0.1111111111111111\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "gun happy happines", "DISTANCE", "2"], "want": "%1\r\n+results\r\n%2\r\n$3\r\ngun\r\n*1\r\n%1\r\n$4\r\n+run\r\n,0.1111111111111111\r\n$8\r\nhappines\r\n*1\r\n%1\r\n$9\r\nhappiness\r\n,0.2222222222222222\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "held cax"], "want": "%1\r\n+results\r\n%1\r\n$3\r\ncax\r\n*1\r\n%1\r\n$3\r\ncat\r\n,0.3333333333333333\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:cnat", "DISTANCE", "1"], "want": "%1\r\n+results\r\n%1\r\n$4\r\ncnat\r\n*1\r\n%1\r\n$3\r\ncat\r\n,0.3333333333333333\r\n"}
+{"cmd": ["flushall"]}
+{"cmd": ["ft.create", "idx", "ON", "HASH", "PREFIX", "1", "d:", "SCHEMA", "t", "TEXT", "b", "TEXT", "g", "TAG"], "want": "+OK\r\n"}
+{"cmd": ["hset", "d:1", "t", "dogs dog", "b", "cat help jump held", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:2", "t", "happiness", "b", "cats happiness runner", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:3", "t", "run help held", "b", "running", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:4", "t", "hello", "b", "dogs nation running", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:5", "t", "run runner help nation", "b", "national dogs quickly", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:6", "t", "help foxes jumped", "b", "quick happy national hello help", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:7", "t", "jumping", "b", "jumping jump jump", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:8", "t", "runner hello word quickly", "b", "", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:9", "t", "held runner foxes fox", "b", "fox dog quick hello", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:10", "t", "happy", "b", "", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["ft.dictadd", "dict0", "word", "cat", "CAT", "CAT"], "want": ":3\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "-foxes", "DISTANCE", "3", "TERMS", "INCLUDE", "dict0", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:10\r\n+results\r\n%1\r\n$5\r\nfoxes\r\n-term exists in index\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:held word"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "happiness rus runnring"], "want": "%1\r\n+results\r\n%2\r\n$3\r\nrus\r\n*1\r\n%1\r\n$3\r\nrun\r\n,0.2\r\n$8\r\nrunnring\r\n*1\r\n%1\r\n$7\r\nrunning\r\n,0.2\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "help ox quicly", "DISTANCE", "3", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%2\r\n$2\r\nox\r\n*9\r\n%1\r\n$4\r\n+dog\r\n,0.3\r\n%1\r\n$4\r\ndogs\r\n,0.3\r\n%1\r\n$4\r\n+fox\r\n,0.2\r\n%1\r\n$3\r\ndog\r\n,0.2\r\n%1\r\n$5\r\nfoxes\r\n,0.2\r\n%1\r\n$3\r\nrun\r\n,0.2\r\n%1\r\n$3\r\nfox\r\n,0.1\r\n%1\r\n$3\r\ncat\r\n,0.1\r\n%1\r\n$4\r\nword\r\n,0.1\r\n$6\r\nquicly\r\n*3\r\n%1\r\n$6\r\n+quick\r\n,0.2\r\n%1\r\n$5\r\nquick\r\n,0.2\r\n%1\r\n$7\r\nquickly\r\n,0.2\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "world running", "TERMS", "EXCLUDE", "dict0"], "want": "%1\r\n+results\r\n%1\r\n$5\r\nworld\r\n*1\r\n%1\r\n$4\r\nword\r\n,0.1\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "jumped"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:held hapy happd"], "want": "%1\r\n+results\r\n%2\r\n$4\r\nhapy\r\n*1\r\n%1\r\n$5\r\nhappy\r\n,0.2\r\n$5\r\nhappd\r\n*1\r\n%1\r\n$5\r\nhappy\r\n,0.2\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "dog", "DISTANCE", "3", "TERMS", "EXCLUDE", "dict0", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:10\r\n+results\r\n%1\r\n$3\r\ndog\r\n-term exists in index\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "jump", "TERMS", "EXCLUDE", "dict0", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:10\r\n+results\r\n%1\r\n$4\r\njump\r\n-term exists in index\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "runner", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "runzing running", "TERMS", "EXCLUDE", "dict0"], "want": "%1\r\n+results\r\n%1\r\n$7\r\nrunzing\r\n*1\r\n%1\r\n$7\r\nrunning\r\n,0.2\r\n"}
+{"cmd": ["ft.dictdump", "dict0"], "want": "~3\r\n$3\r\nCAT\r\n$3\r\ncat\r\n$4\r\nword\r\n"}
+{"cmd": ["ft.dictdel", "dict0", "run", "jmp"], "want": ":0\r\n"}
+{"cmd": ["flushall"]}
+{"cmd": ["ft.create", "idx", "ON", "HASH", "PREFIX", "1", "d:", "SCHEMA", "t", "TEXT", "b", "TEXT", "g", "TAG"], "want": "+OK\r\n"}
+{"cmd": ["hset", "d:1", "t", "world hell runner", "b", "help jumped", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:2", "t", "quick running runner jump", "b", "fox help", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:3", "t", "jumping jumping cats hell", "b", "cats cats quick running hell", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:4", "t", "dogs running jumping help", "b", "runs", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "happjness", "DISTANCE", "2"], "want": "%1\r\n+results\r\n%1\r\n$9\r\nhappjness\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "word", "DISTANCE", "3"], "want": "%1\r\n+results\r\n%1\r\n$4\r\nword\r\n*3\r\n%1\r\n$4\r\ndogs\r\n,0.25\r\n%1\r\n$3\r\nfox\r\n,0.25\r\n%1\r\n$5\r\nworld\r\n,0.25\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:jumxped national"], "want": "%1\r\n+results\r\n%2\r\n$7\r\njumxped\r\n*1\r\n%1\r\n$6\r\njumped\r\n,0.25\r\n$8\r\nnational\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "runnin"], "want": "%1\r\n+results\r\n%1\r\n$6\r\nrunnin\r\n*1\r\n%1\r\n$7\r\nrunning\r\n,0.75\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:runner aello", "DISTANCE", "3"], "want": "%1\r\n+results\r\n%1\r\n$5\r\naello\r\n*2\r\n%1\r\n$4\r\nhelp\r\n,0.75\r\n%1\r\n$4\r\nhell\r\n,0.5\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "fjumping", "DISTANCE", "1"], "want": "%1\r\n+results\r\n%1\r\n$8\r\nfjumping\r\n*1\r\n%1\r\n$7\r\njumping\r\n,0.5\r\n"}
+{"cmd": ["flushall"]}
+{"cmd": ["hello", "3"]}
+{"cmd": ["ft.create", "idx", "ON", "HASH", "PREFIX", "1", "d:", "SCHEMA", "t", "TEXT", "b", "TEXT", "g", "TAG"], "want": "+OK\r\n"}
+{"cmd": ["hset", "d:1", "t", "fox foxes", "b", "foxes", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:2", "t", "run run", "b", "help quick", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:3", "t", "national happy", "b", "word", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:4", "t", "nation national quick held", "b", "runs cats hello", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:5", "t", "hell", "b", "run jump", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:6", "t", "runner", "b", "", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:7", "t", "hello nation", "b", "dogs fox", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:8", "t", "world runs", "b", "happy running national", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:9", "t", "world world", "b", "nation running runner hello", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["ft.dictadd", "dict0", "quick", "cats", "WORD", "HELLO"], "want": ":4\r\n"}
+{"cmd": ["ft.dictadd", "dict1", "JUMPED", "national", "running", "wdog", "run"], "want": ":5\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:wforld national", "TERMS", "INCLUDE", "dict1", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:9\r\n+results\r\n%2\r\n$6\r\nwforld\r\n*0\r\n$8\r\nnational\r\n-term exists in index\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:nation", "TERMS", "INCLUDE", "dict1"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "fox caet", "TERMS", "EXCLUDE", "dict0"], "want": "%1\r\n+results\r\n%1\r\n$4\r\ncaet\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "quiwk mjump run", "DISTANCE", "3", "TERMS", "INCLUDE", "dict0", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:9\r\n+results\r\n%3\r\n$5\r\nquiwk\r\n*1\r\n%1\r\n$5\r\nquick\r\n,2\r\n$5\r\nmjump\r\n*1\r\n%1\r\n$4\r\njump\r\n,1\r\n$3\r\nrun\r\n-term exists in index\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "jumpng run", "TERMS", "EXCLUDE", "dict0"], "want": "%1\r\n+results\r\n%1\r\n$6\r\njumpng\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "-car", "TERMS", "EXCLUDE", "dict0", "TERMS", "INCLUDE", "dict1", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:9\r\n+results\r\n%1\r\n$3\r\ncar\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "world running", "TERMS", "EXCLUDE", "dict1"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:world", "TERMS", "EXCLUDE", "dict0", "TERMS", "INCLUDE", "dict1"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "bfox jumping"], "want": "%1\r\n+results\r\n%2\r\n$4\r\nbfox\r\n*2\r\n%1\r\n$3\r\nfox\r\n,0.2222222222222222\r\n%1\r\n$4\r\n+fox\r\n,0.1111111111111111\r\n$7\r\njumping\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "dogs", "TERMS", "EXCLUDE", "dict1"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "sword nation", "DISTANCE", "4", "TERMS", "EXCLUDE", "dict0", "TERMS", "INCLUDE", "dict1"], "want": "%1\r\n+results\r\n%1\r\n$5\r\nsword\r\n*11\r\n%1\r\n$4\r\n+run\r\n,0.3333333333333333\r\n%1\r\n$3\r\nfox\r\n,0.2222222222222222\r\n%1\r\n$3\r\nrun\r\n,0.2222222222222222\r\n%1\r\n$5\r\nworld\r\n,0.2222222222222222\r\n%1\r\n$4\r\n+dog\r\n,0.1111111111111111\r\n%1\r\n$4\r\n+fox\r\n,0.1111111111111111\r\n%1\r\n$5\r\nfoxes\r\n,0.1111111111111111\r\n%1\r\n$4\r\nword\r\n,0.1111111111111111\r\n%1\r\n$4\r\ndogs\r\n,0.1111111111111111\r\n%1\r\n$4\r\nheld\r\n,0.1111111111111111\r\n%1\r\n$4\r\nwdog\r\n,0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "happy", "DISTANCE", "4", "TERMS", "EXCLUDE", "dict0"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "-hapiness aog word", "TERMS", "EXCLUDE", "dict0", "TERMS", "EXCLUDE", "dict1"], "want": "%1\r\n+results\r\n%2\r\n$8\r\nhapiness\r\n*0\r\n$3\r\naog\r\n*0\r\n"}
+{"cmd": ["ft.dictdump", "dict0"], "want": "~4\r\n$5\r\nHELLO\r\n$4\r\nWORD\r\n$4\r\ncats\r\n$5\r\nquick\r\n"}
+{"cmd": ["ft.dictdel", "dict0", "dog", "jumpned"], "want": ":0\r\n"}
+{"cmd": ["ft.dictdump", "dict1"], "want": "~5\r\n$6\r\nJUMPED\r\n$8\r\nnational\r\n$3\r\nrun\r\n$7\r\nrunning\r\n$4\r\nwdog\r\n"}
+{"cmd": ["ft.dictdel", "dict1", "foxes", "rung"], "want": ":0\r\n"}
+{"cmd": ["flushall"]}
+{"cmd": ["ft.create", "idx", "ON", "HASH", "PREFIX", "1", "d:", "SCHEMA", "t", "TEXT", "b", "TEXT", "NOSTEM", "g", "TAG"], "want": "+OK\r\n"}
+{"cmd": ["ft.synupdate", "idx", "g1", "quickly", "jumped"], "want": "+OK\r\n"}
+{"cmd": ["hset", "d:1", "t", "running happy happiness", "b", "", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:2", "t", "hello world", "b", "quick word runs help run", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:3", "t", "cat quick jumping", "b", "runner", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["ft.dictadd", "dict0", "happiness", "cait", "hello", "happinrss", "CAT"], "want": ":5\r\n"}
+{"cmd": ["ft.dictadd", "dict1", "WORLD", "uick", "JUMPING", "run", "sjumping"], "want": ":5\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:helbl jumping", "TERMS", "INCLUDE", "dict0", "TERMS", "INCLUDE", "dict1"], "want": "%1\r\n+results\r\n%1\r\n$5\r\nhelbl\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:nation hedl vumped", "DISTANCE", "3", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%3\r\n$6\r\nnation\r\n*0\r\n$4\r\nhedl\r\n*1\r\n%1\r\n$4\r\nhelp\r\n,0.3333333333333333\r\n$6\r\nvumped\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:jumpinp", "TERMS", "INCLUDE", "dict1"], "want": "%1\r\n+results\r\n%1\r\n$7\r\njumpinp\r\n*1\r\n%1\r\n$7\r\nJUMPING\r\n,0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "jmped jumpingv quickly", "DISTANCE", "1", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:3\r\n+results\r\n%3\r\n$5\r\njmped\r\n*0\r\n$8\r\njumpingv\r\n*1\r\n%1\r\n$7\r\njumping\r\n,1\r\n$7\r\nquickly\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "ats helb hell", "TERMS", "EXCLUDE", "dict0", "TERMS", "INCLUDE", "dict1"], "want": "%1\r\n+results\r\n%3\r\n$3\r\nats\r\n*0\r\n$4\r\nhelb\r\n*1\r\n%1\r\n$4\r\nhelp\r\n,0.3333333333333333\r\n$4\r\nhell\r\n*2\r\n%1\r\n$5\r\nhello\r\n,0.3333333333333333\r\n%1\r\n$4\r\nhelp\r\n,0.3333333333333333\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "held happgness word", "DISTANCE", "4", "TERMS", "INCLUDE", "dict0", "TERMS", "INCLUDE", "dict1"], "want": "%1\r\n+results\r\n%2\r\n$4\r\nheld\r\n*11\r\n%1\r\n$4\r\n+run\r\n,0.3333333333333333\r\n%1\r\n$3\r\ncat\r\n,0.3333333333333333\r\n%1\r\n$5\r\nhappy\r\n,0.3333333333333333\r\n%1\r\n$5\r\nhello\r\n,0.3333333333333333\r\n%1\r\n$4\r\nhelp\r\n,0.3333333333333333\r\n%1\r\n$3\r\nrun\r\n,0.3333333333333333\r\n%1\r\n$4\r\nruns\r\n,0.3333333333333333\r\n%1\r\n$4\r\nword\r\n,0.3333333333333333\r\n%1\r\n$5\r\nworld\r\n,0.3333333333333333\r\n%1\r\n$4\r\ncait\r\n,0\r\n%1\r\n$4\r\nuick\r\n,0\r\n$9\r\nhappgness\r\n*2\r\n%1\r\n$9\r\nhappiness\r\n,0.3333333333333333\r\n%1\r\n$9\r\nhappinrss\r\n,0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:runs", "TERMS", "EXCLUDE", "dict0"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "ats ell cats", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%3\r\n$3\r\nats\r\n*0\r\n$3\r\nell\r\n*0\r\n$4\r\ncats\r\n*1\r\n%1\r\n$3\r\ncat\r\n,0.3333333333333333\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:cats junner runner", "DISTANCE", "2", "TERMS", "INCLUDE", "dict1"], "want": "%1\r\n+results\r\n%2\r\n$4\r\ncats\r\n*0\r\n$6\r\njunner\r\n*1\r\n%1\r\n$6\r\nrunner\r\n,0.3333333333333333\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "runs runzning", "DISTANCE", "2", "TERMS", "EXCLUDE", "dict0", "TERMS", "INCLUDE", "dict1"], "want": "%1\r\n+results\r\n%1\r\n$8\r\nrunzning\r\n*1\r\n%1\r\n$7\r\nrunning\r\n,0.3333333333333333\r\n"}
+{"cmd": ["ft.dictdump", "dict0"], "want": "~5\r\n$3\r\nCAT\r\n$4\r\ncait\r\n$9\r\nhappiness\r\n$9\r\nhappinrss\r\n$5\r\nhello\r\n"}
+{"cmd": ["ft.dictdel", "dict0", "running", "worgd"], "want": ":0\r\n"}
+{"cmd": ["ft.dictdump", "dict1"], "want": "~5\r\n$7\r\nJUMPING\r\n$5\r\nWORLD\r\n$3\r\nrun\r\n$8\r\nsjumping\r\n$4\r\nuick\r\n"}
+{"cmd": ["ft.dictdel", "dict1", "jump", "world"], "want": ":0\r\n"}
+{"cmd": ["flushall"]}
+{"cmd": ["ft.create", "idx", "ON", "HASH", "PREFIX", "1", "d:", "SCHEMA", "t", "TEXT", "b", "TEXT", "g", "TAG"], "want": "+OK\r\n"}
+{"cmd": ["hset", "d:1", "t", "help", "b", "quick dogs", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:2", "t", "jump nation jumping", "b", "quickly run", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:3", "t", "run runner running word", "b", "quick run foxes", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["ft.dictadd", "dict0", "runs", "DOG", "CATS", "jumped"], "want": ":4\r\n"}
+{"cmd": ["ft.dictadd", "dict1", "CATS", "running", "ruts", "QUICKLY", "RUNNER"], "want": ":5\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "-catsd", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%1\r\n$5\r\ncatsd\r\n*1\r\n%1\r\n$4\r\nCATS\r\n,0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "natin", "DISTANCE", "2", "TERMS", "EXCLUDE", "dict0", "TERMS", "INCLUDE", "dict1"], "want": "%1\r\n+results\r\n%1\r\n$5\r\nnatin\r\n*1\r\n%1\r\n$6\r\nnation\r\n,0.3333333333333333\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "dcat wodrd", "DISTANCE", "4"], "want": "%1\r\n+results\r\n%2\r\n$4\r\ndcat\r\n*9\r\n%1\r\n$5\r\nquick\r\n,0.6666666666666666\r\n%1\r\n$3\r\nrun\r\n,0.6666666666666666\r\n%1\r\n$4\r\n+dog\r\n,0.3333333333333333\r\n%1\r\n$4\r\n+fox\r\n,0.3333333333333333\r\n%1\r\n$4\r\n+run\r\n,0.3333333333333333\r\n%1\r\n$4\r\ndogs\r\n,0.3333333333333333\r\n%1\r\n$4\r\nhelp\r\n,0.3333333333333333\r\n%1\r\n$4\r\njump\r\n,0.3333333333333333\r\n%1\r\n$4\r\nword\r\n,0.3333333333333333\r\n$5\r\nwodrd\r\n*6\r\n%1\r\n$3\r\nrun\r\n,0.6666666666666666\r\n%1\r\n$4\r\n+dog\r\n,0.3333333333333333\r\n%1\r\n$4\r\n+run\r\n,0.3333333333333333\r\n%1\r\n$4\r\ndogs\r\n,0.3333333333333333\r\n%1\r\n$5\r\nfoxes\r\n,0.3333333333333333\r\n%1\r\n$4\r\nword\r\n,0.3333333333333333\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "quick natinal", "TERMS", "INCLUDE", "dict1"], "want": "%1\r\n+results\r\n%1\r\n$7\r\nnatinal\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:hello quackly jump", "DISTANCE", "1", "TERMS", "EXCLUDE", "dict0", "TERMS", "INCLUDE", "dict1"], "want": "%1\r\n+results\r\n%2\r\n$5\r\nhello\r\n*0\r\n$7\r\nquackly\r\n*1\r\n%1\r\n$7\r\nquickly\r\n,0.3333333333333333\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "runs held", "DISTANCE", "3", "TERMS", "EXCLUDE", "dict0", "TERMS", "INCLUDE", "dict1"], "want": "%1\r\n+results\r\n%1\r\n$4\r\nheld\r\n*2\r\n%1\r\n$4\r\nhelp\r\n,0.3333333333333333\r\n%1\r\n$4\r\nword\r\n,0.3333333333333333\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "fsx foxes runner", "TERMS", "INCLUDE", "dict0", "TERMS", "EXCLUDE", "dict1", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:3\r\n+results\r\n%3\r\n$3\r\nfsx\r\n*0\r\n$5\r\nfoxes\r\n-term exists in index\r\n$6\r\nrunner\r\n-term exists in index\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:happitness", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%1\r\n$10\r\nhappitness\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "umped cat tord", "DISTANCE", "2", "TERMS", "EXCLUDE", "dict0"], "want": "%1\r\n+results\r\n%3\r\n$5\r\numped\r\n*0\r\n$3\r\ncat\r\n*0\r\n$4\r\ntord\r\n*1\r\n%1\r\n$4\r\nword\r\n,0.3333333333333333\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "world", "TERMS", "INCLUDE", "dict1"], "want": "%1\r\n+results\r\n%1\r\n$5\r\nworld\r\n*1\r\n%1\r\n$4\r\nword\r\n,0.3333333333333333\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "dogs nationv", "DISTANCE", "3", "TERMS", "INCLUDE", "dict1"], "want": "%1\r\n+results\r\n%1\r\n$7\r\nnationv\r\n*1\r\n%1\r\n$6\r\nnation\r\n,0.3333333333333333\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "world help", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%1\r\n$5\r\nworld\r\n*1\r\n%1\r\n$4\r\nword\r\n,0.3333333333333333\r\n"}
+{"cmd": ["ft.dictdump", "dict0"], "want": "~4\r\n$4\r\nCATS\r\n$3\r\nDOG\r\n$6\r\njumped\r\n$4\r\nruns\r\n"}
+{"cmd": ["ft.dictdel", "dict0", "world", "national"], "want": ":0\r\n"}
+{"cmd": ["ft.dictdump", "dict1"], "want": "~5\r\n$4\r\nCATS\r\n$7\r\nQUICKLY\r\n$6\r\nRUNNER\r\n$7\r\nrunning\r\n$4\r\nruts\r\n"}
+{"cmd": ["ft.dictdel", "dict1", "running", "quikly"], "want": ":1\r\n"}
+{"cmd": ["flushall"]}
+{"cmd": ["ft.create", "idx", "ON", "HASH", "PREFIX", "1", "d:", "SCHEMA", "t", "TEXT", "b", "TEXT", "g", "TAG"], "want": "+OK\r\n"}
+{"cmd": ["ft.synupdate", "idx", "g1", "jumped", "jumping"], "want": "+OK\r\n"}
+{"cmd": ["hset", "d:1", "t", "word", "b", "word", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:2", "t", "quickly", "b", "nation hell runner", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:3", "t", "fox nation", "b", "world cat fox", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:4", "t", "held jumped world", "b", "cat running", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["ft.dictadd", "dict0", "CATS", "rdnning", "foi"], "want": ":3\r\n"}
+{"cmd": ["ft.dictadd", "dict1", "help"], "want": ":1\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "jumpingr jump", "DISTANCE", "2", "TERMS", "EXCLUDE", "dict1"], "want": "%1\r\n+results\r\n%2\r\n$8\r\njumpingr\r\n*0\r\n$4\r\njump\r\n*2\r\n%1\r\n$5\r\n+jump\r\n,0.25\r\n%1\r\n$6\r\njumped\r\n,0.25\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "happinessn quickly", "DISTANCE", "1"], "want": "%1\r\n+results\r\n%1\r\n$10\r\nhappinessn\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "fox jump natin", "DISTANCE", "4", "TERMS", "EXCLUDE", "dict0"], "want": "%1\r\n+results\r\n%2\r\n$4\r\njump\r\n*9\r\n%1\r\n$3\r\ncat\r\n,0.5\r\n%1\r\n$5\r\n+jump\r\n,0.25\r\n%1\r\n$4\r\n+run\r\n,0.25\r\n%1\r\n$3\r\nfox\r\n,0.25\r\n%1\r\n$4\r\nheld\r\n,0.25\r\n%1\r\n$4\r\nhell\r\n,0.25\r\n%1\r\n$6\r\njumped\r\n,0.25\r\n%1\r\n$4\r\nword\r\n,0.25\r\n%1\r\n$3\r\n~g1\r\n,0.25\r\n$5\r\nnatin\r\n*3\r\n%1\r\n$3\r\ncat\r\n,0.5\r\n%1\r\n$6\r\nnation\r\n,0.5\r\n%1\r\n$4\r\n+run\r\n,0.25\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "korld fox", "TERMS", "EXCLUDE", "dict1", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:4\r\n+results\r\n%2\r\n$5\r\nkorld\r\n*1\r\n%1\r\n$5\r\nworld\r\n,2\r\n$3\r\nfox\r\n-term exists in index\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "unner", "DISTANCE", "3", "TERMS", "INCLUDE", "dict1", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:4\r\n+results\r\n%1\r\n$5\r\nunner\r\n*1\r\n%1\r\n$6\r\nrunner\r\n,1\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:foxes quickly qucick", "DISTANCE", "2", "TERMS", "INCLUDE", "dict1"], "want": "%1\r\n+results\r\n%2\r\n$5\r\nfoxes\r\n*1\r\n%1\r\n$3\r\nfox\r\n,0.25\r\n$6\r\nqucick\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "heoll held helz", "DISTANCE", "2", "TERMS", "INCLUDE", "dict1"], "want": "%1\r\n+results\r\n%2\r\n$5\r\nheoll\r\n*3\r\n%1\r\n$4\r\nheld\r\n,0.25\r\n%1\r\n$4\r\nhell\r\n,0.25\r\n%1\r\n$4\r\nhelp\r\n,0\r\n$4\r\nhelz\r\n*3\r\n%1\r\n$4\r\nheld\r\n,0.25\r\n%1\r\n$4\r\nhell\r\n,0.25\r\n%1\r\n$4\r\nhelp\r\n,0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "happy dog", "DISTANCE", "4", "TERMS", "INCLUDE", "dict0", "TERMS", "EXCLUDE", "dict1"], "want": "%1\r\n+results\r\n%2\r\n$5\r\nhappy\r\n*4\r\n%1\r\n$3\r\ncat\r\n,0.5\r\n%1\r\n$4\r\nheld\r\n,0.25\r\n%1\r\n$4\r\nhell\r\n,0.25\r\n%1\r\n$4\r\nCATS\r\n,0\r\n$3\r\ndog\r\n*10\r\n%1\r\n$3\r\ncat\r\n,0.5\r\n%1\r\n$5\r\nworld\r\n,0.5\r\n%1\r\n$4\r\nword\r\n,0.25\r\n%1\r\n$4\r\n+run\r\n,0.25\r\n%1\r\n$3\r\nfox\r\n,0.25\r\n%1\r\n$4\r\nheld\r\n,0.25\r\n%1\r\n$4\r\nhell\r\n,0.25\r\n%1\r\n$3\r\n~g1\r\n,0.25\r\n%1\r\n$3\r\nfoi\r\n,0\r\n%1\r\n$4\r\nCATS\r\n,0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "fox national", "DISTANCE", "3"], "want": "%1\r\n+results\r\n%1\r\n$8\r\nnational\r\n*1\r\n%1\r\n$6\r\nnation\r\n,0.5\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "eumping jumped foxes", "DISTANCE", "1", "TERMS", "EXCLUDE", "dict1"], "want": "%1\r\n+results\r\n%2\r\n$7\r\neumping\r\n*0\r\n$5\r\nfoxes\r\n*0\r\n"}
+{"cmd": ["ft.dictdump", "dict0"], "want": "~3\r\n$4\r\nCATS\r\n$3\r\nfoi\r\n$7\r\nrdnning\r\n"}
+{"cmd": ["ft.dictdel", "dict0", "happy", "foxes"], "want": ":0\r\n"}
+{"cmd": ["ft.dictdump", "dict1"], "want": "~1\r\n$4\r\nhelp\r\n"}
+{"cmd": ["ft.dictdel", "dict1", "national", "fuox"], "want": ":0\r\n"}
+{"cmd": ["flushall"]}
+{"cmd": ["ft.create", "idx", "ON", "HASH", "PREFIX", "1", "d:", "SCHEMA", "t", "TEXT", "b", "TEXT", "g", "TAG"], "want": "+OK\r\n"}
+{"cmd": ["hset", "d:1", "t", "hell fox runs", "b", "runs cat", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:2", "t", "runner help runner help", "b", "nation jumping foxes held cats", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:3", "t", "foxes fox foxes", "b", "", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:4", "t", "held", "b", "dog quick dog jumping", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:5", "t", "held quickly", "b", "", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["ft.dictadd", "dict0", "RUNNING", "hello", "quickly", "dogs", "QUICK"], "want": ":5\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "rcunning national"], "want": "%1\r\n+results\r\n%2\r\n$8\r\nrcunning\r\n*0\r\n$8\r\nnational\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "quickly quickly", "DISTANCE", "3", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:jumped foes jumped", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:5\r\n+results\r\n%3\r\n$6\r\njumped\r\n*0\r\n$4\r\nfoes\r\n*1\r\n%1\r\n$5\r\nfoxes\r\n,2\r\n$6\r\njumped\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "cump chello", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%2\r\n$4\r\ncump\r\n*0\r\n$6\r\nchello\r\n*1\r\n%1\r\n$5\r\nhello\r\n,0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "held dig", "TERMS", "EXCLUDE", "dict0", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:5\r\n+results\r\n%2\r\n$4\r\nheld\r\n-term exists in index\r\n$3\r\ndig\r\n*1\r\n%1\r\n$3\r\ndog\r\n,1\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "-@b:happy cat dog", "DISTANCE", "2"], "want": "%1\r\n+results\r\n%1\r\n$5\r\nhappy\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "hell", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:5\r\n+results\r\n%1\r\n$4\r\nhell\r\n-term exists in index\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "runnr runner", "DISTANCE", "2"], "want": "%1\r\n+results\r\n%1\r\n$5\r\nrunnr\r\n*2\r\n%1\r\n$6\r\nrunner\r\n,0.2\r\n%1\r\n$4\r\nruns\r\n,0.2\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:natxion rus", "DISTANCE", "4", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%2\r\n$7\r\nnatxion\r\n*1\r\n%1\r\n$6\r\nnation\r\n,0.2\r\n$3\r\nrus\r\n*12\r\n%1\r\n$4\r\nheld\r\n,0.6\r\n%1\r\n$5\r\n+jump\r\n,0.4\r\n%1\r\n$4\r\n+fox\r\n,0.4\r\n%1\r\n$5\r\nfoxes\r\n,0.4\r\n%1\r\n$4\r\n+cat\r\n,0.2\r\n%1\r\n$4\r\n+run\r\n,0.2\r\n%1\r\n$3\r\ncat\r\n,0.2\r\n%1\r\n$4\r\ncats\r\n,0.2\r\n%1\r\n$3\r\ndog\r\n,0.2\r\n%1\r\n$5\r\nquick\r\n,0.2\r\n%1\r\n$4\r\nruns\r\n,0.2\r\n%1\r\n$4\r\ndogs\r\n,0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:fopxes", "DISTANCE", "2", "TERMS", "EXCLUDE", "dict0"], "want": "%1\r\n+results\r\n%1\r\n$6\r\nfopxes\r\n*1\r\n%1\r\n$5\r\nfoxes\r\n,0.4\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "jumped", "DISTANCE", "2", "TERMS", "EXCLUDE", "dict0"], "want": "%1\r\n+results\r\n%1\r\n$6\r\njumped\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:dog natin"], "want": "%1\r\n+results\r\n%1\r\n$5\r\nnatin\r\n*1\r\n%1\r\n$6\r\nnation\r\n,0.2\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "quick", "DISTANCE", "4", "TERMS", "INCLUDE", "dict0", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:5\r\n+results\r\n%1\r\n$5\r\nquick\r\n-term exists in index\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:dog bcats", "TERMS", "EXCLUDE", "dict0"], "want": "%1\r\n+results\r\n%1\r\n$5\r\nbcats\r\n*1\r\n%1\r\n$4\r\ncats\r\n,0.2\r\n"}
+{"cmd": ["ft.dictdump", "dict0"], "want": "~5\r\n$5\r\nQUICK\r\n$7\r\nRUNNING\r\n$4\r\ndogs\r\n$5\r\nhello\r\n$7\r\nquickly\r\n"}
+{"cmd": ["ft.dictdel", "dict0", "foxes", "dogs"], "want": ":1\r\n"}
+{"cmd": ["flushall"]}
+{"cmd": ["ft.create", "idx", "ON", "HASH", "PREFIX", "1", "d:", "SCHEMA", "t", "TEXT", "b", "TEXT", "NOSTEM", "g", "TAG"], "want": "+OK\r\n"}
+{"cmd": ["ft.synupdate", "idx", "g1", "held", "hello"], "want": "+OK\r\n"}
+{"cmd": ["hset", "d:1", "t", "national national", "b", "runs nation world", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:2", "t", "hell quick", "b", "nation", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["ft.dictadd", "dict0", "wrd", "national"], "want": ":2\r\n"}
+{"cmd": ["ft.dictadd", "dict1", "CAT", "hell"], "want": ":2\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:workd rung uns"], "want": "%1\r\n+results\r\n%3\r\n$5\r\nworkd\r\n*1\r\n%1\r\n$5\r\nworld\r\n,0.5\r\n$4\r\nrung\r\n*1\r\n%1\r\n$4\r\nruns\r\n,0.5\r\n$3\r\nuns\r\n*1\r\n%1\r\n$4\r\nruns\r\n,0.5\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "-@b:runs word", "DISTANCE", "1"], "want": "%1\r\n+results\r\n%1\r\n$4\r\nword\r\n*1\r\n%1\r\n$5\r\nworld\r\n,0.5\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "dog held runsa", "TERMS", "INCLUDE", "dict0", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:2\r\n+results\r\n%3\r\n$3\r\ndog\r\n*0\r\n$4\r\nheld\r\n*1\r\n%1\r\n$4\r\nhell\r\n,1\r\n$5\r\nrunsa\r\n*1\r\n%1\r\n$4\r\nruns\r\n,1\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:quck", "DISTANCE", "1"], "want": "%1\r\n+results\r\n%1\r\n$4\r\nquck\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "hell jumping held"], "want": "%1\r\n+results\r\n%2\r\n$7\r\njumping\r\n*0\r\n$4\r\nheld\r\n*1\r\n%1\r\n$4\r\nhell\r\n,0.5\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "rns happiness jumping", "TERMS", "INCLUDE", "dict0", "TERMS", "INCLUDE", "dict1", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:2\r\n+results\r\n%3\r\n$3\r\nrns\r\n*1\r\n%1\r\n$4\r\nruns\r\n,1\r\n$9\r\nhappiness\r\n*0\r\n$7\r\njumping\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "jmp runs qufick", "DISTANCE", "4"], "want": "%1\r\n+results\r\n%2\r\n$3\r\njmp\r\n*2\r\n%1\r\n$4\r\nhell\r\n,0.5\r\n%1\r\n$4\r\nruns\r\n,0.5\r\n$6\r\nqufick\r\n*1\r\n%1\r\n$5\r\nquick\r\n,0.5\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "help muns", "DISTANCE", "3", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%2\r\n$4\r\nhelp\r\n*1\r\n%1\r\n$4\r\nhell\r\n,0.5\r\n$4\r\nmuns\r\n*1\r\n%1\r\n$4\r\nruns\r\n,0.5\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "wod quickld"], "want": "%1\r\n+results\r\n%2\r\n$3\r\nwod\r\n*0\r\n$7\r\nquickld\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "jump", "DISTANCE", "4", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%1\r\n$4\r\njump\r\n*4\r\n%1\r\n$4\r\nhell\r\n,0.5\r\n%1\r\n$5\r\nquick\r\n,0.5\r\n%1\r\n$4\r\nruns\r\n,0.5\r\n%1\r\n$3\r\nwrd\r\n,0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "happines happy jup", "DISTANCE", "2"], "want": "%1\r\n+results\r\n%3\r\n$8\r\nhappines\r\n*0\r\n$5\r\nhappy\r\n*0\r\n$3\r\njup\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "fox nation fcox", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:2\r\n+results\r\n%3\r\n$3\r\nfox\r\n*0\r\n$6\r\nnation\r\n-term exists in index\r\n$4\r\nfcox\r\n*0\r\n"}
+{"cmd": ["ft.dictdump", "dict0"], "want": "~2\r\n$8\r\nnational\r\n$3\r\nwrd\r\n"}
+{"cmd": ["ft.dictdel", "dict0", "national", "worlod"], "want": ":1\r\n"}
+{"cmd": ["ft.dictdump", "dict1"], "want": "~2\r\n$3\r\nCAT\r\n$4\r\nhell\r\n"}
+{"cmd": ["ft.dictdel", "dict1", "runner", "jumted"], "want": ":0\r\n"}
+{"cmd": ["flushall"]}
+{"cmd": ["ft.create", "idx", "ON", "HASH", "PREFIX", "1", "d:", "SCHEMA", "t", "TEXT", "b", "TEXT", "g", "TAG"], "want": "+OK\r\n"}
+{"cmd": ["hset", "d:1", "t", "running", "b", "hello cats", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:2", "t", "dogs jumped happy", "b", "fox", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:3", "t", "held", "b", "national quick nation", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:4", "t", "dog run hell fox", "b", "jump held", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:5", "t", "word foxes", "b", "runner", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["ft.dictadd", "dict0", "naional"], "want": ":1\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "oruns running quickly", "DISTANCE", "3", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:5\r\n+results\r\n%3\r\n$5\r\noruns\r\n*2\r\n%1\r\n$4\r\n+run\r\n,1\r\n%1\r\n$3\r\nrun\r\n,1\r\n$7\r\nrunning\r\n-term exists in index\r\n$7\r\nquickly\r\n*1\r\n%1\r\n$5\r\nquick\r\n,1\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "jumpedy", "DISTANCE", "1", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%1\r\n$7\r\njumpedy\r\n*1\r\n%1\r\n$6\r\njumped\r\n,0.2\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "-@b:run jumping", "TERMS", "INCLUDE", "dict0", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:5\r\n+results\r\n%2\r\n$3\r\nrun\r\n-term exists in index\r\n$7\r\njumping\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "quick yumped", "TERMS", "EXCLUDE", "dict0"], "want": "%1\r\n+results\r\n%1\r\n$6\r\nyumped\r\n*1\r\n%1\r\n$6\r\njumped\r\n,0.2\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "og", "DISTANCE", "4", "TERMS", "EXCLUDE", "dict0"], "want": "%1\r\n+results\r\n%1\r\n$2\r\nog\r\n*15\r\n%1\r\n$3\r\nfox\r\n,0.4\r\n%1\r\n$4\r\nheld\r\n,0.4\r\n%1\r\n$5\r\nfoxes\r\n,0.2\r\n%1\r\n$4\r\nhell\r\n,0.2\r\n%1\r\n$5\r\nhello\r\n,0.2\r\n%1\r\n$4\r\n+cat\r\n,0.2\r\n%1\r\n$4\r\n+dog\r\n,0.2\r\n%1\r\n$4\r\n+fox\r\n,0.2\r\n%1\r\n$4\r\n+run\r\n,0.2\r\n%1\r\n$4\r\ncats\r\n,0.2\r\n%1\r\n$3\r\ndog\r\n,0.2\r\n%1\r\n$4\r\ndogs\r\n,0.2\r\n%1\r\n$4\r\njump\r\n,0.2\r\n%1\r\n$3\r\nrun\r\n,0.2\r\n%1\r\n$4\r\nword\r\n,0.2\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "jumped"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "tump quick runner", "DISTANCE", "1", "TERMS", "EXCLUDE", "dict0"], "want": "%1\r\n+results\r\n%1\r\n$4\r\ntump\r\n*1\r\n%1\r\n$4\r\njump\r\n,0.2\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "held runner jumping", "DISTANCE", "2"], "want": "%1\r\n+results\r\n%1\r\n$7\r\njumping\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "cox runs", "TERMS", "EXCLUDE", "dict0"], "want": "%1\r\n+results\r\n%2\r\n$3\r\ncox\r\n*1\r\n%1\r\n$3\r\nfox\r\n,0.4\r\n$4\r\nruns\r\n*1\r\n%1\r\n$3\r\nrun\r\n,0.2\r\n"}
+{"cmd": ["ft.dictdump", "dict0"], "want": "~1\r\n$7\r\nnaional\r\n"}
+{"cmd": ["ft.dictdel", "dict0", "word", "cats"], "want": ":0\r\n"}
+{"cmd": ["flushall"]}
+{"cmd": ["hello", "3"]}
+{"cmd": ["ft.create", "idx", "ON", "HASH", "PREFIX", "1", "d:", "SCHEMA", "t", "TEXT", "b", "TEXT", "NOSTEM", "g", "TAG"], "want": "+OK\r\n"}
+{"cmd": ["hset", "d:1", "t", "jump hell", "b", "national quick jumping", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:2", "t", "dogs jumped", "b", "held", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:3", "t", "run quick", "b", "running", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:4", "t", "cats word jump jumped", "b", "foxes word nation world", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["ft.dictadd", "dict0", "world", "FOXES"], "want": ":2\r\n"}
+{"cmd": ["ft.dictadd", "dict1", "natin", "quick", "FOXES"], "want": ":3\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "hazppy", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%1\r\n$6\r\nhazppy\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:runner jump help", "DISTANCE", "3", "TERMS", "INCLUDE", "dict0", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:4\r\n+results\r\n%3\r\n$6\r\nrunner\r\n*1\r\n%1\r\n$7\r\nrunning\r\n,1\r\n$4\r\njump\r\n-term exists in index\r\n$4\r\nhelp\r\n*1\r\n%1\r\n$4\r\nheld\r\n,1\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:world dog", "TERMS", "EXCLUDE", "dict1"], "want": "%1\r\n+results\r\n%1\r\n$3\r\ndog\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "hell running nation", "TERMS", "EXCLUDE", "dict0"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "foes cat", "DISTANCE", "1", "TERMS", "INCLUDE", "dict0", "TERMS", "EXCLUDE", "dict1"], "want": "%1\r\n+results\r\n%2\r\n$4\r\nfoes\r\n*1\r\n%1\r\n$5\r\nfoxes\r\n,0.25\r\n$3\r\ncat\r\n*2\r\n%1\r\n$4\r\n+cat\r\n,0.25\r\n%1\r\n$4\r\ncats\r\n,0.25\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:jumpig run drun", "DISTANCE", "3", "TERMS", "EXCLUDE", "dict0", "TERMS", "INCLUDE", "dict1"], "want": "%1\r\n+results\r\n%2\r\n$6\r\njumpig\r\n*1\r\n%1\r\n$7\r\njumping\r\n,0.25\r\n$4\r\ndrun\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "kword cunner", "TERMS", "EXCLUDE", "dict0"], "want": "%1\r\n+results\r\n%2\r\n$5\r\nkword\r\n*1\r\n%1\r\n$4\r\nword\r\n,0.25\r\n$6\r\ncunner\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "happm", "DISTANCE", "2", "TERMS", "EXCLUDE", "dict0", "TERMS", "EXCLUDE", "dict1"], "want": "%1\r\n+results\r\n%1\r\n$5\r\nhappm\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "cas jumped", "TERMS", "EXCLUDE", "dict0", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:4\r\n+results\r\n%2\r\n$3\r\ncas\r\n*1\r\n%1\r\n$4\r\ncats\r\n,1\r\n$6\r\njumped\r\n-term exists in index\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:cat runner", "DISTANCE", "3", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%2\r\n$3\r\ncat\r\n*0\r\n$6\r\nrunner\r\n*1\r\n%1\r\n$7\r\nrunning\r\n,0.25\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "running", "TERMS", "INCLUDE", "dict1"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "jumpiing"], "want": "%1\r\n+results\r\n%1\r\n$8\r\njumpiing\r\n*1\r\n%1\r\n$7\r\njumping\r\n,0.25\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "dogs run", "DISTANCE", "2", "TERMS", "INCLUDE", "dict0", "TERMS", "INCLUDE", "dict1"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "cats", "TERMS", "INCLUDE", "dict0", "TERMS", "INCLUDE", "dict1"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "happiness hell", "TERMS", "INCLUDE", "dict1"], "want": "%1\r\n+results\r\n%1\r\n$9\r\nhappiness\r\n*0\r\n"}
+{"cmd": ["ft.dictdump", "dict0"], "want": "~2\r\n$5\r\nFOXES\r\n$5\r\nworld\r\n"}
+{"cmd": ["ft.dictdel", "dict0", "run", "uns"], "want": ":0\r\n"}
+{"cmd": ["ft.dictdump", "dict1"], "want": "~3\r\n$5\r\nFOXES\r\n$5\r\nnatin\r\n$5\r\nquick\r\n"}
+{"cmd": ["ft.dictdel", "dict1", "hell", "nationsal"], "want": ":0\r\n"}
+{"cmd": ["flushall"]}
+{"cmd": ["ft.create", "idx", "ON", "HASH", "PREFIX", "1", "d:", "SCHEMA", "t", "TEXT", "b", "TEXT", "g", "TAG"], "want": "+OK\r\n"}
+{"cmd": ["hset", "d:1", "t", "foxes", "b", "dogs quick", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:2", "t", "runner", "b", "hell happy dog", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:3", "t", "cats held hello quick", "b", "jumping quickly jumped happy quick", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:4", "t", "hello world", "b", "cat happiness foxes", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:5", "t", "fox foxes jump national", "b", "national cat", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:6", "t", "dogs held national runner", "b", "dog jump happiness jump word", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "hell jump"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "worldi dogs quaick", "DISTANCE", "1"], "want": "%1\r\n+results\r\n%2\r\n$6\r\nworldi\r\n*1\r\n%1\r\n$5\r\nworld\r\n,0.16666666666666666\r\n$6\r\nquaick\r\n*1\r\n%1\r\n$5\r\nquick\r\n,0.3333333333333333\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:jumped adog happiness"], "want": "%1\r\n+results\r\n%1\r\n$4\r\nadog\r\n*2\r\n%1\r\n$4\r\n+dog\r\n,0.3333333333333333\r\n%1\r\n$3\r\ndog\r\n,0.3333333333333333\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "hvappy runner", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:6\r\n+results\r\n%2\r\n$6\r\nhvappy\r\n*1\r\n%1\r\n$5\r\nhappy\r\n,2\r\n$6\r\nrunner\r\n-term exists in index\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "cat runs", "DISTANCE", "3"], "want": "%1\r\n+results\r\n%1\r\n$4\r\nruns\r\n*4\r\n%1\r\n$4\r\ndogs\r\n,0.3333333333333333\r\n%1\r\n$4\r\njump\r\n,0.3333333333333333\r\n%1\r\n$6\r\nrunner\r\n,0.3333333333333333\r\n%1\r\n$4\r\ncats\r\n,0.16666666666666666\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "jumued"], "want": "%1\r\n+results\r\n%1\r\n$6\r\njumued\r\n*1\r\n%1\r\n$6\r\njumped\r\n,0.16666666666666666\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "-@b:hell", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:6\r\n+results\r\n%1\r\n$4\r\nhell\r\n-term exists in index\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "word happy hppy", "DISTANCE", "3", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:6\r\n+results\r\n%3\r\n$4\r\nword\r\n-term exists in index\r\n$5\r\nhappy\r\n-term exists in index\r\n$4\r\nhppy\r\n*4\r\n%1\r\n$6\r\n+happi\r\n,4\r\n%1\r\n$5\r\nhappy\r\n,2\r\n%1\r\n$4\r\nheld\r\n,2\r\n%1\r\n$4\r\nhell\r\n,1\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "hell quickly", "DISTANCE", "1"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "runs"], "want": "%1\r\n+results\r\n%1\r\n$4\r\nruns\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "naion hely", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:6\r\n+results\r\n%2\r\n$5\r\nnaion\r\n*0\r\n$4\r\nhely\r\n*2\r\n%1\r\n$4\r\nheld\r\n,2\r\n%1\r\n$4\r\nhell\r\n,1\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "helle happy jumping", "DISTANCE", "1"], "want": "%1\r\n+results\r\n%1\r\n$5\r\nhelle\r\n*2\r\n%1\r\n$5\r\nhello\r\n,0.3333333333333333\r\n%1\r\n$4\r\nhell\r\n,0.16666666666666666\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "quickly", "DISTANCE", "2"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["flushall"]}
+{"cmd": ["ft.create", "idx", "ON", "HASH", "PREFIX", "1", "d:", "SCHEMA", "t", "TEXT", "b", "TEXT", "NOSTEM", "g", "TAG"], "want": "+OK\r\n"}
+{"cmd": ["ft.synupdate", "idx", "g1", "hell", "jumping"], "want": "+OK\r\n"}
+{"cmd": ["hset", "d:1", "t", "dogs", "b", "hell jump running", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:2", "t", "foxes", "b", "run", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:3", "t", "held foxes", "b", "hell dog hello", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:4", "t", "run happy help world", "b", "national quick", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:5", "t", "world", "b", "hell hello", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:6", "t", "cat jump cat cat", "b", "foxes running", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:nation", "DISTANCE", "3"], "want": "%1\r\n+results\r\n%1\r\n$6\r\nnation\r\n*1\r\n%1\r\n$8\r\nnational\r\n,0.16666666666666666\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "cats happiness haxpiness", "DISTANCE", "2"], "want": "%1\r\n+results\r\n%3\r\n$4\r\ncats\r\n*1\r\n%1\r\n$3\r\ncat\r\n,0.16666666666666666\r\n$9\r\nhappiness\r\n*0\r\n$9\r\nhaxpiness\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "nation world"], "want": "%1\r\n+results\r\n%1\r\n$6\r\nnation\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "cat zrun"], "want": "%1\r\n+results\r\n%1\r\n$4\r\nzrun\r\n*1\r\n%1\r\n$3\r\nrun\r\n,0.3333333333333333\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:helo held happiness"], "want": "%1\r\n+results\r\n%2\r\n$4\r\nhelo\r\n*2\r\n%1\r\n$4\r\nhell\r\n,0.5\r\n%1\r\n$5\r\nhello\r\n,0.3333333333333333\r\n$9\r\nhappiness\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "runt running", "DISTANCE", "1"], "want": "%1\r\n+results\r\n%1\r\n$4\r\nrunt\r\n*1\r\n%1\r\n$3\r\nrun\r\n,0.3333333333333333\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "national fox", "DISTANCE", "4"], "want": "%1\r\n+results\r\n%1\r\n$3\r\nfox\r\n*14\r\n%1\r\n$5\r\nfoxes\r\n,0.5\r\n%1\r\n$4\r\nhell\r\n,0.5\r\n%1\r\n$3\r\n~g1\r\n,0.5\r\n%1\r\n$5\r\nhello\r\n,0.3333333333333333\r\n%1\r\n$4\r\n+fox\r\n,0.3333333333333333\r\n%1\r\n$4\r\njump\r\n,0.3333333333333333\r\n%1\r\n$3\r\nrun\r\n,0.3333333333333333\r\n%1\r\n$5\r\nworld\r\n,0.3333333333333333\r\n%1\r\n$4\r\nheld\r\n,0.16666666666666666\r\n%1\r\n$4\r\nhelp\r\n,0.16666666666666666\r\n%1\r\n$4\r\n+dog\r\n,0.16666666666666666\r\n%1\r\n$3\r\ncat\r\n,0.16666666666666666\r\n%1\r\n$3\r\ndog\r\n,0.16666666666666666\r\n%1\r\n$4\r\ndogs\r\n,0.16666666666666666\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:jumping", "DISTANCE", "3", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:6\r\n+results\r\n%1\r\n$7\r\njumping\r\n*2\r\n%1\r\n$4\r\njump\r\n,2\r\n%1\r\n$7\r\nrunning\r\n,2\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "foxes jumpeng woord", "DISTANCE", "3"], "want": "%1\r\n+results\r\n%2\r\n$7\r\njumpeng\r\n*1\r\n%1\r\n$4\r\njump\r\n,0.3333333333333333\r\n$5\r\nwoord\r\n*1\r\n%1\r\n$5\r\nworld\r\n,0.3333333333333333\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "nation run", "DISTANCE", "4"], "want": "%1\r\n+results\r\n%1\r\n$6\r\nnation\r\n*2\r\n%1\r\n$3\r\ncat\r\n,0.16666666666666666\r\n%1\r\n$8\r\nnational\r\n,0.16666666666666666\r\n"}
+{"cmd": ["flushall"]}
+{"cmd": ["hello", "3"]}
+{"cmd": ["ft.create", "idx", "ON", "HASH", "PREFIX", "1", "d:", "SCHEMA", "t", "TEXT", "b", "TEXT", "NOSTEM", "g", "TAG"], "want": "+OK\r\n"}
+{"cmd": ["ft.synupdate", "idx", "g1", "world", "runs"], "want": "+OK\r\n"}
+{"cmd": ["hset", "d:1", "t", "hello", "b", "word", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:2", "t", "nation runs", "b", "runs jump happy hello nation", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:3", "t", "jumping help running runner", "b", "", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:4", "t", "jumping jumping cats", "b", "dog held happy", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["ft.dictadd", "dict0", "uick", "NATION"], "want": ":2\r\n"}
+{"cmd": ["ft.dictadd", "dict1", "hnell", "happiness", "HELL", "JUMPED"], "want": ":4\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "wcrld world runner", "DISTANCE", "1", "TERMS", "INCLUDE", "dict1"], "want": "%1\r\n+results\r\n%2\r\n$5\r\nwcrld\r\n*0\r\n$5\r\nworld\r\n*1\r\n%1\r\n$4\r\nword\r\n,0.25\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "rkunner held dog", "TERMS", "INCLUDE", "dict1"], "want": "%1\r\n+results\r\n%1\r\n$7\r\nrkunner\r\n*1\r\n%1\r\n$6\r\nrunner\r\n,0.25\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "dogs equickly"], "want": "%1\r\n+results\r\n%2\r\n$4\r\ndogs\r\n*1\r\n%1\r\n$3\r\ndog\r\n,0.25\r\n$8\r\nequickly\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "quickly cat foxes", "TERMS", "INCLUDE", "dict1"], "want": "%1\r\n+results\r\n%3\r\n$7\r\nquickly\r\n*0\r\n$3\r\ncat\r\n*2\r\n%1\r\n$4\r\n+cat\r\n,0.25\r\n%1\r\n$4\r\ncats\r\n,0.25\r\n$5\r\nfoxes\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "jumping", "TERMS", "INCLUDE", "dict1", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:4\r\n+results\r\n%1\r\n$7\r\njumping\r\n-term exists in index\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "quick runs cats", "DISTANCE", "2", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%1\r\n$5\r\nquick\r\n*1\r\n%1\r\n$4\r\nuick\r\n,0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "qwickly jump", "TERMS", "EXCLUDE", "dict0"], "want": "%1\r\n+results\r\n%1\r\n$7\r\nqwickly\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "hmlp", "DISTANCE", "1", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:4\r\n+results\r\n%1\r\n$4\r\nhmlp\r\n*1\r\n%1\r\n$4\r\nhelp\r\n,1\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "foxes cat helblo", "TERMS", "EXCLUDE", "dict0", "TERMS", "INCLUDE", "dict1"], "want": "%1\r\n+results\r\n%3\r\n$5\r\nfoxes\r\n*0\r\n$3\r\ncat\r\n*2\r\n%1\r\n$4\r\n+cat\r\n,0.25\r\n%1\r\n$4\r\ncats\r\n,0.25\r\n$6\r\nhelblo\r\n*1\r\n%1\r\n$5\r\nhello\r\n,0.5\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "catzs", "TERMS", "EXCLUDE", "dict1"], "want": "%1\r\n+results\r\n%1\r\n$5\r\ncatzs\r\n*1\r\n%1\r\n$4\r\ncats\r\n,0.25\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "fox", "TERMS", "EXCLUDE", "dict0", "TERMS", "INCLUDE", "dict1"], "want": "%1\r\n+results\r\n%1\r\n$3\r\nfox\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "cats jumping", "DISTANCE", "4", "TERMS", "EXCLUDE", "dict0", "TERMS", "EXCLUDE", "dict1"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "happines jump cats", "TERMS", "INCLUDE", "dict1", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:4\r\n+results\r\n%3\r\n$8\r\nhappines\r\n*1\r\n%1\r\n$9\r\nhappiness\r\n,0\r\n$4\r\njump\r\n-term exists in index\r\n$4\r\ncats\r\n-term exists in index\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "runner", "DISTANCE", "1", "TERMS", "EXCLUDE", "dict1"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.dictdump", "dict0"], "want": "~2\r\n$6\r\nNATION\r\n$4\r\nuick\r\n"}
+{"cmd": ["ft.dictdel", "dict0", "jump", "word"], "want": ":0\r\n"}
+{"cmd": ["ft.dictdump", "dict1"], "want": "~4\r\n$4\r\nHELL\r\n$6\r\nJUMPED\r\n$9\r\nhappiness\r\n$5\r\nhnell\r\n"}
+{"cmd": ["ft.dictdel", "dict1", "fox", "jup"], "want": ":0\r\n"}
+{"cmd": ["flushall"]}
+{"cmd": ["hello", "3"]}
+{"cmd": ["ft.create", "idx", "ON", "HASH", "PREFIX", "1", "d:", "SCHEMA", "t", "TEXT", "b", "TEXT", "NOSTEM", "g", "TAG"], "want": "+OK\r\n"}
+{"cmd": ["ft.synupdate", "idx", "g1", "happy", "fox"], "want": "+OK\r\n"}
+{"cmd": ["hset", "d:1", "t", "runner", "b", "foxes cats", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:2", "t", "dog held run hello", "b", "foxes", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["ft.dictadd", "dict0", "catc", "quickly"], "want": ":2\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "quickly"], "want": "%1\r\n+results\r\n%1\r\n$7\r\nquickly\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "-help happy cat", "DISTANCE", "2", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:2\r\n+results\r\n%3\r\n$4\r\nhelp\r\n*2\r\n%1\r\n$4\r\nheld\r\n,1\r\n%1\r\n$5\r\nhello\r\n,1\r\n$5\r\nhappy\r\n*0\r\n$3\r\ncat\r\n*1\r\n%1\r\n$4\r\ncats\r\n,1\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:jump", "DISTANCE", "3"], "want": "%1\r\n+results\r\n%1\r\n$4\r\njump\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "happy", "DISTANCE", "2"], "want": "%1\r\n+results\r\n%1\r\n$5\r\nhappy\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "daog jumped happy", "DISTANCE", "3", "TERMS", "INCLUDE", "dict0", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:2\r\n+results\r\n%3\r\n$4\r\ndaog\r\n*3\r\n%1\r\n$4\r\ncats\r\n,1\r\n%1\r\n$3\r\ndog\r\n,1\r\n%1\r\n$4\r\ncatc\r\n,0\r\n$6\r\njumped\r\n*0\r\n$5\r\nhappy\r\n*0\r\n"}
+{"cmd": ["ft.dictdump", "dict0"], "want": "~2\r\n$4\r\ncatc\r\n$7\r\nquickly\r\n"}
+{"cmd": ["ft.dictdel", "dict0", "word", "hepp"], "want": ":0\r\n"}
+{"cmd": ["flushall"]}
+{"cmd": ["ft.create", "idx", "ON", "HASH", "PREFIX", "1", "d:", "SCHEMA", "t", "TEXT", "b", "TEXT", "g", "TAG"], "want": "+OK\r\n"}
+{"cmd": ["hset", "d:1", "t", "hell hello foxes jumped", "b", "held foxes cats world foxes", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:2", "t", "cat world hell running", "b", "quick cat", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:3", "t", "runs nation held nation", "b", "quick happiness cats hello national", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:4", "t", "runner runs", "b", "cat jumping", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:5", "t", "runner hell cats", "b", "foxes", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:6", "t", "run dog foxes", "b", "cat hello dogs dogs jumped", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "ell quick"], "want": "%1\r\n+results\r\n%1\r\n$3\r\nell\r\n*1\r\n%1\r\n$4\r\nhell\r\n,0.5\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "quickly fox run"], "want": "%1\r\n+results\r\n%2\r\n$7\r\nquickly\r\n*0\r\n$3\r\nfox\r\n*1\r\n%1\r\n$4\r\n+fox\r\n,0.5\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "nation quick"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:cats"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "-quick zell", "DISTANCE", "1"], "want": "%1\r\n+results\r\n%1\r\n$4\r\nzell\r\n*1\r\n%1\r\n$4\r\nhell\r\n,0.5\r\n"}
+{"cmd": ["flushall"]}
+{"cmd": ["ft.create", "idx", "ON", "HASH", "PREFIX", "1", "d:", "SCHEMA", "t", "TEXT", "b", "TEXT", "g", "TAG"], "want": "+OK\r\n"}
+{"cmd": ["hset", "d:1", "t", "dog running quick cat", "b", "runner help", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:2", "t", "runner happiness", "b", "held run", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["ft.dictadd", "dict0", "JUMPED"], "want": ":1\r\n"}
+{"cmd": ["ft.dictadd", "dict1", "cat", "DOGS", "HELP"], "want": ":3\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "runner national", "TERMS", "EXCLUDE", "dict1"], "want": "%1\r\n+results\r\n%1\r\n$8\r\nnational\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "cat help", "TERMS", "EXCLUDE", "dict0"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "runs nation", "DISTANCE", "3", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:2\r\n+results\r\n%2\r\n$4\r\nruns\r\n*3\r\n%1\r\n$6\r\nrunner\r\n,2\r\n%1\r\n$3\r\nrun\r\n,1\r\n%1\r\n$4\r\n+run\r\n,1\r\n$6\r\nnation\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "foxec", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%1\r\n$5\r\nfoxec\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:jum word", "TERMS", "INCLUDE", "dict1"], "want": "%1\r\n+results\r\n%2\r\n$3\r\njum\r\n*0\r\n$4\r\nword\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "jumping heop foxes", "TERMS", "EXCLUDE", "dict1"], "want": "%1\r\n+results\r\n%3\r\n$7\r\njumping\r\n*0\r\n$4\r\nheop\r\n*1\r\n%1\r\n$4\r\nhelp\r\n,0.5\r\n$5\r\nfoxes\r\n*0\r\n"}
+{"cmd": ["ft.dictdump", "dict0"], "want": "~1\r\n$6\r\nJUMPED\r\n"}
+{"cmd": ["ft.dictdel", "dict0", "foxes", "dg"], "want": ":0\r\n"}
+{"cmd": ["ft.dictdump", "dict1"], "want": "~3\r\n$4\r\nDOGS\r\n$4\r\nHELP\r\n$3\r\ncat\r\n"}
+{"cmd": ["ft.dictdel", "dict1", "cats", "natiozal"], "want": ":0\r\n"}
+{"cmd": ["flushall"]}
+{"cmd": ["ft.create", "idx", "ON", "HASH", "PREFIX", "1", "d:", "SCHEMA", "t", "TEXT", "b", "TEXT", "g", "TAG"], "want": "+OK\r\n"}
+{"cmd": ["hset", "d:1", "t", "quick happiness help", "b", "", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:2", "t", "hell dog word", "b", "national runner dog run", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:3", "t", "runner", "b", "fox dog nation run cats", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:4", "t", "runs run happy cats", "b", "", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["ft.dictadd", "dict0", "dog", "HELLO"], "want": ":2\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "held runz", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:4\r\n+results\r\n%2\r\n$4\r\nheld\r\n*2\r\n%1\r\n$4\r\nhell\r\n,1\r\n%1\r\n$4\r\nhelp\r\n,1\r\n$4\r\nrunz\r\n*2\r\n%1\r\n$3\r\nrun\r\n,3\r\n%1\r\n$4\r\nruns\r\n,1\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "-dogms haptpiness", "DISTANCE", "2", "TERMS", "EXCLUDE", "dict0"], "want": "%1\r\n+results\r\n%2\r\n$5\r\ndogms\r\n*1\r\n%1\r\n$3\r\ndog\r\n,0.5\r\n$10\r\nhaptpiness\r\n*1\r\n%1\r\n$9\r\nhappiness\r\n,0.25\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "world"], "want": "%1\r\n+results\r\n%1\r\n$5\r\nworld\r\n*1\r\n%1\r\n$4\r\nword\r\n,0.25\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "cats cat help", "TERMS", "EXCLUDE", "dict0"], "want": "%1\r\n+results\r\n%1\r\n$3\r\ncat\r\n*2\r\n%1\r\n$4\r\n+cat\r\n,0.5\r\n%1\r\n$4\r\ncats\r\n,0.5\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "word happy quick", "DISTANCE", "1", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "hello nagtional foxes", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%3\r\n$5\r\nhello\r\n*2\r\n%1\r\n$4\r\nhell\r\n,0.25\r\n%1\r\n$5\r\nHELLO\r\n,0\r\n$9\r\nnagtional\r\n*1\r\n%1\r\n$8\r\nnational\r\n,0.25\r\n$5\r\nfoxes\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "help", "DISTANCE", "3", "TERMS", "INCLUDE", "dict0", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:4\r\n+results\r\n%1\r\n$4\r\nhelp\r\n-term exists in index\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:dogs dogs", "DISTANCE", "2"], "want": "%1\r\n+results\r\n%2\r\n$4\r\ndogs\r\n*1\r\n%1\r\n$3\r\ndog\r\n,0.5\r\n$4\r\ndogs\r\n*1\r\n%1\r\n$3\r\ndog\r\n,0.5\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "natoon dog", "DISTANCE", "3"], "want": "%1\r\n+results\r\n%1\r\n$6\r\nnatoon\r\n*3\r\n%1\r\n$7\r\n+nation\r\n,0.25\r\n%1\r\n$6\r\nnation\r\n,0.25\r\n%1\r\n$8\r\nnational\r\n,0.25\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "national foxes jumping", "DISTANCE", "1"], "want": "%1\r\n+results\r\n%2\r\n$5\r\nfoxes\r\n*0\r\n$7\r\njumping\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "jupp quickly word", "DISTANCE", "4"], "want": "%1\r\n+results\r\n%2\r\n$4\r\njupp\r\n*13\r\n%1\r\n$3\r\nrun\r\n,0.75\r\n%1\r\n$4\r\n+cat\r\n,0.5\r\n%1\r\n$6\r\n+happi\r\n,0.5\r\n%1\r\n$4\r\ncats\r\n,0.5\r\n%1\r\n$3\r\ndog\r\n,0.5\r\n%1\r\n$4\r\nruns\r\n,0.25\r\n%1\r\n$4\r\n+run\r\n,0.25\r\n%1\r\n$3\r\nfox\r\n,0.25\r\n%1\r\n$5\r\nhappy\r\n,0.25\r\n%1\r\n$4\r\nhell\r\n,0.25\r\n%1\r\n$4\r\nhelp\r\n,0.25\r\n%1\r\n$5\r\nquick\r\n,0.25\r\n%1\r\n$4\r\nword\r\n,0.25\r\n$7\r\nquickly\r\n*1\r\n%1\r\n$5\r\nquick\r\n,0.25\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "-happy", "DISTANCE", "3", "TERMS", "EXCLUDE", "dict0"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.dictdump", "dict0"], "want": "~2\r\n$5\r\nHELLO\r\n$3\r\ndog\r\n"}
+{"cmd": ["ft.dictdel", "dict0", "cats", "foxes"], "want": ":0\r\n"}
+{"cmd": ["flushall"]}
+{"cmd": ["ft.create", "idx", "ON", "HASH", "PREFIX", "1", "d:", "SCHEMA", "t", "TEXT", "b", "TEXT", "g", "TAG"], "want": "+OK\r\n"}
+{"cmd": ["hset", "d:1", "t", "run", "b", "hell jumped happy happiness", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:2", "t", "dog hello happiness hello", "b", "", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:3", "t", "fox dogs dog national", "b", "happy dogs jumped", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:4", "t", "word national jumping foxes", "b", "jumped fox", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:5", "t", "word hello jumped", "b", "", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:6", "t", "fox jump national jumping", "b", "dog jumping fox", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["ft.dictadd", "dict0", "hell", "quickl", "nation", "dogs", "cumped"], "want": ":5\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "netion run runs", "DISTANCE", "4", "TERMS", "EXCLUDE", "dict0"], "want": "%1\r\n+results\r\n%2\r\n$6\r\nnetion\r\n*3\r\n%1\r\n$7\r\n+nation\r\n,0.5\r\n%1\r\n$8\r\nnational\r\n,0.5\r\n%1\r\n$5\r\nhello\r\n,0.3333333333333333\r\n$4\r\nruns\r\n*11\r\n%1\r\n$5\r\n+jump\r\n,0.8333333333333334\r\n%1\r\n$3\r\ndog\r\n,0.5\r\n%1\r\n$3\r\nfox\r\n,0.5\r\n%1\r\n$4\r\nword\r\n,0.3333333333333333\r\n%1\r\n$4\r\n+dog\r\n,0.16666666666666666\r\n%1\r\n$4\r\n+fox\r\n,0.16666666666666666\r\n%1\r\n$4\r\ndogs\r\n,0.16666666666666666\r\n%1\r\n$5\r\nfoxes\r\n,0.16666666666666666\r\n%1\r\n$4\r\nhell\r\n,0.16666666666666666\r\n%1\r\n$4\r\njump\r\n,0.16666666666666666\r\n%1\r\n$3\r\nrun\r\n,0.16666666666666666\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "jumo", "TERMS", "EXCLUDE", "dict0", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:6\r\n+results\r\n%1\r\n$4\r\njumo\r\n*1\r\n%1\r\n$4\r\njump\r\n,1\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "ogs", "DISTANCE", "2", "TERMS", "EXCLUDE", "dict0", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:6\r\n+results\r\n%1\r\n$3\r\nogs\r\n*2\r\n%1\r\n$3\r\ndog\r\n,3\r\n%1\r\n$4\r\ndogs\r\n,1\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "hell foxes word"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "runner running", "DISTANCE", "1"], "want": "%1\r\n+results\r\n%2\r\n$6\r\nrunner\r\n*0\r\n$7\r\nrunning\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "qick nation drgs", "DISTANCE", "1", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%3\r\n$4\r\nqick\r\n*0\r\n$6\r\nnation\r\n*2\r\n%1\r\n$7\r\n+nation\r\n,0.5\r\n%1\r\n$6\r\nnation\r\n,0\r\n$4\r\ndrgs\r\n*1\r\n%1\r\n$4\r\ndogs\r\n,0.16666666666666666\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "wkrld", "DISTANCE", "1", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%1\r\n$5\r\nwkrld\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "cats", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:6\r\n+results\r\n%1\r\n$4\r\ncats\r\n*0\r\n"}
+{"cmd": ["ft.dictdump", "dict0"], "want": "~5\r\n$6\r\ncumped\r\n$4\r\ndogs\r\n$4\r\nhell\r\n$6\r\nnation\r\n$6\r\nquickl\r\n"}
+{"cmd": ["ft.dictdel", "dict0", "dogs", "fox"], "want": ":1\r\n"}
+{"cmd": ["flushall"]}
+{"cmd": ["ft.create", "idx", "ON", "HASH", "PREFIX", "1", "d:", "SCHEMA", "t", "TEXT", "b", "TEXT", "NOSTEM", "g", "TAG"], "want": "+OK\r\n"}
+{"cmd": ["hset", "d:1", "t", "hell", "b", "quickly foxes", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:2", "t", "held cat dogs nation", "b", "quickly jump runs", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:3", "t", "running hello cat dog", "b", "word quick help help dog", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:4", "t", "foxes", "b", "jumping foxes quick running", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:5", "t", "hell", "b", "dog running word help", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:6", "t", "cats", "b", "foxes jumped", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:7", "t", "jumping", "b", "nation cat word happy foxes", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:8", "t", "held runs cat", "b", "word jumping", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:9", "t", "jumping happiness", "b", "hell runs quickly quickly", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:10", "t", "happiness", "b", "happy running quickly hell jump", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["ft.dictadd", "dict0", "HELL"], "want": ":1\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "poxes", "DISTANCE", "2", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%1\r\n$5\r\npoxes\r\n*1\r\n%1\r\n$5\r\nfoxes\r\n,0.4\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "hlp", "DISTANCE", "3", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%1\r\n$3\r\nhlp\r\n*8\r\n%1\r\n$3\r\ncat\r\n,0.4\r\n%1\r\n$4\r\nhell\r\n,0.4\r\n%1\r\n$4\r\nheld\r\n,0.2\r\n%1\r\n$4\r\nhelp\r\n,0.2\r\n%1\r\n$5\r\nhappy\r\n,0.2\r\n%1\r\n$3\r\ndog\r\n,0.2\r\n%1\r\n$4\r\njump\r\n,0.2\r\n%1\r\n$5\r\nhello\r\n,0.1\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "dog nation hel", "DISTANCE", "3"], "want": "%1\r\n+results\r\n%1\r\n$3\r\nhel\r\n*6\r\n%1\r\n$3\r\ncat\r\n,0.4\r\n%1\r\n$4\r\nhell\r\n,0.4\r\n%1\r\n$4\r\nheld\r\n,0.2\r\n%1\r\n$4\r\nhelp\r\n,0.2\r\n%1\r\n$3\r\ndog\r\n,0.2\r\n%1\r\n$5\r\nhello\r\n,0.1\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:punner hell", "DISTANCE", "3"], "want": "%1\r\n+results\r\n%1\r\n$6\r\npunner\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:fxox", "DISTANCE", "1", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%1\r\n$4\r\nfxox\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "unner", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%1\r\n$5\r\nunner\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "cath", "DISTANCE", "2"], "want": "%1\r\n+results\r\n%1\r\n$4\r\ncath\r\n*3\r\n%1\r\n$3\r\ncat\r\n,0.4\r\n%1\r\n$4\r\ncats\r\n,0.1\r\n%1\r\n$4\r\n+cat\r\n,0.1\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "happy quickly", "DISTANCE", "1", "TERMS", "EXCLUDE", "dict0"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "jumpp runnng nation", "DISTANCE", "3", "TERMS", "EXCLUDE", "dict0"], "want": "%1\r\n+results\r\n%2\r\n$5\r\njumpp\r\n*4\r\n%1\r\n$7\r\njumping\r\n,0.4\r\n%1\r\n$4\r\njump\r\n,0.2\r\n%1\r\n$5\r\n+jump\r\n,0.2\r\n%1\r\n$6\r\njumped\r\n,0.1\r\n$6\r\nrunnng\r\n*2\r\n%1\r\n$7\r\nrunning\r\n,0.4\r\n%1\r\n$4\r\nruns\r\n,0.3\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "fox heplp foxes", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%2\r\n$3\r\nfox\r\n*1\r\n%1\r\n$4\r\n+fox\r\n,0.1\r\n$5\r\nheplp\r\n*1\r\n%1\r\n$4\r\nhelp\r\n,0.2\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "worvd"], "want": "%1\r\n+results\r\n%1\r\n$5\r\nworvd\r\n*1\r\n%1\r\n$4\r\nword\r\n,0.4\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "help"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "do jumped"], "want": "%1\r\n+results\r\n%1\r\n$2\r\ndo\r\n*1\r\n%1\r\n$3\r\ndog\r\n,0.2\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:quick jump hello", "DISTANCE", "2", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:10\r\n+results\r\n%3\r\n$5\r\nquick\r\n-term exists in index\r\n$4\r\njump\r\n-term exists in index\r\n$5\r\nhello\r\n-term exists in index\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "jumping", "DISTANCE", "2", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.dictdump", "dict0"], "want": "~1\r\n$4\r\nHELL\r\n"}
+{"cmd": ["ft.dictdel", "dict0", "foxes", "cats"], "want": ":0\r\n"}
+{"cmd": ["flushall"]}
+{"cmd": ["ft.create", "idx", "ON", "HASH", "PREFIX", "1", "d:", "SCHEMA", "t", "TEXT", "b", "TEXT", "g", "TAG"], "want": "+OK\r\n"}
+{"cmd": ["hset", "d:1", "t", "word quickly dog", "b", "", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:2", "t", "help dog", "b", "happiness word", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:3", "t", "fox national help", "b", "happy held running", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["ft.dictadd", "dict0", "NATION", "fox"], "want": ":2\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "jump national quick", "DISTANCE", "2", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:3\r\n+results\r\n%3\r\n$4\r\njump\r\n*0\r\n$8\r\nnational\r\n-term exists in index\r\n$5\r\nquick\r\n*2\r\n%1\r\n$6\r\n+quick\r\n,1\r\n%1\r\n$7\r\nquickly\r\n,1\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "naytion run hlp", "DISTANCE", "1"], "want": "%1\r\n+results\r\n%3\r\n$7\r\nnaytion\r\n*0\r\n$3\r\nrun\r\n*1\r\n%1\r\n$4\r\n+run\r\n,0.3333333333333333\r\n$3\r\nhlp\r\n*1\r\n%1\r\n$4\r\nhelp\r\n,0.6666666666666666\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:help", "DISTANCE", "1"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "jump jumpd ogs", "DISTANCE", "1"], "want": "%1\r\n+results\r\n%3\r\n$4\r\njump\r\n*0\r\n$5\r\njumpd\r\n*0\r\n$3\r\nogs\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "quickly jumtped", "DISTANCE", "2", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%1\r\n$7\r\njumtped\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "runs dogs", "DISTANCE", "3", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%2\r\n$4\r\nruns\r\n*1\r\n%1\r\n$4\r\n+run\r\n,0.3333333333333333\r\n$4\r\ndogs\r\n*3\r\n%1\r\n$3\r\ndog\r\n,0.6666666666666666\r\n%1\r\n$4\r\nword\r\n,0.6666666666666666\r\n%1\r\n$3\r\nfox\r\n,0.3333333333333333\r\n"}
+{"cmd": ["ft.dictdump", "dict0"], "want": "~2\r\n$6\r\nNATION\r\n$3\r\nfox\r\n"}
+{"cmd": ["ft.dictdel", "dict0", "hello", "kelp"], "want": ":0\r\n"}
+{"cmd": ["flushall"]}
+{"cmd": ["hello", "3"]}
+{"cmd": ["ft.create", "idx", "ON", "HASH", "PREFIX", "1", "d:", "SCHEMA", "t", "TEXT", "b", "TEXT", "g", "TAG"], "want": "+OK\r\n"}
+{"cmd": ["ft.synupdate", "idx", "g1", "dogs", "nation"], "want": "+OK\r\n"}
+{"cmd": ["hset", "d:1", "t", "world dog word", "b", "run", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:2", "t", "dog", "b", "", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["ft.dictadd", "dict0", "foxes", "HAPPINESS", "JUMPING"], "want": ":3\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:cats foxes", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%2\r\n$4\r\ncats\r\n*0\r\n$5\r\nfoxes\r\n*1\r\n%1\r\n$5\r\nfoxes\r\n,0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "fx run wordu"], "want": "%1\r\n+results\r\n%2\r\n$2\r\nfx\r\n*0\r\n$5\r\nwordu\r\n*1\r\n%1\r\n$4\r\nword\r\n,0.5\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "-held cyts dog", "DISTANCE", "1", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:2\r\n+results\r\n%3\r\n$4\r\nheld\r\n*0\r\n$4\r\ncyts\r\n*0\r\n$3\r\ndog\r\n-term exists in index\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "quickly", "DISTANCE", "3", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%1\r\n$7\r\nquickly\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:runnang jump", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%2\r\n$7\r\nrunnang\r\n*0\r\n$4\r\njump\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "quicklb quicaly world", "DISTANCE", "1"], "want": "%1\r\n+results\r\n%2\r\n$7\r\nquicklb\r\n*0\r\n$7\r\nquicaly\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "foes", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:2\r\n+results\r\n%1\r\n$4\r\nfoes\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "-@b:runner cat", "DISTANCE", "2", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:2\r\n+results\r\n%2\r\n$6\r\nrunner\r\n*0\r\n$3\r\ncat\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "held jumping"], "want": "%1\r\n+results\r\n%2\r\n$4\r\nheld\r\n*0\r\n$7\r\njumping\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "-running", "DISTANCE", "4", "TERMS", "EXCLUDE", "dict0", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:2\r\n+results\r\n%1\r\n$7\r\nrunning\r\n*1\r\n%1\r\n$3\r\nrun\r\n,1\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "help rurn", "TERMS", "EXCLUDE", "dict0"], "want": "%1\r\n+results\r\n%2\r\n$4\r\nhelp\r\n*0\r\n$4\r\nrurn\r\n*1\r\n%1\r\n$3\r\nrun\r\n,0.5\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "-@b:ello happy held", "DISTANCE", "3", "TERMS", "EXCLUDE", "dict0"], "want": "%1\r\n+results\r\n%3\r\n$4\r\nello\r\n*0\r\n$5\r\nhappy\r\n*0\r\n$4\r\nheld\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "-nation dogs heul", "DISTANCE", "2"], "want": "%1\r\n+results\r\n%3\r\n$6\r\nnation\r\n*0\r\n$4\r\ndogs\r\n*1\r\n%1\r\n$3\r\ndog\r\n,1\r\n$4\r\nheul\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:hello runner happy", "DISTANCE", "4", "TERMS", "EXCLUDE", "dict0"], "want": "%1\r\n+results\r\n%3\r\n$5\r\nhello\r\n*0\r\n$6\r\nrunner\r\n*1\r\n%1\r\n$3\r\nrun\r\n,0.5\r\n$5\r\nhappy\r\n*0\r\n"}
+{"cmd": ["ft.dictdump", "dict0"], "want": "~3\r\n$9\r\nHAPPINESS\r\n$7\r\nJUMPING\r\n$5\r\nfoxes\r\n"}
+{"cmd": ["ft.dictdel", "dict0", "run", "runner"], "want": ":0\r\n"}
+{"cmd": ["flushall"]}
+{"cmd": ["ft.create", "idx", "ON", "HASH", "PREFIX", "1", "d:", "SCHEMA", "t", "TEXT", "b", "TEXT", "g", "TAG"], "want": "+OK\r\n"}
+{"cmd": ["ft.synupdate", "idx", "g1", "cat", "world"], "want": "+OK\r\n"}
+{"cmd": ["hset", "d:1", "t", "national dog", "b", "nation quickly", "g", "red"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:2", "t", "runs hell", "b", "held", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:3", "t", "runs jumped held cats", "b", "", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:4", "t", "jump foxes world", "b", "runner quick runs cats", "g", "x"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:5", "t", "happy nation jump", "b", "jumped foxes", "g", "blue"], "want": ":3\r\n"}
+{"cmd": ["ft.dictadd", "dict0", "quipckly", "run", "happy"], "want": ":3\r\n"}
+{"cmd": ["ft.dictadd", "dict1", "HELLO"], "want": ":1\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "@b:jumped", "DISTANCE", "1", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "jujmping jfmped jumpd", "DISTANCE", "3", "TERMS", "EXCLUDE", "dict1"], "want": "%1\r\n+results\r\n%3\r\n$8\r\njujmping\r\n*0\r\n$6\r\njfmped\r\n*2\r\n%1\r\n$4\r\njump\r\n,0.4\r\n%1\r\n$6\r\njumped\r\n,0.4\r\n$5\r\njumpd\r\n*3\r\n%1\r\n$5\r\n+jump\r\n,0.4\r\n%1\r\n$4\r\njump\r\n,0.4\r\n%1\r\n$6\r\njumped\r\n,0.4\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "run", "TERMS", "INCLUDE", "dict0"], "want": "%1\r\n+results\r\n%1\r\n$3\r\nrun\r\n*3\r\n%1\r\n$4\r\n+run\r\n,0.6\r\n%1\r\n$4\r\nruns\r\n,0.6\r\n%1\r\n$3\r\nrun\r\n,0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "happiness help at", "DISTANCE", "2", "TERMS", "EXCLUDE", "dict1"], "want": "%1\r\n+results\r\n%3\r\n$9\r\nhappiness\r\n*0\r\n$4\r\nhelp\r\n*2\r\n%1\r\n$4\r\nheld\r\n,0.4\r\n%1\r\n$4\r\nhell\r\n,0.2\r\n$2\r\nat\r\n*2\r\n%1\r\n$4\r\n+cat\r\n,0.4\r\n%1\r\n$4\r\ncats\r\n,0.4\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "held woarld", "DISTANCE", "4", "TERMS", "EXCLUDE", "dict0", "TERMS", "EXCLUDE", "dict1"], "want": "%1\r\n+results\r\n%1\r\n$6\r\nwoarld\r\n*2\r\n%1\r\n$4\r\nheld\r\n,0.4\r\n%1\r\n$5\r\nworld\r\n,0.2\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "-runl dogs"], "want": "%1\r\n+results\r\n%2\r\n$4\r\nrunl\r\n*1\r\n%1\r\n$4\r\nruns\r\n,0.6\r\n$4\r\ndogs\r\n*1\r\n%1\r\n$3\r\ndog\r\n,0.2\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "jumpnng", "DISTANCE", "2", "TERMS", "EXCLUDE", "dict0", "FULLSCOREINFO"], "want": "%2\r\n+total_docs\r\n:5\r\n+results\r\n%1\r\n$7\r\njumpnng\r\n*0\r\n"}
+{"cmd": ["ft.spellcheck", "idx", "-@b:happy", "DISTANCE", "2", "TERMS", "INCLUDE", "dict0", "TERMS", "INCLUDE", "dict1"], "want": "%1\r\n+results\r\n%0\r\n"}
+{"cmd": ["ft.dictdump", "dict0"], "want": "~3\r\n$5\r\nhappy\r\n$8\r\nquipckly\r\n$3\r\nrun\r\n"}
+{"cmd": ["ft.dictdel", "dict0", "running", "hel"], "want": ":0\r\n"}
+{"cmd": ["ft.dictdump", "dict1"], "want": "~1\r\n$5\r\nHELLO\r\n"}
+{"cmd": ["ft.dictdel", "dict1", "hello", "happy"], "want": ":0\r\n"}

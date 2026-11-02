@@ -3,6 +3,7 @@ package search
 import (
 	"math"
 	"sort"
+	"unicode"
 )
 
 // Trie is RediSearch's suggestion trie (FT.SUGADD): a radix tree of 16-bit
@@ -641,6 +642,9 @@ type dfaFilter struct {
 	dists      []int
 	max        int
 	prefixMode bool
+	// lower makes the filter lower-case the trie's runes, as RediSearch's
+	// term trie filter does, instead of case folding them.
+	lower bool
 }
 
 func (f *dfaFilter) stepVec(state []svEntry, c uint16) []svEntry {
@@ -762,7 +766,13 @@ func (f *dfaFilter) step(b uint16, dist *int) (stop, matched bool) {
 	if matched {
 		*dist = min(dn.distance, minDist)
 	}
-	next := dn.edge(uint16(foldRune(uint32(b))))
+	var r uint16
+	if f.lower {
+		r = uint16(unicode.ToLower(rune(b)))
+	} else {
+		r = uint16(foldRune(uint32(b)))
+	}
+	next := dn.edge(r)
 	if next == nil {
 		next = dn.fallback
 	}
@@ -786,4 +796,22 @@ func (f *dfaFilter) step(b uint16, dist *int) (stop, matched bool) {
 func (f *dfaFilter) pop(n int) {
 	f.stack = f.stack[:len(f.stack)-n]
 	f.dists = f.dists[:len(f.dists)-n]
+}
+
+// matchWord runs a word through the filter as the trie iterator does and
+// reports whether the iterator returns it. The state before the word's last
+// rune counts too, so a word whose last rune is one edit too many still
+// matches, as in RediSearch.
+func (f *dfaFilter) matchWord(word []uint16) bool {
+	f.stack, f.dists = f.stack[:1], f.dists[:1]
+	matched := false
+	for _, b := range word {
+		var dist int
+		stop, m := f.step(b, &dist)
+		if stop {
+			return false
+		}
+		matched = m
+	}
+	return len(word) > 0 && matched
 }

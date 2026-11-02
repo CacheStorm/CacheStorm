@@ -28,7 +28,8 @@ func RegisterSearchCommands(router *Router) {
 		"FT.ALIASUPDATE": cmdFTALIASUPDATE, "FT.EXPLAIN": cmdFTEXPLAIN,
 		"FT.ADD": cmdFTADD, "FT.DEL": cmdFTDEL, "FT.GET": cmdFTGET, "FT.ALTER": cmdFTALTER,
 		"FT.CURSOR": cmdFTCURSOR, "FT.SYNUPDATE": cmdFTSYNUPDATE, "FT.SYNDUMP": cmdFTSYNDUMP,
-		"FT.SYNADD": cmdFTSYNADD,
+		"FT.SYNADD": cmdFTSYNADD, "FT.DICTADD": cmdFTDICTADD, "FT.DICTDEL": cmdFTDICTDEL,
+		"FT.DICTDUMP": cmdFTDICTDUMP, "FT.SPELLCHECK": cmdFTSPELLCHECK,
 	} {
 		router.Register(&CommandDef{Name: name, Handler: handler})
 	}
@@ -1392,6 +1393,157 @@ func cmdFTSYNDUMP(ctx *Context) error {
 
 func cmdFTSYNADD(ctx *Context) error {
 	return ctx.WriteError(errors.New("No longer supported, use FT.SYNUPDATE")) //nolint:staticcheck // RediSearch's reply text
+}
+
+func cmdFTDICTADD(ctx *Context) error {
+	if ctx.ArgCount() < 2 {
+		return ctx.WriteError(ftArityError("FT.DICTADD"))
+	}
+	return ctx.WriteInteger(int64(searchIndexesFor(ctx).DictAdd(ctx.ArgString(0), argStrings(ctx)[1:])))
+}
+
+func cmdFTDICTDEL(ctx *Context) error {
+	if ctx.ArgCount() < 2 {
+		return ctx.WriteError(ftArityError("FT.DICTDEL"))
+	}
+	return ctx.WriteInteger(int64(searchIndexesFor(ctx).DictDel(ctx.ArgString(0), argStrings(ctx)[1:])))
+}
+
+func cmdFTDICTDUMP(ctx *Context) error {
+	if ctx.ArgCount() != 1 {
+		return ctx.WriteError(moduleArityError(ctx))
+	}
+	terms := searchIndexesFor(ctx).DictDump(ctx.ArgString(0))
+	out := make([]*resp.Value, len(terms))
+	for i, t := range terms {
+		out[i] = resp.BulkString(t)
+	}
+	if ctx.Writer.IsRESP3() {
+		return ctx.WriteValue(resp.SetValue(out))
+	}
+	return ctx.WriteArray(out)
+}
+
+// argIndex is RMUtil_ArgExists: the first argument from start that equals
+// name, ignoring case, or 0.
+func argIndex(ctx *Context, name string, start int) int {
+	for i := max(start, 1); i <= ctx.ArgCount(); i++ {
+		if strings.EqualFold(ctx.ArgString(i-1), name) {
+			return i
+		}
+	}
+	return 0
+}
+
+// cmdFTSPELLCHECK is FT.SPELLCHECK index query [DISTANCE d] [TERMS
+// INCLUDE|EXCLUDE dict]... [DIALECT n] [PARAMS ...]. Arguments are found
+// anywhere after the query, as RediSearch looks them up.
+func cmdFTSPELLCHECK(ctx *Context) error {
+	if ctx.ArgCount() < 2 {
+		return ctx.WriteError(moduleArityError(ctx))
+	}
+	manager := searchIndexesFor(ctx)
+	idx, ok := manager.Get(ctx.ArgString(0))
+	if !ok {
+		return ctx.WriteError(errors.New(ctx.ArgString(0) + ": no such index"))
+	}
+	n := ctx.ArgCount() + 1 // argv positions as RediSearch counts them, the command at 0
+	arg := func(i int) string { return ctx.ArgString(i - 1) }
+	// RediSearch parses the query without a stop word list, so stop words
+	// are checked too.
+	opts := search.QueryOptions{Params: map[string]string{}, NoStopwords: true}
+	if p := argIndex(ctx, "DIALECT", 3); p > 0 && p+1 < n {
+		opts.Dialect = parseDialect(arg(p + 1))
+	}
+	if p := argIndex(ctx, "PARAMS", 3); p > 0 && p+1 < n {
+		if count, err := strconv.Atoi(arg(p + 1)); err == nil {
+			for j := p + 2; j+1 < n && j+1 < p+2+count; j += 2 {
+				opts.Params[arg(j)] = arg(j + 1)
+			}
+		}
+	}
+	query, err := search.ParseQuery(idx, ctx.ArgString(1), opts)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	distance := 1
+	if p := argIndex(ctx, "DISTANCE", 0); p > 0 {
+		if p+1 >= n {
+			return ctx.WriteError(errors.New("DISTANCE arg is given but no DISTANCE comes after"))
+		}
+		d, err := strconv.ParseInt(arg(p+1), 10, 64)
+		if err != nil || d < 1 || d > 4 {
+			return ctx.WriteError(errors.New("bad distance given, distance must be a natural number between 1 to 4"))
+		}
+		distance = int(d)
+	}
+	var include, exclude []string
+	for p := argIndex(ctx, "TERMS", 1); p > 0; p = argIndex(ctx, "TERMS", p+1) {
+		if p+2 >= n {
+			return ctx.WriteError(errors.New("TERM arg is given but no TERM params comes after"))
+		}
+		switch strings.ToUpper(arg(p + 1)) {
+		case "INCLUDE":
+			include = append(include, arg(p+2))
+		case "EXCLUDE":
+			exclude = append(exclude, arg(p+2))
+		default:
+			return ctx.WriteError(errors.New("bad format, exclude/include operation was not given"))
+		}
+	}
+	full := argIndex(ctx, "FULLSCOREINFO", 0) > 0
+	for _, name := range append(append([]string(nil), include...), exclude...) {
+		if !manager.DictExists(name) {
+			return ctx.WriteError(errors.New("Dict does not exist: " + name)) //nolint:staticcheck // RediSearch's reply text
+		}
+	}
+	terms, total := manager.SpellCheck(idx, ctx.Store, query, distance, include, exclude, full)
+	resp3 := ctx.Writer.IsRESP3()
+	score := func(f float64) *resp.Value {
+		if resp3 {
+			return resp.DoubleValue(fpconvDtoa(f))
+		}
+		return resp.BulkString(fpconvDtoa(f))
+	}
+	var results []*resp.Value
+	for _, t := range terms {
+		if t.Found {
+			if resp3 {
+				results = append(results, resp.BulkString(t.Term), resp.ErrorValue("term exists in index"))
+			} else {
+				results = append(results, resp.ArrayValue([]*resp.Value{resp.SimpleString("TERM"), resp.BulkString(t.Term), resp.SimpleString("term exists in index")}))
+			}
+			continue
+		}
+		suggestions := make([]*resp.Value, len(t.Suggestions))
+		for i, s := range t.Suggestions {
+			if resp3 {
+				suggestions[i] = resp.PairsValue([]*resp.Value{resp.BulkString(s), score(t.Scores[i])})
+			} else {
+				suggestions[i] = resp.ArrayValue([]*resp.Value{score(t.Scores[i]), resp.BulkString(s)})
+			}
+		}
+		if resp3 {
+			results = append(results, resp.BulkString(t.Term), resp.ArrayValue(suggestions))
+		} else {
+			results = append(results, resp.ArrayValue([]*resp.Value{resp.SimpleString("TERM"), resp.BulkString(t.Term), resp.ArrayValue(suggestions)}))
+		}
+	}
+	if results == nil {
+		results = []*resp.Value{}
+	}
+	if resp3 {
+		var root []*resp.Value
+		if full {
+			root = append(root, resp.SimpleString("total_docs"), resp.IntegerValue(int64(total)))
+		}
+		root = append(root, resp.SimpleString("results"), resp.PairsValue(results))
+		return ctx.WriteValue(resp.PairsValue(root))
+	}
+	if full {
+		results = append([]*resp.Value{resp.IntegerValue(int64(total))}, results...)
+	}
+	return ctx.WriteArray(results)
 }
 
 func cmdFTTAGVALS(ctx *Context) error {
