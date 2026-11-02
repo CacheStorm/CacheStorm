@@ -940,11 +940,12 @@ func cmdFTAGGREGATE(ctx *Context) error {
 	for i, h := range found {
 		if d := idx.Content(ctx.Store, h.Doc.Key); d != nil {
 			r := idx.NewRow(d)
+			r.SetDocID(int64(i + 1))
 			for _, y := range h.Yields {
 				r.Set(y[0], y[1])
 			}
 			if addScores {
-				r.Set("__score", strconv.FormatFloat(h.Score, 'g', 12, 64))
+				r.SetFloat("__score", h.Score)
 			}
 			rows = append(rows, r)
 			read[r] = i + 1
@@ -1070,16 +1071,15 @@ func cmdFTAGGREGATE(ctx *Context) error {
 				if err := barrier(); err != nil {
 					return ctx.WriteError(err)
 				}
-				search.SortRows(rows, arr.keys)
-				sorted = true
+				keep := len(rows)
 				if max := arr.offset + arr.limit; !arr.limited || arr.limit != 0 {
-					if max == 0 {
-						max = 10
-					}
-					if max < len(rows) {
-						rows = rows[:max]
+					keep = max
+					if keep == 0 {
+						keep = 10
 					}
 				}
+				rows = search.SortRowsTop(rows, arr.keys, keep)
+				sorted = true
 			}
 			switch {
 			case arr.limited && arr.limit == 0:
@@ -1112,7 +1112,11 @@ func cmdFTAGGREGATE(ctx *Context) error {
 					failed[r] = errMissingProperty(missing)
 					continue
 				}
-				r.Set(name, expr.Eval(r))
+				if v, f, num := expr.EvalTyped(r); num {
+					r.SetFloat(name, f)
+				} else {
+					r.Set(name, v)
+				}
 			}
 			i += 3
 		case "FILTER":
@@ -1346,9 +1350,11 @@ func aggregateRowReply(r *search.Row, resp3 bool, order []string) *resp.Value {
 			fields = append(fields, resp.BulkString(name), resp.NullBulkString())
 		case r.IsList(name):
 			list := []*resp.Value{}
-			if v != "" {
-				for _, item := range strings.Split(v, "\x00") {
-					list = append(list, resp.BulkString(item))
+			for _, item := range r.ListItems(name) {
+				if item.Null {
+					list = append(list, resp.NullBulkString())
+				} else {
+					list = append(list, resp.BulkString(item.Value))
 				}
 			}
 			fields = append(fields, resp.BulkString(name), resp.ArrayValue(list))

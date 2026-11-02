@@ -19,10 +19,87 @@ type Row struct {
 	// items joined by NULs, replied as arrays.
 	lists map[string]bool
 	nulls map[string]bool
+	// arrays hold the items of the lists.
+	arrays map[string][]cell
+	// numv holds, at full precision, the values that are numbers to
+	// RediSearch, which hashes and compares them as such.
+	numv map[string]float64
+	// docID orders a document's row as RediSearch's document id does.
+	docID int64
+}
+
+// SetDocID gives the row its document's place in the index's order, from 1.
+func (r *Row) SetDocID(id int64) { r.docID = id }
+
+// SetNumber sets a row value RediSearch holds as a number, from its text.
+func (r *Row) SetNumber(name, value string) {
+	f, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		r.Set(name, value)
+		return
+	}
+	r.SetFloat(name, f)
+}
+
+// SetFloat sets a number, shown as RediSearch prints numbers.
+func (r *Row) SetFloat(name string, f float64) {
+	r.Set(name, FormatNumber(f))
+	if r.numv == nil {
+		r.numv = make(map[string]float64)
+	}
+	r.numv[name] = f
+}
+
+// Number returns a value the row holds, or a document field it falls back
+// to, when it is a number.
+func (r *Row) Number(name string) (float64, bool) {
+	if _, ok := r.Value(name); ok {
+		f, ok := r.numv[name]
+		return f, ok
+	}
+	if r.doc != nil {
+		if f := r.idx.Field(name); f != nil && f.Type == FieldNumeric {
+			if nums := r.doc.field(f.pos).nums; len(nums) > 0 {
+				return nums[0], true
+			}
+		}
+	}
+	return 0, false
 }
 
 // IsList reports whether a row value is a list.
 func (r *Row) IsList(name string) bool { return r.lists[name] }
+
+// ListItem is an item of a list value; Null items reply as null.
+type ListItem struct {
+	Value string
+	Null  bool
+}
+
+// ListItems returns a list value's items.
+func (r *Row) ListItems(name string) []ListItem {
+	out := make([]ListItem, 0, len(r.arrays[name]))
+	for _, c := range r.arrays[name] {
+		out = append(out, ListItem{Value: c.v, Null: c.null})
+	}
+	return out
+}
+
+func (r *Row) setList(name string, items []cell) {
+	vals := make([]string, len(items))
+	for i, c := range items {
+		vals[i] = c.v
+	}
+	r.Set(name, strings.Join(vals, "\x00"))
+	if r.lists == nil {
+		r.lists = make(map[string]bool)
+	}
+	if r.arrays == nil {
+		r.arrays = make(map[string][]cell)
+	}
+	r.lists[name] = true
+	r.arrays[name] = items
+}
 
 // IsNull reports whether a row value is null: a GROUPBY key the rows lack.
 func (r *Row) IsNull(name string) bool { return r.nulls[name] }
@@ -50,6 +127,9 @@ func (r *Row) Get(name string) (string, bool) {
 
 // Set adds or replaces a row value.
 func (r *Row) Set(name, value string) {
+	delete(r.numv, name)
+	delete(r.lists, name)
+	delete(r.arrays, name)
 	for i, n := range r.Names {
 		if n == name {
 			r.Values[i] = value
@@ -90,6 +170,12 @@ func (r *Row) LoadAs(name, as string) {
 		return
 	}
 	if v, ok := FieldValue(r.idx, r.doc, name); ok {
+		if f := r.idx.Field(name); f != nil && f.Type == FieldNumeric {
+			if nums := r.doc.field(f.pos).nums; len(nums) > 0 {
+				r.SetFloat(as, nums[0])
+				return
+			}
+		}
 		r.Set(as, v)
 	}
 }
@@ -147,43 +233,67 @@ func Group(rows []*Row, props []string, reducers []Reducer) ([]*Row, error) {
 	type group struct {
 		key  []string
 		null []bool
+		num  []bool
+		f    []float64
 		rows []*Row
 	}
-	var order []string
-	groups := make(map[string]*group)
-	for _, r := range rows {
-		key := make([]string, len(props))
-		null := make([]bool, len(props))
-		kb := make([]string, len(props))
-		for i, p := range props {
-			var ok bool
-			key[i], ok = r.Get(strings.TrimPrefix(p, "@"))
-			null[i] = !ok
-			kb[i] = key[i]
+	// Groups come in the order RediSearch's hash table holds their hashes;
+	// each item of a list value makes its own group, an empty list a null.
+	var table khashOrder
+	groups := make(map[uint64]*group)
+	cells := make([]cell, len(props))
+	var extract func(r *Row, i int, h uint64)
+	extract = func(r *Row, i int, h uint64) {
+		if i == len(props) {
+			g, ok := groups[h]
 			if !ok {
-				kb[i] = "\x01"
+				g = &group{key: make([]string, len(props)), null: make([]bool, len(props)), num: make([]bool, len(props)), f: make([]float64, len(props))}
+				for j, c := range cells {
+					g.key[j], g.null[j], g.num[j], g.f[j] = c.v, c.null || !c.present, c.num, c.f
+				}
+				groups[h] = g
+				table.put(h)
+			}
+			g.rows = append(g.rows, r)
+			return
+		}
+		c := r.cell(props[i])
+		if !c.present {
+			c = cell{present: true, null: true}
+		}
+		switch {
+		case !c.isArr:
+			cells[i] = c
+			extract(r, i+1, c.hash(h))
+		case len(c.arr) == 0:
+			cells[i] = cell{present: true, null: true}
+			extract(r, i+1, h+1)
+		default:
+			for _, item := range c.arr {
+				cells[i] = item
+				extract(r, i+1, item.hash(h))
 			}
 		}
-		k := strings.Join(kb, "\x00")
-		g, ok := groups[k]
-		if !ok {
-			g = &group{key: key, null: null}
-			groups[k] = g
-			order = append(order, k)
-		}
-		g.rows = append(g.rows, r)
+	}
+	for _, r := range rows {
+		extract(r, 0, 0)
 	}
 	if len(rows) == 0 && len(props) == 0 {
-		groups[""] = &group{}
-		order = append(order, "")
+		groups[0] = &group{}
+		table.put(0)
 	}
+	order := table.order()
 	out := make([]*Row, 0, len(order))
 	for _, k := range order {
 		g := groups[k]
 		row := &Row{}
 		for i, p := range props {
 			name := strings.TrimPrefix(p, "@")
-			row.Set(name, g.key[i])
+			if g.num[i] {
+				row.SetFloat(name, g.f[i])
+			} else {
+				row.Set(name, g.key[i])
+			}
 			if g.null[i] {
 				row.markNull(name)
 			}
@@ -194,12 +304,16 @@ func Group(rows []*Row, props []string, reducers []Reducer) ([]*Row, error) {
 				return nil, err
 			}
 			name := red.Name()
-			row.Set(name, v)
-			if fn := strings.ToUpper(red.Fn); fn == "TOLIST" || fn == "RANDOM_SAMPLE" {
-				if row.lists == nil {
-					row.lists = make(map[string]bool)
-				}
-				row.lists[name] = true
+			switch {
+			case v.isArr:
+				row.setList(name, v.arr)
+			case v.num:
+				row.SetFloat(name, v.f)
+			case v.null:
+				row.Set(name, "")
+				row.markNull(name)
+			default:
+				row.Set(name, v.v)
 			}
 		}
 		out = append(out, row)
@@ -213,109 +327,6 @@ func trimAt(args []string) []string {
 		out[i] = strings.TrimPrefix(a, "@")
 	}
 	return out
-}
-
-func numbers(rows []*Row, field string) []float64 {
-	var out []float64
-	for _, r := range rows {
-		if v, ok := r.Get(strings.TrimPrefix(field, "@")); ok {
-			if f, err := strconv.ParseFloat(v, 64); err == nil {
-				out = append(out, f)
-			}
-		}
-	}
-	return out
-}
-
-func reduce(red Reducer, rows []*Row) (string, error) {
-	arg := func(i int) string {
-		if i < len(red.Args) {
-			return red.Args[i]
-		}
-		return ""
-	}
-	switch strings.ToUpper(red.Fn) {
-	case "COUNT":
-		return FormatNumber(float64(len(rows))), nil
-	case "COUNT_DISTINCT", "COUNT_DISTINCTISH":
-		seen := make(map[string]bool)
-		for _, r := range rows {
-			if v, ok := r.Get(strings.TrimPrefix(arg(0), "@")); ok {
-				seen[v] = true
-			}
-		}
-		return FormatNumber(float64(len(seen))), nil
-	case "SUM":
-		sum := 0.0
-		for _, v := range numbers(rows, arg(0)) {
-			sum += v
-		}
-		return FormatNumber(sum), nil
-	case "AVG":
-		vs := numbers(rows, arg(0))
-		if len(vs) == 0 {
-			return "nan", nil
-		}
-		sum := 0.0
-		for _, v := range vs {
-			sum += v
-		}
-		return FormatNumber(sum / float64(len(vs))), nil
-	case "MIN", "MAX":
-		vs := numbers(rows, arg(0))
-		if len(vs) == 0 {
-			return "inf", nil
-		}
-		best := vs[0]
-		for _, v := range vs {
-			if strings.EqualFold(red.Fn, "MIN") {
-				best = math.Min(best, v)
-			} else {
-				best = math.Max(best, v)
-			}
-		}
-		return FormatNumber(best), nil
-	case "STDDEV":
-		vs := numbers(rows, arg(0))
-		if len(vs) < 2 {
-			return "0", nil
-		}
-		mean := 0.0
-		for _, v := range vs {
-			mean += v
-		}
-		mean /= float64(len(vs))
-		sq := 0.0
-		for _, v := range vs {
-			sq += (v - mean) * (v - mean)
-		}
-		return FormatNumber(math.Sqrt(sq / float64(len(vs)-1))), nil
-	case "QUANTILE":
-		vs := numbers(rows, arg(0))
-		q, err := strconv.ParseFloat(arg(1), 64)
-		if err != nil || len(vs) == 0 {
-			return "0", nil
-		}
-		sort.Float64s(vs)
-		return FormatNumber(vs[int(math.Min(float64(len(vs)-1), math.Floor(q*float64(len(vs)))))]), nil
-	case "FIRST_VALUE":
-		if len(rows) == 0 {
-			return "", nil
-		}
-		v, _ := rows[0].Get(strings.TrimPrefix(arg(0), "@"))
-		return v, nil
-	case "TOLIST", "RANDOM_SAMPLE":
-		seen := make(map[string]bool)
-		var vals []string
-		for _, r := range rows {
-			if v, ok := r.Get(strings.TrimPrefix(arg(0), "@")); ok && !seen[v] {
-				seen[v] = true
-				vals = append(vals, v)
-			}
-		}
-		return strings.Join(vals, "\x00"), nil
-	}
-	return "", errors.New("Bad arguments for REDUCE: unknown reducer " + red.Fn) //nolint:staticcheck // RediSearch's reply text
 }
 
 // SortKey is one SORTBY property.
@@ -575,6 +586,18 @@ func (n callNode) eval(r *Row) value {
 
 // Eval returns the expression's value for r as a string.
 func (e *Expr) Eval(r *Row) string { return e.root.eval(r).String() }
+
+// EvalTyped evaluates the expression and returns the number RediSearch
+// holds when the result is one.
+func (e *Expr) EvalTyped(r *Row) (string, float64, bool) {
+	if f, ok := e.root.(fieldNode); ok {
+		v, _ := r.Get(f.name)
+		n, isNum := r.Number(f.name)
+		return v, n, isNum
+	}
+	v := e.root.eval(r)
+	return v.String(), v.num, v.isNum && !v.null
+}
 
 // Missing returns a property the expression reads that r lacks, which
 // RediSearch refuses to evaluate; exists() may read anything.

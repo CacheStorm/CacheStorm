@@ -67,7 +67,11 @@ func (p *pipelineKeys) read(rows []*search.Row, name string, load bool) bool {
 			if lower {
 				v = strings.ToLower(v)
 			}
-			r.Set(name, v)
+			if n, ok := r.Number(name); ok {
+				r.SetFloat(name, n)
+			} else {
+				r.Set(name, v)
+			}
 		}
 	}
 	p.add(name)
