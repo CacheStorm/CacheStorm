@@ -3,6 +3,7 @@ package command
 import (
 	"bufio"
 	"bytes"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"strings"
@@ -55,6 +56,23 @@ func TestSearchReplaysRediSearchCorpus(t *testing.T) {
 	replayRedisCorpus(t, router, "testdata/redisearch_r8.jsonl")
 }
 
+// testdata/redisearch_vectors_r8.jsonl holds random vector indexes (FLAT
+// and HNSW, single and double precision, L2, IP and cosine, 2 to 40
+// dimensions) and KNN, hybrid and range queries with Redis 8.2's replies;
+// vector blobs are written in hex. Redis ran on an x86 CPU with AVX and
+// without AVX-512; with the same kernels the distances agree to the last
+// bit.
+func TestSearchReplaysVectorCorpus(t *testing.T) {
+	t.Cleanup(search.SetVectorKernels(true, false))
+	router := NewRouter()
+	RegisterSearchCommands(router)
+	RegisterHashCommands(router)
+	RegisterKeyCommands(router)
+	search.GetIndexManager().Reset()
+	t.Cleanup(search.GetIndexManager().Reset)
+	replayRedisCorpus(t, router, "testdata/redisearch_vectors_r8.jsonl")
+}
+
 func replayRedisCorpus(t *testing.T, router *Router, file string) {
 	t.Helper()
 	f, err := os.Open(file)
@@ -69,6 +87,7 @@ func replayRedisCorpus(t *testing.T, router *Router, file string) {
 	for n := 1; sc.Scan(); n++ {
 		var c struct {
 			Cmd  []string `json:"cmd"`
+			Hex  []int    `json:"hex"`
 			Want *string  `json:"want"`
 		}
 		if err := json.Unmarshal(sc.Bytes(), &c); err != nil {
@@ -86,7 +105,15 @@ func replayRedisCorpus(t *testing.T, router *Router, file string) {
 		var out bytes.Buffer
 		w := resp.NewWriter(&out)
 		w.SetRESP3(resp3)
-		ctx := NewContext(strings.ToUpper(c.Cmd[0]), bytesArgs(c.Cmd[1:]...), st, w)
+		args := bytesArgs(c.Cmd[1:]...)
+		for _, i := range c.Hex {
+			b, err := hex.DecodeString(c.Cmd[i])
+			if err != nil {
+				t.Fatal(err)
+			}
+			args[i-1] = b
+		}
+		ctx := NewContext(strings.ToUpper(c.Cmd[0]), args, st, w)
 		if err := router.Execute(ctx); err != nil {
 			t.Fatalf("line %d %v: %v", n, c.Cmd, err)
 		}

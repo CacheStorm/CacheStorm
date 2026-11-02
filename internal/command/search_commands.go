@@ -135,6 +135,24 @@ func cmdFTINFO(ctx *Context) error {
 			if f.NoStem {
 				a = append(a, resp.SimpleString("NOSTEM"))
 			}
+		case search.FieldVector:
+			v := f.Vector
+			a = append(a, resp.SimpleString("algorithm"), resp.SimpleString(v.Algorithm), resp.SimpleString("data_type"), resp.SimpleString(v.Type),
+				resp.SimpleString("dim"), resp.IntegerValue(int64(v.Dim)), resp.SimpleString("distance_metric"), resp.SimpleString(v.Metric))
+			if v.Algorithm == "HNSW" {
+				m, ef := int64(16), int64(200)
+				for _, p := range v.Params {
+					if x, err := strconv.ParseInt(p[1], 10, 64); err == nil {
+						switch p[0] {
+						case "M":
+							m = x
+						case "EF_CONSTRUCTION":
+							ef = x
+						}
+					}
+				}
+				a = append(a, resp.SimpleString("M"), resp.IntegerValue(m), resp.SimpleString("ef_construction"), resp.IntegerValue(ef))
+			}
 		case search.FieldTag:
 			a = append(a, resp.SimpleString("SEPARATOR"), resp.BulkString(string(f.Separator)))
 			if f.CaseSensitive {
@@ -396,21 +414,29 @@ func cmdFTSEARCH(ctx *Context) error {
 	type hit struct {
 		doc     *search.Document
 		score   float64
+		yields  [][2]string
 		sortKey string
 		sortNum float64
 		sortOK  bool
 		isNum   bool
 	}
+	found, err := idx.Search(ctx.Store, query, req.opts)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
 	var hits []hit
-	for _, h := range idx.Search(ctx.Store, query, req.opts) {
+	for _, h := range found {
 		if req.inKeys == nil || req.inKeys[h.Doc.Key] {
-			hits = append(hits, hit{doc: h.Doc, score: h.Score})
+			hits = append(hits, hit{doc: h.Doc, score: h.Score, yields: h.Yields})
 		}
 	}
 	if req.sortBy != "" {
 		for i := range hits {
 			h := &hits[i]
-			h.sortKey, h.sortOK = search.FieldValue(idx, h.doc, req.sortBy)
+			h.sortKey, h.sortOK = yieldValue(h.yields, req.sortBy)
+			if !h.sortOK {
+				h.sortKey, h.sortOK = search.FieldValue(idx, h.doc, req.sortBy)
+			}
 			if !h.sortOK {
 				// Only SORTABLE fields are kept in the index; others are
 				// read from the key.
@@ -481,10 +507,10 @@ func cmdFTSEARCH(ctx *Context) error {
 			add("payload", resp.NullBulkString())
 		}
 		if req.withSortKeys {
-			add("sortkey", sortKeyReply(idx, h.doc, req.sortBy))
+			add("sortkey", sortKeyReply(idx, h.doc, req.sortBy, h.yields))
 		}
 		if !req.noContent {
-			doc := documentReply(idx, h.doc, req, order)
+			doc := documentReply(idx, h.doc, req, order, h.yields)
 			if resp3 {
 				doc = resp.PairsValue(doc.Array)
 			}
@@ -522,8 +548,21 @@ func searchReply(resp3 bool, total int, results []*resp.Value, warnings ...strin
 	})
 }
 
-func sortKeyReply(idx *search.Index, doc *search.Document, field string) *resp.Value {
-	v, ok := search.FieldValue(idx, doc, field)
+// yieldValue returns a field a vector query yielded.
+func yieldValue(yields [][2]string, name string) (string, bool) {
+	for _, y := range yields {
+		if y[0] == name {
+			return y[1], true
+		}
+	}
+	return "", false
+}
+
+func sortKeyReply(idx *search.Index, doc *search.Document, field string, yields [][2]string) *resp.Value {
+	v, ok := yieldValue(yields, field)
+	if !ok {
+		v, ok = search.FieldValue(idx, doc, field)
+	}
 	if field == "" || !ok {
 		return resp.NullBulkString()
 	}
@@ -553,9 +592,13 @@ func (o *fieldOrder) add(name string) {
 
 // documentReply is a result's fields: RETURN's, or every hash field, or
 // the JSON document as "$", in the order o keeps.
-func documentReply(idx *search.Index, doc *search.Document, req *searchRequest, o *fieldOrder) *resp.Value {
+func documentReply(idx *search.Index, doc *search.Document, req *searchRequest, o *fieldOrder, yields [][2]string) *resp.Value {
 	if o == nil {
 		o = &fieldOrder{}
+	}
+	// A vector query's distance fields are made before any other.
+	for _, y := range yields {
+		o.add(y[0])
 	}
 	sortName := ""
 	if req.sortBy != "" {
@@ -571,7 +614,9 @@ func documentReply(idx *search.Index, doc *search.Document, req *searchRequest, 
 		values := make(map[string]string, len(req.returns))
 		for _, r := range req.returns {
 			o.add(r[1])
-			if v, ok := search.FieldValue(idx, doc, r[0]); ok {
+			if v, ok := yieldValue(yields, r[0]); ok {
+				values[r[1]] = v
+			} else if v, ok := search.FieldValue(idx, doc, r[0]); ok {
 				values[r[1]] = v
 			}
 		}
@@ -581,9 +626,15 @@ func documentReply(idx *search.Index, doc *search.Document, req *searchRequest, 
 			}
 		}
 	case doc.JSON != nil:
+		for _, y := range yields {
+			out = append(out, resp.BulkString(y[0]), resp.BulkString(y[1]))
+		}
 		out = append(out, resp.BulkString("$"), resp.BulkBytes(store.AppendJSON(nil, doc.JSON)))
 	default:
 		values := make(map[string]string, len(doc.Fields))
+		for _, y := range yields {
+			values[y[0]] = y[1]
+		}
 		for _, kv := range doc.Fields {
 			o.add(kv[0])
 			values[kv[0]] = kv[1]
@@ -630,8 +681,13 @@ func cmdFTAGGREGATE(ctx *Context) error {
 	if err != nil {
 		return ctx.WriteError(err)
 	}
-	found := idx.Search(ctx.Store, query, opts)
-	sort.Slice(found, func(i, j int) bool { return found[i].Doc.Before(found[j].Doc) })
+	found, err := idx.Search(ctx.Store, query, opts)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	if !search.NearestFirst(query) {
+		sort.Slice(found, func(i, j int) bool { return found[i].Doc.Before(found[j].Doc) })
+	}
 	addScores := false
 	for i := 2; i < n; i++ {
 		if strings.EqualFold(ctx.ArgString(i), "ADDSCORES") {
@@ -646,6 +702,9 @@ func cmdFTAGGREGATE(ctx *Context) error {
 	for i, h := range found {
 		if d := idx.Content(ctx.Store, h.Doc.Key); d != nil {
 			r := idx.NewRow(d)
+			for _, y := range h.Yields {
+				r.Set(y[0], y[1])
+			}
 			if addScores {
 				r.Set("__score", strconv.FormatFloat(h.Score, 'g', 12, 64))
 			}
@@ -1034,7 +1093,7 @@ func cmdFTGET(ctx *Context) error {
 	if !ok {
 		return ctx.WriteNullBulkString()
 	}
-	return ctx.WriteValue(documentReply(idx, doc, &searchRequest{}, nil))
+	return ctx.WriteValue(documentReply(idx, doc, &searchRequest{}, nil, nil))
 }
 
 // touchSearchKey marks key changed for every index of the server.

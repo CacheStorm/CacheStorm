@@ -19,7 +19,10 @@ func hashOf(kv ...string) *store.HashValue {
 	return h
 }
 
-func keys(hits []Hit) string {
+func keys(hits []Hit, err error) string {
+	if err != nil {
+		return err.Error()
+	}
 	var out []string
 	for _, h := range hits {
 		out = append(out, h.Doc.Key)
@@ -67,7 +70,8 @@ func TestQueriesFollowTheKeyspace(t *testing.T) {
 	}
 	st.Delete("doc:1")
 	n, _ := ParseQuery(idx, "hello", QueryOptions{})
-	for _, h := range idx.Search(st, n, QueryOptions{}) {
+	hits, _ := idx.Search(st, n, QueryOptions{})
+	for _, h := range hits {
 		if h.Doc.Key == "doc:1" && idx.Fresh(st, h.Doc) != nil {
 			t.Fatal("Fresh kept a deleted document")
 		}
@@ -99,7 +103,8 @@ func TestSearchIsSafeAgainstConcurrentWrites(t *testing.T) {
 		defer wg.Done()
 		n, _ := ParseQuery(idx, "word3|word4", QueryOptions{})
 		for i := 0; i < 300; i++ {
-			for _, h := range idx.Search(st, n, QueryOptions{}) {
+			hits, _ := idx.Search(st, n, QueryOptions{})
+			for _, h := range hits {
 				idx.Fresh(st, h.Doc)
 			}
 		}

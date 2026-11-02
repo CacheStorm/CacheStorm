@@ -22,6 +22,9 @@ const (
 	qGeo
 	qFuzzy
 	qWildcard
+	qVector
+	qWildcardQuery
+	qMissing
 )
 
 // allFields is the field mask of a node no modifier restricts.
@@ -55,6 +58,15 @@ type qnode struct {
 	// terms are an affix's or a fuzzy term's index terms, in order, which
 	// a query fills in before matching.
 	terms []string
+	// A vector query: KNN (k nearest, the root of a query, whose child is
+	// the filter) or a range; str is the blob parameter's name, blob its
+	// value, yield the field the distance is returned as.
+	knn      bool
+	k        int
+	byScore  bool
+	blob     string
+	yield    string
+	vecAttrs [][2]string
 }
 
 func newNode(t qtype) *qnode { return &qnode{typ: t, mask: allFields, weight: 1} }
@@ -249,6 +261,33 @@ func (idx *Index) dump(b *strings.Builder, n *qnode, depth int) {
 		fmt.Fprintf(b, "GEO %s:{%s,%s --> %s %s}", n.field, cfmtF(n.lon), cfmtF(n.lat), cfmtF(n.radius), n.unit)
 	case qWildcard:
 		b.WriteString("<WILDCARD>")
+	case qWildcardQuery:
+		b.WriteString("WILDCARD{" + n.str + "}")
+	case qMissing:
+		b.WriteString("ISMISSING{" + n.field + "}")
+	case qVector:
+		b.WriteString("VECTOR {")
+		if len(n.children) > 0 {
+			b.WriteString("\n")
+			for _, c := range n.children {
+				idx.dump(b, c, depth+1)
+			}
+			pad(b, depth)
+			b.WriteString("} => {")
+		}
+		if n.knn {
+			fmt.Fprintf(b, "K=%d nearest vectors to `$%s` ", n.k, n.str)
+		} else {
+			fmt.Fprintf(b, "Vectors that are within %s distance radius from `$%s` ", formatG(n.radius), n.str)
+		}
+		b.WriteString("in vector index associated with field @" + n.field)
+		for _, a := range n.vecAttrs {
+			b.WriteString(", " + a[0] + " = " + a[1])
+		}
+		if n.yield != "" {
+			b.WriteString(", yields distance as `" + n.yield + "`")
+		}
+		b.WriteString("}")
 	case qFuzzy:
 		b.WriteString("FUZZY{" + n.str + "}")
 	}
@@ -287,7 +326,7 @@ func (c *docCache) fillTerms(n *qnode) {
 		return
 	}
 	switch n.typ {
-	case qPrefix, qFuzzy:
+	case qPrefix, qFuzzy, qWildcardQuery:
 		if n.terms != nil {
 			return
 		}
@@ -297,7 +336,8 @@ func (c *docCache) fillTerms(n *qnode) {
 			return
 		}
 		for t := range c.terms {
-			if n.typ == qFuzzy && levenshteinWithin(s, t, n.dist) || n.typ == qPrefix && affixMatch(n, s, t) {
+			if n.typ == qFuzzy && levenshteinWithin(s, t, n.dist) || n.typ == qPrefix && affixMatch(n, s, t) ||
+				n.typ == qWildcardQuery && wildcardMatch(s, t) {
 				n.terms = append(n.terms, t)
 			}
 		}
@@ -322,6 +362,33 @@ func affixMatch(n *qnode, s, t string) bool {
 	default:
 		return strings.HasSuffix(t, s)
 	}
+}
+
+// wildcardMatch matches a w'...' pattern: * is any run of characters, ?
+// any one character.
+func wildcardMatch(pattern, s string) bool {
+	p, t := []rune(pattern), []rune(s)
+	star, mark := -1, 0
+	i, j := 0, 0
+	for j < len(t) {
+		switch {
+		case i < len(p) && (p[i] == '?' || p[i] == t[j]):
+			i++
+			j++
+		case i < len(p) && p[i] == '*':
+			star, mark = i, j
+			i++
+		case star >= 0:
+			i, mark = star+1, mark+1
+			j = mark
+		default:
+			return false
+		}
+	}
+	for i < len(p) && p[i] == '*' {
+		i++
+	}
+	return i == len(p)
 }
 
 // levenshteinWithin reports whether a and b are at most max edits apart,

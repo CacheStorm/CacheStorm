@@ -87,7 +87,7 @@
 {"cmd": ["ft.aggregate", "idx", "hello", "ADDSCORES", "LOAD", "1", "@title"], "want": "*3\r\n:1\r\n*4\r\n$7\r\n__score\r\n$14\r\n0.617318222673\r\n$5\r\ntitle\r\n$11\r\nhello world\r\n*4\r\n$7\r\n__score\r\n$14\r\n0.713108983988\r\n$5\r\ntitle\r\n$11\r\nhello there\r\n"}
 {"cmd": ["ft.aggregate", "idx", "*", "GROUPBY", "1", "@tag", "REDUCE", "TOLIST", "1", "@title", "AS", "l"], "want": "*4\r\n:3\r\n*4\r\n$3\r\ntag\r\n$3\r\na,b\r\n$1\r\nl\r\n*1\r\n$11\r\nhello world\r\n*4\r\n$3\r\ntag\r\n$1\r\nb\r\n$1\r\nl\r\n*1\r\n$13\r\ngoodbye world\r\n*4\r\n$3\r\ntag\r\n$3\r\nc,A\r\n$1\r\nl\r\n*1\r\n$11\r\nhello there\r\n"}
 {"cmd": ["ft.explain", "idx", "hello world"], "want": "$104\r\nINTERSECT {\n  UNION {\n    hello\n    +hello(expanded)\n  }\n  UNION {\n    world\n    +world(expanded)\n  }\n}\n\r\n"}
-{"cmd": ["ft.info", "idx"], "want": null}
+{"cmd": ["ft.info", "idx"]}
 {"cmd": ["flushall"]}
 {"cmd": ["ft.create", "idx", "ON", "HASH", "PREFIX", "1", "doc:", "SCHEMA", "title", "TEXT", "WEIGHT", "2", "body", "TEXT", "price", "NUMERIC", "SORTABLE", "tag", "TAG", "loc", "GEO"], "want": "+OK\r\n"}
 {"cmd": ["hset", "doc:1", "title", "hello world", "body", "the quick brown fox", "price", "10", "tag", "a,b", "loc", "13.36,38.11"], "want": ":5\r\n"}
@@ -1250,4 +1250,601 @@
 {"cmd": ["ft.aggregate", "idx", "hello", "ADDSCORES", "LOAD", "1", "@title"], "want": "%5\r\n+attributes\r\n*0\r\n+format\r\n+STRING\r\n+results\r\n*2\r\n%2\r\n+extra_attributes\r\n%2\r\n$7\r\n__score\r\n$14\r\n0.617318222673\r\n$5\r\ntitle\r\n$11\r\nhello world\r\n+values\r\n*0\r\n%2\r\n+extra_attributes\r\n%2\r\n$7\r\n__score\r\n$14\r\n0.713108983988\r\n$5\r\ntitle\r\n$11\r\nhello there\r\n+values\r\n*0\r\n+total_results\r\n:2\r\n+warning\r\n*0\r\n"}
 {"cmd": ["ft.aggregate", "idx", "*", "GROUPBY", "1", "@tag", "REDUCE", "TOLIST", "1", "@title", "AS", "l"], "want": "%5\r\n+attributes\r\n*0\r\n+format\r\n+STRING\r\n+results\r\n*3\r\n%2\r\n+extra_attributes\r\n%2\r\n$3\r\ntag\r\n$3\r\na,b\r\n$1\r\nl\r\n*1\r\n$11\r\nhello world\r\n+values\r\n*0\r\n%2\r\n+extra_attributes\r\n%2\r\n$3\r\ntag\r\n$1\r\nb\r\n$1\r\nl\r\n*1\r\n$13\r\ngoodbye world\r\n+values\r\n*0\r\n%2\r\n+extra_attributes\r\n%2\r\n$3\r\ntag\r\n$3\r\nc,A\r\n$1\r\nl\r\n*1\r\n$11\r\nhello there\r\n+values\r\n*0\r\n+total_results\r\n:3\r\n+warning\r\n*0\r\n"}
 {"cmd": ["ft.explain", "idx", "hello world"], "want": "$104\r\nINTERSECT {\n  UNION {\n    hello\n    +hello(expanded)\n  }\n  UNION {\n    world\n    +world(expanded)\n  }\n}\n\r\n"}
-{"cmd": ["ft.info", "idx"], "want": null}
+{"cmd": ["ft.info", "idx"]}
+{"cmd": ["hello", "2"]}
+{"cmd": ["flushall"]}
+{"cmd": ["ft.create", "idx", "ON", "HASH", "PREFIX", "1", "doc:", "SCHEMA", "title", "TEXT", "WEIGHT", "2", "body", "TEXT", "NOSTEM", "price", "NUMERIC", "SORTABLE", "tag", "TAG", "loc", "GEO"], "want": "+OK\r\n"}
+{"cmd": ["ft.explain", "idx", "@loc:[1 2 3 parsec] @nofield: 'x y' \\-", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Unknown field at offset 20 near nofield\r\n"}
+{"cmd": ["ft.explain", "idx", "world]runs*$p", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 5 near world\r\n"}
+{"cmd": ["ft.explain", "idx", "$p @nofield:", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Unknown field at offset 3 near nofield\r\n"}
+{"cmd": ["ft.explain", "idx", "12 %%wrld%% the $p* \\- \"", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 23 near \\-\r\n"}
+{"cmd": ["ft.explain", "idx", "@price==-$n@tag:{$p}@title:runs%%wrld%%*ld", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-No such parameter `n@`\r\n"}
+{"cmd": ["ft.explain", "idx", "(x=>$p{running", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 4 near p\r\n"}
+{"cmd": ["ft.explain", "idx", "12 hel \"$p\" @title|body:", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 23 near body\r\n"}
+{"cmd": ["ft.explain", "idx", "foo* ismissing(@title) runs '' \"hello world\" }", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-'ismissing' requires defining the field with 'INDEXMISSING' at offset 15 near title\r\n"}
+{"cmd": ["ft.explain", "idx", "@body:", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 5 near body\r\n"}
+{"cmd": ["ft.explain", "idx", "\"$p\" AS +3 {$weight:2}", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 11 near +3\r\n"}
+{"cmd": ["ft.explain", "idx", "@price:[($n +inf]", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$35\r\nNUMERIC {7.000000 < @price <= inf}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "@body: 3.5", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$10\r\n@body:3.5\n\r\n"}
+{"cmd": ["ft.explain", "idx", "*orl* @title: ismissing(@title) inf 5. as", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 30 near title\r\n"}
+{"cmd": ["ft.explain", "idx", "{ $p*", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 0 near \r\n"}
+{"cmd": ["ft.explain", "idx", "@price:[$n 10]ismissing(@title)@title|nofield:inf{$weight:2}\"", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-'ismissing' requires defining the field with 'INDEXMISSING' at offset 24 near title\r\n"}
+{"cmd": ["ft.explain", "idx", "w'$p' $n w'$p'", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$48\r\nINTERSECT {\n  7\n  WILDCARD{Pv}\n  WILDCARD{Pv}\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "inf \" @nofield: \"", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$46\r\nINTERSECT {\n  inf\n  EXACT {\n    nofield\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", ")@tag:{$p}", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 0 near \r\n"}
+{"cmd": ["ft.explain", "idx", "[", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 0 near \r\n"}
+{"cmd": ["ft.explain", "idx", "@loc:[1 2 3 km] } 'x y' %%wrld%%", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 16 near km\r\n"}
+{"cmd": ["ft.explain", "idx", "| '' \"hello world\" @price != 3 =>", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 0 near \r\n"}
+{"cmd": ["ft.explain", "idx", "(", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 0 near \r\n"}
+{"cmd": ["ft.explain", "idx", "@tag:{fo*} .5 ( ismissing(@title) -4 a", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-'ismissing' requires defining the field with 'INDEXMISSING' at offset 26 near title\r\n"}
+{"cmd": ["ft.explain", "idx", "\"$p\" 1e3", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$41\r\nINTERSECT {\n  EXACT {\n    $p\n  }\n  1e3\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "*w'$p'", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$48\r\nINTERSECT {\n  SUFFIX{*w}\n  EXACT {\n    $p\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "{$weight:2}", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 0 near \r\n"}
+{"cmd": ["ft.explain", "idx", "\"$p\" \"a\\\"b\" [", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 12 near a\\\"b\r\n"}
+{"cmd": ["ft.explain", "idx", "@tag:{$p} *$p } @tag:{\"a b\"} )", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 14 near p\r\n"}
+{"cmd": ["ft.explain", "idx", "-4 ] ''", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 3 near -4\r\n"}
+{"cmd": ["ft.explain", "idx", "w'$p' x +3 running -", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 19 near running\r\n"}
+{"cmd": ["ft.explain", "idx", "$n @price==-$n ( AS", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 17 near AS\r\n"}
+{"cmd": ["ft.explain", "idx", "@nofield: -$n", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Unknown field at offset 0 near nofield\r\n"}
+{"cmd": ["ft.explain", "idx", "running 5.", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$82\r\nINTERSECT {\n  UNION {\n    running\n    +run(expanded)\n    run(expanded)\n  }\n  5.\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "}", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 0 near \r\n"}
+{"cmd": ["ft.explain", "idx", "running 5. ] 'x y' )", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 11 near 5.\r\n"}
+{"cmd": ["ft.explain", "idx", "$n -$n ) \"a\\\"b\" 3.5", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 7 near n\r\n"}
+{"cmd": ["ft.explain", "idx", "w'he*' )", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 7 near he*\r\n"}
+{"cmd": ["ft.explain", "idx", "foo* *$p runs 1e3", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$139\r\nINTERSECT {\n  PREFIX{foo*}\n  SUFFIX{*pv}\n  INTERSECT {\n    UNION {\n      runs\n      +run(expanded)\n      run(expanded)\n    }\n    1e3\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "'x y' 3.5 $p", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$85\r\nINTERSECT {\n  3.5\n  UNION {\n    pv\n    +pv(expanded)\n  }\n  EXACT {\n    x\n    y\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "w'he*' -$n ( inf -4 w'he*'", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 22 near he*\r\n"}
+{"cmd": ["ft.explain", "idx", "@price:[$n] @price:[$n 10] (", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 27 near 10\r\n"}
+{"cmd": ["ft.explain", "idx", "foo* 3.5", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$35\r\nINTERSECT {\n  PREFIX{foo*}\n  3.5\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "1e3 $p $n", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$63\r\nINTERSECT {\n  UNION {\n    pv\n    +pv(expanded)\n  }\n  7\n  1e3\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "x AS", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$29\r\nUNION {\n  x\n  +x(expanded)\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "@tag:{}", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 6 near tag\r\n"}
+{"cmd": ["ft.explain", "idx", "{$weight:2} @price<=$n @nofield: @tag:{$p} 5.", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 0 near \r\n"}
+{"cmd": ["ft.explain", "idx", ": +3 => @price:[(1 +inf]", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 0 near \r\n"}
+{"cmd": ["ft.explain", "idx", ".5 x |", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 5 near x\r\n"}
+{"cmd": ["ft.explain", "idx", "\\- : a\\ b", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 3 near \\-\r\n"}
+{"cmd": ["ft.explain", "idx", "foo* 3.5 *", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 9 near 3.5\r\n"}
+{"cmd": ["ft.explain", "idx", "\"$p\" world", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$80\r\nINTERSECT {\n  EXACT {\n    $p\n  }\n  UNION {\n    world\n    +world(expanded)\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "} w'he*' as @title|nofield: as {", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 0 near \r\n"}
+{"cmd": ["ft.explain", "idx", "12 a\\ b", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$60\r\nINTERSECT {\n  12\n  UNION {\n    a b\n    +a b(expanded)\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "(", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 0 near \r\n"}
+{"cmd": ["ft.explain", "idx", "foo* -$n @tag:{$p} x", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$107\r\nINTERSECT {\n  PREFIX{foo*}\n  NOT{\n    7\n  }\n  TAG:@tag {\n    Pv\n  }\n  UNION {\n    x\n    +x(expanded)\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "\"$p\" @price:[$n 10] inf foo* runs foo*", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$205\r\nINTERSECT {\n  inf\n  PREFIX{foo*}\n  NUMERIC {7.000000 <= @price <= 10.000000}\n  EXACT {\n    $p\n  }\n  INTERSECT {\n    UNION {\n      runs\n      +run(expanded)\n      run(expanded)\n    }\n    PREFIX{foo*}\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "$p*'x y'=>the", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 10 near the\r\n"}
+{"cmd": ["ft.explain", "idx", "foo* +3 \"$p\" 'x y' @price != 3", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$137\r\nINTERSECT {\n  PREFIX{foo*}\n  +3\n  EXACT {\n    $p\n  }\n  EXACT {\n    x\n    y\n  }\n  NOT{\n    NUMERIC {3.000000 <= @price <= 3.000000}\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "w'he*'foo*", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$45\r\nINTERSECT {\n  WILDCARD{he*}\n  PREFIX{foo*}\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "a\\ b ~ ) => => \"a\\\"b\"", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 7 near a\\ b\r\n"}
+{"cmd": ["ft.explain", "idx", "foo* ] 5. { @price:[1 5] inf", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 5 near foo\r\n"}
+{"cmd": ["ft.explain", "idx", "$n](", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 2 near n\r\n"}
+{"cmd": ["ft.explain", "idx", "@title|body: @nofield: @price<=$n", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 13 near nofield\r\n"}
+{"cmd": ["ft.explain", "idx", "inf inf -4 %helo%", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$45\r\nINTERSECT {\n  -4\n  FUZZY{helo}\n  inf\n  inf\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "@title|body: foo* - {$weight:2} @price==-$n ]", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 20 near foo\r\n"}
+{"cmd": ["ft.explain", "idx", "helinf", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$39\r\nUNION {\n  helinf\n  +helinf(expanded)\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "3.5 ) @price:[$n 10] [ \" :", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 4 near 3.5\r\n"}
+{"cmd": ["ft.explain", "idx", "a\\ b inf", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$61\r\nINTERSECT {\n  UNION {\n    a b\n    +a b(expanded)\n  }\n  inf\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "as '' @price<=$n @title|nofield: @tag:{\"a b\"}", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Unknown field at offset 24 near nofield\r\n"}
+{"cmd": ["ft.explain", "idx", "hel @title|body: *ld runs", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$141\r\nINTERSECT {\n  UNION {\n    hel\n    +hel(expanded)\n  }\n  @title|body:SUFFIX{*ld}\n  UNION {\n    runs\n    +run(expanded)\n    run(expanded)\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "a\\ b $p*", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$69\r\nINTERSECT {\n  UNION {\n    a b\n    +a b(expanded)\n  }\n  PREFIX{pv*}\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "@tag:{the} $p } foo*", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 14 near p\r\n"}
+{"cmd": ["ft.explain", "idx", "%helo%", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$12\r\nFUZZY{helo}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "* [ @loc:[1 2 3 parsec]", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 2 near \r\n"}
+{"cmd": ["ft.explain", "idx", "5. @price:[($n +inf] AS 3.5 12*", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$98\r\nINTERSECT {\n  5.\n  NUMERIC {7.000000 < @price <= inf}\n  INTERSECT {\n    3.5\n    PREFIX{12*}\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "*ldAS", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$14\r\nSUFFIX{*ldAS}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "@title:*ldruns*$p", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$106\r\n@title:INTERSECT {\n  @title:INFIX{*ldruns*}\n  @title:UNION {\n    @title:pv\n    @title:+pv(expanded)\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "ismissing(@title) @price>5", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-'ismissing' requires defining the field with 'INDEXMISSING' at offset 10 near title\r\n"}
+{"cmd": ["ft.explain", "idx", "as @price:[($n +inf]", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$35\r\nNUMERIC {7.000000 < @price <= inf}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "\"hello world\" the $p*", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$62\r\nINTERSECT {\n  EXACT {\n    hello\n    world\n  }\n  PREFIX{pv*}\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "@price<=$n)", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 10 near \r\n"}
+{"cmd": ["ft.explain", "idx", "$n", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$2\r\n7\n\r\n"}
+{"cmd": ["ft.explain", "idx", "12@tag:{$p}x@tag:{$p}as{$weight:2}", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 23 near as\r\n"}
+{"cmd": ["ft.explain", "idx", "+3*$p@body:@title|nofield:$p*%helo%", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 11 near title\r\n"}
+{"cmd": ["ft.explain", "idx", "12*runsfoo*|", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 11 near runsfoo\r\n"}
+{"cmd": ["ft.explain", "idx", "x 12 @price != 3", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$112\r\nINTERSECT {\n  UNION {\n    x\n    +x(expanded)\n  }\n  12\n  NOT{\n    NUMERIC {3.000000 <= @price <= 3.000000}\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "@price==-$n @price:[($n +inf] @price>5 : $n", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 39 near +inf\r\n"}
+{"cmd": ["ft.explain", "idx", "3.5 ~", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 4 near 3.5\r\n"}
+{"cmd": ["ft.explain", "idx", "$p*", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$12\r\nPREFIX{pv*}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "inf", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$4\r\ninf\n\r\n"}
+{"cmd": ["ft.explain", "idx", "hello+3", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$64\r\nINTERSECT {\n  UNION {\n    hello\n    +hello(expanded)\n  }\n  +3\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "\"hello world\" x +3 *orl*", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$105\r\nINTERSECT {\n  +3\n  INFIX{*orl*}\n  UNION {\n    x\n    +x(expanded)\n  }\n  EXACT {\n    hello\n    world\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "@title: @price:[($n +inf] | ~ ) *orl*", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 8 near price\r\n"}
+{"cmd": ["ft.explain", "idx", "@price:[1 5]foo*", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$72\r\nINTERSECT {\n  NUMERIC {1.000000 <= @price <= 5.000000}\n  PREFIX{foo*}\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "+3", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$3\r\n+3\n\r\n"}
+{"cmd": ["ft.explain", "idx", "\"$p\"", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$15\r\nEXACT {\n  $p\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "*", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$11\r\n<WILDCARD>\n\r\n"}
+{"cmd": ["ft.explain", "idx", ")", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 0 near \r\n"}
+{"cmd": ["ft.explain", "idx", "@title|nofield: %%wrld%% @price:[($n +inf]", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Unknown field at offset 7 near nofield\r\n"}
+{"cmd": ["ft.explain", "idx", "[ a\\ b *$p", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 0 near \r\n"}
+{"cmd": ["ft.explain", "idx", "the", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$8\r\n<empty>\n\r\n"}
+{"cmd": ["ft.explain", "idx", "-$n.5as@price>5", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$101\r\nINTERSECT {\n  NOT{\n    INTERSECT {\n      7\n      .5\n    }\n  }\n  NUMERIC {5.000000 < @price <= inf}\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "runs * world", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 5 near runs\r\n"}
+{"cmd": ["ft.explain", "idx", "@title|body:*){@title|nofield:", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 12 near body\r\n"}
+{"cmd": ["ft.explain", "idx", "@nofield:@tag:{\"a b\"}-3.53.5", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Unknown field at offset 0 near nofield\r\n"}
+{"cmd": ["ft.explain", "idx", "@tag:{} \" @title|nofield:", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 6 near tag\r\n"}
+{"cmd": ["ft.explain", "idx", "*\\-.5{the@price:[($n +inf]", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 5 near .5\r\n"}
+{"cmd": ["ft.explain", "idx", "@loc:[$n $n 3 km]helasx*orl*AS", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$93\r\nINTERSECT {\n  PREFIX{helasx*}\n  PREFIX{orl*}\n  GEO loc:{7.000000,7.000000 --> 3.000000 km}\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "=> world world @price<=$n runs *", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 0 near > \r\n"}
+{"cmd": ["ft.explain", "idx", "@loc:[1 2 3]||@loc:[1 2 3 km]@price != 3[", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 11 near 3\r\n"}
+{"cmd": ["ft.explain", "idx", "@title:", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 6 near title\r\n"}
+{"cmd": ["ft.explain", "idx", "=>$n\"@price==-$n", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 0 near >$\r\n"}
+{"cmd": ["ft.explain", "idx", ".5 inf a\\ b *$p", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$108\r\nINTERSECT {\n  .5\n  inf\n  INTERSECT {\n    UNION {\n      a b\n      +a b(expanded)\n    }\n    SUFFIX{*pv}\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "{$weight:2} runs w'$p' a w'he*'", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 0 near \r\n"}
+{"cmd": ["ft.explain", "idx", "*$p as 5. hello inf \"$p\"", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$133\r\nINTERSECT {\n  SUFFIX{*pv}\n  5.\n  INTERSECT {\n    UNION {\n      hello\n      +hello(expanded)\n    }\n    inf\n  }\n  EXACT {\n    $p\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "a\\ b", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$33\r\nUNION {\n  a b\n  +a b(expanded)\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "@title: inf : | \" ~", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 12 near inf\r\n"}
+{"cmd": ["ft.explain", "idx", "@tag:{$p}@title|nofield:*orl**%helo%{$weight:2}", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Unknown field at offset 16 near nofield\r\n"}
+{"cmd": ["ft.explain", "idx", "] as", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 0 near \r\n"}
+{"cmd": ["ft.explain", "idx", "|w'$p'@title|body:+3", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 0 near \r\n"}
+{"cmd": ["ft.explain", "idx", "*orl* \" : 3.5 \"$p\" @price==-$n", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 19 near price\r\n"}
+{"cmd": ["ft.explain", "idx", "\"hello world\" \" w'he*' foo* hello inf", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 18 near he*\r\n"}
+{"cmd": ["ft.explain", "idx", "as ~ @price:[($n +inf] @price<=$n {", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 34 near +inf\r\n"}
+{"cmd": ["ft.explain", "idx", ") @tag:{$p} \"hello world\" w'$p' |", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 0 near \r\n"}
+{"cmd": ["ft.explain", "idx", "hel", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$33\r\nUNION {\n  hel\n  +hel(expanded)\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "world { ~", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 6 near world\r\n"}
+{"cmd": ["ft.explain", "idx", "'x y' *ld -$n", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$71\r\nINTERSECT {\n  EXACT {\n    x\n    y\n  }\n  SUFFIX{*ld}\n  NOT{\n    7\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "*$p }", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 4 near p\r\n"}
+{"cmd": ["ft.explain", "idx", "@price:[$n 10]-$n@price<=$n-4", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-No such parameter `n-`\r\n"}
+{"cmd": ["ft.explain", "idx", "@title:foo*", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$20\r\n@title:PREFIX{foo*}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "@loc:[$n $n 3 km] 5. +3", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$70\r\nINTERSECT {\n  5.\n  +3\n  GEO loc:{7.000000,7.000000 --> 3.000000 km}\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "@price != 3@price:[$n]", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$113\r\nINTERSECT {\n  NOT{\n    NUMERIC {3.000000 <= @price <= 3.000000}\n  }\n  NUMERIC {7.000000 <= @price <= 7.000000}\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "runsas+3*", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$94\r\nINTERSECT {\n  UNION {\n    runsas\n    +runsa(expanded)\n    runsa(expanded)\n  }\n  PREFIX{+3*}\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "a\\ b w'$p' runs 1e3 ismissing(@title) }", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-'ismissing' requires defining the field with 'INDEXMISSING' at offset 30\r\n"}
+{"cmd": ["ft.explain", "idx", "\\-world{inf", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 7 near \\-world\r\n"}
+{"cmd": ["ft.explain", "idx", "~ \"hello world\"", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$46\r\nOPTIONAL{\n  EXACT {\n    hello\n    world\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "*$p (", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 4 near p\r\n"}
+{"cmd": ["ft.explain", "idx", "%helo% w'he*'", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$44\r\nINTERSECT {\n  FUZZY{helo}\n  WILDCARD{he*}\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "\" @tag:{$p} @price:[$n 10] @title|body: world", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 2 near tag\r\n"}
+{"cmd": ["ft.explain", "idx", "a\\ b", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$33\r\nUNION {\n  a b\n  +a b(expanded)\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "$n(@tag:{fo*}\"a\\\"b\"'x y'%%wrld%%", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 31 near wrld\r\n"}
+{"cmd": ["ft.explain", "idx", "w'$p' @price:[($n +inf] \"$p\" 12", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$118\r\nINTERSECT {\n  WILDCARD{Pv}\n  NUMERIC {7.000000 < @price <= inf}\n  INTERSECT {\n    EXACT {\n      $p\n    }\n    12\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "'' @loc:[1 2 3 km] @nofield: 12* -$n", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Unknown field at offset 19 near nofield\r\n"}
+{"cmd": ["ft.explain", "idx", "inf-4*$p@price:[$n 10]", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$117\r\nINTERSECT {\n  PREFIX{-4*}\n  UNION {\n    pv\n    +pv(expanded)\n  }\n  inf\n  NUMERIC {7.000000 <= @price <= 10.000000}\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "*orl*AS", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$13\r\nINFIX{*orl*}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "%%wrld%%", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$12\r\nFUZZY{wrld}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "ismissing(@title) @tag:{$p} => foo* \\-", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-'ismissing' requires defining the field with 'INDEXMISSING' at offset 10 near title\r\n"}
+{"cmd": ["ft.explain", "idx", "] 12", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 0 near \r\n"}
+{"cmd": ["ft.explain", "idx", "*orl* @nofield: @body:", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Unknown field at offset 6 near nofield\r\n"}
+{"cmd": ["ft.explain", "idx", "1e3 5. ) w'$p' }", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 7 near 5.\r\n"}
+{"cmd": ["ft.explain", "idx", "@tag:{\"a b\"} \\- w'$p' @price==-$n", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$136\r\nINTERSECT {\n  UNION {\n    -\n    +-(expanded)\n  }\n  WILDCARD{Pv}\n  TAG:@tag {\n    a b\n  }\n  NUMERIC {-7.000000 <= @price <= -7.000000}\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "\\- ~ w'$p' @price != 3 *$p ''", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$185\r\nINTERSECT {\n  UNION {\n    -\n    +-(expanded)\n  }\n  OPTIONAL{\n    WILDCARD{Pv}\n  }\n  INTERSECT {\n    NOT{\n      NUMERIC {3.000000 <= @price <= 3.000000}\n    }\n    SUFFIX{*pv}\n  }\n  \"\"\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "'x y'", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$18\r\nEXACT {\n  x\n  y\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "@price:[($n +inf] 3.5 : foo* runs hello", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 22 near 3.5\r\n"}
+{"cmd": ["ft.explain", "idx", "x } @title: runs ] -$n", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 2 near x\r\n"}
+{"cmd": ["ft.explain", "idx", "+3 * *$p %%wrld%% w'$p'", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 3 near +3\r\n"}
+{"cmd": ["ft.explain", "idx", "~ %helo% 12*", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$62\r\nOPTIONAL{\n  INTERSECT {\n    FUZZY{helo}\n    PREFIX{12*}\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "@price>5 1e3", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$57\r\nINTERSECT {\n  NUMERIC {5.000000 < @price <= inf}\n  1e3\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "\\- running ) a\\ b", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 11 near running\r\n"}
+{"cmd": ["ft.explain", "idx", "x", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$29\r\nUNION {\n  x\n  +x(expanded)\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "$n @price==-$n inf", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$69\r\nINTERSECT {\n  NUMERIC {-7.000000 <= @price <= -7.000000}\n  inf\n  7\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "\\- w'$p' ~ the", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$66\r\nINTERSECT {\n  UNION {\n    -\n    +-(expanded)\n  }\n  WILDCARD{Pv}\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "@price != 3 %helo% ) @price>5", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 19 near helo\r\n"}
+{"cmd": ["ft.explain", "idx", "@price<=$n", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$37\r\nNUMERIC {-inf <= @price <= 7.000000}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "'x y' the @title: inf", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$53\r\nINTERSECT {\n  EXACT {\n    x\n    y\n  }\n  @title:inf\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "*orl* a", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$13\r\nINFIX{*orl*}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "5. ) a", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 3 near 5.\r\n"}
+{"cmd": ["ft.explain", "idx", "( inf -4 @price>5 12", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 18 near 12\r\n"}
+{"cmd": ["ft.explain", "idx", "@price>5 }", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 9 near \r\n"}
+{"cmd": ["ft.explain", "idx", "@nofield: 5. @loc:[1 2 3 parsec] ]", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Unknown field at offset 0 near nofield\r\n"}
+{"cmd": ["ft.explain", "idx", "a", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$8\r\n<empty>\n\r\n"}
+{"cmd": ["ft.explain", "idx", "foo* 5. @price:[$n 10] $p* w'$p' {", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 33 near p\r\n"}
+{"cmd": ["ft.explain", "idx", "as'''x y'a}", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 10 near a\r\n"}
+{"cmd": ["ft.explain", "idx", "12 | AS ) ''", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 8 near AS\r\n"}
+{"cmd": ["ft.explain", "idx", "w'he*':+3inf", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 6 near he*\r\n"}
+{"cmd": ["ft.explain", "idx", "( @price:[($n +inf]", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 18 near +inf\r\n"}
+{"cmd": ["ft.explain", "idx", "{ ismissing(@title) w'$p' %%wrld%%", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 0 near \r\n"}
+{"cmd": ["ft.explain", "idx", "foo*:5.=>@price>5$n", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 4 near foo\r\n"}
+{"cmd": ["ft.explain", "idx", "*$p hel *orl* the @price:[($n +inf]", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$121\r\nINTERSECT {\n  UNION {\n    hel\n    +hel(expanded)\n  }\n  INFIX{*orl*}\n  SUFFIX{*pv}\n  NUMERIC {7.000000 < @price <= inf}\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "\"hello world\" \" \"", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$62\r\nINTERSECT {\n  EXACT {\n    hello\n    world\n  }\n  EXACT {\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "@price != 3 1e3 [", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 16 near 1e3\r\n"}
+{"cmd": ["ft.explain", "idx", "a\\ b", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$33\r\nUNION {\n  a b\n  +a b(expanded)\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "hel", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$33\r\nUNION {\n  hel\n  +hel(expanded)\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "@loc:[1 2 3 parsec]AS+3@nofield:", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Unknown field at offset 23 near nofield\r\n"}
+{"cmd": ["ft.explain", "idx", "{$weight:2} AS @tag:{\"a b\"} @tag:{x|y} : hel", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 0 near \r\n"}
+{"cmd": ["ft.explain", "idx", "@tag:{x}running(AS", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 16 near AS\r\n"}
+{"cmd": ["ft.explain", "idx", "running", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$53\r\nUNION {\n  running\n  +run(expanded)\n  run(expanded)\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "-@title|nofield:|@price:[$n 10]", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Unknown field at offset 8 near nofield\r\n"}
+{"cmd": ["ft.explain", "idx", ") $n running", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 0 near \r\n"}
+{"cmd": ["ft.explain", "idx", "+3 hello", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$64\r\nINTERSECT {\n  +3\n  UNION {\n    hello\n    +hello(expanded)\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "w'$p' @nofield: @tag:{$p} 1e3", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Unknown field at offset 6\r\n"}
+{"cmd": ["ft.explain", "idx", "inf 12 foo* } [ 3.5", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 12 near foo\r\n"}
+{"cmd": ["ft.explain", "idx", "$p**orl*3.5*$p-$n@price:[($n +inf]", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$151\r\nINTERSECT {\n  PREFIX{3.5*}\n  UNION {\n    pv\n    +pv(expanded)\n  }\n  INFIX{*orl*}\n  PREFIX{pv*}\n  NOT{\n    7\n  }\n  NUMERIC {7.000000 < @price <= inf}\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "@nofield:", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Unknown field at offset 0 near nofield\r\n"}
+{"cmd": ["ft.explain", "idx", "inffoo**hello%helo%", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$63\r\nINTERSECT {\n  SUFFIX{*hello}\n  FUZZY{helo}\n  PREFIX{inffoo*}\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "@price<=$n [", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 11 near \r\n"}
+{"cmd": ["ft.explain", "idx", "foo* { *ld ~ %helo%", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 5 near foo\r\n"}
+{"cmd": ["ft.explain", "idx", "@title|body: *orl* w'$p' @title: @tag:{$p}", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 33 near tag\r\n"}
+{"cmd": ["ft.explain", "idx", "* ''", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 2 near \r\n"}
+{"cmd": ["ft.explain", "idx", "@price==-$n", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$43\r\nNUMERIC {-7.000000 <= @price <= -7.000000}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "hel *$p +3 3.5 ismissing(@title)", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-'ismissing' requires defining the field with 'INDEXMISSING' at offset 25\r\n"}
+{"cmd": ["ft.explain", "idx", "w'he*' %helo% @price:[$n 10] *", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 29 near 10\r\n"}
+{"cmd": ["ft.explain", "idx", "hel $n +3 @price:[1 5] ( *", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 25 near 5\r\n"}
+{"cmd": ["ft.explain", "idx", "%helo% hel x hello :", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 19 near hello\r\n"}
+{"cmd": ["ft.explain", "idx", "@price:[($n +inf]@body:121e3''\"$p\"", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$91\r\nINTERSECT {\n  NUMERIC {7.000000 < @price <= inf}\n  @body:121e3\n  \"\"\n  EXACT {\n    $p\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "3.5 => @price>5", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 7 near price\r\n"}
+{"cmd": ["ft.explain", "idx", "ismissing(@title)@title|nofield:1e3a-$n", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-'ismissing' requires defining the field with 'INDEXMISSING' at offset 10 near title\r\n"}
+{"cmd": ["ft.explain", "idx", "\"a\\\"b\" ~ @price<=$n", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$93\r\nINTERSECT {\n  EXACT {\n    a\"b\n  }\n  OPTIONAL{\n    NUMERIC {-inf <= @price <= 7.000000}\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "%%wrld%% %%wrld%% 5. .5", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$52\r\nINTERSECT {\n  5.\n  .5\n  FUZZY{wrld}\n  FUZZY{wrld}\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "5.", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$3\r\n5.\n\r\n"}
+{"cmd": ["ft.explain", "idx", "as \"hello world\"", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$26\r\nEXACT {\n  hello\n  world\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "@body: 5.", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$9\r\n@body:5.\n\r\n"}
+{"cmd": ["ft.explain", "idx", ".5 running x", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$119\r\nINTERSECT {\n  .5\n  UNION {\n    running\n    +run(expanded)\n    run(expanded)\n  }\n  UNION {\n    x\n    +x(expanded)\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "running - w'$p' @nofield: {$weight:2} |", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Unknown field at offset 16\r\n"}
+{"cmd": ["ft.explain", "idx", "helloismissing(@title)'x y'}", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 21 near title\r\n"}
+{"cmd": ["ft.explain", "idx", "inf@title|nofield:-$nhel", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Unknown field at offset 10 near nofield\r\n"}
+{"cmd": ["ft.explain", "idx", "x => 3.5", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 5 near 3.5\r\n"}
+{"cmd": ["ft.explain", "idx", "\"a\\\"b\"", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$16\r\nEXACT {\n  a\"b\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "[ @title|body: @tag:{x|y} @price==-$n", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 0 near \r\n"}
+{"cmd": ["ft.explain", "idx", "*$p @title|nofield: +3 - ''", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Unknown field at offset 11 near nofield\r\n"}
+{"cmd": ["ft.explain", "idx", "@price != 3@price:[$n 10]", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$114\r\nINTERSECT {\n  NOT{\n    NUMERIC {3.000000 <= @price <= 3.000000}\n  }\n  NUMERIC {7.000000 <= @price <= 10.000000}\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "inf hel @price<=$n *orl* as", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$137\r\nINTERSECT {\n  inf\n  UNION {\n    hel\n    +hel(expanded)\n  }\n  INTERSECT {\n    NUMERIC {-inf <= @price <= 7.000000}\n    INFIX{*orl*}\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "running", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$53\r\nUNION {\n  running\n  +run(expanded)\n  run(expanded)\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "\"$p\" @tag:{$p} *$p the", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$73\r\nINTERSECT {\n  TAG:@tag {\n    Pv\n  }\n  SUFFIX{*pv}\n  EXACT {\n    $p\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", ")$p@title|body:\"$p\"as", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 0 near \r\n"}
+{"cmd": ["ft.explain", "idx", "hel w'he*' a\\ b the", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$112\r\nINTERSECT {\n  UNION {\n    hel\n    +hel(expanded)\n  }\n  WILDCARD{he*}\n  UNION {\n    a b\n    +a b(expanded)\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "@price==-$n ~ -$n", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$98\r\nINTERSECT {\n  NUMERIC {-7.000000 <= @price <= -7.000000}\n  OPTIONAL{\n    NOT{\n      7\n    }\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "$p", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$31\r\nUNION {\n  pv\n  +pv(expanded)\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "the $p | *ld \"", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 13 near ld\r\n"}
+{"cmd": ["ft.explain", "idx", "running %%wrld%% \" @price:[$n 10] 5. {", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 19 near price\r\n"}
+{"cmd": ["ft.explain", "idx", "$p 5.", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$58\r\nINTERSECT {\n  UNION {\n    pv\n    +pv(expanded)\n  }\n  5.\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "@title:@price>55.w'he*'a\\ bismissing(@title)", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 7 near price\r\n"}
+{"cmd": ["ft.explain", "idx", ".5 hello runs 5. hel", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$200\r\nINTERSECT {\n  .5\n  UNION {\n    hello\n    +hello(expanded)\n  }\n  INTERSECT {\n    UNION {\n      runs\n      +run(expanded)\n      run(expanded)\n    }\n    5.\n  }\n  UNION {\n    hel\n    +hel(expanded)\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "ismissing(@title)\"$p\"@price:[$n 10]3.5$p*", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-'ismissing' requires defining the field with 'INDEXMISSING' at offset 10 near title\r\n"}
+{"cmd": ["ft.explain", "idx", "@title|nofield: @tag:{\"a b\"} the @tag:{\"a b\"}", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Unknown field at offset 7 near nofield\r\n"}
+{"cmd": ["ft.explain", "idx", "| { @price>5 :", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 0 near \r\n"}
+{"cmd": ["ft.explain", "idx", "world", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$37\r\nUNION {\n  world\n  +world(expanded)\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "@price>5 a @title:", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 17 near title\r\n"}
+{"cmd": ["ft.explain", "idx", "@nofield: }", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Unknown field at offset 0 near nofield\r\n"}
+{"cmd": ["ft.explain", "idx", "~ %helo% \\-", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$83\r\nINTERSECT {\n  OPTIONAL{\n    FUZZY{helo}\n  }\n  UNION {\n    -\n    +-(expanded)\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "%%wrld%%@price != 3", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$84\r\nINTERSECT {\n  FUZZY{wrld}\n  NOT{\n    NUMERIC {3.000000 <= @price <= 3.000000}\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "*ldw'he*'[runs", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 9 near he*\r\n"}
+{"cmd": ["ft.explain", "idx", "$p ~", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 3 near p\r\n"}
+{"cmd": ["ft.explain", "idx", "1e3 { - @price:[a b]", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 4 near 1e3\r\n"}
+{"cmd": ["ft.explain", "idx", "12*running*@title|nofield:@price>5", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Unknown field at offset 18 near nofield\r\n"}
+{"cmd": ["ft.explain", "idx", ".512", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$5\r\n.512\n\r\n"}
+{"cmd": ["ft.explain", "idx", "ismissing(@title) \"$p\" @price:[-inf (3] @tag:{\"a b\"}", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-'ismissing' requires defining the field with 'INDEXMISSING' at offset 10 near title\r\n"}
+{"cmd": ["ft.explain", "idx", "running : 'x y' as '' @price>5", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 8 near running\r\n"}
+{"cmd": ["ft.explain", "idx", ".5 @tag:{\"a b\"} .5 *orl*", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$64\r\nINTERSECT {\n  .5\n  INFIX{*orl*}\n  TAG:@tag {\n    a b\n  }\n  .5\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "@price<=$n*orl*+3", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-No such parameter `n*`\r\n"}
+{"cmd": ["ft.explain", "idx", "=> @nofield: hel @body: a\\ b *ld", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 0 near > \r\n"}
+{"cmd": ["ft.explain", "idx", "%%wrld%%runs[\"@body:$p*", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 12 near runs\r\n"}
+{"cmd": ["ft.explain", "idx", "@price<=$ninf|@price != 3", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-No such parameter `ninf|`\r\n"}
+{"cmd": ["ft.explain", "idx", "AS running as ~ \"a\\\"b\"", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$121\r\nINTERSECT {\n  UNION {\n    running\n    +run(expanded)\n    run(expanded)\n  }\n  OPTIONAL{\n    EXACT {\n      a\"b\n    }\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "[ 12*", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 0 near \r\n"}
+{"cmd": ["ft.explain", "idx", "$nw'$p''':$n.5", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 9 near \r\n"}
+{"cmd": ["ft.explain", "idx", "infruns5.", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$43\r\nUNION {\n  infruns5\n  +infruns5(expanded)\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "\\-", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$29\r\nUNION {\n  -\n  +-(expanded)\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "'x y' foo*", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$55\r\nINTERSECT {\n  EXACT {\n    x\n    y\n  }\n  PREFIX{foo*}\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "worldthe@title|body:@price:[($n +inf][as", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 20 near price\r\n"}
+{"cmd": ["ft.explain", "idx", "the}", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 3 near the\r\n"}
+{"cmd": ["ft.explain", "idx", "@loc:[1 2 3] %helo%", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 11 near 3\r\n"}
+{"cmd": ["ft.explain", "idx", "the @title|body: : * } @price:[a b]", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 17 near body\r\n"}
+{"cmd": ["ft.explain", "idx", "$p* @price:[a b] foo*", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 14 near b\r\n"}
+{"cmd": ["ft.explain", "idx", "{ ] 12* $p* %%wrld%%", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 0 near \r\n"}
+{"cmd": ["ft.explain", "idx", "ismissing(@title) @price>5 world ismissing(@title) } *ld", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-'ismissing' requires defining the field with 'INDEXMISSING' at offset 10 near title\r\n"}
+{"cmd": ["ft.explain", "idx", "\"hello world\"\"hello world\"\"hello world\"\"$p\"@price<=$n=>", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 53 near >\r\n"}
+{"cmd": ["ft.explain", "idx", "$n-$n12*'x y'", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-No such parameter `n12`\r\n"}
+{"cmd": ["ft.explain", "idx", "inf {$weight:2} \" @title|nofield: foo*", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 4 near inf\r\n"}
+{"cmd": ["ft.explain", "idx", "w'he*'\"helloruns", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 7 near helloruns\r\n"}
+{"cmd": ["ft.explain", "idx", "@price:[($n +inf] *", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 18 near +inf\r\n"}
+{"cmd": ["ft.explain", "idx", "1e3 12 $p *ld @price:[1 5] )", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 27 near 5\r\n"}
+{"cmd": ["ft.explain", "idx", "@loc:[1 2 3] \"a\\\"b\" @loc:[1 2 3 km]", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 11 near 3\r\n"}
+{"cmd": ["ft.explain", "idx", "AS=>", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 2 near >\r\n"}
+{"cmd": ["ft.explain", "idx", "1e3 ~", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 4 near 1e3\r\n"}
+{"cmd": ["ft.explain", "idx", "as @price:[($n +inf] 5. @tag:{the} inf", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$113\r\nINTERSECT {\n  NUMERIC {7.000000 < @price <= inf}\n  5.\n  INTERSECT {\n    TAG:@tag {\n      the\n    }\n    inf\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "$n$nruns", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-No such parameter `nruns`\r\n"}
+{"cmd": ["ft.explain", "idx", "*ld", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$12\r\nSUFFIX{*ld}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "@title|nofield: @price:[$n 10] (", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Unknown field at offset 7 near nofield\r\n"}
+{"cmd": ["ft.explain", "idx", "foo*", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$13\r\nPREFIX{foo*}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "\"$p\"", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$15\r\nEXACT {\n  $p\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "-4 [", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 3 near -4\r\n"}
+{"cmd": ["ft.explain", "idx", "-$n +3 @loc:[1 2 3]", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 18 near 3\r\n"}
+{"cmd": ["ft.explain", "idx", "@price != 3", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$50\r\nNOT{\n  NUMERIC {3.000000 <= @price <= 3.000000}\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "a\\ b \"$p\" world @title: w'$p' .5", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$184\r\nINTERSECT {\n  UNION {\n    a b\n    +a b(expanded)\n  }\n  EXACT {\n    $p\n  }\n  UNION {\n    world\n    +world(expanded)\n  }\n  @title:INTERSECT {\n    @title:WILDCARD{Pv}\n    @title:.5\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "a", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$8\r\n<empty>\n\r\n"}
+{"cmd": ["ft.explain", "idx", "@title|nofield:", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Unknown field at offset 7 near nofield\r\n"}
+{"cmd": ["ft.explain", "idx", "-as", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$8\r\n<empty>\n\r\n"}
+{"cmd": ["ft.explain", "idx", "hel", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$33\r\nUNION {\n  hel\n  +hel(expanded)\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "@price>5 \"hello world\" @price:[($n +inf] the 5. @body:", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 53 near body\r\n"}
+{"cmd": ["ft.explain", "idx", "} @tag:{the}", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 0 near \r\n"}
+{"cmd": ["ft.explain", "idx", "@price != 3", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$50\r\nNOT{\n  NUMERIC {3.000000 <= @price <= 3.000000}\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "} @price != 3 world ]", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 0 near \r\n"}
+{"cmd": ["ft.explain", "idx", "@price:[($n +inf] +3", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$56\r\nINTERSECT {\n  NUMERIC {7.000000 < @price <= inf}\n  +3\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "%%wrld%%", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$12\r\nFUZZY{wrld}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "''", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$3\r\n\"\"\n\r\n"}
+{"cmd": ["ft.explain", "idx", "- @price==-$n -$n", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$89\r\nINTERSECT {\n  NOT{\n    NUMERIC {-7.000000 <= @price <= -7.000000}\n  }\n  NOT{\n    7\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "*orl*@price>5%helo%\\-''5.", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$149\r\nINTERSECT {\n  NUMERIC {5.000000 < @price <= inf}\n  FUZZY{helo}\n  INFIX{*orl*}\n  UNION {\n    -\n    +-(expanded)\n  }\n  INTERSECT {\n    \"\"\n    5.\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "the {$weight:2} (", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 4 near the\r\n"}
+{"cmd": ["ft.explain", "idx", "{$weight:2} +3 .5 @title|body: ]", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 0 near \r\n"}
+{"cmd": ["ft.explain", "idx", "hel [", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 4 near hel\r\n"}
+{"cmd": ["ft.explain", "idx", "*ld @loc:[1 2 3 km] $p", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$113\r\nINTERSECT {\n  GEO loc:{1.000000,2.000000 --> 3.000000 km}\n  UNION {\n    pv\n    +pv(expanded)\n  }\n  SUFFIX{*ld}\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "@body: @price<=$n", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 7 near price\r\n"}
+{"cmd": ["ft.explain", "idx", "@title:)asworld[", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 7 near title\r\n"}
+{"cmd": ["ft.explain", "idx", "@price:[$n 10] ] {$weight:2} +3 @tag:{$p}", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 15 near 10\r\n"}
+{"cmd": ["ft.explain", "idx", "w'$p'runs@price:[$n 10](", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 23 near 10\r\n"}
+{"cmd": ["ft.explain", "idx", "-$n@nofield:hello*ldismissing(@title)", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Unknown field at offset 3 near nofield\r\n"}
+{"cmd": ["ft.explain", "idx", "as", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$8\r\n<empty>\n\r\n"}
+{"cmd": ["ft.explain", "idx", "\\-inf-w'$p'world$p", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$203\r\nINTERSECT {\n  UNION {\n    -inf\n    +-inf(expanded)\n  }\n  NOT{\n    WILDCARD{Pv}\n  }\n  INTERSECT {\n    UNION {\n      world\n      +world(expanded)\n    }\n    UNION {\n      pv\n      +pv(expanded)\n    }\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "[ x { \"$p\" \"hello world\" @loc:[1 2 3 parsec]", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 0 near \r\n"}
+{"cmd": ["ft.explain", "idx", "@title|nofield:foo*AS", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Unknown field at offset 7 near nofield\r\n"}
+{"cmd": ["ft.explain", "idx", "w'$p'@title|nofield:%%wrld%%\"", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Unknown field at offset 12 near nofield\r\n"}
+{"cmd": ["ft.explain", "idx", "| ) -$n w'he*' @price<=$n", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 0 near \r\n"}
+{"cmd": ["ft.explain", "idx", "[\"ismissing(@title)@nofield:", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 0 near \r\n"}
+{"cmd": ["ft.explain", "idx", "\\- @price:[1] | %%wrld%%", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$132\r\nUNION {\n  INTERSECT {\n    UNION {\n      -\n      +-(expanded)\n    }\n    NUMERIC {1.000000 <= @price <= 1.000000}\n  }\n  FUZZY{wrld}\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "w'he*' the +3", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$35\r\nINTERSECT {\n  WILDCARD{he*}\n  +3\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "hello {$weight:2} @price:[-inf (3] * $n ismissing(@title)", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 6 near hello\r\n"}
+{"cmd": ["ft.explain", "idx", "@title|body: inf 12*", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$70\r\n@title|body:INTERSECT {\n  @title|body:inf\n  @title|body:PREFIX{12*}\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "@title: \"hello world\" w'he*' @price>5 'x y'", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$190\r\nINTERSECT {\n  @title:INTERSECT {\n    @title:EXACT {\n      @title:hello\n      @title:world\n    }\n    @title:WILDCARD{he*}\n  }\n  NUMERIC {5.000000 < @price <= inf}\n  EXACT {\n    x\n    y\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "'x y' @tag:{}", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 12 near tag\r\n"}
+{"cmd": ["ft.explain", "idx", "w'$p' @title: x", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$87\r\nINTERSECT {\n  WILDCARD{Pv}\n  @title:UNION {\n    @title:x\n    @title:+x(expanded)\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "@title|body: hel $n }", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 20 near n\r\n"}
+{"cmd": ["ft.explain", "idx", "foo* *$p \" ]", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 11 near p\r\n"}
+{"cmd": ["ft.explain", "idx", "@price==-$n", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$43\r\nNUMERIC {-7.000000 <= @price <= -7.000000}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "1e3@price<=$n", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$59\r\nINTERSECT {\n  1e3\n  NUMERIC {-inf <= @price <= 7.000000}\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "@price:[$n 10]]@price<=$n]", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 14 near 10\r\n"}
+{"cmd": ["ft.explain", "idx", "~%helo%@tag:{\"a b\"}=>$p@title:", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 21 near p\r\n"}
+{"cmd": ["ft.explain", "idx", "}3.5@price:[$n 10]@price:[-inf (3].5\"hello world\"", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 0 near \r\n"}
+{"cmd": ["ft.explain", "idx", "| *$p", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 0 near \r\n"}
+{"cmd": ["ft.explain", "idx", "*$p", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$12\r\nSUFFIX{*pv}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "=> 5. -", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 0 near > \r\n"}
+{"cmd": ["ft.explain", "idx", "1e3 ] \"hello world\" ~ hello a\\ b", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 4 near 1e3\r\n"}
+{"cmd": ["ft.explain", "idx", "''", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$3\r\n\"\"\n\r\n"}
+{"cmd": ["ft.explain", "idx", "running 1e3 as runs", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$143\r\nINTERSECT {\n  UNION {\n    running\n    +run(expanded)\n    run(expanded)\n  }\n  1e3\n  UNION {\n    runs\n    +run(expanded)\n    run(expanded)\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "hello @tag:{\"a b\"} hello foo* \" runs", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 32 near runs\r\n"}
+{"cmd": ["ft.explain", "idx", "@body: 1e3", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$10\r\n@body:1e3\n\r\n"}
+{"cmd": ["ft.explain", "idx", "* 1e3 12* @title|nofield:", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 2 near 1e3\r\n"}
+{"cmd": ["ft.explain", "idx", "@title|nofield: @price>5 x ismissing(@title) ] @tag:{$p}", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Unknown field at offset 7 near nofield\r\n"}
+{"cmd": ["ft.explain", "idx", "%%wrld%%", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$12\r\nFUZZY{wrld}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "hello *orl* running", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$137\r\nINTERSECT {\n  UNION {\n    hello\n    +hello(expanded)\n  }\n  INFIX{*orl*}\n  UNION {\n    running\n    +run(expanded)\n    run(expanded)\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "@price:[$n 10]", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$42\r\nNUMERIC {7.000000 <= @price <= 10.000000}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "'' { ( the x", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 3 near \r\n"}
+{"cmd": ["ft.explain", "idx", "*$p 5. running {$weight:2} ]", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 15 near running\r\n"}
+{"cmd": ["ft.explain", "idx", "+3", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$3\r\n+3\n\r\n"}
+{"cmd": ["ft.explain", "idx", "@price<=$n runs *orl* @title:", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 28 near title\r\n"}
+{"cmd": ["ft.explain", "idx", "12* w'he*' {$weight:2} a", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 11 near he*\r\n"}
+{"cmd": ["ft.explain", "idx", "[ @title|body: @price:[$n 10] @price != 3 ]", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 0 near \r\n"}
+{"cmd": ["ft.explain", "idx", "3.5 foo* @price:[$n 10] - [ a", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 26 near 10\r\n"}
+{"cmd": ["ft.explain", "idx", "*$pa", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-No such parameter `pa`\r\n"}
+{"cmd": ["ft.explain", "idx", "12 @nofield: * ] ismissing(@title)", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Unknown field at offset 3 near nofield\r\n"}
+{"cmd": ["ft.explain", "idx", "3.5 @price:[($n +inf] @title|body: $p @tag:{\"a b\"} hello", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$197\r\nINTERSECT {\n  3.5\n  NUMERIC {7.000000 < @price <= inf}\n  @title|body:UNION {\n    @title|body:pv\n    @title:+pv(expanded)\n  }\n  TAG:@tag {\n    a b\n  }\n  UNION {\n    hello\n    +hello(expanded)\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "%%wrld%%]\\-", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 8 near wrld\r\n"}
+{"cmd": ["ft.explain", "idx", "x \\- $n *orl* ismissing(@title)", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-'ismissing' requires defining the field with 'INDEXMISSING' at offset 24 near title\r\n"}
+{"cmd": ["ft.explain", "idx", "-$n @price:[$n 10] @price<=$n ] \"hello world\"", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 30 near 10\r\n"}
+{"cmd": ["ft.explain", "idx", "*orl*@title|nofield:as", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Unknown field at offset 12 near nofield\r\n"}
+{"cmd": ["ft.explain", "idx", "hello [ | @tag:{$p} %helo% }", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 6 near hello\r\n"}
+{"cmd": ["ft.explain", "idx", "@tag:{\"a b\"} @title|nofield: %%wrld%% %helo% \"", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Unknown field at offset 20 near nofield\r\n"}
+{"cmd": ["ft.explain", "idx", "as @nofield: ~ {$weight:2} ] *$p", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Unknown field at offset 3 near nofield\r\n"}
+{"cmd": ["ft.explain", "idx", "{(@nofield:infrunningthe", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 0 near \r\n"}
+{"cmd": ["ft.explain", "idx", "\\- @nofield: @price != 3", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Unknown field at offset 3 near nofield\r\n"}
+{"cmd": ["ft.explain", "idx", "hel \\-", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$92\r\nINTERSECT {\n  UNION {\n    hel\n    +hel(expanded)\n  }\n  UNION {\n    -\n    +-(expanded)\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "x*orl*.5", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$47\r\nINTERSECT {\n  PREFIX{orl*}\n  .5\n  PREFIX{x*}\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "@title:", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 6 near title\r\n"}
+{"cmd": ["ft.explain", "idx", "| as - *$p ~", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 0 near \r\n"}
+{"cmd": ["ft.explain", "idx", "running \"$p\" hello ) 1e3", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 19 near hello\r\n"}
+{"cmd": ["ft.explain", "idx", "a @price != 3 *$p", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$84\r\nINTERSECT {\n  NOT{\n    NUMERIC {3.000000 <= @price <= 3.000000}\n  }\n  SUFFIX{*pv}\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "-$n { the hel hel", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 4 near n\r\n"}
+{"cmd": ["ft.explain", "idx", "5.@price:[1 5]", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$62\r\nINTERSECT {\n  5.\n  NUMERIC {1.000000 <= @price <= 5.000000}\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "hel 1e3 \"$p\"", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$82\r\nINTERSECT {\n  UNION {\n    hel\n    +hel(expanded)\n  }\n  1e3\n  EXACT {\n    $p\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "*orl*", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$13\r\nINFIX{*orl*}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "foo*", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$13\r\nPREFIX{foo*}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "[", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 0 near \r\n"}
+{"cmd": ["ft.explain", "idx", "a ismissing(@title) %%wrld%% w'he*' '' ]", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-'ismissing' requires defining the field with 'INDEXMISSING' at offset 12 near title\r\n"}
+{"cmd": ["ft.explain", "idx", "@body: [ @title: \"hello world\" \" \"$p\"", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 9 near title\r\n"}
+{"cmd": ["ft.explain", "idx", "%helo%}w'$p'foo*@tag:{fo*}AS", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 6 near helo\r\n"}
+{"cmd": ["ft.explain", "idx", "runs", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$50\r\nUNION {\n  runs\n  +run(expanded)\n  run(expanded)\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "world", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$37\r\nUNION {\n  world\n  +world(expanded)\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "hel x @price:[$n 10] *$p", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$172\r\nINTERSECT {\n  UNION {\n    hel\n    +hel(expanded)\n  }\n  UNION {\n    x\n    +x(expanded)\n  }\n  INTERSECT {\n    NUMERIC {7.000000 <= @price <= 10.000000}\n    SUFFIX{*pv}\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "$p* \"hello world\" \"hello world\" %%wrld%% ( inf", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 43 near inf\r\n"}
+{"cmd": ["ft.explain", "idx", "@tag:{x|y} hello", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$88\r\nINTERSECT {\n  TAG:@tag {\n    x\n    y\n  }\n  UNION {\n    hello\n    +hello(expanded)\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "the3.5@price>5@price:[($n +inf]", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$136\r\nINTERSECT {\n  UNION {\n    the3\n    +the3(expanded)\n  }\n  .5\n  NUMERIC {5.000000 < @price <= inf}\n  NUMERIC {7.000000 < @price <= inf}\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "the [", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 4 near the\r\n"}
+{"cmd": ["ft.explain", "idx", "runs hello @price==-$n", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$164\r\nINTERSECT {\n  UNION {\n    runs\n    +run(expanded)\n    run(expanded)\n  }\n  UNION {\n    hello\n    +hello(expanded)\n  }\n  NUMERIC {-7.000000 <= @price <= -7.000000}\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "$nismissing(@title)~%helo%*$p12", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 18 near title\r\n"}
+{"cmd": ["ft.explain", "idx", "12*@price:[$n 10]", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$72\r\nINTERSECT {\n  PREFIX{12*}\n  NUMERIC {7.000000 <= @price <= 10.000000}\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "AS 12*", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$12\r\nPREFIX{12*}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "~\"a\\\"b\"-$n*$p*orl*world", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$190\r\nINTERSECT {\n  OPTIONAL{\n    EXACT {\n      a\"b\n    }\n  }\n  NOT{\n    INTERSECT {\n      PREFIX{pv*}\n      PREFIX{orl*}\n      PREFIX{7*}\n    }\n  }\n  UNION {\n    world\n    +world(expanded)\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "\"hello world\"", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$26\r\nEXACT {\n  hello\n  world\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "*ld\"$p\"\\-", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$86\r\nINTERSECT {\n  SUFFIX{*ld}\n  EXACT {\n    $p\n  }\n  UNION {\n    -\n    +-(expanded)\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "@price>5 .5 *$p inf", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$76\r\nINTERSECT {\n  SUFFIX{*pv}\n  inf\n  .5\n  NUMERIC {5.000000 < @price <= inf}\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "@price != 3@tag:{$p}-4@price != 3foo*", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$196\r\nINTERSECT {\n  TAG:@tag {\n    Pv\n  }\n  -4\n  NOT{\n    NUMERIC {3.000000 <= @price <= 3.000000}\n  }\n  INTERSECT {\n    NOT{\n      NUMERIC {3.000000 <= @price <= 3.000000}\n    }\n    PREFIX{foo*}\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "x @tag:{x} $p * @price==-$n \"a\\\"b\"", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 14 near p\r\n"}
+{"cmd": ["ft.explain", "idx", "runs -$n", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$91\r\nINTERSECT {\n  UNION {\n    runs\n    +run(expanded)\n    run(expanded)\n  }\n  NOT{\n    7\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "as -$n @title|nofield:", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Unknown field at offset 14 near nofield\r\n"}
+{"cmd": ["ft.explain", "idx", "as @price != 3 foo* a\\ b -4 *", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 28 near -4\r\n"}
+{"cmd": ["ft.explain", "idx", "\" w'he*' w'$p'", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 4 near he*\r\n"}
+{"cmd": ["ft.explain", "idx", "@price != 3@tag:{\"a b\"}}\"hello world\"", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 23 near a b\r\n"}
+{"cmd": ["ft.explain", "idx", "@price:[5 1] \\- } }", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 16 near \\-\r\n"}
+{"cmd": ["ft.explain", "idx", "5.@price==-$n@price:[1]", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-No such parameter `n@`\r\n"}
+{"cmd": ["ft.explain", "idx", "\"a\\\"b\" w'$p' 'x y' AS 1e3", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$83\r\nINTERSECT {\n  EXACT {\n    a\"b\n  }\n  WILDCARD{Pv}\n  EXACT {\n    x\n    y\n  }\n  1e3\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "+3 foo* | *ld", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$66\r\nUNION {\n  INTERSECT {\n    +3\n    PREFIX{foo*}\n  }\n  SUFFIX{*ld}\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "$n 12 \"hello world\" 'x y'", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$83\r\nINTERSECT {\n  7\n  12\n  EXACT {\n    hello\n    world\n  }\n  EXACT {\n    x\n    y\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "@loc:[1 2 3 km]", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$44\r\nGEO loc:{1.000000,2.000000 --> 3.000000 km}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "\"hello world\" @nofield: hel", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Unknown field at offset 14 near nofield\r\n"}
+{"cmd": ["ft.explain", "idx", "|AS125.:@title|body:", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 0 near \r\n"}
+{"cmd": ["ft.explain", "idx", "hel w'$p'", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$70\r\nINTERSECT {\n  UNION {\n    hel\n    +hel(expanded)\n  }\n  WILDCARD{Pv}\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "\"~a3.5", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 1 near \r\n"}
+{"cmd": ["ft.explain", "idx", "@title:w'he*'-$n*''", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$68\r\nINTERSECT {\n  @title:WILDCARD{he*}\n  NOT{\n    PREFIX{7*}\n  }\n  \"\"\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "{ ismissing(@title) @tag:{\"a b\"}", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 0 near \r\n"}
+{"cmd": ["ft.explain", "idx", "@price:[1 5] +3 as", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$62\r\nINTERSECT {\n  NUMERIC {1.000000 <= @price <= 5.000000}\n  +3\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "@price>5@price != 3)@price==-$n%%wrld%%'x y'", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 19 near \r\n"}
+{"cmd": ["ft.explain", "idx", "inf ~ hello", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$89\r\nINTERSECT {\n  inf\n  OPTIONAL{\n    UNION {\n      hello\n      +hello(expanded)\n    }\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "ismissing(@title) hello @title|nofield: w'$p' -$n", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-'ismissing' requires defining the field with 'INDEXMISSING' at offset 10 near title\r\n"}
+{"cmd": ["ft.explain", "idx", "$p* ismissing(@title) => @tag:{\"a b\"} @price:[($n +inf]", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-'ismissing' requires defining the field with 'INDEXMISSING' at offset 14\r\n"}
+{"cmd": ["ft.explain", "idx", "=>", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 0 near >\r\n"}
+{"cmd": ["ft.explain", "idx", "12", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$3\r\n12\n\r\n"}
+{"cmd": ["ft.explain", "idx", "@tag:{\"a b\"}@nofield:(", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Unknown field at offset 12 near nofield\r\n"}
+{"cmd": ["ft.explain", "idx", "ismissing(@title)$nrunning=>*$p|", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-'ismissing' requires defining the field with 'INDEXMISSING' at offset 10 near title\r\n"}
+{"cmd": ["ft.explain", "idx", "\"$p\"@loc:[$n $n 3 km]running:", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 28 near running\r\n"}
+{"cmd": ["ft.explain", "idx", "-4 \"hello world\"", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$53\r\nINTERSECT {\n  -4\n  EXACT {\n    hello\n    world\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "\"a\\\"b\" \\- \"$p\" @title|body: \"hello world\" @title|nofield:", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Unknown field at offset 49 near nofield\r\n"}
+{"cmd": ["ft.explain", "idx", "|@price:[$n 10]the", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 0 near \r\n"}
+{"cmd": ["ft.explain", "idx", "hello : @price != 3 | @tag:{$p}", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 6 near hello\r\n"}
+{"cmd": ["ft.explain", "idx", "@nofield:@title|body:\"$p\"*orl**orl*", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Unknown field at offset 0 near nofield\r\n"}
+{"cmd": ["ft.explain", "idx", "@tag:{x}\"\"hello world\")", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 22 near world\r\n"}
+{"cmd": ["ft.explain", "idx", "world @price>5 $p*", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$110\r\nINTERSECT {\n  NUMERIC {5.000000 < @price <= inf}\n  PREFIX{pv*}\n  UNION {\n    world\n    +world(expanded)\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "+312", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$5\r\n+312\n\r\n"}
+{"cmd": ["ft.explain", "idx", "'' ) @tag:{\"a b\"} |", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 3 near \r\n"}
+{"cmd": ["ft.explain", "idx", "@tag:{x|y} @tag:{\"a b\"} [", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 24 near a b\r\n"}
+{"cmd": ["ft.explain", "idx", "-$n 'x y' *$p +3 inf @tag:{\"a b\"}", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$107\r\nINTERSECT {\n  +3\n  inf\n  SUFFIX{*pv}\n  EXACT {\n    x\n    y\n  }\n  NOT{\n    7\n  }\n  TAG:@tag {\n    a b\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "+3", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$3\r\n+3\n\r\n"}
+{"cmd": ["ft.explain", "idx", "@nofield: the", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Unknown field at offset 0 near nofield\r\n"}
+{"cmd": ["ft.explain", "idx", "5.ismissing(@title)$n|", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-'ismissing' requires defining the field with 'INDEXMISSING' at offset 12 near title\r\n"}
+{"cmd": ["ft.explain", "idx", "-$n", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$11\r\nNOT{\n  7\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "ismissing(@title) *$p => +3 $n hel", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-'ismissing' requires defining the field with 'INDEXMISSING' at offset 10 near title\r\n"}
+{"cmd": ["ft.explain", "idx", "*$p => { hel *$p runs", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 9 near hel\r\n"}
+{"cmd": ["ft.explain", "idx", "12", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$3\r\n12\n\r\n"}
+{"cmd": ["ft.explain", "idx", "+3 @tag:{$p} @price != 3", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$99\r\nINTERSECT {\n  +3\n  TAG:@tag {\n    Pv\n  }\n  NOT{\n    NUMERIC {3.000000 <= @price <= 3.000000}\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "inf \\-", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$57\r\nINTERSECT {\n  inf\n  UNION {\n    -\n    +-(expanded)\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "x @tag:{\"a b\"} ]", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 15 near a b\r\n"}
+{"cmd": ["ft.explain", "idx", "@title|body:[", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 12 near body\r\n"}
+{"cmd": ["ft.explain", "idx", "*$p @price != 3 @price != 3 @price:[$n 10]", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$184\r\nINTERSECT {\n  SUFFIX{*pv}\n  NOT{\n    NUMERIC {3.000000 <= @price <= 3.000000}\n  }\n  NOT{\n    NUMERIC {3.000000 <= @price <= 3.000000}\n  }\n  NUMERIC {7.000000 <= @price <= 10.000000}\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "@nofield: inf the @tag:{$p} $n", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Unknown field at offset 0 near nofield\r\n"}
+{"cmd": ["ft.explain", "idx", "world @price:[5 1] @price:[$n 10] (", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 34 near 10\r\n"}
+{"cmd": ["ft.explain", "idx", "running @title|nofield:", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Unknown field at offset 15 near nofield\r\n"}
+{"cmd": ["ft.explain", "idx", "running*orl*[runs@tag:{\"a b\"}", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 12 near orl\r\n"}
+{"cmd": ["ft.explain", "idx", "*orl* *orl*", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$44\r\nINTERSECT {\n  INFIX{*orl*}\n  INFIX{*orl*}\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "inf world =>", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 10 near >\r\n"}
+{"cmd": ["ft.explain", "idx", "5. -", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 3 near 5.\r\n"}
+{"cmd": ["ft.explain", "idx", "@price:[$n 10] +3 ) @loc:[1 2 3 km] 5. world", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 18 near +3\r\n"}
+{"cmd": ["ft.explain", "idx", "the", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$8\r\n<empty>\n\r\n"}
+{"cmd": ["ft.explain", "idx", ".5 x world @price<=$n \"", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 22 near world\r\n"}
+{"cmd": ["ft.explain", "idx", "@tag:{$p} - x", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$94\r\nINTERSECT {\n  TAG:@tag {\n    Pv\n  }\n  NOT{\n    UNION {\n      x\n      +x(expanded)\n    }\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "@tag:{\"a b\"}runs", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$99\r\nINTERSECT {\n  TAG:@tag {\n    a b\n  }\n  UNION {\n    runs\n    +run(expanded)\n    run(expanded)\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "@body: \"a\\\"b\" a $p* 12 foo*", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$82\r\nINTERSECT {\n  12\n  PREFIX{foo*}\n  PREFIX{pv*}\n  @body:EXACT {\n    @body:a\"b\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "foo* runs world 'x y' ~ 12", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$183\r\nINTERSECT {\n  PREFIX{foo*}\n  UNION {\n    runs\n    +run(expanded)\n    run(expanded)\n  }\n  UNION {\n    world\n    +world(expanded)\n  }\n  EXACT {\n    x\n    y\n  }\n  OPTIONAL{\n    12\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "\":AS\"$p\"", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 7 near p\r\n"}
+{"cmd": ["ft.explain", "idx", "hel @price != 3 %helo% AS a", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$125\r\nINTERSECT {\n  NOT{\n    NUMERIC {3.000000 <= @price <= 3.000000}\n  }\n  FUZZY{helo}\n  UNION {\n    hel\n    +hel(expanded)\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "$n", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$2\r\n7\n\r\n"}
+{"cmd": ["ft.explain", "idx", "w'$p'", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$13\r\nWILDCARD{Pv}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "a\\ b -", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 5 near a\\ b\r\n"}
+{"cmd": ["ft.explain", "idx", "*orl* @loc:[1 2 3 km] running =>", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 30 near >\r\n"}
+{"cmd": ["ft.explain", "idx", "@price:[$n 10]\\-$n", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$99\r\nINTERSECT {\n  UNION {\n    -\n    +-(expanded)\n  }\n  7\n  NUMERIC {7.000000 <= @price <= 10.000000}\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "a\\ b {$weight:2} *orl* $p* -$n {", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 5 near a\\ b\r\n"}
+{"cmd": ["ft.explain", "idx", "\"a\\\"b\" @price:[($n +inf] @price != 3", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$129\r\nINTERSECT {\n  EXACT {\n    a\"b\n  }\n  NUMERIC {7.000000 < @price <= inf}\n  NOT{\n    NUMERIC {3.000000 <= @price <= 3.000000}\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "foo*hello@title|nofield:[", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Unknown field at offset 16 near nofield\r\n"}
+{"cmd": ["ft.explain", "idx", "3.5 +3 | runs )", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 14 near runs\r\n"}
+{"cmd": ["ft.explain", "idx", "}$p*1e312*12*", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 0 near \r\n"}
+{"cmd": ["ft.explain", "idx", "'x y'*orl*ismissing(@title)$p*", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-'ismissing' requires defining the field with 'INDEXMISSING' at offset 20 near title\r\n"}
+{"cmd": ["ft.explain", "idx", "$n w'he*'", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$34\r\nINTERSECT {\n  7\n  WILDCARD{he*}\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "*ld @price<=$n", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$67\r\nINTERSECT {\n  SUFFIX{*ld}\n  NUMERIC {-inf <= @price <= 7.000000}\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "*ld @price==-$n 5. *ld =>", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 23 near >\r\n"}
+{"cmd": ["ft.explain", "idx", "'x y'", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$18\r\nEXACT {\n  x\n  y\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "a\\ b ismissing(@title) 'x y' }", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-'ismissing' requires defining the field with 'INDEXMISSING' at offset 15 near title\r\n"}
+{"cmd": ["ft.explain", "idx", ") - @price:[($n +inf] @nofield:", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 0 near \r\n"}
+{"cmd": ["ft.explain", "idx", "%%wrld%% @loc:[$n $n 3 km] hello inf", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$153\r\nINTERSECT {\n  FUZZY{wrld}\n  GEO loc:{7.000000,7.000000 --> 3.000000 km}\n  INTERSECT {\n    UNION {\n      hello\n      +hello(expanded)\n    }\n    inf\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "- @title|nofield:", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Unknown field at offset 9 near nofield\r\n"}
+{"cmd": ["ft.explain", "idx", "@price<=$n $p* AS running as [", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 29 near as\r\n"}
+{"cmd": ["ft.explain", "idx", "} *$p", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 0 near \r\n"}
+{"cmd": ["ft.explain", "idx", "@title: \" @tag:{x y|z} 3.5 \\-", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 10 near tag\r\n"}
+{"cmd": ["ft.explain", "idx", "=> \"hello world\" a \"a\\\"b\" => *ld", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 0 near > \r\n"}
+{"cmd": ["ft.explain", "idx", "$n } (", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 3 near n\r\n"}
+{"cmd": ["ft.explain", "idx", "\"a\\\"b\"5.$n%helo%ismissing(@title)w'he*'", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-'ismissing' requires defining the field with 'INDEXMISSING' at offset 26 near title\r\n"}
+{"cmd": ["ft.explain", "idx", "hel -$n ] @loc:[1 2 3 km] - -", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 8 near n\r\n"}
+{"cmd": ["ft.explain", "idx", "@title: @title: \"a\\\"b\"", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 8 near title\r\n"}
+{"cmd": ["ft.explain", "idx", "\"$p\" @tag:{\"a b\"}", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$60\r\nINTERSECT {\n  EXACT {\n    $p\n  }\n  TAG:@tag {\n    a b\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "AS +3 12", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$24\r\nINTERSECT {\n  +3\n  12\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "@price<=$n $p", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$92\r\nINTERSECT {\n  NUMERIC {-inf <= @price <= 7.000000}\n  UNION {\n    pv\n    +pv(expanded)\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "$p$n", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$57\r\nINTERSECT {\n  UNION {\n    pv\n    +pv(expanded)\n  }\n  7\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "*$p : the - * -$n", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 4 near p\r\n"}
+{"cmd": ["ft.explain", "idx", "@nofield: w'he*' ~ @tag:{\"a b\"} ] the", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Unknown field at offset 0 near nofield\r\n"}
+{"cmd": ["ft.explain", "idx", "a 12* \\- AS @loc:[1 2 3 parsec]", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Invalid GeoFilter unit\r\n"}
+{"cmd": ["ft.explain", "idx", "[ foo* 'x y' @loc:[1 2 3 parsec]", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 0 near \r\n"}
+{"cmd": ["ft.explain", "idx", "-4 {$weight:2} hello \"hello world\"", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 3 near -4\r\n"}
+{"cmd": ["ft.explain", "idx", "@title|body: 3.5 @price != 3 inf", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$94\r\nINTERSECT {\n  NOT{\n    NUMERIC {3.000000 <= @price <= 3.000000}\n  }\n  inf\n  @title|body:3.5\n}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "5. @price != 3 $p runs ~", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 23 near runs\r\n"}
+{"cmd": ["ft.explain", "idx", "hel : the", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 4 near hel\r\n"}
+{"cmd": ["ft.explain", "idx", "@title: *", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 8 near title\r\n"}
+{"cmd": ["ft.explain", "idx", "@price:[$n 10]a", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "$42\r\nNUMERIC {7.000000 <= @price <= 10.000000}\n\r\n"}
+{"cmd": ["ft.explain", "idx", "]", "PARAMS", "4", "p", "Pv", "n", "7", "DIALECT", "2"], "want": "-Syntax error at offset 0 near \r\n"}
+{"cmd": ["hello", "2"]}
+{"cmd": ["flushall"]}
+{"cmd": ["ft.create", "idx", "ON", "HASH", "PREFIX", "1", "d:", "SCHEMA", "title", "TEXT", "WEIGHT", "3", "body", "TEXT", "price", "NUMERIC", "SORTABLE", "tag", "TAG"], "want": "+OK\r\n"}
+{"cmd": ["hset", "d:1", "title", "relational", "body", "", "tag", "x", "DIALECT", "2"], "want": ":4\r\n"}
+{"cmd": ["hset", "d:2", "title", "jumped national", "body", "dogs", "price", "38", "DIALECT", "2"], "want": ":4\r\n"}
+{"cmd": ["hset", "d:3", "title", "runner dogs running national", "body", "the happiness relational jumps", "price", "36", "DIALECT", "2"], "want": ":4\r\n"}
+{"cmd": ["hset", "d:4", "title", "connected jumping", "body", "nation", "price", "14", "tag", "x,y,blue", "DIALECT", "2"], "want": ":5\r\n"}
+{"cmd": ["hset", "d:5", "title", "connected foxes quick cat", "body", "jumped nation foxes", "price", "22", "tag", "green,red", "DIALECT", "2"], "want": ":5\r\n"}
+{"cmd": ["hset", "d:6", "title", "generously happiness", "price", "43", "tag", "yellow,blue,y", "DIALECT", "2"], "want": ":4\r\n"}
+{"cmd": ["hset", "d:7", "title", "hope and jump jumped", "price", "43", "tag", "BLUE,yellow,y", "DIALECT", "2"], "want": ":4\r\n"}
+{"cmd": ["hset", "d:8", "body", "connection connect runs and", "price", "40", "tag", "Red", "DIALECT", "2"], "want": ":4\r\n"}
+{"cmd": ["hset", "d:9", "title", "quick connections", "body", "jumped happily of connections national brown happy", "DIALECT", "2"], "want": ":3\r\n"}
+{"cmd": ["ft.search", "idx", "the*", "NOCONTENT", "SORTBY", "price", "ASC", "LIMIT", "1", "5", "DIALECT", "2"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "idx", "@tag:{blue}", "WITHSCORES", "NOCONTENT", "DIALECT", "2"], "want": "*7\r\n:3\r\n$3\r\nd:6\r\n$18\r\n1.1959641719975667\r\n$3\r\nd:4\r\n$18\r\n1.1341828583354947\r\n$3\r\nd:7\r\n$17\r\n1.027976137930892\r\n"}
+{"cmd": ["ft.search", "idx", "in|hoped", "RETURN", "2", "title", "price", "DIALECT", "2"], "want": "*3\r\n:1\r\n$3\r\nd:7\r\n*4\r\n$5\r\ntitle\r\n$20\r\nhope and jump jumped\r\n$5\r\nprice\r\n$2\r\n43\r\n"}
+{"cmd": ["ft.search", "idx", "@tag:{x|x}", "WITHSCORES", "NOCONTENT", "LIMIT", "0", "1", "DIALECT", "2"], "want": "*3\r\n:2\r\n$3\r\nd:1\r\n$17\r\n3.775534828104004\r\n"}
+{"cmd": ["ft.search", "idx", "generously hoping", "WITHSCORES", "NOCONTENT", "SORTBY", "price", "ASC", "DIALECT", "2"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "idx", "dog hoped", "WITHSCORES", "VERBATIM", "DIALECT", "2"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "idx", "@tag:{y}", "WITHSCORES", "NOCONTENT", "SORTBY", "price", "DESC", "DIALECT", "2"], "want": "*7\r\n:3\r\n$3\r\nd:7\r\n$17\r\n1.027976137930892\r\n$3\r\nd:6\r\n$18\r\n1.1959641719975667\r\n$3\r\nd:4\r\n$18\r\n1.1341828583354947\r\n"}
+{"cmd": ["ft.search", "idx", "happily -it", "WITHSCORES", "SORTBY", "price", "ASC", "DIALECT", "2"], "want": "*4\r\n:1\r\n$3\r\nd:9\r\n$17\r\n3.257700157932395\r\n*6\r\n$5\r\ntitle\r\n$17\r\nquick connections\r\n$4\r\nbody\r\n$50\r\njumped happily of connections national brown happy\r\n$7\r\nDIALECT\r\n$1\r\n2\r\n"}
+{"cmd": ["ft.search", "idx", "*", "RETURN", "2", "title", "price", "LIMIT", "1", "4", "DIALECT", "2"], "want": "*9\r\n:9\r\n$3\r\nd:8\r\n*2\r\n$5\r\nprice\r\n$2\r\n40\r\n$3\r\nd:6\r\n*4\r\n$5\r\ntitle\r\n$20\r\ngenerously happiness\r\n$5\r\nprice\r\n$2\r\n43\r\n$3\r\nd:2\r\n*4\r\n$5\r\ntitle\r\n$15\r\njumped national\r\n$5\r\nprice\r\n$2\r\n38\r\n$3\r\nd:4\r\n*4\r\n$5\r\ntitle\r\n$17\r\nconnected jumping\r\n$5\r\nprice\r\n$2\r\n14\r\n"}
+{"cmd": ["ft.search", "idx", "@tag:{yellow|Red}", "SORTBY", "price", "ASC", "DIALECT", "2"], "want": "*9\r\n:4\r\n$3\r\nd:5\r\n*10\r\n$5\r\nprice\r\n$2\r\n22\r\n$5\r\ntitle\r\n$25\r\nconnected foxes quick cat\r\n$4\r\nbody\r\n$19\r\njumped nation foxes\r\n$3\r\ntag\r\n$9\r\ngreen,red\r\n$7\r\nDIALECT\r\n$1\r\n2\r\n$3\r\nd:8\r\n*8\r\n$5\r\nprice\r\n$2\r\n40\r\n$4\r\nbody\r\n$27\r\nconnection connect runs and\r\n$3\r\ntag\r\n$3\r\nRed\r\n$7\r\nDIALECT\r\n$1\r\n2\r\n$3\r\nd:6\r\n*8\r\n$5\r\nprice\r\n$2\r\n43\r\n$5\r\ntitle\r\n$20\r\ngenerously happiness\r\n$3\r\ntag\r\n$13\r\nyellow,blue,y\r\n$7\r\nDIALECT\r\n$1\r\n2\r\n$3\r\nd:7\r\n*8\r\n$5\r\nprice\r\n$2\r\n43\r\n$5\r\ntitle\r\n$20\r\nhope and jump jumped\r\n$3\r\ntag\r\n$13\r\nBLUE,yellow,y\r\n$7\r\nDIALECT\r\n$1\r\n2\r\n"}
+{"cmd": ["ft.search", "idx", "\"cats it\"", "WITHSCORES", "DIALECT", "2"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "idx", "@price:[30 42]", "WITHSCORES", "DIALECT", "2"], "want": "*10\r\n:3\r\n$3\r\nd:2\r\n$1\r\n0\r\n*8\r\n$5\r\ntitle\r\n$15\r\njumped national\r\n$4\r\nbody\r\n$4\r\ndogs\r\n$5\r\nprice\r\n$2\r\n38\r\n$7\r\nDIALECT\r\n$1\r\n2\r\n$3\r\nd:3\r\n$1\r\n0\r\n*8\r\n$5\r\ntitle\r\n$28\r\nrunner dogs running national\r\n$4\r\nbody\r\n$30\r\nthe happiness relational jumps\r\n$5\r\nprice\r\n$2\r\n36\r\n$7\r\nDIALECT\r\n$1\r\n2\r\n$3\r\nd:8\r\n$1\r\n0\r\n*8\r\n$4\r\nbody\r\n$27\r\nconnection connect runs and\r\n$5\r\nprice\r\n$2\r\n40\r\n$7\r\nDIALECT\r\n$1\r\n2\r\n$3\r\ntag\r\n$3\r\nRed\r\n"}
+{"cmd": ["ft.search", "idx", "\"is cats\"", "WITHSCORES", "NOCONTENT", "VERBATIM", "DIALECT", "2"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "idx", "*", "WITHSCORES", "SORTBY", "price", "DESC", "DIALECT", "2"], "want": "*28\r\n:9\r\n$3\r\nd:7\r\n$18\r\n0.9791907510770511\r\n*8\r\n$5\r\nprice\r\n$2\r\n43\r\n$5\r\ntitle\r\n$20\r\nhope and jump jumped\r\n$3\r\ntag\r\n$13\r\nBLUE,yellow,y\r\n$7\r\nDIALECT\r\n$1\r\n2\r\n$3\r\nd:6\r\n$18\r\n1.1392064588159427\r\n*8\r\n$5\r\nprice\r\n$2\r\n43\r\n$5\r\ntitle\r\n$20\r\ngenerously happiness\r\n$3\r\ntag\r\n$13\r\nyellow,blue,y\r\n$7\r\nDIALECT\r\n$1\r\n2\r\n$3\r\nd:8\r\n$18\r\n1.3617363433023029\r\n*8\r\n$5\r\nprice\r\n$2\r\n40\r\n$3\r\ntag\r\n$3\r\nRed\r\n$7\r\nDIALECT\r\n$1\r\n2\r\n$4\r\nbody\r\n$27\r\nconnection connect runs and\r\n$3\r\nd:2\r\n$18\r\n1.0803571444251858\r\n*8\r\n$5\r\nprice\r\n$2\r\n38\r\n$5\r\ntitle\r\n$15\r\njumped national\r\n$7\r\nDIALECT\r\n$1\r\n2\r\n$4\r\nbody\r\n$4\r\ndogs\r\n$3\r\nd:3\r\n$17\r\n0.764440429960547\r\n*8\r\n$5\r\nprice\r\n$2\r\n36\r\n$5\r\ntitle\r\n$28\r\nrunner dogs running national\r\n$7\r\nDIALECT\r\n$1\r\n2\r\n$4\r\nbody\r\n$30\r\nthe happiness relational jumps\r\n$3\r\nd:5\r\n$17\r\n0.764440429960547\r\n*10\r\n$5\r\nprice\r\n$2\r\n22\r\n$5\r\ntitle\r\n$25\r\nconnected foxes quick cat\r\n$3\r\ntag\r\n$9\r\ngreen,red\r\n$7\r\nDIALECT\r\n$1\r\n2\r\n$4\r\nbody\r\n$19\r\njumped nation foxes\r\n$3\r\nd:4\r\n$18\r\n1.0803571444251858\r\n*10\r\n$5\r\nprice\r\n$2\r\n14\r\n$5\r\ntitle\r\n$17\r\nconnected jumping\r\n$3\r\ntag\r\n$8\r\nx,y,blue\r\n$7\r\nDIALECT\r\n$1\r\n2\r\n$4\r\nbody\r\n$6\r\nnation\r\n$3\r\nd:9\r\n$18\r\n0.8585909760128235\r\n*6\r\n$5\r\ntitle\r\n$17\r\nquick connections\r\n$7\r\nDIALECT\r\n$1\r\n2\r\n$4\r\nbody\r\n$50\r\njumped happily of connections national brown happy\r\n$3\r\nd:1\r\n$18\r\n1.3617363433023029\r\n*8\r\n$5\r\ntitle\r\n$10\r\nrelational\r\n$3\r\ntag\r\n$1\r\nx\r\n$7\r\nDIALECT\r\n$1\r\n2\r\n$4\r\nbody\r\n$0\r\n\r\n"}
+{"cmd": ["ft.search", "idx", "@tag:{blue}", "WITHSCORES", "RETURN", "2", "title", "price", "DIALECT", "2"], "want": "*10\r\n:3\r\n$3\r\nd:6\r\n$18\r\n1.1959641719975667\r\n*4\r\n$5\r\ntitle\r\n$20\r\ngenerously happiness\r\n$5\r\nprice\r\n$2\r\n43\r\n$3\r\nd:4\r\n$18\r\n1.1341828583354947\r\n*4\r\n$5\r\ntitle\r\n$17\r\nconnected jumping\r\n$5\r\nprice\r\n$2\r\n14\r\n$3\r\nd:7\r\n$17\r\n1.027976137930892\r\n*4\r\n$5\r\ntitle\r\n$20\r\nhope and jump jumped\r\n$5\r\nprice\r\n$2\r\n43\r\n"}
+{"cmd": ["ft.search", "idx", "jumped -happily", "WITHSCORES", "NOCONTENT", "SORTBY", "price", "DESC", "VERBATIM", "DIALECT", "2"], "want": "*7\r\n:3\r\n$3\r\nd:7\r\n$18\r\n1.2409836070711686\r\n$3\r\nd:2\r\n$18\r\n1.3056680827091969\r\n$3\r\nd:5\r\n$18\r\n0.6104116030748785\r\n"}
+{"cmd": ["ft.search", "idx", "@title|body:hoping", "RETURN", "2", "title", "price", "LIMIT", "0", "5", "DIALECT", "2"], "want": "*3\r\n:1\r\n$3\r\nd:7\r\n*4\r\n$5\r\ntitle\r\n$20\r\nhope and jump jumped\r\n$5\r\nprice\r\n$2\r\n43\r\n"}
+{"cmd": ["ft.search", "idx", "@tag:{blue|x}", "NOCONTENT", "LIMIT", "1", "2", "DIALECT", "2"], "want": "*3\r\n:4\r\n$3\r\nd:1\r\n$3\r\nd:6\r\n"}
+{"cmd": ["ft.search", "idx", "hope @price:[0 40]", "WITHSCORES", "SORTBY", "price", "DESC", "DIALECT", "2"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "idx", "@title|body:it", "WITHSCORES", "VERBATIM", "DIALECT", "2"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "idx", "@tag:{blue}", "RETURN", "2", "title", "price", "SORTBY", "price", "ASC", "DIALECT", "2"], "want": "*7\r\n:3\r\n$3\r\nd:4\r\n*4\r\n$5\r\nprice\r\n$2\r\n14\r\n$5\r\ntitle\r\n$17\r\nconnected jumping\r\n$3\r\nd:6\r\n*4\r\n$5\r\nprice\r\n$2\r\n43\r\n$5\r\ntitle\r\n$20\r\ngenerously happiness\r\n$3\r\nd:7\r\n*4\r\n$5\r\nprice\r\n$2\r\n43\r\n$5\r\ntitle\r\n$20\r\nhope and jump jumped\r\n"}
+{"cmd": ["ft.search", "idx", "@tag:{y|green}", "NOCONTENT", "SORTBY", "price", "ASC", "DIALECT", "2"], "want": "*5\r\n:4\r\n$3\r\nd:4\r\n$3\r\nd:5\r\n$3\r\nd:6\r\n$3\r\nd:7\r\n"}
+{"cmd": ["ft.search", "idx", "@tag:{red|green}", "WITHSCORES", "DIALECT", "2"], "want": "*7\r\n:2\r\n$3\r\nd:5\r\n$18\r\n2.5099746561735996\r\n*10\r\n$5\r\ntitle\r\n$25\r\nconnected foxes quick cat\r\n$4\r\nbody\r\n$19\r\njumped nation foxes\r\n$5\r\nprice\r\n$2\r\n22\r\n$3\r\ntag\r\n$9\r\ngreen,red\r\n$7\r\nDIALECT\r\n$1\r\n2\r\n$3\r\nd:8\r\n$17\r\n1.887767414052002\r\n*8\r\n$4\r\nbody\r\n$27\r\nconnection connect runs and\r\n$5\r\nprice\r\n$2\r\n40\r\n$3\r\ntag\r\n$3\r\nRed\r\n$7\r\nDIALECT\r\n$1\r\n2\r\n"}
+{"cmd": ["ft.search", "idx", "@tag:{y|Red}", "DIALECT", "2"], "want": "*11\r\n:5\r\n$3\r\nd:8\r\n*8\r\n$4\r\nbody\r\n$27\r\nconnection connect runs and\r\n$5\r\nprice\r\n$2\r\n40\r\n$3\r\ntag\r\n$3\r\nRed\r\n$7\r\nDIALECT\r\n$1\r\n2\r\n$3\r\nd:6\r\n*8\r\n$5\r\nprice\r\n$2\r\n43\r\n$3\r\ntag\r\n$13\r\nyellow,blue,y\r\n$7\r\nDIALECT\r\n$1\r\n2\r\n$5\r\ntitle\r\n$20\r\ngenerously happiness\r\n$3\r\nd:4\r\n*10\r\n$4\r\nbody\r\n$6\r\nnation\r\n$5\r\nprice\r\n$2\r\n14\r\n$3\r\ntag\r\n$8\r\nx,y,blue\r\n$7\r\nDIALECT\r\n$1\r\n2\r\n$5\r\ntitle\r\n$17\r\nconnected jumping\r\n$3\r\nd:5\r\n*10\r\n$4\r\nbody\r\n$19\r\njumped nation foxes\r\n$5\r\nprice\r\n$2\r\n22\r\n$3\r\ntag\r\n$9\r\ngreen,red\r\n$7\r\nDIALECT\r\n$1\r\n2\r\n$5\r\ntitle\r\n$25\r\nconnected foxes quick cat\r\n$3\r\nd:7\r\n*8\r\n$5\r\nprice\r\n$2\r\n43\r\n$3\r\ntag\r\n$13\r\nBLUE,yellow,y\r\n$7\r\nDIALECT\r\n$1\r\n2\r\n$5\r\ntitle\r\n$20\r\nhope and jump jumped\r\n"}
+{"cmd": ["ft.search", "idx", "@title|body:of", "WITHSCORES", "NOCONTENT", "LIMIT", "1", "3", "VERBATIM", "DIALECT", "2"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.aggregate", "idx", "*", "LOAD", "1", "@price", "FILTER", "@price>20", "DIALECT", "2"], "want": "-Could not find the value for a parameter name, consider using EXISTS if applicable for price\r\n"}
+{"cmd": ["ft.aggregate", "idx", "jumps @price:[0 40]", "GROUPBY", "1", "@tag", "REDUCE", "COUNT", "0", "AS", "n", "SORTBY", "2", "@n", "DESC", "DIALECT", "2"], "want": "*4\r\n:3\r\n*4\r\n$3\r\ntag\r\n$-1\r\n$1\r\nn\r\n$1\r\n2\r\n*4\r\n$3\r\ntag\r\n$8\r\nx,y,blue\r\n$1\r\nn\r\n$1\r\n1\r\n*4\r\n$3\r\ntag\r\n$9\r\ngreen,red\r\n$1\r\nn\r\n$1\r\n1\r\n"}
+{"cmd": ["ft.aggregate", "idx", "connected -happiness", "LOAD", "1", "@price", "FILTER", "@price>20", "DIALECT", "2"], "want": "*3\r\n:2\r\n*2\r\n$5\r\nprice\r\n$2\r\n22\r\n*2\r\n$5\r\nprice\r\n$2\r\n40\r\n"}
+{"cmd": ["ft.aggregate", "idx", "and|dogs", "ADDSCORES", "LOAD", "1", "@title", "DIALECT", "2"], "want": "*3\r\n:1\r\n*4\r\n$7\r\n__score\r\n$13\r\n2.99538603462\r\n$5\r\ntitle\r\n$15\r\njumped national\r\n*4\r\n$7\r\n__score\r\n$13\r\n2.93544445963\r\n$5\r\ntitle\r\n$28\r\nrunner dogs running national\r\n"}
+{"cmd": ["ft.aggregate", "idx", "connections to", "GROUPBY", "1", "@tag", "REDUCE", "COUNT", "0", "AS", "n", "SORTBY", "2", "@n", "DESC", "DIALECT", "2"], "want": null}
+{"cmd": ["ft.aggregate", "idx", "*", "GROUPBY", "1", "@tag", "REDUCE", "COUNT", "0", "AS", "n", "SORTBY", "2", "@n", "DESC", "DIALECT", "2"], "want": null}
+{"cmd": ["ft.aggregate", "idx", "a|in", "LOAD", "1", "@price", "SORTBY", "2", "@price", "ASC", "LIMIT", "0", "3", "DIALECT", "2"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.aggregate", "idx", "@title:the", "GROUPBY", "1", "@tag", "REDUCE", "COUNT", "0", "AS", "n", "SORTBY", "2", "@n", "DESC", "DIALECT", "2"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.aggregate", "idx", "@title:generous", "LOAD", "2", "@title", "@price", "DIALECT", "2"], "want": "*2\r\n:1\r\n*4\r\n$5\r\ntitle\r\n$20\r\ngenerously happiness\r\n$5\r\nprice\r\n$2\r\n43\r\n"}
+{"cmd": ["ft.aggregate", "idx", "connected -runs", "LOAD", "1", "@price", "FILTER", "@price>20", "DIALECT", "2"], "want": "*2\r\n:2\r\n*2\r\n$5\r\nprice\r\n$2\r\n22\r\n"}
+{"cmd": ["hello", "2"]}
+{"cmd": ["flushall"]}
+{"cmd": ["ft.create", "idx", "ON", "HASH", "PREFIX", "1", "d:", "SCHEMA", "title", "TEXT", "WEIGHT", "2", "body", "TEXT", "price", "NUMERIC", "SORTABLE", "tag", "TAG"], "want": "+OK\r\n"}
+{"cmd": ["hset", "d:1", "title", "jumped", "body", "dog connections runs and to and connection to", "price", "26", "tag", "red", "DIALECT", "2"], "want": ":5\r\n"}
+{"cmd": ["hset", "d:2", "title", "is connection jumps quickly", "body", "connection", "price", "25", "tag", "yellow", "DIALECT", "2"], "want": ":5\r\n"}
+{"cmd": ["hset", "d:3", "title", "to", "price", "14", "tag", "green", "DIALECT", "2"], "want": ":4\r\n"}
+{"cmd": ["hset", "d:4", "title", "to", "body", "hope and", "price", "29", "tag", "x,green", "DIALECT", "2"], "want": ":5\r\n"}
+{"cmd": ["hset", "d:5", "title", "relational", "body", "to in hoped cats foxes", "price", "34", "tag", "green,x,BLUE", "DIALECT", "2"], "want": ":5\r\n"}
+{"cmd": ["hset", "d:6", "body", "quick run fox generously dogs", "price", "28", "tag", "x,green", "DIALECT", "2"], "want": ":4\r\n"}
+{"cmd": ["hset", "d:7", "title", "happily", "tag", "BLUE", "DIALECT", "2"], "want": ":3\r\n"}
+{"cmd": ["hset", "d:8", "title", "generously happily nation a", "price", "37", "tag", "green,BLUE", "DIALECT", "2"], "want": ":4\r\n"}
+{"cmd": ["hset", "d:9", "title", "running", "body", "it", "price", "10", "DIALECT", "2"], "want": ":4\r\n"}
+{"cmd": ["ft.search", "idx", "@tag:{y|blue}", "NOCONTENT", "SORTBY", "price", "ASC", "DIALECT", "2"], "want": "*4\r\n:3\r\n$3\r\nd:5\r\n$3\r\nd:8\r\n$3\r\nd:7\r\n"}
+{"cmd": ["ft.search", "idx", "foxes connect", "WITHSCORES", "NOCONTENT", "VERBATIM", "DIALECT", "2"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "idx", "@price:[1 57]", "WITHSCORES", "NOCONTENT", "LIMIT", "1", "4", "DIALECT", "2"], "want": "*9\r\n:8\r\n$3\r\nd:2\r\n$1\r\n0\r\n$3\r\nd:3\r\n$1\r\n0\r\n$3\r\nd:4\r\n$1\r\n0\r\n$3\r\nd:5\r\n$1\r\n0\r\n"}
+{"cmd": ["ft.search", "idx", "is @price:[0 40]", "NOCONTENT", "SORTBY", "price", "DESC", "DIALECT", "2"], "want": "*9\r\n:8\r\n$3\r\nd:8\r\n$3\r\nd:5\r\n$3\r\nd:4\r\n$3\r\nd:6\r\n$3\r\nd:1\r\n$3\r\nd:2\r\n$3\r\nd:3\r\n$3\r\nd:9\r\n"}
+{"cmd": ["ft.search", "idx", "@tag:{green|y}", "RETURN", "2", "title", "price", "SORTBY", "price", "ASC", "VERBATIM", "DIALECT", "2"], "want": "*11\r\n:5\r\n$3\r\nd:3\r\n*4\r\n$5\r\nprice\r\n$2\r\n14\r\n$5\r\ntitle\r\n$2\r\nto\r\n$3\r\nd:6\r\n*2\r\n$5\r\nprice\r\n$2\r\n28\r\n$3\r\nd:4\r\n*4\r\n$5\r\nprice\r\n$2\r\n29\r\n$5\r\ntitle\r\n$2\r\nto\r\n$3\r\nd:5\r\n*4\r\n$5\r\nprice\r\n$2\r\n34\r\n$5\r\ntitle\r\n$10\r\nrelational\r\n$3\r\nd:8\r\n*4\r\n$5\r\nprice\r\n$2\r\n37\r\n$5\r\ntitle\r\n$27\r\ngenerously happily nation a\r\n"}
+{"cmd": ["ft.search", "idx", "run -hoping", "NOCONTENT", "VERBATIM", "DIALECT", "2"], "want": "*2\r\n:1\r\n$3\r\nd:6\r\n"}
+{"cmd": ["ft.search", "idx", "hoping -in", "DIALECT", "2"], "want": "*5\r\n:2\r\n$3\r\nd:4\r\n*10\r\n$5\r\ntitle\r\n$2\r\nto\r\n$4\r\nbody\r\n$8\r\nhope and\r\n$5\r\nprice\r\n$2\r\n29\r\n$3\r\ntag\r\n$7\r\nx,green\r\n$7\r\nDIALECT\r\n$1\r\n2\r\n$3\r\nd:5\r\n*10\r\n$5\r\ntitle\r\n$10\r\nrelational\r\n$4\r\nbody\r\n$22\r\nto in hoped cats foxes\r\n$5\r\nprice\r\n$2\r\n34\r\n$3\r\ntag\r\n$12\r\ngreen,x,BLUE\r\n$7\r\nDIALECT\r\n$1\r\n2\r\n"}
+{"cmd": ["ft.search", "idx", "\"run fox\"", "DIALECT", "2"], "want": "*3\r\n:1\r\n$3\r\nd:6\r\n*8\r\n$4\r\nbody\r\n$29\r\nquick run fox generously dogs\r\n$5\r\nprice\r\n$2\r\n28\r\n$3\r\ntag\r\n$7\r\nx,green\r\n$7\r\nDIALECT\r\n$1\r\n2\r\n"}
+{"cmd": ["ft.search", "idx", "jump*", "WITHSCORES", "DIALECT", "2"], "want": "*7\r\n:2\r\n$3\r\nd:1\r\n$18\r\n2.2382424849678646\r\n*10\r\n$5\r\ntitle\r\n$6\r\njumped\r\n$4\r\nbody\r\n$45\r\ndog connections runs and to and connection to\r\n$5\r\nprice\r\n$2\r\n26\r\n$3\r\ntag\r\n$3\r\nred\r\n$7\r\nDIALECT\r\n$1\r\n2\r\n$3\r\nd:2\r\n$18\r\n2.1038483819924534\r\n*10\r\n$5\r\ntitle\r\n$27\r\nis connection jumps quickly\r\n$4\r\nbody\r\n$10\r\nconnection\r\n$5\r\nprice\r\n$2\r\n25\r\n$3\r\ntag\r\n$6\r\nyellow\r\n$7\r\nDIALECT\r\n$1\r\n2\r\n"}
+{"cmd": ["ft.search", "idx", "@title|body:connect", "NOCONTENT", "LIMIT", "2", "3", "DIALECT", "2"], "want": "*1\r\n:2\r\n"}
+{"cmd": ["ft.search", "idx", "@title|body:foxes", "WITHSCORES", "NOCONTENT", "DIALECT", "2"], "want": "*5\r\n:2\r\n$3\r\nd:5\r\n$17\r\n3.350757326718108\r\n$3\r\nd:6\r\n$17\r\n1.675378663359054\r\n"}
+{"cmd": ["ft.search", "idx", "connect -hoping", "RETURN", "2", "title", "price", "VERBATIM", "DIALECT", "2"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "idx", "jump|to", "NOCONTENT", "LIMIT", "2", "2", "DIALECT", "2"], "want": "*1\r\n:2\r\n"}
+{"cmd": ["ft.search", "idx", "@title|body:in", "WITHSCORES", "SORTBY", "price", "ASC", "DIALECT", "2"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "idx", "and -quick", "WITHSCORES", "SORTBY", "price", "DESC", "DIALECT", "2"], "want": "*22\r\n:7\r\n$3\r\nd:8\r\n$1\r\n0\r\n*8\r\n$5\r\nprice\r\n$2\r\n37\r\n$5\r\ntitle\r\n$27\r\ngenerously happily nation a\r\n$3\r\ntag\r\n$10\r\ngreen,BLUE\r\n$7\r\nDIALECT\r\n$1\r\n2\r\n$3\r\nd:5\r\n$1\r\n0\r\n*10\r\n$5\r\nprice\r\n$2\r\n34\r\n$5\r\ntitle\r\n$10\r\nrelational\r\n$3\r\ntag\r\n$12\r\ngreen,x,BLUE\r\n$7\r\nDIALECT\r\n$1\r\n2\r\n$4\r\nbody\r\n$22\r\nto in hoped cats foxes\r\n$3\r\nd:4\r\n$1\r\n0\r\n*10\r\n$5\r\nprice\r\n$2\r\n29\r\n$5\r\ntitle\r\n$2\r\nto\r\n$3\r\ntag\r\n$7\r\nx,green\r\n$7\r\nDIALECT\r\n$1\r\n2\r\n$4\r\nbody\r\n$8\r\nhope and\r\n$3\r\nd:1\r\n$1\r\n0\r\n*10\r\n$5\r\nprice\r\n$2\r\n26\r\n$5\r\ntitle\r\n$6\r\njumped\r\n$3\r\ntag\r\n$3\r\nred\r\n$7\r\nDIALECT\r\n$1\r\n2\r\n$4\r\nbody\r\n$45\r\ndog connections runs and to and connection to\r\n$3\r\nd:3\r\n$1\r\n0\r\n*8\r\n$5\r\nprice\r\n$2\r\n14\r\n$5\r\ntitle\r\n$2\r\nto\r\n$3\r\ntag\r\n$5\r\ngreen\r\n$7\r\nDIALECT\r\n$1\r\n2\r\n$3\r\nd:9\r\n$1\r\n0\r\n*8\r\n$5\r\nprice\r\n$2\r\n10\r\n$5\r\ntitle\r\n$7\r\nrunning\r\n$7\r\nDIALECT\r\n$1\r\n2\r\n$4\r\nbody\r\n$2\r\nit\r\n$3\r\nd:7\r\n$1\r\n0\r\n*6\r\n$5\r\ntitle\r\n$7\r\nhappily\r\n$3\r\ntag\r\n$4\r\nBLUE\r\n$7\r\nDIALECT\r\n$1\r\n2\r\n"}
+{"cmd": ["ft.search", "idx", "@body:(jumped|happily)", "LIMIT", "1", "5", "DIALECT", "2"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "idx", "and and", "SORTBY", "price", "DESC", "DIALECT", "2"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "idx", "@title:running", "NOCONTENT", "SORTBY", "price", "DESC", "VERBATIM", "DIALECT", "2"], "want": "*2\r\n:1\r\n$3\r\nd:9\r\n"}
+{"cmd": ["ft.search", "idx", "\"running hoping\"", "NOCONTENT", "VERBATIM", "DIALECT", "2"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "idx", "hoped connect", "WITHSCORES", "NOCONTENT", "LIMIT", "0", "0", "DIALECT", "2"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "idx", "fox cat", "WITHSCORES", "NOCONTENT", "LIMIT", "1", "1", "DIALECT", "2"], "want": "*1\r\n:1\r\n"}
+{"cmd": ["ft.search", "idx", "@title:fox", "RETURN", "2", "title", "price", "DIALECT", "2"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "idx", "happy -dogs", "WITHSCORES", "NOCONTENT", "SORTBY", "price", "DESC", "LIMIT", "3", "4", "DIALECT", "2"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "idx", "the*", "DIALECT", "2"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "idx", "@title:it", "WITHSCORES", "NOCONTENT", "DIALECT", "2"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.aggregate", "idx", "to*", "LOAD", "1", "@title", "LIMIT", "2", "3", "DIALECT", "2"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.aggregate", "idx", "dog*", "LOAD", "1", "@title", "LIMIT", "1", "1", "DIALECT", "2"], "want": "*2\r\n:2\r\n*0\r\n"}
+{"cmd": ["ft.aggregate", "idx", "@title|body:to", "ADDSCORES", "LOAD", "1", "@title", "DIALECT", "2"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.aggregate", "idx", "@tag:{green}", "LOAD", "1", "@price", "FILTER", "@price>20", "DIALECT", "2"], "want": "*5\r\n:2\r\n*2\r\n$5\r\nprice\r\n$2\r\n29\r\n*2\r\n$5\r\nprice\r\n$2\r\n34\r\n*2\r\n$5\r\nprice\r\n$2\r\n28\r\n*2\r\n$5\r\nprice\r\n$2\r\n37\r\n"}
+{"cmd": ["ft.aggregate", "idx", "@body:(running|running)", "LOAD", "1", "@price", "FILTER", "@price>20", "DIALECT", "2"], "want": "*3\r\n:1\r\n*2\r\n$5\r\nprice\r\n$2\r\n26\r\n*2\r\n$5\r\nprice\r\n$2\r\n28\r\n"}
+{"cmd": ["ft.aggregate", "idx", "@tag:{BLUE|yellow}", "LOAD", "1", "@price", "SORTBY", "2", "@price", "ASC", "LIMIT", "0", "3", "DIALECT", "2"], "want": "*4\r\n:4\r\n*2\r\n$5\r\nprice\r\n$2\r\n25\r\n*2\r\n$5\r\nprice\r\n$2\r\n34\r\n*2\r\n$5\r\nprice\r\n$2\r\n37\r\n"}
+{"cmd": ["ft.aggregate", "idx", "runs -hoped", "GROUPBY", "1", "@tag", "REDUCE", "COUNT", "0", "AS", "n", "SORTBY", "2", "@n", "DESC", "DIALECT", "2"], "want": null}
+{"cmd": ["ft.aggregate", "idx", "@title|body:run", "LOAD", "2", "@title", "@price", "DIALECT", "2"], "want": "*4\r\n:1\r\n*4\r\n$5\r\ntitle\r\n$6\r\njumped\r\n$5\r\nprice\r\n$2\r\n26\r\n*2\r\n$5\r\nprice\r\n$2\r\n28\r\n*4\r\n$5\r\ntitle\r\n$7\r\nrunning\r\n$5\r\nprice\r\n$2\r\n10\r\n"}
+{"cmd": ["ft.aggregate", "idx", "@title|body:cat", "LOAD", "1", "@price", "SORTBY", "2", "@price", "ASC", "LIMIT", "0", "3", "DIALECT", "2"], "want": "*2\r\n:1\r\n*2\r\n$5\r\nprice\r\n$2\r\n34\r\n"}
+{"cmd": ["ft.aggregate", "idx", "@price:[30 28]", "LOAD", "1", "@price", "SORTBY", "2", "@price", "ASC", "LIMIT", "0", "3", "DIALECT", "2"], "want": "-Invalid numeric range (min > max): @price:[30.000000 28.000000]\r\n"}

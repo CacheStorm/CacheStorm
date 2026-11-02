@@ -25,9 +25,10 @@ const (
 	FieldTag
 	FieldGeo
 	FieldVector
+	FieldGeoShape
 )
 
-var fieldTypeNames = map[FieldType]string{FieldText: "TEXT", FieldNumeric: "NUMERIC", FieldTag: "TAG", FieldGeo: "GEO", FieldVector: "VECTOR"}
+var fieldTypeNames = map[FieldType]string{FieldText: "TEXT", FieldNumeric: "NUMERIC", FieldTag: "TAG", FieldGeo: "GEO", FieldVector: "VECTOR", FieldGeoShape: "GEOSHAPE"}
 
 func (t FieldType) String() string { return fieldTypeNames[t] }
 
@@ -43,6 +44,8 @@ type Field struct {
 	NoIndex       bool
 	Separator     byte
 	CaseSensitive bool
+	IndexMissing  bool
+	Vector        *VectorSpec
 	path          *store.JSONPath
 	pos           int
 }
@@ -178,14 +181,12 @@ func parseSchema(args []string, json bool) ([]Field, error) {
 			f.Type = FieldGeo
 		case "VECTOR":
 			f.Type = FieldVector
-			// VECTOR algorithm count attr value ...
-			if i+2 < len(args) {
-				n, err := strconv.Atoi(args[i+2])
-				if err != nil || n < 0 {
-					return nil, errors.New("ERR Bad arguments for vector similarity number of parameters")
-				}
-				i += 2 + n
+			spec, next, err := parseVectorSpec(args, i+1)
+			if err != nil {
+				return nil, err
 			}
+			f.Vector = spec
+			i = next - 1
 		default:
 			return nil, errors.New("ERR Invalid field type for field `" + f.Identifier + "`")
 		}
@@ -214,7 +215,9 @@ func parseSchema(args []string, json bool) ([]Field, error) {
 				f.NoIndex = true
 			case "CASESENSITIVE":
 				f.CaseSensitive = true
-			case "UNF", "WITHSUFFIXTRIE", "INDEXEMPTY", "INDEXMISSING", "PHONETIC":
+			case "INDEXMISSING":
+				f.IndexMissing = true
+			case "UNF", "WITHSUFFIXTRIE", "INDEXEMPTY", "PHONETIC":
 				if strings.EqualFold(args[i], "PHONETIC") {
 					i++
 				}

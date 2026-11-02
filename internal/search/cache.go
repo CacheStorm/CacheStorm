@@ -291,27 +291,54 @@ func hasFieldTTLs(v store.Value) bool {
 	return ok && h.HasFieldTTLs()
 }
 
-// Hit is a document a query matched and its score.
+// Hit is a document a query matched, its score, and the fields a vector
+// query yields for it (a distance, by name).
 type Hit struct {
-	Doc   *Document
-	Score float64
+	Doc      *Document
+	Score    float64
+	Distance float64
+	Yields   [][2]string
 }
 
 // Search runs a query over the index's documents in st: the postings give
-// the candidates, which are then matched and scored.
-func (idx *Index) Search(st *store.Store, n Node, opts QueryOptions) []Hit {
+// the candidates, which are then matched and scored. A KNN query keeps the
+// k documents nearest its vector among those its filter matches.
+func (idx *Index) Search(st *store.Store, n Node, opts QueryOptions) ([]Hit, error) {
+	if n == nil {
+		return nil, nil
+	}
+	qs := make(map[*qnode][]float64)
+	if err := idx.checkVectors(n, qs); err != nil {
+		return nil, err
+	}
 	c := idx.cache(st)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.syncLocked(idx, st)
-	c.fillTerms(n)
-	var hits []Hit
-	match := func(d *Document) {
-		if ok, score := idx.Match(n, d, opts, c.stats); ok {
-			hits = append(hits, Hit{d, score})
+	root := n
+	var knn *qnode
+	if n.typ == qVector && n.knn {
+		knn, root = n, nil
+		if len(n.children) > 0 {
+			root = n.children[0]
 		}
 	}
-	if cand, all := c.candidates(idx, n); all {
+	c.fillTerms(root)
+	c.stats.vectors = qs
+	defer func() { c.stats.vectors = nil }()
+	var hits []Hit
+	match := func(d *Document) {
+		if root == nil {
+			hits = append(hits, Hit{Doc: d})
+			return
+		}
+		if ok, score := idx.Match(root, d, opts, c.stats); ok {
+			h := Hit{Doc: d, Score: score}
+			h.Yields = idx.rangeYields(root, d, qs, nil)
+			hits = append(hits, h)
+		}
+	}
+	if cand, all := c.candidates(idx, root); all || root == nil {
 		for _, d := range c.docs {
 			match(d)
 		}
@@ -320,8 +347,20 @@ func (idx *Index) Search(st *store.Store, n Node, opts QueryOptions) []Hit {
 			match(d)
 		}
 	}
-	return hits
+	if knn != nil {
+		if knn.byScore {
+			for i := range hits {
+				hits[i].Score = 0
+			}
+		}
+		hits = idx.knn(knn, qs[knn], hits)
+	}
+	return hits, nil
 }
+
+// NearestFirst reports whether a query's results come nearest first: a
+// KNN query without a filter.
+func NearestFirst(n Node) bool { return n != nil && n.typ == qVector && n.knn && n.byScore }
 
 // maxPrefixExpansions and minPrefixLength are RediSearch's limits on an
 // affix query: the index terms it covers and the letters it needs.
@@ -346,7 +385,7 @@ func (c *docCache) candidates(idx *Index, n Node) (docSet, bool) {
 		out := make(docSet)
 		union(out, c.terms[n.str])
 		return out, false
-	case qPrefix, qFuzzy:
+	case qPrefix, qFuzzy, qWildcardQuery:
 		out := make(docSet)
 		for _, t := range n.terms {
 			union(out, c.terms[t])

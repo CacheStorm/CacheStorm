@@ -45,7 +45,8 @@ type termFreq struct {
 type docField struct {
 	strs []string // TEXT tokens in position order, TAG tags
 	nums []float64
-	raw  []string // full documents and SORTABLE fields
+	vec  []float64 // a VECTOR field's vector
+	raw  []string  // full documents and SORTABLE fields
 }
 
 func fieldBit(pos int) uint64 { return 1 << (uint(pos) & 63) }
@@ -70,6 +71,7 @@ func (idx *Index) Load(key string, entry *store.Entry, full bool) (*Document, bo
 	value := entry.Value
 	doc := &Document{Key: key, entry: entry, value: value, full: full, fields: make([]docField, len(idx.Fields))}
 	values := make([][]string, len(idx.Fields))
+	var jsonVecs [][]*store.JNode
 	switch v := value.(type) {
 	case *store.HashValue:
 		if idx.JSON {
@@ -94,8 +96,13 @@ func (idx *Index) Load(key string, entry *store.Entry, full bool) (*Document, bo
 		}
 		v.RLock()
 		root := v.Root
+		jsonVecs = make([][]*store.JNode, len(idx.Fields))
 		for i, f := range idx.Fields {
 			for _, m := range f.path.Eval(root) {
+				if f.Type == FieldVector {
+					jsonVecs[i] = append(jsonVecs[i], m.Node)
+					continue
+				}
 				values[i] = append(values[i], jsonScalars(m.Node)...)
 			}
 		}
@@ -115,10 +122,32 @@ func (idx *Index) Load(key string, entry *store.Entry, full bool) (*Document, bo
 		}
 		switch f.Type {
 		case FieldNumeric:
+			// A value that is not a number fails the whole document, which
+			// RediSearch then leaves out of the index.
 			for _, raw := range values[i] {
-				if n, err := strconv.ParseFloat(raw, 64); err == nil {
-					df.nums = append(df.nums, n)
+				n, err := parseIndexNumber(raw)
+				if err != nil {
+					return nil, false
 				}
+				df.nums = append(df.nums, n)
+			}
+		case FieldVector:
+			if jsonVecs != nil {
+				for _, n := range jsonVecs[i] {
+					vec, ok := f.Vector.jsonVector(n)
+					if !ok {
+						return nil, false
+					}
+					df.vec = vec
+				}
+				continue
+			}
+			for _, raw := range values[i] {
+				vec, ok := f.Vector.decode([]byte(raw))
+				if !ok {
+					return nil, false
+				}
+				df.vec = vec
 			}
 		case FieldGeo:
 			for _, raw := range values[i] {
@@ -162,6 +191,14 @@ func (idx *Index) Load(key string, entry *store.Entry, full bool) (*Document, bo
 		}
 	}
 	return doc, true
+}
+
+// parseIndexNumber reads a NUMERIC field's value as RediSearch does.
+func parseIndexNumber(s string) (float64, error) {
+	if strings.HasPrefix(strings.TrimLeft(s, "+-"), "0x") || strings.HasPrefix(strings.TrimLeft(s, "+-"), "0X") || strings.Contains(s, "_") {
+		return 0, strconv.ErrSyntax
+	}
+	return strconv.ParseFloat(s, 64)
 }
 
 func (d *Document) addTerm(t string, freq uint32, bit uint64) {
@@ -288,16 +325,6 @@ func (e *ErrSyntax) Error() string {
 	return fmt.Sprintf("Syntax error at offset %d near %s", e.Offset, e.Near)
 }
 
-type queryParser struct {
-	s    string
-	pos  int
-	idx  *Index
-	opts QueryOptions
-	// sawStopword is set once a stop word was dropped, which may leave a
-	// group empty.
-	sawStopword bool
-}
-
 // ParseQuery parses a RediSearch query against idx: in the default
 // dialect with RediSearch's own grammar, then adds the stems of its terms.
 func ParseQuery(idx *Index, q string, opts QueryOptions) (Node, error) {
@@ -306,12 +333,19 @@ func ParseQuery(idx *Index, q string, opts QueryOptions) (Node, error) {
 	if opts.Dialect <= 1 {
 		n, err = parseDialect1(idx, q, opts)
 	} else {
-		n, err = parseLegacy(idx, q, opts)
+		n, err = parseDialect2(idx, q, opts)
+		if err == nil && n != nil && len(opts.InFields) > 0 {
+			var mask uint64
+			for _, f := range opts.InFields {
+				mask |= idx.textFieldBit(f)
+			}
+			n.setMask(mask)
+		}
 	}
 	if err != nil {
 		return nil, err
 	}
-	if err := validate(n); err != nil {
+	if err := idx.validate(n); err != nil {
 		return nil, err
 	}
 	if !opts.Verbatim {
@@ -321,372 +355,26 @@ func ParseQuery(idx *Index, q string, opts QueryOptions) (Node, error) {
 }
 
 // validate checks what RediSearch checks of a parsed query.
-func validate(n Node) error {
+func (idx *Index) validate(n Node) error {
 	if n == nil {
 		return nil
 	}
 	if n.typ == qNumeric && n.lo > n.hi {
 		return fmt.Errorf("Invalid numeric range (min > max): @%s:[%s %s]", n.field, cfmtF(n.lo), cfmtF(n.hi)) //nolint:staticcheck // RediSearch's reply text
 	}
+	if n.typ == qVector {
+		if f := idx.Field(n.field); f != nil && f.Vector != nil {
+			if err := checkVectorAttrs(f.Vector, n); err != nil {
+				return err
+			}
+		}
+	}
 	for _, c := range n.children {
-		if err := validate(c); err != nil {
+		if err := idx.validate(c); err != nil {
 			return err
 		}
 	}
 	return nil
-}
-
-// parseLegacy parses the later dialects: a hand-written reading of the
-// query syntax.
-func parseLegacy(idx *Index, q string, opts QueryOptions) (Node, error) {
-	p := &queryParser{s: q, idx: idx, opts: opts}
-	n, err := p.intersection(0)
-	if err != nil {
-		return nil, err
-	}
-	p.space()
-	if p.pos < len(p.s) {
-		return nil, p.fail()
-	}
-	return n, nil
-}
-
-func (p *queryParser) fail() error {
-	near := p.s[p.pos:]
-	if len(near) > 10 {
-		near = near[:10]
-	}
-	return &ErrSyntax{Offset: p.pos, Near: near}
-}
-
-func (p *queryParser) space() {
-	for p.pos < len(p.s) && (p.s[p.pos] == ' ' || p.s[p.pos] == '\t') {
-		p.pos++
-	}
-}
-
-// intersection reads space-separated unions until a closing bracket.
-func (p *queryParser) intersection(depth int) (Node, error) {
-	var children []Node
-	for {
-		p.space()
-		if p.pos >= len(p.s) || p.s[p.pos] == ')' {
-			break
-		}
-		n, err := p.union(depth)
-		if err != nil {
-			return nil, err
-		}
-		if n != nil {
-			children = append(children, n)
-		}
-	}
-	switch len(children) {
-	case 0:
-		if depth > 0 && !p.sawStopword {
-			return nil, p.fail()
-		}
-		return nil, nil
-	case 1:
-		return children[0], nil
-	}
-	return newNode(qPhrase).add(children...), nil
-}
-
-// union reads unary nodes joined by |, which binds tighter than the
-// intersection, as in RediSearch's default dialect.
-func (p *queryParser) union(depth int) (Node, error) {
-	first, err := p.unary(depth)
-	if err != nil {
-		return nil, err
-	}
-	nodes := []Node{first}
-	for {
-		p.space()
-		if p.pos >= len(p.s) || p.s[p.pos] != '|' {
-			break
-		}
-		p.pos++
-		p.space()
-		n, err := p.unary(depth)
-		if err != nil {
-			return nil, err
-		}
-		nodes = append(nodes, n)
-	}
-	var kept []Node
-	for _, n := range nodes {
-		if n != nil {
-			kept = append(kept, n)
-		}
-	}
-	switch len(kept) {
-	case 0:
-		return nil, nil
-	case 1:
-		return kept[0], nil
-	}
-	return newNode(qUnion).add(kept...), nil
-}
-
-func (p *queryParser) unary(depth int) (Node, error) {
-	if p.pos >= len(p.s) {
-		return nil, p.fail()
-	}
-	switch p.s[p.pos] {
-	case '-':
-		p.pos++
-		n, err := p.unary(depth)
-		if err != nil || n == nil {
-			return nil, err
-		}
-		return newNode(qNot).add(n), nil
-	case '~':
-		p.pos++
-		n, err := p.unary(depth)
-		if err != nil || n == nil {
-			return nil, err
-		}
-		return newNode(qOptional).add(n), nil
-	}
-	return p.atom(nil, depth)
-}
-
-// atom reads one query element; fields scope its terms.
-func (p *queryParser) atom(fields []string, depth int) (Node, error) {
-	if p.pos >= len(p.s) {
-		return nil, p.fail()
-	}
-	switch p.s[p.pos] {
-	case '(':
-		start := p.pos
-		p.pos++
-		saved := p.opts.InFields
-		if fields != nil {
-			p.opts.InFields = fields
-		}
-		n, err := p.intersection(depth + 1)
-		p.opts.InFields = saved
-		if err != nil {
-			p.pos = start
-			return nil, p.fail()
-		}
-		if p.pos >= len(p.s) || p.s[p.pos] != ')' {
-			p.pos = start
-			return nil, p.fail()
-		}
-		p.pos++
-		return n, nil
-	case '@':
-		return p.fieldExpr(depth)
-	case '"':
-		p.pos++
-		end := strings.IndexByte(p.s[p.pos:], '"')
-		if end < 0 {
-			return nil, p.fail()
-		}
-		spans := tokenSpans(p.s[p.pos : p.pos+end])
-		// In the default dialect a phrase is a term, or two terms and
-		// then any words: a stop word before the second term is an error.
-		if !p.opts.NoStopwords {
-			for i := 0; i < len(spans) && i < 2; i++ {
-				if p.idx.Stopwords[spans[i].tok] {
-					return nil, &ErrSyntax{Offset: p.pos + spans[i].start, Near: spans[i].raw}
-				}
-			}
-		}
-		var words []string
-		for _, sp := range spans {
-			words = append(words, sp.tok)
-		}
-		words = p.terms(words)
-		p.pos += end + 1
-		if len(words) == 0 {
-			return nil, nil
-		}
-		ph := newNode(qPhrase)
-		ph.exact, ph.verbatim = true, true
-		for _, w := range words {
-			ph.add(tokenNode(w))
-		}
-		p.restrict(ph, fields)
-		return ph, nil
-	case '*':
-		p.pos++
-		return newNode(qWildcard), nil
-	case '$':
-		name := p.word()
-		v, ok := p.opts.Params[strings.TrimPrefix(name, "$")]
-		if !ok {
-			return nil, errors.New("No such parameter `" + strings.TrimPrefix(name, "$") + "`")
-		}
-		return p.termOf(v, fields)
-	case ')', '|':
-		return nil, p.fail()
-	}
-	w := p.word()
-	if w == "" {
-		return nil, p.fail()
-	}
-	return p.termOf(w, fields)
-}
-
-func (p *queryParser) termOf(w string, fields []string) (Node, error) {
-	prefix := strings.HasSuffix(w, "*")
-	w = strings.TrimSuffix(strings.Trim(w, "%"), "*")
-	toks := Tokenize(w)
-	if len(toks) == 0 {
-		return nil, nil
-	}
-	if !prefix && len(toks) == 1 && !p.opts.NoStopwords && p.idx.Stopwords[toks[0]] {
-		p.sawStopword = true
-		return nil, nil
-	}
-	var n *qnode
-	switch {
-	case len(toks) > 1:
-		n = newNode(qPhrase)
-		n.exact, n.verbatim = true, true
-		for _, t := range toks {
-			n.add(tokenNode(t))
-		}
-	case prefix:
-		n = newNode(qPrefix)
-		n.str, n.prefix = toks[0], true
-	default:
-		n = tokenNode(toks[0])
-	}
-	p.restrict(n, fields)
-	return n, nil
-}
-
-func (p *queryParser) scope(fields []string) []string {
-	if fields != nil {
-		return fields
-	}
-	return p.opts.InFields
-}
-
-// restrict limits n to the fields that scope it.
-func (p *queryParser) restrict(n *qnode, fields []string) {
-	scope := p.scope(fields)
-	if scope == nil {
-		return
-	}
-	var mask uint64
-	for _, f := range scope {
-		mask |= p.idx.textFieldBit(f)
-	}
-	n.setMask(mask)
-}
-
-func (p *queryParser) terms(words []string) []string {
-	if p.opts.NoStopwords {
-		return words
-	}
-	var out []string
-	for _, w := range words {
-		if !p.idx.Stopwords[w] {
-			out = append(out, w)
-		}
-	}
-	return out
-}
-
-// word reads a bare term: everything up to a space or an operator; a
-// backslash escapes the next character.
-func (p *queryParser) word() string {
-	var b strings.Builder
-	for p.pos < len(p.s) {
-		c := p.s[p.pos]
-		if c == '\\' && p.pos+1 < len(p.s) {
-			b.WriteByte(p.s[p.pos+1])
-			p.pos += 2
-			continue
-		}
-		if c == ' ' || c == '\t' || c == '(' || c == ')' || c == '|' || c == '"' || c == '{' || c == '}' || c == '[' || c == ']' || c == '@' {
-			break
-		}
-		b.WriteByte(c)
-		p.pos++
-	}
-	return b.String()
-}
-
-func (p *queryParser) fieldExpr(depth int) (Node, error) {
-	start := p.pos
-	p.pos++
-	colon := strings.IndexByte(p.s[p.pos:], ':')
-	if colon <= 0 {
-		p.pos = start
-		return nil, p.fail()
-	}
-	names := strings.Split(p.s[p.pos:p.pos+colon], "|")
-	p.pos += colon + 1
-	p.space()
-	if p.pos >= len(p.s) {
-		return nil, p.fail()
-	}
-	var field *Field
-	if len(names) == 1 {
-		field = p.idx.Field(names[0])
-	}
-	switch p.s[p.pos] {
-	case '[':
-		end := strings.IndexByte(p.s[p.pos:], ']')
-		if end < 0 {
-			return nil, p.fail()
-		}
-		parts := strings.Fields(p.s[p.pos+1 : p.pos+end])
-		p.pos += end + 1
-		for i, part := range parts {
-			if strings.HasPrefix(part, "$") {
-				v, ok := p.opts.Params[part[1:]]
-				if !ok {
-					return nil, errors.New("No such parameter `" + part[1:] + "`")
-				}
-				parts[i] = v
-			}
-		}
-		if field != nil && field.Type == FieldGeo {
-			return parseGeo(names[0], parts)
-		}
-		return parseNumericRange(names[0], parts)
-	case '{':
-		end := strings.IndexByte(p.s[p.pos:], '}')
-		if end < 0 {
-			return nil, p.fail()
-		}
-		var values []string
-		for _, v := range strings.Split(p.s[p.pos+1:p.pos+end], "|") {
-			v = strings.ReplaceAll(strings.TrimSpace(v), "\\", "")
-			if strings.HasPrefix(v, "$") {
-				if pv, ok := p.opts.Params[v[1:]]; ok {
-					v = pv
-				}
-			}
-			if v != "" {
-				values = append(values, v)
-			}
-		}
-		p.pos += end + 1
-		if p.idx.Field(names[0]) == nil || len(values) == 0 {
-			return nil, nil
-		}
-		tn := newNode(qTag)
-		tn.field = names[0]
-		for _, v := range values {
-			if strings.HasSuffix(v, "*") {
-				pn := newNode(qPrefix)
-				pn.str, pn.prefix = strings.TrimSuffix(v, "*"), true
-				tn.add(pn)
-			} else {
-				tn.add(tokenNode(v))
-			}
-		}
-		return tn, nil
-	}
-	return p.atom(names, depth)
 }
 
 func parseBound(s string) (float64, bool, error) {
@@ -805,7 +493,21 @@ func (idx *Index) Match(n Node, doc *Document, opts QueryOptions, stats *Stats) 
 			return false, 0
 		}
 		return true, stats.termScore(n.str, tf.freq, doc) * n.weight
-	case qPrefix, qFuzzy:
+	case qVector:
+		f := idx.Field(n.field)
+		if f == nil || f.Vector == nil || stats.vectors == nil {
+			return false, 0
+		}
+		vec := doc.fields[f.pos].vec
+		return vec != nil && f.Vector.distance(vec, stats.vectors[n]) <= n.radius, 0
+	case qMissing:
+		f := idx.Field(n.field)
+		if f == nil {
+			return false, 0
+		}
+		df := &doc.fields[f.pos]
+		return len(df.strs) == 0 && len(df.nums) == 0 && df.vec == nil && len(df.raw) == 0, 0
+	case qPrefix, qFuzzy, qWildcardQuery:
 		// A union that stops at its first term the document holds.
 		for _, t := range n.terms {
 			if tf, ok := doc.terms[t]; ok && tf.mask&n.mask != 0 {
@@ -868,6 +570,8 @@ type Stats struct {
 	tagDocs  func(pos int, tag string) int
 	// score is the documents' score, the index's default score.
 	score float64
+	// vectors are the query vectors of a query's vector ranges.
+	vectors map[*qnode][]float64
 }
 
 func (s *Stats) add(d *Document, sign int) {
