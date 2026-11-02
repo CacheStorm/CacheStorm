@@ -73,6 +73,21 @@ func TestSearchReplaysVectorCorpus(t *testing.T) {
 	replayRedisCorpus(t, router, "testdata/redisearch_vectors_r8.jsonl")
 }
 
+// testdata/redisearch_scoring_r8.jsonl holds random documents and
+// queries whose scores depend on how RediSearch's iterators visit them:
+// unions of stems and synonyms inside intersections, negations, optional
+// and numeric clauses, in both dialects, with Redis 8.2's replies.
+func TestSearchReplaysScoringCorpus(t *testing.T) {
+	router := NewRouter()
+	RegisterSearchCommands(router)
+	RegisterHashCommands(router)
+	RegisterStringCommands(router)
+	RegisterKeyCommands(router)
+	search.GetIndexManager().Reset()
+	t.Cleanup(search.GetIndexManager().Reset)
+	replayRedisCorpus(t, router, "testdata/redisearch_scoring_r8.jsonl")
+}
+
 // testdata/redisearch_synonyms_r8.jsonl holds random synonym groups,
 // documents and single-term queries with their scores, FT.AGGREGATE
 // pipelines that sort, page and filter in one arrange step, and the

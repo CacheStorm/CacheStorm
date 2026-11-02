@@ -522,22 +522,59 @@ func (idx *Index) textStream(doc *Document) []string {
 }
 
 func (idx *Index) exactPhrase(n *qnode, doc *Document) bool {
-	words := make([]string, len(n.children))
+	stream := idx.textStream(doc)
+	offsets := make([][]int, len(n.children))
 	for i, c := range n.children {
 		if c.typ != qToken {
 			return false
 		}
-		words[i] = c.str
-	}
-	stream := idx.textStream(doc)
-	for j := 0; j+len(words) <= len(stream); j++ {
-		all := true
-		for k, w := range words {
-			all = all && stream[j+k] == w
+		for j, w := range stream {
+			if w == c.str {
+				offsets[i] = append(offsets[i], j+1)
+			}
 		}
-		if all {
+	}
+	return withinRangeInOrder(offsets, 0)
+}
+
+// withinRangeInOrder is RediSearch's in-order slop test over each term's
+// positions. A term may reuse the position of the term before it, so a
+// phrase that repeats a word matches the word alone.
+func withinRangeInOrder(offsets [][]int, maxSlop int) bool {
+	next := make([]int, len(offsets))
+	read := func(i int) int {
+		if next[i] >= len(offsets[i]) {
+			return -1
+		}
+		next[i]++
+		return offsets[i][next[i]-1]
+	}
+	positions := make([]int, len(offsets))
+	for {
+		span := 0
+		for i := range offsets {
+			pos, lastPos := positions[i], 0
+			if i == 0 {
+				pos = read(0)
+			} else {
+				lastPos = positions[i-1]
+			}
+			for pos != -1 && pos < lastPos {
+				pos = read(i)
+			}
+			if pos == -1 {
+				return false
+			}
+			positions[i] = pos
+			if i > 0 {
+				span += pos - lastPos - 1
+				if span > maxSlop {
+					break
+				}
+			}
+		}
+		if span <= maxSlop {
 			return true
 		}
 	}
-	return false
 }

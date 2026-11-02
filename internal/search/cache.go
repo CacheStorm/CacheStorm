@@ -26,7 +26,11 @@ type docCache struct {
 	// sequence number of its last write: the document id it takes.
 	dirty map[string]int64
 	seq   int64
-	stats *Stats
+	// minID is the lowest document id the last rebuild gave.
+	minID int64
+	// engine holds what the score engine reads, rebuilt after writes.
+	engine *engineView
+	stats  *Stats
 	// The postings: documents by index term, and by tag value of each TAG
 	// field (by schema position). A document frequency is a posting's
 	// length.
@@ -72,6 +76,7 @@ func dropPosting(m map[string][]*Document, k string, d *Document) {
 
 // index adds (add) or removes a document and its postings.
 func (c *docCache) index(idx *Index, d *Document, add bool) {
+	c.engine = nil
 	if add {
 		c.docs[d.Key] = d
 		c.stats.add(d, 1)
@@ -248,6 +253,7 @@ func (c *docCache) syncLocked(idx *Index, st *store.Store) {
 		for i, d := range rest {
 			d.id = int64(i - len(rest))
 		}
+		c.minID = int64(-len(rest))
 		c.generation = gen
 		return
 	}
@@ -356,6 +362,14 @@ func (idx *Index) Search(st *store.Store, n Node, opts QueryOptions) ([]Hit, err
 	} else {
 		for d := range cand {
 			match(d)
+		}
+	}
+	if needsEngine(root) && len(hits) > 0 {
+		scores := newScoreEngine(idx, c, c.stats).scores(root)
+		for i := range hits {
+			if s, ok := scores[hits[i].Doc]; ok {
+				hits[i].Score = s
+			}
 		}
 	}
 	if knn != nil {
