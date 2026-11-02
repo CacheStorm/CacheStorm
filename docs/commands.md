@@ -15,7 +15,7 @@ under Tag-Based Invalidation and Command Help but counted only once, under Core 
 | [Core Redis](#core-redis-commands) | 208 | Standard Redis commands |
 | [JSON](#json-commands) | 13 | JSON document operations |
 | [Time Series](#time-series-commands) | 12 | Time-series data |
-| [Search](#search-commands) | 13 | Full-text search |
+| [Search](#search-commands) | 14 | Full-text and vector search |
 | [Graph](#graph-commands) | 12 | Graph database |
 | [Probabilistic](#probabilistic-commands) | 19 | Bloom filters, sketches |
 | [Resilience](#resilience-commands) | 21 | Circuit breakers, rate limits |
@@ -450,6 +450,7 @@ FT.CREATE index [ON HASH|JSON] [PREFIX count prefix ...] [LANGUAGE lang] [SCORE 
     SCHEMA {identifier [AS attribute] {TEXT [WEIGHT w] [NOSTEM] | NUMERIC | TAG [SEPARATOR c] [CASESENSITIVE] | GEO
             | VECTOR {FLAT|HNSW} count TYPE {FLOAT32|FLOAT64|FLOAT16|BFLOAT16|INT8|UINT8} DIM n DISTANCE_METRIC {L2|IP|COSINE} [name value ...]}
             [SORTABLE] [NOINDEX] [INDEXMISSING]} ...
+FT.ALTER index [SKIPINITIALSCAN] SCHEMA ADD field options ...
 FT.DROPINDEX index [DD]
 FT.SEARCH index query [NOCONTENT] [VERBATIM] [NOSTOPWORDS] [WITHSCORES] [WITHPAYLOADS] [WITHSORTKEYS] [FILTER field min max] [GEOFILTER field lon lat radius m|km|mi|ft]
     [INKEYS count key ...] [INFIELDS count field ...] [RETURN count field [AS name] ...] [SORTBY field [ASC|DESC]] [LIMIT offset num] [PARAMS count name value ...] [DIALECT n]

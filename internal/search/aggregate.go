@@ -106,10 +106,10 @@ func FieldValue(idx *Index, doc *Document, name string) (string, bool) {
 	}
 	if f := idx.Field(name); f != nil {
 		// A NUMERIC field reads as the number it holds.
-		if nums := doc.fields[f.pos].nums; f.Type == FieldNumeric && len(nums) > 0 {
+		if nums := doc.field(f.pos).nums; f.Type == FieldNumeric && len(nums) > 0 {
 			return FormatNumber(nums[0]), true
 		}
-		if raw := doc.fields[f.pos].raw; len(raw) > 0 {
+		if raw := doc.field(f.pos).raw; len(raw) > 0 {
 			return raw[0], true
 		}
 		return doc.HashField(f.Identifier)

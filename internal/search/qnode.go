@@ -474,7 +474,7 @@ func (idx *Index) matchTag(n *qnode, doc *Document, stats *Stats) (bool, float64
 	if f == nil || f.Type != FieldTag {
 		return false, 0
 	}
-	tags := doc.fields[f.pos].strs
+	tags := doc.field(f.pos).strs
 	matched, total := false, 0.0
 	for _, c := range n.children {
 		want, affix := tagChild(f, c)
@@ -503,7 +503,7 @@ func (idx *Index) textStream(doc *Document) []string {
 	var out []string
 	for i := range idx.Fields {
 		if idx.Fields[i].Type == FieldText {
-			out = append(out, doc.fields[i].strs...)
+			out = append(out, doc.field(i).strs...)
 		}
 	}
 	return out

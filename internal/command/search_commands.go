@@ -23,7 +23,7 @@ func RegisterSearchCommands(router *Router) {
 		"FT.SEARCH": cmdFTSEARCH, "FT.AGGREGATE": cmdFTAGGREGATE, "FT._LIST": cmdFTLIST,
 		"FT.TAGVALS": cmdFTTAGVALS, "FT.ALIASADD": cmdFTALIASADD, "FT.ALIASDEL": cmdFTALIASDEL,
 		"FT.ALIASUPDATE": cmdFTALIASUPDATE, "FT.EXPLAIN": cmdFTEXPLAIN,
-		"FT.ADD": cmdFTADD, "FT.DEL": cmdFTDEL, "FT.GET": cmdFTGET,
+		"FT.ADD": cmdFTADD, "FT.DEL": cmdFTDEL, "FT.GET": cmdFTGET, "FT.ALTER": cmdFTALTER,
 	} {
 		router.Register(&CommandDef{Name: name, Handler: handler})
 	}
@@ -40,9 +40,15 @@ func searchIndexesFor(ctx *Context) *search.IndexManager {
 
 func errNoSuchIndex(name string) error { return errors.New("No such index " + name) }
 
+// ftArityError is RediSearch's arity error, which names its internal
+// command.
+func ftArityError(name string) error {
+	return errors.New("ERR wrong number of arguments for '_" + name + "' command")
+}
+
 func cmdFTCREATE(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(arityError(ctx.Command))
+	if ctx.ArgCount() < 4 {
+		return ctx.WriteError(ftArityError("FT.CREATE"))
 	}
 	if ctx.DB != 0 {
 		return ctx.WriteError(errors.New("Cannot create index on db != 0")) //nolint:staticcheck // RediSearch's reply text
@@ -77,6 +83,39 @@ func indexDocuments(ctx *Context, idx *search.Index, keys map[string]bool) []*se
 	}
 	search.SortByID(docs)
 	return docs
+}
+
+// cmdFTALTER is FT.ALTER index [SKIPINITIALSCAN] SCHEMA ADD field options ...
+func cmdFTALTER(ctx *Context) error {
+	if ctx.ArgCount() < 4 {
+		return ctx.WriteError(ftArityError("FT.ALTER"))
+	}
+	manager := searchIndexesFor(ctx)
+	idx, ok := manager.Get(ctx.ArgString(0))
+	if !ok {
+		return ctx.WriteError(errors.New(ctx.ArgString(0) + ": no such index"))
+	}
+	i := 1
+	skip := strings.EqualFold(ctx.ArgString(i), "SKIPINITIALSCAN")
+	if skip {
+		i++
+	}
+	if !strings.EqualFold(ctx.ArgString(i), "SCHEMA") {
+		return ctx.WriteError(errors.New("ALTER must be followed by SCHEMA")) //nolint:staticcheck // RediSearch's reply text
+	}
+	if i+1 >= ctx.ArgCount() || !strings.EqualFold(ctx.ArgString(i+1), "ADD") {
+		return ctx.WriteError(errors.New("Unknown action passed to ALTER SCHEMA")) //nolint:staticcheck // RediSearch's reply text
+	}
+	args := make([]string, 0, ctx.ArgCount()-i-2)
+	for j := i + 2; j < ctx.ArgCount(); j++ {
+		args = append(args, ctx.ArgString(j))
+	}
+	altered, err := idx.Alter(args, skip)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	manager.Replace(altered)
+	return ctx.WriteOK()
 }
 
 func cmdFTDROPINDEX(ctx *Context) error {

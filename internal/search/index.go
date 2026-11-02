@@ -61,7 +61,7 @@ type Index struct {
 	Language  string
 	Score     float64
 	Args      []string
-	cacheSet  cacheSet
+	cacheSet  *cacheSet
 }
 
 //nolint:staticcheck // RediSearch's reply texts
@@ -89,7 +89,7 @@ func stopwordSet(words []string) map[string]bool {
 // ParseIndex reads an FT.CREATE definition: the arguments after the index
 // name.
 func ParseIndex(name string, args []string) (*Index, error) {
-	idx := &Index{Name: name, Score: 1, Language: "english", Stopwords: stopwordSet(DefaultStopwords), Args: append([]string(nil), args...)}
+	idx := &Index{Name: name, Score: 1, Language: "english", Stopwords: stopwordSet(DefaultStopwords), Args: append([]string(nil), args...), cacheSet: &cacheSet{}}
 	i := 0
 	for ; i < len(args); i++ {
 		switch strings.ToUpper(args[i]) {
@@ -168,7 +168,7 @@ func parseSchema(args []string, json bool) ([]Field, error) {
 			i += 2
 		}
 		if i >= len(args) {
-			return nil, errors.New("ERR Field `" + f.Identifier + "` does not have a type")
+			return nil, errors.New("Field `" + f.Identifier + "` does not have a type") //nolint:staticcheck // RediSearch's reply text
 		}
 		switch strings.ToUpper(args[i]) {
 		case "TEXT":
@@ -188,7 +188,7 @@ func parseSchema(args []string, json bool) ([]Field, error) {
 			f.Vector = spec
 			i = next - 1
 		default:
-			return nil, errors.New("ERR Invalid field type for field `" + f.Identifier + "`")
+			return nil, errors.New("Invalid field type for field `" + f.Identifier + "`") //nolint:staticcheck // RediSearch's reply text
 		}
 		i++
 		for i < len(args) {
@@ -227,6 +227,11 @@ func parseSchema(args []string, json bool) ([]Field, error) {
 			i++
 		}
 	done:
+		for _, g := range fields {
+			if g.Name == f.Name {
+				return nil, errors.New("Duplicate field in schema - " + f.Name) //nolint:staticcheck // RediSearch's reply text
+			}
+		}
 		f.pos = len(fields)
 		if json {
 			p, err := store.ParseJSONPath(f.Identifier)
@@ -238,6 +243,54 @@ func parseSchema(args []string, json bool) ([]Field, error) {
 		fields = append(fields, f)
 	}
 	return fields, nil
+}
+
+// Alter returns idx with the fields of an FT.ALTER ... SCHEMA ADD, which
+// replaces it: queries that hold the old definition keep it. Unless skip,
+// the documents are indexed again; with SKIPINITIALSCAN those indexed
+// before keep their old fields until their keys are written.
+func (idx *Index) Alter(args []string, skip bool) (*Index, error) {
+	added, err := parseSchema(args, idx.JSON)
+	if err != nil {
+		return nil, err
+	}
+	out := *idx
+	out.Fields = append([]Field(nil), idx.Fields...)
+	for _, f := range added {
+		for _, g := range out.Fields {
+			if g.Name == f.Name || g.Identifier == f.Identifier {
+				return nil, errors.New("Duplicate field in schema - " + f.Name) //nolint:staticcheck // RediSearch's reply text
+			}
+		}
+		f.pos = len(out.Fields)
+		out.Fields = append(out.Fields, f)
+	}
+	out.Args = append(append([]string(nil), idx.Args...), args...)
+	if !hasSchema(idx.Args) {
+		out.Args = append(append(append([]string(nil), idx.Args...), "SCHEMA"), args...)
+	}
+	if !skip {
+		out.cacheSet.rebuildAll()
+	}
+	return &out, nil
+}
+
+func hasSchema(args []string) bool {
+	for _, a := range args {
+		if strings.EqualFold(a, "SCHEMA") {
+			return true
+		}
+	}
+	return false
+}
+
+// Replace swaps an index for its altered definition.
+func (m *IndexManager) Replace(idx *Index) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.indexes[idx.Name]; ok {
+		m.indexes[idx.Name] = idx
+	}
 }
 
 // Field returns the schema field a query names, by attribute or

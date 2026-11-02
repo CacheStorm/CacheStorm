@@ -51,6 +51,17 @@ type docField struct {
 
 func fieldBit(pos int) uint64 { return 1 << (uint(pos) & 63) }
 
+var noField docField
+
+// field returns a schema field of the document; a field FT.ALTER added
+// after the document was indexed is empty.
+func (d *Document) field(pos int) *docField {
+	if pos < len(d.fields) {
+		return &d.fields[pos]
+	}
+	return &noField
+}
+
 // termWeight is what one occurrence adds to a term's frequency and the
 // document's length: the field weight, at least 1.
 func termWeight(w float64) uint32 {
@@ -498,14 +509,14 @@ func (idx *Index) Match(n Node, doc *Document, opts QueryOptions, stats *Stats) 
 		if f == nil || f.Vector == nil || stats.vectors == nil {
 			return false, 0
 		}
-		vec := doc.fields[f.pos].vec
+		vec := doc.field(f.pos).vec
 		return vec != nil && f.Vector.distance(vec, stats.vectors[n]) <= n.radius, 0
 	case qMissing:
 		f := idx.Field(n.field)
 		if f == nil {
 			return false, 0
 		}
-		df := &doc.fields[f.pos]
+		df := doc.field(f.pos)
 		return len(df.strs) == 0 && len(df.nums) == 0 && df.vec == nil && len(df.raw) == 0, 0
 	case qPrefix, qFuzzy, qWildcardQuery:
 		// A union that stops at its first term the document holds.
@@ -528,7 +539,7 @@ func (idx *Index) Match(n Node, doc *Document, opts QueryOptions, stats *Stats) 
 		if f == nil || f.Type != FieldNumeric {
 			return false, 0
 		}
-		for _, v := range doc.fields[f.pos].nums {
+		for _, v := range doc.field(f.pos).nums {
 			if (v > n.lo || v == n.lo && n.loIncl) && (v < n.hi || v == n.hi && n.hiIncl) {
 				return true, 0
 			}
@@ -542,7 +553,7 @@ func (idx *Index) Match(n Node, doc *Document, opts QueryOptions, stats *Stats) 
 			return false, 0
 		}
 		km := n.radius * geoUnits[n.unit]
-		coords := doc.fields[f.pos].nums
+		coords := doc.field(f.pos).nums
 		for i := 0; i+1 < len(coords); i += 2 {
 			if haversineKm(n.lon, n.lat, coords[i], coords[i+1]) <= km {
 				return true, 0

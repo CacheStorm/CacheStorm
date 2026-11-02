@@ -236,3 +236,39 @@ func TestSearchFlushAllDropsIndexes(t *testing.T) {
 		t.Fatalf("FT._LIST after restart = %s", got)
 	}
 }
+
+// FT.ALTER's fields survive an AOF replay and a snapshot, which rebuild
+// the index with them.
+func TestSearchAlterSurvivesRestart(t *testing.T) {
+	aof := aofRewriteConfig(t, t.TempDir(), nil)
+	snap := replTestConfig(t, func(c *config.Config) {
+		c.Persistence.Enabled = true
+		c.Persistence.AOF = false
+		c.Persistence.DataDir = t.TempDir()
+		c.Persistence.SnapshotInterval = "0"
+	})
+	for _, cfg := range []*config.Config{aof, snap} {
+		s := startReplServerCfg(t, cfg)
+		c := dialRepl(t, s)
+		for _, cmd := range [][]string{
+			{"FT.CREATE", "items", "PREFIX", "1", "item:", "SCHEMA", "name", "TEXT"},
+			{"HSET", "item:1", "name", "lamp", "price", "12"},
+			{"FT.ALTER", "items", "SCHEMA", "ADD", "price", "NUMERIC", "SORTABLE"},
+		} {
+			c.do(cmd...)
+		}
+		if got := searchIDs(t, c, "items", "@price:[10 20]"); got != "item:1" {
+			t.Fatalf("after FT.ALTER: %s", got)
+		}
+		if !cfg.Persistence.AOF {
+			if got := c.str("SAVE"); got != "OK" {
+				t.Fatalf("SAVE = %s", got)
+			}
+		}
+		stopReplServer(s)
+		r := dialRepl(t, startReplServerCfg(t, cfg))
+		if got := searchIDs(t, r, "items", "@price:[10 20]"); got != "item:1" {
+			t.Fatalf("after restart: %s", got)
+		}
+	}
+}

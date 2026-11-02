@@ -411,7 +411,7 @@ func (idx *Index) knn(n *qnode, q []float64, hits []Hit) []Hit {
 	f := idx.Field(n.field)
 	var out []Hit
 	for _, h := range hits {
-		vec := h.Doc.fields[f.pos].vec
+		vec := h.Doc.field(f.pos).vec
 		if vec == nil {
 			continue
 		}
@@ -441,7 +441,7 @@ func (idx *Index) rangeYields(n *qnode, doc *Document, qs map[*qnode][]float64, 
 	}
 	if n.typ == qVector && !n.knn && n.yield != "" {
 		f := idx.Field(n.field)
-		if vec := doc.fields[f.pos].vec; vec != nil {
+		if vec := doc.field(f.pos).vec; vec != nil {
 			if d := f.Vector.distance(vec, qs[n]); d <= n.radius {
 				out = append(out, [2]string{n.yield, FormatDistance(d)})
 			}

@@ -98,7 +98,7 @@ func (c *docCache) index(idx *Index, d *Document, add bool) {
 			c.tags[i] = m
 		}
 		seen := make(map[string]bool)
-		for _, t := range d.fields[i].strs {
+		for _, t := range d.field(i).strs {
 			if seen[t] {
 				continue
 			}
@@ -146,6 +146,17 @@ func (idx *Index) lookup(st *store.Store, create bool) *docCache {
 }
 
 func (idx *Index) cache(st *store.Store) *docCache { return idx.lookup(st, true) }
+
+// rebuildAll makes every cache read its store again on its next query.
+func (cs *cacheSet) rebuildAll() {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	for _, c := range cs.caches {
+		c.dirtyMu.Lock()
+		c.built = false
+		c.dirtyMu.Unlock()
+	}
+}
 
 // maxDirty bounds the keys marked between two queries: past it the cache
 // is rebuilt on the next query instead of growing without limit.
