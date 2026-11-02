@@ -30,7 +30,7 @@ func RegisterSearchCommands(router *Router) {
 		"FT.CURSOR": cmdFTCURSOR, "FT.SYNUPDATE": cmdFTSYNUPDATE, "FT.SYNDUMP": cmdFTSYNDUMP,
 		"FT.SYNADD": cmdFTSYNADD, "FT.DICTADD": cmdFTDICTADD, "FT.DICTDEL": cmdFTDICTDEL,
 		"FT.DICTDUMP": cmdFTDICTDUMP, "FT.SPELLCHECK": cmdFTSPELLCHECK,
-		"FT.EXPLAINCLI": cmdFTEXPLAINCLI, "FT.CONFIG": cmdFTCONFIG, "FT.MGET": cmdFTMGET, "FT.DROP": cmdFTDROPINDEX,
+		"FT.EXPLAINCLI": cmdFTEXPLAINCLI, "FT.CONFIG": cmdFTCONFIG, "FT.PROFILE": cmdFTPROFILE, "FT.MGET": cmdFTMGET, "FT.DROP": cmdFTDROPINDEX,
 		"FT._DROPIFX": cmdFTDROPIFX, "FT._DROPINDEXIFX": cmdFTDROPIFX, "FT._CREATEIFNX": cmdFTCREATEIFNX,
 		"FT._ALTERIFNX": cmdFTALTERIFNX, "FT._ALIASADDIFNX": cmdFTALIASADDIFNX, "FT._ALIASDELIFX": cmdFTALIASDELIFX,
 	} {
@@ -951,6 +951,9 @@ func cmdFTAGGREGATE(ctx *Context) error {
 			docs[r] = h.Doc
 		}
 	}
+	if ctx.aggTrace != nil {
+		ctx.aggTrace.matched = len(rows)
+	}
 	pipeline := newPipelineKeys(idx)
 	for _, y := range search.Yields(query) {
 		pipeline.add(y)
@@ -1035,6 +1038,9 @@ func cmdFTAGGREGATE(ctx *Context) error {
 				return ctx.WriteError(err)
 			}
 			grouped, arranged, groups = true, false, len(rows)
+			if ctx.aggTrace != nil {
+				ctx.aggTrace.groups = append(ctx.aggTrace.groups, len(rows))
+			}
 		case "SORTBY", "LIMIT":
 			last := aggregateStepEnd(ctx, i)
 			if word == "SORTBY" {
@@ -1121,21 +1127,32 @@ func cmdFTAGGREGATE(ctx *Context) error {
 				return ctx.WriteError(err)
 			}
 			kept := rows[:0]
-			for _, r := range rows {
+			trace := filterTrace{failAt: -1}
+			for pos, r := range rows {
 				if _, ok := failed[r]; ok {
+					if trace.failAt < 0 {
+						trace.failAt = pos
+					}
 					kept = append(kept, r)
 					continue
 				}
 				if missing, ok := expr.Missing(r); ok {
 					failed[r] = errMissingProperty(missing)
+					if trace.failAt < 0 {
+						trace.failAt = pos
+					}
 					kept = append(kept, r)
 					continue
 				}
 				if expr.Truthy(r) {
+					trace.passed = append(trace.passed, pos)
 					kept = append(kept, r)
 				}
 			}
 			rows = kept
+			if ctx.aggTrace != nil {
+				ctx.aggTrace.filters = append(ctx.aggTrace.filters, trace)
+			}
 			i++
 		case "PARAMS":
 			_, last, err := countedArgs(ctx, i)

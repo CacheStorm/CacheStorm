@@ -30,6 +30,9 @@ type Context struct {
 	// script all see, as Redis' commandTimeSnapshot: set when the first of
 	// them runs.
 	timeSnapshot int64
+	// aggTrace, when FT.PROFILE sets it, collects what FT.AGGREGATE's
+	// steps did.
+	aggTrace *aggregateTrace
 
 	Command       string
 	Args          [][]byte

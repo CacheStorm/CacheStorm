@@ -13,6 +13,15 @@ type scoreEngine struct {
 	stats *Stats
 	view  *engineView
 	rest  int64
+	// profile wraps each iterator in a counting one, for FT.PROFILE.
+	profile bool
+}
+
+func (e *scoreEngine) wrap(it rsIter) rsIter {
+	if it == nil || !e.profile {
+		return it
+	}
+	return &profIter{rsIter: it}
 }
 
 // engineView is a cache's documents by id and its NUMERIC fields' documents
@@ -130,7 +139,9 @@ func (e *scoreEngine) reader(term string, mask uint64, weight float64) rsIter {
 	if union&mask == 0 {
 		return nil
 	}
-	return newTermReader(e.entries(docs, term, false), mask, weight, e.stats.idf(len(docs)))
+	r := newTermReader(e.entries(docs, term, false), mask, weight, e.stats.idf(len(docs)))
+	r.profTerm = term
+	return e.wrap(r)
 }
 
 func (e *scoreEngine) tagReader(f *Field, value string, weight float64) rsIter {
@@ -138,7 +149,9 @@ func (e *scoreEngine) tagReader(f *Field, value string, weight float64) rsIter {
 	if len(docs) == 0 {
 		return nil
 	}
-	return newTermReader(e.entries(docs, value, true), math.MaxUint64, weight, e.stats.idf(len(docs)))
+	r := newTermReader(e.entries(docs, value, true), math.MaxUint64, weight, e.stats.idf(len(docs)))
+	r.profType, r.profTerm = "TAG", value
+	return e.wrap(r)
 }
 
 func (e *scoreEngine) list(n *qnode) rsIter {
@@ -152,7 +165,9 @@ func (e *scoreEngine) list(n *qnode) rsIter {
 		return nil
 	}
 	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
-	return newListIter(ids)
+	l := newListIter(ids)
+	l.profType = map[qtype]string{qGeo: "GEO", qMissing: "MISSING", qVector: "METRIC - VECTOR DISTANCE"}[n.typ]
+	return e.wrap(l)
 }
 
 func (e *scoreEngine) build(n *qnode, mask uint64) rsIter {
@@ -176,7 +191,7 @@ func (e *scoreEngine) build(n *qnode, mask uint64) rsIter {
 		case 1:
 			return its[0]
 		}
-		return newUnionIter(its, false, n.weight)
+		return e.wrap(newUnionIter(its, false, n.weight))
 	case qPhrase:
 		if len(n.children) == 1 {
 			return e.build(n.children[0], mask)
@@ -189,7 +204,7 @@ func (e *scoreEngine) build(n *qnode, mask uint64) rsIter {
 		if n.exact {
 			relevant = func(id int64) bool { d := e.doc(id); return d != nil && e.idx.exactPhrase(n, d) }
 		}
-		return newIntersectIter(its, n.exact, mask, n.weight, relevant)
+		return e.wrap(newIntersectIter(its, n.exact, mask, n.weight, relevant))
 	case qPrefix, qFuzzy, qWildcardQuery:
 		var its []rsIter
 		for _, t := range n.terms {
@@ -200,17 +215,26 @@ func (e *scoreEngine) build(n *qnode, mask uint64) rsIter {
 		if len(its) == 0 {
 			return nil
 		}
-		return newUnionIter(its, true, n.weight)
+		u := newUnionIter(its, true, n.weight)
+		u.queryType = map[qtype]string{qPrefix: "PREFIX", qFuzzy: "FUZZY", qWildcardQuery: "WILDCARD"}[n.typ] + " - " + n.str
+		return e.wrap(u)
 	case qNot:
 		var child rsIter
 		if len(n.children) > 0 {
 			child = e.build(n.children[0], mask)
 		}
-		return newNotIter(child, e.maxID(), n.weight)
+		if child == nil {
+			child = e.wrap(newEmptyIter())
+		}
+		return e.wrap(newNotIter(child, e.maxID(), n.weight))
 	case qOptional:
-		return newOptionalIter(e.build(n.children[0], mask), e.maxID(), n.weight)
+		child := e.build(n.children[0], mask)
+		if child == nil {
+			child = e.wrap(newEmptyIter())
+		}
+		return e.wrap(newOptionalIter(child, e.maxID(), n.weight))
 	case qWildcard:
-		return newWildcardIter(e.maxID(), len(e.c.docs))
+		return e.wrap(newWildcardIter(e.maxID(), len(e.c.docs)))
 	case qTag:
 		return e.tag(n)
 	case qNumeric:
@@ -229,22 +253,24 @@ func (e *scoreEngine) numeric(n *qnode) rsIter {
 	}
 	docs := e.view.nums[f.pos]
 	entries := make([]postingEntry, len(docs))
-	matched := false
+	lo, hi := math.Inf(1), math.Inf(-1)
 	for i, d := range docs {
 		entries[i].id = e.docID(d)
 		for _, v := range d.field(f.pos).nums {
+			lo, hi = min(lo, v), max(hi, v)
 			if (v > n.lo || v == n.lo && n.loIncl) && (v < n.hi || v == n.hi && n.hiIncl) {
-				entries[i].mask, matched = 1, true
-				break
+				entries[i].mask = 1
 			}
 		}
 	}
-	if !matched {
+	// The range's leaf is read when its values overlap the filter's.
+	if len(docs) == 0 || hi < n.lo || lo > n.hi {
 		return nil
 	}
 	r := newTermReader(entries, 1, 1, 0)
 	r.cur.typ = resNumeric
-	return r
+	r.profType, r.profTerm = "NUMERIC", numericRangeTerm(lo, hi)
+	return e.wrap(r)
 }
 
 func (e *scoreEngine) tag(n *qnode) rsIter {
@@ -276,7 +302,9 @@ func (e *scoreEngine) tag(n *qnode) rsIter {
 		if len(its) == 0 {
 			return nil
 		}
-		return newUnionIter(its, true, n.weight)
+		u := newUnionIter(its, true, n.weight)
+		u.queryType = "PREFIX - " + want
+		return e.wrap(u)
 	}
 	if len(n.children) == 1 {
 		return one(n.children[0])
@@ -290,7 +318,9 @@ func (e *scoreEngine) tag(n *qnode) rsIter {
 	if len(its) == 0 {
 		return nil
 	}
-	return newUnionIter(its, false, n.weight)
+	u := newUnionIter(its, false, n.weight)
+	u.queryType = "TAG"
+	return e.wrap(u)
 }
 
 // scores reads the root to its end and scores each document it returns.

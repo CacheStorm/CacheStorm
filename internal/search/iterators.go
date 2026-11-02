@@ -84,15 +84,17 @@ type postingEntry struct {
 // returning the entries whose field mask meets the query's.
 type termReader struct {
 	iterBase
-	entries []postingEntry
-	pos     int
-	lastID  int64
-	mask    uint64
-	atEnd   bool
+	profType string
+	profTerm string
+	entries  []postingEntry
+	pos      int
+	lastID   int64
+	mask     uint64
+	atEnd    bool
 }
 
 func newTermReader(entries []postingEntry, mask uint64, weight, idf float64) *termReader {
-	r := &termReader{entries: entries, mask: mask}
+	r := &termReader{entries: entries, mask: mask, profType: "TEXT"}
 	r.cur = &rsResult{typ: resTerm, weight: weight, idf: idf}
 	r.kind = kindRead
 	if len(entries) > 0 {
@@ -185,16 +187,18 @@ func (e *emptyIter) hasNext() bool                 { return false }
 
 type unionIter struct {
 	iterBase
-	its      []rsIter
-	heap     []rsIter
-	minDocID int64
-	quick    bool
-	expected int
-	weight   float64
+	queryType string
+	orig      []rsIter
+	its       []rsIter
+	heap      []rsIter
+	minDocID  int64
+	quick     bool
+	expected  int
+	weight    float64
 }
 
 func newUnionIter(its []rsIter, quick bool, weight float64) *unionIter {
-	u := &unionIter{its: append([]rsIter(nil), its...), quick: quick, weight: weight}
+	u := &unionIter{its: append([]rsIter(nil), its...), orig: its, quick: quick, weight: weight, queryType: "UNION"}
 	u.kind = kindUnion
 	u.cur = &rsResult{typ: resUnion, weight: weight}
 	for _, it := range its {
@@ -546,7 +550,7 @@ func iterCmp(a, b rsIter) int {
 		return 1
 	}
 	factor := func(it rsIter) float64 {
-		if ii, ok := it.(*intersectIter); ok {
+		if ii, ok := unwrap(it).(*intersectIter); ok {
 			return float64(1 / max(1, len(ii.its)))
 		}
 		return 1
