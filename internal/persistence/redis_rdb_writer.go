@@ -46,6 +46,7 @@ var rdbModules = map[byte]uint64{
 	store.ExtensionCMS:     rdbModuleID("CStorm-CM", 1),
 	store.ExtensionTopK:    rdbModuleID("CStorm-TK", 1),
 	store.ExtensionTDigest: rdbModuleID("CStorm-TD", 1),
+	store.ExtensionSuggest: rdbModuleID("CStorm-SG", 1),
 }
 
 const (

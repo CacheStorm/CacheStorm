@@ -81,7 +81,7 @@ var writeCommands = map[string]bool{
 	"CMS.INITBYDIM": true, "CMS.INITBYPROB": true, "CMS.INCRBY": true, "CMS.MERGE": true,
 	"TOPK.RESERVE": true, "TOPK.ADD": true, "TOPK.INCRBY": true,
 	"TDIGEST.CREATE": true, "TDIGEST.ADD": true, "TDIGEST.RESET": true, "TDIGEST.MERGE": true,
-	"FT.CREATE": true, "FT.DROPINDEX": true, "FT.ADD": true, "FT.DEL": true, "FT.ALTER": true,
+	"FT.CREATE": true, "FT.DROPINDEX": true, "FT.ADD": true, "FT.DEL": true, "FT.ALTER": true, "FT.SUGADD": true, "FT.SUGDEL": true,
 	"FT.ALIASADD": true, "FT.ALIASDEL": true, "FT.ALIASUPDATE": true,
 }
 
@@ -321,6 +321,7 @@ func New(cfg *config.Config) (result *Server, retErr error) {
 	command.RegisterJSONCommands(s.router)
 	command.RegisterTSCommands(s.router)
 	command.RegisterSearchCommands(s.router)
+	command.RegisterSuggestCommands(s.router)
 	command.RegisterProbabilisticCommands(s.router)
 	command.RegisterGraphCommands(s.router)
 	command.RegisterDigestCommands(s.router)

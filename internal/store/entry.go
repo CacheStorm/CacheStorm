@@ -24,6 +24,7 @@ const (
 	DataTypeCMS
 	DataTypeTopK
 	DataTypeTDigest
+	DataTypeSuggest
 )
 
 func (dt DataType) String() string {
@@ -56,6 +57,8 @@ func (dt DataType) String() string {
 		return "TopK-TYPE"
 	case DataTypeTDigest:
 		return "TDIS-TYPE"
+	case DataTypeSuggest:
+		return "trietype0"
 	default:
 		return "unknown"
 	}

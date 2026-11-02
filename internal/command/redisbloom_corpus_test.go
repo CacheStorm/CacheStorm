@@ -73,6 +73,18 @@ func TestSearchReplaysVectorCorpus(t *testing.T) {
 	replayRedisCorpus(t, router, "testdata/redisearch_vectors_r8.jsonl")
 }
 
+// testdata/redisearch_suggest_r8.jsonl holds auto-complete dictionaries
+// built and queried at random (scores, INCR, payloads, deletes, fuzzy and
+// case-folded prefixes) with Redis 8.2's replies. TRIM is left out where it
+// would drop results: RediSearch then frees results it still replies with.
+func TestSuggestReplaysCorpus(t *testing.T) {
+	router := NewRouter()
+	RegisterSuggestCommands(router)
+	RegisterStringCommands(router)
+	RegisterKeyCommands(router)
+	replayRedisCorpus(t, router, "testdata/redisearch_suggest_r8.jsonl")
+}
+
 func replayRedisCorpus(t *testing.T, router *Router, file string) {
 	t.Helper()
 	f, err := os.Open(file)

@@ -23,6 +23,7 @@ const (
 	ExtensionCMS     byte = 205
 	ExtensionTopK    byte = 206
 	ExtensionTDigest byte = 207
+	ExtensionSuggest byte = 208
 )
 
 // ErrExtensionFormat reports a corrupt extension value encoding.
