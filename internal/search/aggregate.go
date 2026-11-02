@@ -15,6 +15,23 @@ type Row struct {
 	Values []string
 	doc    *Document
 	idx    *Index
+	// lists are the values a TOLIST or RANDOM_SAMPLE reducer made: their
+	// items joined by NULs, replied as arrays.
+	lists map[string]bool
+	nulls map[string]bool
+}
+
+// IsList reports whether a row value is a list.
+func (r *Row) IsList(name string) bool { return r.lists[name] }
+
+// IsNull reports whether a row value is null: a GROUPBY key the rows lack.
+func (r *Row) IsNull(name string) bool { return r.nulls[name] }
+
+func (r *Row) markNull(name string) {
+	if r.nulls == nil {
+		r.nulls = make(map[string]bool)
+	}
+	r.nulls[name] = true
 }
 
 // Get returns a row value by name (without the @), falling back to the
@@ -88,11 +105,12 @@ func FieldValue(idx *Index, doc *Document, name string) (string, bool) {
 		return "", false
 	}
 	if f := idx.Field(name); f != nil {
-		if raw := doc.fields[f.pos].raw; len(raw) > 0 {
-			return raw[0], true
-		}
+		// A NUMERIC field reads as the number it holds.
 		if nums := doc.fields[f.pos].nums; f.Type == FieldNumeric && len(nums) > 0 {
 			return FormatNumber(nums[0]), true
+		}
+		if raw := doc.fields[f.pos].raw; len(raw) > 0 {
+			return raw[0], true
 		}
 		return doc.HashField(f.Identifier)
 	}
@@ -110,19 +128,28 @@ type Reducer struct {
 func Group(rows []*Row, props []string, reducers []Reducer) ([]*Row, error) {
 	type group struct {
 		key  []string
+		null []bool
 		rows []*Row
 	}
 	var order []string
 	groups := make(map[string]*group)
 	for _, r := range rows {
 		key := make([]string, len(props))
+		null := make([]bool, len(props))
+		kb := make([]string, len(props))
 		for i, p := range props {
-			key[i], _ = r.Get(strings.TrimPrefix(p, "@"))
+			var ok bool
+			key[i], ok = r.Get(strings.TrimPrefix(p, "@"))
+			null[i] = !ok
+			kb[i] = key[i]
+			if !ok {
+				kb[i] = "\x01"
+			}
 		}
-		k := strings.Join(key, "\x00")
+		k := strings.Join(kb, "\x00")
 		g, ok := groups[k]
 		if !ok {
-			g = &group{key: key}
+			g = &group{key: key, null: null}
 			groups[k] = g
 			order = append(order, k)
 		}
@@ -137,7 +164,11 @@ func Group(rows []*Row, props []string, reducers []Reducer) ([]*Row, error) {
 		g := groups[k]
 		row := &Row{}
 		for i, p := range props {
-			row.Set(strings.TrimPrefix(p, "@"), g.key[i])
+			name := strings.TrimPrefix(p, "@")
+			row.Set(name, g.key[i])
+			if g.null[i] {
+				row.markNull(name)
+			}
 		}
 		for _, red := range reducers {
 			v, err := reduce(red, g.rows)
@@ -149,6 +180,12 @@ func Group(rows []*Row, props []string, reducers []Reducer) ([]*Row, error) {
 				name = "__generated_alias" + strings.ToLower(red.Fn) + strings.ToLower(strings.Join(trimAt(red.Args), ""))
 			}
 			row.Set(name, v)
+			if fn := strings.ToUpper(red.Fn); fn == "TOLIST" || fn == "RANDOM_SAMPLE" {
+				if row.lists == nil {
+					row.lists = make(map[string]bool)
+				}
+				row.lists[name] = true
+			}
 		}
 		out = append(out, row)
 	}
@@ -321,10 +358,10 @@ func FormatNumber(f float64) string {
 	if math.IsNaN(f) {
 		return "nan"
 	}
-	if f == math.Trunc(f) && math.Abs(f) < 1e17 {
+	if f == math.Trunc(f) && math.Abs(f) < 1<<63 {
 		return strconv.FormatInt(int64(f), 10)
 	}
-	return strconv.FormatFloat(f, 'g', -1, 64)
+	return strconv.FormatFloat(f, 'g', 12, 64)
 }
 
 // Expr is a parsed APPLY or FILTER expression.
@@ -523,6 +560,36 @@ func (n callNode) eval(r *Row) value {
 
 // Eval returns the expression's value for r as a string.
 func (e *Expr) Eval(r *Row) string { return e.root.eval(r).String() }
+
+// Missing returns a property the expression reads that r lacks, which
+// RediSearch refuses to evaluate; exists() may read anything.
+func (e *Expr) Missing(r *Row) (string, bool) { return missingField(e.root, r) }
+
+func missingField(n exprNode, r *Row) (string, bool) {
+	switch n := n.(type) {
+	case fieldNode:
+		if _, ok := r.Get(n.name); !ok {
+			return n.name, true
+		}
+	case unaryOp:
+		return missingField(n.x, r)
+	case binaryOp:
+		if name, ok := missingField(n.l, r); ok {
+			return name, true
+		}
+		return missingField(n.r, r)
+	case callNode:
+		if n.fn == "exists" {
+			return "", false
+		}
+		for _, a := range n.args {
+			if name, ok := missingField(a, r); ok {
+				return name, true
+			}
+		}
+	}
+	return "", false
+}
 
 // Truthy reports whether a FILTER expression holds for r.
 func (e *Expr) Truthy(r *Row) bool { return e.root.eval(r).truthy() }

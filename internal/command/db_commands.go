@@ -94,6 +94,7 @@ func cmdFLUSHDB(ctx *Context) error {
 		return ctx.WriteError(ErrSyntaxError)
 	}
 	ctx.Store.Flush()
+	searchIndexesFor(ctx).Reset()
 	return ctx.WriteOK()
 }
 
@@ -102,6 +103,7 @@ func cmdFLUSHALL(ctx *Context) error {
 		return ctx.WriteError(ErrSyntaxError)
 	}
 	ctx.databases().FlushAll()
+	searchIndexesFor(ctx).Reset()
 	return ctx.WriteOK()
 }
 

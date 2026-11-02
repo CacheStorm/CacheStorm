@@ -46,20 +46,6 @@ func seedSearch(t *testing.T, c *replClient) {
 	}
 }
 
-// seedDocuments writes seedSearch's documents again, into indexes that
-// already exist.
-func seedDocuments(t *testing.T, c *replClient) {
-	t.Helper()
-	for _, cmd := range [][]string{
-		{"FT.ADD", "articles", "doc1", "1", "FIELDS", "title", "hello world", "body", "first\r\nbody", "tags", "a,b"},
-		{"FT.ADD", "news", "doc2", "0.5", "FIELDS", "title", "hello there"},
-	} {
-		if got := c.str(cmd...); got != "OK" {
-			t.Fatalf("%v = %s", cmd, got)
-		}
-	}
-}
-
 func searchIDs(t *testing.T, c *replClient, index, query string) string {
 	t.Helper()
 	v := c.do("FT.SEARCH", index, query, "NOCONTENT")
@@ -88,8 +74,10 @@ func checkSearch(t *testing.T, c *replClient) {
 	if got := searchIDs(t, c, "articles", "stale"); got != "" {
 		t.Fatalf("replaced document still matches its old title: %s", got)
 	}
-	if got := searchIDs(t, c, "articles", "first"); got != "doc1" {
-		t.Fatalf("FT.SEARCH first = %s", got)
+	// Control characters are dropped from a token, not split on: the
+	// body "first\r\nbody" is the one word "firstbody", as in Redis.
+	if got := searchIDs(t, c, "articles", "firstbody"); got != "doc1" {
+		t.Fatalf("FT.SEARCH firstbody = %s", got)
 	}
 	if got := c.do("FT.GET", "articles", "doc1"); got.Type != resp.TypeArray || !strings.Contains(sortedPairs(got), "body=first\r\nbody") {
 		t.Fatalf("FT.GET doc1 = %s", str(got))
@@ -224,9 +212,9 @@ func TestSearchFullSyncReplacesReplicaStateAndPersists(t *testing.T) {
 	checkSearch(t, dialRepl(t, startReplServerCfg(t, cfg)))
 }
 
-// FLUSHALL deletes the documents, which are keys, and keeps the index
-// definitions, as in Redis.
-func TestSearchSurvivesFlushAll(t *testing.T) {
+// FLUSHALL deletes the documents and, as in Redis 8, every index; a
+// restart replays both.
+func TestSearchFlushAllDropsIndexes(t *testing.T) {
 	cfg := aofRewriteConfig(t, t.TempDir(), nil)
 	s := startReplServerCfg(t, cfg)
 	c := dialRepl(t, s)
@@ -235,8 +223,8 @@ func TestSearchSurvivesFlushAll(t *testing.T) {
 	if got := c.str("FLUSHALL"); got != "OK" {
 		t.Fatal(got)
 	}
-	if got := c.do("FT.SEARCH", "articles", "hello", "NOCONTENT"); len(got.Array) != 1 || got.Array[0].Int != 0 {
-		t.Fatalf("FT.SEARCH after FLUSHALL = %+v, want no documents", got)
+	if got := c.str("FT.SEARCH", "articles", "hello", "NOCONTENT"); got != "ERR:No such index articles" {
+		t.Fatalf("FT.SEARCH after FLUSHALL = %s, want no index", got)
 	}
 	stopReplServer(s)
 
@@ -244,6 +232,7 @@ func TestSearchSurvivesFlushAll(t *testing.T) {
 	if got := r.str("EXISTS", "k"); got != "0" {
 		t.Fatalf("flushed key came back: %s", got)
 	}
-	seedDocuments(t, r)
-	checkSearch(t, r)
+	if got := r.str("FT._LIST"); got != "[]" {
+		t.Fatalf("FT._LIST after restart = %s", got)
+	}
 }

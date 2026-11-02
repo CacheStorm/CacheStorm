@@ -44,6 +44,9 @@ func cmdFTCREATE(ctx *Context) error {
 	if ctx.ArgCount() < 2 {
 		return ctx.WriteError(arityError(ctx.Command))
 	}
+	if ctx.DB != 0 {
+		return ctx.WriteError(errors.New("Cannot create index on db != 0")) //nolint:staticcheck // RediSearch's reply text
+	}
 	args := make([]string, ctx.ArgCount()-1)
 	for i := range args {
 		args[i] = ctx.ArgString(i + 1)
@@ -55,6 +58,7 @@ func cmdFTCREATE(ctx *Context) error {
 	if err := searchIndexesFor(ctx).Create(idx); err != nil {
 		return ctx.WriteError(err)
 	}
+	idx.Open(ctx.Store)
 	return ctx.WriteOK()
 }
 
@@ -71,7 +75,7 @@ func indexDocuments(ctx *Context, idx *search.Index, keys map[string]bool) []*se
 			docs = append(docs, d)
 		}
 	}
-	sort.Slice(docs, func(i, j int) bool { return docs[i].Key < docs[j].Key })
+	search.SortByID(docs)
 	return docs
 }
 
@@ -102,7 +106,7 @@ func cmdFTLIST(ctx *Context) error {
 	for i, n := range names {
 		out[i] = resp.SimpleString(n)
 	}
-	return ctx.WriteArray(out)
+	return ctx.WriteValue(resp.SetValue(out))
 }
 
 func cmdFTINFO(ctx *Context) error {
@@ -182,8 +186,45 @@ func countedArgs(ctx *Context, i int) ([]string, int, error) {
 	return out, i + 1 + n, nil
 }
 
+//nolint:staticcheck // RediSearch's reply texts
+var (
+	errLimitArity  = errors.New("LIMIT requires two arguments")
+	errLimitNumber = errors.New("LIMIT needs two numeric arguments")
+	errLimitOffset = errors.New("The `offset` of the LIMIT must be 0 when `num` is 0")
+)
+
+// parseDialect reads a DIALECT argument; anything but a number is the
+// default dialect.
+func parseDialect(s string) int {
+	if d, err := strconv.Atoi(s); err == nil {
+		return d
+	}
+	return 1
+}
+
+func errMissingProperty(name string) error {
+	return errors.New("Could not find the value for a parameter name, consider using EXISTS if applicable for " + name) //nolint:staticcheck // RediSearch's reply text
+}
+
+// parseLimit reads the offset and count after LIMIT at args[i].
+func parseLimit(ctx *Context, i int) (offset, num int, err error) {
+	if i+2 >= ctx.ArgCount() {
+		return 0, 0, errLimitArity
+	}
+	off, err1 := strconv.ParseUint(ctx.ArgString(i+1), 10, 31)
+	cnt, err2 := strconv.ParseUint(ctx.ArgString(i+2), 10, 31)
+	if err1 != nil || err2 != nil {
+		return 0, 0, errLimitNumber
+	}
+	if cnt == 0 && off != 0 {
+		return 0, 0, errLimitOffset
+	}
+	return int(off), int(cnt), nil
+}
+
 type searchRequest struct {
 	noContent, withScores, withSortKeys bool
+	withPayloads                        bool
 	opts                                search.QueryOptions
 	filters                             []search.Node
 	inKeys                              map[string]bool
@@ -209,7 +250,9 @@ func parseSearchRequest(ctx *Context) (*searchRequest, error) {
 			r.withScores = true
 		case "WITHSORTKEYS":
 			r.withSortKeys = true
-		case "WITHPAYLOADS", "INORDER", "EXPLAINSCORE":
+		case "WITHPAYLOADS":
+			r.withPayloads = true
+		case "INORDER", "EXPLAINSCORE":
 		case "FILTER":
 			if i+3 >= n {
 				return nil, errors.New("Bad arguments for FILTER: Expected an argument, but none provided") //nolint:staticcheck // RediSearch's reply text
@@ -254,8 +297,13 @@ func parseSearchRequest(ctx *Context) (*searchRequest, error) {
 			r.returnSet, i = true, last
 			for j := 0; j < len(fields); j++ {
 				name, as := fields[j], fields[j]
-				if j+2 < len(fields) && strings.EqualFold(fields[j+1], "AS") {
-					as = fields[j+2]
+				if j+1 < len(fields) && strings.EqualFold(fields[j+1], "AS") {
+					if j+2 >= len(fields) {
+						return nil, errors.New("RETURN path AS name - must be accompanied with NAME") //nolint:staticcheck // RediSearch's reply text
+					}
+					if as = fields[j+2]; strings.EqualFold(as, "AS") {
+						return nil, errors.New("Alias for RETURN cannot be `AS`") //nolint:staticcheck // RediSearch's reply text
+					}
 					j += 2
 				}
 				r.returns = append(r.returns, [2]string{name, as})
@@ -282,13 +330,9 @@ func parseSearchRequest(ctx *Context) (*searchRequest, error) {
 				i++
 			}
 		case "LIMIT":
-			if i+2 >= n {
-				return nil, errors.New("Bad arguments for LIMIT: Expected an argument, but none provided") //nolint:staticcheck // RediSearch's reply text
-			}
-			off, err1 := strconv.Atoi(ctx.ArgString(i + 1))
-			num, err2 := strconv.Atoi(ctx.ArgString(i + 2))
-			if err1 != nil || err2 != nil || off < 0 || num < 0 {
-				return nil, errors.New("Bad arguments for LIMIT: Value is outside acceptable bounds") //nolint:staticcheck // RediSearch's reply text
+			off, num, err := parseLimit(ctx, i)
+			if err != nil {
+				return nil, err
 			}
 			r.offset, r.limit = off, num
 			i += 2
@@ -318,7 +362,12 @@ func parseSearchRequest(ctx *Context) (*searchRequest, error) {
 					more = false
 				}
 			}
-		case "SLOP", "TIMEOUT", "LANGUAGE", "EXPANDER", "SCORER", "PAYLOAD", "DIALECT":
+		case "DIALECT":
+			if i+1 < n {
+				r.opts.Dialect = parseDialect(ctx.ArgString(i + 1))
+			}
+			i++
+		case "SLOP", "TIMEOUT", "LANGUAGE", "EXPANDER", "SCORER", "PAYLOAD":
 			i++
 		}
 	}
@@ -390,7 +439,8 @@ func cmdFTSEARCH(ctx *Context) error {
 				c = strings.Compare(a.sortKey, b.sortKey)
 			}
 			if c == 0 {
-				return a.doc.Key < b.doc.Key
+				// Ties go by document id, the later first when descending.
+				return a.doc.Before(b.doc) != req.sortDesc
 			}
 			if req.sortDesc {
 				return c > 0
@@ -398,33 +448,78 @@ func cmdFTSEARCH(ctx *Context) error {
 			return c < 0
 		})
 	} else {
-		sort.Slice(hits, func(i, j int) bool {
+		sort.SliceStable(hits, func(i, j int) bool {
 			if hits[i].score != hits[j].score {
 				return hits[i].score > hits[j].score
 			}
-			return hits[i].doc.Key < hits[j].doc.Key
+			return hits[i].doc.Before(hits[j].doc)
 		})
 	}
-	out := []*resp.Value{resp.IntegerValue(int64(len(hits)))}
+	resp3 := ctx.Writer.IsRESP3()
+	var results []*resp.Value
+	order := &fieldOrder{}
 	for i := req.offset; i < len(hits) && i < req.offset+req.limit; i++ {
 		h := hits[i]
+		key := h.doc.Key
 		// The documents returned are read again if their key changed in a
 		// way no command reported.
-		if h.doc = idx.Content(ctx.Store, h.doc.Key); h.doc == nil {
+		if h.doc = idx.Content(ctx.Store, key); h.doc == nil {
 			continue
 		}
-		out = append(out, resp.BulkString(h.doc.Key))
+		var fields []*resp.Value
+		add := func(name string, v *resp.Value) {
+			if resp3 {
+				fields = append(fields, resp.SimpleString(name))
+			}
+			fields = append(fields, v)
+		}
+		add("id", resp.BulkString(key))
 		if req.withScores {
-			out = append(out, resp.BulkString(strconv.FormatFloat(h.score, 'g', -1, 64)))
+			add("score", resp.DoubleValue(fpconvDtoa(h.score)))
+		}
+		if req.withPayloads {
+			add("payload", resp.NullBulkString())
 		}
 		if req.withSortKeys {
-			out = append(out, sortKeyReply(idx, h.doc, req.sortBy))
+			add("sortkey", sortKeyReply(idx, h.doc, req.sortBy))
 		}
 		if !req.noContent {
-			out = append(out, documentReply(idx, h.doc, req))
+			doc := documentReply(idx, h.doc, req, order)
+			if resp3 {
+				doc = resp.PairsValue(doc.Array)
+			}
+			add("extra_attributes", doc)
+		}
+		if resp3 {
+			add("values", resp.ArrayValue([]*resp.Value{}))
+			results = append(results, resp.PairsValue(fields))
+		} else {
+			results = append(results, fields...)
 		}
 	}
-	return ctx.WriteArray(out)
+	return ctx.WriteValue(searchReply(resp3, len(hits), results))
+}
+
+// searchReply is FT.SEARCH's and FT.AGGREGATE's reply: the total and the
+// results, flat for RESP2 and as RediSearch's map for RESP3.
+func searchReply(resp3 bool, total int, results []*resp.Value, warnings ...string) *resp.Value {
+	if !resp3 {
+		return resp.ArrayValue(append([]*resp.Value{resp.IntegerValue(int64(total))}, results...))
+	}
+	if results == nil {
+		results = []*resp.Value{}
+	}
+	warn := []*resp.Value{}
+	for _, w := range warnings {
+		warn = append(warn, resp.SimpleString(w))
+	}
+	return resp.PairsValue([]*resp.Value{
+		resp.SimpleString("attributes"), resp.ArrayValue([]*resp.Value{}),
+		resp.SimpleString("format"), resp.SimpleString("STRING"),
+		resp.SimpleString("results"), resp.ArrayValue(results),
+		resp.SimpleString("total_results"), resp.IntegerValue(int64(total)),
+		resp.SimpleString("warning"), resp.ArrayValue(warn),
+	})
 }
 
 func sortKeyReply(idx *search.Index, doc *search.Document, field string) *resp.Value {
@@ -433,41 +528,69 @@ func sortKeyReply(idx *search.Index, doc *search.Document, field string) *resp.V
 		return resp.NullBulkString()
 	}
 	if f, err := strconv.ParseFloat(v, 64); err == nil {
-		return resp.BulkString("#" + search.FormatNumber(f))
+		return resp.BulkString("#" + strconv.FormatFloat(f, 'g', 17, 64))
 	}
 	return resp.BulkString("$" + strings.ToLower(v))
 }
 
-// documentReply is a result's fields: RETURN's, or every hash field (the
-// SORTBY field first) or the JSON document as "$".
-func documentReply(idx *search.Index, doc *search.Document, req *searchRequest) *resp.Value {
+// fieldOrder is the order a search's replies give fields in: RediSearch
+// lists a result's fields in the order the query first met them, the
+// SORTBY field first.
+type fieldOrder struct {
+	names []string
+	seen  map[string]bool
+}
+
+func (o *fieldOrder) add(name string) {
+	if o.seen == nil {
+		o.seen = make(map[string]bool)
+	}
+	if !o.seen[name] {
+		o.seen[name] = true
+		o.names = append(o.names, name)
+	}
+}
+
+// documentReply is a result's fields: RETURN's, or every hash field, or
+// the JSON document as "$", in the order o keeps.
+func documentReply(idx *search.Index, doc *search.Document, req *searchRequest, o *fieldOrder) *resp.Value {
+	if o == nil {
+		o = &fieldOrder{}
+	}
+	sortName := ""
+	if req.sortBy != "" {
+		sortName = req.sortBy
+		if f := idx.Field(req.sortBy); f != nil && !idx.JSON {
+			sortName = f.Identifier
+		}
+		o.add(sortName)
+	}
 	var out []*resp.Value
 	switch {
 	case req.returnSet:
+		values := make(map[string]string, len(req.returns))
 		for _, r := range req.returns {
+			o.add(r[1])
 			if v, ok := search.FieldValue(idx, doc, r[0]); ok {
-				out = append(out, resp.BulkString(r[1]), resp.BulkString(v))
+				values[r[1]] = v
+			}
+		}
+		for _, name := range o.names {
+			if v, ok := values[name]; ok {
+				out = append(out, resp.BulkString(name), resp.BulkString(v))
 			}
 		}
 	case doc.JSON != nil:
 		out = append(out, resp.BulkString("$"), resp.BulkBytes(store.AppendJSON(nil, doc.JSON)))
 	default:
-		first := ""
-		if req.sortBy != "" {
-			if f := idx.Field(req.sortBy); f != nil {
-				first = f.Identifier
-			} else {
-				first = req.sortBy
-			}
-			if v, ok := doc.HashField(first); ok {
-				out = append(out, resp.BulkString(first), resp.BulkString(v))
-			} else {
-				first = ""
-			}
-		}
+		values := make(map[string]string, len(doc.Fields))
 		for _, kv := range doc.Fields {
-			if kv[0] != first {
-				out = append(out, resp.BulkString(kv[0]), resp.BulkString(kv[1]))
+			o.add(kv[0])
+			values[kv[0]] = kv[1]
+		}
+		for _, name := range o.names {
+			if v, ok := values[name]; ok {
+				out = append(out, resp.BulkString(name), resp.BulkString(v))
 			}
 		}
 	}
@@ -488,6 +611,10 @@ func cmdFTAGGREGATE(ctx *Context) error {
 		switch strings.ToUpper(ctx.ArgString(i)) {
 		case "VERBATIM":
 			opts.Verbatim = true
+		case "DIALECT":
+			if i+1 < n {
+				opts.Dialect = parseDialect(ctx.ArgString(i + 1))
+			}
 		case "PARAMS":
 			params, last, err := countedArgs(ctx, i)
 			if err != nil {
@@ -504,14 +631,42 @@ func cmdFTAGGREGATE(ctx *Context) error {
 		return ctx.WriteError(err)
 	}
 	found := idx.Search(ctx.Store, query, opts)
-	sort.Slice(found, func(i, j int) bool { return found[i].Doc.Key < found[j].Doc.Key })
-	var rows []*search.Row
-	for _, h := range found {
-		if d := idx.Content(ctx.Store, h.Doc.Key); d != nil {
-			rows = append(rows, idx.NewRow(d))
+	sort.Slice(found, func(i, j int) bool { return found[i].Doc.Before(found[j].Doc) })
+	addScores := false
+	for i := 2; i < n; i++ {
+		if strings.EqualFold(ctx.ArgString(i), "ADDSCORES") {
+			addScores = true
 		}
 	}
+	var rows []*search.Row
+	// read is how many documents the query had read when a row came from
+	// each: RediSearch's total counts the documents read before the first
+	// row it sends, unless a GROUPBY or SORTBY read them all first.
+	read := make(map[*search.Row]int)
+	for i, h := range found {
+		if d := idx.Content(ctx.Store, h.Doc.Key); d != nil {
+			r := idx.NewRow(d)
+			if addScores {
+				r.Set("__score", strconv.FormatFloat(h.Score, 'g', 12, 64))
+			}
+			rows = append(rows, r)
+			read[r] = i + 1
+		}
+	}
+	grouped, sorted := false, false
 	offset, limit := 0, -1
+	// failed holds the rows an APPLY or FILTER could not evaluate. The
+	// rows stream through the steps, so an error stops the reply where
+	// the row comes, unless a GROUPBY or SORTBY needs every row first.
+	failed := make(map[*search.Row]error)
+	barrier := func() error {
+		for _, r := range rows {
+			if err, ok := failed[r]; ok {
+				return err
+			}
+		}
+		return nil
+	}
 	for i := 2; i < n; i++ {
 		word := strings.ToUpper(ctx.ArgString(i))
 		switch word {
@@ -555,9 +710,13 @@ func cmdFTAGGREGATE(ctx *Context) error {
 				}
 				reducers = append(reducers, red)
 			}
+			if err := barrier(); err != nil {
+				return ctx.WriteError(err)
+			}
 			if rows, err = search.Group(rows, props, reducers); err != nil {
 				return ctx.WriteError(err)
 			}
+			grouped = true
 		case "SORTBY":
 			props, last, err := countedArgs(ctx, i)
 			if err != nil {
@@ -573,7 +732,11 @@ func cmdFTAGGREGATE(ctx *Context) error {
 				}
 				keys = append(keys, k)
 			}
+			if err := barrier(); err != nil {
+				return ctx.WriteError(err)
+			}
 			search.SortRows(rows, keys)
+			sorted = true
 			if i+2 < n && strings.EqualFold(ctx.ArgString(i+1), "MAX") {
 				if m, err := strconv.Atoi(ctx.ArgString(i + 2)); err == nil && m < len(rows) {
 					rows = rows[:m]
@@ -590,6 +753,13 @@ func cmdFTAGGREGATE(ctx *Context) error {
 			}
 			name := ctx.ArgString(i + 3)
 			for _, r := range rows {
+				if _, ok := failed[r]; ok {
+					continue
+				}
+				if missing, ok := expr.Missing(r); ok {
+					failed[r] = errMissingProperty(missing)
+					continue
+				}
 				r.Set(name, expr.Eval(r))
 			}
 			i += 3
@@ -603,6 +773,15 @@ func cmdFTAGGREGATE(ctx *Context) error {
 			}
 			kept := rows[:0]
 			for _, r := range rows {
+				if _, ok := failed[r]; ok {
+					kept = append(kept, r)
+					continue
+				}
+				if missing, ok := expr.Missing(r); ok {
+					failed[r] = errMissingProperty(missing)
+					kept = append(kept, r)
+					continue
+				}
 				if expr.Truthy(r) {
 					kept = append(kept, r)
 				}
@@ -610,13 +789,9 @@ func cmdFTAGGREGATE(ctx *Context) error {
 			rows = kept
 			i++
 		case "LIMIT":
-			if i+2 >= n {
-				return ctx.WriteError(errors.New("Bad arguments for LIMIT: Expected an argument, but none provided")) //nolint:staticcheck // RediSearch's reply text
-			}
-			off, err1 := strconv.Atoi(ctx.ArgString(i + 1))
-			num, err2 := strconv.Atoi(ctx.ArgString(i + 2))
-			if err1 != nil || err2 != nil || off < 0 || num < 0 {
-				return ctx.WriteError(errors.New("Bad arguments for LIMIT: Value is outside acceptable bounds")) //nolint:staticcheck // RediSearch's reply text
+			off, num, err := parseLimit(ctx, i)
+			if err != nil {
+				return ctx.WriteError(err)
 			}
 			offset, limit = off, num
 			i += 2
@@ -630,13 +805,47 @@ func cmdFTAGGREGATE(ctx *Context) error {
 			i++
 		}
 	}
-	out := []*resp.Value{resp.IntegerValue(int64(len(rows)))}
-	for i := offset; i < len(rows) && (limit < 0 || i < offset+limit); i++ {
+	resp3 := ctx.Writer.IsRESP3()
+	end := len(rows)
+	if limit >= 0 {
+		end = min(end, offset+limit)
+	}
+	var warning error
+	for i := 0; i < end; i++ {
+		if err, ok := failed[rows[i]]; ok {
+			if i <= offset {
+				return ctx.WriteError(err)
+			}
+			end, warning = i, err
+			break
+		}
+	}
+	total := len(rows)
+	if !grouped {
+		// A RESP2 reply sends the total after the first row, a RESP3 one
+		// after the last row or the error.
+		total = len(found)
+		switch {
+		case sorted || limit == 0 || offset >= len(rows):
+		case !resp3:
+			total = read[rows[offset]]
+		case warning != nil:
+			total = read[rows[end]]
+		case limit > 0 && offset+limit <= len(rows):
+			total = read[rows[offset+limit-1]]
+		}
+	}
+	results := []*resp.Value{}
+	for i := offset; i < end; i++ {
 		r := rows[i]
 		fields := make([]*resp.Value, 0, 2*len(r.Names))
 		for j, name := range r.Names {
 			v := r.Values[j]
-			if strings.Contains(v, "\x00") || strings.HasPrefix(name, "__generated_aliastolist") {
+			if r.IsNull(name) {
+				fields = append(fields, resp.BulkString(name), resp.NullBulkString())
+				continue
+			}
+			if r.IsList(name) {
 				list := []*resp.Value{}
 				if v != "" {
 					for _, item := range strings.Split(v, "\x00") {
@@ -648,9 +857,20 @@ func cmdFTAGGREGATE(ctx *Context) error {
 			}
 			fields = append(fields, resp.BulkString(name), resp.BulkString(v))
 		}
-		out = append(out, resp.ArrayValue(fields))
+		if resp3 {
+			results = append(results, resp.PairsValue([]*resp.Value{
+				resp.SimpleString("extra_attributes"), resp.PairsValue(fields),
+				resp.SimpleString("values"), resp.ArrayValue([]*resp.Value{}),
+			}))
+		} else {
+			results = append(results, resp.ArrayValue(fields))
+		}
 	}
-	return ctx.WriteArray(out)
+	var warnings []string
+	if warning != nil {
+		warnings = append(warnings, warning.Error())
+	}
+	return ctx.WriteValue(searchReply(resp3, total, results, warnings...))
 }
 
 func cmdFTTAGVALS(ctx *Context) error {
@@ -670,7 +890,7 @@ func cmdFTTAGVALS(ctx *Context) error {
 	for i, t := range tags {
 		out[i] = resp.BulkString(t)
 	}
-	return ctx.WriteArray(out)
+	return ctx.WriteValue(resp.SetValue(out))
 }
 
 func cmdFTALIASADD(ctx *Context) error {
@@ -711,10 +931,30 @@ func cmdFTEXPLAIN(ctx *Context) error {
 	if !ok {
 		return ctx.WriteError(errNoSuchIndex(ctx.ArgString(0)))
 	}
-	if _, err := search.ParseQuery(idx, ctx.ArgString(1), search.QueryOptions{}); err != nil {
+	opts := search.QueryOptions{Params: map[string]string{}}
+	for i := 2; i < ctx.ArgCount(); i++ {
+		switch strings.ToUpper(ctx.ArgString(i)) {
+		case "DIALECT":
+			if i+1 < ctx.ArgCount() {
+				opts.Dialect = parseDialect(ctx.ArgString(i + 1))
+				i++
+			}
+		case "PARAMS":
+			params, last, err := countedArgs(ctx, i)
+			if err != nil {
+				return ctx.WriteError(err)
+			}
+			for j := 0; j+1 < len(params); j += 2 {
+				opts.Params[params[j]] = params[j+1]
+			}
+			i = last
+		}
+	}
+	query, err := search.ParseQuery(idx, ctx.ArgString(1), opts)
+	if err != nil {
 		return ctx.WriteError(err)
 	}
-	return ctx.WriteBulkString(ctx.ArgString(1) + "\n")
+	return ctx.WriteBulkString(idx.Explain(query))
 }
 
 // cmdFTADD is RediSearch 1's FT.ADD index docId score [REPLACE [PARTIAL]]
@@ -794,7 +1034,7 @@ func cmdFTGET(ctx *Context) error {
 	if !ok {
 		return ctx.WriteNullBulkString()
 	}
-	return ctx.WriteValue(documentReply(idx, doc, &searchRequest{}))
+	return ctx.WriteValue(documentReply(idx, doc, &searchRequest{}, nil))
 }
 
 // touchSearchKey marks key changed for every index of the server.

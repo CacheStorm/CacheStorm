@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
+	"github.com/cachestorm/cachestorm/internal/search"
 	"github.com/cachestorm/cachestorm/internal/store"
 )
 
@@ -36,6 +37,24 @@ func TestJSONReplaysRedisJSONCorpus(t *testing.T) {
 	replayRedisCorpus(t, router, "testdata/redisjson_r8.jsonl")
 }
 
+// testdata/redisearch_r8.jsonl holds FT commands and Redis 8.2's
+// (RediSearch 8.2.13) replies: random documents and queries, the parse
+// trees FT.EXPLAIN prints for random DIALECT 1 queries and their syntax
+// errors, in RESP2 and RESP3. Replies left without "want" differ by
+// design: hash-ordered lists and groups, FT.INFO's statistics, and scores
+// that depend on the order RediSearch's iterators visit a union's terms.
+func TestSearchReplaysRediSearchCorpus(t *testing.T) {
+	router := NewRouter()
+	RegisterSearchCommands(router)
+	RegisterHashCommands(router)
+	RegisterJSONCommands(router)
+	RegisterStringCommands(router)
+	RegisterKeyCommands(router)
+	search.GetIndexManager().Reset()
+	t.Cleanup(search.GetIndexManager().Reset)
+	replayRedisCorpus(t, router, "testdata/redisearch_r8.jsonl")
+}
+
 func replayRedisCorpus(t *testing.T, router *Router, file string) {
 	t.Helper()
 	f, err := os.Open(file)
@@ -58,6 +77,7 @@ func replayRedisCorpus(t *testing.T, router *Router, file string) {
 		switch strings.ToUpper(c.Cmd[0]) {
 		case "FLUSHALL":
 			st = store.NewStore()
+			search.GetIndexManager().Reset()
 			continue
 		case "HELLO":
 			resp3 = c.Cmd[1] == "3"

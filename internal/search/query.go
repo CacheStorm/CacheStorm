@@ -6,36 +6,63 @@ import (
 	"math"
 	"strconv"
 	"strings"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/cachestorm/cachestorm/internal/store"
 )
 
 // Document is a key as an index reads it. The indexed form keeps what
-// queries match on: each schema field's tokens and stems, numbers and tags,
-// and the raw value of SORTABLE fields. A full document (Content) also
-// holds the hash fields in their order or the JSON document, for replies.
+// queries match on: each schema field's tokens, numbers and tags, the
+// document's index terms with their weighted frequencies, and the raw value
+// of SORTABLE fields. A full document (Content) also holds the hash fields
+// in their order or the JSON document, for replies.
 type Document struct {
 	Key    string
 	Fields [][2]string
 	JSON   *store.JNode
 	full   bool
 	fields []docField
-	length int32
+	// terms are the document's text index terms, as RediSearch's forward
+	// index has them: each token, and "+stem" for a token whose stem
+	// differs, with its frequency weighted by the field and the fields it
+	// occurs in.
+	terms  map[string]termFreq
+	length uint32
+	// id orders documents as RediSearch's document ids do: by when the key
+	// was last indexed.
+	id int64
 	// entry and value are what the document was read from, to tell when
 	// the key changed since.
 	entry *store.Entry
 	value store.Value
 }
 
+type termFreq struct {
+	freq uint32
+	mask uint64
+}
+
 // docField is one schema field of a document, by position in the schema.
 type docField struct {
-	strs  []string // TEXT tokens, TAG tags
-	stems []string // TEXT stems, sharing the token when unchanged
-	nums  []float64
-	raw   []string // full documents and SORTABLE fields
+	strs []string // TEXT tokens in position order, TAG tags
+	nums []float64
+	raw  []string // full documents and SORTABLE fields
 }
+
+func fieldBit(pos int) uint64 { return 1 << (uint(pos) & 63) }
+
+// termWeight is what one occurrence adds to a term's frequency and the
+// document's length: the field weight, at least 1.
+func termWeight(w float64) uint32 {
+	return max(1, uint32(float32(w)))
+}
+
+// stemWeight is the same for a stem, which counts a fifth.
+func stemWeight(w float64) uint32 {
+	return max(1, uint32(float32(float64(float32(w))*0.2)))
+}
+
+// minStemLength is the shortest token whose stem is indexed.
+const minStemLength = 4
 
 // Load reads key's value as idx indexes it; ok is false when the value is
 // not of the index's type. full keeps the content for replies.
@@ -79,6 +106,7 @@ func (idx *Index) Load(key string, entry *store.Entry, full bool) (*Document, bo
 	default:
 		return nil, false
 	}
+	stemming := idx.Language == "english"
 	for i := range idx.Fields {
 		f := &idx.Fields[i]
 		df := &doc.fields[i]
@@ -112,13 +140,22 @@ func (idx *Index) Load(key string, entry *store.Entry, full bool) (*Document, bo
 				}
 			}
 		case FieldText:
+			if f.NoIndex {
+				continue
+			}
+			bit, w, sw := fieldBit(i), termWeight(f.Weight), stemWeight(f.Weight)
 			for _, raw := range values[i] {
-				toks := Tokenize(raw)
-				df.strs = append(df.strs, toks...)
-				for _, t := range toks {
-					df.stems = append(df.stems, Stem(t))
-					if !idx.Stopwords[t] {
-						doc.length++
+				for _, t := range Tokenize(raw) {
+					if idx.Stopwords[t] {
+						continue
+					}
+					df.strs = append(df.strs, t)
+					doc.addTerm(t, w, bit)
+					doc.length += w
+					if stemming && !f.NoStem && len(t) >= minStemLength {
+						if st := snowballEnglish(t); st != t {
+							doc.addTerm("+"+st, sw, bit)
+						}
 					}
 				}
 			}
@@ -127,17 +164,14 @@ func (idx *Index) Load(key string, entry *store.Entry, full bool) (*Document, bo
 	return doc, true
 }
 
-// stemSet calls fn once for each distinct stem of the document.
-func (d *Document) stemSet(fn func(stem string)) {
-	seen := make(map[string]struct{})
-	for _, f := range d.fields {
-		for _, st := range f.stems {
-			if _, ok := seen[st]; !ok {
-				seen[st] = struct{}{}
-				fn(st)
-			}
-		}
+func (d *Document) addTerm(t string, freq uint32, bit uint64) {
+	if d.terms == nil {
+		d.terms = make(map[string]termFreq)
 	}
+	tf := d.terms[t]
+	tf.freq += freq
+	tf.mask |= bit
+	d.terms[t] = tf
 }
 
 // jsonScalars are the indexable values of a JSON match: a scalar, or the
@@ -171,68 +205,73 @@ func (d *Document) HashField(name string) (string, bool) {
 	return "", false
 }
 
-func isSeparator(r rune) bool {
-	if unicode.IsSpace(r) {
-		return true
+// tokenSeparators are the bytes that split text into tokens, as
+// RediSearch's tokenizer has them; a backslash escapes one.
+var tokenSeparators = func() (t [256]bool) {
+	for _, c := range []byte(" \t,./(){}[]:;~!@#$%^&*-=+|'`\"<>?") {
+		t[c] = true
 	}
-	return strings.ContainsRune(",.<>{}[]\"':;!@#$%^&*()-+=~/\\|?`", r)
-}
+	return t
+}()
 
-// Tokenize splits text into lower-case terms, as RediSearch does.
+// Tokenize splits text into lower-case terms, as RediSearch does: at the
+// separators, dropping escaping backslashes, unescaped blanks and control
+// characters from each token.
 func Tokenize(text string) []string {
-	return strings.FieldsFunc(strings.ToLower(text), isSeparator)
+	var out []string
+	for _, sp := range tokenSpans(text) {
+		out = append(out, sp.tok)
+	}
+	return out
 }
 
-// Stem reduces an English word to a stem, so plural and inflected forms
-// match: a light Porter-style suffix stripper.
-func Stem(w string) string {
-	if utf8.RuneCountInString(w) < 4 {
-		return w
-	}
-	for _, rule := range [][2]string{{"sses", "ss"}, {"ies", "y"}, {"ness", ""}, {"ing", ""}, {"edly", ""}, {"ed", ""}, {"ly", ""}, {"es", ""}, {"s", ""}} {
-		if strings.HasSuffix(w, rule[0]) && !strings.HasSuffix(w, "ss") || rule[0] == "sses" && strings.HasSuffix(w, "sses") {
-			stem := strings.TrimSuffix(w, rule[0]) + rule[1]
-			if utf8.RuneCountInString(stem) >= 3 {
-				return stem
+// span is a token and the offset and text it was read from.
+type span struct {
+	start int
+	raw   string
+	tok   string
+}
+
+func tokenSpans(text string) []span {
+	var out []span
+	start, escaped := 0, false
+	for i := 0; i <= len(text); i++ {
+		if i < len(text) {
+			c := text[i]
+			if !tokenSeparators[c] || escaped {
+				escaped = !escaped && c == '\\'
+				continue
 			}
 		}
+		if t := normalizeToken(text[start:i]); t != "" {
+			out = append(out, span{start, text[start:i], t})
+		}
+		start, escaped = i+1, false
 	}
-	return w
+	return out
 }
 
-// Node is a parsed query node.
-type Node interface{}
-
-type (
-	andNode  struct{ children []Node }
-	orNode   struct{ children []Node }
-	notNode  struct{ child Node }
-	allNode  struct{}
-	termNode struct {
-		fields []string
-		text   string
-		stem   string
-		prefix bool
-		phrase []string
+func normalizeToken(s string) string {
+	var b []byte
+	escaped := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case (c == ' ' || c == '\t') && !escaped || c < 0x20 || c == 0x7f:
+		case c == '\\' && !escaped:
+			escaped = true
+			continue
+		default:
+			b = append(b, c)
+		}
+		escaped = false
 	}
-	numericNode struct {
-		field          string
-		lo, hi         float64
-		loExcl, hiExcl bool
-	}
-	tagNode struct {
-		field  string
-		values []string
-	}
-	geoNode struct {
-		field              string
-		lon, lat, radiusKm float64
-	}
-	emptyNode struct{}
-)
+	return strings.ToLower(string(b))
+}
 
 // QueryOptions change how a query is read.
 type QueryOptions struct {
+	Dialect     int
 	Verbatim    bool
 	NoStopwords bool
 	InFields    []string
@@ -254,10 +293,52 @@ type queryParser struct {
 	pos  int
 	idx  *Index
 	opts QueryOptions
+	// sawStopword is set once a stop word was dropped, which may leave a
+	// group empty.
+	sawStopword bool
 }
 
-// ParseQuery parses a RediSearch query against idx.
+// ParseQuery parses a RediSearch query against idx: in the default
+// dialect with RediSearch's own grammar, then adds the stems of its terms.
 func ParseQuery(idx *Index, q string, opts QueryOptions) (Node, error) {
+	var n Node
+	var err error
+	if opts.Dialect <= 1 {
+		n, err = parseDialect1(idx, q, opts)
+	} else {
+		n, err = parseLegacy(idx, q, opts)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := validate(n); err != nil {
+		return nil, err
+	}
+	if !opts.Verbatim {
+		idx.expand(&n)
+	}
+	return n, nil
+}
+
+// validate checks what RediSearch checks of a parsed query.
+func validate(n Node) error {
+	if n == nil {
+		return nil
+	}
+	if n.typ == qNumeric && n.lo > n.hi {
+		return fmt.Errorf("Invalid numeric range (min > max): @%s:[%s %s]", n.field, cfmtF(n.lo), cfmtF(n.hi)) //nolint:staticcheck // RediSearch's reply text
+	}
+	for _, c := range n.children {
+		if err := validate(c); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// parseLegacy parses the later dialects: a hand-written reading of the
+// query syntax.
+func parseLegacy(idx *Index, q string, opts QueryOptions) (Node, error) {
 	p := &queryParser{s: q, idx: idx, opts: opts}
 	n, err := p.intersection(0)
 	if err != nil {
@@ -302,17 +383,14 @@ func (p *queryParser) intersection(depth int) (Node, error) {
 	}
 	switch len(children) {
 	case 0:
-		if depth == 0 && strings.TrimSpace(p.s) != "" {
-			return emptyNode{}, nil
-		}
-		if depth > 0 {
+		if depth > 0 && !p.sawStopword {
 			return nil, p.fail()
 		}
-		return emptyNode{}, nil
+		return nil, nil
 	case 1:
 		return children[0], nil
 	}
-	return &andNode{children}, nil
+	return newNode(qPhrase).add(children...), nil
 }
 
 // union reads unary nodes joined by |, which binds tighter than the
@@ -348,7 +426,7 @@ func (p *queryParser) union(depth int) (Node, error) {
 	case 1:
 		return kept[0], nil
 	}
-	return &orNode{kept}, nil
+	return newNode(qUnion).add(kept...), nil
 }
 
 func (p *queryParser) unary(depth int) (Node, error) {
@@ -362,10 +440,14 @@ func (p *queryParser) unary(depth int) (Node, error) {
 		if err != nil || n == nil {
 			return nil, err
 		}
-		return &notNode{n}, nil
+		return newNode(qNot).add(n), nil
 	case '~':
 		p.pos++
-		return p.unary(depth)
+		n, err := p.unary(depth)
+		if err != nil || n == nil {
+			return nil, err
+		}
+		return newNode(qOptional).add(n), nil
 	}
 	return p.atom(nil, depth)
 }
@@ -403,15 +485,35 @@ func (p *queryParser) atom(fields []string, depth int) (Node, error) {
 		if end < 0 {
 			return nil, p.fail()
 		}
-		words := p.terms(Tokenize(p.s[p.pos : p.pos+end]))
+		spans := tokenSpans(p.s[p.pos : p.pos+end])
+		// In the default dialect a phrase is a term, or two terms and
+		// then any words: a stop word before the second term is an error.
+		if !p.opts.NoStopwords {
+			for i := 0; i < len(spans) && i < 2; i++ {
+				if p.idx.Stopwords[spans[i].tok] {
+					return nil, &ErrSyntax{Offset: p.pos + spans[i].start, Near: spans[i].raw}
+				}
+			}
+		}
+		var words []string
+		for _, sp := range spans {
+			words = append(words, sp.tok)
+		}
+		words = p.terms(words)
 		p.pos += end + 1
 		if len(words) == 0 {
 			return nil, nil
 		}
-		return &termNode{fields: p.scope(fields), phrase: words}, nil
+		ph := newNode(qPhrase)
+		ph.exact, ph.verbatim = true, true
+		for _, w := range words {
+			ph.add(tokenNode(w))
+		}
+		p.restrict(ph, fields)
+		return ph, nil
 	case '*':
 		p.pos++
-		return allNode{}, nil
+		return newNode(qWildcard), nil
 	case '$':
 		name := p.word()
 		v, ok := p.opts.Params[strings.TrimPrefix(name, "$")]
@@ -437,12 +539,25 @@ func (p *queryParser) termOf(w string, fields []string) (Node, error) {
 		return nil, nil
 	}
 	if !prefix && len(toks) == 1 && !p.opts.NoStopwords && p.idx.Stopwords[toks[0]] {
+		p.sawStopword = true
 		return nil, nil
 	}
-	if len(toks) > 1 {
-		return &termNode{fields: p.scope(fields), phrase: toks}, nil
+	var n *qnode
+	switch {
+	case len(toks) > 1:
+		n = newNode(qPhrase)
+		n.exact, n.verbatim = true, true
+		for _, t := range toks {
+			n.add(tokenNode(t))
+		}
+	case prefix:
+		n = newNode(qPrefix)
+		n.str, n.prefix = toks[0], true
+	default:
+		n = tokenNode(toks[0])
 	}
-	return &termNode{fields: p.scope(fields), text: toks[0], stem: Stem(toks[0]), prefix: prefix}, nil
+	p.restrict(n, fields)
+	return n, nil
 }
 
 func (p *queryParser) scope(fields []string) []string {
@@ -450,6 +565,19 @@ func (p *queryParser) scope(fields []string) []string {
 		return fields
 	}
 	return p.opts.InFields
+}
+
+// restrict limits n to the fields that scope it.
+func (p *queryParser) restrict(n *qnode, fields []string) {
+	scope := p.scope(fields)
+	if scope == nil {
+		return
+	}
+	var mask uint64
+	for _, f := range scope {
+		mask |= p.idx.textFieldBit(f)
+	}
+	n.setMask(mask)
 }
 
 func (p *queryParser) terms(words []string) []string {
@@ -542,7 +670,21 @@ func (p *queryParser) fieldExpr(depth int) (Node, error) {
 			}
 		}
 		p.pos += end + 1
-		return &tagNode{field: names[0], values: values}, nil
+		if p.idx.Field(names[0]) == nil || len(values) == 0 {
+			return nil, nil
+		}
+		tn := newNode(qTag)
+		tn.field = names[0]
+		for _, v := range values {
+			if strings.HasSuffix(v, "*") {
+				pn := newNode(qPrefix)
+				pn.str, pn.prefix = strings.TrimSuffix(v, "*"), true
+				tn.add(pn)
+			} else {
+				tn.add(tokenNode(v))
+			}
+		}
+		return tn, nil
 	}
 	return p.atom(names, depth)
 }
@@ -572,7 +714,9 @@ func parseNumericRange(field string, parts []string) (Node, error) {
 	if err1 != nil || err2 != nil {
 		return nil, errNumericRange
 	}
-	return &numericNode{field: field, lo: lo, hi: hi, loExcl: loExcl, hiExcl: hiExcl}, nil
+	n := newNode(qNumeric)
+	n.field, n.lo, n.hi, n.loIncl, n.hiIncl = field, lo, hi, !loExcl, !hiExcl
+	return n, nil
 }
 
 //nolint:staticcheck // RediSearch's reply texts
@@ -590,11 +734,19 @@ func parseGeo(field string, parts []string) (Node, error) {
 	lon, err1 := strconv.ParseFloat(parts[0], 64)
 	lat, err2 := strconv.ParseFloat(parts[1], 64)
 	r, err3 := strconv.ParseFloat(parts[2], 64)
-	unit, ok := geoUnits[strings.ToLower(parts[3])]
-	if err1 != nil || err2 != nil || err3 != nil || !ok {
+	if err1 != nil || err2 != nil || err3 != nil {
 		return nil, errGeoUnit
 	}
-	return &geoNode{field: field, lon: lon, lat: lat, radiusKm: r * unit}, nil
+	return geoNode(field, lon, lat, r, parts[3])
+}
+
+func geoNode(field string, lon, lat, radius float64, unit string) (Node, error) {
+	if _, ok := geoUnits[strings.ToLower(unit)]; !ok {
+		return nil, errGeoUnit
+	}
+	n := newNode(qGeo)
+	n.field, n.lon, n.lat, n.radius, n.unit = field, lon, lat, radius, strings.ToLower(unit)
+	return n, nil
 }
 
 // NumericFilter and GeoFilter build the nodes of FT.SEARCH's FILTER and
@@ -608,16 +760,25 @@ func GeoFilter(field string, lon, lat, radius, unit string) (Node, error) {
 }
 
 // And joins nodes into one that requires all of them.
-func And(nodes ...Node) Node { return &andNode{nodes} }
+func And(nodes ...Node) Node {
+	for _, n := range nodes {
+		if n == nil {
+			return nil
+		}
+	}
+	return newNode(qPhrase).add(nodes...)
+}
 
-// Match reports whether doc satisfies n and the score it earns there.
+// Match reports whether doc satisfies n and the score it earns there:
+// RediSearch's BM25STD, a sum over the index terms the document matched.
 func (idx *Index) Match(n Node, doc *Document, opts QueryOptions, stats *Stats) (bool, float64) {
-	switch n := n.(type) {
-	case allNode:
-		return true, 1
-	case emptyNode:
+	if n == nil {
 		return false, 0
-	case *andNode:
+	}
+	switch n.typ {
+	case qWildcard:
+		return true, stats.bm25(1, 1, doc) * n.weight
+	case qPhrase:
 		total := 0.0
 		for _, c := range n.children {
 			ok, s := idx.Match(c, doc, opts, stats)
@@ -626,57 +787,62 @@ func (idx *Index) Match(n Node, doc *Document, opts QueryOptions, stats *Stats) 
 			}
 			total += s
 		}
-		return true, total
-	case *orNode:
+		if n.exact && !idx.exactPhrase(n, doc) {
+			return false, 0
+		}
+		return true, total * n.weight
+	case qUnion:
 		matched, total := false, 0.0
 		for _, c := range n.children {
 			if ok, s := idx.Match(c, doc, opts, stats); ok {
 				matched, total = true, total+s
 			}
 		}
-		return matched, total
-	case *notNode:
-		ok, _ := idx.Match(n.child, doc, opts, stats)
+		return matched, total * n.weight
+	case qToken:
+		tf, ok := doc.terms[n.str]
+		if !ok || tf.mask&n.mask == 0 {
+			return false, 0
+		}
+		return true, stats.termScore(n.str, tf.freq, doc) * n.weight
+	case qPrefix, qFuzzy:
+		// A union that stops at its first term the document holds.
+		for _, t := range n.terms {
+			if tf, ok := doc.terms[t]; ok && tf.mask&n.mask != 0 {
+				return true, stats.termScore(t, tf.freq, doc) * n.weight
+			}
+		}
+		return false, 0
+	case qNot:
+		ok, _ := idx.Match(n.children[0], doc, opts, stats)
 		return !ok, 0
-	case *termNode:
-		return idx.matchTerm(n, doc, opts, stats)
-	case *numericNode:
+	case qOptional:
+		if ok, s := idx.Match(n.children[0], doc, opts, stats); ok {
+			return true, s * n.weight
+		}
+		return true, 0
+	case qNumeric:
 		f := idx.Field(n.field)
 		if f == nil || f.Type != FieldNumeric {
 			return false, 0
 		}
 		for _, v := range doc.fields[f.pos].nums {
-			if (v > n.lo || v == n.lo && !n.loExcl) && (v < n.hi || v == n.hi && !n.hiExcl) {
+			if (v > n.lo || v == n.lo && n.loIncl) && (v < n.hi || v == n.hi && n.hiIncl) {
 				return true, 0
 			}
 		}
 		return false, 0
-	case *tagNode:
-		f := idx.Field(n.field)
-		if f == nil || f.Type != FieldTag {
-			return false, 0
-		}
-		for _, tag := range doc.fields[f.pos].strs {
-			for _, want := range n.values {
-				prefix := strings.HasSuffix(want, "*")
-				want = strings.TrimSuffix(want, "*")
-				if !f.CaseSensitive {
-					want = strings.ToLower(want)
-				}
-				if tag == want || prefix && strings.HasPrefix(tag, want) {
-					return true, 0
-				}
-			}
-		}
-		return false, 0
-	case *geoNode:
+	case qTag:
+		return idx.matchTag(n, doc, stats)
+	case qGeo:
 		f := idx.Field(n.field)
 		if f == nil || f.Type != FieldGeo {
 			return false, 0
 		}
+		km := n.radius * geoUnits[n.unit]
 		coords := doc.fields[f.pos].nums
 		for i := 0; i+1 < len(coords); i += 2 {
-			if haversineKm(n.lon, n.lat, coords[i], coords[i+1]) <= n.radiusKm {
+			if haversineKm(n.lon, n.lat, coords[i], coords[i+1]) <= km {
 				return true, 0
 			}
 		}
@@ -693,107 +859,50 @@ func haversineKm(lon1, lat1, lon2, lat2 float64) float64 {
 	return 2 * r * math.Asin(math.Sqrt(a))
 }
 
-// textFields are the TEXT fields a term searches.
-func (idx *Index) textFields(scope []string) []*Field {
-	var out []*Field
-	for i := range idx.Fields {
-		f := &idx.Fields[i]
-		if f.Type != FieldText || f.NoIndex {
-			continue
-		}
-		if scope != nil {
-			in := false
-			for _, s := range scope {
-				in = in || s == f.Name || s == f.Identifier
-			}
-			if !in {
-				continue
-			}
-		}
-		out = append(out, f)
-	}
-	return out
-}
-
-func (idx *Index) termMatches(f *Field, token, stem, term, termStem string, prefix bool, opts QueryOptions) bool {
-	if prefix {
-		return strings.HasPrefix(token, term)
-	}
-	if token == term {
-		return true
-	}
-	if opts.Verbatim || f.NoStem || idx.Language != "english" {
-		return false
-	}
-	return stem == termStem
-}
-
-// matchTerm matches a term or phrase; its score is BM25 over the
-// occurrences, each weighted by its field's weight, as RediSearch's
-// BM25STD scorer counts them.
-func (idx *Index) matchTerm(n *termNode, doc *Document, opts QueryOptions, stats *Stats) (bool, float64) {
-	weighted := 0.0
-	for _, f := range idx.textFields(n.fields) {
-		df := &doc.fields[f.pos]
-		toks, stems := df.strs, df.stems
-		if n.phrase != nil {
-			for i := 0; i+len(n.phrase) <= len(toks); i++ {
-				all := true
-				for j, w := range n.phrase {
-					all = all && idx.termMatches(f, toks[i+j], stems[i+j], w, Stem(w), false, opts)
-				}
-				if all {
-					weighted += f.Weight
-				}
-			}
-			continue
-		}
-		for i, t := range toks {
-			if idx.termMatches(f, t, stems[i], n.text, n.stem, n.prefix, opts) {
-				weighted += f.Weight
-			}
-		}
-	}
-	if weighted == 0 {
-		return false, 0
-	}
-	term := n.text
-	if n.phrase != nil {
-		term = n.phrase[0]
-	}
-	return true, stats.bm25(doc, term, weighted)
-}
-
-// Stats are the corpus figures BM25 scoring needs; df is a stem's
-// document frequency.
+// Stats are the corpus figures BM25 scoring needs: the number of documents
+// and their total length, and an index term's or a tag's document count.
 type Stats struct {
-	Docs   int
-	AvgLen float64
-	total  int
-	df     func(stem string) int
+	Docs     int
+	total    uint64
+	termDocs func(term string) int
+	tagDocs  func(pos int, tag string) int
+	// score is the documents' score, the index's default score.
+	score float64
 }
 
 func (s *Stats) add(d *Document, sign int) {
 	s.Docs += sign
-	s.total += sign * int(d.length)
-	s.AvgLen = 0
-	if s.Docs > 0 {
-		s.AvgLen = float64(s.total) / float64(s.Docs)
+	if sign > 0 {
+		s.total += uint64(d.length)
+	} else {
+		s.total -= uint64(d.length)
 	}
 }
 
-func (s *Stats) bm25(doc *Document, term string, tf float64) float64 {
-	const k1, b = 1.2, 0.75
-	if s == nil || s.Docs == 0 || s.df == nil {
-		return tf
+func (s *Stats) avgLen() float64 {
+	if s.Docs == 0 {
+		return 0
 	}
-	n := float64(s.df(Stem(term)))
-	idf := math.Log(1 + (float64(s.Docs)-n+0.5)/(n+0.5))
-	norm := 1.0
-	if s.AvgLen > 0 {
-		norm = 1 - b + b*float64(doc.length)/s.AvgLen
-	}
-	return idf * tf * (k1 + 1) / (tf + k1*norm)
+	return float64(s.total) / float64(s.Docs)
+}
+
+// idf is BM25's inverse document frequency of a term n documents hold,
+// computed in single precision as RediSearch does.
+func (s *Stats) idf(n int) float64 {
+	total := max(s.Docs, n)
+	return math.Log(float64(1 + (float32(total-n)+0.5)/(float32(n)+0.5)))
+}
+
+func (s *Stats) termScore(term string, freq uint32, doc *Document) float64 {
+	return s.bm25(s.idf(s.termDocs(term)), float64(freq), doc)
+}
+
+// bm25 is one term's BM25STD score, with RediSearch's single-precision
+// constants (k1 1.2, b 0.75) and the document score applied.
+func (s *Stats) bm25(idf, f float64, doc *Document) float64 {
+	const k1, b = float32(1.2), float32(0.75)
+	norm := float64(1-b) + float64(b*float32(doc.length))/s.avgLen()
+	return s.score * (idf * f * float64(k1+1) / (f + float64(k1)*norm))
 }
 
 // jsonText is a JSON document as RETURN or LOAD * shows it.

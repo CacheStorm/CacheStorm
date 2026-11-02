@@ -2,7 +2,6 @@ package search
 
 import (
 	"sort"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"weak"
@@ -23,12 +22,15 @@ type docCache struct {
 	// that hold a shard lock, while a query holds mu and reads the store.
 	dirtyMu sync.Mutex
 	built   bool
-	dirty   map[string]struct{}
-	stats   *Stats
-	// The postings: documents by term stem, and by tag value of each TAG
+	// dirty holds the keys written since the last query, each with the
+	// sequence number of its last write: the document id it takes.
+	dirty map[string]int64
+	seq   int64
+	stats *Stats
+	// The postings: documents by index term, and by tag value of each TAG
 	// field (by schema position). A document frequency is a posting's
 	// length.
-	stems map[string][]*Document
+	terms map[string][]*Document
 	tags  map[int]map[string][]*Document
 	// bytes estimates the memory the cache holds, for INFO search.
 	bytes atomic.Int64
@@ -39,9 +41,12 @@ type docSet map[*Document]struct{}
 func (c *docCache) reset() {
 	c.bytes.Store(0)
 	c.docs = make(map[string]*Document)
-	c.stems = make(map[string][]*Document)
+	c.terms = make(map[string][]*Document)
 	c.tags = make(map[int]map[string][]*Document)
-	c.stats = &Stats{df: func(stem string) int { return len(c.stems[stem]) }}
+	c.stats = &Stats{
+		termDocs: func(term string) int { return len(c.terms[term]) },
+		tagDocs:  func(pos int, tag string) int { return len(c.tags[pos][tag]) },
+	}
 }
 
 func addPosting(m map[string][]*Document, k string, d *Document) {
@@ -76,13 +81,13 @@ func (c *docCache) index(idx *Index, d *Document, add bool) {
 		c.stats.add(d, -1)
 		c.bytes.Add(-d.size())
 	}
-	d.stemSet(func(st string) {
+	for t := range d.terms {
 		if add {
-			addPosting(c.stems, st, d)
+			addPosting(c.terms, t, d)
 		} else {
-			dropPosting(c.stems, st, d)
+			dropPosting(c.terms, t, d)
 		}
-	})
+	}
 	for i := range idx.Fields {
 		if idx.Fields[i].Type != FieldTag {
 			continue
@@ -133,7 +138,7 @@ func (idx *Index) lookup(st *store.Store, create bool) *docCache {
 				delete(idx.cacheSet.caches, k)
 			}
 		}
-		c = &docCache{dirty: make(map[string]struct{})}
+		c = &docCache{dirty: make(map[string]int64)}
 		c.reset()
 		idx.cacheSet.caches[key] = c
 	}
@@ -146,8 +151,8 @@ func (idx *Index) cache(st *store.Store) *docCache { return idx.lookup(st, true)
 // is rebuilt on the next query instead of growing without limit.
 const maxDirty = 1 << 16
 
-// Touch marks key as written in st. It creates nothing: a store no query
-// has read yet has no cache to keep current.
+// Touch marks key as written in st. It creates nothing: a store no
+// command of the index has read yet has no cache to keep current.
 func (idx *Index) Touch(st *store.Store, key string) {
 	if !idx.Covers(key) {
 		return
@@ -157,19 +162,28 @@ func (idx *Index) Touch(st *store.Store, key string) {
 		return
 	}
 	c.dirtyMu.Lock()
-	if c.built {
-		if len(c.dirty) >= maxDirty {
-			c.built = false
-			clear(c.dirty)
-		} else {
-			c.dirty[key] = struct{}{}
-		}
+	if len(c.dirty) >= maxDirty {
+		c.built = false
+		clear(c.dirty)
+	} else {
+		c.seq++
+		c.dirty[key] = c.seq
 	}
 	c.dirtyMu.Unlock()
 }
 
-// Documents returns the index's documents in st and their corpus
-// statistics. The caller must not change them.
+// Open makes the index keep track of st from now on, indexing what it
+// holds: FT.CREATE calls it, so documents written later are numbered in
+// the order they are written.
+func (idx *Index) Open(st *store.Store) {
+	c := idx.cache(st)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.syncLocked(idx, st)
+}
+
+// Documents returns the index's documents in st, in document id order,
+// and their corpus statistics. The caller must not change them.
 func (idx *Index) Documents(st *store.Store) ([]*Document, *Stats) {
 	c := idx.cache(st)
 	c.mu.Lock()
@@ -179,34 +193,66 @@ func (idx *Index) Documents(st *store.Store) ([]*Document, *Stats) {
 	for _, d := range c.docs {
 		docs = append(docs, d)
 	}
+	SortByID(docs)
 	return docs, c.stats
 }
+
+// SortByID orders documents by id.
+func SortByID(docs []*Document) {
+	sort.Slice(docs, func(i, j int) bool { return docs[i].id < docs[j].id })
+}
+
+// Before reports whether a was indexed before b.
+func (d *Document) Before(b *Document) bool { return d.id < b.id }
 
 // syncLocked brings the cache up to date with st.
 func (c *docCache) syncLocked(idx *Index, st *store.Store) {
 	c.dirtyMu.Lock()
 	built := c.built
 	dirty := c.dirty
-	c.dirty = make(map[string]struct{})
+	c.dirty = make(map[string]int64)
 	c.built = true
 	c.dirtyMu.Unlock()
+	c.stats.score = idx.Score
 	if gen := st.Generation(); !built || c.generation != gen {
+		// A rebuild numbers the documents written since the last query
+		// by their writes, after the others.
 		c.reset()
+		c.stats.score = idx.Score
+		var rest []*Document
 		st.ForEachLive(func(key string, entry *store.Entry) error { //nolint:errcheck // the callback never fails
 			if idx.Covers(key) {
 				if doc, ok := idx.Load(key, entry, false); ok {
+					if seq, ok := dirty[key]; ok {
+						doc.id = seq
+					} else {
+						rest = append(rest, doc)
+					}
 					c.index(idx, doc, true)
 				}
 			}
 			return nil
 		})
+		sort.Slice(rest, func(i, j int) bool { return rest[i].Key < rest[j].Key })
+		for i, d := range rest {
+			d.id = int64(i - len(rest))
+		}
 		c.generation = gen
+		return
 	}
+	keys := make([]string, 0, len(dirty))
 	for key := range dirty {
-		c.refreshLocked(idx, st, key)
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool { return dirty[keys[i]] < dirty[keys[j]] })
+	for _, key := range keys {
+		if doc := c.refreshLocked(idx, st, key); doc != nil {
+			doc.id = dirty[key]
+		}
 	}
 }
 
+// refreshLocked reads key again; the document read takes the next id.
 func (c *docCache) refreshLocked(idx *Index, st *store.Store, key string) *Document {
 	if old, ok := c.docs[key]; ok {
 		c.index(idx, old, false)
@@ -219,6 +265,10 @@ func (c *docCache) refreshLocked(idx *Index, st *store.Store, key string) *Docum
 	if !ok {
 		return nil
 	}
+	c.dirtyMu.Lock()
+	c.seq++
+	doc.id = c.seq
+	c.dirtyMu.Unlock()
 	c.index(idx, doc, true)
 	return doc
 }
@@ -254,6 +304,7 @@ func (idx *Index) Search(st *store.Store, n Node, opts QueryOptions) []Hit {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.syncLocked(idx, st)
+	c.fillTerms(n)
 	var hits []Hit
 	match := func(d *Document) {
 		if ok, score := idx.Match(n, d, opts, c.stats); ok {
@@ -272,6 +323,13 @@ func (idx *Index) Search(st *store.Store, n Node, opts QueryOptions) []Hit {
 	return hits
 }
 
+// maxPrefixExpansions and minPrefixLength are RediSearch's limits on an
+// affix query: the index terms it covers and the letters it needs.
+const (
+	maxPrefixExpansions = 200
+	minPrefixLength     = 2
+)
+
 // candidates returns a superset of the documents n can match; all is true
 // when the postings cannot narrow it.
 func (c *docCache) candidates(idx *Index, n Node) (docSet, bool) {
@@ -280,59 +338,40 @@ func (c *docCache) candidates(idx *Index, n Node) (docSet, bool) {
 			out[d] = struct{}{}
 		}
 	}
-	switch n := n.(type) {
-	case emptyNode:
+	if n == nil {
 		return docSet{}, false
-	case *termNode:
-		if n.phrase != nil {
-			var out docSet
-			for i, w := range n.phrase {
-				set := make(docSet)
-				union(set, c.stems[Stem(w)])
-				out = intersect(out, set, i == 0)
-			}
-			return out, false
-		}
+	}
+	switch n.typ {
+	case qToken:
 		out := make(docSet)
-		if n.prefix {
-			// A token with the prefix has a stem that has it too, or that
-			// the prefix extends.
-			for st, list := range c.stems {
-				if strings.HasPrefix(st, n.text) || strings.HasPrefix(n.text, st) {
-					union(out, list)
-				}
-			}
-			return out, false
-		}
-		union(out, c.stems[n.stem])
-		if st := Stem(n.text); st != n.stem {
-			union(out, c.stems[st])
+		union(out, c.terms[n.str])
+		return out, false
+	case qPrefix, qFuzzy:
+		out := make(docSet)
+		for _, t := range n.terms {
+			union(out, c.terms[t])
 		}
 		return out, false
-	case *tagNode:
+	case qTag:
 		f := idx.Field(n.field)
 		if f == nil {
 			return docSet{}, false
 		}
 		out := make(docSet)
-		for _, want := range n.values {
-			prefix := strings.HasSuffix(want, "*")
-			want = strings.TrimSuffix(want, "*")
-			if !f.CaseSensitive {
-				want = strings.ToLower(want)
-			}
-			if !prefix {
+		for _, ch := range n.children {
+			want, affix := tagChild(f, ch)
+			if affix == nil {
 				union(out, c.tags[f.pos][want])
 				continue
 			}
 			for t, list := range c.tags[f.pos] {
-				if strings.HasPrefix(t, want) {
+				if affixMatch(affix, want, t) {
 					union(out, list)
 				}
 			}
 		}
 		return out, false
-	case *andNode:
+	case qPhrase:
 		var out docSet
 		narrowed := false
 		for _, child := range n.children {
@@ -343,7 +382,7 @@ func (c *docCache) candidates(idx *Index, n Node) (docSet, bool) {
 			out, narrowed = intersect(out, set, !narrowed), true
 		}
 		return out, !narrowed
-	case *orNode:
+	case qUnion:
 		out := make(docSet)
 		for _, child := range n.children {
 			set, all := c.candidates(idx, child)
@@ -398,10 +437,10 @@ func (idx *Index) Summary(st *store.Store) (docs, terms, records int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.syncLocked(idx, st)
-	for _, list := range c.stems {
+	for _, list := range c.terms {
 		records += len(list)
 	}
-	return len(c.docs), len(c.stems), records
+	return len(c.docs), len(c.terms), records
 }
 
 // TagValues returns the distinct values of a TAG field in st, sorted.
@@ -423,13 +462,13 @@ func (idx *Index) TagValues(st *store.Store, f *Field) []string {
 // size estimates the memory a cached document and its postings take.
 func (d *Document) size() int64 {
 	n := int64(128 + len(d.Key))
+	for t := range d.terms {
+		n += 48 + int64(len(t))
+	}
 	for _, f := range d.fields {
 		n += 96 + int64(len(f.nums))*8
-		for i, t := range f.strs {
+		for _, t := range f.strs {
 			n += 16 + int64(len(t))
-			if i < len(f.stems) {
-				n += 16 + 8
-			}
 		}
 		for _, r := range f.raw {
 			n += 16 + int64(len(r))
