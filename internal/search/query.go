@@ -76,9 +76,6 @@ func stemWeight(w float64) uint32 {
 	return max(1, uint32(float32(float64(float32(w))*0.2)))
 }
 
-// minStemLength is the shortest token whose stem is indexed.
-const minStemLength = 4
-
 // Load reads key's value as idx indexes it; ok is false when the value is
 // not of the index's type. full keeps the content for replies.
 func (idx *Index) Load(key string, entry *store.Entry, full bool) (*Document, bool) {
@@ -195,7 +192,7 @@ func (idx *Index) Load(key string, entry *store.Entry, full bool) (*Document, bo
 					df.strs = append(df.strs, t)
 					doc.addTerm(t, w, bit)
 					doc.length += w
-					if stemming && !f.NoStem && len(t) >= minStemLength {
+					if stemming && !f.NoStem && len(t) >= minStemLength() {
 						if st := snowballEnglish(t); st != t {
 							doc.addTerm("+"+st, sw, bit)
 						}
@@ -347,6 +344,9 @@ func (e *ErrSyntax) Error() string {
 func ParseQuery(idx *Index, q string, opts QueryOptions) (Node, error) {
 	var n Node
 	var err error
+	if opts.Dialect == 0 {
+		opts.Dialect = DefaultDialect()
+	}
 	if opts.Dialect <= 1 {
 		n, err = parseDialect1(idx, q, opts)
 	} else {

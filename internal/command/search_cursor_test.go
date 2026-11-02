@@ -141,7 +141,7 @@ func TestFTCursorErrors(t *testing.T) {
 	h.expect("-The index was dropped while the cursor was idle\r\n", "FT.CURSOR", "READ", "i", "$C")
 	h.expect("-Cursor not found, id: "+h.cid+"\r\n", "FT.CURSOR", "READ", "i", "$C")
 
-	for range search.IndexCursorLimit {
+	for range search.IndexCursorLimit() {
 		h.do("FT.AGGREGATE", "i", "*", "WITHCURSOR", "COUNT", "1")
 	}
 	h.expect("-INDEX_CURSOR_LIMIT of 128 has been reached for an index\r\n", "FT.AGGREGATE", "i", "*", "WITHCURSOR", "COUNT", "1")

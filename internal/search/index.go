@@ -397,6 +397,14 @@ func (m *IndexManager) resolve(name string) string {
 	return name
 }
 
+// HasAlias reports whether an alias exists.
+func (m *IndexManager) HasAlias(alias string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	_, ok := m.aliases[alias]
+	return ok
+}
+
 // Get returns an index by name or alias.
 func (m *IndexManager) Get(name string) (*Index, bool) {
 	m.mu.RLock()

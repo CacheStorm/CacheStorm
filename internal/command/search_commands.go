@@ -30,6 +30,9 @@ func RegisterSearchCommands(router *Router) {
 		"FT.CURSOR": cmdFTCURSOR, "FT.SYNUPDATE": cmdFTSYNUPDATE, "FT.SYNDUMP": cmdFTSYNDUMP,
 		"FT.SYNADD": cmdFTSYNADD, "FT.DICTADD": cmdFTDICTADD, "FT.DICTDEL": cmdFTDICTDEL,
 		"FT.DICTDUMP": cmdFTDICTDUMP, "FT.SPELLCHECK": cmdFTSPELLCHECK,
+		"FT.EXPLAINCLI": cmdFTEXPLAINCLI, "FT.CONFIG": cmdFTCONFIG, "FT.MGET": cmdFTMGET, "FT.DROP": cmdFTDROPINDEX,
+		"FT._DROPIFX": cmdFTDROPIFX, "FT._DROPINDEXIFX": cmdFTDROPIFX, "FT._CREATEIFNX": cmdFTCREATEIFNX,
+		"FT._ALTERIFNX": cmdFTALTERIFNX, "FT._ALIASADDIFNX": cmdFTALIASADDIFNX, "FT._ALIASDELIFX": cmdFTALIASDELIFX,
 	} {
 		router.Register(&CommandDef{Name: name, Handler: handler})
 	}
@@ -124,6 +127,8 @@ func cmdFTALTER(ctx *Context) error {
 	return ctx.WriteOK()
 }
 
+// cmdFTDROPINDEX is FT.DROPINDEX index [DD] and the older FT.DROP index
+// [KEEPDOCS], which deletes the documents unless told to keep them.
 func cmdFTDROPINDEX(ctx *Context) error {
 	if ctx.ArgCount() < 1 || ctx.ArgCount() > 2 {
 		return ctx.WriteError(arityError(ctx.Command))
@@ -133,16 +138,128 @@ func cmdFTDROPINDEX(ctx *Context) error {
 	if !ok {
 		return ctx.WriteError(errors.New(ctx.ArgString(0) + ": no such index"))
 	}
+	drop := ctx.Command == "FT.DROP"
+	delDocs := drop
 	if ctx.ArgCount() == 2 {
-		if !strings.EqualFold(ctx.ArgString(1), "DD") {
-			return ctx.WriteError(ErrSyntaxError)
+		switch arg := ctx.ArgString(1); {
+		case strings.EqualFold(arg, "_FORCEKEEPDOCS"):
+			delDocs = false
+		case drop && strings.EqualFold(arg, "KEEPDOCS"):
+			delDocs = false
+		case !drop && strings.EqualFold(arg, "DD"):
+			delDocs = true
+		default:
+			return ctx.WriteError(errors.New("Unknown argument")) //nolint:staticcheck // RediSearch's reply text
 		}
+	}
+	if delDocs {
 		for _, doc := range indexDocuments(ctx, idx, nil) {
 			ctx.Store.Delete(doc.Key)
 		}
 	}
 	manager.Drop(idx.Name)
 	return ctx.WriteOK()
+}
+
+// The _IFNX and _IFX variants, which RediSearch's coordinator sends to
+// shards, succeed when there is nothing to do.
+func cmdFTDROPIFX(ctx *Context) error {
+	if ctx.ArgCount() >= 1 && ctx.ArgCount() <= 2 {
+		if _, ok := searchIndexesFor(ctx).Get(ctx.ArgString(0)); !ok {
+			return ctx.WriteOK()
+		}
+	}
+	return cmdFTDROPINDEX(ctx)
+}
+
+func cmdFTCREATEIFNX(ctx *Context) error {
+	if ctx.ArgCount() >= 4 {
+		if _, ok := searchIndexesFor(ctx).Get(ctx.ArgString(0)); ok {
+			return ctx.WriteOK()
+		}
+	}
+	return cmdFTCREATE(ctx)
+}
+
+func cmdFTALTERIFNX(ctx *Context) error {
+	if ctx.ArgCount() >= 4 {
+		if idx, ok := searchIndexesFor(ctx).Get(ctx.ArgString(0)); ok {
+			at := 2
+			if strings.EqualFold(ctx.ArgString(1), "SKIPINITIALSCAN") {
+				at = 3
+			}
+			if at+1 < ctx.ArgCount() && strings.EqualFold(ctx.ArgString(at), "ADD") && idx.Field(ctx.ArgString(at+1)) != nil {
+				return ctx.WriteOK()
+			}
+		}
+	}
+	return cmdFTALTER(ctx)
+}
+
+func cmdFTALIASADDIFNX(ctx *Context) error {
+	if ctx.ArgCount() == 2 {
+		m := searchIndexesFor(ctx)
+		if target, ok := m.Get(ctx.ArgString(0)); ok {
+			if idx, ok := m.Get(ctx.ArgString(1)); ok && idx == target {
+				return ctx.WriteOK()
+			}
+		}
+	}
+	return cmdFTALIASADD(ctx)
+}
+
+func cmdFTALIASDELIFX(ctx *Context) error {
+	if ctx.ArgCount() == 1 && !searchIndexesFor(ctx).HasAlias(ctx.ArgString(0)) {
+		return ctx.WriteOK()
+	}
+	return cmdFTALIASDEL(ctx)
+}
+
+// cmdFTEXPLAINCLI is FT.EXPLAIN with the tree's lines as an array.
+func cmdFTEXPLAINCLI(ctx *Context) error {
+	if ctx.ArgCount() < 2 {
+		return ctx.WriteError(moduleArityError(ctx))
+	}
+	if _, ok := searchIndexesFor(ctx).Get(ctx.ArgString(0)); !ok {
+		return ctx.WriteError(errors.New(ctx.ArgString(0) + ": no such index"))
+	}
+	tree, err := explainQuery(ctx)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	lines := strings.Split(tree, "\n")
+	vals := make([]*resp.Value, len(lines))
+	for i, l := range lines {
+		vals[i] = resp.SimpleString(l)
+	}
+	return ctx.WriteArray(vals)
+}
+
+// cmdFTMGET is FT.MGET index key [key ...]: each document's fields, or a
+// null for a key the index does not hold.
+func cmdFTMGET(ctx *Context) error {
+	if ctx.ArgCount() < 2 {
+		return ctx.WriteError(moduleArityError(ctx))
+	}
+	idx, ok := searchIndexesFor(ctx).Get(ctx.ArgString(0))
+	if !ok {
+		return ctx.WriteError(errors.New(ctx.ArgString(0) + ": no such index"))
+	}
+	out := make([]*resp.Value, 0, ctx.ArgCount()-1)
+	for i := 1; i < ctx.ArgCount(); i++ {
+		key := ctx.ArgString(i)
+		entry, exists := ctx.Store.Get(key)
+		var doc *search.Document
+		if exists && idx.Covers(key) {
+			doc, _ = idx.Load(key, entry, true)
+		}
+		if doc == nil {
+			out = append(out, resp.NullBulkString())
+			continue
+		}
+		out = append(out, documentReply(idx, doc, &searchRequest{}, nil, nil))
+	}
+	return ctx.WriteArray(out)
 }
 
 func cmdFTLIST(ctx *Context) error {
@@ -233,7 +350,7 @@ func cmdFTINFO(ctx *Context) error {
 		resp.SimpleString("cursor_stats"), resp.ArrayValue([]*resp.Value{
 			resp.SimpleString("global_idle"), resp.IntegerValue(int64(idle)),
 			resp.SimpleString("global_total"), resp.IntegerValue(int64(total)),
-			resp.SimpleString("index_capacity"), resp.IntegerValue(search.IndexCursorLimit),
+			resp.SimpleString("index_capacity"), resp.IntegerValue(int64(search.IndexCursorLimit())),
 			resp.SimpleString("index_total"), resp.IntegerValue(int64(own)),
 		}),
 	})
@@ -288,6 +405,16 @@ func parseLimit(ctx *Context, i int) (offset, num int, err error) {
 	}
 	if cnt == 0 && off != 0 {
 		return 0, 0, errLimitOffset
+	}
+	maxSearch, maxAggregate := uint64(search.MaxSearchResults()), uint64(search.MaxAggregateResults())
+	switch {
+	case cnt == 0:
+	case ctx.Command == "FT.SEARCH" && cnt > maxSearch:
+		return 0, 0, fmt.Errorf("LIMIT exceeds maximum of %d", maxSearch)
+	case ctx.Command != "FT.SEARCH" && cnt > maxAggregate:
+		return 0, 0, fmt.Errorf("LIMIT exceeds maximum of %d", maxAggregate)
+	case off > maxSearch:
+		return 0, 0, fmt.Errorf("OFFSET exceeds maximum of %d", maxSearch)
 	}
 	return int(off), int(cnt), nil
 }
@@ -1253,8 +1380,8 @@ func parseCursorSettings(ctx *Context, i int, cs *cursorSettings) (int, error) {
 		}
 		i += 2
 	}
-	if cs.maxIdle == 0 || cs.maxIdle > search.CursorMaxIdle {
-		cs.maxIdle = search.CursorMaxIdle
+	if cs.maxIdle == 0 || cs.maxIdle > search.CursorMaxIdle() {
+		cs.maxIdle = search.CursorMaxIdle()
 	}
 	if cs.count == 0 {
 		cs.count = search.CursorReadSize
@@ -1546,6 +1673,61 @@ func cmdFTSPELLCHECK(ctx *Context) error {
 	return ctx.WriteArray(results)
 }
 
+// cmdFTCONFIG is FT.CONFIG GET|SET|HELP option [value].
+func cmdFTCONFIG(ctx *Context) error {
+	if ctx.ArgCount() < 2 {
+		return ctx.WriteError(moduleArityError(ctx))
+	}
+	resp3 := ctx.Writer.IsRESP3()
+	value := func(v *string) *resp.Value {
+		if v == nil {
+			return resp.NullBulkString()
+		}
+		return resp.BulkString(*v)
+	}
+	switch strings.ToUpper(ctx.ArgString(0)) {
+	case "GET", "HELP":
+		help := strings.EqualFold(ctx.ArgString(0), "HELP")
+		var items []*resp.Value
+		for _, o := range search.ConfigGet(ctx.ArgString(1)) {
+			v := value(o.Value)
+			if help {
+				desc := []*resp.Value{resp.SimpleString("Description"), resp.SimpleString(o.Help), resp.SimpleString("Value"), v}
+				if resp3 {
+					v = resp.PairsValue(desc)
+				} else {
+					v = resp.ArrayValue(append([]*resp.Value{resp.SimpleString(o.Name)}, desc...))
+				}
+			}
+			switch {
+			case resp3:
+				items = append(items, resp.SimpleString(o.Name), v)
+			case help:
+				items = append(items, v)
+			default:
+				items = append(items, resp.ArrayValue([]*resp.Value{resp.SimpleString(o.Name), v}))
+			}
+		}
+		if items == nil {
+			items = []*resp.Value{}
+		}
+		if resp3 {
+			return ctx.WriteValue(resp.PairsValue(items))
+		}
+		return ctx.WriteArray(items)
+	case "SET":
+		excess, err := search.ConfigSet(ctx.ArgString(1), argStrings(ctx)[2:])
+		if err != nil {
+			return ctx.WriteError(err)
+		}
+		if excess {
+			return ctx.WriteSimpleString("EXCESSARGS")
+		}
+		return ctx.WriteOK()
+	}
+	return ctx.WriteSimpleString("No such configuration action")
+}
+
 func cmdFTTAGVALS(ctx *Context) error {
 	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(arityError(ctx.Command))
@@ -1600,9 +1782,17 @@ func cmdFTEXPLAIN(ctx *Context) error {
 	if ctx.ArgCount() < 2 {
 		return ctx.WriteError(arityError(ctx.Command))
 	}
+	tree, err := explainQuery(ctx)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	return ctx.WriteBulkString(tree)
+}
+
+func explainQuery(ctx *Context) (string, error) {
 	idx, ok := searchIndexesFor(ctx).Get(ctx.ArgString(0))
 	if !ok {
-		return ctx.WriteError(errNoSuchIndex(ctx.ArgString(0)))
+		return "", errNoSuchIndex(ctx.ArgString(0))
 	}
 	opts := search.QueryOptions{Params: map[string]string{}}
 	for i := 2; i < ctx.ArgCount(); i++ {
@@ -1615,7 +1805,7 @@ func cmdFTEXPLAIN(ctx *Context) error {
 		case "PARAMS":
 			params, last, err := countedArgs(ctx, i)
 			if err != nil {
-				return ctx.WriteError(err)
+				return "", err
 			}
 			for j := 0; j+1 < len(params); j += 2 {
 				opts.Params[params[j]] = params[j+1]
@@ -1625,9 +1815,9 @@ func cmdFTEXPLAIN(ctx *Context) error {
 	}
 	query, err := search.ParseQuery(idx, ctx.ArgString(1), opts)
 	if err != nil {
-		return ctx.WriteError(err)
+		return "", err
 	}
-	return ctx.WriteBulkString(idx.Explain(query))
+	return idx.Explain(query), nil
 }
 
 // cmdFTADD is RediSearch 1's FT.ADD index docId score [REPLACE [PARTIAL]]

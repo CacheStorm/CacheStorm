@@ -1,7 +1,7 @@
 package search
 
 import (
-	"errors"
+	"fmt"
 	"math/rand/v2"
 	"sync"
 	"time"
@@ -13,14 +13,11 @@ import (
 // second) or by FT.CURSOR GC, and an index holds at most 128 of them.
 const (
 	CursorReadSize     = 1000
-	CursorMaxIdle      = 300000 * time.Millisecond
-	IndexCursorLimit   = 128
 	cursorSweepEvery   = 500
 	cursorSweepTimeout = time.Second
 )
 
 //nolint:staticcheck // RediSearch's reply text
-var ErrCursorLimit = errors.New("INDEX_CURSOR_LIMIT of 128 has been reached for an index")
 
 // Cursor is a paused aggregation; State is the command layer's.
 type Cursor struct {
@@ -84,10 +81,10 @@ func (m *IndexManager) ReserveCursor(idx *Index, maxIdle time.Duration, state an
 	defer cl.mu.Unlock()
 	now := time.Now()
 	cl.tick(now)
-	if cl.active(idx.cacheSet) >= IndexCursorLimit {
+	if limit := IndexCursorLimit(); cl.active(idx.cacheSet) >= limit {
 		cl.collect(now, false)
-		if cl.active(idx.cacheSet) >= IndexCursorLimit {
-			return nil, ErrCursorLimit
+		if cl.active(idx.cacheSet) >= limit {
+			return nil, fmt.Errorf("INDEX_CURSOR_LIMIT of %d has been reached for an index", limit)
 		}
 	}
 	id := uint64(rand.Uint32()&0x7fffffff|1) + 1

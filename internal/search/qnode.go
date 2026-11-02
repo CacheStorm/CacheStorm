@@ -344,7 +344,7 @@ func (c *docCache) fillTerms(n *qnode) {
 		}
 		n.terms = []string{}
 		s := strings.ToLower(n.str)
-		if n.typ == qPrefix && len(n.str) < minPrefixLength {
+		if n.typ == qPrefix && len(n.str) < minPrefixLength() {
 			return
 		}
 		for t := range c.terms {
@@ -354,8 +354,8 @@ func (c *docCache) fillTerms(n *qnode) {
 			}
 		}
 		sort.Strings(n.terms)
-		if len(n.terms) > maxPrefixExpansions {
-			n.terms = n.terms[:maxPrefixExpansions]
+		if max := maxPrefixExpansions(); len(n.terms) > max {
+			n.terms = n.terms[:max]
 		}
 	case qTag:
 		return
@@ -494,7 +494,7 @@ func (idx *Index) matchTag(n *qnode, doc *Document, stats *Stats) (bool, float64
 		for _, tag := range tags {
 			ok := tag == want
 			if affix != nil {
-				ok = len(want) >= minPrefixLength && affixMatch(affix, want, tag)
+				ok = len(want) >= minPrefixLength() && affixMatch(affix, want, tag)
 			}
 			if ok && (!found || tag < best) {
 				best, found = tag, true

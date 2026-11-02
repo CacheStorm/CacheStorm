@@ -387,13 +387,6 @@ func (idx *Index) Search(st *store.Store, n Node, opts QueryOptions) ([]Hit, err
 // KNN query without a filter.
 func NearestFirst(n Node) bool { return n != nil && n.typ == qVector && n.knn && n.byScore }
 
-// maxPrefixExpansions and minPrefixLength are RediSearch's limits on an
-// affix query: the index terms it covers and the letters it needs.
-const (
-	maxPrefixExpansions = 200
-	minPrefixLength     = 2
-)
-
 // candidates returns a superset of the documents n can match; all is true
 // when the postings cannot narrow it.
 func (c *docCache) candidates(idx *Index, n Node) (docSet, bool) {

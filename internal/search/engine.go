@@ -257,7 +257,7 @@ func (e *scoreEngine) tag(n *qnode) rsIter {
 		if affix == nil {
 			return e.tagReader(f, want, n.weight)
 		}
-		if len(want) < minPrefixLength {
+		if len(want) < minPrefixLength() {
 			return nil
 		}
 		var values []string

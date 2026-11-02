@@ -27,8 +27,6 @@ const (
 	resNumeric
 )
 
-const unionHeapMin = 20
-
 type rsResult struct {
 	children  []*rsResult
 	docID     int64
@@ -203,7 +201,7 @@ func newUnionIter(its []rsIter, quick bool, weight float64) *unionIter {
 		it.base().minID = 0
 		u.expected += it.estimate()
 	}
-	if len(its) > unionHeapMin {
+	if len(its) > unionHeapMin() {
 		for _, it := range u.its {
 			u.heapOffer(it)
 		}
