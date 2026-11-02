@@ -199,7 +199,8 @@ func TestACLCommandRulesAndDefaultUserFollowRedis(t *testing.T) {
 	if got := run("ACL", "DELUSER", "acltest", "default"); got != "-ERR The 'default' user cannot be removed\r\n" {
 		t.Fatalf("ACL DELUSER default = %q", got)
 	}
-	if got := run("ACL", "CAT"); !strings.HasPrefix(got, "*21\r\n$8\r\nkeyspace\r\n$4\r\nread\r\n") {
+	// Redis 8.2's order: the core categories, then its modules'.
+	if got := run("ACL", "CAT"); !strings.HasPrefix(got, "*29\r\n$8\r\nkeyspace\r\n$4\r\nread\r\n") || !strings.HasSuffix(got, "$6\r\nsearch\r\n$10\r\ntimeseries\r\n$4\r\njson\r\n") {
 		t.Fatalf("ACL CAT = %q, want Redis' category order", got)
 	}
 }

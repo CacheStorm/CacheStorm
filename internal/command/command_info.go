@@ -21,6 +21,9 @@ func commandCategories(cmd, sub string) []string {
 	if spec, ok := redisCommandSpecs[cmd]; ok {
 		return spec.Categories
 	}
+	if m := moduleCommand(cmd); m != nil {
+		return m.categories
+	}
 	return nil
 }
 
@@ -31,6 +34,9 @@ func commandCategories(cmd, sub string) []string {
 // get an entry built from their registration.
 func commandInfoValue(name string, def *CommandDef) *resp.Value {
 	if m := redisCommandMeta(name); m != nil {
+		return m.info
+	}
+	if m := moduleCommand(name); m != nil {
 		return m.info
 	}
 	arity := -1
@@ -147,7 +153,7 @@ func cmdCommandList(ctx *Context) error {
 		arg := ctx.ArgString(3)
 		switch strings.ToUpper(ctx.ArgString(2)) {
 		case "MODULE":
-			filter = func(string) bool { return false }
+			filter = func(name string) bool { m := moduleCommand(name); return m != nil && m.module == arg }
 		case "ACLCAT":
 			cat := strings.ToLower(strings.TrimPrefix(arg, "@"))
 			filter = func(name string) bool {
@@ -170,7 +176,7 @@ func cmdCommandList(ctx *Context) error {
 	out := []*resp.Value{}
 	for _, name := range registeredCommandNames(ctx) {
 		if filter == nil || filter(name) {
-			out = append(out, resp.BulkString(strings.ToLower(name)))
+			out = append(out, resp.BulkString(commandDisplayName(name)))
 		}
 	}
 	return ctx.WriteArray(out)
@@ -228,6 +234,10 @@ func cmdCommandDocs(ctx *Context) error {
 		case meta != nil:
 			pairs = append(pairs, resp.BulkString(meta.name), resp.PairsValue([]*resp.Value{}))
 		default:
+			if m := moduleCommand(def.Name); m != nil && m.docs != nil {
+				pairs = append(pairs, resp.BulkString(m.name), m.docs)
+				continue
+			}
 			pairs = append(pairs, resp.BulkString(strings.ToLower(def.Name)), extensionDocsValue())
 		}
 	}
@@ -463,6 +473,23 @@ var aclCategoryMembers = func() map[string][]string {
 	return m
 }()
 
+// aclMembers returns an ACL category's commands: Redis' own, and the
+// registered module commands Redis 8.2 puts in it.
+func aclMembers(category string) ([]string, bool) {
+	members, ok := aclCategoryMembers[category]
+	modules := moduleCategoryMembers(category)
+	if len(modules) == 0 {
+		isModule := false
+		for _, c := range moduleCategoryOrder {
+			isModule = isModule || c == category
+		}
+		return members, ok || isModule
+	}
+	out := append(append([]string(nil), members...), modules...)
+	sort.Strings(out)
+	return out, true
+}
+
 // hasSubcommands reports whether cmd is a container command (CONFIG,
 // CLIENT, ...) whose ACL rules may name its subcommands.
 func hasSubcommands(cmd string) bool {
@@ -481,10 +508,7 @@ var containerCommands = func() map[string]struct{} {
 }()
 
 func init() {
-	acl.SetCategoryResolver(func(category string) ([]string, bool) {
-		members, ok := aclCategoryMembers[category]
-		return members, ok
-	})
+	acl.SetCategoryResolver(aclMembers)
 	acl.SetCommandResolver(aclResolveCommand)
 }
 
@@ -512,24 +536,31 @@ var aclCategoryOrder = []string{"keyspace", "read", "write", "set", "sortedset",
 // cmdACLCat implements ACL CAT [category].
 func cmdACLCat(ctx *Context) error {
 	if ctx.ArgCount() == 1 {
-		out := make([]*resp.Value, 0, len(aclCategoryOrder))
+		out := make([]*resp.Value, 0, len(aclCategoryOrder)+len(moduleCategoryOrder))
 		for _, c := range aclCategoryOrder {
 			if _, ok := aclCategoryMembers[c]; ok {
 				out = append(out, resp.BulkString(c))
 			}
+		}
+		for _, c := range moduleCategoryOrder {
+			out = append(out, resp.BulkString(c))
 		}
 		return ctx.WriteArray(out)
 	}
 	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(errSubcommandSyntax(ctx.ArgString(0), "ACL"))
 	}
-	members, ok := aclCategoryMembers[strings.ToLower(strings.TrimPrefix(ctx.ArgString(1), "@"))]
+	members, ok := aclMembers(strings.ToLower(strings.TrimPrefix(ctx.ArgString(1), "@")))
 	if !ok {
 		return ctx.WriteError(errors.New("ERR Unknown category '" + ctx.ArgString(1) + "'"))
 	}
 	out := make([]*resp.Value, len(members))
 	for i, m := range members {
-		out[i] = resp.BulkString(strings.ToLower(m))
+		if strings.Contains(m, "|") {
+			out[i] = resp.BulkString(strings.ToLower(m))
+		} else {
+			out[i] = resp.BulkString(commandDisplayName(m))
+		}
 	}
 	return ctx.WriteArray(out)
 }

@@ -1,6 +1,10 @@
 package command
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/cachestorm/cachestorm/internal/store"
+)
 
 // The replies are Redis 8.2's.
 func TestFTConfig(t *testing.T) {
@@ -73,5 +77,34 @@ func TestFTAdminVariants(t *testing.T) {
 		{"-nosuch: no such index\r\n", []string{"FT.DROP", "nosuch"}},
 	} {
 		h.expect(c.want, c.args...)
+	}
+}
+
+// Module commands are described, and grouped in ACL categories, as Redis
+// 8.2 does with its bundled modules.
+func TestModuleCommandsFollowRedis8(t *testing.T) {
+	r := newMemAcctRouter()
+	RegisterServerCommands(r)
+	RegisterSearchCommands(r)
+	RegisterJSONCommands(r)
+	RegisterStringCommands(r)
+	s := store.NewStore()
+	run := func(args ...string) string { return memAcctRun(r, s, nil, args...) }
+	defer run("ACL", "DELUSER", "modtest")
+	for _, c := range []struct {
+		want string
+		args []string
+	}{
+		{"*1\r\n*10\r\n$9\r\nFT.SEARCH\r\n:-1\r\n*2\r\n+readonly\r\n+module\r\n:0\r\n:0\r\n:0\r\n*2\r\n+@read\r\n+@search\r\n*0\r\n*0\r\n*0\r\n", []string{"COMMAND", "INFO", "ft.search"}},
+		{"*2\r\n$9\r\nFT.SEARCH\r\n*4\r\n$5\r\ngroup\r\n$6\r\nmodule\r\n$6\r\nmodule\r\n$6\r\nsearch\r\n", []string{"COMMAND", "DOCS", "FT.SEARCH"}},
+		{"*2\r\n$9\r\nFT.SEARCH\r\n$13\r\nFT.SPELLCHECK\r\n", []string{"COMMAND", "LIST", "FILTERBY", "PATTERN", "ft.s[ep]*"}},
+		{"+OK\r\n", []string{"ACL", "SETUSER", "modtest", "on", "nopass", "+@search", "+@read", "~*"}},
+		{"+OK\r\n", []string{"ACL", "DRYRUN", "modtest", "FT.SEARCH", "idx", "hello"}},
+		{"+OK\r\n", []string{"ACL", "DRYRUN", "modtest", "JSON.GET", "doc"}},
+		{"$56\r\nUser modtest has no permissions to run the 'set' command\r\n", []string{"ACL", "DRYRUN", "modtest", "SET", "k", "v"}},
+	} {
+		if got := run(c.args...); got != c.want {
+			t.Errorf("%v = %q, want %q", c.args, got, c.want)
+		}
 	}
 }

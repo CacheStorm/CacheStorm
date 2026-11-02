@@ -32,6 +32,7 @@ const (
 var verdicts = map[string]Verdict{
 	"restore/overflow-relative-ttl": {SevEdge, intent, "relative TTL overflow is rejected before mutation; Redis 7.4.11 acknowledges it, logs a negative ABSTTL and loses the key on AOF restart (reproduced in the restore/dump production-readiness round)"},
 	"lua/redis-call-errors":         {SevEdge, intent, "compile errors carry gopher-lua's parser message (\"near 'error': parse error\") instead of Lua 5.1's"},
+	"acl/dryrun-cat-whoami":         {SevEdge, intent, "ACL CAT also lists the module categories (@bloom ... @json) of Redis 8.2, whose bundled modules CacheStorm implements; Redis 7.4 has no modules"},
 }
 
 var arityAccepts = map[string]string{}
