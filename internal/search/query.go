@@ -6,7 +6,10 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 
+	"github.com/cachestorm/cachestorm/internal/cmath"
 	"github.com/cachestorm/cachestorm/internal/store"
 )
 
@@ -196,6 +199,9 @@ func (idx *Index) Load(key string, entry *store.Entry, full bool) (*Document, bo
 						if st := snowballEnglish(t); st != t {
 							doc.addTerm("+"+st, sw, bit)
 						}
+					}
+					for _, g := range idx.synonymGroups(t) {
+						doc.addTerm(g, w, bit)
 					}
 				}
 			}
@@ -605,7 +611,27 @@ func (s *Stats) avgLen() float64 {
 // computed in single precision as RediSearch does.
 func (s *Stats) idf(n int) float64 {
 	total := max(s.Docs, n)
-	return math.Log(float64(1 + (float32(total-n)+0.5)/(float32(n)+0.5)))
+	return logF32(1 + (float32(total-n)+0.5)/(float32(n)+0.5))
+}
+
+// logF32 is C's log of a single-precision argument, cached: the IDF
+// arguments repeat from query to query.
+var (
+	logCache     sync.Map
+	logCacheSize atomic.Int64
+)
+
+func logF32(x float32) float64 {
+	if v, ok := logCache.Load(x); ok {
+		return v.(float64)
+	}
+	v := cmath.Log(float64(x))
+	if logCacheSize.Add(1) > 1<<16 {
+		logCache.Clear()
+		logCacheSize.Store(1)
+	}
+	logCache.Store(x, v)
+	return v
 }
 
 func (s *Stats) termScore(term string, freq uint32, doc *Document) float64 {

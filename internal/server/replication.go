@@ -67,7 +67,7 @@ var exclusiveWrites = map[string]bool{
 	"TAGUNLINK": true, "SETTAG": true,
 	// The search indexes are shared by every database and an index is
 	// reachable through its aliases, so the index name does not order writes.
-	"FT.CREATE": true, "FT.DROPINDEX": true, "FT.ADD": true, "FT.DEL": true, "FT.ALTER": true, "FT.SUGADD": true, "FT.SUGDEL": true,
+	"FT.CREATE": true, "FT.DROPINDEX": true, "FT.ADD": true, "FT.DEL": true, "FT.ALTER": true, "FT.SUGADD": true, "FT.SUGDEL": true, "FT.SYNUPDATE": true,
 	"FT.ALIASADD": true, "FT.ALIASDEL": true, "FT.ALIASUPDATE": true,
 }
 

@@ -27,7 +27,8 @@ func RegisterSearchCommands(router *Router) {
 		"FT.TAGVALS": cmdFTTAGVALS, "FT.ALIASADD": cmdFTALIASADD, "FT.ALIASDEL": cmdFTALIASDEL,
 		"FT.ALIASUPDATE": cmdFTALIASUPDATE, "FT.EXPLAIN": cmdFTEXPLAIN,
 		"FT.ADD": cmdFTADD, "FT.DEL": cmdFTDEL, "FT.GET": cmdFTGET, "FT.ALTER": cmdFTALTER,
-		"FT.CURSOR": cmdFTCURSOR,
+		"FT.CURSOR": cmdFTCURSOR, "FT.SYNUPDATE": cmdFTSYNUPDATE, "FT.SYNDUMP": cmdFTSYNDUMP,
+		"FT.SYNADD": cmdFTSYNADD,
 	} {
 		router.Register(&CommandDef{Name: name, Handler: handler})
 	}
@@ -829,7 +830,7 @@ func cmdFTAGGREGATE(ctx *Context) error {
 	if addScores {
 		pipeline.add("__score")
 	}
-	grouped, sorted := false, false
+	grouped, sorted, arranged, groups := false, false, false, 0
 	offset, limit := 0, -1
 	// failed holds the rows an APPLY or FILTER could not evaluate. The
 	// rows stream through the steps, so an error stops the reply where
@@ -905,35 +906,56 @@ func cmdFTAGGREGATE(ctx *Context) error {
 			if rows, err = search.Group(rows, props, reducers); err != nil {
 				return ctx.WriteError(err)
 			}
-			grouped = true
-		case "SORTBY":
-			props, last, err := countedArgs(ctx, i)
+			grouped, arranged, groups = true, false, len(rows)
+		case "SORTBY", "LIMIT":
+			last := aggregateStepEnd(ctx, i)
+			if word == "SORTBY" {
+				if _, end, err := countedArgs(ctx, i); err == nil {
+					last = end
+					if end+2 < n && strings.EqualFold(ctx.ArgString(end+1), "MAX") {
+						last = end + 2
+					}
+				}
+			} else {
+				last = i + 2
+			}
+			if arranged {
+				i = last
+				continue
+			}
+			arranged = true
+			arr, err := scanArrange(ctx, i)
 			if err != nil {
 				return ctx.WriteError(err)
 			}
 			i = last
-			var keys []search.SortKey
-			for j := 0; j < len(props); j++ {
-				k := search.SortKey{Field: strings.TrimPrefix(props[j], "@")}
-				if j+1 < len(props) && (strings.EqualFold(props[j+1], "DESC") || strings.EqualFold(props[j+1], "ASC")) {
-					k.Desc = strings.EqualFold(props[j+1], "DESC")
-					j++
+			if arr.sorted {
+				if err := pipeline.sortBy(rows, arr.keys); err != nil {
+					return ctx.WriteError(err)
 				}
-				keys = append(keys, k)
-			}
-			if err := pipeline.sortBy(rows, keys); err != nil {
-				return ctx.WriteError(err)
-			}
-			if err := barrier(); err != nil {
-				return ctx.WriteError(err)
-			}
-			search.SortRows(rows, keys)
-			sorted = true
-			if i+2 < n && strings.EqualFold(ctx.ArgString(i+1), "MAX") {
-				if m, err := strconv.Atoi(ctx.ArgString(i + 2)); err == nil && m < len(rows) {
-					rows = rows[:m]
+				if err := barrier(); err != nil {
+					return ctx.WriteError(err)
 				}
-				i += 2
+				search.SortRows(rows, arr.keys)
+				sorted = true
+				if max := arr.offset + arr.limit; !arr.limited || arr.limit != 0 {
+					if max == 0 {
+						max = 10
+					}
+					if max < len(rows) {
+						rows = rows[:max]
+					}
+				}
+			}
+			switch {
+			case arr.limited && arr.limit == 0:
+				offset, limit = 0, 0
+			case arr.offset == 0 && (arr.limit == 0 || arr.sorted):
+			case arr.last && !arr.filterAfter:
+				offset, limit = arr.offset, arr.limit
+			default:
+				from := min(arr.offset, len(rows))
+				rows = rows[from:min(from+arr.limit, len(rows))]
 			}
 		case "APPLY":
 			if i+3 >= n || !strings.EqualFold(ctx.ArgString(i+2), "AS") {
@@ -987,13 +1009,6 @@ func cmdFTAGGREGATE(ctx *Context) error {
 			}
 			rows = kept
 			i++
-		case "LIMIT":
-			off, num, err := parseLimit(ctx, i)
-			if err != nil {
-				return ctx.WriteError(err)
-			}
-			offset, limit = off, num
-			i += 2
 		case "PARAMS":
 			_, last, err := countedArgs(ctx, i)
 			if err != nil {
@@ -1021,7 +1036,7 @@ func cmdFTAGGREGATE(ctx *Context) error {
 	if grouped || sorted {
 		agg.ranked, agg.total = true, len(found)
 		if grouped {
-			agg.total = len(rows)
+			agg.total = groups
 		}
 	}
 	if !cursor.on {
@@ -1324,6 +1339,59 @@ func cmdFTCURSOR(ctx *Context) error {
 		return ctx.WriteInteger(int64(manager.CollectCursors()))
 	}
 	return ctx.WriteError(errors.New("Unknown subcommand")) //nolint:staticcheck // RediSearch's reply text
+}
+
+// cmdFTSYNUPDATE is FT.SYNUPDATE index group [SKIPINITIALSCAN] term ...
+func cmdFTSYNUPDATE(ctx *Context) error {
+	if ctx.ArgCount() < 3 {
+		return ctx.WriteError(ftArityError("FT.SYNUPDATE"))
+	}
+	idx, ok := searchIndexesFor(ctx).Get(ctx.ArgString(0))
+	if !ok {
+		return ctx.WriteError(errors.New(ctx.ArgString(0) + ": no such index"))
+	}
+	skip := strings.EqualFold(ctx.ArgString(2), "SKIPINITIALSCAN")
+	from := 2
+	if skip {
+		from = 3
+	}
+	terms := make([]string, 0, ctx.ArgCount()-from)
+	for i := from; i < ctx.ArgCount(); i++ {
+		terms = append(terms, ctx.ArgString(i))
+	}
+	if err := idx.UpdateSynonyms(ctx.ArgString(1), terms, skip); err != nil {
+		return ctx.WriteError(err)
+	}
+	return ctx.WriteOK()
+}
+
+// cmdFTSYNDUMP replies with each synonym term and its groups, in the order
+// the terms were added; RediSearch lists them in its hash table's order.
+func cmdFTSYNDUMP(ctx *Context) error {
+	if ctx.ArgCount() != 1 {
+		return ctx.WriteError(moduleArityError(ctx))
+	}
+	idx, ok := searchIndexesFor(ctx).Get(ctx.ArgString(0))
+	if !ok {
+		return ctx.WriteError(errors.New(ctx.ArgString(0) + ": no such index"))
+	}
+	terms, groups := idx.Synonyms()
+	out := make([]*resp.Value, 0, 2*len(terms))
+	for i, t := range terms {
+		ids := make([]*resp.Value, len(groups[i]))
+		for j, g := range groups[i] {
+			ids[j] = resp.BulkString(g)
+		}
+		out = append(out, resp.BulkString(t), resp.ArrayValue(ids))
+	}
+	if ctx.Writer.IsRESP3() {
+		return ctx.WriteValue(resp.PairsValue(out))
+	}
+	return ctx.WriteArray(out)
+}
+
+func cmdFTSYNADD(ctx *Context) error {
+	return ctx.WriteError(errors.New("No longer supported, use FT.SYNUPDATE")) //nolint:staticcheck // RediSearch's reply text
 }
 
 func cmdFTTAGVALS(ctx *Context) error {

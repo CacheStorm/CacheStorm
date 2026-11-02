@@ -81,7 +81,7 @@ var writeCommands = map[string]bool{
 	"CMS.INITBYDIM": true, "CMS.INITBYPROB": true, "CMS.INCRBY": true, "CMS.MERGE": true,
 	"TOPK.RESERVE": true, "TOPK.ADD": true, "TOPK.INCRBY": true,
 	"TDIGEST.CREATE": true, "TDIGEST.ADD": true, "TDIGEST.RESET": true, "TDIGEST.MERGE": true,
-	"FT.CREATE": true, "FT.DROPINDEX": true, "FT.ADD": true, "FT.DEL": true, "FT.ALTER": true, "FT.SUGADD": true, "FT.SUGDEL": true,
+	"FT.CREATE": true, "FT.DROPINDEX": true, "FT.ADD": true, "FT.DEL": true, "FT.ALTER": true, "FT.SUGADD": true, "FT.SUGDEL": true, "FT.SYNUPDATE": true,
 	"FT.ALIASADD": true, "FT.ALIASDEL": true, "FT.ALIASUPDATE": true,
 }
 

@@ -4,9 +4,9 @@ import (
 	"encoding/binary"
 	"errors"
 	"math"
-	"math/big"
 	"sync"
 
+	"github.com/cachestorm/cachestorm/internal/cmath"
 	"github.com/cachestorm/cachestorm/internal/store"
 )
 
@@ -515,40 +515,4 @@ func (td *tdigestSketch) byRankLocked(rank float64, reverse bool) float64 {
 // tdLog is a correctly rounded natural logarithm, as glibc's log is; Go's
 // math.Log is off by one unit in the last place for about 1% of inputs,
 // which would shift t-digest centroid boundaries.
-func tdLog(x float64) float64 {
-	if x <= 0 || math.IsInf(x, 0) || math.IsNaN(x) {
-		return math.Log(x)
-	}
-	frac, exp := math.Frexp(x)
-	m := new(big.Float).SetPrec(tdLogPrec).SetFloat64(frac * 2)
-	r := tdAtanhLog(m)
-	r.Add(r, new(big.Float).SetPrec(tdLogPrec).Mul(tdLn2(), new(big.Float).SetInt64(int64(exp-1))))
-	f, _ := r.Float64()
-	return f
-}
-
-const tdLogPrec = 160
-
-// tdAtanhLog is log(m) = 2*atanh((m-1)/(m+1)) for m in [1, 2).
-func tdAtanhLog(m *big.Float) *big.Float {
-	one := new(big.Float).SetPrec(tdLogPrec).SetInt64(1)
-	z := new(big.Float).SetPrec(tdLogPrec).Quo(new(big.Float).SetPrec(tdLogPrec).Sub(m, one), new(big.Float).SetPrec(tdLogPrec).Add(m, one))
-	z2 := new(big.Float).SetPrec(tdLogPrec).Mul(z, z)
-	sum := new(big.Float).SetPrec(tdLogPrec)
-	term := new(big.Float).SetPrec(tdLogPrec).Set(z)
-	for k := int64(1); k < 400; k += 2 {
-		t := new(big.Float).SetPrec(tdLogPrec).Quo(term, new(big.Float).SetInt64(k))
-		if t.Sign() == 0 || (sum.Sign() != 0 && t.MantExp(nil)-sum.MantExp(nil) < -tdLogPrec) {
-			break
-		}
-		sum.Add(sum, t)
-		term.Mul(term, z2)
-	}
-	return sum.Mul(sum, new(big.Float).SetInt64(2))
-}
-
-var tdLn2Value = sync.OnceValue(func() *big.Float {
-	return tdAtanhLog(new(big.Float).SetPrec(tdLogPrec).SetInt64(2))
-})
-
-func tdLn2() *big.Float { return tdLn2Value() }
+func tdLog(x float64) float64 { return cmath.Log(x) }

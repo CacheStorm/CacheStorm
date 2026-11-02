@@ -63,6 +63,7 @@ type Index struct {
 	Score     float64
 	Args      []string
 	cacheSet  *cacheSet
+	syn       *synonyms
 }
 
 //nolint:staticcheck // RediSearch's reply texts
@@ -90,7 +91,7 @@ func stopwordSet(words []string) map[string]bool {
 // ParseIndex reads an FT.CREATE definition: the arguments after the index
 // name.
 func ParseIndex(name string, args []string) (*Index, error) {
-	idx := &Index{Name: name, Score: 1, Language: "english", Stopwords: stopwordSet(DefaultStopwords), Args: append([]string(nil), args...), cacheSet: &cacheSet{}}
+	idx := &Index{Name: name, Score: 1, Language: "english", Stopwords: stopwordSet(DefaultStopwords), Args: append([]string(nil), args...), cacheSet: &cacheSet{}, syn: &synonyms{}}
 	i := 0
 	for ; i < len(args); i++ {
 		switch strings.ToUpper(args[i]) {
@@ -446,6 +447,12 @@ func (m *IndexManager) Commands() [][]string {
 	var out [][]string
 	for _, n := range sortedKeys(m.indexes) {
 		out = append(out, append([]string{"FT.CREATE", n}, m.indexes[n].Args...))
+		terms, groups := m.indexes[n].Synonyms()
+		for i, t := range terms {
+			for _, g := range groups[i] {
+				out = append(out, []string{"FT.SYNUPDATE", n, g, "SKIPINITIALSCAN", t})
+			}
+		}
 	}
 	for _, a := range sortedKeys(m.aliases) {
 		out = append(out, []string{"FT.ALIASADD", a, m.aliases[a]})

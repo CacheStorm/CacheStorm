@@ -118,17 +118,29 @@ func (idx *Index) expand(pn **qnode) {
 		}
 		return
 	}
-	if n.str == "" || idx.Language != "english" {
+	if n.str == "" {
+		return
+	}
+	u := n
+	union := func() {
+		if u.typ != qUnion {
+			u = newNode(qUnion)
+			u.mask = n.mask
+			u.add(n)
+			*pn = u
+		}
+	}
+	for _, g := range idx.synonymGroups(n.str) {
+		union()
+		syn := tokenNode(g)
+		syn.expanded, syn.mask = true, n.mask
+		u.add(syn)
+	}
+	if idx.Language != "english" {
 		return
 	}
 	st := snowballEnglish(n.str)
-	u := n
-	if n.typ != qUnion {
-		u = newNode(qUnion)
-		u.mask = n.mask
-		u.add(n)
-		*pn = u
-	}
+	union()
 	mask := n.mask
 	if mask != allFields {
 		for i := range idx.Fields {

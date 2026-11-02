@@ -73,6 +73,21 @@ func TestSearchReplaysVectorCorpus(t *testing.T) {
 	replayRedisCorpus(t, router, "testdata/redisearch_vectors_r8.jsonl")
 }
 
+// testdata/redisearch_synonyms_r8.jsonl holds random synonym groups,
+// documents and single-term queries with their scores, FT.AGGREGATE
+// pipelines that sort, page and filter in one arrange step, and the
+// properties each step may read, with Redis 8.2's replies.
+func TestSearchReplaysSynonymCorpus(t *testing.T) {
+	router := NewRouter()
+	RegisterSearchCommands(router)
+	RegisterHashCommands(router)
+	RegisterStringCommands(router)
+	RegisterKeyCommands(router)
+	search.GetIndexManager().Reset()
+	t.Cleanup(search.GetIndexManager().Reset)
+	replayRedisCorpus(t, router, "testdata/redisearch_synonyms_r8.jsonl")
+}
+
 // testdata/redisearch_suggest_r8.jsonl holds auto-complete dictionaries
 // built and queried at random (scores, INCR, payloads, deletes, fuzzy and
 // case-folded prefixes) with Redis 8.2's replies. TRIM is left out where it

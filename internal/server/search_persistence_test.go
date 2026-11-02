@@ -272,3 +272,42 @@ func TestSearchAlterSurvivesRestart(t *testing.T) {
 		}
 	}
 }
+
+func TestSynonymsSurviveRestartAndReplicate(t *testing.T) {
+	seed := func(c *replClient) {
+		c.do("FT.CREATE", "syn", "ON", "HASH", "PREFIX", "1", "s:", "SCHEMA", "t", "TEXT")
+		c.do("FT.SYNUPDATE", "syn", "g1", "boy", "child")
+		c.do("FT.SYNUPDATE", "syn", "g2", "SKIPINITIALSCAN", "Boy", "lad")
+		c.do("HSET", "s:1", "t", "a child")
+		c.do("HSET", "s:2", "t", "the lad")
+	}
+	check := func(c *replClient) {
+		t.Helper()
+		if got := c.str("FT.SYNDUMP", "syn"); got != "[boy [g1 g2] child [g1] lad [g2]]" {
+			t.Fatalf("FT.SYNDUMP = %s", got)
+		}
+		if got := searchIDs(t, c, "syn", "boy"); got != "s:1,s:2" {
+			t.Fatalf("FT.SEARCH boy = %s", got)
+		}
+	}
+	cfg := aofRewriteConfig(t, t.TempDir(), func(c *config.Config) { c.Persistence.AOFRewritePercentage = 0 })
+	s := startReplServerCfg(t, cfg)
+	c := dialRepl(t, s)
+	seed(c)
+	check(c)
+	stopReplServer(s)
+	s = startReplServerCfg(t, cfg)
+	c = dialRepl(t, s)
+	check(c)
+	c.do("BGREWRITEAOF")
+	waitAOFRewrites(t, s, 1)
+	stopReplServer(s)
+	check(dialRepl(t, startReplServerCfg(t, cfg)))
+
+	master := startReplServer(t, nil)
+	replica := startReplServer(t, nil)
+	r := replicate(t, replica, master)
+	seed(dialRepl(t, master))
+	waitSynced(t, replica, master)
+	check(r)
+}
