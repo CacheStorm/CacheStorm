@@ -2,9 +2,12 @@ package command
 
 import (
 	"errors"
+	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/search"
@@ -24,6 +27,7 @@ func RegisterSearchCommands(router *Router) {
 		"FT.TAGVALS": cmdFTTAGVALS, "FT.ALIASADD": cmdFTALIASADD, "FT.ALIASDEL": cmdFTALIASDEL,
 		"FT.ALIASUPDATE": cmdFTALIASUPDATE, "FT.EXPLAIN": cmdFTEXPLAIN,
 		"FT.ADD": cmdFTADD, "FT.DEL": cmdFTDEL, "FT.GET": cmdFTGET, "FT.ALTER": cmdFTALTER,
+		"FT.CURSOR": cmdFTCURSOR,
 	} {
 		router.Register(&CommandDef{Name: name, Handler: handler})
 	}
@@ -207,6 +211,7 @@ func cmdFTINFO(ctx *Context) error {
 		attrs = append(attrs, resp.ArrayValue(a))
 	}
 	docs, terms, records := idx.Summary(ctx.Store)
+	idle, total, own := searchIndexesFor(ctx).CursorStats(idx)
 	return ctx.WriteArray([]*resp.Value{
 		resp.SimpleString("index_name"), resp.SimpleString(idx.Name),
 		resp.SimpleString("index_options"), resp.ArrayValue([]*resp.Value{}),
@@ -223,6 +228,12 @@ func cmdFTINFO(ctx *Context) error {
 		resp.SimpleString("indexing"), resp.IntegerValue(0),
 		resp.SimpleString("percent_indexed"), resp.BulkString("1"),
 		resp.SimpleString("hash_indexing_failures"), resp.IntegerValue(0),
+		resp.SimpleString("cursor_stats"), resp.ArrayValue([]*resp.Value{
+			resp.SimpleString("global_idle"), resp.IntegerValue(int64(idle)),
+			resp.SimpleString("global_total"), resp.IntegerValue(int64(total)),
+			resp.SimpleString("index_capacity"), resp.IntegerValue(search.IndexCursorLimit),
+			resp.SimpleString("index_total"), resp.IntegerValue(int64(own)),
+		}),
 	})
 }
 
@@ -290,6 +301,7 @@ type searchRequest struct {
 	sortBy                              string
 	sortDesc                            bool
 	offset, limit                       int
+	cursor                              cursorSettings
 }
 
 func parseSearchRequest(ctx *Context) (*searchRequest, error) {
@@ -424,6 +436,12 @@ func parseSearchRequest(ctx *Context) (*searchRequest, error) {
 				r.opts.Dialect = parseDialect(ctx.ArgString(i + 1))
 			}
 			i++
+		case "WITHCURSOR":
+			last, err := parseCursorSettings(ctx, i, &r.cursor)
+			if err != nil {
+				return nil, err
+			}
+			i = last
 		case "SLOP", "TIMEOUT", "LANGUAGE", "EXPANDER", "SCORER", "PAYLOAD":
 			i++
 		}
@@ -521,7 +539,7 @@ func cmdFTSEARCH(ctx *Context) error {
 		})
 	}
 	resp3 := ctx.Writer.IsRESP3()
-	var results []*resp.Value
+	var entries [][]*resp.Value
 	order := &fieldOrder{}
 	for i := req.offset; i < len(hits) && i < req.offset+req.limit; i++ {
 		h := hits[i]
@@ -557,12 +575,54 @@ func cmdFTSEARCH(ctx *Context) error {
 		}
 		if resp3 {
 			add("values", resp.ArrayValue([]*resp.Value{}))
-			results = append(results, resp.PairsValue(fields))
-		} else {
-			results = append(results, fields...)
+			fields = []*resp.Value{resp.PairsValue(fields)}
 		}
+		entries = append(entries, fields)
 	}
-	return ctx.WriteValue(searchReply(resp3, len(hits), results))
+	results := &searchResults{entries: entries, total: len(hits)}
+	if !req.cursor.on {
+		reply, _, err := results.chunk(ctx, math.MaxInt)
+		if err != nil {
+			return ctx.WriteError(err)
+		}
+		return ctx.WriteValue(reply)
+	}
+	manager := searchIndexesFor(ctx)
+	c, err := manager.ReserveCursor(idx, req.cursor.maxIdle, results)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	c.Chunk = req.cursor.count
+	return readCursor(ctx, manager, c, 0)
+}
+
+// searchResults holds an FT.SEARCH's sorted documents, each one's reply
+// entries ready; a cursor sends them in chunks, the total with the first.
+type searchResults struct {
+	entries [][]*resp.Value
+	total   int
+	next    int
+	sent    bool
+}
+
+func (s *searchResults) chunk(ctx *Context, n int) (*resp.Value, bool, error) {
+	total := 0
+	if !s.sent {
+		total = s.total
+	}
+	s.sent = true
+	to := s.next + min(n, len(s.entries)-s.next)
+	var results []*resp.Value
+	for _, e := range s.entries[s.next:to] {
+		results = append(results, e...)
+	}
+	full := to-s.next == n
+	s.next = to
+	return searchReply(ctx.Writer.IsRESP3(), total, results), full, nil
+}
+
+type cursorState interface {
+	chunk(ctx *Context, n int) (*resp.Value, bool, error)
 }
 
 // searchReply is FT.SEARCH's and FT.AGGREGATE's reply: the total and the
@@ -696,9 +756,18 @@ func cmdFTAGGREGATE(ctx *Context) error {
 		return ctx.WriteError(errNoSuchIndex(ctx.ArgString(0)))
 	}
 	opts := search.QueryOptions{Params: map[string]string{}}
+	var cursor cursorSettings
 	n := ctx.ArgCount()
 	for i := 2; i < n; i++ {
 		switch strings.ToUpper(ctx.ArgString(i)) {
+		case "WITHCURSOR":
+			last, err := parseCursorSettings(ctx, i, &cursor)
+			if err != nil {
+				return ctx.WriteError(err)
+			}
+			i = last
+		case "WITHCOUNT":
+			return ctx.WriteError(errors.New("FT.AGGREGATE + WITHCOUNT is not available when `ENABLE_UNSTABLE_FEATURES` is off")) //nolint:staticcheck // RediSearch's reply text
 		case "VERBATIM":
 			opts.Verbatim = true
 		case "DIALECT":
@@ -738,6 +807,7 @@ func cmdFTAGGREGATE(ctx *Context) error {
 	// each: RediSearch's total counts the documents read before the first
 	// row it sends, unless a GROUPBY or SORTBY read them all first.
 	read := make(map[*search.Row]int)
+	docs := make(map[*search.Row]*search.Document)
 	for i, h := range found {
 		if d := idx.Content(ctx.Store, h.Doc.Key); d != nil {
 			r := idx.NewRow(d)
@@ -749,7 +819,15 @@ func cmdFTAGGREGATE(ctx *Context) error {
 			}
 			rows = append(rows, r)
 			read[r] = i + 1
+			docs[r] = h.Doc
 		}
+	}
+	pipeline := newPipelineKeys(idx)
+	for _, y := range search.Yields(query) {
+		pipeline.add(y)
+	}
+	if addScores {
+		pipeline.add("__score")
 	}
 	grouped, sorted := false, false
 	offset, limit := 0, -1
@@ -773,6 +851,7 @@ func cmdFTAGGREGATE(ctx *Context) error {
 				for _, r := range rows {
 					r.Load([]string{"*"})
 				}
+				pipeline.all = pipeline.root
 				i++
 				continue
 			}
@@ -780,8 +859,17 @@ func cmdFTAGGREGATE(ctx *Context) error {
 			if err != nil {
 				return ctx.WriteError(err)
 			}
-			for _, r := range rows {
-				r.Load(fields)
+			for j := 0; j < len(fields); j++ {
+				name := strings.TrimPrefix(fields[j], "@")
+				as := name
+				if j+2 < len(fields) && strings.EqualFold(fields[j+1], "AS") {
+					as = fields[j+2]
+					j += 2
+				}
+				pipeline.add(as)
+				for _, r := range rows {
+					r.LoadAs(name, as)
+				}
 			}
 			i = last
 		case "GROUPBY":
@@ -808,6 +896,9 @@ func cmdFTAGGREGATE(ctx *Context) error {
 				}
 				reducers = append(reducers, red)
 			}
+			if err := pipeline.group(rows, props, reducers); err != nil {
+				return ctx.WriteError(err)
+			}
 			if err := barrier(); err != nil {
 				return ctx.WriteError(err)
 			}
@@ -830,6 +921,9 @@ func cmdFTAGGREGATE(ctx *Context) error {
 				}
 				keys = append(keys, k)
 			}
+			if err := pipeline.sortBy(rows, keys); err != nil {
+				return ctx.WriteError(err)
+			}
 			if err := barrier(); err != nil {
 				return ctx.WriteError(err)
 			}
@@ -849,7 +943,11 @@ func cmdFTAGGREGATE(ctx *Context) error {
 			if err != nil {
 				return ctx.WriteError(err)
 			}
+			if err := pipeline.readExpr(rows, expr); err != nil {
+				return ctx.WriteError(err)
+			}
 			name := ctx.ArgString(i + 3)
+			pipeline.add(name)
 			for _, r := range rows {
 				if _, ok := failed[r]; ok {
 					continue
@@ -867,6 +965,9 @@ func cmdFTAGGREGATE(ctx *Context) error {
 			}
 			expr, err := search.ParseExpr(ctx.ArgString(i + 1))
 			if err != nil {
+				return ctx.WriteError(err)
+			}
+			if err := pipeline.readExpr(rows, expr); err != nil {
 				return ctx.WriteError(err)
 			}
 			kept := rows[:0]
@@ -901,74 +1002,328 @@ func cmdFTAGGREGATE(ctx *Context) error {
 			i = last
 		case "TIMEOUT", "DIALECT":
 			i++
-		}
-	}
-	resp3 := ctx.Writer.IsRESP3()
-	end := len(rows)
-	if limit >= 0 {
-		end = min(end, offset+limit)
-	}
-	var warning error
-	for i := 0; i < end; i++ {
-		if err, ok := failed[rows[i]]; ok {
-			if i <= offset {
+		case "WITHCURSOR":
+			last, err := parseCursorSettings(ctx, i, &cursor)
+			if err != nil {
 				return ctx.WriteError(err)
 			}
-			end, warning = i, err
+			i = last
+		}
+	}
+	hits := make([]*search.Document, len(found))
+	for i, h := range found {
+		hits[i] = h.Doc
+	}
+	agg := &aggregation{idx: idx, hits: hits, order: pipeline.order, rows: rows, read: read, docs: docs, failed: failed, found: len(found), next: offset, end: len(rows), limitEnd: -1}
+	if limit >= 0 {
+		agg.end, agg.limitEnd = min(len(rows), offset+limit), offset+limit
+	}
+	if grouped || sorted {
+		agg.ranked, agg.total = true, len(found)
+		if grouped {
+			agg.total = len(rows)
+		}
+	}
+	if !cursor.on {
+		reply, _, err := agg.chunk(ctx, math.MaxInt)
+		if err != nil {
+			return ctx.WriteError(err)
+		}
+		return ctx.WriteValue(reply)
+	}
+	manager := searchIndexesFor(ctx)
+	c, err := manager.ReserveCursor(idx, cursor.maxIdle, agg)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	c.Chunk = cursor.count
+	return readCursor(ctx, manager, c, 0)
+}
+
+// aggregation holds an FT.AGGREGATE's rows; a cursor sends them in
+// chunks. RediSearch streams rows that no GROUPBY or SORTBY gathers, and
+// each reply's total counts the documents the query read for it: in RESP2
+// until its first row, in RESP3 until its last row, or all that were left
+// once the query ran out of documents. A gathered reply sends its total
+// once.
+type aggregation struct {
+	idx      *search.Index
+	order    []string
+	rows     []*search.Row
+	docs     map[*search.Row]*search.Document
+	hits     []*search.Document
+	read     map[*search.Row]int
+	failed   map[*search.Row]error
+	found    int
+	next     int
+	end      int
+	limitEnd int
+	pos      int
+	ranked   bool
+	total    int
+	sent     bool
+}
+
+// chunk replies with up to n rows and reports whether rows remain.
+func (a *aggregation) chunk(ctx *Context, n int) (*resp.Value, bool, error) {
+	resp3 := ctx.Writer.IsRESP3()
+	first := !a.sent
+	a.sent = true
+	if !first && !a.ranked {
+		a.dropStale(ctx.Store, n)
+	}
+	from, scan := min(a.next, a.end), a.next
+	if first {
+		scan = 0
+	}
+	to := max(from, min(a.end, from+min(n, a.end)))
+	var warning error
+	for i := scan; i < to; i++ {
+		if err, ok := a.failed[a.rows[i]]; ok {
+			if i <= from {
+				return nil, false, err
+			}
+			to, warning = i, err
 			break
 		}
 	}
-	total := len(rows)
-	if !grouped {
-		// A RESP2 reply sends the total after the first row, a RESP3 one
-		// after the last row or the error.
-		total = len(found)
-		switch {
-		case sorted || limit == 0 || offset >= len(rows):
-		case !resp3:
-			total = read[rows[offset]]
-		case warning != nil:
-			total = read[rows[end]]
-		case limit > 0 && offset+limit <= len(rows):
-			total = read[rows[offset+limit-1]]
+	full := warning == nil && to-from == n
+	pos := a.pos
+	switch {
+	case warning != nil:
+		a.pos = a.read[a.rows[to]]
+	case to > from && (full || to == a.limitEnd):
+		a.pos = a.read[a.rows[to-1]]
+	case to == from && !first && from >= a.limitEnd && a.limitEnd >= 0:
+	default:
+		a.pos = a.found
+	}
+	// Documents written or deleted since the query are skipped unread.
+	read := func(lo, hi int) int {
+		if first || hi <= lo {
+			return hi - lo
+		}
+		n := 0
+		for _, live := range a.idx.Current(ctx.Store, a.hits[lo:hi]) {
+			if live {
+				n++
+			}
+		}
+		return n
+	}
+	var total int
+	if !a.ranked {
+		total = read(pos, a.pos)
+		if !resp3 && to > from {
+			total = read(pos, a.read[a.rows[from]])
 		}
 	}
-	results := []*resp.Value{}
-	for i := offset; i < end; i++ {
-		r := rows[i]
-		fields := make([]*resp.Value, 0, 2*len(r.Names))
-		for j, name := range r.Names {
-			v := r.Values[j]
-			if r.IsNull(name) {
-				fields = append(fields, resp.BulkString(name), resp.NullBulkString())
-				continue
-			}
-			if r.IsList(name) {
-				list := []*resp.Value{}
-				if v != "" {
-					for _, item := range strings.Split(v, "\x00") {
-						list = append(list, resp.BulkString(item))
-					}
-				}
-				fields = append(fields, resp.BulkString(name), resp.ArrayValue(list))
-				continue
-			}
-			fields = append(fields, resp.BulkString(name), resp.BulkString(v))
-		}
-		if resp3 {
-			results = append(results, resp.PairsValue([]*resp.Value{
-				resp.SimpleString("extra_attributes"), resp.PairsValue(fields),
-				resp.SimpleString("values"), resp.ArrayValue([]*resp.Value{}),
-			}))
-		} else {
-			results = append(results, resp.ArrayValue(fields))
-		}
+	if a.ranked && first {
+		total = a.total
+	}
+	a.next = to
+	results := make([]*resp.Value, 0, to-from)
+	for _, r := range a.rows[from:to] {
+		results = append(results, aggregateRowReply(r, resp3, a.order))
 	}
 	var warnings []string
 	if warning != nil {
 		warnings = append(warnings, warning.Error())
 	}
-	return ctx.WriteValue(searchReply(resp3, total, results, warnings...))
+	return searchReply(resp3, total, results, warnings...), full, nil
+}
+
+// dropStale removes, from the next n rows, those whose document was
+// written or deleted since the query: RediSearch's index iterator skips
+// deleted documents, and a written one is indexed again under a new id.
+func (a *aggregation) dropStale(st *store.Store, n int) {
+	from := a.next
+	for kept := 0; kept < n && from < len(a.rows); {
+		window := a.rows[from:min(len(a.rows), from+min(n-kept, len(a.rows)))]
+		docs := make([]*search.Document, len(window))
+		for i, r := range window {
+			docs[i] = a.docs[r]
+		}
+		live := a.idx.Current(st, docs)
+		j := from
+		for i, r := range window {
+			if live[i] {
+				a.rows[j] = r
+				j++
+			}
+		}
+		kept += j - from
+		a.rows = append(a.rows[:j], a.rows[from+len(window):]...)
+		from = j
+	}
+	a.end = len(a.rows)
+	if a.limitEnd >= 0 {
+		a.end = min(a.end, a.limitEnd)
+	}
+}
+
+// aggregateRowReply sends a row's fields in the order of the pipeline's
+// lookup keys, then the fields LOAD * read.
+func aggregateRowReply(r *search.Row, resp3 bool, order []string) *resp.Value {
+	fields := make([]*resp.Value, 0, 2*len(r.Names))
+	names := make([]string, 0, len(r.Names))
+	listed := make(map[string]bool, len(order))
+	for _, name := range order {
+		if _, ok := r.Value(name); ok {
+			names = append(names, name)
+			listed[name] = true
+		}
+	}
+	for _, name := range r.Names {
+		if !listed[name] {
+			names = append(names, name)
+		}
+	}
+	for _, name := range names {
+		v, _ := r.Value(name)
+		switch {
+		case r.IsNull(name):
+			fields = append(fields, resp.BulkString(name), resp.NullBulkString())
+		case r.IsList(name):
+			list := []*resp.Value{}
+			if v != "" {
+				for _, item := range strings.Split(v, "\x00") {
+					list = append(list, resp.BulkString(item))
+				}
+			}
+			fields = append(fields, resp.BulkString(name), resp.ArrayValue(list))
+		default:
+			fields = append(fields, resp.BulkString(name), resp.BulkString(v))
+		}
+	}
+	if !resp3 {
+		return resp.ArrayValue(fields)
+	}
+	return resp.PairsValue([]*resp.Value{
+		resp.SimpleString("extra_attributes"), resp.PairsValue(fields),
+		resp.SimpleString("values"), resp.ArrayValue([]*resp.Value{}),
+	})
+}
+
+type cursorSettings struct {
+	on      bool
+	count   int
+	maxIdle time.Duration
+}
+
+// parseCursorSettings reads WITHCURSOR's MAXIDLE and COUNT after args[i]
+// and returns the index of the last argument they use.
+func parseCursorSettings(ctx *Context, i int, cs *cursorSettings) (int, error) {
+	cs.on = true
+	for i+1 < ctx.ArgCount() {
+		name := strings.ToUpper(ctx.ArgString(i + 1))
+		if name != "MAXIDLE" && name != "COUNT" {
+			break
+		}
+		if i+2 >= ctx.ArgCount() {
+			return i, errors.New("Bad arguments for " + name + ": Expected an argument, but none provided") //nolint:staticcheck // RediSearch's reply text
+		}
+		v, err := strconv.ParseInt(ctx.ArgString(i+2), 10, 64)
+		if err != nil {
+			return i, errors.New("Bad arguments for " + name + ": Could not convert argument to expected type") //nolint:staticcheck // RediSearch's reply text
+		}
+		if v < 1 || v > math.MaxUint32 {
+			return i, errors.New("Bad arguments for " + name + ": Value is outside acceptable bounds") //nolint:staticcheck // RediSearch's reply text
+		}
+		if name == "COUNT" {
+			cs.count = int(v)
+		} else {
+			cs.maxIdle = time.Duration(v) * time.Millisecond
+		}
+		i += 2
+	}
+	if cs.maxIdle == 0 || cs.maxIdle > search.CursorMaxIdle {
+		cs.maxIdle = search.CursorMaxIdle
+	}
+	if cs.count == 0 {
+		cs.count = search.CursorReadSize
+	}
+	return i, nil
+}
+
+// readCursor sends a cursor's next chunk; a count other than 0 becomes the
+// cursor's chunk size, and a negative one sends every row left.
+func readCursor(ctx *Context, manager *search.IndexManager, c *search.Cursor, count int64) error {
+	if count != 0 {
+		c.Chunk = int(max(count, -1))
+	}
+	n := c.Chunk
+	if n < 0 {
+		n = math.MaxInt
+	}
+	reply, more, err := c.State.(cursorState).chunk(ctx, n)
+	if err != nil {
+		manager.FreeCursor(c)
+		return ctx.WriteError(err)
+	}
+	id := int64(c.ID)
+	if more {
+		manager.PauseCursor(c)
+	} else {
+		manager.FreeCursor(c)
+		id = 0
+	}
+	return ctx.WriteValue(resp.ArrayValue([]*resp.Value{reply, resp.IntegerValue(id)}))
+}
+
+// cmdFTCURSOR reads and closes FT.AGGREGATE's cursors. Any existing index
+// may name a cursor, as in RediSearch, whose cursors are global.
+func cmdFTCURSOR(ctx *Context) error {
+	if ctx.ArgCount() < 3 {
+		return ctx.WriteError(errors.New("ERR wrong number of arguments for 'FT.CURSOR' command"))
+	}
+	manager := searchIndexesFor(ctx)
+	if _, ok := manager.Get(ctx.ArgString(1)); !ok {
+		return ctx.WriteError(errors.New(ctx.ArgString(1) + ": no such index"))
+	}
+	cid, err := strconv.ParseInt(ctx.ArgString(2), 10, 64)
+	if err != nil {
+		return ctx.WriteError(errors.New("Bad cursor ID")) //nolint:staticcheck // RediSearch's reply text
+	}
+	notFound := func() error {
+		return ctx.WriteError(fmt.Errorf("Cursor not found, id: %d", int32(cid))) //nolint:staticcheck // RediSearch's reply text
+	}
+	switch strings.ToUpper(ctx.ArgString(0)) {
+	case "READ":
+		var count int64
+		if ctx.ArgCount() > 4 {
+			if !strings.EqualFold(ctx.ArgString(3), "COUNT") {
+				return ctx.WriteError(fmt.Errorf("Unknown argument `%s`", ctx.ArgString(3))) //nolint:staticcheck // RediSearch's reply text
+			}
+			if count, err = strconv.ParseInt(ctx.ArgString(4), 10, 64); err != nil {
+				return ctx.WriteError(fmt.Errorf("Bad value for COUNT: `%s`", ctx.ArgString(4))) //nolint:staticcheck // RediSearch's reply text
+			}
+		}
+		c := manager.TakeCursor(uint64(cid))
+		if c == nil {
+			return notFound()
+		}
+		if !manager.CursorIndexAlive(c) {
+			manager.FreeCursor(c)
+			return ctx.WriteError(errors.New("The index was dropped while the cursor was idle")) //nolint:staticcheck // RediSearch's reply text
+		}
+		return readCursor(ctx, manager, c, count)
+	case "PROFILE":
+		c := manager.TakeCursor(uint64(cid))
+		if c == nil {
+			return notFound()
+		}
+		manager.PauseCursor(c)
+		return ctx.WriteError(fmt.Errorf("cursor request is not profile, id: %d", int32(cid)))
+	case "DEL":
+		if !manager.PurgeCursor(uint64(cid)) {
+			return ctx.WriteError(errors.New("Cursor does not exist")) //nolint:staticcheck // RediSearch's reply text
+		}
+		return ctx.WriteOK()
+	case "GC":
+		return ctx.WriteInteger(int64(manager.CollectCursors()))
+	}
+	return ctx.WriteError(errors.New("Unknown subcommand")) //nolint:staticcheck // RediSearch's reply text
 }
 
 func cmdFTTAGVALS(ctx *Context) error {

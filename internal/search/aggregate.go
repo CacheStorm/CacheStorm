@@ -78,9 +78,19 @@ func (r *Row) Load(names []string) {
 			}
 			continue
 		}
-		if v, ok := FieldValue(r.idx, r.doc, n); ok {
-			r.Set(n, v)
-		}
+		r.LoadAs(n, n)
+	}
+}
+
+// LoadAs copies a field into the row under another name; __key is the
+// document's key.
+func (r *Row) LoadAs(name, as string) {
+	if name == "__key" {
+		r.Set(as, r.doc.Key)
+		return
+	}
+	if v, ok := FieldValue(r.idx, r.doc, name); ok {
+		r.Set(as, v)
 	}
 }
 
@@ -122,6 +132,14 @@ type Reducer struct {
 	Fn   string
 	Args []string
 	As   string
+}
+
+// Name is the field the reducer's value goes to.
+func (red Reducer) Name() string {
+	if red.As != "" {
+		return red.As
+	}
+	return "__generated_alias" + strings.ToLower(red.Fn) + strings.ToLower(strings.Join(trimAt(red.Args), ""))
 }
 
 // Group groups rows by the props and runs the reducers on each group.
@@ -175,10 +193,7 @@ func Group(rows []*Row, props []string, reducers []Reducer) ([]*Row, error) {
 			if err != nil {
 				return nil, err
 			}
-			name := red.As
-			if name == "" {
-				name = "__generated_alias" + strings.ToLower(red.Fn) + strings.ToLower(strings.Join(trimAt(red.Args), ""))
-			}
+			name := red.Name()
 			row.Set(name, v)
 			if fn := strings.ToUpper(red.Fn); fn == "TOLIST" || fn == "RANDOM_SAMPLE" {
 				if row.lists == nil {
@@ -743,4 +758,53 @@ func (p *exprParser) primary() (exprNode, error) {
 
 func isIdentByte(c byte) bool {
 	return c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
+}
+
+// Properties returns the properties the expression reads, in the order
+// RediSearch resolves them.
+func (e *Expr) Properties() []string {
+	var out []string
+	var walk func(n exprNode)
+	walk = func(n exprNode) {
+		switch n := n.(type) {
+		case fieldNode:
+			out = append(out, n.name)
+		case unaryOp:
+			walk(n.x)
+		case binaryOp:
+			walk(n.l)
+			walk(n.r)
+		case callNode:
+			for _, a := range n.args {
+				walk(a)
+			}
+		}
+	}
+	walk(e.root)
+	return out
+}
+
+// Yields returns the fields a query's vector clauses return distances as.
+func Yields(n Node) []string {
+	if n == nil {
+		return nil
+	}
+	var out []string
+	if n.yield != "" {
+		out = append(out, n.yield)
+	}
+	for _, c := range n.children {
+		out = append(out, Yields(c)...)
+	}
+	return out
+}
+
+// Value returns a value the row holds, without reading the document.
+func (r *Row) Value(name string) (string, bool) {
+	for i, n := range r.Names {
+		if n == name {
+			return r.Values[i], true
+		}
+	}
+	return "", false
 }

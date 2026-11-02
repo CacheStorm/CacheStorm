@@ -539,3 +539,17 @@ func (idx *Index) MemoryUsage() int64 {
 	}
 	return n
 }
+
+// Current reports, for each document, whether its key still holds it in
+// st: a write or a delete since the query read it makes it stale.
+func (idx *Index) Current(st *store.Store, docs []*Document) []bool {
+	c := idx.cache(st)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.syncLocked(idx, st)
+	out := make([]bool, len(docs))
+	for i, d := range docs {
+		out[i] = c.docs[d.Key] == d
+	}
+	return out
+}

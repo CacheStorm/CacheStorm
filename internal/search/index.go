@@ -45,6 +45,7 @@ type Field struct {
 	Separator     byte
 	CaseSensitive bool
 	IndexMissing  bool
+	UNF           bool
 	Vector        *VectorSpec
 	path          *store.JSONPath
 	pos           int
@@ -217,7 +218,9 @@ func parseSchema(args []string, json bool) ([]Field, error) {
 				f.CaseSensitive = true
 			case "INDEXMISSING":
 				f.IndexMissing = true
-			case "UNF", "WITHSUFFIXTRIE", "INDEXEMPTY", "PHONETIC":
+			case "UNF":
+				f.UNF = true
+			case "WITHSUFFIXTRIE", "INDEXEMPTY", "PHONETIC":
 				if strings.EqualFold(args[i], "PHONETIC") {
 					i++
 				}
@@ -325,6 +328,9 @@ type IndexManager struct {
 	indexes map[string]*Index
 	aliases map[string]string
 	count   atomic.Int32
+
+	cursorOnce sync.Once
+	cursors    *cursorList
 }
 
 // All returns the indexes; it is cheap when there are none.
