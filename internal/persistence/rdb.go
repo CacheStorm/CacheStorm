@@ -252,8 +252,8 @@ func (w *RDBWriter) writeValue(f io.Writer, v store.Value, valueType int) error 
 		return w.writeString(f, string(vt.Data))
 	case *store.ListValue:
 		vt.RLock()
-		items := make([][]byte, len(vt.Elements))
-		copy(items, vt.Elements)
+		items := make([][]byte, vt.Len())
+		copy(items, vt.Elements())
 		vt.RUnlock()
 		if err := w.writeLength(f, len(items)); err != nil {
 			return err
@@ -742,7 +742,7 @@ func (r *RDBReader) readEntry(f io.Reader, valueType byte, expiresAtMS int64, ta
 			}
 			items[i] = []byte(item)
 		}
-		value = &store.ListValue{Elements: items}
+		value = store.NewListFrom(items)
 
 	case 2:
 		length, err := r.readLength(f)

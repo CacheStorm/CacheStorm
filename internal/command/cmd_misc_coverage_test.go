@@ -630,7 +630,7 @@ func TestCmdACL_LIST(t *testing.T) {
 
 func TestCmdSORT_Success(t *testing.T) {
 	s := store.NewStore()
-	lv := &store.ListValue{Elements: [][]byte{[]byte("3"), []byte("1"), []byte("2")}}
+	lv := store.NewListFrom([][]byte{[]byte("3"), []byte("1"), []byte("2")})
 	s.Set("mylist", lv, store.SetOptions{})
 	ctx := discardCtx("SORT", bytesArgs("mylist"), s)
 	err := cmdSORT(ctx)
@@ -641,7 +641,7 @@ func TestCmdSORT_Success(t *testing.T) {
 
 func TestCmdSORTRO_Success(t *testing.T) {
 	s := store.NewStore()
-	lv := &store.ListValue{Elements: [][]byte{[]byte("3"), []byte("1"), []byte("2")}}
+	lv := store.NewListFrom([][]byte{[]byte("3"), []byte("1"), []byte("2")})
 	s.Set("mylist", lv, store.SetOptions{})
 	ctx := discardCtx("SORT_RO", bytesArgs("mylist"), s)
 	err := cmdSORTRO(ctx)

@@ -38,7 +38,7 @@ func TestRDBComprehensive(t *testing.T) {
 
 	t.Run("RDB Writer with List", func(t *testing.T) {
 		s := store.NewStore()
-		s.Set("list1", &store.ListValue{Elements: [][]byte{[]byte("a"), []byte("b")}}, store.SetOptions{})
+		s.Set("list1", store.NewListFrom([][]byte{[]byte("a"), []byte("b")}), store.SetOptions{})
 
 		cfg := RDBConfig{Version: RDBVersion11, Compression: false, Checksum: true}
 		writer := NewRDBWriter(s, cfg)

@@ -221,27 +221,59 @@ func (v *HashValue) Clone() Value {
 }
 
 type ListValue struct {
-	Elements [][]byte
-	mu       sync.RWMutex
-	dead     bool
-	// backing and head let PushFront prepend in amortised O(1): Elements is
-	// backing[head:] with free slots before head. Code that reassigns
-	// Elements directly simply invalidates the headroom (PushFront checks
-	// that Elements still starts at backing[head]) and the next PushFront
-	// reallocates.
-	backing [][]byte
-	head    int
-	size    sizeCounter
+	l    listChunks
+	mu   sync.RWMutex
+	dead bool
+	size sizeCounter
 	// shape is how Redis would hold the list, for OBJECT ENCODING; nil
 	// until a write needs it (see list_encoding.go).
 	shape *listShape
 }
 
+// NewListFrom returns a list of elems.
+func NewListFrom(elems [][]byte) *ListValue {
+	v := &ListValue{}
+	for _, el := range elems {
+		v.l.pushBack(el)
+	}
+	return v
+}
+
+// AppendLoaded appends el to a list being built, leaving its encoding to
+// be derived from the whole list.
+func (v *ListValue) AppendLoaded(el []byte) {
+	v.l.pushBack(el)
+	v.size.add(listElemSize(el))
+}
+
+// Len is the number of elements. The caller holds the value's lock.
+func (v *ListValue) Len() int { return v.l.count }
+
+// At returns element i, which is in range. The caller holds the value's
+// lock.
+func (v *ListValue) At(i int) []byte { return v.l.at(i) }
+
+// Range calls fn on the elements from index from on, or from there
+// backwards with reverse, until fn returns false. The caller holds the
+// value's lock.
+func (v *ListValue) Range(from int, reverse bool, fn func(i int, el []byte) bool) {
+	v.l.each(from, reverse, fn)
+}
+
+// Elements returns the elements. The caller holds the value's lock; the
+// slices stay valid after the list changes.
+func (v *ListValue) Elements() [][]byte { return v.l.all() }
+
+// Slice returns elements [start, end). The caller holds the value's lock.
+func (v *ListValue) Slice(start, end int) [][]byte {
+	if start >= end {
+		return nil
+	}
+	return v.l.slice(start, end)
+}
+
 // PushFront prepends items so that items[0] becomes the new head, as LPUSH
-// of the items in reverse order does. Prepending
-// to a plain slice copies the whole list each time, which made a list built
-// by LPUSH quadratic; the headroom kept before Elements makes it amortised
-// constant. The caller holds the value's lock.
+// of the items in reverse order does. The caller holds the value's lock.
 func (v *ListValue) PushFront(items ...[]byte) {
 	if len(items) == 0 {
 		return
@@ -255,50 +287,26 @@ func (v *ListValue) PushFront(items ...[]byte) {
 }
 
 func (v *ListValue) pushElems(front bool, items ...[]byte) {
-	if !front {
-		v.Elements = append(v.Elements, items...)
-		v.size.add(sumListElems(items))
-		return
-	}
-	n := len(items)
 	v.size.add(sumListElems(items))
-	if v.head >= n && v.headroomValid() {
-		v.head -= n
-		copy(v.backing[v.head:], items)
-		v.Elements = v.backing[v.head : v.head+n+len(v.Elements)]
+	if !front {
+		for _, el := range items {
+			v.l.pushBack(el)
+		}
 		return
 	}
-	size := n + len(v.Elements)
-	room := size
-	if room < 8 {
-		room = 8
+	for i := len(items) - 1; i >= 0; i-- {
+		v.l.pushFront(items[i])
 	}
-	buf := make([][]byte, room+size, room+size+size/2+8)
-	copy(buf[room:], items)
-	copy(buf[room+n:], v.Elements)
-	v.backing = buf
-	v.head = room
-	v.Elements = buf[room : room+size]
 }
 
-// headroomValid reports whether Elements still starts at backing[head], so
-// the slots before it are free to reuse.
-func (v *ListValue) headroomValid() bool {
-	if v.backing == nil || len(v.Elements) == 0 || v.head >= len(v.backing) {
-		return false
-	}
-	return &v.backing[v.head] == &v.Elements[0] && cap(v.backing)-v.head == cap(v.Elements)
-}
-
-// PopFront removes and returns up to n elements from the head. The vacated
-// slots are cleared so the popped values can be collected, and they become
-// headroom for later PushFront calls. The caller holds the value's lock.
+// PopFront removes and returns up to n elements from the head. The caller
+// holds the value's lock.
 func (v *ListValue) PopFront(n int) [][]byte {
 	return v.pop(n, true)
 }
 
 func (v *ListValue) pop(n int, front bool) [][]byte {
-	if n <= 0 || len(v.Elements) == 0 {
+	if n <= 0 || v.l.count == 0 {
 		return nil
 	}
 	s := v.shapeLocked()
@@ -308,61 +316,33 @@ func (v *ListValue) pop(n int, front bool) [][]byte {
 	} else {
 		s.popBack(out)
 	}
-	if len(v.Elements) > 0 {
+	if v.l.count > 0 {
 		s.toListpack(true)
 	}
 	return out
 }
 
 func (v *ListValue) popElems(n int, front bool) [][]byte {
-	if !front {
-		return v.popBackElems(n)
-	}
-	if n > len(v.Elements) {
-		n = len(v.Elements)
-	}
+	n = min(n, v.l.count)
 	if n <= 0 {
 		return nil
 	}
 	out := make([][]byte, n)
-	copy(out, v.Elements[:n])
+	for i := range out {
+		if front {
+			out[i] = v.l.popFront()
+		} else {
+			out[i] = v.l.popBack()
+		}
+	}
 	v.size.add(-sumListElems(out))
-	valid := v.headroomValid()
-	clear(v.Elements[:n])
-	v.Elements = v.Elements[n:]
-	if valid {
-		v.head += n
-	} else {
-		v.backing, v.head = nil, 0
-	}
-	if len(v.Elements) == 0 {
-		// Start over so an emptied queue does not pin its old array.
-		v.Elements, v.backing, v.head = v.Elements[:0:0], nil, 0
-	}
 	return out
 }
 
 // PopBack removes and returns up to n elements from the tail, last element
-// first. The vacated slots are cleared. The caller holds the value's lock.
+// first. The caller holds the value's lock.
 func (v *ListValue) PopBack(n int) [][]byte {
 	return v.pop(n, false)
-}
-
-func (v *ListValue) popBackElems(n int) [][]byte {
-	if n > len(v.Elements) {
-		n = len(v.Elements)
-	}
-	if n <= 0 {
-		return nil
-	}
-	out := make([][]byte, n)
-	for i := 0; i < n; i++ {
-		out[i] = v.Elements[len(v.Elements)-1-i]
-	}
-	v.size.add(-sumListElems(out))
-	clear(v.Elements[len(v.Elements)-n:])
-	v.Elements = v.Elements[:len(v.Elements)-n]
-	return out
 }
 
 func (v *ListValue) Lock()    { v.mu.Lock() }
@@ -375,7 +355,7 @@ func (v *ListValue) RUnlock() { v.mu.RUnlock() }
 // holds the value's lock.
 func (v *ListValue) IsDead() bool { return v.dead }
 
-func (v *ListValue) emptyLocked() bool { return len(v.Elements) == 0 }
+func (v *ListValue) emptyLocked() bool { return v.l.count == 0 }
 func (v *ListValue) markDeadLocked()   { v.dead = true }
 
 func (v *ListValue) Type() DataType { return DataTypeList }
@@ -385,7 +365,11 @@ func (v *ListValue) SizeOf() int64 {
 	}
 	v.mu.RLock()
 	defer v.mu.RUnlock()
-	n := sumListElems(v.Elements)
+	var n int64
+	v.l.each(0, false, func(_ int, el []byte) bool {
+		n += listElemSize(el)
+		return true
+	})
 	v.size.set(n)
 	return listBaseSize + n
 }
@@ -416,10 +400,10 @@ func (v *ListValue) PushBack(items ...[]byte) {
 // does after TryGrow. The caller holds the value's write lock.
 func (v *ListValue) SetAt(i int, el []byte) {
 	s := v.shapeLocked()
-	s.replace(v.Elements, i, el)
+	s.replace(&v.l, i, el)
 	s.toListpack(true)
-	old := v.Elements[i]
-	v.Elements[i] = el
+	old := v.l.at(i)
+	v.l.setAt(i, el)
 	v.size.add(int64(len(el)) - int64(len(old)))
 }
 
@@ -428,48 +412,47 @@ func (v *ListValue) SetAt(i int, el []byte) {
 // holds the value's write lock.
 func (v *ListValue) Trim(start, stop int) {
 	s := v.shapeLocked()
-	s.popFront(v.Elements[:start])
-	for i := len(v.Elements) - 1; i > stop; i-- {
-		s.popBack(v.Elements[i : i+1])
-	}
+	front := v.l.slice(0, start)
+	s.popFront(front)
+	removed := sumListElems(front)
+	v.l.each(v.l.count-1, true, func(i int, el []byte) bool {
+		if i <= stop {
+			return false
+		}
+		s.popBack([][]byte{el})
+		removed += listElemSize(el)
+		return true
+	})
 	s.toListpack(true)
-	removed := sumListElems(v.Elements[:start]) + sumListElems(v.Elements[stop+1:])
-	clear(v.Elements[:start])
-	clear(v.Elements[stop+1:])
-	v.Elements = v.Elements[start : stop+1]
+	v.l.trim(start, stop)
 	v.size.add(-removed)
 }
 
 // ReplaceElements installs elems as the whole list, for the commands that
-// rebuild it (LINSERT, LREM, LTRIM, ...). Recounting the size is O(len(elems)),
-// which those commands already pay to build elems. The caller holds the
-// value's write lock.
+// rebuild it. The caller holds the value's write lock.
 func (v *ListValue) ReplaceElements(elems [][]byte) {
-	v.Elements, v.shape = elems, nil
+	v.l.rebuild(elems)
+	v.shape = nil
 	v.size.set(sumListElems(elems))
 }
 func (v *ListValue) String() string {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 	var result strings.Builder
-	for i, el := range v.Elements {
+	v.l.each(0, false, func(i int, el []byte) bool {
 		if i > 0 {
 			result.WriteString(", ")
 		}
 		result.Write(el)
-	}
+		return true
+	})
 	return result.String()
 }
 func (v *ListValue) Clone() Value {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
-	cloned := &ListValue{Elements: make([][]byte, len(v.Elements))}
-	for i, el := range v.Elements {
-		cel := make([]byte, len(el))
-		copy(cel, el)
-		cloned.Elements[i] = cel
-	}
-	if v.shape != nil && v.shape.count == len(v.Elements) {
+	cloned := &ListValue{l: v.l.clone()}
+	if v.shape != nil && v.shape.count == v.l.count {
 		cloned.shape = v.shape.clone()
 	}
 	return cloned

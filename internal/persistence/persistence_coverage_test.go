@@ -730,8 +730,8 @@ func TestReadEntryListType(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected ListValue, got %T", entry.Value)
 	}
-	if len(lv.Elements) != 2 {
-		t.Errorf("expected 2 elements, got %d", len(lv.Elements))
+	if lv.Len() != 2 {
+		t.Errorf("expected 2 elements, got %d", lv.Len())
 	}
 }
 
@@ -1553,7 +1553,7 @@ func TestRDBManualRoundTripMultipleTypes(t *testing.T) {
 		t.Error("expected 'mylist'")
 	} else {
 		lv, _ := e.Value.(*store.ListValue)
-		if len(lv.Elements) != 3 {
+		if lv.Len() != 3 {
 			t.Errorf("expected 3 list elements")
 		}
 	}
@@ -1863,7 +1863,7 @@ func TestRDBWriterWriteValueErrors(t *testing.T) {
 	// Test writeValue with different value types and a failing writer.
 	values := []store.Value{
 		&store.StringValue{Data: []byte("test")},
-		&store.ListValue{Elements: [][]byte{[]byte("a"), []byte("b")}},
+		store.NewListFrom([][]byte{[]byte("a"), []byte("b")}),
 		store.NewSetFrom(map[string]struct{}{"x": {}, "y": {}}),
 		store.NewHashFrom(map[string][]byte{"f": []byte("v")}),
 	}
@@ -2106,7 +2106,7 @@ func TestRDBWriteDatabaseErrors(t *testing.T) {
 func TestRDBWriterSaveCompleteSuccess(t *testing.T) {
 	s := store.NewStore()
 	s.Set("complete", &store.StringValue{Data: []byte("success")}, store.SetOptions{})
-	s.Set("complete2", &store.ListValue{Elements: [][]byte{[]byte("a")}}, store.SetOptions{})
+	s.Set("complete2", store.NewListFrom([][]byte{[]byte("a")}), store.SetOptions{})
 	s.Set("complete3", store.NewSetFrom(map[string]struct{}{"m": {}}), store.SetOptions{})
 	s.Set("complete4", store.NewHashFrom(map[string][]byte{"f": []byte("v")}), store.SetOptions{})
 

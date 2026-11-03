@@ -23,18 +23,18 @@ func TestAudit50R14X(t *testing.T) {
 			t.Log("FIX VERIFIED")
 		}
 	}()
-	control := &ListValue{Elements: [][]byte{[]byte("a"), []byte("b")}}
+	control := NewListFrom([][]byte{[]byte("a"), []byte("b")})
 	checkAudit50R14X(t, "control list string", "a, b", control.String())
-	value := &ListValue{Elements: [][]byte{[]byte(""), []byte("b")}}
+	value := NewListFrom([][]byte{[]byte(""), []byte("b")})
 	checkAudit50R14X(t, "leading empty element preserved", ", b", value.String())
-	empty := &ListValue{Elements: [][]byte{[]byte(""), []byte("")}}
+	empty := NewListFrom([][]byte{[]byte(""), []byte("")})
 	checkAudit50R14X(t, "two empty elements preserved", ", ", empty.String())
 	for _, parts := range [][]string{nil, {""}, {"a", "", "b"}, {"a", ""}, {"", "", "tail"}} {
 		elements := make([][]byte, len(parts))
 		for i, p := range parts {
 			elements[i] = []byte(p)
 		}
-		checkAudit50R14X(t, "empty/middle/trailing boundary", strings.Join(parts, ", "), (&ListValue{Elements: elements}).String())
+		checkAudit50R14X(t, "empty/middle/trailing boundary", strings.Join(parts, ", "), (NewListFrom(elements)).String())
 	}
 	source := NewHashFrom(map[string][]byte{"k": []byte("original")})
 	clone := source.Clone().(*HashValue)

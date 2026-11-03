@@ -25,7 +25,7 @@ func TestRDBSaveLoadRoundTripAllTypes(t *testing.T) {
 	}
 
 	mustSet("string_plain", &store.StringValue{Data: []byte("hello")}, store.SetOptions{})
-	mustSet("list", &store.ListValue{Elements: [][]byte{[]byte("a"), []byte("b"), []byte("c")}}, store.SetOptions{})
+	mustSet("list", store.NewListFrom([][]byte{[]byte("a"), []byte("b"), []byte("c")}), store.SetOptions{})
 	mustSet("set", store.NewSetFrom(map[string]struct{}{"x": {}, "y": {}, "z": {}}), store.SetOptions{})
 	mustSet("hash", store.NewHashFrom(map[string][]byte{"f1": []byte("v1"), "f2": []byte("v2")}), store.SetOptions{})
 	mustSet("zset", store.NewSortedSetFrom(map[string]float64{"alice": 90.5, "bob": 85.25, "carol": 77}), store.SetOptions{})
@@ -72,8 +72,8 @@ func TestRDBSaveLoadRoundTripAllTypes(t *testing.T) {
 	if !ok {
 		t.Fatalf("list type = %T, want *store.ListValue", getEntry("list").Value)
 	}
-	if len(lv.Elements) != 3 || string(lv.Elements[0]) != "a" || string(lv.Elements[1]) != "b" || string(lv.Elements[2]) != "c" {
-		t.Errorf("list elements = %v, want [a b c]", lv.Elements)
+	if lv.Len() != 3 || string(lv.At(0)) != "a" || string(lv.At(1)) != "b" || string(lv.At(2)) != "c" {
+		t.Errorf("list elements = %v, want [a b c]", lv.Elements())
 	}
 
 	// Set — all members present

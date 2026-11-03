@@ -106,7 +106,7 @@ func listPush(ctx *Context, left bool) error {
 		}
 		list.PushBack(items...)
 	}
-	length := int64(len(list.Elements))
+	length := int64(list.Len())
 	list.Unlock()
 
 	ctx.notify(store.NotifyList, event, key)
@@ -142,7 +142,7 @@ func cmdLPUSHX(ctx *Context) error {
 		items[i] = ctx.Arg(argCount - i)
 	}
 	list.PushFront(items...)
-	length := int64(len(list.Elements))
+	length := int64(list.Len())
 	list.Unlock()
 
 	ctx.notify(store.NotifyList, "lpush", key)
@@ -169,7 +169,7 @@ func cmdRPUSHX(ctx *Context) error {
 		items = append(items, ctx.Arg(i))
 	}
 	list.PushBack(items...)
-	length := int64(len(list.Elements))
+	length := int64(list.Len())
 	list.Unlock()
 
 	ctx.notify(store.NotifyList, "rpush", key)
@@ -209,15 +209,15 @@ func listPopGeneric(ctx *Context, left bool) error {
 		return ctx.WriteArray([]*resp.Value{})
 	}
 
-	if len(list.Elements) == 0 {
+	if list.Len() == 0 {
 		list.Unlock()
 		if hasCount {
 			return ctx.WriteNullArray()
 		}
 		return ctx.WriteNullBulkString()
 	}
-	if count > len(list.Elements) {
-		count = len(list.Elements)
+	if count > list.Len() {
+		count = list.Len()
 	}
 	var popped [][]byte
 	if left {
@@ -225,7 +225,7 @@ func listPopGeneric(ctx *Context, left bool) error {
 	} else {
 		popped = list.PopBack(count)
 	}
-	empty := len(list.Elements) == 0
+	empty := list.Len() == 0
 	list.Unlock()
 
 	ctx.notify(store.NotifyList, popEvent(left), key)
@@ -266,7 +266,7 @@ func cmdLLEN(ctx *Context) error {
 	}
 
 	list.RLock()
-	length := int64(len(list.Elements))
+	length := int64(list.Len())
 	list.RUnlock()
 
 	return ctx.WriteInteger(length)
@@ -297,7 +297,7 @@ func cmdLRANGE(ctx *Context) error {
 
 	list.RLock()
 
-	length := len(list.Elements)
+	length := list.Len()
 	if length == 0 {
 		reply := []*resp.Value{}
 		list.RUnlock()
@@ -324,9 +324,13 @@ func cmdLRANGE(ctx *Context) error {
 	}
 
 	results := make([]*resp.Value, 0, stop-start+1)
-	for i := start; i <= stop; i++ {
-		results = append(results, resp.BulkBytes(list.Elements[i]))
-	}
+	list.Range(start, false, func(i int, el []byte) bool {
+		if i > stop {
+			return false
+		}
+		results = append(results, resp.BulkBytes(el))
+		return true
+	})
 
 	reply := results
 	list.RUnlock()
@@ -354,7 +358,7 @@ func cmdLINDEX(ctx *Context) error {
 
 	list.RLock()
 
-	length := len(list.Elements)
+	length := list.Len()
 	if index < 0 {
 		index = length + index
 	}
@@ -363,7 +367,7 @@ func cmdLINDEX(ctx *Context) error {
 		return ctx.WriteNullBulkString()
 	}
 
-	reply := list.Elements[index]
+	reply := list.At(index)
 	list.RUnlock()
 	return ctx.WriteBulkBytes(reply)
 }
@@ -391,7 +395,7 @@ func cmdLSET(ctx *Context) error {
 	index := int(index64)
 	list.TryGrow(value)
 
-	length := len(list.Elements)
+	length := list.Len()
 	if index < 0 {
 		index = length + index
 	}
@@ -428,17 +432,19 @@ func cmdLREM(ctx *Context) error {
 
 	var idx []int
 	if count >= 0 {
-		for i, elem := range list.Elements {
-			if (count == 0 || len(idx) < count) && bytes.Equal(elem, value) {
+		list.Range(0, false, func(i int, elem []byte) bool {
+			if bytes.Equal(elem, value) {
 				idx = append(idx, i)
 			}
-		}
+			return count == 0 || len(idx) < count
+		})
 	} else {
-		for i := len(list.Elements) - 1; i >= 0 && len(idx) < -count; i-- {
-			if bytes.Equal(list.Elements[i], value) {
+		list.Range(list.Len()-1, true, func(i int, elem []byte) bool {
+			if bytes.Equal(elem, value) {
 				idx = append(idx, i)
 			}
-		}
+			return len(idx) < -count
+		})
 		for i, j := 0, len(idx)-1; i < j; i, j = i+1, j-1 {
 			idx[i], idx[j] = idx[j], idx[i]
 		}
@@ -446,7 +452,7 @@ func cmdLREM(ctx *Context) error {
 	removed := len(idx)
 
 	list.DeleteAt(idx)
-	empty := len(list.Elements) == 0
+	empty := list.Len() == 0
 	list.Unlock()
 
 	if removed > 0 {
@@ -487,12 +493,13 @@ func cmdLINSERT(ctx *Context) error {
 
 	list.TryGrow(value)
 	pivotIdx := -1
-	for i, elem := range list.Elements {
+	list.Range(0, false, func(i int, elem []byte) bool {
 		if bytes.Equal(elem, pivot) {
 			pivotIdx = i
-			break
+			return false
 		}
-	}
+		return true
+	})
 
 	if pivotIdx == -1 {
 		return ctx.WriteInteger(-1)
@@ -500,7 +507,7 @@ func cmdLINSERT(ctx *Context) error {
 
 	list.InsertAt(pivotIdx, value, position == "AFTER")
 	ctx.notify(store.NotifyList, "linsert", key)
-	return ctx.WriteInteger(int64(len(list.Elements)))
+	return ctx.WriteInteger(int64(list.Len()))
 }
 
 func cmdLTRIM(ctx *Context) error {
@@ -526,7 +533,7 @@ func cmdLTRIM(ctx *Context) error {
 		return ctx.WriteOK()
 	}
 
-	length := len(list.Elements)
+	length := list.Len()
 	if length == 0 {
 		list.Unlock()
 		ctx.notify(store.NotifyList, "ltrim", key)
@@ -723,7 +730,7 @@ func tryListMove(ctx *Context, srcKey, dstKey, whereFrom, whereTo string) ([]byt
 	if srcList, err = lockList(ctx, srcKey); err != nil || srcList == nil {
 		return nil, false, err
 	}
-	if len(srcList.Elements) == 0 {
+	if srcList.Len() == 0 {
 		srcList.Unlock()
 		return nil, false, nil
 	}
@@ -743,7 +750,7 @@ func tryListMove(ctx *Context, srcKey, dstKey, whereFrom, whereTo string) ([]byt
 	} else {
 		value = srcList.PopBack(1)[0]
 	}
-	srcEmpty := len(srcList.Elements) == 0
+	srcEmpty := srcList.Len() == 0
 	srcList.Unlock()
 	srcDeleted := srcEmpty && ctx.Store.DeleteIfEmpty(srcKey, srcList)
 
@@ -771,7 +778,7 @@ func listPopFirst(ctx *Context, keys []string, left bool) (string, []byte, error
 		if list == nil {
 			continue
 		}
-		if len(list.Elements) == 0 {
+		if list.Len() == 0 {
 			list.Unlock()
 			continue
 		}
@@ -781,7 +788,7 @@ func listPopFirst(ctx *Context, keys []string, left bool) (string, []byte, error
 		} else {
 			value = list.PopBack(1)[0]
 		}
-		isEmpty := len(list.Elements) == 0
+		isEmpty := list.Len() == 0
 		list.Unlock()
 		ctx.notify(store.NotifyList, popEvent(left), key)
 		if isEmpty {
@@ -946,26 +953,28 @@ func cmdLPOS(ctx *Context) error {
 	}
 
 	list.RLock()
-	length := int64(len(list.Elements))
+	length := int64(list.Len())
 	var matches []int64
-	var seen int64
-	for idx := int64(0); idx < length && (maxlen == 0 || idx < maxlen); idx++ {
-		pos := idx
-		if fromTail {
-			pos = length - 1 - idx
+	var seen, scanned int64
+	from := 0
+	if fromTail {
+		from = int(length) - 1
+	}
+	list.Range(from, fromTail, func(i int, el []byte) bool {
+		if maxlen != 0 && scanned >= maxlen {
+			return false
 		}
-		if !bytes.Equal(list.Elements[pos], element) {
-			continue
+		scanned++
+		if !bytes.Equal(el, element) {
+			return true
 		}
 		seen++
 		if seen < rank {
-			continue
+			return true
 		}
-		matches = append(matches, pos)
-		if count == -1 || (count > 0 && int64(len(matches)) >= count) {
-			break
-		}
-	}
+		matches = append(matches, int64(i))
+		return count != -1 && (count <= 0 || int64(len(matches)) < count)
+	})
 	list.RUnlock()
 
 	if count == -1 {
@@ -1059,12 +1068,12 @@ func tryListMPop(ctx *Context, keys []string, dir string, count int) (*resp.Valu
 		if list == nil {
 			continue
 		}
-		if len(list.Elements) == 0 {
+		if list.Len() == 0 {
 			list.Unlock()
 			continue
 		}
-		elements := make([]*resp.Value, 0, min(count, len(list.Elements)))
-		for i := 0; i < count && len(list.Elements) > 0; i++ {
+		elements := make([]*resp.Value, 0, min(count, list.Len()))
+		for i := 0; i < count && list.Len() > 0; i++ {
 			var value []byte
 			if dir == "LEFT" {
 				value = list.PopFront(1)[0]
@@ -1073,7 +1082,7 @@ func tryListMPop(ctx *Context, keys []string, dir string, count int) (*resp.Valu
 			}
 			elements = append(elements, resp.BulkBytes(value))
 		}
-		isEmpty := len(list.Elements) == 0
+		isEmpty := list.Len() == 0
 		list.Unlock()
 		ctx.notify(store.NotifyList, popEvent(dir == "LEFT"), key)
 		if isEmpty {
@@ -1104,7 +1113,7 @@ func cmdLMPUSH(ctx *Context) error {
 	}
 
 	list.PushFront(elements...)
-	length := int64(len(list.Elements))
+	length := int64(list.Len())
 	list.Unlock()
 
 	ctx.notify(store.NotifyList, "lpush", key)

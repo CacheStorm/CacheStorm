@@ -615,7 +615,7 @@ func emptyCollection(value Value) bool {
 	case *ListValue:
 		v.RLock()
 		defer v.RUnlock()
-		return len(v.Elements) == 0
+		return v.Len() == 0
 	case *SortedSetValue:
 		v.RLock()
 		defer v.RUnlock()

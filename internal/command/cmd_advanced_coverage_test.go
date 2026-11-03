@@ -1764,7 +1764,7 @@ func TestAdvCoverage_EXEC_QueuedLPUSH_RPUSH(t *testing.T) {
 
 func TestAdvCoverage_EXEC_QueuedLPOP_RPOP(t *testing.T) {
 	s := store.NewStore()
-	lv := &store.ListValue{Elements: [][]byte{[]byte("a"), []byte("b"), []byte("c")}}
+	lv := store.NewListFrom([][]byte{[]byte("a"), []byte("b"), []byte("c")})
 	s.Set("list", lv, store.SetOptions{})
 	ctx := newDiscardContext("EXEC", nil, s)
 	ctx.Transaction.Start()
@@ -1777,7 +1777,7 @@ func TestAdvCoverage_EXEC_QueuedLPOP_RPOP(t *testing.T) {
 
 func TestAdvCoverage_EXEC_QueuedLLEN(t *testing.T) {
 	s := store.NewStore()
-	lv := &store.ListValue{Elements: [][]byte{[]byte("a")}}
+	lv := store.NewListFrom([][]byte{[]byte("a")})
 	s.Set("list", lv, store.SetOptions{})
 	ctx := newDiscardContext("EXEC", nil, s)
 	ctx.Transaction.Start()
@@ -2381,7 +2381,7 @@ func TestAdvCoverage_SETBIT_InvalidBitValue(t *testing.T) {
 
 func TestAdvCoverage_SETBIT_WrongType(t *testing.T) {
 	s := store.NewStore()
-	s.Set("list", &store.ListValue{Elements: [][]byte{[]byte("a")}}, store.SetOptions{})
+	s.Set("list", store.NewListFrom([][]byte{[]byte("a")}), store.SetOptions{})
 	ctx := newDiscardContext("SETBIT", [][]byte{
 		[]byte("list"), []byte("0"), []byte("1"),
 	}, s)
@@ -2903,7 +2903,7 @@ func TestAdvCoverage_BITFIELD_OVERFLOW_WrongArgCount(t *testing.T) {
 
 func TestAdvCoverage_BITFIELD_WrongType(t *testing.T) {
 	s := store.NewStore()
-	s.Set("list", &store.ListValue{Elements: [][]byte{[]byte("a")}}, store.SetOptions{})
+	s.Set("list", store.NewListFrom([][]byte{[]byte("a")}), store.SetOptions{})
 	ctx := newDiscardContext("BITFIELD", [][]byte{
 		[]byte("list"), []byte("GET"), []byte("u8"), []byte("0"),
 	}, s)

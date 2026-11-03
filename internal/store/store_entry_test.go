@@ -107,7 +107,7 @@ func TestStoreDataTypes(t *testing.T) {
 	})
 
 	t.Run("List Value", func(t *testing.T) {
-		val := &ListValue{Elements: [][]byte{[]byte("a"), []byte("b")}}
+		val := NewListFrom([][]byte{[]byte("a"), []byte("b")})
 		if val.Type() != DataTypeList {
 			t.Error("Type should be DataTypeList")
 		}

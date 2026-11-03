@@ -8,7 +8,7 @@ import (
 
 func TestDeleteIfEmptyOnlyRemovesTheSameEmptyValue(t *testing.T) {
 	s := NewStore()
-	l := &ListValue{Elements: [][]byte{[]byte("a")}}
+	l := NewListFrom([][]byte{[]byte("a")})
 	if err := s.Set("k", l, SetOptions{}); err != nil {
 		t.Fatal(err)
 	}
@@ -17,9 +17,9 @@ func TestDeleteIfEmptyOnlyRemovesTheSameEmptyValue(t *testing.T) {
 	}
 
 	l.Lock()
-	l.Elements = nil
+	l.ReplaceElements(nil)
 	l.Unlock()
-	other := &ListValue{Elements: [][]byte{[]byte("b")}}
+	other := NewListFrom([][]byte{[]byte("b")})
 	if err := s.Set("k", other, SetOptions{}); err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +31,7 @@ func TestDeleteIfEmptyOnlyRemovesTheSameEmptyValue(t *testing.T) {
 	}
 
 	other.Lock()
-	other.Elements = nil
+	other.ReplaceElements(nil)
 	other.Unlock()
 	watched := s.WatchKey("k")
 	if !s.DeleteIfEmpty("k", other) {

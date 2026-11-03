@@ -70,12 +70,12 @@ func cmdRESTORELegacy(ctx *Context) error {
 		}
 		value = hv
 	case store.DataTypeList:
-		lv := &store.ListValue{Elements: make([][]byte, 0)}
+		lv := store.NewListFrom(make([][]byte, 0))
 		if len(data) > 0 {
 			items := strings.Split(data, ",")
 			for _, item := range items {
 				if item != "" {
-					lv.Elements = append(lv.Elements, []byte(item))
+					lv.AppendLoaded([]byte(item))
 				}
 			}
 		}

@@ -123,11 +123,11 @@ func TestStoreDataTypesAdvanced(t *testing.T) {
 	})
 
 	t.Run("List Value Operations", func(t *testing.T) {
-		val := &ListValue{Elements: [][]byte{
+		val := NewListFrom([][]byte{
 			[]byte("item1"),
 			[]byte("item2"),
 			[]byte("item3"),
-		}}
+		})
 
 		if val.Type() != DataTypeList {
 			t.Error("Type mismatch")
@@ -135,7 +135,7 @@ func TestStoreDataTypesAdvanced(t *testing.T) {
 
 		// Clone
 		cloned := val.Clone().(*ListValue)
-		if len(cloned.Elements) != 3 {
+		if cloned.Len() != 3 {
 			t.Error("Clone length mismatch")
 		}
 	})

@@ -92,7 +92,7 @@ func TestLowCoverageBatch9_DumpRestoreCommands(t *testing.T) {
 	})
 
 	t.Run("DUMP list value", func(t *testing.T) {
-		lv := &store.ListValue{Elements: [][]byte{[]byte("a"), []byte("b"), []byte("c")}}
+		lv := store.NewListFrom([][]byte{[]byte("a"), []byte("b"), []byte("c")})
 		s.Set("dumplist", lv, store.SetOptions{})
 		_ = runHandler(t, router, "DUMP", [][]byte{[]byte("dumplist")}, s)
 	})
@@ -671,7 +671,7 @@ func TestLowCoverageBatch9_KEYOBJECT(t *testing.T) {
 	})
 
 	t.Run("KEYOBJECT list", func(t *testing.T) {
-		lv := &store.ListValue{Elements: [][]byte{[]byte("a")}}
+		lv := store.NewListFrom([][]byte{[]byte("a")})
 		s.Set("kolist", lv, store.SetOptions{})
 		_ = runHandler(t, router, "KEYOBJECT", [][]byte{[]byte("kolist")}, s)
 	})

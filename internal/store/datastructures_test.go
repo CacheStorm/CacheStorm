@@ -307,7 +307,7 @@ func TestHashValueString(t *testing.T) {
 }
 
 func TestListValueString(t *testing.T) {
-	v := &ListValue{Elements: [][]byte{[]byte("a"), []byte("b")}}
+	v := NewListFrom([][]byte{[]byte("a"), []byte("b")})
 	s := v.String()
 	if s == "" {
 		t.Error("expected non-empty string")

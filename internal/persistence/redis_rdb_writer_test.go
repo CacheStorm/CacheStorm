@@ -30,7 +30,7 @@ func TestWriteRedisRDBLoadsBack(t *testing.T) {
 	expiring.ExpiresAt.Store(4102444800000)
 	src := entryList{
 		{0, "s", expiring},
-		{0, "l", store.NewEntry(&store.ListValue{Elements: [][]byte{[]byte("x"), []byte("y")}})},
+		{0, "l", store.NewEntry(store.NewListFrom([][]byte{[]byte("x"), []byte("y")}))},
 		{0, "j", store.NewEntry(store.MustParseJSONValue(`{"a":1}`))},
 		{2, "h", store.NewEntry(hash)},
 	}

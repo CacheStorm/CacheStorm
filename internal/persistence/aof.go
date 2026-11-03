@@ -852,9 +852,9 @@ func (rw *AOFRewriter) writeValueCommands(w *bufio.Writer, key string, value sto
 
 	case *store.ListValue:
 		vt.RLock()
-		args := make([]string, 0, len(vt.Elements)+1)
+		args := make([]string, 0, vt.Len()+1)
 		args = append(args, key)
-		for _, el := range vt.Elements {
+		for _, el := range vt.Elements() {
 			args = append(args, string(el))
 		}
 		vt.RUnlock()

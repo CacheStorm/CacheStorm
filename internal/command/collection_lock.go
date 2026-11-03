@@ -64,7 +64,7 @@ func lockExisting[T lockableCollection](ctx *Context, key string) (T, error) {
 	}
 }
 
-func newList() *store.ListValue { return &store.ListValue{Elements: make([][]byte, 0)} }
+func newList() *store.ListValue { return store.NewListFrom(make([][]byte, 0)) }
 func newSortedSet() *store.SortedSetValue {
 	return &store.SortedSetValue{}
 }

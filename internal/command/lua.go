@@ -411,7 +411,7 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 		entry, exists := e.store.Get(args[0])
 		var lv *store.ListValue
 		if !exists {
-			lv = &store.ListValue{Elements: make([][]byte, 0)}
+			lv = store.NewListFrom(make([][]byte, 0))
 			e.store.Set(args[0], lv, store.SetOptions{})
 		} else {
 			var ok bool
@@ -422,7 +422,7 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 		}
 		lv.Lock()
 		lv.PushFront([]byte(args[1]))
-		n := len(lv.Elements)
+		n := lv.Len()
 		lv.Unlock()
 		e.store.Reaccount(args[0])
 		return lua.LNumber(n)
@@ -434,7 +434,7 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 		entry, exists := e.store.Get(args[0])
 		var lv *store.ListValue
 		if !exists {
-			lv = &store.ListValue{Elements: make([][]byte, 0)}
+			lv = store.NewListFrom(make([][]byte, 0))
 			e.store.Set(args[0], lv, store.SetOptions{})
 		} else {
 			var ok bool
@@ -445,7 +445,7 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 		}
 		lv.Lock()
 		lv.PushBack([]byte(args[1]))
-		n := len(lv.Elements)
+		n := lv.Len()
 		lv.Unlock()
 		e.store.Reaccount(args[0])
 		return lua.LNumber(n)
@@ -460,7 +460,7 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 		}
 		if lv, ok := entry.Value.(*store.ListValue); ok {
 			lv.Lock()
-			if len(lv.Elements) > 0 {
+			if lv.Len() > 0 {
 				val := lv.PopFront(1)[0]
 				lv.Unlock()
 				e.store.Reaccount(args[0])
@@ -480,7 +480,7 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 		}
 		if lv, ok := entry.Value.(*store.ListValue); ok {
 			lv.Lock()
-			if len(lv.Elements) > 0 {
+			if lv.Len() > 0 {
 				val := lv.PopBack(1)[0]
 				lv.Unlock()
 				e.store.Reaccount(args[0])
@@ -678,7 +678,7 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 			// cmdRPUSH/cmdLPUSH/cmdLPOP mutate Elements under the list
 			// write lock, so even the length must be read under it.
 			lv.RLock()
-			n := len(lv.Elements)
+			n := lv.Len()
 			lv.RUnlock()
 			return lua.LNumber(n)
 		}
@@ -705,7 +705,7 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 			// the unlock. No Store call happens here, so holding the lock
 			// across the copy cannot self-deadlock.
 			lv.RLock()
-			length := len(lv.Elements)
+			length := lv.Len()
 			if start < 0 {
 				start = length + start
 			}
@@ -720,7 +720,7 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 			}
 			var window [][]byte
 			if start <= stop {
-				window = append([][]byte(nil), lv.Elements[start:stop+1]...)
+				window = append([][]byte(nil), lv.Slice(start, stop+1)...)
 			}
 			lv.RUnlock()
 
@@ -956,13 +956,13 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 			}
 			// Length and the element read must come from one locked view.
 			lv.RLock()
-			length := len(lv.Elements)
+			length := lv.Len()
 			if idx < 0 {
 				idx = length + idx
 			}
 			var val []byte
 			if idx >= 0 && idx < length {
-				val = lv.Elements[idx]
+				val = lv.At(idx)
 			}
 			lv.RUnlock()
 			if val != nil {

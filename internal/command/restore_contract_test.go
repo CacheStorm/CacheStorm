@@ -28,7 +28,7 @@ func TestDumpBinaryCollectionRoundTrip(t *testing.T) {
 		value store.Value
 	}{
 		{"hash", store.NewHashFrom(map[string][]byte{"f&=\x00": []byte("v&=\x00"), "": {}})},
-		{"list", &store.ListValue{Elements: [][]byte{[]byte("a,b\x00"), {}, []byte("tail")}}},
+		{"list", store.NewListFrom([][]byte{[]byte("a,b\x00"), {}, []byte("tail")})},
 		{"set", store.NewSetFrom(map[string]struct{}{"a,b\x00": {}, "": {}})},
 		{"zset", store.NewSortedSetFrom(map[string]float64{"m,:\x00": 1.23456789012345, "": -2})},
 	} {
@@ -69,11 +69,11 @@ func dumpValuesEqual(a, b store.Value) bool {
 		return true
 	case *store.ListValue:
 		other, ok := b.(*store.ListValue)
-		if !ok || len(v.Elements) != len(other.Elements) {
+		if !ok || v.Len() != other.Len() {
 			return false
 		}
-		for i, val := range v.Elements {
-			if !bytes.Equal(val, other.Elements[i]) {
+		for i, val := range v.Elements() {
+			if !bytes.Equal(val, other.At(i)) {
 				return false
 			}
 		}

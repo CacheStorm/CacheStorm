@@ -11,8 +11,8 @@ import "sync/atomic"
 // or sorted set counts at the map form's rates and adj corrects it to the form
 // the collection is in.
 const (
-	listBaseSize      = 165
-	listElemOverhead  = 47
+	listBaseSize      = 250
+	listElemOverhead  = 4
 	hashBaseSize      = 450
 	hashFieldOverhead = 88
 	setBaseSize       = 337

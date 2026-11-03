@@ -326,11 +326,12 @@ func (s *listShape) popBack(els [][]byte) {
 	}
 }
 
-// removeAt drops the elements at the ascending indexes idx of elems.
-func (s *listShape) removeAt(elems [][]byte, idx []int) {
+// removeAt drops the elements at the ascending indexes idx, removed being
+// those elements.
+func (s *listShape) removeAt(idx []int, removed [][]byte) {
 	if !s.quick {
-		for _, i := range idx {
-			s.lpBytes -= lpEntrySize(elems[i])
+		for _, el := range removed {
+			s.lpBytes -= lpEntrySize(el)
 		}
 		s.count -= len(idx)
 		return
@@ -341,7 +342,7 @@ func (s *listShape) removeAt(elems [][]byte, idx []int) {
 		end := start + n.count
 		for ; k < len(idx) && idx[k] < end; k++ {
 			n.count--
-			n.sz -= lpEntrySize(elems[idx[k]])
+			n.sz -= lpEntrySize(removed[k])
 		}
 		start = end
 		if n.count > 0 {
@@ -400,7 +401,7 @@ func (s *listShape) mergeAround(c int) int {
 
 // insert adds el before or after element i of elems, the elements before
 // the insertion, as _quicklistInsert does.
-func (s *listShape) insert(elems [][]byte, i int, el []byte, after bool) {
+func (s *listShape) insert(elems listElems, i int, el []byte, after bool) {
 	s.count++
 	if !s.quick {
 		s.lpBytes += lpEntrySize(el)
@@ -420,7 +421,7 @@ func (s *listShape) insert(elems [][]byte, i int, el []byte, after bool) {
 	}
 	nodeElems := func() [][]byte {
 		start := i - off
-		return elems[start : start+n.count]
+		return elems.slice(start, start+n.count)
 	}
 	if qlLarge(sz, s.fill) {
 		if n.plain || atTail || atHead {
@@ -467,8 +468,8 @@ func (s *listShape) insert(elems [][]byte, i int, el []byte, after bool) {
 
 // replace swaps element i of elems, the elements before the change, for
 // el, as quicklistReplaceEntry does.
-func (s *listShape) replace(elems [][]byte, i int, el []byte) {
-	old := elems[i]
+func (s *listShape) replace(elems listElems, i int, el []byte) {
+	old := elems.at(i)
 	if !s.quick {
 		s.lpBytes += lpEntrySize(el) - lpEntrySize(old)
 		return
@@ -489,7 +490,7 @@ func (s *listShape) replace(elems [][]byte, i int, el []byte) {
 		start := i - off
 		var rest *qlNode
 		if off != n.count-1 {
-			r := s.split(ni, off, true, elems[start:start+n.count])
+			r := s.split(ni, off, true, elems.slice(start, start+n.count))
 			rest = &r
 		}
 		s.insertNode(ni+1, newNode(el, s.fill))
@@ -506,11 +507,29 @@ func (s *listShape) replace(elems [][]byte, i int, el []byte) {
 	}
 }
 
+// listElems reads a list's elements for the shape: one, or a range.
+type listElems interface {
+	at(i int) []byte
+	slice(start, end int) [][]byte
+}
+
+func (l *listChunks) slice(start, end int) [][]byte {
+	out := make([][]byte, 0, end-start)
+	l.each(start, false, func(i int, el []byte) bool {
+		if i >= end {
+			return false
+		}
+		out = append(out, el)
+		return true
+	})
+	return out
+}
+
 // Shape helpers on ListValue. The caller holds the value's write lock.
 
 func (v *ListValue) shapeLocked() *listShape {
-	if v.shape == nil || v.shape.count != len(v.Elements) {
-		v.shape = autoListShape(v.Elements)
+	if v.shape == nil || v.shape.count != v.l.count {
+		v.shape = autoListShape(v.l.all())
 	}
 	return v.shape
 }
@@ -519,8 +538,8 @@ func (v *ListValue) shapeLocked() *listShape {
 // lock, at least for reading.
 func (v *ListValue) Encoding() string {
 	s := v.shape
-	if s == nil || s.count != len(v.Elements) {
-		s = autoListShape(v.Elements)
+	if s == nil || s.count != v.l.count {
+		s = autoListShape(v.l.all())
 	}
 	if s.quick {
 		return "quicklist"
@@ -586,17 +605,20 @@ func (v *ListValue) DeleteAt(idx []int) {
 		return
 	}
 	s := v.shapeLocked()
-	s.removeAt(v.Elements, idx)
-	kept := make([][]byte, 0, len(v.Elements)-len(idx))
+	kept := make([][]byte, 0, v.l.count-len(idx))
+	removed := make([][]byte, 0, len(idx))
 	k := 0
-	for i, el := range v.Elements {
+	v.l.each(0, false, func(i int, el []byte) bool {
 		if k < len(idx) && idx[k] == i {
+			removed = append(removed, el)
 			k++
-			continue
+			return true
 		}
 		kept = append(kept, el)
-	}
-	v.Elements, v.backing, v.head = kept, nil, 0
+		return true
+	})
+	s.removeAt(idx, removed)
+	v.l.rebuild(kept)
 	v.size.set(sumListElems(kept))
 	if len(kept) > 0 {
 		s.toListpack(true)
@@ -606,15 +628,15 @@ func (v *ListValue) DeleteAt(idx []int) {
 // InsertAt inserts el before or after element i, as LINSERT does. The
 // caller holds the write lock and has called TryGrow.
 func (v *ListValue) InsertAt(i int, el []byte, after bool) {
-	v.shapeLocked().insert(v.Elements, i, el, after)
+	v.shapeLocked().insert(&v.l, i, el, after)
 	at := i
 	if after {
 		at = i + 1
 	}
-	elems := make([][]byte, 0, len(v.Elements)+1)
-	elems = append(elems, v.Elements[:at]...)
-	elems = append(elems, el)
-	elems = append(elems, v.Elements[at:]...)
-	v.Elements, v.backing, v.head = elems, nil, 0
+	elems := v.l.all()
+	elems = append(elems, nil)
+	copy(elems[at+1:], elems[at:])
+	elems[at] = el
+	v.l.rebuild(elems)
 	v.size.add(listElemSize(el))
 }

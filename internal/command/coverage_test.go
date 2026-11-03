@@ -83,7 +83,7 @@ func TestObjectCommands(t *testing.T) {
 
 	s.Set("mykey", &store.StringValue{Data: []byte("myvalue")}, store.SetOptions{})
 	s.Set("myhash", store.NewHashFrom(map[string][]byte{"field1": []byte("value1")}), store.SetOptions{})
-	s.Set("mylist", &store.ListValue{Elements: [][]byte{[]byte("item1"), []byte("item2")}}, store.SetOptions{})
+	s.Set("mylist", store.NewListFrom([][]byte{[]byte("item1"), []byte("item2")}), store.SetOptions{})
 	s.Set("myset", store.NewSetFrom(map[string]struct{}{"member1": {}}), store.SetOptions{})
 	s.Set("myzset", store.NewSortedSetFrom(map[string]float64{"member1": 1.0}), store.SetOptions{})
 
@@ -857,7 +857,7 @@ func TestCacheCommands(t *testing.T) {
 	s.Set("key2", &store.StringValue{Data: []byte("value2")}, store.SetOptions{})
 	s.Set("key3", &store.StringValue{Data: []byte("value3")}, store.SetOptions{})
 	s.Set("hash1", store.NewHashFrom(map[string][]byte{"field1": []byte("value1")}), store.SetOptions{})
-	s.Set("list1", &store.ListValue{Elements: [][]byte{[]byte("item1"), []byte("item2")}}, store.SetOptions{})
+	s.Set("list1", store.NewListFrom([][]byte{[]byte("item1"), []byte("item2")}), store.SetOptions{})
 	s.Set("set1", store.NewSetFrom(map[string]struct{}{"member1": {}, "member2": {}}), store.SetOptions{})
 
 	tests := []struct {
@@ -2728,7 +2728,7 @@ func TestListCommandsExtendedCoverage(t *testing.T) {
 	router := NewRouter()
 	RegisterListCommands(router)
 
-	s.Set("list1", &store.ListValue{Elements: [][]byte{[]byte("a"), []byte("b"), []byte("c"), []byte("d"), []byte("e")}}, store.SetOptions{})
+	s.Set("list1", store.NewListFrom([][]byte{[]byte("a"), []byte("b"), []byte("c"), []byte("d"), []byte("e")}), store.SetOptions{})
 
 	tests := []struct {
 		name string
@@ -11501,7 +11501,7 @@ func TestSortCommands(t *testing.T) {
 	RegisterServerCommands(router)
 	RegisterListCommands(router)
 
-	s.Set("mylist", &store.ListValue{Elements: [][]byte{[]byte("3"), []byte("1"), []byte("2")}}, store.SetOptions{})
+	s.Set("mylist", store.NewListFrom([][]byte{[]byte("3"), []byte("1"), []byte("2")}), store.SetOptions{})
 
 	tests := []struct {
 		name string

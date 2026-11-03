@@ -2072,7 +2072,7 @@ func TestCmdLPOP_Success(t *testing.T) {
 	router := NewRouter()
 	RegisterListCommands(router)
 
-	s.Set("lpop", &store.ListValue{Elements: [][]byte{[]byte("first"), []byte("second"), []byte("third")}}, store.SetOptions{})
+	s.Set("lpop", store.NewListFrom([][]byte{[]byte("first"), []byte("second"), []byte("third")}), store.SetOptions{})
 
 	ctx, buf := bufCtx("LPOP", bytesArgs("lpop"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {
@@ -2102,7 +2102,7 @@ func TestCmdLPOP_AutoDelete(t *testing.T) {
 	router := NewRouter()
 	RegisterListCommands(router)
 
-	s.Set("lpop_del", &store.ListValue{Elements: [][]byte{[]byte("only")}}, store.SetOptions{})
+	s.Set("lpop_del", store.NewListFrom([][]byte{[]byte("only")}), store.SetOptions{})
 
 	ctx := discardCtx("LPOP", bytesArgs("lpop_del"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {
@@ -2118,7 +2118,7 @@ func TestCmdRPOP_Success(t *testing.T) {
 	router := NewRouter()
 	RegisterListCommands(router)
 
-	s.Set("rpop", &store.ListValue{Elements: [][]byte{[]byte("first"), []byte("second"), []byte("third")}}, store.SetOptions{})
+	s.Set("rpop", store.NewListFrom([][]byte{[]byte("first"), []byte("second"), []byte("third")}), store.SetOptions{})
 
 	ctx, buf := bufCtx("RPOP", bytesArgs("rpop"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {
@@ -2148,7 +2148,7 @@ func TestCmdRPOP_AutoDelete(t *testing.T) {
 	router := NewRouter()
 	RegisterListCommands(router)
 
-	s.Set("rpop_del", &store.ListValue{Elements: [][]byte{[]byte("only")}}, store.SetOptions{})
+	s.Set("rpop_del", store.NewListFrom([][]byte{[]byte("only")}), store.SetOptions{})
 	ctx := discardCtx("RPOP", bytesArgs("rpop_del"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {
 		t.Fatalf("RPOP auto-delete: %v", err)
@@ -2163,7 +2163,7 @@ func TestCmdLLEN_Success(t *testing.T) {
 	router := NewRouter()
 	RegisterListCommands(router)
 
-	s.Set("ll", &store.ListValue{Elements: [][]byte{[]byte("a"), []byte("b"), []byte("c")}}, store.SetOptions{})
+	s.Set("ll", store.NewListFrom([][]byte{[]byte("a"), []byte("b"), []byte("c")}), store.SetOptions{})
 
 	ctx, buf := bufCtx("LLEN", bytesArgs("ll"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {
@@ -2211,7 +2211,7 @@ func TestCmdLRANGE_Success(t *testing.T) {
 	router := NewRouter()
 	RegisterListCommands(router)
 
-	s.Set("lr", &store.ListValue{Elements: [][]byte{[]byte("a"), []byte("b"), []byte("c"), []byte("d")}}, store.SetOptions{})
+	s.Set("lr", store.NewListFrom([][]byte{[]byte("a"), []byte("b"), []byte("c"), []byte("d")}), store.SetOptions{})
 
 	// Full range
 	ctx, buf := bufCtx("LRANGE", bytesArgs("lr", "0", "-1"), s)
@@ -2286,7 +2286,7 @@ func TestCmdLINDEX_Success(t *testing.T) {
 	router := NewRouter()
 	RegisterListCommands(router)
 
-	s.Set("li", &store.ListValue{Elements: [][]byte{[]byte("a"), []byte("b"), []byte("c")}}, store.SetOptions{})
+	s.Set("li", store.NewListFrom([][]byte{[]byte("a"), []byte("b"), []byte("c")}), store.SetOptions{})
 
 	// Normal index
 	ctx, buf := bufCtx("LINDEX", bytesArgs("li", "1"), s)
@@ -2350,7 +2350,7 @@ func TestCmdLSET_Success(t *testing.T) {
 	router := NewRouter()
 	RegisterListCommands(router)
 
-	s.Set("ls", &store.ListValue{Elements: [][]byte{[]byte("a"), []byte("b"), []byte("c")}}, store.SetOptions{})
+	s.Set("ls", store.NewListFrom([][]byte{[]byte("a"), []byte("b"), []byte("c")}), store.SetOptions{})
 
 	ctx := discardCtx("LSET", bytesArgs("ls", "1", "x"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {
@@ -2358,7 +2358,7 @@ func TestCmdLSET_Success(t *testing.T) {
 	}
 
 	entry, _ := s.Get("ls")
-	elems := entry.Value.(*store.ListValue).Elements
+	elems := entry.Value.(*store.ListValue).Elements()
 	if string(elems[1]) != "x" {
 		t.Errorf("Expected 'x' at index 1, got %q", string(elems[1]))
 	}
@@ -2369,7 +2369,7 @@ func TestCmdLSET_NegativeIndex(t *testing.T) {
 	router := NewRouter()
 	RegisterListCommands(router)
 
-	s.Set("ls2", &store.ListValue{Elements: [][]byte{[]byte("a"), []byte("b"), []byte("c")}}, store.SetOptions{})
+	s.Set("ls2", store.NewListFrom([][]byte{[]byte("a"), []byte("b"), []byte("c")}), store.SetOptions{})
 
 	ctx := discardCtx("LSET", bytesArgs("ls2", "-1", "z"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {
@@ -2377,7 +2377,7 @@ func TestCmdLSET_NegativeIndex(t *testing.T) {
 	}
 
 	entry, _ := s.Get("ls2")
-	elems := entry.Value.(*store.ListValue).Elements
+	elems := entry.Value.(*store.ListValue).Elements()
 	if string(elems[2]) != "z" {
 		t.Errorf("Expected 'z' at last index, got %q", string(elems[2]))
 	}
@@ -2407,7 +2407,7 @@ func TestCmdLSET_ErrorPaths(t *testing.T) {
 	}
 
 	// Index out of range
-	s.Set("ls_oor", &store.ListValue{Elements: [][]byte{[]byte("a")}}, store.SetOptions{})
+	s.Set("ls_oor", store.NewListFrom([][]byte{[]byte("a")}), store.SetOptions{})
 	ctx = discardCtx("LSET", bytesArgs("ls_oor", "5", "val"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {
 		t.Fatalf("unexpected: %v", err)
@@ -2419,9 +2419,9 @@ func TestCmdLREM_CountZero(t *testing.T) {
 	router := NewRouter()
 	RegisterListCommands(router)
 
-	s.Set("lrem", &store.ListValue{Elements: [][]byte{
+	s.Set("lrem", store.NewListFrom([][]byte{
 		[]byte("a"), []byte("b"), []byte("a"), []byte("c"), []byte("a"),
-	}}, store.SetOptions{})
+	}), store.SetOptions{})
 
 	// count=0 removes all occurrences
 	ctx, buf := bufCtx("LREM", bytesArgs("lrem", "0", "a"), s)
@@ -2438,9 +2438,9 @@ func TestCmdLREM_PositiveCount(t *testing.T) {
 	router := NewRouter()
 	RegisterListCommands(router)
 
-	s.Set("lrem2", &store.ListValue{Elements: [][]byte{
+	s.Set("lrem2", store.NewListFrom([][]byte{
 		[]byte("a"), []byte("b"), []byte("a"), []byte("c"), []byte("a"),
-	}}, store.SetOptions{})
+	}), store.SetOptions{})
 
 	// count=2 removes first 2 from head
 	ctx, buf := bufCtx("LREM", bytesArgs("lrem2", "2", "a"), s)
@@ -2452,7 +2452,7 @@ func TestCmdLREM_PositiveCount(t *testing.T) {
 	}
 
 	entry, _ := s.Get("lrem2")
-	elems := entry.Value.(*store.ListValue).Elements
+	elems := entry.Value.(*store.ListValue).Elements()
 	// Should have: b, c, a
 	if len(elems) != 3 {
 		t.Errorf("Expected 3 elements, got %d", len(elems))
@@ -2464,9 +2464,9 @@ func TestCmdLREM_NegativeCount(t *testing.T) {
 	router := NewRouter()
 	RegisterListCommands(router)
 
-	s.Set("lrem3", &store.ListValue{Elements: [][]byte{
+	s.Set("lrem3", store.NewListFrom([][]byte{
 		[]byte("a"), []byte("b"), []byte("a"), []byte("c"), []byte("a"),
-	}}, store.SetOptions{})
+	}), store.SetOptions{})
 
 	// count=-2 removes last 2 from tail
 	ctx, buf := bufCtx("LREM", bytesArgs("lrem3", "-2", "a"), s)
@@ -2478,7 +2478,7 @@ func TestCmdLREM_NegativeCount(t *testing.T) {
 	}
 
 	entry, _ := s.Get("lrem3")
-	elems := entry.Value.(*store.ListValue).Elements
+	elems := entry.Value.(*store.ListValue).Elements()
 	// Should have: a, b, c
 	if len(elems) != 3 {
 		t.Errorf("Expected 3 elements, got %d", len(elems))
@@ -2504,7 +2504,7 @@ func TestCmdLREM_AutoDelete(t *testing.T) {
 	router := NewRouter()
 	RegisterListCommands(router)
 
-	s.Set("lrem_del", &store.ListValue{Elements: [][]byte{[]byte("a"), []byte("a")}}, store.SetOptions{})
+	s.Set("lrem_del", store.NewListFrom([][]byte{[]byte("a"), []byte("a")}), store.SetOptions{})
 	ctx := discardCtx("LREM", bytesArgs("lrem_del", "0", "a"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {
 		t.Fatalf("LREM auto-delete: %v", err)
@@ -2537,7 +2537,7 @@ func TestCmdLTRIM_Success(t *testing.T) {
 	router := NewRouter()
 	RegisterListCommands(router)
 
-	s.Set("lt", &store.ListValue{Elements: [][]byte{[]byte("a"), []byte("b"), []byte("c"), []byte("d")}}, store.SetOptions{})
+	s.Set("lt", store.NewListFrom([][]byte{[]byte("a"), []byte("b"), []byte("c"), []byte("d")}), store.SetOptions{})
 
 	ctx := discardCtx("LTRIM", bytesArgs("lt", "1", "2"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {
@@ -2545,7 +2545,7 @@ func TestCmdLTRIM_Success(t *testing.T) {
 	}
 
 	entry, _ := s.Get("lt")
-	elems := entry.Value.(*store.ListValue).Elements
+	elems := entry.Value.(*store.ListValue).Elements()
 	if len(elems) != 2 || string(elems[0]) != "b" || string(elems[1]) != "c" {
 		t.Errorf("Expected [b, c], got %v", elems)
 	}
@@ -2556,7 +2556,7 @@ func TestCmdLTRIM_OutOfRange(t *testing.T) {
 	router := NewRouter()
 	RegisterListCommands(router)
 
-	s.Set("lt2", &store.ListValue{Elements: [][]byte{[]byte("a"), []byte("b")}}, store.SetOptions{})
+	s.Set("lt2", store.NewListFrom([][]byte{[]byte("a"), []byte("b")}), store.SetOptions{})
 
 	// start > stop => empty list, key deleted
 	ctx := discardCtx("LTRIM", bytesArgs("lt2", "5", "1"), s)
@@ -2608,7 +2608,7 @@ func TestCmdLINSERT_Before(t *testing.T) {
 	router := NewRouter()
 	RegisterListCommands(router)
 
-	s.Set("linb", &store.ListValue{Elements: [][]byte{[]byte("a"), []byte("b"), []byte("c")}}, store.SetOptions{})
+	s.Set("linb", store.NewListFrom([][]byte{[]byte("a"), []byte("b"), []byte("c")}), store.SetOptions{})
 
 	ctx, buf := bufCtx("LINSERT", bytesArgs("linb", "BEFORE", "b", "x"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {
@@ -2619,7 +2619,7 @@ func TestCmdLINSERT_Before(t *testing.T) {
 	}
 
 	entry, _ := s.Get("linb")
-	elems := entry.Value.(*store.ListValue).Elements
+	elems := entry.Value.(*store.ListValue).Elements()
 	if string(elems[1]) != "x" {
 		t.Errorf("Expected 'x' at index 1, got %q", string(elems[1]))
 	}
@@ -2630,7 +2630,7 @@ func TestCmdLINSERT_After(t *testing.T) {
 	router := NewRouter()
 	RegisterListCommands(router)
 
-	s.Set("lina", &store.ListValue{Elements: [][]byte{[]byte("a"), []byte("b"), []byte("c")}}, store.SetOptions{})
+	s.Set("lina", store.NewListFrom([][]byte{[]byte("a"), []byte("b"), []byte("c")}), store.SetOptions{})
 
 	ctx, buf := bufCtx("LINSERT", bytesArgs("lina", "AFTER", "b", "x"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {
@@ -2641,7 +2641,7 @@ func TestCmdLINSERT_After(t *testing.T) {
 	}
 
 	entry, _ := s.Get("lina")
-	elems := entry.Value.(*store.ListValue).Elements
+	elems := entry.Value.(*store.ListValue).Elements()
 	if string(elems[2]) != "x" {
 		t.Errorf("Expected 'x' at index 2, got %q", string(elems[2]))
 	}
@@ -2652,7 +2652,7 @@ func TestCmdLINSERT_PivotNotFound(t *testing.T) {
 	router := NewRouter()
 	RegisterListCommands(router)
 
-	s.Set("lin_nf", &store.ListValue{Elements: [][]byte{[]byte("a"), []byte("b")}}, store.SetOptions{})
+	s.Set("lin_nf", store.NewListFrom([][]byte{[]byte("a"), []byte("b")}), store.SetOptions{})
 
 	ctx, buf := bufCtx("LINSERT", bytesArgs("lin_nf", "BEFORE", "z", "x"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {
@@ -2689,7 +2689,7 @@ func TestCmdLINSERT_ErrorPaths(t *testing.T) {
 	}
 
 	// Invalid position
-	s.Set("lin_bad", &store.ListValue{Elements: [][]byte{[]byte("a")}}, store.SetOptions{})
+	s.Set("lin_bad", store.NewListFrom([][]byte{[]byte("a")}), store.SetOptions{})
 	ctx = discardCtx("LINSERT", bytesArgs("lin_bad", "INVALID", "a", "x"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {
 		t.Fatalf("unexpected: %v", err)
@@ -2701,7 +2701,7 @@ func TestCmdRPOPLPUSH_Success(t *testing.T) {
 	router := NewRouter()
 	RegisterListCommands(router)
 
-	s.Set("rpl_src", &store.ListValue{Elements: [][]byte{[]byte("a"), []byte("b"), []byte("c")}}, store.SetOptions{})
+	s.Set("rpl_src", store.NewListFrom([][]byte{[]byte("a"), []byte("b"), []byte("c")}), store.SetOptions{})
 
 	ctx, buf := bufCtx("RPOPLPUSH", bytesArgs("rpl_src", "rpl_dst"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {
@@ -2716,7 +2716,7 @@ func TestCmdRPOPLPUSH_Success(t *testing.T) {
 	if !exists {
 		t.Fatal("destination should exist")
 	}
-	elems := entry.Value.(*store.ListValue).Elements
+	elems := entry.Value.(*store.ListValue).Elements()
 	if string(elems[0]) != "c" {
 		t.Errorf("Expected 'c' at head of dest, got %q", string(elems[0]))
 	}
@@ -2752,7 +2752,7 @@ func TestCmdLMOVE_LeftToRight(t *testing.T) {
 	router := NewRouter()
 	RegisterListCommands(router)
 
-	s.Set("lm_src", &store.ListValue{Elements: [][]byte{[]byte("a"), []byte("b"), []byte("c")}}, store.SetOptions{})
+	s.Set("lm_src", store.NewListFrom([][]byte{[]byte("a"), []byte("b"), []byte("c")}), store.SetOptions{})
 
 	ctx, buf := bufCtx("LMOVE", bytesArgs("lm_src", "lm_dst", "LEFT", "RIGHT"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {
@@ -2768,7 +2768,7 @@ func TestCmdLMOVE_RightToLeft(t *testing.T) {
 	router := NewRouter()
 	RegisterListCommands(router)
 
-	s.Set("lm_src2", &store.ListValue{Elements: [][]byte{[]byte("a"), []byte("b"), []byte("c")}}, store.SetOptions{})
+	s.Set("lm_src2", store.NewListFrom([][]byte{[]byte("a"), []byte("b"), []byte("c")}), store.SetOptions{})
 
 	ctx, buf := bufCtx("LMOVE", bytesArgs("lm_src2", "lm_dst2", "RIGHT", "LEFT"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {
@@ -2802,7 +2802,7 @@ func TestCmdLMOVE_ErrorPaths(t *testing.T) {
 	}
 
 	// Invalid direction
-	s.Set("lm_bad", &store.ListValue{Elements: [][]byte{[]byte("a")}}, store.SetOptions{})
+	s.Set("lm_bad", store.NewListFrom([][]byte{[]byte("a")}), store.SetOptions{})
 	ctx = discardCtx("LMOVE", bytesArgs("lm_bad", "dst", "INVALID", "RIGHT"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {
 		t.Fatalf("unexpected: %v", err)
@@ -2820,9 +2820,9 @@ func TestCmdLPOS_Basic(t *testing.T) {
 	router := NewRouter()
 	RegisterListCommands(router)
 
-	s.Set("lpos", &store.ListValue{Elements: [][]byte{
+	s.Set("lpos", store.NewListFrom([][]byte{
 		[]byte("a"), []byte("b"), []byte("c"), []byte("b"), []byte("d"),
-	}}, store.SetOptions{})
+	}), store.SetOptions{})
 
 	// Find first
 	ctx, buf := bufCtx("LPOS", bytesArgs("lpos", "b"), s)
@@ -2839,9 +2839,9 @@ func TestCmdLPOS_WithRank(t *testing.T) {
 	router := NewRouter()
 	RegisterListCommands(router)
 
-	s.Set("lpos2", &store.ListValue{Elements: [][]byte{
+	s.Set("lpos2", store.NewListFrom([][]byte{
 		[]byte("a"), []byte("b"), []byte("c"), []byte("b"), []byte("d"),
-	}}, store.SetOptions{})
+	}), store.SetOptions{})
 
 	// Rank 2 = second occurrence
 	ctx, buf := bufCtx("LPOS", bytesArgs("lpos2", "b", "RANK", "2"), s)
@@ -2858,9 +2858,9 @@ func TestCmdLPOS_WithCount(t *testing.T) {
 	router := NewRouter()
 	RegisterListCommands(router)
 
-	s.Set("lpos3", &store.ListValue{Elements: [][]byte{
+	s.Set("lpos3", store.NewListFrom([][]byte{
 		[]byte("a"), []byte("b"), []byte("c"), []byte("b"), []byte("d"),
-	}}, store.SetOptions{})
+	}), store.SetOptions{})
 
 	// COUNT 2 = return up to 2 positions
 	ctx := discardCtx("LPOS", bytesArgs("lpos3", "b", "COUNT", "2"), s)
@@ -2874,9 +2874,9 @@ func TestCmdLPOS_NegativeRank(t *testing.T) {
 	router := NewRouter()
 	RegisterListCommands(router)
 
-	s.Set("lpos4", &store.ListValue{Elements: [][]byte{
+	s.Set("lpos4", store.NewListFrom([][]byte{
 		[]byte("a"), []byte("b"), []byte("c"), []byte("b"), []byte("d"),
-	}}, store.SetOptions{})
+	}), store.SetOptions{})
 
 	// Negative rank searches from tail
 	ctx, buf := bufCtx("LPOS", bytesArgs("lpos4", "b", "RANK", "-1"), s)
@@ -2893,9 +2893,9 @@ func TestCmdLPOS_NegativeRankWithCount(t *testing.T) {
 	router := NewRouter()
 	RegisterListCommands(router)
 
-	s.Set("lpos5", &store.ListValue{Elements: [][]byte{
+	s.Set("lpos5", store.NewListFrom([][]byte{
 		[]byte("a"), []byte("b"), []byte("c"), []byte("b"), []byte("d"),
-	}}, store.SetOptions{})
+	}), store.SetOptions{})
 
 	ctx := discardCtx("LPOS", bytesArgs("lpos5", "b", "RANK", "-1", "COUNT", "2"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {
@@ -2908,9 +2908,9 @@ func TestCmdLPOS_WithMAXLEN(t *testing.T) {
 	router := NewRouter()
 	RegisterListCommands(router)
 
-	s.Set("lpos6", &store.ListValue{Elements: [][]byte{
+	s.Set("lpos6", store.NewListFrom([][]byte{
 		[]byte("a"), []byte("b"), []byte("c"), []byte("b"), []byte("d"),
-	}}, store.SetOptions{})
+	}), store.SetOptions{})
 
 	ctx := discardCtx("LPOS", bytesArgs("lpos6", "b", "MAXLEN", "2"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {
@@ -2923,7 +2923,7 @@ func TestCmdLPOS_NotFound(t *testing.T) {
 	router := NewRouter()
 	RegisterListCommands(router)
 
-	s.Set("lpos_nf", &store.ListValue{Elements: [][]byte{[]byte("a"), []byte("b")}}, store.SetOptions{})
+	s.Set("lpos_nf", store.NewListFrom([][]byte{[]byte("a"), []byte("b")}), store.SetOptions{})
 
 	// Not found returns null
 	ctx := discardCtx("LPOS", bytesArgs("lpos_nf", "z"), s)
@@ -2961,7 +2961,7 @@ func TestCmdLPOS_ErrorPaths(t *testing.T) {
 	}
 
 	// Non-integer RANK
-	s.Set("lpos_e", &store.ListValue{Elements: [][]byte{[]byte("a")}}, store.SetOptions{})
+	s.Set("lpos_e", store.NewListFrom([][]byte{[]byte("a")}), store.SetOptions{})
 	ctx = discardCtx("LPOS", bytesArgs("lpos_e", "a", "RANK", "abc"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {
 		t.Fatalf("unexpected: %v", err)
@@ -2991,7 +2991,7 @@ func TestCmdBLPOP_ImmediateSuccess(t *testing.T) {
 	router := NewRouter()
 	RegisterListCommands(router)
 
-	s.Set("blp", &store.ListValue{Elements: [][]byte{[]byte("item1"), []byte("item2")}}, store.SetOptions{})
+	s.Set("blp", store.NewListFrom([][]byte{[]byte("item1"), []byte("item2")}), store.SetOptions{})
 
 	ctx := discardCtx("BLPOP", bytesArgs("blp", "0.01"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {
@@ -3033,7 +3033,7 @@ func TestCmdBRPOP_ImmediateSuccess(t *testing.T) {
 	router := NewRouter()
 	RegisterListCommands(router)
 
-	s.Set("brp", &store.ListValue{Elements: [][]byte{[]byte("item1"), []byte("item2")}}, store.SetOptions{})
+	s.Set("brp", store.NewListFrom([][]byte{[]byte("item1"), []byte("item2")}), store.SetOptions{})
 
 	ctx := discardCtx("BRPOP", bytesArgs("brp", "0.01"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {

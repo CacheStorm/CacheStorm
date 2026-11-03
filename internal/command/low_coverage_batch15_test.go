@@ -32,7 +32,7 @@ func TestLowCoverageBatch15_DUMP_RESTORE_COPY(t *testing.T) {
 	})
 
 	t.Run("DUMP list value", func(t *testing.T) {
-		lv := &store.ListValue{Elements: [][]byte{[]byte("a"), []byte("b")}}
+		lv := store.NewListFrom([][]byte{[]byte("a"), []byte("b")})
 		s.Set("dump_list", lv, store.SetOptions{})
 		_ = runHandler(t, router, "DUMP", [][]byte{[]byte("dump_list")}, s)
 	})

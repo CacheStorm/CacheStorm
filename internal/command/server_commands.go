@@ -1082,7 +1082,7 @@ func doSort(ctx *Context, readOnly bool) error {
 	// so holding RLock across the copy cannot self-deadlock.
 	case *store.ListValue:
 		v.RLock()
-		for _, elem := range v.Elements {
+		for _, elem := range v.Elements() {
 			elements = append(elements, string(elem))
 		}
 		v.RUnlock()
@@ -1205,13 +1205,13 @@ func doSort(ctx *Context, readOnly bool) error {
 				sortStoreDelete(ctx, storeKey)
 				return ctx.WriteInteger(0)
 			}
-			list := &store.ListValue{Elements: make([][]byte, 0, len(projected))}
+			list := store.NewListFrom(make([][]byte, 0, len(projected)))
 			for _, p := range projected {
 				if p.Type == resp.TypeNull || p.IsNull {
-					list.Elements = append(list.Elements, nil)
+					list.AppendLoaded(nil)
 					continue
 				}
-				list.Elements = append(list.Elements, p.Bulk)
+				list.AppendLoaded(p.Bulk)
 			}
 			ctx.Store.Set(storeKey, list, store.SetOptions{})
 			ctx.notify(store.NotifyList, "sortstore", storeKey)
@@ -1227,9 +1227,9 @@ func doSort(ctx *Context, readOnly bool) error {
 			return ctx.WriteInteger(0)
 		}
 
-		list := &store.ListValue{Elements: make([][]byte, 0, len(elements))}
+		list := store.NewListFrom(make([][]byte, 0, len(elements)))
 		for _, elem := range elements {
-			list.Elements = append(list.Elements, []byte(elem))
+			list.AppendLoaded([]byte(elem))
 		}
 		ctx.Store.Set(storeKey, list, store.SetOptions{})
 		ctx.notify(store.NotifyList, "sortstore", storeKey)

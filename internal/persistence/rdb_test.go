@@ -75,7 +75,7 @@ func TestRDBWriterSaveWithString(t *testing.T) {
 
 func TestRDBWriterSaveWithList(t *testing.T) {
 	s := store.NewStore()
-	s.Set("list1", &store.ListValue{Elements: [][]byte{[]byte("a"), []byte("b"), []byte("c")}}, store.SetOptions{})
+	s.Set("list1", store.NewListFrom([][]byte{[]byte("a"), []byte("b"), []byte("c")}), store.SetOptions{})
 
 	cfg := RDBConfig{Version: RDBVersion11}
 	w := NewRDBWriter(s, cfg)
@@ -159,7 +159,7 @@ func TestRDBWriterSaveWithLargeList(t *testing.T) {
 	for i := 0; i < 200; i++ {
 		elements[i] = []byte("item")
 	}
-	s.Set("largelist", &store.ListValue{Elements: elements}, store.SetOptions{})
+	s.Set("largelist", store.NewListFrom(elements), store.SetOptions{})
 
 	cfg := RDBConfig{Version: RDBVersion11}
 	w := NewRDBWriter(s, cfg)
@@ -179,7 +179,7 @@ func TestRDBWriterSaveWithVeryLargeList(t *testing.T) {
 	for i := 0; i < 20000; i++ {
 		elements[i] = []byte("item")
 	}
-	s.Set("verylargelist", &store.ListValue{Elements: elements}, store.SetOptions{})
+	s.Set("verylargelist", store.NewListFrom(elements), store.SetOptions{})
 
 	cfg := RDBConfig{Version: RDBVersion11}
 	w := NewRDBWriter(s, cfg)
@@ -369,7 +369,7 @@ func TestRDBWriterGetValueType(t *testing.T) {
 		expected int
 	}{
 		{&store.StringValue{Data: []byte("test")}, 0},
-		{&store.ListValue{Elements: [][]byte{[]byte("a")}}, 1},
+		{store.NewListFrom([][]byte{[]byte("a")}), 1},
 		{store.NewSetFrom(map[string]struct{}{"a": {}}), 2},
 		{store.NewHashFrom(map[string][]byte{"f": []byte("v")}), 3},
 		{store.NewSortedSetFrom(map[string]float64{"a": 1.0}), 4},

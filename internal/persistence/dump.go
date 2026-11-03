@@ -42,12 +42,12 @@ func EncodeDump(value store.Value) ([]byte, error) {
 	case *store.ListValue:
 		v.RLock()
 		defer v.RUnlock()
-		if len(v.Elements) == 0 {
+		if v.Len() == 0 {
 			return nil, ErrDumpFormat
 		}
 		out = append(out, 1)
-		out = appendDumpLength(out, uint64(len(v.Elements)))
-		for _, s := range v.Elements {
+		out = appendDumpLength(out, uint64(v.Len()))
+		for _, s := range v.Elements() {
 			str(string(s))
 		}
 	case *store.SetValue:
@@ -334,7 +334,7 @@ func (d *dumpDecoder) valueOf(typ byte) store.Value {
 		n := d.count()
 		v := &store.ListValue{}
 		for i := 0; i < n && d.err == nil; i++ {
-			v.Elements = append(v.Elements, []byte(d.str()))
+			v.AppendLoaded([]byte(d.str()))
 		}
 		if n == 0 {
 			d.err = ErrDumpFormat
@@ -435,7 +435,7 @@ func (d *dumpDecoder) valueOf(typ byte) store.Value {
 		case 10:
 			v := &store.ListValue{}
 			for _, s := range items {
-				v.Elements = append(v.Elements, []byte(s))
+				v.AppendLoaded([]byte(s))
 			}
 			return v
 		case 11, 20:
@@ -498,7 +498,7 @@ func (d *dumpDecoder) valueOf(typ byte) store.Value {
 			}
 			data := d.str()
 			if container == 1 {
-				v.Elements = append(v.Elements, []byte(data))
+				v.AppendLoaded([]byte(data))
 				continue
 			}
 			var items []string
@@ -513,10 +513,10 @@ func (d *dumpDecoder) valueOf(typ byte) store.Value {
 				break
 			}
 			for _, s := range items {
-				v.Elements = append(v.Elements, []byte(s))
+				v.AppendLoaded([]byte(s))
 			}
 		}
-		if len(v.Elements) == 0 {
+		if v.Len() == 0 {
 			d.err = ErrDumpFormat
 		}
 		return v

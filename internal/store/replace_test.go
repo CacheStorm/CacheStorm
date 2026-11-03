@@ -69,7 +69,7 @@ func TestReplaceFromPreservesOwnersAndAccounting(t *testing.T) {
 func TestReplaceFromNotifiesBlockedReaders(t *testing.T) {
 	dst := NewDatabases(NewStore(), 2)
 	src := dst.NewStaging()
-	if err := src.DB(0).Set("ready", &ListValue{Elements: [][]byte{[]byte("item")}}, SetOptions{}); err != nil {
+	if err := src.DB(0).Set("ready", NewListFrom([][]byte{[]byte("item")}), SetOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	registered := make(chan struct{})

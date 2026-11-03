@@ -16,14 +16,14 @@ func TestCollectionSizeIsNotRecounted(t *testing.T) {
 	if got := l.SizeOf(); got != want {
 		t.Fatalf("SizeOf=%d, want %d", got, want)
 	}
-	l.Elements = append(l.Elements, []byte("hidden"))
+	l.l.pushBack([]byte("hidden"))
 	if got := l.SizeOf(); got != want {
 		t.Fatalf("SizeOf walked the list: %d", got)
 	}
 }
 
 func TestCollectionHelpersKeepSize(t *testing.T) {
-	l := &ListValue{Elements: [][]byte{[]byte("a"), []byte("bb")}}
+	l := NewListFrom([][]byte{[]byte("a"), []byte("bb")})
 	l.SizeOf()
 	l.PushFront([]byte("ccc"))
 	l.PushBack([]byte("dddd"), nil)
@@ -31,7 +31,7 @@ func TestCollectionHelpersKeepSize(t *testing.T) {
 	l.PopFront(1)
 	l.PopBack(1)
 	l.Trim(0, 1)
-	if got, want := l.SizeOf(), listBaseSize+sumListElems(l.Elements); got != want {
+	if got, want := l.SizeOf(), listBaseSize+sumListElems(l.Elements()); got != want {
 		t.Fatalf("list SizeOf=%d, recount=%d", got, want)
 	}
 

@@ -13,7 +13,7 @@ func TestCachewarmCommandsBatch7(t *testing.T) {
 
 	s.Set("key1", &store.StringValue{Data: []byte("value1")}, store.SetOptions{})
 	s.Set("hash1", store.NewHashFrom(map[string][]byte{"field1": []byte("value1")}), store.SetOptions{})
-	s.Set("list1", &store.ListValue{Elements: [][]byte{[]byte("item1")}}, store.SetOptions{})
+	s.Set("list1", store.NewListFrom([][]byte{[]byte("item1")}), store.SetOptions{})
 
 	tests := []struct {
 		name string
@@ -157,8 +157,8 @@ func TestIntegrationCommandsBatch7(t *testing.T) {
 	router := NewRouter()
 	RegisterIntegrationCommands(router)
 
-	s.Set("arr1", &store.ListValue{Elements: [][]byte{[]byte("1"), []byte("2")}}, store.SetOptions{})
-	s.Set("arr2", &store.ListValue{Elements: [][]byte{[]byte("3"), []byte("4")}}, store.SetOptions{})
+	s.Set("arr1", store.NewListFrom([][]byte{[]byte("1"), []byte("2")}), store.SetOptions{})
+	s.Set("arr2", store.NewListFrom([][]byte{[]byte("3"), []byte("4")}), store.SetOptions{})
 	s.Set("obj1", store.NewHashFrom(map[string][]byte{"a": []byte("1"), "b": []byte("2")}), store.SetOptions{})
 	s.Set("obj2", store.NewHashFrom(map[string][]byte{"c": []byte("3")}), store.SetOptions{})
 

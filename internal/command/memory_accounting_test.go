@@ -51,9 +51,9 @@ func memAcctRun(r *Router, s *store.Store, tx *Transaction, args ...string) stri
 func refValueSize(v store.Value) int64 {
 	switch v := v.(type) {
 	case *store.ListValue:
-		n := int64(165)
-		for _, el := range v.Elements {
-			n += int64(len(el)) + 47
+		n := int64(250)
+		for _, el := range v.Elements() {
+			n += int64(len(el)) + 4
 		}
 		return n
 	case *store.HashValue:

@@ -644,7 +644,7 @@ func (h *HTTPServer) handleKeys(w http.ResponseWriter, r *http.Request) {
 		case "string", "":
 			value = &store.StringValue{Data: []byte(req.Value)}
 		case "list":
-			value = &store.ListValue{Elements: [][]byte{[]byte(req.Value)}}
+			value = store.NewListFrom([][]byte{[]byte(req.Value)})
 		case "set":
 			value = store.NewSetFrom(map[string]struct{}{req.Value: {}})
 		case "hash":

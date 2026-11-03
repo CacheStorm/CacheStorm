@@ -42,9 +42,9 @@ func TestAOFRewriteRoundTripPreservesTypes(t *testing.T) {
 		"field1": []byte("value1"),
 		"field2": []byte("value2"),
 	}), store.SetOptions{})
-	src.Set("list:key", &store.ListValue{Elements: [][]byte{
+	src.Set("list:key", store.NewListFrom([][]byte{
 		[]byte("a"), []byte("b"), []byte("c"),
-	}}, store.SetOptions{})
+	}), store.SetOptions{})
 	src.Set("set:key", store.NewSetFrom(map[string]struct{}{
 		"m1": {}, "m2": {},
 	}), store.SetOptions{})
@@ -146,9 +146,9 @@ func TestAOFRewriteRoundTripPreservesTypes(t *testing.T) {
 	if !ok {
 		t.Fatalf("list:key type = %T, want *store.ListValue", listEntry.Value)
 	}
-	if len(listOut.Elements) != 3 ||
-		string(listOut.Elements[0]) != "a" || string(listOut.Elements[2]) != "c" {
-		t.Fatalf("list elements = %+v", listOut.Elements)
+	if listOut.Len() != 3 ||
+		string(listOut.At(0)) != "a" || string(listOut.At(2)) != "c" {
+		t.Fatalf("list elements = %+v", listOut.Elements())
 	}
 
 	// Set

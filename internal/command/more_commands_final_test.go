@@ -15,7 +15,7 @@ func TestMoreCommandsFinalCoverage(t *testing.T) {
 	s.Set("key1", &store.StringValue{Data: []byte("value1")}, store.SetOptions{})
 	s.Set("key2", &store.StringValue{Data: []byte("value2")}, store.SetOptions{})
 	s.Set("hash1", store.NewHashFrom(map[string][]byte{"field1": []byte("value1")}), store.SetOptions{})
-	s.Set("list1", &store.ListValue{Elements: [][]byte{[]byte("item1"), []byte("item2")}}, store.SetOptions{})
+	s.Set("list1", store.NewListFrom([][]byte{[]byte("item1"), []byte("item2")}), store.SetOptions{})
 	s.Set("set1", store.NewSetFrom(map[string]struct{}{"member1": {}}), store.SetOptions{})
 	s.Set("zset1", store.NewSortedSetFrom(map[string]float64{"member1": 1.0}), store.SetOptions{})
 
@@ -75,7 +75,7 @@ func TestMoreCommandsDumpRestoreFinal(t *testing.T) {
 	// Setup test data
 	s.Set("key1", &store.StringValue{Data: []byte("value1")}, store.SetOptions{})
 	s.Set("hash1", store.NewHashFrom(map[string][]byte{"field1": []byte("value1")}), store.SetOptions{})
-	s.Set("list1", &store.ListValue{Elements: [][]byte{[]byte("item1")}}, store.SetOptions{})
+	s.Set("list1", store.NewListFrom([][]byte{[]byte("item1")}), store.SetOptions{})
 	s.Set("set1", store.NewSetFrom(map[string]struct{}{"member1": {}}), store.SetOptions{})
 	s.Set("zset1", store.NewSortedSetFrom(map[string]float64{"member1": 1.0}), store.SetOptions{})
 
@@ -141,8 +141,8 @@ func TestMoreCommandsSortFinal(t *testing.T) {
 	RegisterMoreCommands(router)
 
 	// Setup test data
-	s.Set("list1", &store.ListValue{Elements: [][]byte{[]byte("3"), []byte("1"), []byte("2")}}, store.SetOptions{})
-	s.Set("list_alpha", &store.ListValue{Elements: [][]byte{[]byte("c"), []byte("a"), []byte("b")}}, store.SetOptions{})
+	s.Set("list1", store.NewListFrom([][]byte{[]byte("3"), []byte("1"), []byte("2")}), store.SetOptions{})
+	s.Set("list_alpha", store.NewListFrom([][]byte{[]byte("c"), []byte("a"), []byte("b")}), store.SetOptions{})
 
 	tests := []struct {
 		name string

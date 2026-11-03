@@ -24,7 +24,7 @@ func TestLowCoverageBatch13_CachewarmCommands(t *testing.T) {
 	})
 
 	t.Run("KEYOBJECT with list", func(t *testing.T) {
-		lv := &store.ListValue{Elements: [][]byte{[]byte("a"), []byte("b")}}
+		lv := store.NewListFrom([][]byte{[]byte("a"), []byte("b")})
 		s.Set("kolist", lv, store.SetOptions{})
 		_ = runHandler(t, router, "KEYOBJECT", [][]byte{[]byte("kolist")}, s)
 	})
@@ -257,7 +257,7 @@ func TestLowCoverageBatch13_ServerCommands(t *testing.T) {
 		s.Set("dumphash", hv, store.SetOptions{})
 		_ = runHandler(t, router, "DUMP", [][]byte{[]byte("dumphash")}, s)
 
-		lv := &store.ListValue{Elements: [][]byte{[]byte("a"), []byte("b")}}
+		lv := store.NewListFrom([][]byte{[]byte("a"), []byte("b")})
 		s.Set("dumplist", lv, store.SetOptions{})
 		_ = runHandler(t, router, "DUMP", [][]byte{[]byte("dumplist")}, s)
 

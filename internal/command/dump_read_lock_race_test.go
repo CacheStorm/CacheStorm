@@ -220,7 +220,7 @@ func TestDumpControlsUncontended(t *testing.T) {
 		case *store.SetValue:
 			count = v.Card()
 		case *store.ListValue:
-			count = len(v.Elements)
+			count = v.Len()
 		case *store.SortedSetValue:
 			count = v.Card()
 		}

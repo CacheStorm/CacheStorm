@@ -188,7 +188,7 @@ func TestHashOperations(t *testing.T) {
 func TestListOperations(t *testing.T) {
 	s := NewStore()
 
-	l := &ListValue{Elements: [][]byte{[]byte("item1"), []byte("item2")}}
+	l := NewListFrom([][]byte{[]byte("item1"), []byte("item2")})
 	s.Set("list1", l, SetOptions{})
 
 	entry, exists := s.Get("list1")
@@ -197,8 +197,8 @@ func TestListOperations(t *testing.T) {
 	}
 
 	lv := entry.Value.(*ListValue)
-	if len(lv.Elements) != 2 {
-		t.Errorf("expected 2 elements, got %d", len(lv.Elements))
+	if lv.Len() != 2 {
+		t.Errorf("expected 2 elements, got %d", lv.Len())
 	}
 }
 

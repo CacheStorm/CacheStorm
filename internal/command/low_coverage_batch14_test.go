@@ -24,7 +24,7 @@ func TestLowCoverageBatch14_KeyObjectSubcommands(t *testing.T) {
 	})
 
 	t.Run("KEY.OBJECT ENCODING list", func(t *testing.T) {
-		lv := &store.ListValue{Elements: [][]byte{[]byte("a")}}
+		lv := store.NewListFrom([][]byte{[]byte("a")})
 		s.Set("ko_enc_list", lv, store.SetOptions{})
 		_ = runHandler(t, router, "KEY.OBJECT", [][]byte{[]byte("ENCODING"), []byte("ko_enc_list")}, s)
 	})
@@ -128,7 +128,7 @@ func TestLowCoverageBatch14_FunctionCallFunction(t *testing.T) {
 	})
 
 	t.Run("FUNCTION.LOAD with list operations", func(t *testing.T) {
-		lv := &store.ListValue{Elements: [][]byte{[]byte("a"), []byte("b")}}
+		lv := store.NewListFrom([][]byte{[]byte("a"), []byte("b")})
 		s.Set("func_list", lv, store.SetOptions{})
 		_ = runHandler(t, router, "FUNCTION.LOAD", [][]byte{
 			[]byte("lrange_func"),
@@ -420,12 +420,12 @@ func TestLowCoverageBatch14_DumpCommands(t *testing.T) {
 	})
 
 	t.Run("DUMP list with multiple elements", func(t *testing.T) {
-		lv := &store.ListValue{Elements: [][]byte{
+		lv := store.NewListFrom([][]byte{
 			[]byte("a"),
 			[]byte("b"),
 			[]byte("c"),
 			[]byte("d"),
-		}}
+		})
 		s.Set("dump_list_multi", lv, store.SetOptions{})
 		_ = runHandler(t, router, "DUMP", [][]byte{[]byte("dump_list_multi")}, s)
 	})
@@ -544,7 +544,7 @@ func TestLowCoverageBatch14_CopyCommands(t *testing.T) {
 	})
 
 	t.Run("COPY list", func(t *testing.T) {
-		lv := &store.ListValue{Elements: [][]byte{[]byte("a"), []byte("b")}}
+		lv := store.NewListFrom([][]byte{[]byte("a"), []byte("b")})
 		s.Set("copy_list_src", lv, store.SetOptions{})
 		_ = runHandler(t, router, "COPY", [][]byte{
 			[]byte("copy_list_src"),

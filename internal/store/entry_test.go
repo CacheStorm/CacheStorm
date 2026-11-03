@@ -104,17 +104,17 @@ func TestHashValue(t *testing.T) {
 }
 
 func TestListValue(t *testing.T) {
-	v := &ListValue{Elements: [][]byte{
+	v := NewListFrom([][]byte{
 		[]byte("elem1"),
 		[]byte("elem2"),
-	}}
+	})
 
 	if v.Type() != DataTypeList {
 		t.Errorf("expected DataTypeList, got %v", v.Type())
 	}
 
 	cloned := v.Clone().(*ListValue)
-	if len(cloned.Elements) != 2 {
+	if cloned.Len() != 2 {
 		t.Error("clone should have same elements")
 	}
 }

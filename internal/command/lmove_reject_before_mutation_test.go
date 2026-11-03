@@ -40,7 +40,7 @@ func listState(s *store.Store, key string) string {
 	}
 	var sb strings.Builder
 	sb.WriteString("[")
-	for _, e := range list.Elements {
+	for _, e := range list.Elements() {
 		sb.WriteString(string(e))
 		sb.WriteString(" ")
 	}

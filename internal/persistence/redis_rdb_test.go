@@ -46,7 +46,7 @@ func TestLoadRedis74RDB(t *testing.T) {
 		var n int
 		switch v := e.Value.(type) {
 		case *store.ListValue:
-			n = len(v.Elements)
+			n = v.Len()
 		case *store.SetValue:
 			n = v.Card()
 		case *store.HashValue:

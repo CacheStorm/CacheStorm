@@ -296,7 +296,7 @@ func (ctx *Context) waitForKeys(keys []string, timeout time.Duration) (string, b
 		}
 		l.RLock()
 		defer l.RUnlock()
-		return len(l.Elements) > 0
+		return l.Len() > 0
 	}))
 }
 

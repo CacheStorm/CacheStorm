@@ -42,7 +42,7 @@ func valueDigest(v store.Value) digest {
 		val.RLock()
 		defer val.RUnlock()
 		h := sha1.New()
-		for _, el := range val.Elements {
+		for _, el := range val.Elements() {
 			var n [8]byte
 			binary.BigEndian.PutUint64(n[:], uint64(len(el)))
 			h.Write(n[:])

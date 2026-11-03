@@ -1020,7 +1020,7 @@ func TestDeep2_ServerCommandDocs(t *testing.T) {
 func TestDeep2_ServerSortCommands(t *testing.T) {
 	s := store.NewStore()
 	// Set up a list
-	s.Set("sortlist", &store.ListValue{Elements: [][]byte{[]byte("3"), []byte("1"), []byte("2")}}, store.SetOptions{})
+	s.Set("sortlist", store.NewListFrom([][]byte{[]byte("3"), []byte("1"), []byte("2")}), store.SetOptions{})
 
 	ctx := discardCtx("SORT", bytesArgs("sortlist"), s)
 	if err := cmdSORT(ctx); err != nil {

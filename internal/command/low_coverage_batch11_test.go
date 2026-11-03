@@ -493,7 +493,7 @@ func TestLowCoverageBatch11_ServerDumpRestoreCommands(t *testing.T) {
 		sv := store.NewSetFrom(map[string]struct{}{})
 		sv.AddMember("m")
 		s.Set("dumpset", sv, store.SetOptions{})
-		lv := &store.ListValue{Elements: [][]byte{[]byte("a"), []byte("b")}}
+		lv := store.NewListFrom([][]byte{[]byte("a"), []byte("b")})
 		s.Set("dumplist", lv, store.SetOptions{})
 		ssv := store.NewSortedSetFrom(map[string]float64{})
 		ssv.Add("m", 1.0)

@@ -318,7 +318,7 @@ func TestSnapshotRoundTripThroughLoad(t *testing.T) {
 	src, srcDBs := newTestManager(t, Config{})
 	_ = src
 	srcDBs.DB(0).Set("a", &store.StringValue{Data: []byte("1")}, store.SetOptions{})
-	srcDBs.DB(2).Set("b", &store.ListValue{Elements: [][]byte{[]byte("x"), []byte("y")}}, store.SetOptions{TTL: time.Hour})
+	srcDBs.DB(2).Set("b", store.NewListFrom([][]byte{[]byte("x"), []byte("y")}), store.SetOptions{TTL: time.Hour})
 	var snap bytes.Buffer
 	if err := writeSnapshotForTest(&snap, srcDBs); err != nil {
 		t.Fatal(err)

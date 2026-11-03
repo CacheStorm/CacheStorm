@@ -18,7 +18,7 @@ func TestStoreType(t *testing.T) {
 		t.Errorf("expected DataTypeHash, got %v", s.Type("hash"))
 	}
 
-	s.Set("list", &ListValue{Elements: [][]byte{[]byte("a")}}, SetOptions{})
+	s.Set("list", NewListFrom([][]byte{[]byte("a")}), SetOptions{})
 	if s.Type("list") != DataTypeList {
 		t.Errorf("expected DataTypeList, got %v", s.Type("list"))
 	}
@@ -235,7 +235,7 @@ func TestHashValueMethods(t *testing.T) {
 }
 
 func TestListValueMethods(t *testing.T) {
-	v := &ListValue{Elements: [][]byte{[]byte("a"), []byte("b"), []byte("c")}}
+	v := NewListFrom([][]byte{[]byte("a"), []byte("b"), []byte("c")})
 
 	if v.Type() != DataTypeList {
 		t.Errorf("expected DataTypeList, got %v", v.Type())
@@ -250,7 +250,7 @@ func TestListValueMethods(t *testing.T) {
 	}
 
 	cloned := v.Clone().(*ListValue)
-	if len(cloned.Elements) != len(v.Elements) {
+	if cloned.Len() != v.Len() {
 		t.Error("clone should have same number of elements")
 	}
 
