@@ -1,19 +1,22 @@
 package store
 
 import (
+	"encoding/binary"
 	"fmt"
 	"iter"
-	"slices"
-	"sort"
+	"math"
 	"sync"
 	"sync/atomic"
+	"unsafe"
 )
 
-// SortedSetValue holds a set of at most zsetSmallMax members as a slice in
-// (score, member) order, like Redis' listpack, and a bigger one as a map of
-// scores with a skiplist for the order, built on first use.
+// SortedSetValue holds a set of at most zsetSmallMax members packed in one
+// buffer in (score, member) order, like Redis' listpack, and a bigger one as
+// a map of scores with a skiplist for the order, built on first use. The
+// buffer is copy-on-write, so members read from it stay valid.
 type SortedSetValue struct {
-	small   []SortedEntry
+	zl      []byte
+	zn      int
 	dict    map[string]float64
 	mu      sync.RWMutex
 	dead    bool
@@ -24,9 +27,64 @@ type SortedSetValue struct {
 	big bool
 }
 
-// zsetSmallMax is the most members the slice form holds: its lookups are
-// linear, as a listpack's are.
-const zsetSmallMax = 128
+// zsetSmallMax is the most members the packed form holds: its lookups are
+// linear, as a listpack's are, and zsetSmallBytes bounds what a change
+// copies.
+const (
+	zsetSmallMax   = 128
+	zsetSmallBytes = 16 << 10
+)
+
+// zlEntry locates a member in the packed buffer: an uvarint length, the
+// member, and its score as 8 little-endian bytes.
+type zlEntry struct {
+	start, ms, me, end int
+}
+
+func (v *SortedSetValue) zlAt(off int) zlEntry {
+	n, k := binary.Uvarint(v.zl[off:])
+	e := zlEntry{start: off, ms: off + k}
+	e.me = e.ms + int(n)
+	e.end = e.me + 8
+	return e
+}
+
+func (v *SortedSetValue) zlScore(e zlEntry) float64 {
+	return math.Float64frombits(binary.LittleEndian.Uint64(v.zl[e.me:e.end]))
+}
+
+func (v *SortedSetValue) zlEntryOf(e zlEntry) SortedEntry {
+	m := ""
+	if e.me > e.ms {
+		m = unsafe.String(&v.zl[e.ms], e.me-e.ms)
+	}
+	return SortedEntry{Member: m, Score: v.zlScore(e)}
+}
+
+func (v *SortedSetValue) zlEach(fn func(i int, e zlEntry) bool) {
+	for i, off := 0, 0; off < len(v.zl); i++ {
+		e := v.zlAt(off)
+		if !fn(i, e) {
+			return
+		}
+		off = e.end
+	}
+}
+
+// zlSplice replaces zl[from:to] with ins in a new buffer of the exact size.
+func (v *SortedSetValue) zlSplice(from, to int, ins []byte) {
+	buf := make([]byte, 0, len(v.zl)-(to-from)+len(ins))
+	buf = append(buf, v.zl[:from]...)
+	buf = append(buf, ins...)
+	v.zl = append(buf, v.zl[to:]...)
+}
+
+func zlEncode(member string, score float64) []byte {
+	buf := make([]byte, 0, binary.MaxVarintLen32+len(member)+8)
+	buf = binary.AppendUvarint(buf, uint64(len(member)))
+	buf = append(buf, member...)
+	return binary.LittleEndian.AppendUint64(buf, math.Float64bits(score))
+}
 
 // NewSortedSet returns an empty sorted set sized for n members.
 func NewSortedSet(n int) *SortedSetValue {
@@ -88,7 +146,7 @@ func (v *SortedSetValue) Clone() Value {
 	defer v.mu.RUnlock()
 	cloned := &SortedSetValue{big: v.big}
 	if v.dict == nil {
-		cloned.small = append([]SortedEntry(nil), v.small...)
+		cloned.zl, cloned.zn = append([]byte(nil), v.zl...), v.zn
 		return cloned
 	}
 	cloned.dict = make(map[string]float64, len(v.dict))
@@ -124,11 +182,10 @@ func (s sortedEntries) Swap(i, j int) { s[i], s[j] = s[j], s[i] }
 func (v *SortedSetValue) All() iter.Seq2[string, float64] {
 	return func(yield func(string, float64) bool) {
 		if v.dict == nil {
-			for _, e := range v.small {
-				if !yield(e.Member, e.Score) {
-					return
-				}
-			}
+			v.zlEach(func(_ int, e zlEntry) bool {
+				se := v.zlEntryOf(e)
+				return yield(se.Member, se.Score)
+			})
 			return
 		}
 		for m, score := range v.dict {
@@ -159,30 +216,41 @@ func (v *SortedSetValue) ordered() *zskiplist {
 	return z
 }
 
-func (v *SortedSetValue) smallFind(member string) int {
-	for i := range v.small {
-		if v.small[i].Member == member {
-			return i
+func (v *SortedSetValue) smallFind(member string) (zlEntry, bool) {
+	var found zlEntry
+	ok := false
+	v.zlEach(func(_ int, e zlEntry) bool {
+		if e.me-e.ms == len(member) && string(v.zl[e.ms:e.me]) == member {
+			found, ok = e, true
+			return false
 		}
-	}
-	return -1
+		return true
+	})
+	return found, ok
 }
 
-// smallPos is where (score, member) goes in the slice.
-func (v *SortedSetValue) smallPos(score float64, member string) int {
-	return sort.Search(len(v.small), func(i int) bool {
-		e := &v.small[i]
-		return e.Score > score || (e.Score == score && e.Member >= member)
+// smallPos is the rank and offset where (score, member) goes in the buffer.
+func (v *SortedSetValue) smallPos(score float64, member string) (int, int) {
+	rank, off := v.zn, len(v.zl)
+	v.zlEach(func(i int, e zlEntry) bool {
+		s := v.zlScore(e)
+		if s > score || (s == score && string(v.zl[e.ms:e.me]) >= member) {
+			rank, off = i, e.start
+			return false
+		}
+		return true
 	})
+	return rank, off
 }
 
 func (v *SortedSetValue) Remove(member string) bool {
 	if v.dict == nil {
-		i := v.smallFind(member)
-		if i < 0 {
+		e, ok := v.smallFind(member)
+		if !ok {
 			return false
 		}
-		v.small = slices.Delete(v.small, i, i+1)
+		v.zlSplice(e.start, e.end, nil)
+		v.zn--
 	} else {
 		score, exists := v.dict[member]
 		if !exists {
@@ -200,8 +268,8 @@ func (v *SortedSetValue) Remove(member string) bool {
 
 func (v *SortedSetValue) GetScore(member string) (float64, bool) {
 	if v.dict == nil {
-		if i := v.smallFind(member); i >= 0 {
-			return v.small[i].Score, true
+		if e, ok := v.smallFind(member); ok {
+			return v.zlScore(e), true
 		}
 		return 0, false
 	}
@@ -241,19 +309,24 @@ func (v *SortedSetValue) Add(member string, score float64) bool {
 // Put is Add for a set being built, which leaves the encoding to the caller.
 func (v *SortedSetValue) Put(member string, score float64) bool {
 	if v.dict == nil {
-		i := v.smallFind(member)
-		if i >= 0 {
-			if v.small[i].Score == score {
+		e, exists := v.smallFind(member)
+		if exists {
+			if v.zlScore(e) == score {
 				return false
 			}
-			v.small = slices.Delete(v.small, i, i+1)
-		} else if len(v.small) >= zsetSmallMax {
+			v.zlSplice(e.start, e.end, nil)
+			v.zn--
+		} else if v.zn >= zsetSmallMax {
 			v.toDict()
 			return v.Put(member, score)
 		}
-		j := v.smallPos(score, member)
-		v.small = slices.Insert(v.small, j, SortedEntry{Member: member, Score: score})
-		if i >= 0 {
+		_, off := v.smallPos(score, member)
+		v.zlSplice(off, off, zlEncode(member, score))
+		v.zn++
+		if len(v.zl) > zsetSmallBytes {
+			v.toDict()
+		}
+		if exists {
 			return false
 		}
 	} else {
@@ -277,19 +350,21 @@ func (v *SortedSetValue) Put(member string, score float64) bool {
 }
 
 func (v *SortedSetValue) toDict() {
-	v.dict = make(map[string]float64, len(v.small)*2)
+	v.dict = make(map[string]float64, v.zn*2)
 	z := newZskiplist()
-	for _, e := range v.small {
-		v.dict[e.Member] = e.Score
-		z.insert(e.Score, e.Member)
-	}
-	v.small = nil
+	v.zlEach(func(_ int, e zlEntry) bool {
+		m, score := string(v.zl[e.ms:e.me]), v.zlScore(e)
+		v.dict[m] = score
+		z.insert(score, m)
+		return true
+	})
+	v.zl, v.zn = nil, 0
 	v.index.Store(z)
 }
 
 func (v *SortedSetValue) Card() int {
 	if v.dict == nil {
-		return len(v.small)
+		return v.zn
 	}
 	return len(v.dict)
 }
@@ -303,7 +378,7 @@ func (v *SortedSetValue) Rank(member string, reverse bool) int {
 	}
 	var r int
 	if v.dict == nil {
-		r = v.smallPos(score, member)
+		r, _ = v.smallPos(score, member)
 	} else {
 		r = v.ordered().rank(score, member) - 1
 	}
@@ -322,18 +397,21 @@ func (v *SortedSetValue) walk(from int, reverse bool, fn func(SortedEntry) bool)
 	}
 	if v.dict == nil {
 		if reverse {
+			var offs [zsetSmallMax]int
+			v.zlEach(func(i int, e zlEntry) bool {
+				offs[i] = e.start
+				return i < from
+			})
 			for i := from; i >= 0; i-- {
-				if !fn(v.small[i]) {
+				if !fn(v.zlEntryOf(v.zlAt(offs[i]))) {
 					return
 				}
 			}
 			return
 		}
-		for i := from; i < n; i++ {
-			if !fn(v.small[i]) {
-				return
-			}
-		}
+		v.zlEach(func(i int, e zlEntry) bool {
+			return i < from || fn(v.zlEntryOf(e))
+		})
 		return
 	}
 	x := v.ordered().byRank(from + 1)
@@ -352,7 +430,15 @@ func (v *SortedSetValue) walk(from int, reverse bool, fn func(SortedEntry) bool)
 // at returns the member at 0-based rank i, which is in range.
 func (v *SortedSetValue) at(i int) SortedEntry {
 	if v.dict == nil {
-		return v.small[i]
+		var out SortedEntry
+		v.zlEach(func(j int, e zlEntry) bool {
+			if j == i {
+				out = v.zlEntryOf(e)
+				return false
+			}
+			return true
+		})
+		return out
 	}
 	x := v.ordered().byRank(i + 1)
 	return SortedEntry{Member: x.member, Score: x.score}
@@ -367,12 +453,23 @@ func (v *SortedSetValue) countBefore(before func(score float64, member string) b
 			// nodes' random levels, which matters when before is not
 			// monotone (a lexicographic bound over mixed scores).
 			z := newZskiplist()
-			for _, e := range v.small {
-				z.insert(e.Score, e.Member)
-			}
+			v.zlEach(func(_ int, e zlEntry) bool {
+				se := v.zlEntryOf(e)
+				z.insert(se.Score, se.Member)
+				return true
+			})
 			return z.countBefore(func(n *zslNode) bool { return before(n.score, n.member) })
 		}
-		return sort.Search(len(v.small), func(i int) bool { return !before(v.small[i].Score, v.small[i].Member) })
+		c := 0
+		v.zlEach(func(_ int, e zlEntry) bool {
+			se := v.zlEntryOf(e)
+			if !before(se.Score, se.Member) {
+				return false
+			}
+			c++
+			return true
+		})
+		return c
 	}
 	return v.ordered().countBefore(func(n *zslNode) bool { return before(n.score, n.member) })
 }
