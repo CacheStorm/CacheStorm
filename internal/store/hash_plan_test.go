@@ -117,7 +117,8 @@ func TestHashPlanHoldsValueLockThroughAdmission(t *testing.T) {
 
 func TestHashPlanReservesSharedBudgetAcrossDatabases(t *testing.T) {
 	s := NewStore()
-	s.ConfigureMemory(3000, EvictionNoEviction, 70, 90, 5)
+	// A hash of one 600-byte field costs about 860 bytes: two fit.
+	s.ConfigureMemory(2000, EvictionNoEviction, 70, 90, 5)
 	dbs := NewDatabases(s, 2)
 	start := make(chan struct{})
 	results := make(chan error, 16)
@@ -151,7 +152,9 @@ func TestHashPlanReservesSharedBudgetAcrossDatabases(t *testing.T) {
 
 func TestHashPlanEvictionReentersAndReselects(t *testing.T) {
 	s := NewStore()
-	s.ConfigureMemory(1600, EvictionAllKeysLRU, 70, 90, 128)
+	// The hash and the victim fit; a 400-byte field does not without
+	// evicting the victim.
+	s.ConfigureMemory(1100, EvictionAllKeysLRU, 70, 90, 128)
 	if err := s.Set("h", NewHashFrom(map[string][]byte{"f": []byte("old")}), SetOptions{}); err != nil {
 		t.Fatal(err)
 	}

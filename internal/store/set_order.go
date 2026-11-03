@@ -195,6 +195,7 @@ func (v *SetValue) Map() map[string]struct{} {
 // NewSetFrom returns a set of the members whose encoding is not tracked.
 func NewSetFrom(members map[string]struct{}) *SetValue {
 	v := &SetValue{dict: make(map[string]struct{}, len(members))}
+	v.adj.Store(setBaseSize - setCompactBase)
 	for m := range members {
 		v.dict[m] = struct{}{}
 	}
@@ -224,6 +225,7 @@ func (v *SetValue) PrepareAdd(first string, n int) {
 
 func (v *SetValue) create(first string, n int) {
 	v.dict, v.ints, v.lp, v.lpN, v.order = nil, nil, nil, 0, nil
+	v.adj.Store(0)
 	switch _, isInt := redisSetInt(first); {
 	case isInt && int64(n) <= setMaxIntsetEntries.Load():
 		v.enc = setEncIntset
@@ -232,6 +234,7 @@ func (v *SetValue) create(first string, n int) {
 	default:
 		v.enc = setEncHashtable
 		v.dict = make(map[string]struct{}, n)
+		v.adj.Store(setBaseSize - setCompactBase)
 	}
 }
 
@@ -304,6 +307,7 @@ func (v *SetValue) toDict() {
 	})
 	v.dict, v.order = d, order
 	v.ints, v.lp, v.lpN = nil, nil, 0
+	v.adj.Store(setBaseSize - setCompactBase)
 }
 
 func (v *SetValue) convertLocked() {
@@ -327,6 +331,7 @@ func (v *SetValue) addNewLocked(member string) {
 		if n, ok := redisSetInt(member); ok {
 			i, _ := slices.BinarySearch(v.ints, n)
 			v.ints = slices.Insert(v.ints, i, n)
+			v.adj.Add(setIntsetElem - setMemberSize(member))
 			if int64(len(v.ints)) > setMaxIntsetEntries.Load() {
 				v.convertLocked()
 			} else if len(v.ints) > setIntsMax {
@@ -344,6 +349,7 @@ func (v *SetValue) addNewLocked(member string) {
 			buf = setLpAppend(buf, strconv.FormatInt(n, 10))
 		}
 		v.enc, v.lp, v.lpN, v.ints = setEncListpack, buf, len(v.ints), nil
+		v.adj.Store(int64(v.lpN) * (setListpackOverhd - setMemberOverhead))
 	}
 	if int64(v.lpN) >= setMaxListpackEntries.Load() || int64(len(member)) > setMaxListpackValue.Load() {
 		v.convertLocked()
@@ -356,6 +362,7 @@ func (v *SetValue) addNewLocked(member string) {
 	copy(buf, v.lp)
 	v.lp = setLpAppend(buf, member)
 	v.lpN++
+	v.adj.Add(setListpackOverhd - setMemberOverhead)
 	if v.lpN > setLpMax || len(v.lp) > setLpBytes {
 		v.toDict()
 	}
@@ -380,6 +387,7 @@ func (v *SetValue) removeLocked(member string) bool {
 			return false
 		}
 		v.ints = slices.Delete(v.ints, i, i+1)
+		v.adj.Add(setMemberSize(member) - setIntsetElem)
 	default:
 		s, e, ok := v.lpFind(member)
 		if !ok {
@@ -389,6 +397,7 @@ func (v *SetValue) removeLocked(member string) bool {
 		buf = append(buf, v.lp[:s]...)
 		v.lp = append(buf, v.lp[e:]...)
 		v.lpN--
+		v.adj.Add(setMemberOverhead - setListpackOverhd)
 	}
 	return true
 }
@@ -403,6 +412,7 @@ func (v *SetValue) orderAddLocked(member string) {
 		v.create(member, 1)
 		if v.dict == nil {
 			v.dict = make(map[string]struct{})
+			v.adj.Store(setBaseSize - setCompactBase)
 		}
 	}
 	switch v.enc {
@@ -464,6 +474,7 @@ func NewLoadedSet(members []string) *SetValue {
 	if int64(len(members)) > setMaxIntsetEntries.Load() {
 		v.enc = setEncHashtable
 		v.dict = make(map[string]struct{}, len(members))
+		v.adj.Store(setBaseSize - setCompactBase)
 	}
 	for _, m := range members {
 		v.AddMember(m)

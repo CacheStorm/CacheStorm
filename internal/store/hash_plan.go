@@ -29,12 +29,12 @@ func (s *Store) ApplyHashFields(key string, prepare func(*HashValue) (map[string
 		size := hash.SizeOf()
 		for field := range fields {
 			if old, exists := hash.Get(field); exists {
-				size -= hashFieldSize(field, old)
+				size -= hash.fieldCost(field, old)
 			}
 		}
 		for field, data := range fields {
-			n := hashFieldSize(field, data)
-			if n > math.MaxInt64-size {
+			n := hash.fieldCost(field, data)
+			if size > 0 && n > math.MaxInt64-size {
 				hash.Unlock()
 				return ValuePlan{}, ErrValueTooLarge
 			}
@@ -117,21 +117,25 @@ func (s *Store) ApplyHashPairs(key string, nx bool, args [][]byte) (int, error) 
 		size := hash.SizeOf()
 		for _, i := range op.keep {
 			field, val := pairs[2*i], pairs[2*i+1]
-			var d int64
+			// d is the change to the size counter, at the map form's rates;
+			// est what the hash grows by in its current form.
+			var d, est int64
 			if old, exists := hash.Get(string(field)); exists {
 				d = int64(len(val)) - int64(len(old))
+				est = d
 				if hash.expiredAt(string(field), now) {
 					added++
 				}
 			} else {
 				d = hashFieldSize(string(field), val)
+				est = hash.fieldCost(string(field), val)
 				added++
 			}
-			if d > 0 && d > math.MaxInt64-size {
+			if est > 0 && est > math.MaxInt64-size {
 				op.release()
 				return ValuePlan{}, ErrValueTooLarge
 			}
-			size += d
+			size += est
 			op.deltas = append(op.deltas, d)
 		}
 		return ValuePlan{Size: size, op: op, allowEmptyKey: value != nil}, nil
@@ -260,9 +264,9 @@ func (s *Store) ApplyHashSetEx(key string, args [][]byte, o HashSetExOptions) (b
 				hash.Unlock()
 				return ValuePlan{}, nil
 			}
-			n := hashFieldSize(field, args[i+1])
+			n := hash.fieldCost(field, args[i+1])
 			if exists {
-				n -= hashFieldSize(field, old)
+				n -= hash.fieldCost(field, old)
 			}
 			if o.ExpireAt > 0 {
 				n += hashFieldTTLOverhead

@@ -88,7 +88,9 @@ func SetHashListpackLimits(entries, value int64) {
 // NewHash returns an empty hash sized for n fields.
 func NewHash(n int) *HashValue {
 	if n > hashSmallMax {
-		return &HashValue{dict: make(map[string][]byte, n)}
+		v := &HashValue{dict: make(map[string][]byte, n)}
+		v.adj.Store(hashBaseSize - hashPackedBase)
+		return v
 	}
 	return &HashValue{}
 }
@@ -226,6 +228,7 @@ func (v *HashValue) put(field string, val []byte) ([]byte, bool) {
 	copy(buf, v.lp)
 	v.lp = lpAppend(buf, field, val)
 	v.lpN++
+	v.adj.Add(hashPackedOverhead - hashFieldOverhead)
 	if v.lpN > hashSmallMax || len(v.lp) > hashSmallBytes {
 		v.toDict()
 	}
@@ -249,6 +252,7 @@ func (v *HashValue) del(field string) ([]byte, bool) {
 	old := v.lpVal(e)
 	v.lpSplice(e.start, e.end, nil)
 	v.lpN--
+	v.adj.Add(hashFieldOverhead - hashPackedOverhead)
 	return old, true
 }
 
@@ -266,6 +270,7 @@ func (v *HashValue) toDict() {
 		return true
 	})
 	v.lp, v.lpN = nil, 0
+	v.adj.Store(hashBaseSize - hashPackedBase)
 }
 
 // SetOrder puts the fields, every field of the hash, in that order, for

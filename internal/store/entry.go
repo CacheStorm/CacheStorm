@@ -100,6 +100,9 @@ type HashValue struct {
 	lp   []byte
 	lpN  int
 	dict map[string][]byte
+	// adj corrects size, counted at the map form's rates, to the form the
+	// hash is in.
+	adj  atomic.Int64
 	mu   sync.RWMutex
 	dead bool
 	size sizeCounter
@@ -131,7 +134,7 @@ func (v *HashValue) markDeadLocked()   { v.dead = true }
 func (v *HashValue) Type() DataType { return DataTypeHash }
 func (v *HashValue) SizeOf() int64 {
 	if n, ok := v.size.load(); ok {
-		return hashBaseSize + n
+		return hashPackedBase + n + v.adj.Load()
 	}
 	v.mu.RLock()
 	defer v.mu.RUnlock()
@@ -142,7 +145,7 @@ func (v *HashValue) SizeOf() int64 {
 	})
 	n += v.ttlSizeLocked()
 	v.size.set(n)
-	return hashBaseSize + n
+	return hashPackedBase + n + v.adj.Load()
 }
 
 // SetField stores val under field, dropping any expiry the field had, as
@@ -201,6 +204,7 @@ func (v *HashValue) Clone() Value {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 	cloned := &HashValue{big: v.big}
+	cloned.adj.Store(v.adj.Load())
 	if v.dict == nil {
 		cloned.lp, cloned.lpN = append([]byte(nil), v.lp...), v.lpN
 	} else {
@@ -482,6 +486,9 @@ type SetValue struct {
 	mu   sync.RWMutex
 	dead bool
 	size sizeCounter
+	// adj corrects size, counted at the map form's rates, to the form the
+	// set is in.
+	adj atomic.Int64
 	// enc and order are the encoding Redis would hold the set in and, for
 	// an intset or listpack kept in dict, its member order.
 	enc   setEncoding
@@ -505,7 +512,7 @@ func (v *SetValue) markDeadLocked()   { v.dead = true }
 func (v *SetValue) Type() DataType { return DataTypeSet }
 func (v *SetValue) SizeOf() int64 {
 	if n, ok := v.size.load(); ok {
-		return setBaseSize + n
+		return setCompactBase + n + v.adj.Load()
 	}
 	v.mu.RLock()
 	defer v.mu.RUnlock()
@@ -515,7 +522,7 @@ func (v *SetValue) SizeOf() int64 {
 		return true
 	})
 	v.size.set(n)
-	return setBaseSize + n
+	return setCompactBase + n + v.adj.Load()
 }
 func (v *SetValue) AddMember(member string) bool {
 	if v.Has(member) {
@@ -537,6 +544,7 @@ func (v *SetValue) RemoveMember(member string) bool {
 func (v *SetValue) ClearMembers() {
 	v.dict, v.ints, v.lp, v.lpN = nil, nil, nil, 0
 	v.enc, v.order = setEncNone, nil
+	v.adj.Store(0)
 	v.size.set(0)
 	v.invalidateScan()
 }
@@ -557,6 +565,7 @@ func (v *SetValue) Clone() Value {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 	cloned := &SetValue{enc: v.enc, lpN: v.lpN}
+	cloned.adj.Store(v.adj.Load())
 	cloned.ints = append([]int64(nil), v.ints...)
 	cloned.lp = append([]byte(nil), v.lp...)
 	if v.dict != nil {

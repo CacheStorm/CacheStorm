@@ -15,8 +15,11 @@ import (
 // a map of scores with a skiplist for the order, built on first use. The
 // buffer is copy-on-write, so members read from it stay valid.
 type SortedSetValue struct {
-	zl      []byte
-	zn      int
+	zl []byte
+	zn int
+	// adj corrects size, counted at the map form's rates, to the form the
+	// set is in.
+	adj     atomic.Int64
 	dict    map[string]float64
 	mu      sync.RWMutex
 	dead    bool
@@ -89,7 +92,9 @@ func zlEncode(member string, score float64) []byte {
 // NewSortedSet returns an empty sorted set sized for n members.
 func NewSortedSet(n int) *SortedSetValue {
 	if n > zsetSmallMax {
-		return &SortedSetValue{dict: make(map[string]float64, n)}
+		v := &SortedSetValue{dict: make(map[string]float64, n)}
+		v.adj.Store(zsetBaseSize - zsetPackedBase)
+		return v
 	}
 	return &SortedSetValue{}
 }
@@ -118,7 +123,7 @@ func (v *SortedSetValue) markDeadLocked()   { v.dead = true }
 func (v *SortedSetValue) Type() DataType { return DataTypeSortedSet }
 func (v *SortedSetValue) SizeOf() int64 {
 	if n, ok := v.size.load(); ok {
-		return zsetBaseSize + n
+		return zsetPackedBase + n + v.adj.Load()
 	}
 	v.mu.RLock()
 	defer v.mu.RUnlock()
@@ -127,7 +132,7 @@ func (v *SortedSetValue) SizeOf() int64 {
 		n += zsetMemberSize(k)
 	}
 	v.size.set(n)
-	return zsetBaseSize + n
+	return zsetPackedBase + n + v.adj.Load()
 }
 func (v *SortedSetValue) String() string {
 	v.mu.RLock()
@@ -145,6 +150,7 @@ func (v *SortedSetValue) Clone() Value {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 	cloned := &SortedSetValue{big: v.big}
+	cloned.adj.Store(v.adj.Load())
 	if v.dict == nil {
 		cloned.zl, cloned.zn = append([]byte(nil), v.zl...), v.zn
 		return cloned
@@ -251,6 +257,7 @@ func (v *SortedSetValue) Remove(member string) bool {
 		}
 		v.zlSplice(e.start, e.end, nil)
 		v.zn--
+		v.adj.Add(zsetMemberOverhd - zsetPackedOverhd)
 	} else {
 		score, exists := v.dict[member]
 		if !exists {
@@ -323,6 +330,9 @@ func (v *SortedSetValue) Put(member string, score float64) bool {
 		_, off := v.smallPos(score, member)
 		v.zlSplice(off, off, zlEncode(member, score))
 		v.zn++
+		if !exists {
+			v.adj.Add(zsetPackedOverhd - zsetMemberOverhd)
+		}
 		if len(v.zl) > zsetSmallBytes {
 			v.toDict()
 		}
@@ -360,6 +370,7 @@ func (v *SortedSetValue) toDict() {
 	})
 	v.zl, v.zn = nil, 0
 	v.index.Store(z)
+	v.adj.Store(zsetBaseSize - zsetPackedBase)
 }
 
 func (v *SortedSetValue) Card() int {

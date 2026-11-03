@@ -41,7 +41,7 @@ func TestCollectionHelpersKeepSize(t *testing.T) {
 	h.SetField("g", []byte("1"))
 	h.DeleteField("f")
 	h.DeleteField("missing")
-	if got, want := h.SizeOf(), int64(hashBaseSize)+hashFieldSize("g", []byte("1")); got != want {
+	if got, want := h.SizeOf(), h.RecountSize(); got != want || want != hashPackedBase+1+1+hashPackedOverhead {
 		t.Fatalf("hash SizeOf=%d, want %d", got, want)
 	}
 
@@ -50,7 +50,7 @@ func TestCollectionHelpersKeepSize(t *testing.T) {
 	s.AddMember("bb")
 	s.AddMember("bb")
 	s.RemoveMember("a")
-	if got, want := s.SizeOf(), int64(setBaseSize)+setMemberSize("bb"); got != want {
+	if got, want := s.SizeOf(), s.RecountSize(); got != want || want != int64(setBaseSize)+setMemberSize("bb") {
 		t.Fatalf("set SizeOf=%d, want %d", got, want)
 	}
 
@@ -59,7 +59,7 @@ func TestCollectionHelpersKeepSize(t *testing.T) {
 	z.Add("a", 5)
 	z.Add("dd", 1)
 	z.RemoveRangeByScore(2, 3)
-	if got, want := z.SizeOf(), int64(zsetBaseSize)+zsetMemberSize("a")+zsetMemberSize("dd"); got != want {
+	if got, want := z.SizeOf(), z.RecountSize(); got != want || want != zsetPackedBase+1+2+2*zsetPackedOverhd {
 		t.Fatalf("zset SizeOf=%d, want %d", got, want)
 	}
 }

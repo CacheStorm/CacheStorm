@@ -57,23 +57,11 @@ func refValueSize(v store.Value) int64 {
 		}
 		return n
 	case *store.HashValue:
-		n := int64(450)
-		for k, val := range v.All() {
-			n += int64(len(k)) + int64(len(val)) + 88
-		}
-		return n
+		return v.RecountSize()
 	case *store.SetValue:
-		n := int64(337)
-		for k := range v.All() {
-			n += int64(len(k)) + 45
-		}
-		return n
+		return v.RecountSize()
 	case *store.SortedSetValue:
-		n := int64(930)
-		for k := range v.All() {
-			n += int64(len(k)) + 122
-		}
-		return n
+		return v.RecountSize()
 	case *store.StreamValue:
 		n := int64(48)
 		for _, e := range v.Entries {

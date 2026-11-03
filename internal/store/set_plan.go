@@ -36,7 +36,7 @@ func (s *Store) AddSetMembers(key string, members []string) (int, error) {
 		}
 		size := set.SizeOf()
 		for _, member := range fresh {
-			n := setMemberSize(member)
+			n := set.memberCost(member)
 			if n > math.MaxInt64-size {
 				set.Unlock()
 				return ValuePlan{}, ErrValueTooLarge
@@ -137,11 +137,11 @@ func (s *Store) moveSetMember(srcKey, dstKey, member string) (bool, error) {
 		srcEmpty := src.Card() == 1
 		srcSize := int64(0)
 		if !srcEmpty {
-			srcSize = entryMetadataSize(source.TagList()) + int64(len(srcKey)) + 16 + src.SizeOf() - setMemberSize(member)
+			srcSize = entryMetadataSize(source.TagList()) + int64(len(srcKey)) + 16 + src.SizeOf() - src.memberCost(member)
 		}
 		dstSize := dst.SizeOf()
 		if !duplicate {
-			n := setMemberSize(member)
+			n := dst.memberCost(member)
 			if n > math.MaxInt64-dstSize {
 				unlock()
 				return false, ErrValueTooLarge
