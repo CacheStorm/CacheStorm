@@ -19,7 +19,7 @@ func TestSetGrowthX(t *testing.T) {
 			}
 			s.Delete("control")
 			if !fresh {
-				if err := s.Set("s", &store.SetValue{Members: map[string]struct{}{"kept": {}}}, store.SetOptions{Tags: []string{"tag"}, ExpireAtMS: 4102444800000}); err != nil {
+				if err := s.Set("s", store.NewSetFrom(map[string]struct{}{"kept": {}}), store.SetOptions{Tags: []string{"tag"}, ExpireAtMS: 4102444800000}); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -33,8 +33,8 @@ func TestSetGrowthX(t *testing.T) {
 			same := !exists
 			if !fresh && exists {
 				set := entry.Value.(*store.SetValue)
-				same = len(set.Members) == 1
-				_, kept := set.Members["kept"]
+				same = set.Card() == 1
+				kept := set.Has("kept")
 				same = same && kept && entry.ExpiresAt.Load() == 4102444800000 && len(entry.TagList()) == 1
 			}
 			t.Logf("EXPECTED: OOM unchanged data/budget/watch/journal | ACTUAL: %q same=%v usage=%d->%d records=%d", got, same, before, s.MemUsage(), records)

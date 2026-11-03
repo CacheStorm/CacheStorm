@@ -315,7 +315,7 @@ func TestListValueString(t *testing.T) {
 }
 
 func TestSetValueString(t *testing.T) {
-	v := &SetValue{Members: map[string]struct{}{"a": {}, "b": {}}}
+	v := NewSetFrom(map[string]struct{}{"a": {}, "b": {}})
 	s := v.String()
 	if s == "" {
 		t.Error("expected non-empty string")

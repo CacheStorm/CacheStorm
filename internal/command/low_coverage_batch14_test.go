@@ -30,8 +30,8 @@ func TestLowCoverageBatch14_KeyObjectSubcommands(t *testing.T) {
 	})
 
 	t.Run("KEY.OBJECT ENCODING set", func(t *testing.T) {
-		sv := &store.SetValue{Members: map[string]struct{}{}}
-		sv.Members["m1"] = struct{}{}
+		sv := store.NewSetFrom(map[string]struct{}{})
+		sv.AddMember("m1")
 		s.Set("ko_enc_set", sv, store.SetOptions{})
 		_ = runHandler(t, router, "KEY.OBJECT", [][]byte{[]byte("ENCODING"), []byte("ko_enc_set")}, s)
 	})
@@ -431,10 +431,10 @@ func TestLowCoverageBatch14_DumpCommands(t *testing.T) {
 	})
 
 	t.Run("DUMP set with multiple members", func(t *testing.T) {
-		sv := &store.SetValue{Members: map[string]struct{}{}}
-		sv.Members["m1"] = struct{}{}
-		sv.Members["m2"] = struct{}{}
-		sv.Members["m3"] = struct{}{}
+		sv := store.NewSetFrom(map[string]struct{}{})
+		sv.AddMember("m1")
+		sv.AddMember("m2")
+		sv.AddMember("m3")
 		s.Set("dump_set_multi", sv, store.SetOptions{})
 		_ = runHandler(t, router, "DUMP", [][]byte{[]byte("dump_set_multi")}, s)
 	})
@@ -553,8 +553,8 @@ func TestLowCoverageBatch14_CopyCommands(t *testing.T) {
 	})
 
 	t.Run("COPY set", func(t *testing.T) {
-		sv := &store.SetValue{Members: map[string]struct{}{}}
-		sv.Members["m1"] = struct{}{}
+		sv := store.NewSetFrom(map[string]struct{}{})
+		sv.AddMember("m1")
 		s.Set("copy_set_src", sv, store.SetOptions{})
 		_ = runHandler(t, router, "COPY", [][]byte{
 			[]byte("copy_set_src"),

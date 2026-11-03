@@ -205,9 +205,9 @@ func TestListOperations(t *testing.T) {
 func TestSetOperations(t *testing.T) {
 	s := NewStore()
 
-	set := &SetValue{Members: make(map[string]struct{})}
-	set.Members["member1"] = struct{}{}
-	set.Members["member2"] = struct{}{}
+	set := NewSetFrom(make(map[string]struct{}))
+	set.AddMember("member1")
+	set.AddMember("member2")
 	s.Set("set1", set, SetOptions{})
 
 	entry, exists := s.Get("set1")
@@ -216,8 +216,8 @@ func TestSetOperations(t *testing.T) {
 	}
 
 	sv := entry.Value.(*SetValue)
-	if len(sv.Members) != 2 {
-		t.Errorf("expected 2 members, got %d", len(sv.Members))
+	if sv.Card() != 2 {
+		t.Errorf("expected 2 members, got %d", sv.Card())
 	}
 }
 

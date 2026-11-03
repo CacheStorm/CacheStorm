@@ -108,7 +108,7 @@ func TestDecodeLegacyRedisCollectionEncodings(t *testing.T) {
 		{"zipmap", blob(9, []byte{1, 1, 'a', 1, 0, 'b', 255}), store.NewHashFrom(map[string][]byte{"a": []byte("b")})},
 		{"quicklist", append([]byte{14, 1}, blob(0, list)[1:]...), &store.ListValue{Elements: [][]byte{[]byte("a")}}},
 		{"old-zset", []byte{3, 1, 1, 'a', 3, '1', '.', '5'}, store.NewSortedSetFrom(map[string]float64{"a": 1.5})},
-		{"intset16", blob(11, []byte{2, 0, 0, 0, 2, 0, 0, 0, 255, 255, 255, 127}), &store.SetValue{Members: map[string]struct{}{"-1": {}, "32767": {}}}},
+		{"intset16", blob(11, []byte{2, 0, 0, 0, 2, 0, 0, 0, 255, 255, 255, 127}), store.NewSetFrom(map[string]struct{}{"-1": {}, "32767": {}})},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			value, err := DecodeDump(dumpTestPayload(tc.body))

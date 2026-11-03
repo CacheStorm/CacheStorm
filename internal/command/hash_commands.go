@@ -557,7 +557,7 @@ func cmdHRANDFIELD(ctx *Context) error {
 			return ctx.WriteNullBulkString()
 		}
 		hash.RLock()
-		picked, found := randomKey(hash.Fields())
+		picked, found := pickKey(hash.Dict(), hashItems(hash))
 		hash.RUnlock()
 		if !found {
 			return ctx.WriteNullBulkString()
@@ -593,7 +593,7 @@ func cmdHRANDFIELD(ctx *Context) error {
 		chosen := map[string]bool(nil)
 		if count < int64(hash.Len()) {
 			chosen = make(map[string]bool, count)
-			for _, f := range randomKeys(hash.Fields(), count) {
+			for _, f := range pickKeys(hash.Dict(), hashItems(hash), count) {
 				chosen[f] = true
 			}
 		}
@@ -604,7 +604,7 @@ func cmdHRANDFIELD(ctx *Context) error {
 			return true
 		})
 	} else {
-		picked = randomKeys(hash.Fields(), count)
+		picked = pickKeys(hash.Dict(), hashItems(hash), count)
 	}
 	size := len(picked)
 	if withValues {

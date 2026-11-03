@@ -45,7 +45,7 @@ func TestCollectionHelpersKeepSize(t *testing.T) {
 		t.Fatalf("hash SizeOf=%d, want %d", got, want)
 	}
 
-	s := &SetValue{Members: map[string]struct{}{"a": {}}}
+	s := NewSetFrom(map[string]struct{}{"a": {}})
 	s.SizeOf()
 	s.AddMember("bb")
 	s.AddMember("bb")

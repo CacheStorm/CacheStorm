@@ -82,7 +82,7 @@ func TestGetOrCreate(t *testing.T) {
 		t.Fatal(err)
 	}
 	time.Sleep(5 * time.Millisecond)
-	fresh, created, err := s.GetOrCreate("exp", func() Value { return &SetValue{Members: map[string]struct{}{}} })
+	fresh, created, err := s.GetOrCreate("exp", func() Value { return NewSetFrom(map[string]struct{}{}) })
 	if err != nil || !created {
 		t.Fatalf("an expired key was not treated as absent: created=%v err=%v", created, err)
 	}
@@ -93,7 +93,7 @@ func TestGetOrCreate(t *testing.T) {
 		t.Fatalf("keyCount %d", s.KeyCount())
 	}
 
-	if _, _, err := s.GetOrCreate("", func() Value { return &SetValue{Members: map[string]struct{}{}} }); err != ErrInvalidKey {
+	if _, _, err := s.GetOrCreate("", func() Value { return NewSetFrom(map[string]struct{}{}) }); err != ErrInvalidKey {
 		t.Fatalf("empty key: %v", err)
 	}
 }

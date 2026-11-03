@@ -141,11 +141,11 @@ func TestStoreDataTypesAdvanced(t *testing.T) {
 	})
 
 	t.Run("Set Value Operations", func(t *testing.T) {
-		val := &SetValue{Members: map[string]struct{}{
+		val := NewSetFrom(map[string]struct{}{
 			"member1": {},
 			"member2": {},
 			"member3": {},
-		}}
+		})
 
 		if val.Type() != DataTypeSet {
 			t.Error("Type mismatch")
@@ -153,7 +153,7 @@ func TestStoreDataTypesAdvanced(t *testing.T) {
 
 		// Clone
 		cloned := val.Clone().(*SetValue)
-		if len(cloned.Members) != 3 {
+		if cloned.Card() != 3 {
 			t.Error("Clone length mismatch")
 		}
 	})

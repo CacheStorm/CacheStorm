@@ -11,7 +11,7 @@ import (
 )
 
 func TestPersistenceSetHashZSetValueRaceX(t *testing.T) {
-	setVal := &store.SetValue{Members: map[string]struct{}{"a": {}, "b": {}}}
+	setVal := store.NewSetFrom(map[string]struct{}{"a": {}, "b": {}})
 	hashVal := store.NewHashFrom(map[string][]byte{"f": []byte("1")})
 	zsetVal := store.NewSortedSetFrom(map[string]float64{"m": 1})
 	writer := NewRDBWriter(store.NewStore(), RDBConfig{})
@@ -24,7 +24,7 @@ func TestPersistenceSetHashZSetValueRaceX(t *testing.T) {
 		defer wg.Done()
 		for i := 0; i < iterations; i++ {
 			setVal.Lock()
-			setVal.Members[fmt.Sprint(i)] = struct{}{}
+			setVal.AddMember(fmt.Sprint(i))
 			setVal.Unlock()
 			hashVal.Lock()
 			hashVal.SetFieldKeepTTL(fmt.Sprint(i), []byte(fmt.Sprint(i)))
@@ -68,7 +68,7 @@ func TestPersistenceSetHashZSetValueRaceX(t *testing.T) {
 	wg.Wait()
 
 	setVal.RLock()
-	setLen := len(setVal.Members)
+	setLen := setVal.Card()
 	setVal.RUnlock()
 	hashVal.RLock()
 	hashLen := hashVal.Len()

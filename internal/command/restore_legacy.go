@@ -81,7 +81,7 @@ func cmdRESTORELegacy(ctx *Context) error {
 		}
 		value = lv
 	case store.DataTypeSet:
-		sv := &store.SetValue{Members: make(map[string]struct{})}
+		sv := store.NewSetFrom(make(map[string]struct{}))
 		if len(data) > 0 {
 			items := strings.Split(data, ",")
 			for _, item := range items {

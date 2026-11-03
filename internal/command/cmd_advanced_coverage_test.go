@@ -1800,7 +1800,7 @@ func TestAdvCoverage_EXEC_QueuedSADD_SREM(t *testing.T) {
 
 func TestAdvCoverage_EXEC_QueuedSCARD_SISMEMBER(t *testing.T) {
 	s := store.NewStore()
-	sv := &store.SetValue{Members: map[string]struct{}{"a": {}, "b": {}}}
+	sv := store.NewSetFrom(map[string]struct{}{"a": {}, "b": {}})
 	s.Set("set", sv, store.SetOptions{})
 	ctx := newDiscardContext("EXEC", nil, s)
 	ctx.Transaction.Start()

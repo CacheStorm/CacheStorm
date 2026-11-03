@@ -497,7 +497,7 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 		entry, exists := e.store.Get(args[0])
 		var sv *store.SetValue
 		if !exists {
-			sv = &store.SetValue{Members: make(map[string]struct{})}
+			sv = store.NewSetFrom(make(map[string]struct{}))
 			e.store.Set(args[0], sv, store.SetOptions{})
 		} else {
 			var ok bool
@@ -507,7 +507,7 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 			}
 		}
 		sv.Lock()
-		if _, ok := sv.Members[args[1]]; !ok {
+		if ok := sv.Has(args[1]); !ok {
 			sv.AddMember(args[1])
 			sv.Unlock()
 			e.store.Reaccount(args[0])
@@ -527,7 +527,7 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 		if sv, ok := entry.Value.(*store.SetValue); ok {
 			// cmdSADD/cmdSREM/cmdSMOVE mutate Members under the set write lock.
 			sv.RLock()
-			_, found := sv.Members[args[1]]
+			found := sv.Has(args[1])
 			sv.RUnlock()
 			if found {
 				return lua.LNumber(1)
@@ -545,7 +545,7 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 		}
 		if sv, ok := entry.Value.(*store.SetValue); ok {
 			sv.RLock()
-			n := len(sv.Members)
+			n := sv.Card()
 			sv.RUnlock()
 			return lua.LNumber(n)
 		}
@@ -904,8 +904,8 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 		}
 		if sv, ok := entry.Value.(*store.SetValue); ok {
 			sv.RLock()
-			members := make([]string, 0, len(sv.Members))
-			for member := range sv.Members {
+			members := make([]string, 0, sv.Card())
+			for member := range sv.All() {
 				members = append(members, member)
 			}
 			sv.RUnlock()
@@ -931,7 +931,7 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 			sv.Lock()
 			removed := 0
 			for i := 1; i < len(args); i++ {
-				if _, ok := sv.Members[args[i]]; ok {
+				if ok := sv.Has(args[i]); ok {
 					sv.RemoveMember(args[i])
 					removed++
 				}

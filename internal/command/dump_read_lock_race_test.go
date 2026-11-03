@@ -218,7 +218,7 @@ func TestDumpControlsUncontended(t *testing.T) {
 		case *store.HashValue:
 			count = v.Len()
 		case *store.SetValue:
-			count = len(v.Members)
+			count = v.Card()
 		case *store.ListValue:
 			count = len(v.Elements)
 		case *store.SortedSetValue:

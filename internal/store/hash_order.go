@@ -187,6 +187,10 @@ func (v *HashValue) All() iter.Seq2[string, []byte] {
 	return func(yield func(string, []byte) bool) { v.Range(yield) }
 }
 
+// Dict returns the map of a hash held as one, nil for a packed hash. The
+// caller holds the value's lock and does not change the map.
+func (v *HashValue) Dict() map[string][]byte { return v.dict }
+
 // Fields returns a copy of the fields and their values.
 func (v *HashValue) Fields() map[string][]byte {
 	m := make(map[string][]byte, v.Len())

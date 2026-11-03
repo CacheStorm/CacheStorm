@@ -89,13 +89,13 @@ func cmdSREM(ctx *Context) error {
 	removed := 0
 	for i := 1; i < ctx.ArgCount(); i++ {
 		member := ctx.ArgString(i)
-		if _, exists := set.Members[member]; exists {
+		if exists := set.Has(member); exists {
 			set.RemoveMember(member)
 			removed++
 		}
 	}
 
-	isEmpty := len(set.Members) == 0
+	isEmpty := set.Card() == 0
 	set.Unlock()
 
 	if removed > 0 {
@@ -147,7 +147,7 @@ func cmdSISMEMBER(ctx *Context) error {
 	}
 
 	set.RLock()
-	if _, exists := set.Members[member]; exists {
+	if exists := set.Has(member); exists {
 		reply := int64(1)
 		set.RUnlock()
 		return ctx.WriteInteger(reply)
@@ -172,7 +172,7 @@ func cmdSCARD(ctx *Context) error {
 	}
 
 	set.RLock()
-	reply := int64(int64(len(set.Members)))
+	reply := int64(int64(set.Card()))
 	set.RUnlock()
 	return ctx.WriteInteger(reply)
 }
@@ -208,9 +208,9 @@ func cmdSPOP(ctx *Context) error {
 	}
 
 	if !withCount {
-		for member := range set.Members {
+		if member, ok := pickKey(set.Dict(), setItems(set)); ok {
 			set.RemoveMember(member)
-			isEmpty := len(set.Members) == 0
+			isEmpty := set.Card() == 0
 			set.Unlock()
 			ctx.notify(store.NotifySet, "spop", key)
 			if isEmpty {
@@ -224,7 +224,7 @@ func cmdSPOP(ctx *Context) error {
 		return ctx.WriteNullBulkString()
 	}
 
-	if count >= len(set.Members) {
+	if count >= set.Card() {
 		// Redis replies with the union of the set alone.
 		whole := store.NewIntsetSet()
 		set.Range(func(m string) bool {
@@ -232,7 +232,7 @@ func cmdSPOP(ctx *Context) error {
 			return true
 		})
 		members := setMembersReply(whole)
-		popped := make([]string, 0, len(set.Members))
+		popped := make([]string, 0, set.Card())
 		whole.Range(func(m string) bool {
 			popped = append(popped, m)
 			return true
@@ -247,21 +247,18 @@ func cmdSPOP(ctx *Context) error {
 		return ctx.WriteSet(members)
 	}
 
-	if remaining := len(set.Members) - count; remaining*spopMoveStrategyMul <= count {
+	if remaining := set.Card() - count; remaining*spopMoveStrategyMul <= count {
 		return spopKeepRemaining(ctx, key, set, remaining)
 	}
 
 	members := make([]*resp.Value, 0, count)
 	popped := make([]string, 0, count)
-	i := 0
-	for member := range set.Members {
-		if i >= count {
-			break
-		}
+	for _, member := range pickKeys(set.Dict(), setItems(set), int64(count)) {
 		members = append(members, resp.BulkString(member))
 		popped = append(popped, member)
+	}
+	for _, member := range popped {
 		set.RemoveMember(member)
-		i++
 	}
 	set.Unlock()
 	if len(popped) > 0 {
@@ -281,7 +278,7 @@ const spopMoveStrategyMul = 5
 // returns the rest in the old set's order. A listpack keeps its order.
 // The caller holds set's write lock, which this releases.
 func spopKeepRemaining(ctx *Context, key string, set *store.SetValue, remaining int) error {
-	all := make([]string, 0, len(set.Members))
+	all := make([]string, 0, set.Card())
 	set.Range(func(m string) bool {
 		all = append(all, m)
 		return true
@@ -358,7 +355,7 @@ func cmdSRANDMEMBER(ctx *Context) error {
 
 	set.RLock()
 	if !withCount {
-		member, ok := randomKey(set.Members)
+		member, ok := pickKey(set.Dict(), setItems(set))
 		set.RUnlock()
 		if !ok {
 			return ctx.WriteNullBulkString()
@@ -367,7 +364,7 @@ func cmdSRANDMEMBER(ctx *Context) error {
 	}
 	var picked []string
 	switch {
-	case count >= int64(len(set.Members)):
+	case count >= int64(set.Card()):
 		// The whole set, as the union of the set alone.
 		whole := store.NewIntsetSet()
 		set.Range(func(m string) bool {
@@ -381,7 +378,7 @@ func cmdSRANDMEMBER(ctx *Context) error {
 	case count > 0 && set.Encoding() == "listpack":
 		// A sample of a listpack comes in the listpack's order.
 		chosen := make(map[string]bool, count)
-		for _, m := range randomKeys(set.Members, count) {
+		for _, m := range pickKeys(set.Dict(), setItems(set), count) {
 			chosen[m] = true
 		}
 		set.Range(func(m string) bool {
@@ -391,7 +388,7 @@ func cmdSRANDMEMBER(ctx *Context) error {
 			return true
 		})
 	default:
-		picked = randomKeys(set.Members, count)
+		picked = pickKeys(set.Dict(), setItems(set), count)
 	}
 	set.RUnlock()
 	result := make([]*resp.Value, len(picked))
@@ -456,8 +453,8 @@ func cmdSSCAN(ctx *Context) error {
 			return true
 		})
 	} else {
-		members, next = collectionScanPage(set, len(set.Members), cursor, opts.count, func(emit func(string)) {
-			for m := range set.Members {
+		members, next = collectionScanPage(set, set.Card(), cursor, opts.count, func(emit func(string)) {
+			for m := range set.All() {
 				emit(m)
 			}
 		})
@@ -521,11 +518,11 @@ func cmdSINTERCARD(ctx *Context) error {
 		}
 	}
 	sets := append([]*store.SetValue(nil), src.sets...)
-	sort.SliceStable(sets, func(i, j int) bool { return len(sets[i].Members) < len(sets[j].Members) })
-	for m := range sets[0].Members {
+	sort.SliceStable(sets, func(i, j int) bool { return sets[i].Card() < sets[j].Card() })
+	for m := range sets[0].All() {
 		found := true
 		for _, other := range sets[1:] {
-			if _, ok := other.Members[m]; !ok {
+			if ok := other.Has(m); !ok {
 				found = false
 				break
 			}
@@ -559,7 +556,7 @@ func cmdSMISMEMBER(ctx *Context) error {
 			result = append(result, resp.IntegerValue(0))
 		} else {
 			set.RLock()
-			_, exists := set.Members[member]
+			exists := set.Has(member)
 			set.RUnlock()
 			if exists {
 				result = append(result, resp.IntegerValue(1))

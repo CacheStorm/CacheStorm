@@ -64,7 +64,7 @@ func refValueSize(v store.Value) int64 {
 		return n
 	case *store.SetValue:
 		n := int64(337)
-		for k := range v.Members {
+		for k := range v.All() {
 			n += int64(len(k)) + 45
 		}
 		return n

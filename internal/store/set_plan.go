@@ -21,7 +21,7 @@ func (s *Store) AddSetMembers(key string, members []string) (int, error) {
 		seen := make(map[string]struct{}, len(members))
 		fresh := make([]string, 0, len(members))
 		for _, member := range members {
-			if _, exists := set.Members[member]; exists {
+			if exists := set.Has(member); exists {
 				continue
 			}
 			if _, dup := seen[member]; !dup {
@@ -99,7 +99,7 @@ func (s *Store) moveSetMember(srcKey, dstKey, member string) (bool, error) {
 		dst.SizeOf()
 		if srcKey == dstKey {
 			src.RLock()
-			_, exists := src.Members[member]
+			exists := src.Has(member)
 			src.RUnlock()
 			unlockEntries()
 			return exists, nil
@@ -119,7 +119,7 @@ func (s *Store) moveSetMember(srcKey, dstKey, member string) (bool, error) {
 			unlock()
 			continue
 		}
-		if _, exists := src.Members[member]; !exists {
+		if exists := src.Has(member); !exists {
 			unlock()
 			return false, nil
 		}
@@ -133,8 +133,8 @@ func (s *Store) moveSetMember(srcKey, dstKey, member string) (bool, error) {
 				return false, ErrKeyTooLarge
 			}
 		}
-		_, duplicate := dst.Members[member]
-		srcEmpty := len(src.Members) == 1
+		duplicate := dst.Has(member)
+		srcEmpty := src.Card() == 1
 		srcSize := int64(0)
 		if !srcEmpty {
 			srcSize = entryMetadataSize(source.TagList()) + int64(len(srcKey)) + 16 + src.SizeOf() - setMemberSize(member)

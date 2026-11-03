@@ -98,9 +98,9 @@ func TestLowCoverageBatch9_DumpRestoreCommands(t *testing.T) {
 	})
 
 	t.Run("DUMP set value", func(t *testing.T) {
-		sv := &store.SetValue{Members: make(map[string]struct{})}
-		sv.Members["member1"] = struct{}{}
-		sv.Members["member2"] = struct{}{}
+		sv := store.NewSetFrom(make(map[string]struct{}))
+		sv.AddMember("member1")
+		sv.AddMember("member2")
 		s.Set("dumpset", sv, store.SetOptions{})
 		_ = runHandler(t, router, "DUMP", [][]byte{[]byte("dumpset")}, s)
 	})
@@ -677,8 +677,8 @@ func TestLowCoverageBatch9_KEYOBJECT(t *testing.T) {
 	})
 
 	t.Run("KEYOBJECT set", func(t *testing.T) {
-		sv := &store.SetValue{Members: make(map[string]struct{})}
-		sv.Members["m"] = struct{}{}
+		sv := store.NewSetFrom(make(map[string]struct{}))
+		sv.AddMember("m")
 		s.Set("koset", sv, store.SetOptions{})
 		_ = runHandler(t, router, "KEYOBJECT", [][]byte{[]byte("koset")}, s)
 	})

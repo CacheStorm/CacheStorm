@@ -91,15 +91,15 @@ func (s *setOpSources) unionDiff(op int) *store.SetValue {
 		var one, two int
 		for _, set := range sets {
 			if set != nil {
-				one += len(sets[0].Members)
-				two += len(set.Members)
+				one += sets[0].Card()
+				two += set.Card()
 			}
 		}
 		if one/2 <= two {
 			sets[0].Range(func(m string) bool {
 				for _, other := range sets[1:] {
 					if other != nil {
-						if _, ok := other.Members[m]; ok {
+						if ok := other.Has(m); ok {
 							return true
 						}
 					}
@@ -130,31 +130,38 @@ func (s *setOpSources) unionDiff(op int) *store.SetValue {
 // set found in all the others, in its order. It returns nil when a key is
 // missing.
 func (s *setOpSources) inter() []string {
+	members, _ := s.interFirst()
+	return members
+}
+
+// interFirst is inter, also returning the smallest set, whose encoding
+// SINTERSTORE's result starts in.
+func (s *setOpSources) interFirst() ([]string, *store.SetValue) {
 	sets := append([]*store.SetValue(nil), s.sets...)
 	for _, set := range sets {
 		if set == nil {
-			return nil
+			return nil, nil
 		}
 	}
-	sort.SliceStable(sets, func(i, j int) bool { return len(sets[i].Members) < len(sets[j].Members) })
+	sort.SliceStable(sets, func(i, j int) bool { return sets[i].Card() < sets[j].Card() })
 	var out []string
 	sets[0].Range(func(m string) bool {
 		for _, other := range sets[1:] {
 			if other == sets[0] {
 				continue
 			}
-			if _, ok := other.Members[m]; !ok {
+			if ok := other.Has(m); !ok {
 				return true
 			}
 		}
 		out = append(out, m)
 		return true
 	})
-	return out
+	return out, sets[0]
 }
 
 func setMembersReply(set *store.SetValue) []*resp.Value {
-	out := make([]*resp.Value, 0, len(set.Members))
+	out := make([]*resp.Value, 0, set.Card())
 	set.Range(func(m string) bool {
 		out = append(out, resp.BulkString(m))
 		return true
@@ -206,10 +213,19 @@ func setOpStoreCommand(ctx *Context, op int, event string) error {
 	}
 	var dst *store.SetValue
 	if op == setOpInter {
-		dst = store.NewIntsetSet()
-		for _, m := range src.inter() {
+		// As sinterGenericCommand: the result starts as an intset when the
+		// smallest set is one and as a listpack otherwise, and becomes an
+		// intset at the end when it holds only integers.
+		members, first := src.interFirst()
+		if first != nil && first.Encoding() == "intset" {
+			dst = store.NewIntsetSet()
+		} else {
+			dst = store.NewListpackSet()
+		}
+		for _, m := range members {
 			dst.AddMember(m)
 		}
+		dst.MaybeConvertToIntset()
 	} else {
 		dst = src.unionDiff(op)
 	}
@@ -219,7 +235,7 @@ func setOpStoreCommand(ctx *Context, op int, event string) error {
 	src.locked = nil
 	defer ctx.Store.SetOpsRUnlock()
 
-	if len(dst.Members) == 0 {
+	if dst.Card() == 0 {
 		if ctx.Store.Delete(dstKey) {
 			ctx.notify(store.NotifyGeneric, "del", dstKey)
 			ctx.Store.KeyNotifier().NotifyKey(dstKey)
@@ -232,7 +248,7 @@ func setOpStoreCommand(ctx *Context, op int, event string) error {
 		return ctx.WriteError(err)
 	}
 	ctx.notify(store.NotifySet, event, dstKey)
-	return ctx.WriteInteger(int64(len(dst.Members)))
+	return ctx.WriteInteger(int64(dst.Card()))
 }
 
 func cmdSUNION(ctx *Context) error { return setOpCommand(ctx, setOpUnion) }

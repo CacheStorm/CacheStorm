@@ -763,8 +763,8 @@ func TestReadEntrySetType(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected SetValue, got %T", entry.Value)
 	}
-	if len(sv.Members) != 3 {
-		t.Errorf("expected 3 members, got %d", len(sv.Members))
+	if sv.Card() != 3 {
+		t.Errorf("expected 3 members, got %d", sv.Card())
 	}
 }
 
@@ -1562,7 +1562,7 @@ func TestRDBManualRoundTripMultipleTypes(t *testing.T) {
 		t.Error("expected 'myset'")
 	} else {
 		sv, _ := e.Value.(*store.SetValue)
-		if len(sv.Members) != 2 {
+		if sv.Card() != 2 {
 			t.Errorf("expected 2 set members")
 		}
 	}
@@ -1864,7 +1864,7 @@ func TestRDBWriterWriteValueErrors(t *testing.T) {
 	values := []store.Value{
 		&store.StringValue{Data: []byte("test")},
 		&store.ListValue{Elements: [][]byte{[]byte("a"), []byte("b")}},
-		&store.SetValue{Members: map[string]struct{}{"x": {}, "y": {}}},
+		store.NewSetFrom(map[string]struct{}{"x": {}, "y": {}}),
 		store.NewHashFrom(map[string][]byte{"f": []byte("v")}),
 	}
 
@@ -2107,7 +2107,7 @@ func TestRDBWriterSaveCompleteSuccess(t *testing.T) {
 	s := store.NewStore()
 	s.Set("complete", &store.StringValue{Data: []byte("success")}, store.SetOptions{})
 	s.Set("complete2", &store.ListValue{Elements: [][]byte{[]byte("a")}}, store.SetOptions{})
-	s.Set("complete3", &store.SetValue{Members: map[string]struct{}{"m": {}}}, store.SetOptions{})
+	s.Set("complete3", store.NewSetFrom(map[string]struct{}{"m": {}}), store.SetOptions{})
 	s.Set("complete4", store.NewHashFrom(map[string][]byte{"f": []byte("v")}), store.SetOptions{})
 
 	tmpDir := t.TempDir()

@@ -30,8 +30,8 @@ func TestLowCoverageBatch13_CachewarmCommands(t *testing.T) {
 	})
 
 	t.Run("KEYOBJECT with set", func(t *testing.T) {
-		sv := &store.SetValue{Members: map[string]struct{}{}}
-		sv.Members["member1"] = struct{}{}
+		sv := store.NewSetFrom(map[string]struct{}{})
+		sv.AddMember("member1")
 		s.Set("koset", sv, store.SetOptions{})
 		_ = runHandler(t, router, "KEYOBJECT", [][]byte{[]byte("koset")}, s)
 	})
@@ -261,8 +261,8 @@ func TestLowCoverageBatch13_ServerCommands(t *testing.T) {
 		s.Set("dumplist", lv, store.SetOptions{})
 		_ = runHandler(t, router, "DUMP", [][]byte{[]byte("dumplist")}, s)
 
-		sv := &store.SetValue{Members: map[string]struct{}{}}
-		sv.Members["m1"] = struct{}{}
+		sv := store.NewSetFrom(map[string]struct{}{})
+		sv.AddMember("m1")
 		s.Set("dumpset", sv, store.SetOptions{})
 		_ = runHandler(t, router, "DUMP", [][]byte{[]byte("dumpset")}, s)
 

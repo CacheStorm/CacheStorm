@@ -114,7 +114,7 @@ func TestStoreDataTypes(t *testing.T) {
 	})
 
 	t.Run("Set Value", func(t *testing.T) {
-		val := &SetValue{Members: map[string]struct{}{"a": {}, "b": {}}}
+		val := NewSetFrom(map[string]struct{}{"a": {}, "b": {}})
 		if val.Type() != DataTypeSet {
 			t.Error("Type should be DataTypeSet")
 		}
@@ -146,9 +146,9 @@ func TestStoreValueClone(t *testing.T) {
 	})
 
 	t.Run("Set Clone", func(t *testing.T) {
-		original := &SetValue{Members: map[string]struct{}{"member": {}}}
+		original := NewSetFrom(map[string]struct{}{"member": {}})
 		cloned := original.Clone().(*SetValue)
-		if _, exists := cloned.Members["member"]; !exists {
+		if exists := cloned.Has("member"); !exists {
 			t.Error("Clone member missing")
 		}
 	})

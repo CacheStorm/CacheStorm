@@ -29,7 +29,7 @@ func TestDumpBinaryCollectionRoundTrip(t *testing.T) {
 	}{
 		{"hash", store.NewHashFrom(map[string][]byte{"f&=\x00": []byte("v&=\x00"), "": {}})},
 		{"list", &store.ListValue{Elements: [][]byte{[]byte("a,b\x00"), {}, []byte("tail")}}},
-		{"set", &store.SetValue{Members: map[string]struct{}{"a,b\x00": {}, "": {}}}},
+		{"set", store.NewSetFrom(map[string]struct{}{"a,b\x00": {}, "": {}})},
 		{"zset", store.NewSortedSetFrom(map[string]float64{"m,:\x00": 1.23456789012345, "": -2})},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -80,11 +80,11 @@ func dumpValuesEqual(a, b store.Value) bool {
 		return true
 	case *store.SetValue:
 		other, ok := b.(*store.SetValue)
-		if !ok || len(v.Members) != len(other.Members) {
+		if !ok || v.Card() != other.Card() {
 			return false
 		}
-		for k := range v.Members {
-			if _, exists := other.Members[k]; !exists {
+		for k := range v.All() {
+			if exists := other.Has(k); !exists {
 				return false
 			}
 		}

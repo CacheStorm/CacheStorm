@@ -70,7 +70,7 @@ func TestSREM_Coverage(t *testing.T) {
 	})
 
 	t.Run("remove existing member", func(t *testing.T) {
-		s.Set("rs1", &store.SetValue{Members: map[string]struct{}{"a": {}, "b": {}}}, store.SetOptions{})
+		s.Set("rs1", store.NewSetFrom(map[string]struct{}{"a": {}, "b": {}}), store.SetOptions{})
 		ctx := discardCtx("SREM", [][]byte{barg("rs1"), barg("a")}, s)
 		if err := cmdSREM(ctx); err != nil {
 			t.Fatal(err)
@@ -78,7 +78,7 @@ func TestSREM_Coverage(t *testing.T) {
 	})
 
 	t.Run("remove non-existing member", func(t *testing.T) {
-		s.Set("rs2", &store.SetValue{Members: map[string]struct{}{"a": {}}}, store.SetOptions{})
+		s.Set("rs2", store.NewSetFrom(map[string]struct{}{"a": {}}), store.SetOptions{})
 		ctx := discardCtx("SREM", [][]byte{barg("rs2"), barg("z")}, s)
 		if err := cmdSREM(ctx); err != nil {
 			t.Fatal(err)
@@ -86,7 +86,7 @@ func TestSREM_Coverage(t *testing.T) {
 	})
 
 	t.Run("remove all members deletes key", func(t *testing.T) {
-		s.Set("rs3", &store.SetValue{Members: map[string]struct{}{"x": {}}}, store.SetOptions{})
+		s.Set("rs3", store.NewSetFrom(map[string]struct{}{"x": {}}), store.SetOptions{})
 		ctx := discardCtx("SREM", [][]byte{barg("rs3"), barg("x")}, s)
 		if err := cmdSREM(ctx); err != nil {
 			t.Fatal(err)
@@ -120,7 +120,7 @@ func TestSMEMBERS_Coverage(t *testing.T) {
 	})
 
 	t.Run("existing set", func(t *testing.T) {
-		s.Set("sm1", &store.SetValue{Members: map[string]struct{}{"a": {}, "b": {}}}, store.SetOptions{})
+		s.Set("sm1", store.NewSetFrom(map[string]struct{}{"a": {}, "b": {}}), store.SetOptions{})
 		ctx := discardCtx("SMEMBERS", [][]byte{barg("sm1")}, s)
 		if err := cmdSMEMBERS(ctx); err != nil {
 			t.Fatal(err)
@@ -154,7 +154,7 @@ func TestSISMEMBER_Coverage(t *testing.T) {
 	})
 
 	t.Run("member exists", func(t *testing.T) {
-		s.Set("si1", &store.SetValue{Members: map[string]struct{}{"a": {}, "b": {}}}, store.SetOptions{})
+		s.Set("si1", store.NewSetFrom(map[string]struct{}{"a": {}, "b": {}}), store.SetOptions{})
 		ctx := discardCtx("SISMEMBER", [][]byte{barg("si1"), barg("a")}, s)
 		if err := cmdSISMEMBER(ctx); err != nil {
 			t.Fatal(err)
@@ -195,7 +195,7 @@ func TestSCARD_Coverage(t *testing.T) {
 	})
 
 	t.Run("existing set", func(t *testing.T) {
-		s.Set("sc1", &store.SetValue{Members: map[string]struct{}{"a": {}, "b": {}, "c": {}}}, store.SetOptions{})
+		s.Set("sc1", store.NewSetFrom(map[string]struct{}{"a": {}, "b": {}, "c": {}}), store.SetOptions{})
 		ctx := discardCtx("SCARD", [][]byte{barg("sc1")}, s)
 		if err := cmdSCARD(ctx); err != nil {
 			t.Fatal(err)
@@ -236,7 +236,7 @@ func TestSPOP_Coverage(t *testing.T) {
 	})
 
 	t.Run("pop single", func(t *testing.T) {
-		s.Set("sp1", &store.SetValue{Members: map[string]struct{}{"a": {}, "b": {}}}, store.SetOptions{})
+		s.Set("sp1", store.NewSetFrom(map[string]struct{}{"a": {}, "b": {}}), store.SetOptions{})
 		ctx := discardCtx("SPOP", [][]byte{barg("sp1")}, s)
 		if err := cmdSPOP(ctx); err != nil {
 			t.Fatal(err)
@@ -244,7 +244,7 @@ func TestSPOP_Coverage(t *testing.T) {
 	})
 
 	t.Run("pop with count less than set size", func(t *testing.T) {
-		s.Set("sp2", &store.SetValue{Members: map[string]struct{}{"a": {}, "b": {}, "c": {}, "d": {}}}, store.SetOptions{})
+		s.Set("sp2", store.NewSetFrom(map[string]struct{}{"a": {}, "b": {}, "c": {}, "d": {}}), store.SetOptions{})
 		ctx := discardCtx("SPOP", [][]byte{barg("sp2"), barg("2")}, s)
 		if err := cmdSPOP(ctx); err != nil {
 			t.Fatal(err)
@@ -252,7 +252,7 @@ func TestSPOP_Coverage(t *testing.T) {
 	})
 
 	t.Run("pop with count >= set size", func(t *testing.T) {
-		s.Set("sp3", &store.SetValue{Members: map[string]struct{}{"x": {}, "y": {}}}, store.SetOptions{})
+		s.Set("sp3", store.NewSetFrom(map[string]struct{}{"x": {}, "y": {}}), store.SetOptions{})
 		ctx := discardCtx("SPOP", [][]byte{barg("sp3"), barg("10")}, s)
 		if err := cmdSPOP(ctx); err != nil {
 			t.Fatal(err)
@@ -260,7 +260,7 @@ func TestSPOP_Coverage(t *testing.T) {
 	})
 
 	t.Run("pop last member deletes key", func(t *testing.T) {
-		s.Set("sp4", &store.SetValue{Members: map[string]struct{}{"only": {}}}, store.SetOptions{})
+		s.Set("sp4", store.NewSetFrom(map[string]struct{}{"only": {}}), store.SetOptions{})
 		ctx := discardCtx("SPOP", [][]byte{barg("sp4")}, s)
 		if err := cmdSPOP(ctx); err != nil {
 			t.Fatal(err)
@@ -308,7 +308,7 @@ func TestSRANDMEMBER_Coverage(t *testing.T) {
 	})
 
 	t.Run("single member no count", func(t *testing.T) {
-		s.Set("sr1", &store.SetValue{Members: map[string]struct{}{"a": {}, "b": {}}}, store.SetOptions{})
+		s.Set("sr1", store.NewSetFrom(map[string]struct{}{"a": {}, "b": {}}), store.SetOptions{})
 		ctx := discardCtx("SRANDMEMBER", [][]byte{barg("sr1")}, s)
 		if err := cmdSRANDMEMBER(ctx); err != nil {
 			t.Fatal(err)
@@ -316,7 +316,7 @@ func TestSRANDMEMBER_Coverage(t *testing.T) {
 	})
 
 	t.Run("count larger than set", func(t *testing.T) {
-		s.Set("sr2", &store.SetValue{Members: map[string]struct{}{"a": {}, "b": {}}}, store.SetOptions{})
+		s.Set("sr2", store.NewSetFrom(map[string]struct{}{"a": {}, "b": {}}), store.SetOptions{})
 		ctx := discardCtx("SRANDMEMBER", [][]byte{barg("sr2"), barg("10")}, s)
 		if err := cmdSRANDMEMBER(ctx); err != nil {
 			t.Fatal(err)
@@ -324,7 +324,7 @@ func TestSRANDMEMBER_Coverage(t *testing.T) {
 	})
 
 	t.Run("count smaller than set", func(t *testing.T) {
-		s.Set("sr3", &store.SetValue{Members: map[string]struct{}{"a": {}, "b": {}, "c": {}, "d": {}}}, store.SetOptions{})
+		s.Set("sr3", store.NewSetFrom(map[string]struct{}{"a": {}, "b": {}, "c": {}, "d": {}}), store.SetOptions{})
 		ctx := discardCtx("SRANDMEMBER", [][]byte{barg("sr3"), barg("2")}, s)
 		if err := cmdSRANDMEMBER(ctx); err != nil {
 			t.Fatal(err)
@@ -365,7 +365,7 @@ func TestSMOVE_Coverage(t *testing.T) {
 	})
 
 	t.Run("member not in src", func(t *testing.T) {
-		s.Set("mv1", &store.SetValue{Members: map[string]struct{}{"a": {}}}, store.SetOptions{})
+		s.Set("mv1", store.NewSetFrom(map[string]struct{}{"a": {}}), store.SetOptions{})
 		ctx := discardCtx("SMOVE", [][]byte{barg("mv1"), barg("mvdst"), barg("z")}, s)
 		if err := cmdSMOVE(ctx); err != nil {
 			t.Fatal(err)
@@ -373,8 +373,8 @@ func TestSMOVE_Coverage(t *testing.T) {
 	})
 
 	t.Run("successful move", func(t *testing.T) {
-		s.Set("mv2", &store.SetValue{Members: map[string]struct{}{"a": {}, "b": {}}}, store.SetOptions{})
-		s.Set("mv2dst", &store.SetValue{Members: map[string]struct{}{"c": {}}}, store.SetOptions{})
+		s.Set("mv2", store.NewSetFrom(map[string]struct{}{"a": {}, "b": {}}), store.SetOptions{})
+		s.Set("mv2dst", store.NewSetFrom(map[string]struct{}{"c": {}}), store.SetOptions{})
 		ctx := discardCtx("SMOVE", [][]byte{barg("mv2"), barg("mv2dst"), barg("a")}, s)
 		if err := cmdSMOVE(ctx); err != nil {
 			t.Fatal(err)
@@ -382,7 +382,7 @@ func TestSMOVE_Coverage(t *testing.T) {
 	})
 
 	t.Run("move last member deletes src", func(t *testing.T) {
-		s.Set("mv3", &store.SetValue{Members: map[string]struct{}{"only": {}}}, store.SetOptions{})
+		s.Set("mv3", store.NewSetFrom(map[string]struct{}{"only": {}}), store.SetOptions{})
 		ctx := discardCtx("SMOVE", [][]byte{barg("mv3"), barg("mv3dst"), barg("only")}, s)
 		if err := cmdSMOVE(ctx); err != nil {
 			t.Fatal(err)
@@ -409,7 +409,7 @@ func TestSUNION_Coverage(t *testing.T) {
 	})
 
 	t.Run("single set", func(t *testing.T) {
-		s.Set("su1", &store.SetValue{Members: map[string]struct{}{"a": {}, "b": {}}}, store.SetOptions{})
+		s.Set("su1", store.NewSetFrom(map[string]struct{}{"a": {}, "b": {}}), store.SetOptions{})
 		ctx := discardCtx("SUNION", [][]byte{barg("su1")}, s)
 		if err := cmdSUNION(ctx); err != nil {
 			t.Fatal(err)
@@ -417,8 +417,8 @@ func TestSUNION_Coverage(t *testing.T) {
 	})
 
 	t.Run("two sets", func(t *testing.T) {
-		s.Set("su2a", &store.SetValue{Members: map[string]struct{}{"a": {}, "b": {}}}, store.SetOptions{})
-		s.Set("su2b", &store.SetValue{Members: map[string]struct{}{"b": {}, "c": {}}}, store.SetOptions{})
+		s.Set("su2a", store.NewSetFrom(map[string]struct{}{"a": {}, "b": {}}), store.SetOptions{})
+		s.Set("su2b", store.NewSetFrom(map[string]struct{}{"b": {}, "c": {}}), store.SetOptions{})
 		ctx := discardCtx("SUNION", [][]byte{barg("su2a"), barg("su2b")}, s)
 		if err := cmdSUNION(ctx); err != nil {
 			t.Fatal(err)
@@ -426,7 +426,7 @@ func TestSUNION_Coverage(t *testing.T) {
 	})
 
 	t.Run("one key missing", func(t *testing.T) {
-		s.Set("su3", &store.SetValue{Members: map[string]struct{}{"a": {}}}, store.SetOptions{})
+		s.Set("su3", store.NewSetFrom(map[string]struct{}{"a": {}}), store.SetOptions{})
 		ctx := discardCtx("SUNION", [][]byte{barg("su3"), barg("nosuch")}, s)
 		if err := cmdSUNION(ctx); err != nil {
 			t.Fatal(err)
@@ -453,8 +453,8 @@ func TestSINTER_Coverage(t *testing.T) {
 	})
 
 	t.Run("two sets with overlap", func(t *testing.T) {
-		s.Set("si2a", &store.SetValue{Members: map[string]struct{}{"a": {}, "b": {}, "c": {}}}, store.SetOptions{})
-		s.Set("si2b", &store.SetValue{Members: map[string]struct{}{"b": {}, "c": {}, "d": {}}}, store.SetOptions{})
+		s.Set("si2a", store.NewSetFrom(map[string]struct{}{"a": {}, "b": {}, "c": {}}), store.SetOptions{})
+		s.Set("si2b", store.NewSetFrom(map[string]struct{}{"b": {}, "c": {}, "d": {}}), store.SetOptions{})
 		ctx := discardCtx("SINTER", [][]byte{barg("si2a"), barg("si2b")}, s)
 		if err := cmdSINTER(ctx); err != nil {
 			t.Fatal(err)
@@ -462,7 +462,7 @@ func TestSINTER_Coverage(t *testing.T) {
 	})
 
 	t.Run("one key missing returns empty", func(t *testing.T) {
-		s.Set("si3", &store.SetValue{Members: map[string]struct{}{"a": {}}}, store.SetOptions{})
+		s.Set("si3", store.NewSetFrom(map[string]struct{}{"a": {}}), store.SetOptions{})
 		ctx := discardCtx("SINTER", [][]byte{barg("si3"), barg("nosuch")}, s)
 		if err := cmdSINTER(ctx); err != nil {
 			t.Fatal(err)
@@ -489,8 +489,8 @@ func TestSDIFF_Coverage(t *testing.T) {
 	})
 
 	t.Run("two sets", func(t *testing.T) {
-		s.Set("sd1a", &store.SetValue{Members: map[string]struct{}{"a": {}, "b": {}, "c": {}}}, store.SetOptions{})
-		s.Set("sd1b", &store.SetValue{Members: map[string]struct{}{"b": {}, "d": {}}}, store.SetOptions{})
+		s.Set("sd1a", store.NewSetFrom(map[string]struct{}{"a": {}, "b": {}, "c": {}}), store.SetOptions{})
+		s.Set("sd1b", store.NewSetFrom(map[string]struct{}{"b": {}, "d": {}}), store.SetOptions{})
 		ctx := discardCtx("SDIFF", [][]byte{barg("sd1a"), barg("sd1b")}, s)
 		if err := cmdSDIFF(ctx); err != nil {
 			t.Fatal(err)
@@ -524,8 +524,8 @@ func TestSUNIONSTORE_Coverage(t *testing.T) {
 	})
 
 	t.Run("store union", func(t *testing.T) {
-		s.Set("sus1", &store.SetValue{Members: map[string]struct{}{"a": {}, "b": {}}}, store.SetOptions{})
-		s.Set("sus2", &store.SetValue{Members: map[string]struct{}{"b": {}, "c": {}}}, store.SetOptions{})
+		s.Set("sus1", store.NewSetFrom(map[string]struct{}{"a": {}, "b": {}}), store.SetOptions{})
+		s.Set("sus2", store.NewSetFrom(map[string]struct{}{"b": {}, "c": {}}), store.SetOptions{})
 		ctx := discardCtx("SUNIONSTORE", [][]byte{barg("susdst"), barg("sus1"), barg("sus2")}, s)
 		if err := cmdSUNIONSTORE(ctx); err != nil {
 			t.Fatal(err)
@@ -551,8 +551,8 @@ func TestSINTERSTORE_Coverage(t *testing.T) {
 	})
 
 	t.Run("store intersection", func(t *testing.T) {
-		s.Set("sis1", &store.SetValue{Members: map[string]struct{}{"a": {}, "b": {}}}, store.SetOptions{})
-		s.Set("sis2", &store.SetValue{Members: map[string]struct{}{"b": {}, "c": {}}}, store.SetOptions{})
+		s.Set("sis1", store.NewSetFrom(map[string]struct{}{"a": {}, "b": {}}), store.SetOptions{})
+		s.Set("sis2", store.NewSetFrom(map[string]struct{}{"b": {}, "c": {}}), store.SetOptions{})
 		ctx := discardCtx("SINTERSTORE", [][]byte{barg("sisdst"), barg("sis1"), barg("sis2")}, s)
 		if err := cmdSINTERSTORE(ctx); err != nil {
 			t.Fatal(err)
@@ -560,7 +560,7 @@ func TestSINTERSTORE_Coverage(t *testing.T) {
 	})
 
 	t.Run("empty intersection", func(t *testing.T) {
-		s.Set("sis3", &store.SetValue{Members: map[string]struct{}{"a": {}}}, store.SetOptions{})
+		s.Set("sis3", store.NewSetFrom(map[string]struct{}{"a": {}}), store.SetOptions{})
 		ctx := discardCtx("SINTERSTORE", [][]byte{barg("sisdst2"), barg("sis3"), barg("nosuch")}, s)
 		if err := cmdSINTERSTORE(ctx); err != nil {
 			t.Fatal(err)
@@ -568,8 +568,8 @@ func TestSINTERSTORE_Coverage(t *testing.T) {
 	})
 
 	t.Run("no overlap empty result", func(t *testing.T) {
-		s.Set("sis4a", &store.SetValue{Members: map[string]struct{}{"a": {}}}, store.SetOptions{})
-		s.Set("sis4b", &store.SetValue{Members: map[string]struct{}{"z": {}}}, store.SetOptions{})
+		s.Set("sis4a", store.NewSetFrom(map[string]struct{}{"a": {}}), store.SetOptions{})
+		s.Set("sis4b", store.NewSetFrom(map[string]struct{}{"z": {}}), store.SetOptions{})
 		ctx := discardCtx("SINTERSTORE", [][]byte{barg("sisdst3"), barg("sis4a"), barg("sis4b")}, s)
 		if err := cmdSINTERSTORE(ctx); err != nil {
 			t.Fatal(err)
@@ -588,8 +588,8 @@ func TestSDIFFSTORE_Coverage(t *testing.T) {
 	})
 
 	t.Run("store diff", func(t *testing.T) {
-		s.Set("sds1", &store.SetValue{Members: map[string]struct{}{"a": {}, "b": {}, "c": {}}}, store.SetOptions{})
-		s.Set("sds2", &store.SetValue{Members: map[string]struct{}{"b": {}}}, store.SetOptions{})
+		s.Set("sds1", store.NewSetFrom(map[string]struct{}{"a": {}, "b": {}, "c": {}}), store.SetOptions{})
+		s.Set("sds2", store.NewSetFrom(map[string]struct{}{"b": {}}), store.SetOptions{})
 		ctx := discardCtx("SDIFFSTORE", [][]byte{barg("sdsdst"), barg("sds1"), barg("sds2")}, s)
 		if err := cmdSDIFFSTORE(ctx); err != nil {
 			t.Fatal(err)
@@ -597,8 +597,8 @@ func TestSDIFFSTORE_Coverage(t *testing.T) {
 	})
 
 	t.Run("empty diff result", func(t *testing.T) {
-		s.Set("sds3", &store.SetValue{Members: map[string]struct{}{"a": {}}}, store.SetOptions{})
-		s.Set("sds4", &store.SetValue{Members: map[string]struct{}{"a": {}}}, store.SetOptions{})
+		s.Set("sds3", store.NewSetFrom(map[string]struct{}{"a": {}}), store.SetOptions{})
+		s.Set("sds4", store.NewSetFrom(map[string]struct{}{"a": {}}), store.SetOptions{})
 		ctx := discardCtx("SDIFFSTORE", [][]byte{barg("sdsdst2"), barg("sds3"), barg("sds4")}, s)
 		if err := cmdSDIFFSTORE(ctx); err != nil {
 			t.Fatal(err)
@@ -631,7 +631,7 @@ func TestSSCAN_Coverage(t *testing.T) {
 	})
 
 	t.Run("scan with defaults", func(t *testing.T) {
-		s.Set("ss1", &store.SetValue{Members: map[string]struct{}{"a": {}, "b": {}, "c": {}}}, store.SetOptions{})
+		s.Set("ss1", store.NewSetFrom(map[string]struct{}{"a": {}, "b": {}, "c": {}}), store.SetOptions{})
 		ctx := discardCtx("SSCAN", [][]byte{barg("ss1"), barg("0")}, s)
 		if err := cmdSSCAN(ctx); err != nil {
 			t.Fatal(err)
@@ -700,7 +700,7 @@ func TestSINTERCARD_Coverage(t *testing.T) {
 	})
 
 	t.Run("single key", func(t *testing.T) {
-		s.Set("sic1", &store.SetValue{Members: map[string]struct{}{"a": {}, "b": {}}}, store.SetOptions{})
+		s.Set("sic1", store.NewSetFrom(map[string]struct{}{"a": {}, "b": {}}), store.SetOptions{})
 		ctx := discardCtx("SINTERCARD", [][]byte{barg("sic1")}, s)
 		if err := cmdSINTERCARD(ctx); err != nil {
 			t.Fatal(err)
@@ -708,8 +708,8 @@ func TestSINTERCARD_Coverage(t *testing.T) {
 	})
 
 	t.Run("two keys with overlap", func(t *testing.T) {
-		s.Set("sic2a", &store.SetValue{Members: map[string]struct{}{"a": {}, "b": {}, "c": {}}}, store.SetOptions{})
-		s.Set("sic2b", &store.SetValue{Members: map[string]struct{}{"b": {}, "c": {}, "d": {}}}, store.SetOptions{})
+		s.Set("sic2a", store.NewSetFrom(map[string]struct{}{"a": {}, "b": {}, "c": {}}), store.SetOptions{})
+		s.Set("sic2b", store.NewSetFrom(map[string]struct{}{"b": {}, "c": {}, "d": {}}), store.SetOptions{})
 		ctx := discardCtx("SINTERCARD", [][]byte{barg("sic2a"), barg("sic2b")}, s)
 		if err := cmdSINTERCARD(ctx); err != nil {
 			t.Fatal(err)
@@ -717,8 +717,8 @@ func TestSINTERCARD_Coverage(t *testing.T) {
 	})
 
 	t.Run("with LIMIT", func(t *testing.T) {
-		s.Set("sic3a", &store.SetValue{Members: map[string]struct{}{"a": {}, "b": {}, "c": {}}}, store.SetOptions{})
-		s.Set("sic3b", &store.SetValue{Members: map[string]struct{}{"a": {}, "b": {}, "c": {}}}, store.SetOptions{})
+		s.Set("sic3a", store.NewSetFrom(map[string]struct{}{"a": {}, "b": {}, "c": {}}), store.SetOptions{})
+		s.Set("sic3b", store.NewSetFrom(map[string]struct{}{"a": {}, "b": {}, "c": {}}), store.SetOptions{})
 		ctx := discardCtx("SINTERCARD", [][]byte{barg("sic3a"), barg("sic3b"), barg("LIMIT"), barg("1")}, s)
 		if err := cmdSINTERCARD(ctx); err != nil {
 			t.Fatal(err)
@@ -733,7 +733,7 @@ func TestSINTERCARD_Coverage(t *testing.T) {
 	})
 
 	t.Run("one key missing returns 0", func(t *testing.T) {
-		s.Set("sic4", &store.SetValue{Members: map[string]struct{}{"a": {}}}, store.SetOptions{})
+		s.Set("sic4", store.NewSetFrom(map[string]struct{}{"a": {}}), store.SetOptions{})
 		ctx := discardCtx("SINTERCARD", [][]byte{barg("sic4"), barg("nosuch")}, s)
 		if err := cmdSINTERCARD(ctx); err != nil {
 			t.Fatal(err)
@@ -759,7 +759,7 @@ func TestSMISMEMBER_Coverage(t *testing.T) {
 	})
 
 	t.Run("existing set mixed results", func(t *testing.T) {
-		s.Set("smis1", &store.SetValue{Members: map[string]struct{}{"a": {}, "c": {}}}, store.SetOptions{})
+		s.Set("smis1", store.NewSetFrom(map[string]struct{}{"a": {}, "c": {}}), store.SetOptions{})
 		ctx := discardCtx("SMISMEMBER", [][]byte{barg("smis1"), barg("a"), barg("b"), barg("c")}, s)
 		if err := cmdSMISMEMBER(ctx); err != nil {
 			t.Fatal(err)

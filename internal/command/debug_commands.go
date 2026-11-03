@@ -193,9 +193,9 @@ func getEncoding(v store.Value) string {
 		if enc := val.Encoding(); enc != "" {
 			return enc
 		}
-		if len(val.Members) <= encMaxIntsetEntries {
+		if val.Card() <= encMaxIntsetEntries {
 			allInts := true
-			for m := range val.Members {
+			for m := range val.All() {
 				if _, ok := parseRedisInt([]byte(m)); !ok {
 					allInts = false
 					break
@@ -205,10 +205,10 @@ func getEncoding(v store.Value) string {
 				return "intset"
 			}
 		}
-		if len(val.Members) > encMaxListpackEntries {
+		if val.Card() > encMaxListpackEntries {
 			return "hashtable"
 		}
-		for m := range val.Members {
+		for m := range val.All() {
 			if len(m) > encMaxListpackValue {
 				return "hashtable"
 			}

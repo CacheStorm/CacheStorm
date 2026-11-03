@@ -120,17 +120,17 @@ func TestListValue(t *testing.T) {
 }
 
 func TestSetValue(t *testing.T) {
-	v := &SetValue{Members: map[string]struct{}{
+	v := NewSetFrom(map[string]struct{}{
 		"member1": {},
 		"member2": {},
-	}}
+	})
 
 	if v.Type() != DataTypeSet {
 		t.Errorf("expected DataTypeSet, got %v", v.Type())
 	}
 
 	cloned := v.Clone().(*SetValue)
-	if len(cloned.Members) != 2 {
+	if cloned.Card() != 2 {
 		t.Error("clone should have same members")
 	}
 }

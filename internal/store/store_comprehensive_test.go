@@ -23,7 +23,7 @@ func TestStoreType(t *testing.T) {
 		t.Errorf("expected DataTypeList, got %v", s.Type("list"))
 	}
 
-	s.Set("set", &SetValue{Members: map[string]struct{}{"a": {}}}, SetOptions{})
+	s.Set("set", NewSetFrom(map[string]struct{}{"a": {}}), SetOptions{})
 	if s.Type("set") != DataTypeSet {
 		t.Errorf("expected DataTypeSet, got %v", s.Type("set"))
 	}
@@ -262,7 +262,7 @@ func TestListValueMethods(t *testing.T) {
 }
 
 func TestSetValueMethods(t *testing.T) {
-	v := &SetValue{Members: map[string]struct{}{"a": {}, "b": {}}}
+	v := NewSetFrom(map[string]struct{}{"a": {}, "b": {}})
 
 	if v.Type() != DataTypeSet {
 		t.Errorf("expected DataTypeSet, got %v", v.Type())
@@ -273,7 +273,7 @@ func TestSetValueMethods(t *testing.T) {
 	}
 
 	cloned := v.Clone().(*SetValue)
-	if len(cloned.Members) != len(v.Members) {
+	if cloned.Card() != v.Card() {
 		t.Error("clone should have same number of members")
 	}
 

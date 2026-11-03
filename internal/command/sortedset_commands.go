@@ -1230,8 +1230,8 @@ func zsetOpGeneric(ctx *Context, op int, hasDst, cardOnly bool) error {
 			v.RUnlock()
 		case *store.SetValue:
 			v.RLock()
-			srcs[i].members = make(map[string]float64, len(v.Members))
-			for m := range v.Members {
+			srcs[i].members = make(map[string]float64, v.Card())
+			for m := range v.All() {
 				srcs[i].members[m] = 1
 			}
 			v.RUnlock()

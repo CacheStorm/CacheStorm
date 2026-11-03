@@ -59,7 +59,7 @@ func TestSetAdmissionPersistenceX(t *testing.T) {
 				}
 				entry, _ := s.store.Get("s")
 				set := entry.Value.(*store.SetValue)
-				if len(set.Members) != 1 || entry.ExpiresAt.Load() != 4102444800000 || len(entry.TagList()) != 1 {
+				if set.Card() != 1 || entry.ExpiresAt.Load() != 4102444800000 || len(entry.TagList()) != 1 {
 					t.Fatal("refusal changed live set/metadata")
 				}
 				key := "s"
@@ -100,14 +100,14 @@ func TestSetAdmissionPersistenceX(t *testing.T) {
 					t.Fatal("accepted set lost")
 				}
 				set = entry.Value.(*store.SetValue)
-				if _, ok := set.Members[member]; !ok || restored.store.Exists("absent") || restored.store.MemUsage() != restored.store.MemoryTracker().Usage() {
+				if ok := set.Has(member); !ok || restored.store.Exists("absent") || restored.store.MemUsage() != restored.store.MemoryTracker().Usage() {
 					t.Fatal("restart diverged")
 				}
 				if kind == "move" {
-					if restored.store.Exists("s") || entry.ExpiresAt.Load() != 0 || len(entry.TagList()) != 0 || len(set.Members) != 1 {
+					if restored.store.Exists("s") || entry.ExpiresAt.Load() != 0 || len(entry.TagList()) != 0 || set.Card() != 1 {
 						t.Fatal("move metadata/source mismatch")
 					}
-				} else if entry.ExpiresAt.Load() != 4102444800000 || len(entry.TagList()) != 1 || len(set.Members) != 2 {
+				} else if entry.ExpiresAt.Load() != 4102444800000 || len(entry.TagList()) != 1 || set.Card() != 2 {
 					t.Fatal("SADD metadata mismatch")
 				}
 			})

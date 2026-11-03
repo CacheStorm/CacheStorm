@@ -11,7 +11,7 @@ import (
 func TestSetPlanIdentityDuplicatesAndKeys(t *testing.T) {
 	s := NewStore()
 	s.ConfigureMemory(2048, EvictionNoEviction, 70, 90, 5)
-	set := &SetValue{Members: map[string]struct{}{"kept": {}}}
+	set := NewSetFrom(map[string]struct{}{"kept": {}})
 	if err := s.Set("s", set, SetOptions{Tags: []string{"tag"}, ExpireAtMS: 4102444800000}); err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +36,7 @@ func TestSetPlanIdentityDuplicatesAndKeys(t *testing.T) {
 			t.Fatal("invalid key accepted")
 		}
 	}
-	if err := s.SetEntry("", NewEntry(&SetValue{Members: map[string]struct{}{"old": {}}})); err != nil {
+	if err := s.SetEntry("", NewEntry(NewSetFrom(map[string]struct{}{"old": {}}))); err != nil {
 		t.Fatal(err)
 	}
 	if n, err := s.AddSetMembers("", []string{"new"}); n != 1 || err != nil {
@@ -84,8 +84,8 @@ func TestSetPlanSharedBudgetAndLoading(t *testing.T) {
 func TestSetMoveAdmissionMetadataAndDuplicateDestination(t *testing.T) {
 	s := NewStore()
 	s.ConfigureMemory(2048, EvictionNoEviction, 70, 90, 5)
-	a := &SetValue{Members: map[string]struct{}{"m": {}, "stay": {}}}
-	b := &SetValue{Members: map[string]struct{}{"other": {}}}
+	a := NewSetFrom(map[string]struct{}{"m": {}, "stay": {}})
+	b := NewSetFrom(map[string]struct{}{"other": {}})
 	for key, value := range map[string]*SetValue{"s": a, "d": b} {
 		if err := s.Set(key, value, SetOptions{Tags: []string{key}, ExpireAtMS: 4102444800000}); err != nil {
 			t.Fatal(err)
@@ -123,7 +123,7 @@ func TestSetMoveRejectedGrowthAndSourceCredit(t *testing.T) {
 	s := NewStore()
 	s.ConfigureMemory(1300, EvictionNoEviction, 70, 90, 5)
 	member := strings.Repeat("m", 700)
-	if err := s.Set("s", &SetValue{Members: map[string]struct{}{member: {}}}, SetOptions{Tags: []string{"tag"}, ExpireAtMS: 4102444800000}); err != nil {
+	if err := s.Set("s", NewSetFrom(map[string]struct{}{member: {}}), SetOptions{Tags: []string{"tag"}, ExpireAtMS: 4102444800000}); err != nil {
 		t.Fatal(err)
 	}
 	before := s.MemUsage()
@@ -179,7 +179,7 @@ func TestSetMoveEvictionReleasesLocksAndReselects(t *testing.T) {
 		}
 		if !remove {
 			e, _ := s.Get("s")
-			if _, found := e.Value.(*SetValue).Members["fromcallback"]; !found {
+			if found := e.Value.(*SetValue).Has("fromcallback"); !found {
 				t.Fatal("callback field lost")
 			}
 		}
@@ -220,7 +220,7 @@ func TestSetMoveOppositeDirectionsAccounting(t *testing.T) {
 	total := 0
 	for _, key := range []string{"a", "b"} {
 		if e, ok := s.Get(key); ok {
-			total += len(e.Value.(*SetValue).Members)
+			total += e.Value.(*SetValue).Card()
 		}
 	}
 	if total != 2 {
@@ -279,7 +279,7 @@ func TestSetMoveErrorsReleaseLocks(t *testing.T) {
 		t.Fatal("set operation lock leaked")
 	}
 	s.setOpsMu.Unlock()
-	if _, ok := set.Members["m"]; !ok {
+	if ok := set.Has("m"); !ok {
 		t.Fatal("source changed")
 	}
 	if err := s.Set("alias", set, SetOptions{}); err != nil {

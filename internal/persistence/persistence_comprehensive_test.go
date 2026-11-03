@@ -50,7 +50,7 @@ func TestRDBComprehensive(t *testing.T) {
 
 	t.Run("RDB Writer with Set", func(t *testing.T) {
 		s := store.NewStore()
-		s.Set("set1", &store.SetValue{Members: map[string]struct{}{"a": {}}}, store.SetOptions{})
+		s.Set("set1", store.NewSetFrom(map[string]struct{}{"a": {}}), store.SetOptions{})
 
 		cfg := RDBConfig{Version: RDBVersion11, Compression: false, Checksum: true}
 		writer := NewRDBWriter(s, cfg)

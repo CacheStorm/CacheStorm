@@ -38,8 +38,8 @@ func TestLowCoverageBatch15_DUMP_RESTORE_COPY(t *testing.T) {
 	})
 
 	t.Run("DUMP set value", func(t *testing.T) {
-		sv := &store.SetValue{Members: map[string]struct{}{}}
-		sv.Members["member1"] = struct{}{}
+		sv := store.NewSetFrom(map[string]struct{}{})
+		sv.AddMember("member1")
 		s.Set("dump_set", sv, store.SetOptions{})
 		_ = runHandler(t, router, "DUMP", [][]byte{[]byte("dump_set")}, s)
 	})

@@ -14,7 +14,7 @@ func TestSetWritesReportStoreRejection(t *testing.T) {
 			s := store.NewStore()
 			s.ConfigureMemory(2000, store.EvictionNoEviction, 70, 85, 5)
 			for key, value := range map[string]store.Value{
-				"src": &store.SetValue{Members: map[string]struct{}{"a": {}}},
+				"src": store.NewSetFrom(map[string]struct{}{"a": {}}),
 				"dst": &store.StringValue{Data: []byte("keep")},
 			} {
 				if err := s.Set(key, value, store.SetOptions{}); err != nil {

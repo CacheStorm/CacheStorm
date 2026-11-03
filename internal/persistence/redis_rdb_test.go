@@ -48,7 +48,7 @@ func TestLoadRedis74RDB(t *testing.T) {
 		case *store.ListValue:
 			n = len(v.Elements)
 		case *store.SetValue:
-			n = len(v.Members)
+			n = v.Card()
 		case *store.HashValue:
 			n = v.Len()
 		case *store.SortedSetValue:

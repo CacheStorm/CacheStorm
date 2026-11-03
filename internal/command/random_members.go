@@ -1,6 +1,10 @@
 package command
 
-import "math/rand"
+import (
+	"math/rand"
+
+	"github.com/cachestorm/cachestorm/internal/store"
+)
 
 // randomKeyWindow is how many consecutive keys randomKey draws from, as
 // Redis' dictGetFairRandomKey samples a handful of keys and picks one.
@@ -102,4 +106,53 @@ func randomIndexes(n int, count int64) []int {
 		out = append(out, k)
 	}
 	return out
+}
+
+// pickKeys is randomKeys for a collection held either as dict or, when dict
+// is nil, as the items all lists.
+func pickKeys[V any](dict map[string]V, all func() []string, count int64) []string {
+	if dict != nil {
+		return randomKeys(dict, count)
+	}
+	items := all()
+	idx := randomIndexes(len(items), count)
+	out := make([]string, len(idx))
+	for i, j := range idx {
+		out[i] = items[j]
+	}
+	return out
+}
+
+// pickKey is randomKey for a collection held as pickKeys' is.
+func pickKey[V any](dict map[string]V, all func() []string) (string, bool) {
+	if dict != nil {
+		return randomKey(dict)
+	}
+	items := all()
+	if len(items) == 0 {
+		return "", false
+	}
+	return items[rand.Intn(len(items))], true
+}
+
+func setItems(set *store.SetValue) func() []string {
+	return func() []string {
+		out := make([]string, 0, set.Card())
+		set.Range(func(m string) bool {
+			out = append(out, m)
+			return true
+		})
+		return out
+	}
+}
+
+func hashItems(hash *store.HashValue) func() []string {
+	return func() []string {
+		out := make([]string, 0, hash.Len())
+		hash.Range(func(f string, _ []byte) bool {
+			out = append(out, f)
+			return true
+		})
+		return out
+	}
 }

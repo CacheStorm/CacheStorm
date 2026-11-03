@@ -52,7 +52,7 @@ func valueDigest(v store.Value) digest {
 	case *store.SetValue:
 		val.RLock()
 		defer val.RUnlock()
-		for m := range val.Members {
+		for m := range val.All() {
 			d.xor(sum([]byte(m)))
 		}
 	case *store.HashValue:

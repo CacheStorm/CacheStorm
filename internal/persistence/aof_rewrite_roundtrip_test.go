@@ -45,9 +45,9 @@ func TestAOFRewriteRoundTripPreservesTypes(t *testing.T) {
 	src.Set("list:key", &store.ListValue{Elements: [][]byte{
 		[]byte("a"), []byte("b"), []byte("c"),
 	}}, store.SetOptions{})
-	src.Set("set:key", &store.SetValue{Members: map[string]struct{}{
+	src.Set("set:key", store.NewSetFrom(map[string]struct{}{
 		"m1": {}, "m2": {},
-	}}, store.SetOptions{})
+	}), store.SetOptions{})
 	src.Set("zset:key", store.NewSortedSetFrom(map[string]float64{
 		"alice": 90.5, "bob": 85.25,
 	}), store.SetOptions{})
@@ -160,11 +160,11 @@ func TestAOFRewriteRoundTripPreservesTypes(t *testing.T) {
 	if !ok {
 		t.Fatalf("set:key type = %T, want *store.SetValue", setEntry.Value)
 	}
-	if _, ok := setOut.Members["m1"]; !ok {
-		t.Fatalf("set members = %+v", setOut.Members)
+	if ok := setOut.Has("m1"); !ok {
+		t.Fatalf("set members = %+v", setOut.Map())
 	}
-	if _, ok := setOut.Members["m2"]; !ok {
-		t.Fatalf("set members = %+v", setOut.Members)
+	if ok := setOut.Has("m2"); !ok {
+		t.Fatalf("set members = %+v", setOut.Map())
 	}
 
 	// SortedSet: exact scores.

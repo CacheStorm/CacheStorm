@@ -91,7 +91,7 @@ func TestRDBWriterSaveWithList(t *testing.T) {
 
 func TestRDBWriterSaveWithSet(t *testing.T) {
 	s := store.NewStore()
-	s.Set("set1", &store.SetValue{Members: map[string]struct{}{"a": {}, "b": {}, "c": {}}}, store.SetOptions{})
+	s.Set("set1", store.NewSetFrom(map[string]struct{}{"a": {}, "b": {}, "c": {}}), store.SetOptions{})
 
 	cfg := RDBConfig{Version: RDBVersion11}
 	w := NewRDBWriter(s, cfg)
@@ -370,7 +370,7 @@ func TestRDBWriterGetValueType(t *testing.T) {
 	}{
 		{&store.StringValue{Data: []byte("test")}, 0},
 		{&store.ListValue{Elements: [][]byte{[]byte("a")}}, 1},
-		{&store.SetValue{Members: map[string]struct{}{"a": {}}}, 2},
+		{store.NewSetFrom(map[string]struct{}{"a": {}}), 2},
 		{store.NewHashFrom(map[string][]byte{"f": []byte("v")}), 3},
 		{store.NewSortedSetFrom(map[string]float64{"a": 1.0}), 4},
 	}

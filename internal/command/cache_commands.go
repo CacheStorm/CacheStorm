@@ -201,7 +201,7 @@ func cmdCacheExport(ctx *Context) error {
 				case *store.SetValue:
 					members := make([]*resp.Value, 0)
 					v.RLock()
-					for member := range v.Members {
+					for member := range v.All() {
 						members = append(members, resp.BulkString(member))
 					}
 					v.RUnlock()

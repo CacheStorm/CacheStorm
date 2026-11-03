@@ -53,11 +53,11 @@ func EncodeDump(value store.Value) ([]byte, error) {
 	case *store.SetValue:
 		v.RLock()
 		defer v.RUnlock()
-		if len(v.Members) == 0 {
+		if v.Card() == 0 {
 			return nil, ErrDumpFormat
 		}
 		out = append(out, 2)
-		out = appendDumpLength(out, uint64(len(v.Members)))
+		out = appendDumpLength(out, uint64(v.Card()))
 		for _, k := range v.SaveOrder() {
 			str(k)
 		}
@@ -439,19 +439,19 @@ func (d *dumpDecoder) valueOf(typ byte) store.Value {
 			}
 			return v
 		case 11, 20:
-			v := &store.SetValue{Members: make(map[string]struct{})}
+			seen := make(map[string]struct{}, len(items))
 			for _, s := range items {
-				if _, ok := v.Members[s]; ok {
+				if _, ok := seen[s]; ok {
 					d.err = ErrDumpFormat
 				}
-				v.Members[s] = struct{}{}
+				seen[s] = struct{}{}
 			}
 			if typ == 20 {
+				v := &store.SetValue{}
 				v.SetListpackOrder(items)
-			} else {
-				v = store.NewLoadedSet(items)
+				return v
 			}
-			return v
+			return store.NewLoadedSet(items)
 		case 9, 13, 16:
 			if len(items)%2 != 0 {
 				d.err = ErrDumpFormat

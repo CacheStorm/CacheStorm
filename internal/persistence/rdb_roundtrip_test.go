@@ -26,7 +26,7 @@ func TestRDBSaveLoadRoundTripAllTypes(t *testing.T) {
 
 	mustSet("string_plain", &store.StringValue{Data: []byte("hello")}, store.SetOptions{})
 	mustSet("list", &store.ListValue{Elements: [][]byte{[]byte("a"), []byte("b"), []byte("c")}}, store.SetOptions{})
-	mustSet("set", &store.SetValue{Members: map[string]struct{}{"x": {}, "y": {}, "z": {}}}, store.SetOptions{})
+	mustSet("set", store.NewSetFrom(map[string]struct{}{"x": {}, "y": {}, "z": {}}), store.SetOptions{})
 	mustSet("hash", store.NewHashFrom(map[string][]byte{"f1": []byte("v1"), "f2": []byte("v2")}), store.SetOptions{})
 	mustSet("zset", store.NewSortedSetFrom(map[string]float64{"alice": 90.5, "bob": 85.25, "carol": 77}), store.SetOptions{})
 	mustSet("string_ttl", &store.StringValue{Data: []byte("fleeting")}, store.SetOptions{TTL: 5 * time.Minute})
@@ -82,7 +82,7 @@ func TestRDBSaveLoadRoundTripAllTypes(t *testing.T) {
 		t.Fatalf("set type = %T, want *store.SetValue", getEntry("set").Value)
 	}
 	for _, m := range []string{"x", "y", "z"} {
-		if _, ok := sv2.Members[m]; !ok {
+		if ok := sv2.Has(m); !ok {
 			t.Errorf("set missing member %q", m)
 		}
 	}

@@ -472,12 +472,18 @@ func (v *ListValue) Clone() Value {
 }
 
 type SetValue struct {
-	Members map[string]struct{}
-	mu      sync.RWMutex
-	dead    bool
-	size    sizeCounter
+	// dict holds a set in the hashtable form; a set Redis would hold as an
+	// intset or listpack, and small enough, is ints or lp instead (see
+	// set_order.go).
+	dict map[string]struct{}
+	ints []int64
+	lp   []byte
+	lpN  int
+	mu   sync.RWMutex
+	dead bool
+	size sizeCounter
 	// enc and order are the encoding Redis would hold the set in and, for
-	// an intset or listpack, its member order (see set_order.go).
+	// an intset or listpack kept in dict, its member order.
 	enc   setEncoding
 	order []string
 	scanCache
@@ -493,7 +499,7 @@ func (v *SetValue) RUnlock() { v.mu.RUnlock() }
 // holds the value's lock.
 func (v *SetValue) IsDead() bool { return v.dead }
 
-func (v *SetValue) emptyLocked() bool { return len(v.Members) == 0 }
+func (v *SetValue) emptyLocked() bool { return v.Card() == 0 }
 func (v *SetValue) markDeadLocked()   { v.dead = true }
 
 func (v *SetValue) Type() DataType { return DataTypeSet }
@@ -504,45 +510,32 @@ func (v *SetValue) SizeOf() int64 {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 	var n int64
-	for k := range v.Members {
+	v.Range(func(k string) bool {
 		n += setMemberSize(k)
-	}
+		return true
+	})
 	v.size.set(n)
 	return setBaseSize + n
 }
-
-// AddMember adds member and reports whether it is new. The caller holds the
-// value's write lock.
 func (v *SetValue) AddMember(member string) bool {
-	if v.Members == nil {
-		v.Members = make(map[string]struct{})
-	}
-	if _, exists := v.Members[member]; exists {
+	if v.Has(member) {
 		return false
 	}
-	v.orderAddLocked(member)
-	v.Members[member] = struct{}{}
+	v.addNewLocked(member)
 	v.size.add(setMemberSize(member))
 	v.invalidateScan()
 	return true
 }
-
-// RemoveMember removes member and reports whether it was present. The caller
-// holds the value's write lock.
 func (v *SetValue) RemoveMember(member string) bool {
-	if _, exists := v.Members[member]; !exists {
+	if !v.removeLocked(member) {
 		return false
 	}
-	delete(v.Members, member)
-	v.orderRemoveLocked(member)
 	v.size.add(-setMemberSize(member))
 	v.invalidateScan()
 	return true
 }
-
-// ClearMembers empties the set. The caller holds the value's write lock.
 func (v *SetValue) ClearMembers() {
-	v.Members = make(map[string]struct{})
+	v.dict, v.ints, v.lp, v.lpN = nil, nil, nil, 0
 	v.enc, v.order = setEncNone, nil
 	v.size.set(0)
 	v.invalidateScan()
@@ -551,20 +544,26 @@ func (v *SetValue) String() string {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 	result := ""
-	for k := range v.Members {
+	v.Range(func(k string) bool {
 		if result != "" {
 			result += ", "
 		}
 		result += k
-	}
+		return true
+	})
 	return result
 }
 func (v *SetValue) Clone() Value {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
-	cloned := &SetValue{Members: make(map[string]struct{}, len(v.Members)), enc: v.enc}
-	for k := range v.Members {
-		cloned.Members[k] = struct{}{}
+	cloned := &SetValue{enc: v.enc, lpN: v.lpN}
+	cloned.ints = append([]int64(nil), v.ints...)
+	cloned.lp = append([]byte(nil), v.lp...)
+	if v.dict != nil {
+		cloned.dict = make(map[string]struct{}, len(v.dict))
+		for k := range v.dict {
+			cloned.dict[k] = struct{}{}
+		}
 	}
 	if v.order != nil {
 		cloned.order = append([]string(nil), v.order...)
