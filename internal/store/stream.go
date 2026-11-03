@@ -13,30 +13,27 @@ type StreamField struct {
 }
 
 type StreamEntry struct {
-	ID        string
-	Fields    map[string][]byte
-	CreatedAt time.Time
+	ID string
 	// Pairs keeps the fields in the order XADD received them, duplicates
-	// included. Entries built without it fall back to Fields sorted by name.
+	// included.
 	Pairs []StreamField
 	node  *streamNode
 }
 
 // FieldPairs returns the entry's fields in reply order.
-func (e *StreamEntry) FieldPairs() []StreamField {
-	if e.Pairs != nil {
-		return e.Pairs
+func (e *StreamEntry) FieldPairs() []StreamField { return e.Pairs }
+
+// FieldMap returns the entry's fields by name, the last value of a
+// repeated one winning.
+func (e *StreamEntry) FieldMap() map[string][]byte {
+	if e.Pairs == nil {
+		return nil
 	}
-	names := make([]string, 0, len(e.Fields))
-	for name := range e.Fields {
-		names = append(names, name)
+	m := make(map[string][]byte, len(e.Pairs))
+	for _, p := range e.Pairs {
+		m[p.Name] = p.Value
 	}
-	sort.Strings(names)
-	pairs := make([]StreamField, len(names))
-	for i, name := range names {
-		pairs[i] = StreamField{Name: name, Value: e.Fields[name]}
-	}
-	return pairs
+	return m
 }
 
 func (e *StreamEntry) streamID() StreamID { return streamIDOf(e.ID) }
@@ -379,14 +376,7 @@ func (v *StreamValue) String() string {
 }
 
 func cloneStreamEntry(entry *StreamEntry) *StreamEntry {
-	out := &StreamEntry{
-		ID:        entry.ID,
-		Fields:    make(map[string][]byte, len(entry.Fields)),
-		CreatedAt: entry.CreatedAt,
-	}
-	for k, val := range entry.Fields {
-		out.Fields[k] = append([]byte(nil), val...)
-	}
+	out := &StreamEntry{ID: entry.ID}
 	if entry.Pairs != nil {
 		out.Pairs = make([]StreamField, len(entry.Pairs))
 		for i, p := range entry.Pairs {
@@ -452,14 +442,14 @@ func (v *StreamValue) maxDeletedLocked() StreamID { return streamIDOf(v.MaxDelet
 // appendLocked stores a new entry with an already validated ID.
 func (v *StreamValue) appendLocked(id StreamID, pairs []StreamField) *StreamEntry {
 	v.ensureNodes()
-	owned := make([]StreamField, len(pairs))
-	fields := make(map[string][]byte, len(pairs))
-	for i, p := range pairs {
-		val := append([]byte(nil), p.Value...)
-		owned[i] = StreamField{Name: p.Name, Value: val}
-		fields[p.Name] = val
+	var owned []StreamField
+	if pairs != nil {
+		owned = make([]StreamField, len(pairs))
 	}
-	entry := &StreamEntry{ID: id.String(), Fields: fields, CreatedAt: time.Now(), Pairs: owned}
+	for i, p := range pairs {
+		owned[i] = StreamField{Name: p.Name, Value: append([]byte(nil), p.Value...)}
+	}
+	entry := &StreamEntry{ID: id.String(), Pairs: owned}
 	var tail *streamNode
 	if n := len(v.Entries); n > 0 {
 		tail = v.Entries[n-1].node
@@ -556,11 +546,22 @@ func (v *StreamValue) HasConsumer(groupName, name string) bool {
 	return ok
 }
 
-func pairsFromMap(fields map[string][]byte) []StreamField {
+// StreamPairsFromMap lists fields sorted by name, the order of an entry
+// given as a map.
+func StreamPairsFromMap(fields map[string][]byte) []StreamField {
 	if fields == nil {
 		return nil
 	}
-	return (&StreamEntry{Fields: fields}).FieldPairs()
+	names := make([]string, 0, len(fields))
+	for name := range fields {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	pairs := make([]StreamField, len(names))
+	for i, name := range names {
+		pairs[i] = StreamField{Name: name, Value: fields[name]}
+	}
+	return pairs
 }
 
 // Add appends an entry with an explicit "ms-seq" (or bare "ms") ID.
@@ -579,10 +580,7 @@ func (v *StreamValue) Add(id string, fields map[string][]byte) (*StreamEntry, er
 	if parsed.Compare(v.lastIDLocked()) <= 0 {
 		return nil, ErrStreamIDTooSmall
 	}
-	entry := v.appendLocked(parsed, pairsFromMap(fields))
-	if fields == nil {
-		entry.Fields = nil
-	}
+	entry := v.appendLocked(parsed, StreamPairsFromMap(fields))
 	if v.MaxLen > 0 && int64(len(v.Entries)) > v.MaxLen {
 		v.trimLocked(StreamTrimArgs{Strategy: StreamTrimMaxLen, MaxLen: v.MaxLen})
 	}

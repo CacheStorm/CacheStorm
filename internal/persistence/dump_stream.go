@@ -456,11 +456,7 @@ func streamNodeEntries(master store.StreamID, items []string) ([]*store.StreamEn
 			continue
 		}
 		id := store.StreamID{Ms: master.Ms + uint64(msDiff), Seq: master.Seq + uint64(seqDiff)}
-		fields := make(map[string][]byte, len(pairs))
-		for _, f := range pairs {
-			fields[f.Name] = f.Value
-		}
-		out = append(out, &store.StreamEntry{ID: id.String(), Fields: fields, Pairs: pairs})
+		out = append(out, &store.StreamEntry{ID: id.String(), Pairs: pairs})
 	}
 	if seen != count+deleted || int64(len(out)) != count {
 		return nil, false

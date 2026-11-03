@@ -5,8 +5,8 @@ import (
 	"sort"
 )
 
-// hasTombstonesLocked reports whether an entry deleted with XDEL may lie at or
-// after start, which makes logical read counters unreliable past it.
+// hasTombstonesLocked is Redis' streamRangeHasTombstones(s, start, NULL):
+// whether the last entry deleted with XDEL lies at or after start.
 func (v *StreamValue) hasTombstonesLocked(start StreamID) bool {
 	if len(v.Entries) == 0 {
 		return false
@@ -15,14 +15,12 @@ func (v *StreamValue) hasTombstonesLocked(start StreamID) bool {
 	if maxDel.IsZero() {
 		return false
 	}
-	if v.firstIDLocked().Compare(maxDel) > 0 {
-		return false
-	}
 	return start.Compare(maxDel) <= 0
 }
 
-// estimateDistanceLocked returns the logical position of id counted from the
-// first entry ever added, when it can be known.
+// estimateDistanceLocked is Redis' streamEstimateDistanceFromFirstEverEntry:
+// the logical position of id counted from the first entry ever added, when
+// it can be known.
 func (v *StreamValue) estimateDistanceLocked(id StreamID) (int64, bool) {
 	if v.EntriesAdded == 0 {
 		return 0, true
@@ -32,13 +30,17 @@ func (v *StreamValue) estimateDistanceLocked(id StreamID) (int64, bool) {
 	if length == 0 && id.Compare(last) < 1 {
 		return v.EntriesAdded, true
 	}
+	maxDel := v.maxDeletedLocked()
+	if !id.IsZero() && id.Less(maxDel) {
+		// Entries deleted after id fragment the stream.
+		return 0, false
+	}
 	switch c := id.Compare(last); {
 	case c == 0:
 		return v.EntriesAdded, true
 	case c > 0:
 		return 0, false
 	}
-	maxDel := v.maxDeletedLocked()
 	first := v.firstIDLocked()
 	if maxDel.IsZero() || maxDel.Less(first) {
 		switch id.Compare(first) {
@@ -51,12 +53,19 @@ func (v *StreamValue) estimateDistanceLocked(id StreamID) (int64, bool) {
 	return 0, false
 }
 
+// groupLagLocked is Redis' streamReplyWithCGLag.
 func (v *StreamValue) groupLagLocked(g *ConsumerGroup) (int64, bool) {
-	if v.EntriesAdded == 0 {
+	if v.EntriesAdded == 0 || len(v.Entries) == 0 {
 		return 0, true
 	}
 	last := streamIDOf(g.LastID)
-	if g.EntriesRead != EntriesReadInvalid && !v.hasTombstonesLocked(last) && last.Compare(v.firstIDLocked()) >= 0 {
+	first := v.firstIDLocked()
+	if last.Less(first) && v.maxDeletedLocked().Less(first) {
+		// Every remaining entry comes after both the group's position and
+		// the last tombstone.
+		return int64(len(v.Entries)), true
+	}
+	if g.EntriesRead != EntriesReadInvalid && !v.hasTombstonesLocked(last) {
 		return v.EntriesAdded - g.EntriesRead, true
 	}
 	if read, ok := v.estimateDistanceLocked(last); ok {
@@ -66,12 +75,13 @@ func (v *StreamValue) groupLagLocked(g *ConsumerGroup) (int64, bool) {
 }
 
 // advanceGroupLocked moves the group's last-delivered ID to id, keeping its
-// logical read counter in step.
+// logical read counter in step, as streamReplyWithRange does.
 func (v *StreamValue) advanceGroupLocked(g *ConsumerGroup, id StreamID) {
-	if !streamIDOf(g.LastID).Less(id) {
+	last := streamIDOf(g.LastID)
+	if !last.Less(id) {
 		return
 	}
-	if g.EntriesRead != EntriesReadInvalid && !v.hasTombstonesLocked(id) {
+	if g.EntriesRead != EntriesReadInvalid && last.Compare(v.firstIDLocked()) >= 0 && !v.hasTombstonesLocked(last) {
 		g.EntriesRead++
 	} else if v.EntriesAdded != 0 {
 		if read, ok := v.estimateDistanceLocked(id); ok {

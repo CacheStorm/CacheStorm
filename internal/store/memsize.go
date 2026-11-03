@@ -46,14 +46,8 @@ func zsetMemberSize(member string) int64 { return int64(len(member)) + zsetMembe
 
 func streamEntrySize(e *StreamEntry) int64 {
 	size := int64(len(e.ID)) + streamEntryOverhd
-	if e.Pairs != nil {
-		for _, p := range e.Pairs {
-			size += int64(len(p.Name)) + int64(len(p.Value)) + streamPairOverhd
-		}
-		return size
-	}
-	for k, val := range e.Fields {
-		size += int64(len(k)) + int64(len(val)) + streamPairOverhd
+	for _, p := range e.Pairs {
+		size += int64(len(p.Name)) + int64(len(p.Value)) + streamPairOverhd
 	}
 	return size
 }

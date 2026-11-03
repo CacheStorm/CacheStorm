@@ -2,7 +2,6 @@ package store
 
 import (
 	"testing"
-	"time"
 )
 
 func TestGeoValue(t *testing.T) {
@@ -255,17 +254,16 @@ func TestConsumerGroupClaim(t *testing.T) {
 
 func TestStreamEntry(t *testing.T) {
 	entry := &StreamEntry{
-		ID:        "1-0",
-		Fields:    map[string][]byte{"field1": []byte("value1")},
-		CreatedAt: time.Now(),
+		ID:    "1-0",
+		Pairs: StreamPairsFromMap(map[string][]byte{"field1": []byte("value1")}),
 	}
 
 	if entry.ID != "1-0" {
 		t.Errorf("expected ID '1-0', got '%s'", entry.ID)
 	}
 
-	if string(entry.Fields["field1"]) != "value1" {
-		t.Errorf("expected field1 'value1', got '%s'", entry.Fields["field1"])
+	if string(entry.FieldMap()["field1"]) != "value1" {
+		t.Errorf("expected field1 'value1', got '%s'", entry.FieldMap()["field1"])
 	}
 }
 

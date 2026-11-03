@@ -173,7 +173,7 @@ func (v *StreamValue) countNodes() int {
 	shadow := &StreamValue{}
 	var tail *streamNode
 	for _, e := range v.Entries {
-		copyEntry := &StreamEntry{ID: e.ID, Fields: e.Fields, Pairs: e.Pairs}
+		copyEntry := &StreamEntry{ID: e.ID, Pairs: e.Pairs}
 		tail = shadow.placeEntry(tail, copyEntry)
 	}
 	return shadow.nodeCount

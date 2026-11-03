@@ -13,7 +13,7 @@ import (
 func TestPersistenceJSONStreamTSValueRaceX(t *testing.T) {
 	jsonVal := store.MustParseJSONValue(`{"a":1}`)
 	streamVal := &store.StreamValue{
-		Entries: []*store.StreamEntry{{ID: "1-0", Fields: map[string][]byte{"f": []byte("v")}}},
+		Entries: []*store.StreamEntry{{ID: "1-0", Pairs: store.StreamPairsFromMap(map[string][]byte{"f": []byte("v")})}},
 		LastID:  "1-0",
 	}
 	tsVal := &store.TimeSeriesValue{

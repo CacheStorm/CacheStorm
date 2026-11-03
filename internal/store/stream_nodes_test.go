@@ -52,7 +52,7 @@ func TestStreamNodesRebuiltForLoadedStreams(t *testing.T) {
 	addN(t, src, 150, false)
 	loaded := &StreamValue{Entries: make([]*StreamEntry, 0, 150), Groups: map[string]*ConsumerGroup{}}
 	for _, e := range src.Entries {
-		loaded.Entries = append(loaded.Entries, &StreamEntry{ID: e.ID, Fields: e.Fields})
+		loaded.Entries = append(loaded.Entries, &StreamEntry{ID: e.ID, Pairs: StreamPairsFromMap(e.FieldMap())})
 	}
 	loaded.LastID = src.LastID
 	if got := loaded.Info(false, 0).Nodes; got != 2 {

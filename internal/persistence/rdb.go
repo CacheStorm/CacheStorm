@@ -897,7 +897,7 @@ func (r *RDBReader) readEntry(f io.Reader, valueType byte, expiresAtMS int64, ta
 				}
 				fields[k] = []byte(val)
 			}
-			entries = append(entries, &store.StreamEntry{ID: id, Fields: fields})
+			entries = append(entries, &store.StreamEntry{ID: id, Pairs: store.StreamPairsFromMap(fields)})
 			lastID = id
 		}
 		value = &store.StreamValue{

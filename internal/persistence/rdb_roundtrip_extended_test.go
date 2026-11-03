@@ -26,8 +26,8 @@ func TestRDBSaveLoadRoundTripExtendedTypes(t *testing.T) {
 
 	stream := store.NewStreamValue(1000)
 	stream.Entries = append(stream.Entries,
-		&store.StreamEntry{ID: "1-1", Fields: map[string][]byte{"sensor": []byte("42")}},
-		&store.StreamEntry{ID: "1-2", Fields: map[string][]byte{"sensor": []byte("43"), "unit": []byte("C")}},
+		&store.StreamEntry{ID: "1-1", Pairs: store.StreamPairsFromMap(map[string][]byte{"sensor": []byte("42")})},
+		&store.StreamEntry{ID: "1-2", Pairs: store.StreamPairsFromMap(map[string][]byte{"sensor": []byte("43"), "unit": []byte("C")})},
 	)
 	stream.LastID = "1-2"
 	stream.Length = 2
@@ -104,8 +104,8 @@ func TestRDBSaveLoadRoundTripExtendedTypes(t *testing.T) {
 	if len(streamOut.Entries) != 2 || streamOut.Entries[0].ID != "1-1" || streamOut.Entries[1].ID != "1-2" {
 		t.Fatalf("stream entries = %+v", streamOut.Entries)
 	}
-	if string(streamOut.Entries[1].Fields["unit"]) != "C" {
-		t.Fatalf("stream entry[1] fields = %+v", streamOut.Entries[1].Fields)
+	if string(streamOut.Entries[1].FieldMap()["unit"]) != "C" {
+		t.Fatalf("stream entry[1] fields = %+v", streamOut.Entries[1].FieldMap())
 	}
 	if streamOut.LastID != "1-2" || streamOut.Length != 2 || streamOut.MaxLen != 1000 {
 		t.Fatalf("stream bounds = lastID:%s len:%d maxLen:%d", streamOut.LastID, streamOut.Length, streamOut.MaxLen)
