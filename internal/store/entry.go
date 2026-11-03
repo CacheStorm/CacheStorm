@@ -400,12 +400,31 @@ func (v *ListValue) PushBack(items ...[]byte) {
 // does after TryGrow. The caller holds the value's write lock.
 func (v *ListValue) SetAt(i int, el []byte) {
 	s := v.shapeLocked()
-	s.replace(&v.l, i, el)
+	ci, off := v.l.locate(i)
+	c := v.l.chunks[ci]
+	_, ds, de, _ := c.entry(off)
+	old := c.elem(ds, de)
+	s.replace(knownElem{&v.l, i, old}, i, el)
 	s.toListpack(true)
-	old := v.l.at(i)
-	v.l.setAt(i, el)
+	v.l.setAt(ci, off, el)
 	v.size.add(int64(len(el)) - int64(len(old)))
 }
+
+// knownElem is a list's elements with element i already looked up.
+type knownElem struct {
+	l   *listChunks
+	i   int
+	old []byte
+}
+
+func (k knownElem) at(i int) []byte {
+	if i == k.i {
+		return k.old
+	}
+	return k.l.at(i)
+}
+
+func (k knownElem) slice(start, end int) [][]byte { return k.l.slice(start, end) }
 
 // Trim keeps only the elements in [start, stop], which must be valid indexes
 // with start <= stop, as LTRIM does. It costs O(removed elements). The caller

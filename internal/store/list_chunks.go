@@ -307,9 +307,9 @@ func (l *listChunks) rebuild(elems [][]byte) {
 	*l = fresh
 }
 
-// setAt replaces element i in a new buffer for its chunk.
-func (l *listChunks) setAt(i int, el []byte) {
-	ci, off := l.locate(i)
+// setAt replaces the off-th element of chunk ci in a new buffer for the
+// chunk.
+func (l *listChunks) setAt(ci, off int, el []byte) {
 	c := l.chunks[ci]
 	start, _, _, end := c.entry(off)
 	need := listEntrySize(len(el))
