@@ -38,10 +38,10 @@ func TestAOFRewriteRoundTripPreservesTypes(t *testing.T) {
 	src := store.NewStore()
 
 	src.Set("str:key", &store.StringValue{Data: []byte("hello")}, store.SetOptions{})
-	src.Set("hash:key", &store.HashValue{Fields: map[string][]byte{
+	src.Set("hash:key", store.NewHashFrom(map[string][]byte{
 		"field1": []byte("value1"),
 		"field2": []byte("value2"),
-	}}, store.SetOptions{})
+	}), store.SetOptions{})
 	src.Set("list:key", &store.ListValue{Elements: [][]byte{
 		[]byte("a"), []byte("b"), []byte("c"),
 	}}, store.SetOptions{})
@@ -133,8 +133,8 @@ func TestAOFRewriteRoundTripPreservesTypes(t *testing.T) {
 	if !ok {
 		t.Fatalf("hash:key type = %T, want *store.HashValue", hashEntry.Value)
 	}
-	if string(hashOut.Fields["field1"]) != "value1" || string(hashOut.Fields["field2"]) != "value2" {
-		t.Fatalf("hash fields = %+v", hashOut.Fields)
+	if string(hashOut.Field("field1")) != "value1" || string(hashOut.Field("field2")) != "value2" {
+		t.Fatalf("hash fields = %+v", hashOut.Fields())
 	}
 
 	// List: RPUSH preserves order.

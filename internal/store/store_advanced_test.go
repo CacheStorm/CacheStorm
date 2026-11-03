@@ -131,7 +131,7 @@ func TestStoreAdvancedSetOptions(t *testing.T) {
 
 	t.Run("Type", func(t *testing.T) {
 		s.Set("strkey", &StringValue{Data: []byte("value")}, SetOptions{})
-		s.Set("hashkey", &HashValue{Fields: map[string][]byte{"f": []byte("v")}}, SetOptions{})
+		s.Set("hashkey", NewHashFrom(map[string][]byte{"f": []byte("v")}), SetOptions{})
 		s.Set("setkey", &SetValue{Members: map[string]struct{}{"m": {}}}, SetOptions{})
 
 		if s.Type("strkey") != DataTypeString {

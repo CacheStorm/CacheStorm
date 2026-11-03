@@ -216,7 +216,7 @@ func TestDumpControlsUncontended(t *testing.T) {
 		var count int
 		switch v := decoded.(type) {
 		case *store.HashValue:
-			count = len(v.Fields)
+			count = v.Len()
 		case *store.SetValue:
 			count = len(v.Members)
 		case *store.ListValue:

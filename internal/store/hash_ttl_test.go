@@ -9,9 +9,9 @@ import (
 )
 
 func hashWithFields(fields ...string) *HashValue {
-	h := &HashValue{Fields: make(map[string][]byte)}
+	h := NewHashFrom(make(map[string][]byte))
 	for _, f := range fields {
-		h.Fields[f] = []byte("v-" + f)
+		h.SetFieldKeepTTL(f, []byte("v-"+f))
 	}
 	return h
 }
@@ -107,8 +107,7 @@ func TestHashFieldTTLBookkeeping(t *testing.T) {
 		t.Fatal("deleting a field drops its expiry")
 	}
 
-	var recount HashValue
-	recount.Fields = h.Fields
+	recount := NewHashFrom(h.Fields())
 	if got, want := h.SizeOf(), recount.SizeOf(); got != want {
 		t.Fatalf("incremental SizeOf %d != recount %d", got, want)
 	}
@@ -143,8 +142,8 @@ func TestHashFieldExpireDueFieldsOrderAndLimit(t *testing.T) {
 	if fmt.Sprint(got) != "[a]" || fmt.Sprint(got2) != "[b c]" {
 		t.Fatalf("expired %v then %v", got, got2)
 	}
-	if len(h.Fields) != 1 || h.NextFieldExpiry() != 100 {
-		t.Fatalf("left %v, next %d", h.Fields, h.NextFieldExpiry())
+	if h.Len() != 1 || h.NextFieldExpiry() != 100 {
+		t.Fatalf("left %v, next %d", h.Fields(), h.NextFieldExpiry())
 	}
 }
 
@@ -182,7 +181,7 @@ func TestHashFieldLazyExpiryOnRead(t *testing.T) {
 	}
 	h := entry.Value.(*HashValue)
 	h.RLock()
-	n := len(h.Fields)
+	n := h.Len()
 	h.RUnlock()
 	if n != 1 {
 		t.Fatalf("read saw %d fields, want 1", n)
@@ -236,8 +235,8 @@ func TestHashFieldWriteTreatsExpiredFieldAsAbsent(t *testing.T) {
 	h := entry.Value.(*HashValue)
 	h.RLock()
 	defer h.RUnlock()
-	if string(h.Fields["a"]) != "new" || h.FieldExpireAt("a") != 0 {
-		t.Fatalf("a = %q with expiry %d", h.Fields["a"], h.FieldExpireAt("a"))
+	if string(h.Field("a")) != "new" || h.FieldExpireAt("a") != 0 {
+		t.Fatalf("a = %q with expiry %d", h.Field("a"), h.FieldExpireAt("a"))
 	}
 }
 
@@ -256,8 +255,8 @@ func TestHashFieldWriteToFullyExpiredHashRecreatesIt(t *testing.T) {
 	}
 	entry, _ = s.Get("h")
 	h := entry.Value.(*HashValue)
-	if h == old || len(h.Fields) != 1 {
-		t.Fatalf("the write must create a fresh hash, got %v", h.Fields)
+	if h == old || h.Len() != 1 {
+		t.Fatalf("the write must create a fresh hash, got %v", h.Fields())
 	}
 	checkMemUsage(t, s)
 }
@@ -275,15 +274,15 @@ func TestHashFieldPassiveStoreHidesWithoutDeleting(t *testing.T) {
 		t.Fatal("h must exist")
 	}
 	view := entry.Value.(*HashValue)
-	if _, ok := view.Fields["a"]; ok || len(view.Fields) != 1 {
-		t.Fatalf("a replica must hide the expired field: %v", view.Fields)
+	if _, ok := view.Get("a"); ok || view.Len() != 1 {
+		t.Fatalf("a replica must hide the expired field: %v", view.Fields())
 	}
 	if len(rec.get("h")) != 0 {
 		t.Fatal("a replica must not expire fields itself")
 	}
 	s.loading.Store(true)
 	entry, _ = s.Get("h")
-	if len(entry.Value.(*HashValue).Fields) != 2 {
+	if entry.Value.(*HashValue).Len() != 2 {
 		t.Fatal("the master's stream sees the field until its HDEL arrives")
 	}
 	s.loading.Store(false)
@@ -347,14 +346,14 @@ func TestHashFieldActiveExpiryIsBounded(t *testing.T) {
 	h.Lock()
 	for i := 0; i < 3*hashFieldActiveBudget; i++ {
 		f := fmt.Sprintf("f%d", i)
-		h.Fields[f] = []byte("v")
+		h.SetFieldKeepTTL(f, []byte("v"))
 		h.SetFieldExpireAt(f, past)
 	}
 	h.Unlock()
 	s.ScheduleHashFieldExpiry("big", h)
 	s.activeExpireHashFields(time.Now().UnixMilli())
 	h.RLock()
-	left := len(h.Fields)
+	left := h.Len()
 	h.RUnlock()
 	if left != 2*hashFieldActiveBudget {
 		t.Fatalf("one cycle left %d fields, want %d", left, 2*hashFieldActiveBudget)

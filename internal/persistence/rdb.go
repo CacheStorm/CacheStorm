@@ -277,9 +277,9 @@ func (w *RDBWriter) writeValue(f io.Writer, v store.Value, valueType int) error 
 		}
 	case *store.HashValue:
 		vt.RLock()
-		fields := make([][2]string, 0, len(vt.Fields))
+		fields := make([][2]string, 0, vt.Len())
 		for _, field := range hashFieldOrder(vt) {
-			fields = append(fields, [2]string{field, string(vt.Fields[field])})
+			fields = append(fields, [2]string{field, string(vt.Field(field))})
 		}
 		vt.RUnlock()
 		if err := w.writeLength(f, len(fields)); err != nil {
@@ -776,7 +776,7 @@ func (r *RDBReader) readEntry(f io.Reader, valueType byte, expiresAtMS int64, ta
 			}
 			fields[field] = []byte(val)
 		}
-		value = &store.HashValue{Fields: fields}
+		value = store.NewHashFrom(fields)
 
 	case rdbTypeHashTTL:
 		length, err := r.readLength(f)

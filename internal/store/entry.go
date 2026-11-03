@@ -97,10 +97,12 @@ func (v *StringValue) Clone() Value {
 }
 
 type HashValue struct {
-	Fields map[string][]byte
-	mu     sync.RWMutex
-	dead   bool
-	size   sizeCounter
+	lp   []byte
+	lpN  int
+	dict map[string][]byte
+	mu   sync.RWMutex
+	dead bool
+	size sizeCounter
 	// ttl holds the field expiries; nil until a field is first given one.
 	ttl *hashFieldTTLs
 	// minExpire is the earliest field expiry (unix ms), 0 when no field has
@@ -123,7 +125,7 @@ func (v *HashValue) RUnlock() { v.mu.RUnlock() }
 // holds the value's lock.
 func (v *HashValue) IsDead() bool { return v.dead }
 
-func (v *HashValue) emptyLocked() bool { return len(v.Fields) == 0 }
+func (v *HashValue) emptyLocked() bool { return v.Len() == 0 }
 func (v *HashValue) markDeadLocked()   { v.dead = true }
 
 func (v *HashValue) Type() DataType { return DataTypeHash }
@@ -134,9 +136,10 @@ func (v *HashValue) SizeOf() int64 {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 	var n int64
-	for k, val := range v.Fields {
+	v.Range(func(k string, val []byte) bool {
 		n += hashFieldSize(k, val)
-	}
+		return true
+	})
 	n += v.ttlSizeLocked()
 	v.size.set(n)
 	return hashBaseSize + n
@@ -159,16 +162,11 @@ func (v *HashValue) SetField(field string, val []byte) bool {
 // HINCRBY does, and reports whether the field is new. The caller holds the
 // value's write lock.
 func (v *HashValue) SetFieldKeepTTL(field string, val []byte) bool {
-	if v.Fields == nil {
-		v.Fields = make(map[string][]byte)
-	}
-	old, exists := v.Fields[field]
-	v.Fields[field] = val
+	old, exists := v.put(field, val)
 	v.noteLengthsLocked(field, val)
 	if exists {
 		v.size.add(int64(len(val)) - int64(len(old)))
 	} else {
-		v.orderAppendLocked(field)
 		v.size.add(hashFieldSize(field, val))
 		v.invalidateScan()
 	}
@@ -178,12 +176,10 @@ func (v *HashValue) SetFieldKeepTTL(field string, val []byte) bool {
 // DeleteField removes field and reports whether it existed. The caller holds
 // the value's write lock.
 func (v *HashValue) DeleteField(field string) bool {
-	old, exists := v.Fields[field]
+	old, exists := v.del(field)
 	if !exists {
 		return false
 	}
-	delete(v.Fields, field)
-	v.orderRemoveLocked(field)
 	v.size.add(-hashFieldSize(field, old))
 	v.clearFieldTTL(field)
 	v.invalidateScan()
@@ -193,7 +189,7 @@ func (v *HashValue) String() string {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 	result := ""
-	for k, val := range v.Fields {
+	for k, val := range v.All() {
 		if result != "" {
 			result += ", "
 		}
@@ -204,11 +200,14 @@ func (v *HashValue) String() string {
 func (v *HashValue) Clone() Value {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
-	cloned := &HashValue{Fields: make(map[string][]byte, len(v.Fields)), big: v.big}
-	for k, val := range v.Fields {
-		cv := make([]byte, len(val))
-		copy(cv, val)
-		cloned.Fields[k] = cv
+	cloned := &HashValue{big: v.big}
+	if v.dict == nil {
+		cloned.lp, cloned.lpN = append([]byte(nil), v.lp...), v.lpN
+	} else {
+		cloned.dict = make(map[string][]byte, len(v.dict))
+		for k, val := range v.dict {
+			cloned.dict[k] = append([]byte(nil), val...)
+		}
 	}
 	if v.order != nil {
 		cloned.order = append([]string(nil), v.order...)

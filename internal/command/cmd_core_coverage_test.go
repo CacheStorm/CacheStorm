@@ -99,7 +99,7 @@ func TestCmdAPPEND_WrongType(t *testing.T) {
 	router := NewRouter()
 	RegisterStringCommands(router)
 
-	s.Set("hkey", &store.HashValue{Fields: map[string][]byte{"f": []byte("v")}}, store.SetOptions{})
+	s.Set("hkey", store.NewHashFrom(map[string][]byte{"f": []byte("v")}), store.SetOptions{})
 	ctx := discardCtx("APPEND", bytesArgs("hkey", "data"), s)
 	err := router.ExecuteSilent(ctx)
 	if err != nil {
@@ -168,7 +168,7 @@ func TestCmdSETRANGE_ErrorPaths(t *testing.T) {
 	}
 
 	// Wrong type
-	s.Set("hk", &store.HashValue{Fields: map[string][]byte{}}, store.SetOptions{})
+	s.Set("hk", store.NewHashFrom(map[string][]byte{}), store.SetOptions{})
 	ctx = discardCtx("SETRANGE", bytesArgs("hk", "0", "val"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {
 		t.Fatalf("unexpected Go error: %v", err)
@@ -246,7 +246,7 @@ func TestCmdGETRANGE_ErrorPaths(t *testing.T) {
 	}
 
 	// Wrong type
-	s.Set("hk", &store.HashValue{Fields: map[string][]byte{}}, store.SetOptions{})
+	s.Set("hk", store.NewHashFrom(map[string][]byte{}), store.SetOptions{})
 	ctx = discardCtx("GETRANGE", bytesArgs("hk", "0", "5"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {
 		t.Fatalf("unexpected: %v", err)
@@ -508,7 +508,7 @@ func TestCmdMGET_WrongType(t *testing.T) {
 	router := NewRouter()
 	RegisterStringCommands(router)
 
-	s.Set("mg_hash", &store.HashValue{Fields: map[string][]byte{"f": []byte("v")}}, store.SetOptions{})
+	s.Set("mg_hash", store.NewHashFrom(map[string][]byte{"f": []byte("v")}), store.SetOptions{})
 
 	// MGET returns null for wrong type keys, not an error
 	ctx := discardCtx("MGET", bytesArgs("mg_hash"), s)
@@ -562,7 +562,7 @@ func TestCmdINCR_WrongType(t *testing.T) {
 	router := NewRouter()
 	RegisterStringCommands(router)
 
-	s.Set("ic_hash", &store.HashValue{Fields: map[string][]byte{}}, store.SetOptions{})
+	s.Set("ic_hash", store.NewHashFrom(map[string][]byte{}), store.SetOptions{})
 	ctx := discardCtx("INCR", bytesArgs("ic_hash"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {
 		t.Fatalf("unexpected: %v", err)
@@ -723,7 +723,7 @@ func TestCmdINCRBYFLOAT_ErrorPaths(t *testing.T) {
 	}
 
 	// Wrong type
-	s.Set("fk_hash", &store.HashValue{Fields: map[string][]byte{}}, store.SetOptions{})
+	s.Set("fk_hash", store.NewHashFrom(map[string][]byte{}), store.SetOptions{})
 	ctx = discardCtx("INCRBYFLOAT", bytesArgs("fk_hash", "1.0"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {
 		t.Fatalf("unexpected: %v", err)
@@ -777,7 +777,7 @@ func TestCmdGETSET_WrongType(t *testing.T) {
 	router := NewRouter()
 	RegisterStringCommands(router)
 
-	s.Set("gs_hash", &store.HashValue{Fields: map[string][]byte{"f": []byte("v")}}, store.SetOptions{})
+	s.Set("gs_hash", store.NewHashFrom(map[string][]byte{"f": []byte("v")}), store.SetOptions{})
 	ctx := discardCtx("GETSET", bytesArgs("gs_hash", "new"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {
 		t.Fatalf("unexpected: %v", err)
@@ -824,7 +824,7 @@ func TestCmdSTRLEN_WrongType(t *testing.T) {
 	router := NewRouter()
 	RegisterStringCommands(router)
 
-	s.Set("sl_hash", &store.HashValue{Fields: map[string][]byte{}}, store.SetOptions{})
+	s.Set("sl_hash", store.NewHashFrom(map[string][]byte{}), store.SetOptions{})
 	ctx := discardCtx("STRLEN", bytesArgs("sl_hash"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {
 		t.Fatalf("unexpected: %v", err)
@@ -880,7 +880,7 @@ func TestCmdGETDEL_WrongType(t *testing.T) {
 	router := NewRouter()
 	RegisterStringCommands(router)
 
-	s.Set("gd_hash", &store.HashValue{Fields: map[string][]byte{}}, store.SetOptions{})
+	s.Set("gd_hash", store.NewHashFrom(map[string][]byte{}), store.SetOptions{})
 	ctx := discardCtx("GETDEL", bytesArgs("gd_hash"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {
 		t.Fatalf("unexpected: %v", err)
@@ -980,7 +980,7 @@ func TestCmdGETEX_WrongType(t *testing.T) {
 	router := NewRouter()
 	RegisterStringCommands(router)
 
-	s.Set("gex_hash", &store.HashValue{Fields: map[string][]byte{}}, store.SetOptions{})
+	s.Set("gex_hash", store.NewHashFrom(map[string][]byte{}), store.SetOptions{})
 	ctx := discardCtx("GETEX", bytesArgs("gex_hash"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {
 		t.Fatalf("unexpected: %v", err)
@@ -1155,7 +1155,7 @@ func TestCmdLCS_WrongType(t *testing.T) {
 	router := NewRouter()
 	RegisterStringCommands(router)
 
-	s.Set("lcs_h1", &store.HashValue{Fields: map[string][]byte{}}, store.SetOptions{})
+	s.Set("lcs_h1", store.NewHashFrom(map[string][]byte{}), store.SetOptions{})
 	s.Set("lcs_h2", &store.StringValue{Data: []byte("hello")}, store.SetOptions{})
 
 	ctx := discardCtx("LCS", bytesArgs("lcs_h1", "lcs_h2"), s)
@@ -1233,7 +1233,7 @@ func TestCmdHSET_UpdateExisting(t *testing.T) {
 	router := NewRouter()
 	RegisterHashCommands(router)
 
-	s.Set("h3", &store.HashValue{Fields: map[string][]byte{"f1": []byte("old")}}, store.SetOptions{})
+	s.Set("h3", store.NewHashFrom(map[string][]byte{"f1": []byte("old")}), store.SetOptions{})
 	ctx, buf := bufCtx("HSET", bytesArgs("h3", "f1", "new"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {
 		t.Fatalf("HSET update: %v", err)
@@ -1279,7 +1279,7 @@ func TestCmdHGET_Success(t *testing.T) {
 	router := NewRouter()
 	RegisterHashCommands(router)
 
-	s.Set("hg", &store.HashValue{Fields: map[string][]byte{"f1": []byte("v1")}}, store.SetOptions{})
+	s.Set("hg", store.NewHashFrom(map[string][]byte{"f1": []byte("v1")}), store.SetOptions{})
 
 	ctx, buf := bufCtx("HGET", bytesArgs("hg", "f1"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {
@@ -1295,7 +1295,7 @@ func TestCmdHGET_MissingField(t *testing.T) {
 	router := NewRouter()
 	RegisterHashCommands(router)
 
-	s.Set("hg2", &store.HashValue{Fields: map[string][]byte{"f1": []byte("v1")}}, store.SetOptions{})
+	s.Set("hg2", store.NewHashFrom(map[string][]byte{"f1": []byte("v1")}), store.SetOptions{})
 
 	ctx, buf := bufCtx("HGET", bytesArgs("hg2", "nosuchfield"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {
@@ -1336,11 +1336,11 @@ func TestCmdHDEL_Success(t *testing.T) {
 	router := NewRouter()
 	RegisterHashCommands(router)
 
-	s.Set("hd", &store.HashValue{Fields: map[string][]byte{
+	s.Set("hd", store.NewHashFrom(map[string][]byte{
 		"f1": []byte("v1"),
 		"f2": []byte("v2"),
 		"f3": []byte("v3"),
-	}}, store.SetOptions{})
+	}), store.SetOptions{})
 
 	ctx, buf := bufCtx("HDEL", bytesArgs("hd", "f1", "f2"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {
@@ -1356,7 +1356,7 @@ func TestCmdHDEL_LastField(t *testing.T) {
 	router := NewRouter()
 	RegisterHashCommands(router)
 
-	s.Set("hd2", &store.HashValue{Fields: map[string][]byte{"f1": []byte("v1")}}, store.SetOptions{})
+	s.Set("hd2", store.NewHashFrom(map[string][]byte{"f1": []byte("v1")}), store.SetOptions{})
 
 	ctx := discardCtx("HDEL", bytesArgs("hd2", "f1"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {
@@ -1398,7 +1398,7 @@ func TestCmdHEXISTS_Success(t *testing.T) {
 	router := NewRouter()
 	RegisterHashCommands(router)
 
-	s.Set("he", &store.HashValue{Fields: map[string][]byte{"f1": []byte("v1")}}, store.SetOptions{})
+	s.Set("he", store.NewHashFrom(map[string][]byte{"f1": []byte("v1")}), store.SetOptions{})
 
 	// Exists
 	ctx, buf := bufCtx("HEXISTS", bytesArgs("he", "f1"), s)
@@ -1444,10 +1444,10 @@ func TestCmdHGETALL_Success(t *testing.T) {
 	router := NewRouter()
 	RegisterHashCommands(router)
 
-	s.Set("hga", &store.HashValue{Fields: map[string][]byte{
+	s.Set("hga", store.NewHashFrom(map[string][]byte{
 		"f1": []byte("v1"),
 		"f2": []byte("v2"),
-	}}, store.SetOptions{})
+	}), store.SetOptions{})
 
 	ctx, buf := bufCtx("HGETALL", bytesArgs("hga"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {
@@ -1496,7 +1496,7 @@ func TestCmdHMSET_Success(t *testing.T) {
 		t.Fatal("hash should exist")
 	}
 	hv := entry.Value.(*store.HashValue)
-	if string(hv.Fields["f1"]) != "v1" || string(hv.Fields["f2"]) != "v2" {
+	if string(hv.Field("f1")) != "v1" || string(hv.Field("f2")) != "v2" {
 		t.Error("wrong values in hash")
 	}
 }
@@ -1524,10 +1524,10 @@ func TestCmdHMGET_Success(t *testing.T) {
 	router := NewRouter()
 	RegisterHashCommands(router)
 
-	s.Set("hmg", &store.HashValue{Fields: map[string][]byte{
+	s.Set("hmg", store.NewHashFrom(map[string][]byte{
 		"f1": []byte("v1"),
 		"f2": []byte("v2"),
-	}}, store.SetOptions{})
+	}), store.SetOptions{})
 
 	ctx, buf := bufCtx("HMGET", bytesArgs("hmg", "f1", "f2", "f3"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {
@@ -1580,7 +1580,7 @@ func TestCmdHINCRBY_ExistingField(t *testing.T) {
 	router := NewRouter()
 	RegisterHashCommands(router)
 
-	s.Set("hib2", &store.HashValue{Fields: map[string][]byte{"counter": []byte("10")}}, store.SetOptions{})
+	s.Set("hib2", store.NewHashFrom(map[string][]byte{"counter": []byte("10")}), store.SetOptions{})
 	ctx, buf := bufCtx("HINCRBY", bytesArgs("hib2", "counter", "3"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {
 		t.Fatalf("HINCRBY existing: %v", err)
@@ -1608,7 +1608,7 @@ func TestCmdHINCRBY_ErrorPaths(t *testing.T) {
 	}
 
 	// Non-integer existing value
-	s.Set("hib_bad", &store.HashValue{Fields: map[string][]byte{"f": []byte("notint")}}, store.SetOptions{})
+	s.Set("hib_bad", store.NewHashFrom(map[string][]byte{"f": []byte("notint")}), store.SetOptions{})
 	ctx = discardCtx("HINCRBY", bytesArgs("hib_bad", "f", "1"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {
 		t.Fatalf("unexpected: %v", err)
@@ -1641,7 +1641,7 @@ func TestCmdHINCRBYFLOAT_ExistingField(t *testing.T) {
 	router := NewRouter()
 	RegisterHashCommands(router)
 
-	s.Set("hif2", &store.HashValue{Fields: map[string][]byte{"f": []byte("10.5")}}, store.SetOptions{})
+	s.Set("hif2", store.NewHashFrom(map[string][]byte{"f": []byte("10.5")}), store.SetOptions{})
 	ctx, buf := bufCtx("HINCRBYFLOAT", bytesArgs("hif2", "f", "1.5"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {
 		t.Fatalf("HINCRBYFLOAT existing: %v", err)
@@ -1669,7 +1669,7 @@ func TestCmdHINCRBYFLOAT_ErrorPaths(t *testing.T) {
 	}
 
 	// Non-float existing value
-	s.Set("hif_bad", &store.HashValue{Fields: map[string][]byte{"f": []byte("notfloat")}}, store.SetOptions{})
+	s.Set("hif_bad", store.NewHashFrom(map[string][]byte{"f": []byte("notfloat")}), store.SetOptions{})
 	ctx = discardCtx("HINCRBYFLOAT", bytesArgs("hif_bad", "f", "1.0"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {
 		t.Fatalf("unexpected: %v", err)
@@ -1681,7 +1681,7 @@ func TestCmdHLEN_Success(t *testing.T) {
 	router := NewRouter()
 	RegisterHashCommands(router)
 
-	s.Set("hl", &store.HashValue{Fields: map[string][]byte{"f1": []byte("v1"), "f2": []byte("v2")}}, store.SetOptions{})
+	s.Set("hl", store.NewHashFrom(map[string][]byte{"f1": []byte("v1"), "f2": []byte("v2")}), store.SetOptions{})
 
 	ctx, buf := bufCtx("HLEN", bytesArgs("hl"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {
@@ -1717,7 +1717,7 @@ func TestCmdHKEYS_Success(t *testing.T) {
 	router := NewRouter()
 	RegisterHashCommands(router)
 
-	s.Set("hk", &store.HashValue{Fields: map[string][]byte{"f1": []byte("v1"), "f2": []byte("v2")}}, store.SetOptions{})
+	s.Set("hk", store.NewHashFrom(map[string][]byte{"f1": []byte("v1"), "f2": []byte("v2")}), store.SetOptions{})
 
 	ctx, buf := bufCtx("HKEYS", bytesArgs("hk"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {
@@ -1756,7 +1756,7 @@ func TestCmdHVALS_Success(t *testing.T) {
 	router := NewRouter()
 	RegisterHashCommands(router)
 
-	s.Set("hv", &store.HashValue{Fields: map[string][]byte{"f1": []byte("v1"), "f2": []byte("v2")}}, store.SetOptions{})
+	s.Set("hv", store.NewHashFrom(map[string][]byte{"f1": []byte("v1"), "f2": []byte("v2")}), store.SetOptions{})
 
 	ctx, buf := bufCtx("HVALS", bytesArgs("hv"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {
@@ -1809,7 +1809,7 @@ func TestCmdHSETNX_ExistingField(t *testing.T) {
 	router := NewRouter()
 	RegisterHashCommands(router)
 
-	s.Set("hsn2", &store.HashValue{Fields: map[string][]byte{"f1": []byte("old")}}, store.SetOptions{})
+	s.Set("hsn2", store.NewHashFrom(map[string][]byte{"f1": []byte("old")}), store.SetOptions{})
 	ctx, buf := bufCtx("HSETNX", bytesArgs("hsn2", "f1", "new"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {
 		t.Fatalf("HSETNX existing: %v", err)
@@ -1819,7 +1819,7 @@ func TestCmdHSETNX_ExistingField(t *testing.T) {
 	}
 	// Verify value unchanged
 	entry, _ := s.Get("hsn2")
-	if string(entry.Value.(*store.HashValue).Fields["f1"]) != "old" {
+	if string(entry.Value.(*store.HashValue).Field("f1")) != "old" {
 		t.Error("value should not have changed")
 	}
 }
@@ -1840,11 +1840,11 @@ func TestCmdHRANDFIELD_Basic(t *testing.T) {
 	router := NewRouter()
 	RegisterHashCommands(router)
 
-	s.Set("hr", &store.HashValue{Fields: map[string][]byte{
+	s.Set("hr", store.NewHashFrom(map[string][]byte{
 		"f1": []byte("v1"),
 		"f2": []byte("v2"),
 		"f3": []byte("v3"),
-	}}, store.SetOptions{})
+	}), store.SetOptions{})
 
 	// Single field
 	ctx := discardCtx("HRANDFIELD", bytesArgs("hr"), s)
@@ -1913,11 +1913,11 @@ func TestCmdHSCAN_Basic(t *testing.T) {
 	router := NewRouter()
 	RegisterHashCommands(router)
 
-	s.Set("hsc", &store.HashValue{Fields: map[string][]byte{
+	s.Set("hsc", store.NewHashFrom(map[string][]byte{
 		"f1": []byte("v1"),
 		"f2": []byte("v2"),
 		"f3": []byte("v3"),
-	}}, store.SetOptions{})
+	}), store.SetOptions{})
 
 	// Basic scan
 	ctx := discardCtx("HSCAN", bytesArgs("hsc", "0"), s)
@@ -1967,7 +1967,7 @@ func TestCmdHSCAN_ErrorPaths(t *testing.T) {
 	}
 
 	// Unknown option
-	s.Set("hsc_e", &store.HashValue{Fields: map[string][]byte{"f": []byte("v")}}, store.SetOptions{})
+	s.Set("hsc_e", store.NewHashFrom(map[string][]byte{"f": []byte("v")}), store.SetOptions{})
 	ctx = discardCtx("HSCAN", bytesArgs("hsc_e", "0", "BADOPT"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {
 		t.Fatalf("unexpected: %v", err)
@@ -3134,7 +3134,7 @@ func TestCmdSET_GETwithWrongType(t *testing.T) {
 	router := NewRouter()
 	RegisterStringCommands(router)
 
-	s.Set("set_get_hash", &store.HashValue{Fields: map[string][]byte{"f": []byte("v")}}, store.SetOptions{})
+	s.Set("set_get_hash", store.NewHashFrom(map[string][]byte{"f": []byte("v")}), store.SetOptions{})
 	ctx := discardCtx("SET", bytesArgs("set_get_hash", "val", "GET"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {
 		t.Fatalf("unexpected: %v", err)
@@ -3179,7 +3179,7 @@ func TestCmdGET_WrongType(t *testing.T) {
 	router := NewRouter()
 	RegisterStringCommands(router)
 
-	s.Set("get_hash", &store.HashValue{Fields: map[string][]byte{"f": []byte("v")}}, store.SetOptions{})
+	s.Set("get_hash", store.NewHashFrom(map[string][]byte{"f": []byte("v")}), store.SetOptions{})
 	ctx := discardCtx("GET", bytesArgs("get_hash"), s)
 	if err := router.ExecuteSilent(ctx); err != nil {
 		t.Fatalf("unexpected: %v", err)

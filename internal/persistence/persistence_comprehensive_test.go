@@ -26,7 +26,7 @@ func TestRDBComprehensive(t *testing.T) {
 
 	t.Run("RDB Writer with Hash", func(t *testing.T) {
 		s := store.NewStore()
-		s.Set("hash1", &store.HashValue{Fields: map[string][]byte{"f1": []byte("v1")}}, store.SetOptions{})
+		s.Set("hash1", store.NewHashFrom(map[string][]byte{"f1": []byte("v1")}), store.SetOptions{})
 
 		cfg := RDBConfig{Version: RDBVersion11, Compression: false, Checksum: true}
 		writer := NewRDBWriter(s, cfg)

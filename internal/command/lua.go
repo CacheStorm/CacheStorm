@@ -346,7 +346,7 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 		if hv, ok := entry.Value.(*store.HashValue); ok {
 			// cmdHSET/cmdHDEL mutate Fields under the hash write lock.
 			hv.RLock()
-			val, found := hv.Fields[args[1]]
+			val, found := hv.Get(args[1])
 			hv.RUnlock()
 			if found {
 				return lua.LString(string(val))
@@ -361,7 +361,7 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 		entry, exists := e.store.Get(args[0])
 		var hv *store.HashValue
 		if !exists {
-			hv = &store.HashValue{Fields: make(map[string][]byte)}
+			hv = &store.HashValue{}
 			e.store.Set(args[0], hv, store.SetOptions{})
 		} else {
 			var ok bool
@@ -390,8 +390,8 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 			// and a map iteration concurrent with a map write is a fatal
 			// runtime error ("concurrent map iteration and map write").
 			hv.RLock()
-			pairs := make([][2][]byte, 0, len(hv.Fields))
-			for k, v := range hv.Fields {
+			pairs := make([][2][]byte, 0, hv.Len())
+			for k, v := range hv.All() {
 				pairs = append(pairs, [2][]byte{[]byte(k), v})
 			}
 			hv.RUnlock()
@@ -620,7 +620,7 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 		}
 		if hv, ok := entry.Value.(*store.HashValue); ok {
 			hv.RLock()
-			_, found := hv.Fields[args[1]]
+			_, found := hv.Get(args[1])
 			hv.RUnlock()
 			if found {
 				return lua.LNumber(1)
@@ -640,7 +640,7 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 			hv.Lock()
 			deleted := 0
 			for i := 1; i < len(args); i++ {
-				if _, ok := hv.Fields[args[i]]; ok {
+				if _, ok := hv.Get(args[i]); ok {
 					hv.DeleteField(args[i])
 					deleted++
 				}
@@ -660,7 +660,7 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 		}
 		if hv, ok := entry.Value.(*store.HashValue); ok {
 			hv.RLock()
-			n := len(hv.Fields)
+			n := hv.Len()
 			hv.RUnlock()
 			return lua.LNumber(n)
 		}
@@ -858,8 +858,8 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 		}
 		if hv, ok := entry.Value.(*store.HashValue); ok {
 			hv.RLock()
-			keys := make([]string, 0, len(hv.Fields))
-			for k := range hv.Fields {
+			keys := make([]string, 0, hv.Len())
+			for k := range hv.All() {
 				keys = append(keys, k)
 			}
 			hv.RUnlock()
@@ -881,8 +881,8 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 		}
 		if hv, ok := entry.Value.(*store.HashValue); ok {
 			hv.RLock()
-			vals := make([][]byte, 0, len(hv.Fields))
-			for _, v := range hv.Fields {
+			vals := make([][]byte, 0, hv.Len())
+			for _, v := range hv.All() {
 				vals = append(vals, v)
 			}
 			hv.RUnlock()
@@ -1114,7 +1114,7 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 			// so it cannot self-deadlock.
 			hv.RLock()
 			for i := 1; i < len(args); i++ {
-				if val, ok := hv.Fields[args[i]]; ok {
+				if val, ok := hv.Get(args[i]); ok {
 					tbl.Append(lua.LString(string(val)))
 				} else {
 					tbl.Append(lua.LNil)
@@ -1131,7 +1131,7 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 		entry, exists := e.store.Get(args[0])
 		var hv *store.HashValue
 		if !exists {
-			hv = &store.HashValue{Fields: make(map[string][]byte)}
+			hv = &store.HashValue{}
 		} else {
 			hv = entry.Value.(*store.HashValue)
 		}

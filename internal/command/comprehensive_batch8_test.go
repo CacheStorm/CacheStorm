@@ -10,7 +10,7 @@ func TestComprehensiveLowCoverageBatch8(t *testing.T) {
 	s := store.NewStore()
 
 	s.Set("str1", &store.StringValue{Data: []byte("value1")}, store.SetOptions{})
-	s.Set("hash1", &store.HashValue{Fields: map[string][]byte{"f1": []byte("v1")}}, store.SetOptions{})
+	s.Set("hash1", store.NewHashFrom(map[string][]byte{"f1": []byte("v1")}), store.SetOptions{})
 	s.Set("list1", &store.ListValue{Elements: [][]byte{[]byte("a"), []byte("b")}}, store.SetOptions{})
 	s.Set("set1", &store.SetValue{Members: map[string]struct{}{"m1": {}}}, store.SetOptions{})
 	s.Set("zset1", store.NewSortedSetFrom(map[string]float64{"m1": 1.0}), store.SetOptions{})
@@ -103,7 +103,7 @@ func TestAllCommandsBatch8(t *testing.T) {
 	RegisterTransactionCommands(router)
 
 	s.Set("key1", &store.StringValue{Data: []byte("value1")}, store.SetOptions{})
-	s.Set("hash1", &store.HashValue{Fields: map[string][]byte{"field1": []byte("value1")}}, store.SetOptions{})
+	s.Set("hash1", store.NewHashFrom(map[string][]byte{"field1": []byte("value1")}), store.SetOptions{})
 	s.Set("list1", &store.ListValue{Elements: [][]byte{[]byte("a"), []byte("b"), []byte("c")}}, store.SetOptions{})
 	s.Set("set1", &store.SetValue{Members: map[string]struct{}{"member1": {}, "member2": {}}}, store.SetOptions{})
 	s.Set("zset1", store.NewSortedSetFrom(map[string]float64{"m1": 1.0, "m2": 2.0}), store.SetOptions{})

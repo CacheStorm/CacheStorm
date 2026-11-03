@@ -10,7 +10,7 @@ func TestHashExistingEmptyKeyX(t *testing.T) {
 	for _, name := range []string{"HSET", "HMSET", "HSETNX", "HINCRBY", "HINCRBYFLOAT"} {
 		t.Run(name, func(t *testing.T) {
 			s := store.NewStore()
-			if err := s.SetEntry("", store.NewEntry(&store.HashValue{Fields: map[string][]byte{"f": []byte("1")}})); err != nil {
+			if err := s.SetEntry("", store.NewEntry(store.NewHashFrom(map[string][]byte{"f": []byte("1")}))); err != nil {
 				t.Fatal(err)
 			}
 			r := NewRouter()

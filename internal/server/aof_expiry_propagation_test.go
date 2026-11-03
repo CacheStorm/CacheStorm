@@ -116,11 +116,11 @@ func TestAOFExpiryHistoryDoesNotDiscardEarlierMutations(t *testing.T) {
 				t.Fatalf("wrong restored type: %T", entry.Value)
 			}
 			if mode == "RECREATE" {
-				if len(hash.Fields) != 1 || string(hash.Fields["new"]) != "three" {
-					t.Fatalf("expired history leaked into recreated hash: %v", hash.Fields)
+				if hash.Len() != 1 || string(hash.Field("new")) != "three" {
+					t.Fatalf("expired history leaked into recreated hash: %v", hash.Fields())
 				}
-			} else if len(hash.Fields) != 2 || string(hash.Fields["before"]) != "one" || string(hash.Fields["after"]) != "two" {
-				t.Fatalf("earlier hash mutation lost: %v", hash.Fields)
+			} else if hash.Len() != 2 || string(hash.Field("before")) != "one" || string(hash.Field("after")) != "two" {
+				t.Fatalf("earlier hash mutation lost: %v", hash.Fields())
 			}
 		})
 	}

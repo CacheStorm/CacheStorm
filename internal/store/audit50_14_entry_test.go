@@ -36,14 +36,14 @@ func TestAudit50R14X(t *testing.T) {
 		}
 		checkAudit50R14X(t, "empty/middle/trailing boundary", strings.Join(parts, ", "), (&ListValue{Elements: elements}).String())
 	}
-	source := &HashValue{Fields: map[string][]byte{"k": []byte("original")}}
+	source := NewHashFrom(map[string][]byte{"k": []byte("original")})
 	clone := source.Clone().(*HashValue)
 	ready, release, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
-	go func() { close(ready); <-release; clone.Fields["k"][0] = 'X'; close(done) }()
+	go func() { close(ready); <-release; clone.Field("k")[0] = 'X'; close(done) }()
 	<-ready
 	close(release)
 	<-done
-	checkAudit50R14X(t, "control nested hash clone", "original", string(source.Fields["k"]))
+	checkAudit50R14X(t, "control nested hash clone", "original", string(source.Field("k")))
 	entry := NewEntry(&StringValue{Data: []byte("value")})
 	checkAudit50R14X(t, "no expiry TTL", time.Duration(-1), entry.TTL())
 	entry.Touch()

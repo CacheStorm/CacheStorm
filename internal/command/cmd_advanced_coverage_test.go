@@ -1705,7 +1705,7 @@ func TestAdvCoverage_EXEC_QueuedHSET(t *testing.T) {
 
 func TestAdvCoverage_EXEC_QueuedHGET(t *testing.T) {
 	s := store.NewStore()
-	hv := &store.HashValue{Fields: map[string][]byte{"f1": []byte("v1")}}
+	hv := store.NewHashFrom(map[string][]byte{"f1": []byte("v1")})
 	s.Set("h1", hv, store.SetOptions{})
 	ctx := newDiscardContext("EXEC", nil, s)
 	ctx.Transaction.Start()
@@ -1717,7 +1717,7 @@ func TestAdvCoverage_EXEC_QueuedHGET(t *testing.T) {
 
 func TestAdvCoverage_EXEC_QueuedHDEL(t *testing.T) {
 	s := store.NewStore()
-	hv := &store.HashValue{Fields: map[string][]byte{"f1": []byte("v1")}}
+	hv := store.NewHashFrom(map[string][]byte{"f1": []byte("v1")})
 	s.Set("h1", hv, store.SetOptions{})
 	ctx := newDiscardContext("EXEC", nil, s)
 	ctx.Transaction.Start()
@@ -1729,7 +1729,7 @@ func TestAdvCoverage_EXEC_QueuedHDEL(t *testing.T) {
 
 func TestAdvCoverage_EXEC_QueuedHEXISTS(t *testing.T) {
 	s := store.NewStore()
-	hv := &store.HashValue{Fields: map[string][]byte{"f1": []byte("v1")}}
+	hv := store.NewHashFrom(map[string][]byte{"f1": []byte("v1")})
 	s.Set("h1", hv, store.SetOptions{})
 	ctx := newDiscardContext("EXEC", nil, s)
 	ctx.Transaction.Start()
@@ -1741,7 +1741,7 @@ func TestAdvCoverage_EXEC_QueuedHEXISTS(t *testing.T) {
 
 func TestAdvCoverage_EXEC_QueuedHLEN(t *testing.T) {
 	s := store.NewStore()
-	hv := &store.HashValue{Fields: map[string][]byte{"f1": []byte("v1")}}
+	hv := store.NewHashFrom(map[string][]byte{"f1": []byte("v1")})
 	s.Set("h1", hv, store.SetOptions{})
 	ctx := newDiscardContext("EXEC", nil, s)
 	ctx.Transaction.Start()

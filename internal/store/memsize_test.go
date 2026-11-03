@@ -35,7 +35,7 @@ func TestCollectionHelpersKeepSize(t *testing.T) {
 		t.Fatalf("list SizeOf=%d, recount=%d", got, want)
 	}
 
-	h := &HashValue{Fields: map[string][]byte{"f": []byte("v")}}
+	h := NewHashFrom(map[string][]byte{"f": []byte("v")})
 	h.SizeOf()
 	h.SetField("f", []byte("longer"))
 	h.SetField("g", []byte("1"))

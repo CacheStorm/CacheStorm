@@ -17,8 +17,8 @@ func TestLowCoverageBatch14_KeyObjectSubcommands(t *testing.T) {
 	})
 
 	t.Run("KEY.OBJECT ENCODING hash", func(t *testing.T) {
-		hv := &store.HashValue{Fields: map[string][]byte{}}
-		hv.Fields["f1"] = []byte("v1")
+		hv := store.NewHashFrom(map[string][]byte{})
+		hv.SetFieldKeepTTL("f1", []byte("v1"))
 		s.Set("ko_enc_hash", hv, store.SetOptions{})
 		_ = runHandler(t, router, "KEY.OBJECT", [][]byte{[]byte("ENCODING"), []byte("ko_enc_hash")}, s)
 	})
@@ -111,8 +111,8 @@ func TestLowCoverageBatch14_FunctionCallFunction(t *testing.T) {
 	})
 
 	t.Run("FUNCTION.LOAD with hash operations", func(t *testing.T) {
-		hv := &store.HashValue{Fields: map[string][]byte{}}
-		hv.Fields["field1"] = []byte("value1")
+		hv := store.NewHashFrom(map[string][]byte{})
+		hv.SetFieldKeepTTL("field1", []byte("value1"))
 		s.Set("func_hash", hv, store.SetOptions{})
 		_ = runHandler(t, router, "FUNCTION.LOAD", [][]byte{
 			[]byte("hget_func"),
@@ -411,10 +411,10 @@ func TestLowCoverageBatch14_DumpCommands(t *testing.T) {
 	})
 
 	t.Run("DUMP hash with multiple fields", func(t *testing.T) {
-		hv := &store.HashValue{Fields: map[string][]byte{}}
-		hv.Fields["f1"] = []byte("v1")
-		hv.Fields["f2"] = []byte("v2")
-		hv.Fields["f3"] = []byte("v3")
+		hv := store.NewHashFrom(map[string][]byte{})
+		hv.SetFieldKeepTTL("f1", []byte("v1"))
+		hv.SetFieldKeepTTL("f2", []byte("v2"))
+		hv.SetFieldKeepTTL("f3", []byte("v3"))
 		s.Set("dump_hash_multi", hv, store.SetOptions{})
 		_ = runHandler(t, router, "DUMP", [][]byte{[]byte("dump_hash_multi")}, s)
 	})
@@ -534,8 +534,8 @@ func TestLowCoverageBatch14_CopyCommands(t *testing.T) {
 	})
 
 	t.Run("COPY hash", func(t *testing.T) {
-		hv := &store.HashValue{Fields: map[string][]byte{}}
-		hv.Fields["f1"] = []byte("v1")
+		hv := store.NewHashFrom(map[string][]byte{})
+		hv.SetFieldKeepTTL("f1", []byte("v1"))
 		s.Set("copy_hash_src", hv, store.SetOptions{})
 		_ = runHandler(t, router, "COPY", [][]byte{
 			[]byte("copy_hash_src"),

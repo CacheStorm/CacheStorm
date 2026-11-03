@@ -26,7 +26,7 @@ func rawHashFields(st *store.Store, key string) []string {
 	h.RLock()
 	defer h.RUnlock()
 	var out []string
-	for f := range h.Fields {
+	for f := range h.All() {
 		out = append(out, f)
 	}
 	sort.Strings(out)

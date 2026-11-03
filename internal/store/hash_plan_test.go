@@ -10,7 +10,7 @@ import (
 func TestHashPlanPreservesIdentityAndMetadata(t *testing.T) {
 	s := NewStore()
 	s.ConfigureMemory(2048, EvictionNoEviction, 70, 90, 5)
-	hash := &HashValue{Fields: map[string][]byte{"a": make([]byte, 600), "b": make([]byte, 600)}}
+	hash := NewHashFrom(map[string][]byte{"a": make([]byte, 600), "b": make([]byte, 600)})
 	if err := s.Set("h", hash, SetOptions{Tags: []string{"tag"}, ExpireAtMS: 4102444800000}); err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +31,7 @@ func TestHashPlanUnlocksOnEveryExit(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			s := NewStore()
 			s.ConfigureMemory(1024, EvictionNoEviction, 70, 90, 5)
-			hash := &HashValue{Fields: map[string][]byte{"f": []byte("kept")}}
+			hash := NewHashFrom(map[string][]byte{"f": []byte("kept")})
 			key := "h"
 			if mode == "wrongtype" {
 				if err := s.Set(key, &StringValue{Data: []byte("kept")}, SetOptions{}); err != nil {
@@ -77,7 +77,7 @@ func TestHashPlanUnlocksOnEveryExit(t *testing.T) {
 func TestHashPlanHoldsValueLockThroughAdmission(t *testing.T) {
 	s := NewStore()
 	s.ConfigureMemory(1024, EvictionNoEviction, 70, 90, 5)
-	hash := &HashValue{Fields: map[string][]byte{"f": []byte("old")}}
+	hash := NewHashFrom(map[string][]byte{"f": []byte("old")})
 	if err := s.Set("h", hash, SetOptions{}); err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestHashPlanHoldsValueLockThroughAdmission(t *testing.T) {
 		done <- s.ApplyHashFields("h", func(h *HashValue) (map[string][]byte, error) {
 			close(entered)
 			<-release
-			return map[string][]byte{"f": append(append([]byte(nil), h.Fields["f"]...), []byte(" new")...)}, nil
+			return map[string][]byte{"f": append(append([]byte(nil), h.Field("f")...), []byte(" new")...)}, nil
 		})
 	}()
 	<-entered
@@ -105,7 +105,7 @@ func TestHashPlanHoldsValueLockThroughAdmission(t *testing.T) {
 		t.Fatal(err)
 	}
 	entry, _ := s.Get("h")
-	if entry.Value != hash || string(hash.Fields["f"]) != "old new" {
+	if entry.Value != hash || string(hash.Field("f")) != "old new" {
 		t.Fatal("identity/data changed")
 	}
 	if !hash.mu.TryLock() {
@@ -152,7 +152,7 @@ func TestHashPlanReservesSharedBudgetAcrossDatabases(t *testing.T) {
 func TestHashPlanEvictionReentersAndReselects(t *testing.T) {
 	s := NewStore()
 	s.ConfigureMemory(1600, EvictionAllKeysLRU, 70, 90, 128)
-	if err := s.Set("h", &HashValue{Fields: map[string][]byte{"f": []byte("old")}}, SetOptions{}); err != nil {
+	if err := s.Set("h", NewHashFrom(map[string][]byte{"f": []byte("old")}), SetOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Set("victim", &StringValue{Data: make([]byte, 400)}, SetOptions{}); err != nil {
@@ -173,7 +173,7 @@ func TestHashPlanEvictionReentersAndReselects(t *testing.T) {
 	preparations := 0
 	err := s.ApplyHashFields("h", func(h *HashValue) (map[string][]byte, error) {
 		preparations++
-		if preparations > 1 && string(h.Fields["f"]) != "callback" {
+		if preparations > 1 && string(h.Field("f")) != "callback" {
 			t.Error("stale hash after callback")
 		}
 		return map[string][]byte{"g": make([]byte, 400)}, nil
@@ -200,7 +200,7 @@ func TestApplyHashPairsLastValueWinsAndCountsNewFields(t *testing.T) {
 	e, _ := s.Get("h")
 	h := e.Value.(*HashValue)
 	h.RLock()
-	f, ka := string(h.Fields["f"]), string(h.Fields["ka"])
+	f, ka := string(h.Field("f")), string(h.Field("ka"))
 	h.RUnlock()
 	if f != "3" || ka != "5" {
 		t.Fatalf("f=%q ka=%q, want the last values 3 and 5", f, ka)
@@ -210,7 +210,7 @@ func TestApplyHashPairsLastValueWinsAndCountsNewFields(t *testing.T) {
 	}
 	var want int64
 	h.RLock()
-	for k, v := range h.Fields {
+	for k, v := range h.All() {
 		want += hashFieldSize(k, v)
 	}
 	h.RUnlock()

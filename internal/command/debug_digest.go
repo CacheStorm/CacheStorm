@@ -58,7 +58,7 @@ func valueDigest(v store.Value) digest {
 	case *store.HashValue:
 		val.RLock()
 		defer val.RUnlock()
-		for f, fv := range val.Fields {
+		for f, fv := range val.All() {
 			d.xor(sum([]byte(f), fv))
 		}
 	case *store.SortedSetValue:

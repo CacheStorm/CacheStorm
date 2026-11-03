@@ -25,8 +25,8 @@ func TestLowCoverageBatch15_DUMP_RESTORE_COPY(t *testing.T) {
 	})
 
 	t.Run("DUMP hash value", func(t *testing.T) {
-		hv := &store.HashValue{Fields: map[string][]byte{}}
-		hv.Fields["field1"] = []byte("value1")
+		hv := store.NewHashFrom(map[string][]byte{})
+		hv.SetFieldKeepTTL("field1", []byte("value1"))
 		s.Set("dump_hash", hv, store.SetOptions{})
 		_ = runHandler(t, router, "DUMP", [][]byte{[]byte("dump_hash")}, s)
 	})

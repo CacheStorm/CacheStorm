@@ -797,11 +797,11 @@ func TestReadEntryHashType(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected HashValue, got %T", entry.Value)
 	}
-	if len(hv.Fields) != 2 {
-		t.Errorf("expected 2 fields, got %d", len(hv.Fields))
+	if hv.Len() != 2 {
+		t.Errorf("expected 2 fields, got %d", hv.Len())
 	}
-	if string(hv.Fields["field1"]) != "val1" {
-		t.Errorf("expected 'val1', got '%s'", string(hv.Fields["field1"]))
+	if string(hv.Field("field1")) != "val1" {
+		t.Errorf("expected 'val1', got '%s'", string(hv.Field("field1")))
 	}
 }
 
@@ -1571,7 +1571,7 @@ func TestRDBManualRoundTripMultipleTypes(t *testing.T) {
 		t.Error("expected 'myhash'")
 	} else {
 		hv, _ := e.Value.(*store.HashValue)
-		if string(hv.Fields["field"]) != "value" {
+		if string(hv.Field("field")) != "value" {
 			t.Errorf("expected hash field='value'")
 		}
 	}
@@ -1865,7 +1865,7 @@ func TestRDBWriterWriteValueErrors(t *testing.T) {
 		&store.StringValue{Data: []byte("test")},
 		&store.ListValue{Elements: [][]byte{[]byte("a"), []byte("b")}},
 		&store.SetValue{Members: map[string]struct{}{"x": {}, "y": {}}},
-		&store.HashValue{Fields: map[string][]byte{"f": []byte("v")}},
+		store.NewHashFrom(map[string][]byte{"f": []byte("v")}),
 	}
 
 	for _, v := range values {
@@ -2108,7 +2108,7 @@ func TestRDBWriterSaveCompleteSuccess(t *testing.T) {
 	s.Set("complete", &store.StringValue{Data: []byte("success")}, store.SetOptions{})
 	s.Set("complete2", &store.ListValue{Elements: [][]byte{[]byte("a")}}, store.SetOptions{})
 	s.Set("complete3", &store.SetValue{Members: map[string]struct{}{"m": {}}}, store.SetOptions{})
-	s.Set("complete4", &store.HashValue{Fields: map[string][]byte{"f": []byte("v")}}, store.SetOptions{})
+	s.Set("complete4", store.NewHashFrom(map[string][]byte{"f": []byte("v")}), store.SetOptions{})
 
 	tmpDir := t.TempDir()
 	rdbPath := filepath.Join(tmpDir, "complete.rdb")

@@ -145,7 +145,7 @@ func TestSetEntryAdmissionAndSnapshotOwnership(t *testing.T) {
 
 func TestTransferCopyIsolationAndExpiredDestinations(t *testing.T) {
 	s := NewStore()
-	value := &HashValue{Fields: map[string][]byte{"field": []byte("v")}}
+	value := NewHashFrom(map[string][]byte{"field": []byte("v")})
 	if err := s.Set("src", value, SetOptions{ExpireAtMS: 4102444800000, Tags: []string{"source"}}); err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +163,7 @@ func TestTransferCopyIsolationAndExpiredDestinations(t *testing.T) {
 	copyValue.Lock()
 	copyValue.SetField("field", []byte("d"))
 	copyValue.Unlock()
-	if string(value.Fields["field"]) != "v" || dest.ExpiresAt.Load() != 4102444800000 || len(s.GetTagIndex().GetKeys("expired")) != 0 {
+	if string(value.Field("field")) != "v" || dest.ExpiresAt.Load() != 4102444800000 || len(s.GetTagIndex().GetKeys("expired")) != 0 {
 		t.Fatal("copy aliases source or expired destination metadata")
 	}
 	if changed, err := s.Transfer("src", s, "dst", TransferOptions{Copy: true}); changed || err != nil {

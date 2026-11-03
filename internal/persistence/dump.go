@@ -75,14 +75,14 @@ func EncodeDump(value store.Value) ([]byte, error) {
 		}
 		v.RLock()
 		defer v.RUnlock()
-		if len(v.Fields) == 0 {
+		if v.Len() == 0 {
 			return nil, ErrDumpFormat
 		}
 		out = append(out, 4)
-		out = appendDumpLength(out, uint64(len(v.Fields)))
+		out = appendDumpLength(out, uint64(v.Len()))
 		for _, k := range hashFieldOrder(v) {
 			str(k)
-			str(string(v.Fields[k]))
+			str(string(v.Field(k)))
 		}
 	case *store.SortedSetValue:
 		v.RLock()
@@ -395,15 +395,15 @@ func (d *dumpDecoder) valueOf(typ byte) store.Value {
 		return v
 	case 4:
 		n := d.count()
-		v := &store.HashValue{Fields: make(map[string][]byte)}
+		v := &store.HashValue{}
 		order := make([]string, 0, n)
 		for i := 0; i < n && d.err == nil; i++ {
 			key := d.str()
 			s := d.str()
-			if _, ok := v.Fields[key]; ok {
+			if _, ok := v.Get(key); ok {
 				d.err = ErrDumpFormat
 			}
-			v.Fields[key] = []byte(s)
+			v.SetFieldKeepTTL(key, []byte(s))
 			order = append(order, key)
 		}
 		if n == 0 {
@@ -457,13 +457,13 @@ func (d *dumpDecoder) valueOf(typ byte) store.Value {
 				d.err = ErrDumpFormat
 				return nil
 			}
-			v := &store.HashValue{Fields: make(map[string][]byte)}
+			v := &store.HashValue{}
 			order := make([]string, 0, len(items)/2)
 			for i := 0; i < len(items); i += 2 {
-				if _, ok := v.Fields[items[i]]; ok {
+				if _, ok := v.Get(items[i]); ok {
 					d.err = ErrDumpFormat
 				}
-				v.Fields[items[i]] = []byte(items[i+1])
+				v.SetFieldKeepTTL(items[i], []byte(items[i+1]))
 				order = append(order, items[i])
 			}
 			v.SetOrder(order)

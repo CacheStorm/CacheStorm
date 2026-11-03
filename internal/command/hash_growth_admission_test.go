@@ -22,7 +22,7 @@ func TestHashGrowthAdmissionX(t *testing.T) {
 					if numeric {
 						initial = "99"
 					}
-					if err := s.Set("h", &store.HashValue{Fields: map[string][]byte{"f": []byte(initial)}}, store.SetOptions{Tags: []string{"tag"}, ExpireAtMS: 4102444800000}); err != nil {
+					if err := s.Set("h", store.NewHashFrom(map[string][]byte{"f": []byte(initial)}), store.SetOptions{Tags: []string{"tag"}, ExpireAtMS: 4102444800000}); err != nil {
 						t.Fatal("CONTROL", err)
 					}
 					if numeric {
@@ -45,7 +45,7 @@ func TestHashGrowthAdmissionX(t *testing.T) {
 				before, beforeOK := s.Get("h")
 				var snapshot map[string][]byte
 				if beforeOK {
-					snapshot = before.Value.Clone().(*store.HashValue).Fields
+					snapshot = before.Value.Clone().(*store.HashValue).Fields()
 				}
 				usage := s.MemUsage()
 				version := s.WatchKey("h")
@@ -65,7 +65,7 @@ func TestHashGrowthAdmissionX(t *testing.T) {
 				var fields map[string][]byte
 				if afterOK {
 					h := after.Value.(*store.HashValue)
-					fields = h.Clone().(*store.HashValue).Fields
+					fields = h.Clone().(*store.HashValue).Fields()
 				}
 				same := beforeOK == afterOK && reflect.DeepEqual(fields, snapshot)
 				t.Logf("EXPECTED: OOM, unchanged value/usage/watch/journal | ACTUAL: reply=%q same=%v usage=%d->%d version=%d->%d records=%d", got, same, usage, s.MemUsage(), version, s.GetVersion("h"), records)

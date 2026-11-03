@@ -12,9 +12,9 @@ import (
 )
 
 func hashOf(kv ...string) *store.HashValue {
-	h := &store.HashValue{Fields: map[string][]byte{}}
+	h := store.NewHashFrom(map[string][]byte{})
 	for i := 0; i+1 < len(kv); i += 2 {
-		h.Fields[kv[i]] = []byte(kv[i+1])
+		h.SetFieldKeepTTL(kv[i], []byte(kv[i+1]))
 	}
 	return h
 }

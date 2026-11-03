@@ -115,7 +115,7 @@ func TestAOFRewritePreservesValuesWithTTLControl(t *testing.T) {
 	if err := src.Set("plain", &store.StringValue{Data: []byte("hello")}, store.SetOptions{}); err != nil {
 		t.Fatalf("setup Set: %v", err)
 	}
-	if err := src.Set("tagged", &store.HashValue{Fields: map[string][]byte{"f": []byte("v")}},
+	if err := src.Set("tagged", store.NewHashFrom(map[string][]byte{"f": []byte("v")}),
 		store.SetOptions{TTL: 3600 * time.Second}); err != nil {
 		t.Fatalf("setup Set hash: %v", err)
 	}

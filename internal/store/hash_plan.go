@@ -28,7 +28,7 @@ func (s *Store) ApplyHashFields(key string, prepare func(*HashValue) (map[string
 		}
 		size := hash.SizeOf()
 		for field := range fields {
-			if old, exists := hash.Fields[field]; exists {
+			if old, exists := hash.Get(field); exists {
 				size -= hashFieldSize(field, old)
 			}
 		}
@@ -118,7 +118,7 @@ func (s *Store) ApplyHashPairs(key string, nx bool, args [][]byte) (int, error) 
 		for _, i := range op.keep {
 			field, val := pairs[2*i], pairs[2*i+1]
 			var d int64
-			if old, exists := hash.Fields[string(field)]; exists {
+			if old, exists := hash.Get(string(field)); exists {
 				d = int64(len(val)) - int64(len(old))
 				if hash.expiredAt(string(field), now) {
 					added++
@@ -158,13 +158,12 @@ var hashSetOpPool = sync.Pool{New: func() any {
 
 func (op *hashSetOp) apply() Value {
 	hash := op.hash
-	if hash.Fields == nil {
-		hash.Fields = make(map[string][]byte, len(op.keep))
-	}
 	hash.invalidateScan()
-	if !hash.big {
+	if !hash.big && (len(op.keep) < len(op.pairs)/2 || hash.HasFieldTTLs()) {
 		// The listpack sees the pairs one by one: a new field goes last, and
-		// so does an existing one whose expiry the write clears.
+		// so does an existing one whose expiry the write clears. Without a
+		// repeated field or an expiry, setting the kept pairs in order
+		// gives the same order.
 		var seen map[string]bool
 		for i := 0; 2*i+1 < len(op.pairs); i++ {
 			field := string(op.pairs[2*i])
@@ -172,7 +171,7 @@ func (op *hashSetOp) apply() Value {
 			if seen[field] {
 				continue
 			}
-			_, exists := hash.Fields[field]
+			exists := hash.Has(field)
 			if exists && hash.FieldExpireAt(field) == 0 {
 				continue
 			}
@@ -183,14 +182,22 @@ func (op *hashSetOp) apply() Value {
 			if exists {
 				hash.orderPlaceLocked(field, 0)
 			} else {
-				hash.orderAppendLocked(field)
+				hash.put(field, nil)
+			}
+		}
+	}
+	if limit := hashListpackValue.Load(); !hash.big {
+		for _, a := range op.pairs {
+			if int64(len(a)) > limit {
+				hash.convertLocked()
+				break
 			}
 		}
 	}
 	for k, i := range op.keep {
 		field := string(op.pairs[2*i])
 		hash.clearFieldTTL(field)
-		hash.Fields[field] = op.pairs[2*i+1]
+		hash.put(field, op.pairs[2*i+1])
 		hash.size.add(op.deltas[k])
 	}
 	return hash
@@ -248,7 +255,7 @@ func (s *Store) ApplyHashSetEx(key string, args [][]byte, o HashSetExOptions) (b
 			seen[string(args[i])] = i
 		}
 		for field, i := range seen {
-			old, exists := hash.Fields[field]
+			old, exists := hash.Get(field)
 			if live := hash.FieldLive(field, now); (o.FNX && live) || (o.FXX && !live) {
 				hash.Unlock()
 				return ValuePlan{}, nil

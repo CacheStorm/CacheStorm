@@ -24,7 +24,7 @@ func (l entryList) ForEachEntry(fn func(db int, key string, entry interface{}) e
 }
 
 func TestWriteRedisRDBLoadsBack(t *testing.T) {
-	hash := &store.HashValue{Fields: map[string][]byte{"a": []byte("1"), "b": []byte("2")}}
+	hash := store.NewHashFrom(map[string][]byte{"a": []byte("1"), "b": []byte("2")})
 	hash.SetFieldExpireAt("a", 4102444800000)
 	expiring := store.NewEntry(&store.StringValue{Data: []byte("v")})
 	expiring.ExpiresAt.Store(4102444800000)
@@ -72,7 +72,7 @@ func TestRedisRDBExtensionsLoadBack(t *testing.T) {
 	tagged.SetTags([]string{"red", "blue"})
 	hot := store.NewEntry(&store.StringValue{Data: []byte("h")})
 	hot.SetLFUCount(42)
-	gone := &store.HashValue{Fields: map[string][]byte{"f": []byte("v")}}
+	gone := store.NewHashFrom(map[string][]byte{"f": []byte("v")})
 	gone.SetFieldExpireAt("f", 1)
 	src := entryList{
 		{0, "j", store.NewEntry(store.MustParseJSONValue(`{"a":[1,2]}`))},

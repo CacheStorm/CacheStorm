@@ -353,7 +353,7 @@ func TestReplicaAppliesTheMastersHDELOfAnExpiredField(t *testing.T) {
 	}
 	h := entry.Value.(*store.HashValue)
 	h.RLock()
-	n := len(h.Fields)
+	n := h.Len()
 	h.RUnlock()
 	if n != 1 {
 		t.Fatalf("stored fields %d, want 1", n)

@@ -489,7 +489,7 @@ func TestLowCoverageBatch11_ServerDumpRestoreCommands(t *testing.T) {
 
 	t.Run("DUMP all types", func(t *testing.T) {
 		s.Set("dumpstr", &store.StringValue{Data: []byte("value")}, store.SetOptions{})
-		s.Set("dumphash", &store.HashValue{Fields: map[string][]byte{"f": []byte("v")}}, store.SetOptions{})
+		s.Set("dumphash", store.NewHashFrom(map[string][]byte{"f": []byte("v")}), store.SetOptions{})
 		sv := &store.SetValue{Members: map[string]struct{}{}}
 		sv.Members["m"] = struct{}{}
 		s.Set("dumpset", sv, store.SetOptions{})

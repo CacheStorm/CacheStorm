@@ -84,9 +84,9 @@ func TestLowCoverageBatch9_DumpRestoreCommands(t *testing.T) {
 	})
 
 	t.Run("DUMP hash value", func(t *testing.T) {
-		hv := &store.HashValue{Fields: make(map[string][]byte)}
-		hv.Fields["field1"] = []byte("value1")
-		hv.Fields["field2"] = []byte("value2")
+		hv := store.NewHashFrom(make(map[string][]byte))
+		hv.SetFieldKeepTTL("field1", []byte("value1"))
+		hv.SetFieldKeepTTL("field2", []byte("value2"))
 		s.Set("dumphash", hv, store.SetOptions{})
 		_ = runHandler(t, router, "DUMP", [][]byte{[]byte("dumphash")}, s)
 	})
@@ -664,8 +664,8 @@ func TestLowCoverageBatch9_KEYOBJECT(t *testing.T) {
 	})
 
 	t.Run("KEYOBJECT hash", func(t *testing.T) {
-		hv := &store.HashValue{Fields: make(map[string][]byte)}
-		hv.Fields["f"] = []byte("v")
+		hv := store.NewHashFrom(make(map[string][]byte))
+		hv.SetFieldKeepTTL("f", []byte("v"))
 		s.Set("kohash", hv, store.SetOptions{})
 		_ = runHandler(t, router, "KEYOBJECT", [][]byte{[]byte("kohash")}, s)
 	})

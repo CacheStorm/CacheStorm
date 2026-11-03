@@ -296,10 +296,10 @@ func TestStringValueString(t *testing.T) {
 }
 
 func TestHashValueString(t *testing.T) {
-	v := &HashValue{Fields: map[string][]byte{
+	v := NewHashFrom(map[string][]byte{
 		"f1": []byte("v1"),
 		"f2": []byte("v2"),
-	}}
+	})
 	s := v.String()
 	if s == "" {
 		t.Error("expected non-empty string")

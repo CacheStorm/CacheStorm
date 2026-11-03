@@ -17,8 +17,8 @@ func TestLowCoverageBatch13_CachewarmCommands(t *testing.T) {
 	})
 
 	t.Run("KEYOBJECT with hash", func(t *testing.T) {
-		hv := &store.HashValue{Fields: map[string][]byte{}}
-		hv.Fields["field1"] = []byte("value1")
+		hv := store.NewHashFrom(map[string][]byte{})
+		hv.SetFieldKeepTTL("field1", []byte("value1"))
 		s.Set("kohash", hv, store.SetOptions{})
 		_ = runHandler(t, router, "KEYOBJECT", [][]byte{[]byte("kohash")}, s)
 	})
@@ -252,8 +252,8 @@ func TestLowCoverageBatch13_ServerCommands(t *testing.T) {
 		s.Set("dumpstr", &store.StringValue{Data: []byte("value")}, store.SetOptions{})
 		_ = runHandler(t, router, "DUMP", [][]byte{[]byte("dumpstr")}, s)
 
-		hv := &store.HashValue{Fields: map[string][]byte{}}
-		hv.Fields["f1"] = []byte("v1")
+		hv := store.NewHashFrom(map[string][]byte{})
+		hv.SetFieldKeepTTL("f1", []byte("v1"))
 		s.Set("dumphash", hv, store.SetOptions{})
 		_ = runHandler(t, router, "DUMP", [][]byte{[]byte("dumphash")}, s)
 

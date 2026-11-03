@@ -43,7 +43,7 @@ func TestSetAdmissionIncludesKeysAndTags(t *testing.T) {
 				key = "tagged"
 				err = s.Set(key, &StringValue{Data: []byte("small")}, SetOptions{Tags: []string{strings.Repeat("t", 1024)}})
 			case "create":
-				_, _, err = s.GetOrCreate(key, func() Value { return &HashValue{Fields: map[string][]byte{}} })
+				_, _, err = s.GetOrCreate(key, func() Value { return NewHashFrom(map[string][]byte{}) })
 			default:
 				err = s.Set(key, &StringValue{Data: []byte("small")}, SetOptions{})
 			}

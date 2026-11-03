@@ -13,7 +13,7 @@ func TestStoreType(t *testing.T) {
 		t.Errorf("expected DataTypeString, got %v", s.Type("str"))
 	}
 
-	s.Set("hash", &HashValue{Fields: map[string][]byte{"f": []byte("v")}}, SetOptions{})
+	s.Set("hash", NewHashFrom(map[string][]byte{"f": []byte("v")}), SetOptions{})
 	if s.Type("hash") != DataTypeHash {
 		t.Errorf("expected DataTypeHash, got %v", s.Type("hash"))
 	}
@@ -207,7 +207,7 @@ func TestStringValueMethods(t *testing.T) {
 }
 
 func TestHashValueMethods(t *testing.T) {
-	v := &HashValue{Fields: map[string][]byte{"f1": []byte("v1"), "f2": []byte("v2")}}
+	v := NewHashFrom(map[string][]byte{"f1": []byte("v1"), "f2": []byte("v2")})
 
 	if v.Type() != DataTypeHash {
 		t.Errorf("expected DataTypeHash, got %v", v.Type())
@@ -223,7 +223,7 @@ func TestHashValueMethods(t *testing.T) {
 	}
 
 	cloned := v.Clone().(*HashValue)
-	if len(cloned.Fields) != len(v.Fields) {
+	if cloned.Len() != v.Len() {
 		t.Error("clone should have same number of fields")
 	}
 

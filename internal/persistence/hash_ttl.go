@@ -29,7 +29,7 @@ type hashSnapshot struct {
 // listpack order for a small hash, sorted for a hash table, whose own order
 // is arbitrary. The caller holds h's lock.
 func hashFieldOrder(h *store.HashValue) []string {
-	fields := make([]string, 0, len(h.Fields))
+	fields := make([]string, 0, h.Len())
 	h.Range(func(f string, _ []byte) bool {
 		fields = append(fields, f)
 		return true
@@ -45,7 +45,7 @@ func snapshotHash(h *store.HashValue) hashSnapshot {
 	h.RLock()
 	defer h.RUnlock()
 	var snap hashSnapshot
-	snap.fields = make([]string, 0, len(h.Fields))
+	snap.fields = make([]string, 0, h.Len())
 	for _, f := range hashFieldOrder(h) {
 		if at := h.FieldExpireAt(f); at == 0 || at > now {
 			snap.fields = append(snap.fields, f)
@@ -54,7 +54,7 @@ func snapshotHash(h *store.HashValue) hashSnapshot {
 	snap.values = make([][]byte, len(snap.fields))
 	snap.ttls = make([]int64, len(snap.fields))
 	for i, f := range snap.fields {
-		snap.values[i] = h.Fields[f]
+		snap.values[i] = h.Field(f)
 		snap.ttls[i] = h.FieldExpireAt(f)
 		if snap.ttls[i] != 0 {
 			snap.anyTTL = true
@@ -76,16 +76,16 @@ func hashLive(v store.Value) bool {
 // expiry has passed. It returns nil when none is left.
 func newHashWithTTLs(fields []string, values [][]byte, ttls []int64) *store.HashValue {
 	now := time.Now().UnixMilli()
-	h := &store.HashValue{Fields: make(map[string][]byte, len(fields))}
+	h := store.NewHash(len(fields))
 	order := make([]string, 0, len(fields))
 	for i, f := range fields {
 		if ttls[i] != 0 && ttls[i] <= now {
 			continue
 		}
-		h.Fields[f] = values[i]
+		h.SetFieldKeepTTL(f, values[i])
 		order = append(order, f)
 	}
-	if len(h.Fields) == 0 {
+	if h.Len() == 0 {
 		return nil
 	}
 	for i, f := range fields {

@@ -106,10 +106,10 @@ func TestStoreDataTypesAdvanced(t *testing.T) {
 	})
 
 	t.Run("Hash Value Operations", func(t *testing.T) {
-		val := &HashValue{Fields: map[string][]byte{
+		val := NewHashFrom(map[string][]byte{
 			"field1": []byte("value1"),
 			"field2": []byte("value2"),
-		}}
+		})
 
 		if val.Type() != DataTypeHash {
 			t.Error("Type mismatch")
@@ -117,7 +117,7 @@ func TestStoreDataTypesAdvanced(t *testing.T) {
 
 		// Clone
 		cloned := val.Clone().(*HashValue)
-		if string(cloned.Fields["field1"]) != "value1" {
+		if string(cloned.Field("field1")) != "value1" {
 			t.Error("Clone mismatch")
 		}
 	})

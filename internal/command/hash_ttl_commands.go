@@ -230,7 +230,7 @@ func hexpireGeneric(ctx *Context, unitMS int64, absolute bool) error {
 		updated = append(updated, f)
 		results[i] = resp.IntegerValue(1)
 	}
-	empty := len(hash.Fields) == 0
+	empty := hash.Len() == 0
 	hash.Unlock()
 	if len(deleted) > 0 {
 		ctx.notify(store.NotifyHash, "hdel", key)
@@ -274,7 +274,7 @@ func httlGeneric(ctx *Context, unitMS int64, absolute bool) error {
 	results := make([]*resp.Value, len(fields))
 	hash.RLock()
 	for i, f := range fields {
-		if _, ok := hash.Fields[f]; !ok {
+		if _, ok := hash.Get(f); !ok {
 			results[i] = resp.IntegerValue(-2)
 			continue
 		}
@@ -403,7 +403,7 @@ func cmdHGETEX(ctx *Context) error {
 	now, clock := time.Now().UnixMilli(), ctx.Store.HashFieldClock()
 	var deleted, updated, persisted []string
 	for i, f := range fields {
-		val, ok := hash.Fields[f]
+		val, ok := hash.Get(f)
 		if !ok || !hash.FieldLive(f, clock) {
 			results[i] = resp.NullBulkString()
 			continue
@@ -429,7 +429,7 @@ func cmdHGETEX(ctx *Context) error {
 		ctx.PropagateAs()
 		return ctx.WriteArray(results)
 	}
-	empty := len(hash.Fields) == 0
+	empty := hash.Len() == 0
 	hash.Unlock()
 	switch {
 	case len(deleted) > 0:
@@ -593,7 +593,7 @@ func hsetexDelete(ctx *Context, key string, pairs [][]byte, opts store.HashSetEx
 	for i := 0; i < len(pairs); i += 2 {
 		hash.DeleteField(string(pairs[i]))
 	}
-	empty := len(hash.Fields) == 0
+	empty := hash.Len() == 0
 	hash.Unlock()
 	ctx.notify(store.NotifyHash, "hset", key)
 	ctx.notify(store.NotifyHash, "hdel", key)

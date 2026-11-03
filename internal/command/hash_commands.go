@@ -81,7 +81,7 @@ func cmdHGET(ctx *Context) error {
 	}
 
 	hash.RLock()
-	value, exists := hash.Fields[field]
+	value, exists := hash.Get(field)
 	if !exists {
 		hash.RUnlock()
 		return ctx.WriteNullBulkString()
@@ -127,7 +127,7 @@ func cmdHMGET(ctx *Context) error {
 	hash.RLock()
 	for i := 1; i < ctx.ArgCount(); i++ {
 		field := ctx.ArgString(i)
-		value, exists := hash.Fields[field]
+		value, exists := hash.Get(field)
 		if !exists {
 			results[i-1] = resp.NullBulkString()
 		} else {
@@ -155,7 +155,7 @@ func cmdHGETALL(ctx *Context) error {
 	}
 
 	hash.RLock()
-	results := make([]*resp.Value, 0, len(hash.Fields)*2)
+	results := make([]*resp.Value, 0, hash.Len()*2)
 	hash.Range(func(field string, value []byte) bool {
 		results = append(results, resp.BulkString(field), resp.BulkBytes(value))
 		return true
@@ -190,7 +190,7 @@ func cmdHDEL(ctx *Context) error {
 		}
 	}
 
-	isEmpty := len(hash.Fields) == 0
+	isEmpty := hash.Len() == 0
 	hash.Unlock()
 
 	if deleted > 0 {
@@ -222,7 +222,7 @@ func cmdHEXISTS(ctx *Context) error {
 	}
 
 	hash.RLock()
-	if _, exists := hash.Fields[field]; exists {
+	if _, exists := hash.Get(field); exists {
 		reply := int64(1)
 		hash.RUnlock()
 		return ctx.WriteInteger(reply)
@@ -247,7 +247,7 @@ func cmdHLEN(ctx *Context) error {
 	}
 
 	hash.RLock()
-	reply := int64(int64(len(hash.Fields)))
+	reply := int64(int64(hash.Len()))
 	hash.RUnlock()
 	return ctx.WriteInteger(reply)
 }
@@ -267,7 +267,7 @@ func cmdHKEYS(ctx *Context) error {
 	}
 
 	hash.RLock()
-	keys := make([]*resp.Value, 0, len(hash.Fields))
+	keys := make([]*resp.Value, 0, hash.Len())
 	hash.Range(func(field string, _ []byte) bool {
 		keys = append(keys, resp.BulkString(field))
 		return true
@@ -293,7 +293,7 @@ func cmdHVALS(ctx *Context) error {
 	}
 
 	hash.RLock()
-	vals := make([]*resp.Value, 0, len(hash.Fields))
+	vals := make([]*resp.Value, 0, hash.Len())
 	hash.Range(func(_ string, value []byte) bool {
 		vals = append(vals, resp.BulkBytes(value))
 		return true
@@ -475,7 +475,7 @@ func cmdHSTRLEN(ctx *Context) error {
 	}
 
 	hash.RLock()
-	value, exists := hash.Fields[field]
+	value, exists := hash.Get(field)
 	if !exists {
 		reply := int64(0)
 		hash.RUnlock()
@@ -520,8 +520,8 @@ func cmdHSCAN(ctx *Context) error {
 			return true
 		})
 	} else {
-		fields, next = collectionScanPage(hash, len(hash.Fields), cursor, opts.count, func(emit func(string)) {
-			for f := range hash.Fields {
+		fields, next = collectionScanPage(hash, hash.Len(), cursor, opts.count, func(emit func(string)) {
+			for f := range hash.All() {
 				emit(f)
 			}
 		})
@@ -533,7 +533,7 @@ func cmdHSCAN(ctx *Context) error {
 		}
 		items = append(items, resp.BulkString(f))
 		if !opts.noValues {
-			items = append(items, resp.BulkBytes(hash.Fields[f]))
+			items = append(items, resp.BulkBytes(hash.Field(f)))
 		}
 	}
 	hash.RUnlock()
@@ -557,7 +557,7 @@ func cmdHRANDFIELD(ctx *Context) error {
 			return ctx.WriteNullBulkString()
 		}
 		hash.RLock()
-		picked, found := randomKey(hash.Fields)
+		picked, found := randomKey(hash.Fields())
 		hash.RUnlock()
 		if !found {
 			return ctx.WriteNullBulkString()
@@ -587,13 +587,13 @@ func cmdHRANDFIELD(ctx *Context) error {
 
 	hash.RLock()
 	var picked []string
-	if count > 0 && count >= int64(len(hash.Fields)) || count > 0 && !hash.Big() && !hash.FieldTTLsUsed() {
+	if count > 0 && count >= int64(hash.Len()) || count > 0 && !hash.Big() && !hash.FieldTTLsUsed() {
 		// The whole hash, or for a listpack hash a sample, comes in the
 		// hash's order, as Redis returns them.
 		chosen := map[string]bool(nil)
-		if count < int64(len(hash.Fields)) {
+		if count < int64(hash.Len()) {
 			chosen = make(map[string]bool, count)
-			for _, f := range randomKeys(hash.Fields, count) {
+			for _, f := range randomKeys(hash.Fields(), count) {
 				chosen[f] = true
 			}
 		}
@@ -604,7 +604,7 @@ func cmdHRANDFIELD(ctx *Context) error {
 			return true
 		})
 	} else {
-		picked = randomKeys(hash.Fields, count)
+		picked = randomKeys(hash.Fields(), count)
 	}
 	size := len(picked)
 	if withValues {
@@ -616,9 +616,9 @@ func cmdHRANDFIELD(ctx *Context) error {
 		switch {
 		case pairs:
 			// RESP3 replies with one [field, value] array per pick.
-			result = append(result, resp.ArrayValue([]*resp.Value{resp.BulkString(f), resp.BulkBytes(hash.Fields[f])}))
+			result = append(result, resp.ArrayValue([]*resp.Value{resp.BulkString(f), resp.BulkBytes(hash.Field(f))}))
 		case withValues:
-			result = append(result, resp.BulkString(f), resp.BulkBytes(hash.Fields[f]))
+			result = append(result, resp.BulkString(f), resp.BulkBytes(hash.Field(f)))
 		default:
 			result = append(result, resp.BulkString(f))
 		}
@@ -659,7 +659,7 @@ func cmdHGETDEL(ctx *Context) error {
 	var deleted []string
 	now := ctx.Store.HashFieldClock()
 	for i, f := range fields {
-		value, ok := hash.Fields[f]
+		value, ok := hash.Get(f)
 		if !ok || !hash.FieldLive(f, now) {
 			results[i] = resp.NullBulkString()
 			continue
@@ -668,7 +668,7 @@ func cmdHGETDEL(ctx *Context) error {
 		hash.DeleteField(f)
 		deleted = append(deleted, f)
 	}
-	empty := len(hash.Fields) == 0
+	empty := hash.Len() == 0
 	hash.Unlock()
 	if len(deleted) == 0 {
 		ctx.PropagateAs()

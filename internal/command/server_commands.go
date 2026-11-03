@@ -969,7 +969,7 @@ func sortLookupValue(ctx *Context, pattern, elem string) (string, bool) {
 		}
 		// cmdHSET mutates Fields under the hash write lock.
 		hv.RLock()
-		v, ok := hv.Fields[field]
+		v, ok := hv.Get(field)
 		hv.RUnlock()
 		if !ok {
 			return "", false

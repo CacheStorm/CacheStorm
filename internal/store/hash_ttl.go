@@ -77,7 +77,7 @@ func (v *HashValue) FieldExpireAt(field string) int64 {
 // SetFieldExpireAt gives the existing field an expiry (unix milliseconds,
 // > 0). The caller holds the value's write lock.
 func (v *HashValue) SetFieldExpireAt(field string, at int64) {
-	if _, ok := v.Fields[field]; !ok || at <= 0 {
+	if !v.Has(field) || at <= 0 {
 		return
 	}
 	if v.ttl == nil {
@@ -157,7 +157,7 @@ func (v *HashValue) FieldLive(field string, now int64) bool {
 // LiveField returns field's value when FieldLive reports it. The caller
 // holds the value's lock.
 func (v *HashValue) LiveField(field string, now int64) ([]byte, bool) {
-	val, ok := v.Fields[field]
+	val, ok := v.Get(field)
 	if !ok || v.expiredAt(field, now) {
 		return nil, false
 	}
@@ -185,12 +185,14 @@ func (v *HashValue) dropExpiredTTL(field string, now int64) {
 func (v *HashValue) hasLiveField(now int64) bool {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
-	for f := range v.Fields {
+	live := false
+	v.Range(func(f string, _ []byte) bool {
 		if at := v.FieldExpireAt(f); at == 0 || at > now {
-			return true
+			live = true
 		}
-	}
-	return false
+		return !live
+	})
+	return live
 }
 
 func (v *HashValue) fieldsDue(now int64) bool {
@@ -260,19 +262,15 @@ func (v *HashValue) cloneTTLsLocked(dst *HashValue) {
 func (v *HashValue) liveView(now int64) *HashValue {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
-	out := &HashValue{Fields: make(map[string][]byte, len(v.Fields)), big: v.big}
-	var order []string
+	out := NewHash(v.Len())
+	out.big = v.big
 	v.Range(func(f string, val []byte) bool {
 		if at := v.FieldExpireAt(f); at != 0 && at <= now {
 			return true
 		}
-		out.Fields[f] = val
-		order = append(order, f)
+		out.put(f, val)
 		return true
 	})
-	if !v.big {
-		out.order = order
-	}
 	if v.ttl != nil {
 		out.ttl = &hashFieldTTLs{at: make(map[string]int64)}
 		for f, at := range v.ttl.at {
@@ -389,7 +387,7 @@ func (s *Store) reapHashFieldsLocked(shard *Shard, key string, entry *Entry, h *
 		h.Unlock()
 		return nil, false, 0
 	}
-	empty := len(h.Fields) == 0
+	empty := h.Len() == 0
 	if empty {
 		h.markDeadLocked()
 	}
@@ -438,7 +436,7 @@ func (s *Store) settleHashFields(shard *Shard, key string, entry *Entry, h *Hash
 			return entry, h.hasLiveField(now), false
 		}
 		view := h.liveView(now)
-		if len(view.Fields) == 0 {
+		if view.Len() == 0 {
 			return nil, false, false
 		}
 		e := entry.rehome()

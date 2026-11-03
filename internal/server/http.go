@@ -648,7 +648,7 @@ func (h *HTTPServer) handleKeys(w http.ResponseWriter, r *http.Request) {
 		case "set":
 			value = &store.SetValue{Members: map[string]struct{}{req.Value: {}}}
 		case "hash":
-			value = &store.HashValue{Fields: map[string][]byte{"value": []byte(req.Value)}}
+			value = store.NewHashFrom(map[string][]byte{"value": []byte(req.Value)})
 		default:
 			value = &store.StringValue{Data: []byte(req.Value)}
 		}

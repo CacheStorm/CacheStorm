@@ -53,7 +53,7 @@ func TestDigestCommandsCHECKSUMFullCoverage(t *testing.T) {
 	// Setup test data
 	s.Set("key1", &store.StringValue{Data: []byte("value1")}, store.SetOptions{})
 	s.Set("key2", &store.StringValue{Data: []byte("value2")}, store.SetOptions{})
-	s.Set("hash1", &store.HashValue{Fields: map[string][]byte{"field1": []byte("value1")}}, store.SetOptions{})
+	s.Set("hash1", store.NewHashFrom(map[string][]byte{"field1": []byte("value1")}), store.SetOptions{})
 	s.Set("list1", &store.ListValue{Elements: [][]byte{[]byte("item1"), []byte("item2")}}, store.SetOptions{})
 	s.Set("set1", &store.SetValue{Members: map[string]struct{}{"member1": {}}}, store.SetOptions{})
 

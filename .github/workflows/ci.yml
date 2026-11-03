@@ -82,7 +82,9 @@ jobs:
   # the 2026-10-20 review shipped with a green CI.
   sdk-python:
     name: Python client
-    runs-on: ubuntu-latest
+    # Ubuntu 26.04 (ubuntu-latest since 2026-10) has no Python 3.9 build,
+    # the oldest version the client supports.
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     strategy:
       matrix:

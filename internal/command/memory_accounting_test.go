@@ -58,7 +58,7 @@ func refValueSize(v store.Value) int64 {
 		return n
 	case *store.HashValue:
 		n := int64(450)
-		for k, val := range v.Fields {
+		for k, val := range v.All() {
 			n += int64(len(k)) + int64(len(val)) + 88
 		}
 		return n

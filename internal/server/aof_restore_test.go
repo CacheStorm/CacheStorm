@@ -16,7 +16,7 @@ func TestAOFRestoreKeepsDeadlineAndHistory(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			cfg := aofTxConfig(t)
 			s, run := aofTxStart(t, cfg)
-			payload, err := persistence.EncodeDump(&store.HashValue{Fields: map[string][]byte{"before&": []byte("one=\x00")}})
+			payload, err := persistence.EncodeDump(store.NewHashFrom(map[string][]byte{"before&": []byte("one=\x00")}))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -58,10 +58,10 @@ func TestAOFRestoreKeepsDeadlineAndHistory(t *testing.T) {
 				t.Fatalf("deadline=%d want %d", got.ExpiresAt.Load(), deadline)
 			}
 			hash, ok := got.Value.(*store.HashValue)
-			if !ok || string(hash.Fields["before&"]) != "one=\x00" {
+			if !ok || string(hash.Field("before&")) != "one=\x00" {
 				t.Fatal("binary field lost")
 			}
-			if mode == "persist" && string(hash.Fields["after"]) != "two" {
+			if mode == "persist" && string(hash.Field("after")) != "two" {
 				t.Fatal("pre-persist mutation lost")
 			}
 		})

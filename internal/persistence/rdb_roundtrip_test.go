@@ -27,7 +27,7 @@ func TestRDBSaveLoadRoundTripAllTypes(t *testing.T) {
 	mustSet("string_plain", &store.StringValue{Data: []byte("hello")}, store.SetOptions{})
 	mustSet("list", &store.ListValue{Elements: [][]byte{[]byte("a"), []byte("b"), []byte("c")}}, store.SetOptions{})
 	mustSet("set", &store.SetValue{Members: map[string]struct{}{"x": {}, "y": {}, "z": {}}}, store.SetOptions{})
-	mustSet("hash", &store.HashValue{Fields: map[string][]byte{"f1": []byte("v1"), "f2": []byte("v2")}}, store.SetOptions{})
+	mustSet("hash", store.NewHashFrom(map[string][]byte{"f1": []byte("v1"), "f2": []byte("v2")}), store.SetOptions{})
 	mustSet("zset", store.NewSortedSetFrom(map[string]float64{"alice": 90.5, "bob": 85.25, "carol": 77}), store.SetOptions{})
 	mustSet("string_ttl", &store.StringValue{Data: []byte("fleeting")}, store.SetOptions{TTL: 5 * time.Minute})
 	mustSet("zset_ttl", store.NewSortedSetFrom(map[string]float64{"m": 1.5}), store.SetOptions{TTL: 10 * time.Minute})
@@ -92,8 +92,8 @@ func TestRDBSaveLoadRoundTripAllTypes(t *testing.T) {
 	if !ok {
 		t.Fatalf("hash type = %T, want *store.HashValue", getEntry("hash").Value)
 	}
-	if string(hv.Fields["f1"]) != "v1" || string(hv.Fields["f2"]) != "v2" {
-		t.Errorf("hash fields = %v, want f1=v1 f2=v2", hv.Fields)
+	if string(hv.Field("f1")) != "v1" || string(hv.Field("f2")) != "v2" {
+		t.Errorf("hash fields = %v, want f1=v1 f2=v2", hv.Fields())
 	}
 
 	// SortedSet — members and scores preserved exactly (previously loaded

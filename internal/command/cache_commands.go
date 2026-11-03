@@ -185,7 +185,7 @@ func cmdCacheExport(ctx *Context) error {
 				case *store.HashValue:
 					fields := make([]*resp.Value, 0)
 					v.RLock()
-					for k, val := range v.Fields {
+					for k, val := range v.All() {
 						fields = append(fields, resp.BulkString(k), resp.BulkBytes(val))
 					}
 					v.RUnlock()

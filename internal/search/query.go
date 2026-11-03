@@ -96,7 +96,7 @@ func (idx *Index) Load(key string, entry *store.Entry, full bool) (*Document, bo
 			})
 		}
 		for i, f := range idx.Fields {
-			if val, ok := v.Fields[f.Identifier]; ok {
+			if val, ok := v.Get(f.Identifier); ok {
 				values[i] = []string{string(val)}
 			}
 		}

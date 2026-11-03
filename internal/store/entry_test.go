@@ -88,17 +88,17 @@ func TestStringValue(t *testing.T) {
 }
 
 func TestHashValue(t *testing.T) {
-	v := &HashValue{Fields: map[string][]byte{
+	v := NewHashFrom(map[string][]byte{
 		"field1": []byte("value1"),
 		"field2": []byte("value2"),
-	}}
+	})
 
 	if v.Type() != DataTypeHash {
 		t.Errorf("expected DataTypeHash, got %v", v.Type())
 	}
 
 	cloned := v.Clone().(*HashValue)
-	if len(cloned.Fields) != 2 {
+	if cloned.Len() != 2 {
 		t.Error("clone should have same fields")
 	}
 }

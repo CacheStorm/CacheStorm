@@ -38,7 +38,7 @@ func TestWriteLookupDoesNotCountKeyspaceHits(t *testing.T) {
 	if GlobalMetrics.TotalExpirations.Load() != expirations+1 {
 		t.Fatal("writing to an expired key did not count an expiration")
 	}
-	if v, ok := s.Get("h"); !ok || len(v.Value.(*HashValue).Fields) != 1 {
+	if v, ok := s.Get("h"); !ok || v.Value.(*HashValue).Len() != 1 {
 		t.Fatal("writing to an expired key did not start a fresh hash")
 	}
 }
@@ -56,14 +56,14 @@ func TestApplyHashPairsPooledPlanIsClean(t *testing.T) {
 	if err != nil || added != 20 {
 		t.Fatalf("added %d, %v; want 20", added, err)
 	}
-	if v, _ := s.Get("big"); string(v.Value.(*HashValue).Fields["a"]) != "last" {
+	if v, _ := s.Get("big"); string(v.Value.(*HashValue).Field("a")) != "last" {
 		t.Fatal("a repeated field did not take its last value")
 	}
 	added, err = s.ApplyHashPairs("small", false, [][]byte{[]byte("f"), []byte("1")})
 	if err != nil || added != 1 {
 		t.Fatalf("added %d, %v; want 1", added, err)
 	}
-	if v, _ := s.Get("small"); len(v.Value.(*HashValue).Fields) != 1 {
-		t.Fatalf("small hash has %d fields, want 1", len(v.Value.(*HashValue).Fields))
+	if v, _ := s.Get("small"); v.Value.(*HashValue).Len() != 1 {
+		t.Fatalf("small hash has %d fields, want 1", v.Value.(*HashValue).Len())
 	}
 }

@@ -170,8 +170,8 @@ func TestStoreFlush(t *testing.T) {
 func TestHashOperations(t *testing.T) {
 	s := NewStore()
 
-	h := &HashValue{Fields: make(map[string][]byte)}
-	h.Fields["field1"] = []byte("value1")
+	h := NewHashFrom(make(map[string][]byte))
+	h.SetFieldKeepTTL("field1", []byte("value1"))
 	s.Set("hash1", h, SetOptions{})
 
 	entry, exists := s.Get("hash1")
@@ -180,8 +180,8 @@ func TestHashOperations(t *testing.T) {
 	}
 
 	hv := entry.Value.(*HashValue)
-	if string(hv.Fields["field1"]) != "value1" {
-		t.Errorf("expected value1, got %s", hv.Fields["field1"])
+	if string(hv.Field("field1")) != "value1" {
+		t.Errorf("expected value1, got %s", hv.Field("field1"))
 	}
 }
 

@@ -55,7 +55,7 @@ func cmdRESTORELegacy(ctx *Context) error {
 	case store.DataTypeString:
 		value = &store.StringValue{Data: []byte(data)}
 	case store.DataTypeHash:
-		hv := &store.HashValue{Fields: make(map[string][]byte)}
+		hv := &store.HashValue{}
 		if len(data) > 0 {
 			pairs := strings.Split(data, "&")
 			for _, pair := range pairs {

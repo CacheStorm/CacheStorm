@@ -82,7 +82,7 @@ func TestObjectCommands(t *testing.T) {
 	RegisterStringCommands(router)
 
 	s.Set("mykey", &store.StringValue{Data: []byte("myvalue")}, store.SetOptions{})
-	s.Set("myhash", &store.HashValue{Fields: map[string][]byte{"field1": []byte("value1")}}, store.SetOptions{})
+	s.Set("myhash", store.NewHashFrom(map[string][]byte{"field1": []byte("value1")}), store.SetOptions{})
 	s.Set("mylist", &store.ListValue{Elements: [][]byte{[]byte("item1"), []byte("item2")}}, store.SetOptions{})
 	s.Set("myset", &store.SetValue{Members: map[string]struct{}{"member1": {}}}, store.SetOptions{})
 	s.Set("myzset", store.NewSortedSetFrom(map[string]float64{"member1": 1.0}), store.SetOptions{})
@@ -856,7 +856,7 @@ func TestCacheCommands(t *testing.T) {
 	s.Set("key1", &store.StringValue{Data: []byte("value1")}, store.SetOptions{})
 	s.Set("key2", &store.StringValue{Data: []byte("value2")}, store.SetOptions{})
 	s.Set("key3", &store.StringValue{Data: []byte("value3")}, store.SetOptions{})
-	s.Set("hash1", &store.HashValue{Fields: map[string][]byte{"field1": []byte("value1")}}, store.SetOptions{})
+	s.Set("hash1", store.NewHashFrom(map[string][]byte{"field1": []byte("value1")}), store.SetOptions{})
 	s.Set("list1", &store.ListValue{Elements: [][]byte{[]byte("item1"), []byte("item2")}}, store.SetOptions{})
 	s.Set("set1", &store.SetValue{Members: map[string]struct{}{"member1": {}, "member2": {}}}, store.SetOptions{})
 
@@ -2699,7 +2699,7 @@ func TestHashCommandsExtendedCoverage(t *testing.T) {
 	router := NewRouter()
 	RegisterHashCommands(router)
 
-	s.Set("hash1", &store.HashValue{Fields: map[string][]byte{"f1": []byte("v1"), "f2": []byte("v2")}}, store.SetOptions{})
+	s.Set("hash1", store.NewHashFrom(map[string][]byte{"f1": []byte("v1"), "f2": []byte("v2")}), store.SetOptions{})
 
 	tests := []struct {
 		name string

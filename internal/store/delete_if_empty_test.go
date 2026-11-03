@@ -63,7 +63,7 @@ func TestDeleteIfEmptyOnlyRemovesTheSameEmptyValue(t *testing.T) {
 func TestGetOrCreate(t *testing.T) {
 	s := NewStore()
 	watched := s.WatchKey("k")
-	v, created, err := s.GetOrCreate("k", func() Value { return &HashValue{Fields: map[string][]byte{}} })
+	v, created, err := s.GetOrCreate("k", func() Value { return NewHashFrom(map[string][]byte{}) })
 	if err != nil || !created {
 		t.Fatalf("created=%v err=%v", created, err)
 	}

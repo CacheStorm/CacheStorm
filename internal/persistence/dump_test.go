@@ -103,9 +103,9 @@ func TestDecodeLegacyRedisCollectionEncodings(t *testing.T) {
 		expected store.Value
 	}{
 		{"ziplist-list", blob(10, list), &store.ListValue{Elements: [][]byte{[]byte("a")}}},
-		{"ziplist-hash", blob(13, hash), &store.HashValue{Fields: map[string][]byte{"a": []byte("b")}}},
+		{"ziplist-hash", blob(13, hash), store.NewHashFrom(map[string][]byte{"a": []byte("b")})},
 		{"ziplist-zset", blob(12, zset), store.NewSortedSetFrom(map[string]float64{"a": 1.5})},
-		{"zipmap", blob(9, []byte{1, 1, 'a', 1, 0, 'b', 255}), &store.HashValue{Fields: map[string][]byte{"a": []byte("b")}}},
+		{"zipmap", blob(9, []byte{1, 1, 'a', 1, 0, 'b', 255}), store.NewHashFrom(map[string][]byte{"a": []byte("b")})},
 		{"quicklist", append([]byte{14, 1}, blob(0, list)[1:]...), &store.ListValue{Elements: [][]byte{[]byte("a")}}},
 		{"old-zset", []byte{3, 1, 1, 'a', 3, '1', '.', '5'}, store.NewSortedSetFrom(map[string]float64{"a": 1.5})},
 		{"intset16", blob(11, []byte{2, 0, 0, 0, 2, 0, 0, 0, 255, 255, 255, 127}), &store.SetValue{Members: map[string]struct{}{"-1": {}, "32767": {}}}},
