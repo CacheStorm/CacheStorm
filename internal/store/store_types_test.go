@@ -99,7 +99,7 @@ func TestEncodeGeohash(t *testing.T) {
 }
 
 func TestSortedSetValueMethods(t *testing.T) {
-	sv := &SortedSetValue{Members: map[string]float64{"a": 1.0, "b": 2.0, "c": 3.0}}
+	sv := NewSortedSetFrom(map[string]float64{"a": 1.0, "b": 2.0, "c": 3.0})
 
 	if sv.Type() != DataTypeSortedSet {
 		t.Errorf("expected DataTypeSortedSet, got %v", sv.Type())
@@ -115,7 +115,7 @@ func TestSortedSetValueMethods(t *testing.T) {
 	}
 
 	cloned := sv.Clone().(*SortedSetValue)
-	if len(cloned.Members) != len(sv.Members) {
+	if cloned.Card() != sv.Card() {
 		t.Error("clone should have same number of members")
 	}
 
@@ -127,7 +127,7 @@ func TestSortedSetValueMethods(t *testing.T) {
 }
 
 func TestSortedSetValueGetSortedRange(t *testing.T) {
-	sv := &SortedSetValue{Members: map[string]float64{"a": 1.0, "b": 2.0, "c": 3.0}}
+	sv := NewSortedSetFrom(map[string]float64{"a": 1.0, "b": 2.0, "c": 3.0})
 
 	entries := sv.GetSortedRange(0, -1, false, false)
 	if len(entries) != 3 {
@@ -154,7 +154,7 @@ func TestSortedSetValueGetSortedRange(t *testing.T) {
 }
 
 func TestSortedSetValueRank(t *testing.T) {
-	sv := &SortedSetValue{Members: map[string]float64{"a": 1.0, "b": 2.0, "c": 3.0}}
+	sv := NewSortedSetFrom(map[string]float64{"a": 1.0, "b": 2.0, "c": 3.0})
 
 	rank := sv.Rank("a", false)
 	if rank != 0 {

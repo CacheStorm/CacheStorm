@@ -54,7 +54,7 @@ func TestCollectionHelpersKeepSize(t *testing.T) {
 		t.Fatalf("set SizeOf=%d, want %d", got, want)
 	}
 
-	z := &SortedSetValue{Members: map[string]float64{"a": 1, "b": 2, "c": 3}}
+	z := NewSortedSetFrom(map[string]float64{"a": 1, "b": 2, "c": 3})
 	z.SizeOf()
 	z.Add("a", 5)
 	z.Add("dd", 1)

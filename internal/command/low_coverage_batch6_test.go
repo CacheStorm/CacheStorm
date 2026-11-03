@@ -43,7 +43,7 @@ func TestSortedSetCommandsLowCoverageBatch6(t *testing.T) {
 	router := NewRouter()
 	RegisterSortedSetCommands(router)
 
-	s.Set("zset1", &store.SortedSetValue{Members: map[string]float64{"member1": 1.0, "member2": 2.0}}, store.SetOptions{})
+	s.Set("zset1", store.NewSortedSetFrom(map[string]float64{"member1": 1.0, "member2": 2.0}), store.SetOptions{})
 
 	tests := []struct {
 		name string

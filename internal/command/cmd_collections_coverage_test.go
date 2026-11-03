@@ -804,7 +804,7 @@ func TestZADD_Coverage(t *testing.T) {
 	})
 
 	t.Run("NX flag skip existing", func(t *testing.T) {
-		s.Set("z3", &store.SortedSetValue{Members: map[string]float64{"a": 1.0}}, store.SetOptions{})
+		s.Set("z3", store.NewSortedSetFrom(map[string]float64{"a": 1.0}), store.SetOptions{})
 		ctx := discardCtx("ZADD", [][]byte{barg("z3"), barg("NX"), barg("5"), barg("a"), barg("2"), barg("b")}, s)
 		if err := cmdZADD(ctx); err != nil {
 			t.Fatal(err)
@@ -812,7 +812,7 @@ func TestZADD_Coverage(t *testing.T) {
 	})
 
 	t.Run("XX flag skip new", func(t *testing.T) {
-		s.Set("z4", &store.SortedSetValue{Members: map[string]float64{"a": 1.0}}, store.SetOptions{})
+		s.Set("z4", store.NewSortedSetFrom(map[string]float64{"a": 1.0}), store.SetOptions{})
 		ctx := discardCtx("ZADD", [][]byte{barg("z4"), barg("XX"), barg("5"), barg("a"), barg("2"), barg("newmem")}, s)
 		if err := cmdZADD(ctx); err != nil {
 			t.Fatal(err)
@@ -827,7 +827,7 @@ func TestZADD_Coverage(t *testing.T) {
 	})
 
 	t.Run("GT flag", func(t *testing.T) {
-		s.Set("z6", &store.SortedSetValue{Members: map[string]float64{"a": 5.0}}, store.SetOptions{})
+		s.Set("z6", store.NewSortedSetFrom(map[string]float64{"a": 5.0}), store.SetOptions{})
 		ctx := discardCtx("ZADD", [][]byte{barg("z6"), barg("GT"), barg("3"), barg("a"), barg("10"), barg("b")}, s)
 		if err := cmdZADD(ctx); err != nil {
 			t.Fatal(err)
@@ -835,7 +835,7 @@ func TestZADD_Coverage(t *testing.T) {
 	})
 
 	t.Run("LT flag", func(t *testing.T) {
-		s.Set("z7", &store.SortedSetValue{Members: map[string]float64{"a": 5.0}}, store.SetOptions{})
+		s.Set("z7", store.NewSortedSetFrom(map[string]float64{"a": 5.0}), store.SetOptions{})
 		ctx := discardCtx("ZADD", [][]byte{barg("z7"), barg("LT"), barg("3"), barg("a")}, s)
 		if err := cmdZADD(ctx); err != nil {
 			t.Fatal(err)
@@ -843,7 +843,7 @@ func TestZADD_Coverage(t *testing.T) {
 	})
 
 	t.Run("CH flag", func(t *testing.T) {
-		s.Set("z8", &store.SortedSetValue{Members: map[string]float64{"a": 1.0}}, store.SetOptions{})
+		s.Set("z8", store.NewSortedSetFrom(map[string]float64{"a": 1.0}), store.SetOptions{})
 		ctx := discardCtx("ZADD", [][]byte{barg("z8"), barg("CH"), barg("5"), barg("a")}, s)
 		if err := cmdZADD(ctx); err != nil {
 			t.Fatal(err)
@@ -851,7 +851,7 @@ func TestZADD_Coverage(t *testing.T) {
 	})
 
 	t.Run("INCR flag", func(t *testing.T) {
-		s.Set("z9", &store.SortedSetValue{Members: map[string]float64{"a": 1.0}}, store.SetOptions{})
+		s.Set("z9", store.NewSortedSetFrom(map[string]float64{"a": 1.0}), store.SetOptions{})
 		ctx := discardCtx("ZADD", [][]byte{barg("z9"), barg("INCR"), barg("5"), barg("a")}, s)
 		if err := cmdZADD(ctx); err != nil {
 			t.Fatal(err)
@@ -866,7 +866,7 @@ func TestZADD_Coverage(t *testing.T) {
 	})
 
 	t.Run("INCR with XX on missing member", func(t *testing.T) {
-		s.Set("z11", &store.SortedSetValue{Members: map[string]float64{}}, store.SetOptions{})
+		s.Set("z11", store.NewSortedSetFrom(map[string]float64{}), store.SetOptions{})
 		ctx := discardCtx("ZADD", [][]byte{barg("z11"), barg("XX"), barg("INCR"), barg("5"), barg("missing")}, s)
 		if err := cmdZADD(ctx); err != nil {
 			t.Fatal(err)
@@ -910,7 +910,7 @@ func TestZADD_Coverage(t *testing.T) {
 	})
 
 	t.Run("XX on empty set", func(t *testing.T) {
-		s.Set("z16", &store.SortedSetValue{Members: map[string]float64{}}, store.SetOptions{})
+		s.Set("z16", store.NewSortedSetFrom(map[string]float64{}), store.SetOptions{})
 		ctx := discardCtx("ZADD", [][]byte{barg("z16"), barg("XX"), barg("1"), barg("a")}, s)
 		if err := cmdZADD(ctx); err != nil {
 			t.Fatal(err)
@@ -936,7 +936,7 @@ func TestZREM_Coverage(t *testing.T) {
 	})
 
 	t.Run("remove existing", func(t *testing.T) {
-		s.Set("zr1", &store.SortedSetValue{Members: map[string]float64{"a": 1, "b": 2}}, store.SetOptions{})
+		s.Set("zr1", store.NewSortedSetFrom(map[string]float64{"a": 1, "b": 2}), store.SetOptions{})
 		ctx := discardCtx("ZREM", [][]byte{barg("zr1"), barg("a")}, s)
 		if err := cmdZREM(ctx); err != nil {
 			t.Fatal(err)
@@ -944,7 +944,7 @@ func TestZREM_Coverage(t *testing.T) {
 	})
 
 	t.Run("remove all empties key", func(t *testing.T) {
-		s.Set("zr2", &store.SortedSetValue{Members: map[string]float64{"a": 1}}, store.SetOptions{})
+		s.Set("zr2", store.NewSortedSetFrom(map[string]float64{"a": 1}), store.SetOptions{})
 		ctx := discardCtx("ZREM", [][]byte{barg("zr2"), barg("a")}, s)
 		if err := cmdZREM(ctx); err != nil {
 			t.Fatal(err)
@@ -978,7 +978,7 @@ func TestZSCORE_Coverage(t *testing.T) {
 	})
 
 	t.Run("member exists", func(t *testing.T) {
-		s.Set("zs1", &store.SortedSetValue{Members: map[string]float64{"a": 3.14}}, store.SetOptions{})
+		s.Set("zs1", store.NewSortedSetFrom(map[string]float64{"a": 3.14}), store.SetOptions{})
 		ctx := discardCtx("ZSCORE", [][]byte{barg("zs1"), barg("a")}, s)
 		if err := cmdZSCORE(ctx); err != nil {
 			t.Fatal(err)
@@ -1019,7 +1019,7 @@ func TestZRANK_Coverage(t *testing.T) {
 	})
 
 	t.Run("member exists", func(t *testing.T) {
-		s.Set("zrk1", &store.SortedSetValue{Members: map[string]float64{"a": 1, "b": 2, "c": 3}}, store.SetOptions{})
+		s.Set("zrk1", store.NewSortedSetFrom(map[string]float64{"a": 1, "b": 2, "c": 3}), store.SetOptions{})
 		ctx := discardCtx("ZRANK", [][]byte{barg("zrk1"), barg("b")}, s)
 		if err := cmdZRANK(ctx); err != nil {
 			t.Fatal(err)
@@ -1052,7 +1052,7 @@ func TestZCARD_Coverage(t *testing.T) {
 	})
 
 	t.Run("existing zset", func(t *testing.T) {
-		s.Set("zc1", &store.SortedSetValue{Members: map[string]float64{"a": 1, "b": 2}}, store.SetOptions{})
+		s.Set("zc1", store.NewSortedSetFrom(map[string]float64{"a": 1, "b": 2}), store.SetOptions{})
 		ctx := discardCtx("ZCARD", [][]byte{barg("zc1")}, s)
 		if err := cmdZCARD(ctx); err != nil {
 			t.Fatal(err)
@@ -1092,7 +1092,7 @@ func TestZCOUNT_Coverage(t *testing.T) {
 	})
 
 	t.Run("count in range", func(t *testing.T) {
-		s.Set("zcnt1", &store.SortedSetValue{Members: map[string]float64{"a": 1, "b": 5, "c": 10}}, store.SetOptions{})
+		s.Set("zcnt1", store.NewSortedSetFrom(map[string]float64{"a": 1, "b": 5, "c": 10}), store.SetOptions{})
 		ctx := discardCtx("ZCOUNT", [][]byte{barg("zcnt1"), barg("0"), barg("6")}, s)
 		if err := cmdZCOUNT(ctx); err != nil {
 			t.Fatal(err)
@@ -1125,7 +1125,7 @@ func TestZINCRBY_Coverage(t *testing.T) {
 	})
 
 	t.Run("existing member", func(t *testing.T) {
-		s.Set("zi2", &store.SortedSetValue{Members: map[string]float64{"a": 10}}, store.SetOptions{})
+		s.Set("zi2", store.NewSortedSetFrom(map[string]float64{"a": 10}), store.SetOptions{})
 		ctx := discardCtx("ZINCRBY", [][]byte{barg("zi2"), barg("3"), barg("a")}, s)
 		if err := cmdZINCRBY(ctx); err != nil {
 			t.Fatal(err)
@@ -1165,7 +1165,7 @@ func TestZRANGEBYSCORE_Coverage(t *testing.T) {
 	})
 
 	t.Run("success", func(t *testing.T) {
-		s.Set("zrbs1", &store.SortedSetValue{Members: map[string]float64{"a": 1, "b": 5, "c": 10}}, store.SetOptions{})
+		s.Set("zrbs1", store.NewSortedSetFrom(map[string]float64{"a": 1, "b": 5, "c": 10}), store.SetOptions{})
 		ctx := discardCtx("ZRANGEBYSCORE", [][]byte{barg("zrbs1"), barg("0"), barg("6")}, s)
 		if err := cmdZRANGEBYSCORE(ctx); err != nil {
 			t.Fatal(err)
@@ -1198,7 +1198,7 @@ func TestZRANGEBYLEX_Coverage(t *testing.T) {
 	})
 
 	t.Run("success", func(t *testing.T) {
-		s.Set("zrbl1", &store.SortedSetValue{Members: map[string]float64{"a": 0, "b": 0, "c": 0, "d": 0}}, store.SetOptions{})
+		s.Set("zrbl1", store.NewSortedSetFrom(map[string]float64{"a": 0, "b": 0, "c": 0, "d": 0}), store.SetOptions{})
 		ctx := discardCtx("ZRANGEBYLEX", [][]byte{barg("zrbl1"), barg("-"), barg("+")}, s)
 		if err := cmdZRANGEBYLEX(ctx); err != nil {
 			t.Fatal(err)
@@ -1259,7 +1259,7 @@ func TestZRANGE_Coverage(t *testing.T) {
 	})
 
 	t.Run("by index", func(t *testing.T) {
-		s.Set("zrng1", &store.SortedSetValue{Members: map[string]float64{"a": 1, "b": 2, "c": 3}}, store.SetOptions{})
+		s.Set("zrng1", store.NewSortedSetFrom(map[string]float64{"a": 1, "b": 2, "c": 3}), store.SetOptions{})
 		ctx := discardCtx("ZRANGE", [][]byte{barg("zrng1"), barg("0"), barg("-1")}, s)
 		if err := cmdZRANGE(ctx); err != nil {
 			t.Fatal(err)
@@ -1295,7 +1295,7 @@ func TestZRANGE_Coverage(t *testing.T) {
 	})
 
 	t.Run("BYLEX", func(t *testing.T) {
-		s.Set("zrng2", &store.SortedSetValue{Members: map[string]float64{"a": 0, "b": 0, "c": 0}}, store.SetOptions{})
+		s.Set("zrng2", store.NewSortedSetFrom(map[string]float64{"a": 0, "b": 0, "c": 0}), store.SetOptions{})
 		ctx := discardCtx("ZRANGE", [][]byte{barg("zrng2"), barg("[a"), barg("[c"), barg("BYLEX")}, s)
 		if err := cmdZRANGE(ctx); err != nil {
 			t.Fatal(err)
@@ -1384,7 +1384,7 @@ func TestZREVRANGE_Coverage(t *testing.T) {
 	})
 
 	t.Run("success", func(t *testing.T) {
-		s.Set("zrv1", &store.SortedSetValue{Members: map[string]float64{"a": 1, "b": 2, "c": 3}}, store.SetOptions{})
+		s.Set("zrv1", store.NewSortedSetFrom(map[string]float64{"a": 1, "b": 2, "c": 3}), store.SetOptions{})
 		ctx := discardCtx("ZREVRANGE", [][]byte{barg("zrv1"), barg("0"), barg("-1")}, s)
 		if err := cmdZREVRANGE(ctx); err != nil {
 			t.Fatal(err)
@@ -1417,7 +1417,7 @@ func TestZPOPMIN_Coverage(t *testing.T) {
 	})
 
 	t.Run("pop single", func(t *testing.T) {
-		s.Set("zpm1", &store.SortedSetValue{Members: map[string]float64{"a": 1, "b": 2, "c": 3}}, store.SetOptions{})
+		s.Set("zpm1", store.NewSortedSetFrom(map[string]float64{"a": 1, "b": 2, "c": 3}), store.SetOptions{})
 		ctx := discardCtx("ZPOPMIN", [][]byte{barg("zpm1")}, s)
 		if err := cmdZPOPMIN(ctx); err != nil {
 			t.Fatal(err)
@@ -1425,7 +1425,7 @@ func TestZPOPMIN_Coverage(t *testing.T) {
 	})
 
 	t.Run("pop with count", func(t *testing.T) {
-		s.Set("zpm2", &store.SortedSetValue{Members: map[string]float64{"a": 1, "b": 2, "c": 3}}, store.SetOptions{})
+		s.Set("zpm2", store.NewSortedSetFrom(map[string]float64{"a": 1, "b": 2, "c": 3}), store.SetOptions{})
 		ctx := discardCtx("ZPOPMIN", [][]byte{barg("zpm2"), barg("2")}, s)
 		if err := cmdZPOPMIN(ctx); err != nil {
 			t.Fatal(err)
@@ -1440,7 +1440,7 @@ func TestZPOPMIN_Coverage(t *testing.T) {
 	})
 
 	t.Run("empty zset", func(t *testing.T) {
-		s.Set("zpm3", &store.SortedSetValue{Members: map[string]float64{}}, store.SetOptions{})
+		s.Set("zpm3", store.NewSortedSetFrom(map[string]float64{}), store.SetOptions{})
 		ctx := discardCtx("ZPOPMIN", [][]byte{barg("zpm3")}, s)
 		if err := cmdZPOPMIN(ctx); err != nil {
 			t.Fatal(err)
@@ -1466,7 +1466,7 @@ func TestZPOPMAX_Coverage(t *testing.T) {
 	})
 
 	t.Run("pop single", func(t *testing.T) {
-		s.Set("zpx1", &store.SortedSetValue{Members: map[string]float64{"a": 1, "b": 2, "c": 3}}, store.SetOptions{})
+		s.Set("zpx1", store.NewSortedSetFrom(map[string]float64{"a": 1, "b": 2, "c": 3}), store.SetOptions{})
 		ctx := discardCtx("ZPOPMAX", [][]byte{barg("zpx1")}, s)
 		if err := cmdZPOPMAX(ctx); err != nil {
 			t.Fatal(err)
@@ -1474,7 +1474,7 @@ func TestZPOPMAX_Coverage(t *testing.T) {
 	})
 
 	t.Run("pop with count", func(t *testing.T) {
-		s.Set("zpx2", &store.SortedSetValue{Members: map[string]float64{"a": 1, "b": 2, "c": 3}}, store.SetOptions{})
+		s.Set("zpx2", store.NewSortedSetFrom(map[string]float64{"a": 1, "b": 2, "c": 3}), store.SetOptions{})
 		ctx := discardCtx("ZPOPMAX", [][]byte{barg("zpx2"), barg("2")}, s)
 		if err := cmdZPOPMAX(ctx); err != nil {
 			t.Fatal(err)
@@ -1521,7 +1521,7 @@ func TestZRANGESTORE_Coverage(t *testing.T) {
 	})
 
 	t.Run("success", func(t *testing.T) {
-		s.Set("zrss1", &store.SortedSetValue{Members: map[string]float64{"a": 1, "b": 2, "c": 3}}, store.SetOptions{})
+		s.Set("zrss1", store.NewSortedSetFrom(map[string]float64{"a": 1, "b": 2, "c": 3}), store.SetOptions{})
 		ctx := discardCtx("ZRANGESTORE", [][]byte{barg("zrsdst"), barg("zrss1"), barg("0"), barg("-1")}, s)
 		if err := cmdZRANGESTORE(ctx); err != nil {
 			t.Fatal(err)
@@ -1536,7 +1536,7 @@ func TestZRANGESTORE_Coverage(t *testing.T) {
 	})
 
 	t.Run("empty result", func(t *testing.T) {
-		s.Set("zrss2", &store.SortedSetValue{Members: map[string]float64{"a": 1}}, store.SetOptions{})
+		s.Set("zrss2", store.NewSortedSetFrom(map[string]float64{"a": 1}), store.SetOptions{})
 		ctx := discardCtx("ZRANGESTORE", [][]byte{barg("zrsdst3"), barg("zrss2"), barg("5"), barg("10")}, s)
 		if err := cmdZRANGESTORE(ctx); err != nil {
 			t.Fatal(err)
@@ -1562,7 +1562,7 @@ func TestZLEXCOUNT_Coverage(t *testing.T) {
 	})
 
 	t.Run("count", func(t *testing.T) {
-		s.Set("zlc1", &store.SortedSetValue{Members: map[string]float64{"a": 0, "b": 0, "c": 0}}, store.SetOptions{})
+		s.Set("zlc1", store.NewSortedSetFrom(map[string]float64{"a": 0, "b": 0, "c": 0}), store.SetOptions{})
 		ctx := discardCtx("ZLEXCOUNT", [][]byte{barg("zlc1"), barg("-"), barg("+")}, s)
 		if err := cmdZLEXCOUNT(ctx); err != nil {
 			t.Fatal(err)
@@ -1588,7 +1588,7 @@ func TestZMSCORE_Coverage(t *testing.T) {
 	})
 
 	t.Run("mixed existing and missing", func(t *testing.T) {
-		s.Set("zms1", &store.SortedSetValue{Members: map[string]float64{"a": 1.5, "c": 3.5}}, store.SetOptions{})
+		s.Set("zms1", store.NewSortedSetFrom(map[string]float64{"a": 1.5, "c": 3.5}), store.SetOptions{})
 		ctx := discardCtx("ZMSCORE", [][]byte{barg("zms1"), barg("a"), barg("b"), barg("c")}, s)
 		if err := cmdZMSCORE(ctx); err != nil {
 			t.Fatal(err)
@@ -1621,7 +1621,7 @@ func TestZRANDMEMBER_Coverage(t *testing.T) {
 	})
 
 	t.Run("positive count", func(t *testing.T) {
-		s.Set("zrm1", &store.SortedSetValue{Members: map[string]float64{"a": 1, "b": 2, "c": 3}}, store.SetOptions{})
+		s.Set("zrm1", store.NewSortedSetFrom(map[string]float64{"a": 1, "b": 2, "c": 3}), store.SetOptions{})
 		ctx := discardCtx("ZRANDMEMBER", [][]byte{barg("zrm1"), barg("COUNT"), barg("2")}, s)
 		if err := cmdZRANDMEMBER(ctx); err != nil {
 			t.Fatal(err)
@@ -1689,7 +1689,7 @@ func TestZSCAN_Coverage(t *testing.T) {
 	})
 
 	t.Run("scan with defaults", func(t *testing.T) {
-		s.Set("zsc1", &store.SortedSetValue{Members: map[string]float64{"a": 1, "b": 2, "c": 3}}, store.SetOptions{})
+		s.Set("zsc1", store.NewSortedSetFrom(map[string]float64{"a": 1, "b": 2, "c": 3}), store.SetOptions{})
 		ctx := discardCtx("ZSCAN", [][]byte{barg("zsc1"), barg("0")}, s)
 		if err := cmdZSCAN(ctx); err != nil {
 			t.Fatal(err)
@@ -1764,8 +1764,8 @@ func TestZDIFF_Coverage(t *testing.T) {
 	})
 
 	t.Run("diff two sets", func(t *testing.T) {
-		s.Set("zd1a", &store.SortedSetValue{Members: map[string]float64{"a": 1, "b": 2, "c": 3}}, store.SetOptions{})
-		s.Set("zd1b", &store.SortedSetValue{Members: map[string]float64{"b": 2}}, store.SetOptions{})
+		s.Set("zd1a", store.NewSortedSetFrom(map[string]float64{"a": 1, "b": 2, "c": 3}), store.SetOptions{})
+		s.Set("zd1b", store.NewSortedSetFrom(map[string]float64{"b": 2}), store.SetOptions{})
 		ctx := discardCtx("ZDIFF", [][]byte{barg("2"), barg("zd1a"), barg("zd1b")}, s)
 		if err := cmdZDIFF(ctx); err != nil {
 			t.Fatal(err)
@@ -1780,8 +1780,8 @@ func TestZDIFF_Coverage(t *testing.T) {
 	})
 
 	t.Run("diff yields empty", func(t *testing.T) {
-		s.Set("zd2a", &store.SortedSetValue{Members: map[string]float64{"a": 1}}, store.SetOptions{})
-		s.Set("zd2b", &store.SortedSetValue{Members: map[string]float64{"a": 1}}, store.SetOptions{})
+		s.Set("zd2a", store.NewSortedSetFrom(map[string]float64{"a": 1}), store.SetOptions{})
+		s.Set("zd2b", store.NewSortedSetFrom(map[string]float64{"a": 1}), store.SetOptions{})
 		ctx := discardCtx("ZDIFF", [][]byte{barg("2"), barg("zd2a"), barg("zd2b")}, s)
 		if err := cmdZDIFF(ctx); err != nil {
 			t.Fatal(err)
@@ -1821,8 +1821,8 @@ func TestZUNION_Coverage(t *testing.T) {
 	})
 
 	t.Run("union two sets", func(t *testing.T) {
-		s.Set("zu1a", &store.SortedSetValue{Members: map[string]float64{"a": 1, "b": 2}}, store.SetOptions{})
-		s.Set("zu1b", &store.SortedSetValue{Members: map[string]float64{"b": 3, "c": 4}}, store.SetOptions{})
+		s.Set("zu1a", store.NewSortedSetFrom(map[string]float64{"a": 1, "b": 2}), store.SetOptions{})
+		s.Set("zu1b", store.NewSortedSetFrom(map[string]float64{"b": 3, "c": 4}), store.SetOptions{})
 		ctx := discardCtx("ZUNION", [][]byte{barg("2"), barg("zu1a"), barg("zu1b")}, s)
 		if err := cmdZUNION(ctx); err != nil {
 			t.Fatal(err)
@@ -1911,8 +1911,8 @@ func TestZINTER_Coverage(t *testing.T) {
 	s := store.NewStore()
 
 	t.Run("two sets with overlap", func(t *testing.T) {
-		s.Set("zn1a", &store.SortedSetValue{Members: map[string]float64{"a": 1, "b": 2, "c": 3}}, store.SetOptions{})
-		s.Set("zn1b", &store.SortedSetValue{Members: map[string]float64{"b": 5, "c": 6, "d": 7}}, store.SetOptions{})
+		s.Set("zn1a", store.NewSortedSetFrom(map[string]float64{"a": 1, "b": 2, "c": 3}), store.SetOptions{})
+		s.Set("zn1b", store.NewSortedSetFrom(map[string]float64{"b": 5, "c": 6, "d": 7}), store.SetOptions{})
 		ctx := discardCtx("ZINTER", [][]byte{barg("2"), barg("zn1a"), barg("zn1b")}, s)
 		if err := cmdZINTER(ctx); err != nil {
 			t.Fatal(err)
@@ -1927,7 +1927,7 @@ func TestZINTER_Coverage(t *testing.T) {
 	})
 
 	t.Run("second key not found", func(t *testing.T) {
-		s.Set("zn2", &store.SortedSetValue{Members: map[string]float64{"a": 1}}, store.SetOptions{})
+		s.Set("zn2", store.NewSortedSetFrom(map[string]float64{"a": 1}), store.SetOptions{})
 		ctx := discardCtx("ZINTER", [][]byte{barg("2"), barg("zn2"), barg("nosuch")}, s)
 		if err := cmdZINTER(ctx); err != nil {
 			t.Fatal(err)
@@ -1967,8 +1967,8 @@ func TestZUNIONSTORE_Coverage(t *testing.T) {
 	})
 
 	t.Run("store union", func(t *testing.T) {
-		s.Set("zus1a", &store.SortedSetValue{Members: map[string]float64{"a": 1, "b": 2}}, store.SetOptions{})
-		s.Set("zus1b", &store.SortedSetValue{Members: map[string]float64{"b": 3, "c": 4}}, store.SetOptions{})
+		s.Set("zus1a", store.NewSortedSetFrom(map[string]float64{"a": 1, "b": 2}), store.SetOptions{})
+		s.Set("zus1b", store.NewSortedSetFrom(map[string]float64{"b": 3, "c": 4}), store.SetOptions{})
 		ctx := discardCtx("ZUNIONSTORE", [][]byte{barg("zusdst"), barg("2"), barg("zus1a"), barg("zus1b")}, s)
 		if err := cmdZUNIONSTORE(ctx); err != nil {
 			t.Fatal(err)
@@ -2029,8 +2029,8 @@ func TestZINTERSTORE_Coverage(t *testing.T) {
 	})
 
 	t.Run("store intersection", func(t *testing.T) {
-		s.Set("zis1a", &store.SortedSetValue{Members: map[string]float64{"a": 1, "b": 2}}, store.SetOptions{})
-		s.Set("zis1b", &store.SortedSetValue{Members: map[string]float64{"b": 3, "c": 4}}, store.SetOptions{})
+		s.Set("zis1a", store.NewSortedSetFrom(map[string]float64{"a": 1, "b": 2}), store.SetOptions{})
+		s.Set("zis1b", store.NewSortedSetFrom(map[string]float64{"b": 3, "c": 4}), store.SetOptions{})
 		ctx := discardCtx("ZINTERSTORE", [][]byte{barg("zisdst"), barg("2"), barg("zis1a"), barg("zis1b")}, s)
 		if err := cmdZINTERSTORE(ctx); err != nil {
 			t.Fatal(err)
@@ -2045,7 +2045,7 @@ func TestZINTERSTORE_Coverage(t *testing.T) {
 	})
 
 	t.Run("second key not found", func(t *testing.T) {
-		s.Set("zis2", &store.SortedSetValue{Members: map[string]float64{"a": 1}}, store.SetOptions{})
+		s.Set("zis2", store.NewSortedSetFrom(map[string]float64{"a": 1}), store.SetOptions{})
 		ctx := discardCtx("ZINTERSTORE", [][]byte{barg("zisdst3"), barg("2"), barg("zis2"), barg("nosuch")}, s)
 		if err := cmdZINTERSTORE(ctx); err != nil {
 			t.Fatal(err)
@@ -2053,8 +2053,8 @@ func TestZINTERSTORE_Coverage(t *testing.T) {
 	})
 
 	t.Run("empty intersection result", func(t *testing.T) {
-		s.Set("zis3a", &store.SortedSetValue{Members: map[string]float64{"a": 1}}, store.SetOptions{})
-		s.Set("zis3b", &store.SortedSetValue{Members: map[string]float64{"z": 2}}, store.SetOptions{})
+		s.Set("zis3a", store.NewSortedSetFrom(map[string]float64{"a": 1}), store.SetOptions{})
+		s.Set("zis3b", store.NewSortedSetFrom(map[string]float64{"z": 2}), store.SetOptions{})
 		ctx := discardCtx("ZINTERSTORE", [][]byte{barg("zisdst4"), barg("2"), barg("zis3a"), barg("zis3b")}, s)
 		if err := cmdZINTERSTORE(ctx); err != nil {
 			t.Fatal(err)
@@ -2087,8 +2087,8 @@ func TestZDIFFSTORE_Coverage(t *testing.T) {
 	})
 
 	t.Run("store diff", func(t *testing.T) {
-		s.Set("zds1a", &store.SortedSetValue{Members: map[string]float64{"a": 1, "b": 2, "c": 3}}, store.SetOptions{})
-		s.Set("zds1b", &store.SortedSetValue{Members: map[string]float64{"b": 2}}, store.SetOptions{})
+		s.Set("zds1a", store.NewSortedSetFrom(map[string]float64{"a": 1, "b": 2, "c": 3}), store.SetOptions{})
+		s.Set("zds1b", store.NewSortedSetFrom(map[string]float64{"b": 2}), store.SetOptions{})
 		ctx := discardCtx("ZDIFFSTORE", [][]byte{barg("zdsdst"), barg("2"), barg("zds1a"), barg("zds1b")}, s)
 		if err := cmdZDIFFSTORE(ctx); err != nil {
 			t.Fatal(err)
@@ -2096,8 +2096,8 @@ func TestZDIFFSTORE_Coverage(t *testing.T) {
 	})
 
 	t.Run("diff yields empty", func(t *testing.T) {
-		s.Set("zds2a", &store.SortedSetValue{Members: map[string]float64{"a": 1}}, store.SetOptions{})
-		s.Set("zds2b", &store.SortedSetValue{Members: map[string]float64{"a": 1}}, store.SetOptions{})
+		s.Set("zds2a", store.NewSortedSetFrom(map[string]float64{"a": 1}), store.SetOptions{})
+		s.Set("zds2b", store.NewSortedSetFrom(map[string]float64{"a": 1}), store.SetOptions{})
 		ctx := discardCtx("ZDIFFSTORE", [][]byte{barg("zdsdst2"), barg("2"), barg("zds2a"), barg("zds2b")}, s)
 		if err := cmdZDIFFSTORE(ctx); err != nil {
 			t.Fatal(err)

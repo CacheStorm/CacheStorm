@@ -24,8 +24,8 @@ func TestSortedSetIndexMatchesSortedMembers(t *testing.T) {
 		if step%500 != 0 {
 			continue
 		}
-		want := make([]SortedEntry, 0, len(v.Members))
-		for m, s := range v.Members {
+		want := make([]SortedEntry, 0, v.Card())
+		for m, s := range v.All() {
 			want = append(want, SortedEntry{Member: m, Score: s})
 		}
 		sort.Sort(sortedEntries(want))
@@ -67,7 +67,7 @@ func TestSortedSetIndexMatchesSortedMembers(t *testing.T) {
 // Members filled directly, as the snapshot loader does, get their order on
 // first use.
 func TestSortedSetIndexBuiltFromMembers(t *testing.T) {
-	v := &SortedSetValue{Members: map[string]float64{"c": 1, "a": 2, "b": 1}}
+	v := NewSortedSetFrom(map[string]float64{"c": 1, "a": 2, "b": 1})
 	got := v.GetAllEntries()
 	if len(got) != 3 || got[0].Member != "b" || got[1].Member != "c" || got[2].Member != "a" {
 		t.Fatalf("order %v", got)
@@ -86,9 +86,9 @@ func TestSortedSetIndexBuiltFromMembers(t *testing.T) {
 // Readers holding the read lock may race to build the order of a set filled
 // directly; they build it once and all see it.
 func TestSortedSetIndexBuiltByConcurrentReaders(t *testing.T) {
-	v := &SortedSetValue{Members: map[string]float64{}}
+	v := NewSortedSetFrom(map[string]float64{})
 	for i := 0; i < 1000; i++ {
-		v.Members["m"+strconv.Itoa(i)] = float64(i % 37)
+		v.Put("m"+strconv.Itoa(i), float64(i%37))
 	}
 	var wg sync.WaitGroup
 	for g := 0; g < 8; g++ {

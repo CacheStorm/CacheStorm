@@ -37,7 +37,7 @@ func TestLowCoverageBatch13_CachewarmCommands(t *testing.T) {
 	})
 
 	t.Run("KEYOBJECT with sorted set", func(t *testing.T) {
-		ssv := &store.SortedSetValue{Members: map[string]float64{}}
+		ssv := store.NewSortedSetFrom(map[string]float64{})
 		ssv.Add("member1", 1.0)
 		s.Set("kozset", ssv, store.SetOptions{})
 		_ = runHandler(t, router, "KEYOBJECT", [][]byte{[]byte("kozset")}, s)
@@ -266,7 +266,7 @@ func TestLowCoverageBatch13_ServerCommands(t *testing.T) {
 		s.Set("dumpset", sv, store.SetOptions{})
 		_ = runHandler(t, router, "DUMP", [][]byte{[]byte("dumpset")}, s)
 
-		ssv := &store.SortedSetValue{Members: map[string]float64{}}
+		ssv := store.NewSortedSetFrom(map[string]float64{})
 		ssv.Add("m1", 1.0)
 		s.Set("dumpzset", ssv, store.SetOptions{})
 		_ = runHandler(t, router, "DUMP", [][]byte{[]byte("dumpzset")}, s)
@@ -550,7 +550,7 @@ func TestLowCoverageBatch13_SortedSetCommands(t *testing.T) {
 	RegisterSortedSetCommands(router)
 
 	t.Run("ZRANDMEMBER with count", func(t *testing.T) {
-		ssv := &store.SortedSetValue{Members: map[string]float64{}}
+		ssv := store.NewSortedSetFrom(map[string]float64{})
 		ssv.Add("a", 1.0)
 		ssv.Add("b", 2.0)
 		ssv.Add("c", 3.0)
@@ -559,10 +559,10 @@ func TestLowCoverageBatch13_SortedSetCommands(t *testing.T) {
 	})
 
 	t.Run("ZUNIONSTORE", func(t *testing.T) {
-		ssv1 := &store.SortedSetValue{Members: map[string]float64{}}
+		ssv1 := store.NewSortedSetFrom(map[string]float64{})
 		ssv1.Add("a", 1.0)
 		s.Set("zunion1", ssv1, store.SetOptions{})
-		ssv2 := &store.SortedSetValue{Members: map[string]float64{}}
+		ssv2 := store.NewSortedSetFrom(map[string]float64{})
 		ssv2.Add("b", 2.0)
 		s.Set("zunion2", ssv2, store.SetOptions{})
 		_ = runHandler(t, router, "ZUNIONSTORE", [][]byte{
@@ -574,11 +574,11 @@ func TestLowCoverageBatch13_SortedSetCommands(t *testing.T) {
 	})
 
 	t.Run("ZINTERSTORE", func(t *testing.T) {
-		ssv1 := &store.SortedSetValue{Members: map[string]float64{}}
+		ssv1 := store.NewSortedSetFrom(map[string]float64{})
 		ssv1.Add("a", 1.0)
 		ssv1.Add("b", 2.0)
 		s.Set("zinter1", ssv1, store.SetOptions{})
-		ssv2 := &store.SortedSetValue{Members: map[string]float64{}}
+		ssv2 := store.NewSortedSetFrom(map[string]float64{})
 		ssv2.Add("a", 3.0)
 		ssv2.Add("c", 4.0)
 		s.Set("zinter2", ssv2, store.SetOptions{})
@@ -591,11 +591,11 @@ func TestLowCoverageBatch13_SortedSetCommands(t *testing.T) {
 	})
 
 	t.Run("ZDIFFSTORE", func(t *testing.T) {
-		ssv1 := &store.SortedSetValue{Members: map[string]float64{}}
+		ssv1 := store.NewSortedSetFrom(map[string]float64{})
 		ssv1.Add("a", 1.0)
 		ssv1.Add("b", 2.0)
 		s.Set("zdiff1", ssv1, store.SetOptions{})
-		ssv2 := &store.SortedSetValue{Members: map[string]float64{}}
+		ssv2 := store.NewSortedSetFrom(map[string]float64{})
 		ssv2.Add("a", 3.0)
 		s.Set("zdiff2", ssv2, store.SetOptions{})
 		_ = runHandler(t, router, "ZDIFFSTORE", [][]byte{

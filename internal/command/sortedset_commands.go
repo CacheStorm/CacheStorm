@@ -300,7 +300,7 @@ func storeSortedSet(ctx *Context, dst string, entries []store.SortedEntry, event
 		}
 		return nil
 	}
-	z := &store.SortedSetValue{Members: make(map[string]float64, len(entries))}
+	z := store.NewSortedSet(len(entries))
 	for _, e := range entries {
 		z.Add(e.Member, e.Score)
 	}
@@ -382,7 +382,7 @@ flags:
 	}
 
 	maxLen := 0
-	if len(zset.Members) == 0 {
+	if zset.Card() == 0 {
 		for j := 0; j < pairs; j++ {
 			maxLen = max(maxLen, len(ctx.Arg(i+2*j+1)))
 		}
@@ -394,7 +394,7 @@ flags:
 	for j := 0; j < pairs; j++ {
 		score := scores[j]
 		member := ctx.ArgString(i + 2*j + 1)
-		cur, exists := zset.Members[member]
+		cur, exists := zset.GetScore(member)
 		if exists {
 			if nx {
 				continue
@@ -423,7 +423,7 @@ flags:
 			lastScore = score
 		}
 	}
-	empty := len(zset.Members) == 0
+	empty := zset.Card() == 0
 	zset.Unlock()
 	if added+updated > 0 {
 		if incr {
@@ -468,7 +468,7 @@ func cmdZCARD(ctx *Context) error {
 	}
 
 	zset.RLock()
-	reply := int64(len(zset.Members))
+	reply := int64(zset.Card())
 	zset.RUnlock()
 	return ctx.WriteInteger(reply)
 }
@@ -519,12 +519,12 @@ func cmdZINCRBY(ctx *Context) error {
 
 	newScore := incr
 	changed := true
-	if cur, exists := zset.Members[member]; exists {
+	if cur, exists := zset.GetScore(member); exists {
 		newScore = cur + incr
 		changed = newScore != cur
 	}
 	if math.IsNaN(newScore) {
-		empty := len(zset.Members) == 0
+		empty := zset.Card() == 0
 		zset.Unlock()
 		if empty {
 			deleteIfEmpty(ctx, key, zset)
@@ -736,7 +736,7 @@ func zrankGeneric(ctx *Context, reverse bool) error {
 
 	member := ctx.ArgString(1)
 	zset.RLock()
-	score, exists := zset.Members[member]
+	score, exists := zset.GetScore(member)
 	rank := 0
 	if exists {
 		rank = zset.Rank(member, reverse)
@@ -779,12 +779,12 @@ func cmdZREM(ctx *Context) error {
 	removed := 0
 	for i := 1; i < ctx.ArgCount(); i++ {
 		member := ctx.ArgString(i)
-		if _, exists := zset.Members[member]; exists {
+		if _, exists := zset.GetScore(member); exists {
 			zset.Remove(member)
 			removed++
 		}
 	}
-	isEmpty := len(zset.Members) == 0
+	isEmpty := zset.Card() == 0
 	zset.Unlock()
 
 	if removed > 0 {
@@ -813,7 +813,7 @@ func zremRange(ctx *Context, key, event string, pick func(z *store.SortedSetValu
 	for _, e := range victims {
 		zset.Remove(e.Member)
 	}
-	isEmpty := len(zset.Members) == 0
+	isEmpty := zset.Card() == 0
 	zset.Unlock()
 
 	if len(victims) > 0 {
@@ -886,7 +886,7 @@ func cmdZSCORE(ctx *Context) error {
 	}
 
 	zset.RLock()
-	score, exists := zset.Members[ctx.ArgString(1)]
+	score, exists := zset.GetScore(ctx.ArgString(1))
 	zset.RUnlock()
 	if !exists {
 		return ctx.WriteNull()
@@ -913,7 +913,7 @@ func cmdZMSCORE(ctx *Context) error {
 			result = append(result, resp.NullValue())
 			continue
 		}
-		if score, exists := zset.Members[ctx.ArgString(i)]; exists {
+		if score, exists := zset.GetScore(ctx.ArgString(i)); exists {
 			result = append(result, zScoreValue(score))
 		} else {
 			result = append(result, resp.NullValue())
@@ -972,8 +972,8 @@ func cmdZSCAN(ctx *Context) error {
 	}
 
 	zset.RLock()
-	members, next := collectionScanPage(zset, len(zset.Members), cursor, opts.count, func(emit func(string)) {
-		for m := range zset.Members {
+	members, next := collectionScanPage(zset, zset.Card(), cursor, opts.count, func(emit func(string)) {
+		for m := range zset.All() {
 			emit(m)
 		}
 	})
@@ -982,7 +982,7 @@ func cmdZSCAN(ctx *Context) error {
 		if opts.match && !matchPattern(m, opts.pattern) {
 			continue
 		}
-		items = append(items, resp.BulkString(m), resp.BulkString(formatZScore(zset.Members[m])))
+		items = append(items, resp.BulkString(m), resp.BulkString(formatZScore(zset.Score(m))))
 	}
 	zset.RUnlock()
 
@@ -1011,7 +1011,7 @@ func zpopFrom(ctx *Context, key string, count int, max bool) []store.SortedEntry
 	if err != nil || zset == nil {
 		return nil
 	}
-	if len(zset.Members) == 0 {
+	if zset.Card() == 0 {
 		zset.Unlock()
 		return nil
 	}
@@ -1019,7 +1019,7 @@ func zpopFrom(ctx *Context, key string, count int, max bool) []store.SortedEntry
 	for _, e := range all {
 		zset.Remove(e.Member)
 	}
-	isEmpty := len(zset.Members) == 0
+	isEmpty := zset.Card() == 0
 	zset.Unlock()
 
 	if max {
@@ -1144,10 +1144,18 @@ func cmdZRANDMEMBER(ctx *Context) error {
 	}
 
 	zset.RLock()
-	picked := randomKeys(zset.Members, count)
-	out := make([]store.SortedEntry, len(picked))
-	for i, m := range picked {
-		out[i] = store.SortedEntry{Member: m, Score: zset.Members[m]}
+	var out []store.SortedEntry
+	if dict := zset.Dict(); dict != nil {
+		picked := randomKeys(dict, count)
+		out = make([]store.SortedEntry, len(picked))
+		for i, m := range picked {
+			out[i] = store.SortedEntry{Member: m, Score: dict[m]}
+		}
+	} else {
+		all := zset.GetAllEntries()
+		for _, i := range randomIndexes(len(all), count) {
+			out = append(out, all[i])
+		}
 	}
 	zset.RUnlock()
 	return ctx.Writer.WriteValue(zEntriesValue(ctx, out, withScores))
@@ -1215,8 +1223,8 @@ func zsetOpGeneric(ctx *Context, op int, hasDst, cardOnly bool) error {
 		switch v := entry.Value.(type) {
 		case *store.SortedSetValue:
 			v.RLock()
-			srcs[i].members = make(map[string]float64, len(v.Members))
-			for m, s := range v.Members {
+			srcs[i].members = make(map[string]float64, v.Card())
+			for m, s := range v.All() {
 				srcs[i].members[m] = s
 			}
 			v.RUnlock()

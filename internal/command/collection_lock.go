@@ -66,7 +66,7 @@ func lockExisting[T lockableCollection](ctx *Context, key string) (T, error) {
 
 func newList() *store.ListValue { return &store.ListValue{Elements: make([][]byte, 0)} }
 func newSortedSet() *store.SortedSetValue {
-	return &store.SortedSetValue{Members: make(map[string]float64)}
+	return &store.SortedSetValue{}
 }
 
 // lockOrCreateList returns the list at key write-locked, creating it empty.

@@ -619,7 +619,7 @@ func emptyCollection(value Value) bool {
 	case *SortedSetValue:
 		v.RLock()
 		defer v.RUnlock()
-		return len(v.Members) == 0
+		return v.Card() == 0
 	}
 	return false
 }

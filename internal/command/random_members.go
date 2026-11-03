@@ -70,3 +70,36 @@ func randomKeys[V any](m map[string]V, count int64) []string {
 	}
 	return out
 }
+
+// randomIndexes is randomKeys for a collection of n items held in order.
+func randomIndexes(n int, count int64) []int {
+	if n == 0 || count == 0 {
+		return nil
+	}
+	if count < 0 {
+		reps := min(-count, maxRandRepeats)
+		out := make([]int, reps)
+		for i := range out {
+			out[i] = rand.Intn(n)
+		}
+		return out
+	}
+	if count*3 > int64(n) {
+		all := rand.Perm(n)
+		if count < int64(n) {
+			all = all[:count]
+		}
+		return all
+	}
+	out := make([]int, 0, count)
+	seen := make(map[int]struct{}, count)
+	for int64(len(out)) < count {
+		k := rand.Intn(n)
+		if _, dup := seen[k]; dup {
+			continue
+		}
+		seen[k] = struct{}{}
+		out = append(out, k)
+	}
+	return out
+}

@@ -745,9 +745,9 @@ func TestStore_GetTTL_WithTTL(t *testing.T) {
 // =============================
 
 func TestSortedSet_GetSortedRange_NegativeIndices(t *testing.T) {
-	ss := &SortedSetValue{Members: map[string]float64{
+	ss := NewSortedSetFrom(map[string]float64{
 		"a": 1, "b": 2, "c": 3, "d": 4, "e": 5,
-	}}
+	})
 
 	// Negative start
 	entries := ss.GetSortedRange(-3, -1, false, false)
@@ -781,9 +781,9 @@ func TestSortedSet_GetSortedRange_NegativeIndices(t *testing.T) {
 }
 
 func TestSortedSet_RemoveRangeByRank_NegativeIndices(t *testing.T) {
-	ss := &SortedSetValue{Members: map[string]float64{
+	ss := NewSortedSetFrom(map[string]float64{
 		"a": 1, "b": 2, "c": 3,
-	}}
+	})
 
 	// Remove with negative stop
 	removed := ss.RemoveRangeByRank(0, -1)
@@ -793,9 +793,9 @@ func TestSortedSet_RemoveRangeByRank_NegativeIndices(t *testing.T) {
 }
 
 func TestSortedSet_RemoveRangeByRank_Invalid(t *testing.T) {
-	ss := &SortedSetValue{Members: map[string]float64{
+	ss := NewSortedSetFrom(map[string]float64{
 		"a": 1, "b": 2,
-	}}
+	})
 
 	// start > stop
 	removed := ss.RemoveRangeByRank(5, 1)
@@ -805,9 +805,9 @@ func TestSortedSet_RemoveRangeByRank_Invalid(t *testing.T) {
 }
 
 func TestSortedSet_LexCompare_AllBranches(t *testing.T) {
-	ss := &SortedSetValue{Members: map[string]float64{
+	ss := NewSortedSetFrom(map[string]float64{
 		"a": 0, "b": 0, "c": 0, "d": 0, "m": 0, "z": 0,
-	}}
+	})
 
 	// "-" min, "+" max
 	count := ss.LexCount("-", "+")
@@ -847,9 +847,9 @@ func TestSortedSet_LexCompare_AllBranches(t *testing.T) {
 }
 
 func TestSortedSet_RangeByLex_OffsetCount(t *testing.T) {
-	ss := &SortedSetValue{Members: map[string]float64{
+	ss := NewSortedSetFrom(map[string]float64{
 		"a": 0, "b": 0, "c": 0, "d": 0, "e": 0,
-	}}
+	})
 
 	// With offset and count
 	result := ss.RangeByLex("-", "+", 1, 2, false)
@@ -877,9 +877,9 @@ func TestSortedSet_RangeByLex_OffsetCount(t *testing.T) {
 }
 
 func TestSortedSet_GetByScoreRange(t *testing.T) {
-	ss := &SortedSetValue{Members: map[string]float64{
+	ss := NewSortedSetFrom(map[string]float64{
 		"a": 1, "b": 2, "c": 3, "d": 4,
-	}}
+	})
 
 	// Inclusive
 	entries := ss.GetByScoreRange(2, false, 3, false, false)
@@ -910,9 +910,9 @@ func TestSortedSet_GetByScoreRange(t *testing.T) {
 }
 
 func TestSortedSet_GetByLexRange(t *testing.T) {
-	ss := &SortedSetValue{Members: map[string]float64{
+	ss := NewSortedSetFrom(map[string]float64{
 		"a": 0, "b": 0, "c": 0, "d": 0,
-	}}
+	})
 
 	// Inclusive
 	entries := ss.GetByLexRange("b", false, "c", false, false)
@@ -2039,9 +2039,9 @@ func TestWorkflowStatus_String(t *testing.T) {
 }
 
 func TestSortedSetValue_RemoveRangeByRank_ClampedNegatives(t *testing.T) {
-	ss := &SortedSetValue{Members: map[string]float64{
+	ss := NewSortedSetFrom(map[string]float64{
 		"a": 1, "b": 2, "c": 3,
-	}}
+	})
 
 	// Both negative
 	removed := ss.RemoveRangeByRank(-100, -1)
@@ -2051,9 +2051,9 @@ func TestSortedSetValue_RemoveRangeByRank_ClampedNegatives(t *testing.T) {
 }
 
 func TestSortedSetValue_GetSortedRange_Reverse(t *testing.T) {
-	ss := &SortedSetValue{Members: map[string]float64{
+	ss := NewSortedSetFrom(map[string]float64{
 		"a": 1, "b": 2, "c": 3,
-	}}
+	})
 
 	entries := ss.GetSortedRange(0, -1, false, true)
 	if len(entries) != 3 {
@@ -2207,9 +2207,9 @@ func TestMatchPattern_TrailingStar(t *testing.T) {
 
 // sorted_set.go:160 - RemoveRangeByRank: stop >= n (clamped)
 func TestSortedSet_RemoveRangeByRank_StopClamped(t *testing.T) {
-	ss := &SortedSetValue{Members: map[string]float64{
+	ss := NewSortedSetFrom(map[string]float64{
 		"a": 1, "b": 2, "c": 3,
-	}}
+	})
 	removed := ss.RemoveRangeByRank(0, 100)
 	if removed != 3 {
 		t.Fatalf("expected 3, got %d", removed)

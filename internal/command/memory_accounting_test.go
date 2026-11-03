@@ -70,7 +70,7 @@ func refValueSize(v store.Value) int64 {
 		return n
 	case *store.SortedSetValue:
 		n := int64(930)
-		for k := range v.Members {
+		for k := range v.All() {
 			n += int64(len(k)) + 122
 		}
 		return n

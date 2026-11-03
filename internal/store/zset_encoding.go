@@ -37,12 +37,17 @@ func (v *SortedSetValue) Big() bool { return v.big }
 // lexicographic range by rank instead of in order. The caller holds the
 // value's lock.
 func (v *SortedSetValue) Skiplist() bool {
-	return v.big || int64(len(v.Members)) > zsetListpackEntries.Load()
+	return v.big || int64(v.Card()) > zsetListpackEntries.Load()
 }
 
 // ConvertToSkiplist makes the set a skiplist, as Redis' zsetConvert. The
 // caller holds the value's write lock.
-func (v *SortedSetValue) ConvertToSkiplist() { v.big = true }
+func (v *SortedSetValue) ConvertToSkiplist() {
+	v.big = true
+	if v.dict == nil {
+		v.toDict()
+	}
+}
 
 // NoteAdd is ZADD's zsetTypeCreate and zsetTypeMaybeConvert: a command adding
 // n members makes the set a skiplist when they could not all fit a listpack,
@@ -55,6 +60,6 @@ func (v *SortedSetValue) NoteAdd(n, maxLen int) {
 
 func (v *SortedSetValue) noteAddLocked(n, maxLen int) {
 	if int64(n) > zsetListpackEntries.Load() || int64(maxLen) > zsetListpackValue.Load() {
-		v.big = true
+		v.ConvertToSkiplist()
 	}
 }

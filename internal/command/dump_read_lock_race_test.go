@@ -222,7 +222,7 @@ func TestDumpControlsUncontended(t *testing.T) {
 		case *store.ListValue:
 			count = len(v.Elements)
 		case *store.SortedSetValue:
-			count = len(v.Members)
+			count = v.Card()
 		}
 		if count != 4 {
 			t.Fatalf("DUMP %s members=%d want 4", key, count)

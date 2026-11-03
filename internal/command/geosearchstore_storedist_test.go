@@ -95,8 +95,8 @@ func TestGeoSearchStoreStoreDist(t *testing.T) {
 				if !isGeo {
 					t.Fatalf("without STOREDIST destination type = %T, want SortedSetValue", entry.Value)
 				}
-				if len(geo.Members) != 2 {
-					t.Fatalf("destination has %d members, want 2", len(geo.Members))
+				if geo.Card() != 2 {
+					t.Fatalf("destination has %d members, want 2", geo.Card())
 				}
 				return
 			}
@@ -106,7 +106,7 @@ func TestGeoSearchStoreStoreDist(t *testing.T) {
 				t.Fatalf("STOREDIST destination type = %T, want SortedSetValue with distances as scores", entry.Value)
 			}
 			for member, want := range tc.wantScores {
-				gotScore, exists := zset.Members[member]
+				gotScore, exists := zset.GetScore(member)
 				if !exists {
 					t.Fatalf("STOREDIST result missing member %q", member)
 				}

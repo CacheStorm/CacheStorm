@@ -315,7 +315,7 @@ func (ctx *Context) waitForZSetKeys(keys []string, timeout time.Duration) (strin
 		}
 		z.RLock()
 		defer z.RUnlock()
-		return len(z.Members) > 0
+		return z.Card() > 0
 	}))
 }
 

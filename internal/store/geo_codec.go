@@ -79,7 +79,7 @@ func geoDistance(a, b GeoPoint, sin, cos, asin func(float64) float64) float64 {
 func (v *GeoValue) SortedSet() (*SortedSetValue, bool) {
 	v.RLock()
 	defer v.RUnlock()
-	result := &SortedSetValue{Members: make(map[string]float64, len(v.Points))}
+	result := NewSortedSet(len(v.Points))
 	for member, point := range v.Points {
 		if math.IsNaN(point.Lon) || math.IsNaN(point.Lat) || point.Lon < -180 || point.Lon > 180 || point.Lat < -GeoLatitudeLimit || point.Lat > GeoLatitudeLimit {
 			return nil, false

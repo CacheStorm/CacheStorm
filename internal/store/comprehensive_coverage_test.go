@@ -1887,10 +1887,10 @@ func TestMemoryTrackerExtended(t *testing.T) {
 }
 
 func TestSortedSetValueMethods2(t *testing.T) {
-	ss := &SortedSetValue{Members: make(map[string]float64)}
-	ss.Members["a"] = 1.0
-	ss.Members["b"] = 2.0
-	ss.Members["c"] = 3.0
+	ss := NewSortedSetFrom(make(map[string]float64))
+	ss.Put("a", 1.0)
+	ss.Put("b", 2.0)
+	ss.Put("c", 3.0)
 
 	t.Run("Count", func(t *testing.T) {
 		count := ss.Count(1.0, 2.5)
@@ -1914,10 +1914,10 @@ func TestSortedSetValueMethods2(t *testing.T) {
 	})
 
 	t.Run("RemoveRangeByRank", func(t *testing.T) {
-		ss2 := &SortedSetValue{Members: make(map[string]float64)}
-		ss2.Members["a"] = 1.0
-		ss2.Members["b"] = 2.0
-		ss2.Members["c"] = 3.0
+		ss2 := NewSortedSetFrom(make(map[string]float64))
+		ss2.Put("a", 1.0)
+		ss2.Put("b", 2.0)
+		ss2.Put("c", 3.0)
 		removed := ss2.RemoveRangeByRank(0, 0)
 		if removed != 1 {
 			t.Errorf("RemoveRangeByRank(0, 0) = %d, want 1", removed)
@@ -1925,10 +1925,10 @@ func TestSortedSetValueMethods2(t *testing.T) {
 	})
 
 	t.Run("RemoveRangeByScore", func(t *testing.T) {
-		ss3 := &SortedSetValue{Members: make(map[string]float64)}
-		ss3.Members["a"] = 1.0
-		ss3.Members["b"] = 2.0
-		ss3.Members["c"] = 3.0
+		ss3 := NewSortedSetFrom(make(map[string]float64))
+		ss3.Put("a", 1.0)
+		ss3.Put("b", 2.0)
+		ss3.Put("c", 3.0)
 		removed := ss3.RemoveRangeByScore(1.0, 2.5)
 		if removed != 2 {
 			t.Errorf("RemoveRangeByScore = %d, want 2", removed)
@@ -1936,8 +1936,8 @@ func TestSortedSetValueMethods2(t *testing.T) {
 	})
 
 	t.Run("Remove", func(t *testing.T) {
-		ss4 := &SortedSetValue{Members: make(map[string]float64)}
-		ss4.Members["a"] = 1.0
+		ss4 := NewSortedSetFrom(make(map[string]float64))
+		ss4.Put("a", 1.0)
 		if !ss4.Remove("a") {
 			t.Error("Remove should return true")
 		}
@@ -1958,7 +1958,7 @@ func TestSortedSetValueMethods2(t *testing.T) {
 	})
 
 	t.Run("Add", func(t *testing.T) {
-		ss5 := &SortedSetValue{Members: make(map[string]float64)}
+		ss5 := NewSortedSetFrom(make(map[string]float64))
 		if !ss5.Add("a", 1.0) {
 			t.Error("Add new member should return true")
 		}
@@ -1974,10 +1974,10 @@ func TestSortedSetValueMethods2(t *testing.T) {
 	})
 
 	t.Run("LexCount", func(t *testing.T) {
-		ss6 := &SortedSetValue{Members: make(map[string]float64)}
-		ss6.Members["a"] = 0
-		ss6.Members["b"] = 0
-		ss6.Members["c"] = 0
+		ss6 := NewSortedSetFrom(make(map[string]float64))
+		ss6.Put("a", 0)
+		ss6.Put("b", 0)
+		ss6.Put("c", 0)
 		count := ss6.LexCount("[a", "[b")
 		if count != 2 {
 			t.Errorf("LexCount = %d, want 2", count)
@@ -1985,10 +1985,10 @@ func TestSortedSetValueMethods2(t *testing.T) {
 	})
 
 	t.Run("RangeByLex", func(t *testing.T) {
-		ss7 := &SortedSetValue{Members: make(map[string]float64)}
-		ss7.Members["a"] = 0
-		ss7.Members["b"] = 0
-		ss7.Members["c"] = 0
+		ss7 := NewSortedSetFrom(make(map[string]float64))
+		ss7.Put("a", 0)
+		ss7.Put("b", 0)
+		ss7.Put("c", 0)
 		result := ss7.RangeByLex("[a", "[b", 0, 10, false)
 		if len(result) != 2 {
 			t.Errorf("RangeByLex returned %d entries, want 2", len(result))
@@ -1996,10 +1996,10 @@ func TestSortedSetValueMethods2(t *testing.T) {
 	})
 
 	t.Run("RangeByLexReverse", func(t *testing.T) {
-		ss8 := &SortedSetValue{Members: make(map[string]float64)}
-		ss8.Members["a"] = 0
-		ss8.Members["b"] = 0
-		ss8.Members["c"] = 0
+		ss8 := NewSortedSetFrom(make(map[string]float64))
+		ss8.Put("a", 0)
+		ss8.Put("b", 0)
+		ss8.Put("c", 0)
 		result := ss8.RangeByLex("[a", "[b", 0, 10, true)
 		if len(result) != 2 {
 			t.Errorf("RangeByLex reverse returned %d entries, want 2", len(result))
@@ -2007,10 +2007,10 @@ func TestSortedSetValueMethods2(t *testing.T) {
 	})
 
 	t.Run("RemoveRangeByLex", func(t *testing.T) {
-		ss9 := &SortedSetValue{Members: make(map[string]float64)}
-		ss9.Members["a"] = 0
-		ss9.Members["b"] = 0
-		ss9.Members["c"] = 0
+		ss9 := NewSortedSetFrom(make(map[string]float64))
+		ss9.Put("a", 0)
+		ss9.Put("b", 0)
+		ss9.Put("c", 0)
 		removed := ss9.RemoveRangeByLex("[a", "[b")
 		if removed != 2 {
 			t.Errorf("RemoveRangeByLex = %d, want 2", removed)
@@ -2032,10 +2032,10 @@ func TestSortedSetValueMethods2(t *testing.T) {
 	})
 
 	t.Run("GetByLexRange", func(t *testing.T) {
-		ss10 := &SortedSetValue{Members: make(map[string]float64)}
-		ss10.Members["a"] = 0
-		ss10.Members["b"] = 0
-		ss10.Members["c"] = 0
+		ss10 := NewSortedSetFrom(make(map[string]float64))
+		ss10.Put("a", 0)
+		ss10.Put("b", 0)
+		ss10.Put("c", 0)
 		result := ss10.GetByLexRange("a", false, "c", false, false)
 		if len(result) != 3 {
 			t.Errorf("GetByLexRange returned %d entries, want 3", len(result))

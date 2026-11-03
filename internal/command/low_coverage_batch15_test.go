@@ -45,7 +45,7 @@ func TestLowCoverageBatch15_DUMP_RESTORE_COPY(t *testing.T) {
 	})
 
 	t.Run("DUMP sorted set value", func(t *testing.T) {
-		ssv := &store.SortedSetValue{Members: map[string]float64{}}
+		ssv := store.NewSortedSetFrom(map[string]float64{})
 		ssv.Add("member1", 1.0)
 		s.Set("dump_zset", ssv, store.SetOptions{})
 		_ = runHandler(t, router, "DUMP", [][]byte{[]byte("dump_zset")}, s)

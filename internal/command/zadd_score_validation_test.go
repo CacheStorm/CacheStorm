@@ -53,8 +53,8 @@ func TestZAddScoreValidationIsAtomic(t *testing.T) {
 			t.Fatalf("NaN accepted: %q", got)
 		}
 		z := entry.Value.(*store.SortedSetValue)
-		t.Logf("EXPECTED: a=1 and cardinality=2 ACTUAL: a=%v cardinality=%d", z.Members["a"], len(z.Members))
-		if z.Members["a"] != 1 || len(z.Members) != 2 {
+		t.Logf("EXPECTED: a=1 and cardinality=2 ACTUAL: a=%v cardinality=%d", z.Score("a"), z.Card())
+		if z.Score("a") != 1 || z.Card() != 2 {
 			t.Fatal("existing set partially changed")
 		}
 	}

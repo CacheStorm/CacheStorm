@@ -85,7 +85,7 @@ func TestObjectCommands(t *testing.T) {
 	s.Set("myhash", &store.HashValue{Fields: map[string][]byte{"field1": []byte("value1")}}, store.SetOptions{})
 	s.Set("mylist", &store.ListValue{Elements: [][]byte{[]byte("item1"), []byte("item2")}}, store.SetOptions{})
 	s.Set("myset", &store.SetValue{Members: map[string]struct{}{"member1": {}}}, store.SetOptions{})
-	s.Set("myzset", &store.SortedSetValue{Members: map[string]float64{"member1": 1.0}}, store.SetOptions{})
+	s.Set("myzset", store.NewSortedSetFrom(map[string]float64{"member1": 1.0}), store.SetOptions{})
 
 	tests := []struct {
 		name string

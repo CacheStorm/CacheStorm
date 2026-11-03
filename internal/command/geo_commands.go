@@ -45,7 +45,7 @@ func geoPoints(ctx *Context, key string, members ...string) (points map[string]s
 	case *store.SortedSetValue:
 		value.RLock()
 		for _, member := range members {
-			if score, found := value.Members[member]; found {
+			if score, found := value.GetScore(member); found {
 				points[member] = store.GeoPointFromScore(score)
 			}
 		}
@@ -89,7 +89,7 @@ options:
 
 	remaining := ctx.ArgCount() - argIdx
 	if remaining < 3 || remaining%3 != 0 {
-		return ctx.WriteError(ErrWrongArgCount)
+		return ctx.WriteError(ErrSyntaxError)
 	}
 
 	historical := ctx.Replaying || ctx.LegacyReplay
@@ -170,7 +170,7 @@ options:
 				score := store.GeoScore(point.Lon, point.Lat)
 				existing, exists := updates[member]
 				if !exists && zset != nil {
-					existing, exists = zset.Members[member]
+					existing, exists = zset.GetScore(member)
 				}
 				if (xx && !exists) || (nx && exists) {
 					continue
@@ -195,7 +195,7 @@ options:
 					target.Lock()
 					defer target.Unlock()
 				} else if target == nil {
-					target = &store.SortedSetValue{Members: make(map[string]float64, len(updates))}
+					target = store.NewSortedSet(len(updates))
 				}
 				target.NoteAdd(len(points), maxLen)
 				for member, score := range updates {
@@ -237,7 +237,7 @@ func applyHistoricalGeoAdd(ctx *Context, key string, points []store.GeoPoint, ar
 			case *store.SortedSetValue:
 				geo = store.NewGeoValue()
 				current.RLock()
-				for member, score := range current.Members {
+				for member, score := range current.All() {
 					point := store.GeoPointFromScore(score)
 					geo.Add(member, point.Lon, point.Lat)
 				}
@@ -351,7 +351,7 @@ func geoUnitMeters(unit string) (float64, bool) {
 }
 
 func cmdGEOHASH(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
+	if ctx.ArgCount() < 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
@@ -389,7 +389,7 @@ func cmdGEOHASH(ctx *Context) error {
 }
 
 func cmdGEOPOS(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
+	if ctx.ArgCount() < 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
@@ -439,7 +439,7 @@ func geoPositionString(value float64) string {
 
 func publishGeoResult(ctx *Context, key string, value *store.SortedSetValue) error {
 	ctx.writeEffectsHandled = true
-	if value == nil || len(value.Members) == 0 {
+	if value == nil || value.Card() == 0 {
 		if ctx.Store.Delete(key) {
 			ctx.PropagateAs(ExecutedCommand{Name: "DEL", Args: [][]byte{[]byte(key)}, DB: ctx.DB})
 			ctx.notify(store.NotifyGeneric, "del", key)
@@ -461,5 +461,5 @@ func publishGeoResult(ctx *Context, key string, value *store.SortedSetValue) err
 	} else {
 		ctx.notify(store.NotifyZSet, "georadiusstore", key)
 	}
-	return ctx.WriteInteger(int64(len(value.Members)))
+	return ctx.WriteInteger(int64(value.Card()))
 }

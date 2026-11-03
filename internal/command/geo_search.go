@@ -579,7 +579,7 @@ func geoSearchGeneric(ctx *Context, src int, flags int) error {
 		if len(hits) == 0 {
 			return publishGeoResult(ctx, storeKey, nil)
 		}
-		dest := &store.SortedSetValue{Members: make(map[string]float64, len(hits))}
+		dest := store.NewSortedSet(len(hits))
 		for _, h := range hits {
 			score := h.score
 			if storeDist {

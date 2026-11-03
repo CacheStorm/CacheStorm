@@ -1824,7 +1824,7 @@ func TestAdvCoverage_EXEC_QueuedZADD_ZREM(t *testing.T) {
 
 func TestAdvCoverage_EXEC_QueuedZCARD_ZSCORE(t *testing.T) {
 	s := store.NewStore()
-	zv := &store.SortedSetValue{Members: map[string]float64{"a": 1.0}}
+	zv := store.NewSortedSetFrom(map[string]float64{"a": 1.0})
 	s.Set("zset", zv, store.SetOptions{})
 	ctx := newDiscardContext("EXEC", nil, s)
 	ctx.Transaction.Start()

@@ -868,8 +868,8 @@ func (rw *AOFRewriter) writeValueCommands(w *bufio.Writer, key string, value sto
 
 	case *store.SortedSetValue:
 		vt.RLock()
-		items := make([]string, 0, len(vt.Members)*2)
-		for member, score := range vt.Members {
+		items := make([]string, 0, vt.Card()*2)
+		for member, score := range vt.All() {
 			items = append(items, strconv.FormatFloat(score, 'f', -1, 64), member)
 		}
 		vt.RUnlock()

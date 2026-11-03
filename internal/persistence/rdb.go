@@ -295,8 +295,8 @@ func (w *RDBWriter) writeValue(f io.Writer, v store.Value, valueType int) error 
 		}
 	case *store.SortedSetValue:
 		vt.RLock()
-		members := make(map[string]float64, len(vt.Members))
-		for m, score := range vt.Members {
+		members := make(map[string]float64, vt.Card())
+		for m, score := range vt.All() {
 			members[m] = score
 		}
 		vt.RUnlock()
@@ -826,7 +826,7 @@ func (r *RDBReader) readEntry(f io.Reader, valueType byte, expiresAtMS int64, ta
 			}
 			members[member] = score
 		}
-		value = &store.SortedSetValue{Members: members}
+		value = store.NewSortedSetFrom(members)
 
 	case 5:
 		length, err := r.readLength(f)

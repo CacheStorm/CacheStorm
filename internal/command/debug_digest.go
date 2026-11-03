@@ -64,7 +64,7 @@ func valueDigest(v store.Value) digest {
 	case *store.SortedSetValue:
 		val.RLock()
 		defer val.RUnlock()
-		for m, score := range val.Members {
+		for m, score := range val.All() {
 			var b [8]byte
 			binary.BigEndian.PutUint64(b[:], math.Float64bits(score))
 			d.xor(sum([]byte(m), b[:]))

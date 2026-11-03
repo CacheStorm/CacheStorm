@@ -45,7 +45,7 @@ func TestGeoSearchStoreReplacesDestination(t *testing.T) {
 			case "repeat", "ttl", "empty", "missing-source":
 				checkCount(run("GEOSEARCHSTORE", dest, src, "FROMMEMBER", "Catania", "BYRADIUS", "200", "km"), 2)
 				entry, ok := s.Get(dest)
-				if !ok || len(entry.Value.(*store.SortedSetValue).Members) != 2 {
+				if !ok || entry.Value.(*store.SortedSetValue).Card() != 2 {
 					t.Fatal("fresh destination control must contain both cities")
 				}
 				if mode == "ttl" {
@@ -79,10 +79,10 @@ func TestGeoSearchStoreReplacesDestination(t *testing.T) {
 			if !ok {
 				t.Fatalf("destination type = %T, want SortedSetValue", entry.Value)
 			}
-			if len(geo.Members) != 1 {
-				t.Errorf("destination has %d members, want only Catania; stale members survived overwrite", len(geo.Members))
+			if geo.Card() != 1 {
+				t.Errorf("destination has %d members, want only Catania; stale members survived overwrite", geo.Card())
 			}
-			if point, ok := geo.Members["Catania"]; !ok || point != store.GeoScore(15.087269, 37.502669) {
+			if point, ok := geo.GetScore("Catania"); !ok || point != store.GeoScore(15.087269, 37.502669) {
 				t.Errorf("Catania missing or changed: %+v", point)
 			}
 			if entry.ExpiresAt.Load() != 0 {
@@ -90,7 +90,7 @@ func TestGeoSearchStoreReplacesDestination(t *testing.T) {
 			}
 			if dest != src {
 				entry, ok := s.Get(src)
-				if !ok || len(entry.Value.(*store.SortedSetValue).Members) != 2 {
+				if !ok || entry.Value.(*store.SortedSetValue).Card() != 2 {
 					t.Error("search modified the source")
 				}
 			}

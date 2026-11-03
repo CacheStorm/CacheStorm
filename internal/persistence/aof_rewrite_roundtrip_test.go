@@ -48,9 +48,9 @@ func TestAOFRewriteRoundTripPreservesTypes(t *testing.T) {
 	src.Set("set:key", &store.SetValue{Members: map[string]struct{}{
 		"m1": {}, "m2": {},
 	}}, store.SetOptions{})
-	src.Set("zset:key", &store.SortedSetValue{Members: map[string]float64{
+	src.Set("zset:key", store.NewSortedSetFrom(map[string]float64{
 		"alice": 90.5, "bob": 85.25,
-	}}, store.SetOptions{})
+	}), store.SetOptions{})
 
 	geo := store.NewGeoValue()
 	geo.Add("palermo", 13.361389, 38.115556)
@@ -176,8 +176,8 @@ func TestAOFRewriteRoundTripPreservesTypes(t *testing.T) {
 	if !ok {
 		t.Fatalf("zset:key type = %T, want *store.SortedSetValue", zsetEntry.Value)
 	}
-	if zsetOut.Members["alice"] != 90.5 || zsetOut.Members["bob"] != 85.25 {
-		t.Fatalf("zset members = %+v", zsetOut.Members)
+	if zsetOut.Score("alice") != 90.5 || zsetOut.Score("bob") != 85.25 {
+		t.Fatalf("zset members = %+v", zsetOut.Map())
 	}
 
 	// Geo: exact coordinates.
@@ -189,10 +189,10 @@ func TestAOFRewriteRoundTripPreservesTypes(t *testing.T) {
 	if !ok {
 		t.Fatalf("geo:sicily type = %T, want *store.SortedSetValue", geoEntry.Value)
 	}
-	if pal := geoOut.Members["palermo"]; pal != store.GeoScore(13.361389, 38.115556) {
+	if pal := geoOut.Score("palermo"); pal != store.GeoScore(13.361389, 38.115556) {
 		t.Fatalf("palermo = %+v", pal)
 	}
-	if cat := geoOut.Members["catania"]; cat != store.GeoScore(15.087269, 37.502669) {
+	if cat := geoOut.Score("catania"); cat != store.GeoScore(15.087269, 37.502669) {
 		t.Fatalf("catania = %+v", cat)
 	}
 

@@ -13,7 +13,7 @@ import (
 func TestPersistenceSetHashZSetValueRaceX(t *testing.T) {
 	setVal := &store.SetValue{Members: map[string]struct{}{"a": {}, "b": {}}}
 	hashVal := &store.HashValue{Fields: map[string][]byte{"f": []byte("1")}}
-	zsetVal := &store.SortedSetValue{Members: map[string]float64{"m": 1}}
+	zsetVal := store.NewSortedSetFrom(map[string]float64{"m": 1})
 	writer := NewRDBWriter(store.NewStore(), RDBConfig{})
 	rewriter := &AOFRewriter{}
 
@@ -30,7 +30,7 @@ func TestPersistenceSetHashZSetValueRaceX(t *testing.T) {
 			hashVal.Fields[fmt.Sprint(i)] = []byte(fmt.Sprint(i))
 			hashVal.Unlock()
 			zsetVal.Lock()
-			zsetVal.Members[fmt.Sprint(i)] = float64(i)
+			zsetVal.Put(fmt.Sprint(i), float64(i))
 			zsetVal.Unlock()
 		}
 	}()
@@ -74,7 +74,7 @@ func TestPersistenceSetHashZSetValueRaceX(t *testing.T) {
 	hashLen := len(hashVal.Fields)
 	hashVal.RUnlock()
 	zsetVal.RLock()
-	zsetLen := len(zsetVal.Members)
+	zsetLen := zsetVal.Card()
 	zsetVal.RUnlock()
 	if setLen != 2+iterations || hashLen != 1+iterations || zsetLen != 1+iterations {
 		t.Fatalf("FAIL post-join control: set=%d hash=%d zset=%d", setLen, hashLen, zsetLen)

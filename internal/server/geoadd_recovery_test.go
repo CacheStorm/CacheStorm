@@ -40,7 +40,7 @@ func TestGeoAddRejectedWritesDoNotDivergeFromAOF(t *testing.T) {
 			}
 			entry, _ := s.store.Get("geo")
 			expected := map[string]float64{"seed": store.GeoScore(0, 0)}
-			if !reflect.DeepEqual(entry.Value.(*store.SortedSetValue).Members, expected) || s.store.GetVersion("geo") != version || s.store.MemUsage() != before {
+			if !reflect.DeepEqual(entry.Value.(*store.SortedSetValue).Map(), expected) || s.store.GetVersion("geo") != version || s.store.MemUsage() != before {
 				t.Fatal("failed write changed live data or bookkeeping")
 			}
 			s.store.UnwatchKey("geo")
@@ -56,7 +56,7 @@ func TestGeoAddRejectedWritesDoNotDivergeFromAOF(t *testing.T) {
 				t.Fatal(err)
 			}
 			entry, ok := restored.store.Get("geo")
-			if !ok || !reflect.DeepEqual(entry.Value.(*store.SortedSetValue).Members, expected) || entry.ExpiresAt.Load() != 4102444800000 || !reflect.DeepEqual(entry.TagList(), []string{"tag"}) {
+			if !ok || !reflect.DeepEqual(entry.Value.(*store.SortedSetValue).Map(), expected) || entry.ExpiresAt.Load() != 4102444800000 || !reflect.DeepEqual(entry.TagList(), []string{"tag"}) {
 				t.Fatal("live/AOF value or metadata diverged")
 			}
 		})
@@ -88,7 +88,7 @@ func TestGeoAddTrustedHistoryRemainsReadable(t *testing.T) {
 				t.Fatal(err)
 			}
 			geo, ok := s.store.Get("geo")
-			if !ok || !reflect.DeepEqual(geo.Value.(*store.SortedSetValue).Members, map[string]float64{"seed": store.GeoScore(0, 0)}) || s.store.Exists("absent") {
+			if !ok || !reflect.DeepEqual(geo.Value.(*store.SortedSetValue).Map(), map[string]float64{"seed": store.GeoScore(0, 0)}) || s.store.Exists("absent") {
 				t.Fatal("legacy conditional write changed recovered data")
 			}
 			nan, ok := s.store.Get("nan")

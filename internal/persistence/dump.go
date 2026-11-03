@@ -87,19 +87,19 @@ func EncodeDump(value store.Value) ([]byte, error) {
 	case *store.SortedSetValue:
 		v.RLock()
 		defer v.RUnlock()
-		if len(v.Members) == 0 {
+		if v.Card() == 0 {
 			return nil, ErrDumpFormat
 		}
 		out = append(out, 5)
-		out = appendDumpLength(out, uint64(len(v.Members)))
-		keys := make([]string, 0, len(v.Members))
-		for k := range v.Members {
+		out = appendDumpLength(out, uint64(v.Card()))
+		keys := make([]string, 0, v.Card())
+		for k := range v.All() {
 			keys = append(keys, k)
 		}
 		sort.Strings(keys)
 		for _, k := range keys {
 			str(k)
-			score := v.Members[k]
+			score, _ := v.GetScore(k)
 			if math.IsNaN(score) {
 				return nil, ErrDumpFormat
 			}
@@ -358,7 +358,7 @@ func (d *dumpDecoder) valueOf(typ byte) store.Value {
 		return store.NewLoadedSet(members)
 	case 3, 5:
 		n := d.count()
-		v := &store.SortedSetValue{Members: make(map[string]float64)}
+		v := store.NewSortedSet(n)
 		for i := 0; i < n && d.err == nil; i++ {
 			key := d.str()
 			var score float64
@@ -384,10 +384,10 @@ func (d *dumpDecoder) valueOf(typ byte) store.Value {
 					}
 				}
 			}
-			if _, ok := v.Members[key]; ok || math.IsNaN(score) {
+			if _, ok := v.GetScore(key); ok || math.IsNaN(score) {
 				d.err = ErrDumpFormat
 			}
-			v.Members[key] = score
+			v.Put(key, score)
 		}
 		if n == 0 {
 			d.err = ErrDumpFormat
@@ -473,13 +473,13 @@ func (d *dumpDecoder) valueOf(typ byte) store.Value {
 				d.err = ErrDumpFormat
 				return nil
 			}
-			v := &store.SortedSetValue{Members: make(map[string]float64)}
+			v := store.NewSortedSet(len(items) / 2)
 			for i := 0; i < len(items); i += 2 {
 				score, err := strconv.ParseFloat(items[i+1], 64)
-				if _, ok := v.Members[items[i]]; ok || err != nil || math.IsNaN(score) {
+				if _, ok := v.GetScore(items[i]); ok || err != nil || math.IsNaN(score) {
 					d.err = ErrDumpFormat
 				}
-				v.Members[items[i]] = score
+				v.Put(items[i], score)
 			}
 			return v
 		}

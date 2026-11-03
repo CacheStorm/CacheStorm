@@ -1423,9 +1423,9 @@ func TestRDBWriteLengthAllBranches(t *testing.T) {
 
 func TestRDBWriterSortedSetValue(t *testing.T) {
 	s := store.NewStore()
-	s.Set("zs", &store.SortedSetValue{Members: map[string]float64{
+	s.Set("zs", store.NewSortedSetFrom(map[string]float64{
 		"alice": 10.5, "bob": 20.3,
-	}}, store.SetOptions{})
+	}), store.SetOptions{})
 
 	tmpDir := t.TempDir()
 	rdbPath := filepath.Join(tmpDir, "zset.rdb")

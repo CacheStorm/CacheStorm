@@ -220,7 +220,7 @@ func getEncoding(v store.Value) string {
 		if val.Skiplist() {
 			return "skiplist"
 		}
-		for m := range val.Members {
+		for m := range val.All() {
 			if len(m) > encMaxListpackValue {
 				return "skiplist"
 			}

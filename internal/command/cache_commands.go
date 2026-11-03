@@ -209,7 +209,7 @@ func cmdCacheExport(ctx *Context) error {
 				case *store.SortedSetValue:
 					members := make([]*resp.Value, 0)
 					v.RLock()
-					for member, score := range v.Members {
+					for member, score := range v.All() {
 						members = append(members, resp.ArrayValue([]*resp.Value{
 							resp.BulkString(member),
 							resp.BulkString(strconv.FormatFloat(score, 'f', -1, 64)),

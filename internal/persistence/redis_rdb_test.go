@@ -52,7 +52,7 @@ func TestLoadRedis74RDB(t *testing.T) {
 		case *store.HashValue:
 			n = len(v.Fields)
 		case *store.SortedSetValue:
-			n = len(v.Members)
+			n = v.Card()
 		}
 		if n != want {
 			t.Fatalf("%s has %d elements, want %d", key, n, want)

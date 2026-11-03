@@ -58,7 +58,7 @@ func TestGeoRadiusReadsPreserveWatchAndAOF(t *testing.T) {
 
 func TestGeoRadiusMemberAOFFailureDoesNotAcknowledge(t *testing.T) {
 	s := fullAOFServer(t)
-	seed := &store.SortedSetValue{Members: map[string]float64{"member": store.GeoScore(0, 0)}}
+	seed := store.NewSortedSetFrom(map[string]float64{"member": store.GeoScore(0, 0)})
 	if err := s.store.Set("geo", seed, store.SetOptions{}); err != nil {
 		t.Fatal(err)
 	}

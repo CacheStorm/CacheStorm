@@ -62,7 +62,7 @@ func TestRDBComprehensive(t *testing.T) {
 
 	t.Run("RDB Writer with Sorted Set", func(t *testing.T) {
 		s := store.NewStore()
-		s.Set("zset1", &store.SortedSetValue{Members: map[string]float64{"a": 1.0}}, store.SetOptions{})
+		s.Set("zset1", store.NewSortedSetFrom(map[string]float64{"a": 1.0}), store.SetOptions{})
 
 		cfg := RDBConfig{Version: RDBVersion11, Compression: false, Checksum: true}
 		writer := NewRDBWriter(s, cfg)

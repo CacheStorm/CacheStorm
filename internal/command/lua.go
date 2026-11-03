@@ -743,7 +743,7 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 		entry, exists := e.store.Get(args[0])
 		var zset *store.SortedSetValue
 		if !exists {
-			zset = &store.SortedSetValue{Members: make(map[string]float64)}
+			zset = &store.SortedSetValue{}
 			e.store.Set(args[0], zset, store.SetOptions{})
 		} else {
 			zset = entry.Value.(*store.SortedSetValue)
@@ -751,7 +751,7 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 		// cmdZADD mutates Members under zset.Lock(); an unguarded write here
 		// races it, and concurrent map writes can abort the process.
 		zset.Lock()
-		_, already := zset.Members[args[2]]
+		_, already := zset.GetScore(args[2])
 		zset.Add(args[2], score)
 		zset.Unlock()
 		e.store.Reaccount(args[0])
@@ -771,7 +771,7 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 		if zset, ok := entry.Value.(*store.SortedSetValue); ok {
 			// cmdZADD/cmdZREM mutate Members under the zset write lock.
 			zset.RLock()
-			score, found := zset.Members[args[1]]
+			score, found := zset.GetScore(args[1])
 			zset.RUnlock()
 			if found {
 				return lua.LNumber(score)
@@ -788,7 +788,7 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 			return lua.LNumber(0)
 		}
 		if zset, ok := entry.Value.(*store.SortedSetValue); ok {
-			return lua.LNumber(len(zset.Members))
+			return lua.LNumber(zset.Card())
 		}
 		return lua.LNumber(0)
 
@@ -804,7 +804,7 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 			// cmdZREM deletes from Members under zset.Lock(); deleting here
 			// without it races that write.
 			zset.Lock()
-			_, present := zset.Members[args[1]]
+			_, present := zset.GetScore(args[1])
 			if present {
 				zset.Remove(args[1])
 			}

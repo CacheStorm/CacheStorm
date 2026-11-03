@@ -37,7 +37,7 @@ func TestLowCoverageBatch14_KeyObjectSubcommands(t *testing.T) {
 	})
 
 	t.Run("KEY.OBJECT ENCODING zset", func(t *testing.T) {
-		ssv := &store.SortedSetValue{Members: map[string]float64{}}
+		ssv := store.NewSortedSetFrom(map[string]float64{})
 		ssv.Add("m1", 1.0)
 		s.Set("ko_enc_zset", ssv, store.SetOptions{})
 		_ = runHandler(t, router, "KEY.OBJECT", [][]byte{[]byte("ENCODING"), []byte("ko_enc_zset")}, s)
@@ -440,7 +440,7 @@ func TestLowCoverageBatch14_DumpCommands(t *testing.T) {
 	})
 
 	t.Run("DUMP zset with multiple members", func(t *testing.T) {
-		ssv := &store.SortedSetValue{Members: map[string]float64{}}
+		ssv := store.NewSortedSetFrom(map[string]float64{})
 		ssv.Add("m1", 1.0)
 		ssv.Add("m2", 2.0)
 		ssv.Add("m3", 3.0)
@@ -563,7 +563,7 @@ func TestLowCoverageBatch14_CopyCommands(t *testing.T) {
 	})
 
 	t.Run("COPY zset", func(t *testing.T) {
-		ssv := &store.SortedSetValue{Members: map[string]float64{}}
+		ssv := store.NewSortedSetFrom(map[string]float64{})
 		ssv.Add("m1", 1.0)
 		s.Set("copy_zset_src", ssv, store.SetOptions{})
 		_ = runHandler(t, router, "COPY", [][]byte{

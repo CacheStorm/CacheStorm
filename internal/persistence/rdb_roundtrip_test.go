@@ -28,9 +28,9 @@ func TestRDBSaveLoadRoundTripAllTypes(t *testing.T) {
 	mustSet("list", &store.ListValue{Elements: [][]byte{[]byte("a"), []byte("b"), []byte("c")}}, store.SetOptions{})
 	mustSet("set", &store.SetValue{Members: map[string]struct{}{"x": {}, "y": {}, "z": {}}}, store.SetOptions{})
 	mustSet("hash", &store.HashValue{Fields: map[string][]byte{"f1": []byte("v1"), "f2": []byte("v2")}}, store.SetOptions{})
-	mustSet("zset", &store.SortedSetValue{Members: map[string]float64{"alice": 90.5, "bob": 85.25, "carol": 77}}, store.SetOptions{})
+	mustSet("zset", store.NewSortedSetFrom(map[string]float64{"alice": 90.5, "bob": 85.25, "carol": 77}), store.SetOptions{})
 	mustSet("string_ttl", &store.StringValue{Data: []byte("fleeting")}, store.SetOptions{TTL: 5 * time.Minute})
-	mustSet("zset_ttl", &store.SortedSetValue{Members: map[string]float64{"m": 1.5}}, store.SetOptions{TTL: 10 * time.Minute})
+	mustSet("zset_ttl", store.NewSortedSetFrom(map[string]float64{"m": 1.5}), store.SetOptions{TTL: 10 * time.Minute})
 
 	path := filepath.Join(t.TempDir(), "roundtrip.rdb")
 	writer := NewRDBWriter(src, RDBConfig{Version: RDBVersion11})
@@ -102,8 +102,8 @@ func TestRDBSaveLoadRoundTripAllTypes(t *testing.T) {
 	if !ok {
 		t.Fatalf("zset type = %T, want *store.SortedSetValue", getEntry("zset").Value)
 	}
-	if zv.Members["alice"] != 90.5 || zv.Members["bob"] != 85.25 || zv.Members["carol"] != 77 {
-		t.Errorf("zset members = %#v, want alice=90.5 bob=85.25 carol=77", zv.Members)
+	if zv.Score("alice") != 90.5 || zv.Score("bob") != 85.25 || zv.Score("carol") != 77 {
+		t.Errorf("zset members = %#v, want alice=90.5 bob=85.25 carol=77", zv.Map())
 	}
 
 	// TTLs restored via the 0xFC path (millisecond precision loses a little).

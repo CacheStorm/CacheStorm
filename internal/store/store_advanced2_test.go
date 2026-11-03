@@ -159,11 +159,11 @@ func TestStoreDataTypesAdvanced(t *testing.T) {
 	})
 
 	t.Run("Sorted Set Value Operations", func(t *testing.T) {
-		val := &SortedSetValue{Members: map[string]float64{
+		val := NewSortedSetFrom(map[string]float64{
 			"member1": 1.0,
 			"member2": 2.0,
 			"member3": 3.0,
-		}}
+		})
 
 		if val.Type() != DataTypeSortedSet {
 			t.Error("Type mismatch")
@@ -171,7 +171,7 @@ func TestStoreDataTypesAdvanced(t *testing.T) {
 
 		// Clone
 		cloned := val.Clone().(*SortedSetValue)
-		if len(cloned.Members) != 3 {
+		if cloned.Card() != 3 {
 			t.Error("Clone length mismatch")
 		}
 	})

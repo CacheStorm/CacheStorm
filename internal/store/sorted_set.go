@@ -2,16 +2,19 @@ package store
 
 import (
 	"fmt"
+	"iter"
+	"slices"
+	"sort"
 	"sync"
 	"sync/atomic"
 )
 
-// SortedSetValue keeps each member's score in Members and the members in
-// (score, member) order in a skiplist. Code outside this file only fills
-// Members directly while building a new value; the order is then derived on
-// first use.
+// SortedSetValue holds a set of at most zsetSmallMax members as a slice in
+// (score, member) order, like Redis' listpack, and a bigger one as a map of
+// scores with a skiplist for the order, built on first use.
 type SortedSetValue struct {
-	Members map[string]float64
+	small   []SortedEntry
+	dict    map[string]float64
 	mu      sync.RWMutex
 	dead    bool
 	size    sizeCounter
@@ -19,6 +22,27 @@ type SortedSetValue struct {
 	indexMu sync.Mutex
 	scanCache
 	big bool
+}
+
+// zsetSmallMax is the most members the slice form holds: its lookups are
+// linear, as a listpack's are.
+const zsetSmallMax = 128
+
+// NewSortedSet returns an empty sorted set sized for n members.
+func NewSortedSet(n int) *SortedSetValue {
+	if n > zsetSmallMax {
+		return &SortedSetValue{dict: make(map[string]float64, n)}
+	}
+	return &SortedSetValue{}
+}
+
+// NewSortedSetFrom returns a sorted set of the members and scores.
+func NewSortedSetFrom(members map[string]float64) *SortedSetValue {
+	v := NewSortedSet(len(members))
+	for m, score := range members {
+		v.Put(m, score)
+	}
+	return v
 }
 
 func (v *SortedSetValue) Lock()    { v.mu.Lock() }
@@ -30,7 +54,7 @@ func (v *SortedSetValue) RUnlock() { v.mu.RUnlock() }
 // (see ListValue.IsDead). The caller holds the value's lock.
 func (v *SortedSetValue) IsDead() bool { return v.dead }
 
-func (v *SortedSetValue) emptyLocked() bool { return len(v.Members) == 0 }
+func (v *SortedSetValue) emptyLocked() bool { return v.Card() == 0 }
 func (v *SortedSetValue) markDeadLocked()   { v.dead = true }
 
 func (v *SortedSetValue) Type() DataType { return DataTypeSortedSet }
@@ -41,7 +65,7 @@ func (v *SortedSetValue) SizeOf() int64 {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 	var n int64
-	for k := range v.Members {
+	for k := range v.All() {
 		n += zsetMemberSize(k)
 	}
 	v.size.set(n)
@@ -51,7 +75,7 @@ func (v *SortedSetValue) String() string {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 	result := ""
-	for member, score := range v.Members {
+	for member, score := range v.All() {
 		if result != "" {
 			result += ", "
 		}
@@ -62,11 +86,16 @@ func (v *SortedSetValue) String() string {
 func (v *SortedSetValue) Clone() Value {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
-	cloned := &SortedSetValue{Members: make(map[string]float64, len(v.Members)), big: v.big}
-	for k, score := range v.Members {
-		cloned.Members[k] = score
+	cloned := &SortedSetValue{big: v.big}
+	if v.dict == nil {
+		cloned.small = append([]SortedEntry(nil), v.small...)
+		return cloned
 	}
-	if z := v.index.Load(); z != nil && z.length == len(v.Members) {
+	cloned.dict = make(map[string]float64, len(v.dict))
+	for k, score := range v.dict {
+		cloned.dict[k] = score
+	}
+	if z := v.index.Load(); z != nil && z.length == len(v.dict) {
 		c := newZskiplist()
 		for x := z.first(); x != nil; x = x.level[0].forward {
 			c.insert(x.score, x.member)
@@ -89,91 +118,270 @@ func (s sortedEntries) Less(i, j int) bool {
 }
 func (s sortedEntries) Swap(i, j int) { s[i], s[j] = s[j], s[i] }
 
-// ordered returns the skiplist, building it from Members when it is missing
-// or out of step. The caller holds the value's lock (a read lock is enough).
+// All yields every member and its score: in (score, member) order for a
+// small set, in no particular order for a big one. The caller holds the
+// value's lock and does not change the set while iterating.
+func (v *SortedSetValue) All() iter.Seq2[string, float64] {
+	return func(yield func(string, float64) bool) {
+		if v.dict == nil {
+			for _, e := range v.small {
+				if !yield(e.Member, e.Score) {
+					return
+				}
+			}
+			return
+		}
+		for m, score := range v.dict {
+			if !yield(m, score) {
+				return
+			}
+		}
+	}
+}
+
+// ordered returns the skiplist of a big set, building it from the map when
+// it is missing or out of step. The caller holds the value's lock (a read
+// lock is enough).
 func (v *SortedSetValue) ordered() *zskiplist {
-	if z := v.index.Load(); z != nil && z.length == len(v.Members) {
+	if z := v.index.Load(); z != nil && z.length == len(v.dict) {
 		return z
 	}
 	v.indexMu.Lock()
 	defer v.indexMu.Unlock()
-	if z := v.index.Load(); z != nil && z.length == len(v.Members) {
+	if z := v.index.Load(); z != nil && z.length == len(v.dict) {
 		return z
 	}
 	z := newZskiplist()
-	for m, score := range v.Members {
+	for m, score := range v.dict {
 		z.insert(score, m)
 	}
 	v.index.Store(z)
 	return z
 }
 
+func (v *SortedSetValue) smallFind(member string) int {
+	for i := range v.small {
+		if v.small[i].Member == member {
+			return i
+		}
+	}
+	return -1
+}
+
+// smallPos is where (score, member) goes in the slice.
+func (v *SortedSetValue) smallPos(score float64, member string) int {
+	return sort.Search(len(v.small), func(i int) bool {
+		e := &v.small[i]
+		return e.Score > score || (e.Score == score && e.Member >= member)
+	})
+}
+
 func (v *SortedSetValue) Remove(member string) bool {
-	score, exists := v.Members[member]
-	if !exists {
-		return false
+	if v.dict == nil {
+		i := v.smallFind(member)
+		if i < 0 {
+			return false
+		}
+		v.small = slices.Delete(v.small, i, i+1)
+	} else {
+		score, exists := v.dict[member]
+		if !exists {
+			return false
+		}
+		if z := v.index.Load(); z != nil {
+			z.delete(score, member)
+		}
+		delete(v.dict, member)
 	}
-	if z := v.index.Load(); z != nil {
-		z.delete(score, member)
-	}
-	delete(v.Members, member)
 	v.size.add(-zsetMemberSize(member))
 	v.invalidateScan()
 	return true
 }
 
 func (v *SortedSetValue) GetScore(member string) (float64, bool) {
-	score, exists := v.Members[member]
+	if v.dict == nil {
+		if i := v.smallFind(member); i >= 0 {
+			return v.small[i].Score, true
+		}
+		return 0, false
+	}
+	score, exists := v.dict[member]
 	return score, exists
+}
+
+// Dict returns a big set's map of scores, nil for a small set. The caller
+// holds the value's lock and does not change the map.
+func (v *SortedSetValue) Dict() map[string]float64 { return v.dict }
+
+// Map returns a copy of the members and their scores.
+func (v *SortedSetValue) Map() map[string]float64 {
+	m := make(map[string]float64, v.Card())
+	for k, score := range v.All() {
+		m[k] = score
+	}
+	return m
+}
+
+// Score returns member's score, 0 when it is not a member.
+func (v *SortedSetValue) Score(member string) float64 {
+	score, _ := v.GetScore(member)
+	return score
 }
 
 // Add sets member's score and reports whether the member is new. The caller
 // holds the value's write lock.
 func (v *SortedSetValue) Add(member string, score float64) bool {
-	if v.Members == nil {
-		v.Members = make(map[string]float64)
+	added := v.Put(member, score)
+	if added {
+		v.noteAddLocked(v.Card(), len(member))
 	}
-	z := v.ordered()
-	old, exists := v.Members[member]
-	if exists && old == score {
-		return false
+	return added
+}
+
+// Put is Add for a set being built, which leaves the encoding to the caller.
+func (v *SortedSetValue) Put(member string, score float64) bool {
+	if v.dict == nil {
+		i := v.smallFind(member)
+		if i >= 0 {
+			if v.small[i].Score == score {
+				return false
+			}
+			v.small = slices.Delete(v.small, i, i+1)
+		} else if len(v.small) >= zsetSmallMax {
+			v.toDict()
+			return v.Put(member, score)
+		}
+		j := v.smallPos(score, member)
+		v.small = slices.Insert(v.small, j, SortedEntry{Member: member, Score: score})
+		if i >= 0 {
+			return false
+		}
+	} else {
+		z := v.ordered()
+		old, exists := v.dict[member]
+		if exists && old == score {
+			return false
+		}
+		if exists {
+			z.delete(old, member)
+		}
+		z.insert(score, member)
+		v.dict[member] = score
+		if exists {
+			return false
+		}
 	}
-	if exists {
-		z.delete(old, member)
+	v.size.add(zsetMemberSize(member))
+	v.invalidateScan()
+	return true
+}
+
+func (v *SortedSetValue) toDict() {
+	v.dict = make(map[string]float64, len(v.small)*2)
+	z := newZskiplist()
+	for _, e := range v.small {
+		v.dict[e.Member] = e.Score
+		z.insert(e.Score, e.Member)
 	}
-	z.insert(score, member)
-	v.Members[member] = score
-	if !exists {
-		v.size.add(zsetMemberSize(member))
-		v.invalidateScan()
-		v.noteAddLocked(len(v.Members), len(member))
-	}
-	return !exists
+	v.small = nil
+	v.index.Store(z)
 }
 
 func (v *SortedSetValue) Card() int {
-	return len(v.Members)
+	if v.dict == nil {
+		return len(v.small)
+	}
+	return len(v.dict)
 }
 
 // Rank returns member's 0-based rank, counted from the highest score when
 // reverse is set, or -1 when it is not a member.
 func (v *SortedSetValue) Rank(member string, reverse bool) int {
-	score, ok := v.Members[member]
+	score, ok := v.GetScore(member)
 	if !ok {
 		return -1
 	}
-	r := v.ordered().rank(score, member) - 1
+	var r int
+	if v.dict == nil {
+		r = v.smallPos(score, member)
+	} else {
+		r = v.ordered().rank(score, member) - 1
+	}
 	if reverse {
-		return len(v.Members) - 1 - r
+		return v.Card() - 1 - r
 	}
 	return r
+}
+
+// walk calls fn on the members from 0-based rank from onwards, or
+// backwards with reverse, until fn returns false.
+func (v *SortedSetValue) walk(from int, reverse bool, fn func(SortedEntry) bool) {
+	n := v.Card()
+	if from < 0 || from >= n {
+		return
+	}
+	if v.dict == nil {
+		if reverse {
+			for i := from; i >= 0; i-- {
+				if !fn(v.small[i]) {
+					return
+				}
+			}
+			return
+		}
+		for i := from; i < n; i++ {
+			if !fn(v.small[i]) {
+				return
+			}
+		}
+		return
+	}
+	x := v.ordered().byRank(from + 1)
+	for x != nil {
+		if !fn(SortedEntry{Member: x.member, Score: x.score}) {
+			return
+		}
+		if reverse {
+			x = x.backward
+		} else {
+			x = x.level[0].forward
+		}
+	}
+}
+
+// at returns the member at 0-based rank i, which is in range.
+func (v *SortedSetValue) at(i int) SortedEntry {
+	if v.dict == nil {
+		return v.small[i]
+	}
+	x := v.ordered().byRank(i + 1)
+	return SortedEntry{Member: x.member, Score: x.score}
+}
+
+// countBefore returns how many members satisfy before, which holds for a
+// prefix of the order.
+func (v *SortedSetValue) countBefore(before func(score float64, member string) bool) int {
+	if v.dict == nil {
+		if v.Skiplist() {
+			// A set Redis holds as a skiplist answers a search by the
+			// nodes' random levels, which matters when before is not
+			// monotone (a lexicographic bound over mixed scores).
+			z := newZskiplist()
+			for _, e := range v.small {
+				z.insert(e.Score, e.Member)
+			}
+			return z.countBefore(func(n *zslNode) bool { return before(n.score, n.member) })
+		}
+		return sort.Search(len(v.small), func(i int) bool { return !before(v.small[i].Score, v.small[i].Member) })
+	}
+	return v.ordered().countBefore(func(n *zslNode) bool { return before(n.score, n.member) })
 }
 
 // RangeByRank returns the members at 0-based ranks lo..hi inclusive,
 // counted from the highest score when reverse is set. The caller has
 // clamped lo and hi to the set.
 func (v *SortedSetValue) RangeByRank(lo, hi int, reverse bool) []SortedEntry {
-	n := len(v.Members)
+	n := v.Card()
 	if lo < 0 {
 		lo = 0
 	}
@@ -183,35 +391,32 @@ func (v *SortedSetValue) RangeByRank(lo, hi int, reverse bool) []SortedEntry {
 	if lo > hi {
 		return nil
 	}
-	z := v.ordered()
 	out := make([]SortedEntry, 0, hi-lo+1)
+	from := lo
 	if reverse {
-		for x := z.byRank(n - lo); x != nil && len(out) < hi-lo+1; x = x.backward {
-			out = append(out, SortedEntry{Member: x.member, Score: x.score})
-		}
-		return out
+		from = n - 1 - lo
 	}
-	for x := z.byRank(lo + 1); x != nil && len(out) < hi-lo+1; x = x.level[0].forward {
-		out = append(out, SortedEntry{Member: x.member, Score: x.score})
-	}
+	v.walk(from, reverse, func(e SortedEntry) bool {
+		out = append(out, e)
+		return len(out) < hi-lo+1
+	})
 	return out
 }
 
 // ScoreRanks returns the 0-based ranks first..last of the members whose
 // scores are in the range; first > last when none is.
 func (v *SortedSetValue) ScoreRanks(min float64, minEx bool, max float64, maxEx bool) (first, last int) {
-	z := v.ordered()
-	first = z.countBefore(func(n *zslNode) bool {
+	first = v.countBefore(func(score float64, _ string) bool {
 		if minEx {
-			return n.score <= min
+			return score <= min
 		}
-		return n.score < min
+		return score < min
 	})
-	last = z.countBefore(func(n *zslNode) bool {
+	last = v.countBefore(func(score float64, _ string) bool {
 		if maxEx {
-			return n.score < max
+			return score < max
 		}
-		return n.score <= max
+		return score <= max
 	}) - 1
 	return first, last
 }
@@ -257,11 +462,11 @@ func (b LexBound) lteMax(member string) bool {
 // reverse it runs backwards from max. offset and limit (< 0 for all) apply
 // in that order.
 func (v *SortedSetValue) LexRange(min, max LexBound, reverse bool, offset, limit int) []SortedEntry {
-	z := v.ordered()
-	if z.length == 0 || !min.gteMin(z.tail.member) || !max.lteMax(z.first().member) {
+	n := v.Card()
+	if n == 0 || !min.gteMin(v.at(n-1).Member) || !max.lteMax(v.at(0).Member) {
 		return nil
 	}
-	return v.lexRun(z, min, max, reverse, offset, limit)
+	return v.lexRun(min, max, reverse, offset, limit)
 }
 
 // LexRemoveRange returns the members ZREMRANGEBYLEX removes: LexRange's, but
@@ -271,16 +476,15 @@ func (v *SortedSetValue) LexRemoveRange(min, max LexBound) []SortedEntry {
 	if !v.Skiplist() {
 		return v.LexRange(min, max, false, 0, -1)
 	}
-	z := v.ordered()
-	if z.length == 0 {
+	if v.Card() == 0 {
 		return nil
 	}
-	return v.lexRun(z, min, max, false, 0, -1)
+	return v.lexRun(min, max, false, 0, -1)
 }
 
-func (v *SortedSetValue) lexRun(z *zskiplist, min, max LexBound, reverse bool, offset, limit int) []SortedEntry {
+func (v *SortedSetValue) lexRun(min, max LexBound, reverse bool, offset, limit int) []SortedEntry {
 	var out []SortedEntry
-	emit := func(x *zslNode) bool {
+	emit := func(e SortedEntry) bool {
 		if offset > 0 {
 			offset--
 			return true
@@ -288,84 +492,96 @@ func (v *SortedSetValue) lexRun(z *zskiplist, min, max LexBound, reverse bool, o
 		if limit == 0 {
 			return false
 		}
-		out = append(out, SortedEntry{Member: x.member, Score: x.score})
+		out = append(out, e)
 		if limit > 0 {
 			limit--
 		}
 		return true
 	}
 	if reverse {
-		x := v.lastNotAbove(z, max)
-		for ; x != nil && min.gteMin(x.member); x = x.backward {
-			if !emit(x) {
-				break
-			}
-		}
+		v.walk(v.lastNotAbove(max), true, func(e SortedEntry) bool {
+			return min.gteMin(e.Member) && emit(e)
+		})
 		return out
 	}
-	x := v.firstNotBelow(z, min)
-	for ; x != nil && max.lteMax(x.member); x = x.level[0].forward {
-		if !emit(x) {
-			break
-		}
-	}
+	v.walk(v.firstNotBelow(min), false, func(e SortedEntry) bool {
+		return max.lteMax(e.Member) && emit(e)
+	})
 	return out
 }
 
 // CountLex is the number of members LexRange returns without a limit.
 func (v *SortedSetValue) CountLex(min, max LexBound) int {
-	z := v.ordered()
-	if z.length == 0 || !min.gteMin(z.tail.member) || !max.lteMax(z.first().member) {
+	n := v.Card()
+	if n == 0 || !min.gteMin(v.at(n-1).Member) || !max.lteMax(v.at(0).Member) {
 		return 0
 	}
 	if v.Skiplist() {
-		first := z.countBefore(func(n *zslNode) bool { return !min.gteMin(n.member) })
-		last := z.countBefore(func(n *zslNode) bool { return max.lteMax(n.member) })
+		first := v.countBefore(func(_ float64, m string) bool { return !min.gteMin(m) })
+		last := v.countBefore(func(_ float64, m string) bool { return max.lteMax(m) })
 		if last < first {
 			return 0
 		}
 		return last - first
 	}
-	n := 0
-	for x := v.firstNotBelow(z, min); x != nil && max.lteMax(x.member); x = x.level[0].forward {
-		n++
-	}
-	return n
+	c := 0
+	v.walk(v.firstNotBelow(min), false, func(e SortedEntry) bool {
+		if !max.lteMax(e.Member) {
+			return false
+		}
+		c++
+		return true
+	})
+	return c
 }
 
-func (v *SortedSetValue) firstNotBelow(z *zskiplist, min LexBound) *zslNode {
+// firstNotBelow is the rank of the first member not below min, -1 when
+// there is none: found by search in a skiplist and by a scan in a listpack,
+// as Redis does.
+func (v *SortedSetValue) firstNotBelow(min LexBound) int {
 	if v.Skiplist() {
-		return z.byRank(z.countBefore(func(n *zslNode) bool { return !min.gteMin(n.member) }) + 1)
+		return v.countBefore(func(_ float64, m string) bool { return !min.gteMin(m) })
 	}
-	for x := z.first(); x != nil; x = x.level[0].forward {
-		if min.gteMin(x.member) {
-			return x
+	r := -1
+	i := 0
+	v.walk(0, false, func(e SortedEntry) bool {
+		if min.gteMin(e.Member) {
+			r = i
+			return false
 		}
-	}
-	return nil
+		i++
+		return true
+	})
+	return r
 }
 
-func (v *SortedSetValue) lastNotAbove(z *zskiplist, max LexBound) *zslNode {
+func (v *SortedSetValue) lastNotAbove(max LexBound) int {
 	if v.Skiplist() {
-		return z.byRank(z.countBefore(func(n *zslNode) bool { return max.lteMax(n.member) }))
+		return v.countBefore(func(_ float64, m string) bool { return max.lteMax(m) }) - 1
 	}
-	for x := z.tail; x != nil; x = x.backward {
-		if max.lteMax(x.member) {
-			return x
+	n := v.Card()
+	r := -1
+	i := n - 1
+	v.walk(n-1, true, func(e SortedEntry) bool {
+		if max.lteMax(e.Member) {
+			r = i
+			return false
 		}
-	}
-	return nil
+		i--
+		return true
+	})
+	return r
 }
 
 // GetAllEntries returns every member in (score, member) order.
 func (v *SortedSetValue) GetAllEntries() []SortedEntry {
-	return v.RangeByRank(0, len(v.Members)-1, false)
+	return v.RangeByRank(0, v.Card()-1, false)
 }
 
 // GetSortedRange returns the members at ranks start..stop, which may be
 // negative to count from the end, as ZRANGE does.
 func (v *SortedSetValue) GetSortedRange(start, stop int, _ bool, reverse bool) []SortedEntry {
-	n := len(v.Members)
+	n := v.Card()
 	if start < 0 {
 		start += n
 	}
@@ -398,7 +614,7 @@ func (v *SortedSetValue) GetByScoreRange(minScore float64, minExclusive bool, ma
 		return []SortedEntry{}
 	}
 	if reverse {
-		n := len(v.Members)
+		n := v.Card()
 		return v.RangeByRank(n-1-last, n-1-first, true)
 	}
 	return v.RangeByRank(first, last, false)
@@ -432,7 +648,7 @@ func (v *SortedSetValue) RemoveRangeByScore(minScore, maxScore float64) int {
 // bound is open), in (score, member) order or reversed.
 func (v *SortedSetValue) GetByLexRange(minLex string, minExclusive bool, maxLex string, maxExclusive bool, reverse bool) []SortedEntry {
 	out := []SortedEntry{}
-	for _, e := range v.RangeByRank(0, len(v.Members)-1, reverse) {
+	for _, e := range v.RangeByRank(0, v.Card()-1, reverse) {
 		if minLex != "" && (e.Member < minLex || (minExclusive && e.Member == minLex)) {
 			continue
 		}
@@ -448,7 +664,7 @@ func (v *SortedSetValue) GetByLexRange(minLex string, minExclusive bool, maxLex 
 // max ("-", "+", "[x", "(x"), after offset, at most count when count > 0.
 func (v *SortedSetValue) RangeByLex(min, max string, offset, count int, reverse bool) []string {
 	var result []string
-	for _, e := range v.RangeByRank(0, len(v.Members)-1, reverse) {
+	for _, e := range v.RangeByRank(0, v.Card()-1, reverse) {
 		if lexCompare(e.Member, min, max) {
 			result = append(result, e.Member)
 		}
@@ -472,7 +688,7 @@ func (v *SortedSetValue) RangeByLex(min, max string, offset, count int, reverse 
 // LexCount counts the members within the bounds min and max.
 func (v *SortedSetValue) LexCount(min, max string) int {
 	count := 0
-	for member := range v.Members {
+	for member := range v.All() {
 		if lexCompare(member, min, max) {
 			count++
 		}

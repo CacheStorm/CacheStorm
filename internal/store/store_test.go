@@ -224,9 +224,9 @@ func TestSetOperations(t *testing.T) {
 func TestSortedSetOperations(t *testing.T) {
 	s := NewStore()
 
-	zset := &SortedSetValue{Members: make(map[string]float64)}
-	zset.Members["member1"] = 1.0
-	zset.Members["member2"] = 2.0
+	zset := NewSortedSetFrom(make(map[string]float64))
+	zset.Put("member1", 1.0)
+	zset.Put("member2", 2.0)
 	s.Set("zset1", zset, SetOptions{})
 
 	entry, exists := s.Get("zset1")
@@ -235,8 +235,8 @@ func TestSortedSetOperations(t *testing.T) {
 	}
 
 	zv := entry.Value.(*SortedSetValue)
-	if len(zv.Members) != 2 {
-		t.Errorf("expected 2 members, got %d", len(zv.Members))
+	if zv.Card() != 2 {
+		t.Errorf("expected 2 members, got %d", zv.Card())
 	}
 }
 

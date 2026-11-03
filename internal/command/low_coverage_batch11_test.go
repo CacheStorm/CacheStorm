@@ -495,7 +495,7 @@ func TestLowCoverageBatch11_ServerDumpRestoreCommands(t *testing.T) {
 		s.Set("dumpset", sv, store.SetOptions{})
 		lv := &store.ListValue{Elements: [][]byte{[]byte("a"), []byte("b")}}
 		s.Set("dumplist", lv, store.SetOptions{})
-		ssv := &store.SortedSetValue{Members: map[string]float64{}}
+		ssv := store.NewSortedSetFrom(map[string]float64{})
 		ssv.Add("m", 1.0)
 		s.Set("dumpzset", ssv, store.SetOptions{})
 
@@ -568,7 +568,7 @@ func TestLowCoverageBatch11_SortedSetCommands(t *testing.T) {
 	RegisterSortedSetCommands(router)
 
 	t.Run("ZRANDMEMBER", func(t *testing.T) {
-		ssv := &store.SortedSetValue{Members: map[string]float64{}}
+		ssv := store.NewSortedSetFrom(map[string]float64{})
 		ssv.Add("a", 1.0)
 		ssv.Add("b", 2.0)
 		ssv.Add("c", 3.0)
@@ -577,12 +577,12 @@ func TestLowCoverageBatch11_SortedSetCommands(t *testing.T) {
 	})
 
 	t.Run("ZUNIONSTORE", func(t *testing.T) {
-		ssv1 := &store.SortedSetValue{Members: map[string]float64{}}
+		ssv1 := store.NewSortedSetFrom(map[string]float64{})
 		ssv1.Add("a", 1.0)
 		ssv1.Add("b", 2.0)
 		s.Set("zunion1", ssv1, store.SetOptions{})
 
-		ssv2 := &store.SortedSetValue{Members: map[string]float64{}}
+		ssv2 := store.NewSortedSetFrom(map[string]float64{})
 		ssv2.Add("c", 3.0)
 		s.Set("zunion2", ssv2, store.SetOptions{})
 
@@ -590,12 +590,12 @@ func TestLowCoverageBatch11_SortedSetCommands(t *testing.T) {
 	})
 
 	t.Run("ZINTERSTORE", func(t *testing.T) {
-		ssv1 := &store.SortedSetValue{Members: map[string]float64{}}
+		ssv1 := store.NewSortedSetFrom(map[string]float64{})
 		ssv1.Add("a", 1.0)
 		ssv1.Add("b", 2.0)
 		s.Set("zinter1", ssv1, store.SetOptions{})
 
-		ssv2 := &store.SortedSetValue{Members: map[string]float64{}}
+		ssv2 := store.NewSortedSetFrom(map[string]float64{})
 		ssv2.Add("a", 3.0)
 		ssv2.Add("c", 4.0)
 		s.Set("zinter2", ssv2, store.SetOptions{})
@@ -604,12 +604,12 @@ func TestLowCoverageBatch11_SortedSetCommands(t *testing.T) {
 	})
 
 	t.Run("ZDIFFSTORE", func(t *testing.T) {
-		ssv1 := &store.SortedSetValue{Members: map[string]float64{}}
+		ssv1 := store.NewSortedSetFrom(map[string]float64{})
 		ssv1.Add("a", 1.0)
 		ssv1.Add("b", 2.0)
 		s.Set("zdiff1", ssv1, store.SetOptions{})
 
-		ssv2 := &store.SortedSetValue{Members: map[string]float64{}}
+		ssv2 := store.NewSortedSetFrom(map[string]float64{})
 		ssv2.Add("a", 3.0)
 		s.Set("zdiff2", ssv2, store.SetOptions{})
 

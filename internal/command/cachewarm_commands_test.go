@@ -53,7 +53,7 @@ func TestCacheWarmCommandsKEYOBJECTFullCoverage(t *testing.T) {
 	s.Set("hash1", &store.HashValue{Fields: map[string][]byte{"field1": []byte("value1")}}, store.SetOptions{})
 	s.Set("list1", &store.ListValue{Elements: [][]byte{[]byte("item1"), []byte("item2")}}, store.SetOptions{})
 	s.Set("set1", &store.SetValue{Members: map[string]struct{}{"member1": {}}}, store.SetOptions{})
-	s.Set("zset1", &store.SortedSetValue{Members: map[string]float64{"member1": 1.0}}, store.SetOptions{})
+	s.Set("zset1", store.NewSortedSetFrom(map[string]float64{"member1": 1.0}), store.SetOptions{})
 
 	tests := []struct {
 		name string

@@ -92,7 +92,7 @@ func TestGeoAddMemoryAdmissionPrecedesGrowth(t *testing.T) {
 					t.Fatalf("oversized write accepted: %q", got)
 				}
 				entry, ok := s.Get("geo")
-				if ok != existing || (ok && len(entry.Value.(*store.SortedSetValue).Members) != 1) {
+				if ok != existing || (ok && entry.Value.(*store.SortedSetValue).Card() != 1) {
 					t.Fatal("rejected write changed members")
 				}
 				if records != 0 || s.GetVersion("geo") != version || s.MemUsage() != before || s.MemoryTracker().Usage() != before {
@@ -128,7 +128,7 @@ func TestGeoAddNoOpAndInPlaceUpdate(t *testing.T) {
 		t.Fatalf("duplicate updates=%q", got)
 	}
 	after, _ := s.Get("geo")
-	point := before.Value.(*store.SortedSetValue).Members["seed"]
+	point := before.Value.(*store.SortedSetValue).Score("seed")
 	if before.Value != after.Value || point != store.GeoScore(2, 2) || records != 1 || s.GetVersion("geo") == version {
 		t.Fatal("update was not applied in place or missed effect tracking")
 	}

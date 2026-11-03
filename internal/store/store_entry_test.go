@@ -121,7 +121,7 @@ func TestStoreDataTypes(t *testing.T) {
 	})
 
 	t.Run("Sorted Set Value", func(t *testing.T) {
-		val := &SortedSetValue{Members: map[string]float64{"a": 1.0}}
+		val := NewSortedSetFrom(map[string]float64{"a": 1.0})
 		if val.Type() != DataTypeSortedSet {
 			t.Error("Type should be DataTypeSortedSet")
 		}

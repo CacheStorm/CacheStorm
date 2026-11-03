@@ -106,7 +106,7 @@ func TestLowCoverageBatch9_DumpRestoreCommands(t *testing.T) {
 	})
 
 	t.Run("DUMP sorted set value", func(t *testing.T) {
-		ssv := &store.SortedSetValue{Members: make(map[string]float64)}
+		ssv := store.NewSortedSetFrom(make(map[string]float64))
 		ssv.Add("member1", 1.0)
 		ssv.Add("member2", 2.0)
 		s.Set("dumpzset", ssv, store.SetOptions{})
@@ -684,7 +684,7 @@ func TestLowCoverageBatch9_KEYOBJECT(t *testing.T) {
 	})
 
 	t.Run("KEYOBJECT zset", func(t *testing.T) {
-		ssv := &store.SortedSetValue{Members: make(map[string]float64)}
+		ssv := store.NewSortedSetFrom(make(map[string]float64))
 		ssv.Add("m", 1.0)
 		s.Set("kozset", ssv, store.SetOptions{})
 		_ = runHandler(t, router, "KEYOBJECT", [][]byte{[]byte("kozset")}, s)
