@@ -343,23 +343,34 @@ func (ec *EvictionController) sampleVolatileKeys() []candidate {
 	return ec.sample(true)
 }
 
+func candidateOf(key string, entry *Entry) candidate {
+	return candidate{
+		key:         key,
+		lastAccess:  entry.LastAccess(),
+		accessCount: uint64(entry.LFUCount()),
+		expiresAt:   entry.ExpiresAt.Load(),
+	}
+}
+
 func (ec *EvictionController) sample(volatile bool) []candidate {
 	sampleSize := ec.SampleSize()
 	candidates := make([]candidate, 0, sampleSize)
 	ec.visitShards(func(shard *Shard) bool {
 		shard.mu.RLock()
-		for key, entry := range shard.data {
-			expiresAt := entry.ExpiresAt.Load()
-			if volatile && expiresAt <= 0 {
-				continue
+		if volatile {
+			// The shard's keys with an expiry, not a walk of all its keys
+			// for one that has one.
+			for key := range shard.vol {
+				if entry := shard.data[key]; entry != nil {
+					candidates = append(candidates, candidateOf(key, entry))
+				}
+				break
 			}
-			candidates = append(candidates, candidate{
-				key:         key,
-				lastAccess:  entry.LastAccess(),
-				accessCount: uint64(entry.LFUCount()),
-				expiresAt:   expiresAt,
-			})
-			break
+		} else {
+			for key, entry := range shard.data {
+				candidates = append(candidates, candidateOf(key, entry))
+				break
+			}
 		}
 		shard.mu.RUnlock()
 		return len(candidates) < sampleSize

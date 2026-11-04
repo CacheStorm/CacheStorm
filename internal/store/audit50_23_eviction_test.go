@@ -40,8 +40,9 @@ func TestAudit50R23X(t *testing.T) {
 		t.Fatal("harness cannot locate distinct shard")
 	}
 	s.Set(key, &StringValue{Data: []byte("v")}, SetOptions{})
-	entry, _ := s.GetShard(key).Get(key)
-	entry.ExpiresAt.Store(1<<63 - 1)
+	if !s.SetExpiresAt(key, 1<<63-1) {
+		t.Fatal("could not give the key an expiry")
+	}
 	mt := NewMemoryTracker(1000, 80, 90)
 	control := NewEvictionController(EvictionAllKeysRandom, 1000, s, mt, 1)
 	control.rnd = rand.New(rand.NewSource(1))
