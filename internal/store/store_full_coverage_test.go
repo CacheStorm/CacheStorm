@@ -983,8 +983,8 @@ func TestStreamValue_Clone(t *testing.T) {
 	if len(cloned.Groups) != 1 {
 		t.Fatalf("expected 1 group in clone, got %d", len(cloned.Groups))
 	}
-	if len(cloned.Entries) != 1 {
-		t.Fatalf("expected 1 entry in clone, got %d", len(cloned.Entries))
+	if cloned.Len() != 1 {
+		t.Fatalf("expected 1 entry in clone, got %d", cloned.Len())
 	}
 }
 

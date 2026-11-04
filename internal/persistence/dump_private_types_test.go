@@ -43,7 +43,7 @@ func TestDumpPrivateTypesRoundTrip(t *testing.T) {
 	}
 	decoded, _ := DecodeDump(mustDump(t, stream))
 	s := decoded.(*store.StreamValue)
-	if len(s.Entries) != 2 || s.LastID != "2-1" || s.Groups["grp"] == nil {
+	if s.Len() != 2 || s.LastID != "2-1" || s.Groups["grp"] == nil {
 		t.Fatalf("stream after the round trip: %+v", s)
 	}
 	payload := mustDump(t, stream)

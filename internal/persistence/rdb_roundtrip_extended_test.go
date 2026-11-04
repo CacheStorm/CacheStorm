@@ -25,10 +25,8 @@ func TestRDBSaveLoadRoundTripExtendedTypes(t *testing.T) {
 	src.Set("json:doc", jsonVal, store.SetOptions{})
 
 	stream := store.NewStreamValue(1000)
-	stream.Entries = append(stream.Entries,
-		&store.StreamEntry{ID: "1-1", Pairs: store.StreamPairsFromMap(map[string][]byte{"sensor": []byte("42")})},
-		&store.StreamEntry{ID: "1-2", Pairs: store.StreamPairsFromMap(map[string][]byte{"sensor": []byte("43"), "unit": []byte("C")})},
-	)
+	stream.LoadEntry(store.StreamID{Ms: 1, Seq: 1}, store.StreamPairsFromMap(map[string][]byte{"sensor": []byte("42")}))
+	stream.LoadEntry(store.StreamID{Ms: 1, Seq: 2}, store.StreamPairsFromMap(map[string][]byte{"sensor": []byte("43"), "unit": []byte("C")}))
 	stream.LastID = "1-2"
 	stream.Length = 2
 	src.Set("stream:sensors", stream, store.SetOptions{})
@@ -101,11 +99,12 @@ func TestRDBSaveLoadRoundTripExtendedTypes(t *testing.T) {
 	if !ok {
 		t.Fatalf("stream:sensors type = %T, want *store.StreamValue", streamEntry.Value)
 	}
-	if len(streamOut.Entries) != 2 || streamOut.Entries[0].ID != "1-1" || streamOut.Entries[1].ID != "1-2" {
-		t.Fatalf("stream entries = %+v", streamOut.Entries)
+	outEntries := streamOut.EntriesLocked()
+	if len(outEntries) != 2 || outEntries[0].ID != "1-1" || outEntries[1].ID != "1-2" {
+		t.Fatalf("stream entries = %+v", outEntries)
 	}
-	if string(streamOut.Entries[1].FieldMap()["unit"]) != "C" {
-		t.Fatalf("stream entry[1] fields = %+v", streamOut.Entries[1].FieldMap())
+	if string(outEntries[1].FieldMap()["unit"]) != "C" {
+		t.Fatalf("stream entry[1] fields = %+v", outEntries[1].FieldMap())
 	}
 	if streamOut.LastID != "1-2" || streamOut.Length != 2 || streamOut.MaxLen != 1000 {
 		t.Fatalf("stream bounds = lastID:%s len:%d maxLen:%d", streamOut.LastID, streamOut.Length, streamOut.MaxLen)

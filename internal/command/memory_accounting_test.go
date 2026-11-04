@@ -63,14 +63,7 @@ func refValueSize(v store.Value) int64 {
 	case *store.SortedSetValue:
 		return v.RecountSize()
 	case *store.StreamValue:
-		n := int64(48)
-		for _, e := range v.Entries {
-			n += int64(len(e.ID)) + 32
-			for _, p := range e.FieldPairs() {
-				n += int64(len(p.Name)) + int64(len(p.Value)) + 80
-			}
-		}
-		return n
+		return v.RecountSize()
 	}
 	return v.SizeOf()
 }

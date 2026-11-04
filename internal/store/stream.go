@@ -12,12 +12,13 @@ type StreamField struct {
 	Value []byte
 }
 
+// StreamEntry is an entry as the stream hands it out, built from the node
+// that packs it.
 type StreamEntry struct {
 	ID string
 	// Pairs keeps the fields in the order XADD received them, duplicates
 	// included.
 	Pairs []StreamField
-	node  *streamNode
 }
 
 // FieldPairs returns the entry's fields in reply order.
@@ -313,8 +314,11 @@ func (g *ConsumerGroup) GetConsumer(name string) *Consumer {
 }
 
 type StreamValue struct {
-	mu           sync.RWMutex
-	Entries      []*StreamEntry
+	mu sync.RWMutex
+	// nodes pack the entries, oldest first; a node with no live entry left
+	// is dropped. count is the number of live entries.
+	nodes        []*streamNode
+	count        int
 	LastID       string
 	MaxDeletedID string
 	Length       int64
@@ -322,8 +326,6 @@ type StreamValue struct {
 	// EntriesAdded counts every entry ever added, including the deleted.
 	EntriesAdded int64
 	Groups       map[string]*ConsumerGroup
-	nodeCount    int
-	nodeLive     int
 	size         sizeCounter
 }
 
@@ -334,9 +336,8 @@ func (v *StreamValue) RUnlock() { v.mu.RUnlock() }
 
 func NewStreamValue(maxLen int64) *StreamValue {
 	return &StreamValue{
-		Entries: make([]*StreamEntry, 0),
-		MaxLen:  maxLen,
-		Groups:  make(map[string]*ConsumerGroup),
+		MaxLen: maxLen,
+		Groups: make(map[string]*ConsumerGroup),
 	}
 }
 
@@ -348,18 +349,31 @@ func (v *StreamValue) SizeOf() int64 {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 	var n int64
-	for _, entry := range v.Entries {
-		n += streamEntrySize(entry)
+	for _, node := range v.nodes {
+		n += streamNodeOverhead + int64(len(node.buf))
 	}
 	v.size.set(n)
 	return streamBaseSize + n
 }
+
+// RecountSize counts SizeOf from the nodes, for tests checking the
+// maintained counter.
+func (v *StreamValue) RecountSize() int64 {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	n := int64(streamBaseSize)
+	for _, node := range v.nodes {
+		n += streamNodeOverhead + int64(len(node.buf))
+	}
+	return n
+}
+
 func (v *StreamValue) String() string {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 
 	result := ""
-	for _, entry := range v.Entries {
+	for _, entry := range v.EntriesLocked() {
 		if result != "" {
 			result += "\n"
 		}
@@ -375,23 +389,13 @@ func (v *StreamValue) String() string {
 	return result
 }
 
-func cloneStreamEntry(entry *StreamEntry) *StreamEntry {
-	out := &StreamEntry{ID: entry.ID}
-	if entry.Pairs != nil {
-		out.Pairs = make([]StreamField, len(entry.Pairs))
-		for i, p := range entry.Pairs {
-			out.Pairs[i] = StreamField{Name: p.Name, Value: append([]byte(nil), p.Value...)}
-		}
-	}
-	return out
-}
-
 func (v *StreamValue) Clone() Value {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 
 	cloned := &StreamValue{
-		Entries:      make([]*StreamEntry, len(v.Entries)),
+		nodes:        make([]*streamNode, len(v.nodes)),
+		count:        v.count,
 		LastID:       v.LastID,
 		MaxDeletedID: v.MaxDeletedID,
 		Length:       v.Length,
@@ -400,8 +404,11 @@ func (v *StreamValue) Clone() Value {
 		Groups:       make(map[string]*ConsumerGroup),
 	}
 
-	for i, entry := range v.Entries {
-		cloned.Entries[i] = cloneStreamEntry(entry)
+	for i, node := range v.nodes {
+		c := *node
+		c.masterFields = append([]string(nil), node.masterFields...)
+		c.buf = append([]byte(nil), node.buf...)
+		cloned.nodes[i] = &c
 	}
 
 	for name, group := range v.Groups {
@@ -431,36 +438,139 @@ func (v *StreamValue) Clone() Value {
 func (v *StreamValue) lastIDLocked() StreamID { return streamIDOf(v.LastID) }
 
 func (v *StreamValue) firstIDLocked() StreamID {
-	if len(v.Entries) == 0 {
-		return StreamID{}
+	if pos, ok := v.firstPosLocked(); ok {
+		_, id, _ := v.nodes[pos.node].head(pos.off)
+		return id
 	}
-	return v.Entries[0].streamID()
+	return StreamID{}
 }
 
 func (v *StreamValue) maxDeletedLocked() StreamID { return streamIDOf(v.MaxDeletedID) }
 
-// appendLocked stores a new entry with an already validated ID.
+// appendLocked stores a new entry with an already validated ID, packing a
+// copy of its fields.
 func (v *StreamValue) appendLocked(id StreamID, pairs []StreamField) *StreamEntry {
-	v.ensureNodes()
-	var owned []StreamField
-	if pairs != nil {
-		owned = make([]StreamField, len(pairs))
-	}
-	for i, p := range pairs {
-		owned[i] = StreamField{Name: p.Name, Value: append([]byte(nil), p.Value...)}
-	}
-	entry := &StreamEntry{ID: id.String(), Pairs: owned}
 	var tail *streamNode
-	if n := len(v.Entries); n > 0 {
-		tail = v.Entries[n-1].node
+	if k := len(v.nodes); k > 0 {
+		tail = v.nodes[k-1]
 	}
-	v.placeEntry(tail, entry)
-	v.Entries = append(v.Entries, entry)
-	v.size.add(streamEntrySize(entry))
-	v.LastID = entry.ID
-	v.Length = int64(len(v.Entries))
+	if tail == nil || tail.full(rawFieldBytes(pairs)) {
+		if tail != nil {
+			tail.seal()
+		}
+		tail = newStreamNode(id, pairs)
+		v.nodes = append(v.nodes, tail)
+		v.size.add(streamNodeOverhead)
+	}
+	off := len(tail.buf)
+	v.size.add(int64(tail.add(id, pairs)))
+	v.count++
+	v.LastID = id.String()
+	v.Length = int64(v.count)
 	v.EntriesAdded++
-	return entry
+	return tail.entry(off)
+}
+
+// LoadEntry appends an entry read from a dump or snapshot. It reports
+// false when the ID does not follow the last one packed.
+func (v *StreamValue) LoadEntry(id StreamID, pairs []StreamField) bool {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	// Against the last ID packed, deleted or not: nodes keep their entries
+	// in ID order.
+	if k := len(v.nodes); k > 0 && !v.nodes[k-1].last.Less(id) {
+		return false
+	}
+	v.appendLocked(id, pairs)
+	return true
+}
+
+// EntriesLocked returns every entry, oldest first. The caller holds the
+// read lock.
+func (v *StreamValue) EntriesLocked() []*StreamEntry {
+	out := make([]*StreamEntry, 0, v.count)
+	v.eachLocked(streamPos{}, func(n *streamNode, off int, _ StreamID) bool {
+		out = append(out, n.entry(off))
+		return true
+	})
+	return out
+}
+
+// LenLocked is Len for a caller holding the lock.
+func (v *StreamValue) LenLocked() int { return v.count }
+
+// eachLocked calls fn on the live entries from pos on, oldest first, until
+// fn returns false.
+func (v *StreamValue) eachLocked(pos streamPos, fn func(n *streamNode, off int, id StreamID) bool) {
+	for ni := pos.node; ni < len(v.nodes); ni++ {
+		from := 0
+		if ni == pos.node {
+			from = pos.off
+		}
+		n := v.nodes[ni]
+		if !n.each(from, func(off int, flags byte, id StreamID, _ int) bool {
+			if flags&streamDeleted != 0 {
+				return true
+			}
+			return fn(n, off, id)
+		}) {
+			return
+		}
+	}
+}
+
+func (v *StreamValue) firstPosLocked() (streamPos, bool) {
+	return v.seekLocked(StreamID{})
+}
+
+// seekLocked returns the place of the first live entry with ID >= id.
+func (v *StreamValue) seekLocked(id StreamID) (streamPos, bool) {
+	ni := sort.Search(len(v.nodes), func(i int) bool { return !v.nodes[i].last.Less(id) })
+	var pos streamPos
+	found := false
+	v.eachLocked(streamPos{node: ni}, func(n *streamNode, off int, eid StreamID) bool {
+		if eid.Less(id) {
+			return true
+		}
+		for ni < len(v.nodes) && v.nodes[ni] != n {
+			ni++
+		}
+		pos, found = streamPos{node: ni, off: off}, true
+		return false
+	})
+	return pos, found
+}
+
+// lastEntryIDLocked is the ID of the newest live entry.
+func (v *StreamValue) lastEntryIDLocked() (StreamID, bool) {
+	if len(v.nodes) == 0 {
+		return StreamID{}, false
+	}
+	var last StreamID
+	found := false
+	v.nodes[len(v.nodes)-1].each(0, func(_ int, flags byte, id StreamID, _ int) bool {
+		if flags&streamDeleted == 0 {
+			last, found = id, true
+		}
+		return true
+	})
+	return last, found
+}
+
+// deleteAtLocked flags the live entry at pos deleted and drops its node
+// once it has none left.
+func (v *StreamValue) deleteAtLocked(pos streamPos) {
+	n := v.nodes[pos.node]
+	n.buf[pos.off] |= streamDeleted
+	n.live--
+	v.count--
+	if n.live == 0 {
+		v.size.add(-(streamNodeOverhead + int64(len(n.buf))))
+		copy(v.nodes[pos.node:], v.nodes[pos.node+1:])
+		v.nodes[len(v.nodes)-1] = nil
+		v.nodes = v.nodes[:len(v.nodes)-1]
+	}
+	v.Length = int64(v.count)
 }
 
 // StreamAddArgs is the ID part of an XADD: IDGiven is false for "*", and
@@ -581,17 +691,10 @@ func (v *StreamValue) Add(id string, fields map[string][]byte) (*StreamEntry, er
 		return nil, ErrStreamIDTooSmall
 	}
 	entry := v.appendLocked(parsed, StreamPairsFromMap(fields))
-	if v.MaxLen > 0 && int64(len(v.Entries)) > v.MaxLen {
+	if v.MaxLen > 0 && int64(v.count) > v.MaxLen {
 		v.trimLocked(StreamTrimArgs{Strategy: StreamTrimMaxLen, MaxLen: v.MaxLen})
 	}
 	return entry, nil
-}
-
-// searchLocked returns the index of the first entry with ID >= id.
-func (v *StreamValue) searchLocked(id StreamID) int {
-	return sort.Search(len(v.Entries), func(i int) bool {
-		return v.Entries[i].streamID().Compare(id) >= 0
-	})
 }
 
 // Range returns the entries with start <= ID <= end, at most count of them
@@ -606,25 +709,43 @@ func (v *StreamValue) rangeLocked(start, end StreamID, count int64, rev bool) []
 	if end.Less(start) {
 		return nil
 	}
-	lo := v.searchLocked(start)
-	hi := sort.Search(len(v.Entries), func(i int) bool {
-		return v.Entries[i].streamID().Compare(end) > 0
-	})
-	if lo >= hi {
-		return nil
-	}
-	n := hi - lo
-	if count > 0 && int64(n) > count {
-		n = int(count)
-	}
-	out := make([]*StreamEntry, 0, n)
-	if rev {
-		for i := hi - 1; i >= lo && len(out) < n; i-- {
-			out = append(out, v.Entries[i])
+	var out []*StreamEntry
+	full := func() bool { return count > 0 && int64(len(out)) >= count }
+	if !rev {
+		pos, ok := v.seekLocked(start)
+		if !ok {
+			return nil
 		}
-	} else {
-		for i := lo; i < hi && len(out) < n; i++ {
-			out = append(out, v.Entries[i])
+		v.eachLocked(pos, func(n *streamNode, off int, id StreamID) bool {
+			if end.Less(id) {
+				return false
+			}
+			out = append(out, n.entry(off))
+			return !full()
+		})
+		return out
+	}
+	// Newest first: the nodes that may hold entries up to end, each read
+	// forward and replied backward.
+	ni := sort.Search(len(v.nodes), func(i int) bool { return end.Less(v.nodes[i].master) }) - 1
+	var offs []int
+	for ; ni >= 0 && !full(); ni-- {
+		n := v.nodes[ni]
+		if n.last.Less(start) {
+			break
+		}
+		offs = offs[:0]
+		n.each(0, func(off int, flags byte, id StreamID, _ int) bool {
+			if end.Less(id) {
+				return false
+			}
+			if flags&streamDeleted == 0 && !id.Less(start) {
+				offs = append(offs, off)
+			}
+			return true
+		})
+		for i := len(offs) - 1; i >= 0 && !full(); i-- {
+			out = append(out, n.entry(offs[i]))
 		}
 	}
 	return out
@@ -645,10 +766,7 @@ func (v *StreamValue) After(id StreamID, count int64) []*StreamEntry {
 func (v *StreamValue) LastEntryID() (StreamID, bool) {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
-	if len(v.Entries) == 0 {
-		return StreamID{}, false
-	}
-	return v.Entries[len(v.Entries)-1].streamID(), true
+	return v.lastEntryIDLocked()
 }
 
 // LastGeneratedID is the stream's top ID, which deletions never lower.
@@ -673,7 +791,7 @@ func (v *StreamValue) GetRange(start, end string, count int64) []*StreamEntry {
 func (v *StreamValue) Len() int64 {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
-	return int64(len(v.Entries))
+	return int64(v.count)
 }
 
 // Delete removes the entries with the given IDs, as XDEL does, and returns
@@ -692,20 +810,18 @@ func (v *StreamValue) Delete(ids ...string) int64 {
 func (v *StreamValue) DeleteIDs(ids []StreamID) int64 {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	v.ensureNodes()
 
 	deleted := int64(0)
 	maxDel := v.maxDeletedLocked()
 	for _, id := range ids {
-		i := v.searchLocked(id)
-		if i >= len(v.Entries) || v.Entries[i].streamID() != id {
+		pos, ok := v.seekLocked(id)
+		if !ok {
 			continue
 		}
-		v.dropEntryNode(v.Entries[i])
-		v.size.add(-streamEntrySize(v.Entries[i]))
-		copy(v.Entries[i:], v.Entries[i+1:])
-		v.Entries[len(v.Entries)-1] = nil
-		v.Entries = v.Entries[:len(v.Entries)-1]
+		if _, eid, _ := v.nodes[pos.node].head(pos.off); eid != id {
+			continue
+		}
+		v.deleteAtLocked(pos)
 		if maxDel.Less(id) {
 			maxDel = id
 		}
@@ -714,7 +830,6 @@ func (v *StreamValue) DeleteIDs(ids []StreamID) int64 {
 	if deleted > 0 {
 		v.MaxDeletedID = maxDel.String()
 	}
-	v.Length = int64(len(v.Entries))
 	return deleted
 }
 
@@ -741,28 +856,58 @@ func (v *StreamValue) TrimStream(args StreamTrimArgs) int64 {
 	return v.trimLocked(args)
 }
 
+// removeHeadLocked removes the n oldest entries: whole nodes while n
+// covers them, then flags entries of the next one deleted.
 func (v *StreamValue) removeHeadLocked(n int) {
-	for i := 0; i < n; i++ {
-		v.dropEntryNode(v.Entries[i])
-		v.size.add(-streamEntrySize(v.Entries[i]))
-		v.Entries[i] = nil
+	for n > 0 && len(v.nodes) > 0 {
+		node := v.nodes[0]
+		if n >= node.live {
+			n -= node.live
+			v.count -= node.live
+			v.size.add(-(streamNodeOverhead + int64(len(node.buf))))
+			v.nodes[0] = nil
+			v.nodes = v.nodes[1:]
+			continue
+		}
+		var offs []int
+		node.each(0, func(off int, flags byte, _ StreamID, _ int) bool {
+			if flags&streamDeleted == 0 {
+				offs = append(offs, off)
+			}
+			return len(offs) < n
+		})
+		for _, off := range offs {
+			v.deleteAtLocked(streamPos{node: 0, off: off})
+		}
+		n = 0
 	}
-	v.Entries = v.Entries[n:]
-	v.Length = int64(len(v.Entries))
+	v.Length = int64(v.count)
+}
+
+// countBeforeLocked counts the live entries with ID < id.
+func (v *StreamValue) countBeforeLocked(id StreamID) int {
+	n := 0
+	v.eachLocked(streamPos{}, func(_ *streamNode, _ int, eid StreamID) bool {
+		if !eid.Less(id) {
+			return false
+		}
+		n++
+		return true
+	})
+	return n
 }
 
 func (v *StreamValue) trimLocked(args StreamTrimArgs) int64 {
 	if args.Strategy == StreamTrimNone {
 		return 0
 	}
-	v.ensureNodes()
 	deleted := int64(0)
-	for len(v.Entries) > 0 {
-		length := int64(len(v.Entries))
+	for len(v.nodes) > 0 {
+		length := int64(v.count)
 		if args.Strategy == StreamTrimMaxLen && length <= args.MaxLen {
 			break
 		}
-		node := v.Entries[0].node
+		node := v.nodes[0]
 		entries := int64(node.live)
 		if args.Limit > 0 && deleted+entries > args.Limit {
 			break
@@ -782,15 +927,19 @@ func (v *StreamValue) trimLocked(args StreamTrimArgs) int64 {
 			break
 		}
 		n := 0
-		for n < int(entries) {
-			if args.Strategy == StreamTrimMaxLen && length-int64(n) <= args.MaxLen {
-				break
+		node.each(0, func(_ int, flags byte, id StreamID, _ int) bool {
+			if flags&streamDeleted != 0 {
+				return true
 			}
-			if args.Strategy == StreamTrimMinID && !v.Entries[n].streamID().Less(args.MinID) {
-				break
+			if args.Strategy == StreamTrimMaxLen && length-int64(n) <= args.MaxLen {
+				return false
+			}
+			if args.Strategy == StreamTrimMinID && !id.Less(args.MinID) {
+				return false
 			}
 			n++
-		}
+			return true
+		})
 		if n > 0 {
 			v.removeHeadLocked(n)
 			deleted += int64(n)
@@ -821,11 +970,10 @@ func (v *StreamValue) TrimByMinID(minID string, _ bool) int64 {
 func (v *StreamValue) TrimLimited(maxLen int64, limit int64) int64 {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	v.ensureNodes()
 	if maxLen < 0 {
 		maxLen = 0
 	}
-	length := int64(len(v.Entries))
+	length := int64(v.count)
 	if maxLen >= length {
 		return 0
 	}
@@ -846,8 +994,7 @@ func (v *StreamValue) TrimByMinIDLimited(minID string, limit int64) int64 {
 	}
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	v.ensureNodes()
-	n := v.searchLocked(id)
+	n := v.countBeforeLocked(id)
 	if limit > 0 && int64(n) > limit {
 		n = int(limit)
 	}
@@ -929,11 +1076,15 @@ func (v *StreamValue) GetEntryByID(id string) *StreamEntry {
 }
 
 func (v *StreamValue) entryLocked(id StreamID) *StreamEntry {
-	i := v.searchLocked(id)
-	if i < len(v.Entries) && v.Entries[i].streamID() == id {
-		return v.Entries[i]
+	pos, ok := v.seekLocked(id)
+	if !ok {
+		return nil
 	}
-	return nil
+	n := v.nodes[pos.node]
+	if _, eid, _ := n.head(pos.off); eid != id {
+		return nil
+	}
+	return n.entry(pos.off)
 }
 
 func (v *StreamValue) SetLastID(lastID string) {

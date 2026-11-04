@@ -172,11 +172,12 @@ func TestAOFRewritePreservesStreamEntriesControl(t *testing.T) {
 	dst := aofGroupRewriteAndReplay(t, src)
 	replayed := aofGroupStream(t, dst, "st")
 
-	if len(replayed.Entries) != 2 {
-		t.Fatalf("stream has %d entries after rewrite, want 2", len(replayed.Entries))
+	replayedEntries := replayed.EntriesLocked()
+	if len(replayedEntries) != 2 {
+		t.Fatalf("stream has %d entries after rewrite, want 2", len(replayedEntries))
 	}
-	if replayed.Entries[0].ID != "1-1" || replayed.Entries[1].ID != "2-2" {
-		t.Fatalf("entry IDs = %q,%q, want 1-1,2-2", replayed.Entries[0].ID, replayed.Entries[1].ID)
+	if replayedEntries[0].ID != "1-1" || replayedEntries[1].ID != "2-2" {
+		t.Fatalf("entry IDs = %q,%q, want 1-1,2-2", replayedEntries[0].ID, replayedEntries[1].ID)
 	}
 }
 

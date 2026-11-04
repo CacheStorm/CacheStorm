@@ -30,8 +30,6 @@ const (
 	setIntsetElem      = 10
 	zsetPackedBase     = 128
 	zsetPackedOverhd   = 11
-	streamEntryOverhd  = 32
-	streamPairOverhd   = 80
 )
 
 func listElemSize(el []byte) int64 { return int64(len(el)) + listElemOverhead }
@@ -43,14 +41,6 @@ func hashFieldSize(field string, val []byte) int64 {
 func setMemberSize(member string) int64 { return int64(len(member)) + setMemberOverhead }
 
 func zsetMemberSize(member string) int64 { return int64(len(member)) + zsetMemberOverhd }
-
-func streamEntrySize(e *StreamEntry) int64 {
-	size := int64(len(e.ID)) + streamEntryOverhd
-	for _, p := range e.Pairs {
-		size += int64(len(p.Name)) + int64(len(p.Value)) + streamPairOverhd
-	}
-	return size
-}
 
 // sizeCounter is the incrementally maintained payload size of a collection:
 // the sum of its elements' sizes, without the base. A value built from a

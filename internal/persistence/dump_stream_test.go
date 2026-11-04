@@ -31,7 +31,7 @@ func viewStream(v *store.StreamValue) streamView {
 	out := streamView{Length: v.Length, EntriesAdded: v.EntriesAdded, LastID: v.LastID, MaxDeletedID: v.MaxDeletedID,
 		Groups: map[string]string{}, Pending: map[string]store.PendingEntry{}, ConsumerPending: map[string]int64{},
 		ConsumerSeen: map[string][2]int64{}, GroupRead: map[string]int64{}}
-	for _, e := range v.Entries {
+	for _, e := range v.EntriesLocked() {
 		out.IDs = append(out.IDs, e.ID)
 		out.Entries = append(out.Entries, e.FieldPairs())
 	}

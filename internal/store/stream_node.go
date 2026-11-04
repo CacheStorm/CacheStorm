@@ -1,6 +1,9 @@
 package store
 
-import "strconv"
+import (
+	"encoding/binary"
+	"strconv"
+)
 
 // Redis stores a stream as a radix tree of listpack nodes. Approximate ("~")
 // trimming only ever drops whole nodes, so its result depends on where the
@@ -13,14 +16,35 @@ const (
 	streamDefaultLimit   = 100 * streamNodeMaxEntries
 )
 
+// A node also holds its entries, packed into buf as Redis packs them into
+// the listpack: each entry is a flags byte, its ID's milliseconds less the
+// master's and its sequence (uvarints), then its values when its fields are
+// the master's, or else the field count and each name and value; a name or
+// value is an uvarint length and the bytes. A deleted entry keeps its bytes
+// with streamDeleted set, as Redis keeps it flagged in the listpack, until
+// the whole node goes. Bytes once written are never written again except a
+// flags byte, so a value handed out as a slice of buf stays valid.
 type streamNode struct {
 	master       StreamID
 	masterFields []string
-	bytes        int
-	total        int
-	live         int
-	last         StreamID
+	// bytes models the size of Redis' listpack, which decides where a node
+	// ends.
+	bytes int
+	total int
+	live  int
+	last  StreamID
+	buf   []byte
 }
+
+const (
+	streamDeleted    = 1
+	streamSameFields = 2
+	// streamNilFields marks an entry added with no field list at all,
+	// which hands out nil fields rather than none.
+	streamNilFields = 4
+	// streamNodeOverhead is what a node costs besides its packed entries.
+	streamNodeOverhead = 160
+)
 
 func lpIntSize(v int64) int {
 	switch {
@@ -86,31 +110,42 @@ func sameStreamFields(master []string, pairs []StreamField) bool {
 	return true
 }
 
-// placeEntry appends e to tail, or to a fresh node when tail is full, and
-// returns the node now holding e. The caller holds the write lock.
-func (v *StreamValue) placeEntry(tail *streamNode, e *StreamEntry) *streamNode {
-	pairs := e.FieldPairs()
-	id := e.streamID()
+// full reports whether an entry of raw field bytes goes to a new node.
+func (n *streamNode) full(raw int) bool {
+	return n.bytes+raw >= streamNodeMaxBytes || n.total >= streamNodeMaxEntries
+}
+
+func newStreamNode(id StreamID, pairs []StreamField) *streamNode {
+	names := make([]string, len(pairs))
+	size := 7 + lpIntElem(1) + lpIntElem(0) + lpIntElem(int64(len(pairs))) + lpIntElem(0)
+	for i, p := range pairs {
+		names[i] = p.Name
+		size += lpStrElem(p.Name)
+	}
+	return &streamNode{master: id, masterFields: names, bytes: size}
+}
+
+func rawFieldBytes(pairs []StreamField) int {
 	raw := 0
 	for _, p := range pairs {
 		raw += len(p.Name) + len(p.Value)
 	}
-	if tail == nil || tail.bytes+raw >= streamNodeMaxBytes || tail.total >= streamNodeMaxEntries {
-		names := make([]string, len(pairs))
-		size := 7 + lpIntElem(1) + lpIntElem(0) + lpIntElem(int64(len(pairs))) + lpIntElem(0)
-		for i, p := range pairs {
-			names[i] = p.Name
-			size += lpStrElem(p.Name)
-		}
-		tail = &streamNode{master: id, masterFields: names, bytes: size}
-		v.nodeCount++
-	}
-	same := sameStreamFields(tail.masterFields, pairs)
+	return raw
+}
+
+func appendStreamBytes(buf, b []byte) []byte {
+	buf = binary.AppendUvarint(buf, uint64(len(b)))
+	return append(buf, b...)
+}
+
+// add packs an entry at the end of the node and returns the bytes it took.
+func (n *streamNode) add(id StreamID, pairs []StreamField) int {
+	same := sameStreamFields(n.masterFields, pairs)
 	flags := int64(0)
 	if same {
-		flags = 2
+		flags = streamSameFields
 	}
-	size := lpIntElem(flags) + lpIntElem(int64(id.Ms-tail.master.Ms)) + lpIntElem(int64(id.Seq-tail.master.Seq))
+	size := lpIntElem(flags) + lpIntElem(int64(id.Ms-n.master.Ms)) + lpIntElem(int64(id.Seq-n.master.Seq))
 	lpCount := int64(len(pairs) + 3)
 	if same {
 		for _, p := range pairs {
@@ -124,71 +159,112 @@ func (v *StreamValue) placeEntry(tail *streamNode, e *StreamEntry) *streamNode {
 		lpCount += int64(len(pairs) + 1)
 	}
 	size += lpIntElem(lpCount)
-	tail.bytes += size
-	tail.total++
-	tail.live++
-	tail.last = id
-	e.node = tail
-	v.nodeLive++
-	return tail
-}
+	n.bytes += size
+	n.total++
+	n.live++
+	n.last = id
 
-func (v *StreamValue) nodesValid() bool {
-	n := len(v.Entries)
-	if n == 0 {
-		return v.nodeLive == 0
+	before := len(n.buf)
+	if pairs == nil {
+		flags |= streamNilFields
 	}
-	return v.nodeLive == n && v.Entries[0].node != nil && v.Entries[n-1].node != nil
-}
-
-// ensureNodes rebuilds the node model when the entries were set up without
-// it (RDB load, tests, Clone). The caller holds the write lock.
-func (v *StreamValue) ensureNodes() {
-	if v.nodesValid() {
-		if len(v.Entries) == 0 {
-			v.nodeCount = 0
+	n.buf = append(n.buf, byte(flags))
+	n.buf = binary.AppendUvarint(n.buf, id.Ms-n.master.Ms)
+	n.buf = binary.AppendUvarint(n.buf, id.Seq)
+	if !same {
+		n.buf = binary.AppendUvarint(n.buf, uint64(len(pairs)))
+	}
+	for _, p := range pairs {
+		if !same {
+			n.buf = binary.AppendUvarint(n.buf, uint64(len(p.Name)))
+			n.buf = append(n.buf, p.Name...)
 		}
-		return
+		n.buf = appendStreamBytes(n.buf, p.Value)
 	}
-	v.nodeCount, v.nodeLive = 0, 0
-	var tail *streamNode
-	for _, e := range v.Entries {
-		e.node = nil
-		tail = v.placeEntry(tail, e)
-	}
-	v.Length = int64(len(v.Entries))
-	if v.EntriesAdded < v.Length {
-		v.EntriesAdded = v.Length
+	return len(n.buf) - before
+}
+
+// seal drops the slack of a node no more entries go to.
+func (n *streamNode) seal() {
+	if cap(n.buf) > len(n.buf) {
+		n.buf = append([]byte(nil), n.buf...)
 	}
 }
 
-// countNodes reports the node count without mutating state, for readers.
-func (v *StreamValue) countNodes() int {
-	if v.nodesValid() {
-		if len(v.Entries) == 0 {
-			return 0
+// head decodes the flags and ID of the entry at off and returns the offset
+// of its fields.
+func (n *streamNode) head(off int) (flags byte, id StreamID, fields int) {
+	flags = n.buf[off]
+	off++
+	ms, k := binary.Uvarint(n.buf[off:])
+	off += k
+	seq, k := binary.Uvarint(n.buf[off:])
+	off += k
+	return flags, StreamID{Ms: n.master.Ms + ms, Seq: seq}, off
+}
+
+func (n *streamNode) bytesAt(off int) ([]byte, int) {
+	l, k := binary.Uvarint(n.buf[off:])
+	start := off + k
+	end := start + int(l)
+	return n.buf[start:end:end], end
+}
+
+// fields decodes the fields of an entry from off, the offset head returned,
+// and returns the offset of the next entry. With skip it only finds the end.
+func (n *streamNode) fields(flags byte, off int, skip bool) ([]StreamField, int) {
+	var pairs []StreamField
+	if flags&streamSameFields != 0 {
+		if !skip && flags&streamNilFields == 0 {
+			pairs = make([]StreamField, len(n.masterFields))
 		}
-		return v.nodeCount
+		for i := range n.masterFields {
+			var v []byte
+			v, off = n.bytesAt(off)
+			if !skip {
+				pairs[i] = StreamField{Name: n.masterFields[i], Value: v}
+			}
+		}
+		return pairs, off
 	}
-	shadow := &StreamValue{}
-	var tail *streamNode
-	for _, e := range v.Entries {
-		copyEntry := &StreamEntry{ID: e.ID, Pairs: e.Pairs}
-		tail = shadow.placeEntry(tail, copyEntry)
+	count, k := binary.Uvarint(n.buf[off:])
+	off += k
+	if !skip && flags&streamNilFields == 0 {
+		pairs = make([]StreamField, count)
 	}
-	return shadow.nodeCount
+	for i := 0; i < int(count); i++ {
+		var name, v []byte
+		name, off = n.bytesAt(off)
+		v, off = n.bytesAt(off)
+		if !skip {
+			pairs[i] = StreamField{Name: string(name), Value: v}
+		}
+	}
+	return pairs, off
 }
 
-// dropEntryNode accounts for removing e from its node. The caller holds the
-// write lock.
-func (v *StreamValue) dropEntryNode(e *StreamEntry) {
-	if e.node == nil {
-		return
+// streamPos is an entry's place: its node and offset in it.
+type streamPos struct {
+	node int
+	off  int
+}
+
+// each calls fn on the node's entries from offset from (deleted ones
+// included) until fn returns false, and reports whether it ran out.
+func (n *streamNode) each(from int, fn func(off int, flags byte, id StreamID, fields int) bool) bool {
+	for off := from; off < len(n.buf); {
+		flags, id, f := n.head(off)
+		if !fn(off, flags, id, f) {
+			return false
+		}
+		_, off = n.fields(flags, f, true)
 	}
-	e.node.live--
-	if e.node.live == 0 {
-		v.nodeCount--
-	}
-	v.nodeLive--
-	e.node = nil
+	return true
+}
+
+// entry builds the entry at off.
+func (n *streamNode) entry(off int) *StreamEntry {
+	flags, id, f := n.head(off)
+	pairs, _ := n.fields(flags, f, false)
+	return &StreamEntry{ID: id.String(), Pairs: pairs}
 }

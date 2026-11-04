@@ -894,7 +894,8 @@ func (rw *AOFRewriter) writeValueCommands(w *bufio.Writer, key string, value sto
 	case *store.StreamValue:
 		vt.RLock()
 		defer vt.RUnlock()
-		if len(vt.Entries) == 0 {
+		entries := vt.EntriesLocked()
+		if len(entries) == 0 {
 			if err := rw.writeCommand(w, "XGROUP", "CREATE", key, "", "0-0", "MKSTREAM"); err != nil {
 				return err
 			}
@@ -902,7 +903,7 @@ func (rw *AOFRewriter) writeValueCommands(w *bufio.Writer, key string, value sto
 				return err
 			}
 		}
-		for _, entry := range vt.Entries {
+		for _, entry := range entries {
 			pairs := entry.FieldPairs()
 			args := make([]string, 0, len(pairs)*2+2)
 			args = append(args, key, entry.ID)
@@ -915,7 +916,7 @@ func (rw *AOFRewriter) writeValueCommands(w *bufio.Writer, key string, value sto
 		}
 		if vt.LastID != "" {
 			args := []string{key, vt.LastID}
-			if vt.EntriesAdded > int64(len(vt.Entries)) {
+			if vt.EntriesAdded > int64(len(entries)) {
 				args = append(args, "ENTRIESADDED", strconv.FormatInt(vt.EntriesAdded, 10))
 			}
 			if vt.MaxDeletedID != "" {

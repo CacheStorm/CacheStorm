@@ -117,7 +117,7 @@ func appendDumpStream(out []byte, v *store.StreamValue) []byte {
 	id := func(s store.StreamID) { out = appendDumpLength(appendDumpLength(out, s.Ms), s.Seq) }
 
 	out = append(out, rdbTypeStreamListpacks3)
-	entries := v.Entries
+	entries := v.EntriesLocked()
 	out = appendDumpLength(out, uint64((len(entries)+streamNodeMaxEntries-1)/streamNodeMaxEntries))
 	for start := 0; start < len(entries); start += streamNodeMaxEntries {
 		node := entries[start:min(start+streamNodeMaxEntries, len(entries))]
@@ -281,7 +281,12 @@ func (d *dumpDecoder) stream(kind byte) store.Value {
 			d.err = ErrDumpFormat
 			return nil
 		}
-		v.Entries = append(v.Entries, entries...)
+		for _, e := range entries {
+			if !v.LoadEntry(parseDumpStreamID(e.ID), e.Pairs) {
+				d.err = ErrDumpFormat
+				return nil
+			}
+		}
 	}
 	length, enc := d.length()
 	last := d.streamID()
@@ -302,17 +307,11 @@ func (d *dumpDecoder) stream(kind byte) store.Value {
 	} else {
 		v.EntriesAdded = int64(length)
 	}
-	if d.err != nil || uint64(len(v.Entries)) != length {
+	if d.err != nil || uint64(v.Len()) != length {
 		d.err = ErrDumpFormat
 		return nil
 	}
 	v.Length = int64(length)
-	for i := 1; i < len(v.Entries); i++ {
-		if parseDumpStreamID(v.Entries[i-1].ID).Compare(parseDumpStreamID(v.Entries[i].ID)) >= 0 {
-			d.err = ErrDumpFormat
-			return nil
-		}
-	}
 
 	groups := d.count()
 	for i := 0; i < groups && d.err == nil; i++ {

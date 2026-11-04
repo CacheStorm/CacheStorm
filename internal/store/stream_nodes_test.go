@@ -45,14 +45,16 @@ func TestStreamApproxTrimFollowsRedisNodes(t *testing.T) {
 	}
 }
 
-// A stream built without the node model (RDB load, Clone) rebuilds it on the
-// next write and still trims by nodes.
+// A stream loaded entry by entry (RDB load) or cloned has the nodes XADD
+// would have built, and trims by them.
 func TestStreamNodesRebuiltForLoadedStreams(t *testing.T) {
 	src := NewStreamValue(0)
 	addN(t, src, 150, false)
-	loaded := &StreamValue{Entries: make([]*StreamEntry, 0, 150), Groups: map[string]*ConsumerGroup{}}
-	for _, e := range src.Entries {
-		loaded.Entries = append(loaded.Entries, &StreamEntry{ID: e.ID, Pairs: StreamPairsFromMap(e.FieldMap())})
+	loaded := NewStreamValue(0)
+	for _, e := range src.EntriesLocked() {
+		if !loaded.LoadEntry(streamIDOf(e.ID), StreamPairsFromMap(e.FieldMap())) {
+			t.Fatal("LoadEntry refused an entry in order")
+		}
 	}
 	loaded.LastID = src.LastID
 	if got := loaded.Info(false, 0).Nodes; got != 2 {

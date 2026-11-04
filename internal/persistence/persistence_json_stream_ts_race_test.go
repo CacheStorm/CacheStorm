@@ -12,10 +12,8 @@ import (
 
 func TestPersistenceJSONStreamTSValueRaceX(t *testing.T) {
 	jsonVal := store.MustParseJSONValue(`{"a":1}`)
-	streamVal := &store.StreamValue{
-		Entries: []*store.StreamEntry{{ID: "1-0", Pairs: store.StreamPairsFromMap(map[string][]byte{"f": []byte("v")})}},
-		LastID:  "1-0",
-	}
+	streamVal := store.NewStreamValue(0)
+	streamVal.LoadEntry(store.StreamID{Ms: 1}, store.StreamPairsFromMap(map[string][]byte{"f": []byte("v")}))
 	tsVal := &store.TimeSeriesValue{
 		Samples: []store.TimeSeriesSample{{Timestamp: 1, Value: 1}},
 	}
@@ -74,7 +72,7 @@ func TestPersistenceJSONStreamTSValueRaceX(t *testing.T) {
 	wg.Wait()
 
 	streamVal.RLock()
-	streamLen := len(streamVal.Entries)
+	streamLen := streamVal.LenLocked()
 	streamVal.RUnlock()
 	if streamLen != 1+iterations {
 		t.Fatalf("FAIL post-join control: stream=%d, want %d", streamLen, 1+iterations)

@@ -342,7 +342,7 @@ func (w *RDBWriter) writeValue(f io.Writer, v store.Value, valueType int) error 
 		}
 	case *store.StreamValue:
 		var data bytes.Buffer
-		if err := gob.NewEncoder(&data).Encode(vt.Clone()); err != nil {
+		if err := gob.NewEncoder(&data).Encode(newGobStream(vt)); err != nil {
 			return err
 		}
 		return w.writeString(f, data.String())
@@ -900,21 +900,23 @@ func (r *RDBReader) readEntry(f io.Reader, valueType byte, expiresAtMS int64, ta
 			entries = append(entries, &store.StreamEntry{ID: id, Pairs: store.StreamPairsFromMap(fields)})
 			lastID = id
 		}
-		value = &store.StreamValue{
-			Entries: entries,
-			LastID:  lastID,
-			Length:  int64(len(entries)),
-			MaxLen:  int64(maxLen),
-			Groups:  make(map[string]*store.ConsumerGroup),
+		stream, err := (&gobStream{Entries: entries, LastID: lastID, MaxLen: int64(maxLen)}).value()
+		if err != nil {
+			return err
 		}
+		value = stream
 
 	case 9:
 		data, err := r.readString(f)
 		if err != nil {
 			return err
 		}
-		stream := store.NewStreamValue(0)
-		if err := gob.NewDecoder(strings.NewReader(data)).Decode(stream); err != nil {
+		var gs gobStream
+		if err := gob.NewDecoder(strings.NewReader(data)).Decode(&gs); err != nil {
+			return err
+		}
+		stream, err := gs.value()
+		if err != nil {
 			return err
 		}
 		value = stream
@@ -1341,4 +1343,50 @@ func (w *RDBWriter) writeHashSnapshot(f io.Writer, snap *hashSnapshot) error {
 		}
 	}
 	return nil
+}
+
+// gobStream is a stream as CacheStorm's own snapshots hold it: the exported
+// fields StreamValue had when it kept its entries in a slice, which gob
+// matches by name, so snapshots written before the entries were packed
+// load unchanged.
+type gobStream struct {
+	Entries      []*store.StreamEntry
+	LastID       string
+	MaxDeletedID string
+	Length       int64
+	MaxLen       int64
+	EntriesAdded int64
+	Groups       map[string]*store.ConsumerGroup
+}
+
+func newGobStream(v *store.StreamValue) *gobStream {
+	c := v.Clone().(*store.StreamValue)
+	return &gobStream{
+		Entries:      c.EntriesLocked(),
+		LastID:       c.LastID,
+		MaxDeletedID: c.MaxDeletedID,
+		Length:       c.Length,
+		MaxLen:       c.MaxLen,
+		EntriesAdded: c.EntriesAdded,
+		Groups:       c.Groups,
+	}
+}
+
+func (gs *gobStream) value() (*store.StreamValue, error) {
+	v := store.NewStreamValue(gs.MaxLen)
+	for _, e := range gs.Entries {
+		id, err := store.ParseStreamID(e.ID, 0)
+		if err != nil || !v.LoadEntry(id, e.Pairs) {
+			return nil, fmt.Errorf("snapshot stream entry %q out of order", e.ID)
+		}
+	}
+	if gs.LastID != "" {
+		v.LastID = gs.LastID
+	}
+	v.MaxDeletedID = gs.MaxDeletedID
+	v.EntriesAdded = max(gs.EntriesAdded, int64(len(gs.Entries)))
+	if gs.Groups != nil {
+		v.Groups = gs.Groups
+	}
+	return v, nil
 }

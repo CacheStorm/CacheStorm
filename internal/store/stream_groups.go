@@ -8,7 +8,7 @@ import (
 // hasTombstonesLocked is Redis' streamRangeHasTombstones(s, start, NULL):
 // whether the last entry deleted with XDEL lies at or after start.
 func (v *StreamValue) hasTombstonesLocked(start StreamID) bool {
-	if len(v.Entries) == 0 {
+	if v.count == 0 {
 		return false
 	}
 	maxDel := v.maxDeletedLocked()
@@ -25,7 +25,7 @@ func (v *StreamValue) estimateDistanceLocked(id StreamID) (int64, bool) {
 	if v.EntriesAdded == 0 {
 		return 0, true
 	}
-	length := int64(len(v.Entries))
+	length := int64(v.count)
 	last := v.lastIDLocked()
 	if length == 0 && id.Compare(last) < 1 {
 		return v.EntriesAdded, true
@@ -55,7 +55,7 @@ func (v *StreamValue) estimateDistanceLocked(id StreamID) (int64, bool) {
 
 // groupLagLocked is Redis' streamReplyWithCGLag.
 func (v *StreamValue) groupLagLocked(g *ConsumerGroup) (int64, bool) {
-	if v.EntriesAdded == 0 || len(v.Entries) == 0 {
+	if v.EntriesAdded == 0 || v.count == 0 {
 		return 0, true
 	}
 	last := streamIDOf(g.LastID)
@@ -63,7 +63,7 @@ func (v *StreamValue) groupLagLocked(g *ConsumerGroup) (int64, bool) {
 	if last.Less(first) && v.maxDeletedLocked().Less(first) {
 		// Every remaining entry comes after both the group's position and
 		// the last tombstone.
-		return int64(len(v.Entries)), true
+		return int64(v.count), true
 	}
 	if g.EntriesRead != EntriesReadInvalid && !v.hasTombstonesLocked(last) {
 		return v.EntriesAdded - g.EntriesRead, true
@@ -116,12 +116,13 @@ func (v *StreamValue) GroupHasNew(name string) (hasNew bool, exists bool) {
 	if !ok {
 		return false, false
 	}
-	if len(v.Entries) == 0 {
+	top, ok := v.lastEntryIDLocked()
+	if !ok {
 		return false, true
 	}
 	g.mu.RLock()
 	defer g.mu.RUnlock()
-	return streamIDOf(g.LastID).Less(v.Entries[len(v.Entries)-1].streamID()), true
+	return streamIDOf(g.LastID).Less(top), true
 }
 
 // ReadGroup serves XREADGROUP for one stream. history is false for the ">"
@@ -162,11 +163,12 @@ func (v *StreamValue) ReadGroup(groupName, consumerName string, history bool, af
 		return items, true, true
 	}
 
-	if len(v.Entries) == 0 {
+	top, ok := v.lastEntryIDLocked()
+	if !ok {
 		return nil, false, true
 	}
 	last := streamIDOf(g.LastID)
-	if !last.Less(v.Entries[len(v.Entries)-1].streamID()) {
+	if !last.Less(top) {
 		return nil, false, true
 	}
 	start, _ := last.Next()
@@ -510,11 +512,11 @@ func (v *StreamValue) SetID(id StreamID, entriesAdded int64, maxDeleted StreamID
 	if id.Less(v.maxDeletedLocked()) {
 		return errXSetIDSmallerThanDeleted
 	}
-	if n := len(v.Entries); n > 0 {
-		if id.Less(v.Entries[n-1].streamID()) {
+	if top, ok := v.lastEntryIDLocked(); ok {
+		if id.Less(top) {
 			return errXSetIDSmallerThanTop
 		}
-		if entriesAdded != -1 && int64(n) > entriesAdded {
+		if entriesAdded != -1 && int64(v.count) > entriesAdded {
 			return errXSetIDEntriesAdded
 		}
 	}
@@ -623,8 +625,8 @@ func (v *StreamValue) Info(full bool, count int64) StreamInfo {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 	info := StreamInfo{
-		Length:       int64(len(v.Entries)),
-		Nodes:        v.countNodes(),
+		Length:       int64(v.count),
+		Nodes:        len(v.nodes),
 		LastID:       v.lastIDLocked().String(),
 		MaxDeletedID: v.maxDeletedLocked().String(),
 		EntriesAdded: v.EntriesAdded,
@@ -634,17 +636,18 @@ func (v *StreamValue) Info(full bool, count int64) StreamInfo {
 	if info.EntriesAdded < info.Length {
 		info.EntriesAdded = info.Length
 	}
-	if n := len(v.Entries); n > 0 {
-		info.First, info.Last = v.Entries[0], v.Entries[n-1]
+	if v.count > 0 {
+		info.First = v.rangeLocked(StreamID{}, MaxStreamID, 1, false)[0]
+		info.Last = v.rangeLocked(StreamID{}, MaxStreamID, 1, true)[0]
 	}
 	if !full {
 		return info
 	}
-	n := len(v.Entries)
-	if count > 0 && int64(n) > count {
-		n = int(count)
+	n := int64(0)
+	if count > 0 {
+		n = count
 	}
-	info.Entries = append([]*StreamEntry(nil), v.Entries[:n]...)
+	info.Entries = v.rangeLocked(StreamID{}, MaxStreamID, n, false)
 	for _, g := range v.sortedGroupsLocked() {
 		info.GroupInfos = append(info.GroupInfos, v.groupInfoLocked(g, true, count))
 	}
