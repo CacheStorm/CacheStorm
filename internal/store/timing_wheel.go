@@ -112,13 +112,17 @@ func (tw *TimingWheel) addToLevel(level int, key string, expiresAt int64, durati
 		}
 	}
 	slot = (l.current + slot) % l.numSlots
-	l.mu.Unlock()
 	if slot < 0 {
 		slot = 0
 	}
+	// The key goes into its slot before the level's lock is released: a tick
+	// advancing the pointer in between would leave it in a slot already
+	// passed, where it waited for the wheel to come round (an hour on level
+	// 0) while nothing removed it.
 	l.slots[slot].mu.Lock()
 	l.slots[slot].keys[key] = expiresAt
 	l.slots[slot].mu.Unlock()
+	l.mu.Unlock()
 }
 
 func (tw *TimingWheel) Remove(key string) {
@@ -169,8 +173,6 @@ func (tw *TimingWheel) tickLoop() {
 }
 
 func (tw *TimingWheel) tick() {
-	now := time.Now().UnixMilli()
-
 	tw.levels[0].mu.Lock()
 	bucket := tw.levels[0].slots[tw.levels[0].current]
 	advance := false
@@ -180,19 +182,63 @@ func (tw *TimingWheel) tick() {
 		tw.levels[0].current = (tw.levels[0].current + 1) % tw.levels[0].numSlots
 		advance = true
 	}
+	next := tw.levels[0].slots[tw.levels[0].current]
 	wrapped := advance && tw.levels[0].current == 0
 	tw.levels[0].mu.Unlock()
+
+	// The clock is read once the pointer has moved: read before, while the
+	// tick waited for the level's lock behind writers, it was behind the
+	// time the slot's keys were placed for, and a key due in between was
+	// left in a slot already passed.
+	now := time.Now().UnixMilli()
 
 	// Sweep the current slot every tick: expireBucket's wall-clock check makes
 	// repeated sweeps exact for sub-second remainders, while the slot pointer
 	// only advances once per slot-second — matching the slot math in Add,
 	// where slot = duration / level tickSize.
 	tw.expireBucket(bucket, now)
+	if advance {
+		// The slot's last sweep: a key it still holds that is due before the
+		// next slot is done goes there rather than waiting an hour for the
+		// wheel to come round, whatever delayed the ticks.
+		tw.carry(bucket, next, now+2*int64(time.Second/time.Millisecond))
+	}
 	tw.store.activeExpireHashFields(now)
 
 	if wrapped {
 		tw.cascadeHour(now)
 	}
+}
+
+// carry moves the keys of from due before until into to.
+func (tw *TimingWheel) carry(from, to *wheelBucket, until int64) {
+	if from == to {
+		return
+	}
+	from.mu.Lock()
+	var moved map[string]int64
+	for key, expiresAt := range from.keys {
+		if expiresAt < until {
+			if moved == nil {
+				moved = make(map[string]int64)
+			}
+			moved[key] = expiresAt
+			delete(from.keys, key)
+		}
+	}
+	from.mu.Unlock()
+	if len(moved) == 0 {
+		return
+	}
+	to.mu.Lock()
+	for key, expiresAt := range moved {
+		// A key in both was rescheduled; the later time is the one that
+		// finds it expired, and one still not due is carried again.
+		if cur, ok := to.keys[key]; !ok || expiresAt > cur {
+			to.keys[key] = expiresAt
+		}
+	}
+	to.mu.Unlock()
 }
 
 // cascadeHour is called once per level-0 wrap (every hour of level-0 time):
