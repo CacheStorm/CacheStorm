@@ -42,7 +42,7 @@ server:
   read_timeout: "0"             # Idle client timeout (0 = never, as Redis timeout 0)
   write_timeout: "0"            # Reply write timeout (0 = 5m default)
   read_buffer_size: 4096        # Per-connection read buffer in bytes
-  write_buffer_size: 16384      # Per-connection write buffer in bytes
+  write_buffer_size: 4096       # Per-connection write buffer in bytes
   requirepass: ""               # Password for AUTH (empty = no auth)
   protected_mode: true          # Without a password, serve only loopback clients
   tls_cert_file: ""             # TLS certificate (empty = plaintext)

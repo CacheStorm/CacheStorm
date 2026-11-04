@@ -25,7 +25,7 @@ const (
 	defaultWriteTimeout    = 5 * time.Minute
 	defaultKeepAlivePeriod = 300 * time.Second
 	defaultReadBufferSize  = 4096
-	defaultWriteBufferSize = 16 << 10
+	defaultWriteBufferSize = 4 << 10
 )
 
 // connectionOptions are the per-connection socket settings from the server
@@ -289,6 +289,10 @@ type replySink struct {
 // written, so a long pipeline does not grow the buffer without limit.
 const maxHeldReplies = 64 << 10
 
+// maxKeptReplyBuffer is the most reply buffer a connection keeps between
+// pipelines.
+const maxKeptReplyBuffer = 16 << 10
+
 func (s *replySink) Write(p []byte) (int, error) {
 	if s.held {
 		return s.buf.Write(p)
@@ -308,7 +312,13 @@ func (s *replySink) release() error {
 		return nil
 	}
 	_, err := s.conn.Write(s.buf.Bytes())
-	s.buf.Reset()
+	if s.buf.Cap() > maxKeptReplyBuffer {
+		// A long pipeline grew the buffer; an idle connection does not
+		// keep it.
+		s.buf = bytes.Buffer{}
+	} else {
+		s.buf.Reset()
+	}
 	return err
 }
 

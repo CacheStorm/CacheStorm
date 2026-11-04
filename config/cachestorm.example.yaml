@@ -20,7 +20,7 @@ server:
 
   # Per-connection socket buffer sizes in bytes
   read_buffer_size: 4096
-  write_buffer_size: 16384
+  write_buffer_size: 4096
 
   # Idle client timeout ("0" = never close idle clients, like Redis timeout 0)
   read_timeout: "0"

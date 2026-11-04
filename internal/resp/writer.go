@@ -37,7 +37,14 @@ func (w *Writer) IsRESP3() bool {
 	return w.resp3.Load()
 }
 
+// NewWriter returns a writer buffering into wr, or writing through wr
+// itself when it is already buffered: bufio.NewWriter keeps a buffered
+// writer only when it is at least its default size, and put a second
+// buffer, which Flush never emptied, in front of a smaller one.
 func NewWriter(wr io.Writer) *Writer {
+	if bw, ok := wr.(*bufio.Writer); ok {
+		return &Writer{wr: bw}
+	}
 	return &Writer{wr: bufio.NewWriter(wr)}
 }
 

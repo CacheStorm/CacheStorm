@@ -78,7 +78,7 @@ type ServerConfig struct {
 	ReadTimeout     string `yaml:"read_timeout" default:"0"`
 	WriteTimeout    string `yaml:"write_timeout" default:"0"`
 	ReadBufferSize  int    `yaml:"read_buffer_size" default:"4096"`
-	WriteBufferSize int    `yaml:"write_buffer_size" default:"16384"`
+	WriteBufferSize int    `yaml:"write_buffer_size" default:"4096"`
 	RequirePass     string `yaml:"requirepass"`
 	// ProtectedMode refuses clients that do not connect over loopback while
 	// no password is set, as Redis' protected-mode does, so a server started
