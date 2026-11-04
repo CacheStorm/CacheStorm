@@ -2235,45 +2235,6 @@ func TestConsumerGroupMethods(t *testing.T) {
 	})
 }
 
-func TestTimingWheelCascade(t *testing.T) {
-	s := NewStore()
-	tw := NewTimingWheel(s)
-	tw.Start()
-	defer tw.Stop()
-
-	// Add a key with an expiration to trigger the hourly cascade sweep.
-	s.Set("cascadekey", &StringValue{Data: []byte("value")}, SetOptions{TTL: 5 * time.Second})
-
-	// Manually drive one hourly cascade (level 0 wrapped).
-	tw.cascadeHour(time.Now().UnixMilli())
-}
-
-func TestTimingWheelExpireKey(t *testing.T) {
-	s := NewStore()
-	tw := NewTimingWheel(s)
-
-	// An expired key is removed by expireKey...
-	if err := s.Set("expirekey", &StringValue{Data: []byte("value")}, SetOptions{TTL: 5 * time.Millisecond}); err != nil {
-		t.Fatalf("Set: %v", err)
-	}
-	time.Sleep(20 * time.Millisecond)
-	tw.expireKey("expirekey")
-	if s.Exists("expirekey") {
-		t.Error("expired key should be deleted after expireKey")
-	}
-
-	// ...while a live key must survive it: expireKey only removes entries
-	// that are actually expired, so a stale schedule can never delete a key
-	// that was rescheduled or has no TTL.
-	if err := s.Set("livekey", &StringValue{Data: []byte("value")}, SetOptions{}); err != nil {
-		t.Fatalf("Set: %v", err)
-	}
-	tw.expireKey("livekey")
-	if !s.Exists("livekey") {
-		t.Error("live key must not be deleted by expireKey")
-	}
-}
-
 func TestWaitNextMillis(t *testing.T) {
 	// Call waitNextMillis with current timestamp
 	now := time.Now().UnixMilli()

@@ -60,7 +60,7 @@ type Store struct {
 	versionMu     sync.RWMutex
 	memTracker    *MemoryTracker
 	evictor       *EvictionController
-	expiry        *TimingWheel
+	expiry        *activeExpiry
 	hfe           *hashExpiryIndex
 	setOpsMu      sync.RWMutex
 	expiryMu      sync.Mutex
@@ -79,7 +79,7 @@ func NewStore() *Store {
 		watchRefs:   make(map[string]int),
 	}
 	s.plain = &entryMeta{loading: &s.loading}
-	s.expiry = NewTimingWheel(s)
+	s.expiry = newActiveExpiry(s)
 	s.hfe = newHashExpiryIndex()
 	for i := 0; i < NumShards; i++ {
 		s.shards[i] = NewShard()
@@ -187,9 +187,9 @@ func (s *Store) Evictor() *EvictionController {
 	return s.evictor
 }
 
-// StartExpiry starts the timing wheel that removes expired keys without
-// requiring reads. Idempotent while running; a stopped wheel can be started
-// again (Stop resets its channel).
+// StartExpiry starts active expiry, which removes expired keys without
+// requiring reads. Idempotent while running; a stopped cycle can be started
+// again.
 func (s *Store) StartExpiry() {
 	s.expiryMu.Lock()
 	defer s.expiryMu.Unlock()
@@ -209,16 +209,6 @@ func (s *Store) StopExpiry() {
 	}
 	s.expiryActive = false
 	s.expiry.Stop()
-}
-
-// scheduleExpiry queues a key on the timing wheel so active expiration can
-// remove it without a read. No-op when the key has no expiry. Stale schedules
-// (key deleted, rescheduled, or PERSISTed) fire as no-ops — expireKey only
-// removes entries that are still actually expired.
-func (s *Store) scheduleExpiry(key string, expiresAt int64) {
-	if expiresAt > 0 && s.expiry != nil {
-		s.expiry.Add(key, expiresAt)
-	}
 }
 
 // DeleteIfExpired removes key only if it is present and past its expiry, with
@@ -802,7 +792,6 @@ func (s *Store) SetTTL(key string, ttl time.Duration) bool {
 		return false
 	}
 	s.TouchKey(key)
-	s.scheduleExpiry(key, expiresAt)
 	return true
 }
 
@@ -811,7 +800,6 @@ func (s *Store) SetExpiresAt(key string, expiresAt int64) bool {
 		return false
 	}
 	s.TouchKey(key)
-	s.scheduleExpiry(key, expiresAt)
 	return true
 }
 
@@ -821,8 +809,6 @@ func (s *Store) Persist(key string) bool {
 	if entry, ok := s.shards[s.shardIndex(key)].Get(key); ok && !entry.IsExpired() {
 		entry.Touch()
 	}
-	// ExpiresAt 0 clears the expiry; any stale wheel schedule for this key
-	// later fires as a no-op (expireKey only removes actually-expired keys).
 	if !s.shards[s.shardIndex(key)].clearExpiry(key) {
 		return false
 	}

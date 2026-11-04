@@ -18,9 +18,13 @@ type Metrics struct {
 	TotalEvictions    atomic.Int64
 	TotalExpirations  atomic.Int64
 	ExpiredSubkeys    atomic.Int64
-	TotalErrors       atomic.Int64
-	TotalBytesIn      atomic.Int64
-	TotalBytesOut     atomic.Int64
+	// ExpireCycleTimeCap counts the active expire cycles that stopped at
+	// their time budget and ExpireCycleNanos the time the cycles took.
+	ExpireCycleTimeCap atomic.Int64
+	ExpireCycleNanos   atomic.Int64
+	TotalErrors        atomic.Int64
+	TotalBytesIn       atomic.Int64
+	TotalBytesOut      atomic.Int64
 	// ReadEvents and WriteEvents count the socket reads and writes that
 	// moved data, INFO's total_reads_processed and total_writes_processed.
 	ReadEvents  atomic.Int64
@@ -253,6 +257,8 @@ func (m *Metrics) Reset() {
 	m.TotalEvictions.Store(0)
 	m.TotalExpirations.Store(0)
 	m.ExpiredSubkeys.Store(0)
+	m.ExpireCycleTimeCap.Store(0)
+	m.ExpireCycleNanos.Store(0)
 	m.TotalErrors.Store(0)
 	m.TotalBytesIn.Store(0)
 	m.TotalBytesOut.Store(0)

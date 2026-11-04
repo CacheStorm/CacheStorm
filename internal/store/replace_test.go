@@ -54,14 +54,13 @@ func TestReplaceFromPreservesOwnersAndAccounting(t *testing.T) {
 	if tracker.Usage() != dst.MemUsage() || src.MemUsage() != 0 || src.DB(0).MemoryTracker().Usage() != 0 {
 		t.Fatal("replacement charged memory to the wrong owner")
 	}
-	base.expiry.tick()
+	base.expiry.cycle()
 	if base.KeyCount() != 1 || !base.Exists("new") {
 		t.Fatal("replacement did not schedule elapsed expiry")
 	}
-	base.expiry.farFuture.mu.Lock()
-	at := base.expiry.farFuture.keys["new"]
-	base.expiry.farFuture.mu.Unlock()
-	if at != math.MaxInt64 || tracker.Usage() != dst.MemUsage() {
+	sh := base.shards[base.shardIndex("new")]
+	_, held := sh.vol["new"]
+	if !held || base.TTLMillis("new") <= 0 || tracker.Usage() != dst.MemUsage() {
 		t.Fatal("replacement lost expiry or memory accounting")
 	}
 }

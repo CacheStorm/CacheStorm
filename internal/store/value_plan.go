@@ -187,9 +187,6 @@ func (s *Store) applyValuePlan(key string, options *SetOptions, snapshot *Entry,
 				s.tagIndex.AddTags(key, entry.TagList())
 			}
 		}
-		if options != nil || snapshot != nil {
-			s.scheduleExpiry(key, entry.ExpiresAt.Load())
-		}
 		unlock()
 		if !live {
 			s.notifyNew(key)

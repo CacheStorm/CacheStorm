@@ -5,13 +5,9 @@ import (
 	"testing"
 )
 
-func TestTimingWheelSchedulesElapsedDeadlines(t *testing.T) {
-	for _, state := range []struct {
-		name    string
-		current int
-		subtick int
-	}{{"first-sweep", 0, 0}, {"slot-boundary", 42, 9}, {"hour-wrap", 3599, 9}} {
-		t.Run(state.name, func(t *testing.T) {
+func TestActiveExpiryRemovesElapsedDeadlines(t *testing.T) {
+	for _, name := range []string{"elapsed"} {
+		t.Run(name, func(t *testing.T) {
 			s := NewStore()
 			s.ConfigureMemory(1<<20, EvictionNoEviction, 70, 85, 5)
 			if err := s.Set("control", &StringValue{Data: []byte("v")}, SetOptions{}); err != nil {
@@ -21,25 +17,21 @@ func TestTimingWheelSchedulesElapsedDeadlines(t *testing.T) {
 			if err := s.Set("expired", &StringValue{Data: []byte("payload")}, SetOptions{Tags: []string{"expired-tag"}}); err != nil {
 				t.Fatal(err)
 			}
-			s.expiry.levels[0].current = state.current
-			s.expiry.subtick = state.subtick
 			if !s.SetExpiresAt("expired", 1) {
 				t.Fatal("expiry setup failed")
 			}
 			calls := 0
 			s.SetHooks(StoreHooks{OnExpire: func(key string, value interface{}) { calls++ }})
-			s.expiry.Add("expired", 1)
-			s.expiry.Add("missing", 1)
-			s.expiry.tick()
+			s.expiry.cycle()
 			if s.KeyCount() != 1 || !s.shards[s.shardIndex("control")].Exists("control") || calls != 1 {
 				t.Fatalf("elapsed expiry failed: keys=%d calls=%d", s.KeyCount(), calls)
 			}
 			if s.MemoryTracker().Usage() != baseline || len(s.GetTagIndex().GetKeys("expired-tag")) != 0 {
 				t.Fatal("expiry did not clean up memory and tag membership")
 			}
-			s.expiry.tick()
+			s.expiry.cycle()
 			if calls != 1 {
-				t.Fatal("duplicate schedule duplicated the callback")
+				t.Fatal("a second cycle repeated the callback")
 			}
 		})
 	}
@@ -63,7 +55,7 @@ func TestTimingWheelSchedulesElapsedDeadlines(t *testing.T) {
 					t.Fatal("persist failed")
 				}
 			}
-			s.expiry.tick()
+			s.expiry.cycle()
 			want := int64(1)
 			if mode == "set-entry" {
 				want = 0

@@ -70,11 +70,13 @@ func (d *Databases) ReplaceFrom(src *Databases) error {
 				shard.data = make(map[string]*Entry)
 				shard.keyCount, shard.memUsage = 0, 0
 				shard.expiring, shard.expSumHi, shard.expSumLo = 0, 0, 0
+				shard.vol = nil
 			} else {
 				from := incoming.shards[j]
 				from.mu.Lock()
 				shard.data, shard.keyCount, shard.memUsage = from.data, from.keyCount, from.memUsage
 				shard.expiring, shard.expSumHi, shard.expSumLo = from.expiring, from.expSumHi, from.expSumLo
+				shard.vol = from.vol
 				for key, entry := range shard.data {
 					entry.bind(dst.plain)
 					if shard.slots != nil {
@@ -88,6 +90,7 @@ func (d *Databases) ReplaceFrom(src *Databases) error {
 				from.scan = nil
 				from.keyCount, from.memUsage = 0, 0
 				from.expiring, from.expSumHi, from.expSumLo = 0, 0, 0
+				from.vol = nil
 				from.mu.Unlock()
 			}
 			delta += shard.memUsage
@@ -129,7 +132,6 @@ func (d *Databases) ReplaceFrom(src *Databases) error {
 		if dst := d.slots[i].Load(); dst != nil {
 			for _, shard := range &dst.shards {
 				for key, entry := range shard.GetAll() {
-					dst.scheduleExpiry(key, entry.ExpiresAt.Load())
 					dst.scheduleHashValue(key, entry.Value)
 					if !entry.IsExpired() {
 						dst.published(key, entry.Value)

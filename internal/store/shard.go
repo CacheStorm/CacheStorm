@@ -20,8 +20,12 @@ type Shard struct {
 	// expiry times (unix ms, 128 bits), for INFO's expires and avg_ttl.
 	expiring           int64
 	expSumHi, expSumLo uint64
-	slots              *slotIndex
-	hfe                *hashExpiryIndex
+	// vol holds the keys with an expiry, which active expiry samples as
+	// Redis samples its expires dict. A key is in it once whatever its
+	// expiry, so rescheduling a key leaves nothing behind.
+	vol   map[string]struct{}
+	slots *slotIndex
+	hfe   *hashExpiryIndex
 	// scan orders the keys for SCAN while the shard is being scanned.
 	scan *keyScanIndex
 }
@@ -60,9 +64,9 @@ func (s *Shard) setLocked(key string, entry *Entry) (int64, *Entry) {
 	old, exists := s.data[key]
 	if old != entry {
 		if exists {
-			s.subExpiry(old.ExpiresAt.Load())
+			s.subExpiry(key, old.ExpiresAt.Load())
 		}
-		s.addExpiry(entry.ExpiresAt.Load())
+		s.addExpiry(key, entry.ExpiresAt.Load())
 	}
 	if exists {
 		// Credit what was charged for the old entry, not its current size:
@@ -94,7 +98,7 @@ func (s *Shard) deleteLocked(key string, entry *Entry) int64 {
 	mem := entry.accounted.Load()
 	s.memUsage -= mem
 	s.keyCount--
-	s.subExpiry(entry.ExpiresAt.Load())
+	s.subExpiry(key, entry.ExpiresAt.Load())
 	delete(s.data, key)
 	if s.slots != nil {
 		s.slots.remove(key)
@@ -150,9 +154,9 @@ func (s *Shard) updateExpiry(key string, expiresAt int64) bool {
 	if !exists || entry.IsExpired() {
 		return false
 	}
-	s.subExpiry(entry.ExpiresAt.Load())
+	s.subExpiry(key, entry.ExpiresAt.Load())
 	entry.ExpiresAt.Store(expiresAt)
-	s.addExpiry(expiresAt)
+	s.addExpiry(key, expiresAt)
 	return true
 }
 
@@ -165,7 +169,7 @@ func (s *Shard) clearExpiry(key string) bool {
 	if !exists || entry.IsExpired() || entry.ExpiresAt.Load() == 0 {
 		return false
 	}
-	s.subExpiry(entry.ExpiresAt.Load())
+	s.subExpiry(key, entry.ExpiresAt.Load())
 	entry.ExpiresAt.Store(0)
 	return true
 }
@@ -213,6 +217,7 @@ func (s *Shard) Flush() int64 {
 	s.keyCount = 0
 	s.memUsage = 0
 	s.expiring, s.expSumHi, s.expSumLo = 0, 0, 0
+	s.vol = nil
 	return freed
 }
 
@@ -226,20 +231,25 @@ func (s *Shard) GetAll() map[string]*Entry {
 	return result
 }
 
-func (s *Shard) addExpiry(at int64) {
+func (s *Shard) addExpiry(key string, at int64) {
 	if at <= 0 {
 		return
 	}
+	if s.vol == nil {
+		s.vol = make(map[string]struct{})
+	}
+	s.vol[key] = struct{}{}
 	s.expiring++
 	var carry uint64
 	s.expSumLo, carry = bits.Add64(s.expSumLo, uint64(at), 0)
 	s.expSumHi += carry
 }
 
-func (s *Shard) subExpiry(at int64) {
+func (s *Shard) subExpiry(key string, at int64) {
 	if at <= 0 {
 		return
 	}
+	delete(s.vol, key)
 	s.expiring--
 	var borrow uint64
 	s.expSumLo, borrow = bits.Sub64(s.expSumLo, uint64(at), 0)

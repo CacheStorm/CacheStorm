@@ -1182,142 +1182,6 @@ func TestConsumerGroup_GetPending(t *testing.T) {
 // timing_wheel.go coverage tests
 // =============================
 
-func TestTimingWheel_AddVariousLevels(t *testing.T) {
-	s := NewStore()
-	tw := NewTimingWheel(s)
-
-	now := time.Now().UnixMilli()
-
-	// Expired (duration <= 0)
-	tw.Add("expired", now-1)
-
-	// Level 0: < 1 hour
-	tw.Add("level0", now+int64((30*time.Minute)/time.Millisecond))
-
-	// Level 1: < 24 hours
-	tw.Add("level1", now+int64((12*time.Hour)/time.Millisecond))
-
-	// Level 2: < 30 days
-	tw.Add("level2", now+int64((15*24*time.Hour)/time.Millisecond))
-
-	// Level 3: < 365 days
-	tw.Add("level3", now+int64((100*24*time.Hour)/time.Millisecond))
-
-	// Far future: > 365 days
-	tw.Add("farfuture", now+int64((400*24*time.Hour)/time.Millisecond))
-}
-
-func TestTimingWheel_CleanupFarFuture(t *testing.T) {
-	s := NewStore()
-	tw := NewTimingWheel(s)
-
-	now := time.Now().UnixMilli()
-
-	// Add an expired entry to farFuture
-	tw.farFuture.mu.Lock()
-	tw.farFuture.keys["expired"] = now - int64((time.Second)/time.Millisecond)
-	tw.farFuture.mu.Unlock()
-
-	// Add an entry that's now within range (< 365 days)
-	tw.farFuture.mu.Lock()
-	tw.farFuture.keys["within_range"] = now + int64((30*time.Minute)/time.Millisecond)
-	tw.farFuture.mu.Unlock()
-
-	tw.cleanupFarFuture()
-
-	// Expired should be removed
-	tw.farFuture.mu.Lock()
-	_, exists := tw.farFuture.keys["expired"]
-	tw.farFuture.mu.Unlock()
-	if exists {
-		t.Fatal("expected expired key to be removed from farFuture")
-	}
-}
-
-func TestTimingWheel_ExpireBucket(t *testing.T) {
-	s := NewStore()
-	s.Set("testkey", &StringValue{Data: []byte("val")}, SetOptions{})
-	tw := NewTimingWheel(s)
-
-	bucket := newWheelBucket()
-	now := time.Now().UnixMilli()
-	bucket.keys["testkey"] = now - int64((time.Second)/time.Millisecond) // expired
-	bucket.keys["future"] = now + int64((time.Hour)/time.Millisecond)    // not expired
-
-	tw.expireBucket(bucket, now)
-
-	bucket.mu.Lock()
-	if _, exists := bucket.keys["testkey"]; exists {
-		t.Fatal("expected expired key to be removed from bucket")
-	}
-	if _, exists := bucket.keys["future"]; !exists {
-		t.Fatal("expected future key to remain in bucket")
-	}
-	bucket.mu.Unlock()
-}
-
-func TestTimingWheel_Cascade(t *testing.T) {
-	s := NewStore()
-	tw := NewTimingWheel(s)
-	now := time.Now().UnixMilli()
-
-	// Put a key in level 1 at current slot
-	level1 := tw.levels[1]
-	level1.slots[level1.current].mu.Lock()
-	level1.slots[level1.current].keys["cascadekey"] = now + int64((30*time.Minute)/time.Millisecond)
-	level1.slots[level1.current].mu.Unlock()
-
-	tw.cascadeLevel(1, now)
-}
-
-func TestTimingWheel_CascadeLevel2(t *testing.T) {
-	s := NewStore()
-	tw := NewTimingWheel(s)
-	now := time.Now().UnixMilli()
-
-	level2 := tw.levels[2]
-	level2.slots[level2.current].mu.Lock()
-	level2.slots[level2.current].keys["cascadekey2"] = now + int64((12*time.Hour)/time.Millisecond)
-	level2.slots[level2.current].mu.Unlock()
-
-	tw.cascadeLevel(2, now)
-}
-
-func TestTimingWheel_CascadeLevel3(t *testing.T) {
-	s := NewStore()
-	tw := NewTimingWheel(s)
-	now := time.Now().UnixMilli()
-
-	level3 := tw.levels[3]
-	level3.slots[level3.current].mu.Lock()
-	level3.slots[level3.current].keys["cascadekey3"] = now + int64((15*24*time.Hour)/time.Millisecond)
-	level3.slots[level3.current].mu.Unlock()
-
-	tw.cascadeLevel(3, now)
-}
-
-func TestTimingWheel_CascadeExpired(t *testing.T) {
-	s := NewStore()
-	tw := NewTimingWheel(s)
-	now := time.Now().UnixMilli()
-
-	// Put an expired key in level 1
-	level1 := tw.levels[1]
-	level1.slots[level1.current].mu.Lock()
-	level1.slots[level1.current].keys["expired_cascade"] = now - int64((time.Second)/time.Millisecond)
-	level1.slots[level1.current].mu.Unlock()
-
-	tw.cascadeLevel(1, now)
-}
-
-func TestTimingWheel_CascadeBeyondLevel3(t *testing.T) {
-	s := NewStore()
-	tw := NewTimingWheel(s)
-	now := time.Now().UnixMilli()
-	// Cascade at level 4 should return immediately
-	tw.cascadeLevel(4, now)
-}
-
 // =============================
 // eviction.go coverage tests
 // =============================
@@ -2302,69 +2166,6 @@ func TestStreamValue_String_MultipleFields(t *testing.T) {
 	}
 }
 
-// timing_wheel.go:92 - addToLevel: slot < 0 check
-func TestTimingWheel_AddToLevel_NegativeSlot(t *testing.T) {
-	s := NewStore()
-	tw := NewTimingWheel(s)
-	// Directly call addToLevel with a very small duration to get slot = 0
-	tw.addToLevel(0, "test", time.Now().UnixMilli()+int64(time.Millisecond), time.Millisecond)
-}
-
-// timing_wheel.go:155 - tick: cascade when current == 0
-func TestTimingWheel_Tick_Cascade(t *testing.T) {
-	s := NewStore()
-	tw := NewTimingWheel(s)
-
-	// Set level 0 current to numSlots-1 so next tick wraps to 0 and cascades
-	tw.levels[0].mu.Lock()
-	tw.levels[0].current = tw.levels[0].numSlots - 1
-	tw.levels[0].mu.Unlock()
-
-	tw.tick()
-}
-
-// timing_wheel.go:210 - cascade: level == 2, move to level 2 (else branch)
-func TestTimingWheel_CascadeLevel3_Move(t *testing.T) {
-	s := NewStore()
-	tw := NewTimingWheel(s)
-	now := time.Now().UnixMilli()
-
-	// Add a key to level 3 at current slot that needs to cascade to level 2
-	level3 := tw.levels[3]
-	level3.slots[level3.current].mu.Lock()
-	level3.slots[level3.current].keys["movedkey"] = now + int64((20*24*time.Hour)/time.Millisecond)
-	level3.slots[level3.current].mu.Unlock()
-
-	tw.cascadeLevel(3, now)
-}
-
-// timing_wheel.go:256 - farFutureCleanup: stopCh branch
-func TestTimingWheel_StartStop(t *testing.T) {
-	s := NewStore()
-	tw := NewTimingWheel(s)
-	tw.Start()
-	time.Sleep(20 * time.Millisecond)
-	tw.Stop()
-}
-
-// timing_wheel.go:298-304 - cleanupFarFuture: various duration branches
-func TestTimingWheel_CleanupFarFuture_AllBranches(t *testing.T) {
-	s := NewStore()
-	tw := NewTimingWheel(s)
-	now := time.Now().UnixMilli()
-
-	tw.farFuture.mu.Lock()
-	tw.farFuture.keys["short"] = now + int64((30*time.Minute)/time.Millisecond)      // < 1 hour -> level 0
-	tw.farFuture.keys["medium"] = now + int64((12*time.Hour)/time.Millisecond)       // < 24 hours -> level 1
-	tw.farFuture.keys["long"] = now + int64((15*24*time.Hour)/time.Millisecond)      // < 30 days -> level 2
-	tw.farFuture.keys["verylong"] = now + int64((200*24*time.Hour)/time.Millisecond) // < 365 days -> level 3
-	tw.farFuture.keys["stillfar"] = now + int64((400*24*time.Hour)/time.Millisecond) // >= 365 days -> stays in farFuture
-	tw.farFuture.keys["expired"] = now - int64((time.Second)/time.Millisecond)       // expired
-	tw.farFuture.mu.Unlock()
-
-	tw.cleanupFarFuture()
-}
-
 // utility.go:56 - Allow: entry.Tokens > entry.MaxTokens after refill capping
 func TestRateLimiter_Allow_TokenCapAfterRefill(t *testing.T) {
 	rl := NewRateLimiter()
@@ -2477,20 +2278,6 @@ func TestStore_GetTTL_ExpiredDirect(t *testing.T) {
 	if ttl != -2*time.Second {
 		t.Fatalf("expected -2s, got %v", ttl)
 	}
-}
-
-// Cover remaining cascade level for timing_wheel: level 1 cascade triggers level 2
-func TestTimingWheel_CascadeChain(t *testing.T) {
-	s := NewStore()
-	tw := NewTimingWheel(s)
-
-	// Set level 1 current to last slot so cascade(1) triggers cascade(2)
-	tw.levels[1].mu.Lock()
-	tw.levels[1].current = tw.levels[1].numSlots - 1
-	tw.levels[1].mu.Unlock()
-
-	now := time.Now().UnixMilli()
-	tw.cascadeLevel(1, now)
 }
 
 // =============================
@@ -2614,15 +2401,6 @@ func TestStore_GetTTL_JustExpired(t *testing.T) {
 	}
 }
 
-// timing_wheel.go:92 - addToLevel: slot < 0
-// This happens when duration is negative (shouldn't happen given Add checks, but the guard is there)
-func TestTimingWheel_AddToLevel_EdgeCase(t *testing.T) {
-	s := NewStore()
-	tw := NewTimingWheel(s)
-	// Call addToLevel with very small duration that might produce slot < 0
-	tw.addToLevel(0, "test", time.Now().UnixMilli(), 0)
-}
-
 // utility.go:434 - SnowflakeIDGenerator.Next: sequence wraps to 0 (s.sequence == 0 after AND)
 func TestSnowflakeIDGenerator_RapidSequence(t *testing.T) {
 	gen := NewSnowflakeIDGenerator(0)
@@ -2712,13 +2490,4 @@ func TestKeyNotifier_WaitForKey_ZeroTimeout_PreNotified(t *testing.T) {
 	// This branch (line 39-40) is the successful non-blocking receive
 	// It's inherently racy - the only way to hit it is if NotifyKey happens
 	// between registering as waiter and the select
-}
-
-func TestTimingWheel_AddToLevel_ZeroDuration(t *testing.T) {
-	s := NewStore()
-	tw := NewTimingWheel(s)
-	// Duration = 0 -> slot = 0 + current = current, slot should be non-negative
-	tw.addToLevel(0, "zero_dur", time.Now().UnixMilli(), time.Duration(0))
-	// Also test with negative duration (should be caught by Add, but guard is there)
-	tw.addToLevel(0, "neg_dur", time.Now().UnixMilli(), time.Duration(-1))
 }

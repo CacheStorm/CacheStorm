@@ -2,7 +2,6 @@ package store
 
 import (
 	"testing"
-	"time"
 )
 
 func TestMemoryTracker(t *testing.T) {
@@ -48,21 +47,4 @@ func TestMemoryTrackerCanAllocate(t *testing.T) {
 	if mt.CanAllocate(500) {
 		t.Error("should not be able to allocate 500 when near limit")
 	}
-}
-
-func TestTimingWheelAddRemove(t *testing.T) {
-	s := NewStore()
-	tw := NewTimingWheel(s)
-
-	tw.Add("key1", time.Now().Add(10*time.Second).UnixMilli())
-	tw.Remove("key1")
-}
-
-func TestTimingWheelStartStop(t *testing.T) {
-	s := NewStore()
-	tw := NewTimingWheel(s)
-
-	tw.Start()
-	time.Sleep(200 * time.Millisecond)
-	tw.Stop()
 }

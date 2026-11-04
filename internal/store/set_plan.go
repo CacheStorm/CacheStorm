@@ -194,7 +194,6 @@ func (s *Store) moveSetMember(srcKey, dstKey, member string) (bool, error) {
 		}
 		if !live {
 			s.tagIndex.RemoveKey(dstKey, nil)
-			s.scheduleExpiry(dstKey, 0)
 		}
 		if reserved {
 			s.trackMemory(actual - delta)

@@ -110,7 +110,6 @@ func (s *Store) SetStringBatch(pairs []StringPair, nx bool) (bool, error) {
 			if previous != nil && len(previous.TagList()) > 0 {
 				s.tagIndex.RemoveKey(key, previous.TagList())
 			}
-			s.scheduleExpiry(key, 0)
 		}
 		if reserved {
 			s.trackMemory(actual - delta)

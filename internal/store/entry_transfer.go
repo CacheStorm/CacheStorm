@@ -142,7 +142,6 @@ func (s *Store) Transfer(srcKey string, dst *Store, dstKey string, options Trans
 		if len(entry.TagList()) > 0 {
 			dst.tagIndex.AddTags(dstKey, entry.TagList())
 		}
-		dst.scheduleExpiry(dstKey, entry.ExpiresAt.Load())
 		unlock()
 		dst.notifyNew(dstKey)
 		if !options.Copy {

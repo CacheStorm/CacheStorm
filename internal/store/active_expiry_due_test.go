@@ -6,9 +6,8 @@ import (
 	"time"
 )
 
-// A key due shortly after the level-0 pointer's next advance must still be
-// swept: it was placed in the slot being left and waited an hour.
-func TestTimingWheelKeyDueAfterSlotBoundaryExpires(t *testing.T) {
+// Keys due at staggered times are each removed soon after they are due.
+func TestActiveExpiryRemovesKeysAsTheyFallDue(t *testing.T) {
 	s := NewStore()
 	s.StartExpiry()
 	defer s.StopExpiry()
