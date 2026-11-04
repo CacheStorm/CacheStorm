@@ -2,6 +2,7 @@ package store
 
 import (
 	"sync"
+	"sync/atomic"
 )
 
 const (
@@ -31,6 +32,9 @@ type TagIndex struct {
 	children     map[string]map[string]struct{}
 	parents      map[string]string
 	onInvalidate func(tag string, keys []string)
+	// tags counts the tags indexed, so removing a key that may have tags
+	// skips the walk of every shard when no key has any.
+	tags atomic.Int64
 }
 
 func NewTagIndex() *TagIndex {
@@ -63,6 +67,7 @@ func (ti *TagIndex) AddTagsBatch(keys []string, tags []string) {
 		shard.mu.Lock()
 		if shard.index[tag] == nil {
 			shard.index[tag] = make(map[string]struct{})
+			ti.tags.Add(1)
 		}
 		for _, key := range keys {
 			shard.index[tag][key] = struct{}{}
@@ -89,6 +94,7 @@ func (ti *TagIndex) RemoveTagsBatch(keys []string, tags []string) {
 			}
 			if len(keySet) == 0 {
 				delete(shard.index, tag)
+				ti.tags.Add(-1)
 			}
 		}
 		shard.mu.Unlock()
@@ -104,6 +110,9 @@ func (ti *TagIndex) RemoveKey(key string, tags []string) {
 }
 
 func (ti *TagIndex) RemoveTagsBatchAllShards(keys []string) {
+	if ti.tags.Load() == 0 {
+		return
+	}
 	for i := 0; i < TagShards; i++ {
 		shard := ti.shards[i]
 		shard.mu.Lock()
@@ -113,6 +122,7 @@ func (ti *TagIndex) RemoveTagsBatchAllShards(keys []string) {
 			}
 			if len(keySet) == 0 {
 				delete(shard.index, tag)
+				ti.tags.Add(-1)
 			}
 		}
 		shard.mu.Unlock()
@@ -161,10 +171,14 @@ func (ti *TagIndex) invalidate(tag string) []string {
 	defer shard.mu.Unlock()
 
 	keys := make([]string, 0, len(shard.index[tag]))
-	for k := range shard.index[tag] {
+	set, ok := shard.index[tag]
+	for k := range set {
 		keys = append(keys, k)
 	}
-	delete(shard.index, tag)
+	if ok {
+		delete(shard.index, tag)
+		ti.tags.Add(-1)
+	}
 	return keys
 }
 

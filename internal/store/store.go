@@ -165,7 +165,7 @@ func (s *Store) Reaccount(keys ...string) {
 // without this a collection could grow in place without bound.
 func (s *Store) CheckWriteMemory() error {
 	mt := s.memTracker
-	if mt == nil || mt.Max() <= 0 || mt.Usage() <= mt.Max() {
+	if mt == nil || mt.Max() <= 0 || mt.Usage() <= mt.Limit() {
 		return nil
 	}
 	if s.evictor.evicts() {
@@ -173,7 +173,7 @@ func (s *Store) CheckWriteMemory() error {
 			logger.Warn().Err(err).Msg("eviction attempt failed")
 		}
 	}
-	if mt.Usage() > mt.Max() {
+	if mt.Usage() > mt.Limit() {
 		return ErrMemoryLimit
 	}
 	return nil

@@ -2,7 +2,6 @@ package store
 
 import (
 	"math/rand"
-	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -183,8 +182,29 @@ func (ec *EvictionController) CheckAndEvict() error {
 	return nil
 }
 
+// mayEvictAgain reports whether a write that could not reserve memory may
+// evict another key, counting its evictions in remaining (-1 to start).
+// Once a write has evicted freeEvictions keys the rest are bounded by the
+// key count, so a write evicting keys that free nothing ends; counting keys
+// locks every shard, so a write evicting a few does not.
+func (s *Store) mayEvictAgain(remaining *int) bool {
+	const freeEvictions = 64
+	if *remaining < 0 {
+		if *remaining > -freeEvictions {
+			*remaining--
+			return true
+		}
+		*remaining = int(s.KeyCount()) + 1
+	}
+	if *remaining == 0 {
+		return false
+	}
+	*remaining--
+	return true
+}
+
 func (ec *EvictionController) evictUntil(targetPct float64) {
-	target := int64(float64(ec.memTracker.Max()) * targetPct)
+	target := int64(float64(ec.memTracker.Limit()) * targetPct)
 	for ec.memTracker.Usage() > target {
 		if !ec.evictOne() {
 			break
@@ -273,121 +293,77 @@ type candidate struct {
 }
 
 func (ec *EvictionController) selectLRU() string {
-	candidates := ec.sampleKeys()
-	if len(candidates) == 0 {
-		return ""
-	}
-
-	sort.Slice(candidates, func(i, j int) bool {
-		return candidates[i].lastAccess < candidates[j].lastAccess
-	})
-
-	return candidates[0].key
+	return pickCandidate(ec.sampleKeys(), func(a, b candidate) bool { return a.lastAccess < b.lastAccess })
 }
 
 func (ec *EvictionController) selectLFU() string {
-	candidates := ec.sampleKeys()
-	if len(candidates) == 0 {
-		return ""
+	return pickCandidate(ec.sampleKeys(), func(a, b candidate) bool { return a.accessCount < b.accessCount })
+}
+
+// visitShards calls fn on every shard once, in a random order, until fn
+// returns false. An empty shard must not end a search for a victim while
+// any key exists, and the walk allocates nothing: it runs for every
+// eviction.
+func (ec *EvictionController) visitShards(fn func(*Shard) bool) {
+	ec.rndMu.Lock()
+	r := ec.rnd.Uint64()
+	ec.rndMu.Unlock()
+	// NumShards is a power of two, so an odd step reaches every shard.
+	start, step := int(r%NumShards), int((r>>32)%NumShards)|1
+	for i := 0; i < NumShards; i++ {
+		if !fn(ec.store.shards[(start+i*step)%NumShards]) {
+			return
+		}
 	}
-
-	sort.Slice(candidates, func(i, j int) bool {
-		return candidates[i].accessCount < candidates[j].accessCount
-	})
-
-	return candidates[0].key
 }
 
 func (ec *EvictionController) selectRandom() string {
-	// Sample a random key from a random shard instead of materializing all
-	// keys. An empty shard must not end the search: rescan distinct shards so
-	// the policy can enforce max_memory whenever any key exists.
-	tried := make(map[int]struct{}, NumShards)
-	for len(tried) < NumShards {
-		ec.rndMu.Lock()
-		shardIdx := ec.rnd.Intn(NumShards)
-		ec.rndMu.Unlock()
-		if _, seen := tried[shardIdx]; seen {
-			continue
-		}
-		tried[shardIdx] = struct{}{}
-
-		shard := ec.store.shards[shardIdx]
+	// A random key of a random shard, without materializing all keys.
+	var victim string
+	ec.visitShards(func(shard *Shard) bool {
 		shard.mu.RLock()
+		defer shard.mu.RUnlock()
 		for key := range shard.data {
-			shard.mu.RUnlock()
-			return key
+			victim = key
+			return false
 		}
-		shard.mu.RUnlock()
-	}
-	return ""
+		return true
+	})
+	return victim
 }
 
+// sampleKeys takes a key from each of up to sampleSize shards.
 func (ec *EvictionController) sampleKeys() []candidate {
+	return ec.sample(false)
+}
+
+// sampleVolatileKeys takes a key with an expiry from each of up to
+// sampleSize shards.
+func (ec *EvictionController) sampleVolatileKeys() []candidate {
+	return ec.sample(true)
+}
+
+func (ec *EvictionController) sample(volatile bool) []candidate {
 	sampleSize := ec.SampleSize()
 	candidates := make([]candidate, 0, sampleSize)
-
-	// Sample distinct shards until we have sampleSize candidates (or every
-	// shard has been tried): an empty shard must not consume a sample slot,
-	// otherwise victim selection no-ops under pressure even when evictable
-	// keys exist and the policy cannot enforce max_memory.
-	tried := make(map[int]struct{}, NumShards)
-	for len(candidates) < sampleSize && len(tried) < NumShards {
-		ec.rndMu.Lock()
-		shardIdx := ec.rnd.Intn(NumShards)
-		ec.rndMu.Unlock()
-		if _, seen := tried[shardIdx]; seen {
-			continue
-		}
-		tried[shardIdx] = struct{}{}
-
-		shard := ec.store.shards[shardIdx]
-
+	ec.visitShards(func(shard *Shard) bool {
 		shard.mu.RLock()
 		for key, entry := range shard.data {
+			expiresAt := entry.ExpiresAt.Load()
+			if volatile && expiresAt <= 0 {
+				continue
+			}
 			candidates = append(candidates, candidate{
 				key:         key,
 				lastAccess:  entry.LastAccess(),
 				accessCount: uint64(entry.LFUCount()),
+				expiresAt:   expiresAt,
 			})
 			break
 		}
 		shard.mu.RUnlock()
-	}
-
-	return candidates
-}
-
-func (ec *EvictionController) sampleVolatileKeys() []candidate {
-	sampleSize := ec.SampleSize()
-	candidates := make([]candidate, 0, sampleSize)
-
-	tried := make(map[int]struct{}, NumShards)
-	for len(candidates) < sampleSize && len(tried) < NumShards {
-		ec.rndMu.Lock()
-		shardIdx := ec.rnd.Intn(NumShards)
-		ec.rndMu.Unlock()
-		if _, seen := tried[shardIdx]; seen {
-			continue
-		}
-		tried[shardIdx] = struct{}{}
-		shard := ec.store.shards[shardIdx]
-
-		shard.mu.RLock()
-		for key, entry := range shard.data {
-			if expiresAt := entry.ExpiresAt.Load(); expiresAt > 0 {
-				candidates = append(candidates, candidate{
-					key:         key,
-					lastAccess:  entry.LastAccess(),
-					accessCount: uint64(entry.LFUCount()),
-					expiresAt:   expiresAt,
-				})
-				break
-			}
-		}
-		shard.mu.RUnlock()
-	}
-
+		return len(candidates) < sampleSize
+	})
 	return candidates
 }
 

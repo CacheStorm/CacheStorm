@@ -80,13 +80,9 @@ func (s *Store) SetStringBatch(pairs []StringPair, nx bool) (bool, error) {
 			if tooLarge || !s.evictor.evicts() {
 				return false, ErrMemoryLimit
 			}
-			if remaining < 0 {
-				remaining = int(s.KeyCount()) + 1
-			}
-			if remaining == 0 {
+			if !s.mayEvictAgain(&remaining) {
 				return false, ErrMemoryLimit
 			}
-			remaining--
 			if !s.evictor.evictOne() {
 				return false, ErrMemoryLimit
 			}

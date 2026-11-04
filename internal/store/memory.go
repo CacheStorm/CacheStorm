@@ -22,7 +22,13 @@ type MemoryTracker struct {
 	warningPct   float64
 	criticalPct  float64
 	emergencyPct float64
+	// scale (out of scaleOne) shrinks the limit the dataset is held to when
+	// the process' live heap runs ahead of usage, which only estimates it:
+	// see SetHeapRatio.
+	scale atomic.Uint32
 }
+
+const scaleOne = 1 << 16
 
 func NewMemoryTracker(maxMemory int64, warningPct, criticalPct int) *MemoryTracker {
 	mt := &MemoryTracker{
@@ -31,7 +37,38 @@ func NewMemoryTracker(maxMemory int64, warningPct, criticalPct int) *MemoryTrack
 		emergencyPct: 0.95,
 	}
 	mt.maxMemory.Store(maxMemory)
+	mt.scale.Store(scaleOne)
 	return mt
+}
+
+// limit is the usage the dataset is held to: maxmemory, less what the heap
+// is seen to need beyond usage.
+func (mt *MemoryTracker) limit() int64 {
+	maxMemory := mt.maxMemory.Load()
+	if maxMemory <= 0 {
+		return maxMemory
+	}
+	return int64(float64(maxMemory) * float64(mt.scale.Load()) / scaleOne)
+}
+
+// Limit returns the usage writes and eviction hold the dataset to, which
+// is maxmemory or less (0 for no limit).
+func (mt *MemoryTracker) Limit() int64 { return mt.limit() }
+
+// SetHeapRatio tells the tracker the live heap is ratio times usage. Usage
+// counts the dataset at fixed rates per structure, where Redis counts what
+// its allocator holds; holding usage to maxmemory/ratio holds the heap to
+// maxmemory, so the runtime has the room above it that the Go memory limit
+// leaves instead of collecting garbage without pause. The limit moves
+// halfway at a time and never below half of maxmemory or above it.
+func (mt *MemoryTracker) SetHeapRatio(ratio float64) {
+	target := 1.0
+	if ratio > 1 {
+		target = 1 / ratio
+	}
+	target = max(target, 0.5)
+	cur := float64(mt.scale.Load()) / scaleOne
+	mt.scale.Store(uint32((cur + target) / 2 * scaleOne))
 }
 
 // SetMax changes the memory limit; 0 removes it. Usage is unaffected, so a
@@ -77,7 +114,7 @@ func (mt *MemoryTracker) Max() int64 {
 }
 
 func (mt *MemoryTracker) Pressure() PressureLevel {
-	maxMemory := mt.maxMemory.Load()
+	maxMemory := mt.limit()
 	if maxMemory <= 0 {
 		return PressureNormal
 	}
@@ -98,7 +135,7 @@ func (mt *MemoryTracker) Pressure() PressureLevel {
 }
 
 func (mt *MemoryTracker) CanAllocate(bytes int64) bool {
-	maxMemory := mt.maxMemory.Load()
+	maxMemory := mt.limit()
 	if maxMemory <= 0 {
 		return true
 	}
@@ -121,7 +158,7 @@ func (mt *MemoryTracker) PressurePercent() float64 {
 }
 
 func (mt *MemoryTracker) withinLimit(usage int64) bool {
-	maxMemory := mt.maxMemory.Load()
+	maxMemory := mt.limit()
 	return maxMemory <= 0 || float64(usage)/float64(maxMemory) < mt.emergencyPct
 }
 

@@ -127,13 +127,9 @@ func (s *Store) applyValuePlan(key string, options *SetOptions, snapshot *Entry,
 			if tooLarge || !s.evictor.evicts() {
 				return ErrMemoryLimit
 			}
-			if remaining < 0 {
-				remaining = int(s.KeyCount()) + 1
-			}
-			if remaining == 0 {
+			if !s.mayEvictAgain(&remaining) {
 				return ErrMemoryLimit
 			}
-			remaining--
 			if !s.evictor.evictOne() {
 				return ErrMemoryLimit
 			}
