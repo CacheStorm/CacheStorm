@@ -127,6 +127,16 @@ func prepareBitmapValue(value store.Value, prepare func([]byte) (store.ValuePlan
 	}
 }
 
+// markRawString gives a string the raw encoding, as Redis' bit writes do
+// before they look at a bit (dbUnshareStringValue), so a write that changes
+// nothing still leaves an embstr or int string raw. The value is not
+// otherwise touched: no event, no WATCH invalidation.
+func markRawString(v store.Value) {
+	if sv, ok := v.(*store.StringValue); ok {
+		sv.Enc = store.StringEncRaw
+	}
+}
+
 func bitmapValuePlan(current store.Value, data []byte, length int, apply func([]byte)) store.ValuePlan {
 	return store.ValuePlan{Size: int64(length) + 48, Apply: func() store.Value {
 		bm, existing := current.(*BitmapValue)
@@ -172,6 +182,7 @@ func bitmapSetBit(ctx *Context, offset int64, bit byte) error {
 			}
 			length := max(len(data), index+1)
 			if length == len(data) && old == next {
+				markRawString(current)
 				return store.ValuePlan{}, nil
 			}
 			changed = true
@@ -282,6 +293,9 @@ func bitmapBitfield(ctx *Context) error {
 				if current == nil && (ctx.Replaying || ctx.LegacyReplay) && ctx.Command == "BITFIELD" {
 					changed = true
 					return bitmapValuePlan(current, data, length, func([]byte) {}), nil
+				}
+				if growTo > 0 {
+					markRawString(current)
 				}
 				return store.ValuePlan{}, nil
 			}
