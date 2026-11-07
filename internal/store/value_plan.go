@@ -6,10 +6,9 @@ import (
 )
 
 type ValuePlan struct {
-	Size          int64
-	Apply         func() Value
-	unlock        func()
-	allowEmptyKey bool
+	Size   int64
+	Apply  func() Value
+	unlock func()
 	// op replaces Apply and unlock for hot paths that must not allocate a
 	// closure per call.
 	op planOp
@@ -100,10 +99,6 @@ func (s *Store) applyValuePlan(key string, options *SetOptions, snapshot *Entry,
 			}
 			unlock()
 			return nil
-		}
-		if key == "" && snapshot == nil && !plan.allowEmptyKey {
-			unlock()
-			return ErrInvalidKey
 		}
 		if len(key) > MaxKeySize {
 			unlock()

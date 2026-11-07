@@ -27,7 +27,7 @@ func TestHashPlanPreservesIdentityAndMetadata(t *testing.T) {
 }
 
 func TestHashPlanUnlocksOnEveryExit(t *testing.T) {
-	for _, mode := range []string{"noop", "error", "oom", "wrongtype", "emptykey", "longkey"} {
+	for _, mode := range []string{"noop", "error", "oom", "wrongtype", "longkey"} {
 		t.Run(mode, func(t *testing.T) {
 			s := NewStore()
 			s.ConfigureMemory(1024, EvictionNoEviction, 70, 90, 5)
@@ -39,9 +39,6 @@ func TestHashPlanUnlocksOnEveryExit(t *testing.T) {
 				}
 			} else if err := s.Set(key, hash, SetOptions{}); err != nil {
 				t.Fatal(err)
-			}
-			if mode == "emptykey" {
-				key = ""
 			}
 			if mode == "longkey" {
 				key = string(make([]byte, MaxKeySize+1))

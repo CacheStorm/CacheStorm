@@ -242,7 +242,7 @@ func cmdMSET(ctx *Context) error {
 	pairs := make([]store.StringPair, 0, ctx.ArgCount()/2)
 	for i := 0; i < ctx.ArgCount(); i += 2 {
 		key := ctx.ArgString(i)
-		if len(key) == 0 || len(key) > store.MaxKeySize {
+		if len(key) > store.MaxKeySize {
 			return ctx.WriteError(store.ErrInvalidKey)
 		}
 		pairs = append(pairs, store.StringPair{Key: key, Data: ctx.Arg(i + 1)})
@@ -559,7 +559,7 @@ func cmdMSETNX(ctx *Context) error {
 	pairs := make([]store.StringPair, 0, ctx.ArgCount()/2)
 	for i := 0; i < ctx.ArgCount(); i += 2 {
 		key := ctx.ArgString(i)
-		if len(key) == 0 || len(key) > store.MaxKeySize {
+		if len(key) > store.MaxKeySize {
 			return ctx.WriteError(store.ErrInvalidKey)
 		}
 		pairs = append(pairs, store.StringPair{Key: key, Data: ctx.Arg(i + 1)})

@@ -48,7 +48,7 @@ func (s *Store) AddSetMembers(key string, members []string) (int, error) {
 				set.AddMember(member)
 			}
 			return set
-		}, unlock: set.Unlock, allowEmptyKey: value != nil}, nil
+		}, unlock: set.Unlock}, nil
 	})
 	if err != nil {
 		return 0, err
@@ -124,10 +124,6 @@ func (s *Store) moveSetMember(srcKey, dstKey, member string) (bool, error) {
 			return false, nil
 		}
 		if !live {
-			if dstKey == "" {
-				unlock()
-				return false, ErrInvalidKey
-			}
 			if len(dstKey) > MaxKeySize {
 				unlock()
 				return false, ErrKeyTooLarge

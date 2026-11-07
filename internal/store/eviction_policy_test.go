@@ -70,7 +70,7 @@ func TestVolatileTTLPrefersSoonestExpiry(t *testing.T) {
 	fillForEviction(t, s)
 	before := int64(0)
 	for i := 0; i < 10; i++ {
-		key := s.evictor.selectVictim()
+		key, _ := s.evictor.selectVictim()
 		e, ok := s.shards[s.shardIndex(key)].Get(key)
 		if !ok {
 			t.Fatalf("victim %q is missing", key)

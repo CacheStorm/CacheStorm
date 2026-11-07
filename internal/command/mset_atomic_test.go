@@ -64,10 +64,10 @@ func TestMSETRejectsInvalidKeyUpfront(t *testing.T) {
 	s := store.NewStore()
 	router := newMSETRouter(s)
 
-	// The empty key is invalid: the whole MSET must be rejected before any
-	// pair is applied (pre-fix: the empty key was silently skipped and
+	// An over-long key is invalid: the whole MSET must be rejected before
+	// any pair is applied (once an invalid key was silently skipped and
 	// goodkey was applied behind +OK).
-	reply := runCmd(t, s, router, "MSET", "", "v", "goodkey", "v2")
+	reply := runCmd(t, s, router, "MSET", strings.Repeat("k", store.MaxKeySize+1), "v", "goodkey", "v2")
 	if !strings.Contains(reply, "invalid key") {
 		t.Fatalf("MSET with an invalid key must be rejected up front, got %q", reply)
 	}

@@ -59,6 +59,6 @@ func TestAudit50R32X(t *testing.T) {
 	checkAudit50R32X(t, "new key stored", "$7\r\ncreated\r\n", run("GET", "missing"))
 	checkAudit50R32X(t, "empty replacement old value", "$3\r\nnew\r\n", run("GETSET", "control", ""))
 	checkAudit50R32X(t, "empty replacement stored", "$0\r\n\r\n", run("GET", "control"))
-	checkAudit50R32X(t, "invalid key error propagated", true, strings.HasPrefix(run("GETSET", "", "value"), "-ERR invalid key"))
+	checkAudit50R32X(t, "invalid key error propagated", true, strings.HasPrefix(run("GETSET", strings.Repeat("k", store.MaxKeySize+1), "value"), "-ERR"))
 
 }

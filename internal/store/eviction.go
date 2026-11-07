@@ -221,8 +221,8 @@ func (ec *EvictionController) evictKeys(count int) {
 }
 
 func (ec *EvictionController) evictOne() bool {
-	key := ec.selectVictim()
-	if key == "" {
+	key, ok := ec.selectVictim()
+	if !ok {
 		return false
 	}
 
@@ -247,7 +247,9 @@ func (ec *EvictionController) evictOne() bool {
 	return true
 }
 
-func (ec *EvictionController) selectVictim() string {
+// selectVictim picks a key to evict under the policy; ok is false when
+// there is none. The empty string is a valid key.
+func (ec *EvictionController) selectVictim() (key string, ok bool) {
 	switch ec.Policy() {
 	case EvictionAllKeysLRU:
 		return ec.selectLRU()
@@ -264,15 +266,15 @@ func (ec *EvictionController) selectVictim() string {
 	case EvictionAllKeysRandom:
 		return ec.selectRandom()
 	default:
-		return ""
+		return "", false
 	}
 }
 
 // pickCandidate returns the candidate that sorts first under less, or the
 // first sampled one when less is nil (the sample is already random).
-func pickCandidate(candidates []candidate, less func(a, b candidate) bool) string {
+func pickCandidate(candidates []candidate, less func(a, b candidate) bool) (string, bool) {
 	if len(candidates) == 0 {
-		return ""
+		return "", false
 	}
 	best := candidates[0]
 	if less != nil {
@@ -282,7 +284,7 @@ func pickCandidate(candidates []candidate, less func(a, b candidate) bool) strin
 			}
 		}
 	}
-	return best.key
+	return best.key, true
 }
 
 type candidate struct {
@@ -292,11 +294,11 @@ type candidate struct {
 	expiresAt   int64
 }
 
-func (ec *EvictionController) selectLRU() string {
+func (ec *EvictionController) selectLRU() (string, bool) {
 	return pickCandidate(ec.sampleKeys(), func(a, b candidate) bool { return a.lastAccess < b.lastAccess })
 }
 
-func (ec *EvictionController) selectLFU() string {
+func (ec *EvictionController) selectLFU() (string, bool) {
 	return pickCandidate(ec.sampleKeys(), func(a, b candidate) bool { return a.accessCount < b.accessCount })
 }
 
@@ -317,19 +319,20 @@ func (ec *EvictionController) visitShards(fn func(*Shard) bool) {
 	}
 }
 
-func (ec *EvictionController) selectRandom() string {
+func (ec *EvictionController) selectRandom() (string, bool) {
 	// A random key of a random shard, without materializing all keys.
 	var victim string
+	found := false
 	ec.visitShards(func(shard *Shard) bool {
 		shard.mu.RLock()
 		defer shard.mu.RUnlock()
 		for key := range shard.data {
-			victim = key
+			victim, found = key, true
 			return false
 		}
 		return true
 	})
-	return victim
+	return victim, found
 }
 
 // sampleKeys takes a key from each of up to sampleSize shards.

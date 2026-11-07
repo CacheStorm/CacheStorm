@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **The empty string is a valid key**, as in Redis: SET, MSET, HSET, SADD, SMOVE, RENAME and every other write answered `ERR invalid key name` for it. Eviction and blocked-pop wakeups no longer use the empty string to mean "no key", so an empty key can be evicted and passes its wakeup on. It survives RDB and AOF reloads
 - **KEYS returns every matching key**: it gathered matches from a copy of the whole keyspace, one map per call, and stopped at 100,000 keys, which Redis does not. It now walks each shard under its read lock and writes the keys straight into the reply; KEYS over 250 keys went from 424 allocations to 9. SCAN and STATS.KEYSPACE no longer build a value per key or copy the keyspace either
 - **Stream reads are written from the nodes**: XRANGE, XREVRANGE and XREAD write each entry straight from its stream node instead of building an entry object, an ID string, a field slice and a reply value per field. A hundred-entry XRANGE went from 1315 allocations to 14 and XREAD from 1330 to 25
 - **Pipelines of large replies**: output held for a pipeline beyond 16KB moves to a buffer lent from a shared pool and given back once written, instead of a buffer grown from 512 bytes and dropped after every pipeline (about 20KB of garbage per hundred-entry XRANGE with 16 commands pipelined). A hundred-entry XRANGE with 50 clients went from 0.76x Redis to 0.97x; idle connections still keep at most 16KB

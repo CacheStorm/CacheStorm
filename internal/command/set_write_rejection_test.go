@@ -72,7 +72,7 @@ func TestSetWritesReportStoreRejection(t *testing.T) {
 		})
 	}
 	s := store.NewStore()
-	if got := runSetAuditX(t, s, "SADD", "", "a"); got != "-ERR invalid key name\r\n" {
+	if got := runSetAuditX(t, s, "SADD", strings.Repeat("k", store.MaxKeySize+1), "a"); got != "-"+store.ErrKeyTooLarge.Error()+"\r\n" {
 		t.Fatalf("invalid key boundary: %q", got)
 	}
 	runSetAuditX(t, s, "SADD", "existing", "a")

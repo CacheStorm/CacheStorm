@@ -97,6 +97,8 @@ type Context struct {
 	passKey   string
 	passReady func(string) bool
 	passToken store.WakeToken
+	// passing is set while passKey holds a key; the empty key is a key.
+	passing bool
 
 	// router is the router dispatching this command, recorded by
 	// Router.Execute so EXEC runs its queue through the same handlers.
@@ -346,13 +348,13 @@ func (ctx *Context) waitForKeysReady(keys []string, timeout time.Duration, ready
 		Consume: true,
 		// A command that waits again after a wakeup found nothing to take
 		// keeps its place at the head of the queue.
-		Front: ctx.passKey != "",
+		Front: ctx.passing,
 	})
 	if ok {
 		// Only the oldest blocked consumer is woken by a write; once this
 		// command has taken its share, Router.Execute hands the key on to
 		// the next one if data is left.
-		ctx.passKey, ctx.passReady = key, ready
+		ctx.passKey, ctx.passReady, ctx.passing = key, ready, true
 	}
 	return key, ok
 }
@@ -377,12 +379,12 @@ func (ctx *Context) waitForStreamKeys(keys []string, timeout time.Duration, read
 
 // passWakeup hands a consumed key's wakeup to the next blocked client.
 func (ctx *Context) passWakeup() {
-	if ctx.passKey == "" {
+	if !ctx.passing {
 		return
 	}
 	ctx.Store.KeyNotifier().PassToken(ctx.passKey, ctx.passReady, ctx.passToken)
 	ctx.passToken = store.WakeToken{}
-	ctx.passKey, ctx.passReady = "", nil
+	ctx.passKey, ctx.passReady, ctx.passing = "", nil, false
 }
 
 func (ctx *Context) IsAuthenticated() bool {

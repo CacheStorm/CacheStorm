@@ -1811,10 +1811,10 @@ func TestEvictionController(t *testing.T) {
 		ecRandom := NewEvictionController(EvictionAllKeysRandom, 1000000, s4, mt4, 50)
 		ecNone := NewEvictionController(EvictionNoEviction, 1000000, s4, mt4, 50)
 
-		if key := ecRandom.selectVictim(); key == "" {
+		if _, ok := ecRandom.selectVictim(); !ok {
 			t.Error("Random should select a key")
 		}
-		if key := ecNone.selectVictim(); key != "" {
+		if _, ok := ecNone.selectVictim(); ok {
 			t.Error("No eviction should not select a key")
 		}
 	})
@@ -1824,7 +1824,7 @@ func TestEvictionController(t *testing.T) {
 		mt5 := NewMemoryTracker(1000000, 80, 90)
 		ec5 := NewEvictionController(EvictionAllKeysLFU, 1000000, s5, mt5, 5)
 
-		if key := ec5.selectLFU(); key != "" {
+		if _, ok := ec5.selectLFU(); ok {
 			t.Error("LFU with no keys should return empty")
 		}
 	})
@@ -1834,7 +1834,7 @@ func TestEvictionController(t *testing.T) {
 		mt6 := NewMemoryTracker(1000000, 80, 90)
 		ec6 := NewEvictionController(EvictionAllKeysRandom, 1000000, s6, mt6, 5)
 
-		if key := ec6.selectRandom(); key != "" {
+		if _, ok := ec6.selectRandom(); ok {
 			t.Error("Random with no keys should return empty")
 		}
 	})

@@ -46,7 +46,7 @@ func (s *Store) ApplyHashFields(key string, prepare func(*HashValue) (map[string
 				hash.SetFieldKeepTTL(field, data)
 			}
 			return hash
-		}, unlock: hash.Unlock, allowEmptyKey: value != nil}, nil
+		}, unlock: hash.Unlock}, nil
 	})
 }
 
@@ -138,7 +138,7 @@ func (s *Store) ApplyHashPairs(key string, nx bool, args [][]byte) (int, error) 
 			size += est
 			op.deltas = append(op.deltas, d)
 		}
-		return ValuePlan{Size: size, op: op, allowEmptyKey: value != nil}, nil
+		return ValuePlan{Size: size, op: op}, nil
 	})
 	return added, err
 }
@@ -291,7 +291,7 @@ func (s *Store) ApplyHashSetEx(key string, args [][]byte, o HashSetExOptions) (b
 				}
 			}
 			return hash
-		}, unlock: hash.Unlock, allowEmptyKey: value != nil}, nil
+		}, unlock: hash.Unlock}, nil
 	})
 	if err != nil {
 		applied = false

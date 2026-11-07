@@ -1,6 +1,7 @@
 package store
 
 import (
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -93,7 +94,7 @@ func TestGetOrCreate(t *testing.T) {
 		t.Fatalf("keyCount %d", s.KeyCount())
 	}
 
-	if _, _, err := s.GetOrCreate("", func() Value { return NewSetFrom(map[string]struct{}{}) }); err != ErrInvalidKey {
+	if _, _, err := s.GetOrCreate(strings.Repeat("k", MaxKeySize+1), func() Value { return NewSetFrom(map[string]struct{}{}) }); err != ErrKeyTooLarge {
 		t.Fatalf("empty key: %v", err)
 	}
 }

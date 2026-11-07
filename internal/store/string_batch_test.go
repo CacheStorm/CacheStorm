@@ -74,7 +74,7 @@ func TestStringBatchDuplicatesValidationAndNX(t *testing.T) {
 	if ok, err := s.SetStringBatch([]StringPair{{"b", []byte("new")}, {"a", []byte("overwrite")}}, true); ok || err != nil || s.Exists("b") || s.GetVersion("a") != version {
 		t.Fatalf("NX no-op: %v %v", ok, err)
 	}
-	for _, key := range []string{"", strings.Repeat("x", MaxKeySize+1)} {
+	for _, key := range []string{strings.Repeat("x", MaxKeySize+1)} {
 		if ok, err := s.SetStringBatch([]StringPair{{"b", []byte("new")}, {key, nil}}, false); ok || err == nil || s.Exists("b") {
 			t.Fatalf("late invalid key: %v %v", ok, err)
 		}

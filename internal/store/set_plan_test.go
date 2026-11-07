@@ -31,7 +31,7 @@ func TestSetPlanIdentityDuplicatesAndKeys(t *testing.T) {
 	if n, err := s.AddSetMembers("missing", nil); n != 0 || err != nil || s.Exists("missing") {
 		t.Fatalf("empty: %d %v", n, err)
 	}
-	for _, key := range []string{"", strings.Repeat("k", MaxKeySize+1)} {
+	for _, key := range []string{strings.Repeat("k", MaxKeySize+1)} {
 		if _, err := s.AddSetMembers(key, []string{"m"}); err == nil {
 			t.Fatal("invalid key accepted")
 		}
@@ -263,7 +263,7 @@ func TestSetMoveErrorsReleaseLocks(t *testing.T) {
 		want             error
 	}{
 		{"wrong", "d", "m", ErrWrongType}, {"s", "wrong", "m", ErrWrongType}, {"s", "wrong", "absent", ErrWrongType},
-		{"missing", "wrong", "m", nil}, {"s", "", "m", ErrInvalidKey}, {"s", strings.Repeat("x", MaxKeySize+1), "m", ErrKeyTooLarge},
+		{"missing", "wrong", "m", nil}, {"s", strings.Repeat("x", MaxKeySize+1), "m", ErrKeyTooLarge},
 	} {
 		if ok, err := s.MoveSetMember(tc.src, tc.dst, tc.member); ok || !errors.Is(err, tc.want) {
 			t.Fatalf("%s -> %s: %v %v", tc.src, tc.dst, ok, err)

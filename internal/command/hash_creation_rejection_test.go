@@ -47,7 +47,7 @@ func TestHashCreationReportsStoreRejection(t *testing.T) {
 				}
 			}
 			s = store.NewStore()
-			if got := runHashAuditX(t, s, cmd, "", "f", "1"); got != "-ERR invalid key name\r\n" {
+			if got := runHashAuditX(t, s, cmd, strings.Repeat("k", store.MaxKeySize+1), "f", "1"); got != "-"+store.ErrKeyTooLarge.Error()+"\r\n" {
 				t.Fatalf("invalid-key rejection: %q", got)
 			}
 			if got := runHashAuditX(t, s, cmd, "ok", "f", "1"); strings.HasPrefix(got, "-") {

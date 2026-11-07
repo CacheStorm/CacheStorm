@@ -634,9 +634,10 @@ func TestStore_SetValidation(t *testing.T) {
 	s := NewStore()
 
 	// Empty key
+	// The empty string is a valid key, as in Redis.
 	err := s.Set("", &StringValue{Data: []byte("val")}, SetOptions{})
-	if err != ErrInvalidKey {
-		t.Fatalf("expected ErrInvalidKey, got %v", err)
+	if err != nil {
+		t.Fatalf("empty key rejected: %v", err)
 	}
 
 	// Key too large
@@ -1253,7 +1254,7 @@ func TestEvictionController_SelectVolatileLRU(t *testing.T) {
 
 	// selectVolatileLRU might not find volatile keys due to random sampling,
 	// which would cause it to fall back to selectLRU
-	victim := ec.selectVictim()
+	victim, _ := ec.selectVictim()
 	_ = victim // either volatile or persistent key
 }
 
@@ -1262,7 +1263,7 @@ func TestEvictionController_NoEvictionPolicy(t *testing.T) {
 	mt := NewMemoryTracker(1000, 70, 85)
 	ec := NewEvictionController(EvictionNoEviction, 1000, s, mt, 5)
 
-	victim := ec.selectVictim()
+	victim, _ := ec.selectVictim()
 	if victim != "" {
 		t.Fatalf("expected empty for NoEviction, got %s", victim)
 	}

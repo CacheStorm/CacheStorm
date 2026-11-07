@@ -510,9 +510,6 @@ func (s *Store) ExpiryDeadline(key string) (int64, bool) {
 }
 
 func validateStoreWrite(key string, value Value) (int64, error) {
-	if key == "" {
-		return 0, ErrInvalidKey
-	}
 	if len(key) > MaxKeySize {
 		return 0, ErrKeyTooLarge
 	}

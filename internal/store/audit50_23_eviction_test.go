@@ -46,10 +46,10 @@ func TestAudit50R23X(t *testing.T) {
 	mt := NewMemoryTracker(1000, 80, 90)
 	control := NewEvictionController(EvictionAllKeysRandom, 1000, s, mt, 1)
 	control.rnd = rand.New(rand.NewSource(1))
-	checkAudit50R23X(t, "control sparse random selection", key, control.selectVictim())
+	checkAudit50R23X(t, "control sparse random selection", key, victimKey(control.selectVictim()))
 	ec := NewEvictionController(EvictionVolatileLRU, 1000, s, mt, 1)
 	ec.rnd = rand.New(rand.NewSource(1))
-	checkAudit50R23X(t, "sparse volatile selection", key, ec.selectVictim())
+	checkAudit50R23X(t, "sparse volatile selection", key, victimKey(ec.selectVictim()))
 
 	persistent := ""
 	for i := 0; i < NumShards*4; i++ {
@@ -65,13 +65,15 @@ func TestAudit50R23X(t *testing.T) {
 	s.Set(persistent, &StringValue{Data: []byte("keep")}, SetOptions{})
 	for i := int64(0); i < 5; i++ {
 		ec.rnd = rand.New(rand.NewSource(i))
-		checkAudit50R23X(t, "persistent neighbor skipped", key, ec.selectVictim())
+		checkAudit50R23X(t, "persistent neighbor skipped", key, victimKey(ec.selectVictim()))
 	}
 	s.Delete(key)
-	checkAudit50R23X(t, "persistent-only no victim", "", ec.selectVictim())
+	checkAudit50R23X(t, "persistent-only no victim", "", victimKey(ec.selectVictim()))
 	s.Delete(persistent)
-	checkAudit50R23X(t, "empty store", "", ec.selectVictim())
+	checkAudit50R23X(t, "empty store", "", victimKey(ec.selectVictim()))
 	no := NewEvictionController(EvictionNoEviction, 1000, s, mt, 1)
-	checkAudit50R23X(t, "no eviction policy", "", no.selectVictim())
+	checkAudit50R23X(t, "no eviction policy", "", victimKey(no.selectVictim()))
 
 }
+
+func victimKey(key string, _ bool) string { return key }
