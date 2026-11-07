@@ -28,6 +28,7 @@ func TestStreamedReplyMatchesValues(t *testing.T) {
 		sw.WriteArrayHeader(2)
 		sw.WriteNullItem()
 		sw.WriteBulkStringItem("v")
+		sw.WriteIntegerItem(-42)
 		if err := sw.Flush(); err != nil {
 			t.Fatal(err)
 		}
@@ -36,6 +37,7 @@ func TestStreamedReplyMatchesValues(t *testing.T) {
 		bw.WriteValue(SetValue([]*Value{BulkBytes([]byte{})}))
 		bw.WriteArray([]*Value{})
 		bw.WriteArray([]*Value{NullBulkString(), BulkString("v")})
+		bw.WriteValue(IntegerValue(-42))
 		if streamed.String() != built.String() {
 			t.Fatalf("RESP3 %v: streamed %q, built %q", resp3, streamed.String(), built.String())
 		}

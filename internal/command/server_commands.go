@@ -760,43 +760,34 @@ func cmdHOTKEYS(ctx *Context) error {
 		if err != nil {
 			return ctx.WriteError(ErrNotInteger)
 		}
+		if count < 0 {
+			return ctx.WriteError(errCountOutOfRange)
+		}
 	}
 
-	keys := ctx.Store.Keys()
+	// The keys are read in place, without recording an access, and sorted
+	// once: a pass per key over a copy of the keyspace held the server for
+	// minutes on a large one.
 	type hotKey struct {
 		key    string
 		access uint64
 	}
+	var hot []hotKey
+	ctx.Store.AppendLiveKeys(nil, func(key string, e *store.Entry) bool {
+		hot = append(hot, hotKey{key: key, access: uint64(e.LFUCount())})
+		return false
+	})
+	sort.SliceStable(hot, func(i, j int) bool { return hot[i].access > hot[j].access })
+	count = min(count, len(hot))
 
-	hotKeys := make([]hotKey, 0, len(keys))
-	for _, key := range keys {
-		entry, exists := ctx.Store.Get(key)
-		if exists {
-			hotKeys = append(hotKeys, hotKey{key: key, access: uint64(entry.LFUCount())})
-		}
+	w := ctx.Writer
+	w.WriteArrayHeader(count)
+	for _, h := range hot[:count] {
+		w.WriteArrayHeader(2)
+		w.WriteBulkStringItem(h.key)
+		w.WriteIntegerItem(int64(h.access))
 	}
-
-	for i := 0; i < len(hotKeys)-1; i++ {
-		for j := i + 1; j < len(hotKeys); j++ {
-			if hotKeys[j].access > hotKeys[i].access {
-				hotKeys[i], hotKeys[j] = hotKeys[j], hotKeys[i]
-			}
-		}
-	}
-
-	if count > len(hotKeys) {
-		count = len(hotKeys)
-	}
-
-	result := make([]*resp.Value, 0, count)
-	for i := 0; i < count; i++ {
-		result = append(result, resp.ArrayValue([]*resp.Value{
-			resp.BulkString(hotKeys[i].key),
-			resp.IntegerValue(int64(hotKeys[i].access)),
-		}))
-	}
-
-	return ctx.WriteArray(result)
+	return w.Flush()
 }
 
 func cmdMEMINFO(ctx *Context) error {

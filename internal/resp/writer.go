@@ -66,6 +66,9 @@ func (w *Writer) WriteBulkItem(b []byte) { _ = w.writeBulk(b) }
 // WriteBulkStringItem is WriteBulkItem of a string.
 func (w *Writer) WriteBulkStringItem(s string) { _ = w.writeBulkString(s) }
 
+// WriteIntegerItem writes an integer element.
+func (w *Writer) WriteIntegerItem(n int64) { _ = w.writeHeader(TypeInteger, int(n)) }
+
 // WriteNullItem writes a null element: RESP3 null, a null bulk string for
 // RESP2.
 func (w *Writer) WriteNullItem() {
