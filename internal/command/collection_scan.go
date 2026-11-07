@@ -235,6 +235,29 @@ func scanPage(size int, cursor uint64, count int, hashOf func(string) uint64, ea
 }
 
 // writeCollectionScanReply writes the [cursor, items] SCAN reply.
+// writeScanHead starts a scan reply: the next cursor, then the header of a
+// page of n elements that the caller writes as items.
+func writeScanHead(w *resp.Writer, cursor uint64, n int) {
+	w.WriteArrayHeader(2)
+	w.WriteBulkStringItem(strconv.FormatUint(cursor, 10))
+	w.WriteArrayHeader(n)
+}
+
+// matching returns the members that match the scan's pattern. members may be
+// a cached snapshot's, so a filtered page is a new slice.
+func (o collectionScanOpts) matching(members []string) []string {
+	if !o.match {
+		return members
+	}
+	kept := make([]string, 0, len(members))
+	for _, m := range members {
+		if matchPattern(m, o.pattern) {
+			kept = append(kept, m)
+		}
+	}
+	return kept
+}
+
 func writeCollectionScanReply(ctx *Context, cursor uint64, items []*resp.Value) error {
 	return ctx.WriteArray([]*resp.Value{
 		resp.BulkString(strconv.FormatUint(cursor, 10)),

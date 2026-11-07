@@ -189,8 +189,7 @@ func cmdGET(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
-	key := ctx.ArgString(0)
-	entry, exists := ctx.Store.Get(key)
+	entry, exists := ctx.Store.GetBytes(ctx.Arg(0))
 	if !exists {
 		return ctx.WriteNullBulkString()
 	}
@@ -259,22 +258,22 @@ func cmdMGET(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
-	results := make([]*resp.Value, ctx.ArgCount())
+	w := ctx.Writer
+	w.WriteArrayHeader(ctx.ArgCount())
 	for i := 0; i < ctx.ArgCount(); i++ {
-		entry, exists := ctx.Store.Get(ctx.ArgString(i))
+		entry, exists := ctx.Store.GetBytes(ctx.Arg(i))
 		if !exists {
-			results[i] = resp.NullBulkString()
+			w.WriteNullItem()
 			continue
 		}
 		data, ok := stringValueOf(entry.Value)
 		if !ok {
-			results[i] = resp.NullBulkString()
+			w.WriteNullItem()
 			continue
 		}
-		results[i] = resp.BulkBytes(data)
+		w.WriteBulkItem(data)
 	}
-
-	return ctx.WriteArray(results)
+	return w.Flush()
 }
 
 func cmdINCR(ctx *Context) error {

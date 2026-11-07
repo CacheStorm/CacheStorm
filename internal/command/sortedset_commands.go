@@ -990,21 +990,36 @@ func cmdZSCAN(ctx *Context) error {
 	}
 
 	zset.RLock()
+	defer zset.RUnlock()
+	w := ctx.Writer
+	if card := zset.Card(); card <= collectionScanSmall {
+		// A small set is returned whole with cursor 0. Walking it with its
+		// scores saves a lookup per member, which is a pass over a listpack.
+		entries := make([]store.SortedEntry, 0, card)
+		for m, score := range zset.All() {
+			if !opts.match || matchPattern(m, opts.pattern) {
+				entries = append(entries, store.SortedEntry{Member: m, Score: score})
+			}
+		}
+		writeScanHead(w, 0, 2*len(entries))
+		for _, e := range entries {
+			w.WriteBulkStringItem(e.Member)
+			w.WriteBulkStringItem(formatZScore(e.Score))
+		}
+		return w.Flush()
+	}
 	members, next := collectionScanPage(zset, zset.Card(), cursor, opts.count, func(emit func(string)) {
 		for m := range zset.All() {
 			emit(m)
 		}
 	})
-	items := make([]*resp.Value, 0, len(members)*2)
+	members = opts.matching(members)
+	writeScanHead(w, next, 2*len(members))
 	for _, m := range members {
-		if opts.match && !matchPattern(m, opts.pattern) {
-			continue
-		}
-		items = append(items, resp.BulkString(m), resp.BulkString(formatZScore(zset.Score(m))))
+		w.WriteBulkStringItem(m)
+		w.WriteBulkStringItem(formatZScore(zset.Score(m)))
 	}
-	zset.RUnlock()
-
-	return writeCollectionScanReply(ctx, next, items)
+	return w.Flush()
 }
 
 // parsePositiveCount parses a pop count the way getPositiveLongFromObject

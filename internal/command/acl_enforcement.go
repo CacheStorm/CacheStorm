@@ -396,6 +396,18 @@ func aclKeysForCommand(cmd string, args [][]byte) []string {
 	return nil
 }
 
+// AllArgsAreKeys reports whether every argument of cmd is a key, as for
+// MGET, DEL and EXISTS, so a caller can take the keys from args without
+// building CommandKeys. It agrees with CommandKeys.
+func AllArgsAreKeys(cmd string, args [][]byte) bool {
+	cmd = CanonicalName(cmd)
+	if keyShapeOf(cmd) != keyShapeAll {
+		return false
+	}
+	_, named := aclNamedKeys(cmd, args)
+	return !named
+}
+
 // SoleFirstKey returns the key of a command whose only key is its first
 // argument, as CommandKeys would return it, without making a string of it:
 // the write gate needs only its bytes. ok is false for every other command.

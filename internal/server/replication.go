@@ -47,9 +47,34 @@ type gateHold struct {
 	read      bool
 	stripes   []int
 	// inline backs stripes for the common case of a command with few keys,
-	// so acquiring the gate does not allocate.
+	// so acquiring the gate does not allocate; spill backs them for more
+	// keys and is kept from one command to the next. There are at most
+	// gateStripes stripes, so it stays small.
 	inline [4]int
+	spill  []int
 }
+
+// reset starts planning a new hold in h, keeping its spill buffer.
+func (h *gateHold) reset(g *writeGate, read, exclusive bool) {
+	*h = gateHold{g: g, read: read, exclusive: exclusive, spill: h.spill}
+}
+
+// keyStripes sets the hold's stripes to those of keys, read through key.
+func keyStripes[T any](h *gateHold, keys []T, key func(T) int) {
+	h.stripes = h.inline[:0]
+	if len(keys) > len(h.inline) {
+		h.stripes = h.spill[:0]
+	}
+	for _, k := range keys {
+		h.stripes = appendStripe(h.stripes, key(k))
+	}
+	if cap(h.stripes) > len(h.inline) {
+		h.spill = h.stripes[:0]
+	}
+}
+
+func argStripe(a []byte) int { return stripeOf(a) }
+func keyStripe(k string) int { return stripeOf(k) }
 
 // exclusiveWrites are writes that reach keys they do not name, or several
 // databases, so they take the whole gate.
@@ -96,20 +121,19 @@ func stripeOf[K string | []byte](key K) int {
 // planWrite works out the hold a write of cmd needs, without locking.
 func (g *writeGate) planWrite(h *gateHold, ctx *command.Context) *gateHold {
 	cmd, args := ctx.Command, ctx.Args
-	*h = gateHold{g: g}
+	h.reset(g, false, false)
 	if exclusiveWrites[cmd] || globalRead(cmd, args) {
 		h.exclusive = true
 	} else if key, ok := command.SoleFirstKey(cmd, args); ok {
 		h.stripes = append(h.inline[:0], stripeOf(key))
+	} else if len(args) > 0 && command.AllArgsAreKeys(cmd, args) {
+		keyStripes(h, args, argStripe)
 	} else {
 		keys := ctx.CommandKeys()
 		if len(keys) == 0 {
 			h.exclusive = true
 		} else {
-			h.stripes = h.inline[:0]
-			for _, k := range keys {
-				h.stripes = appendStripe(h.stripes, stripeOf(k))
-			}
+			keyStripes(h, keys, keyStripe)
 		}
 	}
 	return h
@@ -134,16 +158,16 @@ func globalRead(cmd string, args [][]byte) bool {
 
 // planRead works out the hold a read of cmd needs, without locking.
 func (g *writeGate) planRead(h *gateHold, ctx *command.Context) *gateHold {
-	*h = gateHold{g: g, read: true, exclusive: globalRead(ctx.Command, ctx.Args)}
-	if !h.exclusive {
-		h.stripes = h.inline[:0]
-		if key, ok := command.SoleFirstKey(ctx.Command, ctx.Args); ok {
-			h.stripes = append(h.stripes, stripeOf(key))
-			return h
-		}
-		for _, key := range ctx.CommandKeys() {
-			h.stripes = appendStripe(h.stripes, stripeOf(key))
-		}
+	h.reset(g, true, globalRead(ctx.Command, ctx.Args))
+	if h.exclusive {
+		return h
+	}
+	if key, ok := command.SoleFirstKey(ctx.Command, ctx.Args); ok {
+		h.stripes = append(h.inline[:0], stripeOf(key))
+	} else if command.AllArgsAreKeys(ctx.Command, ctx.Args) {
+		keyStripes(h, ctx.Args, argStripe)
+	} else {
+		keyStripes(h, ctx.CommandKeys(), keyStripe)
 	}
 	return h
 }

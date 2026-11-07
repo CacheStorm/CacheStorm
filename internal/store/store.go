@@ -416,6 +416,29 @@ func (s *Store) Get(key string) (*Entry, bool) {
 	return s.get(key, false, true)
 }
 
+// GetBytes is Get of a key given as bytes, as commands receive it: a live
+// key is found without copying it to a string. Expired keys and hashes with
+// field TTLs take Get's path.
+func (s *Store) GetBytes(key []byte) (*Entry, bool) {
+	shard := s.shards[fnv32a(key)&ShardMask]
+	shard.mu.RLock()
+	entry, ok := shard.data[string(key)]
+	shard.mu.RUnlock()
+	if !ok {
+		GlobalMetrics.RecordMiss()
+		return nil, false
+	}
+	if entry.IsExpired() {
+		return s.get(string(key), false, true)
+	}
+	if h, isHash := entry.Value.(*HashValue); isHash && h.minExpire.Load() != 0 {
+		return s.get(string(key), false, true)
+	}
+	entry.Touch()
+	GlobalMetrics.RecordHit()
+	return entry, true
+}
+
 // Peek is Get without recording an access, for the commands Redis looks keys
 // up for with LOOKUP_NOTOUCH (TYPE, TTL and its kin, OBJECT).
 func (s *Store) Peek(key string) (*Entry, bool) {

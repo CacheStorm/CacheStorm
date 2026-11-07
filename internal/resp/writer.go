@@ -66,6 +66,16 @@ func (w *Writer) WriteBulkItem(b []byte) { _ = w.writeBulk(b) }
 // WriteBulkStringItem is WriteBulkItem of a string.
 func (w *Writer) WriteBulkStringItem(s string) { _ = w.writeBulkString(s) }
 
+// WriteNullItem writes a null element: RESP3 null, a null bulk string for
+// RESP2.
+func (w *Writer) WriteNullItem() {
+	if w.resp3.Load() {
+		_, _ = w.wr.WriteString("_\r\n")
+		return
+	}
+	_, _ = w.wr.WriteString("$-1\r\n")
+}
+
 // WriteDoubleItem writes an element that is a double given as its text: a
 // RESP3 double, a bulk string for RESP2.
 func (w *Writer) WriteDoubleItem(s string) {

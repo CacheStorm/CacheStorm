@@ -468,14 +468,13 @@ func cmdSSCAN(ctx *Context) error {
 	}
 	set.RUnlock()
 
-	items := make([]*resp.Value, 0, len(members))
+	members = opts.matching(members)
+	w := ctx.Writer
+	writeScanHead(w, next, len(members))
 	for _, m := range members {
-		if opts.match && !matchPattern(m, opts.pattern) {
-			continue
-		}
-		items = append(items, resp.BulkString(m))
+		w.WriteBulkStringItem(m)
 	}
-	return writeCollectionScanReply(ctx, next, items)
+	return w.Flush()
 }
 
 var errSetTooManyKeys = errors.New("ERR Number of keys can't be greater than number of args")

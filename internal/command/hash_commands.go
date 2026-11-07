@@ -510,13 +510,19 @@ func cmdHSCAN(ctx *Context) error {
 		return ctx.WriteError(err)
 	}
 
+	// Values can change in place, so the page is written under the lock.
 	hash.RLock()
+	defer hash.RUnlock()
 	var fields []string
+	var values [][]byte
 	var next uint64
 	if !hash.Big() {
 		// A listpack hash is returned whole, in its order, as Redis does.
-		hash.Range(func(f string, _ []byte) bool {
-			fields = append(fields, f)
+		hash.Range(func(f string, v []byte) bool {
+			if !opts.match || matchPattern(f, opts.pattern) {
+				fields = append(fields, f)
+				values = append(values, v)
+			}
 			return true
 		})
 	} else {
@@ -525,20 +531,26 @@ func cmdHSCAN(ctx *Context) error {
 				emit(f)
 			}
 		})
+		fields = opts.matching(fields)
 	}
-	items := make([]*resp.Value, 0, len(fields)*2)
-	for _, f := range fields {
-		if opts.match && !matchPattern(f, opts.pattern) {
+	w := ctx.Writer
+	if opts.noValues {
+		writeScanHead(w, next, len(fields))
+	} else {
+		writeScanHead(w, next, 2*len(fields))
+	}
+	for i, f := range fields {
+		w.WriteBulkStringItem(f)
+		if opts.noValues {
 			continue
 		}
-		items = append(items, resp.BulkString(f))
-		if !opts.noValues {
-			items = append(items, resp.BulkBytes(hash.Field(f)))
+		if values != nil {
+			w.WriteBulkItem(values[i])
+		} else {
+			w.WriteBulkItem(hash.Field(f))
 		}
 	}
-	hash.RUnlock()
-
-	return writeCollectionScanReply(ctx, next, items)
+	return w.Flush()
 }
 
 func cmdHRANDFIELD(ctx *Context) error {
@@ -585,8 +597,11 @@ func cmdHRANDFIELD(ctx *Context) error {
 		return ctx.WriteArray([]*resp.Value{})
 	}
 
+	// Values can change in place, so the reply is written under the lock.
 	hash.RLock()
+	defer hash.RUnlock()
 	var picked []string
+	var values [][]byte
 	if count > 0 && count >= int64(hash.Len()) || count > 0 && !hash.Big() && !hash.FieldTTLsUsed() {
 		// The whole hash, or for a listpack hash a sample, comes in the
 		// hash's order, as Redis returns them.
@@ -597,34 +612,40 @@ func cmdHRANDFIELD(ctx *Context) error {
 				chosen[f] = true
 			}
 		}
-		hash.Range(func(f string, _ []byte) bool {
+		hash.Range(func(f string, v []byte) bool {
 			if chosen == nil || chosen[f] {
 				picked = append(picked, f)
+				if withValues {
+					values = append(values, v)
+				}
 			}
 			return true
 		})
 	} else {
 		picked = pickKeys(hash.Dict(), hashItems(hash), count)
 	}
-	size := len(picked)
-	if withValues {
-		size *= 2
+	w := ctx.Writer
+	pairs := withValues && w.IsRESP3()
+	if withValues && !pairs {
+		w.WriteArrayHeader(2 * len(picked))
+	} else {
+		w.WriteArrayHeader(len(picked))
 	}
-	result := make([]*resp.Value, 0, size)
-	pairs := withValues && ctx.Writer.IsRESP3()
-	for _, f := range picked {
-		switch {
-		case pairs:
+	for i, f := range picked {
+		if pairs {
 			// RESP3 replies with one [field, value] array per pick.
-			result = append(result, resp.ArrayValue([]*resp.Value{resp.BulkString(f), resp.BulkBytes(hash.Field(f))}))
-		case withValues:
-			result = append(result, resp.BulkString(f), resp.BulkBytes(hash.Field(f)))
+			w.WriteArrayHeader(2)
+		}
+		w.WriteBulkStringItem(f)
+		switch {
+		case !withValues:
+		case values != nil:
+			w.WriteBulkItem(values[i])
 		default:
-			result = append(result, resp.BulkString(f))
+			w.WriteBulkItem(hash.Field(f))
 		}
 	}
-	hash.RUnlock()
-	return ctx.WriteArray(result)
+	return w.Flush()
 }
 
 // cmdHGETDEL is Redis 8's HGETDEL key FIELDS numfields field ...: it
