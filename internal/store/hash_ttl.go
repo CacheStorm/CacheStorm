@@ -80,9 +80,7 @@ func (v *HashValue) SetFieldExpireAt(field string, at int64) {
 	if !v.Has(field) || at <= 0 {
 		return
 	}
-	if v.ttl == nil {
-		v.ttl = &hashFieldTTLs{at: make(map[string]int64)}
-	}
+	v.UseFieldTTLs()
 	old, had := v.ttl.at[field]
 	if had && old == at {
 		return
@@ -118,8 +116,18 @@ func (v *HashValue) HasFieldTTLs() bool { return v.minExpire.Load() != 0 }
 // NextFieldExpiry returns the earliest field expiry (unix ms), 0 when none.
 func (v *HashValue) NextFieldExpiry() int64 { return v.minExpire.Load() }
 
-// FieldTTLsUsed reports whether a field of the hash was ever given an
-// expiry, which is what makes Redis report the listpackex encoding. The
+// UseFieldTTLs moves the hash to the encoding that keeps field expiries, as
+// Redis converts a listpack to listpackex as soon as HEXPIRE and its kin
+// run on it, whether or not a field gets an expiry. The caller holds the
+// value's write lock.
+func (v *HashValue) UseFieldTTLs() {
+	if v.ttl == nil {
+		v.ttl = &hashFieldTTLs{at: make(map[string]int64)}
+	}
+}
+
+// FieldTTLsUsed reports whether HEXPIRE or a kin ever ran on the hash,
+// which is what makes Redis report the listpackex encoding. The
 // caller holds the value's lock.
 func (v *HashValue) FieldTTLsUsed() bool { return v.ttl != nil }
 

@@ -194,6 +194,7 @@ func hexpireGeneric(ctx *Context, unitMS int64, absolute bool) error {
 		ctx.PropagateAs()
 		return ctx.WriteArray(hfeIntegers(len(fields), -2))
 	}
+	hash.UseFieldTTLs()
 	deletes := ctx.Store.HashFieldExpiryDeletes()
 	now, clock := time.Now().UnixMilli(), ctx.Store.HashFieldClock()
 	results := make([]*resp.Value, len(fields))
