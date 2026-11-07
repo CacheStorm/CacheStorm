@@ -186,18 +186,27 @@ func setOpCommand(ctx *Context, op int) error {
 	if err != nil {
 		return ctx.WriteError(err)
 	}
-	var reply []*resp.Value
+	// The sets-operations lock is released before the reply is written. The
+	// result is a private set, or members that stay valid: compact sets
+	// copy their buffer on change.
+	w := ctx.Writer
 	if op == setOpInter {
 		members := src.inter()
-		reply = make([]*resp.Value, len(members))
-		for i, m := range members {
-			reply[i] = resp.BulkString(m)
+		src.close()
+		w.WriteSetHeader(len(members))
+		for _, m := range members {
+			w.WriteBulkStringItem(m)
 		}
-	} else {
-		reply = setMembersReply(src.unionDiff(op))
+		return w.Flush()
 	}
+	dst := src.unionDiff(op)
 	src.close()
-	return ctx.WriteSet(reply)
+	w.WriteSetHeader(dst.Card())
+	dst.RangeTransient(func(m string) bool {
+		w.WriteBulkStringItem(m)
+		return true
+	})
+	return w.Flush()
 }
 
 // setOpStoreCommand answers SUNIONSTORE, SDIFFSTORE and SINTERSTORE.
