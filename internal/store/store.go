@@ -987,6 +987,23 @@ func (s *Store) GetAll() map[string]*Entry {
 	return result
 }
 
+// AppendLiveKeys appends to dst every unexpired key that keep accepts,
+// calling keep under each shard's read lock, and returns dst. keep must not
+// take store locks.
+func (s *Store) AppendLiveKeys(dst []string, keep func(key string, e *Entry) bool) []string {
+	for i := 0; i < NumShards; i++ {
+		sh := s.shards[i]
+		sh.mu.RLock()
+		for k, v := range sh.data {
+			if !v.IsExpired() && keep(k, v) {
+				dst = append(dst, k)
+			}
+		}
+		sh.mu.RUnlock()
+	}
+	return dst
+}
+
 // ForEachLive calls fn for every unexpired entry, shard by shard. Each shard's
 // entries are collected under its read lock and fn runs after the lock is
 // released, so fn may take other locks. It stops at the first error.

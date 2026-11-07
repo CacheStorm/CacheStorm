@@ -156,14 +156,15 @@ func cmdSLOWLOGCONFIG(ctx *Context) error {
 func cmdSTATSKEYSPACE(ctx *Context) error {
 	typeCounts := make(map[store.DataType]int64)
 	var totalKeys, expires, ttlSumMs int64
-	for _, entry := range ctx.Store.GetAll() {
+	ctx.Store.AppendLiveKeys(nil, func(_ string, entry *store.Entry) bool {
 		totalKeys++
 		typeCounts[entry.Value.Type()]++
 		if ttl := entry.TTL(); ttl > 0 {
 			expires++
 			ttlSumMs += ttl.Milliseconds()
 		}
-	}
+		return false
+	})
 	var avgTTL int64
 	if expires > 0 {
 		avgTTL = ttlSumMs / expires

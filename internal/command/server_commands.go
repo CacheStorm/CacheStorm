@@ -558,21 +558,19 @@ func cmdKEYS(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
-	const maxKeysResult = 100000 // Safety cap to prevent OOM on large databases
-
+	// Every matching key is returned, as Redis does, written from the keys
+	// themselves rather than a copy of the keyspace.
 	pattern := ctx.ArgString(0)
-	matched := make([]*resp.Value, 0)
-	for key, entry := range ctx.Store.GetAll() {
-		if entry.IsExpired() || !matchPattern(key, pattern) {
-			continue
-		}
-		matched = append(matched, resp.BulkString(key))
-		if len(matched) >= maxKeysResult {
-			break
-		}
+	all := pattern == "*"
+	keys := ctx.Store.AppendLiveKeys(nil, func(key string, _ *store.Entry) bool {
+		return all || matchPattern(key, pattern)
+	})
+	w := ctx.Writer
+	w.WriteArrayHeader(len(keys))
+	for _, k := range keys {
+		w.WriteBulkStringItem(k)
 	}
-
-	return ctx.WriteArray(matched)
+	return w.Flush()
 }
 
 func cmdRANDOMKEY(ctx *Context) error {
@@ -697,7 +695,7 @@ func cmdSCAN(ctx *Context) error {
 	}
 
 	keys, next := scanKeyspace(ctx.Store, cursor, count, typeName != "")
-	result := make([]*resp.Value, 0, len(keys))
+	kept := keys[:0]
 	for _, k := range keys {
 		if pattern != "" && !matchPattern(k.key, pattern) {
 			continue
@@ -705,13 +703,14 @@ func cmdSCAN(ctx *Context) error {
 		if typeName != "" && !strings.EqualFold(redisTypeName(k.entry.Value), typeName) {
 			continue
 		}
-		result = append(result, resp.BulkString(k.key))
+		kept = append(kept, k)
 	}
-
-	return ctx.WriteArray([]*resp.Value{
-		resp.BulkString(strconv.FormatUint(next, 10)),
-		resp.ArrayValue(result),
-	})
+	w := ctx.Writer
+	writeScanHead(w, next, len(kept))
+	for _, k := range kept {
+		w.WriteBulkStringItem(k.key)
+	}
+	return w.Flush()
 }
 
 // SCAN walks the keyspace shard by shard. The cursor's top bits name the
