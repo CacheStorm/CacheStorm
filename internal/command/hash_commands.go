@@ -317,7 +317,7 @@ func cmdHINCRBY(ctx *Context) error {
 
 	ctx.writeEffectsHandled = true
 	field := ctx.ArgString(1)
-	incr, err := strconv.ParseInt(ctx.ArgString(2), 10, 64)
+	incr, err := redisAtoi64(ctx.ArgString(2))
 	if err != nil {
 		return ctx.WriteError(ErrNotInteger)
 	}

@@ -623,8 +623,8 @@ func zrangeGeneric(ctx *Context, storeResult bool, rangeType, dir int) error {
 			withScores = true
 		case opt == "LIMIT" && left >= 2:
 			var err1, err2 error
-			offset, err1 = strconv.ParseInt(ctx.ArgString(j+1), 10, 64)
-			limit, err2 = strconv.ParseInt(ctx.ArgString(j+2), 10, 64)
+			offset, err1 = redisAtoi64(ctx.ArgString(j + 1))
+			limit, err2 = redisAtoi64(ctx.ArgString(j + 2))
 			if err1 != nil || err2 != nil {
 				return ctx.WriteError(ErrNotInteger)
 			}
@@ -665,8 +665,8 @@ func zrangeGeneric(ctx *Context, storeResult bool, rangeType, dir int) error {
 	switch rangeType {
 	case zrangeRank:
 		var err1, err2 error
-		start, err1 = strconv.ParseInt(ctx.ArgString(minIdx), 10, 64)
-		stop, err2 = strconv.ParseInt(ctx.ArgString(maxIdx), 10, 64)
+		start, err1 = redisAtoi64(ctx.ArgString(minIdx))
+		stop, err2 = redisAtoi64(ctx.ArgString(maxIdx))
 		if err1 != nil || err2 != nil {
 			return ctx.WriteError(ErrNotInteger)
 		}
@@ -876,8 +876,8 @@ func cmdZREMRANGEBYRANK(ctx *Context) error {
 	if ctx.ArgCount() != 3 {
 		return ctx.WriteError(arityError(ctx.Command))
 	}
-	start, err1 := strconv.ParseInt(ctx.ArgString(1), 10, 64)
-	stop, err2 := strconv.ParseInt(ctx.ArgString(2), 10, 64)
+	start, err1 := redisAtoi64(ctx.ArgString(1))
+	stop, err2 := redisAtoi64(ctx.ArgString(2))
 	if err1 != nil || err2 != nil {
 		return ctx.WriteError(ErrNotInteger)
 	}
@@ -1059,7 +1059,7 @@ func cmdZSCAN(ctx *Context) error {
 // does: a non-integer and a negative value both get the "must be positive"
 // reply.
 func parsePositiveCount(arg string) (int, error) {
-	v, err := strconv.ParseInt(arg, 10, 64)
+	v, err := redisAtoi64(arg)
 	if err != nil || v < 0 {
 		return 0, errCountOutOfRange
 	}
@@ -1233,7 +1233,7 @@ const maxRandRepeats = 1000000
 // parseRandCount parses the count of SRANDMEMBER/ZRANDMEMBER/HRANDFIELD,
 // which must lie in [-LONG_MAX, LONG_MAX].
 func parseRandCount(arg string) (int64, error) {
-	v, err := strconv.ParseInt(arg, 10, 64)
+	v, err := redisAtoi64(arg)
 	if err != nil {
 		return 0, ErrNotInteger
 	}
@@ -1268,7 +1268,7 @@ func zsetOpGeneric(ctx *Context, op int, hasDst, cardOnly bool) error {
 		return ctx.WriteError(arityError(ctx.Command))
 	}
 
-	numKeys, err := strconv.ParseInt(ctx.ArgString(numIdx), 10, 64)
+	numKeys, err := redisAtoi64(ctx.ArgString(numIdx))
 	if err != nil {
 		return ctx.WriteError(ErrNotInteger)
 	}
@@ -1334,7 +1334,7 @@ func zsetOpGeneric(ctx *Context, op int, hasDst, cardOnly bool) error {
 			withScores = true
 			j++
 		case cardOnly && remaining >= 2 && opt == "LIMIT":
-			v, err := strconv.ParseInt(ctx.ArgString(j+1), 10, 64)
+			v, err := redisAtoi64(ctx.ArgString(j + 1))
 			if err != nil || v < 0 {
 				return ctx.WriteError(errLimitNegative)
 			}
@@ -1479,14 +1479,16 @@ func cmdZINTERCARD(ctx *Context) error {
 // at argument from, with Redis' error replies.
 func parseZMPop(ctx *Context, from int) ([]string, bool, int, error) {
 	n := ctx.ArgCount()
-	numKeys, err := strconv.ParseInt(ctx.ArgString(from), 10, 64)
+	numKeys, err := redisAtoi64(ctx.ArgString(from))
 	if err != nil || numKeys < 1 {
 		return nil, false, 0, errNumKeysPositive
 	}
-	whereIdx := int64(from) + numKeys + 1
-	if whereIdx >= int64(n) {
+	// numKeys is compared with what is left, not added to from: a huge
+	// count would overflow the sum.
+	if numKeys >= int64(n-from-1) {
 		return nil, false, 0, ErrSyntaxError
 	}
+	whereIdx := int64(from) + numKeys + 1
 	keys := make([]string, numKeys)
 	for i := range keys {
 		keys[i] = ctx.ArgString(from + 1 + i)
@@ -1502,7 +1504,7 @@ func parseZMPop(ctx *Context, from int) ([]string, bool, int, error) {
 	count := -1
 	for j := int(whereIdx) + 1; j < n; j++ {
 		if count == -1 && strings.EqualFold(ctx.ArgString(j), "COUNT") && j+1 < n {
-			v, err := strconv.ParseInt(ctx.ArgString(j+1), 10, 64)
+			v, err := redisAtoi64(ctx.ArgString(j + 1))
 			if err != nil || v < 1 {
 				return nil, false, 0, errPopCountPositive
 			}

@@ -1,7 +1,6 @@
 package command
 
 import (
-	"strconv"
 	"strings"
 	"sync"
 
@@ -99,12 +98,14 @@ func toStrings(args [][]byte) []string {
 	return out
 }
 
+// atoiSafe parses a key count as the command itself does, -1 when it is not
+// one. A count beyond int's range is -1 too: no command has that many keys.
 func atoiSafe(b []byte) int {
-	n, err := strconv.Atoi(string(b))
-	if err != nil {
+	n, ok := parseRedisInt(b)
+	if !ok || n < 0 || int64(int(n)) != n {
 		return -1
 	}
-	return n
+	return int(n)
 }
 
 // keysAfterNumkeys returns the args following a leading count, e.g.
@@ -114,7 +115,9 @@ func keysAfterNumkeys(args [][]byte, base int) []string {
 		return nil
 	}
 	n := atoiSafe(args[base])
-	if n < 0 || base+1+n > len(args) {
+	// n > len(args)-base-1, not base+1+n > len(args): a huge count would
+	// overflow the sum to a negative bound.
+	if n < 0 || n > len(args)-base-1 {
 		return nil
 	}
 	return toStrings(args[base+1 : base+1+n])
@@ -350,7 +353,7 @@ func aclNamedKeys(cmd string, args [][]byte) ([]string, bool) {
 			return nil, true
 		}
 		n := atoiSafe(args[1])
-		if n < 0 || 2+n > len(args) {
+		if n < 0 || n > len(args)-2 {
 			return nil, true
 		}
 		return toStrings(args[2 : 2+n]), true

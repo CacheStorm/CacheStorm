@@ -44,6 +44,53 @@ func parseRedisInt(b []byte) (int64, bool) {
 	return v, true
 }
 
+// redisAtoi64 is strconv.ParseInt(s, 10, 64) with string2ll's syntax, which
+// Redis parses every integer argument with: no '+', no leading zero, no
+// "-0", no spaces.
+func redisAtoi64(s string) (int64, error) {
+	v, ok := parseRedisInt([]byte(s))
+	if !ok {
+		return 0, strconv.ErrSyntax
+	}
+	return v, nil
+}
+
+// redisAtoi is redisAtoi64 for an int.
+func redisAtoi(s string) (int, error) {
+	v, err := redisAtoi64(s)
+	if err != nil || int64(int(v)) != v {
+		return 0, strconv.ErrSyntax
+	}
+	return int(v), nil
+}
+
+// parseScanCursor parses a SCAN cursor as Redis' string2ull does: a
+// string2ll integer that is not negative, or failing that whatever strtoull
+// takes whole -- leading whitespace, a sign, leading zeros, a negative
+// number wrapping around.
+func parseScanCursor(s string) (uint64, bool) {
+	if v, ok := parseRedisInt([]byte(s)); ok {
+		return uint64(v), v >= 0
+	}
+	t := strings.TrimLeft(s, " \t\n\v\f\r")
+	neg := false
+	if t != "" && (t[0] == '+' || t[0] == '-') {
+		neg = t[0] == '-'
+		t = t[1:]
+	}
+	if t == "" || t[0] < '0' || t[0] > '9' {
+		return 0, false
+	}
+	v, err := strconv.ParseUint(t, 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	if neg {
+		v = -v
+	}
+	return v, true
+}
+
 // scanHash orders the keyspace for SCAN; the top bit is dropped so that the
 // cursor (hash+1) always fits in an unsigned 64-bit integer.
 

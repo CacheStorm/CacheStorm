@@ -659,8 +659,8 @@ func cmdSCAN(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
-	cursor, err := strconv.ParseUint(ctx.ArgString(0), 10, 64)
-	if err != nil {
+	cursor, ok := parseScanCursor(ctx.ArgString(0))
+	if !ok {
 		return ctx.WriteError(errors.New("ERR invalid cursor"))
 	}
 
@@ -756,7 +756,7 @@ func cmdHOTKEYS(ctx *Context) error {
 	count := 10
 	if ctx.ArgCount() >= 1 {
 		var err error
-		count, err = strconv.Atoi(ctx.ArgString(0))
+		count, err = redisAtoi(ctx.ArgString(0))
 		if err != nil {
 			return ctx.WriteError(ErrNotInteger)
 		}
@@ -1029,10 +1029,10 @@ func doSort(ctx *Context, readOnly bool) error {
 			alpha = true
 		case arg == "LIMIT" && left >= 2:
 			var err error
-			if offset, err = strconv.ParseInt(ctx.ArgString(i+1), 10, 64); err != nil {
+			if offset, err = redisAtoi64(ctx.ArgString(i + 1)); err != nil {
 				return ctx.WriteError(ErrNotInteger)
 			}
-			if count, err = strconv.ParseInt(ctx.ArgString(i+2), 10, 64); err != nil {
+			if count, err = redisAtoi64(ctx.ArgString(i + 2)); err != nil {
 				return ctx.WriteError(ErrNotInteger)
 			}
 			i += 2
@@ -1371,7 +1371,7 @@ func cmdSLOWLOG(ctx *Context) error {
 		count := 10
 		if ctx.ArgCount() > 1 {
 			var err error
-			count, err = strconv.Atoi(ctx.ArgString(1))
+			count, err = redisAtoi(ctx.ArgString(1))
 			if err != nil || count < -1 {
 				return ctx.WriteError(errors.New("ERR count should be greater than or equal to -1"))
 			}
@@ -1445,7 +1445,7 @@ func cmdLOLWUT(ctx *Context) error {
 	if ctx.ArgCount() > 0 {
 		arg := strings.ToUpper(ctx.ArgString(0))
 		if arg == "VERSION" && ctx.ArgCount() > 1 {
-			v, err := strconv.Atoi(ctx.ArgString(1))
+			v, err := redisAtoi(ctx.ArgString(1))
 			if err == nil {
 				version = v
 			}
@@ -1690,7 +1690,7 @@ func cmdACL(ctx *Context) error {
 		bits := 256
 		if ctx.ArgCount() > 1 {
 			var err error
-			bits, err = strconv.Atoi(ctx.ArgString(1))
+			bits, err = redisAtoi(ctx.ArgString(1))
 			if err != nil {
 				return ctx.WriteError(ErrNotInteger)
 			}
@@ -1821,12 +1821,23 @@ func cmdWAITAOF(ctx *Context) error {
 	if ctx.ArgCount() != 3 {
 		return ctx.WriteError(arityError("waitaof"))
 	}
-	numLocal, err1 := strconv.ParseInt(ctx.ArgString(0), 10, 64)
-	numReplicas, err2 := strconv.ParseInt(ctx.ArgString(1), 10, 64)
-	if err1 != nil || err2 != nil || numLocal < 0 || numReplicas < 0 {
+	// getRangeLongFromObjectOrReply(0, 1), then
+	// getPositiveLongFromObjectOrReply.
+	numLocal, err := redisAtoi64(ctx.ArgString(0))
+	if err != nil {
 		return ctx.WriteError(ErrNotInteger)
 	}
-	ms, err := strconv.ParseInt(ctx.ArgString(2), 10, 64)
+	if numLocal < 0 || numLocal > 1 {
+		return ctx.WriteError(errors.New("ERR value is out of range, value must between 0 and 1"))
+	}
+	numReplicas, err := redisAtoi64(ctx.ArgString(1))
+	if err != nil {
+		return ctx.WriteError(ErrNotInteger)
+	}
+	if numReplicas < 0 {
+		return ctx.WriteError(errCountOutOfRange)
+	}
+	ms, err := redisAtoi64(ctx.ArgString(2))
 	if err != nil {
 		return ctx.WriteError(errors.New("ERR timeout is not an integer or out of range"))
 	}

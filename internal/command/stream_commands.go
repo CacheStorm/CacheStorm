@@ -93,11 +93,7 @@ func getStream(ctx *Context, key string) *store.StreamValue {
 // parseStreamLL parses an integer argument the way Redis does: no sign
 // other than a leading minus, no surrounding spaces.
 func parseStreamLL(s string) (int64, bool) {
-	if s == "" || s[0] == '+' {
-		return 0, false
-	}
-	v, err := strconv.ParseInt(s, 10, 64)
-	return v, err == nil
+	return parseRedisInt([]byte(s))
 }
 
 func parseStrictStreamID(s string) (store.StreamID, error) {

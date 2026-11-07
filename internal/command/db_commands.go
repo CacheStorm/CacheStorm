@@ -39,11 +39,20 @@ func (ctx *Context) selectDB(index int) error {
 // parseDBIndex parses a database index argument the way Redis does: any
 // integer parses, the range is checked separately.
 func parseDBIndex(arg string) (int, bool) {
-	n, err := strconv.ParseInt(arg, 10, 64)
+	n, err := redisAtoi64(arg)
 	if err != nil || n < -1<<31 || n > 1<<31-1 {
 		return 0, false
 	}
 	return int(n), true
+}
+
+// errDBIndexNotInt is getIntFromObjectOrReply's reply: an integer outside
+// int's range is reported differently from a non-integer.
+func errDBIndexNotInt(arg string) error {
+	if _, err := redisAtoi64(arg); err == nil {
+		return errors.New("ERR value is out of range, value must between -2147483648 and 2147483647")
+	}
+	return ErrNotInteger
 }
 
 func cmdSELECT(ctx *Context) error {
@@ -52,7 +61,7 @@ func cmdSELECT(ctx *Context) error {
 	}
 	index, ok := parseDBIndex(ctx.ArgString(0))
 	if !ok {
-		return ctx.WriteError(ErrNotInteger)
+		return ctx.WriteError(errDBIndexNotInt(ctx.ArgString(0)))
 	}
 	if index != 0 && ctx.clusterRefuses() {
 		return ctx.WriteError(errors.New("ERR SELECT is not allowed in cluster mode"))
@@ -142,7 +151,7 @@ func cmdMOVE(ctx *Context) error {
 	key := ctx.ArgString(0)
 	index, ok := parseDBIndex(ctx.ArgString(1))
 	if !ok {
-		return ctx.WriteError(ErrNotInteger)
+		return ctx.WriteError(errDBIndexNotInt(ctx.ArgString(1)))
 	}
 	dbs := ctx.databases()
 	if !dbs.Valid(index) {
@@ -192,7 +201,7 @@ func cmdCOPY(ctx *Context) error {
 			i++
 			index, ok := parseDBIndex(ctx.ArgString(i))
 			if !ok {
-				return ctx.WriteError(ErrNotInteger)
+				return ctx.WriteError(errDBIndexNotInt(ctx.ArgString(i)))
 			}
 			if index != 0 && ctx.clusterRefuses() {
 				return ctx.WriteError(errDBIndexOutOfRange)

@@ -4,7 +4,6 @@ import (
 	"errors"
 	"math/rand"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
@@ -496,7 +495,7 @@ func cmdSINTERCARD(ctx *Context) error {
 	}
 
 	// Redis grammar: SINTERCARD numkeys key [key ...] [LIMIT limit].
-	numKeys, err := strconv.ParseInt(ctx.ArgString(0), 10, 64)
+	numKeys, err := redisAtoi64(ctx.ArgString(0))
 	if err != nil || numKeys < 1 {
 		return ctx.WriteError(errNumKeysPositive)
 	}
@@ -507,7 +506,7 @@ func cmdSINTERCARD(ctx *Context) error {
 	var limit int64
 	for j := 1 + int(numKeys); j < n; j++ {
 		if strings.EqualFold(ctx.ArgString(j), "LIMIT") && j+1 < n {
-			v, err := strconv.ParseInt(ctx.ArgString(j+1), 10, 64)
+			v, err := redisAtoi64(ctx.ArgString(j + 1))
 			if err != nil || v < 0 {
 				return ctx.WriteError(errLimitNegative)
 			}

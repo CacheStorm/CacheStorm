@@ -39,15 +39,8 @@ type collectionScanOpts struct {
 // parseCollectionScanCursor parses an unsigned SCAN cursor as Redis'
 // string2ull does: a leading '+' is accepted, a negative value is not.
 func parseCollectionScanCursor(arg string) (uint64, error) {
-	if arg == "-0" {
-		return 0, nil
-	}
-	arg = strings.TrimPrefix(arg, "+")
-	if arg == "" || arg[0] == '+' || arg[0] == '-' {
-		return 0, errInvalidCursor
-	}
-	c, err := strconv.ParseUint(arg, 10, 64)
-	if err != nil {
+	c, ok := parseScanCursor(arg)
+	if !ok {
 		return 0, errInvalidCursor
 	}
 	return c, nil
@@ -65,7 +58,7 @@ func parseCollectionScanOptions(ctx *Context, from int, isHash bool) (collection
 			if left < 2 {
 				return opts, ErrSyntaxError
 			}
-			c, err := strconv.ParseInt(ctx.ArgString(i+1), 10, 64)
+			c, err := redisAtoi64(ctx.ArgString(i + 1))
 			if err != nil {
 				return opts, ErrNotInteger
 			}

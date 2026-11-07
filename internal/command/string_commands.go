@@ -832,7 +832,7 @@ func cmdLCS(ctx *Context) error {
 			withMatchLen = true
 		case arg == "MINMATCHLEN" && i+1 < ctx.ArgCount():
 			i++
-			n, err := strconv.ParseInt(ctx.ArgString(i), 10, 64)
+			n, err := redisAtoi64(ctx.ArgString(i))
 			if err != nil {
 				return ctx.WriteError(ErrNotInteger)
 			}

@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"maps"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -1117,7 +1116,7 @@ func fcallKeysAndArgs(ctx *Context) ([]string, []string, error) {
 	if ctx.ArgCount() < 2 {
 		return nil, nil, nil
 	}
-	n, err := strconv.ParseInt(ctx.ArgString(1), 10, 64)
+	n, err := redisAtoi64(ctx.ArgString(1))
 	if err != nil {
 		return nil, nil, errors.New("ERR Bad number of keys provided")
 	}

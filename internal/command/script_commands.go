@@ -113,7 +113,7 @@ func scriptKeysAndArgs(ctx *Context) ([]string, []string, error) {
 	if ctx.ArgCount() < 2 {
 		return nil, nil, ErrWrongArgCount
 	}
-	numKeys, err := strconv.ParseInt(ctx.ArgString(1), 10, 64)
+	numKeys, err := redisAtoi64(ctx.ArgString(1))
 	if err != nil {
 		return nil, nil, ErrNotInteger
 	}

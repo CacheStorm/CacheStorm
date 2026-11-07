@@ -278,11 +278,11 @@ func cmdLRANGE(ctx *Context) error {
 	}
 
 	key := ctx.ArgString(0)
-	start, err := strconv.Atoi(ctx.ArgString(1))
+	start, err := redisAtoi(ctx.ArgString(1))
 	if err != nil {
 		return ctx.WriteError(ErrNotInteger)
 	}
-	stop, err := strconv.Atoi(ctx.ArgString(2))
+	stop, err := redisAtoi(ctx.ArgString(2))
 	if err != nil {
 		return ctx.WriteError(ErrNotInteger)
 	}
@@ -417,7 +417,7 @@ func cmdLREM(ctx *Context) error {
 	}
 
 	key := ctx.ArgString(0)
-	count, err := strconv.Atoi(ctx.ArgString(1))
+	count, err := redisAtoi(ctx.ArgString(1))
 	if err != nil {
 		return ctx.WriteError(ErrNotInteger)
 	}
@@ -517,11 +517,11 @@ func cmdLTRIM(ctx *Context) error {
 	}
 
 	key := ctx.ArgString(0)
-	start, err := strconv.Atoi(ctx.ArgString(1))
+	start, err := redisAtoi(ctx.ArgString(1))
 	if err != nil {
 		return ctx.WriteError(ErrNotInteger)
 	}
-	stop, err := strconv.Atoi(ctx.ArgString(2))
+	stop, err := redisAtoi(ctx.ArgString(2))
 	if err != nil {
 		return ctx.WriteError(ErrNotInteger)
 	}
@@ -907,7 +907,7 @@ func cmdLPOS(ctx *Context) error {
 		switch {
 		case opt == "RANK" && more:
 			i++
-			v, err := strconv.ParseInt(ctx.ArgString(i), 10, 64)
+			v, err := redisAtoi64(ctx.ArgString(i))
 			if err != nil {
 				return ctx.WriteError(ErrNotInteger)
 			}
@@ -920,14 +920,14 @@ func cmdLPOS(ctx *Context) error {
 			rank = v
 		case opt == "COUNT" && more:
 			i++
-			v, err := strconv.ParseInt(ctx.ArgString(i), 10, 64)
+			v, err := redisAtoi64(ctx.ArgString(i))
 			if err != nil || v < 0 {
 				return ctx.WriteError(errLPosCount)
 			}
 			count = v
 		case opt == "MAXLEN" && more:
 			i++
-			v, err := strconv.ParseInt(ctx.ArgString(i), 10, 64)
+			v, err := redisAtoi64(ctx.ArgString(i))
 			if err != nil || v < 0 {
 				return ctx.WriteError(errLPosMaxlen)
 			}
@@ -1017,14 +1017,16 @@ func parseListMPop(ctx *Context, from int) ([]string, string, int, error) {
 	if n < from+1 {
 		return nil, "", 0, arityError(ctx.Command)
 	}
-	numKeys, err := strconv.ParseInt(ctx.ArgString(from), 10, 64)
+	numKeys, err := redisAtoi64(ctx.ArgString(from))
 	if err != nil || numKeys < 1 {
 		return nil, "", 0, errNumKeysPositive
 	}
-	whereIdx := int64(from) + numKeys + 1
-	if whereIdx >= int64(n) {
+	// numKeys is compared with what is left, not added to from: a huge
+	// count would overflow the sum.
+	if numKeys >= int64(n-from-1) {
 		return nil, "", 0, ErrSyntaxError
 	}
+	whereIdx := int64(from) + numKeys + 1
 
 	keys := make([]string, numKeys)
 	for i := range keys {
@@ -1039,7 +1041,7 @@ func parseListMPop(ctx *Context, from int) ([]string, string, int, error) {
 	count := -1
 	for j := int(whereIdx) + 1; j < n; j++ {
 		if count == -1 && strings.EqualFold(ctx.ArgString(j), "COUNT") && j+1 < n {
-			v, err := strconv.ParseInt(ctx.ArgString(j+1), 10, 64)
+			v, err := redisAtoi64(ctx.ArgString(j + 1))
 			if err != nil || v < 1 {
 				return nil, "", 0, errPopCountPositive
 			}

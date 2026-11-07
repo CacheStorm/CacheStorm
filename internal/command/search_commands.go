@@ -363,7 +363,7 @@ func countedArgs(ctx *Context, i int) ([]string, int, error) {
 		return nil, i, errors.New("Bad arguments for " + strings.ToUpper(ctx.ArgString(i)) + ": Expected an argument, but none provided") //nolint:staticcheck // RediSearch's reply text
 	}
 	n, err := strconv.Atoi(ctx.ArgString(i + 1))
-	if err != nil || n < 0 || i+1+n >= ctx.ArgCount() {
+	if err != nil || n < 0 || n >= ctx.ArgCount()-i-1 {
 		return nil, i, errors.New("Bad arguments for " + strings.ToUpper(ctx.ArgString(i)) + ": Expected an argument, but none provided") //nolint:staticcheck // RediSearch's reply text
 	}
 	out := make([]string, n)

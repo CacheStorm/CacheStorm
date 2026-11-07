@@ -100,11 +100,8 @@ func cmdGETBIT(ctx *Context) error {
 	}
 
 	key := ctx.ArgString(0)
-	offset, err := strconv.ParseInt(ctx.ArgString(1), 10, 64)
-	if err != nil {
-		return ctx.WriteError(ErrNotInteger)
-	}
-	if offset < 0 || offset > 4294967295 {
+	offset, err := redisAtoi64(ctx.ArgString(1))
+	if err != nil || offset < 0 || offset > 4294967295 {
 		return ctx.WriteError(errors.New("ERR bit offset is not an integer or out of range"))
 	}
 
@@ -225,10 +222,10 @@ func cmdBITCOUNT(ctx *Context) error {
 	isBit := false
 	if n >= 3 {
 		var err error
-		if start, err = strconv.ParseInt(ctx.ArgString(1), 10, 64); err != nil {
+		if start, err = redisAtoi64(ctx.ArgString(1)); err != nil {
 			return ctx.WriteError(ErrNotInteger)
 		}
-		if end, err = strconv.ParseInt(ctx.ArgString(2), 10, 64); err != nil {
+		if end, err = redisAtoi64(ctx.ArgString(2)); err != nil {
 			return ctx.WriteError(ErrNotInteger)
 		}
 		if n == 4 {
@@ -274,7 +271,7 @@ func cmdBITPOS(ctx *Context) error {
 	if n < 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
-	bit, err := strconv.ParseInt(ctx.ArgString(1), 10, 64)
+	bit, err := redisAtoi64(ctx.ArgString(1))
 	if err != nil {
 		return ctx.WriteError(ErrNotInteger)
 	}
@@ -285,7 +282,7 @@ func cmdBITPOS(ctx *Context) error {
 	isBit, endGiven := false, false
 	switch {
 	case n >= 3 && n <= 5:
-		if start, err = strconv.ParseInt(ctx.ArgString(2), 10, 64); err != nil {
+		if start, err = redisAtoi64(ctx.ArgString(2)); err != nil {
 			return ctx.WriteError(ErrNotInteger)
 		}
 		if n == 5 {
@@ -294,7 +291,7 @@ func cmdBITPOS(ctx *Context) error {
 			}
 		}
 		if n >= 4 {
-			if end, err = strconv.ParseInt(ctx.ArgString(3), 10, 64); err != nil {
+			if end, err = redisAtoi64(ctx.ArgString(3)); err != nil {
 				return ctx.WriteError(ErrNotInteger)
 			}
 			endGiven = true
@@ -565,6 +562,8 @@ func parseEncoding(encoding string) int {
 			return 0
 		}
 	}
+	// The encoding was validated when parsed; a historical frame may spell
+	// the width with leading zeros ("u08"), so it is read leniently here.
 	bits, err := strconv.Atoi(encoding[1:])
 	if err != nil || bits < 1 || bits > 64 {
 		return 0
