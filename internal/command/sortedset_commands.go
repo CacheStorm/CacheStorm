@@ -84,6 +84,20 @@ func getSortedSet(ctx *Context, key string) (*store.SortedSetValue, error) {
 // formatZScore renders a score the way Redis 7.4 replies with it: integers
 // that fit in half the int64 range print in full, other values use the
 // shortest round-trip digits in fixed or exponent notation (fpconv_dtoa).
+// formatScanScore is ld2string's LD_STR_AUTO, which ZSCAN uses for a
+// skiplist's scores: %.17Lg of the score.
+func formatScanScore(f float64) string {
+	switch {
+	case math.IsNaN(f):
+		return "nan"
+	case math.IsInf(f, 1):
+		return "inf"
+	case math.IsInf(f, -1):
+		return "-inf"
+	}
+	return strconv.FormatFloat(f, 'g', 17, 64)
+}
+
 func formatZScore(f float64) string {
 	switch {
 	case math.IsNaN(f):
@@ -93,6 +107,9 @@ func formatZScore(f float64) string {
 	case math.IsInf(f, -1):
 		return "-inf"
 	case f == 0:
+		if math.Signbit(f) {
+			return "-0"
+		}
 		return "0"
 	}
 	if f >= -4.611686018427387904e18 && f <= 4.611686018427387904e18 && f == math.Trunc(f) {
@@ -992,6 +1009,12 @@ func cmdZSCAN(ctx *Context) error {
 	zset.RLock()
 	defer zset.RUnlock()
 	w := ctx.Writer
+	// Redis writes a listpack's scores as ZRANGE does, and a skiplist's as
+	// a long double with 17 significant digits.
+	format := formatZScore
+	if zsetIsSkiplist(zset) {
+		format = formatScanScore
+	}
 	if card := zset.Card(); card <= collectionScanSmall {
 		// A small set is returned whole with cursor 0. Walking it with its
 		// scores saves a lookup per member, which is a pass over a listpack.
@@ -1004,7 +1027,7 @@ func cmdZSCAN(ctx *Context) error {
 		writeScanHead(w, 0, 2*len(entries))
 		for _, e := range entries {
 			w.WriteBulkStringItem(e.Member)
-			w.WriteBulkStringItem(formatZScore(e.Score))
+			w.WriteBulkStringItem(format(e.Score))
 		}
 		return w.Flush()
 	}
@@ -1017,7 +1040,7 @@ func cmdZSCAN(ctx *Context) error {
 	writeScanHead(w, next, 2*len(members))
 	for _, m := range members {
 		w.WriteBulkStringItem(m)
-		w.WriteBulkStringItem(formatZScore(zset.Score(m)))
+		w.WriteBulkStringItem(format(zset.Score(m)))
 	}
 	return w.Flush()
 }

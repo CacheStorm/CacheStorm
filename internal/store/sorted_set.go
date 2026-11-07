@@ -83,6 +83,11 @@ func (v *SortedSetValue) zlSplice(from, to int, ins []byte) {
 }
 
 func zlEncode(member string, score float64) []byte {
+	if score == 0 {
+		// A listpack keeps a zero score as the integer 0, so -0 loses its
+		// sign there, and keeps losing it once the set converts.
+		score = 0
+	}
 	buf := make([]byte, 0, binary.MaxVarintLen32+len(member)+8)
 	buf = binary.AppendUvarint(buf, uint64(len(member)))
 	buf = append(buf, member...)

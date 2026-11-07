@@ -324,11 +324,13 @@ func TestBlockingPopsRaceFreeWithPushes(t *testing.T) {
 
 func TestZScoreFormatting(t *testing.T) {
 	for f, want := range map[float64]string{
-		1.5:                  "1.5",
-		3:                    "3",
-		1e20:                 "1e+20",
-		0.1:                  "0.1",
-		math.Copysign(0, -1): "0",
+		1.5:  "1.5",
+		3:    "3",
+		1e20: "1e+20",
+		0.1:  "0.1",
+		// A score is -0 only in a skiplist (a listpack drops the sign on
+		// insert), and Redis replies -0 for it.
+		math.Copysign(0, -1): "-0",
 		123456789012345678:   "123456789012345680",
 		0.30000000000000004:  "0.30000000000000004",
 		math.Inf(1):          "inf",

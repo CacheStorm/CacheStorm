@@ -217,13 +217,8 @@ func getEncoding(v store.Value) string {
 	case *store.SortedSetValue:
 		val.RLock()
 		defer val.RUnlock()
-		if val.Skiplist() {
+		if zsetIsSkiplist(val) {
 			return "skiplist"
-		}
-		for m := range val.All() {
-			if len(m) > encMaxListpackValue {
-				return "skiplist"
-			}
 		}
 		return "listpack"
 	case *store.StreamValue:
@@ -496,4 +491,18 @@ func memoryDoctorReport(ctx *Context) string {
 	}
 	return "Sam, I detected a few issues in this CacheStorm instance memory implants:\n\n" + strings.Join(issues, "\n\n") +
 		"\n\nI'm here to keep you safe, Sam. I want to help you.\n"
+}
+
+// zsetIsSkiplist reports whether Redis holds the sorted set as a skiplist
+// rather than a listpack. The caller holds the value's lock.
+func zsetIsSkiplist(val *store.SortedSetValue) bool {
+	if val.Skiplist() {
+		return true
+	}
+	for m := range val.All() {
+		if len(m) > encMaxListpackValue {
+			return true
+		}
+	}
+	return false
 }
