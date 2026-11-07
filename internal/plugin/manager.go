@@ -3,6 +3,7 @@ package plugin
 import (
 	"slices"
 	"sync"
+	"sync/atomic"
 
 	"github.com/cachestorm/cachestorm/internal/command"
 )
@@ -17,6 +18,10 @@ type Manager struct {
 	tagHooks      []OnTagInvalidateHook
 	startupHooks  []OnStartupHook
 	shutdownHooks []OnShutdownHook
+	// before and after publish beforeHooks and afterHooks to the command
+	// path, which runs them for every command without taking mu or copying.
+	before atomic.Pointer[[]BeforeCommandHook]
+	after  atomic.Pointer[[]AfterCommandHook]
 }
 
 func NewManager() *Manager {
@@ -40,9 +45,13 @@ func (m *Manager) Register(p Plugin) error {
 
 	if hook, ok := p.(BeforeCommandHook); ok {
 		m.beforeHooks = append(m.beforeHooks, hook)
+		hooks := slices.Clip(m.beforeHooks)
+		m.before.Store(&hooks)
 	}
 	if hook, ok := p.(AfterCommandHook); ok {
 		m.afterHooks = append(m.afterHooks, hook)
+		hooks := slices.Clip(m.afterHooks)
+		m.after.Store(&hooks)
 	}
 	if hook, ok := p.(OnEvictHook); ok {
 		m.evictHooks = append(m.evictHooks, hook)
@@ -92,11 +101,11 @@ func (m *Manager) CloseAll() error {
 }
 
 func (m *Manager) RunBeforeHooks(ctx *command.Context) error {
-	m.mu.RLock()
-	hooks := slices.Clone(m.beforeHooks)
-	m.mu.RUnlock()
-
-	for _, hook := range hooks {
+	hooks := m.before.Load()
+	if hooks == nil {
+		return nil
+	}
+	for _, hook := range *hooks {
 		if err := hook.BeforeCommand(ctx); err != nil {
 			return err
 		}
@@ -105,11 +114,11 @@ func (m *Manager) RunBeforeHooks(ctx *command.Context) error {
 }
 
 func (m *Manager) RunAfterHooks(ctx *command.Context) {
-	m.mu.RLock()
-	hooks := slices.Clone(m.afterHooks)
-	m.mu.RUnlock()
-
-	for _, hook := range hooks {
+	hooks := m.after.Load()
+	if hooks == nil {
+		return
+	}
+	for _, hook := range *hooks {
 		hook.AfterCommand(ctx)
 	}
 }

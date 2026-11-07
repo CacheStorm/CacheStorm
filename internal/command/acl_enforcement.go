@@ -157,42 +157,34 @@ func storeKeyAfter(args [][]byte) []string {
 	return keys
 }
 
-// aclKeysForCommand returns the keys a command operates on, for key-pattern
-// enforcement.
-//
-// A command that is not classified here falls back to its first argument, so a
-// key-pattern ACL such as ~user:* still applies to it — an unlisted data
-// command must not become a way to read or write outside the sandbox. The
-// table covers the commands whose keys are not simply args[0] (multi-key,
-// NUMKEYS-counted, source/destination, keyword-separated) plus explicit no-key
-// entries for admin commands, so an argument like "GET" in CONFIG GET is never
-// mistaken for a key.
-func aclKeysForCommand(cmd string, args [][]byte) []string {
+// aclNamedKeys returns the keys of a command the table names, and whether
+// it names it.
+func aclNamedKeys(cmd string, args [][]byte) ([]string, bool) {
 	switch cmd {
 	case "EVAL", "EVALSHA", "EVAL_RO", "EVALSHA_RO":
 		// EVAL script numkeys key [key ...]
-		return keysAfterNumkeys(args, 1)
+		return keysAfterNumkeys(args, 1), true
 	case "ZUNIONSTORE", "ZINTERSTORE", "ZDIFFSTORE":
 		// ZUNIONSTORE dest numkeys key [key ...] — args[0] IS dest, the key this
 		// command WRITES. Omitting it let a user confined to ~user:* compute
 		// into any key outside the sandbox, so dest is checked alongside the
 		// NUMKEYS-counted sources.
 		if len(args) < 1 {
-			return nil
+			return nil, true
 		}
 		keys := keysAfterNumkeys(args, 1)
 		if keys == nil {
 			// Malformed count: keep the existing contract of returning no keys
 			// rather than guessing a shape.
-			return nil
+			return nil, true
 		}
-		return append([]string{string(args[0])}, keys...)
+		return append([]string{string(args[0])}, keys...), true
 	case "ZUNION", "ZINTER", "ZDIFF":
 		// ZUNION numkeys key [key ...] — the READ-ONLY forms take NO
 		// destination, so the count sits at args[0]. Reading it from args[1]
 		// parsed a key as the count, atoi failed, and nil came back — leaving
 		// these commands with no key check at all.
-		return keysAfterNumkeys(args, 0)
+		return keysAfterNumkeys(args, 0), true
 	case "BITOP":
 		// BITOP op destkey key [key ...]
 		// args[0] is the operation word (AND/OR/XOR/NOT), NOT a key.
@@ -201,9 +193,9 @@ func aclKeysForCommand(cmd string, args [][]byte) []string {
 		// destkey out let a user confined to ~user:* compute into any key
 		// outside the sandbox.
 		if len(args) >= 3 {
-			return toStrings(args[1:])
+			return toStrings(args[1:]), true
 		}
-		return nil
+		return nil, true
 	case "SORT", "SORT_RO":
 		// SORT key ... [STORE destination] [BY pattern] [GET pattern ...]
 		keys := []string{}
@@ -211,48 +203,48 @@ func aclKeysForCommand(cmd string, args [][]byte) []string {
 			keys = append(keys, string(args[0]))
 		}
 		keys = append(keys, storeKeyAfter(args)...)
-		return append(keys, sortLookupKeys(args)...)
+		return append(keys, sortLookupKeys(args)...), true
 	case "SINTERCARD":
-		return keysAfterNumkeys(args, 0)
+		return keysAfterNumkeys(args, 0), true
 	case "CMS.MERGE", "TDIGEST.MERGE":
 		// CMS.MERGE destination numkeys source [source ...] [WEIGHTS ...]
 		if len(args) < 1 {
-			return nil
+			return nil, true
 		}
-		return append([]string{string(args[0])}, keysAfterNumkeys(args, 1)...)
+		return append([]string{string(args[0])}, keysAfterNumkeys(args, 1)...), true
 	case "TS.MADD", "JSON.MSET":
 		// TS.MADD key timestamp value [key timestamp value ...]
 		var keys []string
 		for i := 0; i < len(args); i += 3 {
 			keys = append(keys, string(args[i]))
 		}
-		return keys
+		return keys, true
 	case "TS.CREATERULE", "TS.DELETERULE":
 		// TS.CREATERULE sourceKey destKey ...
 		if len(args) < 2 {
-			return nil
+			return nil, true
 		}
-		return toStrings(args[:2])
+		return toStrings(args[:2]), true
 	case "FT.ADD", "FT.DEL", "FT.GET":
 		// FT.ADD index docId ...: the document is a key
 		if len(args) < 2 {
-			return nil
+			return nil, true
 		}
-		return []string{string(args[1])}
+		return []string{string(args[1])}, true
 	case "JSON.DEBUG":
 		// JSON.DEBUG MEMORY key [path]
 		if len(args) >= 2 && strings.EqualFold(string(args[0]), "MEMORY") {
-			return []string{string(args[1])}
+			return []string{string(args[1])}, true
 		}
-		return nil
+		return nil, true
 	case "JSON.MGET":
 		// JSON.MGET key [key ...] path
 		if len(args) < 2 {
-			return nil
+			return nil, true
 		}
-		return toStrings(args[:len(args)-1])
+		return toStrings(args[:len(args)-1]), true
 	case "SINTER", "SDIFF", "SUNION", "SDIFFSTORE", "SINTERSTORE", "SUNIONSTORE":
-		return toStrings(args)
+		return toStrings(args), true
 	case "MIGRATE":
 		// MIGRATE host port key|"" db timeout ... [KEYS key ...]
 		var keys []string
@@ -265,7 +257,7 @@ func aclKeysForCommand(cmd string, args [][]byte) []string {
 				break
 			}
 		}
-		return keys
+		return keys, true
 	case "GEOSEARCHSTORE":
 		// GEOSEARCHSTORE destination source <FROMMEMBER m | FROMLONLAT lon lat>
 		// ... — BOTH keys must be checked. There was no entry for this command,
@@ -273,43 +265,43 @@ func aclKeysForCommand(cmd string, args [][]byte) []string {
 		// only: the destination. The SOURCE at args[1] was then read
 		// unchecked, letting a ~user:* user copy any geo set in the store.
 		if len(args) >= 2 {
-			return toStrings(args[:2])
+			return toStrings(args[:2]), true
 		}
 		if len(args) >= 1 {
-			return toStrings(args[:1])
+			return toStrings(args[:1]), true
 		}
-		return nil
+		return nil, true
 	case "LMPOP", "ZMPOP", "ZINTERCARD":
 		// LMPOP numkeys key [key ...] LEFT|RIGHT [COUNT n]: the count sits
 		// at args[0]. These fell through to the args[0] default, so the count
 		// was checked as a key and the real keys never were.
-		return keysAfterNumkeys(args, 0)
+		return keysAfterNumkeys(args, 0), true
 	case "BLMPOP", "BZMPOP":
 		// BLMPOP timeout numkeys key [key ...] ...: BLMPOP was treated as
 		// "source destination" and returned the timeout and the count.
-		return keysAfterNumkeys(args, 1)
+		return keysAfterNumkeys(args, 1), true
 	case "BLPOP", "BRPOP", "BZPOPMIN", "BZPOPMAX":
 		// BLPOP key [key ...] timeout: every argument but the timeout.
 		// BZPOPMIN/BZPOPMAX checked only their first key.
 		if len(args) >= 2 {
-			return toStrings(args[:len(args)-1])
+			return toStrings(args[:len(args)-1]), true
 		}
-		return toStrings(args)
+		return toStrings(args), true
 	case "RENAME", "RENAMENX", "SMOVE", "LMOVE", "RPOPLPUSH", "BLMOVE", "BRPOPLPUSH",
 		"COPY":
 		// source destination [member ...] — BOTH sides must be permitted.
 		// Omitting the destination lets a user move a key out of the
 		// key-pattern they are confined to.
 		if len(args) >= 2 {
-			return toStrings(args[:2])
+			return toStrings(args[:2]), true
 		}
 		if len(args) == 1 {
-			return toStrings(args[:1])
+			return toStrings(args[:1]), true
 		}
-		return nil
+		return nil, true
 	case "GEORADIUS", "GEORADIUSBYMEMBER":
 		if len(args) == 0 {
-			return nil
+			return nil, true
 		}
 		keys := []string{string(args[0])}
 		offset := 5
@@ -319,14 +311,14 @@ func aclKeysForCommand(cmd string, args [][]byte) []string {
 		if len(args) > offset {
 			keys = append(keys, storeKeyAfter(args[offset:])...)
 		}
-		return keys
+		return keys, true
 	case "GEORADIUSSTORE":
 		// source ... [STORE destination]
 		keys := []string{}
 		if len(args) >= 1 {
 			keys = append(keys, string(args[0]))
 		}
-		return append(keys, storeKeyAfter(args)...)
+		return append(keys, storeKeyAfter(args)...), true
 	case "XREAD", "XREADGROUP":
 		// XREAD [COUNT n] [BLOCK ms] STREAMS key [key ...] id [id ...]
 		// XREADGROUP GROUP g c [COUNT n] [BLOCK ms] [NOACK] STREAMS key ...
@@ -337,33 +329,49 @@ func aclKeysForCommand(cmd string, args [][]byte) []string {
 			if strings.EqualFold(string(a), "STREAMS") {
 				rest := args[i+1:]
 				if len(rest)%2 != 0 {
-					return toStrings(rest)
+					return toStrings(rest), true
 				}
-				return toStrings(rest[:len(rest)/2])
+				return toStrings(rest[:len(rest)/2]), true
 			}
 		}
-		return nil
+		return nil, true
 	case "XINFO", "XGROUP":
 		// XINFO STREAM|GROUPS|CONSUMERS key, XGROUP CREATE|SETID|DESTROY
 		// key ... — both take their subcommand first, key second.
 		if len(args) >= 2 {
-			return toStrings(args[1:2])
+			return toStrings(args[1:2]), true
 		}
-		return nil
+		return nil, true
 	case "FCALL", "FCALL_RO":
 		// FCALL f-name numkeys key [key ...] arg [arg ...] — the key count
 		// sits between the function name and the keys, so the function name
 		// itself is not a key.
 		if len(args) < 2 {
-			return nil
+			return nil, true
 		}
 		n := atoiSafe(args[1])
 		if n < 0 || 2+n > len(args) {
-			return nil
+			return nil, true
 		}
-		return toStrings(args[2 : 2+n])
+		return toStrings(args[2 : 2+n]), true
 	}
+	return nil, false
+}
 
+// aclKeysForCommand returns the keys a command operates on, for key-pattern
+// enforcement.
+//
+// A command that is not classified here falls back to its first argument, so a
+// key-pattern ACL such as ~user:* still applies to it — an unlisted data
+// command must not become a way to read or write outside the sandbox. The
+// table covers the commands whose keys are not simply args[0] (multi-key,
+// NUMKEYS-counted, source/destination, keyword-separated) plus explicit no-key
+// entries for admin commands, so an argument like "GET" in CONFIG GET is never
+// mistaken for a key.
+func aclKeysForCommand(cmd string, args [][]byte) []string {
+	if keys, ok := aclNamedKeys(cmd, args); ok {
+		return keys
+	}
 	switch keyShapeOf(cmd) {
 	case keyShapeMSET:
 		keys := make([]string, 0, (len(args)+1)/2)
@@ -386,6 +394,20 @@ func aclKeysForCommand(cmd string, args [][]byte) []string {
 		return toStrings(args[:1])
 	}
 	return nil
+}
+
+// SoleFirstKey returns the key of a command whose only key is its first
+// argument, as CommandKeys would return it, without making a string of it:
+// the write gate needs only its bytes. ok is false for every other command.
+func SoleFirstKey(cmd string, args [][]byte) (key []byte, ok bool) {
+	cmd = CanonicalName(cmd)
+	if len(args) == 0 || keyShapeOf(cmd) != keyShapeFirst {
+		return nil, false
+	}
+	if _, named := aclNamedKeys(cmd, args); named {
+		return nil, false
+	}
+	return args[0], true
 }
 
 type keyShape uint8

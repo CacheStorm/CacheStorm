@@ -7,6 +7,7 @@ import (
 	"io"
 	"math"
 	"strconv"
+	"strings"
 	"sync/atomic"
 )
 
@@ -71,7 +72,29 @@ type Reader struct {
 	// unauthenticated applies the limits on a client that has to
 	// authenticate before it may run commands.
 	unauthenticated bool
+	// name holds a command's name while it is looked up among the
+	// interned names, so a known name costs no allocation.
+	name []byte
 }
+
+// commandNames maps a command name, as clients send it in upper or lower
+// case, to one shared string.
+var commandNames atomic.Pointer[map[string]string]
+
+// InternCommandNames sets the command names a client command's name is
+// matched against, so reading a known name allocates nothing.
+func InternCommandNames(names []string) {
+	m := make(map[string]string, 2*len(names))
+	for _, n := range names {
+		m[n] = n
+		m[strings.ToLower(n)] = n
+		m[strings.ToUpper(n)] = n
+	}
+	commandNames.Store(&m)
+}
+
+// maxInternedName bounds the command names read into Reader.name.
+const maxInternedName = 64
 
 // SetUnauthenticated tells the reader whether the client still has to
 // authenticate, which limits the size of its commands.
@@ -264,6 +287,7 @@ func (r *Reader) readMultiBulk(client bool) (string, [][]byte, error) {
 	if client {
 		limit, maxBulk = queryBufferLimit.Load(), protoMaxBulkLen.Load()
 	}
+	var name string
 	for i := int64(0); i < count; i++ {
 		b, err := r.rd.ReadByte()
 		if err != nil {
@@ -272,7 +296,11 @@ func (r *Reader) readMultiBulk(client bool) (string, [][]byte, error) {
 		if b != byte(TypeBulkString) {
 			return "", nil, ExpectedBulkError(b)
 		}
-		arg, err := r.readCommandBulk(limit-size, maxBulk, unauth)
+		var into *[]byte
+		if i == 0 && client {
+			into = &r.name
+		}
+		arg, err := r.readCommandBulk(limit-size, maxBulk, unauth, into)
 		if err != nil {
 			return "", nil, unexpectedEOF(err)
 		}
@@ -282,14 +310,31 @@ func (r *Reader) readMultiBulk(client bool) (string, [][]byte, error) {
 		if size > limit {
 			return "", nil, ErrQueryBufferLimit
 		}
+		if i == 0 {
+			// The name is not kept as an argument, so a known one is the
+			// shared string and the bytes it was read into are reused.
+			name = internedName(arg)
+			args = append(args[:0], nil)
+		}
 	}
-	return string(args[0]), args[1:], nil
+	return name, args[1:], nil
+}
+
+func internedName(b []byte) string {
+	if m := commandNames.Load(); m != nil {
+		if n, ok := (*m)[string(b)]; ok {
+			return n
+		}
+	}
+	return string(b)
 }
 
 // readCommandBulk reads one bulk-string argument. A large argument is read
 // in chunks, so the memory held grows with the bytes actually received and a
 // header announcing 512 MB costs nothing until the data arrives.
-func (r *Reader) readCommandBulk(room, maxBulk int64, unauth bool) ([]byte, error) {
+// With into set, an argument of at most maxInternedName bytes is read into
+// *into, reused from one command to the next.
+func (r *Reader) readCommandBulk(room, maxBulk int64, unauth bool, into *[]byte) ([]byte, error) {
 	line, err := r.readBoundedLine(true)
 	if err == ErrLineTooLong {
 		return nil, ErrBulkCountTooBig
@@ -310,7 +355,15 @@ func (r *Reader) readCommandBulk(room, maxBulk int64, unauth bool) ([]byte, erro
 
 	const chunk = 1 << 20
 	var buf []byte
-	if size <= chunk {
+	if into != nil && size <= maxInternedName {
+		if int64(cap(*into)) < size {
+			*into = make([]byte, maxInternedName)
+		}
+		buf = (*into)[:size]
+		if _, err := io.ReadFull(r.rd, buf); err != nil {
+			return nil, err
+		}
+	} else if size <= chunk {
 		buf = make([]byte, size)
 		if _, err := io.ReadFull(r.rd, buf); err != nil {
 			return nil, err

@@ -498,9 +498,11 @@ func (r *Router) checkWrite(ctx *Context) (bool, error) {
 
 func (r *Router) executeHandler(ctx *Context, cmd *CommandDef, capture bool) (err error) {
 	original := ctx.Writer
-	var out bytes.Buffer
 	if capture {
-		ctx.Writer = resp.NewWriter(&out)
+		// Only a captured reply needs the buffer: declared outside, the
+		// deferred closure moved it to the heap for every command.
+		out := new(bytes.Buffer)
+		ctx.Writer = resp.NewWriter(out)
 		ctx.Writer.SetRESP3(original.IsRESP3())
 		defer func() {
 			captured := ctx.Writer

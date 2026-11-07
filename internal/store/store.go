@@ -154,8 +154,14 @@ func (s *Store) trackMemory(delta int64) {
 // size up to date as they change.
 func (s *Store) Reaccount(keys ...string) {
 	for _, key := range keys {
-		s.trackMemory(s.shards[s.shardIndex(key)].reaccount(key))
+		s.trackMemory(reaccountIn(s.shards[s.shardIndex(key)], key))
 	}
+}
+
+// ReaccountKey is Reaccount of one key given as bytes, which it does not
+// copy into a string.
+func (s *Store) ReaccountKey(key []byte) {
+	s.trackMemory(reaccountIn(s.shards[fnv32a(key)&ShardMask], key))
 }
 
 // CheckWriteMemory enforces maxmemory before a command that may grow memory,
@@ -393,7 +399,7 @@ func (s *Store) shardIndex(key string) uint32 {
 	return fnv32a(key) & ShardMask
 }
 
-func fnv32a(s string) uint32 {
+func fnv32a[K string | []byte](s K) uint32 {
 	const (
 		offset32 = uint32(2166136261)
 		prime32  = uint32(16777619)
@@ -501,9 +507,20 @@ func (s *Store) Set(key string, value Value, opts SetOptions) error {
 	}
 	opts.Tags = append([]string(nil), opts.Tags...)
 	return s.applyValuePlan(key, &opts, nil, func(Value) (ValuePlan, error) {
+		if sv, ok := value.(*StringValue); ok {
+			return ValuePlan{Size: size, op: (*installString)(sv)}, nil
+		}
 		return ValuePlan{Size: size, Apply: func() Value { return value }}, nil
 	})
 }
+
+// installString is the plan op installing a string made beforehand. A
+// pointer converts to planOp without allocating, where the Apply closure
+// was allocated for every SET.
+type installString StringValue
+
+func (o *installString) apply() Value { return (*StringValue)(o) }
+func (*installString) release()       {}
 
 // published records that value was just installed under key: the version a
 // WATCH observes moves, and a blocked client is woken unless the value is an

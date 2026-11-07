@@ -44,9 +44,16 @@ func reaccountWrittenKeys(ctx *Context) {
 	if ctx.Store == nil || readonlyCommands[ctx.Command] {
 		return
 	}
+	indexes := searchIndexesFor(ctx).All()
+	if len(indexes) == 0 {
+		if key, ok := SoleFirstKey(ctx.Command, ctx.Args); ok {
+			ctx.Store.ReaccountKey(key)
+			return
+		}
+	}
 	keys := ctx.CommandKeys()
 	ctx.Store.Reaccount(keys...)
-	for _, idx := range searchIndexesFor(ctx).All() {
+	for _, idx := range indexes {
 		for _, k := range keys {
 			idx.Touch(ctx.Store, k)
 		}

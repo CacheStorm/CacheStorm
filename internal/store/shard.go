@@ -52,7 +52,7 @@ func (s *Shard) Set(key string, entry *Entry) int64 {
 
 // footprint is what the shard charges for entry under key: the entry's
 // memory usage plus the key and map-slot overhead.
-func footprint(key string, entry *Entry) int64 {
+func footprint[K string | []byte](key K, entry *Entry) int64 {
 	return entry.MemoryUsage() + int64(len(key)) + 16
 }
 
@@ -110,9 +110,11 @@ func (s *Shard) deleteLocked(key string, entry *Entry) int64 {
 // accounted, for a value modified in place, and returns the delta. SizeOf
 // is O(1) for every collection, so this is cheap enough to run after every
 // write. The common no-change case only takes the read lock.
-func (s *Shard) reaccount(key string) int64 {
+// reaccountIn charges the change in key's footprint since it was last
+// accounted; a []byte key is looked up without being copied.
+func reaccountIn[K string | []byte](s *Shard, key K) int64 {
 	s.mu.RLock()
-	entry, ok := s.data[key]
+	entry, ok := s.data[string(key)]
 	same := ok && footprint(key, entry) == entry.accounted.Load()
 	s.mu.RUnlock()
 	if !ok || same {
@@ -121,7 +123,7 @@ func (s *Shard) reaccount(key string) int64 {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	entry, ok = s.data[key]
+	entry, ok = s.data[string(key)]
 	if !ok {
 		return 0
 	}

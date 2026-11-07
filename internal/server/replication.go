@@ -84,7 +84,7 @@ var ungatedCommands = map[string]bool{
 	"QUIT": true, "RESET": true, "AUTH": true, "HELLO": true,
 }
 
-func stripeOf(key string) int {
+func stripeOf[K string | []byte](key K) int {
 	h := uint32(2166136261)
 	for i := 0; i < len(key); i++ {
 		h ^= uint32(key[i])
@@ -99,6 +99,8 @@ func (g *writeGate) planWrite(h *gateHold, ctx *command.Context) *gateHold {
 	*h = gateHold{g: g}
 	if exclusiveWrites[cmd] || globalRead(cmd, args) {
 		h.exclusive = true
+	} else if key, ok := command.SoleFirstKey(cmd, args); ok {
+		h.stripes = append(h.inline[:0], stripeOf(key))
 	} else {
 		keys := ctx.CommandKeys()
 		if len(keys) == 0 {
@@ -135,6 +137,10 @@ func (g *writeGate) planRead(h *gateHold, ctx *command.Context) *gateHold {
 	*h = gateHold{g: g, read: true, exclusive: globalRead(ctx.Command, ctx.Args)}
 	if !h.exclusive {
 		h.stripes = h.inline[:0]
+		if key, ok := command.SoleFirstKey(ctx.Command, ctx.Args); ok {
+			h.stripes = append(h.stripes, stripeOf(key))
+			return h
+		}
 		for _, key := range ctx.CommandKeys() {
 			h.stripes = appendStripe(h.stripes, stripeOf(key))
 		}

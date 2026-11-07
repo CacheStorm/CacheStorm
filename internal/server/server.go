@@ -21,6 +21,7 @@ import (
 	"github.com/cachestorm/cachestorm/internal/persistence"
 	"github.com/cachestorm/cachestorm/internal/plugin"
 	"github.com/cachestorm/cachestorm/internal/replication"
+	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/search"
 	"github.com/cachestorm/cachestorm/internal/sentinel"
 	"github.com/cachestorm/cachestorm/internal/store"
@@ -346,6 +347,11 @@ func New(cfg *config.Config) (result *Server, retErr error) {
 	command.RegisterAdvancedCommands2(s.router)
 	command.RegisterResilienceCommands(s.router)
 	command.RegisterMLCommands(s.router)
+	names := make([]string, 0, 1300)
+	for name := range s.router.Commands() {
+		names = append(names, name)
+	}
+	resp.InternCommandNames(names)
 
 	// Database 0 is s.store; the others are created on first use and share
 	// its Pub/Sub hub, memory tracker and hooks, configured above.
