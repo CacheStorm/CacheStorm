@@ -154,16 +154,18 @@ func cmdHGETALL(ctx *Context) error {
 		return ctx.Writer.WriteValue(resp.PairsValue([]*resp.Value{}))
 	}
 
+	// The reply is written as the fields are walked, under the hash's lock:
+	// a Value per field and value cost most of the command.
 	hash.RLock()
-	results := make([]*resp.Value, 0, hash.Len()*2)
+	defer hash.RUnlock()
+	w := ctx.Writer
+	w.WriteMapHeader(hash.Len())
 	hash.Range(func(field string, value []byte) bool {
-		results = append(results, resp.BulkString(field), resp.BulkBytes(value))
+		w.WriteBulkStringItem(field)
+		w.WriteBulkItem(value)
 		return true
 	})
-
-	reply := results
-	hash.RUnlock()
-	return ctx.Writer.WriteValue(resp.PairsValue(reply))
+	return w.Flush()
 }
 
 func cmdHDEL(ctx *Context) error {
@@ -267,15 +269,14 @@ func cmdHKEYS(ctx *Context) error {
 	}
 
 	hash.RLock()
-	keys := make([]*resp.Value, 0, hash.Len())
+	defer hash.RUnlock()
+	w := ctx.Writer
+	w.WriteArrayHeader(hash.Len())
 	hash.Range(func(field string, _ []byte) bool {
-		keys = append(keys, resp.BulkString(field))
+		w.WriteBulkStringItem(field)
 		return true
 	})
-
-	reply := keys
-	hash.RUnlock()
-	return ctx.WriteArray(reply)
+	return w.Flush()
 }
 
 func cmdHVALS(ctx *Context) error {
@@ -293,15 +294,14 @@ func cmdHVALS(ctx *Context) error {
 	}
 
 	hash.RLock()
-	vals := make([]*resp.Value, 0, hash.Len())
+	defer hash.RUnlock()
+	w := ctx.Writer
+	w.WriteArrayHeader(hash.Len())
 	hash.Range(func(_ string, value []byte) bool {
-		vals = append(vals, resp.BulkBytes(value))
+		w.WriteBulkItem(value)
 		return true
 	})
-
-	reply := vals
-	hash.RUnlock()
-	return ctx.WriteArray(reply)
+	return w.Flush()
 }
 
 var (

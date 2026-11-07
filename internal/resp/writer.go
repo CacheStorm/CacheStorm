@@ -19,6 +19,77 @@ type Writer struct {
 	// errors counts the error replies written, so a caller can tell whether
 	// a command answered with an error.
 	errors int64
+	// num formats lengths and counts without allocating, which
+	// strconv.Itoa does from 100 up.
+	num [20]byte
+}
+
+// writeHeader writes a type byte, n and CRLF.
+func (w *Writer) writeHeader(t Type, n int) error {
+	w.wr.WriteByte(byte(t))
+	w.wr.Write(strconv.AppendInt(w.num[:0], int64(n), 10))
+	_, err := w.wr.WriteString("\r\n")
+	return err
+}
+
+// A reply of many elements can be written as it is produced instead of as
+// a Value per element: a header with the element count, the elements, then
+// Flush. The count must be exactly the number of elements that follow. These
+// methods report no error: the buffered writer keeps the first one and
+// Flush returns it.
+
+// WriteArrayHeader starts an array of n elements.
+func (w *Writer) WriteArrayHeader(n int) { _ = w.writeHeader(TypeArray, n) }
+
+// WriteSetHeader starts a RESP3 set of n elements, an array for RESP2.
+func (w *Writer) WriteSetHeader(n int) {
+	if w.resp3.Load() {
+		_ = w.writeHeader(TypeSet, n)
+		return
+	}
+	_ = w.writeHeader(TypeArray, n)
+}
+
+// WriteMapHeader starts a RESP3 map of n pairs, a flat array of 2n
+// elements for RESP2.
+func (w *Writer) WriteMapHeader(n int) {
+	if w.resp3.Load() {
+		_ = w.writeHeader(TypeMap, n)
+		return
+	}
+	_ = w.writeHeader(TypeArray, 2*n)
+}
+
+// WriteBulkItem writes a bulk string element of a reply started by a header.
+func (w *Writer) WriteBulkItem(b []byte) { _ = w.writeBulk(b) }
+
+// WriteBulkStringItem is WriteBulkItem of a string.
+func (w *Writer) WriteBulkStringItem(s string) { _ = w.writeBulkString(s) }
+
+// WriteDoubleItem writes an element that is a double given as its text: a
+// RESP3 double, a bulk string for RESP2.
+func (w *Writer) WriteDoubleItem(s string) {
+	if !w.resp3.Load() {
+		_ = w.writeBulkString(s)
+		return
+	}
+	w.wr.WriteByte(byte(TypeDouble))
+	w.wr.WriteString(s)
+	_, _ = w.wr.WriteString("\r\n")
+}
+
+func (w *Writer) writeBulk(b []byte) error {
+	w.writeHeader(TypeBulkString, len(b))
+	w.wr.Write(b)
+	_, err := w.wr.WriteString("\r\n")
+	return err
+}
+
+func (w *Writer) writeBulkString(s string) error {
+	w.writeHeader(TypeBulkString, len(s))
+	w.wr.WriteString(s)
+	_, err := w.wr.WriteString("\r\n")
+	return err
 }
 
 // Errors returns how many error replies the writer has written.
@@ -143,23 +214,14 @@ func (w *Writer) WriteInteger(n int64) error {
 }
 
 func (w *Writer) WriteBulkString(s string) error {
-	return w.WriteBulkBytes([]byte(s))
+	if err := w.writeBulkString(s); err != nil {
+		return err
+	}
+	return w.wr.Flush()
 }
 
 func (w *Writer) WriteBulkBytes(b []byte) error {
-	if err := w.wr.WriteByte(byte(TypeBulkString)); err != nil {
-		return err
-	}
-	if _, err := w.wr.WriteString(strconv.Itoa(len(b))); err != nil {
-		return err
-	}
-	if _, err := w.wr.WriteString("\r\n"); err != nil {
-		return err
-	}
-	if _, err := w.wr.Write(b); err != nil {
-		return err
-	}
-	if _, err := w.wr.WriteString("\r\n"); err != nil {
+	if err := w.writeBulk(b); err != nil {
 		return err
 	}
 	return w.wr.Flush()
@@ -252,12 +314,7 @@ func (w *Writer) WriteValueNoFlush(v *Value) error {
 			_, err := w.wr.WriteString("-1\r\n")
 			return err
 		}
-		w.wr.WriteByte(byte(TypeBulkString))
-		w.wr.WriteString(strconv.Itoa(len(v.Bulk)))
-		w.wr.WriteString("\r\n")
-		w.wr.Write(v.Bulk)
-		_, err := w.wr.WriteString("\r\n")
-		return err
+		return w.writeBulk(v.Bulk)
 	case TypeArray, TypePush, TypeSet:
 		if v.IsNull {
 			if w.resp3.Load() {
@@ -272,9 +329,7 @@ func (w *Writer) WriteValueNoFlush(v *Value) error {
 		if (v.Type == TypePush || v.Type == TypeSet) && w.resp3.Load() {
 			header = v.Type
 		}
-		w.wr.WriteByte(byte(header))
-		w.wr.WriteString(strconv.Itoa(len(v.Array)))
-		if _, err := w.wr.WriteString("\r\n"); err != nil {
+		if err := w.writeHeader(header, len(v.Array)); err != nil {
 			return err
 		}
 		for _, item := range v.Array {

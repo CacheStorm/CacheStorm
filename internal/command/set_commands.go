@@ -124,10 +124,17 @@ func cmdSMEMBERS(ctx *Context) error {
 		return ctx.WriteSet([]*resp.Value{})
 	}
 
+	// The reply is written as the members are walked, under the set's lock,
+	// instead of as a Value per member.
 	set.RLock()
-	reply := setMembersReply(set)
-	set.RUnlock()
-	return ctx.WriteSet(reply)
+	defer set.RUnlock()
+	w := ctx.Writer
+	w.WriteSetHeader(set.Card())
+	set.Range(func(m string) bool {
+		w.WriteBulkStringItem(m)
+		return true
+	})
+	return w.Flush()
 }
 
 func cmdSISMEMBER(ctx *Context) error {

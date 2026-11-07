@@ -323,18 +323,19 @@ func cmdLRANGE(ctx *Context) error {
 		return ctx.WriteArray(reply)
 	}
 
-	results := make([]*resp.Value, 0, stop-start+1)
+	// The reply is written as the elements are walked, under the list's
+	// lock, instead of as a Value per element.
+	defer list.RUnlock()
+	w := ctx.Writer
+	w.WriteArrayHeader(stop - start + 1)
 	list.Range(start, false, func(i int, el []byte) bool {
 		if i > stop {
 			return false
 		}
-		results = append(results, resp.BulkBytes(el))
+		w.WriteBulkItem(el)
 		return true
 	})
-
-	reply := results
-	list.RUnlock()
-	return ctx.WriteArray(reply)
+	return w.Flush()
 }
 
 func cmdLINDEX(ctx *Context) error {
