@@ -41,8 +41,8 @@ server:
   tcp_keepalive: 300            # TCP keepalive period in seconds (0 = off)
   read_timeout: "0"             # Idle client timeout (0 = never, as Redis timeout 0)
   write_timeout: "0"            # Reply write timeout (0 = 5m default)
-  read_buffer_size: 4096        # Per-connection read buffer in bytes
-  write_buffer_size: 4096       # Per-connection write buffer in bytes
+  read_buffer_size: 4096        # Read buffer, held only while a client sends
+  write_buffer_size: 512        # Per-connection buffer a reply is staged in
   requirepass: ""               # Password for AUTH (empty = no auth)
   protected_mode: true          # Without a password, serve only loopback clients
   tls_cert_file: ""             # TLS certificate (empty = plaintext)

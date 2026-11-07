@@ -9,7 +9,7 @@ func Default() *Config {
 			Databases:       16,
 			TCPKeepAlive:    300,
 			ReadBufferSize:  4096,
-			WriteBufferSize: 4096,
+			WriteBufferSize: 512,
 			ProtectedMode:   true,
 		},
 		HTTP: HTTPConfig{

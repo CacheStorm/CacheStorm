@@ -18,9 +18,10 @@ server:
   # TCP keepalive in seconds
   tcp_keepalive: 300
 
-  # Per-connection socket buffer sizes in bytes
+  # Per-connection buffer sizes in bytes. The read buffer is held only while
+  # a client is sending; the write buffer stages one reply value at a time.
   read_buffer_size: 4096
-  write_buffer_size: 4096
+  write_buffer_size: 512
 
   # Idle client timeout ("0" = never close idle clients, like Redis timeout 0)
   read_timeout: "0"

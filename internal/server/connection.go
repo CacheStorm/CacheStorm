@@ -25,7 +25,9 @@ const (
 	defaultWriteTimeout    = 5 * time.Minute
 	defaultKeepAlivePeriod = 300 * time.Second
 	defaultReadBufferSize  = 4096
-	defaultWriteBufferSize = 4 << 10
+	// defaultWriteBufferSize stages one reply value on its way into the
+	// reply sink, which flushes it there per value, so it need not be big.
+	defaultWriteBufferSize = 512
 )
 
 // connectionOptions are the per-connection socket settings from the server
@@ -140,6 +142,70 @@ type Connection struct {
 	// gateWaiting is set while a blocking command has handed heldGate back
 	// to wait, so releaseGate does not unlock it a second time.
 	gateWaiting bool
+
+	// src feeds bufReader. While the connection waits for its next command
+	// it holds no read buffer: bufReader goes back to its pool and the wait
+	// reads into wake, which src then hands to a fresh buffer first.
+	src  readSource
+	wake [128]byte
+}
+
+// readSource is what a connection's read buffer reads from: what the idle
+// wait read, then the socket.
+type readSource struct {
+	conn    net.Conn
+	pending []byte
+}
+
+func (s *readSource) Read(p []byte) (int, error) {
+	if len(s.pending) > 0 {
+		n := copy(p, s.pending)
+		s.pending = s.pending[n:]
+		return n, nil
+	}
+	return s.conn.Read(p)
+}
+
+// readerPools holds idle read buffers, one pool per size.
+var readerPools sync.Map
+
+func readerPool(size int) *sync.Pool {
+	if p, ok := readerPools.Load(size); ok {
+		return p.(*sync.Pool)
+	}
+	p, _ := readerPools.LoadOrStore(size, &sync.Pool{New: func() any { return bufio.NewReaderSize(nil, size) }})
+	return p.(*sync.Pool)
+}
+
+// awaitInput waits for the client to send more when nothing is buffered,
+// holding no read buffer meanwhile: an idle client then costs its
+// goroutine and little else, as Redis 7.4's shared query buffer does.
+func (c *Connection) awaitInput() error {
+	if c.src.conn == nil || c.bufReader != nil && c.bufReader.Buffered() > 0 || len(c.src.pending) > 0 {
+		// A connection built without newConnection reads its own reader.
+		return nil
+	}
+	if c.bufReader != nil {
+		c.bufReader.Reset(nil)
+		readerPool(c.readBufSize).Put(c.bufReader)
+		c.bufReader = nil
+	}
+	for {
+		n, err := c.conn.Read(c.wake[:])
+		if n > 0 {
+			// An error that came with data is met again on the next read.
+			c.src.pending = c.wake[:n]
+			break
+		}
+		if err != nil {
+			return err
+		}
+	}
+	br := readerPool(c.readBufSize).Get().(*bufio.Reader)
+	br.Reset(&c.src)
+	c.bufReader = br
+	c.reader.Reset(br)
+	return nil
 }
 
 // maxGateBatch bounds how many pipelined commands run under one gate hold
@@ -355,13 +421,10 @@ func newConnection(id int64, conn net.Conn, s *store.Store, r *command.Router, p
 	}
 
 	cc := &countingConn{Conn: conn}
-	br := bufio.NewReaderSize(cc, opts.readBufferSize)
 	sink := &replySink{conn: cc}
 	c := &Connection{
 		ID:           id,
 		conn:         cc,
-		bufReader:    br,
-		reader:       resp.NewReader(br),
 		sink:         sink,
 		writer:       resp.NewWriter(bufio.NewWriterSize(sink, opts.writeBufferSize)),
 		store:        s,
@@ -376,6 +439,10 @@ func newConnection(id int64, conn net.Conn, s *store.Store, r *command.Router, p
 		writeBufSize: opts.writeBufferSize,
 	}
 	c.info.multi = -1
+	c.src.conn = cc
+	c.bufReader = readerPool(opts.readBufferSize).Get().(*bufio.Reader)
+	c.bufReader.Reset(&c.src)
+	c.reader = resp.NewReader(c.bufReader)
 	// Keep-alive was set on the raw TCP connection above, before this wrapper,
 	// so the deadline refresh sits between the byte counters and the socket.
 	// The wrapper reads Connection.writeTimeout live, so the configured timeout
@@ -424,8 +491,13 @@ func (c *Connection) Handle() {
 				c.releaseGate()
 			}
 		}
-		c.reader.SetUnauthenticated(!c.authenticated && c.router.RequirePass() != "")
-		cmd, args, err := c.reader.ReadClientCommand()
+		var cmd string
+		var args [][]byte
+		err := c.awaitInput()
+		if err == nil {
+			c.reader.SetUnauthenticated(!c.authenticated && c.router.RequirePass() != "")
+			cmd, args, err = c.reader.ReadClientCommand()
+		}
 		if err != nil {
 			// Replies kept for a pipeline go out before the connection
 			// reports the error or closes.
