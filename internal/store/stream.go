@@ -1,9 +1,11 @@
 package store
 
 import (
+	"encoding/binary"
 	"sort"
 	"sync"
 	"time"
+	"unsafe"
 )
 
 // StreamField is one field-value pair of a stream entry, in insertion order.
@@ -706,10 +708,29 @@ func (v *StreamValue) Range(start, end StreamID, count int64, rev bool) []*Strea
 }
 
 func (v *StreamValue) rangeLocked(start, end StreamID, count int64, rev bool) []*StreamEntry {
+	refs := v.rangeRefsLocked(start, end, count, rev)
+	if len(refs) == 0 {
+		return nil
+	}
+	out := make([]*StreamEntry, len(refs))
+	for i, r := range refs {
+		out[i] = r.n.entry(r.off)
+	}
+	return out
+}
+
+// streamRef is an entry's node and offset in it.
+type streamRef struct {
+	n   *streamNode
+	off int
+}
+
+// rangeRefsLocked finds the entries Range returns, in reply order.
+func (v *StreamValue) rangeRefsLocked(start, end StreamID, count int64, rev bool) []streamRef {
 	if end.Less(start) {
 		return nil
 	}
-	var out []*StreamEntry
+	var out []streamRef
 	full := func() bool { return count > 0 && int64(len(out)) >= count }
 	if !rev {
 		pos, ok := v.seekLocked(start)
@@ -720,7 +741,7 @@ func (v *StreamValue) rangeLocked(start, end StreamID, count int64, rev bool) []
 			if end.Less(id) {
 				return false
 			}
-			out = append(out, n.entry(off))
+			out = append(out, streamRef{n, off})
 			return !full()
 		})
 		return out
@@ -745,10 +766,72 @@ func (v *StreamValue) rangeLocked(start, end StreamID, count int64, rev bool) []
 			return true
 		})
 		for i := len(offs) - 1; i >= 0 && !full(); i-- {
-			out = append(out, n.entry(offs[i]))
+			out = append(out, streamRef{n, offs[i]})
 		}
 	}
 	return out
+}
+
+// StreamVisit is an entry read in place from its node. It is valid only
+// during the visit that hands it out.
+type StreamVisit struct {
+	n     *streamNode
+	flags byte
+	f     int
+	ID    StreamID
+}
+
+// FieldCount is the number of field-value pairs EachField yields.
+func (e *StreamVisit) FieldCount() int {
+	switch {
+	case e.flags&streamNilFields != 0:
+		return 0
+	case e.flags&streamSameFields != 0:
+		return len(e.n.masterFields)
+	}
+	c, _ := binary.Uvarint(e.n.buf[e.f:])
+	return int(c)
+}
+
+// EachField calls fn with each field and value in the order XADD gave them.
+// name and value are valid only during the visit.
+func (e *StreamVisit) EachField(fn func(name, value []byte)) {
+	if e.flags&streamNilFields != 0 {
+		return
+	}
+	off := e.f
+	if e.flags&streamSameFields != 0 {
+		for _, name := range e.n.masterFields {
+			var v []byte
+			v, off = e.n.bytesAt(off)
+			fn(unsafe.Slice(unsafe.StringData(name), len(name)), v)
+		}
+		return
+	}
+	count, k := binary.Uvarint(e.n.buf[off:])
+	off += k
+	for range count {
+		var name, v []byte
+		name, off = e.n.bytesAt(off)
+		v, off = e.n.bytesAt(off)
+		fn(name, v)
+	}
+}
+
+// VisitRange calls begin with the number of entries Range would return and
+// then visit on each, in order, with the stream read-locked, so a reply can
+// be written from the nodes without building the entries.
+func (v *StreamValue) VisitRange(start, end StreamID, count int64, rev bool, begin func(n int), visit func(e *StreamVisit)) {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	refs := v.rangeRefsLocked(start, end, count, rev)
+	begin(len(refs))
+	var e StreamVisit
+	for _, r := range refs {
+		e.n = r.n
+		e.flags, e.ID, e.f = r.n.head(r.off)
+		visit(&e)
+	}
 }
 
 // After returns up to count entries (all when count <= 0) with ID > id.

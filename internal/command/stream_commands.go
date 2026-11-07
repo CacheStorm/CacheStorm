@@ -403,7 +403,36 @@ func xrangeGeneric(ctx *Context, rev bool) error {
 	if count < 0 {
 		count = 0
 	}
-	return ctx.WriteValue(streamEntriesValue(stream.Range(start, end, count, rev)))
+	// The entries are written from the stream's nodes as they are read.
+	w := ctx.Writer
+	var id [41]byte
+	stream.VisitRange(start, end, count, rev, w.WriteArrayHeader, func(e *store.StreamVisit) {
+		writeStreamVisit(w, e, &id)
+	})
+	return w.Flush()
+}
+
+// writeStreamVisit writes an entry as [id, [field, value, ...]], formatting
+// the ID in buf.
+func writeStreamVisit(w *resp.Writer, e *store.StreamVisit, buf *[41]byte) {
+	w.WriteArrayHeader(2)
+	b := strconv.AppendUint(buf[:0], e.ID.Ms, 10)
+	b = append(b, '-')
+	w.WriteBulkItem(strconv.AppendUint(b, e.ID.Seq, 10))
+	w.WriteArrayHeader(2 * e.FieldCount())
+	e.EachField(func(name, value []byte) {
+		w.WriteBulkItem(name)
+		w.WriteBulkItem(value)
+	})
+}
+
+// xreadResult is one stream's part of an XREAD reply: the entries after gt,
+// or for XREADGROUP the items it served.
+type xreadResult struct {
+	key    string
+	items  *resp.Value
+	stream *store.StreamValue
+	gt     store.StreamID
 }
 
 type xreadSpec struct {
@@ -536,19 +565,36 @@ parse:
 
 	// writeResults answers with one [key, entries] element per stream: an
 	// array of pairs in RESP2 and a map keyed by stream in RESP3, as Redis.
-	writeResults := func(results []*resp.Value) error {
-		if !ctx.Writer.IsRESP3() {
-			return ctx.WriteArray(results)
+	// XREAD's entries are written from the stream as they are read; the
+	// gate keeps the streams as serve found them.
+	writeResults := func(results []xreadResult) error {
+		w := ctx.Writer
+		resp3 := w.IsRESP3()
+		if resp3 {
+			w.WriteMapHeader(len(results))
+		} else {
+			w.WriteArrayHeader(len(results))
 		}
-		pairs := make([]*resp.Value, 0, 2*len(results))
+		var id [41]byte
 		for _, r := range results {
-			pairs = append(pairs, r.Array[0], r.Array[1])
+			if !resp3 {
+				w.WriteArrayHeader(2)
+			}
+			w.WriteBulkStringItem(r.key)
+			if r.items != nil {
+				_ = w.WriteValueNoFlush(r.items)
+				continue
+			}
+			start, _ := r.gt.Next()
+			r.stream.VisitRange(start, store.MaxStreamID, count, false, w.WriteArrayHeader, func(e *store.StreamVisit) {
+				writeStreamVisit(w, e, &id)
+			})
 		}
-		return ctx.Writer.WriteValue(resp.PairsValue(pairs))
+		return w.Flush()
 	}
 
-	serve := func() ([]*resp.Value, error) {
-		results := make([]*resp.Value, 0, len(specs))
+	serve := func() ([]xreadResult, error) {
+		results := make([]xreadResult, 0, len(specs))
 		now := time.Now().UnixMilli()
 		for _, sp := range specs {
 			stream, err := lookupStream(ctx, sp.key)
@@ -559,11 +605,9 @@ parse:
 				if stream == nil {
 					continue
 				}
-				entries := stream.After(sp.gt, count)
-				if len(entries) == 0 {
-					continue
+				if last, ok := stream.LastEntryID(); ok && sp.gt.Less(last) {
+					results = append(results, xreadResult{key: sp.key, stream: stream, gt: sp.gt})
 				}
-				results = append(results, resp.ArrayValue([]*resp.Value{resp.BulkString(sp.key), streamEntriesValue(entries)}))
 				continue
 			}
 			if stream == nil {
@@ -578,7 +622,7 @@ parse:
 				ctx.notify(store.NotifyStream, "xgroup-createconsumer", sp.key)
 			}
 			if served {
-				results = append(results, resp.ArrayValue([]*resp.Value{resp.BulkString(sp.key), streamItemsValue(items, false)}))
+				results = append(results, xreadResult{key: sp.key, items: streamItemsValue(items, false)})
 			}
 		}
 		return results, nil
