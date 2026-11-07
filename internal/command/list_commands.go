@@ -672,7 +672,7 @@ const blockForever = time.Duration(1) << 62
 // Redis' getTimeoutFromObjectOrReply does: fractional seconds are rounded up
 // to whole milliseconds and 0 waits without a deadline.
 func parseBlockTimeout(arg string) (time.Duration, error) {
-	sec, err := strconv.ParseFloat(cHexFloat(arg), 64)
+	sec, err := strconv.ParseFloat(cFloat(arg), 64)
 	if (err != nil && !errors.Is(err, strconv.ErrRange)) || math.IsNaN(sec) {
 		return 0, errTimeoutNotFloat
 	}

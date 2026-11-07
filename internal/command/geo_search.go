@@ -305,7 +305,7 @@ func geoSearchZSet(ctx *Context, key string) (*store.SortedSetValue, error) {
 }
 
 func geoParseFloat(arg string) (float64, bool) {
-	f, err := strconv.ParseFloat(arg, 64)
+	f, err := strconv.ParseFloat(cFloat(arg), 64)
 	if err != nil || math.IsNaN(f) {
 		return 0, false
 	}

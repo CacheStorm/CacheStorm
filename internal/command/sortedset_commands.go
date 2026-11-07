@@ -118,11 +118,18 @@ func formatZScore(f float64) string {
 	return fpconvDtoa(f)
 }
 
-// cHexFloat adds the binary exponent Go requires to a hexadecimal float
-// written without one ("0x10"), which C's strtod accepts.
-func cHexFloat(s string) string {
+// cFloat is s as C's strtod reads it, made ready for Go's float parsers: a
+// hexadecimal float gets the binary exponent Go requires ("0x10" parses in C
+// without one), and the forms Go accepts but strtod does not -- digit
+// separators ("1_0") and a binary exponent on a decimal ("1p1") -- become
+// text no parser accepts.
+func cFloat(s string) string {
 	body := strings.TrimLeft(s, "+-")
-	if len(body) > 2 && (body[:2] == "0x" || body[:2] == "0X") && !strings.ContainsAny(body, "pP") {
+	hex := len(body) > 2 && (body[:2] == "0x" || body[:2] == "0X")
+	switch {
+	case strings.ContainsRune(s, '_'), !hex && strings.ContainsAny(body, "pP"):
+		return "\x00"
+	case hex && !strings.ContainsAny(body, "pP"):
 		return s + "p0"
 	}
 	return s
@@ -131,7 +138,7 @@ func cHexFloat(s string) string {
 // parseZScore parses a score or increment as Redis' string2d does: NaN and
 // out-of-range values are refused, infinities are accepted.
 func parseZScore(s string) (float64, bool) {
-	f, err := strconv.ParseFloat(cHexFloat(s), 64)
+	f, err := strconv.ParseFloat(cFloat(s), 64)
 	if err != nil || math.IsNaN(f) {
 		return 0, false
 	}
@@ -150,9 +157,12 @@ func parseScoreBound(s string) (float64, bool, error) {
 		s = s[1:]
 	}
 	if s == "" {
+		// strtod converts nothing and stops at the end: 0.
 		return 0, ex, nil
 	}
-	f, err := strconv.ParseFloat(cHexFloat(s), 64)
+	// zslParseRange calls strtod directly, which skips leading whitespace.
+	s = strings.TrimLeft(s, " \t\n\v\f\r")
+	f, err := strconv.ParseFloat(cFloat(s), 64)
 	if (err != nil && !errors.Is(err, strconv.ErrRange)) || math.IsNaN(f) {
 		return 0, ex, errZScoreRange
 	}

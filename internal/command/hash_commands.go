@@ -351,7 +351,7 @@ const longDoublePrec = 64
 // double precision. Infinities are returned as such; NaN and malformed input
 // are refused.
 func parseLongDouble(s string) (*big.Float, bool) {
-	s = cHexFloat(s)
+	s = cFloat(s)
 	f, err := strconv.ParseFloat(s, 64)
 	rangeErr := errors.Is(err, strconv.ErrRange)
 	if (err != nil && !rangeErr) || math.IsNaN(f) {

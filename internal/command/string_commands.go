@@ -751,7 +751,7 @@ func parseIncrByFloatArg(b []byte) (*big.Float, bool) {
 	if strings.ContainsRune(body, '_') || strings.HasPrefix(body, "0b") || strings.HasPrefix(body, "0o") || strings.HasPrefix(body, "nan") {
 		return nil, false
 	}
-	f, _, err := big.ParseFloat(s, 0, longDoublePrec, big.ToNearestEven)
+	f, _, err := big.ParseFloat(cFloat(s), 0, longDoublePrec, big.ToNearestEven)
 	if err != nil || f.IsInf() {
 		return nil, false
 	}

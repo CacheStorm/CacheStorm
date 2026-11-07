@@ -231,6 +231,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Authentication: only AUTH, HELLO, QUIT and RESET run before a requirepass client authenticates, the commands Redis flags `no_auth`. PING and COMMAND were exempt too, so an unauthenticated client could probe the server
 
 ### Fixed
+- Floats are read as C's strtod reads them: ZADD, ZINCRBY, score ranges, WEIGHTS, HINCRBYFLOAT, INCRBYFLOAT, GEOADD, GEOSEARCH radii and blocking timeouts refused nothing Go's parsers accept, so `1_0` was 10 and `1p1` was 2 where Redis answers that the value is not a float. GEOADD and GEOSEARCH now take hexadecimal floats without an exponent (`0x10`), and score ranges skip leading whitespace, as Redis does
 - HEXPIRE, HPEXPIRE, HEXPIREAT and HPEXPIREAT move a listpack hash to listpackex even when no field gets an expiry (a missing field, an unmet NX/XX/GT/LT, or a time already past), as Redis converts before looking at the fields
 - ZSCAN writes a skiplist's scores as Redis does, with 17 significant digits (`7.4618086549232663` where ZRANGE says `7.461808654923266`); a listpack's keep ZRANGE's form. A score of -0 stays -0 in a skiplist and is replied as such by ZSCORE, ZRANGE and ZSCAN, while a listpack stores it as 0, as Redis' do. Found by the differential fuzz
 - SETBIT and BITFIELD writes that change no bit leave the string raw, as Redis does (OBJECT ENCODING answered embstr or int), still without an event or a WATCH invalidation. Found by a differential fuzz against Redis 7.4 over 70 commands

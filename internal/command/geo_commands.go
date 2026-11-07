@@ -102,8 +102,8 @@ options:
 	}
 	points := make([]store.GeoPoint, 0, remaining/3)
 	for i := argIdx; i < ctx.ArgCount(); i += 3 {
-		lon, err1 := strconv.ParseFloat(ctx.ArgString(i), 64)
-		lat, err2 := strconv.ParseFloat(ctx.ArgString(i+1), 64)
+		lon, err1 := strconv.ParseFloat(cFloat(ctx.ArgString(i)), 64)
+		lat, err2 := strconv.ParseFloat(cFloat(ctx.ArgString(i+1)), 64)
 		if err1 != nil || err2 != nil || (!historical && (math.IsNaN(lon) || math.IsNaN(lat))) {
 			return ctx.WriteError(ErrNotFloat)
 		}
