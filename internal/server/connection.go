@@ -349,6 +349,9 @@ type replySink struct {
 	conn net.Conn
 	held bool
 	buf  bytes.Buffer
+	// big is a buffer from bigReplyBuffers that the held output moved to
+	// once it outgrew maxKeptReplyBuffer; it goes back at release.
+	big *bytes.Buffer
 }
 
 // maxHeldReplies bounds how much pipelined output is kept before it is
@@ -359,9 +362,33 @@ const maxHeldReplies = 64 << 10
 // pipelines.
 const maxKeptReplyBuffer = 16 << 10
 
+// maxPooledReplyBuffer is the largest buffer returned to bigReplyBuffers; a
+// bigger one held a single huge reply and is left to the collector.
+const maxPooledReplyBuffer = 1 << 20
+
+// bigReplyBuffers lends the buffers that pipelines of large replies need,
+// so a connection neither keeps one while idle nor grows a new one from
+// nothing for every pipeline.
+var bigReplyBuffers = sync.Pool{New: func() any {
+	return bytes.NewBuffer(make([]byte, 0, maxHeldReplies+maxHeldReplies/2))
+}}
+
+// heldBuf is the buffer the kept output is in.
+func (s *replySink) heldBuf() *bytes.Buffer {
+	if s.big != nil {
+		return s.big
+	}
+	return &s.buf
+}
+
 func (s *replySink) Write(p []byte) (int, error) {
 	if s.held {
-		return s.buf.Write(p)
+		if s.big == nil && s.buf.Len()+len(p) > maxKeptReplyBuffer {
+			s.big = bigReplyBuffers.Get().(*bytes.Buffer)
+			s.big.Write(s.buf.Bytes())
+			s.buf.Reset()
+		}
+		return s.heldBuf().Write(p)
 	}
 	if err := s.release(); err != nil {
 		return 0, err
@@ -371,19 +398,23 @@ func (s *replySink) Write(p []byte) (int, error) {
 
 func (s *replySink) hold() { s.held = true }
 
+// pending is how much output is kept.
+func (s *replySink) pending() int { return s.heldBuf().Len() }
+
 // release writes the kept output to the socket and stops holding.
 func (s *replySink) release() error {
 	s.held = false
-	if s.buf.Len() == 0 {
+	b := s.heldBuf()
+	if b.Len() == 0 {
 		return nil
 	}
-	_, err := s.conn.Write(s.buf.Bytes())
-	if s.buf.Cap() > maxKeptReplyBuffer {
-		// A long pipeline grew the buffer; an idle connection does not
-		// keep it.
-		s.buf = bytes.Buffer{}
-	} else {
-		s.buf.Reset()
+	_, err := s.conn.Write(b.Bytes())
+	b.Reset()
+	if s.big != nil {
+		if s.big.Cap() <= maxPooledReplyBuffer {
+			bigReplyBuffers.Put(s.big)
+		}
+		s.big = nil
 	}
 	return err
 }
@@ -819,7 +850,7 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 		if err := c.writer.Flush(); err != nil {
 			return true
 		}
-		if c.bufReader.Buffered() == 0 || c.sink.buf.Len() >= maxHeldReplies || c.subscriber != nil || c.killed.Load() {
+		if c.bufReader.Buffered() == 0 || c.sink.pending() >= maxHeldReplies || c.subscriber != nil || c.killed.Load() {
 			// The gate is never held across a socket write: a client that
 			// does not read its replies would keep it, and every other
 			// client, waiting.
