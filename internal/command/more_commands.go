@@ -1915,6 +1915,11 @@ var (
 	bloomXMux sync.RWMutex
 )
 
+const (
+	maxBloomXSize   = 1 << 26
+	maxBloomXHashes = 64
+)
+
 type BloomXFilter struct {
 	Name   string
 	Size   int
@@ -1932,8 +1937,17 @@ func cmdBLOOMXCREATE(ctx *Context) error {
 	if size <= 0 {
 		return ctx.WriteError(fmt.Errorf("ERR size must be positive"))
 	}
+	// A bit takes a byte here, so the size bounds the allocation a client
+	// can ask for.
+	if size > maxBloomXSize {
+		return ctx.WriteError(fmt.Errorf("ERR size must be at most %d", maxBloomXSize))
+	}
+	if hashes <= 0 || hashes > maxBloomXHashes {
+		return ctx.WriteError(fmt.Errorf("ERR hashes must be between 1 and %d", maxBloomXHashes))
+	}
+	f := &BloomXFilter{Name: name, Size: size, Hashes: hashes, Bits: make([]bool, size)}
 	bloomXMux.Lock()
-	bloomX[name] = &BloomXFilter{Name: name, Size: size, Hashes: hashes, Bits: make([]bool, size)}
+	bloomX[name] = f
 	bloomXMux.Unlock()
 	return ctx.WriteOK()
 }

@@ -1136,8 +1136,11 @@ func cmdBUFFERXCREATE(ctx *Context) error {
 	if size < 0 {
 		return ctx.WriteError(fmt.Errorf("ERR size must not be negative"))
 	}
+	// size only sizes the first allocation; the buffer grows as written, so
+	// a client cannot reserve memory it never fills.
+	b := &BufferX{Name: name, Data: make([]byte, 0, min(size, 1<<16))}
 	buffersXMux.Lock()
-	buffersX[name] = &BufferX{Name: name, Data: make([]byte, 0, size)}
+	buffersX[name] = b
 	buffersXMux.Unlock()
 	return ctx.WriteOK()
 }

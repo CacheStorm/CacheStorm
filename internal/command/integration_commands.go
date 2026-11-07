@@ -632,7 +632,7 @@ func cmdARRAYSPLICE(ctx *Context) error {
 	if deleteCount < 0 {
 		deleteCount = 0
 	}
-	if start+deleteCount > len(arr) {
+	if deleteCount > len(arr)-start {
 		deleteCount = len(arr) - start
 	}
 
@@ -1321,9 +1321,14 @@ func cmdMATHPOW(ctx *Context) error {
 	base := parseInt64(ctx.ArgString(0))
 	exp := parseInt64(ctx.ArgString(1))
 
+	// Squaring gives the product exp multiplications would, wrapping the
+	// same way, in log(exp) steps instead of exp.
 	result := int64(1)
-	for i := int64(0); i < exp; i++ {
-		result *= base
+	for ; exp > 0; exp >>= 1 {
+		if exp&1 == 1 {
+			result *= base
+		}
+		base *= base
 	}
 
 	return ctx.WriteInteger(result)
@@ -1724,17 +1729,23 @@ type Captcha struct {
 	ExpiresAt int64
 }
 
+const maxCaptchaLength = 64
+
 func cmdCAPTCHAGENERATE(ctx *Context) error {
 	length := 6
 	if ctx.ArgCount() >= 1 {
 		length = int(parseInt64(ctx.ArgString(0)))
 	}
+	if length > maxCaptchaLength {
+		return ctx.WriteError(fmt.Errorf("ERR length must be at most %d", maxCaptchaLength))
+	}
 
 	id := generateUUID()
-	answer := ""
-	for i := 0; i < length; i++ {
-		answer += string(rune('0' + randomInt(10)))
+	digits := make([]byte, max(length, 0))
+	for i := range digits {
+		digits[i] = byte('0' + randomInt(10))
 	}
+	answer := string(digits)
 
 	captchasMu.Lock()
 	captchas[id] = &Captcha{
