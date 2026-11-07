@@ -172,6 +172,23 @@ func (v *SetValue) Range(fn func(member string) bool) {
 	}
 }
 
+// RangeTransient is Range for a caller that does not keep a member past fn:
+// an intset's members are formatted into one reused buffer instead of a
+// string each.
+func (v *SetValue) RangeTransient(fn func(member string) bool) {
+	if v.dict != nil || v.enc != setEncIntset {
+		v.Range(fn)
+		return
+	}
+	var buf [20]byte
+	for _, n := range v.ints {
+		b := strconv.AppendInt(buf[:0], n, 10)
+		if !fn(unsafe.String(&b[0], len(b))) {
+			return
+		}
+	}
+}
+
 // All yields the members as Range does. The caller holds the value's lock
 // and does not change the set while iterating.
 func (v *SetValue) All() iter.Seq[string] {

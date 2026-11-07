@@ -130,7 +130,7 @@ func cmdSMEMBERS(ctx *Context) error {
 	defer set.RUnlock()
 	w := ctx.Writer
 	w.WriteSetHeader(set.Card())
-	set.Range(func(m string) bool {
+	set.RangeTransient(func(m string) bool {
 		w.WriteBulkStringItem(m)
 		return true
 	})
@@ -449,27 +449,37 @@ func cmdSSCAN(ctx *Context) error {
 	}
 
 	// SADD/SREM/SMOVE mutate Members under the set's write lock, so the page
-	// is selected under the matching read lock.
+	// is selected and written under the matching read lock.
 	set.RLock()
-	var members []string
-	var next uint64
+	defer set.RUnlock()
+	w := ctx.Writer
 	if enc := set.Encoding(); enc == "intset" || enc == "listpack" {
 		// A compact set is returned whole, in its order, as Redis does.
-		set.Range(func(m string) bool {
-			members = append(members, m)
+		n := set.Card()
+		if opts.match {
+			n = 0
+			set.RangeTransient(func(m string) bool {
+				if matchPattern(m, opts.pattern) {
+					n++
+				}
+				return true
+			})
+		}
+		writeScanHead(w, 0, n)
+		set.RangeTransient(func(m string) bool {
+			if !opts.match || matchPattern(m, opts.pattern) {
+				w.WriteBulkStringItem(m)
+			}
 			return true
 		})
-	} else {
-		members, next = collectionScanPage(set, set.Card(), cursor, opts.count, func(emit func(string)) {
-			for m := range set.All() {
-				emit(m)
-			}
-		})
+		return w.Flush()
 	}
-	set.RUnlock()
-
+	members, next := collectionScanPage(set, set.Card(), cursor, opts.count, func(emit func(string)) {
+		for m := range set.All() {
+			emit(m)
+		}
+	})
 	members = opts.matching(members)
-	w := ctx.Writer
 	writeScanHead(w, next, len(members))
 	for _, m := range members {
 		w.WriteBulkStringItem(m)
