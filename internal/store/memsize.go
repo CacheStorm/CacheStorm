@@ -103,7 +103,7 @@ func (v *SetValue) RecountSize() int64 {
 		}
 		return n
 	case v.enc == setEncIntset:
-		return setCompactBase + int64(len(v.ints))*setIntsetElem
+		return setCompactBase + int64(v.ints.Len())*setIntsetElem
 	}
 	n := int64(setCompactBase)
 	v.Range(func(m string) bool {

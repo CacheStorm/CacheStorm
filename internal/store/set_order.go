@@ -89,7 +89,7 @@ func (v *SetValue) Card() int {
 	case v.dict != nil:
 		return len(v.dict)
 	case v.enc == setEncIntset:
-		return len(v.ints)
+		return v.ints.Len()
 	}
 	return v.lpN
 }
@@ -114,7 +114,7 @@ func (v *SetValue) intIndex(member string) (int, bool) {
 	if !ok {
 		return 0, false
 	}
-	return slices.BinarySearch(v.ints, n)
+	return v.ints.search(n)
 }
 
 // lpFind returns the bounds of member's entry in lp.
@@ -149,8 +149,8 @@ func (v *SetValue) Range(fn func(member string) bool) {
 			}
 		}
 	case v.enc == setEncIntset:
-		for _, n := range v.ints {
-			if !fn(strconv.FormatInt(n, 10)) {
+		for i := range v.ints.Len() {
+			if !fn(strconv.FormatInt(v.ints.at(i), 10)) {
 				return
 			}
 		}
@@ -181,8 +181,8 @@ func (v *SetValue) RangeTransient(fn func(member string) bool) {
 		return
 	}
 	var buf [20]byte
-	for _, n := range v.ints {
-		b := strconv.AppendInt(buf[:0], n, 10)
+	for i := range v.ints.Len() {
+		b := strconv.AppendInt(buf[:0], v.ints.at(i), 10)
 		if !fn(unsafe.String(&b[0], len(b))) {
 			return
 		}
@@ -346,26 +346,26 @@ func (v *SetValue) addNewLocked(member string) {
 	}
 	if v.enc == setEncIntset {
 		if n, ok := redisSetInt(member); ok {
-			i, _ := slices.BinarySearch(v.ints, n)
-			v.ints = slices.Insert(v.ints, i, n)
+			i, _ := v.ints.search(n)
+			v.ints = v.ints.insert(i, n)
 			v.adj.Add(setIntsetElem - setMemberSize(member))
-			if int64(len(v.ints)) > setMaxIntsetEntries.Load() {
+			if int64(v.ints.Len()) > setMaxIntsetEntries.Load() {
 				v.convertLocked()
-			} else if len(v.ints) > setIntsMax {
+			} else if v.ints.Len() > setIntsMax {
 				v.toDict()
 			}
 			return
 		}
-		if int64(len(v.ints)) >= setMaxListpackEntries.Load() || int64(len(member)) > setMaxListpackValue.Load() {
+		if int64(v.ints.Len()) >= setMaxListpackEntries.Load() || int64(len(member)) > setMaxListpackValue.Load() {
 			v.convertLocked()
 			v.dict[member] = struct{}{}
 			return
 		}
 		var buf []byte
-		for _, n := range v.ints {
-			buf = setLpAppend(buf, strconv.FormatInt(n, 10))
+		for i := range v.ints.Len() {
+			buf = setLpAppend(buf, strconv.FormatInt(v.ints.at(i), 10))
 		}
-		v.enc, v.lp, v.lpN, v.ints = setEncListpack, buf, len(v.ints), nil
+		v.enc, v.lp, v.lpN, v.ints = setEncListpack, buf, v.ints.Len(), nil
 		v.adj.Store(int64(v.lpN) * (setListpackOverhd - setMemberOverhead))
 	}
 	if int64(v.lpN) >= setMaxListpackEntries.Load() || int64(len(member)) > setMaxListpackValue.Load() {
@@ -403,7 +403,7 @@ func (v *SetValue) removeLocked(member string) bool {
 		if !ok {
 			return false
 		}
-		v.ints = slices.Delete(v.ints, i, i+1)
+		v.ints = v.ints.remove(i)
 		v.adj.Add(setMemberSize(member) - setIntsetElem)
 	default:
 		s, e, ok := v.lpFind(member)

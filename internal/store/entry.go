@@ -482,7 +482,7 @@ type SetValue struct {
 	// intset or listpack, and small enough, is ints or lp instead (see
 	// set_order.go).
 	dict map[string]struct{}
-	ints []int64
+	ints intset
 	lp   []byte
 	lpN  int
 	mu   sync.RWMutex
@@ -568,7 +568,7 @@ func (v *SetValue) Clone() Value {
 	defer v.mu.RUnlock()
 	cloned := &SetValue{enc: v.enc, lpN: v.lpN}
 	cloned.adj.Store(v.adj.Load())
-	cloned.ints = append([]int64(nil), v.ints...)
+	cloned.ints = append(intset(nil), v.ints...)
 	cloned.lp = append([]byte(nil), v.lp...)
 	if v.dict != nil {
 		cloned.dict = make(map[string]struct{}, len(v.dict))
