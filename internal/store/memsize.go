@@ -50,31 +50,32 @@ func zsetMemberSize(member string) int64 { return int64(len(member)) + zsetMembe
 // Writers update it under the value's write lock; SizeOf reads it without
 // the lock.
 type sizeCounter struct {
-	bytes atomic.Int64
-	known atomic.Bool
+	// v is the payload size plus one once it is known, zero before: one
+	// word in every collection instead of a size and a separate flag.
+	v atomic.Int64
 }
 
 // add applies a delta made by a mutation. The caller holds the value's write
 // lock (or owns a value that is not yet shared).
 func (c *sizeCounter) add(delta int64) {
-	if delta != 0 && c.known.Load() {
-		c.bytes.Add(delta)
+	if delta != 0 && c.v.Load() != 0 {
+		c.v.Add(delta)
 	}
 }
 
 // set records a full count. The caller holds the value's lock, read or
 // write: concurrent readers counting under the read lock store equal values.
 func (c *sizeCounter) set(n int64) {
-	c.bytes.Store(n)
-	c.known.Store(true)
+	c.v.Store(n + 1)
 }
 
 // load returns the payload size and whether it is known.
 func (c *sizeCounter) load() (int64, bool) {
-	if !c.known.Load() {
+	v := c.v.Load()
+	if v == 0 {
 		return 0, false
 	}
-	return c.bytes.Load(), true
+	return v - 1, true
 }
 
 // RecountSize is what SizeOf maintains, counted from scratch for the form
@@ -103,7 +104,7 @@ func (v *SetValue) RecountSize() int64 {
 		}
 		return n
 	case v.enc == setEncIntset:
-		return setCompactBase + int64(v.ints.Len())*setIntsetElem
+		return setCompactBase + int64(intset(v.lp).Len())*setIntsetElem
 	}
 	n := int64(setCompactBase)
 	v.Range(func(m string) bool {

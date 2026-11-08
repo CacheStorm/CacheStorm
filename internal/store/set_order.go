@@ -89,9 +89,9 @@ func (v *SetValue) Card() int {
 	case v.dict != nil:
 		return len(v.dict)
 	case v.enc == setEncIntset:
-		return v.ints.Len()
+		return intset(v.lp).Len()
 	}
-	return v.lpN
+	return int(v.lpN)
 }
 
 // Has reports whether member is in the set. The caller holds the value's
@@ -114,7 +114,7 @@ func (v *SetValue) intIndex(member string) (int, bool) {
 	if !ok {
 		return 0, false
 	}
-	return v.ints.search(n)
+	return intset(v.lp).search(n)
 }
 
 // lpFind returns the bounds of member's entry in lp.
@@ -149,8 +149,8 @@ func (v *SetValue) Range(fn func(member string) bool) {
 			}
 		}
 	case v.enc == setEncIntset:
-		for i := range v.ints.Len() {
-			if !fn(strconv.FormatInt(v.ints.at(i), 10)) {
+		for i := range intset(v.lp).Len() {
+			if !fn(strconv.FormatInt(intset(v.lp).at(i), 10)) {
 				return
 			}
 		}
@@ -181,8 +181,8 @@ func (v *SetValue) RangeTransient(fn func(member string) bool) {
 		return
 	}
 	var buf [20]byte
-	for i := range v.ints.Len() {
-		b := strconv.AppendInt(buf[:0], v.ints.at(i), 10)
+	for i := range intset(v.lp).Len() {
+		b := strconv.AppendInt(buf[:0], intset(v.lp).at(i), 10)
 		if !fn(unsafe.String(&b[0], len(b))) {
 			return
 		}
@@ -241,7 +241,7 @@ func (v *SetValue) PrepareAdd(first string, n int) {
 }
 
 func (v *SetValue) create(first string, n int) {
-	v.dict, v.ints, v.lp, v.lpN, v.order = nil, nil, nil, 0, nil
+	v.dict, v.lp, v.lpN, v.order = nil, nil, 0, nil
 	v.adj.Store(0)
 	switch _, isInt := redisSetInt(first); {
 	case isInt && int64(n) <= setMaxIntsetEntries.Load():
@@ -323,7 +323,7 @@ func (v *SetValue) toDict() {
 		return true
 	})
 	v.dict, v.order = d, order
-	v.ints, v.lp, v.lpN = nil, nil, 0
+	v.lp, v.lpN = nil, 0
 	v.adj.Store(setBaseSize - setCompactBase)
 }
 
@@ -346,26 +346,26 @@ func (v *SetValue) addNewLocked(member string) {
 	}
 	if v.enc == setEncIntset {
 		if n, ok := redisSetInt(member); ok {
-			i, _ := v.ints.search(n)
-			v.ints = v.ints.insert(i, n)
+			i, _ := intset(v.lp).search(n)
+			v.lp = intset(v.lp).insert(i, n)
 			v.adj.Add(setIntsetElem - setMemberSize(member))
-			if int64(v.ints.Len()) > setMaxIntsetEntries.Load() {
+			if int64(intset(v.lp).Len()) > setMaxIntsetEntries.Load() {
 				v.convertLocked()
-			} else if v.ints.Len() > setIntsMax {
+			} else if intset(v.lp).Len() > setIntsMax {
 				v.toDict()
 			}
 			return
 		}
-		if int64(v.ints.Len()) >= setMaxListpackEntries.Load() || int64(len(member)) > setMaxListpackValue.Load() {
+		if int64(intset(v.lp).Len()) >= setMaxListpackEntries.Load() || int64(len(member)) > setMaxListpackValue.Load() {
 			v.convertLocked()
 			v.dict[member] = struct{}{}
 			return
 		}
 		var buf []byte
-		for i := range v.ints.Len() {
-			buf = setLpAppend(buf, strconv.FormatInt(v.ints.at(i), 10))
+		for i := range intset(v.lp).Len() {
+			buf = setLpAppend(buf, strconv.FormatInt(intset(v.lp).at(i), 10))
 		}
-		v.enc, v.lp, v.lpN, v.ints = setEncListpack, buf, v.ints.Len(), nil
+		v.enc, v.lp, v.lpN = setEncListpack, buf, int32(intset(v.lp).Len())
 		v.adj.Store(int64(v.lpN) * (setListpackOverhd - setMemberOverhead))
 	}
 	if int64(v.lpN) >= setMaxListpackEntries.Load() || int64(len(member)) > setMaxListpackValue.Load() {
@@ -403,7 +403,7 @@ func (v *SetValue) removeLocked(member string) bool {
 		if !ok {
 			return false
 		}
-		v.ints = v.ints.remove(i)
+		v.lp = intset(v.lp).remove(i)
 		v.adj.Add(setMemberSize(member) - setIntsetElem)
 	default:
 		s, e, ok := v.lpFind(member)

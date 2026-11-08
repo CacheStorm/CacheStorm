@@ -479,23 +479,23 @@ func (v *ListValue) Clone() Value {
 
 type SetValue struct {
 	// dict holds a set in the hashtable form; a set Redis would hold as an
-	// intset or listpack, and small enough, is ints or lp instead (see
-	// set_order.go).
+	// intset or listpack, and small enough, is in lp instead: the packed
+	// intset bytes (see set_intset.go) or the listpack (see set_order.go).
 	dict map[string]struct{}
-	ints intset
 	lp   []byte
-	lpN  int
-	mu   sync.RWMutex
-	dead bool
-	size sizeCounter
+	// order is, for an intset or listpack kept in dict, its member order.
+	order []string
+	mu    sync.RWMutex
+	size  sizeCounter
 	// adj corrects size, counted at the map form's rates, to the form the
 	// set is in.
 	adj atomic.Int64
-	// enc and order are the encoding Redis would hold the set in and, for
-	// an intset or listpack kept in dict, its member order.
-	enc   setEncoding
-	order []string
 	scanCache
+	// The small fields share one word: lp's member count, the encoding
+	// Redis would hold the set in, and whether the set was deleted.
+	lpN  int32
+	enc  setEncoding
+	dead bool
 }
 
 func (v *SetValue) Lock()    { v.mu.Lock() }
@@ -544,7 +544,7 @@ func (v *SetValue) RemoveMember(member string) bool {
 	return true
 }
 func (v *SetValue) ClearMembers() {
-	v.dict, v.ints, v.lp, v.lpN = nil, nil, nil, 0
+	v.dict, v.lp, v.lpN = nil, nil, 0
 	v.enc, v.order = setEncNone, nil
 	v.adj.Store(0)
 	v.size.set(0)
@@ -568,7 +568,6 @@ func (v *SetValue) Clone() Value {
 	defer v.mu.RUnlock()
 	cloned := &SetValue{enc: v.enc, lpN: v.lpN}
 	cloned.adj.Store(v.adj.Load())
-	cloned.ints = append(intset(nil), v.ints...)
 	cloned.lp = append([]byte(nil), v.lp...)
 	if v.dict != nil {
 		cloned.dict = make(map[string]struct{}, len(v.dict))
