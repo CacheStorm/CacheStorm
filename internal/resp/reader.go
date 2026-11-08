@@ -774,3 +774,19 @@ func SplitArgs(line string) ([]string, error) {
 	}
 	return out, nil
 }
+
+// HasCompleteNonEmptyCommand is HasCompleteCommand for a command that is not
+// empty: a multibulk with at least one argument, or an inline line with a
+// word on it. Reading one cannot block, where ReadClientCommand skips an
+// empty command and waits for the one after it.
+func HasCompleteNonEmptyCommand(buf []byte) bool {
+	if !HasCompleteCommand(buf) {
+		return false
+	}
+	i := bytes.IndexByte(buf, '\n')
+	if buf[0] != byte(TypeArray) {
+		return len(bytes.TrimSpace(buf[:i])) > 0
+	}
+	n, ok := parseDecimal(bytes.TrimSuffix(buf[1:i], []byte("\r")))
+	return ok && n > 0
+}

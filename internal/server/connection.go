@@ -55,18 +55,24 @@ type Connection struct {
 	sink *replySink
 	// draining is set when the server shuts down: the connection finishes the
 	// command it is running and then closes instead of reading another.
-	draining    atomic.Bool
-	conn        net.Conn
-	bufReader   *bufio.Reader
-	reader      *resp.Reader
-	writer      *resp.Writer
-	store       *store.Store
-	router      *command.Router
-	plugins     *plugin.Manager
-	namespace   string
-	createdAt   time.Time
-	lastCmd     string
-	rawCmd      string
+	draining  atomic.Bool
+	conn      net.Conn
+	bufReader *bufio.Reader
+	reader    *resp.Reader
+	writer    *resp.Writer
+	store     *store.Store
+	router    *command.Router
+	plugins   *plugin.Manager
+	namespace string
+	createdAt time.Time
+	lastCmd   string
+	rawCmd    string
+	// pend holds commands parsed ahead of the one running (see
+	// nextCommand), pendHead the next to run and pendErr a read error met
+	// after them.
+	pend        []pendingCommand
+	pendHead    int
+	pendErr     error
 	readTimeout time.Duration
 	// blocked is set while a blocking command (BLPOP, XREAD BLOCK, ...)
 	// waits, for INFO's blocked_clients.
@@ -232,12 +238,95 @@ func (c *Connection) keepGate(h *gateHold, ctx *command.Context, blocking bool) 
 	if h.exclusive || blocking || c.subscriber != nil || c.heldCount+1 >= maxGateBatch || ctx.CloseConnection || ctx.Handoff != nil || c.killed.Load() {
 		return false
 	}
+	return c.hasPending()
+}
+
+// pendingCommand is a command parsed ahead, waiting its turn in a batch.
+type pendingCommand struct {
+	cmd  string
+	args [][]byte
+}
+
+// hasPending reports whether commands parsed ahead are waiting to run.
+func (c *Connection) hasPending() bool { return c.pendHead < len(c.pend) }
+
+// commandBuffered reports whether a complete command that does something is
+// already buffered, so replies may wait to go out with its. Empty commands
+// (a blank line, *0, *-1) are skipped by the reader, which then waits for
+// the network; replies held for them would wait with it.
+func (c *Connection) commandBuffered() bool {
+	if c.bufReader == nil {
+		return false
+	}
 	n := c.bufReader.Buffered()
 	if n == 0 {
 		return false
 	}
 	buf, err := c.bufReader.Peek(n)
-	return err == nil && resp.HasCompleteCommand(buf)
+	return err == nil && resp.HasCompleteNonEmptyCommand(buf)
+}
+
+// batchBreakers end a parsed batch: they change how the commands after them
+// are read (AUTH and HELLO the unauthenticated limits, SYNC, PSYNC and
+// MONITOR hand the connection over, RESET and QUIT end it), or wait.
+var batchBreakers = map[string]bool{
+	"AUTH": true, "HELLO": true, "SYNC": true, "PSYNC": true, "MONITOR": true,
+	"RESET": true, "QUIT": true, "REPLCONF": true,
+}
+
+// nextCommand returns the next command to run. When it reads from the
+// network it also parses every further complete command already buffered,
+// up to a batch, so a pipeline is parsed before its batch takes the write
+// gate instead of one command at a time while holding it; the gate is then
+// held only while the batch runs. A read error met while parsing ahead is
+// returned once the commands before it have run.
+func (c *Connection) nextCommand() (string, [][]byte, error) {
+	if c.hasPending() {
+		p := c.pend[c.pendHead]
+		c.pend[c.pendHead] = pendingCommand{}
+		c.pendHead++
+		return p.cmd, p.args, nil
+	}
+	c.pend, c.pendHead = c.pend[:0], 0
+	if err := c.pendErr; err != nil {
+		c.pendErr = nil
+		return "", nil, err
+	}
+	if err := c.awaitInput(); err != nil {
+		return "", nil, err
+	}
+	unauth := !c.authenticated && c.router.RequirePass() != ""
+	c.reader.SetUnauthenticated(unauth)
+	cmd, args, err := c.reader.ReadClientCommand()
+	if err != nil || unauth || c.bufReader == nil || !batchable(cmd) {
+		return cmd, args, err
+	}
+	for len(c.pend) < maxGateBatch-1 {
+		n := c.bufReader.Buffered()
+		if n == 0 {
+			break
+		}
+		buf, perr := c.bufReader.Peek(n)
+		if perr != nil || !resp.HasCompleteNonEmptyCommand(buf) {
+			break
+		}
+		next, nargs, nerr := c.reader.ReadClientCommand()
+		if nerr != nil {
+			c.pendErr = nerr
+			break
+		}
+		c.pend = append(c.pend, pendingCommand{cmd: next, args: nargs})
+		if !batchable(next) {
+			break
+		}
+	}
+	return cmd, args, nil
+}
+
+// batchable reports whether commands after cmd may be parsed before it runs.
+func batchable(cmd string) bool {
+	name := command.CanonicalName(cmd)
+	return !batchBreakers[name] && !blockingCommands[name]
 }
 
 // unblock ends the blocking command the connection is waiting in, as a
@@ -512,23 +601,15 @@ func (c *Connection) Handle() {
 		// Checked after the deadline is armed: Drain sets the flag and then
 		// moves the deadline to now, so either this check sees the flag or
 		// the read below is interrupted by Drain's deadline.
-		if c.draining.Load() && c.bufReader.Buffered() == 0 {
+		if c.draining.Load() && !c.hasPending() && c.bufReader.Buffered() == 0 {
 			return
 		}
-		if c.heldGate != nil {
-			if n := c.bufReader.Buffered(); n == 0 {
-				c.releaseGate()
-			} else if buf, perr := c.bufReader.Peek(n); perr != nil || !resp.HasCompleteCommand(buf) {
-				c.releaseGate()
-			}
+		// A hold is kept only across the commands of one parsed batch, so
+		// the next batch is parsed with the gate free for other clients.
+		if c.heldGate != nil && !c.hasPending() {
+			c.releaseGate()
 		}
-		var cmd string
-		var args [][]byte
-		err := c.awaitInput()
-		if err == nil {
-			c.reader.SetUnauthenticated(!c.authenticated && c.router.RequirePass() != "")
-			cmd, args, err = c.reader.ReadClientCommand()
-		}
+		cmd, args, err := c.nextCommand()
 		if err != nil {
 			// Replies kept for a pipeline go out before the connection
 			// reports the error or closes.
@@ -855,7 +936,7 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 		if err := c.writer.Flush(); err != nil {
 			return true
 		}
-		if c.bufReader.Buffered() == 0 || c.sink.pending() >= maxHeldReplies || c.subscriber != nil || c.killed.Load() {
+		if (!c.hasPending() && !c.commandBuffered()) || c.sink.pending() >= maxHeldReplies || c.subscriber != nil || c.killed.Load() {
 			// The gate is never held across a socket write: a client that
 			// does not read its replies would keep it, and every other
 			// client, waiting.
