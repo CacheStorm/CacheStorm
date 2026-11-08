@@ -58,11 +58,17 @@ func (s *Shard) noteAddLocked(key string) {
 // next page starts at, 0 when the shard is done. With withEntries the
 // entries are returned too.
 func (s *Store) ScanShard(idx int, pos uint64, count int, withEntries bool) ([]string, []*Entry, uint64) {
+	return s.AppendScanShard(nil, nil, idx, pos, count, withEntries)
+}
+
+// AppendScanShard is ScanShard appending to keys and entries, so a scan over
+// many shards fills one pair of slices.
+func (s *Store) AppendScanShard(keys []string, entries []*Entry, idx int, pos uint64, count int, withEntries bool) ([]string, []*Entry, uint64) {
 	sh := s.shards[idx]
 	sh.mu.Lock()
 	if len(sh.data) <= 2*count {
 		defer sh.mu.Unlock()
-		return sh.scanAllLocked(pos, withEntries)
+		return sh.scanAllLocked(keys, entries, pos, withEntries)
 	}
 	if sh.scan == nil {
 		index := &keyScanIndex{}
@@ -85,9 +91,9 @@ func (s *Store) ScanShard(idx int, pos uint64, count int, withEntries bool) ([]s
 	}
 	defer sh.mu.Unlock()
 	if sh.scan == nil || sh.scan.sorted == nil {
-		return sh.scanAllLocked(pos, withEntries)
+		return sh.scanAllLocked(keys, entries, pos, withEntries)
 	}
-	keys, entries, next := sh.scanIndexedLocked(pos, count, withEntries)
+	keys, entries, next := sh.scanIndexedLocked(keys, entries, pos, count, withEntries)
 	if next == 0 {
 		sh.scan = nil
 	}
@@ -104,9 +110,7 @@ func (sh *Shard) live(key string) (*Entry, bool) {
 
 // scanAllLocked returns every key at or after pos, for a small shard or one
 // whose index is still being built.
-func (sh *Shard) scanAllLocked(pos uint64, withEntries bool) ([]string, []*Entry, uint64) {
-	var keys []string
-	var entries []*Entry
+func (sh *Shard) scanAllLocked(keys []string, entries []*Entry, pos uint64, withEntries bool) ([]string, []*Entry, uint64) {
 	for k, e := range sh.data {
 		if e.IsExpired() || ScanHash(k) < pos {
 			continue
@@ -119,10 +123,9 @@ func (sh *Shard) scanAllLocked(pos uint64, withEntries bool) ([]string, []*Entry
 	return keys, entries, 0
 }
 
-func (sh *Shard) scanIndexedLocked(pos uint64, count int, withEntries bool) ([]string, []*Entry, uint64) {
+func (sh *Shard) scanIndexedLocked(keys []string, entries []*Entry, pos uint64, count int, withEntries bool) ([]string, []*Entry, uint64) {
 	sorted, added := sh.scan.sorted, sh.scan.added
-	var keys []string
-	var entries []*Entry
+	start := len(keys)
 	emit := func(k string, e *Entry) {
 		keys = append(keys, k)
 		if withEntries {
@@ -149,8 +152,8 @@ func (sh *Shard) scanIndexedLocked(pos uint64, count int, withEntries bool) ([]s
 		limit = ^uint64(0)
 	}
 	if len(added) > 0 {
-		seen := make(map[string]struct{}, len(keys))
-		for _, k := range keys {
+		seen := make(map[string]struct{}, len(keys)-start)
+		for _, k := range keys[start:] {
 			seen[k] = struct{}{}
 		}
 		for _, k := range added {

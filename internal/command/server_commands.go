@@ -694,13 +694,13 @@ func cmdSCAN(ctx *Context) error {
 		}
 	}
 
-	keys, next := scanKeyspace(ctx.Store, cursor, count, typeName != "")
+	keys, entries, next := scanKeyspace(ctx.Store, cursor, count, typeName != "")
 	kept := keys[:0]
-	for _, k := range keys {
-		if pattern != "" && !matchPattern(k.key, pattern) {
+	for i, k := range keys {
+		if pattern != "" && !matchPattern(k, pattern) {
 			continue
 		}
-		if typeName != "" && !strings.EqualFold(redisTypeName(k.entry.Value), typeName) {
+		if typeName != "" && !strings.EqualFold(redisTypeName(entries[i].Value), typeName) {
 			continue
 		}
 		kept = append(kept, k)
@@ -708,7 +708,7 @@ func cmdSCAN(ctx *Context) error {
 	w := ctx.Writer
 	writeScanHead(w, next, len(kept))
 	for _, k := range kept {
-		w.WriteBulkStringItem(k.key)
+		w.WriteBulkStringItem(k)
 	}
 	return w.Flush()
 }
@@ -719,37 +719,27 @@ func cmdSCAN(ctx *Context) error {
 // exactly once.
 const keyScanPosMask = 1<<store.ScanPosBits - 1
 
-type scannedKey struct {
-	key   string
-	entry *store.Entry
-}
-
 // scanKeyspace returns the keys of one SCAN page and the next cursor (0 when
-// the scan is complete); entries are filled in when withEntries is set.
-func scanKeyspace(st *store.Store, cursor uint64, count int, withEntries bool) ([]scannedKey, uint64) {
+// the scan is complete); with withEntries, entries[i] is keys[i]'s entry.
+func scanKeyspace(st *store.Store, cursor uint64, count int, withEntries bool) ([]string, []*store.Entry, uint64) {
 	shard, pos := int(cursor>>store.ScanPosBits), cursor&keyScanPosMask
-	var out []scannedKey
+	keys := make([]string, 0, min(count, 1024))
+	var entries []*store.Entry
 	for shard < store.NumShards {
-		keys, entries, nextPos := st.ScanShard(shard, pos, count-len(out), withEntries)
-		for i, k := range keys {
-			sk := scannedKey{key: k}
-			if withEntries {
-				sk.entry = entries[i]
-			}
-			out = append(out, sk)
-		}
+		var nextPos uint64
+		keys, entries, nextPos = st.AppendScanShard(keys, entries, shard, pos, count-len(keys), withEntries)
 		if nextPos != 0 {
-			return out, uint64(shard)<<store.ScanPosBits | nextPos
+			return keys, entries, uint64(shard)<<store.ScanPosBits | nextPos
 		}
 		shard, pos = shard+1, 0
-		if len(out) >= count {
+		if len(keys) >= count {
 			break
 		}
 	}
 	if shard >= store.NumShards {
-		return out, 0
+		return keys, entries, 0
 	}
-	return out, uint64(shard) << store.ScanPosBits
+	return keys, entries, uint64(shard) << store.ScanPosBits
 }
 
 func cmdHOTKEYS(ctx *Context) error {
