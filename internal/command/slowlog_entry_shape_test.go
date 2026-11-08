@@ -9,39 +9,12 @@ import (
 	"github.com/cachestorm/cachestorm/internal/store"
 )
 
-// Deliberate version-gating decision, recorded 2026-10-09: SLOWLOG GET emits SIX
-// elements, matching Redis < 8.10. This is intentional, not an oversight.
-//
-// Redis documents seven values per entry (SLOWLOG GET docs, "Return information"),
-// where element 7 is:
-//
-//	"The total number of arguments in the command, including the command name.
-//	 Added in Redis 8.10."
-//
-// Its stated purpose is narrow and entirely about TRUNCATION:
-//
-//	"The logged argument array (element 4) is truncated when the command has more
-//	 arguments than the slowlog-max-argc configuration directive allows (32 by
-//	 default). In that case, the last logged element is replaced with a string of
-//	 the form ... (N more arguments). The total argument count (element 7) always
-//	 reflects the command's ORIGINAL argument count, captured before truncation,
-//	 so it can be read directly without parsing that string."
-//
-// Element 7 is the escape hatch for a truncated element 4 -- it exists so a
-// client need not parse the "... (N more arguments)" marker. CacheStorm has no
-// `slowlog-max-argc` directive and never truncates element 4: `cmdSLOWLOG` emits
-// every recorded argument. Verified empirically -- a SADD carrying 200 arguments
-// yields element 4 with 201 entries and no truncation marker.
-//
-// Therefore an element 7 here would be arithmetically IDENTICAL to len(element 4)
-// (element 4 already begins with the command name, which cmdSLOWLOG prepends).
-// It would carry zero information while breaking every client that indexes the
-// array positionally against the pre-8.10 six-element layout.
-//
-// If CacheStorm later adopts slowlog-max-argc truncation, this decision must be
-// revisited in the SAME change: that is the only condition under which element 7
-// becomes meaningful. Emitting element 7 without truncation would be pure
-// duplication, and emitting it alone would be a wire-format break with no upside.
+// SLOWLOG GET emits SIX elements per entry, the Redis 7.4 layout CacheStorm
+// targets. Like Redis 7.4 the logged arguments (element 4) are trimmed to 32
+// words, the last replaced by "... (N more arguments)", and each argument to
+// 128 bytes plus "... (N more bytes)". Redis 8.10 later added a seventh
+// element carrying the untrimmed argument count; a 7.4 client indexes the
+// six-element array positionally, so it is not emitted.
 
 // slowlogGateRecorder puts the shared recorder in a known state and restores it.
 func slowlogGateRecorder(t *testing.T) {
@@ -106,32 +79,25 @@ func TestSlowlogEntryShapeIsSixElements(t *testing.T) {
 	}
 }
 
-// TestSlowlogArgsAreNotTruncated is the reason element 7 is withheld: element 4
-// carries every argument, far past Redis's default slowlog-max-argc of 32, with
-// no "... (N more arguments)" marker. Consequently len(element 4) already IS the
-// original argument count, and an element 7 would be pure duplication.
-func TestSlowlogArgsAreNotTruncated(t *testing.T) {
+// TestSlowlogArgsAreTrimmed checks element 4 against Redis 7.4: a SADD with
+// 200 arguments (201 words) keeps 31 words and a marker for the other 170.
+func TestSlowlogArgsAreTrimmed(t *testing.T) {
 	slowlogGateRecorder(t)
 
-	// 200 arguments: far beyond Redis's default slowlog-max-argc (32).
 	const nArgs = 200
 	e := slowlogGateEntry(t, nArgs)
 
 	argsArr := e.Array[3]
-	// Element 4 is [command name, arg1..argN] -- cmdSLOWLOG prepends the command.
-	wantLen := nArgs + 1
-	if len(argsArr.Array) != wantLen {
-		t.Fatalf("element 4 has %d entries, want %d (no truncation is applied); if "+
-			"CacheStorm adopts slowlog-max-argc, this test must be revisited together "+
-			"with the element-7 decision", len(argsArr.Array), wantLen)
+	if len(argsArr.Array) != 32 {
+		t.Fatalf("element 4 has %d entries, want 32", len(argsArr.Array))
 	}
 	if string(argsArr.Array[0].Bulk) != "SADD" {
 		t.Fatalf("element 4 must begin with the command name, got %q", argsArr.Array[0].Bulk)
 	}
-	last := string(argsArr.Array[len(argsArr.Array)-1].Bulk)
-	if len(last) > 3 && last[:3] == "..." {
-		t.Fatalf("element 4 ends with a truncation marker %q; if truncation is now applied, "+
-			"Redis 8.10's element 7 (original argument count) becomes meaningful and must be "+
-			"added in the same change", last)
+	if last := string(argsArr.Array[31].Bulk); last != "... (170 more arguments)" {
+		t.Fatalf("element 4 ends with %q, want the Redis marker for 170 more arguments", last)
+	}
+	if len(e.Array) != 6 {
+		t.Fatalf("entry has %d elements, want the Redis 7.4 six", len(e.Array))
 	}
 }

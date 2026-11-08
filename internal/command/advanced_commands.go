@@ -1000,6 +1000,9 @@ type TrieNode struct {
 	IsEnd    bool
 }
 
+// maxTrieWordLen bounds the words a trie stores.
+const maxTrieWordLen = 4096
+
 func cmdTRIEADD(ctx *Context) error {
 	if ctx.ArgCount() < 2 {
 		return ctx.WriteError(ErrWrongArgCount)
@@ -1007,6 +1010,11 @@ func cmdTRIEADD(ctx *Context) error {
 
 	name := ctx.ArgString(0)
 	word := ctx.ArgString(1)
+	// Each character of a word is a node with its own map, hundreds of bytes
+	// apiece, so the word length bounds what one TRIE.ADD can allocate.
+	if len(word) > maxTrieWordLen {
+		return ctx.WriteError(fmt.Errorf("ERR word must be at most %d bytes", maxTrieWordLen))
+	}
 
 	triesMu.Lock()
 	defer triesMu.Unlock()

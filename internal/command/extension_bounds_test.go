@@ -229,12 +229,19 @@ func TestExtensionStringBuildersAreBounded(t *testing.T) {
 		}
 	}
 
+	if got := runCmd(t, s, router, "TRIE.ADD", "t", big); !strings.HasPrefix(got, "-ERR") {
+		t.Errorf("TRIE.ADD of a megabyte word: %q", got)
+	}
+	if got := runCmd(t, s, router, "TRIE.ADD", "t", "word"); strings.HasPrefix(got, "-") {
+		t.Errorf("TRIE.ADD word: %q", got)
+	}
+
 	runCmd(t, s, router, "FREQ.CREATE", "f")
 	for _, it := range [][]string{{"b", "2"}, {"a", "2"}, {"c", "5"}, {"d", "1"}} {
 		runCmd(t, s, router, "FREQ.ADD", "f", it[0], it[1])
 	}
 	got := runCmd(t, s, router, "FREQ.TOP", "f", "3")
-	if ia, ib, ic := strings.Index(got, "$1\r\na"), strings.Index(got, "$1\r\nb"), strings.Index(got, "$1\r\nc"); !(ic >= 0 && ic < ia && ia < ib) {
+	if ia, ib, ic := strings.Index(got, "$1\r\na"), strings.Index(got, "$1\r\nb"), strings.Index(got, "$1\r\nc"); ic < 0 || ic >= ia || ia >= ib {
 		t.Errorf("FREQ.TOP order: %q", got)
 	}
 }

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -363,11 +364,40 @@ func (sl *SlowLog) SetMaxSize(n int) {
 	}
 }
 
-func (sl *SlowLog) addLocked(duration time.Duration, cmd string, args [][]byte, clientIP, clientName string) {
-	args = slices.Clone(args)
-	for i := range args {
-		args[i] = slices.Clone(args[i])
+// Redis keeps at most slowLogMaxArgc words of a slow command (the command
+// name included) and slowLogMaxString bytes of each, so one slow command
+// with huge arguments cannot make the log hold copies of them.
+const (
+	slowLogMaxArgc   = 32
+	slowLogMaxString = 128
+)
+
+// slowLogArgs copies args, the arguments after the command name, trimmed as
+// Redis' slowlogCreateEntry trims them.
+func slowLogArgs(args [][]byte) [][]byte {
+	argc := len(args) + 1
+	kept := len(args)
+	if argc > slowLogMaxArgc {
+		kept = slowLogMaxArgc - 1
 	}
+	out := make([][]byte, kept)
+	for i := range out {
+		if argc > slowLogMaxArgc && i == kept-1 {
+			out[i] = fmt.Appendf(nil, "... (%d more arguments)", argc-slowLogMaxArgc+1)
+			continue
+		}
+		a := args[i]
+		if len(a) > slowLogMaxString {
+			out[i] = fmt.Appendf(slices.Clone(a[:slowLogMaxString]), "... (%d more bytes)", len(a)-slowLogMaxString)
+			continue
+		}
+		out[i] = slices.Clone(a)
+	}
+	return out
+}
+
+func (sl *SlowLog) addLocked(duration time.Duration, cmd string, args [][]byte, clientIP, clientName string) {
+	args = slowLogArgs(args)
 	entry := SlowLogEntry{
 		ID:         sl.sequence.Add(1),
 		Timestamp:  time.Now(),

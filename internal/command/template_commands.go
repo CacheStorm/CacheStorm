@@ -974,7 +974,7 @@ func cmdSTRPADRIGHT(ctx *Context) error {
 		return ctx.WriteError(errStringTooLong)
 	}
 	if pad := totalLen - len(s); pad > 0 {
-		s = s + strings.Repeat(padChar[:1], pad)
+		s += strings.Repeat(padChar[:1], pad)
 	}
 
 	return ctx.WriteBulkString(s)
