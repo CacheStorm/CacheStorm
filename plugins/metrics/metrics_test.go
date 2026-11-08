@@ -1,7 +1,9 @@
 package metrics
 
 import (
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -68,5 +70,27 @@ func TestSetCountersExportPrometheus(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in output:\n%s", want, out)
 		}
+	}
+}
+
+// Counting runs from many goroutines at once, including the first sighting
+// of a name, without a lock or a race on the counter table.
+func TestAfterCommandConcurrent(t *testing.T) {
+	p := New(true)
+	var wg sync.WaitGroup
+	for g := 0; g < 8; g++ {
+		wg.Add(1)
+		go func(g int) {
+			defer wg.Done()
+			for i := 0; i < 1000; i++ {
+				name := "CMD" + strconv.Itoa(i%10)
+				p.AfterCommand(command.NewContext(name, nil, nil, nil))
+			}
+		}(g)
+	}
+	wg.Wait()
+	cmds := p.GetMetrics()["commands_total"].(map[string]int64)
+	if len(cmds) != 10 || cmds["CMD3"] != 800 {
+		t.Fatalf("counts %v, want 10 names with 800 each", cmds)
 	}
 }

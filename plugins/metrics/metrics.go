@@ -5,17 +5,16 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/cachestorm/cachestorm/internal/command"
 	"github.com/cachestorm/cachestorm/internal/plugin"
 )
 
 type Metrics struct {
-	mu sync.RWMutex
-
-	commandsTotal    map[string]*int64
-	commandDuration  map[string]*latencyHistogram
+	// commandsTotal maps a command name to its *atomic.Int64 count. A
+	// sync.Map keeps the per-command path lock-free: the set of names is
+	// fixed once each command has run, which is the case sync.Map is for.
+	commandsTotal    sync.Map
 	hitCount         int64
 	missCount        int64
 	evictedCount     int64
@@ -26,54 +25,6 @@ type Metrics struct {
 	memoryBytes      int64
 }
 
-type latencyHistogram struct {
-	mu      sync.Mutex
-	buckets []bucket
-	count   int64
-	sum     int64
-}
-
-type bucket struct {
-	le    time.Duration
-	count int64
-}
-
-func newLatencyHistogram() *latencyHistogram {
-	buckets := []time.Duration{
-		100 * time.Microsecond,
-		500 * time.Microsecond,
-		time.Millisecond,
-		5 * time.Millisecond,
-		10 * time.Millisecond,
-		50 * time.Millisecond,
-		100 * time.Millisecond,
-		500 * time.Millisecond,
-		time.Second,
-	}
-
-	h := &latencyHistogram{
-		buckets: make([]bucket, len(buckets)),
-	}
-	for i, le := range buckets {
-		h.buckets[i] = bucket{le: le}
-	}
-	return h
-}
-
-func (h *latencyHistogram) observe(d time.Duration) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	h.count++
-	h.sum += int64(d)
-
-	for i := range h.buckets {
-		if d <= h.buckets[i].le {
-			h.buckets[i].count++
-		}
-	}
-}
-
 type MetricsPlugin struct {
 	metrics *Metrics
 	server  *http.Server
@@ -82,10 +33,7 @@ type MetricsPlugin struct {
 
 func New(enabled bool) *MetricsPlugin {
 	return &MetricsPlugin{
-		metrics: &Metrics{
-			commandsTotal:   make(map[string]*int64),
-			commandDuration: make(map[string]*latencyHistogram),
-		},
+		metrics: &Metrics{},
 		enabled: enabled,
 	}
 }
@@ -113,17 +61,11 @@ func (m *MetricsPlugin) AfterCommand(ctx *command.Context) {
 		return
 	}
 
-	duration := time.Since(ctx.StartTime)
-
-	m.metrics.mu.Lock()
-	if m.metrics.commandsTotal[ctx.Command] == nil {
-		m.metrics.commandsTotal[ctx.Command] = new(int64)
-		m.metrics.commandDuration[ctx.Command] = newLatencyHistogram()
+	n, ok := m.metrics.commandsTotal.Load(ctx.Command)
+	if !ok {
+		n, _ = m.metrics.commandsTotal.LoadOrStore(ctx.Command, new(atomic.Int64))
 	}
-	m.metrics.mu.Unlock()
-
-	atomic.AddInt64(m.metrics.commandsTotal[ctx.Command], 1)
-	m.metrics.commandDuration[ctx.Command].observe(duration)
+	n.(*atomic.Int64).Add(1)
 }
 
 func (m *MetricsPlugin) RecordHit() {
@@ -180,12 +122,11 @@ func (m *MetricsPlugin) ExportPrometheus() string {
 	result += "# HELP cachestorm_commands_total Total number of commands executed\n"
 	result += "# TYPE cachestorm_commands_total counter\n"
 
-	m.metrics.mu.RLock()
-	for cmd, count := range m.metrics.commandsTotal {
-		result += "cachestorm_commands_total{command=\"" + cmd + "\"} " +
-			strconv.FormatInt(atomic.LoadInt64(count), 10) + "\n"
-	}
-	m.metrics.mu.RUnlock()
+	m.metrics.commandsTotal.Range(func(cmd, count any) bool {
+		result += "cachestorm_commands_total{command=\"" + cmd.(string) + "\"} " +
+			strconv.FormatInt(count.(*atomic.Int64).Load(), 10) + "\n"
+		return true
+	})
 
 	result += "\n# HELP cachestorm_hit_total Total cache hits\n"
 	result += "# TYPE cachestorm_hit_total counter\n"
@@ -223,12 +164,11 @@ func (m *MetricsPlugin) ExportPrometheus() string {
 }
 
 func (m *MetricsPlugin) GetMetrics() map[string]interface{} {
-	m.metrics.mu.RLock()
 	commands := make(map[string]int64)
-	for k, v := range m.metrics.commandsTotal {
-		commands[k] = atomic.LoadInt64(v)
-	}
-	m.metrics.mu.RUnlock()
+	m.metrics.commandsTotal.Range(func(k, v any) bool {
+		commands[k.(string)] = v.(*atomic.Int64).Load()
+		return true
+	})
 
 	return map[string]interface{}{
 		"commands_total":    commands,

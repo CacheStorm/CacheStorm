@@ -764,15 +764,20 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 		if stopMerge == nil {
 			command.RecordLatency("command", elapsed)
 		}
-		store.GlobalMetrics.RecordCommand(cmd, elapsed.Nanoseconds())
-		store.GlobalSlowLog.AddIfSlow(elapsed, cmd, ctx.Args, ctx.RemoteAddr, ctx.ClientName)
-		if writeCommands[cmd] {
-			store.GlobalMetrics.RecordWrite()
-		} else {
-			store.GlobalMetrics.RecordRead()
-		}
-		if c.plugins != nil {
-			c.plugins.RunAfterHooks(ctx)
+		// An unknown command is refused before it runs, as in Redis: it
+		// gets no command stats, slow log entry or hooks, so a client
+		// sending endless made-up names cannot grow those tables.
+		if !errors.Is(err, command.ErrUnknownCommand) {
+			store.GlobalMetrics.RecordCommand(cmd, elapsed.Nanoseconds())
+			store.GlobalSlowLog.AddIfSlow(elapsed, cmd, ctx.Args, ctx.RemoteAddr, ctx.ClientName)
+			if writeCommands[cmd] {
+				store.GlobalMetrics.RecordWrite()
+			} else {
+				store.GlobalMetrics.RecordRead()
+			}
+			if c.plugins != nil {
+				c.plugins.RunAfterHooks(ctx)
+			}
 		}
 		if ctx.ResetConnection {
 			if c.srv != nil {
