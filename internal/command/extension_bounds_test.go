@@ -236,6 +236,13 @@ func TestExtensionStringBuildersAreBounded(t *testing.T) {
 		t.Errorf("TRIE.ADD word: %q", got)
 	}
 
+	if got := runCmd(t, s, router, "EVAL.REGEX", big, "x"); !strings.HasPrefix(got, "-ERR") {
+		t.Errorf("EVAL.REGEX with a megabyte pattern: %q", got)
+	}
+	if got := runCmd(t, s, router, "EVAL.REGEX", "^a+b$", "aab"); got != ":1\r\n" {
+		t.Errorf("EVAL.REGEX ^a+b$ aab: %q", got)
+	}
+
 	runCmd(t, s, router, "FREQ.CREATE", "f")
 	for _, it := range [][]string{{"b", "2"}, {"a", "2"}, {"c", "5"}, {"d", "1"}} {
 		runCmd(t, s, router, "FREQ.ADD", "f", it[0], it[1])

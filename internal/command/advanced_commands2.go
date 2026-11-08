@@ -144,12 +144,25 @@ var (
 	validatorsMu sync.RWMutex
 )
 
+// maxClientRegexLen bounds the patterns clients ask the server to compile:
+// a compiled program takes hundreds of bytes per pattern byte, so a
+// megabyte pattern cost hundreds of megabytes.
+const maxClientRegexLen = 4096
+
+// compileClientRegex compiles a pattern sent by a client.
+func compileClientRegex(pattern string) (*regexp.Regexp, error) {
+	if len(pattern) > maxClientRegexLen {
+		return nil, fmt.Errorf("pattern longer than %d bytes", maxClientRegexLen)
+	}
+	return regexp.Compile(pattern)
+}
+
 func cmdVALIDATECREATE(ctx *Context) error {
 	if ctx.ArgCount() < 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
-	rule, err := regexp.Compile(ctx.ArgString(1))
+	rule, err := compileClientRegex(ctx.ArgString(1))
 	if err != nil {
 		return ctx.WriteError(fmt.Errorf("ERR invalid validation pattern: %v", err))
 	}

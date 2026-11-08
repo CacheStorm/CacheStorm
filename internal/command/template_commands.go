@@ -9,7 +9,6 @@ import (
 	"net/mail"
 	"net/netip"
 	"net/url"
-	"regexp"
 	"strconv"
 	"strings"
 	"unicode"
@@ -562,7 +561,7 @@ func cmdEVALREGEX(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
-	re, err := regexp.Compile(ctx.ArgString(0))
+	re, err := compileClientRegex(ctx.ArgString(0))
 	if err != nil {
 		return ctx.WriteError(fmt.Errorf("ERR invalid regex: %v", err))
 	}
@@ -578,7 +577,7 @@ func cmdEVALREGEXMATCH(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
-	re, err := regexp.Compile(ctx.ArgString(0))
+	re, err := compileClientRegex(ctx.ArgString(0))
 	if err != nil {
 		return ctx.WriteError(fmt.Errorf("ERR invalid regex: %v", err))
 	}
@@ -598,7 +597,7 @@ func cmdEVALREGEXREPLACE(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
-	re, err := regexp.Compile(ctx.ArgString(0))
+	re, err := compileClientRegex(ctx.ArgString(0))
 	if err != nil {
 		return ctx.WriteError(fmt.Errorf("ERR invalid regex: %v", err))
 	}
