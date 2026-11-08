@@ -86,6 +86,7 @@ func TestExtensionCreatesBoundTheirSlots(t *testing.T) {
 	RegisterMoreCommands(router)
 	RegisterResilienceCommands(router)
 	RegisterAdvancedCommands2(router)
+	RegisterStatsCommands(router)
 	huge := "100000000000"
 	for _, cmd := range [][]string{
 		{"PARTITION.CREATE", "p", huge},
@@ -94,6 +95,7 @@ func TestExtensionCreatesBoundTheirSlots(t *testing.T) {
 		{"POOLX.CREATE", "p", huge},
 		{"POOLX.CREATE", "p", "-5"},
 		{"SKETCH.CREATE", "s", "4194304", "4194304"},
+		{"SAMPLE.CREATE", "s", huge},
 	} {
 		if got := runCmd(t, s, router, cmd[0], cmd[1:]...); !strings.HasPrefix(got, "-ERR") {
 			t.Errorf("%v: %q, want an error", cmd, got)
@@ -102,7 +104,7 @@ func TestExtensionCreatesBoundTheirSlots(t *testing.T) {
 	for _, cmd := range [][]string{
 		{"PARTITION.CREATE", "p", "8"}, {"PARTITIONX.CREATE", "p", "8"},
 		{"RINGBUFFER.CREATE", "r", "8"}, {"POOLX.CREATE", "p", "8"},
-		{"SKETCH.CREATE", "s", "100", "4"},
+		{"SKETCH.CREATE", "s", "100", "4"}, {"SAMPLE.CREATE", "s", "8"},
 	} {
 		if got := runCmd(t, s, router, cmd[0], cmd[1:]...); got != "+OK\r\n" {
 			t.Errorf("%v: %q, want OK", cmd, got)

@@ -493,6 +493,10 @@ func cmdSAMPLECREATE(ctx *Context) error {
 	if size <= 0 {
 		size = 1000
 	}
+	// The reservoir is allocated at full size up front.
+	if size > maxExtensionSlots {
+		return ctx.WriteError(fmt.Errorf("ERR size must be at most %d", maxExtensionSlots))
+	}
 
 	samplersMu.Lock()
 	samplers[key] = store.NewReservoirSampler(size)
