@@ -1,8 +1,9 @@
 package persistence_test
 
 import (
-	"github.com/cachestorm/cachestorm/internal/store"
 	"testing"
+
+	"github.com/cachestorm/cachestorm/internal/store"
 )
 
 // mustStringValue returns a string value in either stored form as a
