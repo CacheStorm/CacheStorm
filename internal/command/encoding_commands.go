@@ -314,12 +314,20 @@ func classifyJSONNumber(n json.Number) (any, error) {
 		}
 		return f, nil
 	}
+	// Decimal parsing of a big integer is superlinear, so a megabyte of
+	// digits cost seconds; no target format holds more than a few hundred.
+	if len(strings.TrimLeft(s, "-")) > maxJSONIntDigits {
+		return nil, errCodecIntRange
+	}
 	i, ok := new(big.Int).SetString(s, 10)
 	if !ok {
 		return nil, errCodecJSONInput
 	}
 	return i, nil
 }
+
+// maxJSONIntDigits bounds the integer literals the codecs read from JSON.
+const maxJSONIntDigits = 1024
 
 func msgpackEncode(out []byte, v any) ([]byte, error) {
 	switch t := v.(type) {

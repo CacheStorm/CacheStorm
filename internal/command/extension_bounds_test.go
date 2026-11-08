@@ -219,6 +219,16 @@ func TestExtensionStringBuildersAreBounded(t *testing.T) {
 		t.Fatal("string helpers re-copied their output per byte")
 	}
 
+	for _, cmd := range []string{"MSGPACK.ENCODE", "CBOR.ENCODE"} {
+		start := time.Now()
+		if got := runCmd(t, s, router, cmd, "1"+strings.Repeat("7", 1<<20)); !strings.HasPrefix(got, "-ERR") {
+			t.Errorf("%s of a megabyte integer: %q", cmd, got)
+		}
+		if time.Since(start) > 500*time.Millisecond {
+			t.Errorf("%s parsed a megabyte integer before refusing it", cmd)
+		}
+	}
+
 	runCmd(t, s, router, "FREQ.CREATE", "f")
 	for _, it := range [][]string{{"b", "2"}, {"a", "2"}, {"c", "5"}, {"d", "1"}} {
 		runCmd(t, s, router, "FREQ.ADD", "f", it[0], it[1])
