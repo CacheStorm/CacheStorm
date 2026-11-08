@@ -250,10 +250,11 @@ type pendingCommand struct {
 // hasPending reports whether commands parsed ahead are waiting to run.
 func (c *Connection) hasPending() bool { return c.pendHead < len(c.pend) }
 
-// commandBuffered reports whether a complete command that does something is
-// already buffered, so replies may wait to go out with its. Empty commands
-// (a blank line, *0, *-1) are skipped by the reader, which then waits for
-// the network; replies held for them would wait with it.
+// commandBuffered reports whether a command is still to come from the read
+// buffer, complete or not, so replies may wait to go out with its. A buffer
+// of nothing but empty commands (a blank line, *0, *-1) does not count: the
+// reader skips them and then waits for the network, and replies held for
+// them would wait with it.
 func (c *Connection) commandBuffered() bool {
 	if c.bufReader == nil {
 		return false
@@ -263,7 +264,7 @@ func (c *Connection) commandBuffered() bool {
 		return false
 	}
 	buf, err := c.bufReader.Peek(n)
-	return err == nil && resp.HasCompleteNonEmptyCommand(buf)
+	return err != nil || !resp.OnlyEmptyCommands(buf)
 }
 
 // batchBreakers end a parsed batch: they change how the commands after them

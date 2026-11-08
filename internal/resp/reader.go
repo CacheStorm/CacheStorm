@@ -790,3 +790,30 @@ func HasCompleteNonEmptyCommand(buf []byte) bool {
 	n, ok := parseDecimal(bytes.TrimSuffix(buf[1:i], []byte("\r")))
 	return ok && n > 0
 }
+
+// OnlyEmptyCommands reports whether buf holds nothing but complete empty
+// commands (blank inline lines, *0, *-1), which the reader skips before it
+// waits on the network. Anything else, a partial command included, is a
+// command still to come.
+func OnlyEmptyCommands(buf []byte) bool {
+	for len(buf) > 0 {
+		i := bytes.IndexByte(buf, '\n')
+		if i < 0 {
+			return false
+		}
+		line := bytes.TrimSuffix(buf[:i], []byte("\r"))
+		if len(line) > 0 && line[0] == byte(TypeArray) {
+			n, ok := parseDecimal(line[1:])
+			if !ok && (len(line) < 2 || line[1] != '-') {
+				return false
+			}
+			if ok && n > 0 {
+				return false
+			}
+		} else if len(bytes.TrimSpace(line)) > 0 {
+			return false
+		}
+		buf = buf[i+1:]
+	}
+	return true
+}
