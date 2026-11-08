@@ -112,3 +112,40 @@ func TestExtensionCreatesBoundTheirSlots(t *testing.T) {
 		t.Errorf("PARTITIONX.ADD after create: %q", got)
 	}
 }
+
+// ID.NEXTN refuses a batch it could never build, and STR.REPEAT builds its
+// result in one allocation bounded like a string value.
+func TestIDNextNAndStrRepeatBounds(t *testing.T) {
+	s := store.NewStore()
+	router := NewRouter()
+	RegisterUtilityCommands(router)
+	RegisterTemplateCommands(router)
+	if got := runCmd(t, s, router, "ID.CREATE", "bounds-seq", "1", "1", "PADDING", "100000000000"); !strings.HasPrefix(got, "-ERR") {
+		t.Errorf("ID.CREATE with a huge padding: %q, want an error", got)
+	}
+	runCmd(t, s, router, "ID.CREATE", "bounds-seq", "1", "1", "PADDING", "4")
+	for _, n := range []string{"100000000000", "-3", "0"} {
+		if got := runCmd(t, s, router, "ID.NEXTN", "bounds-seq", n); !strings.HasPrefix(got, "-ERR") {
+			t.Errorf("ID.NEXTN %s: %q, want an error", n, got)
+		}
+	}
+	if got := runCmd(t, s, router, "ID.NEXTN", "bounds-seq", "3"); got != "*3\r\n$4\r\n0001\r\n$4\r\n0002\r\n$4\r\n0003\r\n" {
+		t.Errorf("ID.NEXTN 3: %q", got)
+	}
+	start := time.Now()
+	if got := runCmd(t, s, router, "STR.REPEAT", "ab", "100000000000"); !strings.HasPrefix(got, "-ERR") {
+		t.Errorf("STR.REPEAT huge: %q, want an error", got)
+	}
+	if got := runCmd(t, s, router, "STR.REPEAT", "ab", "3"); got != "$6\r\nababab\r\n" {
+		t.Errorf("STR.REPEAT ab 3: %q", got)
+	}
+	if got := runCmd(t, s, router, "STR.REPEAT", "ab", "-1"); got != "$0\r\n\r\n" {
+		t.Errorf("STR.REPEAT ab -1: %q", got)
+	}
+	if got := runCmd(t, s, router, "STR.REPEAT", "x", "200000"); len(got) != 200000+len("$200000\r\n\r\n") {
+		t.Errorf("STR.REPEAT x 200000 returned %d bytes", len(got))
+	}
+	if time.Since(start) > time.Second {
+		t.Fatal("STR.REPEAT built its result by repeated concatenation")
+	}
+}

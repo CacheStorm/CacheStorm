@@ -15,6 +15,7 @@ import (
 	"unicode"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
+	"github.com/cachestorm/cachestorm/internal/store"
 )
 
 func RegisterTemplateCommands(router *Router) {
@@ -976,14 +977,16 @@ func cmdSTRREPEAT(ctx *Context) error {
 	}
 
 	s := ctx.ArgString(0)
-	count := int(parseInt64(ctx.ArgString(1)))
-
-	result := ""
-	for i := 0; i < count; i++ {
-		result += s
+	count := parseInt64(ctx.ArgString(1))
+	if count <= 0 || len(s) == 0 {
+		return ctx.WriteBulkString("")
 	}
-
-	return ctx.WriteBulkString(result)
+	// The result is bounded like a string value, so one call cannot build
+	// more than a string key could hold.
+	if count > store.MaxValueSize/int64(len(s)) {
+		return ctx.WriteError(errStringTooLong)
+	}
+	return ctx.WriteBulkString(strings.Repeat(s, int(count)))
 }
 
 func cmdSTRSPLIT(ctx *Context) error {

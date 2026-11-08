@@ -270,6 +270,9 @@ func cmdIDCREATE(ctx *Context) error {
 		case "PADDING":
 			if i+1 < ctx.ArgCount() {
 				padding = int(parseInt64(ctx.ArgString(i + 1)))
+				if padding > maxIDPadding {
+					return ctx.WriteError(fmt.Errorf("ERR padding must be at most %d", maxIDPadding))
+				}
 				i++
 			}
 		}
@@ -295,6 +298,14 @@ func cmdIDNEXT(ctx *Context) error {
 	return ctx.WriteBulkString(id)
 }
 
+// maxIDBatch bounds how many IDs one ID.NEXTN hands out, so a single call
+// cannot loop for hours or exhaust memory building the reply.
+const maxIDBatch = 1 << 16
+
+// maxIDPadding bounds the zero padding of a sequence's IDs; an int64 has at
+// most 19 digits.
+const maxIDPadding = 64
+
 func cmdIDNEXTN(ctx *Context) error {
 	if ctx.ArgCount() < 2 {
 		return ctx.WriteError(ErrWrongArgCount)
@@ -302,6 +313,9 @@ func cmdIDNEXTN(ctx *Context) error {
 
 	name := ctx.ArgString(0)
 	count := parseInt64(ctx.ArgString(1))
+	if count < 1 || count > maxIDBatch {
+		return ctx.WriteError(fmt.Errorf("ERR count must be between 1 and %d", maxIDBatch))
+	}
 
 	ids, _, exists := store.GlobalIDGenerator.NextN(name, int(count))
 	if !exists {
