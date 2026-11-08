@@ -291,3 +291,42 @@ func TestMSETIsAtomicToReaders(t *testing.T) {
 	stop.Store(true)
 	wg.Wait()
 }
+
+// rawExchange writes raw on a fresh connection and returns the replies that
+// arrive within a short wait.
+func rawExchange(t *testing.T, addr, raw string) string {
+	t.Helper()
+	c := isoDial(t, addr)
+	if _, err := c.c.Write([]byte(raw)); err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	buf := make([]byte, 4096)
+	for {
+		_ = c.c.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
+		n, err := c.c.Read(buf)
+		out.Write(buf[:n])
+		if err != nil {
+			return out.String()
+		}
+	}
+}
+
+// CLIENT REPLY OFF and SKIP silence the error of an unknown command too, and
+// HELLO inside a transaction switches the connection's protocol for the
+// rest of the session, as in Redis.
+func TestReplyModeAndProtocolSwitchInTransactions(t *testing.T) {
+	addr := isolationServer(t)
+	got := rawExchange(t, addr, isoFrame("CLIENT", "REPLY", "OFF")+isoFrame("NOSUCH")+isoFrame("CLIENT", "REPLY", "ON")+isoFrame("PING"))
+	if got != "+OK\r\n+PONG\r\n" {
+		t.Errorf("CLIENT REPLY OFF + unknown command: %q", got)
+	}
+	got = rawExchange(t, addr, isoFrame("CLIENT", "REPLY", "SKIP")+isoFrame("NOSUCH")+isoFrame("PING"))
+	if got != "+PONG\r\n" {
+		t.Errorf("CLIENT REPLY SKIP + unknown command: %q", got)
+	}
+	got = rawExchange(t, addr, isoFrame("MULTI")+isoFrame("HELLO", "3")+isoFrame("EXEC")+isoFrame("GET", "nokey"))
+	if !strings.Contains(got, "*1\r\n%") || !strings.HasSuffix(got, "_\r\n") {
+		t.Errorf("HELLO 3 inside MULTI: %q", got)
+	}
+}

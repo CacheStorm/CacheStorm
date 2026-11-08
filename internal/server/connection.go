@@ -834,10 +834,15 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 		}
 		if err != nil {
 			store.GlobalMetrics.RecordError()
+			// CLIENT REPLY OFF and SKIP silence errors too, as in Redis.
+			ew := c.writer
+			if suppress {
+				ew = out
+			}
 			if err == command.ErrUnknownCommand {
-				c.writer.WriteError(unknownCommandError(c.rawCmd, cmd, args))
+				ew.WriteError(unknownCommandError(c.rawCmd, cmd, args))
 			} else {
-				c.writer.WriteError(err.Error())
+				ew.WriteError(err.Error())
 			}
 		}
 		end := ctx.EndTime
