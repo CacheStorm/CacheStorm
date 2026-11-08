@@ -680,7 +680,23 @@ func (c *Connection) Handle() {
 // close. It holds writeMu throughout, so Pub/Sub frames written by the
 // delivery goroutine never interleave with a reply; the deferred unlock keeps
 // a panicking command from wedging that goroutine.
+// crossProtocolAttack reports whether cmd is the first word of an HTTP
+// request line or header Redis refuses, POST and Host:, in any case.
+func crossProtocolAttack(cmd string) bool {
+	return strings.EqualFold(cmd, "POST") || strings.EqualFold(cmd, "HOST:")
+}
+
 func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
+	if crossProtocolAttack(cmd) {
+		// A browser made to send an HTTP request to this port: its body
+		// could hold commands. Redis drops the connection without a reply.
+		addr := c.remoteAddr
+		if addr == "" && c.conn != nil {
+			addr = c.conn.RemoteAddr().String()
+		}
+		logger.Warn().Str("addr", addr).Msg("Possible SECURITY ATTACK detected. It looks like somebody is sending POST or Host: commands to CacheStorm. This is likely due to an attacker attempting to use Cross Protocol Scripting to compromise your instance. Connection aborted.")
+		return true
+	}
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
 	{
