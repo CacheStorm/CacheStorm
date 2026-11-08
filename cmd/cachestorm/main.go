@@ -164,6 +164,9 @@ func loadConfig(path string, redisArgs []string) (*config.Config, []config.Direc
 	if err != nil {
 		return nil, nil, err
 	}
+	if redisConf {
+		config.UseRedisDefaults(cfg)
+	}
 	if len(directives) == 0 {
 		return cfg, nil, nil
 	}

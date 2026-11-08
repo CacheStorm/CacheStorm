@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/pprof"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -298,6 +299,52 @@ func NewHTTPServer(s *store.Store, router *command.Router, cfg *HTTPConfig) *HTT
 	return h
 }
 
+// browserRequestRefused guards the API against requests a web page makes
+// through a visitor's browser, the cross-protocol attack Redis guards its
+// port against. A page on another origin can send a "simple" POST, one with
+// a text/plain body or none, without a preflight, and the browser delivers
+// it: the API would run /api/execute or /api/invalidate for it. Such a
+// request carries an Origin header, so a state-changing request from an
+// origin other than the API's own or the configured cors_origin is refused.
+// A page can also rebind its own host name to 127.0.0.1 and read the API as
+// same-origin; while the API needs no credentials, a loopback request must
+// therefore name the server by address or as localhost, not by another
+// host name. It returns why a request is refused, or "".
+func (h *HTTPServer) browserRequestRefused(r *http.Request) string {
+	switch r.Method {
+	case http.MethodGet, http.MethodHead:
+	default:
+		if origin := r.Header.Get("Origin"); origin != "" && !h.originAllowed(origin, r.Host) {
+			return "cross-origin request refused"
+		}
+	}
+	if h.config.Password == "" && (h.router == nil || h.router.RequirePass() == "") && isLoopbackAddr(r.RemoteAddr) && !loopbackHostName(r.Host) {
+		return "unauthenticated API reached through host name " + strconv.Quote(r.Host) + " refused; use the server's address or localhost"
+	}
+	return ""
+}
+
+// originAllowed reports whether a browser request from origin may change
+// state: it is the API's own origin (host) or the configured cors_origin.
+func (h *HTTPServer) originAllowed(origin, host string) bool {
+	if cors := h.config.CORSOrigin; cors == "*" || (cors != "" && origin == cors) {
+		return true
+	}
+	u, err := url.Parse(origin)
+	return err == nil && u.Host != "" && strings.EqualFold(u.Host, host)
+}
+
+// loopbackHostName reports whether a Host header names the server in a way a
+// DNS rebinding page cannot: an IP address, or localhost.
+func loopbackHostName(host string) bool {
+	name := host
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		name = h
+	}
+	name = strings.TrimSuffix(strings.Trim(name, "[]"), ".")
+	return name == "" || strings.EqualFold(name, "localhost") || net.ParseIP(name) != nil
+}
+
 func (h *HTTPServer) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := h.config.CORSOrigin
@@ -310,6 +357,11 @@ func (h *HTTPServer) corsMiddleware(next http.Handler) http.Handler {
 
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		if msg := h.browserRequestRefused(r); msg != "" {
+			h.writeError(w, http.StatusForbidden, msg)
 			return
 		}
 

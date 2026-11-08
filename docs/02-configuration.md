@@ -27,6 +27,8 @@ A config file whose name ends in `.conf` is read as a `redis.conf`, with its com
 - **Run-time settings.** Every other directive goes through `CONFIG SET` once the server exists, with the same validation. A `user` line becomes `ACL SETUSER`.
 - **Ignored and refused directives.** A parameter Redis reads only at startup that CacheStorm does not use, such as `tcp-backlog` or `pidfile`, is ignored with a warning when it differs from the default. An unknown directive or an invalid value stops startup with the file and line, or the option, that caused it. `include`, `rename-command`, `aclfile`, `loadmodule` and `daemonize yes` are refused.
 
+A server started from a `redis.conf` uses Redis' defaults where CacheStorm's own differ: it listens on its RESP port only, with no HTTP API and no metrics endpoint, and `maxmemory-policy` is `noeviction` unless the file sets another. The CacheStorm directives `http-port <port>` and `metrics-port <port>` turn those listeners on (`0` keeps them off).
+
 Persistence follows Redis' rules. A `redis.conf` without `save` lines gets Redis' default rules (`3600 1 300 100 60 10000`). A rule `save <seconds> <changes>` takes a snapshot once at least `<changes>` writes happened and `<seconds>` passed since the last save. `save ""` stops periodic snapshots, but SAVE and BGSAVE still work and `dump.rdb` is still loaded at startup. The append-only file is on only for `appendonly yes`. Without a `redis.conf` or a `save` option, persistence stays off, as CacheStorm's own configuration has it.
 
 ## Full Configuration Reference

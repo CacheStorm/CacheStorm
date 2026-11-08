@@ -189,6 +189,21 @@ func (c *Config) applyDirective(d Directive) (bool, error) {
 		return str(&c.Memory.MaxMemory)
 	case "maxmemory-policy":
 		return str(&c.Memory.EvictionPolicy)
+	case "http-port", "metrics-port":
+		// CacheStorm's own listeners, which a redis.conf leaves off: a port
+		// above zero turns one on, zero turns it off.
+		port, enabled := &c.HTTP.Port, &c.HTTP.Enabled
+		if d.Name == "metrics-port" {
+			port, enabled = &c.Plugins.Metrics.Port, &c.Plugins.Metrics.Enabled
+		}
+		if handled, err := integer(port); err != nil {
+			return handled, err
+		}
+		if *port < 0 || *port > 65535 {
+			return true, fmt.Errorf("port out of range")
+		}
+		*enabled = *port > 0
+		return true, nil
 	case "maxmemory-samples":
 		return integer(&c.Memory.SampleSize)
 	case "appendonly":
