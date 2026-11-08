@@ -2,8 +2,13 @@ package store
 
 import (
 	"math"
+	"slices"
 	"sort"
 )
+
+// batchScanMax is how many pairs SetStringBatch matches by scanning before
+// it indexes them in a map.
+const batchScanMax = 32
 
 type StringPair struct {
 	Key  string
@@ -11,24 +16,47 @@ type StringPair struct {
 }
 
 func (s *Store) SetStringBatch(pairs []StringPair, nx bool) (bool, error) {
+	// keys are the distinct keys in first-seen order and vals[i] the last
+	// value given for keys[i], built straight in stored form. An MSET names
+	// a handful of keys, so they are matched by a scan rather than a map,
+	// and the shard indices likewise.
 	keys := make([]string, 0, len(pairs))
-	values := make(map[string]*StringValue, len(pairs))
-	indices := make([]int, 0, len(pairs))
-	seen := make(map[int]bool)
+	vals := make([]Value, 0, len(pairs))
+	var index map[string]int
+	if len(pairs) > batchScanMax {
+		index = make(map[string]int, len(pairs))
+	}
+	indices := make([]int, 0, min(len(pairs), NumShards))
 	for _, pair := range pairs {
-		value := &StringValue{Data: pair.Data}
+		value := NewCompactString(pair.Data, StringEncAuto)
 		if _, err := validateStoreWrite(pair.Key, value); err != nil {
 			return false, err
 		}
-		if _, exists := values[pair.Key]; !exists {
-			keys = append(keys, pair.Key)
-			index := int(s.shardIndex(pair.Key))
-			if !seen[index] {
-				seen[index] = true
-				indices = append(indices, index)
+		at := -1
+		if index != nil {
+			if i, ok := index[pair.Key]; ok {
+				at = i
+			}
+		} else {
+			for i, k := range keys {
+				if k == pair.Key {
+					at = i
+					break
+				}
 			}
 		}
-		values[pair.Key] = value
+		if at >= 0 {
+			vals[at] = value
+			continue
+		}
+		if index != nil {
+			index[pair.Key] = len(keys)
+		}
+		keys = append(keys, pair.Key)
+		vals = append(vals, value)
+		if shard := int(s.shardIndex(pair.Key)); !slices.Contains(indices, shard) {
+			indices = append(indices, shard)
+		}
 	}
 	if len(keys) == 0 {
 		return false, nil
@@ -46,7 +74,7 @@ func (s *Store) SetStringBatch(pairs []StringPair, nx bool) (bool, error) {
 		}
 		newMem, oldMem := int64(0), int64(0)
 		expired := ""
-		for _, key := range keys {
+		for i, key := range keys {
 			previous := s.shards[s.shardIndex(key)].data[key]
 			live := previous != nil && !previous.IsExpired()
 			if previous != nil && !live && !s.passiveExpiry.Load() {
@@ -57,7 +85,7 @@ func (s *Store) SetStringBatch(pairs []StringPair, nx bool) (bool, error) {
 				unlock()
 				return false, nil
 			}
-			size := entryMetadataSize(nil) + int64(len(key)) + 16 + values[key].SizeOf()
+			size := entryMetadataSize(nil) + int64(len(key)) + 16 + vals[i].SizeOf()
 			if size > math.MaxInt64-newMem {
 				unlock()
 				return false, ErrValueTooLarge
@@ -91,9 +119,9 @@ func (s *Store) SetStringBatch(pairs []StringPair, nx bool) (bool, error) {
 		actual := int64(0)
 		var created map[string]bool
 		notifyNew := s.Notifying(NotifyNew)
-		for _, key := range keys {
+		for i, key := range keys {
 			shard := s.shards[s.shardIndex(key)]
-			entry := NewEntry(values[key])
+			entry := NewEntry(vals[i])
 			if previous := shard.data[key]; previous != nil && !previous.IsExpired() {
 				entry.inheritAccess(previous)
 			}
@@ -126,8 +154,8 @@ func (s *Store) SetStringBatch(pairs []StringPair, nx bool) (bool, error) {
 				s.Notify(NotifyString, "set", pair.Key)
 			}
 		}
-		for _, key := range keys {
-			s.published(key, values[key])
+		for i, key := range keys {
+			s.published(key, vals[i])
 		}
 		return true, nil
 	}

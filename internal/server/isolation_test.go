@@ -235,3 +235,59 @@ func TestPipelineEndingInQuitDeliversAllReplies(t *testing.T) {
 		t.Fatalf("replies %q", got.String())
 	}
 }
+
+// MSET takes the stripes of its keys rather than the whole gate; a reader
+// still never sees half of one: MGET of the keys always finds them equal
+// while writers keep setting them all to one value.
+func TestMSETIsAtomicToReaders(t *testing.T) {
+	addr := isolationServer(t)
+	keys := []string{"ma", "mb", "mc", "md"}
+	var stop atomic.Bool
+	var wg sync.WaitGroup
+	for w := 0; w < 4; w++ {
+		wg.Add(1)
+		go func(w int) {
+			defer wg.Done()
+			c := isoDial(t, addr)
+			for i := 0; !stop.Load(); i++ {
+				v := strconv.Itoa(w*1000000 + i)
+				args := []string{"MSET"}
+				for _, k := range keys {
+					args = append(args, k, v)
+				}
+				c.do(args...)
+			}
+		}(w)
+	}
+	r := isoDial(t, addr)
+	deadline := time.Now().Add(1500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		_ = r.c.SetDeadline(time.Now().Add(5 * time.Second))
+		if _, err := r.c.Write([]byte(isoFrame(append([]string{"MGET"}, keys...)...))); err != nil {
+			t.Fatal(err)
+		}
+		head, _ := r.r.ReadString('\n')
+		if head != "*4\r\n" {
+			t.Fatalf("MGET reply %q", head)
+		}
+		var vals []string
+		for range keys {
+			l, _ := r.r.ReadString('\n')
+			if l == "$-1\r\n" {
+				vals = append(vals, "")
+				continue
+			}
+			b, _ := r.r.ReadString('\n')
+			vals = append(vals, b)
+		}
+		for _, v := range vals[1:] {
+			if v != vals[0] {
+				stop.Store(true)
+				wg.Wait()
+				t.Fatalf("MGET saw a partial MSET: %q", vals)
+			}
+		}
+	}
+	stop.Store(true)
+	wg.Wait()
+}

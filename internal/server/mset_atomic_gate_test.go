@@ -33,11 +33,12 @@ func TestMSetAtomicReaderGateX(t *testing.T) {
 				}
 			}()
 			<-entered
-			admitted := s.gate.global.TryRLock()
+			// A reader of the batch's keys takes their stripes (EXEC holds
+			// the whole gate, MSET the stripes of the keys it names).
+			admitted := readerAdmitted(s, "a") || readerAdmitted(s, "b")
 			partial := false
 			if admitted {
 				partial = s.store.Exists("a") && !s.store.Exists("b")
-				s.gate.global.RUnlock()
 			}
 			close(release)
 			<-done
@@ -68,8 +69,7 @@ func TestMSetAtomicGateHeldThroughCommitX(t *testing.T) {
 			case got := <-done:
 				t.Fatalf("returned before commit: %+v", got)
 			}
-			if s.gate.global.TryRLock() {
-				s.gate.global.RUnlock()
+			if readerAdmitted(s, "a") || readerAdmitted(s, "b") {
 				t.Error("reader admitted before commit completed")
 			}
 			close(release)
@@ -153,4 +153,19 @@ func TestMSetAtomicPersistenceX(t *testing.T) {
 			}
 		})
 	}
+}
+
+// readerAdmitted reports whether a reader of key could take the gate now:
+// the shared global lock and key's stripe.
+func readerAdmitted(s *Server, key string) bool {
+	if !s.gate.global.TryRLock() {
+		return false
+	}
+	defer s.gate.global.RUnlock()
+	st := &s.gate.stripes[stripeOf(key)]
+	if !st.TryRLock() {
+		return false
+	}
+	st.RUnlock()
+	return true
 }

@@ -840,7 +840,10 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 				c.writer.WriteError(err.Error())
 			}
 		}
-		end := time.Now()
+		end := ctx.EndTime
+		if end.IsZero() {
+			end = time.Now()
+		}
 		elapsed := end.Sub(ctx.StartTime)
 		if stopMerge == nil {
 			command.RecordLatency("command", elapsed)

@@ -82,8 +82,7 @@ var exclusiveWrites = map[string]bool{
 	"SAVE": true, "BGSAVE": true, "SHUTDOWN": true,
 	"EXEC": true, "EVAL": true, "EVALSHA": true, "FCALL": true,
 	"FLUSHALL": true, "FLUSHDB": true, "SWAPDB": true, "MOVE": true,
-	"RENAME": true, "RENAMENX": true, "COPY": true,
-	"MSET": true, "MSETNX": true, "SMOVE": true,
+	"RENAME": true, "RENAMENX": true, "COPY": true, "SMOVE": true,
 	"SCRIPT": true, "FUNCTION": true, "MIGRATE": true,
 	// Read-only scripts take the gate exclusively too: a script is atomic in
 	// Redis, so it must not see a write land between two of its reads.
@@ -215,10 +214,16 @@ func (h *gateHold) lock() {
 	}
 	h.g.global.RLock()
 	for _, s := range h.stripes {
-		if h.read {
+		switch {
+		case h.read:
 			h.g.stripes[s].RLock()
-		} else {
+		case len(h.stripes) == 1:
 			lockStripe(&h.g.stripes[s])
+		default:
+			// A multi-key write waits without spinning: yielding on
+			// several stripes at once kept the scheduler's run queue lock
+			// busy and slowed every client.
+			h.g.stripes[s].Lock()
 		}
 	}
 }

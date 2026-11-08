@@ -113,6 +113,9 @@ type Context struct {
 	// waited is how long the running command blocked waiting for data,
 	// which its command statistics leave out as Redis does.
 	waited time.Duration
+	// EndTime is when the handler returned, read once for the command's
+	// stats and the connection's bookkeeping; zero when it never ran.
+	EndTime time.Time
 
 	// ReplicaReadOnly is set when the command runs on a read-only replica:
 	// a script may run, but every write it attempts is refused.

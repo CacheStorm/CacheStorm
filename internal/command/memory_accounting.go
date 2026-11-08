@@ -40,11 +40,25 @@ func init() {
 // was never charged and maxmemory did not bound it. Every command Redis does
 // not flag readonly is covered, including CacheStorm's own; a key that did
 // not change costs a read-locked lookup.
+// wholeValueWriters only ever install whole new values or remove keys, which
+// Store.Set, value plans and deletes charge as they happen; they never change
+// a value in place, so there is nothing to reaccount after them.
+var wholeValueWriters = map[string]bool{
+	"SET": true, "SETNX": true, "SETEX": true, "PSETEX": true, "GETSET": true,
+	"MSET": true, "MSETNX": true, "INCR": true, "INCRBY": true, "DECR": true,
+	"DECRBY": true, "INCRBYFLOAT": true, "GETDEL": true, "GETEX": true,
+	"DEL": true, "UNLINK": true, "EXPIRE": true, "PEXPIRE": true,
+	"EXPIREAT": true, "PEXPIREAT": true, "PERSIST": true,
+}
+
 func reaccountWrittenKeys(ctx *Context) {
 	if ctx.Store == nil || readonlyCommands[ctx.Command] {
 		return
 	}
 	indexes := searchIndexesFor(ctx).All()
+	if len(indexes) == 0 && wholeValueWriters[ctx.Command] {
+		return
+	}
 	if len(indexes) == 0 {
 		if key, ok := SoleFirstKey(ctx.Command, ctx.Args); ok {
 			ctx.Store.ReaccountKey(key)
