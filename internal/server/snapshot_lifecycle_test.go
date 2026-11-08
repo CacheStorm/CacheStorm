@@ -145,7 +145,7 @@ func TestSnapshotBackgroundCaptureAndFailure(t *testing.T) {
 	if err := persistence.NewRDBReader(dst).Load(filepath.Join(dir, "dump.rdb")); err != nil {
 		t.Fatal(err)
 	}
-	if e, ok := dst.Get("k"); !ok || string(e.Value.(*store.StringValue).Data) != "captured" {
+	if e, ok := dst.Get("k"); !ok || string(mustStringValue(t, e.Value).Data) != "captured" {
 		t.Fatal("background save did not preserve its capture point")
 	}
 	last := c.do("LASTSAVE").Int
@@ -184,7 +184,7 @@ func TestSnapshotHooksArePerServer(t *testing.T) {
 		if err := persistence.NewRDBReader(dst).Load(filepath.Join(dir, "dump.rdb")); err != nil {
 			t.Fatal(err)
 		}
-		if e, ok := dst.Get("k"); !ok || string(e.Value.(*store.StringValue).Data) != want {
+		if e, ok := dst.Get("k"); !ok || string(mustStringValue(t, e.Value).Data) != want {
 			t.Fatalf("server snapshot in %s contains another server's state", dir)
 		}
 	}

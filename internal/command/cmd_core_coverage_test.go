@@ -76,7 +76,7 @@ func TestCmdAPPEND_Success(t *testing.T) {
 	if !exists {
 		t.Fatal("Key akey should exist")
 	}
-	sv := entry.Value.(*store.StringValue)
+	sv := mustStringValue(t, entry.Value)
 	if string(sv.Data) != "Hello World" {
 		t.Errorf("Expected 'Hello World', got %q", string(sv.Data))
 	}
@@ -119,8 +119,8 @@ func TestCmdSETRANGE_Success(t *testing.T) {
 		t.Fatalf("SETRANGE: %v", err)
 	}
 	entry, _ := s.Get("sr")
-	if string(entry.Value.(*store.StringValue).Data) != "Hello Redis" {
-		t.Errorf("Expected 'Hello Redis', got %q", entry.Value.(*store.StringValue).Data)
+	if string(mustStringValue(t, entry.Value).Data) != "Hello Redis" {
+		t.Errorf("Expected 'Hello Redis', got %q", mustStringValue(t, entry.Value).Data)
 	}
 }
 
@@ -138,7 +138,7 @@ func TestCmdSETRANGE_NewKey(t *testing.T) {
 	if !exists {
 		t.Fatal("newsr should exist")
 	}
-	data := entry.Value.(*store.StringValue).Data
+	data := mustStringValue(t, entry.Value).Data
 	if len(data) != 7 {
 		t.Errorf("Expected length 7, got %d", len(data))
 	}
@@ -278,8 +278,8 @@ func TestCmdSETNX_Success(t *testing.T) {
 
 	// Value should still be original
 	entry, _ := s.Get("setnxk")
-	if string(entry.Value.(*store.StringValue).Data) != "val" {
-		t.Errorf("Expected 'val', got %q", entry.Value.(*store.StringValue).Data)
+	if string(mustStringValue(t, entry.Value).Data) != "val" {
+		t.Errorf("Expected 'val', got %q", mustStringValue(t, entry.Value).Data)
 	}
 }
 
@@ -307,7 +307,7 @@ func TestCmdSETEX_Success(t *testing.T) {
 	if !exists {
 		t.Fatal("key should exist")
 	}
-	if string(entry.Value.(*store.StringValue).Data) != "val" {
+	if string(mustStringValue(t, entry.Value).Data) != "val" {
 		t.Error("wrong value")
 	}
 	if entry.ExpiresAt.Load() == 0 {
@@ -357,7 +357,7 @@ func TestCmdPSETEX_Success(t *testing.T) {
 	if !exists {
 		t.Fatal("key should exist")
 	}
-	if string(entry.Value.(*store.StringValue).Data) != "val" {
+	if string(mustStringValue(t, entry.Value).Data) != "val" {
 		t.Error("wrong value")
 	}
 }
@@ -403,11 +403,11 @@ func TestCmdMSET_Success(t *testing.T) {
 	}
 
 	e1, _ := s.Get("mk1")
-	if string(e1.Value.(*store.StringValue).Data) != "mv1" {
+	if string(mustStringValue(t, e1.Value).Data) != "mv1" {
 		t.Error("mk1 wrong value")
 	}
 	e2, _ := s.Get("mk2")
-	if string(e2.Value.(*store.StringValue).Data) != "mv2" {
+	if string(mustStringValue(t, e2.Value).Data) != "mv2" {
 		t.Error("mk2 wrong value")
 	}
 }
@@ -752,7 +752,7 @@ func TestCmdGETSET_WithExisting(t *testing.T) {
 	}
 
 	entry, _ := s.Get("gs")
-	if string(entry.Value.(*store.StringValue).Data) != "new" {
+	if string(mustStringValue(t, entry.Value).Data) != "new" {
 		t.Error("new value not set")
 	}
 }

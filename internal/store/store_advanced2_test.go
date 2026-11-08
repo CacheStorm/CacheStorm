@@ -99,7 +99,7 @@ func TestStoreDataTypesAdvanced(t *testing.T) {
 		}
 
 		// Clone
-		cloned := val.Clone().(*StringValue)
+		cloned := mustStringValue(t, val.Clone())
 		if string(cloned.Data) != "test string" {
 			t.Error("Clone mismatch")
 		}

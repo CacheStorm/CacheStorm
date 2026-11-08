@@ -15,8 +15,8 @@ func TestStoreSetGet(t *testing.T) {
 		t.Fatal("key1 should exist")
 	}
 
-	if string(entry.Value.(*StringValue).Data) != "value1" {
-		t.Errorf("expected value1, got %s", entry.Value.(*StringValue).Data)
+	if string(mustStringValue(t, entry.Value).Data) != "value1" {
+		t.Errorf("expected value1, got %s", mustStringValue(t, entry.Value).Data)
 	}
 }
 

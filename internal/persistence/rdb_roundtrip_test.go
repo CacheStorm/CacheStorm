@@ -62,7 +62,7 @@ func TestRDBSaveLoadRoundTripAllTypes(t *testing.T) {
 	}
 
 	// String (no TTL)
-	sv, ok := getEntry("string_plain").Value.(*store.StringValue)
+	sv, ok := store.AsStringValue(getEntry("string_plain").Value)
 	if !ok || string(sv.Data) != "hello" {
 		t.Errorf("string_plain = %#v, want StringValue{hello}", getEntry("string_plain").Value)
 	}

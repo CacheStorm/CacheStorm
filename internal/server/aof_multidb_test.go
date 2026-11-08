@@ -60,7 +60,7 @@ func getString(t *testing.T, s *store.Store, key string) string {
 	if !ok {
 		return "<missing>"
 	}
-	sv, ok := e.Value.(*store.StringValue)
+	sv, ok := store.AsStringValue(e.Value)
 	if !ok {
 		t.Fatalf("%s is not a string", key)
 	}

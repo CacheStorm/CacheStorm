@@ -162,6 +162,9 @@ const (
 // its compact encoding.
 func getEncoding(v store.Value) string {
 	switch val := v.(type) {
+	case store.CompactString:
+		sv, _ := store.AsStringValue(val)
+		return getEncoding(sv)
 	case *store.StringValue:
 		if val.Enc == store.StringEncRaw {
 			return "raw"
@@ -289,7 +292,7 @@ func cmdOBJECT(ctx *Context) error {
 		}
 		return ctx.WriteInteger(int64(entry.LFUCount()))
 	case "REFCOUNT":
-		if sv, ok := entry.Value.(*store.StringValue); ok && ctx.Store.SharesIntegers() {
+		if sv, ok := store.AsStringValue(entry.Value); ok && ctx.Store.SharesIntegers() {
 			if n, ok := parseRedisInt(sv.Data); ok && n >= 0 && n < sharedIntegers {
 				return ctx.WriteInteger(math.MaxInt32)
 			}

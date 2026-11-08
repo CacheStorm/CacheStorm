@@ -87,7 +87,7 @@ func TestSETRejectsNonPositiveExpiryLeavesExistingKey(t *testing.T) {
 	if !found {
 		t.Fatal("key was lost after the rejected SET")
 	}
-	sv, ok := got.Value.(*store.StringValue)
+	sv, ok := store.AsStringValue(got.Value)
 	if !ok {
 		t.Fatalf("key type changed to %T", got.Value)
 	}

@@ -50,7 +50,7 @@ func TestAOFRestoresEvalshaAndFcallWrites(t *testing.T) {
 		if !ok {
 			t.Fatalf("%s was not restored", key)
 		}
-		if sv, ok := entry.Value.(*store.StringValue); !ok || string(sv.Data) != want {
+		if sv, ok := store.AsStringValue(entry.Value); !ok || string(sv.Data) != want {
 			t.Fatalf("%s restored as %#v, want %s", key, entry.Value, want)
 		}
 	}

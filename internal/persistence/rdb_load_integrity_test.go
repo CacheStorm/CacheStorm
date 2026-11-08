@@ -40,7 +40,10 @@ func RDB(storeFailure, verify bool) []auditResult {
 	dst := store.NewStore()
 	auditMust(persistence.NewRDBReader(dst).Load(path))
 	entry, ok := dst.Get("k")
-	results := []auditResult{{"control: complete snapshot restores key", true, ok && string(entry.Value.(*store.StringValue).Data) == strings.Repeat("v", 128)}}
+	results := []auditResult{{"control: complete snapshot restores key", true, ok && func() bool {
+		b, _, ok := store.StringOf(entry.Value)
+		return ok && string(b) == strings.Repeat("v", 128)
+	}()}}
 	if !storeFailure {
 		data, err := os.ReadFile(path)
 		auditMust(err)

@@ -124,7 +124,7 @@ func TestWatchAbortsWhenWatchedKeyModified(t *testing.T) {
 	if !exists {
 		t.Fatal("aborted transaction must leave the watched key in place")
 	}
-	if sv, ok := entry.Value.(*store.StringValue); !ok || string(sv.Data) != "v-mid" {
+	if sv, ok := store.AsStringValue(entry.Value); !ok || string(sv.Data) != "v-mid" {
 		t.Fatal("watched key was overwritten by an aborted transaction — optimistic locking is not enforced")
 	}
 }

@@ -63,7 +63,7 @@ func TestHashCreationReportsStoreRejection(t *testing.T) {
 				t.Fatalf("wrong type: %q", got)
 			}
 			before, _ := s.Get("wrong")
-			if string(before.Value.(*store.StringValue).Data) != "keep" {
+			if string(mustStringValue(t, before.Value).Data) != "keep" {
 				t.Fatal("wrong-type destination changed")
 			}
 		})

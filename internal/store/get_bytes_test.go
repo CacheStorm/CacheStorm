@@ -16,7 +16,7 @@ func TestGetBytesAgreesWithGet(t *testing.T) {
 		t.Fatal(err)
 	}
 	time.Sleep(5 * time.Millisecond)
-	if e, ok := s.GetBytes([]byte("live")); !ok || string(e.Value.(*StringValue).Data) != "v" {
+	if e, ok := s.GetBytes([]byte("live")); !ok || string(mustStringValue(t, e.Value).Data) != "v" {
 		t.Fatalf("live: %v %v", e, ok)
 	}
 	if _, ok := s.GetBytes([]byte("missing")); ok {

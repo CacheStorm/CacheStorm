@@ -131,7 +131,7 @@ func TestStoreDataTypes(t *testing.T) {
 func TestStoreValueClone(t *testing.T) {
 	t.Run("String Clone", func(t *testing.T) {
 		original := &StringValue{Data: []byte("original")}
-		cloned := original.Clone().(*StringValue)
+		cloned := mustStringValue(t, original.Clone())
 		if string(cloned.Data) != "original" {
 			t.Error("Clone data mismatch")
 		}

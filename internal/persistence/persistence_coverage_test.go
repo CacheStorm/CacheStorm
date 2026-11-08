@@ -655,7 +655,7 @@ func TestReadRDBAllOpcodes(t *testing.T) {
 	if !ok || entry == nil {
 		t.Fatal("expected 'plain_key'")
 	}
-	sv, _ := entry.Value.(*store.StringValue)
+	sv, _ := store.AsStringValue(entry.Value)
 	if sv == nil || string(sv.Data) != "plain_val" {
 		t.Errorf("expected 'plain_val'")
 	}
@@ -826,7 +826,7 @@ func TestReadEntryDefaultType(t *testing.T) {
 	if !ok || entry == nil {
 		t.Fatal("expected 'unknown_type_key'")
 	}
-	sv, ok := entry.Value.(*store.StringValue)
+	sv, ok := store.AsStringValue(entry.Value)
 	if !ok {
 		t.Fatalf("expected StringValue, got %T", entry.Value)
 	}
@@ -910,7 +910,7 @@ func TestReadLengthEncoding4Byte(t *testing.T) {
 	if !ok || entry == nil {
 		t.Fatal("expected 'bkey'")
 	}
-	sv, _ := entry.Value.(*store.StringValue)
+	sv, _ := store.AsStringValue(entry.Value)
 	if sv == nil || len(sv.Data) != 20000 {
 		t.Errorf("expected value of length 20000, got %d", len(sv.Data))
 	}
@@ -1300,7 +1300,7 @@ func TestPersistenceManagerStartWithExistingRDB(t *testing.T) {
 	if !ok || entry == nil {
 		t.Fatal("expected 'initial_key' to be loaded from RDB on Start")
 	}
-	sv, _ := entry.Value.(*store.StringValue)
+	sv, _ := store.AsStringValue(entry.Value)
 	if sv == nil || string(sv.Data) != "initial_val" {
 		t.Error("expected 'initial_val'")
 	}
@@ -1543,7 +1543,7 @@ func TestRDBManualRoundTripMultipleTypes(t *testing.T) {
 	if e, ok := s.Get("greeting"); !ok || e == nil {
 		t.Error("expected 'greeting'")
 	} else {
-		sv, _ := e.Value.(*store.StringValue)
+		sv, _ := store.AsStringValue(e.Value)
 		if string(sv.Data) != "hello" {
 			t.Errorf("expected 'hello'")
 		}

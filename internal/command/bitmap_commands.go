@@ -58,6 +58,8 @@ func getBitmap(ctx *Context, key string) *BitmapValue {
 		return v
 	case *store.StringValue:
 		return &BitmapValue{Data: v.Data}
+	case store.CompactString:
+		return &BitmapValue{Data: v.Bytes()}
 	default:
 		return nil
 	}
@@ -71,7 +73,7 @@ func bitmapWrongType(ctx *Context, key string) bool {
 		return false
 	}
 	switch entry.Value.(type) {
-	case *store.StringValue, *BitmapValue:
+	case *store.StringValue, store.CompactString, *BitmapValue:
 		return false
 	default:
 		return true
@@ -146,6 +148,8 @@ func bitmapBytes(ctx *Context, key string) ([]byte, bool, error) {
 		return append([]byte(nil), v.Data...), true, nil
 	case *store.StringValue:
 		return v.Data, true, nil
+	case store.CompactString:
+		return v.Bytes(), true, nil
 	}
 	return nil, true, store.ErrWrongType
 }
@@ -165,6 +169,8 @@ func readBitmap(ctx *Context, key string, fn func(data []byte) int64) (int64, bo
 		return fn(v.Data), true, nil
 	case *store.StringValue:
 		return fn(v.Data), true, nil
+	case store.CompactString:
+		return fn(v.Bytes()), true, nil
 	}
 	return 0, true, store.ErrWrongType
 }

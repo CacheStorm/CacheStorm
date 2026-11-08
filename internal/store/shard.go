@@ -59,6 +59,9 @@ func footprint[K string | []byte](key K, entry *Entry) int64 {
 // setLocked installs entry under key and returns the memory delta and the
 // entry it replaced, if any. The caller holds s.mu.
 func (s *Shard) setLocked(key string, entry *Entry) (int64, *Entry) {
+	if sv, ok := entry.Value.(*StringValue); ok && sv.Enc != StringEncRaw {
+		entry.Value = compactValue(sv)
+	}
 	entry.bind(s.plain)
 	oldMem := int64(0)
 	old, exists := s.data[key]

@@ -117,7 +117,7 @@ func TestAOFRewriteRoundTripPreservesTypes(t *testing.T) {
 	if !ok {
 		t.Fatal("str:key missing after replay")
 	}
-	strOut, ok := strEntry.Value.(*store.StringValue)
+	strOut, ok := store.AsStringValue(strEntry.Value)
 	if !ok || string(strOut.Data) != "hello" {
 		t.Fatalf("str:key = %T %+v", strEntry.Value, strEntry.Value)
 	}

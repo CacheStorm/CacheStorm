@@ -82,7 +82,7 @@ func TestStringValue(t *testing.T) {
 	}
 
 	cloned := v.Clone()
-	if string(cloned.(*StringValue).Data) != "hello" {
+	if string(mustStringValue(t, cloned).Data) != "hello" {
 		t.Error("clone should have same data")
 	}
 }

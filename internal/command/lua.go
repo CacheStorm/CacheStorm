@@ -267,7 +267,7 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 		if !exists {
 			return lua.LNil
 		}
-		if sv, ok := entry.Value.(*store.StringValue); ok {
+		if sv, ok := store.AsStringValue(entry.Value); ok {
 			return lua.LString(string(sv.Data))
 		}
 		return lua.LNil
@@ -308,7 +308,7 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 			e.store.Set(args[0], &store.StringValue{Data: []byte("1")}, store.SetOptions{})
 			return lua.LNumber(1)
 		}
-		if sv, ok := entry.Value.(*store.StringValue); ok {
+		if sv, ok := store.AsStringValue(entry.Value); ok {
 			var val int
 			fmt.Sscanf(string(sv.Data), "%d", &val)
 			val++
@@ -326,7 +326,7 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 			e.store.Set(args[0], &store.StringValue{Data: []byte("-1")}, store.SetOptions{})
 			return lua.LNumber(-1)
 		}
-		if sv, ok := entry.Value.(*store.StringValue); ok {
+		if sv, ok := store.AsStringValue(entry.Value); ok {
 			var val int
 			fmt.Sscanf(string(sv.Data), "%d", &val)
 			val--
@@ -593,7 +593,7 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 			entry, exists := e.store.Get(key)
 			if !exists {
 				tbl.Append(lua.LNil)
-			} else if sv, ok := entry.Value.(*store.StringValue); ok {
+			} else if sv, ok := store.AsStringValue(entry.Value); ok {
 				tbl.Append(lua.LString(string(sv.Data)))
 			} else {
 				tbl.Append(lua.LNil)
@@ -980,7 +980,7 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 			e.store.Set(args[0], &store.StringValue{Data: []byte(args[1])}, store.SetOptions{})
 			return lua.LNumber(len(args[1]))
 		}
-		if sv, ok := entry.Value.(*store.StringValue); ok {
+		if sv, ok := store.AsStringValue(entry.Value); ok {
 			newData := make([]byte, 0, len(sv.Data)+len(args[1]))
 			newData = append(newData, sv.Data...)
 			newData = append(newData, []byte(args[1])...)
@@ -997,7 +997,7 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 		if !exists {
 			return lua.LNumber(0)
 		}
-		if sv, ok := entry.Value.(*store.StringValue); ok {
+		if sv, ok := store.AsStringValue(entry.Value); ok {
 			return lua.LNumber(len(sv.Data))
 		}
 		return lua.LNumber(0)
@@ -1015,7 +1015,7 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 			e.store.Set(args[0], &store.StringValue{Data: []byte(args[1])}, store.SetOptions{})
 			return lua.LNumber(incr)
 		}
-		if sv, ok := entry.Value.(*store.StringValue); ok {
+		if sv, ok := store.AsStringValue(entry.Value); ok {
 			var val int64
 			fmt.Sscanf(string(sv.Data), "%d", &val)
 			val += incr
@@ -1037,7 +1037,7 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 			e.store.Set(args[0], &store.StringValue{Data: []byte(fmt.Sprintf("%d", -decr))}, store.SetOptions{})
 			return lua.LNumber(-decr)
 		}
-		if sv, ok := entry.Value.(*store.StringValue); ok {
+		if sv, ok := store.AsStringValue(entry.Value); ok {
 			var val int64
 			fmt.Sscanf(string(sv.Data), "%d", &val)
 			val -= decr
@@ -1076,7 +1076,7 @@ func (e *ScriptEngine) executeCommand(guard ScriptCallGuard, L *lua.LState, cmd 
 		entry, exists := e.store.Get(args[0])
 		var oldVal []byte
 		if exists {
-			if sv, ok := entry.Value.(*store.StringValue); ok {
+			if sv, ok := store.AsStringValue(entry.Value); ok {
 				oldVal = sv.Data
 			}
 		}

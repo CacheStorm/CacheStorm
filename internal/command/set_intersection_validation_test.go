@@ -75,7 +75,7 @@ func TestSetIntersectionValidatesEverySource(t *testing.T) {
 			if got := runSetAuditX(t, s, "SCARD", "other"); got != ":1\r\n" {
 				t.Fatal("second source changed")
 			}
-			if got, _ := s.Get("bad"); string(got.Value.(*store.StringValue).Data) != "unchanged" {
+			if got, _ := s.Get("bad"); string(mustStringValue(t, got.Value).Data) != "unchanged" {
 				t.Fatal("wrong-type input changed")
 			}
 		})

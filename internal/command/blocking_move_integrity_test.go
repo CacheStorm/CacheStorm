@@ -32,7 +32,7 @@ func TestBlockingMovePreservesDataOnTypeError(t *testing.T) {
 					t.Fatalf("source changed: %q", got)
 				}
 				entry, _ := s.Get("bad")
-				if string(entry.Value.(*store.StringValue).Data) != "untouched" {
+				if string(mustStringValue(t, entry.Value).Data) != "untouched" {
 					t.Fatal("destination changed")
 				}
 			}

@@ -31,6 +31,8 @@ func stringValueOf(v store.Value) ([]byte, bool) {
 	switch val := v.(type) {
 	case *store.StringValue:
 		return val.Data, true
+	case store.CompactString:
+		return val.Bytes(), true
 	case *HyperLogLogValue:
 		data, err := val.RedisStringBytes()
 		return data, err == nil

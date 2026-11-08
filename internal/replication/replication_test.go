@@ -339,7 +339,7 @@ func TestSnapshotRoundTripThroughLoad(t *testing.T) {
 	if e, ok := dstDBs.DB(2).Get("b"); !ok || e.TTL() <= 0 {
 		t.Fatal("list with TTL in database 2 was not loaded")
 	}
-	if e, ok := dstDBs.DB(0).Get("a"); !ok || string(e.Value.(*store.StringValue).Data) != "1" {
+	if e, ok := dstDBs.DB(0).Get("a"); !ok || string(mustStringValue(t, e.Value).Data) != "1" {
 		t.Fatal("string in database 0 was not loaded")
 	}
 	// A truncated payload is an error, not a partial success.

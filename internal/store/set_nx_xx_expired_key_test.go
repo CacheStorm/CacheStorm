@@ -41,7 +41,7 @@ func TestSetNXTreatsExpiredKeyAsAbsent(t *testing.T) {
 	if !ok {
 		t.Fatal("the value was not stored")
 	}
-	if got := string(entry.Value.(*StringValue).Data); got != "v2" {
+	if got := string(mustStringValue(t, entry.Value).Data); got != "v2" {
 		t.Fatalf("stored value = %q, want \"v2\"", got)
 	}
 }
@@ -62,7 +62,7 @@ func TestSetXXDoesNotReviveExpiredKey(t *testing.T) {
 	}
 	// The same test instance must not have been overwritten with the new value.
 	if entry, ok := s.GetShard("xxkey").Get("xxkey"); ok {
-		if got := string(entry.Value.(*StringValue).Data); got != "v2" {
+		if got := string(mustStringValue(t, entry.Value).Data); got != "v2" {
 			t.Fatalf("the expired entry was overwritten with %q", got)
 		}
 	}

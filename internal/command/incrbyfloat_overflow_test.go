@@ -41,7 +41,7 @@ func storedStr(t *testing.T, s *store.Store, key string) string {
 	if !exists {
 		t.Fatalf("key %q disappeared", key)
 	}
-	sv, ok := entry.Value.(*store.StringValue)
+	sv, ok := store.AsStringValue(entry.Value)
 	if !ok {
 		t.Fatalf("key %q is not a string value", key)
 	}

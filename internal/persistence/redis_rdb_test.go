@@ -26,7 +26,7 @@ func TestLoadRedis74RDB(t *testing.T) {
 		if !ok {
 			t.Fatalf("%s missing", key)
 		}
-		return string(e.Value.(*store.StringValue).Data)
+		return string(mustStringValue(t, e.Value).Data)
 	}
 	if str("str") != "hello" || str("int") != "12345" || len(str("long")) != 100 || str("hll")[:4] != "HYLL" {
 		t.Fatal("string values differ")

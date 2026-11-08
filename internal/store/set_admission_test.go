@@ -268,7 +268,9 @@ func TestGetOrCreateRacedPublicationTouchesExistingEntry(t *testing.T) {
 	entry.SetLFUCount(lfuInitVal)
 	close(release)
 	got := <-result
-	if got.err != nil || got.created || got.value != actual || entry.LFUCount() != lfuInitVal+1 {
+	// The winner is stored as a CompactString, so compare its bytes.
+	gotBytes, _, _ := StringOf(got.value)
+	if got.err != nil || got.created || string(gotBytes) != string(actual.Data) || entry.LFUCount() != lfuInitVal+1 {
 		t.Fatalf("raced result=%+v counter=%d want=%d", got, entry.LFUCount(), lfuInitVal+1)
 	}
 }

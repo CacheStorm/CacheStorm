@@ -39,12 +39,11 @@ func cmdCacheBulkGet(ctx *Context) error {
 			entry, exists := ctx.Store.Get(key)
 			if exists {
 				var value []byte
-				switch v := entry.Value.(type) {
-				case *store.StringValue:
-					value = v.Data
-				default:
+				data, _, ok := store.StringOf(entry.Value)
+				if !ok {
 					continue
 				}
+				value = data
 				results = append(results, resp.ArrayValue([]*resp.Value{
 					resp.BulkString(key),
 					resp.BulkBytes(value),
@@ -181,6 +180,10 @@ func cmdCacheExport(ctx *Context) error {
 				case *store.StringValue:
 					entryData = append(entryData,
 						resp.BulkString("value"), resp.BulkBytes(v.Data),
+					)
+				case store.CompactString:
+					entryData = append(entryData,
+						resp.BulkString("value"), resp.BulkBytes(v.Bytes()),
 					)
 				case *store.HashValue:
 					fields := make([]*resp.Value, 0)

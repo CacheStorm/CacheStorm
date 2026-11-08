@@ -41,7 +41,7 @@ func TestSetWritesReportStoreRejection(t *testing.T) {
 					t.Fatal("rejected write was acknowledged")
 				}
 				after, ok := s.Get("dst")
-				if !ok || after != before || after.ExpiresAt.Load() != math.MaxInt64 || string(after.Value.(*store.StringValue).Data) != "keep" {
+				if !ok || after != before || after.ExpiresAt.Load() != math.MaxInt64 || string(mustStringValue(t, after.Value).Data) != "keep" {
 					t.Fatal("rejected write changed destination")
 				}
 				if _, ok := s.Get("new"); ok {

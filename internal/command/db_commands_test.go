@@ -148,7 +148,7 @@ func TestSelectInsideMultiAppliesToQueuedCommands(t *testing.T) {
 		t.Fatalf("SELECT inside MULTI must stay selected after EXEC, db=%d", c.db)
 	}
 	expectReply(t, c.do("GET", "a"), "$1\r\n3\r\n")
-	if e, ok := dbs.DB(0).Get("a"); !ok || string(e.Value.(*store.StringValue).Data) != "0" {
+	if e, ok := dbs.DB(0).Get("a"); !ok || string(mustStringValue(t, e.Value).Data) != "0" {
 		t.Fatal("the command queued before SELECT must run in database 0")
 	}
 	if len(executed) != 3 || executed[0].DB != 0 || executed[2].DB != 3 {

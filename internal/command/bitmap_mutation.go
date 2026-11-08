@@ -118,6 +118,8 @@ func prepareBitmapValue(value store.Value, prepare func([]byte) (store.ValuePlan
 		return prepare(nil)
 	case *store.StringValue:
 		return prepare(v.Data)
+	case store.CompactString:
+		return prepare(v.Bytes())
 	case *BitmapValue:
 		v.mu.RLock()
 		defer v.mu.RUnlock()
@@ -132,8 +134,11 @@ func prepareBitmapValue(value store.Value, prepare func([]byte) (store.ValuePlan
 // nothing still leaves an embstr or int string raw. The value is not
 // otherwise touched: no event, no WATCH invalidation.
 func markRawString(v store.Value) {
-	if sv, ok := v.(*store.StringValue); ok {
+	switch sv := v.(type) {
+	case *store.StringValue:
 		sv.Enc = store.StringEncRaw
+	case store.CompactString:
+		sv.MarkRaw()
 	}
 }
 

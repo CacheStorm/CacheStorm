@@ -838,6 +838,8 @@ func (rw *AOFRewriter) writeValueCommands(w *bufio.Writer, key string, value sto
 	switch vt := value.(type) {
 	case *store.StringValue:
 		return rw.writeKeyValue(w, "SET", key, vt.Data)
+	case store.CompactString:
+		return rw.writeKeyValue(w, "SET", key, vt.Bytes())
 
 	case *store.HashValue:
 		snap := snapshotHash(vt)

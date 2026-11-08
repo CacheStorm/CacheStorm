@@ -49,7 +49,7 @@ func replayTx(ctx *Context, r *Router, cmd string, args ...string) string {
 // Defect: executeQueuedCommand's "GET" case did
 //
 //	if entry, exists := ctx.Store.Get(key); exists {
-//	    if sv, ok := entry.Value.(*store.StringValue); ok { return BulkBytes(sv.Data) }
+//	    if sv, ok := store.AsStringValue(entry.Value); ok { return BulkBytes(sv.Data) }
 //	}
 //	return resp.NullBulkString()
 //

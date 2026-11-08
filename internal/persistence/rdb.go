@@ -174,7 +174,7 @@ func (w *RDBWriter) writeEntry(f io.Writer, key string, entry *store.Entry) erro
 		hashSnap = &snap
 	}
 	switch entry.Value.(type) {
-	case *store.StringValue, *store.ListValue, *store.SetValue, *store.HashValue, *store.SortedSetValue, *store.GeoValue, *store.JSONValue, *store.StreamValue, *store.TimeSeriesValue:
+	case *store.StringValue, store.CompactString, *store.ListValue, *store.SetValue, *store.HashValue, *store.SortedSetValue, *store.GeoValue, *store.JSONValue, *store.StreamValue, *store.TimeSeriesValue:
 	default:
 		if _, ok := entry.Value.(store.RedisStringValue); !ok {
 			return fmt.Errorf("unsupported snapshot value %T for key %q", entry.Value, key)
@@ -223,7 +223,7 @@ func (w *RDBWriter) writeEntry(f io.Writer, key string, entry *store.Entry) erro
 
 func (w *RDBWriter) getValueType(v store.Value) int {
 	switch v.(type) {
-	case *store.StringValue:
+	case *store.StringValue, store.CompactString:
 		return 0
 	case *store.ListValue:
 		return 1
@@ -250,6 +250,8 @@ func (w *RDBWriter) writeValue(f io.Writer, v store.Value, valueType int) error 
 	switch vt := v.(type) {
 	case *store.StringValue:
 		return w.writeString(f, string(vt.Data))
+	case store.CompactString:
+		return w.writeString(f, string(vt.Bytes()))
 	case *store.ListValue:
 		vt.RLock()
 		items := make([][]byte, vt.Len())

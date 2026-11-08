@@ -154,7 +154,7 @@ func TestSetrangeDoesNotMutateReadValue(t *testing.T) {
 	c := newCompatSession(t)
 	c.do("SET", "s", "abc")
 	entry, _ := c.s.Get("s")
-	before := entry.Value.(*store.StringValue).Data
+	before := mustStringValue(t, entry.Value).Data
 	c.expect(":3\r\n", "SETRANGE", "s", "0", "X")
 	if string(before) != "abc" {
 		t.Fatalf("SETRANGE wrote into the previous value's bytes: %q", before)

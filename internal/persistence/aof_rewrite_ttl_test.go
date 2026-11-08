@@ -126,7 +126,7 @@ func TestAOFRewritePreservesValuesWithTTLControl(t *testing.T) {
 	if !ok {
 		t.Fatal("control: key \"plain\" missing after rewrite+replay")
 	}
-	sv, ok := entry.Value.(*store.StringValue)
+	sv, ok := store.AsStringValue(entry.Value)
 	if !ok {
 		t.Fatalf("control: value type = %T, want *store.StringValue", entry.Value)
 	}

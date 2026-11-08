@@ -68,7 +68,7 @@ func TestStaleTagIndexDoesNotDeleteRecreatedKey(t *testing.T) {
 	if !ok {
 		t.Fatal("data loss: the recreated live key was deleted by a stale tag mapping")
 	}
-	if got := string(entry.Value.(*StringValue).Data); got != "v2" {
+	if got := string(mustStringValue(t, entry.Value).Data); got != "v2" {
 		t.Errorf("value = %q, want \"v2\"", got)
 	}
 }

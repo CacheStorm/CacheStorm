@@ -34,7 +34,7 @@ func TestPersistenceExpiryMillisecondsFullRange(t *testing.T) {
 				if !ok {
 					t.Fatal("key missing after reload")
 				}
-				if got := string(entry.Value.(*store.StringValue).Data); got != "v" {
+				if got := string(mustStringValue(t, entry.Value).Data); got != "v" {
 					t.Fatalf("value after reload = %q", got)
 				}
 				if got := entry.ExpiresAt.Load(); got != at {

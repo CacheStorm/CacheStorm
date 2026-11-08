@@ -39,6 +39,9 @@ func EncodeDump(value store.Value) ([]byte, error) {
 	case *store.StringValue:
 		out = append(out, 0)
 		str(string(v.Data))
+	case store.CompactString:
+		out = append(out, 0)
+		str(string(v.Bytes()))
 	case *store.ListValue:
 		v.RLock()
 		defer v.RUnlock()

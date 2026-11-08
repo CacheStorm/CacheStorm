@@ -78,7 +78,7 @@ func TestAOFRestoresTransactionWrites(t *testing.T) {
 		}
 	}
 	entry, _ := restored.store.Get("tx:a")
-	if sv, ok := entry.Value.(*store.StringValue); !ok || string(sv.Data) != "2" {
+	if sv, ok := store.AsStringValue(entry.Value); !ok || string(sv.Data) != "2" {
 		t.Fatalf("tx:a restored as %#v, want 2", entry.Value)
 	}
 }

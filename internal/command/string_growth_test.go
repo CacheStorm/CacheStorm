@@ -3,8 +3,6 @@ package command
 import (
 	"strings"
 	"testing"
-
-	"github.com/cachestorm/cachestorm/internal/store"
 )
 
 // TestStringGrowthKeepsPublishedBytes checks that APPEND and SETRANGE, which
@@ -17,7 +15,7 @@ func TestStringGrowthKeepsPublishedBytes(t *testing.T) {
 	h.do("SET", "k", "ab")
 	h.do("APPEND", "k", "cd")
 	entry, _ := h.s.Get("k")
-	before := entry.Value.(*store.StringValue).Data
+	before := mustStringValue(t, entry.Value).Data
 	h.do("APPEND", "k", "ef")
 	h.do("COPY", "k", "c")
 	h.do("APPEND", "k", "gh")

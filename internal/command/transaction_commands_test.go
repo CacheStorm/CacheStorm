@@ -72,7 +72,7 @@ func TestAllTransactionCommands(t *testing.T) {
 				if !exists {
 					return false
 				}
-				val := entry.Value.(*store.StringValue)
+				val := mustStringValue(t, entry.Value)
 				return string(val.Data) == "newvalue"
 			},
 		},

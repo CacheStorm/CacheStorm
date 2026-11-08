@@ -149,8 +149,8 @@ func TestStoreSetEntry(t *testing.T) {
 	if !exists {
 		t.Fatal("key should exist")
 	}
-	if string(e.Value.(*StringValue).Data) != "value" {
-		t.Errorf("expected 'value', got '%s'", e.Value.(*StringValue).Data)
+	if string(mustStringValue(t, e.Value).Data) != "value" {
+		t.Errorf("expected 'value', got '%s'", mustStringValue(t, e.Value).Data)
 	}
 }
 
@@ -200,7 +200,7 @@ func TestStringValueMethods(t *testing.T) {
 		t.Error("clone should have same value")
 	}
 
-	cloned.(*StringValue).Data[0] = 'x'
+	mustStringValue(t, cloned).Data[0] = 'x'
 	if v.String() == "xello" {
 		t.Error("clone should be independent")
 	}

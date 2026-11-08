@@ -38,6 +38,8 @@ func valueDigest(v store.Value) digest {
 	switch val := v.(type) {
 	case *store.StringValue:
 		return sum(val.Data)
+	case store.CompactString:
+		return sum(val.Bytes())
 	case *store.ListValue:
 		val.RLock()
 		defer val.RUnlock()
