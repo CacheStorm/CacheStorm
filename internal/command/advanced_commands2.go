@@ -1031,6 +1031,9 @@ func cmdPOOLXCREATE(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	size := int(parseInt64(ctx.ArgString(1)))
+	if err := checkSlots("size", size); err != nil {
+		return ctx.WriteError(err)
+	}
 	available := make([]string, size)
 	for i := 0; i < size; i++ {
 		available[i] = fmt.Sprintf("resource-%d", i)

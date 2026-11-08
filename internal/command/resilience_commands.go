@@ -2234,14 +2234,11 @@ func cmdPARTITIONXCREATE(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	count := int(parseInt64(ctx.ArgString(1)))
-	if count <= 0 {
-		return ctx.WriteError(fmt.Errorf("ERR count must be positive"))
+	if err := checkSlots("count", count); err != nil {
+		return ctx.WriteError(err)
 	}
-	partitionsXMux.Lock()
 	data := make([][]string, count)
-	for i := range data {
-		data[i] = make([]string, 0)
-	}
+	partitionsXMux.Lock()
 	partitionsX[name] = &PartitionX{Name: name, Count: count, Data: data}
 	partitionsXMux.Unlock()
 	return ctx.WriteOK()

@@ -77,3 +77,38 @@ func TestHotKeys(t *testing.T) {
 		}
 	}
 }
+
+// Creates that allocate their slots up front refuse a count that would
+// exhaust memory, and still accept a reasonable one.
+func TestExtensionCreatesBoundTheirSlots(t *testing.T) {
+	s := store.NewStore()
+	router := NewRouter()
+	RegisterMoreCommands(router)
+	RegisterResilienceCommands(router)
+	RegisterAdvancedCommands2(router)
+	huge := "100000000000"
+	for _, cmd := range [][]string{
+		{"PARTITION.CREATE", "p", huge},
+		{"PARTITIONX.CREATE", "p", huge},
+		{"RINGBUFFER.CREATE", "r", huge},
+		{"POOLX.CREATE", "p", huge},
+		{"POOLX.CREATE", "p", "-5"},
+		{"SKETCH.CREATE", "s", "4194304", "4194304"},
+	} {
+		if got := runCmd(t, s, router, cmd[0], cmd[1:]...); !strings.HasPrefix(got, "-ERR") {
+			t.Errorf("%v: %q, want an error", cmd, got)
+		}
+	}
+	for _, cmd := range [][]string{
+		{"PARTITION.CREATE", "p", "8"}, {"PARTITIONX.CREATE", "p", "8"},
+		{"RINGBUFFER.CREATE", "r", "8"}, {"POOLX.CREATE", "p", "8"},
+		{"SKETCH.CREATE", "s", "100", "4"},
+	} {
+		if got := runCmd(t, s, router, cmd[0], cmd[1:]...); got != "+OK\r\n" {
+			t.Errorf("%v: %q, want OK", cmd, got)
+		}
+	}
+	if got := runCmd(t, s, router, "PARTITIONX.ADD", "p", "k", "v"); strings.HasPrefix(got, "-") {
+		t.Errorf("PARTITIONX.ADD after create: %q", got)
+	}
+}

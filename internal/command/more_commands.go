@@ -1918,7 +1918,23 @@ var (
 const (
 	maxBloomXSize   = 1 << 26
 	maxBloomXHashes = 64
+	// maxExtensionSlots bounds the slots a ring buffer, partition set or
+	// pool allocates up front, and maxSketchCells a sketch's counters, so a
+	// single create cannot exhaust memory.
+	maxExtensionSlots = 1 << 20
+	maxSketchCells    = 1 << 22
 )
+
+// checkSlots reports a create whose up-front slot count is out of range.
+func checkSlots(what string, n int) error {
+	if n <= 0 {
+		return fmt.Errorf("ERR %s must be positive", what)
+	}
+	if n > maxExtensionSlots {
+		return fmt.Errorf("ERR %s must be at most %d", what, maxExtensionSlots)
+	}
+	return nil
+}
 
 type BloomXFilter struct {
 	Name   string
@@ -2059,6 +2075,9 @@ func cmdSKETCHCREATE(ctx *Context) error {
 	if width <= 0 || depth <= 0 {
 		return ctx.WriteError(fmt.Errorf("ERR width and depth must be positive"))
 	}
+	if width > maxSketchCells || depth > maxSketchCells/width {
+		return ctx.WriteError(fmt.Errorf("ERR width times depth must be at most %d", maxSketchCells))
+	}
 	counts := make([][]int64, depth)
 	for i := range counts {
 		counts[i] = make([]int64, width)
@@ -2148,8 +2167,8 @@ func cmdRINGBUFFERCREATE(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	size := int(parseInt64(ctx.ArgString(1)))
-	if size <= 0 {
-		return ctx.WriteError(fmt.Errorf("ERR size must be positive"))
+	if err := checkSlots("size", size); err != nil {
+		return ctx.WriteError(err)
 	}
 	ringBuffersMu.Lock()
 	ringBuffers[name] = &RingBuffer{Name: name, Size: size, Data: make([]string, size), Head: 0, Count: 0}
@@ -2540,14 +2559,12 @@ func cmdPARTITIONCREATE(ctx *Context) error {
 	}
 	name := ctx.ArgString(0)
 	count := int(parseInt64(ctx.ArgString(1)))
-	if count <= 0 {
-		return ctx.WriteError(fmt.Errorf("ERR count must be positive"))
+	if err := checkSlots("count", count); err != nil {
+		return ctx.WriteError(err)
 	}
+	p := &Partition{Name: name, Count: count, Data: make([][]string, count)}
 	partitionsMu.Lock()
-	partitions[name] = &Partition{Name: name, Count: count, Data: make([][]string, count)}
-	for i := range partitions[name].Data {
-		partitions[name].Data[i] = make([]string, 0)
-	}
+	partitions[name] = p
 	partitionsMu.Unlock()
 	return ctx.WriteOK()
 }
