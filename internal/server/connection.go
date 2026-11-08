@@ -45,6 +45,8 @@ type Connection struct {
 	readBufSize  int
 	writeBufSize int
 	ID           int64
+	// connInfo is the connection's entry in the CONNECTION.* registry.
+	connInfo *command.ConnectionInfo
 	// ctx is the context of the running command, reset for each one.
 	ctx command.Context
 	// waitHold is the gate hold a blocking command releases while it
@@ -572,7 +574,7 @@ func newConnection(id int64, conn net.Conn, s *store.Store, r *command.Router, p
 
 	// Track the connection so CONNECTION.INFO, CONNECTION.LIST and
 	// CONNECTION.COUNT report the live connections.
-	command.TrackConnection(id, conn.RemoteAddr().String())
+	c.connInfo = command.TrackConnection(id, conn.RemoteAddr().String())
 
 	return c
 }
@@ -938,7 +940,9 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 
 		// Count the command against the connection so CONNECTION.INFO can
 		// report it.
-		command.BumpConnectionCommandAt(c.ID, end)
+		if c.connInfo != nil {
+			c.connInfo.Bump(end)
+		}
 
 		// Replies go out once the pipeline the client sent has been served,
 		// so a pipeline of N commands costs one socket write instead of N.

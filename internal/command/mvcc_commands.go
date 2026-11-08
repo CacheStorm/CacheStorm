@@ -671,13 +671,23 @@ var (
 
 // TrackConnection registers a live connection in the registry that
 // CONNECTION.INFO, CONNECTION.LIST and CONNECTION.COUNT report.
-func TrackConnection(id int64, remoteAddr string) {
+// The connection keeps the returned entry to count its commands with Bump
+// without a registry lookup.
+func TrackConnection(id int64, remoteAddr string) *ConnectionInfo {
 	now := time.Now().UnixMilli()
 	connectionsMu.Lock()
 	info := &ConnectionInfo{ID: id, RemoteAddr: remoteAddr, ConnectedAt: now}
 	info.LastActive.Store(now)
 	connections[id] = info
 	connectionsMu.Unlock()
+	return info
+}
+
+// Bump counts a command against the connection, which was last active at
+// now.
+func (c *ConnectionInfo) Bump(now time.Time) {
+	c.Commands.Add(1)
+	c.LastActive.Store(now.UnixMilli())
 }
 
 // UntrackConnection removes a connection from the registry once it is gone.

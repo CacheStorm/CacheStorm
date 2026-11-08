@@ -74,6 +74,11 @@ func (c *Connection) publishInfo() {
 	if c.writer.IsRESP3() {
 		proto = 3
 	}
+	// Only this connection's goroutine writes these fields, so it may read
+	// them without the lock; most commands change none of them.
+	if c.info.name == c.clientName && c.info.user == user && c.info.db == c.db && c.info.multi == multi && c.info.resp == proto {
+		return
+	}
 	c.info.mu.Lock()
 	c.info.name = c.clientName
 	c.info.user = user

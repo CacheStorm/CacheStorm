@@ -216,7 +216,12 @@ func (v *HashValue) put(field string, val []byte) ([]byte, bool) {
 	}
 	if e, ok := v.find(field); ok {
 		old := v.lpVal(e)
-		v.lpSplice(e.start, e.end, lpAppend(nil, field, val))
+		// A new buffer, not an overwrite: readers may still hold slices
+		// of the old one after they release the lock.
+		buf := make([]byte, 0, len(v.lp)-(e.end-e.start)+uvarintLen(len(field))+len(field)+uvarintLen(len(val))+len(val))
+		buf = append(buf, v.lp[:e.start]...)
+		buf = lpAppend(buf, field, val)
+		v.lp = append(buf, v.lp[e.end:]...)
 		if len(v.lp) > hashSmallBytes {
 			v.toDict()
 		}

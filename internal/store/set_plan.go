@@ -1,12 +1,17 @@
 package store
 
-import "math"
+import (
+	"math"
+	"slices"
+)
 
 func (s *Store) AddSetMembers(key string, members []string) (int, error) {
 	added := 0
 	err := s.ApplyValuePlan(key, func(value Value) (ValuePlan, error) {
-		set := &SetValue{}
-		if value != nil {
+		var set *SetValue
+		if value == nil {
+			set = &SetValue{}
+		} else {
 			var ok bool
 			set, ok = value.(*SetValue)
 			if !ok {
@@ -18,17 +23,7 @@ func (s *Store) AddSetMembers(key string, members []string) (int, error) {
 		if len(members) > 0 {
 			set.PrepareAdd(members[0], len(members))
 		}
-		seen := make(map[string]struct{}, len(members))
-		fresh := make([]string, 0, len(members))
-		for _, member := range members {
-			if exists := set.Has(member); exists {
-				continue
-			}
-			if _, dup := seen[member]; !dup {
-				seen[member] = struct{}{}
-				fresh = append(fresh, member)
-			}
-		}
+		fresh := freshMembers(set, members)
 		added = len(fresh)
 		if added == 0 {
 			set.Unlock()
@@ -54,6 +49,38 @@ func (s *Store) AddSetMembers(key string, members []string) (int, error) {
 		return 0, err
 	}
 	return added, nil
+}
+
+// freshMembers returns the members the set does not hold yet, each once.
+// The common single-member call allocates nothing, and short lists are
+// deduplicated without a map. The caller holds the set's lock.
+func freshMembers(set *SetValue, members []string) []string {
+	if len(members) == 1 {
+		if set.Has(members[0]) {
+			return nil
+		}
+		return members
+	}
+	var seen map[string]struct{}
+	if len(members) > 16 {
+		seen = make(map[string]struct{}, len(members))
+	}
+	fresh := make([]string, 0, len(members))
+	for _, member := range members {
+		if set.Has(member) {
+			continue
+		}
+		if seen != nil {
+			if _, dup := seen[member]; dup {
+				continue
+			}
+			seen[member] = struct{}{}
+		} else if slices.Contains(fresh, member) {
+			continue
+		}
+		fresh = append(fresh, member)
+	}
+	return fresh
 }
 
 func (s *Store) moveSetMember(srcKey, dstKey, member string) (bool, error) {

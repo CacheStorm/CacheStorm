@@ -42,8 +42,11 @@ func init() {
 // not change costs a read-locked lookup.
 // wholeValueWriters only ever install whole new values or remove keys, which
 // Store.Set, value plans and deletes charge as they happen; they never change
-// a value in place, so there is nothing to reaccount after them.
+// a value in place, so there is nothing to reaccount after them. SADD,
+// HSET, HMSET and HSETNX change their value only through a value plan,
+// which charges the value's exact footprint as it installs it.
 var wholeValueWriters = map[string]bool{
+	"SADD": true, "HSET": true, "HMSET": true, "HSETNX": true,
 	"SET": true, "SETNX": true, "SETEX": true, "PSETEX": true, "GETSET": true,
 	"MSET": true, "MSETNX": true, "INCR": true, "INCRBY": true, "DECR": true,
 	"DECRBY": true, "INCRBYFLOAT": true, "GETDEL": true, "GETEX": true,
