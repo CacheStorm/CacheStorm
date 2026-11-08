@@ -98,24 +98,26 @@ func (v *StringValue) Clone() Value {
 
 type HashValue struct {
 	lp   []byte
-	lpN  int
 	dict map[string][]byte
-	// adj corrects size, counted at the map form's rates, to the form the
-	// hash is in.
-	adj  atomic.Int64
-	mu   sync.RWMutex
-	dead bool
-	size sizeCounter
-	// ttl holds the field expiries; nil until a field is first given one.
-	ttl *hashFieldTTLs
-	// minExpire is the earliest field expiry (unix ms), 0 when no field has
-	// one, readable without the lock.
-	minExpire atomic.Int64
 	// order lists the fields in Redis' listpack order while big is false
 	// (see hash_order.go).
 	order []string
-	big   bool
+	mu    sync.RWMutex
+	size  sizeCounter
+	// adj corrects size, counted at the map form's rates, to the form the
+	// hash is in.
+	adj atomic.Int64
+	// minExpire is the earliest field expiry (unix ms), 0 when no field has
+	// one, readable without the lock.
+	minExpire atomic.Int64
+	// ttl holds the field expiries; nil until a field is first given one.
+	ttl *hashFieldTTLs
 	scanCache
+	// The small fields share one word: lp's field count, whether the hash
+	// is past the listpack limits, and whether it was deleted.
+	lpN  int32
+	big  bool
+	dead bool
 }
 
 func (v *HashValue) Lock()    { v.mu.Lock() }

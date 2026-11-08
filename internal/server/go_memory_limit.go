@@ -88,3 +88,57 @@ func (s *Server) startHeapFeedback() {
 		}
 	}()
 }
+
+// idleTrimInterval is how often the server looks for memory to return.
+const idleTrimInterval = 5 * time.Second
+
+// shouldTrim reports whether to hand free heap pages back to the system:
+// the heap holds a good deal more free memory than it is likely to need
+// soon (an eighth of the live heap, at least 16MB), and allocation over the
+// last interval was quiet (under a sixteenth of the live heap, at least
+// 8MB), so the pages would not be faulted straight back in.
+func shouldTrim(allocated, free, live uint64) bool {
+	return free > max(16<<20, live/8) && allocated < max(8<<20, live/16)
+}
+
+// startIdleTrim returns free heap memory to the system once writes calm
+// down. The runtime keeps the pages a burst of writes left behind, up to the
+// next collection's goal, so after a bulk load RSS stayed a third or more
+// above the live heap however long the server sat idle.
+func (s *Server) startIdleTrim() {
+	if !ManageGoMemoryLimit.Load() {
+		return
+	}
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		ticker := time.NewTicker(idleTrimInterval)
+		defer ticker.Stop()
+		samples := []metrics.Sample{
+			{Name: "/gc/heap/allocs:bytes"},
+			{Name: "/memory/classes/heap/free:bytes"},
+			{Name: "/gc/heap/live:bytes"},
+		}
+		var last uint64
+		for {
+			select {
+			case <-s.stopCh:
+				return
+			case <-ticker.C:
+			}
+			metrics.Read(samples)
+			for _, sm := range samples {
+				if sm.Value.Kind() != metrics.KindUint64 {
+					return
+				}
+			}
+			allocs := samples[0].Value.Uint64()
+			if last != 0 && shouldTrim(allocs-last, samples[1].Value.Uint64(), samples[2].Value.Uint64()) {
+				debug.FreeOSMemory()
+				metrics.Read(samples)
+				allocs = samples[0].Value.Uint64()
+			}
+			last = allocs
+		}
+	}()
+}

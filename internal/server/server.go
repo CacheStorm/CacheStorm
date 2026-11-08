@@ -665,6 +665,7 @@ func (s *Server) Start(_ context.Context) (retErr error) {
 	s.startAOFRewriteLoop()
 	s.startRateSampler()
 	s.startHeapFeedback()
+	s.startIdleTrim()
 
 	startupComplete = true
 	s.started = true

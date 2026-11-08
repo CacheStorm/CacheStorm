@@ -113,7 +113,7 @@ func (v *HashValue) Len() int {
 	if v.dict != nil {
 		return len(v.dict)
 	}
-	return v.lpN
+	return int(v.lpN)
 }
 
 // Get returns field's value. The caller holds the value's lock.
@@ -285,7 +285,7 @@ func (v *HashValue) SetOrder(fields []string) {
 				n++
 			}
 		}
-		if n == v.lpN {
+		if n == int(v.lpN) {
 			v.lp = buf
 		}
 	} else if !v.big {
