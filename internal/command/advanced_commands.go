@@ -7,6 +7,7 @@ import (
 	"math"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -635,27 +636,27 @@ func cmdPARALLELFILTER(ctx *Context) error {
 }
 
 func toUpper(s string) string {
-	result := ""
+	var result strings.Builder
 	for _, c := range s {
 		if c >= 'a' && c <= 'z' {
-			result += string(c - 32)
+			result.WriteString(string(c - 32))
 		} else {
-			result += string(c)
+			result.WriteString(string(c))
 		}
 	}
-	return result
+	return result.String()
 }
 
 func toLower(s string) string {
-	result := ""
+	var result strings.Builder
 	for _, c := range s {
 		if c >= 'A' && c <= 'Z' {
-			result += string(c + 32)
+			result.WriteString(string(c + 32))
 		} else {
-			result += string(c)
+			result.WriteString(string(c))
 		}
 	}
-	return result
+	return result.String()
 }
 
 func reverse(s string) string {

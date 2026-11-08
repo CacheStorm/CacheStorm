@@ -149,3 +149,80 @@ func TestIDNextNAndStrRepeatBounds(t *testing.T) {
 		t.Fatal("STR.REPEAT built its result by repeated concatenation")
 	}
 }
+
+// Commands that expand their input refuse an output past a string value's
+// limit, never allocate from a dimension alone, and build strings in one
+// pass instead of re-copying them per byte.
+func TestExtensionStringBuildersAreBounded(t *testing.T) {
+	s := store.NewStore()
+	router := NewRouter()
+	RegisterExtendedCommands(router)
+	RegisterTemplateCommands(router)
+	RegisterEncodingCommands(router)
+	RegisterExtraCommands(router)
+	RegisterActorCommands(router)
+	RegisterMoreCommands(router)
+
+	runCmd(t, s, router, "VECTOR.CREATE", "vs", "2")
+	for _, cmd := range [][]string{
+		{"VECTOR.CREATE", "big", "1000000000000"},
+		{"VECTOR.ADD", "vs", "id", "1000000000000"},
+		{"VECTOR.ADD", "nostore", "id", "1000000000000"},
+		{"VECTOR.SEARCH", "vs", "1", "1000000000000"},
+		{"STR.PADLEFT", "x", "10000000000", "0"},
+		{"STR.PADRIGHT", "x", "10000000000", "0"},
+	} {
+		if got := runCmd(t, s, router, cmd[0], cmd[1:]...); !strings.HasPrefix(got, "-ERR") {
+			t.Errorf("%v: %q, want an error", cmd, got)
+		}
+	}
+	if got := runCmd(t, s, router, "VECTOR.ADD", "vs", "a", "2", "1", "0"); got != ":1\r\n" && got != "+OK\r\n" {
+		t.Errorf("VECTOR.ADD a valid vector: %q", got)
+	}
+
+	// 600 placeholders of a 1MB argument would be 600MB.
+	big := strings.Repeat("x", 1<<20)
+	if got := runCmd(t, s, router, "EVAL.FORMAT", strings.Repeat("{0}", 600), big); !strings.HasPrefix(got, "-ERR") {
+		t.Errorf("EVAL.FORMAT amplified past the limit: %d bytes", len(got))
+	}
+	if got := runCmd(t, s, router, "EVAL.TEMPLATE", strings.Repeat("{{a}}", 600), "a", big); !strings.HasPrefix(got, "-ERR") {
+		t.Errorf("EVAL.TEMPLATE amplified past the limit: %d bytes", len(got))
+	}
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"EVAL.FORMAT", "{9223372036854775808}-{1}-{}", "a", "b"}, "$4\r\n-b-a\r\n"},
+		{[]string{"EVAL.FORMAT", "{12x {0}", "a"}, "$6\r\n{12x a\r\n"},
+		{[]string{"EVAL.TEMPLATE", "hi {{ n }}!{{", "n", "bo"}, "$8\r\nhi bo!{{\r\n"},
+		{[]string{"STR.PADLEFT", "7", "3", "0"}, "$3\r\n007\r\n"},
+		{[]string{"STR.PADRIGHT", "ab", "4", ".-"}, "$4\r\nab..\r\n"},
+		{[]string{"CSV.DECODE", `é,"a""b",c`}, "*3\r\n$2\r\né\r\n$3\r\na\"b\r\n$1\r\nc\r\n"},
+		{[]string{"CSV.ENCODE", "a,b", "c"}, "$7\r\n\"a,b\",c\r\n"},
+		{[]string{"URL.ENCODE", "a b/é"}, "$12\r\na+b%2F%C3%A9\r\n"},
+		{[]string{"SANITIZE.HTML", "<a href='x'>&"}, "$31\r\n&lt;a href=&#39;x&#39;&gt;&amp;\r\n"},
+	} {
+		if got := runCmd(t, s, router, c.args[0], c.args[1:]...); got != c.want {
+			t.Errorf("%v: %q, want %q", c.args, got, c.want)
+		}
+	}
+
+	start := time.Now()
+	for _, cmd := range []string{"SANITIZE.HTML", "SANITIZE.JSON", "SANITIZE.SQL", "URL.ENCODE", "CSV.DECODE"} {
+		if got := runCmd(t, s, router, cmd, big); len(got) < 1<<20 {
+			t.Errorf("%s of 1MB: %d bytes", cmd, len(got))
+		}
+	}
+	if time.Since(start) > 2*time.Second {
+		t.Fatal("string helpers re-copied their output per byte")
+	}
+
+	runCmd(t, s, router, "FREQ.CREATE", "f")
+	for _, it := range [][]string{{"b", "2"}, {"a", "2"}, {"c", "5"}, {"d", "1"}} {
+		runCmd(t, s, router, "FREQ.ADD", "f", it[0], it[1])
+	}
+	got := runCmd(t, s, router, "FREQ.TOP", "f", "3")
+	if ia, ib, ic := strings.Index(got, "$1\r\na"), strings.Index(got, "$1\r\nb"), strings.Index(got, "$1\r\nc"); !(ic >= 0 && ic < ia && ia < ib) {
+		t.Errorf("FREQ.TOP order: %q", got)
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -721,24 +722,24 @@ func cmdSANITIZEHTML(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	input := ctx.ArgString(0)
-	result := ""
+	var result strings.Builder
 	for _, c := range input {
 		switch c {
 		case '<':
-			result += "&lt;"
+			result.WriteString("&lt;")
 		case '>':
-			result += "&gt;"
+			result.WriteString("&gt;")
 		case '&':
-			result += "&amp;"
+			result.WriteString("&amp;")
 		case '"':
-			result += "&quot;"
+			result.WriteString("&quot;")
 		case '\'':
-			result += "&#39;"
+			result.WriteString("&#39;")
 		default:
-			result += string(c)
+			result.WriteString(string(c))
 		}
 	}
-	return ctx.WriteBulkString(result)
+	return ctx.WriteBulkString(result.String())
 }
 
 func cmdSANITIZEJSON(ctx *Context) error {
@@ -746,24 +747,24 @@ func cmdSANITIZEJSON(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	input := ctx.ArgString(0)
-	result := ""
+	var result strings.Builder
 	for _, c := range input {
 		switch c {
 		case '"':
-			result += "\\\""
+			result.WriteString("\\\"")
 		case '\\':
-			result += "\\\\"
+			result.WriteString("\\\\")
 		case '\n':
-			result += "\\n"
+			result.WriteString("\\n")
 		case '\r':
-			result += "\\r"
+			result.WriteString("\\r")
 		case '\t':
-			result += "\\t"
+			result.WriteString("\\t")
 		default:
-			result += string(c)
+			result.WriteString(string(c))
 		}
 	}
-	return ctx.WriteBulkString(result)
+	return ctx.WriteBulkString(result.String())
 }
 
 func cmdSANITIZESQL(ctx *Context) error {
@@ -771,18 +772,18 @@ func cmdSANITIZESQL(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	input := ctx.ArgString(0)
-	result := ""
+	var result strings.Builder
 	for _, c := range input {
 		switch c {
 		case '\'':
-			result += "''"
+			result.WriteString("''")
 		case '\\':
-			result += "\\\\"
+			result.WriteString("\\\\")
 		default:
-			result += string(c)
+			result.WriteString(string(c))
 		}
 	}
-	return ctx.WriteBulkString(result)
+	return ctx.WriteBulkString(result.String())
 }
 
 func cmdMASKCARD(ctx *Context) error {

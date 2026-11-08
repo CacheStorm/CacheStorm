@@ -283,53 +283,73 @@ func cmdEVALFORMAT(ctx *Context) error {
 	}
 
 	format := ctx.ArgString(0)
-	args := make([]interface{}, ctx.ArgCount()-1)
+	args := make([]string, ctx.ArgCount()-1)
 	for i := 1; i < ctx.ArgCount(); i++ {
 		args[i-1] = ctx.ArgString(i)
 	}
 
-	result := formatString(format, args...)
-
+	result, ok := formatString(format, args...)
+	if !ok {
+		return ctx.WriteError(errStringTooLong)
+	}
 	return ctx.WriteBulkString(result)
 }
 
-func formatString(format string, args ...interface{}) string {
-	result := ""
+// maxTemplateOutput bounds what EVAL.FORMAT and EVAL.TEMPLATE build: each
+// placeholder repeats an argument, so a short request could otherwise ask
+// for an output many times its own size.
+const maxTemplateOutput = store.MaxValueSize
+
+// formatString fills {} and {N} placeholders from args. It reports false
+// when the result would exceed maxTemplateOutput, which it checks before
+// building anything.
+func formatString(format string, args ...string) (string, bool) {
+	return expand(func(emit func(string)) { walkFormat(format, args, emit) })
+}
+
+func walkFormat(format string, args []string, emit func(string)) {
 	argIdx := 0
 	i := 0
-
 	for i < len(format) {
 		if format[i] == '{' && i+1 < len(format) && format[i+1] == '}' {
 			if argIdx < len(args) {
-				result += fmt.Sprintf("%v", args[argIdx])
+				emit(args[argIdx])
 				argIdx++
 			}
 			i += 2
-		} else if format[i] == '{' && i+1 < len(format) && format[i+1] >= '0' && format[i+1] <= '9' {
+			continue
+		}
+		if format[i] == '{' && i+1 < len(format) && format[i+1] >= '0' && format[i+1] <= '9' {
 			j := i + 1
 			for j < len(format) && format[j] >= '0' && format[j] <= '9' {
 				j++
 			}
 			if j < len(format) && format[j] == '}' {
-				idx := 0
-				for k := i + 1; k < j; k++ {
-					idx = idx*10 + int(format[k]-'0')
-				}
-				if idx < len(args) {
-					result += fmt.Sprintf("%v", args[idx])
+				// An index too long to fit an int names no argument.
+				if idx, err := strconv.Atoi(format[i+1 : j]); err == nil && idx < len(args) {
+					emit(args[idx])
 				}
 				i = j + 1
 				continue
 			}
-			result += string(format[i])
-			i++
-		} else {
-			result += string(format[i])
-			i++
 		}
+		emit(format[i : i+1])
+		i++
 	}
+}
 
-	return result
+// expand runs walk twice: once to size the result, refusing one past
+// maxTemplateOutput, and once to build it in a single allocation.
+func expand(walk func(emit func(string))) (string, bool) {
+	n := 0
+	walk(func(v string) { n += len(v) })
+	if n > maxTemplateOutput {
+		return "", false
+	}
+	var b strings.Builder
+	b.Grow(n)
+	walk(func(v string) { b.WriteString(v) })
+	return b.String(), true
 }
 
 func cmdEVALJSONPATH(ctx *Context) error {
@@ -508,35 +528,33 @@ func cmdEVALTEMPLATE(ctx *Context) error {
 		vars[ctx.ArgString(i)] = ctx.ArgString(i + 1)
 	}
 
-	result := applyTemplate(template, vars)
-
+	result, ok := applyTemplate(template, vars)
+	if !ok {
+		return ctx.WriteError(errStringTooLong)
+	}
 	return ctx.WriteBulkString(result)
 }
 
-func applyTemplate(template string, vars map[string]string) string {
-	result := ""
-	i := 0
-
-	for i < len(template) {
-		if i+1 < len(template) && template[i] == '{' && template[i+1] == '{' {
-			j := i + 2
-			for j < len(template) && (template[j] != '}' || j+1 >= len(template) || template[j+1] != '}') {
-				j++
-			}
-			if j < len(template) {
-				key := strings.TrimSpace(template[i+2 : j])
-				if val, ok := vars[key]; ok {
-					result += val
+// applyTemplate fills {{name}} placeholders from vars. It reports false
+// when the result would exceed maxTemplateOutput.
+func applyTemplate(template string, vars map[string]string) (string, bool) {
+	return expand(func(emit func(string)) {
+		i := 0
+		for i < len(template) {
+			if i+1 < len(template) && template[i] == '{' && template[i+1] == '{' {
+				if end := strings.Index(template[i+2:], "}}"); end >= 0 {
+					j := i + 2 + end
+					if val, ok := vars[strings.TrimSpace(template[i+2:j])]; ok {
+						emit(val)
+					}
+					i = j + 2
+					continue
 				}
-				i = j + 2
-				continue
 			}
+			emit(template[i : i+1])
+			i++
 		}
-		result += string(template[i])
-		i++
-	}
-
-	return result
+	})
 }
 
 func cmdEVALREGEX(ctx *Context) error {
@@ -930,8 +948,11 @@ func cmdSTRPADLEFT(ctx *Context) error {
 		padChar = " "
 	}
 
-	for len(s) < totalLen {
-		s = string(padChar[0]) + s
+	if totalLen > store.MaxValueSize {
+		return ctx.WriteError(errStringTooLong)
+	}
+	if pad := totalLen - len(s); pad > 0 {
+		s = strings.Repeat(padChar[:1], pad) + s
 	}
 
 	return ctx.WriteBulkString(s)
@@ -949,8 +970,11 @@ func cmdSTRPADRIGHT(ctx *Context) error {
 		padChar = " "
 	}
 
-	for len(s) < totalLen {
-		s += string(padChar[0])
+	if totalLen > store.MaxValueSize {
+		return ctx.WriteError(errStringTooLong)
+	}
+	if pad := totalLen - len(s); pad > 0 {
+		s = s + strings.Repeat(padChar[:1], pad)
 	}
 
 	return ctx.WriteBulkString(s)

@@ -2508,13 +2508,14 @@ func cmdFREQTOP(ctx *Context) error {
 	}
 	freqsMu.RUnlock()
 
-	for i := 0; i < len(items)-1; i++ {
-		for j := i + 1; j < len(items); j++ {
-			if items[j].Value > items[i].Value {
-				items[i], items[j] = items[j], items[i]
-			}
+	// Highest count first; equal counts by key, so the order is stable
+	// from call to call.
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Value != items[j].Value {
+			return items[i].Value > items[j].Value
 		}
-	}
+		return items[i].Key < items[j].Key
+	})
 	if k > len(items) {
 		k = len(items)
 	}

@@ -611,21 +611,21 @@ func cmdURLENCODE(ctx *Context) error {
 
 func urlEncode(s string) string {
 	hexChars := "0123456789ABCDEF"
-	result := ""
+	var result strings.Builder
 
 	for i := 0; i < len(s); i++ {
 		c := s[i]
 		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
 			c == '-' || c == '_' || c == '.' || c == '~' {
-			result += string(c)
+			result.WriteString(string(c))
 		} else if c == ' ' {
-			result += "+"
+			result.WriteString("+")
 		} else {
-			result += "%" + string(hexChars[c>>4]) + string(hexChars[c&0x0F])
+			result.WriteString("%" + string(hexChars[c>>4]) + string(hexChars[c&0x0F]))
 		}
 	}
 
-	return result
+	return result.String()
 }
 
 func cmdURLDECODE(ctx *Context) error {
@@ -1354,17 +1354,17 @@ func cmdCSVENCODE(ctx *Context) error {
 }
 
 func csvEncode(values []string) string {
-	result := ""
+	var result strings.Builder
 	for i, v := range values {
 		if i > 0 {
-			result += ","
+			result.WriteString(",")
 		}
 		if strings.Contains(v, ",") || strings.Contains(v, "\"") || strings.Contains(v, "\n") {
 			v = "\"" + strings.ReplaceAll(v, "\"", "\"\"") + "\""
 		}
-		result += v
+		result.WriteString(v)
 	}
-	return result
+	return result.String()
 }
 
 func cmdCSVDECODE(ctx *Context) error {
@@ -1386,27 +1386,27 @@ func cmdCSVDECODE(ctx *Context) error {
 func csvDecode(s string) []string {
 	values := make([]string, 0)
 	inQuote := false
-	current := ""
+	var current strings.Builder
 
 	for i := 0; i < len(s); i++ {
 		c := s[i]
 
 		if c == '"' {
 			if inQuote && i+1 < len(s) && s[i+1] == '"' {
-				current += "\""
+				current.WriteString("\"")
 				i++
 			} else {
 				inQuote = !inQuote
 			}
 		} else if c == ',' && !inQuote {
-			values = append(values, current)
-			current = ""
+			values = append(values, current.String())
+			current.Reset()
 		} else {
-			current += string(c)
+			current.WriteByte(c)
 		}
 	}
 
-	values = append(values, current)
+	values = append(values, current.String())
 	return values
 }
 

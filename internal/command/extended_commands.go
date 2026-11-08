@@ -595,12 +595,18 @@ type Vector struct {
 	Meta map[string]string
 }
 
+// maxVectorDim bounds a vector store's dimension.
+const maxVectorDim = 1 << 16
+
 func cmdVECTORCREATE(ctx *Context) error {
 	if ctx.ArgCount() < 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
 	dim := int(parseInt64(ctx.ArgString(1)))
+	if dim < 1 || dim > maxVectorDim {
+		return ctx.WriteError(fmt.Errorf("ERR dimension must be between 1 and %d", maxVectorDim))
+	}
 	normalize := ctx.ArgCount() >= 3 && ctx.ArgString(2) == "NORMALIZE"
 
 	vectorStoresMu.Lock()
@@ -626,6 +632,12 @@ func cmdVECTORADD(ctx *Context) error {
 	// per-connection recover drops the client with no reply.
 	if dim < 0 {
 		return ctx.WriteError(ErrInvalidArg)
+	}
+	// A vector carries one argument per component, so the argument count
+	// bounds the allocation; a dim it does not match is refused before
+	// anything is allocated.
+	if ctx.ArgCount()-3 != dim {
+		return ctx.WriteError(fmt.Errorf("ERR vector dimension mismatch: got %d values for dimension %d", ctx.ArgCount()-3, dim))
 	}
 	data := make([]float64, dim)
 	for i := 0; i < dim && i+3 < ctx.ArgCount(); i++ {
@@ -713,6 +725,11 @@ func cmdVECTORSEARCH(ctx *Context) error {
 	// per-connection recover turned into a dropped connection with no reply.
 	if dim < 0 {
 		return ctx.WriteError(ErrInvalidArg)
+	}
+	// Components past the arguments given are zero; the store's dimension
+	// bounds how many are worth allocating.
+	if dim > maxVectorDim {
+		return ctx.WriteError(fmt.Errorf("ERR dimension must be at most %d", maxVectorDim))
 	}
 	query := make([]float64, dim)
 	for i := 0; i < dim && i+3 < ctx.ArgCount(); i++ {
