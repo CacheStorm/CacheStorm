@@ -255,9 +255,7 @@ func hllCacheWriteAllowed(ctx *Context) bool {
 	if r == nil {
 		return true
 	}
-	r.mu.RLock()
-	check := r.writeCheck
-	r.mu.RUnlock()
+	check := r.hotState().writeCheck
 	return check == nil || check("PFCOUNT", ctx.Args) == nil
 }
 

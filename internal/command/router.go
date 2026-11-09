@@ -1,6 +1,7 @@
 package command
 
 import (
+	"bufio"
 	"bytes"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -8,9 +9,11 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
+	"maps"
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cachestorm/cachestorm/internal/acl"
@@ -29,7 +32,13 @@ type CommandDef struct { //nolint:revive // Command prefix is intentional for cl
 }
 
 type Router struct {
-	mu               sync.RWMutex
+	mu sync.RWMutex
+	// hot is what dispatch reads on every command, published as one value
+	// so a command takes no lock on the router: an RLock is an atomic add
+	// on a cache line every core shares, and several per command made
+	// throughput fall as clients ran on more cores. Every change of a field
+	// it copies stores nil under mu; the next reader rebuilds it.
+	hot              atomic.Pointer[routerHot]
 	commands         map[string]*CommandDef
 	functionRegistry *FunctionRegistry
 	searchIndexes    *search.IndexManager
@@ -171,6 +180,40 @@ type ExecutedCommand struct {
 	DB   int
 }
 
+// routerHot is the router state every command reads; see Router.hot.
+type routerHot struct {
+	commands    map[string]*CommandDef
+	requirePass string
+	postExecute func(ctx *Context, db int, cmd string, args [][]byte) error
+	postExec    func(ctx *Context, cmds []ExecutedCommand) error
+	writeCheck  func(string, [][]byte) error
+	persisted   func(cmd string, args [][]byte) bool
+}
+
+// hotState returns the published state, building it when a change
+// invalidated it. It is built under mu, so it never mixes the state from
+// before a change with the state after.
+func (r *Router) hotState() *routerHot {
+	if h := r.hot.Load(); h != nil {
+		return h
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if h := r.hot.Load(); h != nil {
+		return h
+	}
+	h := &routerHot{
+		commands:    maps.Clone(r.commands),
+		requirePass: r.requirePass,
+		postExecute: r.postExecute,
+		postExec:    r.postExec,
+		writeCheck:  r.writeCheck,
+		persisted:   r.persisted,
+	}
+	r.hot.Store(h)
+	return h
+}
+
 // globalRouter is set during NewRouter() for access from command handlers (e.g. AUTH)
 var globalRouter *Router
 
@@ -265,18 +308,15 @@ func (r *Router) SetRequirePass(password string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.requirePass = password
+	r.hot.Store(nil)
 }
 
 func (r *Router) RequirePass() string {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return r.requirePass
+	return r.hotState().requirePass
 }
 
 func (r *Router) ValidatePassword(password string) bool {
-	r.mu.RLock()
-	rp := r.requirePass
-	r.mu.RUnlock()
+	rp := r.hotState().requirePass
 
 	if rp == "" {
 		return true
@@ -290,9 +330,7 @@ func (r *Router) ValidatePassword(password string) bool {
 
 // PasswordHash returns the SHA256 hash of the configured password (for ACL integration)
 func (r *Router) PasswordHash() string {
-	r.mu.RLock()
-	rp := r.requirePass
-	r.mu.RUnlock()
+	rp := r.hotState().requirePass
 	if rp == "" {
 		return ""
 	}
@@ -331,14 +369,12 @@ func (r *Router) Register(def *CommandDef) {
 		return
 	}
 	r.commands[def.Name] = def
+	r.hot.Store(nil)
 	r.mu.Unlock()
 }
 
 func (r *Router) Get(name string) (*CommandDef, bool) {
-	name = CanonicalName(name)
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	cmd, ok := r.commands[name]
+	cmd, ok := r.hotState().commands[CanonicalName(name)]
 	return cmd, ok
 }
 
@@ -377,6 +413,7 @@ func (r *Router) SetPostExecute(fn func(cmd string, args [][]byte)) {
 func (r *Router) SetPostExecuteDB(fn func(db int, cmd string, args [][]byte)) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.hot.Store(nil)
 	if fn == nil {
 		r.postExecute = nil
 		return
@@ -390,6 +427,7 @@ func (r *Router) SetPostExecuteDB(fn func(db int, cmd string, args [][]byte)) {
 func (r *Router) SetPostExec(fn func(cmds []ExecutedCommand)) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.hot.Store(nil)
 	if fn == nil {
 		r.postExec = nil
 		return
@@ -403,14 +441,13 @@ func (r *Router) SetPersistFilter(fn func(cmd string, args [][]byte) bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.persisted = fn
+	r.hot.Store(nil)
 }
 
 // Persisted reports whether cmd is recorded in the AOF and the replication
 // stream. Without a filter every command counts as recorded.
 func (r *Router) Persisted(cmd string, args [][]byte) bool {
-	r.mu.RLock()
-	fn := r.persisted
-	r.mu.RUnlock()
+	fn := r.hotState().persisted
 	if fn == nil {
 		return true
 	}
@@ -445,9 +482,7 @@ func (r *Router) replicationInfo() func() string {
 }
 
 func (r *Router) postExecuteHook() func(ctx *Context, db int, cmd string, args [][]byte) error {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return r.postExecute
+	return r.hotState().postExecute
 }
 
 // record hands what a command executed to the persistence hooks: its
@@ -481,12 +516,11 @@ func (r *Router) SetCommitHooks(check func(string, [][]byte) error, single func(
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.writeCheck, r.postExecute, r.postExec = check, single, batch
+	r.hot.Store(nil)
 }
 
 func (r *Router) checkWrite(ctx *Context) (bool, error) {
-	r.mu.RLock()
-	check := r.writeCheck
-	r.mu.RUnlock()
+	check := r.hotState().writeCheck
 	if check == nil || (ctx.Command != "EXEC" && !r.Persisted(ctx.Command, ctx.Args)) {
 		return false, nil
 	}
@@ -496,20 +530,52 @@ func (r *Router) checkWrite(ctx *Context) (bool, error) {
 	return true, check(ctx.Command, ctx.Args)
 }
 
+// captureBuffer holds a reply while the write that produced it is
+// persisted, so a failed AOF append can answer with an error instead. Every
+// write takes one when the AOF is on; allocating it per command (a 4 KiB
+// bufio buffer each) left the collector most of the server's CPU.
+type captureBuffer struct {
+	out bytes.Buffer
+	bw  *bufio.Writer
+}
+
+// maxPooledCapture is the largest reply buffer kept for reuse; one that held
+// a bigger reply is left to the collector.
+const maxPooledCapture = 64 << 10
+
+var captureBuffers = sync.Pool{New: func() any {
+	cb := &captureBuffer{}
+	cb.bw = bufio.NewWriterSize(&cb.out, 512)
+	return cb
+}}
+
+func (cb *captureBuffer) release() {
+	if cb.out.Cap() > maxPooledCapture {
+		return
+	}
+	cb.out.Reset()
+	cb.bw.Reset(&cb.out)
+	captureBuffers.Put(cb)
+}
+
 func (r *Router) executeHandler(ctx *Context, cmd *CommandDef, capture bool) (err error) {
 	original := ctx.Writer
 	if capture {
-		// Only a captured reply needs the buffer: declared outside, the
-		// deferred closure moved it to the heap for every command.
-		out := new(bytes.Buffer)
-		ctx.Writer = resp.NewWriter(out)
+		cb := captureBuffers.Get().(*captureBuffer)
+		ctx.Writer = resp.NewWriter(cb.bw)
 		ctx.Writer.SetRESP3(original.IsRESP3())
 		defer func() {
 			captured := ctx.Writer
 			ctx.Writer = original
-			if err == nil {
-				err = original.WriteCaptured(out.Bytes(), captured.Errors())
+			// Items a handler wrote without flushing count too, as they
+			// would on the connection's own writer.
+			if ferr := cb.bw.Flush(); err == nil {
+				err = ferr
 			}
+			if err == nil {
+				err = original.WriteCaptured(cb.out.Bytes(), captured.Errors())
+			}
+			cb.release()
 		}()
 	}
 	db := ctx.DB
@@ -537,9 +603,7 @@ func (r *Router) executeHandler(ctx *Context, cmd *CommandDef, capture bool) (er
 }
 
 func (r *Router) postExecHook() func(ctx *Context, cmds []ExecutedCommand) error {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return r.postExec
+	return r.hotState().postExec
 }
 
 func (r *Router) Execute(ctx *Context) error {
