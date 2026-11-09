@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Builds the root Docker image and checks that a container started from it
 # runs as the unprivileged user, reports healthy, enforces requirepass from
-# the environment, serves commands and reports the stamped version.
+# the environment, serves commands and reports the stamped version, and that
+# one started with Redis-style options reports healthy too.
 #
 #   scripts/docker-smoke.sh            # builds cachestorm:smoke
 #   IMAGE=ghcr.io/... SKIP_BUILD=1 scripts/docker-smoke.sh
@@ -110,5 +111,18 @@ case "$out" in
 	*healthy*|*ok*|*status*) echo "ok: loopback health check still served" ;;
 	*) fail "health endpoint: $out" ;;
 esac
+
+# Started with Redis-style options the server listens on 6379 and has no
+# HTTP API; the health check falls back to a PING on the RESP port.
+docker rm -f "$NAME" >/dev/null
+docker run -d --name "$NAME" "$IMAGE" --save "" --appendonly no >/dev/null
+for _ in $(seq 1 60); do
+	health="$(docker inspect --format '{{.State.Health.Status}}' "$NAME")"
+	[ "$health" = "healthy" ] && break
+	[ "$(docker inspect --format '{{.State.Running}}' "$NAME")" = "true" ] || fail "Redis-style container exited"
+	sleep 1
+done
+[ "$health" = "healthy" ] || fail "Redis-style container not healthy after 60s (status: $health)"
+echo "ok: healthy when started with Redis-style options (no HTTP API)"
 
 echo "docker smoke test passed"
