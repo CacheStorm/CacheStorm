@@ -168,21 +168,18 @@ func (w *AOFWriter) aofReplaceOps() aofReplaceOps {
 	return w.replaceOps
 }
 
+// beginRewrite holds appends off while it encodes src, so an append made
+// meanwhile (one not under the write gate) lands after the snapshot, in the
+// tail.
 func (w *AOFWriter) beginRewrite(src MultiDBSource) (*AOFRewrite, error) {
-	w.mu.Lock()
-	err := w.fatalErr
-	w.mu.Unlock()
-	if err != nil {
-		return nil, err
-	}
-	snapshot := &pieceBuffer{}
-	if err := w.aofReplaceOps().write(snapshot, src); err != nil {
-		return nil, err
-	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.fatalErr != nil {
 		return nil, w.fatalErr
+	}
+	snapshot := &pieceBuffer{}
+	if err := w.aofReplaceOps().write(snapshot, src); err != nil {
+		return nil, err
 	}
 	tail := &aofTail{}
 	if w.curDB > 0 {
