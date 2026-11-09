@@ -46,8 +46,11 @@ func EncodeDump(value store.Value) ([]byte, error) {
 // encoding the caller drops.
 func appendDumpValue(out []byte, value store.Value) ([]byte, uint16, error) {
 	version := uint16(11)
-	str := func(s string) { out = appendDumpLength(out, uint64(len(s))); out = append(out, s...) }
-	bytesStr := func(b []byte) { out = appendDumpLength(out, uint64(len(b))); out = append(out, b...) }
+	// Redis' own types' strings are saved as rdbSaveRawString saves them;
+	// a module value's are plain.
+	str := func(s string) { out = appendRDBRawString(out, s) }
+	bytesStr := func(b []byte) { out = appendRDBRawString(out, b) }
+	plain := func(b []byte) { out = appendDumpLength(out, uint64(len(b))); out = append(out, b...) }
 	switch v := value.(type) {
 	case *store.StringValue:
 		out = append(out, 0)
@@ -125,7 +128,7 @@ func appendDumpValue(out []byte, value store.Value) ([]byte, uint16, error) {
 		out = appendDumpStream(out, v)
 	case *store.JSONValue:
 		out = append(out, dumpTypeJSON)
-		bytesStr(v.Bytes())
+		plain(v.Bytes())
 	case *store.TimeSeriesValue:
 		var data bytes.Buffer
 		v.RLock()
@@ -135,14 +138,14 @@ func appendDumpValue(out []byte, value store.Value) ([]byte, uint16, error) {
 			return out, 0, err
 		}
 		out = append(out, dumpTypeTimeSeries)
-		str(data.String())
+		plain(data.Bytes())
 	case store.ExtensionValue:
 		data, err := v.MarshalBinary()
 		if err != nil {
 			return out, 0, err
 		}
 		out = append(out, v.ExtensionType())
-		bytesStr(data)
+		plain(data)
 	default:
 		raw, ok := value.(store.RedisStringValue)
 		if !ok {

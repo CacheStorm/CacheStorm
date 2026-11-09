@@ -373,7 +373,7 @@ func appendRDBEntry(out, scratch []byte, key string, entry *store.Entry, info *R
 	body := scratch[1:]
 	if module != 0 {
 		out = append(out, rdbTypeModule2)
-		out = appendRDBString(out, key)
+		out = appendRDBRawString(out, key)
 		out = appendDumpLength(out, module)
 		out = appendDumpLength(out, rdbModuleOpcodeStr)
 		out = append(out, body...)
@@ -381,7 +381,7 @@ func appendRDBEntry(out, scratch []byte, key string, entry *store.Entry, info *R
 		return out, scratch, 0, false, nil
 	}
 	out = append(out, typ)
-	out = appendRDBString(out, key)
+	out = appendRDBRawString(out, key)
 	out = append(out, body...)
 	return out, scratch, version, false, nil
 }

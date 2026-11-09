@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"github.com/cachestorm/cachestorm/internal/persistence"
 	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
 )
@@ -152,7 +153,7 @@ var configParams = map[string]*configParam{
 	"rdb-del-sync-files":                  boolParam("no"),
 	"rdb-save-incremental-fsync":          boolParam("yes"),
 	"rdbchecksum":                         immutableParam("yes"),
-	"rdbcompression":                      boolParam("yes"),
+	"rdbcompression":                      {kind: cfgBool, def: "yes", applyText: func(v string) { persistence.SetRDBCompression(v == "yes") }},
 	"repl-backlog-size":                   memParam("1048576", 1, configLongMax),
 	"repl-backlog-ttl":                    intParam("3600", 0, configLongMax),
 	"repl-disable-tcp-nodelay":            boolParam("no"),
