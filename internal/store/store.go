@@ -1005,27 +1005,45 @@ func (s *Store) AppendLiveKeys(dst []string, keep func(key string, e *Entry) boo
 // entries are collected under its read lock and fn runs after the lock is
 // released, so fn may take other locks. It stops at the first error.
 func (s *Store) ForEachLive(fn func(key string, e *Entry) error) error {
-	type pair struct {
-		key   string
-		entry *Entry
-	}
-	var batch []pair
+	var batch []keyEntry
 	for i := 0; i < NumShards; i++ {
-		sh := s.shards[i]
-		batch = batch[:0]
-		sh.mu.RLock()
-		for k, v := range sh.data {
-			batch = append(batch, pair{k, v})
-		}
-		sh.mu.RUnlock()
-		for _, p := range batch {
-			if p.entry.IsExpired() {
-				continue
-			}
-			if err := fn(p.key, p.entry); err != nil {
-				return err
-			}
+		var err error
+		if batch, err = s.forEachLiveInShard(i, batch[:0], fn); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+// ForEachLiveInShard is ForEachLive over shard i (0 <= i < NumShards) alone.
+// Different shards may be walked concurrently.
+func (s *Store) ForEachLiveInShard(i int, fn func(key string, e *Entry) error) error {
+	_, err := s.forEachLiveInShard(i, nil, fn)
+	return err
+}
+
+type keyEntry struct {
+	key   string
+	entry *Entry
+}
+
+func (s *Store) forEachLiveInShard(i int, batch []keyEntry, fn func(key string, e *Entry) error) ([]keyEntry, error) {
+	sh := s.shards[i]
+	sh.mu.RLock()
+	if batch == nil {
+		batch = make([]keyEntry, 0, len(sh.data))
+	}
+	for k, v := range sh.data {
+		batch = append(batch, keyEntry{k, v})
+	}
+	sh.mu.RUnlock()
+	for _, p := range batch {
+		if p.entry.IsExpired() {
+			continue
+		}
+		if err := fn(p.key, p.entry); err != nil {
+			return batch, err
+		}
+	}
+	return batch, nil
 }

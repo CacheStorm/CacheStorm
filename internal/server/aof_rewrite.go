@@ -7,6 +7,7 @@ import (
 
 	"github.com/cachestorm/cachestorm/internal/config"
 	"github.com/cachestorm/cachestorm/internal/logger"
+	"github.com/cachestorm/cachestorm/internal/persistence"
 )
 
 // aofRewriteCheckInterval is how often the AOF size is compared with the
@@ -33,9 +34,10 @@ func (s *Server) configureAOFRewrite() error {
 }
 
 // startAOFRewrite schedules a rewrite in the background. The rewrite takes the
-// write gate exclusively, so it starts once the command that asked for it has
-// released the gate, and no write can land between the snapshot and the
-// switch to the new file.
+// write gate exclusively while it encodes the dataset, so it starts once the
+// command that asked for it has released the gate; the writes that land
+// while the new file is written are kept and appended to it before the
+// switch.
 func (s *Server) startAOFRewrite() error {
 	s.snapshotMu.Lock()
 	defer s.snapshotMu.Unlock()
@@ -50,23 +52,26 @@ func (s *Server) startAOFRewrite() error {
 	s.snapshotWG.Add(1)
 	go func() {
 		defer s.snapshotWG.Done()
-		s.gate.global.Lock()
-		err := s.rewriteAOFLocked()
-		s.gate.global.Unlock()
-		if err != nil {
+		if err := s.rewriteAOF(); err != nil {
 			logger.Error().Err(err).Msg("AOF rewrite failed")
 		}
 	}()
 	return nil
 }
 
-// rewriteAOFLocked replaces the AOF with the current dataset. The caller holds
-// the write gate exclusively.
-func (s *Server) rewriteAOFLocked() error {
+// rewriteAOF replaces the AOF with the current dataset, holding the write
+// gate only while the dataset is encoded.
+func (s *Server) rewriteAOF() error {
 	start := time.Now()
+	s.gate.global.Lock()
 	src, err := s.persistenceSource(s.dbs)
+	var rewrite *persistence.AOFRewrite
 	if err == nil {
-		err = s.aof.Rewrite(src)
+		rewrite, err = s.aof.BeginRewrite(src)
+	}
+	s.gate.global.Unlock()
+	if rewrite != nil {
+		err = rewrite.Finish()
 	}
 	size := s.aof.Size()
 	s.snapshotMu.Lock()

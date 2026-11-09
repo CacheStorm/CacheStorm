@@ -259,10 +259,11 @@ func (s *Server) saveSnapshot(background bool) error {
 		aux = map[string]string{snapshotSearchAux: string(persistence.EncodeCommands(searchCmds))}
 	}
 	// The snapshot is in Redis' RDB format, so Redis and its tools load it.
-	// The checksum is computed after the encoder returns, so a background
-	// save holds the write gate only while the dataset is encoded.
+	// The pieces are joined and the checksum computed after the encoder
+	// returns, so a background save holds the write gate only while the
+	// dataset is encoded.
 	db0 := s.dbs.DB(0)
-	encoded, _, err := persistence.EncodeRedisRDB(replication.DBSource{DBs: s.dbs}, persistence.RedisRDBInfo{
+	encoded, _, err := persistence.EncodeRedisRDBParts(replication.DBSource{DBs: s.dbs}, persistence.RedisRDBInfo{
 		Functions:  persistence.FunctionCodes(functions),
 		Extensions: true,
 		Aux:        aux,
@@ -273,16 +274,15 @@ func (s *Server) saveSnapshot(background bool) error {
 		finish(err)
 		return fmt.Errorf("ERR snapshot failed: %w", err)
 	}
-	data := bytes.NewBuffer(encoded)
-	store := write
-	write = func(data []byte) error {
+	save := func() error {
+		data := encoded.Join()
 		if err := persistence.SealRDBChecksum(data); err != nil {
 			return err
 		}
-		return store(data)
+		return write(data)
 	}
 	if !background {
-		err := write(data.Bytes())
+		err := save()
 		finish(err)
 		if err != nil {
 			return fmt.Errorf("ERR snapshot failed: %w", err)
@@ -290,7 +290,7 @@ func (s *Server) saveSnapshot(background bool) error {
 		return nil
 	}
 	go func() {
-		err := write(data.Bytes())
+		err := save()
 		finish(err)
 		if err != nil {
 			logger.Error().Err(err).Msg("background snapshot failed")

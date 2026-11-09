@@ -364,6 +364,24 @@ func (d DBSource) ForEachEntry(fn func(db int, key string, entry interface{}) er
 	return nil
 }
 
+// EntryShards implements persistence.ShardedEntrySource: each database's
+// store shards, in database order.
+func (d DBSource) EntryShards() []persistence.EntryShard {
+	var shards []persistence.EntryShard
+	for i := 0; i < d.DBs.Count(); i++ {
+		s := d.DBs.Existing(i)
+		if s == nil {
+			continue
+		}
+		for j := 0; j < store.NumShards; j++ {
+			shards = append(shards, persistence.EntryShard{DB: i, Each: func(fn func(string, *store.Entry) error) error {
+				return s.ForEachLiveInShard(j, fn)
+			}})
+		}
+	}
+	return shards
+}
+
 // DatabaseEntries implements persistence.MultiDBSource.
 func (d DBSource) DatabaseEntries() []map[string]interface{} {
 	out := make([]map[string]interface{}, d.DBs.Count())

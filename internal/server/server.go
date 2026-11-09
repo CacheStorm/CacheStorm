@@ -647,7 +647,7 @@ func (s *Server) Start(_ context.Context) (retErr error) {
 			logger.Info().
 				Int("port", s.cfg.HTTP.Port).
 				Msg("HTTP admin server started")
-			if err := s.httpServer.Start(); err != nil {
+			if err := s.httpServer.Start(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				logger.Error().Err(err).Msg("HTTP server error")
 			}
 		}()

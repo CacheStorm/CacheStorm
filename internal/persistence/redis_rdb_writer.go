@@ -5,8 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"runtime"
 	"sort"
 	"strconv"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cachestorm/cachestorm/internal/store"
@@ -78,22 +81,71 @@ func rdbModuleID(name string, encver uint64) uint64 {
 // is 11, or 12 when a hash has field expirations, which only Redis 7.4 can
 // load.
 func WriteRedisRDB(w io.Writer, src EntryStreamer, info RedisRDBInfo) (int, error) {
-	out, skipped, err := EncodeRedisRDB(src, info)
+	parts, skipped, err := EncodeRedisRDBParts(src, info)
 	if err != nil {
 		return skipped, err
 	}
-	if err := SealRDBChecksum(out); err != nil {
-		return skipped, err
-	}
-	_, err = w.Write(out)
-	return skipped, err
+	return skipped, parts.writeSealed(w)
 }
 
 // EncodeRedisRDB encodes src like WriteRedisRDB but leaves the checksum
 // trailer zero, for SealRDBChecksum to fill once the dataset is released.
 func EncodeRedisRDB(src EntryStreamer, info RedisRDBInfo) ([]byte, int, error) {
+	parts, skipped, err := EncodeRedisRDBParts(src, info)
+	if err != nil {
+		return nil, skipped, err
+	}
+	return parts.Join(), skipped, nil
+}
+
+// RDBParts is an encoded RDB file in pieces; Join puts them together.
+type RDBParts struct {
+	pieces [][]byte
+	size   int
+}
+
+// Join returns the file, its checksum trailer zero. The pieces are released.
+func (p *RDBParts) Join() []byte {
+	out := make([]byte, 0, p.size)
+	for i, piece := range p.pieces {
+		out = append(out, piece...)
+		p.pieces[i] = nil
+	}
+	p.pieces = nil
+	return out
+}
+
+// writeSealed writes the file to w with its checksum trailer filled.
+func (p *RDBParts) writeSealed(w io.Writer) error {
+	body := p.size - 8
+	var crc uint64
+	for _, piece := range p.pieces {
+		if body <= 0 {
+			break
+		}
+		piece = piece[:min(len(piece), body)]
+		crc = rdbChecksum(crc, piece)
+		if _, err := w.Write(piece); err != nil {
+			return err
+		}
+		body -= len(piece)
+	}
+	_, err := w.Write(binary.LittleEndian.AppendUint64(nil, crc))
+	return err
+}
+
+func (p *RDBParts) add(piece []byte) {
+	if len(piece) > 0 {
+		p.pieces = append(p.pieces, piece)
+		p.size += len(piece)
+	}
+}
+
+// EncodeRedisRDBParts encodes src like EncodeRedisRDB without joining the
+// pieces, so a snapshot holds the write gate only while the dataset is
+// encoded. A src that is a ShardedEntrySource is encoded on every core.
+func EncodeRedisRDBParts(src EntryStreamer, info RedisRDBInfo) (*RDBParts, int, error) {
 	out := []byte(redisRDBHeader)
-	version := uint16(11)
 	aux := func(k, v string) {
 		out = append(out, 0xFA)
 		out = appendRDBString(out, k)
@@ -120,73 +172,218 @@ func EncodeRedisRDB(src EntryStreamer, info RedisRDBInfo) ([]byte, int, error) {
 		out = append(out, rdbOpcodeFunction2)
 		out = appendRDBString(out, code)
 	}
-	skipped, selected := 0, -1
+	parts := &RDBParts{}
+	var (
+		version uint16
+		skipped int
+		err     error
+	)
+	if sharded, ok := src.(ShardedEntrySource); ok {
+		parts.add(out)
+		version, skipped, err = encodeRDBShards(parts, sharded.EntryShards(), &info)
+		out = nil
+	} else {
+		out, version, skipped, err = encodeRDBSerial(out, src, &info)
+	}
+	if err != nil {
+		return nil, skipped, err
+	}
+	out = append(out, 0xFF)
+	out = append(out, make([]byte, redisRDBTrailerBytes-1)...)
+	parts.add(out)
+	copy(parts.pieces[0][5:9], fmt.Sprintf("%04d", version))
+	return parts, skipped, nil
+}
+
+// ShardedEntrySource is an EntryStreamer whose entries split into parts that
+// can be walked concurrently; the parts in order hold every entry once.
+type ShardedEntrySource interface {
+	EntryStreamer
+	EntryShards() []EntryShard
+}
+
+// EntryShard is one part of a ShardedEntrySource, all in database DB.
+type EntryShard struct {
+	DB   int
+	Each func(fn func(key string, entry *store.Entry) error) error
+}
+
+func encodeRDBSerial(out []byte, src EntryStreamer, info *RedisRDBInfo) ([]byte, uint16, int, error) {
+	version, skipped, selected := uint16(11), 0, -1
+	var scratch []byte
 	err := src.ForEachEntry(func(db int, key string, e interface{}) error {
 		entry, ok := e.(*store.Entry)
 		if !ok {
 			return nil
 		}
-		payload, err := EncodeDump(entry.Value)
-		if err != nil {
-			// An empty collection, or a hash whose fields all expired, is no
-			// key.
-			if info.Extensions && !errors.Is(err, ErrDumpFormat) {
-				return fmt.Errorf("key %q: %w", key, err)
-			}
-			skipped++
-			return nil
-		}
-		typ := payload[0]
-		module := rdbModules[typ]
-		if module != 0 && !info.Extensions {
-			skipped++
-			return nil
-		}
+		mark := len(out)
 		if db != selected {
 			out = append(out, 0xFE)
 			out = appendDumpLength(out, uint64(db))
-			selected = db
 		}
-		if tags := entry.TagList(); info.Extensions && len(tags) > 0 {
-			enc := appendDumpLength(nil, uint64(len(tags)))
-			for _, tag := range tags {
-				enc = appendRDBString(enc, tag)
-			}
-			aux(rdbTagsAux, string(enc))
+		var v uint16
+		var skip bool
+		var err error
+		out, scratch, v, skip, err = appendRDBEntry(out, scratch, key, entry, info)
+		if err != nil {
+			return err
 		}
-		if at := entry.ExpiresAt.Load(); at > 0 {
-			out = append(out, 0xFC)
-			out = binary.LittleEndian.AppendUint64(out, uint64(at))
-		}
-		if info.LFU {
-			out = append(out, 0xF9, entry.LFUCount())
-		} else if info.IdleTimes {
-			out = append(out, 0xF8)
-			out = appendDumpLength(out, uint64(entry.IdleSeconds()))
-		}
-		body := payload[1 : len(payload)-10]
-		if module != 0 {
-			out = append(out, rdbTypeModule2)
-			out = appendRDBString(out, key)
-			out = appendDumpLength(out, module)
-			out = appendDumpLength(out, rdbModuleOpcodeStr)
-			out = append(out, body...)
-			out = appendDumpLength(out, rdbModuleOpcodeEOF)
+		if skip {
+			out = out[:mark]
+			skipped++
 			return nil
 		}
-		version = max(version, binary.LittleEndian.Uint16(payload[len(payload)-10:]))
-		out = append(out, typ)
-		out = appendRDBString(out, key)
-		out = append(out, body...)
+		selected = db
+		version = max(version, v)
 		return nil
 	})
-	if err != nil {
-		return nil, skipped, err
+	return out, version, skipped, err
+}
+
+// rdbShard is one shard's encoding: pieces of its worker's chunks.
+type rdbShard struct {
+	pieces  [][]byte
+	version uint16
+	skipped int
+	err     error
+}
+
+const (
+	rdbChunkMin   = 64 << 10
+	rdbChunkMax   = 4 << 20
+	rdbChunkSlack = 4 << 10
+)
+
+func encodeRDBShards(parts *RDBParts, shards []EntryShard, info *RedisRDBInfo) (uint16, int, error) {
+	encoded := make([]rdbShard, len(shards))
+	var next atomic.Int64
+	var failed atomic.Bool
+	var wg sync.WaitGroup
+	for range min(runtime.GOMAXPROCS(0), len(shards)) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			// Each worker appends into chunks that grow up to rdbChunkMax, so
+			// the encoding allocates about its own size and a small
+			// dataset little.
+			var scratch []byte
+			chunk := make([]byte, 0, rdbChunkMin)
+			for !failed.Load() {
+				i := int(next.Add(1) - 1)
+				if i >= len(shards) {
+					return
+				}
+				p := &encoded[i]
+				p.version = 11
+				start := len(chunk)
+				p.err = shards[i].Each(func(key string, entry *store.Entry) error {
+					mark := len(chunk)
+					var v uint16
+					var skip bool
+					var err error
+					chunk, scratch, v, skip, err = appendRDBEntry(chunk, scratch, key, entry, info)
+					if err != nil {
+						return err
+					}
+					if skip {
+						chunk = chunk[:mark]
+						p.skipped++
+						return nil
+					}
+					p.version = max(p.version, v)
+					if cap(chunk)-len(chunk) < rdbChunkSlack {
+						if len(chunk) > start {
+							p.pieces = append(p.pieces, chunk[start:len(chunk):len(chunk)])
+						}
+						chunk = make([]byte, 0, min(2*cap(chunk), rdbChunkMax))
+						start = 0
+					}
+					return nil
+				})
+				if len(chunk) > start {
+					p.pieces = append(p.pieces, chunk[start:len(chunk):len(chunk)])
+				}
+				if p.err != nil {
+					failed.Store(true)
+				}
+			}
+		}()
 	}
-	copy(out[5:9], fmt.Sprintf("%04d", version))
-	out = append(out, 0xFF)
-	out = append(out, make([]byte, redisRDBTrailerBytes-1)...)
-	return out, skipped, nil
+	wg.Wait()
+	version, skipped, selected := uint16(11), 0, -1
+	for i := range encoded {
+		p := &encoded[i]
+		if p.err != nil {
+			return 0, skipped, p.err
+		}
+		version = max(version, p.version)
+		skipped += p.skipped
+		if len(p.pieces) == 0 {
+			continue
+		}
+		if db := shards[i].DB; db != selected {
+			parts.add(appendDumpLength([]byte{0xFE}, uint64(db)))
+			selected = db
+		}
+		for _, piece := range p.pieces {
+			parts.add(piece)
+		}
+	}
+	return version, skipped, nil
+}
+
+// appendRDBEntry appends key's RDB record to out, using scratch to encode
+// the value. skip reports a key the RDB leaves out: an empty collection, or
+// a value Redis has no type for without info.Extensions; out may then hold a
+// partial record the caller drops.
+func appendRDBEntry(out, scratch []byte, key string, entry *store.Entry, info *RedisRDBInfo) (_, _ []byte, version uint16, skip bool, err error) {
+	scratch, version, err = appendDumpValue(scratch[:0], entry.Value)
+	if err != nil {
+		// An empty collection, or a hash whose fields all expired, is no
+		// key.
+		if info.Extensions && !errors.Is(err, ErrDumpFormat) {
+			return out, scratch, 0, false, fmt.Errorf("key %q: %w", key, err)
+		}
+		return out, scratch, 0, true, nil
+	}
+	typ := scratch[0]
+	module := rdbModules[typ]
+	if module != 0 && !info.Extensions {
+		return out, scratch, 0, true, nil
+	}
+	if tags := entry.TagList(); info.Extensions && len(tags) > 0 {
+		enc := appendDumpLength(nil, uint64(len(tags)))
+		for _, tag := range tags {
+			enc = appendRDBString(enc, tag)
+		}
+		out = append(out, 0xFA)
+		out = appendRDBString(out, rdbTagsAux)
+		out = appendRDBString(out, string(enc))
+	}
+	if at := entry.ExpiresAt.Load(); at > 0 {
+		out = append(out, 0xFC)
+		out = binary.LittleEndian.AppendUint64(out, uint64(at))
+	}
+	if info.LFU {
+		out = append(out, 0xF9, entry.LFUCount())
+	} else if info.IdleTimes {
+		out = append(out, 0xF8)
+		out = appendDumpLength(out, uint64(entry.IdleSeconds()))
+	}
+	body := scratch[1:]
+	if module != 0 {
+		out = append(out, rdbTypeModule2)
+		out = appendRDBString(out, key)
+		out = appendDumpLength(out, module)
+		out = appendDumpLength(out, rdbModuleOpcodeStr)
+		out = append(out, body...)
+		out = appendDumpLength(out, rdbModuleOpcodeEOF)
+		return out, scratch, 0, false, nil
+	}
+	out = append(out, typ)
+	out = appendRDBString(out, key)
+	out = append(out, body...)
+	return out, scratch, version, false, nil
 }
 
 func appendRDBString(dst []byte, s string) []byte {

@@ -58,6 +58,8 @@ type AOFWriter struct {
 	// unknown, so the next command always gets a SELECT.
 	curDB    int
 	openFile func(string, int, os.FileMode) (*os.File, error)
+	// tail keeps what is appended while a rewrite runs.
+	tail *aofTail
 }
 
 func NewAOFWriter(cfg AOFConfig) *AOFWriter {
@@ -305,6 +307,10 @@ func (w *AOFWriter) writeLocked(commands int64) error {
 	if err != nil {
 		w.fatalErr = fmt.Errorf("failed to write to AOF: %w", err)
 		return w.fatalErr
+	}
+	if w.tail != nil {
+		w.tail.buf = append(w.tail.buf, w.writerBuf...)
+		w.tail.appended = true
 	}
 
 	w.size.Add(int64(n))
@@ -584,19 +590,8 @@ const rewriteItemsPerCommand = 64
 // before each non-empty database and a final SELECT 0, so commands appended
 // after the rewrite land in database 0 as the writer assumes.
 func (rw *AOFRewriter) writeAll(w *bufio.Writer) error {
-	if src, ok := rw.store.(interface{ FunctionPayload() []byte }); ok {
-		if payload := src.FunctionPayload(); len(payload) > 0 {
-			if err := rw.writeCommand(w, "FUNCTION", "RESTORE", string(payload), "FLUSH"); err != nil {
-				return err
-			}
-		}
-	}
-	if src, ok := rw.store.(interface{ SearchCommands() [][]string }); ok {
-		for _, cmd := range src.SearchCommands() {
-			if err := rw.writeCommand(w, cmd[0], cmd[1:]...); err != nil {
-				return err
-			}
-		}
+	if err := rw.writePrelude(w); err != nil {
+		return err
 	}
 	multi, ok := rw.store.(MultiDBSource)
 	if !ok {
@@ -647,6 +642,26 @@ func (rw *AOFRewriter) writeAll(w *bufio.Writer) error {
 	}
 	if selected != 0 {
 		return rw.writeCommand(w, "SELECT", "0")
+	}
+	return nil
+}
+
+// writePrelude writes what comes before the keys: the function libraries
+// and the commands that rebuild the search indexes.
+func (rw *AOFRewriter) writePrelude(w *bufio.Writer) error {
+	if src, ok := rw.store.(interface{ FunctionPayload() []byte }); ok {
+		if payload := src.FunctionPayload(); len(payload) > 0 {
+			if err := rw.writeCommand(w, "FUNCTION", "RESTORE", string(payload), "FLUSH"); err != nil {
+				return err
+			}
+		}
+	}
+	if src, ok := rw.store.(interface{ SearchCommands() [][]string }); ok {
+		for _, cmd := range src.SearchCommands() {
+			if err := rw.writeCommand(w, cmd[0], cmd[1:]...); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -1140,6 +1155,22 @@ func (a multiDBAdapter) GetAll() map[string]interface{} {
 // produces: typed write commands, PEXPIREAT for keys with a TTL and a SELECT
 // before each non-empty database other than 0, ending in database 0.
 func WriteSnapshot(w io.Writer, src MultiDBSource) error {
+	if sharded, ok := src.(ShardedEntrySource); ok {
+		pieces, err := encodeSnapshotShards(src, sharded.EntryShards())
+		if err != nil {
+			return err
+		}
+		if pb, ok := w.(*pieceBuffer); ok {
+			pb.pieces = append(pb.pieces, pieces...)
+			return nil
+		}
+		for _, piece := range pieces {
+			if _, err := w.Write(piece); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 	rw := &AOFRewriter{store: multiDBAdapter{src}}
 	bw := bufio.NewWriterSize(w, 64*1024)
 	if err := rw.writeAll(bw); err != nil {

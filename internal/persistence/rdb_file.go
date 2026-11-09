@@ -11,10 +11,13 @@ import (
 	"runtime"
 )
 
-var rdbCRCTable = func() [256]uint64 {
-	var table [256]uint64
+// rdbCRCTables are Redis' CRC64 (Jones polynomial, reflected, no final
+// xor) tables for slicing by 8: rdbCRCTables[0] is the byte-wise table and
+// rdbCRCTables[k] advances a byte k more positions.
+var rdbCRCTables = func() *[8][256]uint64 {
+	var t [8][256]uint64
 	poly := bits.Reverse64(0xad93d23594c935a9)
-	for i := range table {
+	for i := range t[0] {
 		v := uint64(i)
 		for j := 0; j < 8; j++ {
 			if v&1 != 0 {
@@ -23,14 +26,28 @@ var rdbCRCTable = func() [256]uint64 {
 				v >>= 1
 			}
 		}
-		table[i] = v
+		t[0][i] = v
 	}
-	return table
+	for i := range t[0] {
+		v := t[0][i]
+		for k := 1; k < 8; k++ {
+			v = t[0][byte(v)] ^ v>>8
+			t[k][i] = v
+		}
+	}
+	return &t
 }()
 
 func rdbChecksum(crc uint64, data []byte) uint64 {
+	t := rdbCRCTables
+	for len(data) >= 8 {
+		crc ^= binary.LittleEndian.Uint64(data)
+		crc = t[7][byte(crc)] ^ t[6][byte(crc>>8)] ^ t[5][byte(crc>>16)] ^ t[4][byte(crc>>24)] ^
+			t[3][byte(crc>>32)] ^ t[2][byte(crc>>40)] ^ t[1][byte(crc>>48)] ^ t[0][crc>>56]
+		data = data[8:]
+	}
 	for _, b := range data {
-		crc = rdbCRCTable[byte(crc)^b] ^ crc>>8
+		crc = t[0][byte(crc)^b] ^ crc>>8
 	}
 	return crc
 }

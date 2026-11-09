@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"time"
 
 	"github.com/cachestorm/cachestorm/internal/logger"
@@ -114,15 +115,93 @@ func backupAOF(path string, ops aofReplaceOps) (string, error) {
 func (w *AOFWriter) replaceSnapshot(src MultiDBSource) error {
 	w.lifecycle.Lock()
 	defer w.lifecycle.Unlock()
+	r, err := w.beginRewrite(src)
+	if err != nil {
+		return err
+	}
+	return w.finishRewrite(r)
+}
+
+// AOFRewrite is a rewrite BeginRewrite started: the dataset is encoded in
+// memory and the commands appended since are kept, until Finish writes both
+// to a new file and switches to it.
+type AOFRewrite struct {
+	w        *AOFWriter
+	snapshot *pieceBuffer
+}
+
+// aofTail is what was appended since a rewrite's snapshot. It starts with
+// a SELECT of the database the file was in, as the snapshot ends in 0.
+type aofTail struct {
+	buf      []byte
+	endDB    int
+	appended bool
+}
+
+// BeginRewrite encodes src for a rewrite and starts keeping the commands
+// appended from now on. The caller holds writes off while it runs; Finish
+// does the slow part, writing and syncing the new file, with writes going
+// on. It returns nil when the AOF is disabled. Stop waits for Finish.
+func (w *AOFWriter) BeginRewrite(src MultiDBSource) (*AOFRewrite, error) {
+	if !w.config.Enabled {
+		return nil, nil
+	}
+	w.lifecycle.Lock()
+	r, err := w.beginRewrite(src)
+	if err != nil {
+		w.lifecycle.Unlock()
+		return nil, err
+	}
+	return r, nil
+}
+
+// Finish writes the rewrite's file and switches to it.
+func (r *AOFRewrite) Finish() error {
+	defer r.w.lifecycle.Unlock()
+	return r.w.finishRewrite(r)
+}
+
+func (w *AOFWriter) aofReplaceOps() aofReplaceOps {
+	if w.replaceOps.create == nil {
+		return defaultAOFReplaceOps()
+	}
+	return w.replaceOps
+}
+
+func (w *AOFWriter) beginRewrite(src MultiDBSource) (*AOFRewrite, error) {
+	w.mu.Lock()
+	err := w.fatalErr
+	w.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	snapshot := &pieceBuffer{}
+	if err := w.aofReplaceOps().write(snapshot, src); err != nil {
+		return nil, err
+	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.fatalErr != nil {
-		return w.fatalErr
+		return nil, w.fatalErr
 	}
-	ops := w.replaceOps
-	if ops.create == nil {
-		ops = defaultAOFReplaceOps()
+	tail := &aofTail{}
+	if w.curDB > 0 {
+		tail.buf = appendCommand(nil, "SELECT", [][]byte{strconv.AppendInt(nil, int64(w.curDB), 10)})
+		tail.endDB = w.curDB
 	}
+	w.tail = tail
+	return &AOFRewrite{w: w, snapshot: snapshot}, nil
+}
+
+func (w *AOFWriter) finishRewrite(r *AOFRewrite) (err error) {
+	defer func() {
+		if err != nil {
+			w.mu.Lock()
+			w.tail = nil
+			w.mu.Unlock()
+		}
+	}()
+	ops := w.aofReplaceOps()
 	path := filepath.Join(w.config.DataDir, w.config.Filename)
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -142,11 +221,43 @@ func (w *AOFWriter) replaceSnapshot(src MultiDBSource) error {
 	if err := writeAOFHeader(prepared); err != nil {
 		return err
 	}
-	if err := ops.write(prepared, src); err != nil {
+	bw := bufio.NewWriterSize(prepared, 256*1024)
+	for i, piece := range r.snapshot.pieces {
+		if _, err := bw.Write(piece); err != nil {
+			return err
+		}
+		r.snapshot.pieces[i] = nil
+	}
+	if err := bw.Flush(); err != nil {
 		return err
 	}
+	r.snapshot = nil
 	if err := ops.sync(prepared); err != nil {
 		return err
+	}
+	// The commands appended meanwhile go after the snapshot, with appends
+	// held off until the new file has replaced the old one.
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	tail := w.tail
+	w.tail = nil
+	if w.fatalErr != nil {
+		return w.fatalErr
+	}
+	if tail == nil {
+		return errors.New("AOF rewrite lost its tail")
+	}
+	endDB := tail.endDB
+	if tail.appended {
+		endDB = w.curDB
+	}
+	if len(tail.buf) > 0 {
+		if _, err := prepared.Write(tail.buf); err != nil {
+			return err
+		}
+		if err := ops.sync(prepared); err != nil {
+			return err
+		}
 	}
 	info, err := prepared.Stat()
 	if err != nil {
@@ -218,7 +329,7 @@ func (w *AOFWriter) replaceSnapshot(src MultiDBSource) error {
 			logger.Warn().Err(err).Msg("previous AOF handle close failed")
 		}
 	}
-	w.curDB = 0
+	w.curDB = endDB
 	w.size.Store(info.Size())
 	w.dirty.Store(0)
 	w.lastSync = time.Now()

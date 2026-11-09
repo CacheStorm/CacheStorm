@@ -32,32 +32,45 @@ const (
 )
 
 func EncodeDump(value store.Value) ([]byte, error) {
-	var out []byte
+	out, version, err := appendDumpValue(nil, value)
+	if err != nil {
+		return nil, err
+	}
+	out = binary.LittleEndian.AppendUint16(out, version)
+	out = binary.LittleEndian.AppendUint64(out, rdbChecksum(0, out))
+	return out, nil
+}
+
+// appendDumpValue appends value's type byte and RDB body to out and returns
+// the RDB version the encoding needs. On an error out holds a partial
+// encoding the caller drops.
+func appendDumpValue(out []byte, value store.Value) ([]byte, uint16, error) {
 	version := uint16(11)
 	str := func(s string) { out = appendDumpLength(out, uint64(len(s))); out = append(out, s...) }
+	bytesStr := func(b []byte) { out = appendDumpLength(out, uint64(len(b))); out = append(out, b...) }
 	switch v := value.(type) {
 	case *store.StringValue:
 		out = append(out, 0)
-		str(string(v.Data))
+		bytesStr(v.Data)
 	case store.CompactString:
 		out = append(out, 0)
-		str(string(v.Bytes()))
+		bytesStr(v.Bytes())
 	case *store.ListValue:
 		v.RLock()
 		defer v.RUnlock()
 		if v.Len() == 0 {
-			return nil, ErrDumpFormat
+			return out, 0, ErrDumpFormat
 		}
 		out = append(out, 1)
 		out = appendDumpLength(out, uint64(v.Len()))
 		for _, s := range v.Elements() {
-			str(string(s))
+			bytesStr(s)
 		}
 	case *store.SetValue:
 		v.RLock()
 		defer v.RUnlock()
 		if v.Card() == 0 {
-			return nil, ErrDumpFormat
+			return out, 0, ErrDumpFormat
 		}
 		out = append(out, 2)
 		out = appendDumpLength(out, uint64(v.Card()))
@@ -68,7 +81,7 @@ func EncodeDump(value store.Value) ([]byte, error) {
 		if v.HasFieldTTLs() {
 			snap := snapshotHash(v)
 			if len(snap.fields) == 0 {
-				return nil, ErrDumpFormat
+				return out, 0, ErrDumpFormat
 			}
 			if snap.anyTTL {
 				out = appendDumpHashTTL(out, snap)
@@ -79,19 +92,19 @@ func EncodeDump(value store.Value) ([]byte, error) {
 		v.RLock()
 		defer v.RUnlock()
 		if v.Len() == 0 {
-			return nil, ErrDumpFormat
+			return out, 0, ErrDumpFormat
 		}
 		out = append(out, 4)
 		out = appendDumpLength(out, uint64(v.Len()))
 		for _, k := range hashFieldOrder(v) {
 			str(k)
-			str(string(v.Field(k)))
+			bytesStr(v.Field(k))
 		}
 	case *store.SortedSetValue:
 		v.RLock()
 		defer v.RUnlock()
 		if v.Card() == 0 {
-			return nil, ErrDumpFormat
+			return out, 0, ErrDumpFormat
 		}
 		out = append(out, 5)
 		out = appendDumpLength(out, uint64(v.Card()))
@@ -104,7 +117,7 @@ func EncodeDump(value store.Value) ([]byte, error) {
 			str(k)
 			score, _ := v.GetScore(k)
 			if math.IsNaN(score) {
-				return nil, ErrDumpFormat
+				return out, 0, ErrDumpFormat
 			}
 			out = binary.LittleEndian.AppendUint64(out, math.Float64bits(score))
 		}
@@ -112,39 +125,37 @@ func EncodeDump(value store.Value) ([]byte, error) {
 		out = appendDumpStream(out, v)
 	case *store.JSONValue:
 		out = append(out, dumpTypeJSON)
-		str(string(v.Bytes()))
+		bytesStr(v.Bytes())
 	case *store.TimeSeriesValue:
 		var data bytes.Buffer
 		v.RLock()
 		err := gob.NewEncoder(&data).Encode(v)
 		v.RUnlock()
 		if err != nil {
-			return nil, err
+			return out, 0, err
 		}
 		out = append(out, dumpTypeTimeSeries)
 		str(data.String())
 	case store.ExtensionValue:
 		data, err := v.MarshalBinary()
 		if err != nil {
-			return nil, err
+			return out, 0, err
 		}
 		out = append(out, v.ExtensionType())
-		str(string(data))
+		bytesStr(data)
 	default:
 		raw, ok := value.(store.RedisStringValue)
 		if !ok {
-			return nil, fmt.Errorf("ERR DUMP unsupported value type %T", value)
+			return out, 0, fmt.Errorf("ERR DUMP unsupported value type %T", value)
 		}
 		data, err := raw.RedisStringBytes()
 		if err != nil {
-			return nil, err
+			return out, 0, err
 		}
 		out = append(out, 0)
-		str(string(data))
+		bytesStr(data)
 	}
-	out = binary.LittleEndian.AppendUint16(out, version)
-	out = binary.LittleEndian.AppendUint64(out, rdbChecksum(0, out))
-	return out, nil
+	return out, version, nil
 }
 
 func appendDumpLength(dst []byte, n uint64) []byte {
