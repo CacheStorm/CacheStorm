@@ -456,9 +456,18 @@ func (r *AOFReader) LoadValidFrom(path string, offset int64) ([]Command, int64, 
 	for {
 		// Redis writes "#TS:<unix time>" annotation lines between commands
 		// under aof-timestamp-enabled.
+		// CacheStorm's own version header is one too.
 		if next, err := br.Peek(1); err == nil && next[0] == '#' {
-			if _, err := br.ReadSlice('\n'); err != nil {
+			line, err := br.ReadSlice('\n')
+			if err != nil {
 				break
+			}
+			header, herr := aofVersionAnnotation(line, valid, r.Version)
+			if herr != nil {
+				return nil, valid, herr
+			}
+			if header {
+				r.Version = AOFVersion
 			}
 			valid = counter.n - int64(br.Buffered())
 			continue
@@ -474,7 +483,7 @@ func (r *AOFReader) LoadValidFrom(path string, offset int64) ([]Command, int64, 
 		name := strings.ToUpper(cmd)
 		if name == aofVersionCommand {
 			if valid != 0 || r.Version != 0 || len(args) != 1 || string(args[0]) != "2" {
-				return nil, valid, errors.New("invalid or unsupported AOF version header")
+				return nil, valid, errAOFVersion
 			}
 			r.Version = AOFVersion
 			valid = counter.n - int64(br.Buffered())

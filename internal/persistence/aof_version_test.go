@@ -13,6 +13,8 @@ func TestAOFVersionHeaderValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	set := appendCommand(nil, "SET", [][]byte{[]byte("k"), []byte("v")})
+	// The header 0.3 and earlier wrote, a command, still loads.
+	oldHeader := appendCommand(nil, aofVersionCommand, [][]byte{[]byte("2")})
 	for _, tc := range []struct {
 		name    string
 		data    []byte
@@ -21,7 +23,10 @@ func TestAOFVersionHeaderValidation(t *testing.T) {
 	}{
 		{"legacy", set, 0, false},
 		{"versioned", append(append([]byte{}, header.Bytes()...), set...), AOFVersion, false},
+		{"command header", append(append([]byte{}, oldHeader...), set...), AOFVersion, false},
 		{"unsupported", appendCommand(nil, aofVersionCommand, [][]byte{[]byte("3")}), 0, true},
+		{"unsupported annotation", []byte("#CACHESTORM.AOF 3\r\n"), 0, true},
+		{"mixed duplicate", append(append([]byte{}, header.Bytes()...), oldHeader...), 0, true},
 		{"duplicate", append(append([]byte{}, header.Bytes()...), header.Bytes()...), 0, true},
 		{"misplaced", append(append([]byte{}, set...), header.Bytes()...), 0, true},
 	} {
