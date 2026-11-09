@@ -79,10 +79,13 @@ func Default() *Config {
 
 // UseRedisDefaults sets what redis-server does where CacheStorm's own
 // defaults differ, for a server started from a redis.conf: it listens on
-// its RESP port only, without the HTTP API or the metrics endpoint (the
-// http-port and metrics-port directives turn them on), and refuses writes
-// over maxmemory instead of evicting unless maxmemory-policy says otherwise.
+// port 6379 and on its RESP port only, without the HTTP API or the metrics
+// endpoint (the http-port and metrics-port directives turn them on), keeps
+// its files in the working directory, and refuses writes over maxmemory
+// instead of evicting unless maxmemory-policy says otherwise.
 func UseRedisDefaults(c *Config) {
+	c.Server.Port = 6379
+	c.Persistence.DataDir = "."
 	c.HTTP.Enabled = false
 	c.Plugins.Metrics.Enabled = false
 	c.Memory.EvictionPolicy = "noeviction"

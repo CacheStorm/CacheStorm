@@ -136,11 +136,14 @@ func main() {
 
 // loadConfig reads the configuration: a YAML file, or a redis.conf when the
 // path ends in .conf, then the Redis-style command-line options on top, as
-// redis-server lets them override its file. It returns the directives left
-// for CONFIG SET once the server exists.
+// redis-server lets them override its file. A redis.conf, or Redis-style
+// options without a YAML file (as in `redis-server --port 7000`), get
+// Redis' defaults. It returns the directives left for CONFIG SET once the
+// server exists.
 func loadConfig(path string, redisArgs []string) (*config.Config, []config.Directive, error) {
 	var directives []config.Directive
 	redisConf := strings.HasSuffix(path, ".conf")
+	redisMode := redisConf || (path == "" && len(redisArgs) > 0)
 	if redisConf {
 		data, err := os.ReadFile(path)
 		if err != nil {
@@ -156,15 +159,16 @@ func loadConfig(path string, redisArgs []string) (*config.Config, []config.Direc
 		return nil, nil, err
 	}
 	directives = append(directives, args...)
-	// A redis.conf without save rules gets Redis' default ones.
-	if redisConf && !slices.ContainsFunc(directives, func(d config.Directive) bool { return d.Name == "save" }) {
+	// A redis.conf or Redis-style options without save rules get Redis'
+	// default ones.
+	if redisMode && !slices.ContainsFunc(directives, func(d config.Directive) bool { return d.Name == "save" }) {
 		directives = append([]config.Directive{config.RedisDefaultSave}, directives...)
 	}
 	cfg, err := config.Load(path)
 	if err != nil {
 		return nil, nil, err
 	}
-	if redisConf {
+	if redisMode {
 		config.UseRedisDefaults(cfg)
 	}
 	if len(directives) == 0 {

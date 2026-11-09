@@ -36,8 +36,14 @@ USER cachestorm
 
 EXPOSE 6380 8080 7946 9090
 
+# The HTTP health endpoint, or, when the server runs from a redis.conf or
+# Redis-style options and has no HTTP API, a PING on the RESP port (any
+# reply, NOAUTH included, means it is up).
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:8080/api/health || exit 1
+    CMD wget -q --tries=1 --spider http://localhost:8080/api/health \
+        || printf 'PING\r\n' | nc -w 2 localhost 6380 | grep -q . \
+        || printf 'PING\r\n' | nc -w 2 localhost 6379 | grep -q . \
+        || exit 1
 
 ENTRYPOINT ["cachestorm"]
 CMD ["--config", "/etc/cachestorm/cachestorm.yaml"]

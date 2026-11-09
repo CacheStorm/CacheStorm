@@ -28,6 +28,31 @@ func TestRedisConfUsesRedisDefaults(t *testing.T) {
 	if cfg.Memory.EvictionPolicy != "noeviction" {
 		t.Fatalf("policy %q, want noeviction", cfg.Memory.EvictionPolicy)
 	}
+	// Without port and dir lines Redis listens on 6379 and keeps its files
+	// in the working directory.
+	cfg, _, err = loadConfig(write("bare.conf", "appendonly yes\n"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Server.Port != 6379 || cfg.Persistence.DataDir != "." {
+		t.Fatalf("port %d dir %q, want 6379 and the working directory", cfg.Server.Port, cfg.Persistence.DataDir)
+	}
+	// So do Redis-style options without a file, as redis-server --appendonly yes.
+	cfg, _, err = loadConfig("", []string{"--appendonly", "yes"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Server.Port != 6379 || cfg.Persistence.DataDir != "." || cfg.HTTP.Enabled || !cfg.Persistence.AOF {
+		t.Fatalf("options only: port %d dir %q http %v aof %v", cfg.Server.Port, cfg.Persistence.DataDir, cfg.HTTP.Enabled, cfg.Persistence.AOF)
+	}
+	// No file and no options keep CacheStorm's own defaults.
+	cfg, _, err = loadConfig("", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Server.Port != 6380 || !cfg.HTTP.Enabled {
+		t.Fatalf("bare start: port %d http %v", cfg.Server.Port, cfg.HTTP.Enabled)
+	}
 
 	cfg, _, err = loadConfig(write("on.conf", "dir "+dir+"\nmaxmemory-policy allkeys-lfu\nhttp-port 8181\nmetrics-port 9191\n"), nil)
 	if err != nil {
