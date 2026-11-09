@@ -454,6 +454,15 @@ func New(cfg *config.Config) (result *Server, retErr error) {
 			legacyAOF = reader.Version == 0 && valid > 0
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return nil, fmt.Errorf("stat AOF: %w", err)
+		} else if found, err := s.loadRedisMultiPartAOF(dataDir); err != nil {
+			return nil, err
+		} else if found {
+			// The dataset Redis left is written to CacheStorm's own AOF
+			// below; Redis' files stay as they are.
+			aofFound, legacyAOF = true, true
+			if tracker := s.store.MemoryTracker(); tracker != nil && tracker.Max() > 0 && tracker.Usage() > tracker.Max() {
+				return nil, errors.New("AOF loaded dataset exceeds maxmemory")
+			}
 		}
 
 		if err := s.loadReplicationState(dataDir); err != nil {

@@ -59,6 +59,24 @@ func (s *Server) configureSnapshots(restore bool) error {
 	} else if err != nil {
 		return err
 	}
+	if err := s.loadRDBFile(path); err != nil {
+		return err
+	}
+	if s.aof != nil {
+		src, err := s.persistenceSource(s.dbs)
+		if err == nil {
+			err = s.aof.Rewrite(src)
+		}
+		if err != nil {
+			return fmt.Errorf("seed AOF from snapshot: %w", err)
+		}
+	}
+	return nil
+}
+
+// loadRDBFile loads the RDB file at path into the databases, with the
+// function libraries and search indexes it carries.
+func (s *Server) loadRDBFile(path string) error {
 	reader := persistence.NewRDBReaderForDatabases(s.dbs)
 	if err := reader.Load(path); err != nil {
 		return fmt.Errorf("load snapshot %s: %w", path, err)
@@ -71,16 +89,6 @@ func (s *Server) configureSnapshots(restore bool) error {
 	}
 	if err := s.restoreSearch([]byte(reader.AuxFields[snapshotSearchAux])); err != nil {
 		return fmt.Errorf("restore snapshot search indexes: %w", err)
-	}
-
-	if s.aof != nil {
-		src, err := s.persistenceSource(s.dbs)
-		if err == nil {
-			err = s.aof.Rewrite(src)
-		}
-		if err != nil {
-			return fmt.Errorf("seed AOF from snapshot: %w", err)
-		}
 	}
 	return nil
 }

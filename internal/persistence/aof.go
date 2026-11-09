@@ -444,6 +444,15 @@ func (r *AOFReader) LoadValid(path string) ([]Command, int64, error) {
 	txIndex := -1
 
 	for {
+		// Redis writes "#TS:<unix time>" annotation lines between commands
+		// under aof-timestamp-enabled.
+		if next, err := br.Peek(1); err == nil && next[0] == '#' {
+			if _, err := br.ReadSlice('\n'); err != nil {
+				break
+			}
+			valid = counter.n - int64(br.Buffered())
+			continue
+		}
 		cmd, args, err := reader.ReadCommand()
 		if err != nil {
 			if err == io.EOF || err == io.ErrUnexpectedEOF || strings.Contains(err.Error(), "EOF") {
