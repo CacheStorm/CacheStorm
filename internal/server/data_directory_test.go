@@ -319,7 +319,7 @@ func TestDataDirectoryHeldUntilSnapshotWorkerCompletes(t *testing.T) {
 	}
 	entered, release := make(chan struct{}), make(chan struct{})
 	write := s.snapshotWrite
-	s.snapshotWrite = func(data []byte) error { close(entered); <-release; return write(data) }
+	s.snapshotWrite = func(data *persistence.RDBParts) error { close(entered); <-release; return write(data) }
 	if err := s.saveSnapshot(true); err != nil {
 		t.Fatal(err)
 	}

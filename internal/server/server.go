@@ -162,7 +162,7 @@ type Server struct {
 	// changes; snapshotReset wakes the loop to pick them up.
 	saveRules     atomic.Pointer[[]saveRule]
 	snapshotReset chan struct{}
-	snapshotWrite func([]byte) error
+	snapshotWrite func(*persistence.RDBParts) error
 	// The AOF rewrite state is guarded by snapshotMu.
 	aofRewriteRunning    bool
 	aofRewriteLastError  error

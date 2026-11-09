@@ -99,7 +99,7 @@ func TestSnapshotBackgroundCaptureAndFailure(t *testing.T) {
 	s.snapshotLastTime = 1
 	write := s.snapshotWrite
 	entered, release := make(chan struct{}), make(chan struct{})
-	s.snapshotWrite = func(data []byte) error {
+	s.snapshotWrite = func(data *persistence.RDBParts) error {
 		close(entered)
 		<-release
 		return write(data)
@@ -153,7 +153,7 @@ func TestSnapshotBackgroundCaptureAndFailure(t *testing.T) {
 		t.Fatal("successful background completion did not advance LASTSAVE")
 	}
 	s.snapshotMu.Lock()
-	s.snapshotWrite = func([]byte) error { return errors.New("injected disk failure") }
+	s.snapshotWrite = func(*persistence.RDBParts) error { return errors.New("injected disk failure") }
 	s.snapshotMu.Unlock()
 	if got := c.do("SAVE"); got.Type != resp.TypeError {
 		t.Fatalf("failed SAVE = %+v", got)
@@ -199,7 +199,7 @@ func TestSnapshotPeriodicWriterAndStop(t *testing.T) {
 	}
 	entered, release := make(chan struct{}), make(chan struct{})
 	write := s.snapshotWrite
-	s.snapshotWrite = func(data []byte) error {
+	s.snapshotWrite = func(data *persistence.RDBParts) error {
 		close(entered)
 		<-release
 		return write(data)

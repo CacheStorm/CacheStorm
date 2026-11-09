@@ -1,6 +1,7 @@
 package persistence
 
 import (
+	"bufio"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -70,6 +71,19 @@ func WriteRDBFile(path string, data []byte) error {
 			err = io.ErrShortWrite
 		}
 		return err
+	})
+}
+
+// WriteRDBParts writes an encoded RDB to path as WriteRDBFile does,
+// streaming its pieces and filling the checksum as they go, without joining
+// them in memory.
+func WriteRDBParts(path string, parts *RDBParts) error {
+	return writeRDBAtomic(path, func(w io.Writer) error {
+		bw := bufio.NewWriterSize(w, 256*1024)
+		if err := parts.writeSealed(bw); err != nil {
+			return err
+		}
+		return bw.Flush()
 	})
 }
 

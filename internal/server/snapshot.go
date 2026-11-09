@@ -50,7 +50,7 @@ func (s *Server) configureSnapshots(restore bool) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
 	}
-	s.snapshotWrite = func(data []byte) error { return persistence.WriteRDBFile(path, data) }
+	s.snapshotWrite = func(parts *persistence.RDBParts) error { return persistence.WriteRDBParts(path, parts) }
 	if !restore {
 		return nil
 	}
@@ -273,9 +273,9 @@ func (s *Server) saveSnapshot(background bool) error {
 		aux = map[string]string{snapshotSearchAux: string(persistence.EncodeCommands(searchCmds))}
 	}
 	// The snapshot is in Redis' RDB format, so Redis and its tools load it.
-	// The pieces are joined and the checksum computed after the encoder
+	// The pieces are written and the checksum computed after the encoder
 	// returns, so a background save holds the write gate only while the
-	// dataset is encoded.
+	// dataset is encoded, and they are never joined in memory.
 	db0 := s.dbs.DB(0)
 	encoded, _, err := persistence.EncodeRedisRDBParts(replication.DBSource{DBs: s.dbs}, persistence.RedisRDBInfo{
 		Functions:  persistence.FunctionCodes(functions),
@@ -288,13 +288,7 @@ func (s *Server) saveSnapshot(background bool) error {
 		finish(err)
 		return fmt.Errorf("ERR snapshot failed: %w", err)
 	}
-	save := func() error {
-		data := encoded.Join()
-		if err := persistence.SealRDBChecksum(data); err != nil {
-			return err
-		}
-		return write(data)
-	}
+	save := func() error { return write(encoded) }
 	if !background {
 		err := save()
 		finish(err)
