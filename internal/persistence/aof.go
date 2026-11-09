@@ -429,18 +429,28 @@ func (c *countingReader) Read(p []byte) (int, error) {
 // append does not land after the torn bytes. Bytes that do not parse as a
 // command anywhere before the tail are corruption and return an error.
 func (r *AOFReader) LoadValid(path string) ([]Command, int64, error) {
+	return r.LoadValidFrom(path, 0)
+}
+
+// LoadValidFrom is LoadValid for the commands that start offset bytes into
+// the file, after an RDB preamble; the valid length it returns counts from
+// the start of the file.
+func (r *AOFReader) LoadValidFrom(path string, offset int64) ([]Command, int64, error) {
 	r.Version = 0
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to open AOF file: %v", err)
 	}
 	defer f.Close()
+	if _, err := f.Seek(offset, io.SeekStart); err != nil {
+		return nil, 0, err
+	}
 
 	var commands []Command
-	counter := &countingReader{r: f}
+	counter := &countingReader{r: f, n: offset}
 	br := bufio.NewReader(counter)
 	reader := resp.NewReader(br)
-	var valid, txOffset int64
+	valid, txOffset := offset, int64(0)
 	txIndex := -1
 
 	for {

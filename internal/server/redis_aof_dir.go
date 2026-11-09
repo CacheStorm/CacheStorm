@@ -16,6 +16,41 @@ const (
 	redisAOFFilename = "appendonly.aof"
 )
 
+// loadAOFPreamble loads the RDB a Redis 5 or 6 appendonly.aof begins with
+// under aof-use-rdb-preamble yes and returns its length, where the file's
+// commands start; it returns 0 for a file without one. The file is copied
+// to appendonly.aof.redis first, as the caller rewrites it in CacheStorm's
+// format.
+func (s *Server) loadAOFPreamble(path string) (int64, error) {
+	rdb, err := persistence.IsRDBFile(path)
+	if err != nil || !rdb {
+		return 0, err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0, err
+	}
+	backup := path + ".redis"
+	if _, err := os.Stat(backup); errors.Is(err, os.ErrNotExist) {
+		if err := persistence.WriteFileAtomic(backup, data); err != nil {
+			return 0, fmt.Errorf("keep a copy of the Redis AOF: %w", err)
+		}
+	} else if err != nil {
+		return 0, err
+	}
+	reader := persistence.NewRDBReaderForDatabases(s.dbs)
+	n, err := reader.LoadPreamble(data)
+	if err != nil {
+		return 0, fmt.Errorf("the RDB preamble of AOF %s is corrupt: %w", path, err)
+	}
+	if err := s.restoreRDBAux(reader); err != nil {
+		return 0, err
+	}
+	logger.Info().Str("path", path).Str("copy", backup).
+		Msg("loaded a Redis AOF with an RDB preamble; it is rewritten in CacheStorm's format and the original kept as the copy")
+	return int64(n), nil
+}
+
 // loadRedisMultiPartAOF loads the AOF a Redis 7 server left in the data
 // directory's appendonlydir: its base file (an RDB or commands), then each
 // incremental file in the manifest's order. It reports false when there is

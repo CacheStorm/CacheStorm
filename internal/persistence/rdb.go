@@ -475,6 +475,9 @@ type RDBReader struct {
 	body      []byte
 	redis     bool
 	functions []string
+	// preamble stops a load at the RDB's EOF opcode, which commands follow
+	// in an AOF with an RDB preamble.
+	preamble bool
 }
 
 func NewRDBReader(s *store.Store) *RDBReader {
@@ -509,6 +512,31 @@ func (r *RDBReader) LoadBytes(data []byte) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.loadBytes(data)
+}
+
+// LoadPreamble loads the RDB an AOF begins with under Redis'
+// aof-use-rdb-preamble and returns its length; the AOF's commands follow.
+func (r *RDBReader) LoadPreamble(data []byte) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.dbs != nil {
+		r.dbs.FlushAll()
+		r.store = r.dbs.DB(0)
+	}
+	r.body, r.preamble = data, true
+	defer func() { r.body, r.preamble = nil, false }()
+	rd := bytes.NewReader(data)
+	if err := r.readRDB(rd); err != nil {
+		return 0, err
+	}
+	end := len(data) - rd.Len()
+	if end+8 > len(data) {
+		return 0, fmt.Errorf("RDB preamble ends without its checksum")
+	}
+	if sum := binary.LittleEndian.Uint64(data[end : end+8]); sum != 0 && sum != rdbChecksum(0, data[:end]) {
+		return 0, fmt.Errorf("RDB preamble checksum mismatch")
+	}
+	return end + 8, nil
 }
 
 func (r *RDBReader) loadBytes(data []byte) error {
@@ -699,6 +727,9 @@ func (r *RDBReader) readRDB(f io.Reader) error {
 			pendingExpiryMS = int64(expiresAt) * 1000
 
 		case 0xFF:
+			if r.preamble {
+				return nil
+			}
 			var extra [1]byte
 			if _, err := io.ReadFull(f, extra[:]); err != io.EOF {
 				return fmt.Errorf("RDB trailing data after EOF")

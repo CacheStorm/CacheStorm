@@ -81,6 +81,12 @@ func (s *Server) loadRDBFile(path string) error {
 	if err := reader.Load(path); err != nil {
 		return fmt.Errorf("load snapshot %s: %w", path, err)
 	}
+	return s.restoreRDBAux(reader)
+}
+
+// restoreRDBAux restores the function libraries and search indexes an RDB
+// reader found.
+func (s *Server) restoreRDBAux(reader *persistence.RDBReader) error {
 	functions := []byte(reader.AuxFields["cachestorm-functions"])
 	if len(functions) > 0 {
 		if _, err := s.snapshotFunctionCommand([][]byte{[]byte("RESTORE"), functions, []byte("FLUSH")}); err != nil {

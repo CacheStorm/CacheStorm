@@ -73,3 +73,47 @@ func TestStartLoadsRedisMultiPartAOF(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// A Redis 5 or 6 appendonly.aof written under aof-use-rdb-preamble yes is an
+// RDB followed by commands. It loads, is rewritten in CacheStorm's format,
+// and the original is kept beside it.
+func TestStartLoadsRedisAOFWithRDBPreamble(t *testing.T) {
+	dir := t.TempDir()
+	src := store.NewDatabases(store.NewStore(), 16)
+	_ = src.DB(0).Set("base", &store.StringValue{Data: []byte("1")}, store.SetOptions{})
+	_ = src.DB(3).Set("three", &store.StringValue{Data: []byte("3")}, store.SetOptions{})
+	var file bytes.Buffer
+	if _, err := persistence.WriteRedisRDB(&file, replication.DBSource{DBs: src}, persistence.RedisRDBInfo{}); err != nil {
+		t.Fatal(err)
+	}
+	file.WriteString("*2\r\n$6\r\nSELECT\r\n$1\r\n3\r\n*2\r\n$4\r\nINCR\r\n$5\r\nthree\r\n" +
+		"*2\r\n$6\r\nSELECT\r\n$1\r\n0\r\n*3\r\n$3\r\nSET\r\n$5\r\nafter\r\n$1\r\ny\r\n")
+	path := filepath.Join(dir, "appendonly.aof")
+	if err := os.WriteFile(path, file.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s := newMultiDBAOFServer(t, dir)
+	check := func(s *Server) {
+		t.Helper()
+		for _, c := range []struct {
+			db        int
+			key, want string
+		}{{0, "base", "1"}, {0, "after", "y"}, {3, "three", "4"}} {
+			if got := getString(t, s.dbs.DB(c.db), c.key); got != c.want {
+				t.Errorf("db %d %s = %q, want %q", c.db, c.key, got, c.want)
+			}
+		}
+	}
+	check(s)
+	stopReplServer(s)
+	if kept, err := os.ReadFile(path + ".redis"); err != nil || !bytes.Equal(kept, file.Bytes()) {
+		t.Fatalf("the Redis AOF was not kept: %v", err)
+	}
+	if ok, err := persistence.IsRDBFile(path); err != nil || ok {
+		t.Fatalf("appendonly.aof still starts with an RDB: %v", err)
+	}
+	s = newMultiDBAOFServer(t, dir)
+	defer stopReplServer(s)
+	check(s)
+}

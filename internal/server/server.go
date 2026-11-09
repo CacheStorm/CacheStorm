@@ -424,13 +424,17 @@ func New(cfg *config.Config) (result *Server, retErr error) {
 		aofPath := filepath.Join(dataDir, "appendonly.aof")
 		if info, err := os.Stat(aofPath); err == nil {
 			aofFound = true
+			preamble, err := s.loadAOFPreamble(aofPath)
+			if err != nil {
+				return nil, err
+			}
 			reader := persistence.NewAOFReader()
-			commands, valid, err := reader.LoadValid(aofPath)
+			commands, valid, err := reader.LoadValidFrom(aofPath, preamble)
 			if err != nil {
 				return nil, fmt.Errorf("AOF %s is corrupt: %w", aofPath, err)
 			}
 			if len(commands) > 0 {
-				lastDB, err := s.replayAOF(commands, reader.Version == persistence.AOFVersion)
+				lastDB, err := s.replayAOF(commands, reader.Version == persistence.AOFVersion || preamble > 0)
 				if err != nil {
 					return nil, fmt.Errorf("replay AOF %s: %w", aofPath, err)
 				}
@@ -451,7 +455,7 @@ func New(cfg *config.Config) (result *Server, retErr error) {
 					return nil, fmt.Errorf("truncate AOF %s: %w", aofPath, err)
 				}
 			}
-			legacyAOF = reader.Version == 0 && valid > 0
+			legacyAOF = reader.Version == 0 && valid > 0 || preamble > 0
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return nil, fmt.Errorf("stat AOF: %w", err)
 		} else if found, err := s.loadRedisMultiPartAOF(dataDir); err != nil {
