@@ -57,7 +57,7 @@ func (s *Server) loadAOFPreamble(path string) (int64, error) {
 // no manifest. A torn command at the end of an incremental file is left out,
 // as Redis does under aof-load-truncated, without changing the file.
 func (s *Server) loadRedisMultiPartAOF(dataDir string) (bool, error) {
-	dir := filepath.Join(dataDir, redisAOFDir)
+	dir := filepath.Join(dataDir, s.redisAOFDirName())
 	aof, err := persistence.ReadRedisAOFManifest(dir, redisAOFFilename)
 	if errors.Is(err, os.ErrNotExist) {
 		return false, nil
@@ -103,4 +103,12 @@ func (s *Server) loadRedisMultiPartAOF(dataDir string) (bool, error) {
 	logger.Info().Str("dir", dir).Int("incremental_files", len(aof.Incr)).Int("commands", commands).
 		Msg("loaded the Redis 7 multi-part AOF; CacheStorm keeps its own appendonly.aof from now on and leaves the Redis files unchanged")
 	return true, nil
+}
+
+// redisAOFDirName is CONFIG GET appenddirname.
+func (s *Server) redisAOFDirName() string {
+	if s.cfg.Persistence.RedisAOFDir != "" {
+		return s.cfg.Persistence.RedisAOFDir
+	}
+	return redisAOFDir
 }

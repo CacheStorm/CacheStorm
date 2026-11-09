@@ -93,3 +93,18 @@ func TestApplyDirectives(t *testing.T) {
 		}
 	}
 }
+
+func TestAppenddirnameNamesTheRedisAOFDirectory(t *testing.T) {
+	c := Default()
+	if _, err := c.ApplyDirectives([]Directive{{Name: "appenddirname", Args: []string{"myaof"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if c.Persistence.RedisAOFDir != "myaof" {
+		t.Fatalf("RedisAOFDir = %q", c.Persistence.RedisAOFDir)
+	}
+	for _, bad := range []string{"a/b", "..", ""} {
+		if _, err := Default().ApplyDirectives([]Directive{{Name: "appenddirname", Args: []string{bad}}}); err == nil {
+			t.Errorf("appenddirname %q accepted", bad)
+		}
+	}
+}

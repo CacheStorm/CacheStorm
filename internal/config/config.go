@@ -161,6 +161,9 @@ type PersistenceConfig struct {
 	// since the last rewrite. A percentage of 0 disables automatic rewrites.
 	AOFRewritePercentage int    `yaml:"aof_rewrite_percentage" default:"100"`
 	AOFRewriteMinSize    string `yaml:"aof_rewrite_min_size" default:"64mb"`
+	// RedisAOFDir is redis.conf's appenddirname: the directory under DataDir
+	// a Redis 7 AOF to load at startup is in ("appendonlydir" when empty).
+	RedisAOFDir string `yaml:"-"`
 }
 
 type ReplicationConfig struct {

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/cachestorm/cachestorm/internal/config"
 	"github.com/cachestorm/cachestorm/internal/persistence"
 	"github.com/cachestorm/cachestorm/internal/replication"
 	"github.com/cachestorm/cachestorm/internal/store"
@@ -15,8 +16,20 @@ import (
 // appendonly yes loads the multi-part AOF Redis left there, instead of
 // starting empty, and leaves Redis' files as they were.
 func TestStartLoadsRedisMultiPartAOF(t *testing.T) {
+	testStartLoadsRedisMultiPartAOF(t, "")
+}
+
+// redis.conf's appenddirname names the directory.
+func TestStartLoadsRedisMultiPartAOFFromAppenddirname(t *testing.T) {
+	testStartLoadsRedisMultiPartAOF(t, "myaof")
+}
+
+func testStartLoadsRedisMultiPartAOF(t *testing.T, dirname string) {
 	dir := t.TempDir()
 	aofDir := filepath.Join(dir, "appendonlydir")
+	if dirname != "" {
+		aofDir = filepath.Join(dir, dirname)
+	}
 	if err := os.Mkdir(aofDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +59,7 @@ func TestStartLoadsRedisMultiPartAOF(t *testing.T) {
 		}
 	}
 
-	s := newMultiDBAOFServer(t, dir)
+	s := newRedisAOFDirServer(t, dir, dirname)
 	for _, c := range []struct {
 		db        int
 		key, want string
@@ -64,7 +77,7 @@ func TestStartLoadsRedisMultiPartAOF(t *testing.T) {
 	}
 
 	// The next start reads CacheStorm's own AOF.
-	s = newMultiDBAOFServer(t, dir)
+	s = newRedisAOFDirServer(t, dir, dirname)
 	defer stopReplServer(s)
 	if got := getString(t, s.dbs.DB(1), "t"); got != "x" {
 		t.Fatalf("after a restart t = %q", got)
@@ -116,4 +129,22 @@ func TestStartLoadsRedisAOFWithRDBPreamble(t *testing.T) {
 	s = newMultiDBAOFServer(t, dir)
 	defer stopReplServer(s)
 	check(s)
+}
+
+func newRedisAOFDirServer(t *testing.T, dir, dirname string) *Server {
+	t.Helper()
+	cfg := &config.Config{}
+	cfg.Persistence.Enabled = true
+	cfg.Persistence.AOF = true
+	cfg.Persistence.DataDir = dir
+	cfg.Persistence.AOFSync = "always"
+	cfg.Persistence.RedisAOFDir = dirname
+	s, err := newOwnedTestServer(t, cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if err := s.aof.Start(); err != nil {
+		t.Fatalf("start AOF: %v", err)
+	}
+	return s
 }

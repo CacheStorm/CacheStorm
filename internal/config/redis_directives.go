@@ -228,6 +228,16 @@ func (c *Config) applyDirective(d Directive) (bool, error) {
 			return true, fmt.Errorf("CacheStorm always uses %q", want)
 		}
 		return true, nil
+	case "appenddirname":
+		v, err := one()
+		if err != nil {
+			return true, err
+		}
+		if v == "" || v == "." || v == ".." || strings.ContainsAny(v, `/\`) {
+			return true, fmt.Errorf("appenddirname can't be a path, just a dirname")
+		}
+		c.Persistence.RedisAOFDir = v
+		return true, nil
 	case "dir":
 		return str(&c.Persistence.DataDir)
 	case "loglevel":

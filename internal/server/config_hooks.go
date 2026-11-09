@@ -62,6 +62,7 @@ func (s *Server) configValues() map[string]string {
 		"appendonly":                  configYesNo(s.aof != nil),
 		"appendfsync":                 appendfsync,
 		"appendfilename":              "appendonly.aof",
+		"appenddirname":               s.redisAOFDirName(),
 		"dbfilename":                  "dump.rdb",
 		"dir":                         s.persistenceDirectory(),
 		"auto-aof-rewrite-percentage": strconv.FormatInt(s.aofRewritePercentage.Load(), 10),
