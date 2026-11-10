@@ -16,8 +16,13 @@ func TestAOFWriteFailureLatchesHealth(t *testing.T) {
 				t.Skip("requires Unix test devices")
 			}
 			policy := AOFNoSync
-			if phase == "always-flush" || phase == "always-sync" {
+			switch phase {
+			case "always-flush", "always-sync":
 				policy = AOFAlways
+			case "background-flush", "background-sync":
+				// The background loop's write and fsync, which everysec
+				// runs.
+				policy = AOFEverySecond
 			}
 			w := NewAOFWriter(AOFConfig{Enabled: true, DataDir: t.TempDir(), Filename: "appendonly.aof", SyncPolicy: policy})
 			w.openFile = func(_ string, flags int, mode os.FileMode) (*os.File, error) { return os.OpenFile(device, flags, mode) }

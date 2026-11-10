@@ -439,8 +439,11 @@ func (d *deadlineWriterConn) Write(b []byte) (int, error) {
 // a write made while it is not held first drains what it kept.
 type replySink struct {
 	conn net.Conn
-	held bool
-	buf  bytes.Buffer
+	// beforeWrite runs before output goes to the socket: it hands the AOF
+	// what the replies acknowledge.
+	beforeWrite func()
+	held        bool
+	buf         bytes.Buffer
 	// big is a buffer from bigReplyBuffers that the held output moved to
 	// once it outgrew maxKeptReplyBuffer; it goes back at release.
 	big *bytes.Buffer
@@ -485,6 +488,9 @@ func (s *replySink) Write(p []byte) (int, error) {
 	if err := s.release(); err != nil {
 		return 0, err
 	}
+	if s.beforeWrite != nil {
+		s.beforeWrite()
+	}
 	return s.conn.Write(p)
 }
 
@@ -499,6 +505,9 @@ func (s *replySink) release() error {
 	b := s.heldBuf()
 	if b.Len() == 0 {
 		return nil
+	}
+	if s.beforeWrite != nil {
+		s.beforeWrite()
 	}
 	_, err := s.conn.Write(b.Bytes())
 	b.Reset()

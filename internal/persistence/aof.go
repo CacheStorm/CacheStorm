@@ -60,7 +60,23 @@ type AOFWriter struct {
 	openFile func(string, int, os.FileMode) (*os.File, error)
 	// tail keeps what is appended while a rewrite runs.
 	tail *aofTail
+	// pending holds what was appended and not yet written to the file:
+	// appends, which run under the server's write gate, only copy into
+	// it, and WriteOut writes it out before replies are sent, outside mu,
+	// while appends go on into spare. outMu orders writes to the file:
+	// whoever writes pending out holds it, from taking pending until the
+	// write is done. Lock order: lifecycle, outMu, mu.
+	pending []byte
+	spare   []byte
+	outMu   sync.Mutex
+	// appended counts the bytes ever appended and handed those of them
+	// written to the file.
+	appended atomic.Int64
+	handed   atomic.Int64
 }
+
+// maxSpareAOFBuffer is the largest pending buffer kept for reuse.
+const maxSpareAOFBuffer = 1 << 20
 
 func NewAOFWriter(cfg AOFConfig) *AOFWriter {
 	return &AOFWriter{
@@ -125,7 +141,7 @@ func (w *AOFWriter) Start() error {
 	w.writer = bufio.NewWriterSize(w.file, 8192)
 	w.running.Store(true)
 
-	if w.config.SyncPolicy == AOFEverySecond {
+	if w.config.SyncPolicy != AOFAlways {
 		w.wg.Add(1)
 		go w.syncLoop()
 	}
@@ -150,12 +166,14 @@ func (w *AOFWriter) StopWithError() error {
 	}
 	close(w.stopCh)
 	w.wg.Wait()
+	w.outMu.Lock()
+	defer w.outMu.Unlock()
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	err := w.fatalErr
 	if err == nil {
 		if w.writer != nil {
-			err = w.writer.Flush()
+			err = w.drainLocked()
 		}
 		if w.file != nil {
 			err = errors.Join(err, w.file.Sync())
@@ -187,7 +205,11 @@ func (w *AOFWriter) syncLoop() {
 	}
 }
 
+// syncFile writes out what is pending and, under appendfsync everysec,
+// fsyncs the file.
 func (w *AOFWriter) syncFile() {
+	w.outMu.Lock()
+	defer w.outMu.Unlock()
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.fatalErr != nil {
@@ -195,11 +217,14 @@ func (w *AOFWriter) syncFile() {
 	}
 
 	if w.writer != nil {
-		if err := w.writer.Flush(); err != nil {
+		if err := w.drainLocked(); err != nil {
 			w.fatalErr = err
 			logger.Error().Err(err).Msg("aof flush failed")
 			return
 		}
+	}
+	if w.config.SyncPolicy != AOFEverySecond {
+		return
 	}
 	if w.file != nil {
 		if err := w.file.Sync(); err != nil {
@@ -303,20 +328,14 @@ func (w *AOFWriter) writeLocked(commands int64) error {
 	if w.fatalErr != nil {
 		return w.fatalErr
 	}
-	n, err := w.writer.Write(w.writerBuf)
-	if err != nil {
-		w.fatalErr = fmt.Errorf("failed to write to AOF: %w", err)
-		return w.fatalErr
-	}
-	if w.tail != nil {
-		w.tail.buf = append(w.tail.buf, w.writerBuf...)
-		w.tail.appended = true
-	}
-
-	w.size.Add(int64(n))
-	w.dirty.Add(commands)
-
+	n := len(w.writerBuf)
 	if w.config.SyncPolicy == AOFAlways {
+		// Written and fsynced before the command returns, so nothing
+		// is ever pending.
+		if _, err := w.writer.Write(w.writerBuf); err != nil {
+			w.fatalErr = fmt.Errorf("failed to write to AOF: %w", err)
+			return w.fatalErr
+		}
 		if err := w.writer.Flush(); err != nil {
 			w.fatalErr = err
 			return err
@@ -325,8 +344,87 @@ func (w *AOFWriter) writeLocked(commands int64) error {
 			w.fatalErr = err
 			return err
 		}
+	} else {
+		w.pending = append(w.pending, w.writerBuf...)
+	}
+	if w.tail != nil {
+		w.tail.buf = append(w.tail.buf, w.writerBuf...)
+		w.tail.appended = true
 	}
 
+	w.size.Add(int64(n))
+	w.appended.Add(int64(n))
+	if w.config.SyncPolicy == AOFAlways {
+		w.handed.Store(w.appended.Load())
+	}
+	w.dirty.Add(commands)
+	return nil
+}
+
+// drainLocked writes what is pending and what the buffered writer holds to
+// the file. The caller holds outMu and mu.
+func (w *AOFWriter) drainLocked() error {
+	if len(w.pending) > 0 {
+		if _, err := w.writer.Write(w.pending); err != nil {
+			return fmt.Errorf("failed to write to AOF: %w", err)
+		}
+		w.pending = w.pending[:0]
+	}
+	if err := w.writer.Flush(); err != nil {
+		return err
+	}
+	w.handed.Store(w.appended.Load())
+	return nil
+}
+
+// WriteOut writes what has been appended to the file, so the writes a
+// reply acknowledges survive the process being killed, as Redis writes its
+// AOF buffer before it sends replies; fsync stays with the sync policy.
+// Callers about to send replies call it. When nothing is pending it is two
+// atomic loads, and one call writes out what every connection appended.
+// The write happens outside mu, so appends go on meanwhile.
+func (w *AOFWriter) WriteOut() error {
+	// What the caller's replies acknowledge was appended by now; whoever
+	// writes the file meanwhile may cover it, and then this call has
+	// nothing to write.
+	target := w.appended.Load()
+	if w.handed.Load() >= target {
+		return nil
+	}
+	w.outMu.Lock()
+	defer w.outMu.Unlock()
+	if w.handed.Load() >= target {
+		return nil
+	}
+	w.mu.Lock()
+	if w.fatalErr != nil || len(w.pending) == 0 || w.file == nil {
+		err := w.fatalErr
+		if err == nil && len(w.pending) == 0 {
+			w.handed.Store(w.appended.Load())
+		}
+		w.mu.Unlock()
+		return err
+	}
+	// The buffered writer is empty whenever mu is free: every path that
+	// writes through it flushes it before letting go.
+	buf, file := w.pending, w.file
+	target = w.appended.Load()
+	w.pending, w.spare = w.spare[:0], nil
+	w.mu.Unlock()
+
+	_, err := file.Write(buf)
+
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if err != nil {
+		w.fatalErr = fmt.Errorf("failed to write to AOF: %w", err)
+		logger.Error().Err(err).Msg("AOF write failed")
+		return w.fatalErr
+	}
+	w.handed.Store(target)
+	if cap(buf) <= maxSpareAOFBuffer {
+		w.spare = buf[:0]
+	}
 	return nil
 }
 
@@ -358,6 +456,8 @@ func (w *AOFWriter) Dirty() int64 {
 }
 
 func (w *AOFWriter) Flush() error {
+	w.outMu.Lock()
+	defer w.outMu.Unlock()
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.fatalErr != nil {
@@ -365,7 +465,7 @@ func (w *AOFWriter) Flush() error {
 	}
 
 	if w.writer != nil {
-		if err := w.writer.Flush(); err != nil {
+		if err := w.drainLocked(); err != nil {
 			if w.running.Load() {
 				w.fatalErr = err
 			}

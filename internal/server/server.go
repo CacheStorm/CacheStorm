@@ -805,6 +805,7 @@ func (s *Server) acceptLoop() {
 		})
 		c.dbs = s.dbs
 		c.srv = s
+		c.sink.beforeWrite = s.writeOutAOF
 
 		// Apply configured timeouts
 		if wt := s.cfg.Server.WriteTimeoutDuration(); wt > 0 {

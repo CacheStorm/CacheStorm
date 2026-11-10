@@ -234,6 +234,8 @@ func (w *AOFWriter) finishRewrite(r *AOFRewrite) (err error) {
 	}
 	// The commands appended meanwhile go after the snapshot, with appends
 	// held off until the new file has replaced the old one.
+	w.outMu.Lock()
+	defer w.outMu.Unlock()
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	tail := w.tail
@@ -260,8 +262,10 @@ func (w *AOFWriter) finishRewrite(r *AOFRewrite) (err error) {
 	if err != nil {
 		return err
 	}
+	// The old file gets what is still pending first, so the backup a
+	// failed switch rolls back to is complete.
 	if w.running.Load() {
-		if err := w.writer.Flush(); err != nil {
+		if err := w.drainLocked(); err != nil {
 			return err
 		}
 		if err := ops.sync(w.file); err != nil {
