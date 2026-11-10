@@ -72,12 +72,12 @@ func (s *Server) waitAOF(numLocal, numReplicas int64, timeout time.Duration, don
 	if s.repl != nil && s.repl.Role() == replication.RoleReplica {
 		return 0, 0, errors.New("ERR WAITAOF cannot be used with replica instances. Please also note that writes to replicas are just local and are not propagated.")
 	}
-	if numLocal > 0 && s.aof == nil {
+	if numLocal > 0 && s.aof() == nil {
 		return 0, 0, errors.New("ERR WAITAOF cannot be used when numlocal is set but appendonly is disabled.")
 	}
 	var local int64
-	if s.aof != nil {
-		if err := s.aof.Flush(); err != nil {
+	if aof := s.aof(); aof != nil {
+		if err := aof.Flush(); err != nil {
 			logger.Error().Err(err).Msg("WAITAOF fsync failed")
 		} else {
 			local = 1

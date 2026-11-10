@@ -299,8 +299,8 @@ func (s *Server) CommitFullSync(dbs *store.Databases, replay *command.Router) er
 	}
 	functions := replay.FunctionRegistry().CloneForStore(s.Store())
 	searchIndexes := replay.SearchIndexes()
-	if s.aof != nil {
-		if err := s.aof.Rewrite(replication.DBSource{DBs: dbs, Functions: functions.DumpPayload(), Search: searchIndexes.Commands()}); err != nil {
+	if aof := s.aof(); aof != nil {
+		if err := aof.Rewrite(replication.DBSource{DBs: dbs, Functions: functions.DumpPayload(), Search: searchIndexes.Commands()}); err != nil {
 			return err
 		}
 	}
@@ -383,12 +383,12 @@ func (s *Server) recordWrites(cmds []command.ExecutedCommand) error {
 	if hasLogicalWrites(cmds) {
 		s.repl.MarkLocalWrite()
 	}
-	if s.aof != nil {
+	if aof := s.aof(); aof != nil {
 		writes := make([]persistence.Command, len(cmds))
 		for i, c := range cmds {
 			writes[i] = persistence.Command{Name: c.Name, Args: c.Args, DB: c.DB}
 		}
-		if err := s.aof.AppendTransaction(writes); err != nil {
+		if err := aof.AppendTransaction(writes); err != nil {
 			logger.Error().Err(err).Msg("AOF append failed")
 			return errAOFUnavailable
 		}

@@ -63,7 +63,7 @@ func TestHLLAOFRewriteAndCacheReplay(t *testing.T) {
 			entry, _ := s.store.Get("h")
 			expected := entry.Value.String()
 			if rewrite {
-				if err := s.aof.Rewrite(replication.DBSource{DBs: s.dbs}); err != nil {
+				if err := s.aof().Rewrite(replication.DBSource{DBs: s.dbs}); err != nil {
 					t.Fatal(err)
 				}
 			}

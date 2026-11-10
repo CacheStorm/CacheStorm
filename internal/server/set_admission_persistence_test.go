@@ -37,7 +37,7 @@ func TestSetAdmissionPersistenceX(t *testing.T) {
 				}
 				run("ADDTAG", "s", "tag")
 				run("PEXPIREAT", "s", "4102444800000")
-				before := s.aof.Size()
+				before := s.aof().Size()
 				args := []string{"SADD", "s", "rejected", strings.Repeat("x", 1000)}
 				if kind == "move" {
 					args = []string{"SMOVE", "s", strings.Repeat("d", 200), member}
@@ -54,7 +54,7 @@ func TestSetAdmissionPersistenceX(t *testing.T) {
 				default:
 					reply = run(args...)
 				}
-				if !strings.Contains(reply, "-OOM") || s.aof.Size() != before {
+				if !strings.Contains(reply, "-OOM") || s.aof().Size() != before {
 					t.Fatalf("refusal changed journal: %q", reply)
 				}
 				entry, _ := s.store.Get("s")
@@ -71,18 +71,18 @@ func TestSetAdmissionPersistenceX(t *testing.T) {
 				} else if got := run("SADD", "s", "new"); got != ":1\r\n" {
 					t.Fatal(got)
 				}
-				before = s.aof.Size()
-				if got := run("SADD", key, member, member); got != ":0\r\n" || s.aof.Size() != before {
+				before = s.aof().Size()
+				if got := run("SADD", key, member, member); got != ":0\r\n" || s.aof().Size() != before {
 					t.Fatalf("duplicate=%q", got)
 				}
-				if got := run("SMOVE", key, "absent", "missing"); got != ":0\r\n" || s.aof.Size() != before {
+				if got := run("SMOVE", key, "absent", "missing"); got != ":0\r\n" || s.aof().Size() != before {
 					t.Fatalf("missing=%q", got)
 				}
-				if got := run("SMOVE", key, key, member); got != ":1\r\n" || s.aof.Size() != before {
+				if got := run("SMOVE", key, key, member); got != ":1\r\n" || s.aof().Size() != before {
 					t.Fatalf("self=%q", got)
 				}
 				if mode == "rewrite" {
-					if err := s.aof.Rewrite(replication.DBSource{DBs: s.dbs}); err != nil {
+					if err := s.aof().Rewrite(replication.DBSource{DBs: s.dbs}); err != nil {
 						t.Fatal(err)
 					}
 				}

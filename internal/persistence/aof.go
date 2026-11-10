@@ -53,6 +53,8 @@ type AOFWriter struct {
 	stopCh     chan struct{}
 	wg         sync.WaitGroup
 	running    atomic.Bool
+	// looping is set while syncLoop runs; under lifecycle.
+	looping bool
 	// curDB is the database the commands at the end of the file apply to;
 	// a command for another database is preceded by SELECT. -1 means
 	// unknown, so the next command always gets a SELECT.
@@ -142,6 +144,7 @@ func (w *AOFWriter) Start() error {
 	w.running.Store(true)
 
 	if w.config.SyncPolicy != AOFAlways {
+		w.looping = true
 		w.wg.Add(1)
 		go w.syncLoop()
 	}
@@ -166,6 +169,7 @@ func (w *AOFWriter) StopWithError() error {
 	}
 	close(w.stopCh)
 	w.wg.Wait()
+	w.looping = false
 	w.outMu.Lock()
 	defer w.outMu.Unlock()
 	w.mu.Lock()
@@ -203,6 +207,34 @@ func (w *AOFWriter) syncLoop() {
 			w.syncFile()
 		}
 	}
+}
+
+// SetSyncPolicy changes appendfsync while the writer runs, as CONFIG SET
+// does. What is pending is written out first: under always nothing may be.
+func (w *AOFWriter) SetSyncPolicy(policy AOFSyncPolicy) error {
+	w.lifecycle.Lock()
+	defer w.lifecycle.Unlock()
+	w.outMu.Lock()
+	w.mu.Lock()
+	var err error
+	if w.running.Load() && w.writer != nil {
+		err = w.drainLocked()
+		if err == nil && policy == AOFAlways && w.config.SyncPolicy != AOFAlways {
+			err = w.file.Sync()
+		}
+		if err != nil && w.fatalErr == nil {
+			w.fatalErr = err
+		}
+	}
+	w.config.SyncPolicy = policy
+	w.mu.Unlock()
+	w.outMu.Unlock()
+	if err == nil && w.running.Load() && policy != AOFAlways && !w.looping {
+		w.looping = true
+		w.wg.Add(1)
+		go w.syncLoop()
+	}
+	return err
 }
 
 // syncFile writes out what is pending and, under appendfsync everysec,

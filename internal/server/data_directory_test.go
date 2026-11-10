@@ -42,7 +42,7 @@ func TestDataDirectoryRetainedOnHTTPShutdownTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.aof.Start(); err != nil {
+	if err := s.aof().Start(); err != nil {
 		t.Fatal(err)
 	}
 	lease := s.dataLease
@@ -74,7 +74,7 @@ func TestDataDirectoryRetainedOnHTTPShutdownTimeout(t *testing.T) {
 		requestErr = err
 		close(done)
 	}()
-	defer func() { releaseHandler(); <-done; web.Close(); s.aof.Stop(); _ = lease.Close() }()
+	defer func() { releaseHandler(); <-done; web.Close(); s.aof().Stop(); _ = lease.Close() }()
 	<-entered
 	stopErr := s.Stop(context.Background())
 	other, ownershipErr := New(cfg)

@@ -265,7 +265,7 @@ func TestReplicaShutdownFailureDoesNotPublishCheckpoint(t *testing.T) {
 	waitLinkUp(t, dialRepl(t, replica))
 	waitSynced(t, replica, master)
 	replica.repl.Stop()
-	if err := replica.aof.StopWithError(); err != nil {
+	if err := replica.aof().StopWithError(); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Symlink("/dev/full", filepath.Join(cfg.Persistence.DataDir, "shutdown.aof")); err != nil {
@@ -278,7 +278,7 @@ func TestReplicaShutdownFailureDoesNotPublishCheckpoint(t *testing.T) {
 	if err := w.Append("SET", [][]byte{[]byte("buffered"), []byte("v")}); err != nil {
 		t.Fatal(err)
 	}
-	replica.aof = w
+	replica.aofW.Store(w)
 	if err := replica.Stop(context.Background()); err == nil {
 		t.Fatal("server shutdown hid AOF failure")
 	}

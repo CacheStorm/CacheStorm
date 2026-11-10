@@ -101,7 +101,7 @@ func TestMSetAtomicPersistenceX(t *testing.T) {
 				}
 				run("ADDTAG", key, "old")
 			}
-			before := s.aof.Size()
+			before := s.aof().Size()
 			args := []string{"MSET", "rejected", strings.Repeat("x", 3000), "a", "wrong"}
 			var reply string
 			switch mode {
@@ -114,18 +114,18 @@ func TestMSetAtomicPersistenceX(t *testing.T) {
 			default:
 				reply = run(args...)
 			}
-			if !strings.Contains(reply, "-OOM") || s.aof.Size() != before || s.store.Exists("rejected") {
+			if !strings.Contains(reply, "-OOM") || s.aof().Size() != before || s.store.Exists("rejected") {
 				t.Fatalf("rejection changed journal: %q", reply)
 			}
 			if got := run("MSET", "a", strings.Repeat("z", 1200), "b", ""); got != "+OK\r\n" {
 				t.Fatal(got)
 			}
-			before = s.aof.Size()
-			if got := run("MSETNX", "c", "new", "a", "wrong"); got != ":0\r\n" || s.aof.Size() != before {
+			before = s.aof().Size()
+			if got := run("MSETNX", "c", "new", "a", "wrong"); got != ":0\r\n" || s.aof().Size() != before {
 				t.Fatalf("NX no-op=%q", got)
 			}
 			if mode == "rewrite" {
-				if err := s.aof.Rewrite(replication.DBSource{DBs: s.dbs}); err != nil {
+				if err := s.aof().Rewrite(replication.DBSource{DBs: s.dbs}); err != nil {
 					t.Fatal(err)
 				}
 			}

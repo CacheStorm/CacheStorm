@@ -128,13 +128,22 @@ type Server struct {
 	pluginMgr     *plugin.Manager
 	metricsPlugin *metrics.MetricsPlugin
 	metricsServer *http.Server
-	aof           *persistence.AOFWriter
-	conns         sync.Map
-	connID        atomic.Int64
-	connCount     atomic.Int64
-	stopping      atomic.Bool
-	stopCh        chan struct{}
-	wg            sync.WaitGroup
+	// aofW is the AOF writer, nil while the AOF is off; CONFIG SET
+	// appendonly switches it while the server runs, so it is read through
+	// aof().
+	aofW atomic.Pointer[persistence.AOFWriter]
+	// aofWanted is the AOF state CONFIG SET appendonly last asked for, and
+	// aofPolicy the appendfsync policy; aofToggleMu runs switches and
+	// rewrites one at a time.
+	aofWanted   atomic.Bool
+	aofPolicy   atomic.Int32
+	aofToggleMu sync.Mutex
+	conns       sync.Map
+	connID      atomic.Int64
+	connCount   atomic.Int64
+	stopping    atomic.Bool
+	stopCh      chan struct{}
+	wg          sync.WaitGroup
 	// sentinelCancel stops the Sentinel peer listener started in Start().
 	sentinelCancel context.CancelFunc
 	// dbs holds the numbered databases; database 0 starts out as store.
@@ -402,6 +411,7 @@ func New(cfg *config.Config) (result *Server, retErr error) {
 	}
 
 	// Configure AOF persistence
+	s.aofPolicy.Store(int32(persistence.SyncPolicyFromString(cfg.Persistence.AOFSync)))
 	aofFound := false
 	legacyAOF := false
 	if cfg.Persistence.Enabled && cfg.Persistence.AOF {
@@ -415,7 +425,8 @@ func New(cfg *config.Config) (result *Server, retErr error) {
 			DataDir:    dataDir,
 			SyncPolicy: persistence.SyncPolicyFromString(cfg.Persistence.AOFSync),
 		}
-		s.aof = persistence.NewAOFWriter(aofCfg)
+		s.aofW.Store(persistence.NewAOFWriter(aofCfg))
+		s.aofWanted.Store(true)
 
 		// Load existing AOF data. A torn tail left by a crash is cut off so
 		// the next append does not land after it; anything else that fails to
@@ -440,7 +451,7 @@ func New(cfg *config.Config) (result *Server, retErr error) {
 				}
 				// Appends continue where the file left off, so the writer
 				// starts in the database the replay ended in.
-				s.aof.SetCurrentDB(lastDB)
+				s.aof().SetCurrentDB(lastDB)
 				if tracker := s.store.MemoryTracker(); tracker != nil && tracker.Max() > 0 && tracker.Usage() > tracker.Max() {
 					return nil, errors.New("AOF loaded dataset exceeds maxmemory")
 				}
@@ -480,7 +491,7 @@ func New(cfg *config.Config) (result *Server, retErr error) {
 			if err != nil {
 				return nil, err
 			}
-			if err := s.aof.Rewrite(src); err != nil {
+			if err := s.aof().Rewrite(src); err != nil {
 				return nil, fmt.Errorf("upgrade legacy AOF: %w", err)
 			}
 		}
@@ -506,10 +517,18 @@ func New(cfg *config.Config) (result *Server, retErr error) {
 	s.router.SetShutdownHook(s.requestShutdown)
 	s.router.SetWaitAOFHook(s.waitAOF)
 
-	// Every write the router executes goes to the AOF, when it is enabled,
-	// and to the replication stream.
+	s.installCommitHooks()
+
+	return s, nil
+}
+
+// installCommitHooks hands every write the router executes to the AOF, when
+// it is on, and to the replication stream. While the AOF is on a write is
+// checked first and its reply held until it is appended; CONFIG SET
+// appendonly installs them again when it switches the AOF.
+func (s *Server) installCommitHooks() {
 	var checkPersistence func(string, [][]byte) error
-	if s.aof != nil {
+	if s.aof() != nil {
 		checkPersistence = func(_ string, _ [][]byte) error { return s.persistenceError() }
 	}
 	s.router.SetCommitHooks(checkPersistence, func(ctx *command.Context, db int, cmd string, args [][]byte) error {
@@ -521,8 +540,8 @@ func New(cfg *config.Config) (result *Server, retErr error) {
 		if !ctx.FromMaster && upperCmd != "PFCOUNT" {
 			s.repl.MarkLocalWrite()
 		}
-		if s.aof != nil {
-			if err := s.aof.AppendDB(db, upperCmd, args); err != nil {
+		if aof := s.aof(); aof != nil {
+			if err := aof.AppendDB(db, upperCmd, args); err != nil {
 				logger.Error().Err(err).Str("cmd", cmd).Msg("AOF append failed")
 				return errAOFUnavailable
 			}
@@ -548,12 +567,12 @@ func New(cfg *config.Config) (result *Server, retErr error) {
 			if !ctx.FromMaster && hasLogicalWrites(writes) {
 				s.repl.MarkLocalWrite()
 			}
-			if s.aof != nil {
+			if aof := s.aof(); aof != nil {
 				aofWrites := make([]persistence.Command, len(writes))
 				for i, c := range writes {
 					aofWrites[i] = persistence.Command{Name: c.Name, Args: c.Args, DB: c.DB}
 				}
-				if err := s.aof.AppendTransaction(aofWrites); err != nil {
+				if err := aof.AppendTransaction(aofWrites); err != nil {
 					logger.Error().Err(err).Msg("AOF transaction append failed")
 					return errAOFUnavailable
 				}
@@ -561,9 +580,10 @@ func New(cfg *config.Config) (result *Server, retErr error) {
 			s.repl.FeedTransaction(writes)
 			return nil
 		})
-
-	return s, nil
 }
+
+// aof returns the AOF writer, nil while the AOF is off.
+func (s *Server) aof() *persistence.AOFWriter { return s.aofW.Load() }
 
 func (s *Server) Start(_ context.Context) (retErr error) {
 	s.lifecycleMu.Lock()
@@ -586,13 +606,13 @@ func (s *Server) Start(_ context.Context) (retErr error) {
 		}
 	}()
 	// Start AOF writer if configured
-	if s.aof != nil {
-		if err := s.aof.Start(); err != nil {
+	if aof := s.aof(); aof != nil {
+		if err := aof.Start(); err != nil {
 			return err
 		}
 		defer func() {
 			if !startupComplete {
-				retErr = errors.Join(retErr, s.aof.StopWithError())
+				retErr = errors.Join(retErr, aof.StopWithError())
 			}
 		}()
 	}
@@ -953,8 +973,8 @@ func (s *Server) Stop(ctx context.Context) error {
 	s.stopSnapshots()
 	drained = drained && httpShutdownErr == nil
 	if !drained {
-		if s.aof != nil {
-			httpShutdownErr = errors.Join(httpShutdownErr, s.aof.Flush())
+		if aof := s.aof(); aof != nil {
+			httpShutdownErr = errors.Join(httpShutdownErr, aof.Flush())
 		}
 		s.stopErr = errors.Join(httpShutdownErr, errors.New("shutdown incomplete; persistence remains owned until process exit"))
 		logger.Error().Err(s.stopErr).Msg("CacheStorm shutdown incomplete")
@@ -962,8 +982,8 @@ func (s *Server) Stop(ctx context.Context) error {
 	}
 
 	var persistenceErr error
-	if s.aof != nil {
-		persistenceErr = s.aof.StopWithError()
+	if aof := s.aof(); aof != nil {
+		persistenceErr = aof.StopWithError()
 		if persistenceErr == nil {
 			persistenceErr = s.saveReplicationState()
 		}

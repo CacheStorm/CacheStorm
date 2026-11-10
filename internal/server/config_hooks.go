@@ -7,8 +7,20 @@ import (
 	"github.com/cachestorm/cachestorm/internal/cluster"
 	"github.com/cachestorm/cachestorm/internal/command"
 	"github.com/cachestorm/cachestorm/internal/config"
+	"github.com/cachestorm/cachestorm/internal/persistence"
 	"github.com/cachestorm/cachestorm/internal/store"
 )
+
+// aofPolicyName is appendfsync's name for policy.
+func aofPolicyName(policy persistence.AOFSyncPolicy) string {
+	switch policy {
+	case persistence.AOFAlways:
+		return "always"
+	case persistence.AOFNoSync:
+		return "no"
+	}
+	return "everysec"
+}
 
 func configYesNo(b bool) string {
 	if b {
@@ -28,10 +40,7 @@ func (s *Server) configValues() map[string]string {
 	if ev := s.store.Evictor(); ev != nil {
 		samples = ev.SampleSize()
 	}
-	appendfsync := s.cfg.Persistence.AOFSync
-	if appendfsync == "" {
-		appendfsync = "everysec"
-	}
+	appendfsync := aofPolicyName(persistence.AOFSyncPolicy(s.aofPolicy.Load()))
 	replicaof := ""
 	if s.repl != nil {
 		if host, port, ok := s.repl.MasterAddr(); ok {
@@ -59,7 +68,7 @@ func (s *Server) configValues() map[string]string {
 		"protected-mode":              configYesNo(s.cfg.Server.ProtectedMode),
 		"tcp-keepalive":               strconv.Itoa(s.cfg.Server.TCPKeepAlive),
 		"requirepass":                 s.router.RequirePass(),
-		"appendonly":                  configYesNo(s.aof != nil),
+		"appendonly":                  configYesNo(s.aofWanted.Load()),
 		"appendfsync":                 appendfsync,
 		"appendfilename":              "appendonly.aof",
 		"appenddirname":               s.redisAOFDirName(),
@@ -156,7 +165,16 @@ func (s *Server) configSet(name, value string) (bool, error) {
 			return true, err
 		}
 		return true, command.ConfigSetError(name, "can't set immutable config")
-	case "appendonly", "protected-mode":
+	case "appendonly":
+		on, err := command.ParseConfigBool(name, value)
+		if err != nil {
+			return true, err
+		}
+		if err := s.setAppendOnly(on); err != nil {
+			return true, command.ConfigSetError(name, err.Error())
+		}
+		return true, nil
+	case "protected-mode":
 		if _, err := command.ParseConfigBool(name, value); err != nil {
 			return true, err
 		}
@@ -165,7 +183,10 @@ func (s *Server) configSet(name, value string) (bool, error) {
 		if _, err := command.ParseConfigEnum(name, value, "everysec", "always", "no"); err != nil {
 			return true, err
 		}
-		return true, command.ConfigSetError(name, "can't set immutable config")
+		if err := s.setAppendFsync(persistence.SyncPolicyFromString(value)); err != nil {
+			return true, command.ConfigSetError(name, err.Error())
+		}
+		return true, nil
 	case "dir", "dbfilename":
 		return true, command.ConfigSetError(name, "can't set protected config")
 	case "masterauth", "repl-backlog-size", "repl-timeout", "replica-read-only", "replica-announce-ip", "replica-announce-port":

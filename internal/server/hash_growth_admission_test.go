@@ -44,7 +44,7 @@ func TestHashGrowthAdmissionPersistenceX(t *testing.T) {
 						t.Fatal(got)
 					}
 				}
-				before := s.aof.Size()
+				before := s.aof().Size()
 				field, value := "rejected", strings.Repeat("x", 1000)
 				if numeric {
 					field, value = "f", "1"
@@ -60,7 +60,7 @@ func TestHashGrowthAdmissionPersistenceX(t *testing.T) {
 				default:
 					reply = run(name, "h", field, value)
 				}
-				if !strings.Contains(reply, "-OOM") || s.aof.Size() != before {
+				if !strings.Contains(reply, "-OOM") || s.aof().Size() != before {
 					t.Fatalf("rejection changed journal: %q", reply)
 				}
 				entry, _ := s.store.Get("h")
@@ -68,7 +68,7 @@ func TestHashGrowthAdmissionPersistenceX(t *testing.T) {
 				if string(hash.Field("f")) != initial || hash.Len() != 1 || entry.ExpiresAt.Load() != 4102444800000 || len(entry.TagList()) != 1 {
 					t.Fatal("rejected growth changed hash/metadata")
 				}
-				if got := run("HSETNX", "h", "f", "wrong"); got != ":0\r\n" || s.aof.Size() != before {
+				if got := run("HSETNX", "h", "f", "wrong"); got != ":0\r\n" || s.aof().Size() != before {
 					t.Fatalf("NX no-op=%q", got)
 				}
 				want := initial
@@ -81,7 +81,7 @@ func TestHashGrowthAdmissionPersistenceX(t *testing.T) {
 					t.Fatal(got)
 				}
 				if mode == "rewrite" {
-					if err := s.aof.Rewrite(replication.DBSource{DBs: s.dbs}); err != nil {
+					if err := s.aof().Rewrite(replication.DBSource{DBs: s.dbs}); err != nil {
 						t.Fatal(err)
 					}
 				}

@@ -88,7 +88,7 @@ func TestAOFIncompleteTransactionDoesNotSwallowLaterWrites(t *testing.T) {
 	if got := run("SET", "acknowledged", "durable"); got != "+OK\r\n" {
 		t.Fatalf("write failed: %q", got)
 	}
-	if err := s.aof.StopWithError(); err != nil {
+	if err := s.aof().StopWithError(); err != nil {
 		t.Fatal(err)
 	}
 	stopReplServer(s)
@@ -115,7 +115,7 @@ func TestAOFDiscardedTransactionPreservesSelectedDatabase(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !s.store.Exists("committed") || s.dbs.DB(3).Exists("discarded") || s.aof.CurrentDB() != 0 {
+	if !s.store.Exists("committed") || s.dbs.DB(3).Exists("discarded") || s.aof().CurrentDB() != 0 {
 		t.Fatal("discarded transaction affected data or selected DB")
 	}
 }

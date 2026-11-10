@@ -394,10 +394,11 @@ These parameters take effect immediately, for every connected client:
 | `slowlog-log-slower-than`, `slowlog-max-len` | Slow log threshold (µs) and size |
 | `notify-keyspace-events` | Keyspace notification classes (`K E g $ l s h z x e t m d n A`); see "Keyspace notifications" in commands-detailed.md |
 | `save` | Save rules, `<seconds> <changes>` pairs as in Redis; `""` stops periodic snapshots. Needs `persistence.enabled` |
+| `appendonly` | `yes` switches the AOF on as Redis does: the reply comes at once, the dataset is written to a new `appendonly.aof` in the background (writes pause only while it is encoded in memory) and every write follows it, those made meanwhile included; `CONFIG GET` and `INFO` report `yes` from the start. `no` writes out, fsyncs and closes the AOF. Needs `persistence.enabled` |
+| `appendfsync` | `always`, `everysec` or `no`, applied to the running AOF; what is pending is written out first |
 
-`port`, `bind`, `databases`, `dir`, `appendonly`, `appendfsync`,
-`protected-mode` and `tcp-keepalive` are reported by `CONFIG GET` but are
-immutable at runtime. Runtime changes are not written back to the YAML file.
+`port`, `bind`, `databases`, `dir`, `protected-mode` and `tcp-keepalive`
+are reported by `CONFIG GET` but are immutable at runtime. Runtime changes are not written back to the YAML file.
 
 ## Example Configurations
 

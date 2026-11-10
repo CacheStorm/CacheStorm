@@ -31,7 +31,7 @@ func aofTxStart(t *testing.T, cfg *config.Config) (*Server, func(name string, ar
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.aof.Start(); err != nil {
+	if err := s.aof().Start(); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { stopReplServer(s) })

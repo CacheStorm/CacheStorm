@@ -29,10 +29,10 @@ func newAOFServer(t *testing.T) (*Server, string) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if s.aof == nil {
+	if s.aof() == nil {
 		t.Fatal("AOF writer was not configured; test cannot exercise the write gate")
 	}
-	if err := s.aof.Start(); err != nil {
+	if err := s.aof().Start(); err != nil {
 		t.Fatalf("start AOF writer: %v", err)
 	}
 	t.Cleanup(func() { stopReplServer(s) })
@@ -89,7 +89,7 @@ func TestMutatingCommandsReachTheAOF(t *testing.T) {
 	// Control: SET is classified as a write, so it IS persisted. This passes
 	// before and after the fix, so a broken harness cannot look like the defect.
 	aofExec(t, s, "GETDEL", "k")
-	if err := s.aof.Flush(); err != nil {
+	if err := s.aof().Flush(); err != nil {
 		t.Fatalf("flush AOF: %v", err)
 	}
 

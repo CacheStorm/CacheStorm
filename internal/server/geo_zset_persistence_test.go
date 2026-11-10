@@ -33,7 +33,7 @@ func TestGeoZsetPersistenceAndEffectiveStore(t *testing.T) {
 					t.Fatalf("save=%+v", got)
 				}
 			case "rewrite":
-				if err := s.aof.Rewrite(replication.DBSource{DBs: s.dbs}); err != nil {
+				if err := s.aof().Rewrite(replication.DBSource{DBs: s.dbs}); err != nil {
 					t.Fatal(err)
 				}
 			}

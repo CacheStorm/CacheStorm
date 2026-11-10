@@ -1570,7 +1570,7 @@ func TestNewServerWithPersistence(t *testing.T) {
 	if s == nil {
 		t.Fatal("expected server")
 	}
-	if s.aof == nil {
+	if s.aof() == nil {
 		t.Error("expected AOF writer to be configured")
 	}
 }

@@ -38,7 +38,7 @@ func TestGeoRadiusReadsPreserveWatchAndAOF(t *testing.T) {
 	run("GEOADD", "geo", "0", "0", "member")
 	version := s.store.WatchKey("geo")
 	defer s.store.UnwatchKey("geo")
-	size := s.aof.Size()
+	size := s.aof().Size()
 	for _, name := range []string{"GEORADIUS", "GEORADIUS_RO", "GEORADIUSBYMEMBER", "GEORADIUSBYMEMBER_RO"} {
 		args := []string{"geo", "0", "0", "1", "km"}
 		if strings.Contains(name, "BYMEMBER") {
@@ -48,7 +48,7 @@ func TestGeoRadiusReadsPreserveWatchAndAOF(t *testing.T) {
 			t.Fatalf("%s read=%q", name, got)
 		}
 	}
-	if s.store.GetVersion("geo") != version || s.aof.Size() != size {
+	if s.store.GetVersion("geo") != version || s.aof().Size() != size {
 		t.Fatal("radius read changed WATCH or journal")
 	}
 	if got := run("GEORADIUS_RO", "geo", "0", "0", "1", "km", "STORE", "dest"); !strings.HasPrefix(got, "-ERR") || s.store.Exists("dest") {

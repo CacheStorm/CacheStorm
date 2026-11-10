@@ -218,8 +218,8 @@ func (s *Server) dropSlotKeys(slot int) {
 		if len(args) == 0 {
 			return
 		}
-		if s.aof != nil {
-			if err := s.aof.AppendDB(0, "DEL", args); err != nil {
+		if aof := s.aof(); aof != nil {
+			if err := aof.AppendDB(0, "DEL", args); err != nil {
 				logger.Error().Err(err).Msg("AOF append failed")
 			}
 		}

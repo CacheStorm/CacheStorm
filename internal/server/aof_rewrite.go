@@ -25,10 +25,11 @@ func (s *Server) configureAOFRewrite() error {
 	}
 	s.aofRewriteMinSize.Store(minSize)
 	s.aofRewritePercentage.Store(int64(s.cfg.Persistence.AOFRewritePercentage))
-	if s.aof == nil {
+	aof := s.aof()
+	if aof == nil {
 		return nil
 	}
-	s.aofRewriteBase = s.aof.Size()
+	s.aofRewriteBase = aof.Size()
 	s.router.SetAOFRewriteHook(s.startAOFRewrite)
 	return nil
 }
@@ -62,18 +63,29 @@ func (s *Server) startAOFRewrite() error {
 // rewriteAOF replaces the AOF with the current dataset, holding the write
 // gate only while the dataset is encoded.
 func (s *Server) rewriteAOF() error {
+	// CONFIG SET appendonly waits for a rewrite to finish before it
+	// switches the AOF.
+	s.aofToggleMu.Lock()
+	defer s.aofToggleMu.Unlock()
 	start := time.Now()
+	aof := s.aof()
+	if aof == nil {
+		s.snapshotMu.Lock()
+		s.aofRewriteRunning = false
+		s.snapshotMu.Unlock()
+		return errors.New("ERR the AOF is off")
+	}
 	s.gate.global.Lock()
 	src, err := s.persistenceSource(s.dbs)
 	var rewrite *persistence.AOFRewrite
 	if err == nil {
-		rewrite, err = s.aof.BeginRewrite(src)
+		rewrite, err = aof.BeginRewrite(src)
 	}
 	s.gate.global.Unlock()
 	if rewrite != nil {
 		err = rewrite.Finish()
 	}
-	size := s.aof.Size()
+	size := aof.Size()
 	s.snapshotMu.Lock()
 	s.aofRewriteRunning = false
 	s.aofRewriteLastError = err
@@ -95,7 +107,8 @@ func (s *Server) rewriteAOF() error {
 // aofRewriteDue reports whether the AOF has grown past the automatic rewrite
 // threshold.
 func (s *Server) aofRewriteDue() bool {
-	return s.aofRewriteDueForSize(s.aof.Size())
+	aof := s.aof()
+	return aof != nil && s.aofRewriteDueForSize(aof.Size())
 }
 
 func (s *Server) aofRewriteDueForSize(size int64) bool {
@@ -120,8 +133,11 @@ func (s *Server) aofRewriteDueForSize(size int64) bool {
 	return (size-base)*100/base >= percentage
 }
 
+// startAOFRewriteLoop checks the AOF's growth once a second while the AOF
+// is on; it runs whenever the server persists, since CONFIG SET appendonly
+// may switch the AOF on later.
 func (s *Server) startAOFRewriteLoop() {
-	if s.aof == nil {
+	if s.aof() == nil && !s.cfg.Persistence.Enabled {
 		return
 	}
 	s.wg.Add(1)

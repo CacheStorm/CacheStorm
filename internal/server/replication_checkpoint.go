@@ -141,10 +141,11 @@ func writeReplicaCheckpoint(path string, data []byte, ops checkpointIO) error {
 }
 
 func (s *Server) saveReplicationState() error {
-	if s.aof == nil {
+	aof := s.aof()
+	if aof == nil {
 		return nil
 	}
-	if err := s.aof.Err(); err != nil {
+	if err := aof.Err(); err != nil {
 		return err
 	}
 	st, ok := s.repl.SavedState()

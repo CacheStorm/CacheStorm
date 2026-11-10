@@ -55,7 +55,8 @@ func startupCleanupFailureX(t *testing.T, mode string, attempts int) bool {
 			}
 		}
 	}
-	s := &Server{cfg: cfg, aof: w, stopCh: make(chan struct{})}
+	s := &Server{cfg: cfg, stopCh: make(chan struct{})}
+	s.aofW.Store(w)
 	ok := true
 	for i := 0; i < attempts; i++ {
 		delta, closed := startupCleanupLateAppendX(t, w, func() {

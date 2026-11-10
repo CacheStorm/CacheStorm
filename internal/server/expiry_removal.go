@@ -22,8 +22,8 @@ func (s *Server) recordRemoval(st *store.Store, key string) {
 	if s.repl != nil {
 		s.repl.MarkLocalWrite()
 	}
-	if s.aof != nil {
-		if err := s.aof.AppendDB(dbIndex, "DEL", [][]byte{[]byte(key)}); err != nil {
+	if aof := s.aof(); aof != nil {
+		if err := aof.AppendDB(dbIndex, "DEL", [][]byte{[]byte(key)}); err != nil {
 			logger.Error().Err(err).Msg("AOF removal append failed")
 		}
 	}
@@ -53,9 +53,9 @@ func (s *Server) recordFieldRemoval(st *store.Store, key string, fields []string
 	if s.repl != nil {
 		s.repl.MarkLocalWrite()
 	}
-	if s.aof != nil {
+	if aof := s.aof(); aof != nil {
 		for _, f := range fields {
-			if err := s.aof.AppendDB(dbIndex, "HDEL", [][]byte{[]byte(key), []byte(f)}); err != nil {
+			if err := aof.AppendDB(dbIndex, "HDEL", [][]byte{[]byte(key), []byte(f)}); err != nil {
 				logger.Error().Err(err).Msg("AOF field expiry append failed")
 			}
 		}

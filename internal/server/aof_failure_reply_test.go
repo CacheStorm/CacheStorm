@@ -91,7 +91,7 @@ func fullAOFServer(t *testing.T) *Server {
 	if err := os.Symlink("/dev/full", filepath.Join(cfg.Persistence.DataDir, "appendonly.aof")); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.aof.Start(); err != nil {
+	if err := s.aof().Start(); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { stopReplServer(s) })

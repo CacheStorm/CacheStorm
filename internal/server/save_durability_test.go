@@ -29,10 +29,10 @@ func newSaveServer(t *testing.T, syncPolicy string) (*Server, string) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if s.aof == nil {
+	if s.aof() == nil {
 		t.Fatal("AOF writer not configured; harness cannot exercise SAVE")
 	}
-	if err := s.aof.Start(); err != nil {
+	if err := s.aof().Start(); err != nil {
 		t.Fatalf("start AOF writer: %v", err)
 	}
 	t.Cleanup(func() { stopReplServer(s) })

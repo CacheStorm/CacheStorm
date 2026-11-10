@@ -62,10 +62,10 @@ func (s *Server) configureSnapshots(restore bool) error {
 	if err := s.loadRDBFile(path); err != nil {
 		return err
 	}
-	if s.aof != nil {
+	if aof := s.aof(); aof != nil {
 		src, err := s.persistenceSource(s.dbs)
 		if err == nil {
-			err = s.aof.Rewrite(src)
+			err = aof.Rewrite(src)
 		}
 		if err != nil {
 			return fmt.Errorf("seed AOF from snapshot: %w", err)
@@ -199,7 +199,7 @@ func (s *Server) snapshotInfo() string {
 	field("rdb_last_cow_size", 0)
 	field("rdb_last_load_keys_expired", 0)
 	field("rdb_last_load_keys_loaded", 0)
-	field("aof_enabled", boolInt(s.aof != nil))
+	field("aof_enabled", boolInt(s.aofWanted.Load()))
 	field("aof_rewrite_in_progress", boolInt(s.aofRewriteRunning))
 	field("aof_rewrite_scheduled", 0)
 	field("aof_last_rewrite_time_sec", seconds(s.aofRewriteTook))
@@ -211,8 +211,8 @@ func (s *Server) snapshotInfo() string {
 	field("aof_last_cow_size", 0)
 	field("module_fork_in_progress", 0)
 	field("module_fork_last_cow_size", 0)
-	if s.aof != nil {
-		field("aof_current_size", s.aof.Size())
+	if aof := s.aof(); aof != nil {
+		field("aof_current_size", aof.Size())
 		field("aof_base_size", s.aofRewriteBase)
 		field("aof_pending_rewrite", 0)
 		field("aof_buffer_length", 0)
@@ -257,8 +257,8 @@ func (s *Server) saveSnapshot(background bool) error {
 		s.snapshotMu.Unlock()
 		s.snapshotWG.Done()
 	}
-	if s.aof != nil {
-		if err := s.aof.Flush(); err != nil {
+	if aof := s.aof(); aof != nil {
+		if err := aof.Flush(); err != nil {
 			finish(err)
 			return fmt.Errorf("ERR snapshot failed: %w", err)
 		}

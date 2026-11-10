@@ -143,7 +143,7 @@ func newRedisAOFDirServer(t *testing.T, dir, dirname string) *Server {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if err := s.aof.Start(); err != nil {
+	if err := s.aof().Start(); err != nil {
 		t.Fatalf("start AOF: %v", err)
 	}
 	return s
