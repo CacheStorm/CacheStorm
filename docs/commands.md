@@ -2,6 +2,8 @@
 
 CacheStorm registers about 1,200 commands across 50+ modules: the Redis 7.4 command set plus CacheStorm extensions. Compatibility with Redis is measured by the differential harness in `tests/compat`.
 
+The stateless utility namespaces (`STR`, `MATH`, `TIMESTAMP`, `UUID`, `ULID`, `SNOWFLAKE`, `DIGEST`, `CRYPTO`, `COMPRESS`, `DECOMPRESS`, `CBOR`, `MSGPACK`, `CSV`, `XML`, `YAML`, `URL`, `DIFF`, `MASK`, `SANITIZE`, `EVAL`, `PARALLEL`) are served only with `extension_commands: all`; see "Extension commands" in 02-configuration.md.
+
 Every command name in this reference is verified against the registered command
 set: 1,289 documented, 0 phantoms, 0 missing.
 
@@ -942,18 +944,20 @@ COMPRESS.CUSTOM algorithm data [LEVEL level]
 
 ### Queue & Stack
 
-```
-QUEUE.CREATE name [MAX max]
-QUEUE.PUSH name item
-QUEUE.POP name [TIMEOUT timeout]
-QUEUE.PEEK name
-QUEUE.LEN name
-QUEUE.CLEAR name
+A queue or a stack is a list key: a queue pushes at the tail and pops at the head, a stack pushes and pops at the tail. Being keys, they belong to the selected database, are saved in the RDB and the AOF, are replicated, and go with `DEL`, `FLUSHDB` and `FLUSHALL`; the list commands (`LRANGE`, `LLEN`, `BLPOP`, ...) work on them, and a name holding another type answers `WRONGTYPE`. `CREATE` only checks the name, since a list exists while it has elements; `CLEAR` deletes it.
 
-STACK.CREATE name [MAX max]
-STACK.PUSH name item
-STACK.POP name
-STACK.PEEK name
+```
+QUEUE.CREATE name                # OK
+QUEUE.PUSH name item [item ...]  # length after the push (RPUSH)
+QUEUE.POP name                   # head item or null (LPOP)
+QUEUE.PEEK name                  # head item or null
+QUEUE.LEN name
+QUEUE.CLEAR name                 # OK
+
+STACK.CREATE name
+STACK.PUSH name item [item ...]  # RPUSH
+STACK.POP name                   # RPOP
+STACK.PEEK name                  # top item or null
 STACK.LEN name
 STACK.CLEAR name
 ```
@@ -974,12 +978,14 @@ RL.RESET name
 
 ### Distributed Locks
 
+A lock is a hash key with the fields `holder`, `token` and `renewals` that expires with the lock, as a Redis lock is a key set with `NX PX`. It belongs to the selected database, is saved in the RDB and the AOF with its absolute deadline (recorded as `HSET` and `PEXPIREAT`, so a restart or a replica keeps the deadline it was given), is replicated, and is released by `DEL`, `FLUSHDB` and `FLUSHALL`; `PTTL` and `HGETALL` read it. A key holding anything but a lock answers `WRONGTYPE`. TTLs are positive milliseconds.
+
 ```
-LOCK.TRY key holder token ttlMs
-LOCK.ACQUIRE key holder token ttlMs timeoutMs [RETRY retry] [DELAY delay]
-LOCK.RELEASE key holder token
-LOCK.RENEW key holder token ttlMs
-LOCK.INFO key
+LOCK.TRY key holder token ttlMs                # 1 taken (or renewed by its holder), 0 held by another
+LOCK.ACQUIRE key holder token ttlMs timeoutMs  # as TRY, waiting up to timeoutMs (0 = no wait; no wait inside MULTI or scripts)
+LOCK.RELEASE key holder token                  # 1 released, 0 not held by this holder and token
+LOCK.RENEW key holder token ttlMs              # 1 renewed, 0 not held by this holder and token
+LOCK.INFO key                                  # holder, expires_at (Unix s), ttl_ms, renewals; null when free
 LOCK.ISLOCKED key
 ```
 

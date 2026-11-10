@@ -327,7 +327,7 @@ Besides the Redis 7.4 commands and the Redis Stack module commands (RedisJSON `J
 
 The utility namespaces compute a function of their arguments (string and math helpers, hashes, encodings, ids) and store nothing; an application computes the same as easily itself, and each one is more work a client can make the server do. A command left out answers as Redis answers a command it does not have (`ERR unknown command`), and `COMMAND` does not list it.
 
-Most stateful extension namespaces (queues, locks, rate limiters, sessions, circuit breakers and the like) keep their state in the server process, outside the keyspace: it is shared by all databases, `FLUSHALL` does not clear it, it is not in the AOF or the RDB, so a restart loses it, and replicas do not receive it. Use them for state that may be lost; `none` serves none of them.
+`QUEUE`, `STACK` and `LOCK` are keys (lists, and hashes that expire with the lock): per database, persisted and replicated like any key. Most other stateful extension namespaces (rate limiters, sessions, circuit breakers and the like) keep their state in the server process, outside the keyspace: it is shared by all databases, `FLUSHALL` does not clear it, it is not in the AOF or the RDB, so a restart loses it, and replicas do not receive it. Use them for state that may be lost; `none` serves none of them.
 
 ## Eviction Policies
 

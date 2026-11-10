@@ -5,7 +5,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
@@ -219,213 +218,63 @@ func cmdCOMPRESSCUSTOM(ctx *Context) error {
 	return ctx.WriteBulkBytes(compressed)
 }
 
-var (
-	queues   = make(map[string][]string)
-	queuesMu sync.RWMutex
-	stacks   = make(map[string][]string)
-	stacksMu sync.RWMutex
-)
+// QUEUE and STACK are lists in the keyspace: a queue pushes at the tail and
+// pops at the head, a stack pushes and pops at the tail. Being keys, they are
+// per database, saved in the RDB and the AOF, replicated, cleared by
+// FLUSHDB and FLUSHALL, and watched by WATCH; LRANGE and the other list
+// commands read them. QUEUE.CREATE and STACK.CREATE only check that the name
+// holds no other type, since a list exists while it has elements.
 
-func cmdQUEUECREATE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
+func cmdQUEUECREATE(ctx *Context) error { return listCollectionCreate(ctx) }
+func cmdQUEUEPUSH(ctx *Context) error   { return listPush(ctx, false) }
+func cmdQUEUEPOP(ctx *Context) error    { return listCollectionPop(ctx, true) }
+func cmdQUEUEPEEK(ctx *Context) error   { return listCollectionPeek(ctx, "0") }
+func cmdQUEUELEN(ctx *Context) error    { return cmdLLEN(ctx) }
+func cmdQUEUECLEAR(ctx *Context) error  { return listCollectionClear(ctx) }
+func cmdSTACKCREATE(ctx *Context) error { return listCollectionCreate(ctx) }
+func cmdSTACKPUSH(ctx *Context) error   { return listPush(ctx, false) }
+func cmdSTACKPOP(ctx *Context) error    { return listCollectionPop(ctx, false) }
+func cmdSTACKPEEK(ctx *Context) error   { return listCollectionPeek(ctx, "-1") }
+func cmdSTACKLEN(ctx *Context) error    { return cmdLLEN(ctx) }
+func cmdSTACKCLEAR(ctx *Context) error  { return listCollectionClear(ctx) }
+
+func listCollectionCreate(ctx *Context) error {
+	if ctx.ArgCount() != 1 {
+		return ctx.WriteError(arityError(ctx.Command))
 	}
-
-	name := ctx.ArgString(0)
-
-	queuesMu.Lock()
-	queues[name] = make([]string, 0)
-	queuesMu.Unlock()
-
+	if _, err := getList(ctx, ctx.ArgString(0)); err != nil {
+		return ctx.WriteError(err)
+	}
 	return ctx.WriteOK()
 }
 
-func cmdQUEUEPUSH(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
+func listCollectionPop(ctx *Context, head bool) error {
+	if ctx.ArgCount() != 1 {
+		return ctx.WriteError(arityError(ctx.Command))
 	}
-
-	name := ctx.ArgString(0)
-	value := ctx.ArgString(1)
-
-	queuesMu.Lock()
-	if _, exists := queues[name]; !exists {
-		queues[name] = make([]string, 0)
-	}
-	queues[name] = append(queues[name], value)
-	length := len(queues[name])
-	queuesMu.Unlock()
-
-	return ctx.WriteInteger(int64(length))
+	return listPopGeneric(ctx, head)
 }
 
-func cmdQUEUEPOP(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
+func listCollectionPeek(ctx *Context, index string) error {
+	if ctx.ArgCount() != 1 {
+		return ctx.WriteError(arityError(ctx.Command))
 	}
-
-	name := ctx.ArgString(0)
-
-	queuesMu.Lock()
-	defer queuesMu.Unlock()
-
-	q, exists := queues[name]
-	if !exists || len(q) == 0 {
-		return ctx.WriteNull()
-	}
-
-	value := q[0]
-	queues[name] = q[1:]
-
-	return ctx.WriteBulkString(value)
+	args := ctx.Args
+	ctx.Args = [][]byte{args[0], []byte(index)}
+	defer func() { ctx.Args = args }()
+	return cmdLINDEX(ctx)
 }
 
-func cmdQUEUEPEEK(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
+func listCollectionClear(ctx *Context) error {
+	if ctx.ArgCount() != 1 {
+		return ctx.WriteError(arityError(ctx.Command))
 	}
-
-	name := ctx.ArgString(0)
-
-	queuesMu.RLock()
-
-	q, exists := queues[name]
-	if !exists || len(q) == 0 {
-		queuesMu.RUnlock()
-		return ctx.WriteNull()
+	key := ctx.ArgString(0)
+	if _, err := getList(ctx, key); err != nil {
+		return ctx.WriteError(err)
 	}
-
-	reply := q[0]
-	queuesMu.RUnlock()
-	return ctx.WriteBulkString(reply)
-}
-
-func cmdQUEUELEN(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
+	if ctx.Store.Delete(key) {
+		ctx.notify(store.NotifyGeneric, "del", key)
 	}
-
-	name := ctx.ArgString(0)
-
-	queuesMu.RLock()
-
-	reply := int64(int64(len(queues[name])))
-	queuesMu.RUnlock()
-	return ctx.WriteInteger(reply)
-}
-
-func cmdQUEUECLEAR(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	name := ctx.ArgString(0)
-
-	queuesMu.Lock()
-	queues[name] = make([]string, 0)
-	queuesMu.Unlock()
-
-	return ctx.WriteOK()
-}
-
-func cmdSTACKCREATE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	name := ctx.ArgString(0)
-
-	stacksMu.Lock()
-	stacks[name] = make([]string, 0)
-	stacksMu.Unlock()
-
-	return ctx.WriteOK()
-}
-
-func cmdSTACKPUSH(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	name := ctx.ArgString(0)
-	value := ctx.ArgString(1)
-
-	stacksMu.Lock()
-	if _, exists := stacks[name]; !exists {
-		stacks[name] = make([]string, 0)
-	}
-	stacks[name] = append(stacks[name], value)
-	length := len(stacks[name])
-	stacksMu.Unlock()
-
-	return ctx.WriteInteger(int64(length))
-}
-
-func cmdSTACKPOP(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	name := ctx.ArgString(0)
-
-	stacksMu.Lock()
-	defer stacksMu.Unlock()
-
-	s, exists := stacks[name]
-	if !exists || len(s) == 0 {
-		return ctx.WriteNull()
-	}
-
-	value := s[len(s)-1]
-	stacks[name] = s[:len(s)-1]
-
-	return ctx.WriteBulkString(value)
-}
-
-func cmdSTACKPEEK(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	name := ctx.ArgString(0)
-
-	stacksMu.RLock()
-
-	s, exists := stacks[name]
-	if !exists || len(s) == 0 {
-		stacksMu.RUnlock()
-		return ctx.WriteNull()
-	}
-
-	reply := s[len(s)-1]
-	stacksMu.RUnlock()
-	return ctx.WriteBulkString(reply)
-}
-
-func cmdSTACKLEN(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	name := ctx.ArgString(0)
-
-	stacksMu.RLock()
-
-	reply := int64(int64(len(stacks[name])))
-	stacksMu.RUnlock()
-	return ctx.WriteInteger(reply)
-}
-
-func cmdSTACKCLEAR(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	name := ctx.ArgString(0)
-
-	stacksMu.Lock()
-	stacks[name] = make([]string, 0)
-	stacksMu.Unlock()
-
 	return ctx.WriteOK()
 }
