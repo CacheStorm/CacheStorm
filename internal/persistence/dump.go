@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unsafe"
 
 	"github.com/cachestorm/cachestorm/internal/store"
 )
@@ -238,49 +239,78 @@ func (d *dumpDecoder) count() int {
 	return int(n)
 }
 func (d *dumpDecoder) str() string {
+	b, owned := d.raw()
+	if owned {
+		return unsafeString(b)
+	}
+	return string(b)
+}
+
+// view returns a string's bytes without copying them when they are stored
+// plainly: they are then the decoder's input, which the caller copies
+// before it keeps them.
+func (d *dumpDecoder) view() []byte {
+	b, _ := d.raw()
+	return b
+}
+
+// viewString is view as a string sharing the bytes.
+func (d *dumpDecoder) viewString() string { return unsafeString(d.view()) }
+
+// raw decodes a string: its bytes, and whether they were made for the
+// call (an integer or a compressed string) rather than being the input.
+func (d *dumpDecoder) raw() (_ []byte, owned bool) {
 	n, encoded := d.length()
 	if d.err != nil {
-		return ""
+		return nil, false
 	}
 	if !encoded {
 		if n > maxDumpString {
 			d.err = ErrDumpFormat
-			return ""
+			return nil, false
 		}
-		return string(d.take(int(n)))
+		return d.take(int(n)), false
 	}
 	switch n {
 	case 0:
-		return strconv.FormatInt(int64(int8(d.byte())), 10)
+		return strconv.AppendInt(nil, int64(int8(d.byte())), 10), true
 	case 1:
 		b := d.take(2)
 		if len(b) == 2 {
-			return strconv.FormatInt(int64(int16(binary.LittleEndian.Uint16(b))), 10)
+			return strconv.AppendInt(nil, int64(int16(binary.LittleEndian.Uint16(b))), 10), true
 		}
 	case 2:
 		b := d.take(4)
 		if len(b) == 4 {
-			return strconv.FormatInt(int64(int32(binary.LittleEndian.Uint32(b))), 10)
+			return strconv.AppendInt(nil, int64(int32(binary.LittleEndian.Uint32(b))), 10), true
 		}
 	case 3:
 		compressed, enc := d.length()
 		size, encSize := d.length()
 		if enc || encSize || compressed > uint64(len(d.data)-d.pos) || size > uint64(maxDumpString-d.expanded) {
 			d.err = ErrDumpFormat
-			return ""
+			return nil, false
 		}
 		input := d.take(int(compressed))
 		result, err := decodeDumpLZF(input, int(size))
 		if err != nil {
 			d.err = err
-			return ""
+			return nil, false
 		}
 		d.expanded += len(result)
-		return string(result)
+		return result, true
 	default:
 		d.err = ErrDumpFormat
 	}
-	return ""
+	return nil, false
+}
+
+// unsafeString is b as a string sharing its bytes, which must not change.
+func unsafeString(b []byte) string {
+	if len(b) == 0 {
+		return ""
+	}
+	return unsafe.String(&b[0], len(b))
 }
 func decodeDumpLZF(input []byte, size int) ([]byte, error) {
 	out := make([]byte, 0, min(size, len(input)*4+16))
@@ -346,7 +376,13 @@ func (d *dumpDecoder) value() store.Value { return d.valueOf(d.byte()) }
 func (d *dumpDecoder) valueOf(typ byte) store.Value {
 	switch typ {
 	case 0:
-		return &store.StringValue{Data: []byte(d.str())}
+		// Straight into the form the store keeps a string in: one copy of
+		// the bytes instead of a string, a slice and then that form.
+		b := d.view()
+		if d.err != nil {
+			return nil
+		}
+		return store.NewCompactString(b, store.StringEncAuto)
 	case 1:
 		n := d.count()
 		v := &store.ListValue{}
@@ -412,26 +448,28 @@ func (d *dumpDecoder) valueOf(typ byte) store.Value {
 		return v
 	case 4:
 		n := d.count()
-		v := &store.HashValue{}
-		order := make([]string, 0, n)
+		// The fields are read in place; NewLoadedHash copies them.
+		items := make([]string, 0, 2*min(n, 1024))
 		for i := 0; i < n && d.err == nil; i++ {
-			key := d.str()
-			s := d.str()
-			if _, ok := v.Get(key); ok {
-				d.err = ErrDumpFormat
-			}
-			v.SetFieldKeepTTL(key, []byte(s))
-			order = append(order, key)
+			items = append(items, d.viewString(), d.viewString())
 		}
-		if n == 0 {
+		if n == 0 || d.err != nil {
 			d.err = ErrDumpFormat
+			return nil
 		}
-		v.SetOrder(order)
+		v, ok := store.NewLoadedHash(items)
+		if !ok {
+			d.err = ErrDumpFormat
+			return nil
+		}
 		return v
 	case dumpTypeHashMetadata, dumpTypeHashListpackEx:
 		return d.hashWithTTLs(typ)
 	case 9, 10, 11, 12, 13, 16, 17, 20:
-		data := []byte(d.str())
+		// The encoded value is read in place: the decoders copy the
+		// elements out, except into hashes, whose elements NewLoadedHash
+		// copies itself.
+		data := d.view()
 		var items []string
 		var err error
 		switch typ {
@@ -439,7 +477,9 @@ func (d *dumpDecoder) valueOf(typ byte) store.Value {
 			items, err = decodeDumpIntset(data)
 		case 9:
 			items, err = decodeDumpZipmap(data)
-		case 16, 17, 20:
+		case 16:
+			items, err = decodeDumpListpackIn(data, true)
+		case 17, 20:
 			items, err = decodeDumpListpack(data)
 		default:
 			items, err = decodeDumpZiplist(data)
@@ -474,16 +514,11 @@ func (d *dumpDecoder) valueOf(typ byte) store.Value {
 				d.err = ErrDumpFormat
 				return nil
 			}
-			v := &store.HashValue{}
-			order := make([]string, 0, len(items)/2)
-			for i := 0; i < len(items); i += 2 {
-				if _, ok := v.Get(items[i]); ok {
-					d.err = ErrDumpFormat
-				}
-				v.SetFieldKeepTTL(items[i], []byte(items[i+1]))
-				order = append(order, items[i])
+			v, ok := store.NewLoadedHash(items)
+			if !ok {
+				d.err = ErrDumpFormat
+				return nil
 			}
-			v.SetOrder(order)
 			return v
 		default:
 			if len(items)%2 != 0 {

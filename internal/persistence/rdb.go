@@ -676,13 +676,19 @@ func (r *RDBReader) readRDB(f io.Reader) error {
 			r.AuxFields[key] = value
 
 		case 0xFB:
-			_, err := r.readLength(f)
+			keys, err := r.readLength(f)
 			if err != nil {
 				return err
 			}
-			_, err = r.readLength(f)
+			expiring, err := r.readLength(f)
 			if err != nil {
 				return err
+			}
+			// RESIZEDB announces the database's size. A key takes at least
+			// three bytes of the file, so a file cannot make the tables
+			// bigger than its own size would fill.
+			if limit := len(r.body) / 3; r.body != nil && r.store != nil && keys > 0 {
+				r.store.Reserve(min(keys, limit), max(min(expiring, keys, limit), 0))
 			}
 
 		case 0xFE:

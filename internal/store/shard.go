@@ -260,3 +260,28 @@ func (s *Shard) subExpiry(key string, at int64) {
 	s.expSumLo, borrow = bits.Sub64(s.expSumLo, uint64(at), 0)
 	s.expSumHi -= borrow
 }
+
+// Reserve sizes the tables of every shard still empty for keys keys,
+// expiring of them with an expiry, as a snapshot announces its databases'
+// sizes, so loading does not grow each table step by step.
+func (s *Store) Reserve(keys, expiring int) {
+	if keys <= 0 {
+		return
+	}
+	// Keys spread over the shards unevenly by a few percent.
+	per := keys/NumShards + keys/NumShards/10 + 8
+	perExp := 0
+	if expiring > 0 {
+		perExp = expiring/NumShards + expiring/NumShards/10 + 8
+	}
+	for _, sh := range &s.shards {
+		sh.mu.Lock()
+		if len(sh.data) == 0 {
+			sh.data = make(map[string]*Entry, per)
+		}
+		if perExp > 0 && len(sh.vol) == 0 {
+			sh.vol = make(map[string]struct{}, perExp)
+		}
+		sh.mu.Unlock()
+	}
+}

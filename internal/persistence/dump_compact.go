@@ -38,12 +38,27 @@ func decodeDumpIntset(data []byte) ([]string, error) {
 	return out, nil
 }
 
-func decodeDumpListpack(data []byte) ([]string, error) {
+func decodeDumpListpack(data []byte) ([]string, error) { return decodeDumpListpackIn(data, false) }
+
+// decodeDumpListpackIn decodes a listpack's elements; with inPlace the
+// strings share data's bytes instead of copying them.
+func decodeDumpListpackIn(data []byte, inPlace bool) ([]string, error) {
 	if len(data) < 7 || uint64(binary.LittleEndian.Uint32(data)) != uint64(len(data)) {
 		return nil, ErrDumpFormat
 	}
 	d := &dumpDecoder{data: data, pos: 6}
+	// The header counts the elements (65535 when there are more); each
+	// takes at least two bytes.
 	var out []string
+	if count := int(binary.LittleEndian.Uint16(data[4:])); count != 65535 {
+		out = make([]string, 0, min(count, len(data)/2))
+	}
+	str := func(b []byte) string {
+		if inPlace {
+			return unsafeString(b)
+		}
+		return string(b)
+	}
 	for d.err == nil && d.pos < len(data)-1 {
 		start := d.pos
 		b := d.byte()
@@ -52,7 +67,7 @@ func decodeDumpListpack(data []byte) ([]string, error) {
 		case b < 128:
 			s = strconv.Itoa(int(b))
 		case b < 192:
-			s = string(d.take(int(b & 63)))
+			s = str(d.take(int(b & 63)))
 		case b < 224:
 			n := int64(b&31)<<8 | int64(d.byte())
 			if n&4096 != 0 {
@@ -60,7 +75,7 @@ func decodeDumpListpack(data []byte) ([]string, error) {
 			}
 			s = strconv.FormatInt(n, 10)
 		case b < 240:
-			s = string(d.take(int(b&15)<<8 | int(d.byte())))
+			s = str(d.take(int(b&15)<<8 | int(d.byte())))
 		case b == 240:
 			n := d.take(4)
 			if len(n) == 4 {
@@ -68,7 +83,7 @@ func decodeDumpListpack(data []byte) ([]string, error) {
 				if length > uint64(len(data)-d.pos) {
 					d.err = ErrDumpFormat
 				} else {
-					s = string(d.take(int(length)))
+					s = str(d.take(int(length)))
 				}
 			}
 		case b >= 241 && b <= 244:

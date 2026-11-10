@@ -3,6 +3,7 @@ package store
 import (
 	"encoding/binary"
 	"iter"
+	"strings"
 	"sync/atomic"
 	"unsafe"
 )
@@ -396,4 +397,80 @@ func (v *HashValue) orderPlaceLocked(field string, at int64) {
 	v.order = append(v.order, "")
 	copy(v.order[i+1:], v.order[i:])
 	v.order[i] = field
+}
+
+// NewLoadedHash builds a hash from fields and values loaded in order, items
+// alternating them, in one pass. It copies them, so they may share the
+// loader's input. Setting them one at a time searched and copied the packed
+// buffer for each field, quadratic in the fields, which made the small
+// hashes of a snapshot slower to load than everything else in it. It
+// reports false when a field repeats.
+func NewLoadedHash(items []string) (*HashValue, bool) {
+	n := len(items) / 2
+	if !uniqueFields(items) {
+		return nil, false
+	}
+	limit := hashListpackValue.Load()
+	tooLong := false
+	var size int64
+	packed := 0
+	for i := 0; i+1 < len(items); i += 2 {
+		f, val := items[i], items[i+1]
+		size += int64(len(f)) + int64(len(val)) + hashFieldOverhead
+		packed += uvarintLen(len(f)) + len(f) + uvarintLen(len(val)) + len(val)
+		if int64(len(f)) > limit || int64(len(val)) > limit {
+			tooLong = true
+		}
+	}
+	v := &HashValue{}
+	if n <= hashSmallMax && packed <= hashSmallBytes {
+		buf := make([]byte, 0, packed)
+		for i := 0; i+1 < len(items); i += 2 {
+			buf = binary.AppendUvarint(buf, uint64(len(items[i])))
+			buf = append(buf, items[i]...)
+			buf = binary.AppendUvarint(buf, uint64(len(items[i+1])))
+			buf = append(buf, items[i+1]...)
+		}
+		v.lp, v.lpN = buf, int32(n)
+		v.adj.Store(int64(n) * (hashPackedOverhead - hashFieldOverhead))
+	} else {
+		v.dict = make(map[string][]byte, n)
+		v.order = make([]string, 0, n)
+		for i := 0; i+1 < len(items); i += 2 {
+			// The loader hands over strings sharing its input's bytes.
+			f := strings.Clone(items[i])
+			v.dict[f] = []byte(items[i+1])
+			v.order = append(v.order, f)
+		}
+		v.adj.Store(hashBaseSize - hashPackedBase)
+	}
+	v.size.set(size)
+	if tooLong || int64(n) > hashListpackEntries.Load() {
+		v.convertLocked()
+	}
+	return v, true
+}
+
+// uniqueFields reports whether no field of items, which alternates fields
+// and values, repeats.
+func uniqueFields(items []string) bool {
+	n := len(items) / 2
+	if n <= 16 {
+		for i := 0; i < len(items); i += 2 {
+			for j := i + 2; j < len(items); j += 2 {
+				if items[i] == items[j] {
+					return false
+				}
+			}
+		}
+		return true
+	}
+	seen := make(map[string]struct{}, n)
+	for i := 0; i < len(items); i += 2 {
+		if _, ok := seen[items[i]]; ok {
+			return false
+		}
+		seen[items[i]] = struct{}{}
+	}
+	return true
 }
