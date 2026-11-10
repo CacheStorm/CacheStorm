@@ -3,14 +3,15 @@ package config
 func Default() *Config {
 	return &Config{
 		Server: ServerConfig{
-			Bind:            "0.0.0.0",
-			Port:            6380,
-			MaxConnections:  10000,
-			Databases:       16,
-			TCPKeepAlive:    300,
-			ReadBufferSize:  4096,
-			WriteBufferSize: 512,
-			ProtectedMode:   true,
+			Bind:              "0.0.0.0",
+			Port:              6380,
+			MaxConnections:    10000,
+			Databases:         16,
+			TCPKeepAlive:      300,
+			ReadBufferSize:    4096,
+			WriteBufferSize:   512,
+			ProtectedMode:     true,
+			ExtensionCommands: "stateful",
 		},
 		HTTP: HTTPConfig{
 			Enabled:    true,

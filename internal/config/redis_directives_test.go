@@ -108,3 +108,26 @@ func TestAppenddirnameNamesTheRedisAOFDirectory(t *testing.T) {
 		}
 	}
 }
+
+func TestExtensionCommandsDirective(t *testing.T) {
+	if got := Default().Server.ExtensionCommands; got != "stateful" {
+		t.Fatalf("default extension-commands %q", got)
+	}
+	for _, value := range []string{"all", "stateful", "none"} {
+		c := Default()
+		if _, err := c.ApplyDirectives([]Directive{{Name: "extension-commands", Args: []string{value}}}); err != nil {
+			t.Fatal(err)
+		}
+		if c.Server.ExtensionCommands != value {
+			t.Fatalf("extension-commands %s: %q", value, c.Server.ExtensionCommands)
+		}
+		if err := Validate(c); err != nil {
+			t.Fatalf("extension-commands %s: %v", value, err)
+		}
+	}
+	c := Default()
+	c.Server.ExtensionCommands = "some"
+	if err := Validate(c); err == nil {
+		t.Fatal("extension-commands some was accepted")
+	}
+}

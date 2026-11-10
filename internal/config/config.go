@@ -96,6 +96,12 @@ type ServerConfig struct {
 	// NotifyKeyspaceEvents is notify-keyspace-events: the classes of
 	// keyspace notifications published over Pub/Sub; empty disables them.
 	NotifyKeyspaceEvents string `yaml:"notify_keyspace_events"`
+	// ExtensionCommands is extension-commands: which of CacheStorm's own
+	// commands, the ones neither Redis nor the Redis Stack modules have, are
+	// served. "all" serves every one, "stateful" (the default) leaves out
+	// the stateless utility namespaces (STR, MATH, UUID, DIGEST and the
+	// like), "none" serves only Redis and Redis Stack commands.
+	ExtensionCommands string `yaml:"extension_commands" default:"stateful"`
 }
 
 type HTTPConfig struct {

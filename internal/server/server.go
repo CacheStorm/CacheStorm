@@ -356,6 +356,11 @@ func New(cfg *config.Config) (result *Server, retErr error) {
 	command.RegisterAdvancedCommands2(s.router)
 	command.RegisterResilienceCommands(s.router)
 	command.RegisterMLCommands(s.router)
+	for name := range s.router.Commands() {
+		if !command.ExtensionCommandEnabled(name, s.extensionCommands()) {
+			s.router.Unregister(name)
+		}
+	}
 	names := make([]string, 0, 1300)
 	for name := range s.router.Commands() {
 		names = append(names, name)

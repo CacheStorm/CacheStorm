@@ -51,6 +51,10 @@ server:
   # Flags: K E g $ l s h z x e t m d n A; empty = off.
   # notify_keyspace_events: "KEA"
 
+  # CacheStorm's own commands, besides Redis and Redis Stack ones:
+  # all | stateful (default: no stateless STR/MATH/UUID/... helpers) | none.
+  # extension_commands: stateful
+
 # HTTP Admin API
 http:
   enabled: true

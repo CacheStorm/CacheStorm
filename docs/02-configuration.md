@@ -23,7 +23,7 @@ cachestorm /etc/redis/redis.conf --appendonly yes
 
 A config file whose name ends in `.conf` is read as a `redis.conf`, with its comments, quoting and repeated `save` lines. Any other file is YAML. Options on the command line are applied after the file, so they win, as with Redis.
 
-- **Startup settings.** These directives are applied before the server starts: `port`, `bind` (the first address; `*` means all), `protected-mode`, `requirepass`, `databases`, `maxclients`, `tcp-keepalive`, `notify-keyspace-events`, `maxmemory`, `maxmemory-policy` and `maxmemory-samples`. So are `appendonly`, `appendfsync`, `dir`, `save`, `loglevel` and `logfile`, as well as `replicaof` (or `slaveof`), `masterauth`, the `replica-*` and `repl-*` settings, and the `cluster-*` settings.
+- **Startup settings.** These directives are applied before the server starts: `port`, `bind` (the first address; `*` means all), `protected-mode`, `requirepass`, `databases`, `maxclients`, `tcp-keepalive`, `notify-keyspace-events`, `extension-commands`, `maxmemory`, `maxmemory-policy` and `maxmemory-samples`. So are `appendonly`, `appendfsync`, `dir`, `save`, `loglevel` and `logfile`, as well as `replicaof` (or `slaveof`), `masterauth`, the `replica-*` and `repl-*` settings, and the `cluster-*` settings.
 - **Run-time settings.** Every other directive goes through `CONFIG SET` once the server exists, with the same validation. A `user` line becomes `ACL SETUSER`.
 - **Ignored and refused directives.** A parameter Redis reads only at startup that CacheStorm does not use, such as `tcp-backlog` or `pidfile`, is ignored with a warning when it differs from the default. An unknown directive or an invalid value stops startup with the file and line, or the option, that caused it. `include`, `rename-command`, `aclfile`, `loadmodule` and `daemonize yes` are refused.
 
@@ -52,6 +52,7 @@ server:
   tls_ca_cert_file: ""          # CA that signs client (and master) certificates
   tls_auth_clients: ""          # yes | optional | no; empty = yes when a CA is set
   notify_keyspace_events: ""    # Keyspace notifications (notify-keyspace-events), e.g. "KEA"; empty = off
+  extension_commands: stateful  # all | stateful | none (extension-commands); see "Extension commands"
 
 # HTTP/API Configuration
 http:
@@ -313,6 +314,20 @@ An AOF rewrite holds the write gate only while it encodes the dataset in memory;
 - Key tags go in an aux field before the key, and search indexes in a `cachestorm-search` aux field; Redis ignores both.
 
 CacheStorm still loads snapshots in its older native format. `redis-cli --rdb` also returns a Redis-format RDB, but leaves CacheStorm-only types out with a warning, so the file always loads in Redis.
+
+## Extension commands
+
+Besides the Redis 7.4 commands and the Redis Stack module commands (RedisJSON `JSON.*`, RediSearch `FT.*`, RedisTimeSeries `TS.*`, RedisBloom `BF.*`, `CF.*`, `CMS.*`, `TOPK.*`, `TDIGEST.*`), which are always served, CacheStorm has commands of its own. `extension_commands` (`extension-commands` in redis.conf or on the command line) decides which of them are served; it is read at startup, `CONFIG GET` shows it and `CONFIG SET` refuses it:
+
+| Value | Served |
+|-------|--------|
+| `stateful` (default) | every extension command except the stateless utility namespaces: `STR`, `MATH`, `TIMESTAMP`, `UUID`, `ULID`, `SNOWFLAKE`, `DIGEST`, `CRYPTO`, `COMPRESS`, `DECOMPRESS`, `CBOR`, `MSGPACK`, `CSV`, `XML`, `YAML`, `URL`, `DIFF`, `MASK`, `SANITIZE`, `EVAL` and `PARALLEL` |
+| `all` | every extension command |
+| `none` | only Redis and Redis Stack commands, as on a Redis server |
+
+The utility namespaces compute a function of their arguments (string and math helpers, hashes, encodings, ids) and store nothing; an application computes the same as easily itself, and each one is more work a client can make the server do. A command left out answers as Redis answers a command it does not have (`ERR unknown command`), and `COMMAND` does not list it.
+
+Most stateful extension namespaces (queues, locks, rate limiters, sessions, circuit breakers and the like) keep their state in the server process, outside the keyspace: it is shared by all databases, `FLUSHALL` does not clear it, it is not in the AOF or the RDB, so a restart loses it, and replicas do not receive it. Use them for state that may be lost; `none` serves none of them.
 
 ## Eviction Policies
 

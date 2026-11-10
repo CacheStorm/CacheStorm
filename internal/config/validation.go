@@ -33,6 +33,11 @@ func Validate(cfg *Config) error {
 	if cfg.Server.MaxConnections < 0 {
 		return fmt.Errorf("max_connections cannot be negative")
 	}
+	switch cfg.Server.ExtensionCommands {
+	case "", "all", "stateful", "none":
+	default:
+		return fmt.Errorf("invalid extension_commands %q: want all, stateful or none", cfg.Server.ExtensionCommands)
+	}
 	if cfg.Server.Databases < 0 || cfg.Server.Databases > 1<<20 {
 		return fmt.Errorf("invalid databases: %d", cfg.Server.Databases)
 	}

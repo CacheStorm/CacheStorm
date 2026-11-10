@@ -65,6 +65,7 @@ func (s *Server) configValues() map[string]string {
 		"port":                        strconv.Itoa(s.ListeningPort()),
 		"bind":                        s.cfg.Server.Bind,
 		"databases":                   strconv.Itoa(s.dbs.Count()),
+		"extension-commands":          s.extensionCommands(),
 		"protected-mode":              configYesNo(s.cfg.Server.ProtectedMode),
 		"tcp-keepalive":               strconv.Itoa(s.cfg.Server.TCPKeepAlive),
 		"requirepass":                 s.router.RequirePass(),
@@ -240,8 +241,17 @@ func (s *Server) configSet(name, value string) (bool, error) {
 		return true, nil
 	case "save":
 		return true, s.setSnapshotRules(value)
-	case "bind", "databases", "appendfilename":
+	case "bind", "databases", "appendfilename", "extension-commands":
 		return true, command.ConfigSetError(name, "can't set immutable config")
 	}
 	return false, nil
+}
+
+// extensionCommands is the extension-commands setting; empty, from a config
+// written before it existed, is the default.
+func (s *Server) extensionCommands() string {
+	if s.cfg.Server.ExtensionCommands == "" {
+		return command.ExtensionsStateful
+	}
+	return s.cfg.Server.ExtensionCommands
 }

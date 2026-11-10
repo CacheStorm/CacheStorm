@@ -373,6 +373,15 @@ func (r *Router) Register(def *CommandDef) {
 	r.mu.Unlock()
 }
 
+// Unregister removes a command, which then answers as an unknown command.
+func (r *Router) Unregister(name string) {
+	name = CanonicalName(name)
+	r.mu.Lock()
+	delete(r.commands, name)
+	r.hot.Store(nil)
+	r.mu.Unlock()
+}
+
 func (r *Router) Get(name string) (*CommandDef, bool) {
 	cmd, ok := r.hotState().commands[CanonicalName(name)]
 	return cmd, ok

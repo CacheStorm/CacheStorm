@@ -185,6 +185,8 @@ func (c *Config) applyDirective(d Directive) (bool, error) {
 		return integer(&c.Server.TCPKeepAlive)
 	case "notify-keyspace-events":
 		return str(&c.Server.NotifyKeyspaceEvents)
+	case "extension-commands":
+		return str(&c.Server.ExtensionCommands)
 	case "maxmemory":
 		return str(&c.Memory.MaxMemory)
 	case "maxmemory-policy":
