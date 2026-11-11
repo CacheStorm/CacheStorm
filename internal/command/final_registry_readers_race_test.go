@@ -11,24 +11,18 @@ type finalFamilyCase struct {
 }
 
 // TestFinalRegistryReadersAreSynchronised covers the last registry families
-// in internal/command that the earlier sweeps never reached: BUFFERX,
-// CONNECTIONX, JOBX, SESSIONX, STREAMX, SECRET, TRIE, ROLLUP, LOCKX, SHUFFLE,
+// in internal/command that the earlier sweeps never reached: CONNECTIONX, JOBX, SESSIONX, STREAMX, SECRET, TRIE, ROLLUP, LOCKX, SHUFFLE,
 // PARTITIONX and TRANSX.
+//
+// BUFFERX is a string key now: like GET and APPEND it relies on the
+// server's write gate, which this harness bypasses, so it is covered by the
+// server's tests instead.
 //
 // Run with -race this pins the data race. Each family is a subtest so a
 // single family can be run in isolation
 // (`-run 'TestFinalRegistryReadersAreSynchronised/<family>'`).
 func TestFinalRegistryReadersAreSynchronised(t *testing.T) {
 	cases := []finalFamilyCase{
-		{
-			register: RegisterAdvancedCommands2,
-			registryFamilyCase: registryFamilyCase{
-				name:   "bufferx",
-				setup:  [][]string{{"BUFFERX.CREATE", "k", "10"}},
-				writer: [][]string{{"BUFFERX.WRITE", "k", "data"}},
-				reader: [][]string{{"BUFFERX.READ", "k"}},
-			},
-		},
 		{
 			register: RegisterAdvancedCommands2,
 			registryFamilyCase: registryFamilyCase{
