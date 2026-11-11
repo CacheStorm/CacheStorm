@@ -771,18 +771,22 @@ STATEM.LIST [pattern]
 
 ## Advanced Commands
 
+The objects below are keys, per database, persisted and replicated, recorded in the AOF as `HSET`, `HDEL`, `ZADD`, `ZREM` and `DEL`; their `LIST` commands cover the selected database and reply sorted. An actor, DAG, secret, configuration namespace or ring is a hash key marked by a field naming its kind (`__actor`, `__dag`, `__secret`, `__config`, `__ring`); a trie is a sorted set of its words, all scored 0.
+
 ### Actor Model
 
+An actor's mailbox is a queue in its hash: the fields `m:<seq>` between `head` and `tail`.
+
 ```
-ACTOR.CREATE name [mailbox_size]
-ACTOR.DELETE name
-ACTOR.SEND name message
-ACTOR.RECV name [timeout]
-ACTOR.POKE name
-ACTOR.PEEK name
-ACTOR.LEN name
-ACTOR.LIST [pattern]
-ACTOR.CLEAR name
+ACTOR.CREATE name                    # empty mailbox, replacing one at name; OK
+ACTOR.DELETE name                    # 1 if deleted, 0 if absent
+ACTOR.SEND name message              # mailbox length after the send
+ACTOR.RECV name                      # oldest message, removed; null when empty
+ACTOR.POKE name                      # oldest message, kept; null when empty
+ACTOR.PEEK name                      # same as POKE
+ACTOR.LEN name                       # messages waiting, 0 for an unknown actor
+ACTOR.LIST                           # actor names
+ACTOR.CLEAR name                     # empty the mailbox; OK
 ```
 
 ### DAG (Directed Acyclic Graph)
@@ -808,37 +812,41 @@ PARALLEL.FILTER key command
 
 ### Secrets Management
 
+Values are stored as given, not encrypted; protect them with ACLs and, at rest, with disk encryption.
+
 ```
-SECRET.SET key value [TTL ttl]
-SECRET.GET key
-SECRET.DELETE key
-SECRET.LIST [pattern]
-SECRET.ROTATE key newValue
-SECRET.VERSION key
+SECRET.SET key value                 # set the value, starting at version 1 or adding a version; OK
+SECRET.GET key                       # value or null
+SECRET.DELETE key                    # 1 if deleted, 0 if absent
+SECRET.LIST                          # secret keys
+SECRET.ROTATE key newValue           # existing secrets only; replies the new version
+SECRET.VERSION key                   # version, updated_at; null if absent
 ```
 
 ### Configuration
 
+A namespace is a hash key whose fields are its settings (`__config` is reserved); it goes with its last setting.
+
 ```
-CONFIG.SET ns key value
-CONFIG.GET ns key
-CONFIG.DELETE ns key
-CONFIG.LIST [pattern] [NAMESPACE ns]
-CONFIG.NAMESPACE ns [command]
-CONFIG.IMPORT ns key value [key value ...]
-CONFIG.EXPORT ns [pattern] [FORMAT format]
+CONFIG.SET ns key value              # OK
+CONFIG.GET ns key                    # value or null
+CONFIG.DELETE ns key                 # 1 if deleted, 0 if absent
+CONFIG.LIST [ns]                     # key, value pairs of ns, or ns:key, value pairs of every namespace, sorted
+CONFIG.NAMESPACE ns                  # create an empty namespace; OK
+CONFIG.IMPORT ns key value [key value ...]  # number of settings set
+CONFIG.EXPORT ns                     # key, value pairs, sorted
 ```
 
 ### Data Structures
 
 ```
-TRIE.ADD name key [value]
-TRIE.SEARCH name prefix
-TRIE.PREFIX name prefix [COUNT count]
-TRIE.DELETE name key
-TRIE.AUTOCOMPLETE name prefix [COUNT count]
+TRIE.ADD name word                   # recorded as ZADD name 0 word; OK
+TRIE.SEARCH name word                # 1 if the word was added
+TRIE.PREFIX name prefix              # 1 if a word starts with prefix
+TRIE.DELETE name word                # recorded as ZREM; 1 if removed, 0 if absent
+TRIE.AUTOCOMPLETE name prefix        # words starting with prefix, sorted
 
-RING.CREATE name replicas            # consistent-hash ring, replicas = virtual nodes per node (1-1024); OK
+RING.CREATE name replicas            # consistent-hash ring, replicas = virtual nodes per node (1-1024), replacing one at name; OK
 RING.ADD name node                   # node count after the add
 RING.GET name key                    # node that owns key; null if the ring is empty
 RING.NODES name                      # nodes sorted by name

@@ -161,9 +161,13 @@ func TestKeyspaceExtensionWritesAreGated(t *testing.T) {
 		"BOOKMARK.GET": true, "BOOKMARK.LIST": true, "DEADLINE.CHECK": true, "DEADLINE.LIST": true,
 		"ROUTE.MATCH": true, "ROUTE.LIST": true, "GATEWAY.LIST": true, "GRID.GET": true, "GRID.QUERY": true,
 		"GHOST.READ": true, "TAPE.READ": true, "SLICE.GET": true, "ROLLUPX.GET": true,
+		"SECRET.GET": true, "SECRET.LIST": true, "SECRET.VERSION": true, "CONFIG.GET": true, "CONFIG.LIST": true,
+		"CONFIG.EXPORT": true, "TRIE.SEARCH": true, "TRIE.PREFIX": true, "TRIE.AUTOCOMPLETE": true, "RING.GET": true,
+		"RING.NODES": true, "ACTOR.POKE": true, "ACTOR.PEEK": true, "ACTOR.LEN": true, "ACTOR.LIST": true,
+		"DAG.TOPO": true, "DAG.PARENTS": true, "DAG.CHILDREN": true, "DAG.LIST": true,
 		"VECTOR.GET": true, "VECTOR.SEARCH": true, "VECTOR.SIMILARITY": true, "VECTOR.DIMENSIONS": true, "VECTOR.STATS": true,
 	}
-	namespaces := []string{"QUEUE", "STACK", "LOCK", "RATELIMITER", "SESSION", "CIRCUIT", "MSGQUEUE", "RL", "RATELIMIT", "TOKENBUCKET", "LEAKYBUCKET", "THROTTLE", "LOCKX", "LEADER", "CIRCUITX", "CIRCUITBREAKER", "SEM", "SEMAPHOREX", "SESSIONX", "SERVICE", "DOC", "AGG", "VECTOR", "CRDT", "DEDUP", "VECTOR_CLOCK", "THRESHOLD", "SWITCH", "BOOKMARK", "DEADLINE", "ROUTE", "GATEWAY", "GRID", "GHOST", "TAPE", "SLICE", "ROLLUPX"}
+	namespaces := []string{"QUEUE", "STACK", "LOCK", "RATELIMITER", "SESSION", "CIRCUIT", "MSGQUEUE", "RL", "RATELIMIT", "TOKENBUCKET", "LEAKYBUCKET", "THROTTLE", "LOCKX", "LEADER", "CIRCUITX", "CIRCUITBREAKER", "SEM", "SEMAPHOREX", "SESSIONX", "SERVICE", "DOC", "AGG", "VECTOR", "CRDT", "DEDUP", "VECTOR_CLOCK", "THRESHOLD", "SWITCH", "BOOKMARK", "DEADLINE", "ROUTE", "GATEWAY", "GRID", "GHOST", "TAPE", "SLICE", "ROLLUPX", "SECRET", "CONFIG", "TRIE", "RING", "ACTOR", "DAG"}
 	cfg := aofTxConfig(t)
 	cfg.Server.ExtensionCommands = "all"
 	s := startToggleServer(t, cfg)

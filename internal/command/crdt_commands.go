@@ -229,8 +229,23 @@ func cmdCRDTGSETGET(ctx *Context) error {
 	return ctx.WriteArray(out)
 }
 
+// orsetField packs two strings into one field name: the kind byte, the
+// first string's length, a colon, then both strings.
 func orsetField(kind byte, value, tag string) string {
 	return string(kind) + strconv.Itoa(len(value)) + ":" + value + tag
+}
+
+// unpackPair splits a field name made by orsetField.
+func unpackPair(f string) (kind byte, a, b string, ok bool) {
+	colon := strings.IndexByte(f, ':')
+	if len(f) < 3 || colon < 2 {
+		return 0, "", "", false
+	}
+	n, err := strconv.Atoi(f[1:colon])
+	if err != nil || n < 0 || colon+1+n > len(f) {
+		return 0, "", "", false
+	}
+	return f[0], f[colon+1 : colon+1+n], f[colon+1+n:], true
 }
 
 type orset struct {
@@ -256,17 +271,12 @@ func readORSet(ctx *Context, key string) (*orset, error) {
 		return s, nil
 	}
 	for f := range markedFields(h, orsetMarker) {
-		colon := strings.IndexByte(f, ':')
-		if len(f) < 3 || colon < 2 {
+		kind, value, tag, ok := unpackPair(f)
+		if !ok {
 			return nil, store.ErrWrongType
 		}
-		n, err := strconv.Atoi(f[1:colon])
-		if err != nil || n < 0 || colon+1+n > len(f) {
-			return nil, store.ErrWrongType
-		}
-		value, tag := f[colon+1:colon+1+n], f[colon+1+n:]
 		into := s.live
-		switch f[0] {
+		switch kind {
 		case 'a':
 		case 'r':
 			into = s.dead

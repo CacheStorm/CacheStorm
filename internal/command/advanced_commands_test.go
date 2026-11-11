@@ -71,11 +71,7 @@ func TestAllAdvancedCommands(t *testing.T) {
 			s.Set("secret:secret1", &store.StringValue{Data: []byte("encrypted")}, store.SetOptions{})
 		}},
 		{"SECRET.LIST", "SECRET.LIST", nil, nil},
-		{"SECRET.ROTATE exists", "SECRET.ROTATE", [][]byte{[]byte("secret1"), []byte("newvalue")}, func() {
-			secretsMu.Lock()
-			secrets["secret1"] = &Secret{Value: "oldvalue", Version: 1}
-			secretsMu.Unlock()
-		}},
+		{"SECRET.ROTATE exists", "SECRET.ROTATE", [][]byte{[]byte("secret1"), []byte("newvalue")}, nil},
 		{"SECRET.ROTATE not found", "SECRET.ROTATE", [][]byte{[]byte("notfound"), []byte("newvalue")}, nil},
 		{"SECRET.ROTATE no args", "SECRET.ROTATE", nil, nil},
 		{"SECRET.VERSION", "SECRET.VERSION", [][]byte{[]byte("secret1")}, func() {
@@ -83,31 +79,14 @@ func TestAllAdvancedCommands(t *testing.T) {
 		}},
 		{"CONFIG.SET", "CONFIG.SET", [][]byte{[]byte("ns1"), []byte("key1"), []byte("value1")}, nil},
 		{"CONFIG.SET no args", "CONFIG.SET", nil, nil},
-		{"CONFIG.GET exists", "CONFIG.GET", [][]byte{[]byte("ns1"), []byte("key1")}, func() {
-			configsMu.Lock()
-			configs["ns1"] = map[string]string{"key1": "value1"}
-			configsMu.Unlock()
-		}},
+		{"CONFIG.GET exists", "CONFIG.GET", [][]byte{[]byte("ns1"), []byte("key1")}, nil},
 		{"CONFIG.GET not found", "CONFIG.GET", [][]byte{[]byte("ns1"), []byte("notfound")}, nil},
 		{"CONFIG.GET no args", "CONFIG.GET", nil, nil},
-		{"CONFIG.DELETE exists", "CONFIG.DELETE", [][]byte{[]byte("ns1"), []byte("key1")}, func() {
-			configsMu.Lock()
-			configs["ns1"] = map[string]string{"key1": "value1"}
-			configsMu.Unlock()
-		}},
+		{"CONFIG.DELETE exists", "CONFIG.DELETE", [][]byte{[]byte("ns1"), []byte("key1")}, nil},
 		{"CONFIG.DELETE not found", "CONFIG.DELETE", [][]byte{[]byte("ns1"), []byte("notfound")}, nil},
 		{"CONFIG.DELETE no args", "CONFIG.DELETE", nil, nil},
-		{"CONFIG.LIST with ns", "CONFIG.LIST", [][]byte{[]byte("ns1")}, func() {
-			configsMu.Lock()
-			configs["ns1"] = map[string]string{"key1": "value1", "key2": "value2"}
-			configsMu.Unlock()
-		}},
-		{"CONFIG.LIST without ns", "CONFIG.LIST", nil, func() {
-			configsMu.Lock()
-			configs["ns1"] = map[string]string{"key1": "value1"}
-			configs["ns2"] = map[string]string{"key2": "value2"}
-			configsMu.Unlock()
-		}},
+		{"CONFIG.LIST with ns", "CONFIG.LIST", [][]byte{[]byte("ns1")}, nil},
+		{"CONFIG.LIST without ns", "CONFIG.LIST", nil, nil},
 		{"CONFIG.NAMESPACE", "CONFIG.NAMESPACE", [][]byte{[]byte("mynamespace")}, nil},
 		{"CONFIG.NAMESPACE no args", "CONFIG.NAMESPACE", nil, nil},
 		{"CONFIG.IMPORT", "CONFIG.IMPORT", [][]byte{[]byte("import_ns"), []byte("key1"), []byte("value1"), []byte("key2"), []byte("value2")}, nil},

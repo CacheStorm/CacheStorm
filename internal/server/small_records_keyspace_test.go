@@ -144,3 +144,99 @@ func renderReply(v *resp.Value, sep string) string {
 	}
 	return v.Str + v.Err
 }
+
+// SECRET, CONFIG.*, TRIE, RING, ACTOR and DAG objects are keys: they survive
+// a restart through an AOF holding only hash and sorted set commands.
+func TestAdvancedRecordsAreKeys(t *testing.T) {
+	cfg := aofTxConfig(t)
+	s := startToggleServer(t, cfg)
+	c := dialRepl(t, s)
+	ok := func(args ...string) {
+		t.Helper()
+		if v := c.do(args...); v.Type == '-' {
+			t.Fatalf("%v: %v", args, v.Err)
+		}
+	}
+	ok("SECRET.SET", "db-pass", "one")
+	ok("SECRET.ROTATE", "db-pass", "two")
+	ok("CONFIG.IMPORT", "app", "mode", "prod", "level", "3")
+	ok("CONFIG.SET", "app", "region", "eu")
+	ok("CONFIG.DELETE", "app", "level")
+	ok("CONFIG.NAMESPACE", "empty")
+	for _, w := range []string{"car", "cart", "care", "dog"} {
+		ok("TRIE.ADD", "words", w)
+	}
+	ok("TRIE.DELETE", "words", "care")
+	ok("RING.CREATE", "shards", "64")
+	ok("RING.ADD", "shards", "a")
+	ok("RING.ADD", "shards", "b")
+	ok("RING.ADD", "shards", "c")
+	ok("RING.REMOVE", "shards", "c")
+	owner := c.do("RING.GET", "shards", "user:42")
+	ok("ACTOR.CREATE", "worker")
+	ok("ACTOR.SEND", "worker", "m1")
+	ok("ACTOR.SEND", "worker", "m2")
+	ok("ACTOR.SEND", "worker", "m3")
+	if got := c.do("ACTOR.RECV", "worker"); string(got.Bulk) != "m1" {
+		t.Fatalf("ACTOR.RECV: %+v", got)
+	}
+	ok("DAG.CREATE", "build")
+	for _, n := range []string{"fetch", "compile", "test", "ship"} {
+		ok("DAG.ADDNODE", "build", n)
+	}
+	ok("DAG.ADDEDGE", "build", "fetch", "compile")
+	ok("DAG.ADDEDGE", "build", "compile", "test")
+	ok("DAG.ADDEDGE", "build", "test", "ship")
+	if got := c.do("DAG.ADDEDGE", "build", "ship", "fetch"); got.Type != '-' {
+		t.Fatalf("a cycle was accepted: %v", got)
+	}
+	ok("SET", "plain", "v")
+	for _, args := range [][]string{
+		{"SECRET.SET", "plain", "v"}, {"CONFIG.SET", "db-pass", "k", "v"}, {"TRIE.ADD", "plain", "w"},
+		{"RING.ADD", "app", "n"}, {"ACTOR.SEND", "shards", "m"}, {"DAG.ADDNODE", "worker", "n"},
+	} {
+		if got := c.do(args...); got.Type != '-' || !strings.HasPrefix(got.Err, "WRONGTYPE") {
+			t.Fatalf("%v: %v", args, got)
+		}
+	}
+	stopReplServer(s)
+
+	data, err := os.ReadFile(filepath.Join(cfg.Persistence.DataDir, "appendonly.aof"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"SECRET.", "CONFIG.", "TRIE.", "RING.", "ACTOR.", "DAG."} {
+		if strings.Contains(string(data), name) {
+			t.Fatalf("the AOF records %s commands", name)
+		}
+	}
+
+	s = startToggleServer(t, cfg)
+	defer stopReplServer(s)
+	c = dialRepl(t, s)
+	expect := func(want string, args ...string) {
+		t.Helper()
+		if got := renderReply(c.do(args...), ","); got != want {
+			t.Fatalf("%v after restart = %q, want %q", args, got, want)
+		}
+	}
+	expect("two", "SECRET.GET", "db-pass")
+	if got := c.do("SECRET.VERSION", "db-pass"); len(got.Array) != 4 || got.Array[1].Int != 2 || got.Array[3].Int <= 0 {
+		t.Fatalf("SECRET.VERSION after restart: %+v", got)
+	}
+	expect("mode,prod,region,eu", "CONFIG.EXPORT", "app")
+	expect("app:mode,prod,app:region,eu", "CONFIG.LIST")
+	expect("car,cart", "TRIE.AUTOCOMPLETE", "words", "car")
+	expect("0", "TRIE.SEARCH", "words", "care")
+	expect("1", "TRIE.PREFIX", "words", "do")
+	expect("a,b", "RING.NODES", "shards")
+	expect(string(owner.Bulk), "RING.GET", "shards", "user:42")
+	expect("2", "ACTOR.LEN", "worker")
+	expect("m2", "ACTOR.RECV", "worker")
+	expect("m3", "ACTOR.PEEK", "worker")
+	expect("fetch,compile,test,ship", "DAG.TOPO", "build")
+	expect("compile", "DAG.PARENTS", "build", "test")
+	if got := c.do("TYPE", "words"); got.Str != "zset" {
+		t.Fatalf("TYPE words: %v", got)
+	}
+}
