@@ -55,3 +55,10 @@ func TestCacheLockedDoesNotRaceWithCacheRefresh(t *testing.T) {
 		t.Errorf("post-race CACHE.LOCKED errored: %v", err)
 	}
 }
+
+// newRouterForRace builds a router with the integration families registered.
+func newRouterForRace() *Router {
+	router := NewRouter()
+	RegisterIntegrationCommands(router)
+	return router
+}

@@ -25,10 +25,10 @@ func TestExtendedRegistryReadersAreSynchronised(t *testing.T) {
 		},
 		{
 			name:  "leader",
-			setup: [][]string{{"LEADER.ELECT", "k", "candidate", "0"}},
+			setup: [][]string{{"LEADER.ELECT", "k", "candidate", "1"}},
 			// ELECT records the election in the history and updates the
 			// leader, the expiry and the term.
-			writer: [][]string{{"LEADER.ELECT", "k", "candidate", "0"}},
+			writer: [][]string{{"LEADER.ELECT", "k", "candidate", "1"}},
 			reader: [][]string{{"LEADER.HISTORY", "k"}},
 		},
 	}

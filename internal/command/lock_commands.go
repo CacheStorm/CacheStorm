@@ -233,3 +233,76 @@ func cmdLOCKISLOCKED(ctx *Context) error {
 	}
 	return ctx.WriteInteger(1)
 }
+
+// LOCKX is LOCK with the holder as its own token: the same hash key, so
+// LOCK.INFO and LOCKX.STATUS read the same lock.
+
+// LOCKX.ACQUIRE key holder ttl_ms takes the free lock, or renews it for its
+// holder.
+func cmdLOCKXACQUIRE(ctx *Context) error {
+	if ctx.ArgCount() != 3 {
+		return ctx.WriteError(arityError(ctx.Command))
+	}
+	ttl, err := parseLockMillis(ctx.ArgString(2))
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	holder := ctx.ArgString(1)
+	ok, err := tryLock(ctx, ctx.ArgString(0), holder, holder, ttl)
+	return lockReply(ctx, ok, err)
+}
+
+// LOCKX.RELEASE key holder
+func cmdLOCKXRELEASE(ctx *Context) error {
+	if ctx.ArgCount() != 2 {
+		return ctx.WriteError(arityError(ctx.Command))
+	}
+	key, holder := ctx.ArgString(0), ctx.ArgString(1)
+	l, err := readLock(ctx, key)
+	if err != nil || l == nil || l.holder != holder || l.token != holder {
+		return lockReply(ctx, false, err)
+	}
+	ctx.Store.Delete(key)
+	ctx.notify(store.NotifyGeneric, "del", key)
+	ctx.propagateDelete(key)
+	return ctx.WriteInteger(1)
+}
+
+// LOCKX.EXTEND key holder ttl_ms gives the holder's lock a new deadline.
+func cmdLOCKXEXTEND(ctx *Context) error {
+	if ctx.ArgCount() != 3 {
+		return ctx.WriteError(arityError(ctx.Command))
+	}
+	ttl, err := parseLockMillis(ctx.ArgString(2))
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	key, holder := ctx.ArgString(0), ctx.ArgString(1)
+	l, err := readLock(ctx, key)
+	if err != nil || l == nil || l.holder != holder || l.token != holder {
+		return lockReply(ctx, false, err)
+	}
+	l.renewals++
+	l.expiresAt = time.Now().Add(ttl).UnixMilli()
+	return lockReply(ctx, true, writeLock(ctx, key, l))
+}
+
+// LOCKX.STATUS key replies locked 0, or locked 1 with the holder and the
+// deadline in unix milliseconds.
+func cmdLOCKXSTATUS(ctx *Context) error {
+	if ctx.ArgCount() != 1 {
+		return ctx.WriteError(arityError(ctx.Command))
+	}
+	l, err := readLock(ctx, ctx.ArgString(0))
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	if l == nil {
+		return ctx.WriteArray([]*resp.Value{resp.BulkString("locked"), resp.IntegerValue(0)})
+	}
+	return ctx.WriteArray([]*resp.Value{
+		resp.BulkString("locked"), resp.IntegerValue(1),
+		resp.BulkString("holder"), resp.BulkString(l.holder),
+		resp.BulkString("expires_at"), resp.IntegerValue(l.expiresAt),
+	})
+}

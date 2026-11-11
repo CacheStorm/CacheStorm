@@ -602,6 +602,8 @@ CIRCUITX.DELETE name                 # 1 if deleted, 0 if absent
 
 Failures in the closed state open the circuit at `failure_threshold`; any failure in half-open reopens it, and `success_threshold` successes in half-open close it.
 
+A circuit is a hash key holding `state`, `failures`, `successes`, `failure_threshold`, `success_threshold`, `timeout`, `last_failure`, `last_state_change` (unix ms), `total_failures`, `total_successes` and `rejected`: per database, persisted and replicated, so an open circuit stays open across a restart. Changes are recorded in the AOF as `HSET`. A key holding anything else answers `WRONGTYPE`.
+
 ### Rate Limiter
 
 ```
@@ -972,12 +974,16 @@ STACK.CLEAR name
 
 ### Rate Limiting
 
+Each limiter is a hash key holding its settings and state (times in unix milliseconds): per database, persisted and replicated like any key, removed by `DEL` and `FLUSHALL`, and recorded in the AOF as `HSET` (and `DEL` when replaced), so Redis loads it. A key holding anything else answers `WRONGTYPE`; a missing limiter is an error except where noted.
+
+An integer token bucket: `refillRate` tokens come back every whole `intervalMs`, up to `maxTokens`. Fields `max_tokens`, `refill_rate`, `interval_ms`, `tokens`, `last_refill`.
+
 ```
-RL.CREATE key maxTokens refillRate intervalMs [BURST burst]
-RL.ALLOW key tokens
-RL.GET name
-RL.DELETE name
-RL.RESET name
+RL.CREATE key maxTokens refillRate intervalMs  # create or replace, full; OK
+RL.ALLOW key tokens        # [allowed 1/0, tokens left, unix seconds of the next refill]
+RL.GET key                 # tokens, max_tokens, refill_rate, interval_ms; null if missing
+RL.DELETE key              # 1 or 0
+RL.RESET key               # refill to the maximum; 1, or 0 if missing
 ```
 
 ### Distributed Locks
@@ -1070,20 +1076,26 @@ MEMORY.PURGE
 
 ### Circuit Breaker
 
+The same circuit as `CIRCUITX`, under a smaller command set; `CIRCUITX.*` commands work on it too.
+
 ```
-CIRCUITBREAKER.CREATE name threshold timeoutMs
-CIRCUITBREAKER.STATE name
-CIRCUITBREAKER.TRIP name
-CIRCUITBREAKER.RESET name
+CIRCUITBREAKER.CREATE name threshold timeoutMs   # create or replace a closed circuit (success threshold 1); OK
+CIRCUITBREAKER.STATE name                        # name, state, failures, successes; open turns half-open after timeoutMs
+CIRCUITBREAKER.TRIP name                         # record a failure; OK
+CIRCUITBREAKER.RESET name                        # close it; OK
 ```
 
 ### Rate Limit
 
+Each limiter is a hash key holding its settings and state (times in unix milliseconds): per database, persisted and replicated like any key, removed by `DEL` and `FLUSHALL`, and recorded in the AOF as `HSET` (and `DEL` when replaced), so Redis loads it. A key holding anything else answers `WRONGTYPE`; a missing limiter is an error except where noted.
+
+A fixed window of `window` ms allowing `limit` requests per id. The hash holds `limit`, `window`, `window_start` and a field `c:<id>` per id seen in the current window; the first request of a new window drops the old counters.
+
 ```
-RATELIMIT.CREATE name rate window
-RATELIMIT.CHECK name cost
-RATELIMIT.RESET name
-RATELIMIT.DELETE name
+RATELIMIT.CREATE name limit window   # create or replace; OK
+RATELIMIT.CHECK name id              # [allowed 1/0, requests left, ms until the window ends]
+RATELIMIT.RESET name                 # clear the counters; OK
+RATELIMIT.DELETE name                # 1 or 0
 ```
 
 ### Cache Operations
@@ -2071,26 +2083,28 @@ JSON.MSET
 ---
 ## Leader Commands
 
-`LEADER.*` command family (5 commands).
+An election is a hash key holding `leader` (empty when there is none), `term`, `expires_at` (unix ms) and the leaders of the last hundred terms as fields `h:<term>`: per database, persisted and replicated like any key, recorded in the AOF as `HSET` (`DEL` and `HSET` for a new term). A key holding anything else answers `WRONGTYPE`.
 
 ```
-LEADER.CURRENT
-LEADER.ELECT
-LEADER.HISTORY
-LEADER.RENEW
-LEADER.RESIGN
+LEADER.ELECT name candidate [ttl_ms]   # new term when there is no live leader (ttl default 10000): elected 1 term n, or elected 0 current_leader
+LEADER.RENEW name candidate [ttl_ms]   # 1 if candidate leads and was extended, 0 if not; error if the election is missing
+LEADER.RESIGN name candidate           # 1 if candidate led and stepped down, 0 if not
+LEADER.CURRENT name                    # leader, term, expires_at; null when there is no live leader
+LEADER.HISTORY name                    # leaders of the last hundred terms, oldest first
 ```
 
 ---
 ## Leaky Bucket Commands
 
-`LEAKYBUCKET.*` command family (4 commands).
+Each limiter is a hash key holding its settings and state (times in unix milliseconds): per database, persisted and replicated like any key, removed by `DEL` and `FLUSHALL`, and recorded in the AOF as `HSET` (and `DEL` when replaced), so Redis loads it. A key holding anything else answers `WRONGTYPE`; a missing limiter is an error except where noted.
+
+`capacity` units, of which `leak_rate` come back every whole second. Fields `capacity`, `leak_rate`, `remaining`, `last_leak`.
 
 ```
-LEAKYBUCKET.ADD
-LEAKYBUCKET.AVAILABLE
-LEAKYBUCKET.CREATE
-LEAKYBUCKET.DELETE
+LEAKYBUCKET.CREATE name capacity leak_rate   # create or replace, empty; OK
+LEAKYBUCKET.ADD name amount                  # 1 if amount fits, 0 if not
+LEAKYBUCKET.AVAILABLE name                   # units free
+LEAKYBUCKET.DELETE name                      # 1 or 0
 ```
 
 ---
@@ -2122,13 +2136,13 @@ LEVEL.DELETE name                    # 1 if deleted, 0 if absent
 ---
 ## Distributed Locks Commands
 
-`LOCKX.*` command family (4 commands).
+LOCK with the holder as its own token: the same hash key, so `LOCK.INFO` reads a LOCKX lock and the lock expires with its key.
 
 ```
-LOCKX.ACQUIRE
-LOCKX.EXTEND
-LOCKX.RELEASE
-LOCKX.STATUS
+LOCKX.ACQUIRE key holder ttl_ms   # 1 taken (or renewed by its holder), 0 held by another
+LOCKX.RELEASE key holder          # 1 released, 0 not held by holder
+LOCKX.EXTEND key holder ttl_ms    # 1 given a new deadline, 0 not held by holder
+LOCKX.STATUS key                  # locked 0, or locked 1, holder, expires_at (unix ms)
 ```
 
 ---
@@ -2668,13 +2682,15 @@ THRESHOLD.SET
 ---
 ## Throttling Commands
 
-`THROTTLE.*` command family (4 commands).
+Each limiter is a hash key holding its settings and state (times in unix milliseconds): per database, persisted and replicated like any key, removed by `DEL` and `FLUSHALL`, and recorded in the AOF as `HSET` (and `DEL` when replaced), so Redis loads it. A key holding anything else answers `WRONGTYPE`; a missing limiter is an error except where noted.
+
+At most one call per interval. Fields `interval_ms`, `last_call`.
 
 ```
-THROTTLE.CALL
-THROTTLE.DELETE
-THROTTLE.RESET
-THROTTLE.SET
+THROTTLE.SET key interval_ms   # create or replace; OK
+THROTTLE.CALL key              # [1, 0] when the call may go, [0, ms to wait] when not
+THROTTLE.RESET key             # allow the next call at once; OK
+THROTTLE.DELETE key            # 1 or 0
 ```
 
 ---
@@ -2716,14 +2732,16 @@ TOKEN.VALIDATE
 ---
 ## Token Bucket Commands
 
-`TOKENBUCKET.*` command family (5 commands).
+Each limiter is a hash key holding its settings and state (times in unix milliseconds): per database, persisted and replicated like any key, removed by `DEL` and `FLUSHALL`, and recorded in the AOF as `HSET` (and `DEL` when replaced), so Redis loads it. A key holding anything else answers `WRONGTYPE`; a missing limiter is an error except where noted.
+
+A token bucket refilled continuously, `refill_rate` tokens a second, up to `max_tokens`; amounts may be fractional. Fields `max_tokens`, `refill_rate`, `tokens`, `last_refill`.
 
 ```
-TOKENBUCKET.AVAILABLE
-TOKENBUCKET.CONSUME
-TOKENBUCKET.CREATE
-TOKENBUCKET.DELETE
-TOKENBUCKET.RESET
+TOKENBUCKET.CREATE name max_tokens refill_rate   # create or replace, full; OK
+TOKENBUCKET.CONSUME name tokens                  # 1 if taken, 0 if not enough
+TOKENBUCKET.AVAILABLE name                       # tokens now, two decimals
+TOKENBUCKET.RESET name                           # refill to the maximum; OK
+TOKENBUCKET.DELETE name                          # 1 or 0
 ```
 
 ---
