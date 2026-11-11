@@ -11878,18 +11878,6 @@ func TestGeneratePassword(t *testing.T) {
 	}
 }
 
-func TestMatchPatternX(t *testing.T) {
-	if !matchPatternX("test", "*") {
-		t.Error("matchPatternX(test, *) should be true")
-	}
-	if !matchPatternX("test", "test") {
-		t.Error("matchPatternX(test, test) should be true")
-	}
-	if matchPatternX("test", "other") {
-		t.Error("matchPatternX(test, other) should be false")
-	}
-}
-
 func TestGoValueToResp(t *testing.T) {
 	if goValueToResp(nil).Type != resp.TypeNull {
 		t.Error("goValueToResp(nil) should return null")

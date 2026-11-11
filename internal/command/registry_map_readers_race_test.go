@@ -26,7 +26,6 @@ func TestGridReadersAreSafeWhileGridSetWrites(t *testing.T) {
 
 	const iterations = 2000
 
-	registryCleanup(t, &gridsMu, grids, "grid-race")
 	if reply := registryRun(t, router, s, "GRID.CREATE", "grid-race", "4", "4"); reply != "+OK\r\n" {
 		t.Fatalf("GRID.CREATE reply = %q, want +OK", reply)
 	}
@@ -202,8 +201,6 @@ func TestRegistryMapReadersAreExactSequentially(t *testing.T) {
 	router := NewRouter()
 	RegisterExtraCommands(router)
 	RegisterExtendedCommands(router)
-
-	registryCleanup(t, &gridsMu, grids, "grid-ctl")
 
 	if reply := registryRun(t, router, s, "GRID.CREATE", "grid-ctl", "4", "4"); reply != "+OK\r\n" {
 		t.Fatalf("GRID.CREATE reply = %q, want +OK", reply)

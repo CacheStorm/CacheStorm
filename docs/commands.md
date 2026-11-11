@@ -1631,13 +1631,13 @@ BLOOMX.INFO
 ---
 ## Bookmark Commands
 
-`BOOKMARK.*` command family (4 commands).
+A bookmark is a hash key marked by `__bookmark` (its value) with `created_at`. It is per database, persisted and replicated; changes are recorded as `HSET`, `HDEL` and `DEL`, and the `LIST` commands cover the selected database.
 
 ```
-BOOKMARK.DELETE
-BOOKMARK.GET
-BOOKMARK.LIST
-BOOKMARK.SET
+BOOKMARK.SET key value               # OK
+BOOKMARK.GET key                     # value or null
+BOOKMARK.DELETE key                  # 1 if deleted, 0 if absent
+BOOKMARK.LIST                        # bookmark keys of the selected database, sorted
 ```
 
 ---
@@ -1809,13 +1809,13 @@ DATASET.DELETE name                  # 1 if deleted, 0 if absent
 ---
 ## Deadline Commands
 
-`DEADLINE.*` command family (4 commands).
+A deadline is a hash key marked by `__deadline` (its unix ms time) with `callback`; it stays until cancelled. It is per database, persisted and replicated; changes are recorded as `HSET`, `HDEL` and `DEL`, and the `LIST` commands cover the selected database.
 
 ```
-DEADLINE.CANCEL
-DEADLINE.CHECK
-DEADLINE.LIST
-DEADLINE.SET
+DEADLINE.SET id ttl_ms [callback]   # deadline ttl_ms from now; OK
+DEADLINE.CHECK id                    # ms left, 0 once passed, -1 if unknown
+DEADLINE.CANCEL id                   # 1 if deleted, 0 if absent
+DEADLINE.LIST                        # deadline ids of the selected database, sorted
 ```
 
 ---
@@ -1935,13 +1935,13 @@ FUTURE.GET id [timeout_ms]           # value when completed, error when cancelle
 ---
 ## Gateway Commands
 
-`GATEWAY.*` command family (4 commands).
+A gateway is a hash key named by a generated id, marked by `__gateway` (its name), with `created_at` and its routes as `r:<pattern>` fields. It is per database, persisted and replicated; changes are recorded as `HSET`, `HDEL` and `DEL`, and the `LIST` commands cover the selected database.
 
 ```
-GATEWAY.CREATE
-GATEWAY.DELETE
-GATEWAY.LIST
-GATEWAY.ROUTE
+GATEWAY.CREATE name                  # replies the new gateway's id
+GATEWAY.ROUTE id pattern target      # OK
+GATEWAY.DELETE id                    # 1 if deleted, 0 if absent
+GATEWAY.LIST                         # id and name of each gateway, sorted by id
 ```
 
 ---
@@ -1961,13 +1961,13 @@ GAUGE.SET
 ---
 ## Ghost Entries Commands
 
-`GHOST.*` command family (4 commands).
+A ghost is a log: a hash key marked by `__ghost` (the entry count) with the entries as the fields `0`, `1`, ... It is per database, persisted and replicated; changes are recorded as `HSET`, `HDEL` and `DEL`, and the `LIST` commands cover the selected database.
 
 ```
-GHOST.CREATE
-GHOST.DELETE
-GHOST.READ
-GHOST.WRITE
+GHOST.CREATE id                      # empty log, replacing one at id; OK
+GHOST.WRITE id data                  # append; OK
+GHOST.READ id                        # entries in order
+GHOST.DELETE id                      # 1 if deleted, 0 if absent
 ```
 
 ---
@@ -1985,15 +1985,15 @@ GRANT.LIST
 ---
 ## Grid Index Commands
 
-`GRID.*` command family (6 commands).
+A grid is a hash key marked by `__grid` with `width`, `height` and each set cell as `c:<x>,<y>`. It is per database, persisted and replicated; changes are recorded as `HSET`, `HDEL` and `DEL`, and the `LIST` commands cover the selected database.
 
 ```
-GRID.CLEAR
-GRID.CREATE
-GRID.DELETE
-GRID.GET
-GRID.QUERY
-GRID.SET
+GRID.CREATE name width height        # empty grid, replacing one at name; OK
+GRID.SET name x y value              # 0 <= x < width, 0 <= y < height; OK
+GRID.GET name x y                    # value or null
+GRID.QUERY name                      # set cells by row then column: coord, value
+GRID.CLEAR name                      # unset every cell; OK
+GRID.DELETE name                     # 1 if deleted, 0 if absent
 ```
 
 ---
@@ -2398,25 +2398,25 @@ ROLLUP.GET
 ---
 ## Rollupx Commands
 
-`ROLLUPX.*` command family (4 commands).
+A rollup is a hash key marked by `__rollupx` with the `count` and `sum` of its values. It is per database, persisted and replicated; changes are recorded as `HSET`, `HDEL` and `DEL`, and the `LIST` commands cover the selected database.
 
 ```
-ROLLUPX.ADD
-ROLLUPX.CREATE
-ROLLUPX.DELETE
-ROLLUPX.GET
+ROLLUPX.CREATE name                  # OK
+ROLLUPX.ADD name value               # OK
+ROLLUPX.GET name                     # mean with six decimals, "0" when empty
+ROLLUPX.DELETE name                  # 1 if deleted, 0 if absent
 ```
 
 ---
 ## Route Commands
 
-`ROUTE.*` command family (4 commands).
+A route table is a hash key marked by `__route` with each route as `p:<pattern>`; the key goes with its last route. It is per database, persisted and replicated; changes are recorded as `HSET`, `HDEL` and `DEL`, and the `LIST` commands cover the selected database.
 
 ```
-ROUTE.ADD
-ROUTE.LIST
-ROUTE.MATCH
-ROUTE.REMOVE
+ROUTE.ADD name pattern target        # OK
+ROUTE.REMOVE name pattern            # 1 if removed, 0 if absent
+ROUTE.MATCH name path                # target of the route equal to path, else of the first glob pattern matching it in pattern order, else null
+ROUTE.LIST name                      # pattern, target pairs sorted by pattern
 ```
 
 ---
@@ -2495,13 +2495,13 @@ SKETCH.UPDATE
 ---
 ## Slice Commands
 
-`SLICE.*` command family (4 commands).
+A slice is a log like `GHOST`, marked by `__slice`. It is per database, persisted and replicated; changes are recorded as `HSET`, `HDEL` and `DEL`, and the `LIST` commands cover the selected database.
 
 ```
-SLICE.APPEND
-SLICE.CREATE
-SLICE.DELETE
-SLICE.GET
+SLICE.CREATE name                    # empty slice, replacing one at name; OK
+SLICE.APPEND name value [value ...]  # append, creating the slice; OK
+SLICE.GET name                       # values in order
+SLICE.DELETE name                    # 1 if deleted, 0 if absent
 ```
 
 ---
@@ -2623,27 +2623,27 @@ STREAMX.WRITE
 ---
 ## Switching Commands
 
-`SWITCH.*` command family (5 commands).
+A switch is a hash key marked by `__switch` (`1` on, `0` off). It is per database, persisted and replicated; changes are recorded as `HSET`, `HDEL` and `DEL`, and the `LIST` commands cover the selected database.
 
 ```
-SWITCH.LIST
-SWITCH.OFF
-SWITCH.ON
-SWITCH.STATE
-SWITCH.TOGGLE
+SWITCH.ON name                       # OK
+SWITCH.OFF name                      # OK
+SWITCH.TOGGLE name                   # replies the new state, 1 or 0
+SWITCH.STATE name                    # 1 if on, 0 if off or unknown
+SWITCH.LIST                          # name and on/off of each switch, sorted
 ```
 
 ---
 ## Append-only Tape Log Commands
 
-`TAPE.*` command family (5 commands).
+A tape is a log like `GHOST`, marked by `__tape`, with a read position `pos`. It is per database, persisted and replicated; changes are recorded as `HSET`, `HDEL` and `DEL`, and the `LIST` commands cover the selected database.
 
 ```
-TAPE.CREATE
-TAPE.DELETE
-TAPE.READ
-TAPE.SEEK
-TAPE.WRITE
+TAPE.CREATE name                     # empty tape, replacing one at name; OK
+TAPE.WRITE name data                 # append; OK
+TAPE.READ name                       # entry at the position, or null
+TAPE.SEEK name pos                   # 0 <= pos < entries; OK
+TAPE.DELETE name                     # 1 if deleted, 0 if absent
 ```
 
 ---
@@ -2672,13 +2672,13 @@ TENANT.LIST
 ---
 ## Threshold Commands
 
-`THRESHOLD.*` command family (4 commands).
+A threshold is a hash key marked by `__threshold` (its value). It is per database, persisted and replicated; changes are recorded as `HSET`, `HDEL` and `DEL`, and the `LIST` commands cover the selected database.
 
 ```
-THRESHOLD.CHECK
-THRESHOLD.DELETE
-THRESHOLD.LIST
-THRESHOLD.SET
+THRESHOLD.SET name value             # integer; OK
+THRESHOLD.CHECK name value           # 1 if value >= the threshold, else 0 (also for an unknown name)
+THRESHOLD.DELETE name                # 1 if deleted, 0 if absent
+THRESHOLD.LIST                       # name and value of each threshold, sorted
 ```
 
 ---

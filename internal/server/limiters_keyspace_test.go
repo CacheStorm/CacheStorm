@@ -157,9 +157,13 @@ func TestKeyspaceExtensionWritesAreGated(t *testing.T) {
 		"CRDT.LWW.GET": true, "CRDT.GCOUNTER.GET": true, "CRDT.PNCOUNTER.GET": true, "CRDT.GSET.GET": true,
 		"CRDT.ORSET.GET": true, "CRDT.ORSET.TAGS": true,
 		"DEDUP.CHECK": true, "DEDUP.EXPIRE": true, "VECTOR_CLOCK.COMPARE": true, "VECTOR_CLOCK.GET": true,
+		"THRESHOLD.CHECK": true, "THRESHOLD.LIST": true, "SWITCH.STATE": true, "SWITCH.LIST": true,
+		"BOOKMARK.GET": true, "BOOKMARK.LIST": true, "DEADLINE.CHECK": true, "DEADLINE.LIST": true,
+		"ROUTE.MATCH": true, "ROUTE.LIST": true, "GATEWAY.LIST": true, "GRID.GET": true, "GRID.QUERY": true,
+		"GHOST.READ": true, "TAPE.READ": true, "SLICE.GET": true, "ROLLUPX.GET": true,
 		"VECTOR.GET": true, "VECTOR.SEARCH": true, "VECTOR.SIMILARITY": true, "VECTOR.DIMENSIONS": true, "VECTOR.STATS": true,
 	}
-	namespaces := []string{"QUEUE", "STACK", "LOCK", "RATELIMITER", "SESSION", "CIRCUIT", "MSGQUEUE", "RL", "RATELIMIT", "TOKENBUCKET", "LEAKYBUCKET", "THROTTLE", "LOCKX", "LEADER", "CIRCUITX", "CIRCUITBREAKER", "SEM", "SEMAPHOREX", "SESSIONX", "SERVICE", "DOC", "AGG", "VECTOR", "CRDT", "DEDUP", "VECTOR_CLOCK"}
+	namespaces := []string{"QUEUE", "STACK", "LOCK", "RATELIMITER", "SESSION", "CIRCUIT", "MSGQUEUE", "RL", "RATELIMIT", "TOKENBUCKET", "LEAKYBUCKET", "THROTTLE", "LOCKX", "LEADER", "CIRCUITX", "CIRCUITBREAKER", "SEM", "SEMAPHOREX", "SESSIONX", "SERVICE", "DOC", "AGG", "VECTOR", "CRDT", "DEDUP", "VECTOR_CLOCK", "THRESHOLD", "SWITCH", "BOOKMARK", "DEADLINE", "ROUTE", "GATEWAY", "GRID", "GHOST", "TAPE", "SLICE", "ROLLUPX"}
 	cfg := aofTxConfig(t)
 	cfg.Server.ExtensionCommands = "all"
 	s := startToggleServer(t, cfg)
