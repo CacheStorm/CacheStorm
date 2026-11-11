@@ -1381,7 +1381,7 @@ CIRCUIT.STATS name               # the fields above; last_* in Unix seconds
 
 ## Validation Commands
 
-Reusable validation rules and value checkers.
+Reusable validation rules and value checkers. A rule is a hash key marked by `__validate` (its pattern); it is per database, persisted and replicated.
 
 ```
 VALIDATE.CREATE name regex           # store an RE2 rule (unanchored unless ^...$); OK
@@ -1472,14 +1472,14 @@ SERVICE.LIST                         # service names of the selected database, s
 
 ## Profile Commands
 
-Store and read user profile records.
+Store and read user profile records. A profile is a hash key named by its generated id, marked by `__profile` (the user), whose other fields are its attributes. It is per database, persisted and replicated; changes are recorded as Redis commands (`HSET`, `HDEL`, `DEL`), and the `LIST` commands cover the selected database and reply sorted.
 
 ```
-PROFILE.GET id
-PROFILE.SET id key value
-PROFILE.LIST
-PROFILE.CREATE user
-PROFILE.DELETE id
+PROFILE.CREATE user                  # replies the profile's id
+PROFILE.SET id key value             # OK
+PROFILE.GET id                       # id, user, then the attributes sorted by key
+PROFILE.LIST                         # profile ids
+PROFILE.DELETE id                    # 1 if deleted, 0 if absent
 ```
 
 ---
@@ -1603,13 +1603,13 @@ APIKEY.VALIDATE
 ---
 ## Auditx Commands
 
-`AUDITX.*` command family (4 commands).
+An audit log is a log like `STREAMX`, marked by `__auditx`, whose entries are JSON objects. It is per database, persisted and replicated; changes are recorded as Redis commands (`HSET`, `HDEL`, `DEL`), and the `LIST` commands cover the selected database and reply sorted.
 
 ```
-AUDITX.GET
-AUDITX.LIST
-AUDITX.LOG
-AUDITX.SEARCH
+AUDITX.LOG log action user [resource]  # append, creating the log; OK
+AUDITX.GET log                       # timestamp, action, user, resource of each entry
+AUDITX.SEARCH log query              # entries whose action, user or resource equals query
+AUDITX.LIST                          # log names
 ```
 
 ---
@@ -1664,13 +1664,13 @@ BUCKETX.TAKE
 ---
 ## Bufferx Commands
 
-`BUFFERX.*` command family (4 commands).
+A buffer is a string key, so `GET` and `STRLEN` read it; writes are recorded as `SET` and `APPEND`. It is per database, persisted and replicated; changes are recorded as Redis commands (`HSET`, `HDEL`, `DEL`), and the `LIST` commands cover the selected database and reply sorted.
 
 ```
-BUFFERX.CREATE
-BUFFERX.DELETE
-BUFFERX.READ
-BUFFERX.WRITE
+BUFFERX.CREATE name size             # empty, replacing one at name; size is accepted for compatibility; OK
+BUFFERX.WRITE name data              # append; existing buffers only; OK
+BUFFERX.READ name                    # contents, or null
+BUFFERX.DELETE name                  # 1 if deleted, 0 if absent
 ```
 
 ---
@@ -1689,14 +1689,14 @@ CACHE.STATS
 ---
 ## Cachex Commands
 
-`CACHEX.*` command family (5 commands).
+A cache is a hash key marked by `__cachex` whose other fields are its entries. It is per database, persisted and replicated; changes are recorded as Redis commands (`HSET`, `HDEL`, `DEL`), and the `LIST` commands cover the selected database and reply sorted.
 
 ```
-CACHEX.CREATE
-CACHEX.DELETE
-CACHEX.GET
-CACHEX.LIST
-CACHEX.SET
+CACHEX.CREATE name                   # empty, replacing one at name; OK
+CACHEX.SET name key value            # existing caches only; OK
+CACHEX.GET name key                  # value or null
+CACHEX.LIST                          # cache names
+CACHEX.DELETE name                   # 1 if deleted, 0 if absent
 ```
 
 ---
@@ -1751,14 +1751,14 @@ CONNECTION.LIST
 ---
 ## Context Commands
 
-`CONTEXT.*` command family (5 commands).
+A context is a hash key marked by `__context` whose other fields are its values. It is per database, persisted and replicated; changes are recorded as Redis commands (`HSET`, `HDEL`, `DEL`), and the `LIST` commands cover the selected database and reply sorted.
 
 ```
-CONTEXT.CREATE
-CONTEXT.DELETE
-CONTEXT.GET
-CONTEXT.LIST
-CONTEXT.SET
+CONTEXT.CREATE name                  # empty, replacing one at name; OK
+CONTEXT.SET name key value           # existing contexts only; OK
+CONTEXT.GET name key                 # value or null
+CONTEXT.LIST                         # context names
+CONTEXT.DELETE name                  # 1 if deleted, 0 if absent
 ```
 
 ---
@@ -1791,14 +1791,14 @@ COUNTERX.RESET
 ---
 ## Counterx2 Commands
 
-`COUNTERX2.*` command family (5 commands).
+A counter is a hash key marked by `__counterx2` (its value). It is per database, persisted and replicated; changes are recorded as Redis commands (`HSET`, `HDEL`, `DEL`), and the `LIST` commands cover the selected database and reply sorted.
 
 ```
-COUNTERX2.CREATE
-COUNTERX2.DECR
-COUNTERX2.GET
-COUNTERX2.INCR
-COUNTERX2.LIST
+COUNTERX2.CREATE name [initial]      # replacing one at name; OK
+COUNTERX2.INCR name [by]             # creating the counter at 0; replies the value
+COUNTERX2.DECR name [by]             # creating the counter at 0; replies the value
+COUNTERX2.GET name                   # value, 0 for an unknown counter
+COUNTERX2.LIST                       # name and value of each counter
 ```
 
 ---
@@ -1865,14 +1865,14 @@ DEDUP.CLEAR key                      # forget every id; replies how many were se
 ---
 ## Entity Commands
 
-`ENTITY.*` command family (5 commands).
+An entity is a hash key marked by `__entity` (its type) whose other fields are its attributes. It is per database, persisted and replicated; changes are recorded as Redis commands (`HSET`, `HDEL`, `DEL`), and the `LIST` commands cover the selected database and reply sorted.
 
 ```
-ENTITY.CREATE
-ENTITY.DELETE
-ENTITY.GET
-ENTITY.LIST
-ENTITY.SET
+ENTITY.CREATE id type                # replacing one at id; OK
+ENTITY.SET id key value              # OK
+ENTITY.GET id                        # id, type, then the attributes sorted by key
+ENTITY.LIST                          # entity ids
+ENTITY.DELETE id                     # 1 if deleted, 0 if absent
 ```
 
 ---
@@ -1981,13 +1981,13 @@ GHOST.DELETE id                      # 1 if deleted, 0 if absent
 ---
 ## Grant Commands
 
-`GRANT.*` command family (4 commands).
+A grant is a hash key named by its generated id, marked by `__grant` (the user), with `resource` and the space-separated `actions`. `GRANT.CHECK` scans the database's grants; `PERMIT` keeps a user's permissions in one key. It is per database, persisted and replicated; changes are recorded as Redis commands (`HSET`, `HDEL`, `DEL`), and the `LIST` commands cover the selected database and reply sorted.
 
 ```
-GRANT.CHECK
-GRANT.CREATE
-GRANT.DELETE
-GRANT.LIST
+GRANT.CREATE user resource action [action ...]  # replies the grant's id; action * grants every action
+GRANT.CHECK user resource action     # 1 if a grant allows it
+GRANT.LIST                           # id, user, resource of each grant
+GRANT.DELETE id                      # 1 if deleted, 0 if absent
 ```
 
 ---
@@ -2071,14 +2071,14 @@ IDEMPOTENCY.SET
 ---
 ## Indexing Commands
 
-`INDEX.*` command family (5 commands).
+An index is a hash key marked by `__index` with each indexed key as the field `k:<key>` holding its ids as a JSON array. It is per database, persisted and replicated; changes are recorded as Redis commands (`HSET`, `HDEL`, `DEL`), and the `LIST` commands cover the selected database and reply sorted.
 
 ```
-INDEX.ADD
-INDEX.CREATE
-INDEX.DELETE
-INDEX.LIST
-INDEX.SEARCH
+INDEX.CREATE name                    # empty, replacing one at name; OK
+INDEX.ADD name key id                # existing indexes only; OK
+INDEX.SEARCH name key                # ids in the order added
+INDEX.LIST                           # index names
+INDEX.DELETE name                    # 1 if deleted, 0 if absent
 ```
 
 ---
@@ -2133,7 +2133,7 @@ LEASE.REVOKE
 ---
 ## Level Commands
 
-`LEVEL.*` command family (5 commands).
+A level is a hash key marked by `__level` (the current level) with `max`. It is per database, persisted and replicated; changes are recorded as Redis commands (`HSET`, `HDEL`, `DEL`), and the `LIST` commands cover the selected database and reply sorted.
 
 ```
 LEVEL.CREATE name max                # create or replace at level 0; OK
@@ -2246,13 +2246,13 @@ PARTITION.LIST
 ---
 ## Permit Commands
 
-`PERMIT.*` command family (4 commands).
+A user's permissions are a hash key named after the user, marked by `__permit`, with one field `resource:action` per permission. It is per database, persisted and replicated; changes are recorded as Redis commands (`HSET`, `HDEL`, `DEL`), and the `LIST` commands cover the selected database and reply sorted.
 
 ```
-PERMIT.CHECK
-PERMIT.GRANT
-PERMIT.LIST
-PERMIT.REVOKE
+PERMIT.GRANT user resource action    # OK
+PERMIT.REVOKE user resource action   # 1 if revoked, 0 if absent
+PERMIT.CHECK user resource action    # 1 if granted
+PERMIT.LIST user                     # user:resource:action of each permission
 ```
 
 ---
@@ -2267,14 +2267,14 @@ PIPELINE.EXEC
 ---
 ## Poolx Commands
 
-`POOLX.*` command family (5 commands).
+A pool is a hash key marked by `__poolx` (its size) whose resources are `resource-0` to `resource-<size-1>`; one in use is the field `u:<resource>`. It is per database, persisted and replicated; changes are recorded as Redis commands (`HSET`, `HDEL`, `DEL`), and the `LIST` commands cover the selected database and reply sorted.
 
 ```
-POOLX.ACQUIRE
-POOLX.CREATE
-POOLX.DELETE
-POOLX.RELEASE
-POOLX.STATUS
+POOLX.CREATE name size               # replacing one at name; OK
+POOLX.ACQUIRE name                   # lowest-numbered free resource, or null
+POOLX.RELEASE name resource          # 1 if it was in use, else 0
+POOLX.STATUS name                    # name, size, available, in_use
+POOLX.DELETE name                    # 1 if deleted, 0 if absent
 ```
 
 ---
@@ -2344,25 +2344,25 @@ QUOTAX.USAGE
 ---
 ## Record Commands
 
-`RECORD.*` command family (4 commands).
+A record is a hash key named by its generated id, marked by `__record` (its name), whose other fields are its values. It is per database, persisted and replicated; changes are recorded as Redis commands (`HSET`, `HDEL`, `DEL`), and the `LIST` commands cover the selected database and reply sorted.
 
 ```
-RECORD.ADD
-RECORD.CREATE
-RECORD.DELETE
-RECORD.GET
+RECORD.CREATE name                   # replies the new record's id
+RECORD.ADD id key value              # OK
+RECORD.GET id                        # id, name, then the values sorted by key
+RECORD.DELETE id                     # 1 if deleted, 0 if absent
 ```
 
 ---
 ## Relation Commands
 
-`RELATION.*` command family (4 commands).
+A relation is a hash key named by its generated id, marked by `__relation` (its type), with `from` and `to`. It is per database, persisted and replicated; changes are recorded as Redis commands (`HSET`, `HDEL`, `DEL`), and the `LIST` commands cover the selected database and reply sorted.
 
 ```
-RELATION.CREATE
-RELATION.DELETE
-RELATION.GET
-RELATION.LIST
+RELATION.CREATE from to type        # replies the relation's id
+RELATION.GET id                      # id, from, to, type
+RELATION.LIST                        # relation ids
+RELATION.DELETE id                   # 1 if deleted, 0 if absent
 ```
 
 ---
@@ -2567,14 +2567,14 @@ SPATIAL.WITHIN
 ---
 ## Stage Commands
 
-`STAGE.*` command family (5 commands).
+A stage is a hash key marked by `__stage` (the current stage) with `total`. It is per database, persisted and replicated; changes are recorded as Redis commands (`HSET`, `HDEL`, `DEL`), and the `LIST` commands cover the selected database and reply sorted.
 
 ```
-STAGE.CREATE
-STAGE.DELETE
-STAGE.LIST
-STAGE.NEXT
-STAGE.PREV
+STAGE.CREATE name total             # at stage 0, replacing one at name; OK
+STAGE.NEXT name                      # advance, at most to total; replies the stage
+STAGE.PREV name                      # go back, at least to 0; replies the stage
+STAGE.LIST                           # name, current, total of each stage
+STAGE.DELETE name                    # 1 if deleted, 0 if absent
 ```
 
 ---
@@ -2593,14 +2593,14 @@ STATS.MEMORY                         # used_memory, used_memory_human, peak_memo
 ---
 ## Storex Commands
 
-`STOREX.*` command family (5 commands).
+A store is a hash key marked by `__storex` whose other fields are its entries. It is per database, persisted and replicated; changes are recorded as Redis commands (`HSET`, `HDEL`, `DEL`), and the `LIST` commands cover the selected database and reply sorted.
 
 ```
-STOREX.CREATE
-STOREX.DELETE
-STOREX.GET
-STOREX.LIST
-STOREX.PUT
+STOREX.CREATE name                   # empty, replacing one at name; OK
+STOREX.PUT name key value            # existing stores only; OK
+STOREX.GET name key                  # value or null
+STOREX.LIST                          # store names
+STOREX.DELETE name                   # 1 if deleted, 0 if absent
 ```
 
 ---
@@ -2619,13 +2619,13 @@ STREAMPROC.PUSH
 ---
 ## Streamx Commands
 
-`STREAMX.*` command family (4 commands).
+A stream is a log: a hash key marked by `__streamx` (the entry count) with the entries as the fields `0`, `1`, ... It is per database, persisted and replicated; changes are recorded as Redis commands (`HSET`, `HDEL`, `DEL`), and the `LIST` commands cover the selected database and reply sorted.
 
 ```
-STREAMX.CREATE
-STREAMX.DELETE
-STREAMX.READ
-STREAMX.WRITE
+STREAMX.CREATE name                  # empty, replacing one at name; OK
+STREAMX.WRITE name data              # append; existing streams only; OK
+STREAMX.READ name                    # entries in order
+STREAMX.DELETE name                  # 1 if deleted, 0 if absent
 ```
 
 ---
@@ -2717,26 +2717,26 @@ THROTTLEX.STATUS
 ---
 ## Timers Commands
 
-`TIMER.*` command family (4 commands).
+A timer is a hash key named by its generated id, marked by `__timer` (its name), with `duration` and `start` in ms. It is per database, persisted and replicated; changes are recorded as Redis commands (`HSET`, `HDEL`, `DEL`), and the `LIST` commands cover the selected database and reply sorted.
 
 ```
-TIMER.CREATE
-TIMER.DELETE
-TIMER.LIST
-TIMER.STATUS
+TIMER.CREATE name duration_ms        # replies the timer's id
+TIMER.STATUS id                      # id, running, remaining_ms
+TIMER.LIST                           # timer ids
+TIMER.DELETE id                      # 1 if deleted, 0 if absent
 ```
 
 ---
 ## Token Management Commands
 
-`TOKEN.*` command family (5 commands).
+A token is a hash key named by its generated id, marked by `__token` (the user), that expires with the token (recorded as `PEXPIREAT`). It is per database, persisted and replicated; changes are recorded as Redis commands (`HSET`, `HDEL`, `DEL`), and the `LIST` commands cover the selected database and reply sorted.
 
 ```
-TOKEN.CREATE
-TOKEN.DELETE
-TOKEN.LIST
-TOKEN.REFRESH
-TOKEN.VALIDATE
+TOKEN.CREATE user ttl_ms             # replies the token's id
+TOKEN.VALIDATE id                    # 1 while the token lives
+TOKEN.REFRESH id ttl_ms              # expire ttl_ms from now; OK
+TOKEN.LIST                           # live token ids
+TOKEN.DELETE id                      # 1 if deleted, 0 if absent
 ```
 
 ---
@@ -2783,13 +2783,13 @@ VECTOR_CLOCK.GET name                # node, counter pairs sorted by node
 ---
 ## Views Commands
 
-`VIEW.*` command family (4 commands).
+A view is a hash key marked by `__view` (its definition). It is per database, persisted and replicated; changes are recorded as Redis commands (`HSET`, `HDEL`, `DEL`), and the `LIST` commands cover the selected database and reply sorted.
 
 ```
-VIEW.CREATE
-VIEW.DELETE
-VIEW.GET
-VIEW.LIST
+VIEW.CREATE name definition          # replacing one at name; OK
+VIEW.GET name                        # definition, or an error if absent
+VIEW.DELETE name                     # 1 if deleted, 0 if absent
+VIEW.LIST                            # view names
 ```
 
 ---
