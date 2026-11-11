@@ -35,10 +35,11 @@ func TestFinalRegistryReadersAreSynchronised(t *testing.T) {
 		{
 			register: RegisterAdvancedCommands2,
 			registryFamilyCase: registryFamilyCase{
-				name:   "streamx",
-				setup:  [][]string{{"STREAMX.CREATE", "k"}},
-				writer: [][]string{{"STREAMX.WRITE", "k", "data"}},
-				reader: [][]string{{"STREAMX.READ", "k"}},
+				name:       "streamx",
+				iterations: 200,
+				setup:      [][]string{{"STREAMX.CREATE", "k"}},
+				writer:     [][]string{{"STREAMX.WRITE", "k", "data"}},
+				reader:     [][]string{{"STREAMX.READ", "k"}},
 			},
 		},
 		{

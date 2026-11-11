@@ -114,7 +114,7 @@ func runRegistryFamilyRace(t *testing.T, tc registryFamilyCase, register func(*R
 		}
 	}
 
-	const iterations = 2000
+	iterations := tc.loops()
 
 	var wg sync.WaitGroup
 	start := make(chan struct{})

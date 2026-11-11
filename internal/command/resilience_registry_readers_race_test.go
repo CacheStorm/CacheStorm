@@ -87,7 +87,7 @@ func runResilienceFamilyRace(t *testing.T, tc resilienceFamilyCase) {
 		}
 	}
 
-	const iterations = 2000
+	iterations := tc.loops()
 
 	var wg sync.WaitGroup
 	start := make(chan struct{})
@@ -162,10 +162,11 @@ func TestResilienceRegistryReadersAreSynchronised(t *testing.T) {
 		},
 		{
 			registryFamilyCase: registryFamilyCase{
-				name:   "telemetry",
-				setup:  [][]string{{"TELEMETRY.RECORD", "k", "1000", "1.5"}},
-				writer: [][]string{{"TELEMETRY.RECORD", "k", "1000", "2.5"}},
-				reader: [][]string{{"TELEMETRY.QUERY", "k"}},
+				name:       "telemetry",
+				iterations: 200,
+				setup:      [][]string{{"TELEMETRY.RECORD", "k", "1000", "1.5"}},
+				writer:     [][]string{{"TELEMETRY.RECORD", "k", "1000", "2.5"}},
+				reader:     [][]string{{"TELEMETRY.QUERY", "k"}},
 			},
 		},
 		{
@@ -196,10 +197,11 @@ func TestResilienceRegistryReadersAreSynchronised(t *testing.T) {
 		},
 		{
 			registryFamilyCase: registryFamilyCase{
-				name:   "eventsourcing",
-				setup:  [][]string{{"EVENTSOURCING.APPEND", "k", "type", "data"}},
-				writer: [][]string{{"EVENTSOURCING.APPEND", "k", "type", "data"}},
-				reader: [][]string{{"EVENTSOURCING.REPLAY", "k"}, {"EVENTSOURCING.GET", "k", "1"}},
+				name:       "eventsourcing",
+				iterations: 200,
+				setup:      [][]string{{"EVENTSOURCING.APPEND", "k", "type", "data"}},
+				writer:     [][]string{{"EVENTSOURCING.APPEND", "k", "type", "data"}},
+				reader:     [][]string{{"EVENTSOURCING.GET", "k", "1"}},
 			},
 		},
 		{

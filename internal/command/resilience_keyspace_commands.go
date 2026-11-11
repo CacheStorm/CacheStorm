@@ -624,14 +624,22 @@ func cmdEVENTSOURCINGGET(ctx *Context) error {
 	if err != nil {
 		return ctx.WriteError(err)
 	}
-	events, err := readSourcedEvents(ctx, ctx.ArgString(0))
+	name := ctx.ArgString(0)
+	n, _, _, err := logHead(ctx, name, eventSourcedMarker)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
-	if v < 1 || v > int64(len(events)) {
+	if v < 1 || v > int64(n) {
 		return ctx.WriteNull()
 	}
-	e := events[v-1]
+	raw, err := logEntry(ctx, name, eventSourcedMarker, int(v-1))
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	var e sourcedEvent
+	if json.Unmarshal([]byte(raw), &e) != nil {
+		return ctx.WriteError(store.ErrWrongType)
+	}
 	return ctx.WriteArray([]*resp.Value{
 		resp.BulkString("version"), resp.IntegerValue(v),
 		resp.BulkString("type"), resp.BulkString(e.Type),

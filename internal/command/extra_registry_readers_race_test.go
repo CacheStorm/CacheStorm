@@ -18,6 +18,17 @@ type registryFamilyCase struct {
 	setup  [][]string
 	writer [][]string
 	reader [][]string
+	// iterations is how many times each writer runs, 2000 when zero. A
+	// family whose readers read a log that grows with every write takes
+	// fewer, so the test stays linear.
+	iterations int
+}
+
+func (c registryFamilyCase) loops() int {
+	if c.iterations > 0 {
+		return c.iterations
+	}
+	return 2000
 }
 
 // registryReply runs one command and returns the raw RESP reply.
@@ -71,10 +82,11 @@ func TestExtraRegistryReadersAreSynchronised(t *testing.T) {
 			reader: [][]string{{"BOOKMARK.GET", "k"}},
 		},
 		{
-			name:   "ghost",
-			setup:  [][]string{{"GHOST.CREATE", "k"}},
-			writer: [][]string{{"GHOST.WRITE", "k", "payload"}},
-			reader: [][]string{{"GHOST.READ", "k"}},
+			name:       "ghost",
+			iterations: 200,
+			setup:      [][]string{{"GHOST.CREATE", "k"}},
+			writer:     [][]string{{"GHOST.WRITE", "k", "payload"}},
+			reader:     [][]string{{"GHOST.READ", "k"}},
 		},
 		{
 			name:   "tape",
@@ -140,7 +152,7 @@ func TestExtraRegistryReadersAreSynchronised(t *testing.T) {
 				}
 			}
 
-			const iterations = 2000
+			iterations := tc.loops()
 
 			var wg sync.WaitGroup
 			start := make(chan struct{})
