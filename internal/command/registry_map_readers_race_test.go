@@ -144,7 +144,6 @@ func TestDocReadersAreSafeWhileDocInsertWrites(t *testing.T) {
 
 	const iterations = 2000
 
-	registryCleanup(t, &docStoresMu, docStores, "doc-race")
 	if reply := registryRun(t, router, s, "DOC.INSERT", "doc-race", "d1", "field", "value"); !strings.HasPrefix(reply, "$") {
 		t.Fatalf("DOC.INSERT reply = %q, want a bulk string", reply)
 	}
@@ -206,7 +205,6 @@ func TestRegistryMapReadersAreExactSequentially(t *testing.T) {
 	RegisterExtendedCommands(router)
 
 	registryCleanup(t, &gridsMu, grids, "grid-ctl")
-	registryCleanup(t, &docStoresMu, docStores, "doc-ctl")
 
 	if reply := registryRun(t, router, s, "GRID.CREATE", "grid-ctl", "4", "4"); reply != "+OK\r\n" {
 		t.Fatalf("GRID.CREATE reply = %q, want +OK", reply)

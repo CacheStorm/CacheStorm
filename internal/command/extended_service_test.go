@@ -19,6 +19,7 @@ func TestExtendedCommandsSERVICEFullCoverage(t *testing.T) {
 		{"SERVICE.REGISTER", "SERVICE.REGISTER", [][]byte{[]byte("myservice"), []byte("instance1"), []byte("localhost"), []byte("8080")}},
 		{"SERVICE.REGISTER with weight", "SERVICE.REGISTER", [][]byte{[]byte("myservice"), []byte("instance2"), []byte("localhost"), []byte("8081"), []byte("50")}},
 		{"SERVICE.REGISTER no args", "SERVICE.REGISTER", nil},
+		{"SERVICE.REGISTER instance1", "SERVICE.REGISTER", [][]byte{[]byte("myservice"), []byte("instance1"), []byte("localhost"), []byte("8080")}},
 		{"SERVICE.DEREGISTER", "SERVICE.DEREGISTER", [][]byte{[]byte("myservice"), []byte("instance1")}},
 		{"SERVICE.DEREGISTER not found", "SERVICE.DEREGISTER", [][]byte{[]byte("notfound"), []byte("instance1")}},
 		{"SERVICE.DEREGISTER no args", "SERVICE.DEREGISTER", nil},
@@ -42,17 +43,6 @@ func TestExtendedCommandsSERVICEFullCoverage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.name == "SERVICE.DEREGISTER" || tt.name == "SERVICE.HEARTBEAT" || tt.name == "SERVICE.WEIGHT" || tt.name == "SERVICE.TAGS" {
-				servicesMu.Lock()
-				if _, exists := services["myservice"]; !exists {
-					services["myservice"] = make(map[string]*ServiceInstance)
-				}
-				services["myservice"]["instance1"] = &ServiceInstance{
-					ID: "instance1", Name: "myservice", Address: "localhost", Port: 8080,
-					Weight: 100, Tags: []string{}, Metadata: make(map[string]string),
-				}
-				servicesMu.Unlock()
-			}
 			runCommandTest(t, router, s, tt.cmd, tt.args)
 		})
 	}

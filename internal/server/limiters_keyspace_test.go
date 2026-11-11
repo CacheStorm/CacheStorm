@@ -151,8 +151,11 @@ func TestKeyspaceExtensionWritesAreGated(t *testing.T) {
 		"LOCKX.STATUS": true, "LEADER.CURRENT": true, "LEADER.HISTORY": true,
 		"CIRCUITX.STATUS": true, "CIRCUITX.METRICS": true,
 		"SEM.VALUE": true, "SEMAPHOREX.STATUS": true, "SESSIONX.GET": true, "SESSIONX.LIST": true,
+		"SERVICE.DISCOVER": true, "SERVICE.LIST": true, "SERVICE.HEALTHY": true,
+		"DOC.FIND": true, "DOC.FINDONE": true, "DOC.COUNT": true, "DOC.DISTINCT": true, "DOC.AGGREGATE": true,
+		"AGG.SUM": true, "AGG.AVG": true, "AGG.MIN": true, "AGG.MAX": true, "AGG.COUNT": true,
 	}
-	namespaces := []string{"QUEUE", "STACK", "LOCK", "RATELIMITER", "SESSION", "CIRCUIT", "MSGQUEUE", "RL", "RATELIMIT", "TOKENBUCKET", "LEAKYBUCKET", "THROTTLE", "LOCKX", "LEADER", "CIRCUITX", "CIRCUITBREAKER", "SEM", "SEMAPHOREX", "SESSIONX"}
+	namespaces := []string{"QUEUE", "STACK", "LOCK", "RATELIMITER", "SESSION", "CIRCUIT", "MSGQUEUE", "RL", "RATELIMIT", "TOKENBUCKET", "LEAKYBUCKET", "THROTTLE", "LOCKX", "LEADER", "CIRCUITX", "CIRCUITBREAKER", "SEM", "SEMAPHOREX", "SESSIONX", "SERVICE", "DOC", "AGG"}
 	cfg := aofTxConfig(t)
 	cfg.Server.ExtensionCommands = "all"
 	s := startToggleServer(t, cfg)

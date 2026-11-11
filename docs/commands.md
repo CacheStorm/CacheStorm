@@ -1336,7 +1336,7 @@ The stream's first entry, `0-1`, holds `max_retries` and is never delivered. In 
 
 ## Document Commands
 
-Document storage with indexing and aggregation queries.
+Document storage with field queries and aggregation. A store is a hash key marked by the field `__doc`: each document is the field `d:<id>` holding a JSON object, each declared index the field `i:<field>`. It is per database, persisted and replicated; inserts and updates are recorded as `HSET`, deletes as `HDEL`. Queries by field scan the store's documents.
 
 ```
 DOC.INSERT name id field value [field value ...]  # insert or replace a document; replies the id
@@ -1347,7 +1347,7 @@ DOC.DELETE name id                   # 1 if deleted, 0 if absent
 DOC.COUNT name                       # number of documents
 DOC.AGGREGATE name count|fields      # document count, or sorted field names in use
 DOC.DISTINCT name field              # sorted distinct values of field
-DOC.INDEX name field                 # index field (kept current on insert, update and delete); OK
+DOC.INDEX name field                 # declare an index on field (creates the store); OK
 DOC.DROPINDEX name field             # 1 if dropped, 0 if no such index
 ```
 
@@ -1447,17 +1447,17 @@ ANALYTICS.CLEAR name
 
 ## Service Discovery Commands
 
-Register services and instances for discovery and health tracking.
+Register services and instances for discovery and health tracking. A service is a hash key named after it, marked by the field `__service`, with one field per instance id holding the instance as JSON (`address`, `port`, `weight`, `tags`, `last_seen`, `registered`). It is per database, persisted and replicated; changes are recorded as `HSET` and `HDEL`, and the key goes with its last instance. An instance is healthy while its last heartbeat (or registration) is under 30 seconds old.
 
 ```
-SERVICE.REGISTER name id address port
-SERVICE.DEREGISTER name id
-SERVICE.DISCOVER name
-SERVICE.HEALTHY name
-SERVICE.HEARTBEAT name id
-SERVICE.TAGS name id tag [tag ...]
-SERVICE.WEIGHT name id weight
-SERVICE.LIST
+SERVICE.REGISTER name id address port [weight]  # port 0-65535, weight default 100; replaces the instance; OK
+SERVICE.DEREGISTER name id           # 1 if removed, 0 if absent
+SERVICE.DISCOVER name                # healthy instances sorted by id: id, address, port, weight, tags
+SERVICE.HEALTHY name                 # ids of the healthy instances, sorted
+SERVICE.HEARTBEAT name id            # OK, or an error for an unknown instance
+SERVICE.TAGS name id tag [tag ...]   # replace the instance's tags; OK
+SERVICE.WEIGHT name id weight        # OK
+SERVICE.LIST                         # service names of the selected database, sorted
 ```
 
 ---
@@ -1553,16 +1553,16 @@ ZREMRANGEBYRANK
 ---
 ## Aggregation Commands
 
-`AGG.*` command family (7 commands).
+A series is a list key of numbers, readable with `LRANGE`; it is per database, persisted and replicated. `AGG.PUSH` is recorded as `RPUSH` and `AGG.CLEAR` as `DEL`. Results have two decimals.
 
 ```
-AGG.AVG
-AGG.CLEAR
-AGG.COUNT
-AGG.MAX
-AGG.MIN
-AGG.PUSH
-AGG.SUM
+AGG.PUSH key value [value ...]       # append numbers; replies the length
+AGG.SUM key                          # sum, or 0 when empty
+AGG.AVG key                          # mean, or "0" when empty
+AGG.MIN key                          # smallest, or "0" when empty
+AGG.MAX key                          # largest, or "0" when empty
+AGG.COUNT key                        # number of values
+AGG.CLEAR key                        # delete the series; OK
 ```
 
 ---
