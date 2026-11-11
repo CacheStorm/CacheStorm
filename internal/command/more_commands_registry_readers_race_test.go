@@ -90,7 +90,6 @@ func TestAlertHistoryIsSafeWhileAlertTriggerWrites(t *testing.T) {
 
 	const iterations = 2000
 
-	registryCleanup(t, &alertsMu, alerts, "alert-race")
 	if reply := registryRun(t, router, s, "ALERT.CREATE", "alert-race", "message"); reply != "+OK\r\n" {
 		t.Fatalf("ALERT.CREATE reply = %q, want +OK", reply)
 	}
@@ -148,7 +147,6 @@ func TestLeaseGetIsSafeWhileLeaseRenewWrites(t *testing.T) {
 
 	const iterations = 2000
 
-	registryCleanup(t, &leasesMu, leases, "lease-race")
 	if reply := registryRun(t, router, s, "LEASE.CREATE", "lease-race", "holder", "60000"); reply != "+OK\r\n" {
 		t.Fatalf("LEASE.CREATE reply = %q, want +OK", reply)
 	}
@@ -209,7 +207,6 @@ func TestIdempotencyGetIsSafeWhileIdempotencyReplaceWrites(t *testing.T) {
 
 	const iterations = 2000
 
-	registryCleanup(t, &idempotencyKeysMu, idempotencyKeys, "idem-race")
 	if reply := registryRun(t, router, s, "IDEMPOTENCY.SET", "idem-race", "response", "60000"); reply != "+OK\r\n" {
 		t.Fatalf("IDEMPOTENCY.SET reply = %q, want +OK", reply)
 	}
@@ -270,7 +267,6 @@ func TestIdempotencyCheckIsSafeWhileIdempotencyReplaceWrites(t *testing.T) {
 
 	const iterations = 2000
 
-	registryCleanup(t, &idempotencyKeysMu, idempotencyKeys, "idem-check-race")
 	if reply := registryRun(t, router, s, "IDEMPOTENCY.SET", "idem-check-race", "response", "60000"); reply != "+OK\r\n" {
 		t.Fatalf("IDEMPOTENCY.SET reply = %q, want +OK", reply)
 	}
@@ -330,7 +326,6 @@ func TestTenantGetIsSafeWhileTenantConfigWrites(t *testing.T) {
 
 	const iterations = 2000
 
-	registryCleanup(t, &tenantsMu, tenants, "tenant-race")
 	if reply := registryRun(t, router, s, "TENANT.CREATE", "tenant-race", "name"); reply != "+OK\r\n" {
 		t.Fatalf("TENANT.CREATE reply = %q, want +OK", reply)
 	}

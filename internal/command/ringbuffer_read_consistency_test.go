@@ -41,19 +41,9 @@ func ringBufferArrayLen(reply string) (int, error) {
 	return n, nil
 }
 
-// ringBufferCleanup removes the buffers this test created from the
-// package-global registry, so the test leaves no state behind for the rest
-// of the package's suite.
-func ringBufferCleanup(t *testing.T, names ...string) {
-	t.Helper()
-	t.Cleanup(func() {
-		ringBuffersMu.Lock()
-		for _, name := range names {
-			delete(ringBuffers, name)
-		}
-		ringBuffersMu.Unlock()
-	})
-}
+// ringBufferCleanup is kept for the tests' call sites: ring buffers are
+// keys of each test's own store now.
+func ringBufferCleanup(t *testing.T, _ ...string) { t.Helper() }
 
 // TestRingBufferReadIsConsistentUnderConcurrentWrites reads a ring buffer
 // while another client writes to it.

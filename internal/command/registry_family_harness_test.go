@@ -177,20 +177,9 @@ func runRegistryFamilyRace(t *testing.T, tc registryFamilyCase, register func(*R
 	wg.Wait()
 }
 
-// freqCleanupX removes the frequency counters this session's tests created
-// from the package-global registry, so a test leaves no state behind. It is
-// named with an X suffix because another round's test file already defines
-// freqCleanup, and both files live in this package.
-func freqCleanupX(t *testing.T, names ...string) {
-	t.Helper()
-	t.Cleanup(func() {
-		freqsMu.Lock()
-		for _, name := range names {
-			delete(freqs, name)
-		}
-		freqsMu.Unlock()
-	})
-}
+// freqCleanupX is kept for the tests' call sites: the counters are keys of
+// each test's own store now.
+func freqCleanupX(t *testing.T, _ ...string) { t.Helper() }
 
 // ringBufferArrayLenX parses the element count of a RESP array reply. It
 // reports a malformed reply through the returned error rather than

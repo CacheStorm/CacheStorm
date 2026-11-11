@@ -1576,7 +1576,7 @@ AGG.CLEAR key                        # delete the series; OK
 ---
 ## Alerting Commands
 
-`ALERT.*` command family (6 commands).
+An alert is a hash marked by `__alert` (its status) with `id`, `message`, `created_at` and its last 1000 status changes. It is per database, persisted and replicated, changes are recorded as Redis commands, and the `LIST` commands cover the selected database and reply sorted.
 
 ```
 ALERT.CREATE name message            # create or replace with status active; OK
@@ -1590,14 +1590,14 @@ ALERT.HISTORY name                   # id, name, message, status, created_at and
 ---
 ## API Keys Commands
 
-`APIKEY.*` command family (5 commands).
+An API key is a hash named by the generated key, marked by `__apikey` (its name), with `created_at`, `usage` and `active`. It is per database, persisted and replicated, changes are recorded as Redis commands, and the `LIST` commands cover the selected database and reply sorted.
 
 ```
-APIKEY.CREATE
-APIKEY.LIST
-APIKEY.REVOKE
-APIKEY.USAGE
-APIKEY.VALIDATE
+APIKEY.CREATE name                   # replies the new key
+APIKEY.VALIDATE key                  # 1 for an active key, counting the use
+APIKEY.REVOKE key                    # deactivate; 1 if it existed
+APIKEY.USAGE key                     # uses counted
+APIKEY.LIST                          # key, name, active of each key
 ```
 
 ---
@@ -1626,14 +1626,14 @@ BACKPRESSURE.STATUS
 ---
 ## Bloom Filters Commands
 
-`BLOOMX.*` command family (5 commands).
+A filter is a hash marked by `__bloomx` (its size in bits) with `hashes` and one field `b<i>` per set bit. It is per database, persisted and replicated, changes are recorded as Redis commands, and the `LIST` commands cover the selected database and reply sorted.
 
 ```
-BLOOMX.ADD
-BLOOMX.CHECK
-BLOOMX.CREATE
-BLOOMX.DELETE
-BLOOMX.INFO
+BLOOMX.CREATE name size hashes       # size up to 2^26, hashes 1-64; replacing one at name; OK
+BLOOMX.ADD name item                 # 1
+BLOOMX.CHECK name item               # 1 if possibly present, 0 if absent
+BLOOMX.INFO name                     # name, size, hashes
+BLOOMX.DELETE name                   # 1 if deleted, 0 if absent
 ```
 
 ---
@@ -1651,14 +1651,14 @@ BOOKMARK.LIST                        # bookmark keys of the selected database, s
 ---
 ## Buckets Commands
 
-`BUCKETX.*` command family (5 commands).
+A bucket is a hash of `capacity`, `tokens`, `refill` (tokens per interval), `interval` and `last_check`. It is per database, persisted and replicated, changes are recorded as Redis commands, and the `LIST` commands cover the selected database and reply sorted.
 
 ```
-BUCKETX.CREATE
-BUCKETX.DELETE
-BUCKETX.REFILL
-BUCKETX.RETURN
-BUCKETX.TAKE
+BUCKETX.CREATE name capacity refill interval_ms  # full bucket, replacing one at name; OK
+BUCKETX.TAKE name n                  # [1, tokens left] when it took n, else [0, tokens]
+BUCKETX.RETURN name n                # give back n, up to the capacity; replies the tokens
+BUCKETX.REFILL name                  # fill the bucket; OK
+BUCKETX.DELETE name                  # 1 if deleted, 0 if absent
 ```
 
 ---
@@ -1777,15 +1777,15 @@ COOLDOWN.SET
 ---
 ## Counter Metrics Commands
 
-`COUNTERX.*` command family (6 commands).
+A counter is a hash marked by `__counterx` (its value). It is per database, persisted and replicated, changes are recorded as Redis commands, and the `LIST` commands cover the selected database and reply sorted.
 
 ```
-COUNTERX.CREATE
-COUNTERX.DECR
-COUNTERX.DELETE
-COUNTERX.GET
-COUNTERX.INCR
-COUNTERX.RESET
+COUNTERX.CREATE name [initial]       # replacing one at name; OK
+COUNTERX.INCR name [by]              # creating the counter at 0; replies the value
+COUNTERX.DECR name [by]              # creating the counter at 0; replies the value
+COUNTERX.GET name                    # value, 0 for an unknown counter
+COUNTERX.RESET name                  # set to 0; OK
+COUNTERX.DELETE name                 # 1 if deleted, 0 if absent
 ```
 
 ---
@@ -1904,7 +1904,7 @@ EVENTSOURCING.REPLAY
 ---
 ## Experimentation Commands
 
-`EXPERIMENT.*` command family (6 commands).
+An experiment is a hash marked by `__experiment` (its variants) with each user's variant and each user's event counts. It is per database, persisted and replicated, changes are recorded as Redis commands, and the `LIST` commands cover the selected database and reply sorted.
 
 ```
 EXPERIMENT.CREATE name variant [variant ...]  # create or replace; OK
@@ -1918,14 +1918,14 @@ EXPERIMENT.DELETE name               # 1 if deleted, 0 if absent
 ---
 ## Freq Commands
 
-`FREQ.*` command family (5 commands).
+A frequency table is a hash marked by `__freq` with `i:<item>` holding each count. It is per database, persisted and replicated, changes are recorded as Redis commands, and the `LIST` commands cover the selected database and reply sorted.
 
 ```
-FREQ.ADD
-FREQ.COUNT
-FREQ.CREATE
-FREQ.DELETE
-FREQ.TOP
+FREQ.CREATE name                     # empty, replacing one at name; OK
+FREQ.ADD name item [count]           # replies the item's count
+FREQ.COUNT name item
+FREQ.TOP name [k]                    # k most frequent (default 10), ties by item
+FREQ.DELETE name                     # 1 if deleted, 0 if absent
 ```
 
 ---
@@ -1955,15 +1955,15 @@ GATEWAY.LIST                         # id and name of each gateway, sorted by id
 ---
 ## Gauge Metrics Commands
 
-`GAUGE.*` command family (6 commands).
+A gauge is a hash marked by `__gauge` (its value). It is per database, persisted and replicated, changes are recorded as Redis commands, and the `LIST` commands cover the selected database and reply sorted.
 
 ```
-GAUGE.CREATE
-GAUGE.DECR
-GAUGE.DELETE
-GAUGE.GET
-GAUGE.INCR
-GAUGE.SET
+GAUGE.CREATE name [value]            # default 0; OK
+GAUGE.SET name value                 # OK
+GAUGE.INCR name [by]                 # creating the gauge at 0; replies the value with six decimals
+GAUGE.DECR name [by]                 # creating the gauge at 0; replies the value with six decimals
+GAUGE.GET name                       # value with six decimals, "0" for an unknown gauge
+GAUGE.DELETE name                    # 1 if deleted, 0 if absent
 ```
 
 ---
@@ -2018,16 +2018,16 @@ HEALTH.READINESS                     # OK, or a NOTREADY error while a replica's
 ---
 ## Heap Commands
 
-`HEAP.*` command family (7 commands).
+A heap is a min-heap of integers kept as a sorted set scored by value, with a sequence number as each member so a value may be pushed twice. It is per database, persisted and replicated, changes are recorded as Redis commands, and the `LIST` commands cover the selected database and reply sorted.
 
 ```
-HEAP.DELETE
-HEAP.GC
-HEAP.PEEK
-HEAP.POP
-HEAP.PUSH
-HEAP.SIZE
-HEAP.STATS
+HEAP.PUSH name value                 # integer within +-2^53; replies the size
+HEAP.POP name                        # smallest value, removed; null when empty
+HEAP.PEEK name                       # smallest value; null when empty
+HEAP.SIZE name
+HEAP.DELETE name                     # 1 if deleted, 0 if absent
+HEAP.STATS                           # Go runtime heap statistics
+HEAP.GC                              # run the Go garbage collector
 ```
 
 ---
@@ -2058,14 +2058,14 @@ HYPERPARAM.SET
 ---
 ## Idempotency Commands
 
-`IDEMPOTENCY.*` command family (5 commands).
+An idempotency key is a hash marked by `__idempotency` (the response) with `status` and `created_at` that expires with its TTL. It is per database, persisted and replicated, changes are recorded as Redis commands, and the `LIST` commands cover the selected database and reply sorted.
 
 ```
-IDEMPOTENCY.CHECK
-IDEMPOTENCY.DELETE
-IDEMPOTENCY.GET
-IDEMPOTENCY.LIST
-IDEMPOTENCY.SET
+IDEMPOTENCY.SET key response ttl_ms  # error if the key is live; OK
+IDEMPOTENCY.GET key                  # response, or null once expired
+IDEMPOTENCY.CHECK key                # 1 while live
+IDEMPOTENCY.LIST                     # live keys
+IDEMPOTENCY.DELETE key               # 1 if deleted, 0 if absent
 ```
 
 ---
@@ -2120,14 +2120,14 @@ LEAKYBUCKET.DELETE name                      # 1 or 0
 ---
 ## Leases Commands
 
-`LEASE.*` command family (5 commands).
+A lease is a hash marked by `__lease` (its holder) that expires with the lease, so an expired lease can be taken again. It is per database, persisted and replicated, changes are recorded as Redis commands, and the `LIST` commands cover the selected database and reply sorted.
 
 ```
-LEASE.CREATE
-LEASE.GET
-LEASE.LIST
-LEASE.RENEW
-LEASE.REVOKE
+LEASE.CREATE id holder ttl_ms        # error while the lease is live; OK
+LEASE.RENEW id ttl_ms                # expire ttl_ms from now; OK
+LEASE.GET id                         # id, holder, expires_at; null when absent
+LEASE.LIST                           # live lease ids
+LEASE.REVOKE id                      # 1 if deleted, 0 if absent
 ```
 
 ---
@@ -2158,14 +2158,14 @@ LOCKX.STATUS key                  # locked 0, or locked 1, holder, expires_at (u
 ---
 ## Logx Commands
 
-`LOGX.*` command family (5 commands).
+A log is a hash marked by `__logx` (the entry count) with the entries as the fields `0`, `1`, ... (JSON). It is per database, persisted and replicated, changes are recorded as Redis commands, and the `LIST` commands cover the selected database and reply sorted.
 
 ```
-LOGX.CLEAR
-LOGX.READ
-LOGX.SEARCH
-LOGX.STATS
-LOGX.WRITE
+LOGX.WRITE log level message         # append, creating the log; OK
+LOGX.READ log [limit]                # last limit entries (default 100): timestamp, level, message
+LOGX.SEARCH log text                 # entries whose message contains text
+LOGX.STATS log                       # name, entries
+LOGX.CLEAR log                       # delete the log; replies how many entries it held
 ```
 
 ---
@@ -2198,13 +2198,13 @@ MASK.PHONE
 ---
 ## Meter Commands
 
-`METER.*` command family (4 commands).
+A meter is a hash marked by `__meter` (its unit) with the `total` and `count` of the values recorded. It is per database, persisted and replicated, changes are recorded as Redis commands, and the `LIST` commands cover the selected database and reply sorted.
 
 ```
-METER.CREATE
-METER.DELETE
-METER.GET
-METER.RECORD
+METER.CREATE name unit               # replacing one at name; OK
+METER.RECORD name value              # OK
+METER.GET name                       # name, unit, total, count
+METER.DELETE name                    # 1 if deleted, 0 if absent
 ```
 
 ---
@@ -2233,14 +2233,14 @@ MLXPERIMENT.METRICS
 ---
 ## Partitioning Commands
 
-`PARTITION.*` command family (5 commands).
+A partitioned log is a hash marked by `__partition` (the partition count) with `n:<p>` holding partition p's length and `v:<p>:<i>` its values. It is per database, persisted and replicated, changes are recorded as Redis commands, and the `LIST` commands cover the selected database and reply sorted.
 
 ```
-PARTITION.ADD
-PARTITION.CREATE
-PARTITION.DELETE
-PARTITION.GET
-PARTITION.LIST
+PARTITION.CREATE name count          # replacing one at name; OK
+PARTITION.ADD name key value         # append to the partition key hashes to; replies the partition
+PARTITION.GET name partition         # values in order
+PARTITION.LIST name                  # partition, count of each partition
+PARTITION.DELETE name                # 1 if deleted, 0 if absent
 ```
 
 ---
@@ -2331,14 +2331,14 @@ QUOTA.USE
 ---
 ## Quotax Commands
 
-`QUOTAX.*` command family (5 commands).
+A quota is a hash of `limit`, `used`, `period` (ms, 0 never resets) and `reset_at`. It is per database, persisted and replicated, changes are recorded as Redis commands, and the `LIST` commands cover the selected database and reply sorted.
 
 ```
-QUOTAX.CHECK
-QUOTAX.CREATE
-QUOTAX.DELETE
-QUOTAX.RESET
-QUOTAX.USAGE
+QUOTAX.CREATE name limit period_ms   # replacing one at name; OK
+QUOTAX.CHECK name amount             # [1, remaining] when it fits (and uses it), else [0, remaining]
+QUOTAX.USAGE name                    # used, limit, remaining
+QUOTAX.RESET name                    # start a new period; OK
+QUOTAX.DELETE name                   # 1 if deleted, 0 if absent
 ```
 
 ---
@@ -2368,27 +2368,27 @@ RELATION.DELETE id                   # 1 if deleted, 0 if absent
 ---
 ## Ring Buffer Commands
 
-`RINGBUFFER.*` command family (5 commands).
+A ring buffer is a hash marked by `__ringbuffer` (its size) with `head`, `count` and the slots `s<i>`, so a write sets one slot. It is per database, persisted and replicated, changes are recorded as Redis commands, and the `LIST` commands cover the selected database and reply sorted.
 
 ```
-RINGBUFFER.CREATE
-RINGBUFFER.DELETE
-RINGBUFFER.READ
-RINGBUFFER.SIZE
-RINGBUFFER.WRITE
+RINGBUFFER.CREATE name size          # replacing one at name; OK
+RINGBUFFER.WRITE name value          # overwrite the oldest when full; OK
+RINGBUFFER.READ name                 # values, oldest first
+RINGBUFFER.SIZE name                 # size, count
+RINGBUFFER.DELETE name               # 1 if deleted, 0 if absent
 ```
 
 ---
 ## Rollout Commands
 
-`ROLLOUT.*` command family (5 commands).
+A rollout is a hash marked by `__rollout` (its percentage). It is per database, persisted and replicated, changes are recorded as Redis commands, and the `LIST` commands cover the selected database and reply sorted.
 
 ```
-ROLLOUT.CHECK
-ROLLOUT.CREATE
-ROLLOUT.DELETE
-ROLLOUT.LIST
-ROLLOUT.PERCENTAGE
+ROLLOUT.CREATE name [percentage]     # 0-100, default 0, replacing one at name; OK
+ROLLOUT.PERCENTAGE name percentage   # OK
+ROLLOUT.CHECK name user              # 1 when a hash of the user falls within the percentage
+ROLLOUT.LIST                         # name and percentage of each rollout
+ROLLOUT.DELETE name                  # 1 if deleted, 0 if absent
 ```
 
 ---
@@ -2491,13 +2491,13 @@ SHUFFLE.GET
 ---
 ## Sketch Commands
 
-`SKETCH.*` command family (4 commands).
+A count-min sketch is a hash marked by `__sketch` (its width) with `depth` and one field `c<row>:<col>` per nonzero cell. It is per database, persisted and replicated, changes are recorded as Redis commands, and the `LIST` commands cover the selected database and reply sorted.
 
 ```
-SKETCH.CREATE
-SKETCH.DELETE
-SKETCH.QUERY
-SKETCH.UPDATE
+SKETCH.CREATE name width depth       # width times depth up to 2^22; replacing one at name; OK
+SKETCH.UPDATE name item count        # OK
+SKETCH.QUERY name item               # estimated count
+SKETCH.DELETE name                   # 1 if deleted, 0 if absent
 ```
 
 ---
@@ -2515,14 +2515,14 @@ SLICE.DELETE name                    # 1 if deleted, 0 if absent
 ---
 ## Sliding Commands
 
-`SLIDING.*` command family (5 commands).
+A sliding window limiter is a `RATELIMITER` (at most limit requests in any window), so `RATELIMITER.STATUS` reads it too. It is per database, persisted and replicated, changes are recorded as Redis commands, and the `LIST` commands cover the selected database and reply sorted.
 
 ```
-SLIDING.CHECK
-SLIDING.CREATE
-SLIDING.DELETE
-SLIDING.RESET
-SLIDING.STATS
+SLIDING.CREATE name limit window_ms  # limit 1-100000, replacing one at name; OK
+SLIDING.CHECK name                   # [1, remaining, window_ms] when allowed, else [0, 0, ms until one is]
+SLIDING.STATS name                   # name, limit, window_ms, current
+SLIDING.RESET name                   # forget the requests; OK
+SLIDING.DELETE name                  # 1 if deleted, 0 if absent
 ```
 
 ---
@@ -2667,14 +2667,14 @@ TELEMETRY.RECORD
 ---
 ## Multi-tenancy Commands
 
-`TENANT.*` command family (5 commands).
+A tenant is a hash marked by `__tenant` (its name) with `created_at` and its settings as `c:<key>`. It is per database, persisted and replicated, changes are recorded as Redis commands, and the `LIST` commands cover the selected database and reply sorted.
 
 ```
-TENANT.CONFIG
-TENANT.CREATE
-TENANT.DELETE
-TENANT.GET
-TENANT.LIST
+TENANT.CREATE id name                # replacing one at id; OK
+TENANT.CONFIG id key value           # OK
+TENANT.GET id                        # id, name, created_at
+TENANT.LIST                          # tenant ids
+TENANT.DELETE id                     # 1 if deleted, 0 if absent
 ```
 
 ---
@@ -2757,14 +2757,14 @@ TOKENBUCKET.DELETE name                          # 1 or 0
 ---
 ## Trace Commands
 
-`TRACE.*` command family (5 commands).
+A trace is a hash marked by `__trace` (its status) with `spans` and each span as `s:<i>` (JSON). It is per database, persisted and replicated, changes are recorded as Redis commands, and the `LIST` commands cover the selected database and reply sorted.
 
 ```
-TRACE.END
-TRACE.GET
-TRACE.LIST
-TRACE.SPAN
-TRACE.START
+TRACE.START id                       # running trace, replacing one at id; OK
+TRACE.SPAN id name span_id           # open a span; OK
+TRACE.END id                         # complete the trace and close its open spans; OK
+TRACE.GET id                         # id, status, spans
+TRACE.LIST                           # trace ids
 ```
 
 ---
@@ -2804,14 +2804,14 @@ WARM.INVALIDATE
 ---
 ## Window Functions Commands
 
-`WINDOW.*` command family (5 commands).
+A window is a ring of the last size numbers added, marked by `__window`. It is per database, persisted and replicated, changes are recorded as Redis commands, and the `LIST` commands cover the selected database and reply sorted.
 
 ```
-WINDOW.ADD
-WINDOW.AGGREGATE
-WINDOW.CREATE
-WINDOW.DELETE
-WINDOW.GET
+WINDOW.CREATE name size              # replacing one at name; OK
+WINDOW.ADD name value                # OK
+WINDOW.GET name                      # values with six decimals, oldest first
+WINDOW.AGGREGATE name sum|avg|min|max
+WINDOW.DELETE name                   # 1 if deleted, 0 if absent
 ```
 
 *Last updated: 2026-10-12*

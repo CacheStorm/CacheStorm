@@ -9,20 +9,6 @@ import (
 	"github.com/cachestorm/cachestorm/internal/store"
 )
 
-// registryCleanup removes the entries this test created from a package-global
-// registry, so the test leaves no state behind for the rest of the package's
-// suite.
-func registryCleanup[T any](t *testing.T, mu *sync.RWMutex, reg map[string]*T, names ...string) {
-	t.Helper()
-	t.Cleanup(func() {
-		mu.Lock()
-		for _, name := range names {
-			delete(reg, name)
-		}
-		mu.Unlock()
-	})
-}
-
 // TestSlidingStatsIsSafeWhileSlidingCheckWrites reads a sliding window's
 // statistics while another client records entries in it.
 //
@@ -35,8 +21,6 @@ func TestSlidingStatsIsSafeWhileSlidingCheckWrites(t *testing.T) {
 	RegisterMoreCommands(router)
 
 	const iterations = 2000
-
-	registryCleanup(t, &slidingWindowsMu, slidingWindows, "sw-race")
 
 	if reply := registryRun(t, router, s, "SLIDING.CREATE", "sw-race", "100000", "60000"); reply != "+OK\r\n" {
 		t.Fatalf("SLIDING.CREATE reply = %q, want +OK", reply)
@@ -94,8 +78,6 @@ func TestGaugeGetIsSafeWhileGaugeIncrWrites(t *testing.T) {
 
 	const iterations = 2000
 
-	registryCleanup(t, &gaugesMu, gauges, "g-race")
-
 	if reply := registryRun(t, router, s, "GAUGE.CREATE", "g-race", "0"); reply != "+OK\r\n" {
 		t.Fatalf("GAUGE.CREATE reply = %q, want +OK", reply)
 	}
@@ -152,8 +134,6 @@ func TestMeterGetIsSafeWhileMeterRecordWrites(t *testing.T) {
 
 	const iterations = 2000
 
-	registryCleanup(t, &metersMu, meters, "m-race")
-
 	if reply := registryRun(t, router, s, "METER.CREATE", "m-race", "ops"); reply != "+OK\r\n" {
 		t.Fatalf("METER.CREATE reply = %q, want +OK", reply)
 	}
@@ -209,8 +189,6 @@ func TestTraceGetIsSafeWhileTraceMutatorsWrite(t *testing.T) {
 	RegisterMoreCommands(router)
 
 	const iterations = 2000
-
-	registryCleanup(t, &tracesMu, traces, "t-race")
 
 	if reply := registryRun(t, router, s, "TRACE.START", "t-race"); reply != "+OK\r\n" {
 		t.Fatalf("TRACE.START reply = %q, want +OK", reply)
@@ -274,8 +252,6 @@ func TestSketchQueryIsSafeWhileSketchUpdateWrites(t *testing.T) {
 
 	const iterations = 2000
 
-	registryCleanup(t, &sketchesMu, sketches, "s-race")
-
 	if reply := registryRun(t, router, s, "SKETCH.CREATE", "s-race", "16", "4"); reply != "+OK\r\n" {
 		t.Fatalf("SKETCH.CREATE reply = %q, want +OK", reply)
 	}
@@ -331,8 +307,6 @@ func TestRingBufferSizeIsSafeWhileRingBufferWriteWrites(t *testing.T) {
 	RegisterMoreCommands(router)
 
 	const iterations = 2000
-
-	registryCleanup(t, &ringBuffersMu, ringBuffers, "rb-size-race")
 
 	if reply := registryRun(t, router, s, "RINGBUFFER.CREATE", "rb-size-race", "16"); reply != "+OK\r\n" {
 		t.Fatalf("RINGBUFFER.CREATE reply = %q, want +OK", reply)
@@ -390,8 +364,6 @@ func TestPartitionGetIsSafeWhilePartitionAddWrites(t *testing.T) {
 
 	const iterations = 2000
 	const partitionCount = 4
-
-	registryCleanup(t, &partitionsMu, partitions, "pg-race")
 
 	if reply := registryRun(t, router, s, "PARTITION.CREATE", "pg-race", strconv.Itoa(partitionCount)); reply != "+OK\r\n" {
 		t.Fatalf("PARTITION.CREATE reply = %q, want +OK", reply)
@@ -466,8 +438,6 @@ func TestPartitionListIsSafeWhilePartitionAddWrites(t *testing.T) {
 	const iterations = 2000
 	const partitionCount = 4
 
-	registryCleanup(t, &partitionsMu, partitions, "pl-race")
-
 	if reply := registryRun(t, router, s, "PARTITION.CREATE", "pl-race", strconv.Itoa(partitionCount)); reply != "+OK\r\n" {
 		t.Fatalf("PARTITION.CREATE reply = %q, want +OK", reply)
 	}
@@ -519,11 +489,6 @@ func TestRegistryReadersAreExactSequentially(t *testing.T) {
 	s := store.NewStore()
 	router := NewRouter()
 	RegisterMoreCommands(router)
-
-	registryCleanup(t, &gaugesMu, gauges, "g-ctl")
-	registryCleanup(t, &metersMu, meters, "m-ctl")
-	registryCleanup(t, &sketchesMu, sketches, "s-ctl")
-	registryCleanup(t, &partitionsMu, partitions, "p-ctl")
 
 	if reply := registryRun(t, router, s, "GAUGE.CREATE", "g-ctl", "0"); reply != "+OK\r\n" {
 		t.Fatalf("GAUGE.CREATE reply = %q, want +OK", reply)

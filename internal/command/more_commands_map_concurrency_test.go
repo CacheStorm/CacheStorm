@@ -21,19 +21,6 @@ func registryRun(t *testing.T, router *Router, s *store.Store, cmd string, args 
 	return buf.String()
 }
 
-// experimentCleanup removes the experiment this test created from the
-// package-global registry, so the test leaves no state behind.
-func experimentCleanup(t *testing.T, names ...string) {
-	t.Helper()
-	t.Cleanup(func() {
-		experimentsMu.Lock()
-		for _, name := range names {
-			delete(experiments, name)
-		}
-		experimentsMu.Unlock()
-	})
-}
-
 // TestExperimentResultsIsSafeWhileExperimentAssignWrites reads an experiment's
 // results while another client assigns users to it.
 //
@@ -53,8 +40,6 @@ func TestExperimentResultsIsSafeWhileExperimentAssignWrites(t *testing.T) {
 	RegisterMoreCommands(router)
 
 	const iterations = 2000
-
-	experimentCleanup(t, "exp-race")
 
 	if reply := registryRun(t, router, s, "EXPERIMENT.CREATE", "exp-race", "alpha", "beta"); reply != "+OK\r\n" {
 		t.Fatalf("EXPERIMENT.CREATE reply = %q, want +OK", reply)
@@ -170,8 +155,6 @@ func TestExperimentResultsSequentialCountsAssignments(t *testing.T) {
 	s := store.NewStore()
 	router := NewRouter()
 	RegisterMoreCommands(router)
-
-	experimentCleanup(t, "exp-ctl")
 
 	if reply := registryRun(t, router, s, "EXPERIMENT.CREATE", "exp-ctl", "alpha", "beta"); reply != "+OK\r\n" {
 		t.Fatalf("EXPERIMENT.CREATE reply = %q, want +OK", reply)

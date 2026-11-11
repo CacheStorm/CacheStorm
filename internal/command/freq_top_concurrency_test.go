@@ -21,19 +21,9 @@ func freqRun(t *testing.T, router *Router, s *store.Store, cmd string, args ...s
 	return buf.String()
 }
 
-// freqCleanup removes the counter this test created from the package-global
-// registry, so the test leaves no state behind for the rest of the package's
-// suite.
-func freqCleanup(t *testing.T, names ...string) {
-	t.Helper()
-	t.Cleanup(func() {
-		freqsMu.Lock()
-		for _, name := range names {
-			delete(freqs, name)
-		}
-		freqsMu.Unlock()
-	})
-}
+// freqCleanup is kept for the tests' call sites: the counters are keys of
+// each test's own store now.
+func freqCleanup(t *testing.T, _ ...string) { t.Helper() }
 
 // TestFreqTopIsSafeWhileFreqAddWrites reads a frequency counter while
 // another client writes to it.

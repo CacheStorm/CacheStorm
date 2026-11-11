@@ -2,6 +2,7 @@ package command
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 	"time"
 
@@ -33,9 +34,15 @@ func quotaxExec(t *testing.T, router *Router, s *store.Store, cmd string, args .
 //
 // A zero-length window is over the moment the clock moves on, so the
 // rollover reset the counter on every check: the limit was never enforced
-// and the quota allowed unlimited use.
+// and the quota allowed unlimited use. A period that is not a number is
+// refused.
 func TestQuotaXCheckEnforcesLimitWithoutPeriod(t *testing.T) {
-	for _, period := range []string{"0", "abc"} {
+	r := NewRouter()
+	RegisterMoreCommands(r)
+	if got := quotaxExec(t, r, store.NewStore(), "QUOTAX.CREATE", "q", "1", "abc"); !strings.HasPrefix(got, "-ERR") {
+		t.Fatalf("QUOTAX.CREATE with period abc = %q, want an error", got)
+	}
+	for _, period := range []string{"0"} {
 		t.Run("period="+period, func(t *testing.T) {
 			router := NewRouter()
 			RegisterMoreCommands(router)

@@ -411,7 +411,9 @@ func cmdSTAGELIST(ctx *Context) error {
 	return ctx.WriteArray(out)
 }
 
-func cmdCOUNTERX2CREATE(ctx *Context) error {
+func cmdCOUNTERX2CREATE(ctx *Context) error { return counterXCreate(ctx, counterXMarker) }
+
+func counterXCreate(ctx *Context, marker string) error {
 	if ctx.ArgCount() < 1 || ctx.ArgCount() > 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
@@ -422,15 +424,15 @@ func cmdCOUNTERX2CREATE(ctx *Context) error {
 			return ctx.WriteError(err)
 		}
 	}
-	if err := createMarked(ctx, ctx.ArgString(0), counterXMarker, counterXMarker, i64(initial)); err != nil {
+	if err := createMarked(ctx, ctx.ArgString(0), marker, marker, i64(initial)); err != nil {
 		return ctx.WriteError(err)
 	}
 	return ctx.WriteOK()
 }
 
 // counterXAdd adds sign times the optional amount (1 by default) to the
-// counter, creating it at 0.
-func counterXAdd(ctx *Context, sign int64) error {
+// counter marked by marker, creating it at 0.
+func counterXAdd(ctx *Context, marker string, sign int64) error {
 	if ctx.ArgCount() < 1 || ctx.ArgCount() > 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
@@ -442,13 +444,13 @@ func counterXAdd(ctx *Context, sign int64) error {
 		}
 	}
 	name := ctx.ArgString(0)
-	r, err := readMarked(ctx, name, counterXMarker)
+	r, err := readMarked(ctx, name, marker)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
 	cur := int64(0)
 	if r != nil {
-		if cur, err = strconv.ParseInt(r[counterXMarker], 10, 64); err != nil {
+		if cur, err = strconv.ParseInt(r[marker], 10, 64); err != nil {
 			return ctx.WriteError(store.ErrWrongType)
 		}
 	}
@@ -459,7 +461,7 @@ func counterXAdd(ctx *Context, sign int64) error {
 	if (delta > 0 && cur > (1<<63-1)-delta) || (delta < 0 && cur < -(1<<63-1)-1-delta) {
 		return ctx.WriteError(errors.New("ERR increment or decrement would overflow"))
 	}
-	if err := updateRecord(ctx, name, counterXMarker, i64(cur+delta)); err != nil {
+	if err := updateRecord(ctx, name, marker, i64(cur+delta)); err != nil {
 		return ctx.WriteError(err)
 	}
 	return ctx.WriteInteger(cur + delta)
@@ -467,20 +469,22 @@ func counterXAdd(ctx *Context, sign int64) error {
 
 const math64Min = -1 << 63
 
-func cmdCOUNTERX2INCR(ctx *Context) error { return counterXAdd(ctx, 1) }
-func cmdCOUNTERX2DECR(ctx *Context) error { return counterXAdd(ctx, -1) }
-func cmdCOUNTERX2GET(ctx *Context) error {
+func cmdCOUNTERX2INCR(ctx *Context) error { return counterXAdd(ctx, counterXMarker, 1) }
+func cmdCOUNTERX2DECR(ctx *Context) error { return counterXAdd(ctx, counterXMarker, -1) }
+func cmdCOUNTERX2GET(ctx *Context) error  { return counterXGet(ctx, counterXMarker) }
+
+func counterXGet(ctx *Context, marker string) error {
 	if ctx.ArgCount() != 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
-	r, err := readMarked(ctx, ctx.ArgString(0), counterXMarker)
+	r, err := readMarked(ctx, ctx.ArgString(0), marker)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
 	if r == nil {
 		return ctx.WriteInteger(0)
 	}
-	n, err := strconv.ParseInt(r[counterXMarker], 10, 64)
+	n, err := strconv.ParseInt(r[marker], 10, 64)
 	if err != nil {
 		return ctx.WriteError(store.ErrWrongType)
 	}
@@ -753,16 +757,25 @@ func cmdTIMERLIST(ctx *Context) error { return listMarked(ctx, timerMarker) }
 // user), that expires with the token.
 
 func setToken(ctx *Context, id, user string, ttl int64) error {
+	return setExpiring(ctx, id, ttl, tokenMarker, user)
+}
+
+// setExpiring makes key a hash of pairs that expires ttl ms from now,
+// recorded as DEL, HSET and PEXPIREAT.
+func setExpiring(ctx *Context, key string, ttl int64, pairs ...string) error {
 	at := ctx.nowMS() + ttl
-	h, _ := store.NewLoadedHash([]string{tokenMarker, user})
-	if err := ctx.Store.Set(id, h, store.SetOptions{ExpireAtMS: at}); err != nil {
+	h, ok := store.NewLoadedHash(pairs)
+	if !ok {
+		return errors.New("ERR duplicate field")
+	}
+	if err := ctx.Store.Set(key, h, store.SetOptions{ExpireAtMS: at}); err != nil {
 		return err
 	}
-	ctx.notify(store.NotifyHash, "hset", id)
+	ctx.notify(store.NotifyHash, "hset", key)
 	ctx.PropagateAs(
-		ExecutedCommand{Name: "DEL", Args: [][]byte{[]byte(id)}, DB: ctx.DB},
-		ExecutedCommand{Name: "HSET", Args: pairArgs(id, []string{tokenMarker, user}), DB: ctx.DB},
-		ExecutedCommand{Name: "PEXPIREAT", Args: [][]byte{[]byte(id), strconv.AppendInt(nil, at, 10)}, DB: ctx.DB},
+		ExecutedCommand{Name: "DEL", Args: [][]byte{[]byte(key)}, DB: ctx.DB},
+		ExecutedCommand{Name: "HSET", Args: pairArgs(key, pairs), DB: ctx.DB},
+		ExecutedCommand{Name: "PEXPIREAT", Args: [][]byte{[]byte(key), strconv.AppendInt(nil, at, 10)}, DB: ctx.DB},
 	)
 	return nil
 }

@@ -92,8 +92,8 @@ func TestExtensionCreatesBoundTheirSlots(t *testing.T) {
 		{"PARTITION.CREATE", "p", huge},
 		{"PARTITIONX.CREATE", "p", huge},
 		{"RINGBUFFER.CREATE", "r", huge},
-		{"POOLX.CREATE", "p", huge},
-		{"POOLX.CREATE", "p", "-5"},
+		{"POOLX.CREATE", "pool", huge},
+		{"POOLX.CREATE", "pool", "-5"},
 		{"SKETCH.CREATE", "s", "4194304", "4194304"},
 		{"SAMPLE.CREATE", "s", huge},
 	} {
@@ -102,9 +102,9 @@ func TestExtensionCreatesBoundTheirSlots(t *testing.T) {
 		}
 	}
 	for _, cmd := range [][]string{
-		{"PARTITION.CREATE", "p", "8"}, {"PARTITIONX.CREATE", "p", "8"},
-		{"RINGBUFFER.CREATE", "r", "8"}, {"POOLX.CREATE", "p", "8"},
-		{"SKETCH.CREATE", "s", "100", "4"}, {"SAMPLE.CREATE", "s", "8"},
+		{"PARTITION.CREATE", "part", "8"}, {"PARTITIONX.CREATE", "p", "8"},
+		{"RINGBUFFER.CREATE", "r", "8"}, {"POOLX.CREATE", "pool", "8"},
+		{"SKETCH.CREATE", "sk", "100", "4"}, {"SAMPLE.CREATE", "s", "8"},
 	} {
 		if got := runCmd(t, s, router, cmd[0], cmd[1:]...); got != "+OK\r\n" {
 			t.Errorf("%v: %q, want OK", cmd, got)

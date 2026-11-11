@@ -9,31 +9,9 @@ import (
 	"github.com/cachestorm/cachestorm/internal/store"
 )
 
-// sliceCleanup removes the entries this test created from the package-global
-// registries, so the test leaves no state behind for the rest of the package's
-// suite.
-func sliceCleanup(t *testing.T, heapNames, windowNames, logNames []string) {
-	t.Helper()
-	t.Cleanup(func() {
-		heapsMu.Lock()
-		for _, name := range heapNames {
-			delete(heaps, name)
-		}
-		heapsMu.Unlock()
-
-		windowsMu.Lock()
-		for _, name := range windowNames {
-			delete(windows, name)
-		}
-		windowsMu.Unlock()
-
-		logsXMux.Lock()
-		for _, name := range logNames {
-			delete(logsX, name)
-		}
-		logsXMux.Unlock()
-	})
-}
+// sliceCleanup is kept for the tests' call sites: heaps, windows and logs
+// are keys of each test's own store now.
+func sliceCleanup(t *testing.T, _, _, _ []string) { t.Helper() }
 
 // TestHeapPeekIsSafeWhileHeapMutatorsWrite reads a heap's minimum while
 // another client pushes to and pops from it.
