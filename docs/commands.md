@@ -1212,22 +1212,21 @@ STR.WORDS key
 
 ## Session Commands
 
-CacheStorm-native server-side session storage.
+Server-side session storage. A session is a hash key, named by its id, that expires with the session: its data fields sit beside a marker field, `__session_created` (the creation time in ms), which `SESSION.ALL` and `SESSION.GET` hide and `SESSION.SET` refuses. It belongs to the selected database, is saved in the RDB and the AOF with its absolute deadline (recorded as `HSET`, `HDEL`, `DEL` and `PEXPIREAT`), is replicated, and goes away at its deadline or with `DEL` and `FLUSHALL`. A key holding anything but a session answers `WRONGTYPE`. TTLs are positive milliseconds.
 
 ```
-SESSION.CREATE id ttlMs
-SESSION.GET id key
-SESSION.SET id key value
-SESSION.DEL id
+SESSION.CREATE id ttlMs        # create or replace, empty; [id, ttl]
+SESSION.GET id field           # value or null
+SESSION.SET id field value     # OK; keeps the deadline
+SESSION.DELETE id [field]      # 1 removed, 0 not there (SESSION.DEL is the same)
 SESSION.EXISTS id
-SESSION.TTL id
-SESSION.REFRESH id ttlMs
-SESSION.ALL
-SESSION.LIST
+SESSION.TTL id                 # ms left, -2 for no session
+SESSION.REFRESH id ttlMs       # new deadline; OK
+SESSION.ALL id                 # field, value, ...; null for no session
+SESSION.CLEAR id               # remove the data, keep the session and deadline; OK
+SESSION.LIST                   # sessions of the selected database (walks its keys, like KEYS)
 SESSION.COUNT
-SESSION.CLEAR
-SESSION.CLEANUP
-SESSION.DELETE id
+SESSION.CLEANUP                # 0: expired sessions are removed by their expiry
 ```
 
 ---
