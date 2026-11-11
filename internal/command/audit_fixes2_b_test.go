@@ -182,8 +182,10 @@ func TestAuditB_PromiseAwaitHonoursExecDoneAndGate(t *testing.T) {
 		t.Fatal("AWAIT ignored the client going away")
 	}
 	auditBExpect(t, buf.String(), "$-1\r\n")
-	if before.Load() != 1 || after.Load() != 1 {
-		t.Fatalf("BeforeWait/AfterWait called %d/%d times, want 1/1", before.Load(), after.Load())
+	// The wait polls the key, releasing the gate for each poll: the calls
+	// must pair up, and the gate must have been released at least once.
+	if before.Load() < 1 || before.Load() != after.Load() {
+		t.Fatalf("BeforeWait/AfterWait called %d/%d times, want equal and at least 1", before.Load(), after.Load())
 	}
 }
 

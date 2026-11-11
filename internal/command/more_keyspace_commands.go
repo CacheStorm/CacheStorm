@@ -2125,13 +2125,13 @@ func cmdFREQDELETE(ctx *Context) error { return deleteMarked(ctx, freqMarker) }
 // A partitioned log is a hash marked by __partition (the partition count)
 // with n:<p> holding partition p's length and v:<p>:<i> its values.
 
-func loadPartition(ctx *Context, name string) (*store.HashValue, int, error) {
-	h, err := readMarkedHash(ctx, name, partitionMarker)
+func loadPartition(ctx *Context, name, marker string) (*store.HashValue, int, error) {
+	h, err := readMarkedHash(ctx, name, marker)
 	if err != nil || h == nil {
 		return nil, 0, err
 	}
 	h.RLock()
-	raw, _ := h.Get(partitionMarker)
+	raw, _ := h.Get(marker)
 	h.RUnlock()
 	count, err := strconv.Atoi(string(raw))
 	if err != nil || count < 1 || count > maxExtensionSlots {
@@ -2146,7 +2146,9 @@ func partitionLen(h *store.HashValue, p int) int {
 	return n
 }
 
-func cmdPARTITIONCREATE(ctx *Context) error {
+func cmdPARTITIONCREATE(ctx *Context) error { return partitionCreate(ctx, partitionMarker) }
+
+func partitionCreate(ctx *Context, marker string) error {
 	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
@@ -2157,7 +2159,7 @@ func cmdPARTITIONCREATE(ctx *Context) error {
 	if err := checkSlots("count", count); err != nil {
 		return ctx.WriteError(err)
 	}
-	if err := createMarked(ctx, ctx.ArgString(0), partitionMarker, partitionMarker, strconv.Itoa(count)); err != nil {
+	if err := createMarked(ctx, ctx.ArgString(0), marker, marker, strconv.Itoa(count)); err != nil {
 		return ctx.WriteError(err)
 	}
 	return ctx.WriteOK()
@@ -2165,12 +2167,14 @@ func cmdPARTITIONCREATE(ctx *Context) error {
 
 // PARTITION.ADD name key value appends value to the partition key hashes to
 // and replies that partition.
-func cmdPARTITIONADD(ctx *Context) error {
+func cmdPARTITIONADD(ctx *Context) error { return partitionAdd(ctx, partitionMarker) }
+
+func partitionAdd(ctx *Context, marker string) error {
 	if ctx.ArgCount() != 3 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	name := ctx.ArgString(0)
-	h, count, err := loadPartition(ctx, name)
+	h, count, err := loadPartition(ctx, name, marker)
 	if err == nil && h == nil {
 		err = errors.New("ERR partition not found")
 	}
@@ -2188,11 +2192,13 @@ func cmdPARTITIONADD(ctx *Context) error {
 	return ctx.WriteInteger(int64(p))
 }
 
-func cmdPARTITIONGET(ctx *Context) error {
+func cmdPARTITIONGET(ctx *Context) error { return partitionGet(ctx, partitionMarker) }
+
+func partitionGet(ctx *Context, marker string) error {
 	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
-	h, count, err := loadPartition(ctx, ctx.ArgString(0))
+	h, count, err := loadPartition(ctx, ctx.ArgString(0), marker)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
@@ -2216,7 +2222,7 @@ func cmdPARTITIONLIST(ctx *Context) error {
 	if ctx.ArgCount() != 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
-	h, count, err := loadPartition(ctx, ctx.ArgString(0))
+	h, count, err := loadPartition(ctx, ctx.ArgString(0), partitionMarker)
 	if err != nil {
 		return ctx.WriteError(err)
 	}

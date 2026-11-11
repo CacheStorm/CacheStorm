@@ -621,6 +621,8 @@ RATELIMITER.DELETE name               # 1 if deleted, 0 if absent
 
 ### Bulkhead
 
+A bulkhead is a hash key marked by `__bulkhead` (its maximum) with `current` and `rejected`; the waiting count is per server. It is per database, persisted and replicated, and changes are recorded as Redis commands.
+
 ```
 BULKHEAD.CREATE name max_concurrent  # OK
 BULKHEAD.ACQUIRE name [timeout_ms]   # 1 when a permit is taken; without a timeout replies 0 at once if full, with one blocks up to timeout_ms, then 0
@@ -635,22 +637,24 @@ The blocking commands in this section (and `PROMISE.AWAIT`, `FUTURE.GET`) treat 
 
 ## Data Processing Commands
 
+An aggregator keeps the count, sum, min and max of its values; a WINDOWX window is a ring of its last values; a join keeps each key's left and right values; a PARTITIONX log keeps each partition's values. Each is a hash key marked by a field naming its kind. It is per database, persisted and replicated, and changes are recorded as Redis commands.
+
 ### Aggregation
 
 ```
-AGGREGATOR.CREATE name windowSize [TYPE type]
-AGGREGATOR.ADD name value [TIMESTAMP timestamp]
-AGGREGATOR.GET name [TYPE type]
-AGGREGATOR.RESET name
+AGGREGATOR.CREATE name sum|avg|min|max|count  # replacing one at name; OK
+AGGREGATOR.ADD name value            # OK
+AGGREGATOR.GET name                  # the aggregate with six decimals (count as an integer); "0" when empty
+AGGREGATOR.RESET name                # forget the values; OK
 ```
 
 ### Windowing
 
 ```
-WINDOWX.CREATE name size [TYPE sliding|tumbling|session] [GAP gap]
-WINDOWX.ADD name value
-WINDOWX.GET name
-WINDOWX.AGGREGATE name aggType
+WINDOWX.CREATE name size             # the last size values, replacing one at name; OK
+WINDOWX.ADD name value               # OK
+WINDOWX.GET name                     # values with six decimals, oldest first
+WINDOWX.AGGREGATE name sum|avg
 ```
 
 ### Stream Joins
@@ -658,16 +662,16 @@ WINDOWX.AGGREGATE name aggType
 ```
 JOINX.CREATE name                    # inner join on a key; type/condition args are rejected
 JOINX.ADD name LEFT|RIGHT key value  # add a value to one side under key; OK
-JOINX.GET name [key]                 # one [key k left l right r] row per matching pair; optional key limits the rows
+JOINX.GET name [key]                 # one [key k left l right r] row per matching pair, by key; optional key limits the rows
 JOINX.DELETE name                    # 1 if deleted, 0 if absent
 ```
 
 ### Partitioning
 
 ```
-PARTITIONX.CREATE name count
-PARTITIONX.ADD name key value
-PARTITIONX.GET name index
+PARTITIONX.CREATE name count         # replacing one at name; OK
+PARTITIONX.ADD name key value        # append to the partition key hashes to; replies the partition
+PARTITIONX.GET name index            # values in order
 ```
 
 ---
@@ -1615,7 +1619,7 @@ AUDITX.LIST                          # log names
 ---
 ## Backpressure Commands
 
-`BACKPRESSURE.*` command family (3 commands).
+A backpressure gauge is a hash key of `high_water`, `low_water`, `current` and `paused`. It is per database, persisted and replicated, and changes are recorded as Redis commands.
 
 ```
 BACKPRESSURE.CHECK
@@ -1727,7 +1731,7 @@ CHAINED.SET
 ---
 ## Coalescing Commands
 
-`COALESCE.*` command family (4 commands).
+A coalescer is a log in a hash key marked by `__coalesce`; `GET` replies its first value. It is per database, persisted and replicated, and changes are recorded as Redis commands.
 
 ```
 COALESCE.ADD
@@ -1841,7 +1845,7 @@ DEBOUNCE.DELETE key                  # 1 if deleted, 0 if absent
 ---
 ## Debouncex Commands
 
-`DEBOUNCEX.*` command family (4 commands).
+A debouncer is a hash key of `delay`, `last_call`, `pending` and `arg`. It is per database, persisted and replicated, and changes are recorded as Redis commands.
 
 ```
 DEBOUNCEX.CREATE name delay_ms       # OK
@@ -1893,7 +1897,7 @@ EVAL.REGEXREPLACE pattern replacement text  # replace every match; $1 and ${name
 ---
 ## Event Sourcing Commands
 
-`EVENTSOURCING.*` command family (3 commands).
+An event stream is a log in a hash key marked by `__eventsourcing`; entry i is version i+1. It is per database, persisted and replicated, and changes are recorded as Redis commands.
 
 ```
 EVENTSOURCING.APPEND
@@ -1931,7 +1935,7 @@ FREQ.DELETE name                     # 1 if deleted, 0 if absent
 ---
 ## Future Commands
 
-`FUTURE.*` command family (4 commands).
+A future is a hash key named by its generated id, marked by `__future` (pending, completed or cancelled), with `value`; `FUTURE.GET` with a timeout wakes when it is settled. It is per database, persisted and replicated, and changes are recorded as Redis commands.
 
 ```
 FUTURE.CREATE                        # new pending future; replies its id
@@ -2304,7 +2308,7 @@ PROFILEX.LIST
 ---
 ## Promise Tracking Commands
 
-`PROMISE.*` command family (5 commands).
+A promise is a hash key named by its generated id, marked by `__promise` (pending, resolved or rejected), with `value` and `error`; `PROMISE.AWAIT` wakes when it is settled. It is per database, persisted and replicated, and changes are recorded as Redis commands.
 
 ```
 PROMISE.CREATE                       # new pending promise; replies its id
@@ -2480,7 +2484,7 @@ SESSIONX.DELETE id                   # 1 if deleted, 0 if absent or expired
 ---
 ## Shuffle Commands
 
-`SHUFFLE.*` command family (3 commands).
+A shuffle is a hash key marked by `__shuffle` with each value as `e:<seq>`; `GET` removes a random one. It is per database, persisted and replicated, and changes are recorded as Redis commands.
 
 ```
 SHUFFLE.ADD
@@ -2606,7 +2610,7 @@ STOREX.DELETE name                   # 1 if deleted, 0 if absent
 ---
 ## Streamproc Commands
 
-`STREAMPROC.*` command family (5 commands).
+A stream is a queue in a hash key marked by `__streamproc`: the values `m:<seq>` from `head` to `tail`. It is per database, persisted and replicated, and changes are recorded as Redis commands.
 
 ```
 STREAMPROC.CREATE
@@ -2657,7 +2661,7 @@ TAPE.DELETE name                     # 1 if deleted, 0 if absent
 ---
 ## Telemetry Commands
 
-`TELEMETRY.*` command family (2 commands).
+A series is a log of JSON points in a hash key marked by `__telemetry`. It is per database, persisted and replicated, and changes are recorded as Redis commands.
 
 ```
 TELEMETRY.QUERY
@@ -2706,7 +2710,7 @@ THROTTLE.DELETE key            # 1 or 0
 ---
 ## Throttlex Commands
 
-`THROTTLEX.*` command family (3 commands).
+A throttle is a hash key of `rate_ms` and `last_sent`. It is per database, persisted and replicated, and changes are recorded as Redis commands.
 
 ```
 THROTTLEX.CHECK

@@ -222,7 +222,7 @@ func TestResilienceRegistryReadersAreSynchronised(t *testing.T) {
 			registryFamilyCase: registryFamilyCase{
 				name:   "aggregator",
 				setup:  [][]string{{"AGGREGATOR.CREATE", "k", "sum"}},
-				writer: [][]string{{"AGGREGATOR.ADD", "k", "value"}},
+				writer: [][]string{{"AGGREGATOR.ADD", "k", "1.5"}},
 				reader: [][]string{{"AGGREGATOR.GET", "k"}},
 			},
 		},
