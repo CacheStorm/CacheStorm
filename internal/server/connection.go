@@ -997,7 +997,7 @@ var blockingCommands = map[string]bool{
 	"BZPOPMIN": true, "BZPOPMAX": true, "BZMPOP": true,
 	"XREAD": true, "XREADGROUP": true, "WAIT": true,
 	"PROMISE.AWAIT": true, "FUTURE.GET": true, "RATELIMITER.WAIT": true, "BULKHEAD.ACQUIRE": true,
-	"SEM.ACQUIRE": true,
+	"SEM.ACQUIRE": true, "LOCK.ACQUIRE": true,
 }
 
 // watchDisconnect reports the client going away while a blocking command

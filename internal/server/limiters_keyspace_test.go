@@ -150,8 +150,9 @@ func TestKeyspaceExtensionWritesAreGated(t *testing.T) {
 		"RL.GET": true, "TOKENBUCKET.AVAILABLE": true, "LEAKYBUCKET.AVAILABLE": true,
 		"LOCKX.STATUS": true, "LEADER.CURRENT": true, "LEADER.HISTORY": true,
 		"CIRCUITX.STATUS": true, "CIRCUITX.METRICS": true,
+		"SEM.VALUE": true, "SEMAPHOREX.STATUS": true, "SESSIONX.GET": true, "SESSIONX.LIST": true,
 	}
-	namespaces := []string{"QUEUE", "STACK", "LOCK", "RATELIMITER", "SESSION", "CIRCUIT", "MSGQUEUE", "RL", "RATELIMIT", "TOKENBUCKET", "LEAKYBUCKET", "THROTTLE", "LOCKX", "LEADER", "CIRCUITX", "CIRCUITBREAKER"}
+	namespaces := []string{"QUEUE", "STACK", "LOCK", "RATELIMITER", "SESSION", "CIRCUIT", "MSGQUEUE", "RL", "RATELIMIT", "TOKENBUCKET", "LEAKYBUCKET", "THROTTLE", "LOCKX", "LEADER", "CIRCUITX", "CIRCUITBREAKER", "SEM", "SEMAPHOREX", "SESSIONX"}
 	cfg := aofTxConfig(t)
 	cfg.Server.ExtensionCommands = "all"
 	s := startToggleServer(t, cfg)

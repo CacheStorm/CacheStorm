@@ -851,6 +851,8 @@ SEM.RELEASE name permits             # OK; error if it would exceed max
 SEM.VALUE name                       # value, max, waiters
 ```
 
+A `SEM` semaphore is a hash key holding `value` (free permits) and `max`: per database, persisted and replicated, so permits taken before a restart stay taken; changes are recorded as `HSET`. A key holding anything else answers `WRONGTYPE`.
+
 ---
 
 ## Encoding Commands
@@ -2445,19 +2447,19 @@ SANITIZE.STRING
 ---
 ## Semaphores Commands
 
-`SEMAPHOREX.*` command family (4 commands).
+A semaphore counting permits taken, as a hash key holding `current` and `max` (persisted and replicated; changes recorded as `HSET`).
 
 ```
-SEMAPHOREX.ACQUIRE
-SEMAPHOREX.CREATE
-SEMAPHOREX.RELEASE
-SEMAPHOREX.STATUS
+SEMAPHOREX.CREATE name max          # create or replace, none taken; OK
+SEMAPHOREX.ACQUIRE name [n]         # take n permits (default 1): 1, or 0 when fewer are free; never blocks
+SEMAPHOREX.RELEASE name [n]         # give back n permits, never below none taken; OK
+SEMAPHOREX.STATUS name              # name, current, max, available
 ```
 
 ---
 ## Sessionx Commands
 
-`SESSIONX.*` command family (5 commands).
+A session is a hash key named by its id that expires with the session, holding `__sessionx_user` and `__sessionx_created` beside its data (field names starting with `__sessionx_` are reserved). It is per database, persisted with its deadline and replicated; changes are recorded as `HSET` and `PEXPIREAT`. `SESSIONX.LIST` covers the selected database.
 
 ```
 SESSIONX.CREATE user ttl_ms          # replies the session id
