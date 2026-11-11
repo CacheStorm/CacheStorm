@@ -73,7 +73,8 @@ var writeCommands = map[string]bool{
 	// the only replayable record of the effect.
 	"EVAL": true, "EVALSHA": true, "FCALL": true,
 	// CacheStorm's queues and stacks (lists in the keyspace), locks and sessions
-	// (hashes that expire with them) and rate limiters (hashes).
+	// (hashes that expire with them) rate limiters and
+	// circuit breakers (hashes).
 	"QUEUE.PUSH": true, "QUEUE.POP": true, "QUEUE.CLEAR": true,
 	"STACK.PUSH": true, "STACK.POP": true, "STACK.CLEAR": true,
 	"LOCK.TRY": true, "LOCK.ACQUIRE": true, "LOCK.RELEASE": true, "LOCK.RENEW": true,
@@ -81,6 +82,8 @@ var writeCommands = map[string]bool{
 	"RATELIMITER.RESET": true, "RATELIMITER.DELETE": true,
 	"SESSION.CREATE": true, "SESSION.SET": true, "SESSION.DEL": true, "SESSION.DELETE": true,
 	"SESSION.REFRESH": true, "SESSION.CLEAR": true,
+	"CIRCUIT.CREATE": true, "CIRCUIT.ALLOW": true, "CIRCUIT.SUCCESS": true, "CIRCUIT.FAILURE": true,
+	"CIRCUIT.RESET": true, "CIRCUIT.DELETE": true,
 	"JSON.SET": true, "JSON.DEL": true, "JSON.FORGET": true, "JSON.MSET": true, "JSON.MERGE": true,
 	"JSON.NUMINCRBY": true, "JSON.NUMMULTBY": true, "JSON.TOGGLE": true, "JSON.CLEAR": true,
 	"JSON.ARRAPPEND": true, "JSON.ARRINSERT": true, "JSON.ARRPOP": true, "JSON.ARRTRIM": true, "JSON.STRAPPEND": true,

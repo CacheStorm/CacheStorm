@@ -1339,18 +1339,18 @@ DOC.DROPINDEX name field             # 1 if dropped, 0 if no such index
 
 ## Circuit Breaker Commands
 
-Circuit breaker state and failure/success counters for resilient calls.
+Circuit breaker state and failure/success counters for resilient calls. A breaker is a hash key with the fields `state`, `failures`, `successes`, `failure_threshold`, `success_threshold`, `timeout_ms`, `last_failure`, `last_success` and `last_state_change` (times in ms): per database, persisted, replicated, and removed by `DEL` and `FLUSHALL`. Each change is recorded as an `HSET` of the fields' new values, so Redis can load the AOF.
 
 ```
-CIRCUIT.CREATE name failureThreshold successThreshold timeoutMs
-CIRCUIT.STATE name
-CIRCUIT.ALLOW name
-CIRCUIT.SUCCESS name
-CIRCUIT.FAILURE name
-CIRCUIT.RESET name
-CIRCUIT.DELETE name
-CIRCUIT.LIST
-CIRCUIT.STATS name
+CIRCUIT.CREATE name failureThreshold successThreshold timeoutMs  # creates it closed; an existing breaker is kept; name, state
+CIRCUIT.STATE name               # closed | open | half-open
+CIRCUIT.ALLOW name               # 1 while closed or half-open; while open, 1 (and half-open) once timeoutMs passed since the last failure
+CIRCUIT.SUCCESS name             # OK; successThreshold successes close a half-open breaker
+CIRCUIT.FAILURE name             # OK; failureThreshold failures open a closed breaker, one reopens a half-open one
+CIRCUIT.RESET name               # closed, counts cleared; OK
+CIRCUIT.DELETE name              # 1 if deleted, 0 if absent
+CIRCUIT.LIST                     # name, state, ... for the selected database (walks its keys, like KEYS)
+CIRCUIT.STATS name               # the fields above; last_* in Unix seconds
 ```
 
 ---
