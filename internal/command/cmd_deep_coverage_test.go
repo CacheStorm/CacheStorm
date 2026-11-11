@@ -1512,12 +1512,7 @@ func TestDeep_DEDUP_ExpireWithExpiredData(t *testing.T) {
 	s := store.NewStore()
 	// Add with TTL of 1ms so it will be expired immediately
 	cmdDEDUPADD(discardCtx("", bytesArgs("dexpkey", "data1", "1"), s))
-	// Small sleep-free approach: directly set expired entry in the map
-	dedupSetMu.Lock()
-	dedupSet["expired:test"] = 0 // Already expired (unix milli 0)
-	dedupSetMu.Unlock()
-
-	if err := cmdDEDUPEXPIRE(discardCtx("", bytesArgs(), s)); err != nil {
+	if err := cmdDEDUPEXPIRE(discardCtx("", bytesArgs("dexpkey"), s)); err != nil {
 		t.Fatalf("expire: %v", err)
 	}
 }

@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
+	"github.com/cachestorm/cachestorm/internal/store"
 )
 
 func newVectorRouter() *Router {
@@ -27,7 +28,9 @@ func newVectorRouter() *Router {
 	return router
 }
 
-// VECTOR handlers share package-level maps, so isolate by unique names.
+// vectorTestStore holds the stores; the tests isolate by unique names.
+var vectorTestStore = store.NewStore()
+
 func runVector(t *testing.T, router *Router, args ...string) (string, bool) {
 	t.Helper()
 	raw := make([][]byte, len(args))
@@ -35,7 +38,7 @@ func runVector(t *testing.T, router *Router, args ...string) (string, bool) {
 		raw[i] = []byte(a)
 	}
 	var out bytes.Buffer
-	ctx := NewContext(args[0], raw[1:], nil, resp.NewWriter(&out))
+	ctx := NewContext(args[0], raw[1:], vectorTestStore, resp.NewWriter(&out))
 	if err := router.Execute(ctx); err != nil {
 		t.Fatalf("%v: unexpected execute error: %v", args, err)
 	}

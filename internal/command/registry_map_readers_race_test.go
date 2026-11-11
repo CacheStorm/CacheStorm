@@ -91,7 +91,6 @@ func TestCRDTPNCounterGetIsSafeWhileCounterIncrements(t *testing.T) {
 
 	const iterations = 2000
 
-	registryCleanup(t, &crdtPNCounterMu, crdtPNCounter, "pnc-race")
 	if reply := registryRun(t, router, s, "CRDT.PNCounter.INCR", "pnc-race", "node"); reply != "+OK\r\n" {
 		t.Fatalf("CRDT.PNCounter.INCR reply = %q, want +OK", reply)
 	}

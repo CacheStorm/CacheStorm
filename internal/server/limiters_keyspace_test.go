@@ -154,8 +154,12 @@ func TestKeyspaceExtensionWritesAreGated(t *testing.T) {
 		"SERVICE.DISCOVER": true, "SERVICE.LIST": true, "SERVICE.HEALTHY": true,
 		"DOC.FIND": true, "DOC.FINDONE": true, "DOC.COUNT": true, "DOC.DISTINCT": true, "DOC.AGGREGATE": true,
 		"AGG.SUM": true, "AGG.AVG": true, "AGG.MIN": true, "AGG.MAX": true, "AGG.COUNT": true,
+		"CRDT.LWW.GET": true, "CRDT.GCOUNTER.GET": true, "CRDT.PNCOUNTER.GET": true, "CRDT.GSET.GET": true,
+		"CRDT.ORSET.GET": true, "CRDT.ORSET.TAGS": true,
+		"DEDUP.CHECK": true, "DEDUP.EXPIRE": true, "VECTOR_CLOCK.COMPARE": true, "VECTOR_CLOCK.GET": true,
+		"VECTOR.GET": true, "VECTOR.SEARCH": true, "VECTOR.SIMILARITY": true, "VECTOR.DIMENSIONS": true, "VECTOR.STATS": true,
 	}
-	namespaces := []string{"QUEUE", "STACK", "LOCK", "RATELIMITER", "SESSION", "CIRCUIT", "MSGQUEUE", "RL", "RATELIMIT", "TOKENBUCKET", "LEAKYBUCKET", "THROTTLE", "LOCKX", "LEADER", "CIRCUITX", "CIRCUITBREAKER", "SEM", "SEMAPHOREX", "SESSIONX", "SERVICE", "DOC", "AGG"}
+	namespaces := []string{"QUEUE", "STACK", "LOCK", "RATELIMITER", "SESSION", "CIRCUIT", "MSGQUEUE", "RL", "RATELIMIT", "TOKENBUCKET", "LEAKYBUCKET", "THROTTLE", "LOCKX", "LEADER", "CIRCUITX", "CIRCUITBREAKER", "SEM", "SEMAPHOREX", "SESSIONX", "SERVICE", "DOC", "AGG", "VECTOR", "CRDT", "DEDUP", "VECTOR_CLOCK"}
 	cfg := aofTxConfig(t)
 	cfg.Server.ExtensionCommands = "all"
 	s := startToggleServer(t, cfg)

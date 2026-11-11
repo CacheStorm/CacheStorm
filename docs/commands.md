@@ -1247,16 +1247,16 @@ SESSION.CLEANUP                # 0: expired sessions are removed by their expiry
 
 ## CRDT Commands
 
-Conflict-free replicated data types for multi-node convergence.
+Conflict-free replicated data types for multi-node convergence. Each is a key, per database, persisted and replicated: an LWW register is a hash (`value`, `ts`); a G-counter a hash marked `__gcounter` with a field per node; a PN-counter a hash marked `__pncounter` with `p:<node>` and `n:<node>`; a G-set a set; an OR-set a hash marked `__orset` with a field per live tag and per tombstone. Changes are recorded as `HSET`, `HDEL`, `SADD` and `DEL`.
 
 ```
-CRDT.GCOUNTER.INCR name node_id [amount]  # that node's new count
+CRDT.GCOUNTER.INCR name node_id [amount]  # amount >= 0 (default 1); that node's new count
 CRDT.GCOUNTER.GET name               # sum over nodes
 CRDT.PNCOUNTER.INCR name node_id     # +1 for node_id; OK
 CRDT.PNCOUNTER.DECR name node_id     # -1 for node_id; OK
 CRDT.PNCOUNTER.GET name              # increments minus decrements
 CRDT.GSET.ADD name value             # 1 if added, 0 if present
-CRDT.GSET.GET name                   # members
+CRDT.GSET.GET name                   # members, sorted
 CRDT.ORSET.ADD name value [tag]      # add an observed tag (generated if omitted); replies the tag
 CRDT.ORSET.REMOVE name value [tag ...] # tombstone the given tags, or every observed tag; number of live tags removed
 CRDT.ORSET.GET name                  # sorted values with at least one live tag
@@ -1270,19 +1270,19 @@ CRDT.LWW.DELETE key                  # 1 if deleted, 0 if absent
 
 ## Vector Commands
 
-Vector embeddings: storage, similarity search, and index management.
+Vector embeddings with cosine similarity search. A store is a hash key holding its dimension in `__vector`, `__normalize` (`1` when it keeps vectors at unit length), and each vector as the field `v:<id>` of little-endian float64s. It is per database, persisted and replicated; changes are recorded as `HSET`, `HDEL` and `DEL`. Searches scan the store; for indexed search use `FT.SEARCH` with a vector field.
 
 ```
-VECTOR.CREATE name dim
-VECTOR.ADD name id dim value [value ...]
-VECTOR.GET name id
-VECTOR.DELETE name id
-VECTOR.SEARCH name k dim [vectorValue ...]
-VECTOR.SIMILARITY name id1 id2
-VECTOR.MERGE name id1 id2
-VECTOR.NORMALIZE name id
+VECTOR.CREATE name dim [NORMALIZE]   # dim 1-65536; replaces a store already at name; OK
+VECTOR.ADD name id dim value [value ...]  # exactly dim finite values; replaces the vector; OK
+VECTOR.GET name id                   # components with six decimals, or null
+VECTOR.DELETE name id                # 1 if deleted, 0 if absent
+VECTOR.SEARCH name k dim value [value ...]  # k most similar: id and score, best first, ties by id
+VECTOR.SIMILARITY name id1 id2       # cosine similarity
+VECTOR.MERGE name id1 id2 [newid]    # store the mean as newid (id1_id2 by default); replies the id
+VECTOR.NORMALIZE name id             # scale the vector to unit length; OK
 VECTOR.DIMENSIONS name
-VECTOR.STATS name
+VECTOR.STATS name                    # name, dimensions, vectors, normalize
 ```
 
 ---
@@ -1845,13 +1845,13 @@ DEBOUNCEX.FLUSH name [FORCE]         # the pending arg once delay_ms has passed 
 ---
 ## Deduplication Commands
 
-`DEDUP.*` command family (4 commands).
+A dedup set is a hash key with one field per seen id, each expiring on its own (hash field expiration), so `HTTL` and `HGETALL` read it. It is per database, persisted and replicated; `DEDUP.ADD` is recorded as `HSET` and `HPEXPIREAT`, `DEDUP.CLEAR` as `DEL`.
 
 ```
-DEDUP.ADD
-DEDUP.CHECK
-DEDUP.CLEAR
-DEDUP.EXPIRE
+DEDUP.ADD key id [ttl_ms]            # 1 if id was not seen (it is now, for ttl_ms, default 3600000), 0 if seen
+DEDUP.CHECK key id                   # 1 while id is seen
+DEDUP.EXPIRE key                     # 0: expired ids are removed by the server
+DEDUP.CLEAR key                      # forget every id; replies how many were seen
 ```
 
 ---
@@ -2762,14 +2762,14 @@ TRACE.START
 ---
 ## Vector Clocks Commands
 
-`VECTOR_CLOCK.*` command family (5 commands).
+A vector clock is a hash key marked by `__vclock` with one counter field per node; it is per database, persisted and replicated, and changes are recorded as `HSET`.
 
 ```
-VECTOR_CLOCK.COMPARE
-VECTOR_CLOCK.CREATE
-VECTOR_CLOCK.GET
-VECTOR_CLOCK.INCREMENT
-VECTOR_CLOCK.MERGE
+VECTOR_CLOCK.CREATE name node        # a clock with node at 0, replacing one at name; OK
+VECTOR_CLOCK.INCREMENT name node     # tick node (creating the clock); replies its counter
+VECTOR_CLOCK.COMPARE a b             # equal, before, after or concurrent
+VECTOR_CLOCK.MERGE a b               # raise a's counters to b's; OK
+VECTOR_CLOCK.GET name                # node, counter pairs sorted by node
 ```
 
 ---

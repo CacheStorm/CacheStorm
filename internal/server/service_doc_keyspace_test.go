@@ -8,10 +8,10 @@ import (
 	"testing"
 )
 
-// SERVICE registries, DOC stores and AGG series are keys: they survive a
+// SERVICE registries, DOC stores, AGG series and VECTOR stores are keys: they survive a
 // restart through an AOF holding only hash and list commands, and a key of
 // another type is refused with WRONGTYPE.
-func TestServiceDocAggAreKeys(t *testing.T) {
+func TestServiceDocAggVectorAreKeys(t *testing.T) {
 	cfg := aofTxConfig(t)
 	s := startToggleServer(t, cfg)
 	c := dialRepl(t, s)
@@ -35,12 +35,19 @@ func TestServiceDocAggAreKeys(t *testing.T) {
 	ok("DOC.DELETE", "users", "u3")
 	ok("DOC.INDEX", "users", "role")
 	ok("AGG.PUSH", "lat", "1.5", "2.5", "8")
+	ok("VECTOR.CREATE", "emb", "3", "NORMALIZE")
+	ok("VECTOR.ADD", "emb", "a", "3", "3", "0", "4")
+	ok("VECTOR.ADD", "emb", "b", "3", "0", "1", "0")
+	ok("VECTOR.ADD", "emb", "c", "3", "1", "1", "0")
+	ok("VECTOR.DELETE", "emb", "c")
+	ok("VECTOR.MERGE", "emb", "a", "b", "ab")
 	ok("SET", "plain", "v")
 	ok("HSET", "h", "f", "v")
 	for _, args := range [][]string{
 		{"SERVICE.REGISTER", "plain", "a", "h", "1"}, {"SERVICE.DISCOVER", "h"}, {"SERVICE.HEARTBEAT", "users", "a"},
 		{"DOC.INSERT", "h", "1", "f", "v"}, {"DOC.FIND", "api"}, {"DOC.COUNT", "plain"},
 		{"AGG.PUSH", "h", "1"}, {"AGG.SUM", "users"},
+		{"VECTOR.ADD", "h", "x", "1", "1"}, {"VECTOR.CREATE", "users", "2"}, {"VECTOR.STATS", "api"},
 	} {
 		if got := c.do(args...); got.Type != '-' || !strings.HasPrefix(got.Err, "WRONGTYPE") {
 			t.Fatalf("%v: %v", args, got)
@@ -50,6 +57,8 @@ func TestServiceDocAggAreKeys(t *testing.T) {
 		{"SERVICE.REGISTER", "api", "d", "h", "99999"}, {"SERVICE.WEIGHT", "api", "a", "-1"},
 		{"SERVICE.REGISTER", "api", "__service", "h", "1"}, {"AGG.PUSH", "lat", "nan"}, {"AGG.PUSH", "lat", "x"},
 		{"DOC.UPDATE", "users", "nope", "a", "b"},
+		{"VECTOR.ADD", "emb", "z", "2", "1", "1"}, {"VECTOR.ADD", "emb", "z", "3", "1", "inf", "1"},
+		{"VECTOR.SEARCH", "emb", "1", "2", "1", "1"}, {"VECTOR.CREATE", "e2", "0"},
 	} {
 		if got := c.do(args...); got.Type != '-' {
 			t.Fatalf("%v accepted: %v", args, got)
@@ -61,7 +70,7 @@ func TestServiceDocAggAreKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"SERVICE.", "DOC.", "AGG."} {
+	for _, name := range []string{"SERVICE.", "DOC.", "AGG.", "VECTOR."} {
 		if strings.Contains(string(data), name) {
 			t.Fatalf("the AOF records %s commands", name)
 		}
@@ -99,6 +108,15 @@ func TestServiceDocAggAreKeys(t *testing.T) {
 	if got := c.do("AGG.MAX", "lat"); string(got.Bulk) != "8.00" {
 		t.Fatalf("AGG.MAX after restart: %+v", got)
 	}
+	if got := c.do("VECTOR.GET", "emb", "a"); len(got.Array) != 3 || string(got.Array[0].Bulk) != "0.600000" || string(got.Array[2].Bulk) != "0.800000" {
+		t.Fatalf("VECTOR.GET after restart: %+v", got)
+	}
+	if got := c.do("VECTOR.SEARCH", "emb", "2", "3", "0", "2", "0"); len(got.Array) != 2 || string(got.Array[0].Array[1].Bulk) != "b" || string(got.Array[1].Array[1].Bulk) != "ab" {
+		t.Fatalf("VECTOR.SEARCH after restart: %+v", got)
+	}
+	if got := c.do("VECTOR.STATS", "emb"); len(got.Array) != 8 || got.Array[5].Int != 3 || string(got.Array[7].Bulk) != "true" {
+		t.Fatalf("VECTOR.STATS after restart: %+v", got)
+	}
 	if got := c.do("TYPE", "lat"); got.Str != "list" {
 		t.Fatalf("TYPE lat: %v", got)
 	}
@@ -114,6 +132,7 @@ func TestServiceDocAggAreKeys(t *testing.T) {
 		}
 	}
 	ok("AGG.CLEAR", "lat")
+	ok("DEL", "emb")
 	if got := c.do("DBSIZE"); got.Int != 2 {
 		t.Fatalf("DBSIZE once every registry, store and series is emptied: %v", got)
 	}
