@@ -141,3 +141,83 @@ func TestRegistriesAreKeys(t *testing.T) {
 	ok("TOKEN.DELETE", tok)
 	expect("0", "TOKEN.VALIDATE", tok)
 }
+
+// PQ, LRU, SLIDINGWINDOW and DEBOUNCE objects are keys: a priority queue
+// is a sorted set, the others hashes, and all survive a restart.
+func TestDataStructuresAreKeys(t *testing.T) {
+	cfg := aofTxConfig(t)
+	s := startToggleServer(t, cfg)
+	c := dialRepl(t, s)
+	ok := func(args ...string) {
+		t.Helper()
+		if v := c.do(args...); v.Type == '-' {
+			t.Fatalf("%v: %v", args, v.Err)
+		}
+	}
+	ok("PQ.PUSH", "jobs", "low", "5")
+	ok("PQ.PUSH", "jobs", "urgent", "1")
+	ok("PQ.PUSH", "jobs", "also-urgent", "1")
+	ok("PQ.PUSH", "jobs", "urgent", "1")
+	if got := c.do("PQ.POP", "jobs"); string(got.Array[0].Bulk) != "urgent" || got.Array[1].Int != 1 {
+		t.Fatalf("PQ.POP: %+v", got)
+	}
+	ok("LRU.CREATE", "cache", "2")
+	ok("LRU.SET", "cache", "a", "1")
+	ok("LRU.SET", "cache", "b", "2")
+	ok("LRU.GET", "cache", "a")
+	if got := c.do("LRU.SET", "cache", "c", "3"); got.Int != 1 {
+		t.Fatalf("LRU.SET over capacity: %v", got)
+	}
+	ok("SLIDINGWINDOW.CREATE", "api", "3600000", "2")
+	ok("SLIDINGWINDOW.INCR", "api", "ada")
+	ok("SLIDINGWINDOW.INCR", "api", "ada")
+	if got := c.do("SLIDINGWINDOW.INCR", "api", "ada"); got.Array[0].Int != 0 {
+		t.Fatalf("SLIDINGWINDOW.INCR past the limit: %+v", got)
+	}
+	ok("DEBOUNCE.SET", "save", "draft", "3600000")
+	ok("DEBOUNCE.SET", "fire", "now", "0")
+	ok("SET", "plain", "v")
+	for _, args := range [][]string{{"PQ.PUSH", "plain", "v", "1"}, {"LRU.SET", "jobs", "k", "v"}, {"SLIDINGWINDOW.INCR", "cache", "k"}, {"DEBOUNCE.CALL", "api"}} {
+		if got := c.do(args...); got.Type != '-' || !strings.HasPrefix(got.Err, "WRONGTYPE") {
+			t.Fatalf("%v: %v", args, got)
+		}
+	}
+	for _, args := range [][]string{{"PQ.PUSH", "jobs", "v", "x"}, {"LRU.CREATE", "l2", "0"}, {"SLIDINGWINDOW.CREATE", "w2", "0", "1"}, {"DEBOUNCE.SET", "d", "v", "-1"}} {
+		if got := c.do(args...); got.Type != '-' {
+			t.Fatalf("%v accepted: %v", args, got)
+		}
+	}
+	stopReplServer(s)
+
+	data, err := os.ReadFile(filepath.Join(cfg.Persistence.DataDir, "appendonly.aof"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"PQ.", "LRU.", "SLIDINGWINDOW.", "DEBOUNCE."} {
+		if strings.Contains(string(data), name) {
+			t.Fatalf("the AOF records %s commands", name)
+		}
+	}
+
+	s = startToggleServer(t, cfg)
+	defer stopReplServer(s)
+	c = dialRepl(t, s)
+	expect := func(want string, args ...string) {
+		t.Helper()
+		if got := renderReply(c.do(args...), ","); got != want {
+			t.Fatalf("%v after restart = %q, want %q", args, got, want)
+		}
+	}
+	expect("also-urgent,1,urgent,1,low,5", "PQ.GETALL", "jobs")
+	expect("3", "PQ.LEN", "jobs")
+	expect("c,a", "LRU.KEYS", "cache")
+	expect("size,2,capacity,2,usage,100.00", "LRU.STATS", "cache")
+	expect("2", "SLIDINGWINDOW.COUNT", "api", "ada")
+	expect("0,2", "SLIDINGWINDOW.INCR", "api", "ada")
+	expect("draft", "DEBOUNCE.GET", "save")
+	expect("1,now", "DEBOUNCE.CALL", "fire")
+	expect("0,0", "DEBOUNCE.CALL", "fire")
+	if got := c.do("TYPE", "jobs"); got.Str != "zset" {
+		t.Fatalf("TYPE jobs: %v", got)
+	}
+}

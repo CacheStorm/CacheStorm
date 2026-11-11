@@ -1829,13 +1829,13 @@ DEADLINE.LIST                        # deadline ids of the selected database, so
 ---
 ## Debounce Commands
 
-`DEBOUNCE.*` command family (4 commands).
+A debounce is a hash key marked by `__debounce` (its value) with `due`, the unix ms time after which it fires. It is per database, persisted and replicated, and changes are recorded as Redis commands.
 
 ```
-DEBOUNCE.CALL
-DEBOUNCE.DELETE
-DEBOUNCE.GET
-DEBOUNCE.SET
+DEBOUNCE.SET key value delay_ms      # (re)arm, replacing one at key; OK
+DEBOUNCE.GET key                     # value, or null
+DEBOUNCE.CALL key                    # when due, removes it and replies [1, value]; before, [0, ms left]; none, [0, 0]
+DEBOUNCE.DELETE key                  # 1 if deleted, 0 if absent
 ```
 
 ---
@@ -2171,16 +2171,16 @@ LOGX.WRITE
 ---
 ## LRU Cache Commands
 
-`LRU.*` command family (7 commands).
+An LRU cache is a hash key marked by `__lru` (its capacity) with each entry as `v:<key>` and the tick of its last use as `t:<key>`; `LRU.GET` counts as a use, so it is recorded too. It is per database, persisted and replicated, and changes are recorded as Redis commands.
 
 ```
-LRU.CLEAR
-LRU.CREATE
-LRU.DEL
-LRU.GET
-LRU.KEYS
-LRU.SET
-LRU.STATS
+LRU.CREATE name capacity             # empty, replacing one at name; OK
+LRU.SET name key value               # 1 if it evicted the least recently used entry, else 0
+LRU.GET name key                     # value or null; marks the key used
+LRU.DEL name key                     # 1 if deleted, 0 if absent
+LRU.KEYS name                        # keys, most recently used first
+LRU.STATS name                       # size, capacity, usage (percent)
+LRU.CLEAR name                       # empty the cache; OK
 ```
 
 ---
@@ -2280,16 +2280,16 @@ POOLX.DELETE name                    # 1 if deleted, 0 if absent
 ---
 ## Priority Queue Commands
 
-`PQ.*` command family (7 commands).
+A priority queue is a sorted set scored by priority whose members are a 20-digit sequence number, a colon and the value, so equal priorities pop in the order pushed and a value may be queued twice. The lowest priority pops first. It is per database, persisted and replicated, and changes are recorded as Redis commands.
 
 ```
-PQ.CLEAR
-PQ.CREATE
-PQ.GETALL
-PQ.LEN
-PQ.PEEK
-PQ.POP
-PQ.PUSH
+PQ.PUSH name value priority          # priority within +-2^53; replies the queue length
+PQ.POP name                          # removes and replies [value, priority], or null
+PQ.PEEK name                         # [value, priority] of the next item, or null
+PQ.LEN name
+PQ.GETALL name                       # value, priority pairs in pop order
+PQ.CREATE name                       # empty the queue; OK
+PQ.CLEAR name                        # empty the queue; OK
 ```
 
 ---
@@ -2528,14 +2528,14 @@ SLIDING.STATS
 ---
 ## Slidingwindow Commands
 
-`SLIDINGWINDOW.*` command family (5 commands).
+A sliding window counter is a hash key marked by `__slidingwindow` (the window in ms) with `limit` and, for each key counted, its counts in the current and previous windows; a key's count is their sum. It is per database, persisted and replicated, and changes are recorded as Redis commands.
 
 ```
-SLIDINGWINDOW.COUNT
-SLIDINGWINDOW.CREATE
-SLIDINGWINDOW.DELETE
-SLIDINGWINDOW.INCR
-SLIDINGWINDOW.RESET
+SLIDINGWINDOW.CREATE name window_ms limit  # replacing one at name; OK
+SLIDINGWINDOW.INCR name key          # [1, count in the current window] when under the limit, else [0, count]
+SLIDINGWINDOW.COUNT name [key]       # count of key, or of every key
+SLIDINGWINDOW.RESET name             # forget every count; OK
+SLIDINGWINDOW.DELETE name            # 1 if deleted, 0 if absent
 ```
 
 ---
