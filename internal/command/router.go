@@ -46,7 +46,11 @@ type Router struct {
 	// duplicates records command names registered more than once. Register is
 	// last-write-wins, so a second registration silently replaced the first;
 	// six names were registered in two files at once and nothing said so.
-	duplicates  map[string]struct{}
+	duplicates map[string]struct{}
+	// disabled holds the commands Unregister took out of service: clients
+	// no longer reach them, but an AOF, a snapshot or a replication stream
+	// written while they were served still replays through ExecuteSilent.
+	disabled    map[string]*CommandDef
 	requirePass string
 	postExecute func(ctx *Context, db int, cmd string, args [][]byte) error
 	// postExec receives the commands an EXEC ran, so the transaction is
@@ -245,7 +249,11 @@ func (r *Router) ForkForReplay(s *store.Store, allowed []string) *Router {
 	defer r.mu.RUnlock()
 	n := &Router{commands: make(map[string]*CommandDef), duplicates: make(map[string]struct{}), functionRegistry: NewFunctionRegistry(s), searchIndexes: search.NewIndexManager()}
 	for _, name := range allowed {
-		if def := r.commands[name]; def != nil {
+		def := r.commands[name]
+		if def == nil {
+			def = r.disabled[name]
+		}
+		if def != nil {
 			copyDef := *def
 			n.commands[name] = &copyDef
 		}
@@ -373,10 +381,17 @@ func (r *Router) Register(def *CommandDef) {
 	r.mu.Unlock()
 }
 
-// Unregister removes a command, which then answers as an unknown command.
+// Unregister takes a command out of service: clients get the unknown command
+// error, as from a server that does not have it, while replay keeps it.
 func (r *Router) Unregister(name string) {
 	name = CanonicalName(name)
 	r.mu.Lock()
+	if def, ok := r.commands[name]; ok {
+		if r.disabled == nil {
+			r.disabled = make(map[string]*CommandDef)
+		}
+		r.disabled[name] = def
+	}
 	delete(r.commands, name)
 	r.hot.Store(nil)
 	r.mu.Unlock()
@@ -739,6 +754,11 @@ func (r *Router) ExecuteSilent(ctx *Context) error {
 	ctx.router = r
 	ctx.Command = CanonicalName(ctx.Command)
 	cmd, ok := r.Get(ctx.Command)
+	if !ok {
+		r.mu.RLock()
+		cmd, ok = r.disabled[ctx.Command]
+		r.mu.RUnlock()
+	}
 	if !ok {
 		return ErrUnknownCommand
 	}

@@ -605,12 +605,16 @@ Failures in the closed state open the circuit at `failure_threshold`; any failur
 ### Rate Limiter
 
 ```
-RATELIMITER.CREATE name limit window_ms [strategy]   # limit requests per sliding window; OK
+RATELIMITER.CREATE name limit window_ms [strategy]   # at most limit (1-100000) requests in any window; creates or replaces; OK
 RATELIMITER.TRY name                 # [allowed(1|0), remaining, window_ms]
 RATELIMITER.WAIT name timeout_ms     # blocks until a slot frees; ms waited, or null on timeout
 RATELIMITER.RESET name               # clear recorded requests; OK
 RATELIMITER.STATUS name              # name, limit, current, strategy
 RATELIMITER.DELETE name               # 1 if deleted, 0 if absent
+# A RATELIMITER is a hash key (limit, window, strategy, next, and one field per
+# slot holding a request time in ms): per database, persisted, replicated, and
+# removed by DEL and FLUSHALL. A request is recorded as one small HSET.
+# WAIT does not wait inside MULTI or scripts.
 ```
 
 ### Bulkhead

@@ -72,11 +72,13 @@ var writeCommands = map[string]bool{
 	// Scripting mutates through redis.call inside the handler, so the script is
 	// the only replayable record of the effect.
 	"EVAL": true, "EVALSHA": true, "FCALL": true,
-	// CacheStorm's queues and stacks, lists in the keyspace, and locks,
-	// hashes that expire with the lock.
+	// CacheStorm's queues and stacks (lists in the keyspace), locks (hashes
+	// that expire with the lock) and rate limiters (hashes).
 	"QUEUE.PUSH": true, "QUEUE.POP": true, "QUEUE.CLEAR": true,
 	"STACK.PUSH": true, "STACK.POP": true, "STACK.CLEAR": true,
 	"LOCK.TRY": true, "LOCK.ACQUIRE": true, "LOCK.RELEASE": true, "LOCK.RENEW": true,
+	"RATELIMITER.CREATE": true, "RATELIMITER.TRY": true, "RATELIMITER.WAIT": true,
+	"RATELIMITER.RESET": true, "RATELIMITER.DELETE": true,
 	"JSON.SET": true, "JSON.DEL": true, "JSON.FORGET": true, "JSON.MSET": true, "JSON.MERGE": true,
 	"JSON.NUMINCRBY": true, "JSON.NUMMULTBY": true, "JSON.TOGGLE": true, "JSON.CLEAR": true,
 	"JSON.ARRAPPEND": true, "JSON.ARRINSERT": true, "JSON.ARRPOP": true, "JSON.ARRTRIM": true, "JSON.STRAPPEND": true,

@@ -46,7 +46,7 @@ func TestUnsweptRegistryReadersAreSynchronised(t *testing.T) {
 			register: RegisterResilienceCommands,
 			registryFamilyCase: registryFamilyCase{
 				name:   "ratelimiter",
-				setup:  [][]string{{"RATELIMITER.CREATE", "k", "1000000", "1000"}},
+				setup:  [][]string{{"RATELIMITER.CREATE", "k", "100000", "1000"}},
 				writer: [][]string{{"RATELIMITER.TRY", "k"}},
 				reader: [][]string{{"RATELIMITER.STATUS", "k"}},
 			},

@@ -34,6 +34,8 @@ func readLock(ctx *Context, key string) (*lockState, error) {
 	if !ok {
 		return nil, errNotALock
 	}
+	h.RLock()
+	defer h.RUnlock()
 	holder, ok1 := h.Get("holder")
 	token, ok2 := h.Get("token")
 	renewals, ok3 := h.Get("renewals")

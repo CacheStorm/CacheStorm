@@ -226,17 +226,48 @@ func cmdCOMPRESSCUSTOM(ctx *Context) error {
 // holds no other type, since a list exists while it has elements.
 
 func cmdQUEUECREATE(ctx *Context) error { return listCollectionCreate(ctx) }
-func cmdQUEUEPUSH(ctx *Context) error   { return listPush(ctx, false) }
-func cmdQUEUEPOP(ctx *Context) error    { return listCollectionPop(ctx, true) }
-func cmdQUEUEPEEK(ctx *Context) error   { return listCollectionPeek(ctx, "0") }
-func cmdQUEUELEN(ctx *Context) error    { return cmdLLEN(ctx) }
-func cmdQUEUECLEAR(ctx *Context) error  { return listCollectionClear(ctx) }
+func cmdQUEUEPUSH(ctx *Context) error {
+	return recordedAs(ctx, "RPUSH", func() error { return listPush(ctx, false) })
+}
+func cmdQUEUEPOP(ctx *Context) error {
+	return recordedAs(ctx, "LPOP", func() error { return listCollectionPop(ctx, true) })
+}
+func cmdQUEUEPEEK(ctx *Context) error { return listCollectionPeek(ctx, "0") }
+func cmdQUEUELEN(ctx *Context) error  { return cmdLLEN(ctx) }
+func cmdQUEUECLEAR(ctx *Context) error {
+	return recordedAs(ctx, "DEL", func() error { return listCollectionClear(ctx) })
+}
 func cmdSTACKCREATE(ctx *Context) error { return listCollectionCreate(ctx) }
-func cmdSTACKPUSH(ctx *Context) error   { return listPush(ctx, false) }
-func cmdSTACKPOP(ctx *Context) error    { return listCollectionPop(ctx, false) }
-func cmdSTACKPEEK(ctx *Context) error   { return listCollectionPeek(ctx, "-1") }
-func cmdSTACKLEN(ctx *Context) error    { return cmdLLEN(ctx) }
-func cmdSTACKCLEAR(ctx *Context) error  { return listCollectionClear(ctx) }
+func cmdSTACKPUSH(ctx *Context) error {
+	return recordedAs(ctx, "RPUSH", func() error { return listPush(ctx, false) })
+}
+func cmdSTACKPOP(ctx *Context) error {
+	return recordedAs(ctx, "RPOP", func() error { return listCollectionPop(ctx, false) })
+}
+func cmdSTACKPEEK(ctx *Context) error { return listCollectionPeek(ctx, "-1") }
+func cmdSTACKLEN(ctx *Context) error  { return cmdLLEN(ctx) }
+func cmdSTACKCLEAR(ctx *Context) error {
+	return recordedAs(ctx, "DEL", func() error { return listCollectionClear(ctx) })
+}
+
+// recordedAs runs a queue or stack write and records it in the AOF and the
+// replication stream as the list command it amounts to, with the same
+// arguments, so the file and the stream are ones Redis can load and do not
+// depend on CacheStorm's extension commands being served.
+func recordedAs(ctx *Context, name string, run func() error) error {
+	errs := int64(0)
+	if ctx.Writer != nil {
+		errs = ctx.Writer.Errors()
+	}
+	err := run()
+	if err != nil || (ctx.Writer != nil && ctx.Writer.Errors() > errs) {
+		return err
+	}
+	if _, set := ctx.Propagation(); !set {
+		ctx.PropagateAs(ExecutedCommand{Name: name, Args: ctx.Args, DB: ctx.DB})
+	}
+	return nil
+}
 
 func listCollectionCreate(ctx *Context) error {
 	if ctx.ArgCount() != 1 {
