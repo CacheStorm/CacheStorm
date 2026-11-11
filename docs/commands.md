@@ -1299,22 +1299,24 @@ TDIGEST.INFO key                     # Compression, Capacity, Merged/Unmerged no
 
 ## Message Queue Commands
 
-In-memory queue with acknowledgements, a visibility timeout, retries and a dead-letter list. None of the commands block.
+A work queue with acknowledgements, a visibility timeout, retries and dead letters, kept in a stream key read through the consumer group `msgqueue`. It is per database, persisted and replicated like any stream, and its changes are recorded in the AOF as `XADD`, `XCLAIM`, `XACK`, `XDEL` and `XGROUP`, so Redis loads it. None of the commands block.
 
 ```
-MSGQUEUE.CREATE name [max_retries]   # create or replace (default 3 retries); OK
-MSGQUEUE.PUBLISH name body           # replies the message id
-MSGQUEUE.CONSUME name [visibility_timeout_ms]  # take the oldest message (default 5000 ms visibility): id, body, retries; null if empty
-MSGQUEUE.ACK name id                 # 1 if acked, 0 if not in flight
-MSGQUEUE.NACK name id                # 1 requeued, 2 dead-lettered after max_retries, 0 if not in flight
+MSGQUEUE.CREATE name [max_retries]   # create or replace (default 3 retries); OK; WRONGTYPE if name holds anything but a queue
+MSGQUEUE.PUBLISH name body           # replies the message id, a stream ID
+MSGQUEUE.CONSUME name [visibility_timeout_ms]  # take a message (default 5000 ms visibility): id, body, retries; null if empty
+MSGQUEUE.ACK name id                 # 1 if acked (the message is deleted), 0 if not in flight
+MSGQUEUE.NACK name id                # 1 queued for redelivery, 2 dead-lettered after max_retries, 0 if not in flight
 MSGQUEUE.REQUEUE name id             # move a dead letter back with retries reset; 1 or 0
 MSGQUEUE.DEADLETTER name             # dead-lettered messages
-MSGQUEUE.PURGE name                  # drop pending messages; number dropped
+MSGQUEUE.PURGE name                  # drop the messages waiting for delivery; number dropped
 MSGQUEUE.DELETE name                 # 1 if deleted, 0 if absent
 MSGQUEUE.STATS name                  # name, pending, processing, dead_letters, max_retries
 ```
 
-A consumed message that is not acknowledged within its visibility timeout is treated as NACKed.
+A consumed message that is not acknowledged within its visibility timeout is treated as NACKed. CONSUME hands out messages waiting for redelivery, oldest first, before new ones.
+
+The stream's first entry, `0-1`, holds `max_retries` and is never delivered. In the group, a message being processed belongs to the consumer `vt:<timeout>`, one waiting for redelivery to `retry` (or to a `vt:` consumer whose timeout passed), and a dead letter to `dead` (or to a `vt:` consumer whose timeout passed with no retries left); its retry count is its delivery count less the delivery under way. `XINFO`, `XPENDING` and `XRANGE` show the queue as it is.
 
 ---
 

@@ -84,6 +84,8 @@ var writeCommands = map[string]bool{
 	"SESSION.REFRESH": true, "SESSION.CLEAR": true,
 	"CIRCUIT.CREATE": true, "CIRCUIT.ALLOW": true, "CIRCUIT.SUCCESS": true, "CIRCUIT.FAILURE": true,
 	"CIRCUIT.RESET": true, "CIRCUIT.DELETE": true,
+	"MSGQUEUE.CREATE": true, "MSGQUEUE.PUBLISH": true, "MSGQUEUE.CONSUME": true, "MSGQUEUE.ACK": true,
+	"MSGQUEUE.NACK": true, "MSGQUEUE.REQUEUE": true, "MSGQUEUE.PURGE": true, "MSGQUEUE.DELETE": true,
 	"JSON.SET": true, "JSON.DEL": true, "JSON.FORGET": true, "JSON.MSET": true, "JSON.MERGE": true,
 	"JSON.NUMINCRBY": true, "JSON.NUMMULTBY": true, "JSON.TOGGLE": true, "JSON.CLEAR": true,
 	"JSON.ARRAPPEND": true, "JSON.ARRINSERT": true, "JSON.ARRPOP": true, "JSON.ARRTRIM": true, "JSON.STRAPPEND": true,
