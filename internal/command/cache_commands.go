@@ -58,36 +58,41 @@ func cmdCacheBulkGet(ctx *Context) error {
 	return ctx.WriteArray(results)
 }
 
+// CACHE.BULKDEL pattern [limit] deletes the keys matching pattern, at most
+// limit of them when limit is positive: how many. It is recorded as one DEL
+// of the keys it deleted.
 func cmdCacheBulkDel(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+	if ctx.ArgCount() != 1 && ctx.ArgCount() != 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
-
-	pattern := ctx.ArgString(0)
 	limit := int64(0)
-	if ctx.ArgCount() >= 2 {
+	if ctx.ArgCount() == 2 {
 		var err error
 		limit, err = strconv.ParseInt(ctx.ArgString(1), 10, 64)
 		if err != nil {
 			return ctx.WriteError(ErrNotInteger)
 		}
 	}
+	return ctx.WriteInteger(deleteMatching(ctx, ctx.ArgString(0), limit))
+}
 
-	keys := ctx.Store.Keys()
-	deleted := int64(0)
-
-	for _, key := range keys {
-		if matchPattern(key, pattern) {
-			if ctx.Store.Delete(key) {
-				deleted++
-				if limit > 0 && deleted >= limit {
-					break
-				}
-			}
+func deleteMatching(ctx *Context, pattern string, limit int64) int64 {
+	args := [][]byte{}
+	for _, key := range ctx.Store.Keys() {
+		if limit > 0 && int64(len(args)) >= limit {
+			break
+		}
+		if matchPattern(key, pattern) && ctx.Store.Delete(key) {
+			ctx.notify(store.NotifyGeneric, "del", key)
+			args = append(args, []byte(key))
 		}
 	}
-
-	return ctx.WriteInteger(deleted)
+	if len(args) == 0 {
+		ctx.PropagateAs()
+	} else {
+		ctx.PropagateAs(ExecutedCommand{Name: "DEL", Args: args, DB: ctx.DB})
+	}
+	return int64(len(args))
 }
 
 func cmdCacheStats(ctx *Context) error {
@@ -245,29 +250,17 @@ func cmdCacheExport(ctx *Context) error {
 	return ctx.WriteArray(results)
 }
 
+// CACHE.CLEAR pattern deletes the keys matching pattern: how many. "*"
+// empties the database, recorded as FLUSHDB.
 func cmdCacheClear(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+	if ctx.ArgCount() != 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
-
-	pattern := ctx.ArgString(0)
-
-	if pattern == "*" {
-		deleted := ctx.Store.KeyCount()
-		ctx.Store.Flush()
-		return ctx.WriteInteger(deleted)
+	if ctx.ArgString(0) != "*" {
+		return ctx.WriteInteger(deleteMatching(ctx, ctx.ArgString(0), 0))
 	}
-
-	keys := ctx.Store.Keys()
-	deleted := int64(0)
-
-	for _, key := range keys {
-		if matchPattern(key, pattern) {
-			if ctx.Store.Delete(key) {
-				deleted++
-			}
-		}
-	}
-
+	deleted := ctx.Store.KeyCount()
+	ctx.Store.Flush()
+	ctx.PropagateAs(ExecutedCommand{Name: "FLUSHDB", DB: ctx.DB})
 	return ctx.WriteInteger(deleted)
 }

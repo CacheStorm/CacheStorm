@@ -43,7 +43,7 @@ func TestRemainingRegistryReadersAreSynchronised(t *testing.T) {
 			register: RegisterStatsCommands,
 			registryFamilyCase: registryFamilyCase{
 				name:   "histogram",
-				setup:  [][]string{{"HISTOGRAM.CREATE", "k", "10", "10"}},
+				setup:  [][]string{{"HISTOGRAM.CREATE", "k", "0", "10"}},
 				writer: [][]string{{"HISTOGRAM.ADD", "k", "5"}, {"HISTOGRAM.RESET", "k"}},
 				reader: [][]string{{"HISTOGRAM.GET", "k"}, {"HISTOGRAM.MEAN", "k"}, {"HISTOGRAM.INFO", "k"}},
 			},

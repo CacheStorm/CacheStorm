@@ -679,32 +679,34 @@ PARTITIONX.GET name index            # values in order
 
 ## Machine Learning Commands
 
+Each object below is a hash key marked by a field naming its kind (`__feature`, `__embedding`, `__tensor`, `__dataset`, `__mlxperiment`, `__hyperparam`). It is per database, persisted and replicated, and changes are recorded as `HSET`, `HDEL` and `DEL`. Numbers must be finite and are replied with six decimals.
+
 ### Feature Commands
 
 ```
-FEATURE.SET key field value
-FEATURE.GET key field
-FEATURE.DEL key field
-FEATURE.INCR entity key delta
-FEATURE.VECTOR key [FIELDS field [field ...]]
+FEATURE.SET entity name value        # OK
+FEATURE.GET entity name              # null if absent
+FEATURE.DEL entity name              # 1 if deleted, 0 if absent
+FEATURE.INCR entity name delta       # new value
+FEATURE.VECTOR entity                # [name, value] pairs sorted by name
 ```
 
 ### Embedding Commands
 
 ```
-EMBEDDING.CREATE name dimensions [METRIC metric]
-EMBEDDING.GET id
-EMBEDDING.DELETE id
+EMBEDDING.CREATE id value [value ...]  # create or replace; OK
+EMBEDDING.GET id                     # values; null if absent
+EMBEDDING.DELETE id                  # 1 if deleted, 0 if absent
 ```
 
 ### Tensor Commands
 
 ```
-TENSOR.CREATE name dim dim [dim ...] [| value ...]
-TENSOR.GET name
-TENSOR.ADD name1 name2 [OUT out]
-TENSOR.RESHAPE name shape
-TENSOR.DELETE name
+TENSOR.CREATE name dim [dim ...] | value [value ...]  # the dims must multiply to the value count
+TENSOR.GET name                      # shape, data; null if absent
+TENSOR.ADD name other                # add other to name element-wise; OK
+TENSOR.RESHAPE name dim [dim ...]    # same value count; OK
+TENSOR.DELETE name                   # 1 if deleted, 0 if absent
 ```
 
 ---
@@ -756,19 +758,21 @@ SELECT index
 
 ### State Machine
 
+A state machine is a hash key marked by `__statem` (its initial state) with `current`, a field `s:<state>` per state (1 when final) and one per transition. It is per database, persisted and replicated; changes are recorded as `HSET` and `DEL`.
+
 ```
-STATEM.CREATE name initial
-STATEM.DELETE name
-STATEM.ADDSTATE machine state [type]
-STATEM.ADDTRANS machine from to event [condition]
-STATEM.TRIGGER machine event [data]
-STATEM.CURRENT machine
-STATEM.CANTRIGGER machine event
-STATEM.EVENTS machine
-STATEM.RESET machine [state]
-STATEM.ISFINAL machine
-STATEM.INFO machine
-STATEM.LIST [pattern]
+STATEM.CREATE name initial           # name, initial, current; an existing machine is kept
+STATEM.DELETE name                   # 1 if deleted, 0 if absent
+STATEM.ADDSTATE name state [TRUE|FALSE]  # TRUE makes it final; OK
+STATEM.ADDTRANS name from to event   # replaces the event's transition from that state; OK
+STATEM.TRIGGER name event            # the new state; error when no transition matches
+STATEM.CURRENT name
+STATEM.CANTRIGGER name event         # 1 or 0
+STATEM.EVENTS name                   # events valid from the current state, sorted
+STATEM.RESET name                    # back to the initial state; OK
+STATEM.ISFINAL name                  # 1 or 0
+STATEM.INFO name                     # name, current, initial, is_final
+STATEM.LIST                          # machines of the selected database, sorted
 ```
 
 ---
@@ -907,11 +911,16 @@ TIMESTAMP.ENDOF unix_seconds unit    # last second of that UTC period
 DIFF.TEXT text1 text2                # Myers line diff: added, removed, unchanged counts and the diff lines (" ", "-", "+")
 DIFF.JSON json1 json2                # added, removed, changed top-level keys
 
-POOL.CREATE name size [FACTORY factory]
-POOL.GET name [TIMEOUT timeout]
-POOL.PUT name item
-POOL.CLEAR name
-POOL.STATS name
+```
+
+A `POOL` is a hash key marked by `__pool` (its maximum size) with `head`, `tail` and the items `i<n>`. It is per database, persisted and replicated; changes are recorded as `HSET`, `HDEL` and `DEL`.
+
+```
+POOL.CREATE name max_size            # create or replace an empty pool; OK
+POOL.GET name                        # take the oldest item; null if absent or empty
+POOL.PUT name item                   # 1, or 0 when full; error if absent
+POOL.CLEAR name                      # empty the pool; OK
+POOL.STATS name                      # name, size, max_size, available; null if absent
 ```
 
 ---
@@ -1015,14 +1024,18 @@ LOCK.ISLOCKED key
 
 ### ID Generation
 
-```
-ID.CREATE name start increment
-ID.NEXT name
-ID.NEXTN name count
-ID.CURRENT name
-ID.SET name value
-ID.DELETE name
+An ID sequence is a hash key marked by `__id` (its current number) with `increment`, `prefix`, `suffix` and `padding`. It is per database, persisted and replicated, so IDs keep rising across restarts; changes are recorded as `HSET` and `DEL`.
 
+```
+ID.CREATE name start increment [PREFIX p] [SUFFIX s] [PADDING n]  # first ID is start; replaces; OK
+ID.NEXT name                         # the next ID
+ID.NEXTN name count                  # count IDs, at most 65536
+ID.CURRENT name                      # [last ID, its number]; null if absent
+ID.SET name value                    # OK
+ID.DELETE name                       # 1 if deleted, 0 if absent
+```
+
+```
 SNOWFLAKE.NEXT [NODE node]
 SNOWFLAKE.PARSE id
 ```
@@ -1046,34 +1059,38 @@ When enabled, every dispatched command is recorded with its first argument as th
 
 ### Feature Flags
 
+A flag is a hash key marked by `__flag` (1 when enabled) with `description`, `created_at`, `updated_at` and each variant as `v:<key>`. It is per database, persisted and replicated; changes are recorded as `HSET` and `DEL`.
+
 ```
-FLAG.CREATE name [DEFAULT default]
-FLAG.DELETE name
-FLAG.GET name
-FLAG.ENABLE name
+FLAG.CREATE name [description]       # a disabled flag, replacing one at name; name, enabled
+FLAG.DELETE name                     # 1 if deleted, 0 if absent
+FLAG.GET name                        # name, enabled, description, created_at, updated_at; null if absent
+FLAG.ENABLE name                     # 1, or 0 if absent
 FLAG.DISABLE name
 FLAG.TOGGLE name
-FLAG.ISENABLED name
-FLAG.LIST [pattern]
+FLAG.ISENABLED name                  # 1 or 0
+FLAG.LIST                            # flags of the selected database, sorted
 FLAG.LISTENABLED
-FLAG.ADDVARIANT name variant value [WEIGHT weight]
-FLAG.GETVARIANT name key
+FLAG.ADDVARIANT name key value       # OK; error if absent
+FLAG.GETVARIANT name key             # null if absent
 ```
 
 ### Counters
 
+A counter is a hash key marked by `__counter` (its value). It is per database, persisted and replicated; changes are recorded as `HSET` and `DEL`, and an increment that would overflow is refused.
+
 ```
-COUNTER.GET name
-COUNTER.SET name value
-COUNTER.INCR name [BY increment]
-COUNTER.DECR name [BY decrement]
+COUNTER.GET name                     # 0 if absent
+COUNTER.SET name value               # OK
+COUNTER.INCR name                    # new value
+COUNTER.DECR name
 COUNTER.INCRBY name increment
 COUNTER.DECRBY name decrement
-COUNTER.DELETE name
-COUNTER.LIST [pattern]
-COUNTER.GETALL [pattern]
-COUNTER.RESET name
-COUNTER.RESETALL [pattern]
+COUNTER.DELETE name                  # 1 if deleted, 0 if absent
+COUNTER.LIST                         # counters of the selected database, sorted
+COUNTER.GETALL                       # name, value pairs, sorted
+COUNTER.RESET name                   # OK; error if absent
+COUNTER.RESETALL                     # every counter of the selected database to 0; OK
 ```
 
 ### Memory Management
@@ -1114,47 +1131,53 @@ RATELIMIT.DELETE name                # 1 or 0
 
 ### Cache Operations
 
+A CACHE lock is a `LOCKX` lock: the hash key named, holding the holder and expiring with the lock (persisted, replicated, recorded as `HSET` and `PEXPIREAT`). Name the lock apart from the cached value, such as `lock:user:1`.
+
 ```
-CACHE.LOCK key holder ttlMs
-CACHE.UNLOCK key holder
-CACHE.LOCKED key
-CACHE.REFRESH key holder ttlMs
+CACHE.LOCK key holder ttl_ms         # 1, or 0 when another holder has it; the same holder renews
+CACHE.UNLOCK key holder              # 1 if the holder released it, else 0
+CACHE.LOCKED key                     # 1 while held, else 0
+CACHE.REFRESH key holder ttl_ms      # 1 if the holder's lock got the new TTL, else 0
 ```
 
 ### Array Operations
 
+An array is a list key, so `LRANGE` and the other list commands read and change it; writes are recorded as `RPUSH`, `LPUSH`, `RPOP`, `LPOP` and, for the commands that rewrite it, `DEL` and `RPUSH`.
+
 ```
-ARRAY.PUSH key value [value ...]
-ARRAY.POP key
-ARRAY.SHIFT key
-ARRAY.UNSHIFT key value [value ...]
-ARRAY.SLICE key start end
-ARRAY.SPLICE key start deleteCount [value ...]
-ARRAY.REVERSE key
-ARRAY.SORT key [ASC|DESC]
-ARRAY.UNIQUE key
-ARRAY.MERGE dest src
-ARRAY.INTERSECT key1 key2 [OUT out]
-ARRAY.DIFF key1 key2 [OUT out]
-ARRAY.INDEXOF key value
+ARRAY.PUSH key value [value ...]     # new length
+ARRAY.POP key                        # last item; null if empty
+ARRAY.SHIFT key                      # first item; null if empty
+ARRAY.UNSHIFT key value [value ...]  # put the values first, in the order given; new length
+ARRAY.SLICE key start end            # items start..end-1
+ARRAY.SPLICE key start count [value ...]  # the removed items
+ARRAY.REVERSE key                    # OK
+ARRAY.SORT key [ASC|DESC]            # by bytes; OK
+ARRAY.UNIQUE key                     # keep the first of each item; how many it removed
+ARRAY.MERGE dest src                 # append src's items to dest; dest's length
+ARRAY.INTERSECT key1 key2            # key1's distinct items key2 has
+ARRAY.DIFF key1 key2                 # key1's items key2 lacks
+ARRAY.INDEXOF key value              # -1 if absent
 ARRAY.LASTINDEXOF key value
-ARRAY.INCLUDES key value
+ARRAY.INCLUDES key value             # 1 or 0
 ```
 
 ### Object Operations
 
+An object is a hash key, so `HGETALL` and the other hash commands read and change it; writes are recorded as `HSET`, `HDEL` and `DEL`. Replies list the fields sorted.
+
 ```
 OBJECT.KEYS key
 OBJECT.VALUES key
-OBJECT.ENTRIES key
-OBJECT.FROMENTRIES name key value [key value ...]
-OBJECT.MERGE dest src
-OBJECT.PICK key fields...
-OBJECT.OMIT key fields...
-OBJECT.HAS key field
-OBJECT.GET key field [DEFAULT default]
-OBJECT.SET key field value
-OBJECT.DELETE key field
+OBJECT.ENTRIES key                   # field, value pairs
+OBJECT.FROMENTRIES key field value [field value ...]  # replace the object; OK
+OBJECT.MERGE dest src                # copy src's fields into dest; how many
+OBJECT.PICK key field [field ...]    # keep only those fields; how many it kept
+OBJECT.OMIT key field [field ...]    # remove those fields; how many
+OBJECT.HAS key field                 # 1 or 0
+OBJECT.GET key field                 # null if absent
+OBJECT.SET key field value           # OK
+OBJECT.DELETE key field              # 1 or 0
 ```
 
 ### Math Operations
@@ -1191,18 +1214,22 @@ GEO.BOUNDINGBOX lat lon radius [UNIT unit]
 
 ### Captcha
 
+A captcha is a hash key named by its id, marked by `__captcha` (the answer), that expires after five minutes; it is persisted and replicated.
+
 ```
-CAPTCHA.GENERATE [WIDTH width] [HEIGHT height] [LENGTH length]
-CAPTCHA.VERIFY id code
+CAPTCHA.GENERATE [length]            # 1-64 digits, 6 by default; id and answer
+CAPTCHA.VERIFY id answer             # 1 and the captcha is used up when right, else 0
 ```
 
 ### Sequence
 
+A sequence is a string key holding an integer, so `GET` and `INCRBY` read and change it; writes are recorded as `INCRBY` and `SET`.
+
 ```
-SEQUENCE.NEXT name
-SEQUENCE.CURRENT name
-SEQUENCE.RESET name [VALUE value]
-SEQUENCE.SET name value
+SEQUENCE.NEXT name [increment]       # new value
+SEQUENCE.CURRENT name                # 0 if absent
+SEQUENCE.RESET name                  # set to 0; OK
+SEQUENCE.SET name value              # OK
 ```
 
 ---
@@ -1441,18 +1468,18 @@ BATCH.DEL name [key ...]
 
 ## Analytics Commands
 
-Counters and aggregates for tracking usage over time.
+Counters and aggregates for tracking usage over time. A series is a hash key marked by `__analytics` with its `count`, `sum`, `min` and `max`; it is per database, persisted and replicated, and changes are recorded as `HSET` and `DEL`.
 
 ```
-ANALYTICS.INCR name value
-ANALYTICS.DECR name value
-ANALYTICS.GET name
-ANALYTICS.COUNT name
-ANALYTICS.SUM name
+ANALYTICS.INCR name value            # record value; replies the count
+ANALYTICS.DECR name value            # record -value; replies the count
+ANALYTICS.GET name                   # count, sum, min, max; null if absent
+ANALYTICS.COUNT name                 # 0 if absent
+ANALYTICS.SUM name                   # "0" if absent; two decimals
 ANALYTICS.AVG name
 ANALYTICS.MIN name
 ANALYTICS.MAX name
-ANALYTICS.CLEAR name
+ANALYTICS.CLEAR name                 # delete the series; OK
 ```
 
 ---
@@ -1706,7 +1733,7 @@ CACHEX.DELETE name                   # 1 if deleted, 0 if absent
 ---
 ## Chaining Commands
 
-`CHAIN.*` command family (6 commands).
+A chain is a hash key marked by `__chain` (its length) with block i as the field i. It is per database, persisted and replicated; changes are recorded as `HSET` and `DEL`.
 
 ```
 CHAIN.CREATE name                    # create or replace an empty chain; OK
@@ -1720,12 +1747,12 @@ CHAIN.VALIDATE name                  # 1 if every block's hash and link recomput
 ---
 ## Chained Commands
 
-`CHAINED.*` command family (3 commands).
+A root is a hash key whose fields are its paths, read and changed like an `OBJECT`; writes are recorded as `HSET`, `HDEL` and `DEL`.
 
 ```
-CHAINED.DEL
-CHAINED.GET
-CHAINED.SET
+CHAINED.SET root path value          # OK
+CHAINED.GET root path                # null if absent
+CHAINED.DEL root path                # 1 if deleted, 0 if absent
 ```
 
 ---
@@ -1768,14 +1795,14 @@ CONTEXT.DELETE name                  # 1 if deleted, 0 if absent
 ---
 ## Cooldown Commands
 
-`COOLDOWN.*` command family (5 commands).
+A cooldown is a hash key marked by `__cooldown` (its duration in ms) with `last_used`. It is per database, persisted and replicated; changes are recorded as `HSET` and `DEL`.
 
 ```
-COOLDOWN.CHECK
-COOLDOWN.DELETE
-COOLDOWN.LIST
-COOLDOWN.RESET
-COOLDOWN.SET
+COOLDOWN.SET key duration_ms         # create or replace; OK
+COOLDOWN.CHECK key                   # 1 and restart the cooldown when it is over (or absent), else [0, remaining_ms]
+COOLDOWN.RESET key                   # end the cooldown; 1, or 0 if absent
+COOLDOWN.DELETE key                  # 1 if deleted, 0 if absent
+COOLDOWN.LIST                        # key, duration pairs of the selected database, sorted
 ```
 
 ---
@@ -1808,7 +1835,7 @@ COUNTERX2.LIST                       # name and value of each counter
 ---
 ## Datasets Commands
 
-`DATASET.*` command family (5 commands).
+A dataset is a hash key marked by `__dataset` (its length) with item i as the field i. It is per database, persisted and replicated; changes are recorded as `HSET` and `DEL`.
 
 ```
 DATASET.CREATE name                  # create or replace an empty dataset; OK
@@ -2037,26 +2064,26 @@ HEAP.GC                              # run the Go garbage collector
 ---
 ## Histogram Commands
 
-`HISTOGRAM.*` command family (6 commands).
+A histogram is a hash key marked by `__histogram` with `min`, `max`, `width`, `count`, `sum` and each bucket that has values as `b<index>` (bucket -1 holds values below min, the last bucket values from max on). It is per database, persisted and replicated; changes are recorded as `HSET` and `DEL`.
 
 ```
-HISTOGRAM.ADD
-HISTOGRAM.CREATE
-HISTOGRAM.GET
-HISTOGRAM.INFO
-HISTOGRAM.MEAN
-HISTOGRAM.RESET
+HISTOGRAM.CREATE key min max [width]  # min < max, width > 0 (default 1); create or replace; OK
+HISTOGRAM.ADD key value [value ...]  # replies how many were added
+HISTOGRAM.GET key                    # "[lo,hi)", count pairs, lowest first
+HISTOGRAM.MEAN key
+HISTOGRAM.RESET key                  # empty, keeping the range; OK
+HISTOGRAM.INFO key                   # min, max, bucket_width, count, mean
 ```
 
 ---
 ## Hyperparam Commands
 
-`HYPERPARAM.*` command family (3 commands).
+A parameter set is a hash key marked by `__hyperparam`. It is per database, persisted and replicated; changes are recorded as `HSET` and `DEL`.
 
 ```
-HYPERPARAM.DELETE
-HYPERPARAM.GET
-HYPERPARAM.SET
+HYPERPARAM.SET name param value      # OK
+HYPERPARAM.GET name param            # null if absent
+HYPERPARAM.DELETE name               # 1 if deleted, 0 if absent
 ```
 
 ---
@@ -2225,13 +2252,13 @@ METRICS.RESET
 ---
 ## ML Experimentation Commands
 
-`MLXPERIMENT.*` command family (4 commands).
+An experiment is a hash key marked by `__mlxperiment` with a field per metric. It is per database, persisted and replicated; changes are recorded as `HSET` and `DEL`.
 
 ```
-MLXPERIMENT.CREATE
-MLXPERIMENT.DELETE
-MLXPERIMENT.LOG
-MLXPERIMENT.METRICS
+MLXPERIMENT.CREATE name              # create or replace; OK
+MLXPERIMENT.LOG name metric value    # error if absent; OK
+MLXPERIMENT.METRICS name             # metric, value pairs sorted by metric
+MLXPERIMENT.DELETE name              # 1 if deleted, 0 if absent
 ```
 
 ---
@@ -2321,15 +2348,15 @@ PROMISE.AWAIT id timeout_ms          # blocks until settled: value, error "promi
 ---
 ## Quota Control Commands
 
-`QUOTA.*` command family (6 commands).
+A quota is a hash key marked by `__quota` (its window in ms, 0 never rolls over) with `limit`, `used` and `reset_at`. It is per database, persisted and replicated; changes are recorded as `HSET` and `DEL`.
 
 ```
-QUOTA.CHECK
-QUOTA.DELETE
-QUOTA.LIST
-QUOTA.RESET
-QUOTA.SET
-QUOTA.USE
+QUOTA.SET key limit window_ms        # create or replace; OK
+QUOTA.CHECK key                      # limit, used, remaining, reset_at
+QUOTA.USE key amount                 # 1 if it fits, else 0
+QUOTA.RESET key                      # used = 0; 1, or 0 if absent
+QUOTA.DELETE key                     # 1 if deleted, 0 if absent
+QUOTA.LIST                           # key, limit, used of the selected database, sorted
 ```
 
 ---
@@ -2398,13 +2425,13 @@ ROLLOUT.DELETE name                  # 1 if deleted, 0 if absent
 ---
 ## Rollups Commands
 
-`ROLLUP.*` command family (4 commands).
+A rollup is a hash key marked by `__rollup` (its interval) with each bucket as a field named by its start. It is per database, persisted and replicated; changes are recorded as `HSET` and `DEL`.
 
 ```
-ROLLUP.ADD
-ROLLUP.CREATE
-ROLLUP.DELETE
-ROLLUP.GET
+ROLLUP.CREATE name interval          # interval > 0; create or replace; OK
+ROLLUP.ADD name timestamp value      # add to the bucket floor(timestamp/interval)*interval; OK
+ROLLUP.GET name timestamp            # the bucket's sum, two decimals
+ROLLUP.DELETE name                   # 1 if deleted, 0 if absent
 ```
 
 ---
@@ -2434,14 +2461,14 @@ ROUTE.LIST name                      # pattern, target pairs sorted by pattern
 ---
 ## Sample Commands
 
-`SAMPLE.*` command family (5 commands).
+A reservoir is a hash key marked by `__sample` (its size) with `count` and the slots `0`, `1`, ...; the slot a value replaces is chosen at random and recorded, so a replica and a restart hold the same sample. It is per database, persisted and replicated; changes are recorded as `HSET` and `DEL`.
 
 ```
-SAMPLE.ADD
-SAMPLE.CREATE
-SAMPLE.GET
-SAMPLE.INFO
-SAMPLE.RESET
+SAMPLE.CREATE key size               # size <= 0 means 1000; create or replace; OK
+SAMPLE.ADD key value [value ...]     # replies how many were offered
+SAMPLE.GET key                       # the sampled values
+SAMPLE.INFO key                      # size (values held), total_count
+SAMPLE.RESET key                     # OK
 ```
 
 ---
@@ -2557,15 +2584,15 @@ SLOWLOG.RESET
 ---
 ## Spatial Index Commands
 
-`SPATIAL.*` command family (6 commands).
+An index is a hash key marked by `__spatial` with each point as a field named by its id (`lat lon data`). It is per database, persisted and replicated; changes are recorded as `HSET`, `HDEL` and `DEL`.
 
 ```
-SPATIAL.ADD
-SPATIAL.CREATE
-SPATIAL.DELETE
-SPATIAL.LIST
-SPATIAL.NEARBY
-SPATIAL.WITHIN
+SPATIAL.CREATE name                  # create or replace an empty index; OK
+SPATIAL.ADD name id lat lon [data]   # OK
+SPATIAL.NEARBY name lat lon radius_km  # id, distance pairs, nearest first
+SPATIAL.WITHIN name min_lat min_lon max_lat max_lon  # ids, sorted
+SPATIAL.DELETE name id               # 1 if deleted, 0 if absent
+SPATIAL.LIST                         # index names of the selected database, sorted
 ```
 
 ---

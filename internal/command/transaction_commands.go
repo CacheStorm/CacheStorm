@@ -3,7 +3,6 @@ package command
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"io"
 	"math"
 	"strconv"
@@ -416,41 +415,6 @@ func execQueued(ctx *Context, qc queuedCommand) (*resp.Value, *Context) {
 	default:
 		return resp.ArrayValue(values), &sub
 	}
-}
-
-func parseFloat(data []byte) (float64, error) {
-	var result float64
-	var negative bool
-	var decimal bool
-	var decimalPlaces float64 = 1
-	i := 0
-	if len(data) > 0 && data[0] == '-' {
-		negative = true
-		i = 1
-	}
-	for ; i < len(data); i++ {
-		if data[i] == '.' {
-			if decimal {
-				return 0, fmt.Errorf("not a float")
-			}
-			decimal = true
-			continue
-		}
-		if data[i] < '0' || data[i] > '9' {
-			return 0, fmt.Errorf("not a float")
-		}
-		result = result*10 + float64(data[i]-'0')
-		if decimal {
-			decimalPlaces *= 10
-		}
-	}
-	if decimal {
-		result /= decimalPlaces
-	}
-	if negative {
-		result = -result
-	}
-	return result, nil
 }
 
 // computeIntIncr parses current as a base-10 int64 and applies incr with an

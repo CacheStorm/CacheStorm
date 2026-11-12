@@ -89,6 +89,8 @@ var exclusiveWrites = map[string]bool{
 	"EVAL_RO": true, "EVALSHA_RO": true, "FCALL_RO": true,
 	"INVALIDATE": true, "ADDTAG": true, "REMTAG": true, "TAGLINK": true,
 	"TAGUNLINK": true, "SETTAG": true,
+	// They delete the keys matching a pattern.
+	"CACHE.BULKDEL": true, "CACHE.CLEAR": true, "COUNTER.RESETALL": true,
 	// The search indexes are shared by every database and an index is
 	// reachable through its aliases, so the index name does not order writes.
 	"FT.CREATE": true, "FT.DROPINDEX": true, "FT.ADD": true, "FT.DEL": true, "FT.ALTER": true, "FT.SUGADD": true, "FT.SUGDEL": true, "FT.SYNUPDATE": true, "FT.DICTADD": true, "FT.DICTDEL": true, "FT.DROP": true, "FT._CREATEIFNX": true, "FT._ALTERIFNX": true, "FT._DROPIFX": true,

@@ -21,6 +21,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
+	"github.com/cachestorm/cachestorm/internal/store"
 )
 
 // errInvalidPercentEncoding is returned for a '%' that is not followed by
@@ -1977,140 +1978,154 @@ func computeJSONDiff(json1, json2 string) jsonDiff {
 	return diff
 }
 
-var (
-	pools   = make(map[string]*ResourcePool)
-	poolsMu sync.RWMutex
-)
+// A pool is a hash marked by __pool holding its max size; head and tail
+// number the items, which are the fields i<n> from head to tail - 1. POOL.GET
+// takes the oldest item.
 
-type ResourcePool struct {
-	Name    string
-	Items   []string
-	MaxSize int
-	mu      sync.RWMutex
+const poolMarker = "__pool"
+
+type resourcePool struct {
+	max, head, tail int64
 }
 
+func readPool(ctx *Context, name string) (*resourcePool, error) {
+	h, err := readMarkedHash(ctx, name, poolMarker)
+	if err != nil || h == nil {
+		return nil, err
+	}
+	h.RLock()
+	m, _ := h.Get(poolMarker)
+	hd, _ := h.Get("head")
+	tl, _ := h.Get("tail")
+	n := h.Len()
+	h.RUnlock()
+	rec := &record{vals: map[string]string{"max": string(m), "head": string(hd), "tail": string(tl)}}
+	p := &resourcePool{rec.int("max"), rec.int("head"), rec.int("tail")}
+	if rec.bad || p.head > p.tail || int64(n) != 3+p.tail-p.head {
+		return nil, store.ErrWrongType
+	}
+	return p, nil
+}
+
+// POOL.CREATE name max_size makes an empty pool, replacing one at name.
 func cmdPOOLCREATE(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
+	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
-
-	name := ctx.ArgString(0)
-	maxSize := int(parseInt64(ctx.ArgString(1)))
-
-	poolsMu.Lock()
-	pools[name] = &ResourcePool{
-		Name:    name,
-		Items:   make([]string, 0),
-		MaxSize: maxSize,
+	max, err := parseNonNegative(ctx.ArgString(1), "max_size")
+	if err != nil {
+		return ctx.WriteError(err)
 	}
-	poolsMu.Unlock()
-
+	if max > maxExtensionSlots {
+		return ctx.WriteError(fmt.Errorf("ERR max_size must be at most %d", maxExtensionSlots))
+	}
+	if err := createMarked(ctx, ctx.ArgString(0), poolMarker, poolMarker, i64(max), "head", "0", "tail", "0"); err != nil {
+		return ctx.WriteError(err)
+	}
 	return ctx.WriteOK()
 }
 
+// POOL.GET name takes the oldest item, nil when the pool is missing or
+// empty.
 func cmdPOOLGET(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+	if ctx.ArgCount() != 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
-
 	name := ctx.ArgString(0)
-
-	poolsMu.RLock()
-	pool, exists := pools[name]
-	poolsMu.RUnlock()
-
-	if !exists {
+	p, err := readPool(ctx, name)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	if p == nil || p.head == p.tail {
+		ctx.PropagateAs()
 		return ctx.WriteNull()
 	}
-
-	pool.mu.Lock()
-	defer pool.mu.Unlock()
-
-	if len(pool.Items) == 0 {
-		return ctx.WriteNull()
+	field := "i" + i64(p.head)
+	r, err := readMarked(ctx, name, poolMarker)
+	if err != nil {
+		return ctx.WriteError(err)
 	}
-
-	item := pool.Items[0]
-	pool.Items = pool.Items[1:]
-
+	item, ok := r[field]
+	if !ok {
+		return ctx.WriteError(store.ErrWrongType)
+	}
+	h, err := lockHash(ctx, name)
+	if err != nil || h == nil {
+		return ctx.WriteError(errWrongTypeOr(true, err))
+	}
+	h.DeleteField(field)
+	h.Unlock()
+	if _, err := ctx.Store.ApplyHashPairs(name, false, [][]byte{[]byte("head"), []byte(i64(p.head + 1))}); err != nil {
+		return ctx.WriteError(err)
+	}
+	ctx.notify(store.NotifyHash, "hdel", name)
+	ctx.PropagateAs(
+		ExecutedCommand{Name: "HDEL", Args: [][]byte{[]byte(name), []byte(field)}, DB: ctx.DB},
+		ExecutedCommand{Name: "HSET", Args: [][]byte{[]byte(name), []byte("head"), []byte(i64(p.head + 1))}, DB: ctx.DB},
+	)
 	return ctx.WriteBulkString(item)
 }
 
+// POOL.PUT name item adds the item: 1, or 0 when the pool is full.
 func cmdPOOLPUT(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
+	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
-
 	name := ctx.ArgString(0)
-	item := ctx.ArgString(1)
-
-	poolsMu.RLock()
-	pool, exists := pools[name]
-	poolsMu.RUnlock()
-
-	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR pool not found"))
+	p, err := readPool(ctx, name)
+	if err == nil && p == nil {
+		err = errors.New("ERR pool not found")
 	}
-
-	pool.mu.Lock()
-	defer pool.mu.Unlock()
-
-	if len(pool.Items) >= pool.MaxSize {
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	if p.tail-p.head >= p.max {
+		ctx.PropagateAs()
 		return ctx.WriteInteger(0)
 	}
-
-	pool.Items = append(pool.Items, item)
+	if err := updateRecord(ctx, name, "i"+i64(p.tail), ctx.ArgString(1), "tail", i64(p.tail+1)); err != nil {
+		return ctx.WriteError(err)
+	}
 	return ctx.WriteInteger(1)
 }
 
+// POOL.CLEAR name empties the pool; OK.
 func cmdPOOLCLEAR(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+	if ctx.ArgCount() != 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
-
 	name := ctx.ArgString(0)
-
-	poolsMu.RLock()
-	pool, exists := pools[name]
-	poolsMu.RUnlock()
-
-	if !exists {
+	p, err := readPool(ctx, name)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	if p == nil || p.head == p.tail {
+		ctx.PropagateAs()
 		return ctx.WriteOK()
 	}
-
-	pool.mu.Lock()
-	pool.Items = make([]string, 0)
-	pool.mu.Unlock()
-
+	if err := replaceRecord(ctx, name, poolMarker, i64(p.max), "head", "0", "tail", "0"); err != nil {
+		return ctx.WriteError(err)
+	}
 	return ctx.WriteOK()
 }
 
 func cmdPOOLSTATS(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+	if ctx.ArgCount() != 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
-
 	name := ctx.ArgString(0)
-
-	poolsMu.RLock()
-	pool, exists := pools[name]
-	poolsMu.RUnlock()
-
-	if !exists {
+	p, err := readPool(ctx, name)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	if p == nil {
 		return ctx.WriteNull()
 	}
-
-	pool.mu.RLock()
-	defer pool.mu.RUnlock()
-
+	size := p.tail - p.head
 	return ctx.WriteArray([]*resp.Value{
-		resp.BulkString("name"),
-		resp.BulkString(pool.Name),
-		resp.BulkString("size"),
-		resp.IntegerValue(int64(len(pool.Items))),
-		resp.BulkString("max_size"),
-		resp.IntegerValue(int64(pool.MaxSize)),
-		resp.BulkString("available"),
-		resp.IntegerValue(int64(pool.MaxSize - len(pool.Items))),
+		resp.BulkString("name"), resp.BulkString(name),
+		resp.BulkString("size"), resp.IntegerValue(size),
+		resp.BulkString("max_size"), resp.IntegerValue(p.max),
+		resp.BulkString("available"), resp.IntegerValue(p.max - size),
 	})
 }

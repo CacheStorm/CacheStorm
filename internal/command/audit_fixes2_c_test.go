@@ -3,6 +3,7 @@ package command
 import (
 	"bytes"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -524,30 +525,47 @@ func TestAuditFix2CChainValidate(t *testing.T) {
 		t.Fatalf("intact chain VALIDATE = %d", v.Int)
 	}
 
-	chainsMu.Lock()
-	blocks := chains[name].Blocks
-	orig := *blocks[0]
-	blocks[0].Data = "forged"
-	chainsMu.Unlock()
+	// The blocks are fields of the chain's hash; tampering rewrites them.
+	block := func(i int) *Block {
+		e, _ := s.Get(name)
+		h := e.Value.(*store.HashValue)
+		h.RLock()
+		v, _ := h.Get(strconv.Itoa(i))
+		h.RUnlock()
+		b, err := decodeBlock(i, string(v))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+	put := func(b *Block) {
+		if _, err := s.ApplyHashPairs(name, false, [][]byte{[]byte(strconv.FormatInt(b.Index, 10)), []byte(b.encode())}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	orig := block(0)
+	forgedData := *orig
+	forgedData.Data = "forged"
+	put(&forgedData)
 	if v := auditFix2CRun(t, r, s, "CHAIN.VALIDATE", name); v.Int != 0 {
 		t.Fatalf("tampered genesis data must fail validation")
 	}
 
-	chainsMu.Lock()
-	*blocks[0] = orig
-	blocks[2].Timestamp++
-	chainsMu.Unlock()
+	put(orig)
+	b2 := block(2)
+	b2.Timestamp++
+	put(b2)
 	if v := auditFix2CRun(t, r, s, "CHAIN.VALIDATE", name); v.Int != 0 {
 		t.Fatalf("tampered timestamp must fail validation")
 	}
 
-	chainsMu.Lock()
-	blocks[2].Timestamp--
-	forged := *blocks[3]
+	b2.Timestamp--
+	put(b2)
+	forged := block(3)
 	forged.Data = "forged"
-	forged.Hash = computeBlockHash(&forged)
-	*blocks[3] = forged
-	chainsMu.Unlock()
+	forged.Hash = computeBlockHash(forged)
+	put(forged)
 	if v := auditFix2CRun(t, r, s, "CHAIN.VALIDATE", name); v.Int != 0 {
 		t.Fatalf("a rehashed block must break the next block's link")
 	}

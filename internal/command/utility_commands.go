@@ -3,7 +3,6 @@ package command
 import (
 	"fmt"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
@@ -57,63 +56,6 @@ func parseRateLimitDuration(arg, name string) (int64, error) {
 	return ms, nil
 }
 
-func cmdIDCREATE(ctx *Context) error {
-	if ctx.ArgCount() < 3 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	name := ctx.ArgString(0)
-	start := parseInt64(ctx.ArgString(1))
-	increment := parseInt64(ctx.ArgString(2))
-
-	prefix := ""
-	suffix := ""
-	padding := 0
-
-	for i := 3; i < ctx.ArgCount(); i++ {
-		arg := strings.ToUpper(ctx.ArgString(i))
-		switch arg {
-		case "PREFIX":
-			if i+1 < ctx.ArgCount() {
-				prefix = ctx.ArgString(i + 1)
-				i++
-			}
-		case "SUFFIX":
-			if i+1 < ctx.ArgCount() {
-				suffix = ctx.ArgString(i + 1)
-				i++
-			}
-		case "PADDING":
-			if i+1 < ctx.ArgCount() {
-				padding = int(parseInt64(ctx.ArgString(i + 1)))
-				if padding > maxIDPadding {
-					return ctx.WriteError(fmt.Errorf("ERR padding must be at most %d", maxIDPadding))
-				}
-				i++
-			}
-		}
-	}
-
-	store.GlobalIDGenerator.Create(name, start, increment, prefix, suffix, padding)
-
-	return ctx.WriteOK()
-}
-
-func cmdIDNEXT(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	name := ctx.ArgString(0)
-
-	id, _, exists := store.GlobalIDGenerator.Next(name)
-	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR sequence not found"))
-	}
-
-	return ctx.WriteBulkString(id)
-}
-
 // maxIDBatch bounds how many IDs one ID.NEXTN hands out, so a single call
 // cannot loop for hours or exhaust memory building the reply.
 const maxIDBatch = 1 << 16
@@ -121,75 +63,6 @@ const maxIDBatch = 1 << 16
 // maxIDPadding bounds the zero padding of a sequence's IDs; an int64 has at
 // most 19 digits.
 const maxIDPadding = 64
-
-func cmdIDNEXTN(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	name := ctx.ArgString(0)
-	count := parseInt64(ctx.ArgString(1))
-	if count < 1 || count > maxIDBatch {
-		return ctx.WriteError(fmt.Errorf("ERR count must be between 1 and %d", maxIDBatch))
-	}
-
-	ids, _, exists := store.GlobalIDGenerator.NextN(name, int(count))
-	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR sequence not found"))
-	}
-
-	results := make([]*resp.Value, len(ids))
-	for i, id := range ids {
-		results[i] = resp.BulkString(id)
-	}
-
-	return ctx.WriteArray(results)
-}
-
-func cmdIDCURRENT(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	name := ctx.ArgString(0)
-
-	id, num, exists := store.GlobalIDGenerator.Current(name)
-	if !exists {
-		return ctx.WriteNull()
-	}
-
-	return ctx.WriteArray([]*resp.Value{
-		resp.BulkString(id),
-		resp.IntegerValue(num),
-	})
-}
-
-func cmdIDSET(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	name := ctx.ArgString(0)
-	value := parseInt64(ctx.ArgString(1))
-
-	if store.GlobalIDGenerator.Set(name, value) {
-		return ctx.WriteOK()
-	}
-	return ctx.WriteError(fmt.Errorf("ERR sequence not found"))
-}
-
-func cmdIDDELETE(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
-	name := ctx.ArgString(0)
-
-	if store.GlobalIDGenerator.Delete(name) {
-		return ctx.WriteInteger(1)
-	}
-	return ctx.WriteInteger(0)
-}
 
 func cmdSNOWFLAKENEXT(ctx *Context) error {
 	nodeID := int64(1)

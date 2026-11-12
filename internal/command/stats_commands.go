@@ -4,9 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/rand/v2"
+	"sort"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
@@ -42,13 +43,6 @@ func RegisterStatsCommands(router *Router) {
 	router.Register(&CommandDef{Name: "HISTOGRAM.RESET", Handler: cmdHISTOGRAMRESET})
 	router.Register(&CommandDef{Name: "HISTOGRAM.INFO", Handler: cmdHISTOGRAMINFO})
 }
-
-var (
-	samplers     = make(map[string]*store.ReservoirSampler)
-	samplersMu   sync.RWMutex
-	histograms   = make(map[string]*store.Histogram)
-	histogramsMu sync.RWMutex
-)
 
 var (
 	errTDigestNoKey           = errors.New("ERR T-Digest: key does not exist")
@@ -482,277 +476,343 @@ func cmdTDIGESTMERGE(ctx *Context) error {
 	return ctx.WriteOK()
 }
 
+// SAMPLE and HISTOGRAM keep each object in a hash key marked by a field
+// naming its kind. Being keys they are per database, persisted, replicated
+// and removed by DEL and FLUSHALL; changes are recorded as HSET and DEL, so
+// a reservoir's random replacement replays as the slot it chose.
+
+const (
+	sampleMarker    = "__sample"
+	histogramMarker = "__histogram"
+)
+
+func parseFloatList(ctx *Context, from int) ([]float64, error) {
+	args := make([]string, ctx.ArgCount()-from)
+	for i := range args {
+		args[i] = ctx.ArgString(from + i)
+	}
+	return parseFloatArgs(args...)
+}
+
+// --- SAMPLE ---
+
+// A sampler's marker holds its reservoir size, count the values offered,
+// and the fields 0, 1, ... the reservoir's slots.
+
+type sampler struct {
+	size, count int64
+}
+
+func readSampler(ctx *Context, key string) (*sampler, error) {
+	h, err := readMarkedHash(ctx, key, sampleMarker)
+	if err != nil {
+		return nil, err
+	}
+	if h == nil {
+		return nil, errors.New("ERR sampler not found")
+	}
+	h.RLock()
+	size, _ := h.Get(sampleMarker)
+	count, _ := h.Get("count")
+	h.RUnlock()
+	rec := &record{vals: map[string]string{"size": string(size), "count": string(count)}}
+	sm := &sampler{rec.int("size"), rec.int("count")}
+	if rec.bad || sm.size <= 0 || sm.count < 0 {
+		return nil, store.ErrWrongType
+	}
+	return sm, nil
+}
+
+func (sm *sampler) slots() int64 { return min(sm.size, sm.count) }
+
+// SAMPLE.CREATE key size makes an empty reservoir of size slots, replacing
+// one at key. A size of 0 or less means 1000.
 func cmdSAMPLECREATE(ctx *Context) error {
-	if ctx.ArgCount() < 2 {
+	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
-
-	key := ctx.ArgString(0)
-	size := int(parseInt64(ctx.ArgString(1)))
-
+	size, err := parseInt64Arg(ctx.ArgString(1))
+	if err != nil {
+		return ctx.WriteError(err)
+	}
 	if size <= 0 {
 		size = 1000
 	}
-	// The reservoir is allocated at full size up front.
 	if size > maxExtensionSlots {
 		return ctx.WriteError(fmt.Errorf("ERR size must be at most %d", maxExtensionSlots))
 	}
-
-	samplersMu.Lock()
-	samplers[key] = store.NewReservoirSampler(size)
-	samplersMu.Unlock()
-
+	if err := createMarked(ctx, ctx.ArgString(0), sampleMarker, sampleMarker, i64(size), "count", "0"); err != nil {
+		return ctx.WriteError(err)
+	}
 	return ctx.WriteOK()
 }
 
+// SAMPLE.ADD key value [value ...] offers the values to the reservoir: how
+// many were offered.
 func cmdSAMPLEADD(ctx *Context) error {
 	if ctx.ArgCount() < 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
-
-	key := ctx.ArgString(0)
-
-	samplersMu.RLock()
-	rs, exists := samplers[key]
-	samplersMu.RUnlock()
-
-	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR sampler not found"))
+	values, err := parseFloatList(ctx, 1)
+	if err != nil {
+		return ctx.WriteError(err)
 	}
-
-	count := 0
-	for i := 1; i < ctx.ArgCount(); i++ {
-		v, err := parseFloat(ctx.Arg(i))
-		if err != nil {
-			continue
+	key := ctx.ArgString(0)
+	sm, err := readSampler(ctx, key)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	slots := map[int64]float64{}
+	for _, v := range values {
+		sm.count++
+		if sm.count <= sm.size {
+			slots[sm.count-1] = v
+		} else if j := rand.Int64N(sm.count); j < sm.size {
+			slots[j] = v
 		}
-		rs.Add(v)
-		count++
 	}
-
-	return ctx.WriteInteger(int64(count))
+	pairs := []string{"count", i64(sm.count)}
+	for slot, v := range slots {
+		pairs = append(pairs, i64(slot), f64(v))
+	}
+	if err := updateRecord(ctx, key, pairs...); err != nil {
+		return ctx.WriteError(err)
+	}
+	return ctx.WriteInteger(int64(len(values)))
 }
 
+// SAMPLE.GET key: the values in the reservoir.
 func cmdSAMPLEGET(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+	if ctx.ArgCount() != 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
-
 	key := ctx.ArgString(0)
-
-	samplersMu.RLock()
-	rs, exists := samplers[key]
-	samplersMu.RUnlock()
-
-	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR sampler not found"))
+	sm, err := readSampler(ctx, key)
+	if err != nil {
+		return ctx.WriteError(err)
 	}
-
-	data := rs.Get()
-	results := make([]*resp.Value, len(data))
-	for i, v := range data {
-		results[i] = resp.BulkString(strconv.FormatFloat(v, 'f', -1, 64))
+	r, err := readMarked(ctx, key, sampleMarker)
+	if err != nil {
+		return ctx.WriteError(err)
 	}
-
-	return ctx.WriteArray(results)
+	out := make([]*resp.Value, sm.slots())
+	for i := range out {
+		v, ok := r[strconv.Itoa(i)]
+		if !ok {
+			return ctx.WriteError(store.ErrWrongType)
+		}
+		out[i] = resp.BulkString(v)
+	}
+	return ctx.WriteArray(out)
 }
 
+// SAMPLE.RESET key empties the reservoir.
 func cmdSAMPLERESET(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+	if ctx.ArgCount() != 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
-
 	key := ctx.ArgString(0)
-
-	samplersMu.RLock()
-	rs, exists := samplers[key]
-	samplersMu.RUnlock()
-
-	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR sampler not found"))
+	sm, err := readSampler(ctx, key)
+	if err != nil {
+		return ctx.WriteError(err)
 	}
-
-	rs.Reset()
-
+	if err := replaceRecord(ctx, key, sampleMarker, i64(sm.size), "count", "0"); err != nil {
+		return ctx.WriteError(err)
+	}
 	return ctx.WriteOK()
 }
 
 func cmdSAMPLEINFO(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+	if ctx.ArgCount() != 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
-
-	key := ctx.ArgString(0)
-
-	samplersMu.RLock()
-	rs, exists := samplers[key]
-	samplersMu.RUnlock()
-
-	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR sampler not found"))
+	sm, err := readSampler(ctx, ctx.ArgString(0))
+	if err != nil {
+		return ctx.WriteError(err)
 	}
-
 	return ctx.WriteArray([]*resp.Value{
-		resp.BulkString("size"),
-		resp.IntegerValue(int64(rs.Size())),
-		resp.BulkString("total_count"),
-		resp.IntegerValue(rs.TotalCount()),
+		resp.BulkString("size"), resp.IntegerValue(sm.slots()),
+		resp.BulkString("total_count"), resp.IntegerValue(sm.count),
 	})
 }
 
+// --- HISTOGRAM ---
+
+// A histogram holds its min, max, width, count and sum, and each bucket
+// that has values as the field b<index>. Values below min fall in bucket
+// -1 and values from max on in the last bucket.
+
+type histogram struct {
+	min, max, width, sum float64
+	count                int64
+	buckets              map[int64]int64
+}
+
+func readHistogram(ctx *Context, key string) (*histogram, error) {
+	r, err := loadMarked(ctx, key, histogramMarker, "histogram")
+	if err != nil {
+		return nil, err
+	}
+	rec := &record{vals: r}
+	h := &histogram{min: rec.float("min"), max: rec.float("max"), width: rec.float("width"), sum: rec.float("sum"), count: rec.int("count"), buckets: map[int64]int64{}}
+	for f, v := range r {
+		idx, ok := strings.CutPrefix(f, "b")
+		if !ok {
+			continue
+		}
+		i, err1 := strconv.ParseInt(idx, 10, 64)
+		n, err2 := strconv.ParseInt(v, 10, 64)
+		if err1 != nil || err2 != nil {
+			return nil, store.ErrWrongType
+		}
+		h.buckets[i] = n
+	}
+	if rec.bad || h.width <= 0 {
+		return nil, store.ErrWrongType
+	}
+	return h, nil
+}
+
+func (h *histogram) bucket(v float64) int64 {
+	switch {
+	case v < h.min:
+		return -1
+	case v >= h.max:
+		return int64((h.max - h.min) / h.width)
+	}
+	return int64((v - h.min) / h.width)
+}
+
+func (h *histogram) mean() string {
+	if h.count == 0 {
+		return "0"
+	}
+	return f64(h.sum / float64(h.count))
+}
+
+// HISTOGRAM.CREATE key min max [width] makes an empty histogram, replacing
+// one at key. The width defaults to 1.
 func cmdHISTOGRAMCREATE(ctx *Context) error {
-	if ctx.ArgCount() < 3 {
+	if ctx.ArgCount() != 3 && ctx.ArgCount() != 4 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
-
-	key := ctx.ArgString(0)
-	min, err := parseFloat(ctx.Arg(1))
+	b, err := parseFloatList(ctx, 1)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
-	max, err := parseFloat(ctx.Arg(2))
-	if err != nil {
+	width := 1.0
+	if len(b) == 3 {
+		width = b[2]
+	}
+	if b[0] >= b[1] || width <= 0 {
+		return ctx.WriteError(errors.New("ERR min must be below max and width positive"))
+	}
+	if (b[1]-b[0])/width > maxExtensionSlots {
+		return ctx.WriteError(fmt.Errorf("ERR at most %d buckets", maxExtensionSlots))
+	}
+	if err := createMarked(ctx, ctx.ArgString(0), histogramMarker, histogramMarker, "1", "min", f64(b[0]), "max", f64(b[1]), "width", f64(width), "count", "0", "sum", "0"); err != nil {
 		return ctx.WriteError(err)
 	}
-	bucketWidth := 1.0
-
-	if ctx.ArgCount() >= 4 {
-		bw, err := parseFloat(ctx.Arg(3))
-		if err == nil && bw > 0 {
-			bucketWidth = bw
-		}
-	}
-
-	histogramsMu.Lock()
-	histograms[key] = store.NewHistogram(min, max, bucketWidth)
-	histogramsMu.Unlock()
-
 	return ctx.WriteOK()
 }
 
+// HISTOGRAM.ADD key value [value ...] counts the values: how many.
 func cmdHISTOGRAMADD(ctx *Context) error {
 	if ctx.ArgCount() < 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
-
+	values, err := parseFloatList(ctx, 1)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
 	key := ctx.ArgString(0)
-
-	// The histogram is mutated under the registry write lock. The readers
-	// (HISTOGRAM.INFO) read its fields under the registry read lock, so the
-	// two must exclude each other: adding to the histogram with no lock at
-	// all raced with every reader of the same histogram.
-	histogramsMu.Lock()
-	h, exists := histograms[key]
-	if !exists {
-		histogramsMu.Unlock()
-		return ctx.WriteError(fmt.Errorf("ERR histogram not found"))
+	h, err := readHistogram(ctx, key)
+	if err != nil {
+		return ctx.WriteError(err)
 	}
-
-	count := 0
-	for i := 1; i < ctx.ArgCount(); i++ {
-		v, err := parseFloat(ctx.Arg(i))
-		if err != nil {
-			continue
-		}
-		h.Add(v)
-		count++
+	touched := map[int64]bool{}
+	for _, v := range values {
+		b := h.bucket(v)
+		h.buckets[b]++
+		touched[b] = true
+		h.count++
+		h.sum += v
 	}
-	histogramsMu.Unlock()
-
-	return ctx.WriteInteger(int64(count))
+	if math.IsInf(h.sum, 0) {
+		return ctx.WriteError(errors.New("ERR sum would overflow"))
+	}
+	pairs := []string{"count", i64(h.count), "sum", f64(h.sum)}
+	for b := range touched {
+		pairs = append(pairs, "b"+i64(b), i64(h.buckets[b]))
+	}
+	if err := updateRecord(ctx, key, pairs...); err != nil {
+		return ctx.WriteError(err)
+	}
+	return ctx.WriteInteger(int64(len(values)))
 }
 
+// HISTOGRAM.GET key: each bucket's range and count, lowest first.
 func cmdHISTOGRAMGET(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+	if ctx.ArgCount() != 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
-
-	key := ctx.ArgString(0)
-
-	histogramsMu.RLock()
-	h, exists := histograms[key]
-	histogramsMu.RUnlock()
-
-	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR histogram not found"))
+	h, err := readHistogram(ctx, ctx.ArgString(0))
+	if err != nil {
+		return ctx.WriteError(err)
 	}
-
-	buckets := h.Get()
-	results := make([]*resp.Value, 0)
-	for k, v := range buckets {
-		results = append(results, resp.BulkString(k), resp.IntegerValue(v))
+	idx := make([]int64, 0, len(h.buckets))
+	for b := range h.buckets {
+		idx = append(idx, b)
 	}
-
-	return ctx.WriteArray(results)
+	sort.Slice(idx, func(i, j int) bool { return idx[i] < idx[j] })
+	out := make([]*resp.Value, 0, 2*len(idx))
+	for _, b := range idx {
+		lo, hi := h.min+float64(b)*h.width, h.min+float64(b+1)*h.width
+		out = append(out, resp.BulkString("["+f64(lo)+","+f64(hi)+")"), resp.IntegerValue(h.buckets[b]))
+	}
+	return ctx.WriteArray(out)
 }
 
 func cmdHISTOGRAMMEAN(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+	if ctx.ArgCount() != 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
-
-	key := ctx.ArgString(0)
-
-	histogramsMu.RLock()
-	h, exists := histograms[key]
-	histogramsMu.RUnlock()
-
-	if !exists {
-		return ctx.WriteError(fmt.Errorf("ERR histogram not found"))
+	h, err := readHistogram(ctx, ctx.ArgString(0))
+	if err != nil {
+		return ctx.WriteError(err)
 	}
-
-	return ctx.WriteBulkString(strconv.FormatFloat(h.Mean(), 'f', -1, 64))
+	return ctx.WriteBulkString(h.mean())
 }
 
+// HISTOGRAM.RESET key empties the histogram, keeping its range.
 func cmdHISTOGRAMRESET(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+	if ctx.ArgCount() != 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
-
 	key := ctx.ArgString(0)
-
-	histogramsMu.Lock()
-	h, exists := histograms[key]
-
-	if !exists {
-		histogramsMu.Unlock()
-		return ctx.WriteError(fmt.Errorf("ERR histogram not found"))
+	h, err := readHistogram(ctx, key)
+	if err != nil {
+		return ctx.WriteError(err)
 	}
-
-	h.Reset()
-
-	histogramsMu.Unlock()
+	if err := replaceRecord(ctx, key, histogramMarker, "1", "min", f64(h.min), "max", f64(h.max), "width", f64(h.width), "count", "0", "sum", "0"); err != nil {
+		return ctx.WriteError(err)
+	}
 	return ctx.WriteOK()
 }
 
 func cmdHISTOGRAMINFO(ctx *Context) error {
-	if ctx.ArgCount() < 1 {
+	if ctx.ArgCount() != 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
-
-	key := ctx.ArgString(0)
-
-	histogramsMu.RLock()
-	h, exists := histograms[key]
-
-	if !exists {
-		reply := fmt.Errorf("ERR histogram not found")
-		histogramsMu.RUnlock()
-		return ctx.WriteError(reply)
+	h, err := readHistogram(ctx, ctx.ArgString(0))
+	if err != nil {
+		return ctx.WriteError(err)
 	}
-
-	reply := []*resp.Value{
-		resp.BulkString("min"),
-		resp.BulkString(strconv.FormatFloat(h.Min, 'f', -1, 64)),
-		resp.BulkString("max"),
-		resp.BulkString(strconv.FormatFloat(h.Max, 'f', -1, 64)),
-		resp.BulkString("bucket_width"),
-		resp.BulkString(strconv.FormatFloat(h.BucketWidth, 'f', -1, 64)),
-		resp.BulkString("count"),
-		resp.IntegerValue(h.Count),
-		resp.BulkString("mean"),
-		resp.BulkString(strconv.FormatFloat(h.Mean(), 'f', -1, 64)),
-	}
-	histogramsMu.RUnlock()
-	return ctx.WriteArray(reply)
+	return ctx.WriteArray([]*resp.Value{
+		resp.BulkString("min"), resp.BulkString(f64(h.min)),
+		resp.BulkString("max"), resp.BulkString(f64(h.max)),
+		resp.BulkString("bucket_width"), resp.BulkString(f64(h.width)),
+		resp.BulkString("count"), resp.IntegerValue(h.count),
+		resp.BulkString("mean"), resp.BulkString(h.mean()),
+	})
 }
