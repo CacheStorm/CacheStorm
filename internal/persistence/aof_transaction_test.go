@@ -180,6 +180,7 @@ func TestRewriteSerializesConcurrentAppend(t *testing.T) {
 	if err := <-appended; err != nil {
 		t.Fatal(err)
 	}
+	ackAOF(t, w)
 	commands, err := NewAOFReader().Load(filepath.Join(dir, "appendonly.aof"))
 	if err != nil {
 		t.Fatal(err)
