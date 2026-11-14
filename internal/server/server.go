@@ -173,6 +173,7 @@ var writeCommands = map[string]bool{
 	"CACHE.LOCK": true, "CACHE.UNLOCK": true, "CACHE.REFRESH": true, "CACHE.BULKDEL": true, "CACHE.CLEAR": true,
 	"CAPTCHA.GENERATE": true, "CAPTCHA.VERIFY": true,
 	"SEQUENCE.NEXT": true, "SEQUENCE.RESET": true, "SEQUENCE.SET": true,
+	"GRAPH.CREATE": true, "GRAPH.DELETE": true, "GRAPH.ADDNODE": true, "GRAPH.DELNODE": true, "GRAPH.ADDEDGE": true, "GRAPH.DELEDGE": true,
 	"STATEM.CREATE": true, "STATEM.DELETE": true, "STATEM.ADDSTATE": true, "STATEM.ADDTRANS": true, "STATEM.TRIGGER": true, "STATEM.RESET": true,
 	"CHAINED.SET": true, "CHAINED.DEL": true,
 	"FLAG.CREATE": true, "FLAG.DELETE": true, "FLAG.ENABLE": true, "FLAG.DISABLE": true, "FLAG.TOGGLE": true, "FLAG.ADDVARIANT": true,

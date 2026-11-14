@@ -1104,12 +1104,11 @@ INVALIDATE user
 Graph commands operate on a named property graph: labeled nodes connected by
 directed, typed edges.
 
-> **Not implemented:** `GRAPH.QUERY` is registered but returns an empty result
-> set for every query — the query engine is not implemented. Use the commands
-> below to read and write graphs.
+A graph is a key: per database, persisted and replicated. `GRAPH.QUERY` runs
+read-only Cypher; see the Graph section of `commands.md` for what it accepts.
 
 ### GRAPH.CREATE
-Create a graph. Returns the existing graph if the name is already in use.
+Create an empty graph. An existing graph is kept.
 
 ```
 GRAPH.CREATE graphName
@@ -1210,10 +1209,13 @@ GRAPH.NEIGHBORS graphName nodeID [relation]
 ---
 
 ### GRAPH.QUERY
-Not implemented. Returns an empty result set for every query.
+Run a read-only Cypher query (`MATCH ... [WHERE ...] RETURN ...`). Replies
+with the column names, the rows and statistics, as RedisGraph does.
+`GRAPH.RO_QUERY` is the same command.
 
 ```
 GRAPH.QUERY graphName query
+GRAPH.QUERY social "MATCH (a:Person)-[:KNOWS]->(b) WHERE a.age > 30 RETURN a.name, count(b) AS friends ORDER BY friends DESC"
 ```
 
 ---

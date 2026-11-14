@@ -1,373 +1,75 @@
+// Package graph holds the graph model the GRAPH commands keep in a hash key
+// and the read-only Cypher subset GRAPH.QUERY runs over it.
 package graph
 
-import (
-	"fmt"
-	"reflect"
-	"sync"
-)
+import "sort"
 
+// Node is a graph node: an id, one label and string properties.
 type Node struct {
 	ID         uint64
 	Label      string
-	Properties map[string]interface{}
+	Properties map[string]string
 }
 
+// Edge is a directed relationship between two nodes.
 type Edge struct {
 	ID         uint64
 	From       uint64
 	To         uint64
 	Relation   string
-	Properties map[string]interface{}
+	Properties map[string]string
 }
 
-type Graph struct {
-	Name      string
-	Nodes     map[uint64]*Node
-	Edges     map[uint64]*Edge
-	NodeLabel map[string][]uint64
-	EdgeLabel map[string][]uint64
-	Adjacency map[uint64][]uint64
-	nextNode  uint64
-	nextEdge  uint64
-	mu        sync.RWMutex
+// Snapshot is a whole graph as a query reads it.
+type Snapshot struct {
+	nodes map[uint64]*Node
+	edges map[uint64]*Edge
+	// order lists node ids and edge ids ascending; out and in list each
+	// node's edges by id.
+	nodeOrder []uint64
+	out, in   map[uint64][]*Edge
+	edgeOrder []uint64
 }
 
-func NewGraph(name string) *Graph {
-	return &Graph{
-		Name:      name,
-		Nodes:     make(map[uint64]*Node),
-		Edges:     make(map[uint64]*Edge),
-		NodeLabel: make(map[string][]uint64),
-		EdgeLabel: make(map[string][]uint64),
-		Adjacency: make(map[uint64][]uint64),
-		nextNode:  1,
-		nextEdge:  1,
+// NewSnapshot indexes nodes and edges for querying. Edges whose endpoints
+// are missing are left out.
+func NewSnapshot(nodes []*Node, edges []*Edge) *Snapshot {
+	s := &Snapshot{
+		nodes: make(map[uint64]*Node, len(nodes)),
+		edges: make(map[uint64]*Edge, len(edges)),
+		out:   make(map[uint64][]*Edge),
+		in:    make(map[uint64][]*Edge),
 	}
-}
-
-func (g *Graph) AddNode(label string, props map[string]interface{}) *Node {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	node := &Node{
-		ID:         g.nextNode,
-		Label:      label,
-		Properties: props,
-	}
-	g.nextNode++
-
-	g.Nodes[node.ID] = node
-	g.NodeLabel[label] = append(g.NodeLabel[label], node.ID)
-
-	return node
-}
-
-func (g *Graph) GetNode(id uint64) (*Node, bool) {
-	g.mu.RLock()
-	defer g.mu.RUnlock()
-	node, ok := g.Nodes[id]
-	return node, ok
-}
-
-func (g *Graph) DeleteNode(id uint64) bool {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	node, exists := g.Nodes[id]
-	if !exists {
-		return false
-	}
-
-	delete(g.Nodes, id)
-
-	nodes := g.NodeLabel[node.Label]
-	newNodes := make([]uint64, 0)
 	for _, n := range nodes {
-		if n != id {
-			newNodes = append(newNodes, n)
+		s.nodes[n.ID] = n
+		s.nodeOrder = append(s.nodeOrder, n.ID)
+	}
+	sort.Slice(s.nodeOrder, func(i, j int) bool { return s.nodeOrder[i] < s.nodeOrder[j] })
+	sorted := append([]*Edge(nil), edges...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].ID < sorted[j].ID })
+	for _, e := range sorted {
+		if s.nodes[e.From] == nil || s.nodes[e.To] == nil {
+			continue
 		}
+		s.edges[e.ID] = e
+		s.edgeOrder = append(s.edgeOrder, e.ID)
+		s.out[e.From] = append(s.out[e.From], e)
+		s.in[e.To] = append(s.in[e.To], e)
 	}
-	// Info() counts labels as len(NodeLabel), so an emptied label must lose its key.
-	if len(newNodes) == 0 {
-		delete(g.NodeLabel, node.Label)
-	} else {
-		g.NodeLabel[node.Label] = newNodes
-	}
-
-	for edgeID, edge := range g.Edges {
-		if edge.From == id || edge.To == id {
-			g.deleteEdgeLocked(edgeID)
-		}
-	}
-
-	delete(g.Adjacency, id)
-
-	return true
+	return s
 }
 
-func (g *Graph) AddEdge(from, to uint64, relation string, props map[string]interface{}) (*Edge, error) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
+// Node returns the node with id.
+func (s *Snapshot) Node(id uint64) *Node { return s.nodes[id] }
 
-	if _, ok := g.Nodes[from]; !ok {
-		return nil, fmt.Errorf("source node %d not found", from)
+// Nodes returns the nodes in id order.
+func (s *Snapshot) Nodes() []*Node {
+	out := make([]*Node, len(s.nodeOrder))
+	for i, id := range s.nodeOrder {
+		out[i] = s.nodes[id]
 	}
-	if _, ok := g.Nodes[to]; !ok {
-		return nil, fmt.Errorf("target node %d not found", to)
-	}
-
-	edge := &Edge{
-		ID:         g.nextEdge,
-		From:       from,
-		To:         to,
-		Relation:   relation,
-		Properties: props,
-	}
-	g.nextEdge++
-
-	g.Edges[edge.ID] = edge
-	g.EdgeLabel[relation] = append(g.EdgeLabel[relation], edge.ID)
-	g.Adjacency[from] = append(g.Adjacency[from], to)
-
-	return edge, nil
+	return out
 }
 
-func (g *Graph) GetEdge(id uint64) (*Edge, bool) {
-	g.mu.RLock()
-	defer g.mu.RUnlock()
-	edge, ok := g.Edges[id]
-	return edge, ok
-}
-
-func (g *Graph) DeleteEdge(id uint64) bool {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	return g.deleteEdgeLocked(id)
-}
-
-func (g *Graph) deleteEdgeLocked(id uint64) bool {
-	edge, exists := g.Edges[id]
-	if !exists {
-		return false
-	}
-
-	delete(g.Edges, id)
-
-	edges := g.EdgeLabel[edge.Relation]
-	newEdges := make([]uint64, 0)
-	for _, e := range edges {
-		if e != id {
-			newEdges = append(newEdges, e)
-		}
-	}
-	// Same rule as NodeLabel: an emptied relation must lose its key so Info()
-	// stops counting a relation that no edge carries.
-	if len(newEdges) == 0 {
-		delete(g.EdgeLabel, edge.Relation)
-	} else {
-		g.EdgeLabel[edge.Relation] = newEdges
-	}
-
-	neighbors := g.Adjacency[edge.From]
-	for i, neighbor := range neighbors {
-		if neighbor == edge.To {
-			g.Adjacency[edge.From] = append(neighbors[:i], neighbors[i+1:]...)
-			break
-		}
-	}
-
-	return true
-}
-
-type QueryResult struct {
-	Columns []string
-	Data    [][]interface{}
-}
-
-func (g *Graph) Query(query string) (*QueryResult, error) {
-	return &QueryResult{
-		Columns: []string{},
-		Data:    [][]interface{}{},
-	}, nil
-}
-
-func (g *Graph) QueryNodes(label string, filters map[string]interface{}) []*Node {
-	g.mu.RLock()
-	defer g.mu.RUnlock()
-
-	var nodes []*Node
-
-	if label == "" {
-		for _, node := range g.Nodes {
-			nodes = append(nodes, node)
-		}
-	} else {
-		ids := g.NodeLabel[label]
-		for _, id := range ids {
-			if node, ok := g.Nodes[id]; ok {
-				nodes = append(nodes, node)
-			}
-		}
-	}
-
-	if len(filters) == 0 {
-		return nodes
-	}
-
-	result := make([]*Node, 0)
-	for _, node := range nodes {
-		match := true
-		for k, v := range filters {
-			property := node.Properties[k]
-			propertyValue := reflect.ValueOf(property)
-			var equal bool
-			if propertyValue.IsValid() && !propertyValue.Comparable() {
-				equal = reflect.DeepEqual(property, v)
-			} else {
-				equal = property == v
-			}
-			if !equal {
-				match = false
-				break
-			}
-		}
-		if match {
-			result = append(result, node)
-		}
-	}
-
-	return result
-}
-
-func (g *Graph) QueryEdges(relation string) []*Edge {
-	g.mu.RLock()
-	defer g.mu.RUnlock()
-
-	var edges []*Edge
-
-	if relation == "" {
-		for _, edge := range g.Edges {
-			edges = append(edges, edge)
-		}
-	} else {
-		ids := g.EdgeLabel[relation]
-		for _, id := range ids {
-			if edge, ok := g.Edges[id]; ok {
-				edges = append(edges, edge)
-			}
-		}
-	}
-
-	return edges
-}
-
-func (g *Graph) Neighbors(nodeID uint64, relation string) []*Node {
-	g.mu.RLock()
-	defer g.mu.RUnlock()
-
-	neighbors := make([]*Node, 0)
-	if relation != "" {
-		for _, edgeID := range g.EdgeLabel[relation] {
-			edge := g.Edges[edgeID]
-			if edge != nil && edge.From == nodeID {
-				if node, ok := g.Nodes[edge.To]; ok {
-					neighbors = append(neighbors, node)
-				}
-			}
-		}
-		return neighbors
-	}
-	for _, id := range g.Adjacency[nodeID] {
-		if node, ok := g.Nodes[id]; ok {
-			neighbors = append(neighbors, node)
-		}
-	}
-
-	return neighbors
-}
-
-func (g *Graph) NodeCount() int {
-	g.mu.RLock()
-	defer g.mu.RUnlock()
-	return len(g.Nodes)
-}
-
-func (g *Graph) EdgeCount() int {
-	g.mu.RLock()
-	defer g.mu.RUnlock()
-	return len(g.Edges)
-}
-
-func (g *Graph) Info() map[string]interface{} {
-	g.mu.RLock()
-	defer g.mu.RUnlock()
-
-	return map[string]interface{}{
-		"name":      g.Name,
-		"nodes":     len(g.Nodes),
-		"edges":     len(g.Edges),
-		"labels":    len(g.NodeLabel),
-		"relations": len(g.EdgeLabel),
-	}
-}
-
-type GraphManager struct {
-	mu     sync.RWMutex
-	graphs map[string]*Graph
-}
-
-var globalGraphManager = NewGraphManager()
-
-func NewGraphManager() *GraphManager {
-	return &GraphManager{
-		graphs: make(map[string]*Graph),
-	}
-}
-
-func GetGraphManager() *GraphManager {
-	return globalGraphManager
-}
-
-func (gm *GraphManager) Create(name string) *Graph {
-	gm.mu.Lock()
-	defer gm.mu.Unlock()
-
-	if g, exists := gm.graphs[name]; exists {
-		return g
-	}
-
-	graph := NewGraph(name)
-	gm.graphs[name] = graph
-	return graph
-}
-
-func (gm *GraphManager) Get(name string) (*Graph, bool) {
-	gm.mu.RLock()
-	defer gm.mu.RUnlock()
-	g, ok := gm.graphs[name]
-	return g, ok
-}
-
-func (gm *GraphManager) Delete(name string) bool {
-	gm.mu.Lock()
-	defer gm.mu.Unlock()
-
-	if _, exists := gm.graphs[name]; !exists {
-		return false
-	}
-
-	delete(gm.graphs, name)
-	return true
-}
-
-func (gm *GraphManager) List() []string {
-	gm.mu.RLock()
-	defer gm.mu.RUnlock()
-
-	names := make([]string, 0, len(gm.graphs))
-	for name := range gm.graphs {
-		names = append(names, name)
-	}
-	return names
-}
+// Out returns the edges leaving id, in id order.
+func (s *Snapshot) Out(id uint64) []*Edge { return s.out[id] }

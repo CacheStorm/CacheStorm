@@ -60,7 +60,7 @@ A high-performance in-memory data store written in Go. **about 1,200 commands**,
 | **JSON** | 14 | JSON document operations |
 | **Time Series** | 12 | Time-series data |
 | **Search** | 12 | Full-text search |
-| **Graph** | 12 | Graph database operations (`GRAPH.QUERY` not implemented) |
+| **Graph** | 13 | Property graphs as keys, with read-only Cypher queries (`GRAPH.QUERY`) |
 | **Probabilistic** | 20+ | Bloom/Cuckoo filters, Count-Min Sketch |
 | **Distributed** | 100+ | Master-replica replication; Redis Cluster mode with replicas, failover and resharding |
 | **Caching** | 50+ | Cache warming, invalidation |

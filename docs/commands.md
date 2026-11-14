@@ -510,11 +510,18 @@ GRAPH.GETEDGE graphName edgeID
 GRAPH.DELEDGE graphName edgeID
 GRAPH.NEIGHBORS graphName nodeID [relation]
 GRAPH.QUERY graphName query
+GRAPH.RO_QUERY graphName query
 ```
 
-> **Not implemented:** `GRAPH.QUERY` is registered and returns an empty
-> result set for every query; the query engine is not implemented yet. Use the
-> explicit graph commands above to read and write graphs.
+A graph is a hash key marked by a `__graph` field: nodes are its fields `n:<id>` and edges `e:<id>`, so a graph belongs to the selected database, is saved in the RDB and the AOF (recorded as `HSET`, `HDEL` and `DEL`), is replicated, and goes with `DEL` and `FLUSHALL`; a key holding anything else answers `WRONGTYPE`. Ids count up from 1 and are not reused. Property values are strings. `GRAPH.ADDNODE` and `GRAPH.ADDEDGE` make the graph when it is missing; deleting a node deletes its edges.
+
+`GRAPH.QUERY` (and `GRAPH.RO_QUERY`) runs a read-only subset of Cypher and replies as RedisGraph does: the column names, the rows, and two statistics lines. Nodes reply as `[[id, n], [labels, [label]], [properties, [[key, value], ...]]]` and edges as `[[id, n], [type, t], [src_node, n], [dest_node, n], [properties, ...]]`. A query is `MATCH pattern[, pattern ...] [MATCH ...] [WHERE condition] RETURN [DISTINCT] item [AS name], ... [ORDER BY item [ASC|DESC], ...] [SKIP n] [LIMIT n]`:
+
+- Patterns: `(n:Label {key: value})`, joined by `-[r:TYPE|OTHER {key: value}]->`, `<-[...]-` or `-[...]-` (either direction; `-->`, `<--` and `--` without brackets). Each part is optional. A relationship is matched once per row, as Cypher requires.
+- Conditions: `=`, `<>`, `<`, `<=`, `>`, `>=`, `IN [list]`, `CONTAINS`, `STARTS WITH`, `ENDS WITH`, `IS [NOT] NULL`, `AND`, `OR`, `XOR`, `NOT`, arithmetic, and the functions `id`, `labels`, `type`, `toLower`, `toUpper`, `toString`, `toInteger`, `toFloat`, `size` and `abs`. A string property compares with a number as the number it reads as, so `n.age > 30` works on `age "34"`.
+- RETURN items: expressions, and the aggregates `count(*)`, `count([DISTINCT] x)`, `sum`, `avg`, `min`, `max` and `collect`, which group by the other items.
+
+Writing clauses (`CREATE`, `MERGE`, `SET`, `DELETE`, `REMOVE`), `OPTIONAL MATCH`, `WITH`, `UNWIND`, parameters and variable-length relationships are refused with an error; write with the GRAPH commands above. A query whose MATCH finds more than 250,000 rows fails.
 
 ---
 

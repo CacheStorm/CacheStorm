@@ -106,7 +106,7 @@ The bus lives in `internal/cluster` (`msg.go`, `bus.go`, `gossip.go`) and follow
   - **Gossip.** The gossip section adds nodes, unless they are blacklisted by `CLUSTER FORGET` for 60 s. It also carries failure reports from masters, which are valid for 2 × `node_timeout`.
   - **FAIL.** A PFAIL node reported by a majority of the slot-owning masters (this node counted) becomes FAIL, and a FAIL message is broadcast. A FAIL master that answers again is cleared after 2 × `node_timeout`; a replica, or a master with no slots, is cleared at once.
   - **PUBLISH.** A PUBLISH from a known node is delivered to the local subscribers only, so it is never forwarded again.
-- **Cluster state.** The state is computed at every change: slot coverage (when `require_full_coverage` is set) and a majority of reachable slot-owning masters. Redis's writable delay after startup and its rejoin delay after a partition are not implemented.
+- **Cluster state.** The state is computed at every change: slot coverage (when `require_full_coverage` is set) and a majority of reachable slot-owning masters. A master restarted from `nodes.conf` waits 2 s, and one that was on the minority side of a partition waits the node timeout (0.5–5 s), before serving writes, as Redis does.
 - **nodes.conf.** The file is saved after every config change: a node added, renamed or removed, an epoch change, a slot change, a FAIL set or cleared, or an address change.
 - **Tests.** The tests in `internal/server/cluster_bus_test.go` start in-process clusters with a 400 ms `node_timeout`. `scripts/cluster-smoke.sh` runs `redis-cli --cluster create`/`check` (Redis 7.4) against three processes.
 
@@ -154,7 +154,7 @@ The failover code is in `internal/cluster/failover.go` and follows `cluster_lega
   - A manual failover that has not finished in 5 s is abandoned and the master resumes.
   - `FORCE` skips the master: the election starts at once.
   - `TAKEOVER` bumps the config epoch without consensus (`clusterBumpConfigEpochWithoutConsensus`) and promotes without an election.
-- **Not implemented.** Replica migration to orphaned masters, `cluster-replica-no-failover` (the `nofailover` flag is carried but cannot be set) and the writable delay after a failover.
+- **Replica migration and delays.** A replica moves to a master that lost its last working replica (`cluster-migration-barrier`, `cluster-allow-replica-migration`); `cluster-replica-no-failover` keeps a replica from starting an automatic failover; a master waits before serving writes after a partition heals or a restart. See `09-cluster.md`.
 - **Tests.**
   - `internal/server/cluster_failover_test.go` runs 3 masters + 3 replicas in process with a 400 ms `node_timeout`. It covers the REPLICATE errors, NODES/SLOTS/SHARDS/REPLICAS shape, READONLY/READWRITE and MOVED, write propagation, automatic failover after a master is stopped (about 1.5 s) with the old master rejoining as a replica, and a manual failover under a concurrent writer that loses no acknowledged write. It also covers FORCE, TAKEOVER and the FORCE-needed error.
   - `internal/cluster/failover_test.go` checks the vote rules and the replica rank.
