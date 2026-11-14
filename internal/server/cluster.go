@@ -221,6 +221,8 @@ func (s *Server) dropSlotKeys(slot int) {
 		if aof := s.aof(); aof != nil {
 			if err := aof.AppendDB(0, "DEL", args); err != nil {
 				logger.Error().Err(err).Msg("AOF append failed")
+			} else {
+				s.syncRemoval(aof)
 			}
 		}
 		s.repl.Feed(0, "DEL", args)

@@ -80,6 +80,7 @@ func TestAOFRewriteKeepsAppendsMadeWhileItRuns(t *testing.T) {
 		"SET after 6",
 		"SELECT 0", "SET after0 0",
 	}
+	ackAOF(t, w)
 	if got := loadNames(t, path); strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Fatalf("AOF:\n got %q\nwant %q", got, want)
 	}
@@ -100,6 +101,7 @@ func TestAOFRewriteWithoutAppendsEndsInDatabaseZero(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{"SELECT 3", "SET k v", "SELECT 0", "SET z 0"}
+	ackAOF(t, w)
 	if got := loadNames(t, path); strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Fatalf("AOF:\n got %q\nwant %q", got, want)
 	}

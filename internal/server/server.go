@@ -680,6 +680,9 @@ func (s *Server) installCommitHooks() {
 				logger.Error().Err(err).Str("cmd", cmd).Msg("AOF append failed")
 				return errAOFUnavailable
 			}
+			if err := s.commitAOF(aof, ctx.DeferSync); err != nil {
+				return err
+			}
 		}
 		s.repl.Feed(db, upperCmd, args)
 		return nil
@@ -711,6 +714,9 @@ func (s *Server) installCommitHooks() {
 					logger.Error().Err(err).Msg("AOF transaction append failed")
 					return errAOFUnavailable
 				}
+				if err := s.commitAOF(aof, ctx.DeferSync); err != nil {
+					return err
+				}
 			}
 			s.repl.FeedTransaction(writes)
 			return nil
@@ -718,7 +724,12 @@ func (s *Server) installCommitHooks() {
 }
 
 // aof returns the AOF writer, nil while the AOF is off.
-func (s *Server) aof() *persistence.AOFWriter { return s.aofW.Load() }
+func (s *Server) aof() *persistence.AOFWriter {
+	if s == nil {
+		return nil
+	}
+	return s.aofW.Load()
+}
 
 func (s *Server) Start(_ context.Context) (retErr error) {
 	s.lifecycleMu.Lock()
@@ -961,6 +972,10 @@ func (s *Server) acceptLoop() {
 		c.dbs = s.dbs
 		c.srv = s
 		c.sink.beforeWrite = s.writeOutAOF
+		c.sink.unsynced = func(mark int64) bool {
+			aof := s.aof()
+			return aof != nil && aof.Unsynced(mark)
+		}
 
 		// Apply configured timeouts
 		if wt := s.cfg.Server.WriteTimeoutDuration(); wt > 0 {

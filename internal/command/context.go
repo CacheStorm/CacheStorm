@@ -82,6 +82,10 @@ type Context struct {
 	FromMaster   bool
 	Replaying    bool
 	LegacyReplay bool
+	// DeferSync is set when more pipelined commands of the connection
+	// follow: under appendfsync always the fsync before their replies go
+	// out covers this command's writes too, instead of one of its own.
+	DeferSync bool
 
 	// InExec is set while EXEC runs a queued command. A blocking command
 	// must not wait inside a transaction: Redis answers it as if the timeout

@@ -71,6 +71,7 @@ func TestAOFRecordsDatabaseSwitches(t *testing.T) {
 		"MULTI", "SET d 3", "SELECT 5", "SET e 5", "EXEC",
 		"SELECT 0", "SET f 0",
 	}
+	ackAOF(t, w)
 	if got := loadNames(t, path); strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Fatalf("AOF:\n got %q\nwant %q", got, want)
 	}
@@ -82,6 +83,7 @@ func TestAOFUnknownDatabaseStartsWithSelect(t *testing.T) {
 	if err := w.AppendDB(0, "SET", [][]byte{[]byte("a"), []byte("1")}); err != nil {
 		t.Fatal(err)
 	}
+	ackAOF(t, w)
 	if got := loadNames(t, path); len(got) != 2 || got[0] != "SELECT 0" {
 		t.Fatalf("AOF: %q", got)
 	}
@@ -109,4 +111,13 @@ func TestAOFRewriteCoversEveryDatabase(t *testing.T) {
 		t.Fatalf("rewrite: got %q want %q", got, want)
 	}
 	_ = os.Remove(path)
+}
+
+// ackAOF does what the server does before replies go out: the appends they
+// acknowledge reach the file, and under appendfsync always are fsynced.
+func ackAOF(t *testing.T, w *AOFWriter) {
+	t.Helper()
+	if err := w.WriteOut(); err != nil {
+		t.Fatal(err)
+	}
 }

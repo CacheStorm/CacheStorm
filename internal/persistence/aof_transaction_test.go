@@ -24,6 +24,7 @@ func TestRewriteFailureKeepsDurableWriter(t *testing.T) {
 			if err := w.AppendDB(3, "SET", [][]byte{[]byte("old"), []byte("v")}); err != nil {
 				t.Fatal(err)
 			}
+			ackAOF(t, w)
 			before, err := os.ReadFile(path)
 			if err != nil {
 				t.Fatal(err)
@@ -72,6 +73,7 @@ func TestRewriteFailureKeepsDurableWriter(t *testing.T) {
 			if err := w.AppendDB(0, "SET", [][]byte{[]byte("after"), []byte("durable")}); err != nil {
 				t.Fatal(err)
 			}
+			ackAOF(t, w)
 			commands, err := NewAOFReader().Load(path)
 			if err != nil {
 				t.Fatal(err)
@@ -113,6 +115,7 @@ func TestRewriteRollbackFailurePreservesBackupAndRejectsWrites(t *testing.T) {
 	if err := w.Append("SET", [][]byte{[]byte("old"), []byte("v")}); err != nil {
 		t.Fatal(err)
 	}
+	ackAOF(t, w)
 	before, err := os.ReadFile(filepath.Join(dir, "appendonly.aof"))
 	if err != nil {
 		t.Fatal(err)
@@ -203,6 +206,7 @@ func TestRewriteRollbackSyncFailureReportsRecoveryPath(t *testing.T) {
 	if err := w.Append("SET", [][]byte{[]byte("old"), []byte("v")}); err != nil {
 		t.Fatal(err)
 	}
+	ackAOF(t, w)
 	before, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
@@ -248,6 +252,7 @@ func TestRewriteDoesNotLoseWriterOnReopenFailure(t *testing.T) {
 	if err := w.AppendDB(0, "SET", [][]byte{[]byte("after"), []byte("durable")}); err != nil {
 		t.Fatal(err)
 	}
+	ackAOF(t, w)
 	commands, err := NewAOFReader().Load(filepath.Join(dir, "appendonly.aof"))
 	if err != nil {
 		t.Fatal(err)

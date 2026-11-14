@@ -394,6 +394,9 @@ func (s *Server) recordWrites(cmds []command.ExecutedCommand) error {
 			logger.Error().Err(err).Msg("AOF append failed")
 			return errAOFUnavailable
 		}
+		if err := s.commitAOF(aof, false); err != nil {
+			return err
+		}
 	}
 	s.repl.FeedTransaction(cmds)
 	return nil

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/cachestorm/cachestorm/internal/acl"
@@ -156,6 +157,8 @@ type Connection struct {
 	// reads into wake, which src then hands to a fresh buffer first.
 	src  readSource
 	wake [128]byte
+	// raw is the plain socket under conn, which awaitInput waits on.
+	raw syscall.RawConn
 }
 
 // readSource is what a connection's read buffer reads from: what the idle
@@ -163,6 +166,11 @@ type Connection struct {
 type readSource struct {
 	conn    net.Conn
 	pending []byte
+	// direct makes a read go straight to the socket fd without waiting,
+	// while the poller says it is readable; directErr is what it met.
+	direct    bool
+	fd        int
+	directErr error
 }
 
 func (s *readSource) Read(p []byte) (int, error) {
@@ -170,6 +178,18 @@ func (s *readSource) Read(p []byte) (int, error) {
 		n := copy(p, s.pending)
 		s.pending = s.pending[n:]
 		return n, nil
+	}
+	if s.direct {
+		n, err := readNonblocking(s.fd, p)
+		if n > 0 {
+			store.GlobalMetrics.RecordBytesIn(int64(n))
+			return n, nil
+		}
+		if err == nil {
+			err = io.EOF
+		}
+		s.directErr = err
+		return 0, err
 	}
 	return s.conn.Read(p)
 }
@@ -198,22 +218,58 @@ func (c *Connection) awaitInput() error {
 		readerPool(c.readBufSize).Put(c.bufReader)
 		c.bufReader = nil
 	}
-	for {
+	br := c.readWhenReadable()
+	for br == nil {
 		n, err := c.conn.Read(c.wake[:])
 		if n > 0 {
 			// An error that came with data is met again on the next read.
 			c.src.pending = c.wake[:n]
+			br = readerPool(c.readBufSize).Get().(*bufio.Reader)
+			br.Reset(&c.src)
 			break
 		}
 		if err != nil {
 			return err
 		}
 	}
-	br := readerPool(c.readBufSize).Get().(*bufio.Reader)
-	br.Reset(&c.src)
 	c.bufReader = br
 	c.reader.Reset(br)
 	return nil
+}
+
+// readWhenReadable reads the socket straight into a pooled buffer, and
+// while it holds nothing waits on the poller with the buffer back in its
+// pool: two reads per pipeline (the one that meets EAGAIN and the one that
+// gets it) where the wake buffer took three, and an idle connection still
+// holds no buffer. It returns nil when it cannot (TLS, a deadline, an
+// error or end of input), and the wake read then meets the same condition
+// and reports it.
+func (c *Connection) readWhenReadable() *bufio.Reader {
+	if c.raw == nil {
+		return nil
+	}
+	pool := readerPool(c.readBufSize)
+	var br *bufio.Reader
+	err := c.raw.Read(func(fd uintptr) bool {
+		br = pool.Get().(*bufio.Reader)
+		c.src.fd, c.src.direct, c.src.directErr = int(fd), true, nil
+		br.Reset(&c.src)
+		_, perr := br.Peek(1)
+		c.src.direct = false
+		if perr == nil {
+			return true
+		}
+		br.Reset(nil)
+		pool.Put(br)
+		br = nil
+		return !wouldBlock(c.src.directErr)
+	})
+	if err != nil && br != nil {
+		br.Reset(nil)
+		pool.Put(br)
+		br = nil
+	}
+	return br
 }
 
 // maxGateBatch bounds how many pipelined commands run under one gate hold
@@ -441,12 +497,56 @@ type replySink struct {
 	conn net.Conn
 	// beforeWrite runs before output goes to the socket: it hands the AOF
 	// what the replies acknowledge.
-	beforeWrite func()
+	beforeWrite func() error
 	held        bool
 	buf         bytes.Buffer
 	// big is a buffer from bigReplyBuffers that the held output moved to
 	// once it outgrew maxKeptReplyBuffer; it goes back at release.
 	big *bytes.Buffer
+	// deferred are the held replies of writes whose fsync, under
+	// appendfsync always, is the one made before the output goes out;
+	// unsynced reports whether a mark is still not fsynced.
+	deferred []deferredReply
+	unsynced func(mark int64) bool
+}
+
+// deferredReply is where a deferred write's reply lies in the held output,
+// and how much of the AOF must be fsynced before it may go out.
+type deferredReply struct {
+	start, end int
+	mark       int64
+}
+
+// deferWrite records that the held output from start on is the reply of a
+// write appended up to mark, whose fsync is left to the release.
+func (s *replySink) deferWrite(start int, mark int64) {
+	if end := s.pending(); end > start {
+		s.deferred = append(s.deferred, deferredReply{start: start, end: end, mark: mark})
+	}
+}
+
+// failDeferred replaces the replies of deferred writes that were not
+// fsynced with MISCONF, as each would have got with an fsync of its own,
+// so the pipeline stays aligned and no reply acknowledges a write a crash
+// can lose. Every other write's fsync was its own, before its reply.
+func (s *replySink) failDeferred(b *bytes.Buffer) {
+	if s.unsynced == nil || len(s.deferred) == 0 {
+		return
+	}
+	out := b.Bytes()
+	var fixed bytes.Buffer
+	prev := 0
+	for _, d := range s.deferred {
+		if !s.unsynced(d.mark) || d.start < prev || d.end > len(out) {
+			continue
+		}
+		fixed.Write(out[prev:d.start])
+		fixed.WriteString("-" + errAOFUnavailable.Error() + "\r\n")
+		prev = d.end
+	}
+	fixed.Write(out[prev:])
+	b.Reset()
+	b.Write(fixed.Bytes())
 }
 
 // maxHeldReplies bounds how much pipelined output is kept before it is
@@ -489,7 +589,10 @@ func (s *replySink) Write(p []byte) (int, error) {
 		return 0, err
 	}
 	if s.beforeWrite != nil {
-		s.beforeWrite()
+		// release left no deferred reply; a failure is logged and kept.
+		if err := s.beforeWrite(); err != nil {
+			s.deferred = s.deferred[:0]
+		}
 	}
 	return s.conn.Write(p)
 }
@@ -506,9 +609,10 @@ func (s *replySink) release() error {
 	if b.Len() == 0 {
 		return nil
 	}
-	if s.beforeWrite != nil {
-		s.beforeWrite()
+	if s.beforeWrite != nil && s.beforeWrite() != nil {
+		s.failDeferred(b)
 	}
+	s.deferred = s.deferred[:0]
 	_, err := s.conn.Write(b.Bytes())
 	b.Reset()
 	if s.big != nil {
@@ -572,6 +676,7 @@ func newConnection(id int64, conn net.Conn, s *store.Store, r *command.Router, p
 	}
 	c.info.multi = -1
 	c.src.conn = cc
+	c.raw = rawSocket(conn)
 	c.bufReader = readerPool(opts.readBufferSize).Get().(*bufio.Reader)
 	c.bufReader.Reset(&c.src)
 	c.reader = resp.NewReader(c.bufReader)
@@ -798,6 +903,11 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 			defer c.blocked.Store(false)
 		}
 		var err error
+		// A write whose fsync was left to the end of the pipeline: its
+		// reply starts at replyStart, and is replaced by MISCONF if that
+		// fsync fails.
+		var deferredMark int64
+		var replyStart int
 		c.sink.hold()
 		if c.srv != nil && c.srv.refuseOnReplica(ctx) {
 			c.releaseGate()
@@ -835,7 +945,19 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 				c.releaseGate()
 			}
 			errsBefore := c.writer.Errors()
+			aof := c.srv.aof()
+			var appended int64
+			if aof != nil {
+				appended = aof.Appended()
+				ctx.DeferSync = c.hasPending()
+				replyStart = c.sink.pending() + c.writer.Buffered()
+			}
 			err = c.router.Execute(ctx)
+			if aof != nil {
+				if now := aof.Appended(); now != appended && ctx.DeferSync {
+					deferredMark = now
+				}
+			}
 			c.srv.trackCommand(ctx, err != nil || c.writer.Errors() != errsBefore)
 			if c.heldGate != nil {
 				if c.keepGate(c.heldGate, ctx, stopMerge != nil) {
@@ -973,6 +1095,9 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 		// so a pipeline of N commands costs one socket write instead of N.
 		if err := c.writer.Flush(); err != nil {
 			return true
+		}
+		if deferredMark != 0 {
+			c.sink.deferWrite(replyStart, deferredMark)
 		}
 		if (!c.hasPending() && !c.commandBuffered()) || c.sink.pending() >= maxHeldReplies || c.subscriber != nil || c.killed.Load() {
 			// The gate is never held across a socket write: a client that

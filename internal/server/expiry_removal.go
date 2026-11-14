@@ -25,6 +25,8 @@ func (s *Server) recordRemoval(st *store.Store, key string) {
 	if aof := s.aof(); aof != nil {
 		if err := aof.AppendDB(dbIndex, "DEL", [][]byte{[]byte(key)}); err != nil {
 			logger.Error().Err(err).Msg("AOF removal append failed")
+		} else {
+			s.syncRemoval(aof)
 		}
 	}
 	if s.repl != nil {
@@ -59,6 +61,7 @@ func (s *Server) recordFieldRemoval(st *store.Store, key string, fields []string
 				logger.Error().Err(err).Msg("AOF field expiry append failed")
 			}
 		}
+		s.syncRemoval(aof)
 	}
 	if s.repl != nil {
 		s.repl.FeedHashFieldDeletes(st, key, fields)

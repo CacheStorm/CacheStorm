@@ -45,8 +45,16 @@ func TestAOFWriteFailureLatchesHealth(t *testing.T) {
 					t.Fatal("flush succeeded on full device")
 				}
 			default:
-				if err == nil {
-					t.Fatal("always append succeeded despite persistence failure")
+				// Under always the failure surfaces before the reply
+				// acknowledging the append goes out.
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := w.WriteOut(); err == nil {
+					t.Fatal("always write-out succeeded despite persistence failure")
+				}
+				if !w.Unsynced(w.Appended()) {
+					t.Fatal("an append that failed to persist counts as fsynced")
 				}
 			}
 			if w.Err() == nil {

@@ -560,7 +560,7 @@ func (h *HTTPServer) writeJSON(w http.ResponseWriter, status int, data interface
 	// The writes a response acknowledges reach the AOF's file first, as a
 	// RESP reply's do.
 	if h.srv != nil {
-		h.srv.writeOutAOF()
+		h.srv.flushAOFForReply()
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)

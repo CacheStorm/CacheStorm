@@ -136,6 +136,9 @@ func (w *Writer) Flush() error {
 	return w.wr.Flush()
 }
 
+// Buffered is how many bytes are written and not yet flushed.
+func (w *Writer) Buffered() int { return w.wr.Buffered() }
+
 func (w *Writer) WriteValue(v *Value) error {
 	if v == nil {
 		return ErrInvalidType
