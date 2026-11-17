@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"bytes"
+	"encoding/binary"
 	"strings"
 	"testing"
 
@@ -123,12 +124,149 @@ func TestRedisRDBRefusesOtherModules(t *testing.T) {
 		t.Fatal(err)
 	}
 	i := bytes.Index(out, []byte{rdbTypeModule2, 1, 'j'}) + 3
-	copy(out[i:], appendDumpLength(nil, rdbModuleID("ReJSON-RL", 3)))
+	copy(out[i:], appendDumpLength(nil, rdbModuleID("MBbloom--", 3)))
 	if err := SealRDBChecksum(out); err != nil {
 		t.Fatal(err)
 	}
 	r := NewRDBReaderForDatabases(store.NewDatabases(store.NewStore(), 16))
-	if err := r.LoadBytes(out); err == nil || !strings.Contains(err.Error(), "module values are not supported") {
+	if err := r.LoadBytes(out); err == nil || !strings.Contains(err.Error(), "module values of type MBbloom-- (encoding version 3) are not supported") {
 		t.Fatalf("LoadBytes = %v", err)
 	}
+}
+
+// redisModuleRDB is an RDB file as Redis with modules writes it: a module's
+// aux data, then the given keys' module values in db 0.
+func redisModuleRDB(t *testing.T, values map[string][]byte) []byte {
+	t.Helper()
+	out := []byte("REDIS0011")
+	out = append(out, 0xFA)
+	out = appendRDBString(out, "redis-ver")
+	out = appendRDBString(out, "7.4.0")
+	out = append(out, 0xF7)
+	out = appendDumpLength(out, rdbModuleID("ft-index0", 2))
+	out = appendDumpLength(out, rdbModuleOpcodeUInt)
+	out = appendDumpLength(out, 1)
+	out = appendDumpLength(out, rdbModuleOpcodeUInt)
+	out = appendDumpLength(out, 1<<40)
+	out = appendDumpLength(out, rdbModuleOpcodeSInt)
+	out = appendDumpLength(out, 5)
+	out = appendDumpLength(out, rdbModuleOpcodeDouble)
+	out = append(out, 1, 2, 3, 4, 5, 6, 7, 8)
+	out = appendDumpLength(out, rdbModuleOpcodeFloat)
+	out = append(out, 1, 2, 3, 4)
+	out = appendDumpLength(out, rdbModuleOpcodeStr)
+	out = appendRDBString(out, "idx")
+	out = appendDumpLength(out, rdbModuleOpcodeEOF)
+	out = append(out, 0xFE, 0)
+	for _, key := range sortedTestKeys(values) {
+		out = append(out, rdbTypeModule2)
+		out = appendRDBString(out, key)
+		out = append(out, values[key]...)
+	}
+	out = append(out, 0xFF, 0, 0, 0, 0, 0, 0, 0, 0)
+	if err := SealRDBChecksum(out); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func sortedTestKeys(m map[string][]byte) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	for i := range keys {
+		for j := i + 1; j < len(keys); j++ {
+			if keys[j] < keys[i] {
+				keys[i], keys[j] = keys[j], keys[i]
+			}
+		}
+	}
+	return keys
+}
+
+// jsonModuleValue is a document as RedisJSON saves it at encoding version
+// encver; version 2 adds a count and, when it is not zero, two strings.
+func jsonModuleValue(name string, encver uint64, doc string, extra uint64) []byte {
+	out := appendDumpLength(nil, rdbModuleID(name, encver))
+	out = appendDumpLength(out, rdbModuleOpcodeStr)
+	out = appendRDBString(out, doc)
+	if encver == 2 {
+		out = appendDumpLength(out, rdbModuleOpcodeUInt)
+		out = appendDumpLength(out, extra)
+		for range min(extra, 1) * 2 {
+			out = appendDumpLength(out, rdbModuleOpcodeStr)
+			out = appendRDBString(out, "x")
+		}
+	}
+	return appendDumpLength(out, rdbModuleOpcodeEOF)
+}
+
+// A Redis Stack or Redis 8 file loads: its JSON documents, of RedisJSON's
+// string encodings and of CacheStorm's former type, and around a search
+// module's aux data, which is skipped.
+func TestLoadRedisJSONModuleValues(t *testing.T) {
+	file := redisModuleRDB(t, map[string][]byte{
+		"v3":     jsonModuleValue("ReJSON-RL", 3, `{"a":[1,"x"]}`, 0),
+		"v2":     jsonModuleValue("ReJSON-RL", 2, `[true,null]`, 0),
+		"v2aux":  jsonModuleValue("ReJSON-RL", 2, `"s"`, 3),
+		"legacy": jsonModuleValue("CStorm-JS", 1, `{"b":2}`, 0),
+	})
+	dbs := store.NewDatabases(store.NewStore(), 16)
+	r := NewRDBReaderForDatabases(dbs)
+	if err := r.LoadBytes(file); err != nil {
+		t.Fatal(err)
+	}
+	for key, want := range map[string]string{"v3": `{"a":[1,"x"]}`, "v2": `[true,null]`, "v2aux": `"s"`, "legacy": `{"b":2}`} {
+		e, ok := dbs.DB(0).Get(key)
+		if !ok {
+			t.Fatalf("%s lost", key)
+		}
+		if got := string(e.Value.(*store.JSONValue).Bytes()); got != want {
+			t.Fatalf("%s = %s, want %s", key, got, want)
+		}
+	}
+	if strings.Join(r.SkippedModuleAux, ",") != "ft-index0" {
+		t.Fatalf("SkippedModuleAux = %v", r.SkippedModuleAux)
+	}
+
+	for name, value := range map[string][]byte{
+		"a newer RedisJSON encoding": jsonModuleValue("ReJSON-RL", 5, `1`, 0),
+		"a truncated document":       jsonModuleValue("ReJSON-RL", 3, `1`, 0)[:9],
+		"text that is not JSON":      jsonModuleValue("ReJSON-RL", 3, `{`, 0),
+	} {
+		r := NewRDBReaderForDatabases(store.NewDatabases(store.NewStore(), 16))
+		if err := r.LoadBytes(redisModuleRDB(t, map[string][]byte{"k": value})); err == nil {
+			t.Fatalf("%s loaded", name)
+		}
+	}
+}
+
+// DUMP saves a document as RedisJSON does, so Redis with RedisJSON restores
+// it; CacheStorm restores its own and its former payloads.
+func TestDumpJSONAsRedisJSON(t *testing.T) {
+	payload, err := EncodeDump(store.MustParseJSONValue(`{"k":[1,2]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := jsonModuleValue("ReJSON-RL", 3, `{"k":[1,2]}`, 0)
+	if !bytes.Equal(payload[1:len(payload)-10], want) || payload[0] != rdbTypeModule2 {
+		t.Fatalf("payload %q, want module value %q", payload, want)
+	}
+	for _, p := range [][]byte{payload, legacyJSONDump(`{"k":[1,2]}`)} {
+		v, err := DecodeDump(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := string(v.(*store.JSONValue).Bytes()); got != `{"k":[1,2]}` {
+			t.Fatalf("restored %s", got)
+		}
+	}
+}
+
+func legacyJSONDump(doc string) []byte {
+	out := appendDumpLength([]byte{dumpTypeJSON}, uint64(len(doc)))
+	out = append(out, doc...)
+	out = append(out, 11, 0)
+	return binary.LittleEndian.AppendUint64(out, rdbChecksum(0, out))
 }

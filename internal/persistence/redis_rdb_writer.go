@@ -40,9 +40,11 @@ type RedisRDBInfo struct {
 // The module types CacheStorm's extension values are saved as. A module type
 // id is its 9-character name in a 64-symbol alphabet followed by a 10-bit
 // encoding version; Redis refuses a file with module values it has no module
-// for, naming the type.
+// for, naming the type. A JSON document is saved as RedisJSON saves it at
+// encoding version 3, the document's text, which Redis with RedisJSON (Redis
+// Stack, Redis 8) loads.
 var rdbModules = map[byte]uint64{
-	dumpTypeJSON:           rdbModuleID("CStorm-JS", 1),
+	dumpTypeJSON:           rdbModuleID("ReJSON-RL", 3),
 	dumpTypeTimeSeries:     rdbModuleID("CStorm-TS", 1),
 	store.ExtensionBloom:   rdbModuleID("CStorm-BF", 1),
 	store.ExtensionCuckoo:  rdbModuleID("CStorm-CF", 1),
@@ -390,8 +392,34 @@ func appendRDBString(dst []byte, s string) []byte {
 	return append(appendDumpLength(dst, uint64(len(s))), s...)
 }
 
-// moduleValue reads a module value of CacheStorm's own module types; it
-// returns nil without an error for another module's.
+// The module ids moduleValue reads besides rdbModules': RedisJSON's encoding
+// version 2, the text followed by a count that RediSearch once used, and the
+// type JSON documents were saved as before.
+var (
+	rdbModuleJSON2      = rdbModuleID("ReJSON-RL", 2)
+	rdbModuleJSONLegacy = rdbModuleID("CStorm-JS", 1)
+)
+
+const (
+	rdbModuleOpcodeSInt   = 1
+	rdbModuleOpcodeUInt   = 2
+	rdbModuleOpcodeFloat  = 3
+	rdbModuleOpcodeDouble = 4
+)
+
+// rdbModuleName returns the type name a module id carries.
+func rdbModuleName(id uint64) string {
+	name := make([]byte, 9)
+	id >>= 10
+	for i := 8; i >= 0; i-- {
+		name[i] = rdbModuleIDAlphabet[id&63]
+		id >>= 6
+	}
+	return string(name)
+}
+
+// moduleValue reads a module value of CacheStorm's own module types or a
+// RedisJSON document; it returns nil without an error for another module's.
 func (d *dumpDecoder) moduleValue() store.Value {
 	id, _ := d.length()
 	var kind byte
@@ -399,6 +427,9 @@ func (d *dumpDecoder) moduleValue() store.Value {
 		if module == id {
 			kind = typ
 		}
+	}
+	if id == rdbModuleJSON2 || id == rdbModuleJSONLegacy {
+		kind = dumpTypeJSON
 	}
 	if kind == 0 {
 		return nil
@@ -408,9 +439,46 @@ func (d *dumpDecoder) moduleValue() store.Value {
 		return nil
 	}
 	value := d.valueOf(kind)
+	if id == rdbModuleJSON2 {
+		if op, _ := d.length(); op != rdbModuleOpcodeUInt {
+			d.err = ErrDumpFormat
+			return nil
+		}
+		if n, _ := d.length(); n > 0 {
+			for range 2 {
+				if op, _ := d.length(); op != rdbModuleOpcodeStr {
+					d.err = ErrDumpFormat
+					return nil
+				}
+				d.view()
+			}
+		}
+	}
 	if op, _ := d.length(); op != rdbModuleOpcodeEOF {
 		d.err = ErrDumpFormat
 		return nil
 	}
 	return value
+}
+
+// skipModuleData skips a module's data up to its EOF opcode: each item is an
+// opcode and a value whose size the opcode gives.
+func (d *dumpDecoder) skipModuleData() {
+	for d.err == nil {
+		op, _ := d.length()
+		switch op {
+		case rdbModuleOpcodeEOF:
+			return
+		case rdbModuleOpcodeSInt, rdbModuleOpcodeUInt:
+			d.length()
+		case rdbModuleOpcodeFloat:
+			d.take(4)
+		case rdbModuleOpcodeDouble:
+			d.take(8)
+		case rdbModuleOpcodeStr:
+			d.view()
+		default:
+			d.err = ErrDumpFormat
+		}
+	}
 }

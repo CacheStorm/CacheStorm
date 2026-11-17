@@ -465,9 +465,12 @@ func (w *RDBWriter) writeString(f io.Writer, s string) error {
 
 type RDBReader struct {
 	AuxFields map[string]string
-	store     *store.Store
-	dbs       *store.Databases
-	mu        sync.Mutex
+	// SkippedModuleAux names the modules whose aux data a Redis file held
+	// and the load skipped.
+	SkippedModuleAux []string
+	store            *store.Store
+	dbs              *store.Databases
+	mu               sync.Mutex
 	// body is the file Load read, which a Redis file's values are decoded
 	// from in place; redis is set once the aux fields show the file was
 	// written by Redis, whose type numbers and opcodes differ from
@@ -578,7 +581,7 @@ func (r *RDBReader) readRDB(f io.Reader) error {
 	}
 
 	r.AuxFields = make(map[string]string)
-	r.redis, r.functions = false, nil
+	r.redis, r.functions, r.SkippedModuleAux = false, nil, nil
 	decided := false
 
 	// Expiry (unix ms) from a preceding 0xFC/0xFD opcode, and in a Redis
@@ -626,7 +629,27 @@ func (r *RDBReader) readRDB(f io.Reader) error {
 			case rdbOpcodeFunctionPreGA:
 				return fmt.Errorf("pre-GA function format not supported")
 			case 0xF7:
-				return fmt.Errorf("RDB module data is not supported")
+				// A module's aux data, such as RediSearch's index
+				// definitions; CacheStorm has no use for another module's.
+				br, ok := f.(*bytes.Reader)
+				if !ok || r.body == nil {
+					return fmt.Errorf("a Redis RDB file must be loaded with Load")
+				}
+				d := &dumpDecoder{data: r.body, pos: len(r.body) - br.Len()}
+				id, _ := d.length()
+				if op, _ := d.length(); op != rdbModuleOpcodeUInt {
+					return fmt.Errorf("corrupt RDB module aux data")
+				}
+				d.length()
+				d.skipModuleData()
+				if d.err != nil {
+					return fmt.Errorf("corrupt RDB module aux data of %s", rdbModuleName(id))
+				}
+				r.SkippedModuleAux = append(r.SkippedModuleAux, rdbModuleName(id))
+				if _, err := br.Seek(int64(d.pos), io.SeekStart); err != nil {
+					return err
+				}
+				continue
 			case 0xFA:
 				key, err := r.readString(f)
 				if err != nil {
@@ -1091,9 +1114,11 @@ func (r *RDBReader) readRedisEntry(f io.Reader, valueType byte, expiresAtMS, idl
 	var value store.Value
 	switch valueType {
 	case rdbTypeModule2:
+		start := d.pos
 		value = d.moduleValue()
 		if value == nil && d.err == nil {
-			return fmt.Errorf("RDB module values are not supported (key %q)", key)
+			id, _ := (&dumpDecoder{data: r.body, pos: start}).length()
+			return fmt.Errorf("RDB module values of type %s (encoding version %d) are not supported (key %q)", rdbModuleName(id), id&1023, key)
 		}
 	case 6:
 		return fmt.Errorf("RDB module values are not supported (key %q)", key)

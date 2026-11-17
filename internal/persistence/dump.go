@@ -37,6 +37,13 @@ func EncodeDump(value store.Value) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	if out[0] == dumpTypeJSON {
+		// As RedisJSON dumps a document, which Redis with RedisJSON
+		// restores.
+		module := appendDumpLength([]byte{rdbTypeModule2}, rdbModules[dumpTypeJSON])
+		module = appendDumpLength(module, rdbModuleOpcodeStr)
+		out = appendDumpLength(append(module, out[1:]...), rdbModuleOpcodeEOF)
+	}
 	out = binary.LittleEndian.AppendUint16(out, version)
 	out = binary.LittleEndian.AppendUint64(out, rdbChecksum(0, out))
 	return out, nil
@@ -375,6 +382,8 @@ func (d *dumpDecoder) value() store.Value { return d.valueOf(d.byte()) }
 // valueOf decodes a value of RDB type typ.
 func (d *dumpDecoder) valueOf(typ byte) store.Value {
 	switch typ {
+	case rdbTypeModule2:
+		return d.moduleValue()
 	case 0:
 		// Straight into the form the store keeps a string in: one copy of
 		// the bytes instead of a string, a slice and then that form.

@@ -87,6 +87,9 @@ func (s *Server) loadRDBFile(path string) error {
 // restoreRDBAux restores the function libraries and search indexes an RDB
 // reader found.
 func (s *Server) restoreRDBAux(reader *persistence.RDBReader) error {
+	for _, module := range reader.SkippedModuleAux {
+		logger.Warn().Str("module", module).Msg("the RDB holds aux data of a Redis module CacheStorm does not run; it was skipped")
+	}
 	functions := []byte(reader.AuxFields["cachestorm-functions"])
 	if len(functions) > 0 {
 		if _, err := s.snapshotFunctionCommand([][]byte{[]byte("RESTORE"), functions, []byte("FLUSH")}); err != nil {

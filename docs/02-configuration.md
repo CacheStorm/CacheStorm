@@ -310,7 +310,8 @@ An AOF rewrite holds the write gate only while it encodes the dataset in memory;
 
 `dump.rdb` is written in Redis' RDB format (version 11, or 12 when a hash has field expirations), so Redis 7.4, `redis-check-rdb` and other RDB tools read it, and a Redis `dump.rdb` can be copied in the other direction. Function libraries use Redis' own opcode. Under an LRU or LFU `maxmemory-policy` each key's idle time or LFU counter is saved too, as Redis does. What Redis has no type for is kept in ways Redis tolerates or refuses clearly:
 
-- JSON documents and time series are saved as module values of the types `CStorm-JS` and `CStorm-TS`. Redis refuses to load such a file ("no matching module type 'CStorm-JS'"), just as it would refuse a RedisJSON file without the module.
+- JSON documents are saved as RedisJSON saves them (module type `ReJSON-RL`, encoding version 3: the document's text), so Redis Stack and Redis 8, which bundle RedisJSON, load them; Redis without RedisJSON refuses the file, naming the type. Time series are saved as module values of the type `CStorm-TS`, which only CacheStorm loads.
+- A Redis Stack or Redis 8 `dump.rdb` (and a master's full sync) loads with its JSON documents, saved by RedisJSON 2.x at encoding versions 2 and 3. the binary encodings of newer RedisJSON releases (versions 4 and 5) and the other modules' values (RedisBloom, RedisTimeSeries) are refused with an error naming the type and key. A module's aux data, such as RediSearch's index definitions, is skipped with a warning in the log; recreate the indexes with `FT.CREATE`.
 - Key tags go in an aux field before the key, and search indexes in a `cachestorm-search` aux field; Redis ignores both.
 
 CacheStorm still loads snapshots in its older native format. `redis-cli --rdb` also returns a Redis-format RDB, but leaves CacheStorm-only types out with a warning, so the file always loads in Redis.
