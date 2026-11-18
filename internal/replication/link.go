@@ -482,6 +482,9 @@ func loadRDBSnapshot(data []byte, staging *store.Databases, replay *command.Rout
 	if err := reader.LoadBytes(data); err != nil {
 		return 0, fmt.Errorf("loading the master's RDB: %w", err)
 	}
+	for _, module := range reader.SkippedModuleAux {
+		logger.Warn().Str("module", module).Msg("the master's RDB holds aux data of a Redis module CacheStorm does not run; it was skipped")
+	}
 	if functions := reader.AuxFields["cachestorm-functions"]; functions != "" {
 		ctx := command.NewContext("FUNCTION", [][]byte{[]byte("RESTORE"), []byte(functions), []byte("FLUSH")}, staging.DB(0), nil)
 		ctx.DBs = staging

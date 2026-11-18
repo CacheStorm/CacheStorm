@@ -37,13 +37,6 @@ func EncodeDump(value store.Value) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if out[0] == dumpTypeJSON {
-		// As RedisJSON dumps a document, which Redis with RedisJSON
-		// restores.
-		module := appendDumpLength([]byte{rdbTypeModule2}, rdbModules[dumpTypeJSON])
-		module = appendDumpLength(module, rdbModuleOpcodeStr)
-		out = appendDumpLength(append(module, out[1:]...), rdbModuleOpcodeEOF)
-	}
 	out = binary.LittleEndian.AppendUint16(out, version)
 	out = binary.LittleEndian.AppendUint64(out, rdbChecksum(0, out))
 	return out, nil
@@ -134,9 +127,9 @@ func appendDumpValue(out []byte, value store.Value) ([]byte, uint16, error) {
 		}
 	case *store.StreamValue:
 		out = appendDumpStream(out, v)
-	case *store.JSONValue:
-		out = append(out, dumpTypeJSON)
-		plain(v.Bytes())
+	case *store.JSONValue, *store.BloomValue, *store.CuckooValue, *store.CMSValue:
+		// As Redis 8's bundled modules save them, which Redis 8 loads.
+		out, _ = appendRedisModuleValue(out, v)
 	case *store.TimeSeriesValue:
 		var data bytes.Buffer
 		v.RLock()

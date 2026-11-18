@@ -44,7 +44,6 @@ type RedisRDBInfo struct {
 // encoding version 3, the document's text, which Redis with RedisJSON (Redis
 // Stack, Redis 8) loads.
 var rdbModules = map[byte]uint64{
-	dumpTypeJSON:           rdbModuleID("ReJSON-RL", 3),
 	dumpTypeTimeSeries:     rdbModuleID("CStorm-TS", 1),
 	store.ExtensionBloom:   rdbModuleID("CStorm-BF", 1),
 	store.ExtensionCuckoo:  rdbModuleID("CStorm-CF", 1),
@@ -350,7 +349,7 @@ func appendRDBEntry(out, scratch []byte, key string, entry *store.Entry, info *R
 	}
 	typ := scratch[0]
 	module := rdbModules[typ]
-	if module != 0 && !info.Extensions {
+	if (module != 0 || typ == rdbTypeModule2) && !info.Extensions {
 		return out, scratch, 0, true, nil
 	}
 	if tags := entry.TagList(); info.Extensions && len(tags) > 0 {
@@ -428,7 +427,16 @@ func (d *dumpDecoder) moduleValue() store.Value {
 			kind = typ
 		}
 	}
-	if id == rdbModuleJSON2 || id == rdbModuleJSONLegacy {
+	if v, handled := d.redisBloomValue(id); handled {
+		if op, _ := d.length(); d.err == nil && op != rdbModuleOpcodeEOF {
+			d.err = ErrDumpFormat
+		}
+		if d.err != nil {
+			return nil
+		}
+		return v
+	}
+	if id == rdbModuleJSON || id == rdbModuleJSON2 || id == rdbModuleJSONLegacy {
 		kind = dumpTypeJSON
 	}
 	if kind == 0 {

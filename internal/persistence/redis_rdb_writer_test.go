@@ -3,6 +3,8 @@ package persistence
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/hex"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -124,12 +126,12 @@ func TestRedisRDBRefusesOtherModules(t *testing.T) {
 		t.Fatal(err)
 	}
 	i := bytes.Index(out, []byte{rdbTypeModule2, 1, 'j'}) + 3
-	copy(out[i:], appendDumpLength(nil, rdbModuleID("MBbloom--", 3)))
+	copy(out[i:], appendDumpLength(nil, rdbModuleID("TSDB-TYPE", 3)))
 	if err := SealRDBChecksum(out); err != nil {
 		t.Fatal(err)
 	}
 	r := NewRDBReaderForDatabases(store.NewDatabases(store.NewStore(), 16))
-	if err := r.LoadBytes(out); err == nil || !strings.Contains(err.Error(), "module values of type MBbloom-- (encoding version 3) are not supported") {
+	if err := r.LoadBytes(out); err == nil || !strings.Contains(err.Error(), "module values of type TSDB-TYPE (encoding version 3) are not supported") {
 		t.Fatalf("LoadBytes = %v", err)
 	}
 }
@@ -269,4 +271,125 @@ func legacyJSONDump(doc string) []byte {
 	out = append(out, doc...)
 	out = append(out, 11, 0)
 	return binary.LittleEndian.AppendUint64(out, rdbChecksum(0, out))
+}
+
+// DUMP payloads Redis 8.2 wrote: BF.RESERVE 0.01 10 EXPANSION 2 with item1
+// to item25 added; CF.RESERVE 8 BUCKETSIZE 2 with a added; CMS.INITBYDIM 4 2
+// with a incremented by 3 (its counters LZF-compressed).
+const (
+	redisBloomDump = `07 81 30 16 e5 a2 89 be f8 04 02 19 02 02 02 05
+02 02 02 0a 04 7b 14 ae 47 e1 7a 74 3f 02 08 04
+e9 86 2f b2 35 0e 26 40 02 40 80 02 00 05 10 e5
+d8 fd 9a 8d 69 a0 c6 86 07 d0 84 d1 c4 2a 1b 02
+0a 02 14 04 7b 14 ae 47 e1 7a 64 3f 02 09 04 4a
+f7 d4 9e de f0 28 40 02 41 00 02 00 05 20 55 1a
+25 54 cd 55 74 3c 15 d6 0e 98 16 41 d0 b4 ef 04
+c5 c9 00 c5 c1 55 a9 53 84 21 67 80 57 c5 02 0f
+00 0c 00 50 10 81 d1 4e e7 f8 2f`
+	redisCuckooDump = `07 81 30 16 e5 a2 89 82 14 04 02 01 02 04 02 01
+02 00 02 02 02 14 02 01 02 04 05 08 00 00 c4 00
+00 00 00 00 00 0c 00 f5 6a 46 66 be f4 3b 47`
+	redisCMSDump = `07 81 08 c4 a4 f9 36 0f 10 00 02 04 02 02 02 03
+05 c3 11 20 01 00 00 80 00 00 03 80 06 e0 00 07
+80 00 01 00 00 00 0c 00 4a ab e7 d7 65 66 aa d2`
+)
+
+func hexPayload(t *testing.T, s string) []byte {
+	t.Helper()
+	b, err := hex.DecodeString(strings.Join(strings.Fields(s), ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+// Redis 8.2's filters and sketches restore and answer as they did there,
+// and CacheStorm dumps a filter as Redis 8.2 does.
+func TestRestoreRedisBloomPayloads(t *testing.T) {
+	bloomPayload := hexPayload(t, redisBloomDump)
+	v, err := DecodeDump(bloomPayload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bf := v.(*store.BloomValue)
+	for i := 1; i <= 25; i++ {
+		if !bf.Exists([]byte(fmt.Sprintf("item%d", i))) {
+			t.Fatalf("item%d lost", i)
+		}
+	}
+	if info := bf.Info(); info.Capacity != 30 || info.Items != 25 || info.Filters != 2 || info.Expansion != 2 || info.Size != 208 {
+		t.Fatalf("BF.INFO %+v, Redis reports capacity 30, 25 items, 2 filters, expansion 2, size 208", info)
+	}
+	again, err := EncodeDump(bf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body := bloomPayload[:len(bloomPayload)-10]; !bytes.Equal(again[:len(again)-10], body) {
+		t.Fatalf("dumped as\n%x\nRedis 8.2 dumps\n%x", again[:len(again)-10], body)
+	}
+
+	v, err = DecodeDump(hexPayload(t, redisCuckooDump))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cf := v.(*store.CuckooValue)
+	// a's two buckets are the same one of four, which RedisBloom's count
+	// counts twice.
+	if !cf.Exists([]byte("a")) || cf.Count([]byte("a")) != 2 || cf.Exists([]byte("b")) {
+		t.Fatalf("cuckoo filter answers differently: a %v count %d, b %v", cf.Exists([]byte("a")), cf.Count([]byte("a")), cf.Exists([]byte("b")))
+	}
+	if info := cf.Info(); info.Buckets != 4 || info.BucketSize != 2 || info.Inserted != 1 || info.MaxIterations != 20 || info.Expansion != 1 {
+		t.Fatalf("CF.INFO %+v", info)
+	}
+
+	v, err = DecodeDump(hexPayload(t, redisCMSDump))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cms := v.(*store.CMSValue)
+	if cms.Query([]byte("a")) != 3 || cms.Total() != 3 || cms.Width != 4 || cms.Depth != 2 {
+		t.Fatalf("CMS a=%d total=%d", cms.Query([]byte("a")), cms.Total())
+	}
+
+	// What CacheStorm dumps restores in CacheStorm, every field kept.
+	for _, value := range []store.Value{bf, cf, cms} {
+		payload, err := EncodeDump(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		back, err := DecodeDump(payload)
+		if err != nil {
+			t.Fatalf("%T: %v", value, err)
+		}
+		a, _ := value.(store.ExtensionValue).MarshalBinary()
+		b, _ := back.(store.ExtensionValue).MarshalBinary()
+		if !bytes.Equal(a, b) {
+			t.Fatalf("%T changed in a DUMP/RESTORE round trip", value)
+		}
+	}
+
+	// A filter RedisBloom made with 32-bit hashes, and payloads cut short
+	// anywhere, are refused.
+	old := append([]byte(nil), bloomPayload...)
+	old[bytes.Index(old, []byte{0x02, 0x05})+1] = 0x01
+	old = resealDump(old)
+	if _, err := DecodeDump(old); err == nil {
+		t.Fatal("a 32-bit filter restored")
+	}
+	for _, p := range []string{redisBloomDump, redisCuckooDump, redisCMSDump} {
+		full := hexPayload(t, p)
+		body := full[:len(full)-10]
+		for n := 1; n < len(body); n++ {
+			cut := resealDump(append(append([]byte(nil), body[:n]...), full[len(full)-10:]...))
+			if _, err := DecodeDump(cut); err == nil {
+				t.Fatalf("a payload cut to %d bytes restored", n)
+			}
+		}
+	}
+}
+
+// resealDump recomputes a DUMP payload's checksum.
+func resealDump(p []byte) []byte {
+	n := len(p) - 8
+	return binary.LittleEndian.AppendUint64(p[:n:n], rdbChecksum(0, p[:n]))
 }

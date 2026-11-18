@@ -53,6 +53,20 @@ func newBloomLayer(capacity uint64, errorRate float64) *BloomLayer {
 // one half of the one before.
 const bloomTightening = 0.5
 
+// BloomTightening is bloomTightening for the RDB codec.
+const BloomTightening = bloomTightening
+
+// BloomLayerErrorRate is the error rate of layer i of a filter created with
+// errorRate, as RedisBloom saves it.
+func BloomLayerErrorRate(errorRate float64, i int, scaling bool) float64 {
+	return layerErrorRate(errorRate, i, scaling)
+}
+
+// BloomBitsPerEntry is RedisBloom's bits per entry for a layer's error rate.
+func BloomBitsPerEntry(errorRate float64) float64 {
+	return math.Abs(math.Log(errorRate) / 0.480453013918201)
+}
+
 // layerErrorRate is the error rate of layer i of a filter created with
 // errorRate.
 func layerErrorRate(errorRate float64, i int, scaling bool) float64 {
