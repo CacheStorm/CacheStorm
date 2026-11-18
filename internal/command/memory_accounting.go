@@ -55,11 +55,15 @@ var wholeValueWriters = map[string]bool{
 }
 
 func reaccountWrittenKeys(ctx *Context) {
-	if ctx.Store == nil || readonlyCommands[ctx.Command] {
+	traitsOf(ctx.Command).reaccountWrittenKeys(ctx)
+}
+
+func (t *commandTraits) reaccountWrittenKeys(ctx *Context) {
+	if ctx.Store == nil || t.readonly {
 		return
 	}
 	indexes := searchIndexesFor(ctx).All()
-	if len(indexes) == 0 && wholeValueWriters[ctx.Command] {
+	if len(indexes) == 0 && t.wholeValue {
 		return
 	}
 	if len(indexes) == 0 {
@@ -86,13 +90,17 @@ func reaccountWrittenKeys(ctx *Context) {
 // used_memory, so it could otherwise grow until the process runs out of
 // memory.
 func overMemoryFor(ctx *Context, cmd string) bool {
+	return traitsOf(cmd).overMemory(ctx)
+}
+
+func (t *commandTraits) overMemory(ctx *Context) bool {
 	if ctx.Store == nil {
 		return false
 	}
-	if denyOOMCommands[cmd] {
+	if t.denyOOM {
 		return ctx.Store.CheckWriteMemory() != nil
 	}
-	if !extensionMayGrow(cmd) {
+	if !t.mayGrow {
 		return false
 	}
 	mt := ctx.Store.MemoryTracker()

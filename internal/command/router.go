@@ -29,6 +29,9 @@ type CommandDef struct { //nolint:revive // Command prefix is intentional for cl
 	Handler func(ctx *Context) error
 	Arity   int
 	Flags   []string
+	// traits is what dispatch looks up by name on every call, resolved
+	// once when the command is registered.
+	traits *commandTraits
 }
 
 type Router struct {
@@ -111,6 +114,10 @@ func SubcommandError(cmd string, args [][]byte) error {
 	if len(args) == 0 {
 		return nil
 	}
+	return subcommandError(loadContainerMeta()[cmd], cmd, args)
+}
+
+func loadContainerMeta() map[string]*commandMeta {
 	containerMetaOnce.Do(func() {
 		containerMeta = make(map[string]*commandMeta)
 		commandMetaOnce.Do(loadCommandMeta)
@@ -120,8 +127,11 @@ func SubcommandError(cmd string, args [][]byte) error {
 			}
 		}
 	})
-	m := containerMeta[cmd]
-	if m == nil {
+	return containerMeta
+}
+
+func subcommandError(m *commandMeta, cmd string, args [][]byte) error {
+	if m == nil || len(args) == 0 {
 		return nil
 	}
 	sub := string(args[0])
@@ -376,6 +386,7 @@ func (r *Router) Register(def *CommandDef) {
 				"each command name must have exactly one registration site")
 		return
 	}
+	def.traits = traitsOf(def.Name)
 	r.commands[def.Name] = def
 	r.hot.Store(nil)
 	r.mu.Unlock()
@@ -612,12 +623,13 @@ func (r *Router) executeHandler(ctx *Context, cmd *CommandDef, capture bool) (er
 	ctx.waited = 0
 	err = cmd.Handler(ctx)
 	ctx.EndTime = time.Now()
-	recordCall(ctx.Command, ctx.Args, ctx.EndTime.Sub(ctx.StartTime)-ctx.waited, err != nil || ctx.Writer.Errors() > errsBefore)
+	t := cmd.traitsFor(ctx.Command)
+	t.recordCall(ctx.Args, ctx.EndTime.Sub(ctx.StartTime)-ctx.waited, err != nil || ctx.Writer.Errors() > errsBefore)
 	if auditEnabled() {
 		recordAudit(ctx, err == nil && ctx.Writer.Errors() == errsBefore)
 	}
 	ctx.passWakeup()
-	reaccountWrittenKeys(ctx)
+	t.reaccountWrittenKeys(ctx)
 	touchWrittenKeys(ctx, before, err != nil || ctx.Writer.Errors() > errsBefore)
 	signalWrittenKeys(ctx)
 	if err == nil {
@@ -648,7 +660,8 @@ func (r *Router) Execute(ctx *Context) error {
 
 	// Redis rejects a call with the wrong number of arguments before running
 	// or queueing it, and a transaction that queued one is discarded at EXEC.
-	if err := ArgumentError(ctx.Command, ctx.Args); err != nil {
+	t := cmd.traitsFor(ctx.Command)
+	if err := t.argumentError(ctx.Args); err != nil {
 		recordRejected(ctx.Command, ctx.Args)
 		return reject(ctx, err.Error())
 	}
@@ -681,7 +694,7 @@ func (r *Router) Execute(ctx *Context) error {
 	// memory is over the limit, before running or queueing it; a refused
 	// command discards the transaction it was sent in, and an EXEC whose
 	// transaction queued one is refused as a whole.
-	if overMemoryFor(ctx, ctx.Command) {
+	if t.overMemory(ctx) {
 		recordRejected(ctx.Command, ctx.Args)
 		if ctx.Transaction != nil && ctx.Transaction.IsActive() {
 			ctx.Transaction.Abort()

@@ -176,7 +176,11 @@ func SaveDone(covered int64) { dirty.Add(-covered) }
 // statKey names the statistics a call of cmd counts towards: "CMD", or
 // "CMD|SUB" for a container command. An unknown subcommand counts nowhere.
 func statKey(cmd string, args [][]byte) string {
-	if !hasSubcommands(cmd) || len(args) == 0 {
+	return statKeyOf(cmd, hasSubcommands(cmd), args)
+}
+
+func statKeyOf(cmd string, container bool, args [][]byte) string {
+	if !container || len(args) == 0 {
 		return cmd
 	}
 	key := cmd + "|" + strings.ToUpper(string(args[0]))
@@ -187,7 +191,10 @@ func statKey(cmd string, args [][]byte) string {
 }
 
 func commandStatFor(cmd string, args [][]byte) *commandStat {
-	key := statKey(cmd, args)
+	return commandStatOf(statKey(cmd, args))
+}
+
+func commandStatOf(key string) *commandStat {
 	if key == "" {
 		return nil
 	}
@@ -213,12 +220,16 @@ func commandStatFor(cmd string, args [][]byte) *commandStat {
 // recordCall counts one execution of cmd that took d and whether it
 // answered with an error.
 func recordCall(cmd string, args [][]byte, d time.Duration, failed bool) {
-	st := commandStatFor(cmd, args)
+	traitsOf(cmd).recordCall(args, d, failed)
+}
+
+func (t *commandTraits) recordCall(args [][]byte, d time.Duration, failed bool) {
+	st := commandStatOf(statKeyOf(t.name, t.hasSubs, args))
 	if st == nil {
 		return
 	}
 	usec := int64(d / time.Microsecond)
-	if !failed && writeFlagged[cmd] {
+	if !failed && t.writeFlagged {
 		dirty.Add(1)
 	}
 	st.calls.Add(1)
