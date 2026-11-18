@@ -62,7 +62,7 @@ var writeCommands = map[string]bool{
 	"ZDIFFSTORE": true, "ZINTERSTORE": true, "ZUNIONSTORE": true,
 	"ZREMRANGEBYSCORE": true, "ZREMRANGEBYRANK": true, "ZREMRANGEBYLEX": true,
 	"BZPOPMIN": true, "BZPOPMAX": true,
-	"XADD": true, "XDEL": true, "XTRIM": true,
+	"XADD": true, "XDEL": true, "XDELEX": true, "XACKDEL": true, "XTRIM": true,
 	"XACK": true, "XCLAIM": true, "XAUTOCLAIM": true, "XGROUP": true, "XSETID": true,
 	"PFADD": true, "PFMERGE": true, "PFCOUNT": true, "PFDEBUG": true,
 	"SETBIT": true, "BITOP": true, "BITFIELD": true,

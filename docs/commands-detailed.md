@@ -1022,7 +1022,7 @@ Perform bitwise operations between strings.
 BITOP operation destkey key [key ...]
 ```
 
-**Operations:** AND, OR, XOR, NOT
+**Operations:** AND, OR, XOR, NOT, and Redis 8.2's DIFF (bits of the first key set in none of the others), DIFF1 (bits set in one of the others but not in the first key), ANDOR (bits of the first key set in at least one of the others) and ONE (bits set in exactly one key). DIFF, DIFF1 and ANDOR need at least two source keys.
 
 ---
 

@@ -348,13 +348,21 @@ func cmdBITPOS(ctx *Context) error {
 	return ctx.WriteInteger(pos)
 }
 
+// cmdBITOP runs AND, OR, XOR and NOT, and Redis 8.2's DIFF (bits of the
+// first key in none of the others), DIFF1 (bits in some other key but not
+// the first), ANDOR (bits of the first key in some other key) and ONE (bits
+// set in exactly one key).
 func cmdBITOP(ctx *Context) error {
 	if ctx.ArgCount() < 3 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	op := strings.ToUpper(ctx.ArgString(0))
 	switch op {
-	case "AND", "OR", "XOR", "NOT":
+	case "AND", "OR", "XOR", "NOT", "ONE":
+	case "DIFF", "DIFF1", "ANDOR":
+		if ctx.ArgCount() < 4 {
+			return ctx.WriteError(fmt.Errorf("ERR BITOP %s must be called with at least two source keys.", op)) //nolint:staticcheck // Redis reply text
+		}
 	default:
 		return ctx.WriteError(ErrSyntaxError)
 	}
@@ -380,32 +388,51 @@ func cmdBITOP(ctx *Context) error {
 	}
 	result := make([]byte, maxLen)
 	for j := range result {
-		var v byte
-		for i, src := range srcs {
-			var b byte
-			if j < len(src) {
-				b = src[j]
-			}
-			switch {
-			case op == "NOT":
-				v = ^b
-			case i == 0:
-				v = b
-			case op == "AND":
-				v &= b
-			case op == "OR":
-				v |= b
-			default:
-				v ^= b
-			}
-		}
-		result[j] = v
+		result[j] = bitopByte(op, srcs, j)
 	}
 	if err := ctx.Store.Set(destKey, &BitmapValue{Data: result}, store.SetOptions{}); err != nil {
 		return ctx.WriteError(err)
 	}
 	ctx.notify(store.NotifyString, "set", destKey)
 	return ctx.WriteInteger(int64(maxLen))
+}
+
+// bitopByte computes byte j of op over srcs, a missing byte being zero.
+func bitopByte(op string, srcs [][]byte, j int) byte {
+	at := func(src []byte) byte {
+		if j < len(src) {
+			return src[j]
+		}
+		return 0
+	}
+	first := at(srcs[0])
+	and, xor, once, twice, others := first, first, first, byte(0), byte(0)
+	for _, src := range srcs[1:] {
+		b := at(src)
+		and &= b
+		xor ^= b
+		twice |= once & b
+		once |= b
+		others |= b
+	}
+	switch op {
+	case "NOT":
+		return ^first
+	case "AND":
+		return and
+	case "OR":
+		return once
+	case "XOR":
+		return xor
+	case "ONE":
+		return once &^ twice
+	case "DIFF":
+		return first &^ others
+	case "DIFF1":
+		return others &^ first
+	default: // ANDOR
+		return first & others
+	}
 }
 
 func cmdBITFIELD(ctx *Context) error {

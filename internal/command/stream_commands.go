@@ -27,6 +27,8 @@ func RegisterStreamCommands(router *Router) {
 	router.Register(&CommandDef{Name: "XREVRANGE", Handler: cmdXREVRANGE})
 	router.Register(&CommandDef{Name: "XREAD", Handler: cmdXREAD})
 	router.Register(&CommandDef{Name: "XDEL", Handler: cmdXDEL})
+	router.Register(&CommandDef{Name: "XDELEX", Handler: cmdXDELEX})
+	router.Register(&CommandDef{Name: "XACKDEL", Handler: cmdXACKDEL})
 	router.Register(&CommandDef{Name: "XTRIM", Handler: cmdXTRIM})
 	router.Register(&CommandDef{Name: "XINFO", Handler: cmdXINFO})
 	router.Register(&CommandDef{Name: "XGROUP", Handler: cmdXGROUP})
@@ -164,7 +166,7 @@ type addTrimArgs struct {
 func parseAddTrimArgs(ctx *Context, xadd bool) (addTrimArgs, int, error) {
 	var a addTrimArgs
 	argc := ctx.ArgCount()
-	limitGiven := false
+	limitGiven, refsGiven := false, false
 	i := 1
 loop:
 	for ; i < argc; i++ {
@@ -215,6 +217,8 @@ loop:
 			a.trim.Limit = n
 			limitGiven = true
 			i++
+		case !refsGiven && streamRefsOption(opt) >= 0:
+			a.trim.Refs, refsGiven = streamRefsOption(opt), true
 		case xadd && strings.EqualFold(opt, "NOMKSTREAM"):
 			a.noMkStream = true
 		case xadd:
@@ -750,6 +754,157 @@ func cmdXDEL(ctx *Context) error {
 		ctx.PropagateAs()
 	}
 	return ctx.WriteInteger(deleted)
+}
+
+// streamRefsOption returns the reference strategy opt names, KEEPREF,
+// DELREF or ACKED, or -1.
+func streamRefsOption(opt string) int {
+	switch {
+	case strings.EqualFold(opt, "KEEPREF"):
+		return store.StreamKeepRef
+	case strings.EqualFold(opt, "DELREF"):
+		return store.StreamDelRef
+	case strings.EqualFold(opt, "ACKED"):
+		return store.StreamAcked
+	}
+	return -1
+}
+
+// parseAckDelArgs parses the options of XDELEX and XACKDEL from index start:
+// a reference strategy and IDS numids id..., in any order. It returns the
+// strategy and the IDs' arguments, unparsed.
+func parseAckDelArgs(ctx *Context, start int) (refs int, ids [][]byte, err error) {
+	argc := ctx.ArgCount()
+	refs = -1
+	first := -1
+	n := 0
+	for j := start; j < argc; {
+		opt := ctx.ArgString(j)
+		switch {
+		case refs < 0 && streamRefsOption(opt) >= 0:
+			refs = streamRefsOption(opt)
+			j++
+		case strings.EqualFold(opt, "IDS") && j+1 < argc:
+			v, ok := parseStreamLL(ctx.ArgString(j + 1))
+			if !ok || v < 1 {
+				return 0, nil, streamReplyError("ERR Number of IDs must be a positive integer")
+			}
+			if v > int64(argc-j-2) {
+				return 0, nil, streamReplyError("ERR The `numids` parameter must match the number of arguments")
+			}
+			first, n = j+2, int(v)
+			j = first + n
+		default:
+			return 0, nil, ErrSyntaxError
+		}
+	}
+	if first < 0 {
+		return 0, nil, streamReplyError("ERR IDS option is required")
+	}
+	if refs < 0 {
+		refs = store.StreamKeepRef
+	}
+	return refs, ctx.Args[first : first+n], nil
+}
+
+// streamDelReplies writes the replies of XDELEX or XACKDEL.
+func streamDelReplies(ctx *Context, replies []int64) error {
+	out := make([]*resp.Value, len(replies))
+	for i, r := range replies {
+		out[i] = resp.IntegerValue(r)
+	}
+	return ctx.WriteArray(out)
+}
+
+func parseStreamIDArgs(args [][]byte) ([]store.StreamID, error) {
+	ids := make([]store.StreamID, len(args))
+	for i, a := range args {
+		id, err := parseStrictStreamID(string(a))
+		if err != nil {
+			return nil, err
+		}
+		ids[i] = id
+	}
+	return ids, nil
+}
+
+// cmdXDELEX is XDEL with Redis 8.2's reference strategies, replying for
+// each ID: -1 missing, 1 deleted, 2 kept since a group still needs it.
+func cmdXDELEX(ctx *Context) error {
+	if ctx.ArgCount() < 4 {
+		return ctx.WriteError(arityError("xdelex"))
+	}
+	key := ctx.ArgString(0)
+	stream, err := lookupStream(ctx, key)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	refs, idArgs, err := parseAckDelArgs(ctx, 1)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	if stream == nil {
+		ctx.PropagateAs()
+		return streamDelReplies(ctx, missingStreamReplies(len(idArgs)))
+	}
+	ids, err := parseStreamIDArgs(idArgs)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	replies, deleted, changed := stream.DeleteWithRefs(ids, refs)
+	if deleted > 0 {
+		ctx.notify(store.NotifyStream, "xdel", key)
+	}
+	if !changed {
+		ctx.PropagateAs()
+	}
+	return streamDelReplies(ctx, replies)
+}
+
+// cmdXACKDEL acknowledges IDs in a group and deletes them under Redis 8.2's
+// reference strategies, replying for each ID: -1 not pending in the group,
+// 1 acknowledged and deleted, 2 acknowledged but kept for another group.
+func cmdXACKDEL(ctx *Context) error {
+	if ctx.ArgCount() < 5 {
+		return ctx.WriteError(arityError("xackdel"))
+	}
+	key := ctx.ArgString(0)
+	stream, err := lookupStream(ctx, key)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	refs, idArgs, err := parseAckDelArgs(ctx, 2)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	group := ctx.ArgString(1)
+	if stream == nil || !stream.HasGroup(group) {
+		ctx.PropagateAs()
+		return streamDelReplies(ctx, missingStreamReplies(len(idArgs)))
+	}
+	ids, err := parseStreamIDArgs(idArgs)
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	replies, deleted, changed, ok := stream.AckDelete(group, ids, refs)
+	if !ok {
+		replies = missingStreamReplies(len(ids))
+	}
+	if deleted > 0 {
+		ctx.notify(store.NotifyStream, "xdel", key)
+	}
+	if !changed {
+		ctx.PropagateAs()
+	}
+	return streamDelReplies(ctx, replies)
+}
+
+func missingStreamReplies(n int) []int64 {
+	out := make([]int64, n)
+	for i := range out {
+		out[i] = store.StreamDelNoID
+	}
+	return out
 }
 
 func cmdXTRIM(ctx *Context) error {

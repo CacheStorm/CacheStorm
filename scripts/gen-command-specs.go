@@ -5,7 +5,9 @@
 // redis:7.4 in Docker, reads COMMAND and COMMAND DOCS over RESP3 and writes
 // the arity/flags/key/category table plus the verbatim RESP3 COMMAND INFO and
 // COMMAND DOCS entries. Commands CacheStorm implements from later Redis
-// releases (redis8Commands) are taken from redis:8.0. The commands of the
+// releases are taken from redis:8.0 (redis8Commands) or redis:8.2
+// (redis82Commands, which also holds commands 8.2 gave new options). The
+// commands of the
 // modules Redis 8.2 bundles (search, JSON, time series, probabilistic) go to
 // internal/command/redis_module_commands.go.
 //
@@ -37,6 +39,10 @@ const (
 // redis8Commands are Redis 8 commands CacheStorm implements; their entries
 // come from Redis 8.0 because Redis 7.4 does not have them.
 var redis8Commands = []string{"hgetdel", "hgetex", "hsetex"}
+
+// redis82Commands come from Redis 8.2: XDELEX and XACKDEL are new in it, and
+// it gave BITOP, XADD and XTRIM new options.
+var redis82Commands = []string{"bitop", "xackdel", "xadd", "xdelex", "xtrim"}
 
 type val struct {
 	kind  byte
@@ -234,12 +240,22 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	for _, name := range redis8Commands {
-		if d8.info[name] == nil || d8.docs[name] == nil {
-			fmt.Fprintf(os.Stderr, "%s missing from %s\n", name, redis8Image)
-			os.Exit(1)
+	d82, err := fetch(moduleImage)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	for image, later := range map[string]struct {
+		d     *dump
+		names []string
+	}{redis8Image: {d8, redis8Commands}, moduleImage: {d82, redis82Commands}} {
+		for _, name := range later.names {
+			if later.d.info[name] == nil || later.d.docs[name] == nil {
+				fmt.Fprintf(os.Stderr, "%s missing from %s\n", name, image)
+				os.Exit(1)
+			}
+			d74.info[name], d74.docs[name] = later.d.info[name], later.d.docs[name]
 		}
-		d74.info[name], d74.docs[name] = d8.info[name], d8.docs[name]
 	}
 	names := make([]string, 0, len(d74.info))
 	for n := range d74.info {
@@ -299,17 +315,12 @@ func main() {
 		}
 	}
 	fmt.Printf("%d commands, %d subcommands\n", len(names), len(subNames))
-	writeModuleCommands()
+	writeModuleCommands(d82)
 }
 
 // writeModuleCommands writes the COMMAND INFO and COMMAND DOCS entries of
 // the module commands of Redis 8.2, with each command's module.
-func writeModuleCommands() {
-	d, err := fetch(moduleImage)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
+func writeModuleCommands(d *dump) {
 	var names []string
 	modules := map[string]string{}
 	for name, doc := range d.docs {

@@ -893,25 +893,11 @@ func (v *StreamValue) Delete(ids ...string) int64 {
 func (v *StreamValue) DeleteIDs(ids []StreamID) int64 {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-
 	deleted := int64(0)
-	maxDel := v.maxDeletedLocked()
 	for _, id := range ids {
-		pos, ok := v.seekLocked(id)
-		if !ok {
-			continue
+		if v.deleteIDLocked(id) {
+			deleted++
 		}
-		if _, eid, _ := v.nodes[pos.node].head(pos.off); eid != id {
-			continue
-		}
-		v.deleteAtLocked(pos)
-		if maxDel.Less(id) {
-			maxDel = id
-		}
-		deleted++
-	}
-	if deleted > 0 {
-		v.MaxDeletedID = maxDel.String()
 	}
 	return deleted
 }
@@ -929,6 +915,9 @@ type StreamTrimArgs struct {
 	MinID    StreamID
 	Approx   bool
 	Limit    int64
+	// Refs is how trimmed entries' references are treated: StreamKeepRef,
+	// StreamDelRef or StreamAcked.
+	Refs int
 }
 
 // TrimStream trims the way XTRIM does and returns the number of entries
@@ -983,6 +972,9 @@ func (v *StreamValue) countBeforeLocked(id StreamID) int {
 func (v *StreamValue) trimLocked(args StreamTrimArgs) int64 {
 	if args.Strategy == StreamTrimNone {
 		return 0
+	}
+	if args.Refs != StreamKeepRef {
+		return v.trimRefsLocked(args)
 	}
 	deleted := int64(0)
 	for len(v.nodes) > 0 {

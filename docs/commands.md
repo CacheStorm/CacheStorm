@@ -207,7 +207,7 @@ SETBIT key offset value
 GETBIT key offset
 BITCOUNT key [start end [BYTE|BIT]]
 BITPOS key bit [start [end [BYTE|BIT]]]
-BITOP operation destkey key [key ...]
+BITOP AND|OR|XOR|NOT|DIFF|DIFF1|ANDOR|ONE destkey key [key ...]
 BITFIELD key [GET type offset] [SET type offset value] [INCRBY type offset increment] [OVERFLOW WRAP|SAT|FAIL]
 BITFIELD_RO key [GET type offset ...]
 ```
@@ -240,8 +240,9 @@ GEOSEARCHSTORE destination source [FROMMEMBER m] [FROMLONLAT lon lat] [BYRADIUS 
 ### Stream Commands
 
 ```
-XADD key [NOMKSTREAM] [MAXLEN|MINID [=|~] threshold [LIMIT count]] id field value [field value ...]
+XADD key [NOMKSTREAM] [KEEPREF|DELREF|ACKED] [MAXLEN|MINID [=|~] threshold [LIMIT count]] id field value [field value ...]
 XDEL key id [id ...]
+XDELEX key [KEEPREF|DELREF|ACKED] IDS numids id [id ...]
 XLEN key
 XRANGE key start end [COUNT count]
 XREVRANGE key end start [COUNT count]
@@ -253,10 +254,11 @@ XGROUP DESTROY key group
 XGROUP SETID key group id|$
 XREADGROUP GROUP group consumer [COUNT count] [BLOCK milliseconds] [NOACK] STREAMS key [key ...] id [id ...]
 XACK key group id [id ...]
+XACKDEL key group [KEEPREF|DELREF|ACKED] IDS numids id [id ...]
 XCLAIM key group consumer min-idle-time id [id ...] [IDLE ms] [TIME ms-unix-time] [RETRYCOUNT count] [FORCE] [JUSTID]
 XAUTOCLAIM key group consumer min-idle-time start [COUNT count] [JUSTID]
 XPENDING key group [[IDLE min-idle-time] start end count [consumer]]
-XTRIM key MAXLEN|MINID [=|~] threshold [LIMIT count]
+XTRIM key MAXLEN|MINID [=|~] threshold [LIMIT count] [KEEPREF|DELREF|ACKED]
 XINFO STREAM key [FULL [COUNT count]]
 XINFO GROUPS key
 XINFO CONSUMERS key group
