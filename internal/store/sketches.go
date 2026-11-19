@@ -1040,3 +1040,46 @@ func init() {
 	RegisterExtension(ExtensionCMS, decodeCMS)
 	RegisterExtension(ExtensionTopK, decodeTopK)
 }
+
+// RedisHeap returns the top list as RedisBloom saves it: all K heap slots,
+// unused ones with no item.
+func (t *TopKValue) RedisHeap() []TopKItem {
+	t.mu.RLock()
+	h := append([]TopKItem(nil), t.Top...)
+	k := t.K
+	t.mu.RUnlock()
+	if uint32(len(h)) < k {
+		h = append(h, make([]TopKItem, int(k)-len(h))...)
+		for i := len(h)/2 - 1; i >= 0; i-- {
+			topkSiftDown(h, i)
+		}
+	}
+	return h
+}
+
+// RLock and RUnlock hold the top-k for reading.
+func (t *TopKValue) RLock()   { t.mu.RLock() }
+func (t *TopKValue) RUnlock() { t.mu.RUnlock() }
+
+// TopKFingerprint is the fingerprint RedisBloom keeps for an item.
+func TopKFingerprint(item string) uint32 { return murmurHash2([]byte(item), topkFingerprintSeed) }
+
+// TDigestState is a t-digest as RedisBloom saves it: compressed, so every
+// centroid is merged.
+type TDigestState struct {
+	Compression, Min, Max           float64
+	Cap, MergedNodes, UnmergedNodes int64
+	TotalCompressions               int64
+	MergedWeight, UnmergedWeight    int64
+	Means                           []float64
+	Weights                         []int64
+}
+
+// RedisTDigest is a t-digest that can give its RedisBloom saved form.
+type RedisTDigest interface {
+	RedisTDigestState() (TDigestState, error)
+}
+
+// LoadRedisTDigest builds a t-digest from RedisBloom's saved form; the
+// package implementing t-digests sets it.
+var LoadRedisTDigest func(TDigestState) (Value, error)

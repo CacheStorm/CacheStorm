@@ -101,7 +101,49 @@ func decodeTDigest(data []byte) (store.Value, error) {
 	return td, nil
 }
 
-func init() { store.RegisterExtension(store.ExtensionTDigest, decodeTDigest) }
+func init() {
+	store.RegisterExtension(store.ExtensionTDigest, decodeTDigest)
+	store.LoadRedisTDigest = loadRedisTDigest
+}
+
+// RedisTDigestState is the digest as RedisBloom's TDigestRdbSave writes it:
+// compressed first, the key itself as RedisBloom does (a DUMP or a save
+// merges its centroids), then only the merged centroids.
+func (td *tdigestSketch) RedisTDigestState() (store.TDigestState, error) {
+	td.mu.Lock()
+	defer td.mu.Unlock()
+	if err := td.compressLocked(); err != nil {
+		return store.TDigestState{}, err
+	}
+	return store.TDigestState{
+		Compression: float64(td.compression), Min: td.min, Max: td.max,
+		Cap: int64(td.cap), MergedNodes: int64(td.mergedNodes), UnmergedNodes: int64(td.unmergedNodes()),
+		TotalCompressions: td.totalCompressions, MergedWeight: td.mergedWeight, UnmergedWeight: td.unmergedWeight,
+		Means:   append([]float64(nil), td.means[:td.mergedNodes]...),
+		Weights: append([]int64(nil), td.weights[:td.mergedNodes]...),
+	}, nil
+}
+
+// loadRedisTDigest is RedisBloom's TDigestRdbLoad: the capacity must be the
+// compression's, and the unmerged centroids, which are not saved, load as
+// RedisBloom's zeroed arrays hold them.
+func loadRedisTDigest(st store.TDigestState) (store.Value, error) {
+	if !(st.Compression >= 1 && st.Compression <= 1<<20) {
+		return nil, store.ErrExtensionFormat
+	}
+	td := newTDigestSketch(int64(st.Compression))
+	if st.Cap != int64(td.cap) || st.MergedNodes < 0 || st.UnmergedNodes < 0 ||
+		st.MergedNodes+st.UnmergedNodes > st.Cap || int64(len(st.Means)) != st.MergedNodes || len(st.Weights) != len(st.Means) {
+		return nil, store.ErrExtensionFormat
+	}
+	td.min, td.max = st.Min, st.Max
+	td.mergedNodes = int(st.MergedNodes)
+	td.totalCompressions = st.TotalCompressions
+	td.mergedWeight, td.unmergedWeight = st.MergedWeight, st.UnmergedWeight
+	td.means = append(append(td.means, st.Means...), make([]float64, st.UnmergedNodes)...)
+	td.weights = append(append(td.weights, st.Weights...), make([]int64, st.UnmergedNodes)...)
+	return td, nil
+}
 
 func (td *tdigestSketch) capacity() int { return td.cap }
 

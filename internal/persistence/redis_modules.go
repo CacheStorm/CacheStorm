@@ -1,6 +1,7 @@
 package persistence
 
 import (
+	"bytes"
 	"encoding/binary"
 	"math"
 	"math/rand/v2"
@@ -15,10 +16,12 @@ import (
 // sketches. CacheStorm's filters use RedisBloom's hashing and sizing, so a
 // filter keeps answering the same once moved either way.
 var (
-	rdbModuleJSON   = rdbModuleID("ReJSON-RL", 3)
-	rdbModuleBloom  = rdbModuleID("MBbloom--", 4)
-	rdbModuleCuckoo = rdbModuleID("MBbloomCF", 4)
-	rdbModuleCMS    = rdbModuleID("CMSk-TYPE", 0)
+	rdbModuleJSON    = rdbModuleID("ReJSON-RL", 3)
+	rdbModuleBloom   = rdbModuleID("MBbloom--", 4)
+	rdbModuleCuckoo  = rdbModuleID("MBbloomCF", 4)
+	rdbModuleCMS     = rdbModuleID("CMSk-TYPE", 0)
+	rdbModuleTopK    = rdbModuleID("TopK-TYPE", 0)
+	rdbModuleTDigest = rdbModuleID("TDIS-TYPE", 0)
 	// Redis 8's vector sets, saved with their HNSW graph.
 	rdbModuleVectorSet = rdbModuleID("vectorset", 0)
 )
@@ -45,6 +48,9 @@ type moduleWriter struct{ out []byte }
 func (w *moduleWriter) uint(n uint64) {
 	w.out = appendDumpLength(appendDumpLength(w.out, rdbModuleOpcodeUInt), n)
 }
+
+// sint writes a signed item as RedisModule_SaveSigned does: as unsigned.
+func (w *moduleWriter) sint(n int64) { w.uint(uint64(n)) }
 
 func (w *moduleWriter) double(f float64) {
 	w.out = appendDumpLength(w.out, rdbModuleOpcodeDouble)
@@ -125,10 +131,156 @@ func appendRedisModuleValue(out []byte, value store.Value) ([]byte, bool) {
 	case *store.VectorSetValue:
 		w.out = appendDumpLength(w.out, rdbModuleVectorSet)
 		appendVectorSet(w, v)
+	case *store.TopKValue:
+		w.out = appendDumpLength(w.out, rdbModuleTopK)
+		appendTopK(w, v)
+	case store.RedisTDigest:
+		st, err := v.RedisTDigestState()
+		if err != nil {
+			return out, false
+		}
+		w.out = appendDumpLength(w.out, rdbModuleTDigest)
+		w.double(st.Compression)
+		w.double(st.Min)
+		w.double(st.Max)
+		w.sint(st.Cap)
+		w.sint(st.MergedNodes)
+		w.sint(st.UnmergedNodes)
+		w.sint(st.TotalCompressions)
+		w.double(float64(st.MergedWeight))
+		w.double(float64(st.UnmergedWeight))
+		for _, m := range st.Means {
+			w.double(m)
+		}
+		for _, c := range st.Weights {
+			w.double(float64(c))
+		}
 	default:
 		return out, false
 	}
 	return appendDumpLength(w.out, rdbModuleOpcodeEOF), true
+}
+
+// A RedisBloom top-k heap slot as its C struct lies in memory on x86-64:
+// fingerprint, item length, item pointer (meaningless once saved), count.
+const topkHeapSlot = 24
+
+// appendTopK writes a top-k as RedisBloom's TopKRdbSave does: the sizes,
+// the counters, the heap slots as raw structs, then each slot's item with
+// its NUL terminator ("" alone for an empty slot).
+func appendTopK(w *moduleWriter, t *store.TopKValue) {
+	heap := t.RedisHeap()
+	t.RLock()
+	w.uint(uint64(t.K))
+	w.uint(uint64(t.Width))
+	w.uint(uint64(t.Depth))
+	w.double(t.Decay)
+	data := make([]byte, 0, len(t.Buckets)*8)
+	for _, b := range t.Buckets {
+		data = binary.LittleEndian.AppendUint32(data, b.Fp)
+		data = binary.LittleEndian.AppendUint32(data, b.Count)
+	}
+	t.RUnlock()
+	w.buffer(data)
+	slots := make([]byte, len(heap)*topkHeapSlot)
+	for i, it := range heap {
+		slot := slots[i*topkHeapSlot:]
+		if it.Used {
+			binary.LittleEndian.PutUint32(slot, store.TopKFingerprint(it.Item))
+			binary.LittleEndian.PutUint32(slot[4:], uint32(len(it.Item)))
+		}
+		binary.LittleEndian.PutUint32(slot[16:], it.Count)
+	}
+	w.buffer(slots)
+	for _, it := range heap {
+		item := []byte{0}
+		if it.Used {
+			item = append([]byte(it.Item), 0)
+		}
+		w.buffer(item)
+	}
+}
+
+// moduleSint reads a signed item, which Redis saves as unsigned.
+func (d *dumpDecoder) moduleSint() int64 {
+	if op, _ := d.length(); op != rdbModuleOpcodeUInt && op != rdbModuleOpcodeSInt {
+		d.err = ErrDumpFormat
+		return 0
+	}
+	n, encoded := d.length()
+	if encoded {
+		d.err = ErrDumpFormat
+	}
+	return int64(n)
+}
+
+// topK reads RedisBloom's top-k, refusing what TopKRdbLoad refuses.
+func (d *dumpDecoder) topK() store.Value {
+	k, width, depth, decay := d.moduleUint(), d.moduleUint(), d.moduleUint(), d.moduleDouble()
+	if d.err != nil || k == 0 || width == 0 || depth == 0 || k > math.MaxUint32 || width > math.MaxUint32 || depth > math.MaxUint32 {
+		d.err = ErrDumpFormat
+		return nil
+	}
+	data := d.moduleBuffer()
+	if d.err != nil || width*depth > uint64(len(data)) || uint64(len(data)) != width*depth*8 {
+		d.err = ErrDumpFormat
+		return nil
+	}
+	slots := d.moduleBuffer()
+	if d.err != nil || uint64(len(slots)) != k*topkHeapSlot {
+		d.err = ErrDumpFormat
+		return nil
+	}
+	t := store.NewTopKValue(uint32(k), uint32(width), uint32(depth), decay)
+	for i := range t.Buckets {
+		t.Buckets[i] = store.TopKBucket{Fp: binary.LittleEndian.Uint32(data[i*8:]), Count: binary.LittleEndian.Uint32(data[i*8+4:])}
+	}
+	t.Top = make([]store.TopKItem, k)
+	for i := range t.Top {
+		item := d.moduleBuffer()
+		if d.err != nil || len(item) == 0 {
+			d.err = ErrDumpFormat
+			return nil
+		}
+		t.Top[i].Count = binary.LittleEndian.Uint32(slots[i*topkHeapSlot+16:])
+		if len(item) > 1 {
+			// RedisBloom keeps the item up to its NUL.
+			if end := bytes.IndexByte(item, 0); end >= 0 {
+				item = item[:end]
+			}
+			t.Top[i].Item, t.Top[i].Used = string(item), true
+		}
+	}
+	return t
+}
+
+// tDigest reads RedisBloom's t-digest as TDigestRdbLoad does.
+func (d *dumpDecoder) tDigest() store.Value {
+	st := store.TDigestState{Compression: d.moduleDouble(), Min: d.moduleDouble(), Max: d.moduleDouble()}
+	st.Cap, st.MergedNodes, st.UnmergedNodes, st.TotalCompressions = d.moduleSint(), d.moduleSint(), d.moduleSint(), d.moduleSint()
+	merged, unmerged := d.moduleDouble(), d.moduleDouble()
+	if d.err != nil || st.MergedNodes < 0 || st.MergedNodes > int64(len(d.data)-d.pos) || store.LoadRedisTDigest == nil {
+		d.err = ErrDumpFormat
+		return nil
+	}
+	st.MergedWeight, st.UnmergedWeight = int64(merged), int64(unmerged)
+	st.Means = make([]float64, st.MergedNodes)
+	st.Weights = make([]int64, st.MergedNodes)
+	for i := range st.Means {
+		st.Means[i] = d.moduleDouble()
+	}
+	for i := range st.Weights {
+		st.Weights[i] = int64(d.moduleDouble())
+	}
+	if d.err != nil {
+		return nil
+	}
+	v, err := store.LoadRedisTDigest(st)
+	if err != nil {
+		d.err = ErrDumpFormat
+		return nil
+	}
+	return v
 }
 
 // appendVectorSet writes a vector set as Redis's VectorSetRdbSave does.
@@ -304,6 +456,16 @@ func (d *dumpDecoder) redisBloomValue(id uint64) (value store.Value, handled boo
 			return nil, false
 		}
 		return d.cms(), true
+	case rdbModuleTopK >> 10:
+		if encver != 0 {
+			return nil, false
+		}
+		return d.topK(), true
+	case rdbModuleTDigest >> 10:
+		if encver != 0 {
+			return nil, false
+		}
+		return d.tDigest(), true
 	case rdbModuleVectorSet >> 10:
 		if encver != 0 {
 			return nil, false

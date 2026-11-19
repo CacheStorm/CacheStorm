@@ -393,3 +393,30 @@ func resealDump(p []byte) []byte {
 	n := len(p) - 8
 	return binary.LittleEndian.AppendUint64(p[:n:n], rdbChecksum(0, p[:n]))
 }
+
+// Redis 8.2's DUMP of TOPK.RESERVE tkg 3 8 2 1, TOPK.ADD tkg a b a c a b d.
+const redisTopKDumpHex = "07814e8a4af9360f100002030208020204000000000000f03f05c336408001000080000410dea5ae01800ae004000497eddf2a02e002110317f53cf2e0030fc000e00727c000e0072f03e36c9ac0e0016701000005c33a40480fe36c9ac001000000788725e531730000400b40000317f53cf2400b01488880170003401420000397eddf2a40170058a0170002201320000000050264000502610005026200000c0098a930750d40536b"
+
+func TestRestoreRedisTopKRefusesTruncation(t *testing.T) {
+	payload := hexPayload(t, redisTopKDumpHex)
+	v, err := DecodeDump(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	list := v.(*store.TopKValue).List()
+	if len(list) != 3 || list[0].Item != "a" || list[0].Count != 3 || list[2].Item != "d" {
+		t.Fatalf("TOPK.LIST %+v", list)
+	}
+	again, err := EncodeDump(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DecodeDump(again); err != nil {
+		t.Fatalf("re-dumped top-k: %v", err)
+	}
+	for n := 1; n < len(payload)-10; n++ {
+		if _, err := DecodeDump(resealDump(append(append([]byte(nil), payload[:n]...), payload[len(payload)-10:]...))); err == nil {
+			t.Fatalf("a payload cut at %d restored", n)
+		}
+	}
+}

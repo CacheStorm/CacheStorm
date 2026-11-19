@@ -127,9 +127,14 @@ func appendDumpValue(out []byte, value store.Value) ([]byte, uint16, error) {
 		}
 	case *store.StreamValue:
 		out = appendDumpStream(out, v)
-	case *store.JSONValue, *store.BloomValue, *store.CuckooValue, *store.CMSValue, *store.VectorSetValue:
+	case *store.JSONValue, *store.BloomValue, *store.CuckooValue, *store.CMSValue, *store.TopKValue, *store.VectorSetValue:
 		// As Redis 8's bundled modules save them, which Redis 8 loads.
 		out, _ = appendRedisModuleValue(out, v)
+	case store.RedisTDigest:
+		var ok bool
+		if out, ok = appendRedisModuleValue(out, value); !ok {
+			return out, 0, errors.New("ERR T-Digest: overflow detected")
+		}
 	case *store.TimeSeriesValue:
 		var data bytes.Buffer
 		v.RLock()
