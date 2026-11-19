@@ -401,6 +401,7 @@ JSON.FORGET key [path]
 JSON.TYPE key [path]
 JSON.NUMINCRBY key path number
 JSON.NUMMULTBY key path number
+JSON.NUMPOWBY key path number          # deprecated in RedisJSON, still served
 JSON.STRAPPEND key [path] value
 JSON.STRLEN key [path]
 JSON.ARRAPPEND key path value [value ...]
@@ -569,6 +570,9 @@ BF.EXISTS key item
 BF.MEXISTS key item [item ...]
 BF.CARD key
 BF.INFO key [CAPACITY | SIZE | FILTERS | ITEMS | EXPANSION]
+BF.SCANDUMP key iterator              # [next iterator, chunk]; start at 0, done at 0
+BF.LOADCHUNK key iterator data        # replays SCANDUMP's chunks, here or on Redis 8
+BF.DEBUG key
 ```
 
 ### Cuckoo Filter
@@ -586,7 +590,13 @@ CF.MEXISTS key item [item ...]
 CF.COUNT key item
 CF.DEL key item
 CF.INFO key
+CF.COMPACT key                        # moves fingerprints into older filters, dropping emptied ones
+CF.SCANDUMP key iterator
+CF.LOADCHUNK key iterator data
+CF.DEBUG key
 ```
+
+`SCANDUMP` and `LOADCHUNK` use RedisBloom's chunk formats byte for byte, so a filter dumped from Redis 8 loads here and one dumped here loads into Redis 8.
 
 ### Count-Min Sketch
 

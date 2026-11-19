@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"math"
 	"strings"
+
+	"github.com/cachestorm/cachestorm/internal/cmath"
 )
 
 // Expr is a compiled VSIM FILTER expression, a port of Redis 8.2's expr.c.
@@ -474,7 +476,7 @@ func (e *Expr) Match(attrs []byte) bool {
 		var r float64
 		switch in.op {
 		case opPow:
-			r = cpow(exprToNum(a), exprToNum(b))
+			r = cmath.Pow(exprToNum(a), exprToNum(b))
 		case opMult:
 			r = exprToNum(a) * exprToNum(b)
 		case opDiv:

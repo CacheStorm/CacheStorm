@@ -488,10 +488,14 @@ func (c *CuckooValue) Delete(item []byte) bool {
 	return false
 }
 
-// compact is RedisBloom's CuckooFilter_Compact without cont: it moves
-// fingerprints of the newest filters into older ones, dropping a newest
-// filter it empties, until one cannot be emptied.
-func (c *CuckooValue) compact() {
+// compact is RedisBloom's CuckooFilter_Compact without cont, as a delete
+// runs it.
+func (c *CuckooValue) compact() { c.compactFilters(false) }
+
+// compactFilters moves fingerprints of the newest filters into older ones,
+// dropping the newest filter once emptied. Without cont it stops at the
+// first filter it cannot empty.
+func (c *CuckooValue) compactFilters(cont bool) {
 	for fi := len(c.Filters) - 1; fi > 0; fi-- {
 		l := c.Filters[fi]
 		ok := true
@@ -515,11 +519,11 @@ func (c *CuckooValue) compact() {
 				}
 			}
 		}
-		if !ok {
-			break
-		}
-		if fi == len(c.Filters)-1 {
+		if ok && fi == len(c.Filters)-1 {
 			c.Filters = c.Filters[:fi]
+		}
+		if !ok && !cont {
+			break
 		}
 	}
 	c.Deleted = 0

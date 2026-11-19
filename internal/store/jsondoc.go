@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/cachestorm/cachestorm/internal/cmath"
 )
 
 // JKind is the kind of a JSON value. Numbers keep RedisJSON's distinction:
@@ -705,6 +707,27 @@ func AppendJSONString(dst []byte, s string) []byte {
 
 // errJSONNumberOverflow is returned when arithmetic leaves no finite result.
 var errJSONNumberOverflow = errors.New("ERR result is not a finite number")
+
+// JSONPow is RedisJSON's NUMPOWBY: an integer to an integer power is Rust's
+// release-build i64::pow, wrapping, of the exponent cast to u32; otherwise
+// libm's pow, refused when not finite.
+func JSONPow(n, by *JNode) (*JNode, error) {
+	if n.Kind == JInt && by.Kind == JInt {
+		base, exp, r := n.Int, uint32(by.Int), int64(1)
+		for ; exp > 0; exp >>= 1 {
+			if exp&1 == 1 {
+				r *= base
+			}
+			base *= base
+		}
+		return &JNode{Kind: JInt, Int: r}, nil
+	}
+	f := cmath.Pow(n.Number(), by.Number())
+	if math.IsInf(f, 0) || math.IsNaN(f) {
+		return nil, errJSONNumberOverflow
+	}
+	return &JNode{Kind: JFloat, Float: f}, nil
+}
 
 // JSONArith applies JSON.NUMINCRBY (mult false) or JSON.NUMMULTBY to n:
 // integers stay integers (wrapping as RedisJSON's i64 arithmetic does),

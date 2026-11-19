@@ -5,6 +5,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/cachestorm/cachestorm/internal/cmath"
 )
 
 type redisCase struct {
@@ -463,7 +465,7 @@ func TestPowMatchesGlibc(t *testing.T) {
 		{10, -400, 0},
 	}
 	for _, c := range cases {
-		got := cpow(c.x, c.y)
+		got := cmath.Pow(c.x, c.y)
 		if got != c.want && !(got != got && c.want != c.want) {
 			t.Errorf("pow(%v, %v) = %v, want %v", c.x, c.y, got, c.want)
 		}

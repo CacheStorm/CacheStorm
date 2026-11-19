@@ -205,12 +205,13 @@ var writeCommands = map[string]bool{
 	"PARTITION.CREATE": true, "PARTITION.ADD": true, "PARTITION.DELETE": true,
 	"VECTOR_CLOCK.CREATE": true, "VECTOR_CLOCK.INCREMENT": true, "VECTOR_CLOCK.MERGE": true,
 	"JSON.SET": true, "JSON.DEL": true, "JSON.FORGET": true, "JSON.MSET": true, "JSON.MERGE": true,
-	"JSON.NUMINCRBY": true, "JSON.NUMMULTBY": true, "JSON.TOGGLE": true, "JSON.CLEAR": true,
+	"JSON.NUMINCRBY": true, "JSON.NUMMULTBY": true, "JSON.NUMPOWBY": true, "JSON.TOGGLE": true, "JSON.CLEAR": true,
 	"JSON.ARRAPPEND": true, "JSON.ARRINSERT": true, "JSON.ARRPOP": true, "JSON.ARRTRIM": true, "JSON.STRAPPEND": true,
 	"TS.ADD": true, "TS.CREATE": true, "TS.DEL": true, "TS.ALTER": true,
 	"TS.INCRBY": true, "TS.DECRBY": true, "TS.MADD": true, "TS.CREATERULE": true, "TS.DELETERULE": true,
 	"BF.RESERVE": true, "BF.ADD": true, "BF.MADD": true, "BF.INSERT": true,
 	"CF.RESERVE": true, "CF.ADD": true, "CF.ADDNX": true, "CF.INSERT": true, "CF.INSERTNX": true, "CF.DEL": true,
+	"BF.LOADCHUNK": true, "CF.LOADCHUNK": true, "CF.COMPACT": true,
 	"CMS.INITBYDIM": true, "CMS.INITBYPROB": true, "CMS.INCRBY": true, "CMS.MERGE": true,
 	"TOPK.RESERVE": true, "TOPK.ADD": true, "TOPK.INCRBY": true,
 	"TDIGEST.CREATE": true, "TDIGEST.ADD": true, "TDIGEST.RESET": true, "TDIGEST.MERGE": true,
@@ -466,6 +467,7 @@ func New(cfg *config.Config) (result *Server, retErr error) {
 	command.RegisterSearchCommands(s.router)
 	command.RegisterSuggestCommands(s.router)
 	command.RegisterProbabilisticCommands(s.router)
+	command.RegisterRedisBloomChunkCommands(s.router)
 	command.RegisterVectorSetCommands(s.router)
 	command.RegisterGraphCommands(s.router)
 	command.RegisterDigestCommands(s.router)

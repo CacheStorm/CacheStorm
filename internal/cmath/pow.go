@@ -1,15 +1,15 @@
-package vectorset
+package cmath
 
 import "math"
 
-// cpow is a port of glibc's pow (sysdeps/ieee754/dbl-64/e_pow.c), which is
+// Pow is a port of glibc's pow (sysdeps/ieee754/dbl-64/e_pow.c), which is
 // what Redis's ** operator calls. Go's math.Pow differs from it in the last
 // bit for about half of all non-integer inputs, which changes the outcome of
 // comparisons such as `.x ** 0.5 == 1.4142135623730951`. glibc selects the
 // FMA build of this code on x86-64 CPUs that have FMA; that is the variant
 // ported here. Explicit float64 conversions keep the Go compiler from fusing
 // operations the C code rounds separately.
-func cpow(x, y float64) float64 {
+func Pow(x, y float64) float64 {
 	var signBias uint64
 	ix := math.Float64bits(x)
 	iy := math.Float64bits(y)

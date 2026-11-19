@@ -1,4 +1,4 @@
-package vectorset
+package cmath
 
 // Tables from glibc's sysdeps/ieee754/dbl-64/e_pow_log_data.c and
 // e_exp_data.c (N = 128), used by the pow port in pow.go.

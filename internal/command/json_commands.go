@@ -40,7 +40,7 @@ func RegisterJSONCommands(router *Router) {
 	for name, handler := range map[string]func(*Context) error{
 		"JSON.GET": cmdJSONGET, "JSON.SET": cmdJSONSET, "JSON.MGET": cmdJSONMGET, "JSON.MSET": cmdJSONMSET,
 		"JSON.MERGE": cmdJSONMERGE, "JSON.DEL": cmdJSONDEL, "JSON.FORGET": cmdJSONDEL, "JSON.TYPE": cmdJSONTYPE,
-		"JSON.NUMINCRBY": cmdJSONNUMINCRBY, "JSON.NUMMULTBY": cmdJSONNUMMULTBY,
+		"JSON.NUMINCRBY": cmdJSONNUMINCRBY, "JSON.NUMMULTBY": cmdJSONNUMMULTBY, "JSON.NUMPOWBY": cmdJSONNUMPOWBY,
 		"JSON.STRAPPEND": cmdJSONSTRAPPEND, "JSON.STRLEN": cmdJSONSTRLEN,
 		"JSON.ARRAPPEND": cmdJSONARRAPPEND, "JSON.ARRINDEX": cmdJSONARRINDEX, "JSON.ARRINSERT": cmdJSONARRINSERT,
 		"JSON.ARRLEN": cmdJSONARRLEN, "JSON.ARRPOP": cmdJSONARRPOP, "JSON.ARRTRIM": cmdJSONARRTRIM,
@@ -644,16 +644,9 @@ func jsonWriteTargets(ctx *Context, pathArg int) (*store.JSONValue, *store.JSONP
 	return jv, path, nil
 }
 
-func jsonNumOp(ctx *Context, mult bool) error {
+func jsonNumOp(ctx *Context, op func(n, by *store.JNode) (*store.JNode, error)) error {
 	if ctx.ArgCount() != 3 {
 		return ctx.WriteError(arityError(ctx.Command))
-	}
-	by, err := parseJSONArg(ctx.Arg(2), true)
-	if err != nil {
-		return ctx.WriteError(err)
-	}
-	if !by.IsNumber() {
-		return ctx.WriteError(errJSONBadNumber)
 	}
 	key := ctx.ArgString(0)
 	jv, path, err := jsonWriteTargets(ctx, 1)
@@ -662,12 +655,24 @@ func jsonNumOp(ctx *Context, mult bool) error {
 	}
 	var results []*store.JNode
 	var opErr error
+	// RedisJSON parses the number only on reaching a numeric target, so a
+	// path with none replies without looking at it.
+	var by *store.JNode
 	jsonWrite(ctx, key, jv, func() bool {
 		changed := false
 		for _, m := range path.EvalPaths(jv.Root) {
 			if !m.Node.IsNumber() {
 				results = append(results, nil)
 				continue
+			}
+			if by == nil {
+				if by, opErr = parseJSONArg(ctx.Arg(2), true); opErr != nil {
+					return changed
+				}
+				if !by.IsNumber() {
+					opErr = errJSONBadNumber
+					return changed
+				}
 			}
 			cur, ok := m.Follow(jv.Root)
 			if !ok {
@@ -678,7 +683,7 @@ func jsonNumOp(ctx *Context, mult bool) error {
 				opErr = errJSONNotNumber
 				return changed
 			}
-			n, err := store.JSONArith(m.Node, by, mult)
+			n, err := op(m.Node, by)
 			if err != nil {
 				opErr = errJSONNotFinite
 				return changed
@@ -714,8 +719,16 @@ func jsonNumOp(ctx *Context, mult bool) error {
 	return ctx.WriteError(errJSONNotNumber)
 }
 
-func cmdJSONNUMINCRBY(ctx *Context) error { return jsonNumOp(ctx, false) }
-func cmdJSONNUMMULTBY(ctx *Context) error { return jsonNumOp(ctx, true) }
+func cmdJSONNUMINCRBY(ctx *Context) error {
+	return jsonNumOp(ctx, func(n, by *store.JNode) (*store.JNode, error) { return store.JSONArith(n, by, false) })
+}
+func cmdJSONNUMMULTBY(ctx *Context) error {
+	return jsonNumOp(ctx, func(n, by *store.JNode) (*store.JNode, error) { return store.JSONArith(n, by, true) })
+}
+
+// cmdJSONNUMPOWBY is RedisJSON's deprecated NUMPOWBY, still registered by
+// Redis 8.2.
+func cmdJSONNUMPOWBY(ctx *Context) error { return jsonNumOp(ctx, store.JSONPow) }
 
 func cmdJSONSTRAPPEND(ctx *Context) error {
 	if ctx.ArgCount() != 2 && ctx.ArgCount() != 3 {
