@@ -24,11 +24,12 @@ type RedisRDBInfo struct {
 	StreamDB int
 	ReplID   string
 	Offset   int64
-	// Extensions keeps what Redis has no type for, for a snapshot CacheStorm
-	// loads again: JSON documents, time series and the probabilistic
-	// structures as module values, and key tags as an aux field before the
-	// key, which Redis ignores. Without it
-	// those keys are left out and the tags dropped.
+	// Extensions keeps what no Redis has a type for, for a snapshot
+	// CacheStorm loads again: CacheStorm-only values as module values of its
+	// own types, and key tags as an aux field before the key, which Redis
+	// ignores. Without it those keys are left out and the tags dropped.
+	// Values of the types Redis 8's bundled modules have (JSON, time series,
+	// the probabilistic structures, vector sets) are always saved.
 	Extensions bool
 	// Aux holds extra aux fields; Redis ignores the ones it does not know.
 	Aux map[string]string
@@ -77,8 +78,8 @@ func rdbModuleID(name string, encver uint64) uint64 {
 
 // WriteRedisRDB writes src as an RDB file in Redis' own format, which Redis
 // and its tools (redis-check-rdb, replicas, migration tools) load. Values
-// Redis has no type for (JSON documents, time series) are left out unless
-// info.Extensions is set; it returns how many keys it left out. The version
+// of CacheStorm-only types are left out unless info.Extensions is set; it
+// returns how many keys it left out. The version
 // is 11, or 12 when a hash has field expirations, which only Redis 7.4 can
 // load.
 func WriteRedisRDB(w io.Writer, src EntryStreamer, info RedisRDBInfo) (int, error) {
@@ -338,7 +339,15 @@ func encodeRDBShards(parts *RDBParts, shards []EntryShard, info *RedisRDBInfo) (
 // a value Redis has no type for without info.Extensions; out may then hold a
 // partial record the caller drops.
 func appendRDBEntry(out, scratch []byte, key string, entry *store.Entry, info *RedisRDBInfo) (_, _ []byte, version uint16, skip bool, err error) {
-	scratch, version, err = appendDumpValue(scratch[:0], entry.Value)
+	ts, isSeries := entry.Value.(*store.TimeSeriesValue)
+	if isSeries {
+		// Saved whole, with its source key and rules, as RedisTimeSeries
+		// saves a series while persisting. Redis 8 bundles RedisTimeSeries,
+		// so a Redis replica gets its series too.
+		scratch = appendTimeSeriesValue(scratch[:0], key, ts, true)
+	} else {
+		scratch, version, err = appendDumpValue(scratch[:0], entry.Value)
+	}
 	if err != nil {
 		// An empty collection, or a hash whose fields all expired, is no
 		// key.
@@ -349,7 +358,11 @@ func appendRDBEntry(out, scratch []byte, key string, entry *store.Entry, info *R
 	}
 	typ := scratch[0]
 	module := rdbModules[typ]
-	if (module != 0 || typ == rdbTypeModule2) && !info.Extensions {
+	// Values in the encodings of Redis 8's bundled modules are always
+	// saved, so a Redis 8 replica gets them all and a Redis without the
+	// module refuses the file naming the type, rather than losing keys
+	// silently; only CacheStorm's own types need info.Extensions.
+	if module != 0 && !info.Extensions {
 		return out, scratch, 0, true, nil
 	}
 	if tags := entry.TagList(); info.Extensions && len(tags) > 0 {

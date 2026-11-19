@@ -87,5 +87,5 @@ A master that was on the minority side of a partition waits `cluster-node-timeou
 
 ## Limitations
 
-- **DUMP payloads:** JSON documents, Bloom and cuckoo filters, count-min sketches, top-k lists, t-digests and vector sets are dumped as Redis 8's modules dump them, so they restore into Redis 8 or Redis Stack and back. Time series use CacheStorm's own encoding, which Redis cannot restore. Streams use Redis' encoding and move both ways.
+- **DUMP payloads:** JSON documents, Bloom and cuckoo filters, count-min sketches, top-k lists, t-digests and vector sets are dumped as Redis 8's modules dump them, so they restore into Redis 8 or Redis Stack and back. So are time series (RedisTimeSeries' `TSDB-TYPE`); as in Redis, a series' DUMP payload leaves out its compaction rules and source key. Streams use Redis' encoding and move both ways.
 - **Extension state outside the keyspace:** the extension namespaces keep their objects in keys, which belong to slots like any key; only `EVENT` (an event bus) and `AUDIT` (a server log) stay in each node's process, unpartitioned.

@@ -58,6 +58,7 @@ var (
 	errTSDestHasDest      = errors.New("ERR TSDB: the destination key already has a dst rule")
 	errTSMissingFilter    = errors.New("ERR TSDB: missing FILTER argument")
 	errTSFilterNoLabels   = errors.New("ERR TSDB: missing labels for filter argument")
+	errTSDelRetention     = errors.New("ERR TSDB: When a series has compactions, deleting samples or compaction buckets beyond the series retention period is not possible")
 	errTSGroupByOrder     = errors.New("ERR TSDB: GROUPBY should always come after filter")
 )
 
@@ -337,44 +338,23 @@ func upsertCompacted(ctx *Context, c tsClosedBucket) {
 		return
 	}
 	dest.Lock()
-	_, err = dest.Upsert(c.start, c.value, "LAST")
+	dest.UpsertSample(c.start, c.value)
 	dest.Unlock()
-	if err == nil {
-		valueWritten(ctx, c.dest)
-	}
+	valueWritten(ctx, c.dest)
 }
 
 // ruleBucketValue aggregates the series' samples in the rule's bucket at
 // start; ok is false when the bucket has none.
 func ruleBucketValue(ts *store.TimeSeriesValue, r *store.TSRule, start int64) (float64, bool) {
-	norm := max(start, 0)
-	in := ts.Range(norm, start+r.Bucket-1)
-	if len(in) == 0 {
-		return 0, false
-	}
-	if r.Aggregation != "twa" {
-		return store.TSAggregate(r.Aggregation, in), true
-	}
-	var prev, next *store.TimeSeriesSample
-	if p, ok := tsBefore(ts.Samples, norm); ok && norm > 0 {
-		prev = &p
-	}
-	if n, ok := tsFrom(ts.Samples, start+r.Bucket); ok {
-		next = &n
-	}
-	return twaBucket(in, prev, next, norm, start+r.Bucket, false), true
+	return ts.RuleValue(r.Aggregation, uint64(max(start, 0)), uint64(start+r.Bucket-1))
 }
 
 // openRuleBucket makes the series' samples from start to end the rule's
 // open bucket and reports whether there were none.
-func openRuleBucket(ts *store.TimeSeriesValue, r *store.TSRule, start, end int64) bool {
-	norm := max(start, 0)
-	r.Open = ts.Range(norm, end)
-	r.Prev = nil
-	if p, ok := tsBefore(ts.Samples, norm); ok && norm > 0 {
-		r.Prev = &p
-	}
-	return len(r.Open) == 0
+func openRuleBucket(ts *store.TimeSeriesValue, r *store.TSRule, start int64, end uint64) bool {
+	var empty bool
+	r.Ctx, empty = ts.RuleRange(r.Aggregation, uint64(max(start, 0)), end)
+	return empty
 }
 
 // upsertRules recomputes the compaction a sample at or before the newest one
@@ -385,7 +365,7 @@ func upsertRules(ts *store.TimeSeriesValue, at, last int64) []tsClosedBucket {
 		r := &ts.Rules[i]
 		cur := store.TSBucketStart(last, r.Bucket, r.Align)
 		if at >= max(cur, 0) {
-			openRuleBucket(ts, r, cur, cur+r.Bucket-1)
+			openRuleBucket(ts, r, cur, uint64(cur+r.Bucket-1))
 			continue
 		}
 		start := store.TSBucketStart(at, r.Bucket, r.Align)
@@ -416,7 +396,7 @@ func deleteRules(ts *store.TimeSeriesValue, from, to, last int64) []tsRuleDeleti
 		cur := store.TSBucketStart(last, r.Bucket, r.Align)
 		curNorm := max(cur, 0)
 		if from >= curNorm {
-			d.reopenLatest = openRuleBucket(ts, r, cur, cur+r.Bucket-1)
+			d.reopenLatest = openRuleBucket(ts, r, cur, uint64(cur+r.Bucket-1))
 			out = append(out, d)
 			continue
 		}
@@ -430,7 +410,7 @@ func deleteRules(ts *store.TimeSeriesValue, from, to, last int64) []tsRuleDeleti
 		}
 		switch v, ok := ruleBucketValue(ts, r, end); {
 		case to >= curNorm:
-			d.reopenLatest = openRuleBucket(ts, r, cur, math.MaxInt64)
+			d.reopenLatest = openRuleBucket(ts, r, cur, math.MaxUint64)
 			d.to = max(end-r.Bucket, 0)
 		case ok:
 			d.to = max(end-r.Bucket, 0)
@@ -484,7 +464,9 @@ func deleteSamples(ctx *Context, key string, ts *store.TimeSeriesValue, from, to
 		ts.Lock()
 		if d.rule < len(ts.Rules) && ts.Rules[d.rule].Dest == r.Dest {
 			start := max(store.TSBucketStart(reopened, r.Bucket, r.Align), 0)
-			openRuleBucket(ts, &ts.Rules[d.rule], start, start+r.Bucket-1)
+			rule := &ts.Rules[d.rule]
+			rule.Started = !openRuleBucket(ts, rule, start, uint64(start+r.Bucket-1))
+			rule.Start = uint64(start)
 		}
 		ts.Unlock()
 	}
@@ -498,27 +480,9 @@ func feedRules(ts *store.TimeSeriesValue, at int64, value float64) []tsClosedBuc
 	var closed []tsClosedBucket
 	for i := range ts.Rules {
 		r := &ts.Rules[i]
-		start := store.TSBucketStart(at, r.Bucket, r.Align)
-		if len(r.Open) > 0 {
-			open := store.TSBucketStart(r.Open[0].Timestamp, r.Bucket, r.Align)
-			switch {
-			case start < open:
-				continue
-			case start > open:
-				var v float64
-				if r.Aggregation == "twa" {
-					next := store.TimeSeriesSample{Timestamp: at, Value: value}
-					v = twaBucket(r.Open, r.Prev, &next, max(open, 0), open+r.Bucket, false)
-				} else {
-					v = store.TSAggregate(r.Aggregation, r.Open)
-				}
-				closed = append(closed, tsClosedBucket{r.Dest, max(open, 0), v})
-				last := r.Open[len(r.Open)-1]
-				r.Prev = &last
-				r.Open = r.Open[:0]
-			}
+		if start, v, ok := r.Feed(at, value); ok {
+			closed = append(closed, tsClosedBucket{r.Dest, start, v})
 		}
-		r.Open = append(r.Open, store.TimeSeriesSample{Timestamp: at, Value: value})
 	}
 	return closed
 }
@@ -678,7 +642,38 @@ func cmdTSDEL(ctx *Context) error {
 	if ts == nil {
 		return ctx.WriteError(errTSKeyMissing)
 	}
+	ts.RLock()
+	ok := tsDeletePossible(ts, from)
+	ts.RUnlock()
+	if !ok {
+		return ctx.WriteError(errTSDelRetention)
+	}
 	return ctx.WriteInteger(int64(deleteSamples(ctx, key, ts, from, to, 0)))
+}
+
+// tsDeletePossible is RedisTimeSeries' check that TS.DEL from from on a
+// series with compaction rules and a retention period deletes neither
+// samples nor buckets the retention period no longer covers.
+func tsDeletePossible(ts *store.TimeSeriesValue, from int64) bool {
+	retention := uint64(ts.Retention.Milliseconds())
+	if len(ts.Rules) == 0 || retention == 0 {
+		return true
+	}
+	var last uint64
+	if l, ok := ts.Last(); ok {
+		last = uint64(l.Timestamp)
+	}
+	obsolete := func(t uint64) bool { return last > retention && t < last-retention }
+	if obsolete(uint64(from)) {
+		return false
+	}
+	for i := range ts.Rules {
+		r := &ts.Rules[i]
+		if obsolete(store.TSNormalizeBucket(store.TSCalcBucketStart(uint64(from), uint64(r.Bucket), uint64(r.Align)))) {
+			return false
+		}
+	}
+	return true
 }
 
 // tsDouble is a sample value as RedisTimeSeries replies with it: a simple
@@ -1477,7 +1472,8 @@ func cmdTSINFO(ctx *Context) error {
 		source = resp.BulkString(ts.SourceKey)
 	}
 	rules := []*resp.Value{}
-	for _, r := range ts.Rules {
+	for i := range ts.Rules {
+		r := &ts.Rules[i]
 		rule := []*resp.Value{resp.IntegerValue(r.Bucket), resp.SimpleString(strings.ToUpper(r.Aggregation)), resp.IntegerValue(r.Align)}
 		if resp3 {
 			rules = append(rules, resp.BulkString(r.Dest), resp.ArrayValue(rule))
@@ -1510,25 +1506,34 @@ func cmdTSINFO(ctx *Context) error {
 		resp.SimpleString("ignoreMaxValDiff"), ignoreValDiff,
 	}
 	if ctx.ArgCount() == 2 && strings.EqualFold(ctx.ArgString(1), "DEBUG") {
-		start, end := int64(-1), int64(-1)
-		if info.Samples > 0 {
-			start, end = info.First, info.Last
-		}
-		size := info.ChunkSize * info.ChunkCount
-		perSample := float64(size) / math.Max(float64(info.Samples), 1)
-		perSampleReply := resp.BulkString(strconv.FormatFloat(perSample, 'f', -1, 64))
-		if resp3 {
-			perSampleReply = resp.DoubleValue(fpconvDtoa(perSample))
-		}
-		chunk := []*resp.Value{
-			resp.SimpleString("startTimestamp"), resp.IntegerValue(start),
-			resp.SimpleString("endTimestamp"), resp.IntegerValue(end),
-			resp.SimpleString("samples"), resp.IntegerValue(info.Samples),
-			resp.SimpleString("size"), resp.IntegerValue(size),
-			resp.SimpleString("bytesPerSample"), perSampleReply,
+		var chunks []*resp.Value
+		samples := ts.Samples
+		counts, sizes := ts.ChunkLayout()
+		for c, n := range counts {
+			start, end := int64(-1), int64(-1)
+			if n > 0 {
+				start, end = samples[0].Timestamp, samples[n-1].Timestamp
+			}
+			samples = samples[n:]
+			// RedisTimeSeries divides in single precision.
+			var perSample float64
+			if n > 0 {
+				perSample = float64(float32(sizes[c]) / float32(n))
+			}
+			perSampleReply := resp.BulkString(fpconvDtoa(perSample))
+			if resp3 {
+				perSampleReply = resp.DoubleValue(fpconvDtoa(perSample))
+			}
+			chunks = append(chunks, resp.PairsValue([]*resp.Value{
+				resp.SimpleString("startTimestamp"), resp.IntegerValue(start),
+				resp.SimpleString("endTimestamp"), resp.IntegerValue(end),
+				resp.SimpleString("samples"), resp.IntegerValue(n),
+				resp.SimpleString("size"), resp.IntegerValue(sizes[c]),
+				resp.SimpleString("bytesPerSample"), perSampleReply,
+			}))
 		}
 		reply = append(reply, resp.SimpleString("keySelfName"), resp.BulkString(key),
-			resp.SimpleString("Chunks"), resp.ArrayValue([]*resp.Value{resp.PairsValue(chunk)}))
+			resp.SimpleString("Chunks"), resp.ArrayValue(chunks))
 	}
 	return ctx.WriteValue(resp.PairsValue(reply))
 }
@@ -1618,8 +1623,8 @@ func cmdTSDELETERULE(ctx *Context) error {
 	}
 	src.Lock()
 	found := false
-	for i, r := range src.Rules {
-		if r.Dest == destKey {
+	for i := range src.Rules {
+		if src.Rules[i].Dest == destKey {
 			src.Rules = append(src.Rules[:i], src.Rules[i+1:]...)
 			found = true
 			break

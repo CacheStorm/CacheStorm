@@ -4,6 +4,7 @@ import (
 	"errors"
 	"maps"
 	"math"
+	"math/big"
 	"sort"
 	"strconv"
 	"strings"
@@ -34,20 +35,27 @@ type TimeSeriesValue struct {
 	IgnoreMaxValDiff  float64
 	Rules             []TSRule
 	SourceKey         string
+	layout            tsLayout
+	loadedChunks      bool
+	last              TimeSeriesSample
+	lastSet           bool
+	labelMem          int64
+	labelMemSet       bool
+	countSkew         int64
 	mu                sync.RWMutex
 }
 
 // TSRule is a compaction rule: samples are aggregated per bucket into the
-// series Dest. Open holds the samples of the bucket not yet closed, and
-// Prev the last sample of the bucket closed before it, which a "twa" rule
-// interpolates from.
+// series Dest. Ctx aggregates the bucket starting at Start, once Started
+// (RedisTimeSeries' startCurrentTimeBucket, -1 before the first sample).
 type TSRule struct {
 	Dest        string
 	Aggregation string
 	Bucket      int64
 	Align       int64
-	Open        []TimeSeriesSample
-	Prev        *TimeSeriesSample
+	Started     bool
+	Start       uint64
+	Ctx         TSAggContext
 }
 
 // TSDefaultChunkSize is a series' default CHUNK_SIZE.
@@ -82,16 +90,6 @@ func (v *TimeSeriesValue) SizeOf() int64 {
 	return v.memoryUsageLocked()
 }
 
-// MemoryUsage is TS.INFO's memoryUsage: the chunks the samples fill and the
-// series' own overhead.
-func (v *TimeSeriesValue) memoryUsageLocked() int64 {
-	size := 760 + v.chunkCountLocked()*v.chunkSizeLocked()
-	for _, k := range v.LabelKeys {
-		size += int64(len(k)+len(v.Labels[k])) + 30
-	}
-	return size + int64(len(v.Rules))*72
-}
-
 func (v *TimeSeriesValue) chunkSizeLocked() int64 {
 	if v.ChunkSize <= 0 {
 		return TSDefaultChunkSize
@@ -100,8 +98,7 @@ func (v *TimeSeriesValue) chunkSizeLocked() int64 {
 }
 
 func (v *TimeSeriesValue) chunkCountLocked() int64 {
-	perChunk := max(v.chunkSizeLocked()/16, 1)
-	return max((int64(len(v.Samples))+perChunk-1)/perChunk, 1)
+	return int64(len(v.layoutLocked()))
 }
 
 func (v *TimeSeriesValue) Clone() Value {
@@ -118,11 +115,14 @@ func (v *TimeSeriesValue) Clone() Value {
 		IgnoreMaxTimeDiff: v.IgnoreMaxTimeDiff,
 		IgnoreMaxValDiff:  v.IgnoreMaxValDiff,
 		SourceKey:         v.SourceKey,
+		loadedChunks:      v.loadedChunks,
+		last:              v.last,
+		lastSet:           v.lastSet,
+		labelMem:          v.labelMem,
+		labelMemSet:       v.labelMemSet,
+		countSkew:         v.countSkew,
 	}
-	for _, r := range v.Rules {
-		r.Open = append([]TimeSeriesSample(nil), r.Open...)
-		c.Rules = append(c.Rules, r)
-	}
+	c.Rules = append(c.Rules, v.Rules...)
 	return c
 }
 
@@ -154,6 +154,7 @@ const TSNoPolicy = "NONE"
 
 // SetLabels replaces the labels, keeping the order they are given in.
 func (v *TimeSeriesValue) SetLabels(keys []string, values []string) {
+	v.labelMemSet = false
 	v.Labels = make(map[string]string, len(keys))
 	v.LabelKeys = v.LabelKeys[:0]
 	for i, k := range keys {
@@ -185,12 +186,35 @@ func (v *TimeSeriesValue) search(ts int64) int {
 	return sort.Search(len(v.Samples), func(i int) bool { return v.Samples[i].Timestamp >= ts })
 }
 
-// Last returns the newest sample.
+// Last returns RedisTimeSeries' last sample: the one appended last, which
+// an upsert into a later bucket of a compaction's destination leaves
+// behind the newest sample.
 func (v *TimeSeriesValue) Last() (TimeSeriesSample, bool) {
 	if len(v.Samples) == 0 {
 		return TimeSeriesSample{}, false
 	}
+	if v.lastSet {
+		return v.last, true
+	}
 	return v.Samples[len(v.Samples)-1], true
+}
+
+// TotalSamples is TS.INFO's totalSamples: the samples, and the difference
+// a loaded series' own count had from them. RedisTimeSeries keeps a count
+// that some sequences of upserts and deletions leave off by a few, and
+// carries it through a save.
+func (v *TimeSeriesValue) TotalSamples() int64 {
+	return max(int64(len(v.Samples))+v.countSkew, 0)
+}
+
+// SetTotalSamples records the count a loaded series came with.
+func (v *TimeSeriesValue) SetTotalSamples(n int64) {
+	v.countSkew = n - int64(len(v.Samples))
+}
+
+// SetLast sets the last sample, as a loaded series carries it.
+func (v *TimeSeriesValue) SetLast(s TimeSeriesSample) {
+	v.last, v.lastSet = s, true
 }
 
 // Ignores reports whether IGNORE drops a sample as too close to the newest
@@ -210,7 +234,8 @@ func (v *TimeSeriesValue) Upsert(ts int64, value float64, policy string) (int64,
 	if policy == "" {
 		policy = v.Policy()
 	}
-	if last, ok := v.Last(); ok {
+	last, had := v.Last()
+	if had {
 		if v.Retention > 0 && ts < last.Timestamp-v.Retention.Milliseconds() {
 			return 0, ErrTSRetention
 		}
@@ -218,28 +243,99 @@ func (v *TimeSeriesValue) Upsert(ts int64, value float64, policy string) (int64,
 			return last.Timestamp, nil
 		}
 	}
+	appending := !had || ts > last.Timestamp
+	if appending {
+		v.last, v.lastSet = TimeSeriesSample{Timestamp: ts, Value: value}, true
+	}
 	i := v.search(ts)
 	if i < len(v.Samples) && v.Samples[i].Timestamp == ts {
-		s := &v.Samples[i]
-		switch policy {
-		case "BLOCK":
-			return 0, ErrTSDuplicateBlock
-		case "LAST":
-			s.Value = value
-		case "MIN":
-			s.Value = math.Min(s.Value, value)
-		case "MAX":
-			s.Value = math.Max(s.Value, value)
-		case "SUM":
-			s.Value += value
+		if appending {
+			v.Samples[i].Value = value
+			v.layout.valid = false
+			return ts, nil
 		}
+		defer func() {
+			if ts == last.Timestamp {
+				v.last.Value = v.Samples[i].Value
+			}
+		}()
+		s := &v.Samples[i]
+		v.layout.valid = false
+		merged, ok := tsDuplicate(policy, s.Value, value)
+		if !ok {
+			return 0, ErrTSDuplicateBlock
+		}
+		s.Value = merged
 		return ts, nil
 	}
 	v.Samples = append(v.Samples, TimeSeriesSample{})
 	copy(v.Samples[i+1:], v.Samples[i:])
 	v.Samples[i] = TimeSeriesSample{Timestamp: ts, Value: value}
+	if i == len(v.Samples)-1 {
+		v.appended()
+	} else {
+		v.layout.valid = false
+	}
 	v.trimLocked()
 	return ts, nil
+}
+
+// tsDuplicate is handleDuplicateSample: the value a sample at an occupied
+// timestamp leaves under policy; ok is false when BLOCK refuses it. A NaN
+// gives way to the other value whatever the policy.
+func tsDuplicate(policy string, old, value float64) (float64, bool) {
+	if policy == "BLOCK" {
+		return 0, false
+	}
+	if math.IsNaN(old) || math.IsNaN(value) {
+		if math.IsNaN(value) {
+			return old, true
+		}
+		return value, true
+	}
+	switch policy {
+	case "FIRST":
+		return old, true
+	case "MIN":
+		if old < value {
+			return old, true
+		}
+	case "MAX":
+		if old > value {
+			return old, true
+		}
+	case "SUM":
+		return value + old, true
+	}
+	return value, true
+}
+
+// UpsertSample is SeriesUpsertSample, which writes a compaction's
+// recomputed bucket: the sample is inserted or overwrites the one at ts, and
+// the last sample changes only when it is the one at ts. An empty series
+// takes it as its last sample. The caller holds the lock.
+func (v *TimeSeriesValue) UpsertSample(ts int64, value float64) {
+	last, had := v.Last()
+	if !had {
+		v.Upsert(ts, value, "LAST") //nolint:errcheck // LAST never fails
+		return
+	}
+	v.layout.valid = false
+	i := v.search(ts)
+	if i < len(v.Samples) && v.Samples[i].Timestamp == ts {
+		value, _ = tsDuplicate("LAST", v.Samples[i].Value, value)
+		v.Samples[i].Value = value
+	} else {
+		v.Samples = append(v.Samples, TimeSeriesSample{})
+		copy(v.Samples[i+1:], v.Samples[i:])
+		v.Samples[i] = TimeSeriesSample{Timestamp: ts, Value: value}
+	}
+	if !v.lastSet {
+		v.last, v.lastSet = last, true
+	}
+	if ts == last.Timestamp {
+		v.last.Value = value
+	}
 }
 
 // trimLocked drops the samples the retention period no longer covers.
@@ -249,6 +345,8 @@ func (v *TimeSeriesValue) trimLocked() {
 		return
 	}
 	if cut := v.search(last.Timestamp - v.Retention.Milliseconds()); cut > 0 {
+		v.layout.valid = false
+		v.loadedChunks = true
 		v.Samples = append(v.Samples[:0], v.Samples[cut:]...)
 	}
 }
@@ -280,7 +378,13 @@ func (v *TimeSeriesValue) DeleteRange(from, to int64) int {
 	if to < math.MaxInt64 {
 		j = v.search(to + 1)
 	}
+	if j > i {
+		v.layout.valid = false
+	}
 	v.Samples = append(v.Samples[:i], v.Samples[j:]...)
+	if v.lastSet && from <= v.last.Timestamp && v.last.Timestamp <= to {
+		v.lastSet = false
+	}
 	return j - i
 }
 
@@ -290,9 +394,9 @@ type TSInfo struct {
 }
 
 func (v *TimeSeriesValue) Info() TSInfo {
-	info := TSInfo{Samples: int64(len(v.Samples)), Memory: v.memoryUsageLocked(), ChunkCount: v.chunkCountLocked(), ChunkSize: v.chunkSizeLocked()}
-	if len(v.Samples) > 0 {
-		info.First, info.Last = v.Samples[0].Timestamp, v.Samples[len(v.Samples)-1].Timestamp
+	info := TSInfo{Samples: v.TotalSamples(), Memory: v.memoryUsageLocked(), ChunkCount: v.chunkCountLocked(), ChunkSize: v.chunkSizeLocked()}
+	if last, ok := v.Last(); ok {
+		info.First, info.Last = v.Samples[0].Timestamp, last.Timestamp
 	}
 	return info
 }
@@ -320,67 +424,30 @@ func TSAggregate(agg string, samples []TimeSeriesSample) float64 {
 		}
 		return math.NaN()
 	}
-	sum, lo, hi := 0.0, math.Inf(1), math.Inf(-1)
-	for _, s := range samples {
-		sum += s.Value
-		lo, hi = math.Min(lo, s.Value), math.Max(hi, s.Value)
-	}
-	variance := func(sample bool) float64 {
-		if sample && n < 2 {
-			return 0
-		}
-		sum2 := 0.0
+	if agg != "twa" {
+		var c TSAggContext
 		for _, s := range samples {
-			sum2 += s.Value * s.Value
+			c.Add(agg, s.Value, uint64(s.Timestamp))
 		}
-		mean := sum / n
-		v := (sum2 - 2*sum*sum/n + mean*mean*n) / n
-		if sample {
-			return v * n / (n - 1)
-		}
+		v, _ := c.Finalize(agg)
 		return v
 	}
-	switch agg {
-	case "avg":
-		return sum / n
-	case "sum":
-		return sum
-	case "min":
-		return lo
-	case "max":
-		return hi
-	case "range":
-		return hi - lo
-	case "count":
-		return n
-	case "first":
+	if len(samples) == 1 {
 		return samples[0].Value
-	case "last":
-		return samples[len(samples)-1].Value
-	case "var.p":
-		return variance(false)
-	case "var.s":
-		return variance(true)
-	case "std.p":
-		return math.Sqrt(variance(false))
-	case "std.s":
-		return math.Sqrt(variance(true))
-	case "twa":
-		if len(samples) == 1 {
-			return samples[0].Value
-		}
-		area := 0.0
-		for i := 1; i < len(samples); i++ {
-			dt := float64(samples[i].Timestamp - samples[i-1].Timestamp)
-			area += (samples[i].Value + samples[i-1].Value) / 2 * dt
-		}
-		span := float64(samples[len(samples)-1].Timestamp - samples[0].Timestamp)
-		if span == 0 {
-			return sum / n
-		}
-		return area / span
 	}
-	return math.NaN()
+	sum, area := 0.0, 0.0
+	for i, s := range samples {
+		sum += s.Value
+		if i > 0 {
+			dt := float64(s.Timestamp - samples[i-1].Timestamp)
+			area += (s.Value + samples[i-1].Value) / 2 * dt
+		}
+	}
+	span := float64(samples[len(samples)-1].Timestamp - samples[0].Timestamp)
+	if span == 0 {
+		return sum / n
+	}
+	return area / span
 }
 
 // TSBucketStart is the start of the bucket ts falls in.
@@ -394,15 +461,16 @@ func TSBucketStart(ts, bucket, align int64) int64 {
 }
 
 // FormatTSValue prints a sample value as RedisTimeSeries does: the shortest
-// digits, in exponent notation (1E-1, 1E16) below 1 and from 1e16 up.
+// digits, in exponent notation (1E-1, 1E16) below 1 and when Dragonbox's
+// decimal exponent is positive.
 func FormatTSValue(f float64) string {
 	switch {
 	case math.IsNaN(f):
 		return "NaN"
 	case math.IsInf(f, 1):
-		return "inf"
+		return "Infinity"
 	case math.IsInf(f, -1):
-		return "-inf"
+		return "-Infinity"
 	case f == 0:
 		if math.Signbit(f) {
 			return "-0"
@@ -421,7 +489,7 @@ func FormatTSValue(f float64) string {
 	}
 	digits := strings.Replace(mant, ".", "", 1)
 	k := exp - (len(digits) - 1)
-	if exp < 0 || k >= 16 {
+	if exp < 0 || (math.Abs(f) >= 1<<52 && dragonboxExponent(math.Abs(f)) > 0) {
 		out := digits[:1]
 		if len(digits) > 1 {
 			out += "." + digits[1:]
@@ -432,4 +500,41 @@ func FormatTSValue(f float64) string {
 		return sign + digits + strings.Repeat("0", k)
 	}
 	return sign + digits[:exp+1] + "." + digits[exp+1:]
+}
+
+// dragonboxExponent is the decimal exponent Dragonbox gives f (at least
+// 2^52) before removing trailing zeros: one more than its kappa exponent
+// when a multiple of that larger power of ten lies in the interval of
+// numbers rounding to f.
+func dragonboxExponent(f float64) int {
+	b := math.Float64bits(f)
+	frac, biased := b&(1<<52-1), int(b>>52)
+	fc := new(big.Int).SetUint64(frac | 1<<52)
+	e2 := biased - 1075
+	shorter := frac == 0 && biased > 1
+	var e int
+	if shorter {
+		e = (e2*631305-261663)>>21 + 1
+	} else {
+		e = (e2*315653)>>20 + 1
+	}
+	// The interval, scaled by 4 so it has integer ends for e2 >= 0.
+	v4 := new(big.Int).Lsh(fc, uint(e2+2))
+	lowGap := new(big.Int).Lsh(big.NewInt(1), uint(e2+1))
+	if shorter {
+		lowGap.Rsh(lowGap, 1)
+	}
+	lo := new(big.Int).Sub(v4, lowGap)
+	hi := new(big.Int).Add(v4, new(big.Int).Lsh(big.NewInt(1), uint(e2+1)))
+	m := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(e)), nil)
+	m.Lsh(m, 2)
+	if frac&1 == 1 {
+		lo.Add(lo, big.NewInt(1))
+		hi.Sub(hi, big.NewInt(1))
+	}
+	q := new(big.Int).Div(hi, m)
+	if q.Mul(q, m).Cmp(lo) >= 0 {
+		return e
+	}
+	return e - 1
 }

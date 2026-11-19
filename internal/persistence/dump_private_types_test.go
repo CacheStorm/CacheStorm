@@ -66,9 +66,10 @@ func TestTimeSeriesSettingsSurviveDumpAndAOF(t *testing.T) {
 	ts := store.NewTimeSeriesValue(5 * time.Second)
 	ts.SetLabels([]string{"z", "a"}, []string{"1", "2"})
 	ts.DuplicatePolicy, ts.ChunkSize, ts.IgnoreMaxTimeDiff, ts.IgnoreMaxValDiff = "SUM", 128, 10, 0.5
-	ts.Rules = []store.TSRule{{Dest: "dst", Aggregation: "avg", Bucket: 10, Open: []store.TimeSeriesSample{{Timestamp: 1, Value: 2}}}}
+	ts.Rules = []store.TSRule{{Dest: "dst", Aggregation: "avg", Bucket: 10}}
 	ts.SourceKey = "src"
 	ts.Upsert(1, 2, "") //nolint:errcheck
+	ts.Rules[0].Feed(1, 2)
 	payload, err := EncodeDump(ts)
 	if err != nil {
 		t.Fatal(err)
@@ -78,8 +79,10 @@ func TestTimeSeriesSettingsSurviveDumpAndAOF(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := back.(*store.TimeSeriesValue)
-	if got.Policy() != "SUM" || got.ChunkSize != 128 || got.IgnoreMaxValDiff != 0.5 || got.SourceKey != "src" ||
-		len(got.Rules) != 1 || len(got.Rules[0].Open) != 1 || got.Retention != 5*time.Second ||
+	// A DUMP payload leaves the source key and rules out, as RedisTimeSeries'
+	// does; the AOF rewrite's RESTORE payload keeps them.
+	if got.Policy() != "SUM" || got.ChunkSize != 128 || got.IgnoreMaxValDiff != 0.5 || got.SourceKey != "" ||
+		len(got.Rules) != 0 || got.Retention != 5*time.Second ||
 		fmt.Sprint(got.LabelList()) != "[[z 1] [a 2]]" || len(got.Samples) != 1 {
 		t.Fatalf("decoded series = %+v", got)
 	}
@@ -91,5 +94,13 @@ func TestTimeSeriesSettingsSurviveDumpAndAOF(t *testing.T) {
 	w.Flush()
 	if !strings.Contains(out.String(), "RESTORE") {
 		t.Fatalf("a time series must be rewritten as RESTORE, got %q", out.String())
+	}
+	back, err = DecodeDump(encodeTimeSeriesRestore("k", ts))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = back.(*store.TimeSeriesValue)
+	if got.SourceKey != "src" || len(got.Rules) != 1 || !got.Rules[0].Started || got.Rules[0].Ctx.Count != 1 || got.Rules[0].Ctx.Value != 2 {
+		t.Fatalf("restored series = %+v", got)
 	}
 }

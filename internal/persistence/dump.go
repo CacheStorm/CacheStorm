@@ -1,7 +1,6 @@
 package persistence
 
 import (
-	"bytes"
 	"encoding/binary"
 	"encoding/gob"
 	"errors"
@@ -22,10 +21,11 @@ const maxDumpString = 512 << 20
 
 // The value types Redis has no RDB encoding for that CacheStorm serves are
 // dumped under private type bytes, so DUMP/RESTORE and MIGRATE move them
-// between CacheStorm nodes whole: a JSON document, a time series, and the
-// store's extension values (store.ExtensionBloom and on). Redis refuses
-// these payloads. Streams are dumped in Redis' own encoding;
-// dumpTypeStream is still read for payloads older CacheStorm versions wrote.
+// between CacheStorm nodes whole: the store's extension values
+// (store.ExtensionBloom and on). Redis refuses these payloads. Streams, JSON
+// documents and time series are dumped in Redis' own encodings;
+// dumpTypeStream, dumpTypeJSON and dumpTypeTimeSeries are still read for
+// payloads older CacheStorm versions wrote.
 const (
 	dumpTypeStream     = 200
 	dumpTypeJSON       = 201
@@ -136,15 +136,9 @@ func appendDumpValue(out []byte, value store.Value) ([]byte, uint16, error) {
 			return out, 0, errors.New("ERR T-Digest: overflow detected")
 		}
 	case *store.TimeSeriesValue:
-		var data bytes.Buffer
-		v.RLock()
-		err := gob.NewEncoder(&data).Encode(v)
-		v.RUnlock()
-		if err != nil {
-			return out, 0, err
-		}
-		out = append(out, dumpTypeTimeSeries)
-		plain(data.Bytes())
+		// As RedisTimeSeries dumps a series, without its source key and
+		// rules.
+		out = appendTimeSeriesValue(out, "", v, false)
 	case store.ExtensionValue:
 		data, err := v.MarshalBinary()
 		if err != nil {
@@ -611,15 +605,12 @@ func (d *dumpDecoder) valueOf(typ byte) store.Value {
 		if d.err != nil {
 			return nil
 		}
-		v := store.NewTimeSeriesValue(0)
-		if err := gob.NewDecoder(strings.NewReader(data)).Decode(v); err != nil {
+		var v legacyTimeSeries
+		if err := gob.NewDecoder(strings.NewReader(data)).Decode(&v); err != nil {
 			d.err = ErrDumpFormat
 			return nil
 		}
-		if v.Labels == nil {
-			v.Labels = make(map[string]string)
-		}
-		return v
+		return v.value()
 	default:
 		data := d.str()
 		if d.err != nil {

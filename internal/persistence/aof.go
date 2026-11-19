@@ -1041,9 +1041,11 @@ func (rw *AOFRewriter) writeValueCommands(w *bufio.Writer, key string, value sto
 	// Values with no commands that rebuild them in one step (a time series
 	// with its settings and compaction rules, the probabilistic structures,
 	// a vector set with its graph) are restored from their DUMP payload.
-	_, isSeries := value.(*store.TimeSeriesValue)
+	if ts, ok := value.(*store.TimeSeriesValue); ok {
+		return rw.writeCommand(w, "RESTORE", key, "0", string(encodeTimeSeriesRestore(key, ts)))
+	}
 	_, isVectorSet := value.(*store.VectorSetValue)
-	if _, ok := value.(store.ExtensionValue); ok || isSeries || isVectorSet {
+	if _, ok := value.(store.ExtensionValue); ok || isVectorSet {
 		payload, err := EncodeDump(value)
 		if err != nil {
 			return err

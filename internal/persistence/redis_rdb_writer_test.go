@@ -40,8 +40,9 @@ func TestWriteRedisRDBLoadsBack(t *testing.T) {
 	var out bytes.Buffer
 	code := "#!lua name=lib\nredis.register_function('f', function() return 1 end)"
 	skipped, err := WriteRedisRDB(&out, src, RedisRDBInfo{Functions: []string{code}, StreamDB: 2, ReplID: strings.Repeat("a", 40), Offset: 7})
-	if err != nil || skipped != 1 {
-		t.Fatalf("WriteRedisRDB skipped %d, %v; want the JSON key left out", skipped, err)
+	// The JSON document is kept, in RedisJSON's encoding Redis 8 loads.
+	if err != nil || skipped != 0 {
+		t.Fatalf("WriteRedisRDB skipped %d, %v; want every key kept", skipped, err)
 	}
 	if !strings.HasPrefix(out.String(), "REDIS0012") {
 		t.Fatalf("header %q: a hash with field expirations needs RDB 12", out.String()[:9])
@@ -56,6 +57,9 @@ func TestWriteRedisRDBLoadsBack(t *testing.T) {
 	}
 	if _, ok := dbs.DB(0).Get("l"); !ok {
 		t.Fatal("list lost")
+	}
+	if e, ok := dbs.DB(0).Get("j"); !ok || string(e.Value.(*store.JSONValue).Bytes()) != `{"a":1}` {
+		t.Fatal("JSON document lost")
 	}
 	if e, ok := dbs.DB(2).Get("h"); !ok || e.Value.(*store.HashValue).FieldExpireAt("a") != 4102444800000 {
 		t.Fatal("hash with a field expiration lost")
@@ -126,12 +130,12 @@ func TestRedisRDBRefusesOtherModules(t *testing.T) {
 		t.Fatal(err)
 	}
 	i := bytes.Index(out, []byte{rdbTypeModule2, 1, 'j'}) + 3
-	copy(out[i:], appendDumpLength(nil, rdbModuleID("TSDB-TYPE", 3)))
+	copy(out[i:], appendDumpLength(nil, rdbModuleID("TSDB-TYPE", 9)))
 	if err := SealRDBChecksum(out); err != nil {
 		t.Fatal(err)
 	}
 	r := NewRDBReaderForDatabases(store.NewDatabases(store.NewStore(), 16))
-	if err := r.LoadBytes(out); err == nil || !strings.Contains(err.Error(), "module values of type TSDB-TYPE (encoding version 3) are not supported") {
+	if err := r.LoadBytes(out); err == nil || !strings.Contains(err.Error(), "module values of type TSDB-TYPE (encoding version 9) are not supported") {
 		t.Fatalf("LoadBytes = %v", err)
 	}
 }

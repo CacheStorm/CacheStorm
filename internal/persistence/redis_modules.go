@@ -466,6 +466,11 @@ func (d *dumpDecoder) redisBloomValue(id uint64) (value store.Value, handled boo
 			return nil, false
 		}
 		return d.tDigest(), true
+	case rdbModuleTimeSeries >> 10:
+		if encver > tsEncVer {
+			return nil, false
+		}
+		return d.timeSeries(encver), true
 	case rdbModuleVectorSet >> 10:
 		if encver != 0 {
 			return nil, false
