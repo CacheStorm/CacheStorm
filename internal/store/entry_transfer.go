@@ -65,6 +65,10 @@ func (s *Store) Transfer(srcKey string, dst *Store, dstKey string, options Trans
 			unlock()
 			return false, nil
 		}
+		if _, noCopy := source.Value.(interface{ NoCopy() }); noCopy && options.Copy {
+			unlock()
+			return false, ErrModuleNoCopy
+		}
 		base := entryMetadataSize(source.TagList()) + int64(len(dstKey)) + 16
 		size := source.Value.SizeOf()
 		if size < 0 || size > math.MaxInt64-base {

@@ -62,6 +62,7 @@ var writeCommands = map[string]bool{
 	"ZDIFFSTORE": true, "ZINTERSTORE": true, "ZUNIONSTORE": true,
 	"ZREMRANGEBYSCORE": true, "ZREMRANGEBYRANK": true, "ZREMRANGEBYLEX": true,
 	"BZPOPMIN": true, "BZPOPMAX": true,
+	"VADD": true, "VREM": true, "VSETATTR": true,
 	"XADD": true, "XDEL": true, "XDELEX": true, "XACKDEL": true, "XTRIM": true,
 	"XACK": true, "XCLAIM": true, "XAUTOCLAIM": true, "XGROUP": true, "XSETID": true,
 	"PFADD": true, "PFMERGE": true, "PFCOUNT": true, "PFDEBUG": true,
@@ -465,6 +466,7 @@ func New(cfg *config.Config) (result *Server, retErr error) {
 	command.RegisterSearchCommands(s.router)
 	command.RegisterSuggestCommands(s.router)
 	command.RegisterProbabilisticCommands(s.router)
+	command.RegisterVectorSetCommands(s.router)
 	command.RegisterGraphCommands(s.router)
 	command.RegisterDigestCommands(s.router)
 	command.RegisterUtilityCommands(s.router)

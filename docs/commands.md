@@ -527,6 +527,31 @@ Writing clauses (`CREATE`, `MERGE`, `SET`, `DELETE`, `REMOVE`), `OPTIONAL MATCH`
 
 ---
 
+## Vector Set Commands
+
+Redis 8's vector sets (the `vectorset` module of Redis 8.2), ported from its source: a key of type `vectorset` holding elements, each with a vector and optional JSON attributes, indexed by an HNSW graph for similarity search.
+
+```
+VADD key [REDUCE dim] FP32 blob|VALUES n v1 ... vn element [CAS] [NOQUANT|Q8|BIN] [EF build-ef] [SETATTR json] [M links]
+VSIM key ELE element|FP32 blob|VALUES n v1 ... vn [WITHSCORES] [WITHATTRIBS] [COUNT n] [EPSILON d] [EF search-ef] [FILTER expr] [FILTER-EF n] [TRUTH] [NOTHREAD]
+VREM key element
+VEMB key element [RAW]
+VCARD key
+VDIM key
+VINFO key
+VLINKS key element [WITHSCORES]
+VSETATTR key element json
+VGETATTR key element
+VRANDMEMBER key [count]
+VISMEMBER key element
+```
+
+Vectors are normalized and stored as Redis stores them: 8-bit quantized by default (`Q8`), or as floats (`NOQUANT`) or signs (`BIN`), so `VEMB`, `VEMB RAW` and every similarity score are bit for bit Redis 8.2's. `TRUTH` searches exhaustively; without it the HNSW graph is searched exactly as Redis searches it. A graph built here differs from one Redis builds only in the levels its nodes draw at random, so an approximate search can return elements Redis would not, and elements with equal scores may come in another order; a set loaded from Redis keeps Redis's graph and answers every search as Redis does. `FILTER` takes Redis's expression language (`.year > 1950 and .genre in ["a", "b"]`, arithmetic, `**`, string and tuple membership) over the element's JSON attributes, with Redis's coercions and errors. `REDUCE` projects vectors with Redis's deterministic matrix.
+
+Vector sets are saved in snapshots and DUMP payloads in Redis 8's `vectorset` encoding, graph included, so they move to and from Redis 8 by RDB file, full sync, DUMP/RESTORE and MIGRATE; the AOF rewrite stores them with RESTORE. `VADD`, `VREM` and `VSETATTR` are replicated; unlike Redis, a `VADD` that updates an existing element is replicated too. As in Redis, `COPY` refuses a vector set (`ERR not supported for this module key`) and removing the last element deletes the key. Searches run concurrently with each other and wait for writes to the same set.
+
+---
+
 ## Probabilistic Commands
 
 These follow RedisBloom, the probabilistic module built into Redis 8: the same syntax, replies and error texts (some of which, as in RedisBloom, carry no `ERR` prefix). Each structure is a key of its own type (`TYPE` reports `MBbloom--`, `MBbloomCF`, `CMSk-TYPE`, `TopK-TYPE` and `TDIS-TYPE` for t-digests). They live in the selected database, expire, are deleted and flushed like any key, and are saved in snapshots and the AOF, replicated, and moved by DUMP/RESTORE and MIGRATE. The structures are RedisBloom's own: the same MurmurHash functions, sizes, layouts, eviction and compression, so each false positive, each item a top-k list drops and each t-digest centroid is the one Redis 8.2 gives (top-k decay draws random numbers, so with a decay below 1 the drops can still differ). RESP3 clients get booleans, maps and doubles where RedisBloom sends them. One structure may take at most 512 MB; a larger request fails with `ERR Insufficient memory to create filter`.

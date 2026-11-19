@@ -3,8 +3,10 @@ package persistence
 import (
 	"encoding/binary"
 	"math"
+	"math/rand/v2"
 
 	"github.com/cachestorm/cachestorm/internal/store"
+	"github.com/cachestorm/cachestorm/internal/vectorset"
 )
 
 // The module types of Redis 8's bundled modules CacheStorm saves and loads
@@ -17,6 +19,15 @@ var (
 	rdbModuleBloom  = rdbModuleID("MBbloom--", 4)
 	rdbModuleCuckoo = rdbModuleID("MBbloomCF", 4)
 	rdbModuleCMS    = rdbModuleID("CMSk-TYPE", 0)
+	// Redis 8's vector sets, saved with their HNSW graph.
+	rdbModuleVectorSet = rdbModuleID("vectorset", 0)
+)
+
+// A vector set's save flags: it has a projection matrix, some element has
+// attributes.
+const (
+	vsetFlagProjection = 1
+	vsetFlagAttribs    = 2
 )
 
 // RedisBloom's Bloom filter options: bits are not rounded to a power of
@@ -111,10 +122,131 @@ func appendRedisModuleValue(out []byte, value store.Value) ([]byte, bool) {
 			counters = binary.LittleEndian.AppendUint32(counters, c)
 		}
 		w.buffer(counters)
+	case *store.VectorSetValue:
+		w.out = appendDumpLength(w.out, rdbModuleVectorSet)
+		appendVectorSet(w, v)
 	default:
 		return out, false
 	}
 	return appendDumpLength(w.out, rdbModuleOpcodeEOF), true
+}
+
+// appendVectorSet writes a vector set as Redis's VectorSetRdbSave does.
+func appendVectorSet(w *moduleWriter, v *store.VectorSetValue) {
+	v.RLock()
+	defer v.RUnlock()
+	ix := v.Index
+	w.uint(uint64(ix.Dim()))
+	w.uint(ix.Len())
+	w.uint(uint64(ix.Quant()) | uint64(ix.M()&0xffff)<<8)
+	var flags uint64
+	if v.Proj != nil {
+		flags |= vsetFlagProjection
+	}
+	if v.NumAttribs != 0 {
+		flags |= vsetFlagAttribs
+	}
+	w.uint(flags)
+	if v.Proj != nil {
+		w.uint(uint64(v.ProjInput))
+		matrix := make([]byte, 0, len(v.Proj)*4)
+		for _, f := range v.Proj {
+			matrix = binary.LittleEndian.AppendUint32(matrix, math.Float32bits(f))
+		}
+		w.buffer(matrix)
+	}
+	for n := ix.Head(); n != nil; n = n.Next() {
+		e := n.Value.(*store.VectorElem)
+		w.buffer([]byte(e.Name))
+		if v.NumAttribs != 0 {
+			w.buffer(e.Attr)
+		}
+		vec, params := ix.SerializeNode(n)
+		w.buffer(vec)
+		w.uint(uint64(len(params)))
+		for _, p := range params {
+			w.uint(p)
+		}
+	}
+}
+
+// vectorSet reads a vector set as Redis's VectorSetRdbLoad does, refusing
+// what it refuses.
+func (d *dumpDecoder) vectorSet() store.Value {
+	dim, count, config := d.moduleUint(), d.moduleUint(), d.moduleUint()
+	quant := vectorset.Quant(config & 0xff)
+	m := uint32(config>>8) & 0xffff
+	if d.err != nil || dim == 0 || dim > store.MaxVectorDim ||
+		(quant != vectorset.QuantNone && quant != vectorset.QuantQ8 && quant != vectorset.QuantBin) {
+		d.err = ErrDumpFormat
+		return nil
+	}
+	if m == 0 {
+		m = vectorset.DefaultM
+	}
+	v := store.NewVectorSet(uint32(dim), quant, m)
+	flags := d.moduleUint()
+	if flags&vsetFlagProjection != 0 {
+		input := d.moduleUint()
+		if d.err != nil || input == 0 || input > store.MaxVectorDim || dim > input {
+			d.err = ErrDumpFormat
+			return nil
+		}
+		matrix := d.moduleBuffer()
+		if d.err != nil || uint64(len(matrix)) != 4*input*dim {
+			d.err = ErrDumpFormat
+			return nil
+		}
+		v.Proj = make([]float32, input*dim)
+		for i := range v.Proj {
+			v.Proj[i] = math.Float32frombits(binary.LittleEndian.Uint32(matrix[i*4:]))
+		}
+		v.ProjInput = uint32(input)
+	}
+	for ; count > 0 && d.err == nil; count-- {
+		name := d.moduleBuffer()
+		var attr []byte
+		if flags&vsetFlagAttribs != 0 {
+			if a := d.moduleBuffer(); len(a) > 0 {
+				attr = append([]byte(nil), a...)
+			}
+		}
+		vec := d.moduleBuffer()
+		nparams := d.moduleUint()
+		if d.err != nil || uint64(len(vec)) != uint64(v.Index.QuantBytes()) || nparams > uint64(len(d.data)-d.pos) {
+			d.err = ErrDumpFormat
+			return nil
+		}
+		params := make([]uint64, nparams)
+		for i := range params {
+			params[i] = d.moduleUint()
+		}
+		if d.err != nil {
+			return nil
+		}
+		if _, dup := v.Elems[string(name)]; dup {
+			d.err = ErrDumpFormat
+			return nil
+		}
+		e := &store.VectorElem{Name: string(name), Attr: attr}
+		n, err := v.Index.InsertSerialized(append([]byte(nil), vec...), params, e)
+		if err != nil {
+			d.err = ErrDumpFormat
+			return nil
+		}
+		if attr != nil {
+			v.NumAttribs++
+		}
+		v.Elems[e.Name] = n
+	}
+	if d.err != nil {
+		return nil
+	}
+	if err := v.Index.Deserialize(rand.Uint64(), rand.Uint64()); err != nil {
+		d.err = ErrDumpFormat
+		return nil
+	}
+	return v
 }
 
 // moduleUint reads an unsigned module item.
@@ -172,6 +304,11 @@ func (d *dumpDecoder) redisBloomValue(id uint64) (value store.Value, handled boo
 			return nil, false
 		}
 		return d.cms(), true
+	case rdbModuleVectorSet >> 10:
+		if encver != 0 {
+			return nil, false
+		}
+		return d.vectorSet(), true
 	}
 	return nil, false
 }

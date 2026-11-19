@@ -25,6 +25,7 @@ const (
 	DataTypeTopK
 	DataTypeTDigest
 	DataTypeSuggest
+	DataTypeVectorSet
 )
 
 func (dt DataType) String() string {
@@ -59,6 +60,8 @@ func (dt DataType) String() string {
 		return "TDIS-TYPE"
 	case DataTypeSuggest:
 		return "trietype0"
+	case DataTypeVectorSet:
+		return "vectorset"
 	default:
 		return "unknown"
 	}

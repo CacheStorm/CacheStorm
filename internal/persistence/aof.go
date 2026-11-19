@@ -1039,10 +1039,11 @@ func (rw *AOFRewriter) writeBatched(w *bufio.Writer, name, key string, width int
 // typed value on AOF replay, instead of flattening every type to SET.
 func (rw *AOFRewriter) writeValueCommands(w *bufio.Writer, key string, value store.Value) error {
 	// Values with no commands that rebuild them in one step (a time series
-	// with its settings and compaction rules, the probabilistic structures)
-	// are restored from their DUMP payload.
+	// with its settings and compaction rules, the probabilistic structures,
+	// a vector set with its graph) are restored from their DUMP payload.
 	_, isSeries := value.(*store.TimeSeriesValue)
-	if _, ok := value.(store.ExtensionValue); ok || isSeries {
+	_, isVectorSet := value.(*store.VectorSetValue)
+	if _, ok := value.(store.ExtensionValue); ok || isSeries || isVectorSet {
 		payload, err := EncodeDump(value)
 		if err != nil {
 			return err
