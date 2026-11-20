@@ -648,6 +648,10 @@ func (r *Router) Execute(ctx *Context) error {
 	asking := false
 	if r.cluster != nil {
 		asking = ctx.takeAsking()
+		if ctx.ClusterConn != nil {
+			// A command refused before routing counts towards no slot.
+			ctx.ClusterConn.slot = 0
+		}
 	}
 	cmd, ok := r.Get(ctx.Command)
 	if !ok {

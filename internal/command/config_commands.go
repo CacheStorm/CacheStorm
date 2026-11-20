@@ -574,6 +574,9 @@ func cmdConfigResetStat(ctx *Context) error {
 	store.GlobalMetrics.Reset()
 	resetCommandStats()
 	ctx.Store.ResetMemoryPeak()
+	if c := ctx.clusterState(); c != nil {
+		c.ResetSlotUsage()
+	}
 	return ctx.WriteOK()
 }
 

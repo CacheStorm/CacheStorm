@@ -95,7 +95,8 @@ var clusterSubcommandArity = map[string]int{
 	"FLUSHSLOTS": 2, "FORGET": 3, "GETKEYSINSLOT": 4, "HELP": 2, "INFO": 2,
 	"KEYSLOT": 3, "LINKS": 2, "MEET": -4, "MYID": 2, "MYSHARDID": 2, "NODES": 2,
 	"REPLICAS": 3, "REPLICATE": 3, "RESET": -2, "SAVECONFIG": 2,
-	"SET-CONFIG-EPOCH": 3, "SETSLOT": -4, "SHARDS": 2, "SLAVES": 3, "SLOTS": 2,
+	"SET-CONFIG-EPOCH": 3, "SETSLOT": -4, "SHARDS": 2, "SLAVES": 3, "SLOT-STATS": -4,
+	"SLOTS": 2,
 }
 
 var clusterHelp = []string{
@@ -120,6 +121,8 @@ var clusterHelp = []string{
 	"SLOTS",
 	"    Return information about slots range mappings. Each range is made of:",
 	"    start, end, master and replicas IP addresses, ports and ids",
+	"SLOT-STATS",
+	"    Return an array of slot usage statistics for slots assigned to the current node.",
 	"SHARDS",
 	"    Return information about slot range mappings and the nodes associated with them.",
 	"ADDSLOTS <slot> [<slot> ...]",
@@ -203,6 +206,8 @@ func cmdCLUSTER(ctx *Context) error {
 		return ctx.WriteArray(clusterSlotsReply(c))
 	case "SHARDS":
 		return ctx.WriteArray(clusterShardsReply(ctx, c))
+	case "SLOT-STATS":
+		return clusterSlotStats(ctx, c, args)
 	case "LINKS":
 		links := c.Links()
 		out := make([]*resp.Value, len(links))

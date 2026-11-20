@@ -40,9 +40,9 @@ const (
 // come from Redis 8.0 because Redis 7.4 does not have them.
 var redis8Commands = []string{"hgetdel", "hgetex", "hsetex"}
 
-// redis82Commands come from Redis 8.2: XDELEX and XACKDEL are new in it, and
-// it gave BITOP, XADD and XTRIM new options.
-var redis82Commands = []string{"bitop", "xackdel", "xadd", "xdelex", "xtrim"}
+// redis82Commands come from Redis 8.2: XDELEX, XACKDEL and CLUSTER
+// SLOT-STATS are new in it, and it gave BITOP, XADD and XTRIM new options.
+var redis82Commands = []string{"bitop", "cluster", "xackdel", "xadd", "xdelex", "xtrim"}
 
 type val struct {
 	kind  byte

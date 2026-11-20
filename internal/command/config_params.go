@@ -100,6 +100,7 @@ var configParams = map[string]*configParam{
 	"client-query-buffer-limit":           {kind: cfgMemory, def: "1073741824", lo: 1 << 20, hi: configLongMax, apply: resp.SetQueryBufferLimit},
 	"cluster-allow-pubsubshard-when-down": boolParam("yes"),
 	"cluster-allow-reads-when-down":       boolParam("no"),
+	"cluster-slot-stats-enabled":          {kind: cfgBool, def: "no", applyText: func(v string) { slotStatsEnabled.Store(v == "yes") }},
 	"cluster-allow-replica-migration":     boolParam("yes"),
 	"cluster-announce-bus-port":           intParam("0", 0, 65535),
 	"cluster-announce-hostname":           {kind: cfgString, check: checkAnnounceHostname},

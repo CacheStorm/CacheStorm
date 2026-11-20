@@ -133,16 +133,19 @@ type Options struct {
 
 // Cluster is the cluster state of this node.
 type Cluster struct {
-	mu            sync.RWMutex
-	saveMu        sync.Mutex
-	path          string
-	opts          Options
-	myself        *Node
-	nodes         map[string]*Node
-	owner         [Slots]*Node
-	migrating     [Slots]*Node
-	importing     [Slots]*Node
-	notClaiming   [Slots / 8]byte
+	mu          sync.RWMutex
+	saveMu      sync.Mutex
+	path        string
+	opts        Options
+	myself      *Node
+	nodes       map[string]*Node
+	owner       [Slots]*Node
+	migrating   [Slots]*Node
+	importing   [Slots]*Node
+	notClaiming [Slots / 8]byte
+	// usage holds the counters of CLUSTER SLOT-STATS; a slot's start
+	// from zero whenever it changes owner.
+	usage         [Slots]slotUsage
 	currentEpoch  uint64
 	lastVoteEpoch uint64
 	ok            bool
@@ -389,6 +392,7 @@ func (c *Cluster) addSlotLocked(n *Node, slot int) {
 	c.owner[slot] = n
 	n.numSlots++
 	setBit(n.slots[:], slot)
+	c.usage[slot].reset()
 }
 
 func (c *Cluster) delSlotLocked(slot int) {
@@ -396,6 +400,7 @@ func (c *Cluster) delSlotLocked(slot int) {
 		n.numSlots--
 		clearBit(n.slots[:], slot)
 		c.owner[slot] = nil
+		c.usage[slot].reset()
 	}
 	clearBit(c.notClaiming[:], slot)
 }

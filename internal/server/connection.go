@@ -909,6 +909,10 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 		var deferredMark int64
 		var replyStart int
 		c.sink.hold()
+		// executed reports that the router saw the command, and outStart
+		// is where its reply begins, for CLUSTER SLOT-STATS.
+		executed := false
+		outStart := c.sink.pending() + c.writer.Buffered()
 		if c.srv != nil && c.srv.refuseOnReplica(ctx) {
 			c.releaseGate()
 			err = nil
@@ -953,6 +957,7 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 				replyStart = c.sink.pending() + c.writer.Buffered()
 			}
 			err = c.router.Execute(ctx)
+			executed = true
 			if aof != nil {
 				if now := aof.Appended(); now != appended && ctx.DeferSync {
 					deferredMark = now
@@ -1095,6 +1100,9 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 		// so a pipeline of N commands costs one socket write instead of N.
 		if err := c.writer.Flush(); err != nil {
 			return true
+		}
+		if executed {
+			ctx.RecordSlotUsage(len(c.rawCmd), c.sink.pending()-outStart)
 		}
 		if deferredMark != 0 {
 			c.sink.deferWrite(replyStart, deferredMark)
