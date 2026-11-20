@@ -220,11 +220,16 @@ func TestClusterSingleNode(t *testing.T) {
 	if got := c.str("EVAL", "return 1", "2", "a", "b"); got != "ERR:CROSSSLOT Keys in request don't hash to the same slot" {
 		t.Fatalf("cross-slot EVAL: %s", got)
 	}
-	if got := c.str("EVAL", "return redis.call('GET', 'b')", "1", "{t}a"); !strings.Contains(got, "Script attempted to access keys that do not hash to the same slot") {
+	if got := c.str("EVAL", "#!lua\nreturn redis.call('GET', 'b')", "1", "{t}a"); !strings.Contains(got, "Script attempted to access keys that do not hash to the same slot") {
 		t.Fatalf("undeclared key in another slot: %s", got)
 	}
-	if got := c.str("EVAL", "redis.call('GET', 'a') return redis.call('GET', 'b')", "0"); !strings.Contains(got, "Script attempted to access keys that do not hash to the same slot") {
+	if got := c.str("EVAL", "#!lua\nredis.call('GET', 'a') return redis.call('GET', 'b')", "0"); !strings.Contains(got, "Script attempted to access keys that do not hash to the same slot") {
 		t.Fatalf("keyless script crossing slots: %s", got)
+	}
+	// A script without a shebang runs in compatibility mode, which allows
+	// keys of any slot this node serves.
+	if got := c.str("EVAL", "redis.call('GET', 'a') return redis.call('GET', 'b')", "1", "{t}a"); got != "<null>" {
+		t.Fatalf("compatibility-mode script crossing slots: %s", got)
 	}
 	if got := c.str("EVAL", "return redis.call('MGET', 'a', 'b')", "0"); !strings.Contains(got, "Command 'mget' in script attempted to access keys that don't hash to the same slot") {
 		t.Fatalf("cross-slot command in script: %s", got)

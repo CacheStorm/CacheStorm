@@ -693,6 +693,10 @@ func (r *Router) Execute(ctx *Context) error {
 		recordRejected(ctx.Command, ctx.Args)
 		return nil
 	}
+	ctx.compatSlot = compatOff
+	if r.cluster == nil && clusterCompatRatio.Load() != 0 {
+		checkClusterCompat(ctx)
+	}
 
 	// maxmemory: Redis refuses a command that may grow memory while used
 	// memory is over the limit, before running or queueing it; a refused

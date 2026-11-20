@@ -577,6 +577,7 @@ func cmdConfigResetStat(ctx *Context) error {
 	if c := ctx.clusterState(); c != nil {
 		c.ResetSlotUsage()
 	}
+	clusterIncompatibleOps.Store(0)
 	return ctx.WriteOK()
 }
 

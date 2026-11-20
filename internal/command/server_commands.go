@@ -1026,9 +1026,16 @@ func doSort(ctx *Context, readOnly bool) error {
 			// Redis does not sort at all.
 			if !strings.Contains(byPattern, "*") {
 				nosort = true
+			} else if err := sortPatternSlotCheck(ctx, key, byPattern, "BY"); err != nil {
+				return ctx.WriteError(err)
 			}
 			i++
 		case arg == "GET" && left >= 1:
+			if p := ctx.ArgString(i + 1); p != "#" {
+				if err := sortPatternSlotCheck(ctx, key, p, "GET"); err != nil {
+					return ctx.WriteError(err)
+				}
+			}
 			getPatterns = append(getPatterns, ctx.ArgString(i+1))
 			i++
 		default:

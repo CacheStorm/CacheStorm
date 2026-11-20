@@ -93,6 +93,7 @@ func (s *Server) configValues() map[string]string {
 		values["cluster-replica-no-failover"] = configYesNo(opts.ReplicaNoFailover)
 		values["cluster-allow-replica-migration"] = configYesNo(opts.AllowReplicaMigration)
 		values["cluster-migration-barrier"] = strconv.Itoa(opts.MigrationBarrier)
+		values["tls-cluster"] = configYesNo(cc.TLS)
 	}
 	return values
 }
@@ -239,6 +240,21 @@ func (s *Server) configSet(name, value string) (bool, error) {
 		}
 		c.UpdateOptions(update)
 		return true, nil
+	case "cluster-bus-port-protected-mode":
+		// Redis 8.2 refuses to leave a cluster bus without TLS open to any
+		// host once this is on; the bus's TLS is set at startup.
+		if s.router.Cluster() == nil {
+			return false, nil
+		}
+		yes, err := command.ParseConfigBool(name, value)
+		if err != nil {
+			return true, err
+		}
+		if yes && !s.cfg.Cluster.TLS {
+			return true, command.ConfigSetError(name, "can't enable cluster-bus-port-protected-mode while tls-cluster is disabled, "+
+				"as that leaves the cluster bus port unauthenticated; enable tls-cluster first, or in the same CONFIG SET command")
+		}
+		return false, nil
 	case "save":
 		return true, s.setSnapshotRules(value)
 	case "bind", "databases", "appendfilename", "extension-commands":

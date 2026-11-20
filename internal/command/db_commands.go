@@ -66,6 +66,9 @@ func cmdSELECT(ctx *Context) error {
 	if index != 0 && ctx.clusterRefuses() {
 		return ctx.WriteError(errors.New("ERR SELECT is not allowed in cluster mode"))
 	}
+	if index != 0 {
+		noteClusterIncompatible()
+	}
 	if err := ctx.selectDB(index); err != nil {
 		return ctx.WriteError(err)
 	}
@@ -137,6 +140,7 @@ func cmdSWAPDB(ctx *Context) error {
 	}
 	// The selected database now holds other data.
 	ctx.Store = dbs.DB(ctx.DB)
+	noteClusterIncompatible()
 	return ctx.WriteOK()
 }
 
@@ -161,6 +165,7 @@ func cmdMOVE(ctx *Context) error {
 	if dst == ctx.Store {
 		return ctx.WriteError(errSameObject)
 	}
+	noteClusterIncompatible()
 	changed, err := ctx.Store.Transfer(key, dst, key, store.TransferOptions{})
 	if err == store.ErrKeyNotFound {
 		ctx.PropagateAs()
@@ -189,6 +194,7 @@ func cmdCOPY(ctx *Context) error {
 
 	replace := false
 	dst := ctx.Store
+	dstIndex := ctx.DB
 
 	for i := 2; i < ctx.ArgCount(); i++ {
 		switch strings.ToUpper(ctx.ArgString(i)) {
@@ -210,7 +216,7 @@ func cmdCOPY(ctx *Context) error {
 			if !dbs.Valid(index) {
 				return ctx.WriteError(errDBIndexOutOfRange)
 			}
-			dst = dbs.DB(index)
+			dst, dstIndex = dbs.DB(index), index
 		default:
 			return ctx.WriteError(ErrSyntaxError)
 		}
@@ -218,6 +224,9 @@ func cmdCOPY(ctx *Context) error {
 
 	if dst == ctx.Store && srcKey == dstKey {
 		return ctx.WriteError(errSameObject)
+	}
+	if ctx.DB != 0 || dstIndex != 0 {
+		noteClusterIncompatible()
 	}
 
 	if (ctx.Replaying || ctx.LegacyReplay) && len(dstKey) > store.MaxKeySize {

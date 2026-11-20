@@ -333,6 +333,9 @@ func infoStats(w *infoWriter, st *ServerStatus, ctx *Context) {
 	w.int("acl_access_denied_cmd", aclDenied.cmd.Load())
 	w.int("acl_access_denied_key", aclDenied.key.Load())
 	w.int("acl_access_denied_channel", aclDenied.channel.Load())
+	if ctx.clusterCompatSampling() {
+		w.int("cluster_incompatible_ops", clusterIncompatibleOps.Load())
+	}
 	w.end()
 }
 

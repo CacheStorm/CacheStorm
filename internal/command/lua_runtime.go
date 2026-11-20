@@ -51,6 +51,9 @@ type scriptRun struct {
 	// lifts the single-slot rule (allow-cross-slot-keys).
 	slot      int
 	crossSlot bool
+	// compatSlot carries the cluster compatibility check of the EVAL or
+	// FCALL into the commands the script runs.
+	compatSlot int
 }
 
 func newScriptRun(ctx *Context, e *ScriptEngine, name, chunk string, readOnly bool) *scriptRun {
@@ -69,6 +72,8 @@ func newScriptRun(ctx *Context, e *ScriptEngine, name, chunk string, readOnly bo
 		name:     name,
 		chunk:    chunk,
 		slot:     ctx.commandSlot(),
+
+		compatSlot: ctx.compatSlot,
 	}
 }
 
@@ -234,6 +239,7 @@ func (r *scriptRun) call(L *lua.LState) (lua.LValue, bool) {
 	if msg := r.clusterScriptCheck(name, args); msg != "" {
 		return r.rejectCall(L, name, argv[1:], msg), true
 	}
+	r.compatCheck(name, args)
 	if r.ctx.ReplicaReadOnly && name != "PFCOUNT" && (commandHasFlag(name, "write") || r.router.Persisted(name, args)) {
 		return r.rejectCall(L, name, argv[1:], "READONLY You can't write against a read only replica."), true
 	}
@@ -618,6 +624,9 @@ type scriptShebang struct {
 func parseScriptShebang(script string) (string, scriptShebang, string) {
 	var sb scriptShebang
 	if !strings.HasPrefix(script, "#!") {
+		// A script without a shebang runs in Redis' compatibility mode,
+		// where it may use keys of any slot the node serves.
+		sb.crossSlot = true
 		return script, sb, ""
 	}
 	line := script
@@ -686,6 +695,9 @@ func (e *ScriptEngine) runScript(ctx *Context, script string, keys, args []strin
 	}
 	if sb.noCluster && ctx.clusterState() != nil {
 		return resp.ErrorValue(errNoClusterScript)
+	}
+	if sb.noCluster {
+		noteClusterIncompatible()
 	}
 	run := newScriptRun(ctx, e, ScriptSHA(script), luaChunkScript, readOnly || sb.noWrites)
 	run.crossSlot = sb.crossSlot

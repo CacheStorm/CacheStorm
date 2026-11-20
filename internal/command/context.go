@@ -117,6 +117,9 @@ type Context struct {
 	// waited is how long the running command blocked waiting for data,
 	// which its command statistics leave out as Redis does.
 	waited time.Duration
+	// compatSlot is the slot the command's keys are in for the cluster
+	// compatibility statistic (see checkClusterCompat).
+	compatSlot int
 	// EndTime is when the handler returned, read once for the command's
 	// stats and the connection's bookkeeping; zero when it never ran.
 	EndTime time.Time

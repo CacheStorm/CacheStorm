@@ -49,6 +49,12 @@ func (s *Server) openCluster() error {
 	}
 	s.store.EnableSlotIndex()
 	s.router.SetCluster(c)
+	if !cc.TLS {
+		logger.Warn().Msg("WARNING: the cluster bus port is not authenticated: 'tls-cluster' is disabled and " +
+			"protected mode was waived with 'cluster-bus-port-protected-mode no'. Any host able " +
+			"to reach the cluster bus port can speak the cluster protocol, so make sure the port " +
+			"is reachable by trusted hosts only.")
+	}
 	return nil
 }
 
