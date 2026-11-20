@@ -120,6 +120,8 @@ type Context struct {
 	// compatSlot is the slot the command's keys are in for the cluster
 	// compatibility statistic (see checkClusterCompat).
 	compatSlot int
+	// lastError is the last error reply written through WriteError.
+	lastError error
 	// EndTime is when the handler returned, read once for the command's
 	// stats and the connection's bookkeeping; zero when it never ran.
 	EndTime time.Time
@@ -439,6 +441,7 @@ func (ctx *Context) WriteOK() error {
 }
 
 func (ctx *Context) WriteError(err error) error {
+	ctx.lastError = err
 	return ctx.Writer.WriteError(err.Error())
 }
 

@@ -81,6 +81,7 @@ func (c *docCache) index(idx *Index, d *Document, add bool) {
 		c.docs[d.Key] = d
 		c.stats.add(d, 1)
 		c.bytes.Add(d.size())
+		countIndexingOps(idx, d)
 	} else {
 		delete(c.docs, d.Key)
 		c.stats.add(d, -1)

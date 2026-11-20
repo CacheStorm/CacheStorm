@@ -2,6 +2,7 @@ package command
 
 import (
 	"errors"
+	"strconv"
 	"strings"
 
 	"github.com/cachestorm/cachestorm/internal/module"
@@ -32,22 +33,71 @@ func cmdMODULE(ctx *Context) error {
 	}
 }
 
-func handleModuleList(ctx *Context, registry *module.Registry) error {
-	modules := registry.ListModules()
-	result := make([]*resp.Value, 0, len(modules))
+// bundledModule is a module Redis 8 ships whose commands and data types
+// CacheStorm implements.
+type bundledModule struct {
+	name                   string
+	ver                    int64
+	usedBy, using, options string
+}
 
-	for _, m := range modules {
-		result = append(result, resp.ArrayValue([]*resp.Value{
-			resp.BulkString("name"),
-			resp.BulkString(m.Name),
-			resp.BulkString("version"),
-			resp.BulkString(m.Version),
-			resp.BulkString("loaded"),
-			resp.IntegerValue(boolToInt(m.Loaded)),
-		}))
+// bundledModules are named, as Redis 8.2.11 names them, by MODULE LIST, HELLO
+// and INFO modules, so that clients which look for a module before using
+// its commands (search for RedisVL and Redis OM, ReJSON for JSON documents)
+// find it.
+var bundledModules = []bundledModule{
+	{"search", 80213, "[]", "[ReJSON]", "[handle-io-errors]"},
+	{"vectorset", 1, "[]", "[]", "[handle-io-errors|handle-repl-async-load]"},
+	{"timeseries", 80214, "[]", "[]", "[handle-io-errors]"},
+	{"bf", 80216, "[]", "[]", "[handle-io-errors]"},
+	{"ReJSON", 80209, "[search]", "[]", "[handle-io-errors]"},
+}
+
+// moduleList is the reply of MODULE LIST and HELLO's modules: a map of
+// name, ver, path and args per module.
+func moduleList() []*resp.Value {
+	entry := func(name string, ver int64) *resp.Value {
+		return resp.PairsValue([]*resp.Value{
+			resp.BulkString("name"), resp.BulkString(name),
+			resp.BulkString("ver"), resp.IntegerValue(ver),
+			resp.BulkString("path"), resp.BulkString(""),
+			resp.BulkString("args"), resp.ArrayValue([]*resp.Value{}),
+		})
 	}
+	out := make([]*resp.Value, 0, len(bundledModules))
+	for _, m := range bundledModules {
+		out = append(out, entry(m.name, m.ver))
+	}
+	for _, m := range module.GetRegistry().ListModules() {
+		ver := moduleVersion(m.Version)
+		out = append(out, entry(m.Name, ver))
+	}
+	return out
+}
 
-	return ctx.WriteArray(result)
+// moduleInfoLines are INFO's module lines.
+func moduleInfoLines(w *infoWriter) {
+	for _, m := range bundledModules {
+		w.field("module", "name="+m.name+",ver="+strconv.FormatInt(m.ver, 10)+",api=1,filters=0,usedby="+m.usedBy+",using="+m.using+",options="+m.options)
+	}
+	for _, m := range module.GetRegistry().ListModules() {
+		ver := moduleVersion(m.Version)
+		w.field("module", "name="+m.Name+",ver="+strconv.FormatInt(ver, 10)+",api=1,filters=0,usedby=[],using=[],options=[]")
+	}
+}
+
+// moduleVersion reads a registered module's version as the integer Redis
+// reports; one that is not a number reports 0.
+func moduleVersion(v string) int64 {
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return n
+}
+
+func handleModuleList(ctx *Context, _ *module.Registry) error {
+	return ctx.WriteArray(moduleList())
 }
 
 func handleModuleLoad(ctx *Context, registry *module.Registry) error {
@@ -83,13 +133,6 @@ func handleModuleUnload(ctx *Context, registry *module.Registry) error {
 	}
 
 	return ctx.WriteOK()
-}
-
-func boolToInt(b bool) int64 {
-	if b {
-		return 1
-	}
-	return 0
 }
 
 func RegisterModuleCommands(router *Router) {

@@ -176,11 +176,12 @@ func cmdCOMMAND(ctx *Context) error {
 func cmdINFO(ctx *Context) error {
 	r := ctx.dispatcher()
 	sections := make(map[string]bool)
-	all, defaults := false, ctx.ArgCount() == 0
+	all, defaults, everything := false, ctx.ArgCount() == 0, false
 	for i := 0; i < ctx.ArgCount(); i++ {
 		switch name := strings.ToLower(ctx.ArgString(i)); name {
 		case "all", "everything":
 			all = true
+			everything = everything || name == "everything"
 		case "default":
 			defaults = true
 		default:
@@ -246,6 +247,7 @@ func cmdINFO(ctx *Context) error {
 
 	if want("modules") {
 		w.section("Modules")
+		moduleInfoLines(&w)
 		w.end()
 	}
 
@@ -273,19 +275,10 @@ func cmdINFO(ctx *Context) error {
 		sb.WriteString(keyspaceInfo(ctx))
 	}
 
-	// The search section, as Redis 8 has it, is only given when asked for,
-	// so the default sections stay those of Redis 7.4.
-	if sections["search"] {
-		indexes := searchIndexesFor(ctx).All()
-		var used int64
-		for _, idx := range indexes {
-			used += idx.MemoryUsage()
-		}
-		w.section("Search")
-		w.int("search_number_of_indexes", int64(len(indexes)))
-		w.int("search_used_memory_indexes", used)
-		w.field("search_used_memory_indexes_human", humanBytes(used))
-		w.end()
+	// RediSearch's sections come with INFO search, modules or everything,
+	// as Redis 8 gives a module's sections; all and default leave them out.
+	if sections["search"] || sections["modules"] || everything {
+		infoSearch(&w, ctx)
 	}
 
 	// Sections are separated by a blank line, with none after the last.

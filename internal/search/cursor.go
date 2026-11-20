@@ -189,6 +189,19 @@ func (m *IndexManager) CursorIndexAlive(c *Cursor) bool {
 }
 
 // CursorStats returns the idle and total cursors, and those of idx.
+// CursorTotals returns how many cursors are idle and how many exist.
+func (m *IndexManager) CursorTotals() (idle, total int) {
+	cl := m.cursorList()
+	cl.mu.Lock()
+	defer cl.mu.Unlock()
+	for _, c := range cl.cursors {
+		if c.idle {
+			idle++
+		}
+	}
+	return idle, len(cl.cursors)
+}
+
 func (m *IndexManager) CursorStats(idx *Index) (idle, total, index int) {
 	cl := m.cursorList()
 	cl.mu.Lock()

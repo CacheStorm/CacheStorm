@@ -85,7 +85,7 @@ func cmdHELLO(ctx *Context) error {
 		resp.BulkString("id"), resp.IntegerValue(ctx.ClientID),
 		resp.BulkString("mode"), resp.BulkString(ctx.serverMode()),
 		resp.BulkString("role"), resp.BulkString(helloRole()),
-		resp.BulkString("modules"), resp.ArrayValue([]*resp.Value{}),
+		resp.BulkString("modules"), resp.ArrayValue(moduleList()),
 	}))
 }
 

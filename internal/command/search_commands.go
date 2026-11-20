@@ -34,6 +34,10 @@ func RegisterSearchCommands(router *Router) {
 		"FT._DROPIFX": cmdFTDROPIFX, "FT._DROPINDEXIFX": cmdFTDROPIFX, "FT._CREATEIFNX": cmdFTCREATEIFNX,
 		"FT._ALTERIFNX": cmdFTALTERIFNX, "FT._ALIASADDIFNX": cmdFTALIASADDIFNX, "FT._ALIASDELIFX": cmdFTALIASDELIFX,
 	} {
+		switch name {
+		case "FT.SEARCH", "FT.AGGREGATE", "FT.PROFILE", "FT.CURSOR", "FT.SPELLCHECK":
+			handler = countSearchQuery(name, handler)
+		}
 		router.Register(&CommandDef{Name: name, Handler: handler})
 	}
 }
