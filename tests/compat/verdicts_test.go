@@ -33,7 +33,8 @@ var verdicts = map[string]Verdict{
 	"restore/overflow-relative-ttl":  {SevEdge, intent, "relative TTL overflow is rejected before mutation; Redis 7.4.11 acknowledges it, logs a negative ABSTTL and loses the key on AOF restart (reproduced in the restore/dump production-readiness round)"},
 	"lua/redis-call-errors":          {SevEdge, intent, "compile errors carry gopher-lua's parser message (\"near 'error': parse error\") instead of Lua 5.1's"},
 	"acl/dryrun-cat-whoami":          {SevEdge, intent, "ACL CAT also lists the module categories (@bloom ... @json) of Redis 8.2, whose bundled modules CacheStorm implements; Redis 7.4 has no modules"},
-	"command/count-and-list-filters": {SevEdge, intent, "COMMAND LIST also lists XACKDEL (and COMMAND COUNT counts it, with XDELEX), commands of Redis 8.2 CacheStorm implements; Redis 7.4 does not have them"},
+	"command/count-and-list-filters": {SevEdge, intent, "COMMAND LIST also lists XACKDEL (and COMMAND COUNT counts it, with XDELEX, DELEX, DIGEST and MSETEX), commands of Redis 8.2 and 8.4 CacheStorm implements; Redis 7.4 does not have them"},
+	"command/getkeys-forms":          {SevEdge, intent, "COMMAND DOCS SET lists the IFEQ, IFNE, IFDEQ and IFDNE conditions and the 8.4.0 history entry Redis 8.4 added, which CacheStorm implements; Redis 7.4 does not have them"},
 }
 
 var arityAccepts = map[string]string{}

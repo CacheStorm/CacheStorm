@@ -336,8 +336,11 @@ func keysFromSpecsMode(m *commandMeta, argv []string, partial bool) (keys []comm
 				}
 				return nil, false
 			}
+			if step < 1 {
+				step = 1
+			}
 			first += spec.firstKey
-			last = first + int(n) - 1
+			last = first + (int(n)-1)*step
 		default:
 			if partial {
 				continue
@@ -345,7 +348,7 @@ func keysFromSpecsMode(m *commandMeta, argv []string, partial bool) (keys []comm
 			return nil, false
 		}
 		if last >= argc || last < first || first >= argc {
-			if partial || (spec.fkType == "keynum" && last == first-1) {
+			if partial || (spec.fkType == "keynum" && last == first-step) {
 				continue
 			}
 			return nil, false

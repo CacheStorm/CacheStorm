@@ -15,7 +15,25 @@ type StringPair struct {
 	Data []byte
 }
 
+// BatchSetOptions are MSETEX's conditions and expiry for SetStringBatchOpts.
+type BatchSetOptions struct {
+	// NX sets nothing if any key exists, XX if any key is missing.
+	NX, XX bool
+	// ExpireAtMS, when not 0, is every key's expiry (unix ms); KeepTTL keeps
+	// each key's current one instead.
+	ExpireAtMS int64
+	KeepTTL    bool
+}
+
+// SetStringBatch is MSET (or MSETNX with nx).
 func (s *Store) SetStringBatch(pairs []StringPair, nx bool) (bool, error) {
+	return s.SetStringBatchOpts(pairs, BatchSetOptions{NX: nx})
+}
+
+// SetStringBatchOpts sets every pair at once, or none when a condition
+// fails, which it reports as false.
+func (s *Store) SetStringBatchOpts(pairs []StringPair, opts BatchSetOptions) (bool, error) {
+	nx := opts.NX
 	// keys are the distinct keys in first-seen order and vals[i] the last
 	// value given for keys[i], built straight in stored form. An MSET names
 	// a handful of keys, so they are matched by a scan rather than a map,
@@ -81,7 +99,7 @@ func (s *Store) SetStringBatch(pairs []StringPair, nx bool) (bool, error) {
 				expired = key
 				break
 			}
-			if nx && live {
+			if (nx && live) || (opts.XX && !live) {
 				unlock()
 				return false, nil
 			}
@@ -124,6 +142,12 @@ func (s *Store) SetStringBatch(pairs []StringPair, nx bool) (bool, error) {
 			entry := NewEntry(vals[i])
 			if previous := shard.data[key]; previous != nil && !previous.IsExpired() {
 				entry.inheritAccess(previous)
+				if opts.KeepTTL {
+					entry.ExpiresAt.Store(previous.ExpiresAt.Load())
+				}
+			}
+			if opts.ExpireAtMS != 0 {
+				entry.ExpiresAt.Store(opts.ExpireAtMS)
 			}
 			if notifyNew {
 				if previous := shard.data[key]; previous == nil || previous.IsExpired() {
@@ -145,11 +169,15 @@ func (s *Store) SetStringBatch(pairs []StringPair, nx bool) (bool, error) {
 			s.trackMemory(actual)
 		}
 		unlock()
-		if s.Notifying(NotifyString | NotifyNew) {
+		if s.Notifying(NotifyString | NotifyNew | NotifyGeneric) {
 			for _, pair := range pairs {
 				if created[pair.Key] {
 					delete(created, pair.Key)
 					s.notifyNew(pair.Key)
+				}
+				// MSETEX reports each key's expiry before its set.
+				if opts.ExpireAtMS != 0 {
+					s.Notify(NotifyGeneric, "expire", pair.Key)
 				}
 				s.Notify(NotifyString, "set", pair.Key)
 			}

@@ -138,7 +138,22 @@ const (
 	strOptEXAT
 	strOptPXAT
 
+	strOptIFEQ
+	strOptIFNE
+	strOptIFDEQ
+	strOptIFDNE
+
 	strOptExpire = strOptEX | strOptPX | strOptEXAT | strOptPXAT
+	strOptIf     = strOptIFEQ | strOptIFNE | strOptIFDEQ | strOptIFDNE
+	// strOptCond are the conditions, of which a command takes at most one.
+	strOptCond = strOptNX | strOptXX | strOptIf
+)
+
+// The commands parseStringArgs parses the options of.
+const (
+	strModeSet = iota
+	strModeGetex
+	strModeMsetex
 )
 
 // parseStringOptions parses the options of SET (forSet) or GETEX with the
@@ -146,35 +161,47 @@ const (
 // case-insensitive, an expire option conflicts with the other expire options,
 // KEEPTTL and PERSIST, and any conflict or unknown option is a syntax error.
 func parseStringOptions(args [][]byte, forSet bool) (int, []byte, error) {
+	mode := strModeGetex
+	if forSet {
+		mode = strModeSet
+	}
+	flags, expire, _, err := parseStringArgs(args, mode)
+	return flags, expire, err
+}
+
+// parseStringArgs is parseStringOptions for SET, GETEX or MSETEX, also
+// returning the value or digest of SET's IFEQ, IFNE, IFDEQ or IFDNE.
+func parseStringArgs(args [][]byte, mode int) (int, []byte, []byte, error) {
 	flags := 0
-	var expire []byte
+	var expire, match []byte
+	setLike := mode == strModeSet || mode == strModeMsetex
 	for j := 0; j < len(args); j++ {
 		opt := strings.ToUpper(string(args[j]))
 		hasNext := j+1 < len(args)
-		expireFlag := 0
+		expireFlag, ifFlag := 0, 0
 		switch opt {
 		case "NX":
-			if forSet && flags&strOptXX == 0 {
+			if setLike && flags&(strOptCond&^strOptNX) == 0 {
 				flags |= strOptNX
 				continue
 			}
 		case "XX":
-			if forSet && flags&strOptNX == 0 {
+			if setLike && flags&(strOptCond&^strOptXX) == 0 {
 				flags |= strOptXX
 				continue
 			}
 		case "GET":
-			if forSet {
+			if mode == strModeSet {
 				flags |= strOptGET
 				continue
 			}
 		case "KEEPTTL":
-			if forSet && flags&(strOptPERSIST|strOptExpire) == 0 {
+			if setLike && flags&(strOptPERSIST|strOptExpire) == 0 {
 				flags |= strOptKEEPTTL
 				continue
 			}
 		case "PERSIST":
-			if !forSet && flags&(strOptKEEPTTL|strOptExpire) == 0 {
+			if mode == strModeGetex && flags&(strOptKEEPTTL|strOptExpire) == 0 {
 				flags |= strOptPERSIST
 				continue
 			}
@@ -186,6 +213,14 @@ func parseStringOptions(args [][]byte, forSet bool) (int, []byte, error) {
 			expireFlag = strOptEXAT
 		case "PXAT":
 			expireFlag = strOptPXAT
+		case "IFEQ":
+			ifFlag = strOptIFEQ
+		case "IFNE":
+			ifFlag = strOptIFNE
+		case "IFDEQ":
+			ifFlag = strOptIFDEQ
+		case "IFDNE":
+			ifFlag = strOptIFDNE
 		}
 		if expireFlag != 0 && hasNext && flags&(strOptKEEPTTL|strOptPERSIST|(strOptExpire&^expireFlag)) == 0 {
 			flags |= expireFlag
@@ -193,9 +228,15 @@ func parseStringOptions(args [][]byte, forSet bool) (int, []byte, error) {
 			j++
 			continue
 		}
-		return 0, nil, ErrSyntaxError
+		if ifFlag != 0 && hasNext && mode == strModeSet && flags&(strOptCond&^ifFlag) == 0 {
+			flags |= ifFlag
+			match = args[j+1]
+			j++
+			continue
+		}
+		return 0, nil, nil, ErrSyntaxError
 	}
-	return flags, expire, nil
+	return flags, expire, match, nil
 }
 
 // stringOptionsExpireMs converts the parsed expire argument into an absolute

@@ -85,6 +85,9 @@ func RegisterStringCommands(router *Router) {
 	router.Register(&CommandDef{Name: "GETEX", Handler: cmdGETEX})
 	router.Register(&CommandDef{Name: "LCS", Handler: cmdLCS})
 	router.Register(&CommandDef{Name: "SUBSTR", Handler: cmdGETRANGE})
+	router.Register(&CommandDef{Name: "DIGEST", Handler: cmdDIGEST})
+	router.Register(&CommandDef{Name: "DELEX", Handler: cmdDELEX})
+	router.Register(&CommandDef{Name: "MSETEX", Handler: cmdMSETEX})
 }
 
 func cmdSET(ctx *Context) error {
@@ -95,7 +98,7 @@ func cmdSET(ctx *Context) error {
 	key := ctx.ArgString(0)
 	value := ctx.Arg(1)
 
-	flags, expireArg, err := parseStringOptions(ctx.Args[2:], true)
+	flags, expireArg, match, err := parseStringArgs(ctx.Args[2:], strModeSet)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
@@ -105,7 +108,7 @@ func cmdSET(ctx *Context) error {
 			return ctx.WriteError(err)
 		}
 	}
-	return setGeneric(ctx, key, value, flags, expireArg != nil, whenMs)
+	return setGenericIf(ctx, key, value, flags, expireArg != nil, whenMs, match)
 }
 
 // setGeneric is Redis' setGenericCommand: with GET the old value (which must
@@ -113,6 +116,13 @@ func cmdSET(ctx *Context) error {
 // otherwise replies nil, and an expire instant that already passed deletes the
 // key instead of storing it.
 func setGeneric(ctx *Context, key string, value []byte, flags int, hasExpire bool, whenMs int64) error {
+	return setGenericIf(ctx, key, value, flags, hasExpire, whenMs, nil)
+}
+
+// setGenericIf is setGeneric with Redis 8.4's conditions: IFEQ and IFDEQ
+// set only an existing string whose value or digest matches, IFNE and
+// IFDNE a missing key or a string whose value or digest differs.
+func setGenericIf(ctx *Context, key string, value []byte, flags int, hasExpire bool, whenMs int64, match []byte) error {
 	var old []byte
 	oldFound := false
 	if flags&strOptGET != 0 {
@@ -141,6 +151,27 @@ func setGeneric(ctx *Context, key string, value []byte, flags int, hasExpire boo
 			return reply()
 		}
 		return ctx.WriteNull()
+	}
+
+	if flags&strOptIf != 0 {
+		entry, found := ctx.Store.Get(key)
+		if !found {
+			if flags&(strOptIFEQ|strOptIFDEQ) != 0 {
+				return abort()
+			}
+		} else {
+			cur, ok := stringValueOf(entry.Value)
+			if !ok {
+				return ctx.WriteError(store.ErrWrongType)
+			}
+			holds, err := stringConditionHolds(flags, cur, match)
+			if err != nil {
+				return ctx.WriteError(err)
+			}
+			if !holds {
+				return abort()
+			}
+		}
 	}
 
 	if hasExpire && whenMs <= time.Now().UnixMilli() && !ctx.Replaying {

@@ -43,7 +43,7 @@ import (
 var writeCommands = map[string]bool{
 	"SET": true, "SETNX": true, "SETEX": true, "PSETEX": true, "MSET": true, "MSETNX": true,
 	"APPEND": true, "INCR": true, "DECR": true, "INCRBY": true, "DECRBY": true, "INCRBYFLOAT": true,
-	"GETDEL": true, "GETSET": true, "GETEX": true, "SETRANGE": true,
+	"GETDEL": true, "GETSET": true, "GETEX": true, "SETRANGE": true, "DELEX": true, "MSETEX": true,
 	"DEL": true, "UNLINK": true, "RENAME": true, "RENAMENX": true, "EXPIRE": true, "EXPIREAT": true,
 	"PEXPIRE": true, "PEXPIREAT": true, "PERSIST": true,
 	"COPY": true, "MOVE": true, "MIGRATE": true, "RESTORE": true, "RESTORE-ASKING": true, "SORT": true,
