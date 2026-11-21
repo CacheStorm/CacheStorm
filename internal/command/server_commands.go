@@ -249,6 +249,10 @@ func cmdINFO(ctx *Context) error {
 		infoCPU(&w)
 	}
 
+	if want("hotkeys") {
+		infoHotkeys(&w)
+	}
+
 	if want("modules") {
 		w.section("Modules")
 		moduleInfoLines(&w)
@@ -743,7 +747,9 @@ func scanKeyspace(st *store.Store, cursor uint64, count int, withEntries bool) (
 	return keys, entries, uint64(shard) << store.ScanPosBits
 }
 
-func cmdHOTKEYS(ctx *Context) error {
+// hotkeysByAccess is CacheStorm's HOTKEYS [count], from before Redis 8.6
+// gave HOTKEYS subcommands: the count keys with the highest LFU counters.
+func hotkeysByAccess(ctx *Context) error {
 	count := 10
 	if ctx.ArgCount() >= 1 {
 		var err error

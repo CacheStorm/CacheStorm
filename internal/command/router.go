@@ -152,6 +152,9 @@ func subcommandError(m *commandMeta, cmd string, args [][]byte) error {
 // does not fit the command, or that names a subcommand it lacks or whose
 // count does not fit; Redis checks these before anything else.
 func ArgumentError(cmd string, args [][]byte) error {
+	if CanonicalName(cmd) == "HOTKEYS" && legacyHotkeysCall(args) {
+		return nil
+	}
 	if !checkArity(cmd, len(args)) {
 		return arityError(cmd)
 	}

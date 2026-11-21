@@ -1105,6 +1105,9 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 		}
 		if executed {
 			ctx.RecordSlotUsage(len(c.rawCmd), c.sink.pending()-outStart)
+			if stopMerge == nil {
+				ctx.RecordHotkeys(len(c.rawCmd), c.sink.pending()-outStart)
+			}
 		}
 		if deferredMark != 0 {
 			c.sink.deferWrite(replyStart, deferredMark)

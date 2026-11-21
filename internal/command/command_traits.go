@@ -47,6 +47,9 @@ func (d *CommandDef) traitsFor(name string) *commandTraits {
 
 // argumentError is ArgumentError for the command.
 func (t *commandTraits) argumentError(args [][]byte) error {
+	if t.name == "HOTKEYS" && legacyHotkeysCall(args) {
+		return nil
+	}
 	if t.hasArity {
 		n := len(args) + 1
 		if (t.arity >= 0 && n != t.arity) || (t.arity < 0 && n < -t.arity) {

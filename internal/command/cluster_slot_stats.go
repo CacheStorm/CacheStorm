@@ -184,7 +184,7 @@ func (ctx *Context) RecordSlotUsage(nameLen, replyBytes int) {
 // stream a command feeds (n is its bytes times the replicas) and the
 // messages SPUBLISH delivers.
 func (ctx *Context) AddSlotBytesOut(n int64) {
-	if n > 0 && ctx.ClusterConn != nil && slotStatsEnabled.Load() {
+	if n > 0 && ctx.ClusterConn != nil && (slotStatsEnabled.Load() || hotkeys.active.Load()) {
 		ctx.ClusterConn.extraOut += uint64(n)
 	}
 }

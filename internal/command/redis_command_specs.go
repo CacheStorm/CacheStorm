@@ -89,6 +89,7 @@ var redisCommandSpecs = map[string]commandSpec{
 	"HLEN":                 {Arity: 2, Flags: []string{"readonly", "fast"}, FirstKey: 1, LastKey: 1, KeyStep: 1, Categories: []string{"read", "hash", "fast"}},
 	"HMGET":                {Arity: -3, Flags: []string{"readonly", "fast"}, FirstKey: 1, LastKey: 1, KeyStep: 1, Categories: []string{"read", "hash", "fast"}},
 	"HMSET":                {Arity: -4, Flags: []string{"write", "denyoom", "fast"}, FirstKey: 1, LastKey: 1, KeyStep: 1, Categories: []string{"write", "hash", "fast"}},
+	"HOTKEYS":              {Arity: -2, Flags: []string{}, FirstKey: 0, LastKey: 0, KeyStep: 0, Categories: []string{"slow"}},
 	"HPERSIST":             {Arity: -5, Flags: []string{"write", "fast"}, FirstKey: 1, LastKey: 1, KeyStep: 1, Categories: []string{"write", "hash", "fast"}},
 	"HPEXPIRE":             {Arity: -6, Flags: []string{"write", "denyoom", "fast"}, FirstKey: 1, LastKey: 1, KeyStep: 1, Categories: []string{"write", "hash", "fast"}},
 	"HPEXPIREAT":           {Arity: -6, Flags: []string{"write", "denyoom", "fast"}, FirstKey: 1, LastKey: 1, KeyStep: 1, Categories: []string{"write", "hash", "fast"}},

@@ -356,6 +356,11 @@ func execQueued(ctx *Context, qc queuedCommand) (*resp.Value, *Context) {
 	sub.waited = 0
 	err := def.Handler(&sub)
 	recordCall(qc.cmd, qc.args, time.Since(sub.StartTime)-sub.waited, err != nil || sub.Writer.Errors() > 0)
+	if ctx.Command == "EXEC" {
+		// HOTKEYS charges each command of a transaction to its own keys.
+		sub.EndTime = time.Now()
+		sub.RecordHotkeys(len(qc.cmd), output.Len())
+	}
 	if err != nil {
 		countErrorReply(err.Error())
 	}
