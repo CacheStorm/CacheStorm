@@ -46,6 +46,9 @@ type PendingEntry struct {
 	Consumer   string
 	DeliveryTS int64
 	Deliveries int64
+	// seq orders entries with the same delivery time, as Redis' PEL time
+	// list keeps them in the order they were (re)delivered.
+	seq uint64
 }
 
 type Consumer struct {
@@ -67,6 +70,39 @@ type ConsumerGroup struct {
 	Consumers   map[string]*Consumer
 	Pending     map[string]*PendingEntry
 	mu          sync.RWMutex
+	// pelSeq numbers the deliveries, for PendingEntry.seq.
+	pelSeq uint64
+}
+
+// AddLoadedPending adds a PEL entry read from an RDB file or DUMP payload,
+// after the ones loaded before it at the same delivery time.
+func (g *ConsumerGroup) AddLoadedPending(p *PendingEntry) {
+	g.pelSeq++
+	p.seq = g.pelSeq
+	g.Pending[p.ID] = p
+}
+
+// stampLocked records a delivery of p at ts, placing it after every other
+// delivery at the same time in the PEL's time order.
+func (g *ConsumerGroup) stampLocked(p *PendingEntry, ts int64) {
+	g.pelSeq++
+	p.DeliveryTS, p.seq = ts, g.pelSeq
+}
+
+// timeOrderLocked is the PEL oldest delivery first, as Redis 8.4's PEL time
+// list holds it for XREADGROUP CLAIM.
+func (g *ConsumerGroup) timeOrderLocked() []*PendingEntry {
+	out := make([]*PendingEntry, 0, len(g.Pending))
+	for _, p := range g.Pending {
+		out = append(out, p)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].DeliveryTS != out[j].DeliveryTS {
+			return out[i].DeliveryTS < out[j].DeliveryTS
+		}
+		return out[i].seq < out[j].seq
+	})
+	return out
 }
 
 // RLock and RUnlock hold the group for reading, for a caller that walks its
@@ -117,12 +153,9 @@ func (g *ConsumerGroup) addPendingLocked(entryID, consumer string, now int64) {
 			c.Pending--
 		}
 	}
-	g.Pending[entryID] = &PendingEntry{
-		ID:         entryID,
-		Consumer:   consumer,
-		DeliveryTS: now,
-		Deliveries: 1,
-	}
+	p := &PendingEntry{ID: entryID, Consumer: consumer, Deliveries: 1}
+	g.stampLocked(p, now)
+	g.Pending[entryID] = p
 	if c, exists := g.Consumers[consumer]; exists {
 		c.Pending++
 	}
@@ -207,7 +240,7 @@ func (g *ConsumerGroup) claimLocked(entryIDs []string, newConsumer string, opts 
 				old.Pending--
 			}
 		}
-		p.DeliveryTS = deliveryTS
+		g.stampLocked(p, deliveryTS)
 		if opts.SetRetry {
 			p.Deliveries = opts.RetryCount
 		} else if !opts.JustID {
@@ -419,6 +452,7 @@ func (v *StreamValue) Clone() Value {
 			Name:        group.Name,
 			LastID:      group.LastID,
 			EntriesRead: group.EntriesRead,
+			pelSeq:      group.pelSeq,
 			Consumers:   make(map[string]*Consumer, len(group.Consumers)),
 			Pending:     make(map[string]*PendingEntry, len(group.Pending)),
 		}

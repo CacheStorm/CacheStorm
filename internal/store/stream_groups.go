@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"math"
 	"sort"
 )
 
@@ -98,6 +99,60 @@ func (v *StreamValue) advanceGroupLocked(g *ConsumerGroup, id StreamID) {
 type StreamGroupItem struct {
 	ID    StreamID
 	Entry *StreamEntry
+	// For XREADGROUP CLAIM: how long the entry had been idle and how often
+	// delivered before this read (0 and 0 for a new entry), and whether the
+	// read took it from the PEL.
+	Idle, Deliveries int64
+	Claimed          bool
+	// Pending reports that the read added or moved the entry in the PEL,
+	// now delivered DeliveredCount times; replicas get it as an XCLAIM.
+	Pending        bool
+	DeliveredCount int64
+}
+
+// ReadGroupOptions are XREADGROUP's: History reads the consumer's own PEL
+// after After; otherwise the read serves, with MinIdle >= 0 (CLAIM), the
+// PEL entries idle at least MinIdle ms, then new entries.
+type ReadGroupOptions struct {
+	History bool
+	After   StreamID
+	Count   int64
+	NoAck   bool
+	MinIdle int64
+	Now     int64
+}
+
+// ReadGroupResult is what an XREADGROUP of one stream did.
+type ReadGroupResult struct {
+	Items  []StreamGroupItem
+	Served bool
+	// ConsumerCreated reports the read created the consumer.
+	ConsumerCreated bool
+	// LastIDBefore is the group's last delivered ID before the read;
+	// Advanced reports the read moved it, to LastID with EntriesRead.
+	LastIDBefore, LastID string
+	Advanced             bool
+	EntriesRead          int64
+}
+
+// ClaimableAt returns when the oldest delivery in the group's PEL whose
+// entry still exists becomes idle for minIdle ms, for XREADGROUP CLAIM to
+// wake a blocked reader; false when no such entry is pending.
+func (v *StreamValue) ClaimableAt(groupName string, minIdle int64) (int64, bool) {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	g, ok := v.Groups[groupName]
+	if !ok {
+		return 0, false
+	}
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	for _, p := range g.timeOrderLocked() {
+		if v.entryLocked(streamIDOf(p.ID)) != nil {
+			return p.DeliveryTS + minIdle, true
+		}
+	}
+	return 0, false
 }
 
 // HasGroup reports whether the stream has a consumer group called name.
@@ -125,63 +180,116 @@ func (v *StreamValue) GroupHasNew(name string) (hasNew bool, exists bool) {
 	return streamIDOf(g.LastID).Less(top), true
 }
 
-// ReadGroup serves XREADGROUP for one stream. history is false for the ">"
-// ID; otherwise the consumer's own pending entries after `after` are
-// returned. served reports whether the stream belongs in the reply.
+// ReadGroup is XREADGROUP for one stream. It returns false when the
+// group does not exist; served reports whether the stream belongs in the
+// reply.
 func (v *StreamValue) ReadGroup(groupName, consumerName string, history bool, after StreamID, count int64, noack bool, now int64) (items []StreamGroupItem, served bool, ok bool) {
+	r, ok := v.ReadGroupWith(groupName, consumerName, ReadGroupOptions{History: history, After: after, Count: count, NoAck: noack, MinIdle: -1, Now: now})
+	return r.Items, r.Served, ok
+}
+
+// ReadGroupWith is XREADGROUP for one stream, with Redis 8.4's CLAIM.
+func (v *StreamValue) ReadGroupWith(groupName, consumerName string, o ReadGroupOptions) (ReadGroupResult, bool) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	g, exists := v.Groups[groupName]
 	if !exists {
-		return nil, false, false
+		return ReadGroupResult{}, false
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
+	now := o.Now
+	_, known := g.Consumers[consumerName]
+	r := ReadGroupResult{ConsumerCreated: !known, LastIDBefore: g.LastID}
 	c := g.consumerLocked(consumerName, now)
 	c.SeenTime = now
 
-	if history {
+	if o.History {
 		for _, p := range g.sortedPendingLocked() {
 			if p.Consumer != consumerName {
 				continue
 			}
 			id := streamIDOf(p.ID)
-			if !after.Less(id) {
+			if !o.After.Less(id) {
 				continue
 			}
 			e := v.entryLocked(id)
 			if e != nil {
-				p.DeliveryTS = now
+				g.stampLocked(p, now)
 				p.Deliveries++
 			}
-			items = append(items, StreamGroupItem{ID: id, Entry: e})
-			if count > 0 && int64(len(items)) >= count {
+			r.Items = append(r.Items, StreamGroupItem{ID: id, Entry: e})
+			if o.Count > 0 && int64(len(r.Items)) >= o.Count {
 				break
 			}
 		}
-		return items, true, true
+		r.Served = true
+		r.LastID, r.EntriesRead = g.LastID, g.EntriesRead
+		return r, true
 	}
 
-	top, ok := v.lastEntryIDLocked()
-	if !ok {
-		return nil, false, true
-	}
-	last := streamIDOf(g.LastID)
-	if !last.Less(top) {
-		return nil, false, true
-	}
-	start, _ := last.Next()
-	for _, e := range v.rangeLocked(start, MaxStreamID, count, false) {
-		id := e.streamID()
-		v.advanceGroupLocked(g, id)
-		if !noack {
-			g.addPendingLocked(e.ID, consumerName, now)
+	if o.MinIdle >= 0 {
+		// The PEL oldest delivery first; it is claimable up to the first
+		// entry not idle long enough. Entries deleted from the stream are
+		// passed over.
+		for _, p := range g.timeOrderLocked() {
+			idle := now - p.DeliveryTS
+			if idle < o.MinIdle {
+				break
+			}
+			id := streamIDOf(p.ID)
+			e := v.entryLocked(id)
+			if e == nil {
+				continue
+			}
+			item := StreamGroupItem{ID: id, Entry: e, Idle: idle, Deliveries: p.Deliveries, Claimed: true, Pending: true}
+			if p.Consumer != consumerName {
+				if old, ok := g.Consumers[p.Consumer]; ok {
+					old.Pending--
+				}
+				p.Consumer = consumerName
+				c.Pending++
+			}
+			if p.Deliveries != math.MaxInt64 {
+				p.Deliveries++
+			}
+			g.stampLocked(p, now)
 			c.ActiveTime = now
+			item.DeliveredCount = p.Deliveries
+			r.Items = append(r.Items, item)
+			if o.Count > 0 && int64(len(r.Items)) >= o.Count {
+				break
+			}
 		}
-		items = append(items, StreamGroupItem{ID: id, Entry: e})
 	}
-	return items, true, true
+
+	if o.Count == 0 || int64(len(r.Items)) < o.Count {
+		if top, ok := v.lastEntryIDLocked(); ok {
+			if last := streamIDOf(g.LastID); last.Less(top) {
+				start, _ := last.Next()
+				count := o.Count
+				if count > 0 {
+					count -= int64(len(r.Items))
+				}
+				for _, e := range v.rangeLocked(start, MaxStreamID, count, false) {
+					id := e.streamID()
+					v.advanceGroupLocked(g, id)
+					r.Advanced = true
+					item := StreamGroupItem{ID: id, Entry: e}
+					if !o.NoAck {
+						g.addPendingLocked(e.ID, consumerName, now)
+						c.ActiveTime = now
+						item.Pending, item.DeliveredCount = true, 1
+					}
+					r.Items = append(r.Items, item)
+				}
+			}
+		}
+	}
+	r.Served = len(r.Items) > 0
+	r.LastID, r.EntriesRead = g.LastID, g.EntriesRead
+	return r, true
 }
 
 // AckIDs removes ids from the group's PEL and returns how many were pending.
@@ -349,7 +457,7 @@ func (v *StreamValue) ClaimIDs(groupName, consumerName string, ids []StreamID, a
 			p.Consumer = consumerName
 			c.Pending++
 		}
-		p.DeliveryTS = deliveryTS
+		g.stampLocked(p, deliveryTS)
 		if a.RetryCount >= 0 {
 			p.Deliveries = a.RetryCount
 		} else if !a.JustID {
@@ -402,7 +510,7 @@ func (v *StreamValue) AutoClaim(groupName, consumerName string, start StreamID, 
 			p.Consumer = consumerName
 			c.Pending++
 		}
-		p.DeliveryTS = now
+		g.stampLocked(p, now)
 		if !justID {
 			p.Deliveries++
 		}

@@ -337,7 +337,7 @@ func (d *dumpDecoder) stream(kind byte) store.Value {
 			if _, dup := g.Pending[id]; dup {
 				d.err = ErrDumpFormat
 			}
-			g.Pending[id] = p
+			g.AddLoadedPending(p)
 		}
 		consumers := d.count()
 		for j := 0; j < consumers && d.err == nil; j++ {

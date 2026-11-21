@@ -441,6 +441,52 @@ type xreadSpec struct {
 	newOnly bool
 }
 
+// groupItemsValue renders XREADGROUP's entries: [id, fields], or with
+// CLAIM [id, fields, idle, delivery count], 0 and 0 for a new entry.
+func groupItemsValue(items []store.StreamGroupItem, claim bool) *resp.Value {
+	if !claim {
+		return streamItemsValue(items, false)
+	}
+	out := make([]*resp.Value, 0, len(items))
+	for _, it := range items {
+		e := streamEntryValue(it.Entry)
+		e.Array = append(e.Array, resp.IntegerValue(it.Idle), resp.IntegerValue(it.Deliveries))
+		out = append(out, e)
+	}
+	return resp.ArrayValue(out)
+}
+
+// readGroupEffects is what an XREADGROUP of one stream records, as Redis'
+// streamPropagateXCLAIM, streamPropagateGroupID and
+// streamPropagateConsumerCreation do: replicas cannot repeat the read, whose
+// result depends on the time and on the order of consumers.
+func readGroupEffects(ctx *Context, key, group, consumer string, now int64, noack bool, r *store.ReadGroupResult) []ExecutedCommand {
+	var cmds []ExecutedCommand
+	b := func(s string) []byte { return []byte(s) }
+	nowArg := strconv.AppendInt(nil, now, 10)
+	for _, it := range r.Items {
+		if !it.Pending {
+			continue
+		}
+		cmds = append(cmds, ExecutedCommand{Name: "XCLAIM", DB: ctx.DB, Args: [][]byte{
+			b(key), b(group), b(consumer), b("0"), b(it.ID.String()), b("TIME"), nowArg,
+			b("RETRYCOUNT"), strconv.AppendInt(nil, it.DeliveredCount, 10), b("FORCE"), b("JUSTID"),
+			b("LASTID"), b(r.LastIDBefore),
+		}})
+	}
+	if r.Advanced {
+		cmds = append(cmds, ExecutedCommand{Name: "XGROUP", DB: ctx.DB, Args: [][]byte{
+			b("SETID"), b(key), b(group), b(r.LastID), b("ENTRIESREAD"), strconv.AppendInt(nil, r.EntriesRead, 10),
+		}})
+	}
+	if r.ConsumerCreated && (noack || len(cmds) == 0) {
+		cmds = append(cmds, ExecutedCommand{Name: "XGROUP", DB: ctx.DB, Args: [][]byte{
+			b("CREATECONSUMER"), b(key), b(group), b(consumer),
+		}})
+	}
+	return cmds
+}
+
 func cmdXREAD(ctx *Context) error      { return xreadGeneric(ctx, false) }
 func cmdXREADGROUP(ctx *Context) error { return xreadGeneric(ctx, true) }
 
@@ -459,12 +505,26 @@ func xreadGeneric(ctx *Context, xreadgroup bool) error {
 	noack := false
 	groupName, consumerName := "", ""
 	haveGroup := false
+	minIdle := int64(-1)
 
 parse:
 	for i := 0; i < argc; i++ {
 		moreargs := argc - i - 1
 		o := ctx.ArgString(i)
 		switch {
+		case strings.EqualFold(o, "CLAIM") && moreargs > 0:
+			if !xreadgroup {
+				return ctx.WriteError(streamReplyError("ERR The CLAIM option is only supported by XREADGROUP. You called XREAD instead."))
+			}
+			i++
+			n, ok := parseStreamLL(ctx.ArgString(i))
+			if !ok {
+				return ctx.WriteError(streamReplyError("ERR min-idle-time is not an integer or out of range"))
+			}
+			if n < 0 {
+				return ctx.WriteError(streamReplyError("ERR min-idle-time must be a positive integer"))
+			}
+			minIdle = n
 		case strings.EqualFold(o, "BLOCK") && moreargs > 0:
 			i++
 			t, ok := parseStreamLL(ctx.ArgString(i))
@@ -593,6 +653,14 @@ parse:
 		return w.Flush()
 	}
 
+	// propagated is what XREADGROUP records for replicas and the AOF: an
+	// XCLAIM per entry it delivered, XGROUP SETID when it moved the group's
+	// last ID, XGROUP CREATECONSUMER for a consumer nothing else creates.
+	var propagated []ExecutedCommand
+	if xreadgroup {
+		defer func() { ctx.PropagateAs(propagated...) }()
+	}
+
 	serve := func() ([]xreadResult, error) {
 		results := make([]xreadResult, 0, len(specs))
 		now := time.Now().UnixMilli()
@@ -613,16 +681,23 @@ parse:
 			if stream == nil {
 				return nil, errNoReadGroup(sp.key, groupName)
 			}
-			knownConsumer := !ctx.Store.Notifying(store.NotifyStream) || stream.HasConsumer(groupName, consumerName)
-			items, served, ok := stream.ReadGroup(groupName, consumerName, !sp.newOnly, sp.gt, count, noack, now)
+			claim := minIdle
+			if !sp.newOnly {
+				// CLAIM is ignored when the consumer reads its history.
+				claim = -1
+			}
+			r, ok := stream.ReadGroupWith(groupName, consumerName, store.ReadGroupOptions{
+				History: !sp.newOnly, After: sp.gt, Count: count, NoAck: noack, MinIdle: claim, Now: now,
+			})
 			if !ok {
 				return nil, errNoReadGroup(sp.key, groupName)
 			}
-			if !knownConsumer && stream.HasConsumer(groupName, consumerName) {
+			if r.ConsumerCreated {
 				ctx.notify(store.NotifyStream, "xgroup-createconsumer", sp.key)
 			}
-			if served {
-				results = append(results, xreadResult{key: sp.key, items: streamItemsValue(items, false)})
+			propagated = append(propagated, readGroupEffects(ctx, sp.key, groupName, consumerName, now, noack, &r)...)
+			if r.Served {
+				results = append(results, xreadResult{key: sp.key, items: groupItemsValue(r.Items, claim >= 0)})
 			}
 		}
 		return results, nil
@@ -655,6 +730,11 @@ parse:
 				hasNew, exists := stream.GroupHasNew(groupName)
 				if !exists || hasNew {
 					return true
+				}
+				if minIdle >= 0 && sp.newOnly {
+					if at, ok := stream.ClaimableAt(groupName, minIdle); ok && at <= time.Now().UnixMilli() {
+						return true
+					}
 				}
 				continue
 			}
@@ -689,7 +769,32 @@ parse:
 				wait = remaining
 			}
 		}
-		if _, notified := ctx.waitForStreamKeys(keys, wait, ready); !notified {
+		claimDue := false
+		if xreadgroup && minIdle >= 0 {
+			// Wake when a pending entry becomes claimable, or after
+			// min-idle-time when nothing is pending, as Redis does.
+			at := time.Now().UnixMilli() + minIdle
+			for _, sp := range specs {
+				if stream, err := lookupStream(ctx, sp.key); err == nil && stream != nil && sp.newOnly {
+					if t, ok := stream.ClaimableAt(groupName, minIdle); ok && t < at {
+						at = t
+					}
+				}
+			}
+			if d := time.Until(time.UnixMilli(at)); d < wait {
+				wait, claimDue = max(d, 0), true
+			}
+		}
+		if _, notified := ctx.waitForStreamKeys(keys, wait, ready); !notified && claimDue {
+			results, err := serve()
+			if err != nil {
+				return ctx.WriteError(err)
+			}
+			if len(results) > 0 {
+				return writeResults(results)
+			}
+			continue
+		} else if !notified {
 			if streamClientGone(ctx) {
 				return ctx.WriteNullArray()
 			}
