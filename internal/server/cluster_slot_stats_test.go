@@ -25,6 +25,7 @@ func TestClusterSlotStats(t *testing.T) {
 			t.Fatalf("ADDSLOTSRANGE: %s", got)
 		}
 	}
+	c.str("CONFIG", "SET", "cluster-slot-stats-enabled", "no")
 	k := keyInSlot(t, "k", 5)
 	if got := c.str("SET", k, "abc"); got != "OK" {
 		t.Fatalf("SET: %s", got)
@@ -159,6 +160,7 @@ func TestClusterSlotStatsReplicationBytes(t *testing.T) {
 		return strings.Contains(master.c.str("INFO", "replication"), "state=online")
 	})
 	master.c.str("CONFIG", "SET", "cluster-slot-stats-enabled", "yes")
+	defer master.c.str("CONFIG", "SET", "cluster-slot-stats-enabled", "no")
 	k := keyInSlot(t, "k", 7)
 	master.c.str("SET", k, "v")
 	v := master.c.do("CLUSTER", "SLOT-STATS", "SLOTSRANGE", "7", "7")
