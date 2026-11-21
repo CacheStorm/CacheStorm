@@ -1073,13 +1073,7 @@ func cmdXINFO(ctx *Context) error {
 	}
 	info := stream.Info(full, count)
 	nodes := info.Nodes
-	radixNodes := int64(1)
-	switch {
-	case nodes == 1:
-		radixNodes = 2
-	case nodes > 1:
-		radixNodes = int64(2*nodes + 2)
-	}
+	radixNodes := int64(info.RadixNodes)
 	out := []*resp.Value{
 		resp.BulkString("length"), resp.IntegerValue(info.Length),
 		resp.BulkString("radix-tree-keys"), resp.IntegerValue(int64(nodes)),

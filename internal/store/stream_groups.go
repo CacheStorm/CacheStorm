@@ -553,6 +553,7 @@ type StreamGroupInfo struct {
 type StreamInfo struct {
 	Length       int64
 	Nodes        int
+	RadixNodes   int
 	LastID       string
 	MaxDeletedID string
 	EntriesAdded int64
@@ -627,6 +628,7 @@ func (v *StreamValue) Info(full bool, count int64) StreamInfo {
 	info := StreamInfo{
 		Length:       int64(v.count),
 		Nodes:        len(v.nodes),
+		RadixNodes:   streamRaxNodes(v.nodes),
 		LastID:       v.lastIDLocked().String(),
 		MaxDeletedID: v.maxDeletedLocked().String(),
 		EntriesAdded: v.EntriesAdded,
