@@ -17,6 +17,10 @@ type ClusterConn struct {
 	Asking   bool
 	slot     int
 	asking   bool
+	// extraOut is what the running command sent beyond its reply, which
+	// CLUSTER SLOT-STATS counts as its slot's: the replication stream it fed,
+	// once per replica, and the messages SPUBLISH delivered.
+	extraOut uint64
 }
 
 // commandSlot is the slot routing found for the running command, plus one.

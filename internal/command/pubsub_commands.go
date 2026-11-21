@@ -3,6 +3,7 @@ package command
 import (
 	"errors"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
@@ -141,7 +142,14 @@ func cmdSPUBLISH(ctx *Context) error {
 	if ps == nil {
 		return ctx.WriteInteger(0)
 	}
-	return ctx.WriteInteger(int64(ps.SPublish(ctx.ArgString(0), ctx.Arg(1))))
+	n := ps.SPublish(ctx.ArgString(0), ctx.Arg(1))
+	if n > 0 {
+		// Each subscriber got *3 $8 smessage, the channel and the message
+		// (a RESP3 push is as long).
+		bulk := func(l int) int64 { return int64(len(strconv.Itoa(l)) + l + 5) }
+		ctx.AddSlotBytesOut(int64(n) * (4 + bulk(8) + bulk(len(ctx.Arg(0))) + bulk(len(ctx.Arg(1)))))
+	}
+	return ctx.WriteInteger(int64(n))
 }
 
 func writeNameList(ctx *Context, names []string) error {

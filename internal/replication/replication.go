@@ -313,18 +313,20 @@ func (m *Manager) MarkLocalWrite() {
 	}
 }
 
-// Feed records a write a client executed in database db.
-func (m *Manager) Feed(db int, name string, args [][]byte) {
-	m.feed([]command.ExecutedCommand{{Name: name, Args: args, DB: db}}, false)
+// Feed records a write a client executed in database db. It returns the
+// bytes the write added to the stream, SELECT aside, times the replicas
+// attached, which CLUSTER SLOT-STATS counts as the command's slot's.
+func (m *Manager) Feed(db int, name string, args [][]byte) int64 {
+	return m.feed([]command.ExecutedCommand{{Name: name, Args: args, DB: db}}, false)
 }
 
 // FeedTransaction records the writes an EXEC (or a script) executed, as one
 // MULTI ... EXEC block.
-func (m *Manager) FeedTransaction(cmds []command.ExecutedCommand) {
+func (m *Manager) FeedTransaction(cmds []command.ExecutedCommand) int64 {
 	if len(cmds) == 0 {
-		return
+		return 0
 	}
-	m.feed(cmds, true)
+	return m.feed(cmds, true)
 }
 
 // FeedDelete records the removal of key from store s, for an expiry or an
@@ -368,22 +370,25 @@ func (m *Manager) dbIndex(s *store.Store) int {
 	return -1
 }
 
-func (m *Manager) feed(cmds []command.ExecutedCommand, tx bool) {
+func (m *Manager) feed(cmds []command.ExecutedCommand, tx bool) int64 {
 	if !m.feeding.Load() {
-		return
+		return 0
 	}
 	m.mu.Lock()
 	if m.role != RoleMaster || m.backlog == nil || m.stopped {
 		m.mu.Unlock()
-		return
+		return 0
 	}
 	var buf []byte
 	if tx {
 		buf = appendCommand(buf, "MULTI", nil)
 	}
+	selects := 0
 	for _, c := range cmds {
 		if c.DB != m.streamDB {
+			n := len(buf)
 			buf = appendCommand(buf, "SELECT", [][]byte{strconv.AppendInt(nil, int64(c.DB), 10)})
+			selects += len(buf) - n
 			m.streamDB = c.DB
 		}
 		buf = appendCommand(buf, c.Name, c.Args)
@@ -391,11 +396,13 @@ func (m *Manager) feed(cmds []command.ExecutedCommand, tx bool) {
 	if tx {
 		buf = appendCommand(buf, "EXEC", nil)
 	}
+	sent := int64(len(buf)-selects) * int64(len(m.replicas))
 	dropped := m.appendLocked(buf)
 	m.mu.Unlock()
 	for _, r := range dropped {
 		r.close()
 	}
+	return sent
 }
 
 // feedRaw appends already encoded bytes to the stream of a master.

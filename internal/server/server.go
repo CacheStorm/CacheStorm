@@ -689,7 +689,7 @@ func (s *Server) installCommitHooks() {
 				return err
 			}
 		}
-		s.repl.Feed(db, upperCmd, args)
+		ctx.AddSlotBytesOut(s.repl.Feed(db, upperCmd, args))
 		return nil
 	},
 
@@ -723,7 +723,7 @@ func (s *Server) installCommitHooks() {
 					return err
 				}
 			}
-			s.repl.FeedTransaction(writes)
+			ctx.AddSlotBytesOut(s.repl.FeedTransaction(writes))
 			return nil
 		})
 }

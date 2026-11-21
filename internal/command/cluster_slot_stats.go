@@ -175,7 +175,18 @@ func (ctx *Context) RecordSlotUsage(nameLen, replyBytes int) {
 		}
 		out = uint64(max(replyBytes, 0))
 	}
+	out += ctx.ClusterConn.extraOut
 	c.AddSlotUsage(slot, cpu, in, out)
+}
+
+// AddSlotBytesOut counts n bytes the running command sent beyond its reply
+// towards its slot's network-bytes-out, as Redis counts the replication
+// stream a command feeds (n is its bytes times the replicas) and the
+// messages SPUBLISH delivers.
+func (ctx *Context) AddSlotBytesOut(n int64) {
+	if n > 0 && ctx.ClusterConn != nil && slotStatsEnabled.Load() {
+		ctx.ClusterConn.extraOut += uint64(n)
+	}
 }
 
 // requestBytes is the size of a command sent as a RESP array.

@@ -2,7 +2,9 @@ package server
 
 import (
 	"strconv"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/cachestorm/cachestorm/internal/config"
 )
@@ -17,7 +19,7 @@ func reqLen(args ...string) int64 {
 }
 
 func TestClusterSlotStats(t *testing.T) {
-	_, c := startClusterServer(t, t.TempDir(), func(cfg *config.Config) { cfg.Cluster.RequireFullCoverage = false })
+	s, c := startClusterServer(t, t.TempDir(), func(cfg *config.Config) { cfg.Cluster.RequireFullCoverage = false })
 	for _, r := range [][2]string{{"0", "100"}, {"200", "300"}} {
 		if got := c.str("CLUSTER", "ADDSLOTSRANGE", r[0], r[1]); got != "OK" {
 			t.Fatalf("ADDSLOTSRANGE: %s", got)
@@ -83,6 +85,23 @@ func TestClusterSlotStats(t *testing.T) {
 	if got := c.str("CLUSTER", "SLOT-STATS", "ORDERBY", "network-bytes-in", "LIMIT", "1"); got[:4] != "[[5 " {
 		t.Fatalf("ORDERBY network-bytes-in: %s", got)
 	}
+	// SPUBLISH also counts the message each subscriber got.
+	ch := keyInSlot(t, "ch", 5)
+	sub := dialRepl(t, s)
+	sub.do("SSUBSCRIBE", ch)
+	wantIn += reqLen("SSUBSCRIBE", ch)
+	wantOut += int64(len("*3\r\n$10\r\nssubscribe\r\n$" + strconv.Itoa(len(ch)) + "\r\n" + ch + "\r\n:1\r\n"))
+	if _, in, out := usage(5); in != wantIn || out != wantOut {
+		t.Fatalf("after SSUBSCRIBE bytes in/out %d %d, want %d %d", in, out, wantIn, wantOut)
+	}
+	_, _, before := usage(5)
+	c.str("SPUBLISH", ch, "hello")
+	msg := int64(len("*3\r\n$8\r\nsmessage\r\n$"+strconv.Itoa(len(ch))+"\r\n"+ch+"\r\n$5\r\nhello\r\n") + len(":1\r\n"))
+	if _, _, out := usage(5); out-before != msg {
+		t.Fatalf("SPUBLISH bytes out %d, want %d", out-before, msg)
+	}
+	wantIn += reqLen("SPUBLISH", ch, "hello")
+
 	// A command refused before routing counts towards no slot.
 	c.str("GET", k, "extra")
 	if _, in, _ := usage(5); in != wantIn {
@@ -121,4 +140,30 @@ func splitWords(s string) []string {
 		word += string(r)
 	}
 	return out
+}
+
+// A master counts the replication stream a command feeds, once per replica,
+// towards the command's slot.
+func TestClusterSlotStatsReplicationBytes(t *testing.T) {
+	nodes := startBusNodes(t, 2)
+	master, replica := nodes[0], nodes[1]
+	formMesh(t, nodes)
+	if got := master.c.str("CLUSTER", "ADDSLOTSRANGE", "0", "16383"); got != "OK" {
+		t.Fatalf("ADDSLOTSRANGE: %s", got)
+	}
+	eventually(t, 10*time.Second, "the slots to converge", func() bool { return converged(nodes) })
+	if got := replica.c.str("CLUSTER", "REPLICATE", master.id); got != "OK" {
+		t.Fatalf("REPLICATE: %s", got)
+	}
+	eventually(t, 15*time.Second, "the replica to sync", func() bool {
+		return strings.Contains(master.c.str("INFO", "replication"), "state=online")
+	})
+	master.c.str("CONFIG", "SET", "cluster-slot-stats-enabled", "yes")
+	k := keyInSlot(t, "k", 7)
+	master.c.str("SET", k, "v")
+	v := master.c.do("CLUSTER", "SLOT-STATS", "SLOTSRANGE", "7", "7")
+	out := v.Array[0].Array[1].Array[7].Int
+	if want := int64(len("+OK\r\n")) + reqLen("SET", k, "v"); out != want {
+		t.Fatalf("bytes out %d, want %d", out, want)
+	}
 }
