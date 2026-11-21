@@ -9,7 +9,9 @@ import (
 // after the RDB_OPCODE_FUNCTION2 opcode, followed by the RDB version and the
 // checksum, as a key's DUMP payload is.
 const (
-	rdbOpcodeFunction2     = 245
+	rdbOpcodeFunction2 = 245
+	// rdbOpcodeHashTemplate (Redis 8.10) records a HIMPORT field set.
+	rdbOpcodeHashTemplate  = 242
 	rdbOpcodeFunctionPreGA = 246
 )
 
@@ -33,7 +35,7 @@ func DecodeFunctionDump(payload []byte) ([]string, error) {
 		return nil, ErrDumpChecksum
 	}
 	version := binary.LittleEndian.Uint16(payload[len(payload)-10:])
-	if version > 12 || binary.LittleEndian.Uint64(payload[len(payload)-8:]) != rdbChecksum(0, payload[:len(payload)-8]) {
+	if version > maxRDBVersion || binary.LittleEndian.Uint64(payload[len(payload)-8:]) != rdbChecksum(0, payload[:len(payload)-8]) {
 		return nil, ErrDumpChecksum
 	}
 	d := &dumpDecoder{data: payload[:len(payload)-10]}

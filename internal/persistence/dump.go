@@ -126,7 +126,15 @@ func appendDumpValue(out []byte, value store.Value) ([]byte, uint16, error) {
 			out = binary.LittleEndian.AppendUint64(out, math.Float64bits(score))
 		}
 	case *store.StreamValue:
+		at := len(out)
 		out = appendDumpStream(out, v)
+		// The stream types of Redis 8.6 and 8.8 come with their RDB versions.
+		switch out[at] {
+		case rdbTypeStreamListpacks4:
+			version = 13
+		case rdbTypeStreamListpacks5:
+			version = 14
+		}
 	case *store.JSONValue, *store.BloomValue, *store.CuckooValue, *store.CMSValue, *store.TopKValue, *store.VectorSetValue:
 		// As Redis 8's bundled modules save them, which Redis 8 loads.
 		out, _ = appendRedisModuleValue(out, v)
@@ -353,12 +361,36 @@ func decodeDumpLZF(input []byte, size int) ([]byte, error) {
 	return out, nil
 }
 
+// maxRDBVersion is the newest RDB format CacheStorm reads: Redis 8.10's.
+// Versions 13 to 15 added stream IDMP state and NACK zones (read), key
+// metadata (skipped), and the array type and hash templates, which CacheStorm
+// refuses by name.
+const maxRDBVersion = 15
+
+// rdbOpcodeKeyMeta precedes a value's type when modules attached metadata
+// to its key (Redis 8.6).
+const rdbOpcodeKeyMeta = 243
+
+// skipKeyMeta skips a key's module metadata: each class is a 4-byte spec
+// followed by module-encoded data up to its EOF opcode.
+func (d *dumpDecoder) skipKeyMeta() {
+	n := d.count()
+	if n > 64 {
+		d.err = ErrDumpFormat
+		return
+	}
+	for i := 0; i < n && d.err == nil; i++ {
+		d.take(4)
+		d.skipModuleData()
+	}
+}
+
 func DecodeDump(payload []byte) (store.Value, error) {
 	if len(payload) < 11 {
 		return nil, ErrDumpChecksum
 	}
 	version := binary.LittleEndian.Uint16(payload[len(payload)-10:])
-	if version > 12 || binary.LittleEndian.Uint64(payload[len(payload)-8:]) != rdbChecksum(0, payload[:len(payload)-8]) {
+	if version > maxRDBVersion || binary.LittleEndian.Uint64(payload[len(payload)-8:]) != rdbChecksum(0, payload[:len(payload)-8]) {
 		return nil, ErrDumpChecksum
 	}
 	d := &dumpDecoder{data: payload[:len(payload)-10]}
@@ -573,8 +605,16 @@ func (d *dumpDecoder) valueOf(typ byte) store.Value {
 			d.err = ErrDumpFormat
 		}
 		return v
-	case rdbTypeStreamListpacks, rdbTypeStreamListpacks2, rdbTypeStreamListpacks3:
+	case rdbTypeStreamListpacks, rdbTypeStreamListpacks2, rdbTypeStreamListpacks3, rdbTypeStreamListpacks4, rdbTypeStreamListpacks5:
 		return d.stream(typ)
+	case rdbOpcodeKeyMeta:
+		// Redis 8.6 key metadata from modules, ahead of the value's type;
+		// CacheStorm keeps none of it.
+		d.skipKeyMeta()
+		if d.err != nil {
+			return nil
+		}
+		return d.valueOf(d.byte())
 	case dumpTypeStream:
 		data := d.str()
 		if d.err != nil {

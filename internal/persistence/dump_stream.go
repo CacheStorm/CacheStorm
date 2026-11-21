@@ -5,6 +5,7 @@ import (
 	"math"
 	"sort"
 	"strconv"
+	"time"
 
 	"github.com/cachestorm/cachestorm/internal/store"
 )
@@ -16,6 +17,10 @@ const (
 	rdbTypeStreamListpacks  = 15
 	rdbTypeStreamListpacks2 = 19
 	rdbTypeStreamListpacks3 = 21
+	// _4 (Redis 8.6) adds the IDMP state, _5 (Redis 8.8) each group's
+	// NACK zone. CacheStorm reads both.
+	rdbTypeStreamListpacks4 = 26
+	rdbTypeStreamListpacks5 = 27
 )
 
 // streamNodeMaxEntries is Redis' default stream-node-max-entries: a dumped
@@ -116,7 +121,22 @@ func appendDumpStream(out []byte, v *store.StreamValue) []byte {
 	ms := func(t int64) { out = binary.LittleEndian.AppendUint64(out, uint64(t)) }
 	id := func(s store.StreamID) { out = appendDumpLength(appendDumpLength(out, s.Ms), s.Seq) }
 
-	out = append(out, rdbTypeStreamListpacks3)
+	// A stream with IDMP state or released (XNACK) entries needs the
+	// Redis 8.6 or 8.8 type that holds them; any other keeps _3, which
+	// Redis 7.2 and later read.
+	kind := byte(rdbTypeStreamListpacks3)
+	idmp := v.IDMPLocked()
+	if idmp != nil {
+		kind = rdbTypeStreamListpacks4
+	}
+	for _, g := range v.Groups {
+		g.RLock()
+		if len(g.NackedLocked()) > 0 {
+			kind = rdbTypeStreamListpacks5
+		}
+		g.RUnlock()
+	}
+	out = append(out, kind)
 	entries := v.EntriesLocked()
 	out = appendDumpLength(out, uint64((len(entries)+streamNodeMaxEntries-1)/streamNodeMaxEntries))
 	for start := 0; start < len(entries); start += streamNodeMaxEntries {
@@ -218,14 +238,60 @@ func appendDumpStream(out []byte, v *store.StreamValue) []byte {
 			}
 			out = appendDumpLength(out, uint64(owned))
 			for _, p := range pel {
-				if p.Consumer == cname {
+				if p.Consumer == cname && !p.IsNacked() {
 					out = append(out, rawStreamID(parseDumpStreamID(p.ID))...)
 				}
 			}
 		}
+		if kind >= rdbTypeStreamListpacks5 {
+			nacked := g.NackedLocked()
+			out = appendDumpLength(out, uint64(len(nacked)))
+			for _, n := range nacked {
+				out = append(out, rawStreamID(parseDumpStreamID(n))...)
+			}
+		}
 		g.RUnlock()
 	}
+	if kind >= rdbTypeStreamListpacks4 {
+		out = appendStreamIDMP(out, idmp)
+	}
 	return out
+}
+
+// appendStreamIDMP writes the IDMP state as Redis 8.6 saves it: duration,
+// maximum, the producers in name order with their unexpired iids oldest
+// first, and the two counters.
+func appendStreamIDMP(out []byte, m *store.StreamIDMP) []byte {
+	if m == nil {
+		m = &store.StreamIDMP{Duration: store.DefaultIDMPDuration, MaxSize: store.DefaultIDMPMaxSize}
+	}
+	out = appendDumpLength(out, uint64(m.Duration))
+	out = appendDumpLength(out, uint64(m.MaxSize))
+	pids := make([]string, 0, len(m.Producers))
+	for pid := range m.Producers {
+		pids = append(pids, pid)
+	}
+	sort.Strings(pids)
+	out = appendDumpLength(out, uint64(len(pids)))
+	expired := uint64(max(time.Now().UnixMilli()-m.Duration*1000, 0))
+	for _, pid := range pids {
+		out = appendDumpLength(out, uint64(len(pid)))
+		out = append(out, pid...)
+		var live []store.IDMPEntry
+		for _, e := range m.Producers[pid] {
+			if e.ID.Ms > expired {
+				live = append(live, e)
+			}
+		}
+		out = appendDumpLength(out, uint64(len(live)))
+		for _, e := range live {
+			out = appendDumpLength(out, uint64(len(e.IID)))
+			out = append(out, e.IID...)
+			out = appendDumpLength(appendDumpLength(out, e.ID.Ms), e.ID.Seq)
+		}
+	}
+	out = appendDumpLength(out, uint64(m.Added))
+	return appendDumpLength(out, uint64(m.Duplicates))
 }
 
 func (d *dumpDecoder) streamID() store.StreamID {
@@ -362,8 +428,17 @@ func (d *dumpDecoder) stream(kind byte) store.Value {
 			}
 			g.Consumers[c.Name] = c
 		}
+		if kind >= rdbTypeStreamListpacks5 {
+			// The NACK zone: the unowned entries XNACK released, in order.
+			nacked := d.count()
+			for k := 0; k < nacked && d.err == nil; k++ {
+				if !g.MarkLoadedNacked(d.rawID().String()) {
+					d.err = ErrDumpFormat
+				}
+			}
+		}
 		for _, p := range g.Pending {
-			if p.Consumer == "" {
+			if p.Consumer == "" && !p.IsNacked() {
 				d.err = ErrDumpFormat
 			}
 		}
@@ -372,10 +447,50 @@ func (d *dumpDecoder) stream(kind byte) store.Value {
 		}
 		v.Groups[name] = g
 	}
+	if kind >= rdbTypeStreamListpacks4 && d.err == nil {
+		d.streamIDMP(v)
+	}
 	if d.err != nil {
 		return nil
 	}
 	return v
+}
+
+// streamIDMP reads the IDMP state of a Redis 8.6 stream: the duration and
+// maximum, each producer's iids with their entry IDs, and the counters.
+func (d *dumpDecoder) streamIDMP(v *store.StreamValue) {
+	duration, enc1 := d.length()
+	maxSize, enc2 := d.length()
+	if enc1 || enc2 || duration < 1 || duration > 86400 || maxSize < 1 || maxSize > 10000 {
+		d.err = ErrDumpFormat
+		return
+	}
+	m := &store.StreamIDMP{Duration: int64(duration), MaxSize: int64(maxSize), Producers: map[string][]store.IDMPEntry{}}
+	producers := d.count()
+	for i := 0; i < producers && d.err == nil; i++ {
+		pid := d.str()
+		n := d.count()
+		var entries []store.IDMPEntry
+		seen := map[string]bool{}
+		for j := 0; j < n && d.err == nil; j++ {
+			iid := d.str()
+			ms, _ := d.length()
+			seq, _ := d.length()
+			if !seen[iid] && int64(ms) > time.Now().UnixMilli()-int64(duration)*1000 {
+				seen[iid] = true
+				entries = append(entries, store.IDMPEntry{IID: iid, ID: store.StreamID{Ms: ms, Seq: seq}})
+			}
+		}
+		if len(entries) > 0 {
+			m.Producers[pid] = entries
+		}
+	}
+	added, _ := d.length()
+	dups, _ := d.length()
+	m.Added, m.Duplicates = int64(added), int64(dups)
+	if d.err == nil {
+		v.SetLoadedIDMP(m)
+	}
 }
 
 // streamNodeEntries decodes one stream listpack: the master entry (count,

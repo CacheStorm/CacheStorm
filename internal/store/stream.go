@@ -49,6 +49,9 @@ type PendingEntry struct {
 	// seq orders entries with the same delivery time, as Redis' PEL time
 	// list keeps them in the order they were (re)delivered.
 	seq uint64
+	// nacked marks an entry XNACK released: it has no consumer and sits,
+	// in the order it was released, before every delivered entry.
+	nacked bool
 }
 
 type Consumer struct {
@@ -86,8 +89,36 @@ func (g *ConsumerGroup) AddLoadedPending(p *PendingEntry) {
 // delivery at the same time in the PEL's time order.
 func (g *ConsumerGroup) stampLocked(p *PendingEntry, ts int64) {
 	g.pelSeq++
-	p.DeliveryTS, p.seq = ts, g.pelSeq
+	p.DeliveryTS, p.seq, p.nacked = ts, g.pelSeq, false
 }
+
+// MarkLoadedNacked puts a loaded, unowned PEL entry into the NACK zone, as
+// a Redis 8.8 RDB file lists them; false when id is not an unowned entry.
+func (g *ConsumerGroup) MarkLoadedNacked(id string) bool {
+	p, ok := g.Pending[id]
+	if !ok || p.Consumer != "" || p.nacked {
+		return false
+	}
+	g.pelSeq++
+	p.DeliveryTS, p.seq, p.nacked = 0, g.pelSeq, true
+	return true
+}
+
+// NackedLocked returns the IDs of the entries XNACK released, in the order
+// it released them. The caller holds the group's lock.
+func (g *ConsumerGroup) NackedLocked() []string {
+	var out []string
+	for _, p := range g.timeOrderLocked() {
+		if !p.nacked {
+			break
+		}
+		out = append(out, p.ID)
+	}
+	return out
+}
+
+// IsNacked reports whether the PEL entry was released by XNACK.
+func (p *PendingEntry) IsNacked() bool { return p.nacked }
 
 // timeOrderLocked is the PEL oldest delivery first, as Redis 8.4's PEL time
 // list holds it for XREADGROUP CLAIM.
@@ -97,6 +128,12 @@ func (g *ConsumerGroup) timeOrderLocked() []*PendingEntry {
 		out = append(out, p)
 	}
 	sort.Slice(out, func(i, j int) bool {
+		if out[i].nacked != out[j].nacked {
+			return out[i].nacked
+		}
+		if out[i].nacked {
+			return out[i].seq < out[j].seq
+		}
 		if out[i].DeliveryTS != out[j].DeliveryTS {
 			return out[i].DeliveryTS < out[j].DeliveryTS
 		}
@@ -361,7 +398,9 @@ type StreamValue struct {
 	// EntriesAdded counts every entry ever added, including the deleted.
 	EntriesAdded int64
 	Groups       map[string]*ConsumerGroup
-	size         sizeCounter
+	// idmp is the IDMP state, nil until a stream uses IDMP.
+	idmp *StreamIDMP
+	size sizeCounter
 }
 
 func (v *StreamValue) Lock()    { v.mu.Lock() }
@@ -429,6 +468,7 @@ func (v *StreamValue) Clone() Value {
 	defer v.mu.RUnlock()
 
 	cloned := &StreamValue{
+		idmp:         v.idmp.clone(),
 		nodes:        make([]*streamNode, len(v.nodes)),
 		count:        v.count,
 		LastID:       v.LastID,

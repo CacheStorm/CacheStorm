@@ -576,7 +576,7 @@ func (r *RDBReader) readRDB(f io.Reader) error {
 		return fmt.Errorf("invalid RDB version: %v", err)
 	}
 
-	if version < 5 || version > 12 {
+	if version < 5 || version > maxRDBVersion {
 		return fmt.Errorf("unsupported RDB version: %d", version)
 	}
 
@@ -676,6 +676,27 @@ func (r *RDBReader) readRDB(f io.Reader) error {
 				if len(r.functions) > 0 {
 					r.AuxFields["cachestorm-functions"] = string(EncodeFunctionDump(r.functions))
 				}
+			case rdbOpcodeHashTemplate:
+				return fmt.Errorf("hash templates (Redis 8.10 HIMPORT field sets) are not supported")
+			case rdbOpcodeKeyMeta:
+				br, ok := f.(*bytes.Reader)
+				if !ok || r.body == nil {
+					return fmt.Errorf("a Redis RDB file must be loaded with Load")
+				}
+				d := &dumpDecoder{data: r.body, pos: len(r.body) - br.Len()}
+				d.skipKeyMeta()
+				typ := d.byte()
+				if d.err != nil {
+					return fmt.Errorf("corrupt RDB key metadata")
+				}
+				if _, err := br.Seek(int64(d.pos), io.SeekStart); err != nil {
+					return err
+				}
+				if err := r.readRedisEntry(f, typ, pendingExpiryMS, pendingIdle, pendingFreq, pendingTags); err != nil {
+					return err
+				}
+				pendingExpiryMS, pendingIdle, pendingFreq, pendingTags = 0, -1, -1, nil
+				continue
 			case 0xFB, 0xFC, 0xFD, 0xFE:
 			default:
 				if err := r.readRedisEntry(f, opcode, pendingExpiryMS, pendingIdle, pendingFreq, pendingTags); err != nil {
@@ -1124,6 +1145,10 @@ func (r *RDBReader) readRedisEntry(f io.Reader, valueType byte, expiresAtMS, idl
 		return fmt.Errorf("RDB module values are not supported (key %q)", key)
 	case 22, 23:
 		return fmt.Errorf("pre-GA hash field expiration format not supported (key %q)", key)
+	case 28:
+		return fmt.Errorf("array values (Redis 8.8) are not supported (key %q)", key)
+	case 29, 30, 31, 32:
+		return fmt.Errorf("template hashes of Redis 8.10 (HIMPORT) are not supported (key %q)", key)
 	default:
 		value = d.valueOf(valueType)
 	}
