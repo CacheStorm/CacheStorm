@@ -228,11 +228,17 @@ func (v *HashValue) Clone() Value {
 type ListValue struct {
 	l    listChunks
 	mu   sync.RWMutex
-	dead bool
 	size sizeCounter
 	// shape is how Redis would hold the list, for OBJECT ENCODING; nil
-	// until a write needs it (see list_encoding.go).
+	// until a write needs it (see list_encoding.go), and nil while the
+	// list is a listpack described by lpBytes and lpCount.
 	shape *listShape
+	// lpBytes, when not 0, is the size of the listpack Redis would hold
+	// the list in, and lpCount the number of elements it describes. They
+	// fill the struct's padding, so most lists need no shape allocation.
+	lpBytes uint32
+	lpCount uint16
+	dead    bool
 }
 
 // NewListFrom returns a list of elems.
@@ -284,6 +290,7 @@ func (v *ListValue) PushFront(items ...[]byte) {
 		return
 	}
 	s := v.shapeLocked()
+	defer v.settleShapeLocked()
 	s.grow(argBytes(items), len(items))
 	for i := len(items) - 1; i >= 0; i-- {
 		s.push(items[i], true)
@@ -315,6 +322,7 @@ func (v *ListValue) pop(n int, front bool) [][]byte {
 		return nil
 	}
 	s := v.shapeLocked()
+	defer v.settleShapeLocked()
 	out := v.popElems(n, front)
 	if front {
 		s.popFront(out)
@@ -394,6 +402,7 @@ func (v *ListValue) PushBack(items ...[]byte) {
 		return
 	}
 	s := v.shapeLocked()
+	defer v.settleShapeLocked()
 	s.grow(argBytes(items), len(items))
 	for _, el := range items {
 		s.push(el, false)
@@ -405,6 +414,7 @@ func (v *ListValue) PushBack(items ...[]byte) {
 // does after TryGrow. The caller holds the value's write lock.
 func (v *ListValue) SetAt(i int, el []byte) {
 	s := v.shapeLocked()
+	defer v.settleShapeLocked()
 	ci, off := v.l.locate(i)
 	c := v.l.chunks[ci]
 	_, ds, de, _ := c.entry(off)
@@ -436,6 +446,7 @@ func (k knownElem) slice(start, end int) [][]byte { return k.l.slice(start, end)
 // holds the value's write lock.
 func (v *ListValue) Trim(start, stop int) {
 	s := v.shapeLocked()
+	defer v.settleShapeLocked()
 	front := v.l.slice(0, start)
 	s.popFront(front)
 	removed := sumListElems(front)
@@ -456,7 +467,7 @@ func (v *ListValue) Trim(start, stop int) {
 // rebuild it. The caller holds the value's write lock.
 func (v *ListValue) ReplaceElements(elems [][]byte) {
 	v.l.rebuild(elems)
-	v.shape = nil
+	v.shape, v.lpBytes = nil, 0
 	v.size.set(sumListElems(elems))
 }
 func (v *ListValue) String() string {
@@ -479,6 +490,7 @@ func (v *ListValue) Clone() Value {
 	if v.shape != nil && v.shape.count == v.l.count {
 		cloned.shape = v.shape.clone()
 	}
+	cloned.lpBytes, cloned.lpCount = v.lpBytes, v.lpCount
 	return cloned
 }
 

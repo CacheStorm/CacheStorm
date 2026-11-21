@@ -2,6 +2,7 @@ package store
 
 import (
 	"math"
+	"sync"
 	"sync/atomic"
 )
 
@@ -527,16 +528,50 @@ func (l *listChunks) slice(start, end int) [][]byte {
 
 // Shape helpers on ListValue. The caller holds the value's write lock.
 
+// shapeLocked returns the list's shape for a write to update; the caller
+// calls settleShapeLocked when done with it.
 func (v *ListValue) shapeLocked() *listShape {
-	if v.shape == nil || v.shape.count != v.l.count {
+	switch {
+	case v.shape == nil && v.packedShapeValid():
+		s := listShapePool.Get().(*listShape)
+		*s = listShape{count: v.l.count, lpBytes: int(v.lpBytes)}
+		v.shape = s
+	case v.shape == nil || v.shape.count != v.l.count:
 		v.shape = autoListShape(v.l.all())
 	}
+	v.lpBytes = 0
 	return v.shape
+}
+
+func (v *ListValue) packedShapeValid() bool {
+	return v.lpBytes != 0 && int(v.lpCount) == v.l.count
+}
+
+// packListShapes is off only in tests that compare against the unpacked
+// shapes.
+var packListShapes = true
+
+var listShapePool = sync.Pool{New: func() any { return new(listShape) }}
+
+// settleShapeLocked folds a listpack shape back into lpBytes and lpCount
+// and frees it; a quicklist keeps its shape.
+func (v *ListValue) settleShapeLocked() {
+	s := v.shape
+	if s == nil || !packListShapes || s.quick || s.count != v.l.count || s.count > math.MaxUint16 || s.lpBytes <= 0 || s.lpBytes > math.MaxUint32 {
+		return
+	}
+	v.lpBytes, v.lpCount = uint32(s.lpBytes), uint16(s.count)
+	v.shape = nil
+	*s = listShape{}
+	listShapePool.Put(s)
 }
 
 // Encoding is the list's OBJECT ENCODING. The caller holds the value's
 // lock, at least for reading.
 func (v *ListValue) Encoding() string {
+	if v.shape == nil && v.packedShapeValid() {
+		return "listpack"
+	}
 	s := v.shape
 	if s == nil || s.count != v.l.count {
 		s = autoListShape(v.l.all())
@@ -551,6 +586,7 @@ func (v *ListValue) Encoding() string {
 // whether or not the write then happens. The caller holds the write lock.
 func (v *ListValue) TryGrow(el []byte) {
 	v.shapeLocked().grow(len(el), 1)
+	v.settleShapeLocked()
 }
 
 func argBytes(items [][]byte) int {
@@ -575,6 +611,7 @@ func movedBytes(el []byte) int {
 // The caller holds the write lock.
 func (v *ListValue) PushMoved(el []byte, front bool) {
 	s := v.shapeLocked()
+	defer v.settleShapeLocked()
 	s.grow(movedBytes(el), 1)
 	s.push(el, front)
 	v.pushElems(front, el)
@@ -585,6 +622,7 @@ func (v *ListValue) PushMoved(el []byte, front bool) {
 // not be empty. The caller holds the write lock.
 func (v *ListValue) Rotate(fromFront, toFront bool) []byte {
 	s := v.shapeLocked()
+	defer v.settleShapeLocked()
 	el := v.popElems(1, fromFront)[0]
 	if fromFront {
 		s.popFront([][]byte{el})
@@ -605,6 +643,7 @@ func (v *ListValue) DeleteAt(idx []int) {
 		return
 	}
 	s := v.shapeLocked()
+	defer v.settleShapeLocked()
 	kept := make([][]byte, 0, v.l.count-len(idx))
 	removed := make([][]byte, 0, len(idx))
 	k := 0
@@ -629,6 +668,7 @@ func (v *ListValue) DeleteAt(idx []int) {
 // caller holds the write lock and has called TryGrow.
 func (v *ListValue) InsertAt(i int, el []byte, after bool) {
 	v.shapeLocked().insert(&v.l, i, el, after)
+	defer v.settleShapeLocked()
 	at := i
 	if after {
 		at = i + 1
