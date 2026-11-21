@@ -31,6 +31,8 @@ func RegisterListCommands(router *Router) {
 	router.Register(&CommandDef{Name: "LINSERT", Handler: cmdLINSERT})
 	router.Register(&CommandDef{Name: "LMOVE", Handler: cmdLMOVE})
 	router.Register(&CommandDef{Name: "BLMOVE", Handler: cmdBLMOVE})
+	router.Register(&CommandDef{Name: "LMOVEM", Handler: cmdLMOVEM})
+	router.Register(&CommandDef{Name: "BLMOVEM", Handler: cmdBLMOVEM})
 	router.Register(&CommandDef{Name: "BLPOP", Handler: cmdBLPOP})
 	router.Register(&CommandDef{Name: "BRPOP", Handler: cmdBRPOP})
 	router.Register(&CommandDef{Name: "BRPOPLPUSH", Handler: cmdBRPOPLPUSH})

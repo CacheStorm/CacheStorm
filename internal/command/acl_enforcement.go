@@ -386,6 +386,10 @@ func aclKeysForCommand(cmd string, args [][]byte) []string {
 		return toStrings(args)
 	case keyShapeNone:
 		return nil
+	case keyShapeSpecs:
+		if keys, ok := keysBySpecs(cmd, args); ok {
+			return keys
+		}
 	}
 	// Fail closed for a command the tables do not classify. Falling through
 	// with no keys let a user confined to ~user:* read and write any other
@@ -432,7 +436,33 @@ const (
 	keyShapeMSET
 	keyShapeAll
 	keyShapeNone
+	// keyShapeSpecs: Redis' key specs name keys other than the first
+	// argument alone (two keys, a numkeys count, keys after a keyword), so
+	// a command the switch does not name takes its keys from them.
+	keyShapeSpecs
 )
+
+// keysBySpecs returns the keys cmd's Redis key specs find in args.
+func keysBySpecs(cmd string, args [][]byte) ([]string, bool) {
+	argv := make([]string, 0, len(args)+1)
+	argv = append(argv, cmd)
+	for _, a := range args {
+		argv = append(argv, string(a))
+	}
+	meta := lookupRedisCommandMeta(argv)
+	if meta == nil {
+		return nil, false
+	}
+	refs, ok := keysFromSpecs(meta, argv)
+	if !ok {
+		return nil, false
+	}
+	keys := make([]string, len(refs))
+	for i, r := range refs {
+		keys[i] = r.name
+	}
+	return keys, true
+}
 
 // keyShapes caches keyShapeOf: the tables it reads never change, and a
 // command's keys are worked out for every command a connection runs.
@@ -454,8 +484,14 @@ func keyShapeOf(cmd string) keyShape {
 		// A search index is named by its first argument, which is no key.
 		shape = keyShapeNone
 	default:
-		if spec, ok := redisCommandSpecs[cmd]; ok && spec.FirstKey == 0 && !commandHasFlag(cmd, "movablekeys") {
-			shape = keyShapeNone
+		if spec, ok := redisCommandSpecs[cmd]; ok {
+			movable := commandHasFlag(cmd, "movablekeys")
+			switch {
+			case spec.FirstKey == 0 && !movable:
+				shape = keyShapeNone
+			case movable || spec.FirstKey != 1 || spec.LastKey != 1:
+				shape = keyShapeSpecs
+			}
 		}
 	}
 	if _, ok := redisCommandSpecs[cmd]; ok || aclSingleKeyCommands[cmd] || shape != keyShapeFirst {

@@ -52,7 +52,7 @@ var writeCommands = map[string]bool{
 	"HGETDEL": true, "HGETEX": true, "HSETEX": true, "HEXPIRE": true, "HPEXPIRE": true,
 	"HEXPIREAT": true, "HPEXPIREAT": true, "HPERSIST": true,
 	"LPUSH": true, "RPUSH": true, "LPOP": true, "RPOP": true, "LSET": true, "LREM": true,
-	"LTRIM": true, "LINSERT": true, "RPOPLPUSH": true, "LMOVE": true,
+	"LTRIM": true, "LINSERT": true, "RPOPLPUSH": true, "LMOVE": true, "LMOVEM": true, "BLMOVEM": true,
 	"LPUSHX": true, "RPUSHX": true, "LMPUSH": true, "LMPOP": true,
 	"BLPOP": true, "BRPOP": true, "BRPOPLPUSH": true, "BLMOVE": true, "BLMPOP": true,
 	"SADD": true, "SREM": true, "SPOP": true, "SMOVE": true,

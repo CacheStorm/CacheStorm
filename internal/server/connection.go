@@ -1128,7 +1128,7 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 // blockingCommands may wait for data for as long as the client asked, or
 // forever with a zero timeout.
 var blockingCommands = map[string]bool{
-	"BLPOP": true, "BRPOP": true, "BLMOVE": true, "BRPOPLPUSH": true, "BLMPOP": true,
+	"BLPOP": true, "BRPOP": true, "BLMOVE": true, "BLMOVEM": true, "BRPOPLPUSH": true, "BLMPOP": true,
 	"BZPOPMIN": true, "BZPOPMAX": true, "BZMPOP": true,
 	"XREAD": true, "XREADGROUP": true, "WAIT": true,
 	"PROMISE.AWAIT": true, "FUTURE.GET": true, "RATELIMITER.WAIT": true, "BULKHEAD.ACQUIRE": true,

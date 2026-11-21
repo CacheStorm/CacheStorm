@@ -132,3 +132,29 @@ func TestRedis84StringCommandsReplicate(t *testing.T) {
 		}
 	}
 }
+
+// A user confined to some keys cannot reach others through the keys
+// MSETEX, LMOVEM or SUNIONCARD name after their first argument.
+func TestNewCommandsACLKeys(t *testing.T) {
+	s := startReplServerCfg(t, replTestConfig(t, nil))
+	c := dialRepl(t, s)
+	if got := c.str("ACL", "SETUSER", "u", "on", "nopass", "~a*", "+@all"); got != "OK" {
+		t.Fatalf("ACL SETUSER: %s", got)
+	}
+	if got := c.str("AUTH", "u", "x"); got != "OK" {
+		t.Fatalf("AUTH: %s", got)
+	}
+	for _, args := range [][]string{
+		{"MSETEX", "2", "a1", "v", "b1", "v", "EX", "10"},
+		{"LMOVEM", "a1", "b1", "LEFT", "RIGHT"},
+		{"SUNIONCARD", "2", "a1", "b1"},
+		{"SDIFFCARD", "2", "a1", "b1"},
+	} {
+		if got := c.str(args...); !strings.HasPrefix(got, "ERR:NOPERM") {
+			t.Fatalf("%v = %s, want NOPERM", args, got)
+		}
+	}
+	if got := c.str("MSETEX", "2", "a1", "v", "a2", "v"); got != "1" {
+		t.Fatalf("MSETEX on permitted keys: %s", got)
+	}
+}

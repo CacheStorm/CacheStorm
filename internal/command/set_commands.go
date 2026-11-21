@@ -28,6 +28,8 @@ func RegisterSetCommands(router *Router) {
 	router.Register(&CommandDef{Name: "SUNION", Handler: cmdSUNION})
 	router.Register(&CommandDef{Name: "SINTER", Handler: cmdSINTER})
 	router.Register(&CommandDef{Name: "SINTERCARD", Handler: cmdSINTERCARD})
+	router.Register(&CommandDef{Name: "SUNIONCARD", Handler: cmdSUNIONCARD})
+	router.Register(&CommandDef{Name: "SDIFFCARD", Handler: cmdSDIFFCARD})
 	router.Register(&CommandDef{Name: "SDIFF", Handler: cmdSDIFF})
 	router.Register(&CommandDef{Name: "SUNIONSTORE", Handler: cmdSUNIONSTORE})
 	router.Register(&CommandDef{Name: "SINTERSTORE", Handler: cmdSINTERSTORE})
