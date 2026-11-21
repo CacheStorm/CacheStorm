@@ -130,6 +130,15 @@ func (s *Store) MemoryPeak() int64 {
 	return s.memTracker.Peak()
 }
 
+// MemoryPeakTime returns the unix second MemoryPeak was reached; 0 without
+// a tracker.
+func (s *Store) MemoryPeakTime() int64 {
+	if s.memTracker == nil {
+		return 0
+	}
+	return s.memTracker.PeakTime()
+}
+
 // ResetMemoryPeak restarts peak tracking from the current usage.
 func (s *Store) ResetMemoryPeak() {
 	if s.memTracker != nil {

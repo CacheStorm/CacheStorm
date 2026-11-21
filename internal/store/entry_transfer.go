@@ -78,19 +78,19 @@ func (s *Store) Transfer(srcKey string, dst *Store, dstKey string, options Trans
 		newMem := base + size
 		oldMem := int64(0)
 		if previous != nil {
-			oldMem = previous.accounted.Load()
+			oldMem = previous.charged()
 		}
 		shared := s.memTracker == dst.memTracker
 		delta := newMem - oldMem
 		if shared && !options.Copy {
-			delta -= source.accounted.Load()
+			delta -= source.charged()
 		}
 		reserved := dst.memTracker != nil && !dst.loading.Load()
 		if reserved && !dst.memTracker.TryReserve(delta) {
 			minimum := newMem
 			tooLarge := false
 			if options.Copy && shared {
-				sourceMem := source.accounted.Load()
+				sourceMem := source.charged()
 				if sourceMem > math.MaxInt64-minimum {
 					tooLarge = true
 				} else {

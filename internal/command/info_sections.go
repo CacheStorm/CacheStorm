@@ -200,6 +200,7 @@ func infoMemory(w *infoWriter, ctx *Context) {
 	w.field("used_memory_rss_human", humanBytes(mem.rss))
 	w.int("used_memory_peak", mem.peak)
 	w.field("used_memory_peak_human", humanBytes(mem.peak))
+	w.int("used_memory_peak_time", mem.peakTime)
 	w.field("used_memory_peak_perc", mem.peakPerc())
 	w.field("used_memory_overhead", "0")
 	w.field("used_memory_startup", "0")
@@ -240,6 +241,7 @@ func infoMemory(w *infoWriter, ctx *Context) {
 	w.field("mem_not_counted_for_evict", "0")
 	w.field("mem_replication_backlog", "0")
 	w.field("mem_total_replication_buffers", "0")
+	w.field("mem_replica_full_sync_buffer", "0")
 	w.field("mem_clients_slaves", "0")
 	w.field("mem_clients_normal", "0")
 	w.field("mem_cluster_links", "0")
@@ -277,6 +279,17 @@ func scriptMemory(ctx *Context) (scripts, evalBytes, functions, libraries, funct
 		r.mu.RUnlock()
 	}
 	return scripts, evalBytes, functions, libraries, functionBytes
+}
+
+// infoThreads is Redis 8's Threads section: CacheStorm serves every client
+// from what Redis would call its main thread, io_thread_0.
+func infoThreads(w *infoWriter, st *ServerStatus) {
+	m := store.GlobalMetrics
+	w.section("Threads")
+	w.field("io_thread_0", "clients="+strconv.FormatInt(int64(st.ConnectedClients), 10)+
+		",reads="+strconv.FormatInt(m.ReadEvents.Load(), 10)+
+		",writes="+strconv.FormatInt(m.WriteEvents.Load(), 10))
+	w.end()
 }
 
 func infoStats(w *infoWriter, st *ServerStatus, ctx *Context) {
@@ -326,6 +339,7 @@ func infoStats(w *infoWriter, st *ServerStatus, ctx *Context) {
 	w.int("total_reads_processed", m.ReadEvents.Load())
 	w.int("total_writes_processed", m.WriteEvents.Load())
 	zero("io_threaded_reads_processed", "io_threaded_writes_processed",
+		"io_threaded_total_prefetch_batches", "io_threaded_total_prefetch_entries",
 		"client_query_buffer_limit_disconnections", "client_output_buffer_limit_disconnections",
 		"reply_buffer_shrinks", "reply_buffer_expands", "eventloop_cycles", "eventloop_duration_sum",
 		"eventloop_duration_cmd_sum", "instantaneous_eventloop_cycles_per_sec", "instantaneous_eventloop_duration_usec")
@@ -343,6 +357,7 @@ func infoStats(w *infoWriter, st *ServerStatus, ctx *Context) {
 // STATS and MEMORY DOCTOR share.
 type memoryFigures struct {
 	used, rss, peak, system int64
+	peakTime                int64
 }
 
 // goMemory is what INFO reads from the Go runtime, through runtime/metrics,
@@ -370,14 +385,17 @@ func readGoMemory() goMemory {
 }
 
 func readMemoryFigures(ctx *Context, used int64, ms goMemory) memoryFigures {
-	m := memoryFigures{used: used, peak: ctx.Store.MemoryPeak(), system: totalSystemMemory()}
+	m := memoryFigures{used: used, peak: ctx.Store.MemoryPeak(), peakTime: ctx.Store.MemoryPeakTime(), system: totalSystemMemory()}
 	if rss, ok := processRSS(); ok {
 		m.rss = rss
 	} else {
 		m.rss = int64(ms.mapped)
 	}
 	if m.peak < used {
-		m.peak = used
+		m.peak, m.peakTime = used, time.Now().Unix()
+	}
+	if m.peakTime == 0 {
+		m.peakTime = time.Now().Add(-store.GlobalMetrics.Uptime()).Unix()
 	}
 	return m
 }

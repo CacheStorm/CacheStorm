@@ -225,6 +225,10 @@ func cmdINFO(ctx *Context) error {
 		}
 	}
 
+	if want("threads") {
+		infoThreads(&w, &st)
+	}
+
 	if want("stats") {
 		infoStats(&w, &st, ctx)
 	}
@@ -273,6 +277,10 @@ func cmdINFO(ctx *Context) error {
 
 	if want("keyspace") {
 		sb.WriteString(keyspaceInfo(ctx))
+	}
+
+	if want("keysizes") {
+		sb.WriteString(keysizesInfo(ctx))
 	}
 
 	// RediSearch's sections come with INFO search, modules or everything,

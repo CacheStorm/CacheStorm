@@ -71,12 +71,14 @@ func (d *Databases) ReplaceFrom(src *Databases) error {
 				shard.keyCount, shard.memUsage = 0, 0
 				shard.expiring, shard.expSumHi, shard.expSumLo = 0, 0, 0
 				shard.vol = nil
+				shard.keysizes = nil
 			} else {
 				from := incoming.shards[j]
 				from.mu.Lock()
 				shard.data, shard.keyCount, shard.memUsage = from.data, from.keyCount, from.memUsage
 				shard.expiring, shard.expSumHi, shard.expSumLo = from.expiring, from.expSumHi, from.expSumLo
 				shard.vol = from.vol
+				shard.keysizes = from.keysizes
 				for key, entry := range shard.data {
 					entry.bind(dst.plain)
 					if shard.slots != nil {
@@ -91,6 +93,7 @@ func (d *Databases) ReplaceFrom(src *Databases) error {
 				from.keyCount, from.memUsage = 0, 0
 				from.expiring, from.expSumHi, from.expSumLo = 0, 0, 0
 				from.vol = nil
+				from.keysizes = nil
 				from.mu.Unlock()
 			}
 			delta += shard.memUsage

@@ -274,6 +274,61 @@ func keyspaceInfo(ctx *Context) string {
 	return sb.String()
 }
 
+var (
+	keysizeTypeNames = [store.KeysizeTypes]string{
+		"distrib_strings_sizes", "distrib_lists_items", "distrib_sets_items",
+		"distrib_zsets_items", "distrib_hashes_items",
+	}
+	keysizeLabels = func() (labels [store.KeysizeBins]string) {
+		labels[0] = "0"
+		for i := 1; i < store.KeysizeBins; i++ {
+			exp := i - 1
+			labels[i] = strconv.Itoa(1<<(exp%10)) + []string{"", "K", "M", "G", "T", "P", "E"}[exp/10]
+		}
+		return labels
+	}()
+)
+
+// keysizesInfo is Redis 8's Keysizes section of INFO: for each non-empty
+// database, how many keys of each basic type fall in each power-of-two size
+// bin, a string by its length and a collection by its element count.
+func keysizesInfo(ctx *Context) string {
+	var sb strings.Builder
+	sb.WriteString("# Keysizes\r\n")
+	ctx.databases().ForEach(func(index int, s *store.Store) {
+		if s.KeyCount() == 0 {
+			return
+		}
+		hist := s.Keysizes()
+		for t := range hist {
+			first := true
+			for b, n := range &hist[t] {
+				if n <= 0 {
+					continue
+				}
+				if first {
+					sb.WriteString("db")
+					sb.WriteString(strconv.Itoa(index))
+					sb.WriteByte('_')
+					sb.WriteString(keysizeTypeNames[t])
+					sb.WriteByte(':')
+					first = false
+				} else {
+					sb.WriteByte(',')
+				}
+				sb.WriteString(keysizeLabels[b])
+				sb.WriteByte('=')
+				sb.WriteString(strconv.FormatInt(n, 10))
+			}
+			if !first {
+				sb.WriteString("\r\n")
+			}
+		}
+	})
+	sb.WriteString("\r\n")
+	return sb.String()
+}
+
 // notifyKeyMisses publishes the keymiss event for every key a read-only
 // command names that does not exist, as Redis' lookupKeyRead does.
 func notifyKeyMisses(ctx *Context) {

@@ -180,9 +180,9 @@ func (s *Store) moveSetMember(srcKey, dstKey, member string) (bool, error) {
 			return false, ErrValueTooLarge
 		}
 		newMem := srcSize + dstBase + dstSize
-		oldMem := source.accounted.Load()
+		oldMem := source.charged()
 		if previous != nil {
-			oldMem += previous.accounted.Load()
+			oldMem += previous.charged()
 		}
 		delta := newMem - oldMem
 		reserved := s.memTracker != nil && !s.loading.Load()

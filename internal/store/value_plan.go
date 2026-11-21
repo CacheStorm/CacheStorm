@@ -112,7 +112,7 @@ func (s *Store) applyValuePlan(key string, options *SetOptions, snapshot *Entry,
 		newMem := base + plan.Size
 		oldMem := int64(0)
 		if previous != nil {
-			oldMem = previous.accounted.Load()
+			oldMem = previous.charged()
 		}
 		delta := newMem - oldMem
 		reserved := s.memTracker != nil && !s.loading.Load()
@@ -166,7 +166,7 @@ func (s *Store) applyValuePlan(key string, options *SetOptions, snapshot *Entry,
 		} else {
 			entry = NewEntry(value)
 		}
-		actual, _ := shard.setLocked(key, entry)
+		actual, _ := shard.installLocked(key, entry, plan.op != nil || plan.unlock != nil)
 		if reserved {
 			s.trackMemory(actual - delta)
 		} else {

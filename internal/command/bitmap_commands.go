@@ -28,6 +28,18 @@ type BitmapValue struct {
 }
 
 func (v *BitmapValue) Type() store.DataType { return store.DataTypeString }
+
+// StringLen is the bitmap's length for INFO keysizes.
+func (v *BitmapValue) StringLen(held bool) (int, bool) {
+	if held {
+		return len(v.Data), true
+	}
+	if !v.mu.TryRLock() {
+		return 0, false
+	}
+	defer v.mu.RUnlock()
+	return len(v.Data), true
+}
 func (v *BitmapValue) SizeOf() int64 {
 	v.mu.RLock()
 	defer v.mu.RUnlock()

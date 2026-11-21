@@ -405,9 +405,7 @@ func (s *Store) reapHashFieldsLocked(shard *Shard, key string, entry *Entry, h *
 	if empty {
 		return fields, true, -shard.deleteLocked(key, entry)
 	}
-	cur := footprint(key, entry)
-	delta := cur - entry.accounted.Swap(cur)
-	shard.memUsage += delta
+	delta := rechargeLocked(shard, key, entry)
 	if next != 0 {
 		s.hfe.schedule(key, next)
 	}

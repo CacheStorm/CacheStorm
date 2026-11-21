@@ -92,7 +92,7 @@ func (s *Store) SetStringBatch(pairs []StringPair, nx bool) (bool, error) {
 			}
 			newMem += size
 			if previous != nil {
-				oldMem += previous.accounted.Load()
+				oldMem += previous.charged()
 			}
 		}
 		if expired != "" {

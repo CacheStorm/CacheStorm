@@ -28,6 +28,9 @@ type Shard struct {
 	hfe   *hashExpiryIndex
 	// scan orders the keys for SCAN while the shard is being scanned.
 	scan *keyScanIndex
+	// keysizes is INFO keysizes' histogram of the shard's keys, made with
+	// the first key it counts.
+	keysizes *KeysizeHist
 }
 
 func NewShard() *Shard {
@@ -59,11 +62,16 @@ func footprint[K string | []byte](key K, entry *Entry) int64 {
 // setLocked installs entry under key and returns the memory delta and the
 // entry it replaced, if any. The caller holds s.mu.
 func (s *Shard) setLocked(key string, entry *Entry) (int64, *Entry) {
+	return s.installLocked(key, entry, false)
+}
+
+// installLocked is setLocked, told whether the caller holds the value's lock.
+func (s *Shard) installLocked(key string, entry *Entry, held bool) (int64, *Entry) {
 	if sv, ok := entry.Value.(*StringValue); ok && sv.Enc != StringEncRaw {
 		entry.Value = compactValue(sv)
 	}
 	entry.bind(s.plain)
-	oldMem := int64(0)
+	oldMem, oldTag := int64(0), int64(0)
 	old, exists := s.data[key]
 	if old != entry {
 		if exists {
@@ -74,7 +82,8 @@ func (s *Shard) setLocked(key string, entry *Entry) (int64, *Entry) {
 	if exists {
 		// Credit what was charged for the old entry, not its current size:
 		// in-place changes since the last reaccounting were never charged.
-		oldMem = old.accounted.Load()
+		word := old.accounted.Load()
+		oldMem, oldTag = word&chargeMask, sizeTagOf(word)
 		s.memUsage -= oldMem
 	} else {
 		s.keyCount++
@@ -84,8 +93,13 @@ func (s *Shard) setLocked(key string, entry *Entry) (int64, *Entry) {
 		s.noteAddLocked(key)
 	}
 
-	newMem := footprint(key, entry)
-	entry.accounted.Store(newMem)
+	if old != entry {
+		entry.accounted.Store(0)
+	}
+	word := accountWord(key, entry, held)
+	newMem := word & chargeMask
+	entry.accounted.Store(word)
+	s.moveKeysize(oldTag, sizeTagOf(word))
 	s.memUsage += newMem
 	s.data[key] = entry
 	if h, ok := entry.Value.(*HashValue); ok {
@@ -98,7 +112,9 @@ func (s *Shard) setLocked(key string, entry *Entry) (int64, *Entry) {
 // deleteLocked removes key and returns the bytes freed. The caller holds s.mu
 // and has checked that the key is present.
 func (s *Shard) deleteLocked(key string, entry *Entry) int64 {
-	mem := entry.accounted.Load()
+	word := entry.accounted.Load()
+	mem := word & chargeMask
+	s.moveKeysize(sizeTagOf(word), 0)
 	s.memUsage -= mem
 	s.keyCount--
 	s.subExpiry(key, entry.ExpiresAt.Load())
@@ -118,7 +134,7 @@ func (s *Shard) deleteLocked(key string, entry *Entry) int64 {
 func reaccountIn[K string | []byte](s *Shard, key K) int64 {
 	s.mu.RLock()
 	entry, ok := s.data[string(key)]
-	same := ok && footprint(key, entry) == entry.accounted.Load()
+	same := ok && accountWord(key, entry, false) == entry.accounted.Load()
 	s.mu.RUnlock()
 	if !ok || same {
 		return 0
@@ -130,8 +146,16 @@ func reaccountIn[K string | []byte](s *Shard, key K) int64 {
 	if !ok {
 		return 0
 	}
-	cur := footprint(key, entry)
-	delta := cur - entry.accounted.Swap(cur)
+	return rechargeLocked(s, key, entry)
+}
+
+// rechargeLocked charges entry's change in footprint and keysizes bin since
+// it was last accounted and returns the memory delta. The caller holds s.mu.
+func rechargeLocked[K string | []byte](s *Shard, key K, entry *Entry) int64 {
+	cur := accountWord(key, entry, false)
+	prev := entry.accounted.Swap(cur)
+	s.moveKeysize(sizeTagOf(prev), sizeTagOf(cur))
+	delta := cur&chargeMask - prev&chargeMask
 	s.memUsage += delta
 	return delta
 }
@@ -223,6 +247,7 @@ func (s *Shard) Flush() int64 {
 	s.memUsage = 0
 	s.expiring, s.expSumHi, s.expSumLo = 0, 0, 0
 	s.vol = nil
+	s.keysizes = nil
 	return freed
 }
 
