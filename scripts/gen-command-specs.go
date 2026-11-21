@@ -45,7 +45,8 @@ var redis8Commands = []string{"hgetdel", "hgetex", "hsetex"}
 var redis82Commands = []string{"bitop", "cluster", "xackdel", "xadd", "xdelex", "xtrim"}
 
 // The commands of later Redis releases (SET, DELEX, DIGEST and MSETEX from
-// Redis 8.4; LMOVEM, BLMOVEM, SUNIONCARD and SDIFFCARD from Redis 8.10) are
+// Redis 8.4; INCREX from Redis 8.8; LMOVEM, BLMOVEM, SUNIONCARD and SDIFFCARD
+// from Redis 8.10) are
 // patched into the tables from Redis 8.10.3's command JSON by
 // scripts/redis-json-commands/patchtables.py; running this generator drops
 // them, so run that script again afterwards.

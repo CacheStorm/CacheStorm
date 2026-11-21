@@ -105,6 +105,7 @@ var redisCommandSpecs = map[string]commandSpec{
 	"INCR":                 {Arity: 2, Flags: []string{"write", "denyoom", "fast"}, FirstKey: 1, LastKey: 1, KeyStep: 1, Categories: []string{"write", "string", "fast"}},
 	"INCRBY":               {Arity: 3, Flags: []string{"write", "denyoom", "fast"}, FirstKey: 1, LastKey: 1, KeyStep: 1, Categories: []string{"write", "string", "fast"}},
 	"INCRBYFLOAT":          {Arity: 3, Flags: []string{"write", "denyoom", "fast"}, FirstKey: 1, LastKey: 1, KeyStep: 1, Categories: []string{"write", "string", "fast"}},
+	"INCREX":               {Arity: -2, Flags: []string{"write", "denyoom", "fast"}, FirstKey: 1, LastKey: 1, KeyStep: 1, Categories: []string{"write", "string", "fast"}},
 	"INFO":                 {Arity: -1, Flags: []string{"loading", "stale"}, FirstKey: 0, LastKey: 0, KeyStep: 0, Categories: []string{"slow", "dangerous"}},
 	"KEYS":                 {Arity: 2, Flags: []string{"readonly"}, FirstKey: 0, LastKey: 0, KeyStep: 0, Categories: []string{"keyspace", "read", "slow", "dangerous"}},
 	"LASTSAVE":             {Arity: 1, Flags: []string{"loading", "stale", "fast"}, FirstKey: 0, LastKey: 0, KeyStep: 0, Categories: []string{"admin", "fast", "dangerous"}},

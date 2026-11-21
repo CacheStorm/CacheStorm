@@ -88,6 +88,7 @@ func RegisterStringCommands(router *Router) {
 	router.Register(&CommandDef{Name: "DIGEST", Handler: cmdDIGEST})
 	router.Register(&CommandDef{Name: "DELEX", Handler: cmdDELEX})
 	router.Register(&CommandDef{Name: "MSETEX", Handler: cmdMSETEX})
+	router.Register(&CommandDef{Name: "INCREX", Handler: cmdINCREX})
 }
 
 func cmdSET(ctx *Context) error {
