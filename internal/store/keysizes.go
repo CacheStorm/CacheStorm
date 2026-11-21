@@ -51,7 +51,12 @@ func lengthUnder(mu *sync.RWMutex, held bool, n func() int) (int, bool) {
 	return n(), true
 }
 
-// sizeTag is (type+1)<<6 | bin, or 0 for a key keysizes does not count.
+// subexpiryBit marks a hash with field expiries, which INFO keyspace counts
+// as subexpiry.
+const subexpiryBit = 1 << 9
+
+// sizeTag is (type+1)<<6 | bin, with subexpiryBit for a hash with field
+// expiries, or 0 for a key keysizes does not count.
 func sizeTag(v Value, held bool) (int64, bool) {
 	var typ, n int
 	ok := true
@@ -92,7 +97,11 @@ func sizeTag(v Value, held bool) (int64, bool) {
 	if bin >= KeysizeBins {
 		bin = KeysizeBins - 1
 	}
-	return int64(typ+1)<<6 | int64(bin), true
+	tag := int64(typ+1)<<6 | int64(bin)
+	if h, isHash := v.(*HashValue); isHash && h.HasFieldTTLs() {
+		tag |= subexpiryBit
+	}
+	return tag, true
 }
 
 // StringLener is a string value defined outside this package, such as a
@@ -113,14 +122,26 @@ func (s *Shard) moveKeysize(from, to int64) {
 		return
 	}
 	if from != 0 && s.keysizes != nil {
-		s.keysizes[from>>6-1][from&63]--
+		s.keysizes[from>>6&7-1][from&63]--
 	}
 	if to != 0 {
 		if s.keysizes == nil {
 			s.keysizes = new(KeysizeHist)
 		}
-		s.keysizes[to>>6-1][to&63]++
+		s.keysizes[to>>6&7-1][to&63]++
 	}
+	s.subexpiry += to>>9&1 - from>>9&1
+}
+
+// Subexpiry returns how many of the store's hashes have field expiries.
+func (s *Store) Subexpiry() int64 {
+	var n int64
+	for _, sh := range &s.shards {
+		sh.mu.RLock()
+		n += sh.subexpiry
+		sh.mu.RUnlock()
+	}
+	return n
 }
 
 // Keysizes returns the store's keysizes histogram.

@@ -31,6 +31,8 @@ type Shard struct {
 	// keysizes is INFO keysizes' histogram of the shard's keys, made with
 	// the first key it counts.
 	keysizes *KeysizeHist
+	// subexpiry counts the shard's hashes with field expiries.
+	subexpiry int64
 }
 
 func NewShard() *Shard {
@@ -247,7 +249,7 @@ func (s *Shard) Flush() int64 {
 	s.memUsage = 0
 	s.expiring, s.expSumHi, s.expSumLo = 0, 0, 0
 	s.vol = nil
-	s.keysizes = nil
+	s.keysizes, s.subexpiry = nil, 0
 	return freed
 }
 

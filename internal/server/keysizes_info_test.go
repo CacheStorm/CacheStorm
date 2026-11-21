@@ -94,3 +94,38 @@ func TestInfoRedis8Fields(t *testing.T) {
 		t.Fatal("Threads comes before Stats")
 	}
 }
+
+// INFO keyspace's subexpiry counts the hashes with field expiries.
+func TestInfoKeyspaceSubexpiry(t *testing.T) {
+	s := startReplServerCfg(t, replTestConfig(t, nil))
+	c := dialRepl(t, s)
+	sub := func() string {
+		for _, l := range strings.Split(str(c.do("INFO", "keyspace")), "\r\n") {
+			if strings.HasPrefix(l, "db0:") {
+				_, v, _ := strings.Cut(l, "subexpiry=")
+				return v
+			}
+		}
+		return "none"
+	}
+	c.do("HSET", "h", "a", "1", "b", "2")
+	c.do("HSET", "h2", "a", "1")
+	if got := sub(); got != "0" {
+		t.Fatalf("no field expiry: subexpiry=%s", got)
+	}
+	c.do("HEXPIRE", "h", "100", "FIELDS", "1", "a")
+	c.do("HEXPIRE", "h2", "100", "FIELDS", "1", "a")
+	if got := sub(); got != "2" {
+		t.Fatalf("two hashes with expiries: subexpiry=%s", got)
+	}
+	c.do("HDEL", "h", "a")
+	c.do("RENAME", "h2", "h3")
+	if got := sub(); got != "1" {
+		t.Fatalf("after HDEL and RENAME: subexpiry=%s", got)
+	}
+	c.do("HPEXPIRE", "h3", "1", "FIELDS", "1", "a")
+	waitFor(t, "h3 to expire", func() bool { return str(c.do("EXISTS", "h3")) == "0" })
+	if got := sub(); got != "0" {
+		t.Fatalf("after the field expired: subexpiry=%s", got)
+	}
+}
