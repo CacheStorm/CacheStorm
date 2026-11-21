@@ -217,6 +217,28 @@ func commandStatOf(key string) *commandStat {
 	return st
 }
 
+// statCache is a command's stats entry as found in one version of the
+// stats table; a new table (a new command, or CONFIG RESETSTAT) misses it.
+type statCache struct {
+	all *map[string]*commandStat
+	st  *commandStat
+}
+
+// stat returns the stats entry of the call, from the cache when the command
+// has no subcommands and the stats table has not changed since.
+func (t *commandTraits) stat(args [][]byte) *commandStat {
+	if t.hasSubs {
+		return commandStatOf(statKeyOf(t.name, t.hasSubs, args))
+	}
+	all := commandStats.all.Load()
+	if c := t.statCache.Load(); c != nil && c.all == all {
+		return c.st
+	}
+	st := commandStatOf(statKeyOf(t.name, t.hasSubs, args))
+	t.statCache.Store(&statCache{all: all, st: st})
+	return st
+}
+
 // recordCall counts one execution of cmd that took d and whether it
 // answered with an error.
 func recordCall(cmd string, args [][]byte, d time.Duration, failed bool) {
@@ -224,7 +246,7 @@ func recordCall(cmd string, args [][]byte, d time.Duration, failed bool) {
 }
 
 func (t *commandTraits) recordCall(args [][]byte, d time.Duration, failed bool) {
-	st := commandStatOf(statKeyOf(t.name, t.hasSubs, args))
+	st := t.stat(args)
 	if st == nil {
 		return
 	}

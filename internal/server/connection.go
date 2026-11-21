@@ -40,6 +40,9 @@ type connectionOptions struct {
 }
 
 type Connection struct {
+	traitName  string
+	traitBits  nameTraits
+	metricSlot store.CommandSlot
 	// fd is the socket's file descriptor, -1 when it has none (CLIENT LIST);
 	// readBufSize and writeBufSize are the sizes of its buffers.
 	fd           int
@@ -357,7 +360,7 @@ func (c *Connection) nextCommand() (string, [][]byte, error) {
 	unauth := !c.authenticated && c.router.RequirePass() != ""
 	c.reader.SetUnauthenticated(unauth)
 	cmd, args, err := c.reader.ReadClientCommand()
-	if err != nil || unauth || c.bufReader == nil || !batchable(cmd) {
+	if err != nil || unauth || c.bufReader == nil || !c.batchable(cmd) {
 		return cmd, args, err
 	}
 	for len(c.pend) < maxGateBatch-1 {
@@ -375,7 +378,7 @@ func (c *Connection) nextCommand() (string, [][]byte, error) {
 			break
 		}
 		c.pend = append(c.pend, pendingCommand{cmd: next, args: nargs})
-		if !batchable(next) {
+		if !c.batchable(next) {
 			break
 		}
 	}
@@ -383,9 +386,8 @@ func (c *Connection) nextCommand() (string, [][]byte, error) {
 }
 
 // batchable reports whether commands after cmd may be parsed before it runs.
-func batchable(cmd string) bool {
-	name := command.CanonicalName(cmd)
-	return !batchBreakers[name] && !blockingCommands[name]
+func (c *Connection) batchable(cmd string) bool {
+	return !c.traits(command.CanonicalName(cmd)).has(ntBatchBreak | ntBlocking)
 }
 
 // unblock ends the blocking command the connection is waiting in, as a
@@ -853,7 +855,7 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 		if !replyCmd {
 			c.replySkip = false
 		}
-		blocking := blockingCommands[cmd]
+		blocking := c.traits(cmd).has(ntBlocking)
 		var captured *bytes.Buffer
 		if blocking && !suppress {
 			captured = &bytes.Buffer{}
@@ -1012,9 +1014,9 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 		// gets no command stats, slow log entry or hooks, so a client
 		// sending endless made-up names cannot grow those tables.
 		if !errors.Is(err, command.ErrUnknownCommand) {
-			store.GlobalMetrics.RecordCommand(cmd, elapsed.Nanoseconds())
+			store.GlobalMetrics.RecordCommandIn(&c.metricSlot, cmd, elapsed.Nanoseconds())
 			store.GlobalSlowLog.AddIfSlow(elapsed, cmd, ctx.Args, ctx.RemoteAddr, ctx.ClientName)
-			if writeCommands[cmd] {
+			if c.traits(cmd).has(ntWrite) {
 				store.GlobalMetrics.RecordWrite()
 			} else {
 				store.GlobalMetrics.RecordRead()

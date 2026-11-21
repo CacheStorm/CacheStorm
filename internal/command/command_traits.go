@@ -1,5 +1,7 @@
 package command
 
+import "sync/atomic"
+
 // commandTraits is what dispatch needs to know about a command name from the
 // static command tables, looked up once when the command is registered
 // instead of in each table on every call.
@@ -16,6 +18,7 @@ type commandTraits struct {
 	// wholeValue: see wholeValueWriters.
 	wholeValue   bool
 	writeFlagged bool
+	statCache    atomic.Pointer[statCache]
 }
 
 func traitsOf(name string) *commandTraits {

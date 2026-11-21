@@ -347,16 +347,7 @@ func notifyKeyMisses(ctx *Context) {
 
 // isWriteCommand reports whether Redis flags cmd as a write.
 func isWriteCommand(cmd string) bool {
-	spec, ok := redisCommandSpecs[cmd]
-	if !ok {
-		return false
-	}
-	for _, f := range spec.Flags {
-		if f == "write" {
-			return true
-		}
-	}
-	return false
+	return writeFlagged[cmd]
 }
 
 // signalWrittenKeys wakes clients blocked on the keys a write command named,
@@ -366,11 +357,11 @@ func isWriteCommand(cmd string) bool {
 // client blocked on the destination slept through the data. A write with no
 // client blocked anywhere costs one atomic load.
 func signalWrittenKeys(ctx *Context) {
-	if ctx.writeEffectsHandled || ctx.Store == nil || !isWriteCommand(ctx.Command) {
+	if ctx.writeEffectsHandled || ctx.Store == nil {
 		return
 	}
 	kn := ctx.Store.KeyNotifier()
-	if !kn.HasWaiters() {
+	if !kn.HasWaiters() || !isWriteCommand(ctx.Command) {
 		return
 	}
 	for _, key := range aclKeysForCommand(ctx.Command, ctx.Args) {

@@ -263,12 +263,6 @@ func (h *gateHold) unlock() {
 	h.g.global.RUnlock()
 }
 
-// gated reports whether cmd takes the write gate: every command recorded in
-// the AOF and the replication stream, and EXEC, which runs them.
-func gated(cmd string, args [][]byte) bool {
-	return cmd == "EXEC" || persistedCommand(cmd, args)
-}
-
 // replicaRefuses reports whether a read-only replica refuses cmd from a
 // client. Scripts run, but in read-only mode (see Context.ReplicaReadOnly).
 func replicaRefuses(cmd string, args [][]byte) bool {
@@ -471,10 +465,14 @@ func (s *Server) planGate(ctx *command.Context, h *gateHold) *gateHold {
 		// Inside MULTI the command is only queued; EXEC runs it.
 		return nil
 	}
-	if ungatedCommands[ctx.Command] {
+	// The write gate is taken by every command recorded in the AOF and the
+	// replication stream, by EXEC, which runs them, and by the exclusive
+	// writes.
+	t := traitsOfName(ctx.Command)
+	if t.has(ntUngated) {
 		return nil
 	}
-	if gated(ctx.Command, ctx.Args) || exclusiveWrites[ctx.Command] {
+	if t.has(ntWrite|ntExclusive) || ctx.Command == "EXEC" || scriptPersisted(ctx.Command, ctx.Args) {
 		return s.gate.planWrite(h, ctx)
 	}
 	return s.gate.planRead(h, ctx)

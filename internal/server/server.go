@@ -227,9 +227,12 @@ var writeCommands = map[string]bool{
 // restored before them (and a flush must be replayed so a later failed call
 // stays failed).
 func persistedCommand(cmd string, args [][]byte) bool {
-	if writeCommands[cmd] {
-		return true
-	}
+	return traitsOfName(cmd).has(ntWrite) || scriptPersisted(cmd, args)
+}
+
+// scriptPersisted reports whether a SCRIPT or FUNCTION subcommand changes
+// what is persisted.
+func scriptPersisted(cmd string, args [][]byte) bool {
 	if len(args) == 0 || (cmd != "SCRIPT" && cmd != "FUNCTION") {
 		return false
 	}

@@ -136,6 +136,31 @@ func (m *Metrics) RecordCommand(cmd string, latencyNs int64) {
 	st.latency.Record(latencyNs)
 }
 
+// CommandSlot remembers one command's statistics entry for a caller that
+// records the same command repeatedly, such as a connection running a
+// pipeline. It is not safe for concurrent use.
+type CommandSlot struct {
+	name string
+	all  *map[string]*commandStat
+	st   *commandStat
+}
+
+// RecordCommandIn is RecordCommand, looking the command up only when it is
+// not the one slot last recorded or the statistics were reset since.
+func (m *Metrics) RecordCommandIn(slot *CommandSlot, cmd string, latencyNs int64) {
+	all := m.commands.Load()
+	if slot.st == nil || slot.all != all || slot.name != cmd {
+		st := (*all)[cmd]
+		if st == nil {
+			st = m.addCommand(cmd)
+		}
+		*slot = CommandSlot{name: cmd, all: all, st: st}
+	}
+	m.TotalCommands.Add(1)
+	slot.st.count.Add(1)
+	slot.st.latency.Record(latencyNs)
+}
+
 func (m *Metrics) addCommand(cmd string) *commandStat {
 	m.mu.Lock()
 	defer m.mu.Unlock()
