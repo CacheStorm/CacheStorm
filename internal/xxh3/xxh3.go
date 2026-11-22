@@ -1,6 +1,6 @@
-// Package xxh3 is XXH3's 64-bit hash with the default secret and seed 0,
-// ported from xxHash 0.8 (BSD 2-clause, Yann Collet) as Redis 8 bundles it
-// for DIGEST and the IFDEQ/IFDNE conditions.
+// Package xxh3 is XXH3's 64- and 128-bit hashes with the default secret and
+// seed 0, ported from xxHash 0.8 (BSD 2-clause, Yann Collet) as Redis 8
+// bundles it for DIGEST, the IFDEQ/IFDNE conditions and XADD IDMPAUTO.
 package xxh3
 
 import (
@@ -133,6 +133,19 @@ func scramble(acc *[8]uint64) {
 }
 
 func hashLong(b []byte) uint64 {
+	acc := longAccs(b)
+	return mergeAccs(&acc, 11, uint64(len(b))*prime64_1)
+}
+
+func mergeAccs(acc *[8]uint64, s int, start uint64) uint64 {
+	res := start
+	for i := 0; i < 4; i++ {
+		res += fold64(acc[2*i]^r64(secret[:], s+16*i), acc[2*i+1]^r64(secret[:], s+16*i+8))
+	}
+	return avalanche(res)
+}
+
+func longAccs(b []byte) [8]uint64 {
 	acc := [8]uint64{prime32_3, prime64_1, prime64_2, prime64_3, prime64_4, prime32_2, prime64_5, prime32_1}
 	const stripes = (len(secret) - 64) / 8
 	const block = 64 * stripes
@@ -149,9 +162,5 @@ func hashLong(b []byte) uint64 {
 		accumulate512(&acc, b, blocks*block+s*64, s*8)
 	}
 	accumulate512(&acc, b, n-64, len(secret)-64-7)
-	res := uint64(n) * prime64_1
-	for i := 0; i < 4; i++ {
-		res += fold64(acc[2*i]^r64(secret[:], 11+16*i), acc[2*i+1]^r64(secret[:], 11+16*i+8))
-	}
-	return avalanche(res)
+	return acc
 }

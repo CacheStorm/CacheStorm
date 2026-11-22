@@ -35,6 +35,8 @@ func RegisterStreamCommands(router *Router) {
 	router.Register(&CommandDef{Name: "XREADGROUP", Handler: cmdXREADGROUP})
 	router.Register(&CommandDef{Name: "XACK", Handler: cmdXACK})
 	router.Register(&CommandDef{Name: "XNACK", Handler: cmdXNACK})
+	router.Register(&CommandDef{Name: "XCFGSET", Handler: cmdXCFGSET})
+	router.Register(&CommandDef{Name: "XIDMPRECORD", Handler: cmdXIDMPRECORD})
 	router.Register(&CommandDef{Name: "XPENDING", Handler: cmdXPENDING})
 	router.Register(&CommandDef{Name: "XCLAIM", Handler: cmdXCLAIM})
 	router.Register(&CommandDef{Name: "XAUTOCLAIM", Handler: cmdXAUTOCLAIM})
@@ -160,6 +162,10 @@ type addTrimArgs struct {
 	trim       store.StreamTrimArgs
 	noMkStream bool
 	id         store.StreamAddArgs
+	// idmpPID names the producer of XADD IDMP or IDMPAUTO; idmpIID is
+	// IDMP's iid, computed from the fields for IDMPAUTO.
+	idmpPID, idmpIID string
+	idmpAuto         bool
 }
 
 // parseAddTrimArgs parses the options shared by XADD and XTRIM, starting
@@ -222,10 +228,35 @@ loop:
 			a.trim.Refs, refsGiven = streamRefsOption(opt), true
 		case xadd && strings.EqualFold(opt, "NOMKSTREAM"):
 			a.noMkStream = true
+		case xadd && strings.EqualFold(opt, "IDMPAUTO") && moreargs > 0:
+			if a.idmpPID != "" {
+				return a, 0, streamReplyError("ERR syntax error, IDMP/IDMPAUTO specified multiple times")
+			}
+			if ctx.ArgString(i+1) == "" {
+				return a, 0, streamReplyError("ERR syntax error, IDMPAUTO requires a non-empty producer ID")
+			}
+			a.idmpPID, a.idmpAuto = ctx.ArgString(i+1), true
+			i++
+		case xadd && strings.EqualFold(opt, "IDMP") && moreargs >= 2:
+			if a.idmpPID != "" {
+				return a, 0, streamReplyError("ERR syntax error, IDMP/IDMPAUTO specified multiple times")
+			}
+			if ctx.ArgString(i+1) == "" {
+				return a, 0, streamReplyError("ERR syntax error, IDMP requires a non-empty producer ID")
+			}
+			if ctx.ArgString(i+2) == "" {
+				return a, 0, streamReplyError("ERR syntax error, IDMP requires a non-empty idempotent ID")
+			}
+			a.idmpPID, a.idmpIID = ctx.ArgString(i+1), ctx.ArgString(i+2)
+			i += 2
 		case xadd:
 			id, err := parseXAddID(opt)
 			if err != nil {
 				return a, 0, err
+			}
+			// Replicas and the AOF get the ID XADD assigned.
+			if a.idmpPID != "" && !ctx.FromMaster && !ctx.Replaying {
+				return a, 0, streamReplyError("ERR syntax error, IDMP/IDMPAUTO can be used only with auto-generated IDs")
 			}
 			a.id = id
 			break loop
@@ -302,6 +333,9 @@ func cmdXADD(ctx *Context) error {
 		}
 		stream = store.NewStreamValue(0)
 		created = true
+	}
+	if a.idmpPID != "" {
+		return xaddIDMP(ctx, key, idIdx, stream, created, &a, pairs)
 	}
 
 	entry, trimmed, err := stream.XAddTrim(a.id, pairs, a.trim, uint64(ctx.nowMS()))
@@ -1284,6 +1318,7 @@ func cmdXINFO(ctx *Context) error {
 		resp.BulkString("entries-added"), resp.IntegerValue(info.EntriesAdded),
 		resp.BulkString("recorded-first-entry-id"), resp.BulkString(info.FirstID),
 	}
+	out = append(out, idmpInfoFields(stream)...)
 	if !full {
 		edge := func(e *store.StreamEntry) *resp.Value {
 			if e == nil {

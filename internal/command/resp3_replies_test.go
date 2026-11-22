@@ -56,7 +56,7 @@ func TestRESP3ReplyTypes(t *testing.T) {
 			t.Errorf("%v\n got: %q\nwant: %q", c.args, got, c.want)
 		}
 	}
-	if got := do3("XINFO", "STREAM", "x"); !strings.HasPrefix(got, "%10\r\n$6\r\nlength\r\n:1\r\n") {
+	if got := do3("XINFO", "STREAM", "x"); !strings.HasPrefix(got, "%16\r\n$6\r\nlength\r\n:1\r\n") {
 		t.Errorf("XINFO STREAM in RESP3: %q", got)
 	}
 	for _, args := range [][]string{{"INFO", "server"}, {"LOLWUT"}} {

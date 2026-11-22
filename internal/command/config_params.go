@@ -102,6 +102,8 @@ var configParams = map[string]*configParam{
 	"cluster-allow-reads-when-down":        boolParam("no"),
 	"cluster-slot-stats-enabled":           {kind: cfgBool, def: "no", applyText: func(v string) { slotStatsEnabled.Store(v == "yes") }},
 	"cluster-compatibility-sample-ratio":   {kind: cfgInt, def: "0", lo: 0, hi: 100, apply: clusterCompatRatio.Store},
+	"stream-idmp-duration":                 {kind: cfgInt, def: "100", lo: 1, hi: 86400, apply: store.SetIDMPDefaultDuration},
+	"stream-idmp-maxsize":                  {kind: cfgInt, def: "100", lo: 1, hi: 10000, apply: store.SetIDMPDefaultMaxSize},
 	"cluster-bus-port-protected-mode":      boolParam("no"),
 	"vset-force-single-threaded-execution": boolParam("no"),
 	"replica-full-sync-buffer-limit":       {kind: cfgMemory, def: "0", lo: 0, hi: configLongMax},

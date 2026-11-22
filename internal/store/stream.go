@@ -463,6 +463,7 @@ func NewStreamValue(maxLen int64) *StreamValue {
 	return &StreamValue{
 		MaxLen: maxLen,
 		Groups: make(map[string]*ConsumerGroup),
+		idmp:   newStreamIDMP(),
 	}
 }
 

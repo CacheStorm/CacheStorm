@@ -925,6 +925,41 @@ func (rw *AOFRewriter) writeStreamGroups(w *bufio.Writer, key string, sv *store.
 	return nil
 }
 
+// writeStreamIDMP re-emits a stream's IDMP state as Redis rewrites it:
+// XCFGSET when its settings are not the server's defaults, then one
+// XIDMPRECORD per remembered iid whose entry is still in the stream. The
+// caller holds the stream's read lock.
+func (rw *AOFRewriter) writeStreamIDMP(w *bufio.Writer, key string, sv *store.StreamValue) error {
+	m := sv.IDMPLocked()
+	if m == nil {
+		m = &store.StreamIDMP{Duration: store.DefaultIDMPDuration, MaxSize: store.DefaultIDMPMaxSize}
+	}
+	if d, s := store.IDMPDefaults(); m.Duration != d || m.MaxSize != s {
+		if err := rw.writeCommand(w, "XCFGSET", key,
+			"IDMP-DURATION", strconv.FormatInt(m.Duration, 10),
+			"IDMP-MAXSIZE", strconv.FormatInt(m.MaxSize, 10)); err != nil {
+			return err
+		}
+	}
+	pids := make([]string, 0, len(m.Producers))
+	for pid := range m.Producers {
+		pids = append(pids, pid)
+	}
+	sort.Strings(pids)
+	expired := time.Now().UnixMilli() - m.Duration*1000
+	for _, pid := range pids {
+		for _, e := range m.Producers[pid] {
+			if int64(e.ID.Ms) <= expired || !sv.HasEntryLocked(e.ID) {
+				continue
+			}
+			if err := rw.writeCommand(w, "XIDMPRECORD", key, pid, e.IID, e.ID.String()); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // writeStreamConsumers re-emits a group's consumers and pending entries. The
 // caller holds the stream's read lock, which excludes every group writer.
 func (rw *AOFRewriter) writeStreamConsumers(w *bufio.Writer, key, name string, group *store.ConsumerGroup) error {
@@ -1178,7 +1213,7 @@ func (rw *AOFRewriter) writeValueCommands(w *bufio.Writer, key string, value sto
 		if err := rw.writeStreamGroups(w, key, vt); err != nil {
 			return err
 		}
-		return nil
+		return rw.writeStreamIDMP(w, key, vt)
 
 	default:
 		if raw, ok := value.(store.RedisStringValue); ok {
