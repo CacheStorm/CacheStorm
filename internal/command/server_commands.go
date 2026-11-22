@@ -518,7 +518,8 @@ func cmdRENAME(ctx *Context) error {
 	if ctx.ArgCount() != 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
-	changed, err := ctx.Store.Transfer(ctx.ArgString(0), ctx.Store, ctx.ArgString(1), store.TransferOptions{Replace: true})
+	var replaced store.DataType
+	changed, err := ctx.Store.Transfer(ctx.ArgString(0), ctx.Store, ctx.ArgString(1), store.TransferOptions{Replace: true, Replaced: &replaced})
 	if err == store.ErrKeyNotFound {
 		return ctx.WriteError(errNoSuchKey)
 	}
@@ -529,6 +530,7 @@ func cmdRENAME(ctx *Context) error {
 		ctx.PropagateAs()
 	} else {
 		notifyRename(ctx, ctx.ArgString(0), ctx.ArgString(1))
+		ctx.Store.NotifyOverwrite(ctx.ArgString(1), replaced, ctx.Store.Type(ctx.ArgString(1)))
 	}
 	return ctx.WriteOK()
 }
@@ -1207,7 +1209,9 @@ func doSort(ctx *Context, readOnly bool) error {
 				}
 				list.AppendLoaded(p.Bulk)
 			}
-			ctx.Store.Set(storeKey, list, store.SetOptions{})
+			if err := ctx.replaceKey(storeKey, list, store.SetOptions{}); err != nil {
+				return ctx.WriteError(err)
+			}
 			ctx.notify(store.NotifyList, "sortstore", storeKey)
 			return ctx.WriteInteger(int64(len(projected)))
 		}
@@ -1225,7 +1229,9 @@ func doSort(ctx *Context, readOnly bool) error {
 		for _, elem := range elements {
 			list.AppendLoaded([]byte(elem))
 		}
-		ctx.Store.Set(storeKey, list, store.SetOptions{})
+		if err := ctx.replaceKey(storeKey, list, store.SetOptions{}); err != nil {
+			return ctx.WriteError(err)
+		}
 		ctx.notify(store.NotifyList, "sortstore", storeKey)
 		return ctx.WriteInteger(int64(len(elements)))
 	}

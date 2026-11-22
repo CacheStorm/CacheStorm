@@ -39,6 +39,9 @@ type SetOptions struct {
 	XX         bool
 	KeepTTL    bool
 	Tags       []string
+	// Replaced, when set, receives the type of the live value the write
+	// replaced; it is left alone when the key was absent.
+	Replaced *DataType
 }
 
 type Store struct {

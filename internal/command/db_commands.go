@@ -233,7 +233,8 @@ func cmdCOPY(ctx *Context) error {
 		ctx.PropagateAs()
 		return ctx.WriteInteger(1)
 	}
-	changed, err := ctx.Store.Transfer(srcKey, dst, dstKey, store.TransferOptions{Copy: true, Replace: replace})
+	var replaced store.DataType
+	changed, err := ctx.Store.Transfer(srcKey, dst, dstKey, store.TransferOptions{Copy: true, Replace: replace, Replaced: &replaced})
 	if err == store.ErrKeyNotFound {
 		ctx.PropagateAs()
 		return ctx.WriteInteger(0)
@@ -246,6 +247,7 @@ func cmdCOPY(ctx *Context) error {
 		return ctx.WriteInteger(0)
 	}
 	dst.Notify(store.NotifyGeneric, "copy_to", dstKey)
+	dst.NotifyOverwrite(dstKey, replaced, ctx.Store.Type(srcKey))
 	return ctx.WriteInteger(1)
 }
 

@@ -452,7 +452,7 @@ func publishGeoResult(ctx *Context, key string, value *store.SortedSetValue) err
 	if err != nil {
 		return ctx.WriteError(err)
 	}
-	if err := ctx.Store.Set(key, value, store.SetOptions{}); err != nil {
+	if err := ctx.replaceKey(key, value, store.SetOptions{}); err != nil {
 		return ctx.WriteError(err)
 	}
 	ctx.PropagateAs(ExecutedCommand{Name: "RESTORE", Args: [][]byte{[]byte(key), []byte("0"), payload, []byte("REPLACE")}, DB: ctx.DB})

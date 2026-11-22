@@ -136,7 +136,8 @@ func (s *Store) SetStringBatchOpts(pairs []StringPair, opts BatchSetOptions) (bo
 		}
 		actual := int64(0)
 		var created map[string]bool
-		notifyNew := s.Notifying(NotifyNew)
+		var replaced map[string]DataType
+		notifyNew := s.Notifying(NotifyNew | NotifyOverwritten | NotifyTypeChanged)
 		for i, key := range keys {
 			shard := s.shards[s.shardIndex(key)]
 			entry := NewEntry(vals[i])
@@ -155,6 +156,11 @@ func (s *Store) SetStringBatchOpts(pairs []StringPair, opts BatchSetOptions) (bo
 						created = make(map[string]bool)
 					}
 					created[key] = true
+				} else {
+					if replaced == nil {
+						replaced = make(map[string]DataType)
+					}
+					replaced[key] = previous.Value.Type()
 				}
 			}
 			change, previous := shard.setLocked(key, entry)
@@ -169,11 +175,20 @@ func (s *Store) SetStringBatchOpts(pairs []StringPair, opts BatchSetOptions) (bo
 			s.trackMemory(actual)
 		}
 		unlock()
-		if s.Notifying(NotifyString | NotifyNew | NotifyGeneric) {
+		if s.Notifying(NotifyString | NotifyNew | NotifyGeneric | NotifyOverwritten | NotifyTypeChanged) {
 			for _, pair := range pairs {
+				// Each pair is a setKey of its own: a key named twice is
+				// new the first time and overwritten the second.
 				if created[pair.Key] {
 					delete(created, pair.Key)
 					s.notifyNew(pair.Key)
+					if replaced == nil {
+						replaced = make(map[string]DataType)
+					}
+					replaced[pair.Key] = DataTypeString
+				} else if old, ok := replaced[pair.Key]; ok {
+					s.NotifyOverwrite(pair.Key, old, DataTypeString)
+					replaced[pair.Key] = DataTypeString
 				}
 				// MSETEX reports each key's expiry before its set.
 				if opts.ExpireAtMS != 0 {

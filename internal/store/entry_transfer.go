@@ -10,6 +10,9 @@ var storeOrder atomic.Uint64
 type TransferOptions struct {
 	Copy    bool
 	Replace bool
+	// Replaced, when set, receives the type of the live value the transfer
+	// replaced at the destination; it is left alone when there was none.
+	Replaced *DataType
 }
 
 func lockTransferShards(src *Store, srcKey string, dst *Store, dstKey string) func() {
@@ -113,6 +116,9 @@ func (s *Store) Transfer(srcKey string, dst *Store, dstKey string, options Trans
 				return false, ErrMemoryLimit
 			}
 			continue
+		}
+		if live && options.Replaced != nil {
+			*options.Replaced = previous.Value.Type()
 		}
 		entry := source.rehome()
 		// Like Redis' dbAdd, a key that arrives under a new name starts its

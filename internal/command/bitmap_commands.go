@@ -402,7 +402,7 @@ func cmdBITOP(ctx *Context) error {
 	for j := range result {
 		result[j] = bitopByte(op, srcs, j)
 	}
-	if err := ctx.Store.Set(destKey, &BitmapValue{Data: result}, store.SetOptions{}); err != nil {
+	if err := ctx.replaceKey(destKey, &BitmapValue{Data: result}, store.SetOptions{}); err != nil {
 		return ctx.WriteError(err)
 	}
 	ctx.notify(store.NotifyString, "set", destKey)

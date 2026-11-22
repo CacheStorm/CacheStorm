@@ -234,9 +234,9 @@ func hexpireGeneric(ctx *Context, unitMS int64, absolute bool) error {
 	empty := hash.Len() == 0
 	hash.Unlock()
 	if len(deleted) > 0 {
-		ctx.notify(store.NotifyHash, "hdel", key)
+		ctx.notifyFields("hdel", key, deleted)
 	} else if len(updated) > 0 {
-		ctx.notify(store.NotifyHash, "hexpire", key)
+		ctx.notifyFields("hexpire", key, updated)
 	}
 	if empty {
 		deleteIfEmpty(ctx, key, hash)
@@ -334,7 +334,7 @@ func cmdHPERSIST(ctx *Context) error {
 	}
 	hash.Unlock()
 	if len(persisted) > 0 {
-		ctx.notify(store.NotifyHash, "hpersist", key)
+		ctx.notifyFields("hpersist", key, persisted)
 	}
 	hfePropagation(ctx, key, nil, 0, nil, persisted)
 	return ctx.WriteArray(results)
@@ -434,11 +434,11 @@ func cmdHGETEX(ctx *Context) error {
 	hash.Unlock()
 	switch {
 	case len(deleted) > 0:
-		ctx.notify(store.NotifyHash, "hdel", key)
+		ctx.notifyFields("hdel", key, deleted)
 	case len(updated) > 0:
-		ctx.notify(store.NotifyHash, "hexpire", key)
+		ctx.notifyFields("hexpire", key, updated)
 	case len(persisted) > 0:
-		ctx.notify(store.NotifyHash, "hpersist", key)
+		ctx.notifyFields("hpersist", key, persisted)
 	}
 	if empty {
 		deleteIfEmpty(ctx, key, hash)
@@ -543,9 +543,10 @@ parse:
 		ctx.PropagateAs()
 		return ctx.WriteInteger(0)
 	}
-	ctx.notify(store.NotifyHash, "hset", key)
+	fields := ctx.pairFields(pairs)
+	ctx.notifyFields("hset", key, fields)
 	if expiryArg != "" {
-		ctx.notify(store.NotifyHash, "hexpire", key)
+		ctx.notifyFields("hexpire", key, fields)
 	}
 	args := []string{}
 	if opts.KeepTTL {
@@ -579,8 +580,9 @@ func hsetexDelete(ctx *Context, key string, pairs [][]byte, opts store.HashSetEx
 		if opts.FXX {
 			return false, nil
 		}
-		ctx.notify(store.NotifyHash, "hset", key)
-		ctx.notify(store.NotifyHash, "hdel", key)
+		fields := ctx.pairFields(pairs)
+		ctx.notifyFields("hset", key, fields)
+		ctx.notifyFields("hdel", key, fields)
 		ctx.notify(store.NotifyGeneric, "del", key)
 		return true, nil
 	}
@@ -596,8 +598,9 @@ func hsetexDelete(ctx *Context, key string, pairs [][]byte, opts store.HashSetEx
 	}
 	empty := hash.Len() == 0
 	hash.Unlock()
-	ctx.notify(store.NotifyHash, "hset", key)
-	ctx.notify(store.NotifyHash, "hdel", key)
+	fields := ctx.pairFields(pairs)
+	ctx.notifyFields("hset", key, fields)
+	ctx.notifyFields("hdel", key, fields)
 	if empty {
 		deleteIfEmpty(ctx, key, hash)
 	}

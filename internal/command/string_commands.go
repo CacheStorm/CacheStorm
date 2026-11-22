@@ -196,7 +196,7 @@ func setGenericIf(ctx *Context, key string, value []byte, flags int, hasExpire b
 	if hasExpire {
 		opts.ExpireAtMS = whenMs
 	}
-	if err := ctx.Store.Set(key, &store.StringValue{Data: value}, opts); err != nil {
+	if err := ctx.replaceKey(key, &store.StringValue{Data: value}, opts); err != nil {
 		if errors.Is(err, store.ErrKeyExists) || errors.Is(err, store.ErrKeyNotFound) {
 			return abort()
 		}
@@ -629,7 +629,7 @@ func cmdGETSET(ctx *Context) error {
 		}
 	}
 
-	if err := ctx.Store.Set(key, &store.StringValue{Data: newValue}, store.SetOptions{}); err != nil {
+	if err := ctx.replaceKey(key, &store.StringValue{Data: newValue}, store.SetOptions{}); err != nil {
 		return ctx.WriteError(err)
 	}
 	ctx.notify(store.NotifyString, "set", key)

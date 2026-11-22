@@ -103,7 +103,8 @@ func cmdRESTORE(ctx *Context) error {
 		}
 		return ctx.WriteOK()
 	}
-	if err := ctx.Store.Set(key, value, store.SetOptions{NX: !replace, ExpireAtMS: deadline}); err != nil {
+	var replaced store.DataType
+	if err := ctx.Store.Set(key, value, store.SetOptions{NX: !replace, ExpireAtMS: deadline, Replaced: &replaced}); err != nil {
 		if errors.Is(err, store.ErrKeyExists) {
 			return ctx.Writer.WriteError("BUSYKEY Target key name already exists.")
 		}
@@ -126,5 +127,6 @@ func cmdRESTORE(ctx *Context) error {
 	}
 	ctx.PropagateAs(ExecutedCommand{Name: "RESTORE", Args: args, DB: ctx.DB})
 	ctx.notify(store.NotifyGeneric, "restore", key)
+	ctx.Store.NotifyOverwrite(key, replaced, value.Type())
 	return ctx.WriteOK()
 }

@@ -520,3 +520,39 @@ func (ctx *Context) notify(class int, event, key string) {
 		ctx.Store.Notify(class, event, key)
 	}
 }
+
+// notifyFields publishes a hash event naming the fields it touched, which
+// Redis 8.10's subkey channels carry.
+func (ctx *Context) notifyFields(event, key string, fields []string) {
+	if ctx.Store != nil {
+		ctx.Store.NotifySubkeys(store.NotifyHash, event, key, fields)
+	}
+}
+
+// pairFields returns the fields of field/value pairs when a subkey channel
+// would receive them, and nil otherwise.
+func (ctx *Context) pairFields(pairs [][]byte) []string {
+	if ctx.Store == nil || !ctx.Store.NotifyingSubkeys(store.NotifyHash) {
+		return nil
+	}
+	fields := make([]string, 0, len(pairs)/2)
+	for i := 0; i < len(pairs); i += 2 {
+		fields = append(fields, string(pairs[i]))
+	}
+	return fields
+}
+
+// replaceKey stores value at key as Redis' setKey does: replacing a live key
+// announces "overwritten", and "type_changed" when the type differs.
+func (ctx *Context) replaceKey(key string, value store.Value, opts store.SetOptions) error {
+	if !ctx.Store.Notifying(store.NotifyOverwritten | store.NotifyTypeChanged) {
+		return ctx.Store.Set(key, value, opts)
+	}
+	var old store.DataType
+	opts.Replaced = &old
+	if err := ctx.Store.Set(key, value, opts); err != nil {
+		return err
+	}
+	ctx.Store.NotifyOverwrite(key, old, value.Type())
+	return nil
+}

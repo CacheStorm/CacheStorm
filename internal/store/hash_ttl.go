@@ -422,7 +422,7 @@ func (s *Store) finishHashReap(key string, entry *Entry, fields []string, delete
 	}
 	s.TouchKey(key)
 	GlobalMetrics.RecordHashFieldsExpired(int64(len(fields)))
-	s.Notify(NotifyHash, "hexpired", key)
+	s.NotifySubkeys(NotifyHash, "hexpired", key, fields)
 	if deleted {
 		s.Notify(NotifyGeneric, "del", key)
 	}

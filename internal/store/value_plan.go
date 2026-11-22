@@ -53,7 +53,7 @@ func (s *Store) applyValuePlan(key string, options *SetOptions, snapshot *Entry,
 					s.trackMemory(delta)
 					if len(fields) > 0 {
 						GlobalMetrics.RecordHashFieldsExpired(int64(len(fields)))
-						s.Notify(NotifyHash, "hexpired", key)
+						s.NotifySubkeys(NotifyHash, "hexpired", key, fields)
 					}
 				}
 			}
@@ -185,6 +185,8 @@ func (s *Store) applyValuePlan(key string, options *SetOptions, snapshot *Entry,
 		unlock()
 		if !live {
 			s.notifyNew(key)
+		} else if options != nil && options.Replaced != nil {
+			*options.Replaced = current.Type()
 		}
 		s.published(key, value)
 		return nil

@@ -1,6 +1,9 @@
 package store
 
-import "strconv"
+import (
+	"strconv"
+	"strings"
+)
 
 // Keyspace notification classes, the NOTIFY_* flags of Redis' server.h.
 const (
@@ -19,7 +22,18 @@ const (
 	NotifyLoaded   = 1 << 12
 	NotifyModule   = 1 << 13
 	NotifyNew      = 1 << 14
-	NotifyArray    = 1 << 15
+	// NotifyOverwritten and NotifyTypeChanged announce a key replaced
+	// wholesale, as Redis' setKey, RENAME, COPY REPLACE and RESTORE REPLACE do.
+	NotifyOverwritten = 1 << 15
+	NotifyTypeChanged = 1 << 16
+	// The subkey channels of Redis 8.10: hash events also name the fields.
+	NotifySubkeyspace      = 1 << 19
+	NotifySubkeyevent      = 1 << 20
+	NotifySubkeyspaceItem  = 1 << 21
+	NotifySubkeyspaceEvent = 1 << 22
+	NotifyArray            = 1 << 23
+
+	notifySubkeyChannels = NotifySubkeyspace | NotifySubkeyevent | NotifySubkeyspaceItem | NotifySubkeyspaceEvent
 
 	NotifyAll = NotifyGeneric | NotifyString | NotifyList | NotifySet | NotifyHash | NotifyZSet | NotifyExpired | NotifyEvicted | NotifyStream | NotifyModule | NotifyArray
 )
@@ -62,6 +76,18 @@ func ParseNotifyFlags(s string) (flags int, ok bool) {
 			flags |= NotifyArray
 		case 'n':
 			flags |= NotifyNew
+		case 'o':
+			flags |= NotifyOverwritten
+		case 'c':
+			flags |= NotifyTypeChanged
+		case 'S':
+			flags |= NotifySubkeyspace
+		case 'T':
+			flags |= NotifySubkeyevent
+		case 'I':
+			flags |= NotifySubkeyspaceItem
+		case 'V':
+			flags |= NotifySubkeyspaceEvent
 		default:
 			return 0, false
 		}
@@ -83,6 +109,7 @@ func FormatNotifyFlags(flags int) string {
 			{NotifyGeneric, 'g'}, {NotifyString, '$'}, {NotifyList, 'l'}, {NotifySet, 's'},
 			{NotifyHash, 'h'}, {NotifyZSet, 'z'}, {NotifyExpired, 'x'}, {NotifyEvicted, 'e'},
 			{NotifyStream, 't'}, {NotifyModule, 'd'}, {NotifyArray, 'a'}, {NotifyNew, 'n'},
+			{NotifyOverwritten, 'o'}, {NotifyTypeChanged, 'c'},
 		} {
 			if flags&f.flag != 0 {
 				b = append(b, f.c)
@@ -95,8 +122,16 @@ func FormatNotifyFlags(flags int) string {
 	if flags&NotifyKeyevent != 0 {
 		b = append(b, 'E')
 	}
-	if flags&NotifyKeyMiss != 0 {
-		b = append(b, 'm')
+	for _, f := range []struct {
+		flag int
+		c    byte
+	}{
+		{NotifyKeyMiss, 'm'}, {NotifySubkeyspace, 'S'}, {NotifySubkeyevent, 'T'},
+		{NotifySubkeyspaceItem, 'I'}, {NotifySubkeyspaceEvent, 'V'},
+	} {
+		if flags&f.flag != 0 {
+			b = append(b, f.c)
+		}
 	}
 	return string(b)
 }
@@ -150,6 +185,85 @@ func (s *Store) publishNotification(flags int, event, key string) {
 		ch = append(ch, "__:"...)
 		ch = append(ch, event...)
 		s.pubsub.Publish(string(ch), []byte(key))
+	}
+}
+
+// NotifyingSubkeys reports whether events of class reach a subkey channel,
+// so callers collect the subkeys only when someone may receive them.
+func (s *Store) NotifyingSubkeys(class int) bool {
+	flags := int(s.pubsub.notifyFlags.Load())
+	return flags&class != 0 && flags&notifySubkeyChannels != 0
+}
+
+// NotifySubkeys publishes event for key as Notify does and, when subkeys
+// are given, on the subkey channels of Redis' notifyKeyspaceEventWithSubkeys:
+//
+//	__subkeyspace@<db>__:<key>              <event>|<subkeys>
+//	__subkeyevent@<db>__:<event>            <len>:<key>|<subkeys>
+//	__subkeyspaceitem@<db>__:<key>\n<subkey> <event>   (one per subkey)
+//	__subkeyspaceevent@<db>__:<event>|<key> <subkeys>
+//
+// where <subkeys> is <len>:<subkey>[,<len>:<subkey>...].
+func (s *Store) NotifySubkeys(class int, event, key string, subkeys []string) {
+	flags := int(s.pubsub.notifyFlags.Load())
+	if flags&class == 0 {
+		return
+	}
+	s.publishNotification(flags, event, key)
+	if len(subkeys) == 0 || flags&notifySubkeyChannels == 0 {
+		return
+	}
+	db := strconv.AppendInt(nil, int64(s.dbIndex.Load()), 10)
+	channel := func(prefix string, parts ...string) string {
+		ch := append([]byte(prefix), db...)
+		ch = append(ch, "__:"...)
+		for _, p := range parts {
+			ch = append(ch, p...)
+		}
+		return string(ch)
+	}
+	list := func(dst []byte) []byte {
+		for i, sk := range subkeys {
+			if i > 0 {
+				dst = append(dst, ',')
+			}
+			dst = strconv.AppendInt(dst, int64(len(sk)), 10)
+			dst = append(dst, ':')
+			dst = append(dst, sk...)
+		}
+		return dst
+	}
+	piped := strings.IndexByte(event, '|') >= 0
+	if flags&NotifySubkeyspace != 0 && !piped {
+		payload := append([]byte(event), '|')
+		s.pubsub.Publish(channel("__subkeyspace@", key), list(payload))
+	}
+	if flags&NotifySubkeyevent != 0 {
+		payload := strconv.AppendInt(nil, int64(len(key)), 10)
+		payload = append(payload, ':')
+		payload = append(payload, key...)
+		payload = append(payload, '|')
+		s.pubsub.Publish(channel("__subkeyevent@", event), list(payload))
+	}
+	if flags&NotifySubkeyspaceItem != 0 && strings.IndexByte(key, '\n') < 0 {
+		for _, sk := range subkeys {
+			s.pubsub.Publish(channel("__subkeyspaceitem@", key, "\n", sk), []byte(event))
+		}
+	}
+	if flags&NotifySubkeyspaceEvent != 0 && !piped {
+		s.pubsub.Publish(channel("__subkeyspaceevent@", event, "|", key), list(nil))
+	}
+}
+
+// NotifyOverwrite announces that a write replaced a live key holding a
+// value of type old with one of type now, as Redis' setKey does.
+func (s *Store) NotifyOverwrite(key string, old, now DataType) {
+	if old == 0 {
+		return
+	}
+	s.Notify(NotifyOverwritten, "overwritten", key)
+	if old != now {
+		s.Notify(NotifyTypeChanged, "type_changed", key)
 	}
 }
 

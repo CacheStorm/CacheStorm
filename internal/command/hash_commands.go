@@ -60,7 +60,7 @@ func cmdHSET(ctx *Context) error {
 	if err != nil {
 		return ctx.WriteError(err)
 	}
-	ctx.notify(store.NotifyHash, "hset", ctx.ArgString(0))
+	ctx.notifyFields("hset", ctx.ArgString(0), ctx.pairFields(ctx.Args[1:]))
 	return ctx.WriteInteger(int64(added))
 }
 
@@ -101,7 +101,7 @@ func cmdHMSET(ctx *Context) error {
 	if _, err := applyHashSetFields(ctx, false); err != nil {
 		return ctx.WriteError(err)
 	}
-	ctx.notify(store.NotifyHash, "hset", ctx.ArgString(0))
+	ctx.notifyFields("hset", ctx.ArgString(0), ctx.pairFields(ctx.Args[1:]))
 	return ctx.WriteOK()
 }
 
@@ -183,12 +183,17 @@ func cmdHDEL(ctx *Context) error {
 	}
 
 	deleted := 0
+	var fields []string
+	collect := ctx.Store.NotifyingSubkeys(store.NotifyHash)
 	now := ctx.Store.HashFieldClock()
 	for i := 1; i < ctx.ArgCount(); i++ {
 		field := ctx.ArgString(i)
 		if hash.FieldLive(field, now) {
 			hash.DeleteField(field)
 			deleted++
+			if collect {
+				fields = append(fields, field)
+			}
 		}
 	}
 
@@ -196,7 +201,7 @@ func cmdHDEL(ctx *Context) error {
 	hash.Unlock()
 
 	if deleted > 0 {
-		ctx.notify(store.NotifyHash, "hdel", key)
+		ctx.notifyFields("hdel", key, fields)
 	} else if !isEmpty {
 		ctx.PropagateAs()
 	}
@@ -339,7 +344,7 @@ func cmdHINCRBY(ctx *Context) error {
 	if err != nil {
 		return ctx.WriteError(err)
 	}
-	ctx.notify(store.NotifyHash, "hincrby", ctx.ArgString(0))
+	ctx.notifyFields("hincrby", ctx.ArgString(0), []string{field})
 	return ctx.WriteInteger(newVal)
 }
 
@@ -436,7 +441,7 @@ func cmdHINCRBYFLOAT(ctx *Context) error {
 	if err != nil {
 		return ctx.WriteError(err)
 	}
-	ctx.notify(store.NotifyHash, "hincrbyfloat", ctx.ArgString(0))
+	ctx.notifyFields("hincrbyfloat", ctx.ArgString(0), []string{field})
 	return ctx.WriteBulkString(result)
 }
 
@@ -453,7 +458,7 @@ func cmdHSETNX(ctx *Context) error {
 	if added == 0 {
 		ctx.PropagateAs()
 	} else {
-		ctx.notify(store.NotifyHash, "hset", ctx.ArgString(0))
+		ctx.notifyFields("hset", ctx.ArgString(0), ctx.pairFields(ctx.Args[1:]))
 	}
 	return ctx.WriteInteger(int64(added))
 }
@@ -695,7 +700,7 @@ func cmdHGETDEL(ctx *Context) error {
 		ctx.PropagateAs()
 		return ctx.WriteArray(results)
 	}
-	ctx.notify(store.NotifyHash, "hdel", key)
+	ctx.notifyFields("hdel", key, deleted)
 	if empty {
 		deleteIfEmpty(ctx, key, hash)
 	}

@@ -349,7 +349,7 @@ func storeSortedSet(ctx *Context, dst string, entries []store.SortedEntry, event
 	for _, e := range entries {
 		z.Add(e.Member, e.Score)
 	}
-	if err := ctx.Store.Set(dst, z, store.SetOptions{}); err != nil {
+	if err := ctx.replaceKey(dst, z, store.SetOptions{}); err != nil {
 		return err
 	}
 	ctx.notify(store.NotifyZSet, event, dst)
