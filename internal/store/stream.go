@@ -42,6 +42,9 @@ func (e *StreamEntry) FieldMap() map[string][]byte {
 
 func (e *StreamEntry) streamID() StreamID { return streamIDOf(e.ID) }
 
+// StreamID is the entry's ID, parsed.
+func (e *StreamEntry) StreamID() StreamID { return streamIDOf(e.ID) }
+
 type PendingEntry struct {
 	ID         string
 	Consumer   string

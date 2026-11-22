@@ -514,6 +514,25 @@ func createConsumerCommand(ctx *Context, key, group, consumer string) ExecutedCo
 	return ExecutedCommand{Name: "XGROUP", DB: ctx.DB, Args: cmdArgs("CREATECONSUMER", key, group, consumer)}
 }
 
+// budgetedRange is the entries XREAD returns from one stream under
+// MAXCOUNT or MAXSIZE.
+func budgetedRange(b *xreadBudget, stream *store.StreamValue, sp xreadSpec, count int64) *resp.Value {
+	b.claim = false
+	b.openStream(sp.key)
+	start, _ := sp.gt.Next()
+	entries := stream.Range(start, store.MaxStreamID, b.streamCount(count), false)
+	n := 0
+	for _, e := range entries {
+		it := store.StreamGroupItem{ID: e.StreamID(), Entry: e}
+		if !b.admit(&it) {
+			break
+		}
+		n++
+	}
+	b.closeStream(n)
+	return streamEntriesValue(entries[:n])
+}
+
 func cmdXREAD(ctx *Context) error      { return xreadGeneric(ctx, false) }
 func cmdXREADGROUP(ctx *Context) error { return xreadGeneric(ctx, true) }
 
@@ -533,6 +552,7 @@ func xreadGeneric(ctx *Context, xreadgroup bool) error {
 	groupName, consumerName := "", ""
 	haveGroup := false
 	minIdle := int64(-1)
+	maxCount, maxSize := int64(0), int64(0)
 
 parse:
 	for i := 0; i < argc; i++ {
@@ -572,6 +592,20 @@ parse:
 				n = 0
 			}
 			count = n
+		case (strings.EqualFold(o, "MAXCOUNT") || strings.EqualFold(o, "MAXSIZE")) && moreargs > 0:
+			i++
+			n, ok := parseStreamLL(ctx.ArgString(i))
+			if !ok {
+				return ctx.WriteError(ErrNotInteger)
+			}
+			if n <= 0 {
+				return ctx.WriteError(fmt.Errorf("ERR %s must be a positive integer", strings.ToUpper(o)))
+			}
+			if strings.EqualFold(o, "MAXCOUNT") {
+				maxCount = n
+			} else {
+				maxSize = n
+			}
 		case strings.EqualFold(o, "STREAMS") && moreargs > 0:
 			streamsArg = i + 1
 			n := argc - streamsArg
@@ -601,6 +635,9 @@ parse:
 	}
 	if xreadgroup && !haveGroup {
 		return ctx.WriteError(streamReplyError("ERR Missing GROUP option for XREADGROUP"))
+	}
+	if maxCount > 0 && count > 0 && maxCount < count {
+		return ctx.WriteError(streamReplyError("ERR MAXCOUNT must be greater than or equal to COUNT"))
 	}
 
 	specs := make([]xreadSpec, streamsCount)
@@ -691,7 +728,14 @@ parse:
 	serve := func() ([]xreadResult, error) {
 		results := make([]xreadResult, 0, len(specs))
 		now := time.Now().UnixMilli()
+		var budget *xreadBudget
+		if maxCount > 0 || maxSize > 0 {
+			budget = &xreadBudget{maxCount: maxCount, maxSize: maxSize, resp3: ctx.Writer.IsRESP3()}
+		}
 		for _, sp := range specs {
+			if budget.limited() && budget.exhausted() {
+				break
+			}
 			stream, err := lookupStream(ctx, sp.key)
 			if err != nil {
 				return nil, err
@@ -701,6 +745,10 @@ parse:
 					continue
 				}
 				if last, ok := stream.LastEntryID(); ok && sp.gt.Less(last) {
+					if budget.limited() {
+						results = append(results, xreadResult{key: sp.key, items: budgetedRange(budget, stream, sp, count)})
+						continue
+					}
 					results = append(results, xreadResult{key: sp.key, stream: stream, gt: sp.gt})
 				}
 				continue
@@ -713,9 +761,26 @@ parse:
 				// CLAIM is ignored when the consumer reads its history.
 				claim = -1
 			}
-			r, ok := stream.ReadGroupWith(groupName, consumerName, store.ReadGroupOptions{
+			opts := store.ReadGroupOptions{
 				History: !sp.newOnly, After: sp.gt, Count: count, NoAck: noack, MinIdle: claim, Now: now,
-			})
+			}
+			opened := false
+			if budget.limited() {
+				budget.claim = claim >= 0
+				opts.Count = budget.streamCount(count)
+				if !sp.newOnly {
+					budget.openStream(sp.key)
+					opened = true
+				}
+				opts.Admit = func(it *store.StreamGroupItem) bool {
+					if !opened {
+						budget.openStream(sp.key)
+						opened = true
+					}
+					return budget.admit(it)
+				}
+			}
+			r, ok := stream.ReadGroupWith(groupName, consumerName, opts)
 			if !ok {
 				return nil, errNoReadGroup(sp.key, groupName)
 			}
@@ -723,7 +788,10 @@ parse:
 				ctx.notify(store.NotifyStream, "xgroup-createconsumer", sp.key)
 			}
 			propagated = append(propagated, readGroupEffects(ctx, sp.key, groupName, consumerName, now, noack, &r)...)
-			if r.Served {
+			if opened {
+				budget.closeStream(len(r.Items))
+			}
+			if r.Served || opened {
 				results = append(results, xreadResult{key: sp.key, items: groupItemsValue(r.Items, claim >= 0)})
 			}
 		}

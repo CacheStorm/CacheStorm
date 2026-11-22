@@ -120,6 +120,10 @@ type ReadGroupOptions struct {
 	NoAck   bool
 	MinIdle int64
 	Now     int64
+	// Admit, when set, is asked before each entry is delivered; false
+	// ends the read there, the entry neither sent nor made pending, as
+	// Redis 8.10's MAXSIZE does.
+	Admit func(*StreamGroupItem) bool
 }
 
 // ReadGroupResult is what an XREADGROUP of one stream did.
@@ -133,6 +137,8 @@ type ReadGroupResult struct {
 	LastIDBefore, LastID string
 	Advanced             bool
 	EntriesRead          int64
+	// Stopped reports Admit ended the read.
+	Stopped bool
 }
 
 // ClaimableAt returns when the oldest delivery in the group's PEL whose
@@ -215,11 +221,15 @@ func (v *StreamValue) ReadGroupWith(groupName, consumerName string, o ReadGroupO
 				continue
 			}
 			e := v.entryLocked(id)
+			item := StreamGroupItem{ID: id, Entry: e}
+			if o.Admit != nil && !o.Admit(&item) {
+				break
+			}
 			if e != nil {
 				g.stampLocked(p, now)
-				p.Deliveries++
+				p.bumpDeliveries()
 			}
-			r.Items = append(r.Items, StreamGroupItem{ID: id, Entry: e})
+			r.Items = append(r.Items, item)
 			if o.Count > 0 && int64(len(r.Items)) >= o.Count {
 				break
 			}
@@ -244,6 +254,10 @@ func (v *StreamValue) ReadGroupWith(groupName, consumerName string, o ReadGroupO
 				continue
 			}
 			item := StreamGroupItem{ID: id, Entry: e, Idle: idle, Deliveries: p.Deliveries, Claimed: true, Pending: true}
+			if o.Admit != nil && !o.Admit(&item) {
+				r.Stopped = true
+				break
+			}
 			g.handOverLocked(p, consumerName, c)
 			p.bumpDeliveries()
 			g.stampLocked(p, now)
@@ -256,7 +270,7 @@ func (v *StreamValue) ReadGroupWith(groupName, consumerName string, o ReadGroupO
 		}
 	}
 
-	if o.Count == 0 || int64(len(r.Items)) < o.Count {
+	if !r.Stopped && (o.Count == 0 || int64(len(r.Items)) < o.Count) {
 		if top, ok := v.lastEntryIDLocked(); ok {
 			if last := streamIDOf(g.LastID); last.Less(top) {
 				start, _ := last.Next()
@@ -266,9 +280,12 @@ func (v *StreamValue) ReadGroupWith(groupName, consumerName string, o ReadGroupO
 				}
 				for _, e := range v.rangeLocked(start, MaxStreamID, count, false) {
 					id := e.streamID()
+					item := StreamGroupItem{ID: id, Entry: e}
+					if o.Admit != nil && !o.Admit(&item) {
+						break
+					}
 					v.advanceGroupLocked(g, id)
 					r.Advanced = true
-					item := StreamGroupItem{ID: id, Entry: e}
 					if !o.NoAck {
 						g.addPendingLocked(e.ID, consumerName, now)
 						c.ActiveTime = now
