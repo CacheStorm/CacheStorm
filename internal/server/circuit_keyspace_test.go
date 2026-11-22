@@ -23,12 +23,15 @@ func TestCircuitBreakersAreKeys(t *testing.T) {
 			t.Fatalf("CIRCUIT.ALLOW: %+v, want %d", got, want)
 		}
 	}
-	if got := c.do("CIRCUIT.CREATE", "payments", "2", "1", "300"); got.Type == '-' {
+	// The breaker stays open 2s: long enough to outlast the restart on a
+	// loaded machine, and the wait below is counted from its opening.
+	if got := c.do("CIRCUIT.CREATE", "payments", "2", "1", "2000"); got.Type == '-' {
 		t.Fatal(got.Err)
 	}
 	c.do("CIRCUIT.FAILURE", "payments")
 	state("closed")
 	c.do("CIRCUIT.FAILURE", "payments")
+	opened := time.Now()
 	state("open")
 	allow(0)
 	c.do("SET", "plain", "v")
@@ -42,7 +45,7 @@ func TestCircuitBreakersAreKeys(t *testing.T) {
 	c = dialRepl(t, s)
 	state("open")
 	allow(0)
-	time.Sleep(350 * time.Millisecond)
+	time.Sleep(time.Until(opened.Add(2050 * time.Millisecond)))
 	allow(1)
 	state("half-open")
 	c.do("CIRCUIT.SUCCESS", "payments")
