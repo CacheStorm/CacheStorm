@@ -119,6 +119,9 @@ func cmdRESET(ctx *Context) error {
 	if ctx.Transaction != nil {
 		ctx.Transaction.Clear()
 		ctx.Transaction.ClearWatch()
+		ctx.Transaction.mu.Lock()
+		ctx.Transaction.himport = nil
+		ctx.Transaction.mu.Unlock()
 	}
 	if h := trackingHooksFor(ctx); h != nil && h.Disable != nil {
 		h.Disable(ctx.ClientID)

@@ -234,11 +234,15 @@ func persistedCommand(cmd string, args [][]byte) bool {
 // scriptPersisted reports whether a SCRIPT or FUNCTION subcommand changes
 // what is persisted.
 func scriptPersisted(cmd string, args [][]byte) bool {
-	if len(args) == 0 || (cmd != "SCRIPT" && cmd != "FUNCTION") {
+	if len(args) == 0 || (cmd != "SCRIPT" && cmd != "FUNCTION" && cmd != "HIMPORT") {
 		return false
 	}
 	sub := strings.ToUpper(string(args[0]))
 	switch cmd {
+	case "HIMPORT":
+		// HIMPORT SET writes a key (and goes out as RESTORE); the other
+		// subcommands change only the connection's fieldsets.
+		return sub == "SET"
 	case "SCRIPT":
 		return sub == "LOAD" || sub == "FLUSH"
 	case "FUNCTION":
@@ -474,6 +478,7 @@ func New(cfg *config.Config) (result *Server, retErr error) {
 	command.RegisterRedisBloomChunkCommands(s.router)
 	command.RegisterVectorSetCommands(s.router)
 	command.RegisterArrayCommands(s.router)
+	command.RegisterHImportCommands(s.router)
 	command.RegisterGraphCommands(s.router)
 	command.RegisterDigestCommands(s.router)
 	command.RegisterUtilityCommands(s.router)

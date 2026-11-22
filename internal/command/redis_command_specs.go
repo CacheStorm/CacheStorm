@@ -101,6 +101,7 @@ var redisCommandSpecs = map[string]commandSpec{
 	"HGETALL":              {Arity: 2, Flags: []string{"readonly"}, FirstKey: 1, LastKey: 1, KeyStep: 1, Categories: []string{"read", "hash", "slow"}},
 	"HGETDEL":              {Arity: -5, Flags: []string{"write", "fast"}, FirstKey: 1, LastKey: 1, KeyStep: 1, Categories: []string{"write", "hash", "fast"}},
 	"HGETEX":               {Arity: -5, Flags: []string{"write", "fast"}, FirstKey: 1, LastKey: 1, KeyStep: 1, Categories: []string{"write", "hash", "fast"}},
+	"HIMPORT":              {Arity: -2, Flags: []string{}, FirstKey: 0, LastKey: 0, KeyStep: 0, Categories: []string{"hash", "slow"}},
 	"HINCRBY":              {Arity: 4, Flags: []string{"write", "denyoom", "fast"}, FirstKey: 1, LastKey: 1, KeyStep: 1, Categories: []string{"write", "hash", "fast"}},
 	"HINCRBYFLOAT":         {Arity: 4, Flags: []string{"write", "denyoom", "fast"}, FirstKey: 1, LastKey: 1, KeyStep: 1, Categories: []string{"write", "hash", "fast"}},
 	"HKEYS":                {Arity: 2, Flags: []string{"readonly"}, FirstKey: 1, LastKey: 1, KeyStep: 1, Categories: []string{"read", "hash", "slow"}},

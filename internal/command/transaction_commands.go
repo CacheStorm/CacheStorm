@@ -28,6 +28,8 @@ type Transaction struct {
 	active      bool
 	aborted     bool
 	watchedKeys map[watchedKey]int64
+	// himport holds the connection's HIMPORT fieldsets by name.
+	himport map[string]*himportFieldset
 }
 
 // watchedKey is a key in one database. A nil store is a key recorded through

@@ -3,7 +3,6 @@ package persistence
 import (
 	"encoding/binary"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -115,16 +114,92 @@ func TestLoadRedis810RDBFile(t *testing.T) {
 		t.Fatal("key k not loaded")
 	}
 
-	// The types CacheStorm does not have are refused by name.
+	// Redis 8.10's template hashes: templates (opcode 242) named by id.
+	lp := func(id int64, items ...string) string {
+		l := newListpack()
+		l.int(id)
+		for _, it := range items {
+			l.str(it)
+		}
+		return string(l.bytes())
+	}
 	b = []byte("REDIS0015")
 	b = str(str(append(b, 0xFA), "redis-ver"), "8.10.3")
-	b = append(b, 0xFE, 0, 0xFB, 1, 0, 29, 1, 'a', 0)
+	b = append(b, rdbOpcodeHashTemplate, 5, 2)
+	b = str(str(b, "a"), "bb")
+	b = append(b, 0xFE, 0, 0xFB, 2, 0)
+	b = str(str(append(b, rdbTypeHashTmplLpRef), "h1"), lp(5, "x", "y"))
+	b = str(str(append(str(append(b, rdbTypeHashTmplArrayRef), "h2"), 5), "x2"), "y2")
 	b = append(b, 0xFF)
 	b = binary.LittleEndian.AppendUint64(b, rdbChecksum(0, b))
 	if err := os.WriteFile(path, b, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := NewRDBReader(store.NewStore()).Load(path); err == nil || !strings.Contains(err.Error(), "template hashes of Redis 8.10 (HIMPORT) are not supported") {
-		t.Fatalf("template hash type: %v", err)
+	s = store.NewStore()
+	if err := NewRDBReader(s).Load(path); err != nil {
+		t.Fatal(err)
+	}
+	for key, want := range map[string][2]string{"h1": {"x", "y"}, "h2": {"x2", "y2"}} {
+		e, ok := s.Get(key)
+		if !ok {
+			t.Fatalf("%s not loaded", key)
+		}
+		h := e.Value.(*store.HashValue)
+		if a, bb := string(h.Field("a")), string(h.Field("bb")); a != want[0] || bb != want[1] {
+			t.Fatalf("%s = a:%q bb:%q, want %v", key, a, bb, want)
+		}
+	}
+
+	// An unknown template id is corruption.
+	b = []byte("REDIS0015")
+	b = str(str(append(b, 0xFA), "redis-ver"), "8.10.3")
+	b = append(b, 0xFE, 0, 0xFB, 1, 0)
+	b = str(str(append(b, rdbTypeHashTmplLpRef), "h1"), lp(9, "x"))
+	b = append(b, 0xFF)
+	b = binary.LittleEndian.AppendUint64(b, rdbChecksum(0, b))
+	if err := os.WriteFile(path, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := NewRDBReader(store.NewStore()).Load(path); err == nil {
+		t.Fatal("unknown template id loaded")
+	}
+}
+
+// DUMP payloads of Redis 8.10's template hashes carry their field names.
+func TestDumpTemplateHash(t *testing.T) {
+	str := func(b []byte, s string) []byte { return append(append(b, byte(len(s))), s...) }
+	seal := func(body []byte) []byte {
+		p := binary.LittleEndian.AppendUint16(body, 15)
+		return binary.LittleEndian.AppendUint64(p, rdbChecksum(0, p))
+	}
+	lp := func(items ...string) string {
+		l := newListpack()
+		for _, it := range items {
+			l.str(it)
+		}
+		return string(l.bytes())
+	}
+	values := newListpack()
+	values.int(3)
+	values.str("7")
+	values.str("ann")
+	check := func(name string, payload []byte) {
+		t.Helper()
+		v, err := DecodeDump(payload)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		h := v.(*store.HashValue)
+		if h.Len() != 2 || string(h.Field("id")) != "7" || string(h.Field("name")) != "ann" {
+			t.Fatalf("%s: %v", name, h)
+		}
+	}
+	check("TMPL_LP fields as a listpack", seal(str(str([]byte{rdbTypeHashTmplLp, 0}, lp("id", "name")), string(values.bytes()))))
+	check("TMPL_ARRAY raw fields", seal(str(str(str(str([]byte{rdbTypeHashTmplArray, 1, 2}, "id"), "name"), "7"), "ann")))
+	if _, err := DecodeDump(seal(str(str([]byte{rdbTypeHashTmplLp, 0}, lp("name", "id")), string(values.bytes())))); err == nil {
+		t.Fatal("unsorted template fields accepted")
+	}
+	if _, err := DecodeDump(seal(str([]byte{rdbTypeHashTmplLpRef}, string(values.bytes())))); err == nil {
+		t.Fatal("a template reference accepted in a DUMP payload")
 	}
 }

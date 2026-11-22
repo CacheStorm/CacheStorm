@@ -481,6 +481,9 @@ type RDBReader struct {
 	// preamble stops a load at the RDB's EOF opcode, which commands follow
 	// in an AOF with an RDB preamble.
 	preamble bool
+	// hashTemplates are the templates (opcode 242) of a Redis 8.10 file,
+	// which its template hashes name by id.
+	hashTemplates map[uint64][]string
 }
 
 func NewRDBReader(s *store.Store) *RDBReader {
@@ -677,7 +680,10 @@ func (r *RDBReader) readRDB(f io.Reader) error {
 					r.AuxFields["cachestorm-functions"] = string(EncodeFunctionDump(r.functions))
 				}
 			case rdbOpcodeHashTemplate:
-				return fmt.Errorf("hash templates (Redis 8.10 HIMPORT field sets) are not supported")
+				if err := r.readHashTemplate(f); err != nil {
+					return fmt.Errorf("RDB hash template: %w", err)
+				}
+				continue
 			case rdbOpcodeKeyMeta:
 				br, ok := f.(*bytes.Reader)
 				if !ok || r.body == nil {
@@ -1131,7 +1137,10 @@ func (r *RDBReader) readRedisEntry(f io.Reader, valueType byte, expiresAtMS, idl
 	if err != nil {
 		return err
 	}
-	d := &dumpDecoder{data: r.body, pos: len(r.body) - br.Len()}
+	d := &dumpDecoder{data: r.body, pos: len(r.body) - br.Len(), templates: r.hashTemplates}
+	if d.templates == nil {
+		d.templates = map[uint64][]string{}
+	}
 	var value store.Value
 	switch valueType {
 	case rdbTypeModule2:
@@ -1145,8 +1154,6 @@ func (r *RDBReader) readRedisEntry(f io.Reader, valueType byte, expiresAtMS, idl
 		return fmt.Errorf("RDB module values are not supported (key %q)", key)
 	case 22, 23:
 		return fmt.Errorf("pre-GA hash field expiration format not supported (key %q)", key)
-	case 29, 30, 31, 32:
-		return fmt.Errorf("template hashes of Redis 8.10 (HIMPORT) are not supported (key %q)", key)
 	default:
 		value = d.valueOf(valueType)
 	}

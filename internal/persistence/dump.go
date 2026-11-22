@@ -196,6 +196,9 @@ type dumpDecoder struct {
 	// allExpired is set when a hash failed to decode because every field
 	// had expired, which an RDB load skips as Redis does.
 	allExpired bool
+	// templates are the hash templates of the RDB file being loaded, by
+	// id; nil for a DUMP payload.
+	templates map[uint64][]string
 }
 
 func (d *dumpDecoder) take(n int) []byte {
@@ -504,6 +507,8 @@ func (d *dumpDecoder) valueOf(typ byte) store.Value {
 		return v
 	case dumpTypeHashMetadata, dumpTypeHashListpackEx:
 		return d.hashWithTTLs(typ)
+	case rdbTypeHashTmplLp, rdbTypeHashTmplLpRef, rdbTypeHashTmplArray, rdbTypeHashTmplArrayRef:
+		return d.templateHash(typ)
 	case 9, 10, 11, 12, 13, 16, 17, 20:
 		// The encoded value is read in place: the decoders copy the
 		// elements out, except into hashes, whose elements NewLoadedHash

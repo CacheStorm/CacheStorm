@@ -345,6 +345,13 @@ func aclNamedKeys(cmd string, args [][]byte) ([]string, bool) {
 			return toStrings(args[1:2]), true
 		}
 		return nil, true
+	case "HIMPORT":
+		// HIMPORT SET key fieldset value ...; the other subcommands name
+		// no key.
+		if len(args) >= 2 && strings.EqualFold(string(args[0]), "SET") {
+			return toStrings(args[1:2]), true
+		}
+		return nil, true
 	case "FCALL", "FCALL_RO":
 		// FCALL f-name numkeys key [key ...] arg [arg ...] — the key count
 		// sits between the function name and the keys, so the function name
