@@ -141,7 +141,9 @@ func TestBackup(t *testing.T) {
 	expect("ERR:ERR Backup is in progress", "BACKUP", "CLEANUP")
 	expect("OK", "BACKUP", "SEAL")
 
-	// backup-sealed-ttl removes a sealed backup.
+	// backup-sealed-ttl removes a sealed backup. The setting is process
+	// wide, so it goes back for the tests that follow.
+	t.Cleanup(func() { c.do("CONFIG", "SET", "backup-sealed-ttl", "0") })
 	c.do("CONFIG", "SET", "backup-sealed-ttl", "1")
 	waitBackupState(t, c, "idle")
 	if entries, _ := os.ReadDir(backupDir); len(entries) != 0 {
