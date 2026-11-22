@@ -173,13 +173,19 @@ func (s *Store) applyValuePlan(key string, options *SetOptions, snapshot *Entry,
 			s.trackMemory(actual)
 		}
 		if snapshot != nil || options != nil || !live {
-			if snapshot != nil {
-				s.tagIndex.RemoveKey(key, nil)
-			} else if previous != nil && len(previous.TagList()) > 0 {
-				s.tagIndex.RemoveKey(key, previous.TagList())
+			// Only the tags that changed touch the index: a key rewritten
+			// with the tags it had leaves it as it was.
+			var old []string
+			if previous != nil {
+				old = previous.TagList()
 			}
-			if len(entry.TagList()) > 0 {
-				s.tagIndex.AddTags(key, entry.TagList())
+			if next := entry.TagList(); len(old) > 0 || len(next) > 0 {
+				if removed := tagsMissingFrom(old, next); len(removed) > 0 {
+					s.tagIndex.RemoveTags(key, removed)
+				}
+				if added := tagsMissingFrom(next, old); len(added) > 0 {
+					s.tagIndex.AddTags(key, added)
+				}
 			}
 		}
 		unlock()

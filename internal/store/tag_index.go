@@ -101,12 +101,13 @@ func (ti *TagIndex) RemoveTagsBatch(keys []string, tags []string) {
 	}
 }
 
+// RemoveKey drops key from the tags it had. The entry's tag list is the
+// truth the index follows, so a key with no tags is in no tag's set and
+// costs nothing, however many tags other keys have.
 func (ti *TagIndex) RemoveKey(key string, tags []string) {
 	if len(tags) > 0 {
 		ti.RemoveTags(key, tags)
-		return
 	}
-	ti.RemoveTagsBatchAllShards([]string{key})
 }
 
 func (ti *TagIndex) RemoveTagsBatchAllShards(keys []string) {

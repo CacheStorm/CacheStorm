@@ -29,7 +29,25 @@ func (s *Store) UpdateTags(key string, fn func(tags []string) []string) bool {
 
 // tagsMissingFrom returns the tags of a that b does not have.
 func tagsMissingFrom(a, b []string) []string {
+	if len(a) == 0 {
+		return nil
+	}
+	if len(b) == 0 {
+		return a
+	}
 	var out []string
+	if len(a)*len(b) > 64 {
+		in := make(map[string]struct{}, len(b))
+		for _, u := range b {
+			in[u] = struct{}{}
+		}
+		for _, t := range a {
+			if _, ok := in[t]; !ok {
+				out = append(out, t)
+			}
+		}
+		return out
+	}
 	for _, t := range a {
 		found := false
 		for _, u := range b {
@@ -43,4 +61,69 @@ func tagsMissingFrom(a, b []string) []string {
 		}
 	}
 	return out
+}
+
+// AddKeyTags gives key the tags of tags it lacks and reports how many that
+// was; ok is false for a missing or expired key.
+func (s *Store) AddKeyTags(key string, tags []string) (added int, ok bool) {
+	return s.changeKeyTags(key, tags, true)
+}
+
+// RemoveKeyTags takes tags off key and reports how many it had; ok is
+// false for a missing or expired key.
+func (s *Store) RemoveKeyTags(key string, tags []string) (removed int, ok bool) {
+	return s.changeKeyTags(key, tags, false)
+}
+
+func (s *Store) changeKeyTags(key string, tags []string, add bool) (int, bool) {
+	shard := s.shards[s.shardIndex(key)]
+	shard.mu.Lock()
+	entry, ok := shard.data[key]
+	if !ok || entry.IsExpired() {
+		shard.mu.Unlock()
+		return 0, false
+	}
+	old := entry.TagList()
+	var changed []string
+	var next []string
+	if add {
+		next = append(make([]string, 0, len(old)+len(tags)), old...)
+		for _, t := range tags {
+			if !hasTag(next, t) {
+				next = append(next, t)
+				changed = append(changed, t)
+			}
+		}
+	} else {
+		next = make([]string, 0, len(old))
+		for _, t := range old {
+			if hasTag(tags, t) {
+				changed = append(changed, t)
+			} else {
+				next = append(next, t)
+			}
+		}
+	}
+	if len(changed) == 0 {
+		shard.mu.Unlock()
+		return 0, true
+	}
+	entry.SetTags(next)
+	shard.mu.Unlock()
+	if add {
+		s.tagIndex.AddTags(key, changed)
+	} else {
+		s.tagIndex.RemoveTags(key, changed)
+	}
+	s.Reaccount(key)
+	return len(changed), true
+}
+
+func hasTag(tags []string, t string) bool {
+	for _, u := range tags {
+		if u == t {
+			return true
+		}
+	}
+	return false
 }

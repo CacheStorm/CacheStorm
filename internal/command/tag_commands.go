@@ -63,17 +63,7 @@ func cmdADDTAG(ctx *Context) error {
 	if ctx.ArgCount() < 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
-	added := 0
-	ctx.Store.UpdateTags(ctx.ArgString(0), func(tags []string) []string {
-		for i := 1; i < ctx.ArgCount(); i++ {
-			tag := ctx.ArgString(i)
-			if !containsString(tags, tag) {
-				tags = append(tags, tag)
-				added++
-			}
-		}
-		return tags
-	})
+	added, _ := ctx.Store.AddKeyTags(ctx.ArgString(0), tagArgs(ctx))
 	return ctx.WriteInteger(int64(added))
 }
 
@@ -81,26 +71,17 @@ func cmdREMTAG(ctx *Context) error {
 	if ctx.ArgCount() < 2 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
-	removed := 0
-	ctx.Store.UpdateTags(ctx.ArgString(0), func(tags []string) []string {
-		kept := tags[:0]
-		for _, tag := range tags {
-			drop := false
-			for i := 1; i < ctx.ArgCount(); i++ {
-				if tag == ctx.ArgString(i) {
-					drop = true
-					break
-				}
-			}
-			if drop {
-				removed++
-			} else {
-				kept = append(kept, tag)
-			}
-		}
-		return kept
-	})
+	removed, _ := ctx.Store.RemoveKeyTags(ctx.ArgString(0), tagArgs(ctx))
 	return ctx.WriteInteger(int64(removed))
+}
+
+// tagArgs is the tags ADDTAG and REMTAG name after the key.
+func tagArgs(ctx *Context) []string {
+	tags := make([]string, ctx.ArgCount()-1)
+	for i := range tags {
+		tags[i] = ctx.ArgString(i + 1)
+	}
+	return tags
 }
 
 func cmdINVALIDATE(ctx *Context) error {
@@ -211,13 +192,4 @@ func cmdTAGCHILDREN(ctx *Context) error {
 	}
 
 	return ctx.WriteArray(results)
-}
-
-func containsString(list []string, s string) bool {
-	for _, v := range list {
-		if v == s {
-			return true
-		}
-	}
-	return false
 }

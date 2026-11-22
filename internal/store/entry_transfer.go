@@ -148,7 +148,9 @@ func (s *Store) Transfer(srcKey string, dst *Store, dstKey string, options Trans
 			dst.trackMemory(dstDelta)
 			s.trackMemory(srcDelta)
 		}
-		dst.tagIndex.RemoveKey(dstKey, nil)
+		if previous != nil {
+			dst.tagIndex.RemoveKey(dstKey, previous.TagList())
+		}
 		if len(entry.TagList()) > 0 {
 			dst.tagIndex.AddTags(dstKey, entry.TagList())
 		}

@@ -266,10 +266,15 @@ func TestTagIndexRemoveKeyWithoutTags(t *testing.T) {
 	ti := NewTagIndex()
 
 	ti.AddTags("key1", []string{"tag1"})
+	// The caller names the tags the key had: none means nothing to drop,
+	// without a walk of every tag.
 	ti.RemoveKey("key1", nil)
-
+	if ti.Count("tag1") != 1 {
+		t.Errorf("RemoveKey without tags changed the index: %d", ti.Count("tag1"))
+	}
+	ti.RemoveTagsBatchAllShards([]string{"key1"})
 	if ti.Count("tag1") != 0 {
-		t.Errorf("expected 0 keys after RemoveKey without tags, got %d", ti.Count("tag1"))
+		t.Errorf("expected 0 keys after RemoveTagsBatchAllShards, got %d", ti.Count("tag1"))
 	}
 }
 

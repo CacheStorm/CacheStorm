@@ -87,8 +87,11 @@ var exclusiveWrites = map[string]bool{
 	// Read-only scripts take the gate exclusively too: a script is atomic in
 	// Redis, so it must not see a write land between two of its reads.
 	"EVAL_RO": true, "EVALSHA_RO": true, "FCALL_RO": true,
-	"INVALIDATE": true, "ADDTAG": true, "REMTAG": true, "TAGLINK": true,
-	"TAGUNLINK": true, "SETTAG": true,
+	// INVALIDATE deletes the keys of a tag, and the hierarchy TAGLINK and
+	// TAGUNLINK change decides which tags INVALIDATE ... CASCADE reaches.
+	// SETTAG, ADDTAG and REMTAG change one key's tags; the tag index has
+	// locks of its own, so the key's stripe orders them.
+	"INVALIDATE": true, "TAGLINK": true, "TAGUNLINK": true,
 	// They delete the keys matching a pattern.
 	"CACHE.BULKDEL": true, "CACHE.CLEAR": true, "COUNTER.RESETALL": true,
 	// The search indexes are shared by every database and an index is

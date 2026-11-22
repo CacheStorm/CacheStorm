@@ -215,8 +215,8 @@ func (s *Store) moveSetMember(srcKey, dstKey, member string) (bool, error) {
 			d, _ := srcShard.setLocked(srcKey, source)
 			actual += d
 		}
-		if !live {
-			s.tagIndex.RemoveKey(dstKey, nil)
+		if !live && previous != nil {
+			s.tagIndex.RemoveKey(dstKey, previous.TagList())
 		}
 		if reserved {
 			s.trackMemory(actual - delta)
