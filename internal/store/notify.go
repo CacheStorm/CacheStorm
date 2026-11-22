@@ -19,8 +19,9 @@ const (
 	NotifyLoaded   = 1 << 12
 	NotifyModule   = 1 << 13
 	NotifyNew      = 1 << 14
+	NotifyArray    = 1 << 15
 
-	NotifyAll = NotifyGeneric | NotifyString | NotifyList | NotifySet | NotifyHash | NotifyZSet | NotifyExpired | NotifyEvicted | NotifyStream | NotifyModule
+	NotifyAll = NotifyGeneric | NotifyString | NotifyList | NotifySet | NotifyHash | NotifyZSet | NotifyExpired | NotifyEvicted | NotifyStream | NotifyModule | NotifyArray
 )
 
 // ParseNotifyFlags parses a notify-keyspace-events value as Redis'
@@ -57,6 +58,8 @@ func ParseNotifyFlags(s string) (flags int, ok bool) {
 			flags |= NotifyKeyMiss
 		case 'd':
 			flags |= NotifyModule
+		case 'a':
+			flags |= NotifyArray
 		case 'n':
 			flags |= NotifyNew
 		default:
@@ -79,7 +82,7 @@ func FormatNotifyFlags(flags int) string {
 		}{
 			{NotifyGeneric, 'g'}, {NotifyString, '$'}, {NotifyList, 'l'}, {NotifySet, 's'},
 			{NotifyHash, 'h'}, {NotifyZSet, 'z'}, {NotifyExpired, 'x'}, {NotifyEvicted, 'e'},
-			{NotifyStream, 't'}, {NotifyModule, 'd'}, {NotifyNew, 'n'},
+			{NotifyStream, 't'}, {NotifyModule, 'd'}, {NotifyArray, 'a'}, {NotifyNew, 'n'},
 		} {
 			if flags&f.flag != 0 {
 				b = append(b, f.c)

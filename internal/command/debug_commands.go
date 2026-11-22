@@ -226,6 +226,8 @@ func getEncoding(v store.Value) string {
 		return "listpack"
 	case *store.StreamValue:
 		return "stream"
+	case *store.ArrayValue:
+		return "sliced-array"
 	default:
 		return "raw"
 	}

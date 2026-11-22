@@ -186,3 +186,12 @@ func (v *Value) String() string {
 		return "(unknown)"
 	}
 }
+
+// UintValue is an integer reply of an unsigned 64-bit value, as Redis'
+// addReplyUnsignedLongLong sends one beyond the int64 range.
+func UintValue(n uint64) *Value {
+	if n <= 1<<63-1 {
+		return IntegerValue(int64(n))
+	}
+	return &Value{Type: TypeInteger, Str: strconv.FormatUint(n, 10)}
+}

@@ -7,7 +7,7 @@ import (
 // lockableCollection is a list, hash, set or sorted set: a value removed from
 // the keyspace by Store.DeleteIfEmpty when emptied, which marks it dead.
 type lockableCollection interface {
-	*store.ListValue | *store.HashValue | *store.SetValue | *store.SortedSetValue
+	*store.ListValue | *store.HashValue | *store.SetValue | *store.SortedSetValue | *store.ArrayValue
 	store.Value
 	Lock()
 	Unlock()

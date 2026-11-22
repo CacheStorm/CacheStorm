@@ -8,14 +8,14 @@ import (
 
 func TestNotifyFlagsParseAndFormat(t *testing.T) {
 	cases := map[string]string{
-		"":           "",
-		"KEA":        "AKE",
-		"KEAnm":      "AKEm",
-		"g$lshzxetd": "A",
-		"Elg$K":      "g$lKE",
-		"Ex":         "xE",
-		"nmK":        "nKm",
-		"AAg":        "A",
+		"":            "",
+		"KEA":         "AKE",
+		"KEAnm":       "AKEm",
+		"g$lshzxetda": "A",
+		"Elg$K":       "g$lKE",
+		"Ex":          "xE",
+		"nmK":         "nKm",
+		"AAg":         "A",
 	}
 	for in, want := range cases {
 		flags, ok := ParseNotifyFlags(in)
@@ -26,7 +26,7 @@ func TestNotifyFlagsParseAndFormat(t *testing.T) {
 			t.Fatalf("FormatNotifyFlags(%q) = %q, want %q", in, got, want)
 		}
 	}
-	for _, bad := range []string{"Q", "KE ", "a"} {
+	for _, bad := range []string{"Q", "KE ", "b"} {
 		if _, ok := ParseNotifyFlags(bad); ok {
 			t.Fatalf("ParseNotifyFlags(%q) accepted", bad)
 		}

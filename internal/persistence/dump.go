@@ -135,6 +135,12 @@ func appendDumpValue(out []byte, value store.Value) ([]byte, uint16, error) {
 		case rdbTypeStreamListpacks5:
 			version = 14
 		}
+	case *store.ArrayValue:
+		var err error
+		if out, err = appendDumpArray(out, v); err != nil {
+			return out, 0, err
+		}
+		version = 14
 	case *store.JSONValue, *store.BloomValue, *store.CuckooValue, *store.CMSValue, *store.TopKValue, *store.VectorSetValue:
 		// As Redis 8's bundled modules save them, which Redis 8 loads.
 		out, _ = appendRedisModuleValue(out, v)
@@ -607,6 +613,8 @@ func (d *dumpDecoder) valueOf(typ byte) store.Value {
 		return v
 	case rdbTypeStreamListpacks, rdbTypeStreamListpacks2, rdbTypeStreamListpacks3, rdbTypeStreamListpacks4, rdbTypeStreamListpacks5:
 		return d.stream(typ)
+	case rdbTypeArray:
+		return d.array()
 	case rdbOpcodeKeyMeta:
 		// Redis 8.6 key metadata from modules, ahead of the value's type;
 		// CacheStorm keeps none of it.

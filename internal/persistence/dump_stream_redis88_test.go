@@ -118,13 +118,13 @@ func TestLoadRedis810RDBFile(t *testing.T) {
 	// The types CacheStorm does not have are refused by name.
 	b = []byte("REDIS0015")
 	b = str(str(append(b, 0xFA), "redis-ver"), "8.10.3")
-	b = append(b, 0xFE, 0, 0xFB, 1, 0, 28, 1, 'a', 0)
+	b = append(b, 0xFE, 0, 0xFB, 1, 0, 29, 1, 'a', 0)
 	b = append(b, 0xFF)
 	b = binary.LittleEndian.AppendUint64(b, rdbChecksum(0, b))
 	if err := os.WriteFile(path, b, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := NewRDBReader(store.NewStore()).Load(path); err == nil || !strings.Contains(err.Error(), "array values (Redis 8.8) are not supported") {
-		t.Fatalf("array type: %v", err)
+	if err := NewRDBReader(store.NewStore()).Load(path); err == nil || !strings.Contains(err.Error(), "template hashes of Redis 8.10 (HIMPORT) are not supported") {
+		t.Fatalf("template hash type: %v", err)
 	}
 }

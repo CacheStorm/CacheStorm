@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/cachestorm/cachestorm/internal/logger"
 	"github.com/cachestorm/cachestorm/internal/resp"
+	"github.com/cachestorm/cachestorm/internal/sparsearray"
 	"github.com/cachestorm/cachestorm/internal/store"
 )
 
@@ -925,6 +927,38 @@ func (rw *AOFRewriter) writeStreamGroups(w *bufio.Writer, key string, sv *store.
 	return nil
 }
 
+// writeArray re-emits an array as Redis rewrites one: ARMSET with up to
+// 32 index and value pairs in index order, then ARSEEK for the insert
+// cursor.
+func (rw *AOFRewriter) writeArray(w *bufio.Writer, key string, v *store.ArrayValue) error {
+	v.RLock()
+	defer v.RUnlock()
+	ar := v.Array()
+	args := []string{key}
+	var err error
+	flush := func() {
+		if err == nil && len(args) > 1 {
+			err = rw.writeCommand(w, "ARMSET", args...)
+		}
+		args = args[:1]
+	}
+	ar.Scan(0, math.MaxUint64-1, func(idx uint64, s string) bool {
+		args = append(args, strconv.FormatUint(idx, 10), s)
+		if len(args) == 1+rewriteItemsPerCommand {
+			flush()
+		}
+		return err == nil
+	})
+	flush()
+	if err != nil {
+		return err
+	}
+	if ar.InsertIdx != sparsearray.InsertIdxNone {
+		return rw.writeCommand(w, "ARSEEK", key, strconv.FormatUint(ar.InsertIdx+1, 10))
+	}
+	return nil
+}
+
 // writeStreamIDMP re-emits a stream's IDMP state as Redis rewrites it:
 // XCFGSET when its settings are not the server's defaults, then one
 // XIDMPRECORD per remembered iid whose entry is still in the stream. The
@@ -1169,6 +1203,9 @@ func (rw *AOFRewriter) writeValueCommands(w *bufio.Writer, key string, value sto
 
 	case *store.JSONValue:
 		return rw.writeCommand(w, "JSON.SET", key, "$", string(vt.Bytes()))
+
+	case *store.ArrayValue:
+		return rw.writeArray(w, key, vt)
 
 	case *store.StreamValue:
 		vt.RLock()

@@ -1,11 +1,11 @@
-package command
+package fpconv
 
 import (
 	"strconv"
 	"testing"
 )
 
-func TestFormatZScoreMatchesRedisGrisu(t *testing.T) {
+func TestDtoaMatchesRedisGrisu(t *testing.T) {
 	// Replies of Redis 7.4's ZSCORE for these scores.
 	for in, want := range map[string]string{
 		"0.04780121730387921":      "0.047801217303879207",
@@ -22,8 +22,8 @@ func TestFormatZScoreMatchesRedisGrisu(t *testing.T) {
 		"-1.2345678901234567e-123": "-1.2345678901234567e-123",
 	} {
 		f, _ := strconv.ParseFloat(in, 64)
-		if got := formatZScore(f); got != want {
-			t.Errorf("formatZScore(%s) = %s, want %s", in, got, want)
+		if got := Dtoa(f); got != want {
+			t.Errorf("Dtoa(%s) = %s, want %s", in, got, want)
 		}
 	}
 }

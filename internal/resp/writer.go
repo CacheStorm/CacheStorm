@@ -152,6 +152,10 @@ func (w *Writer) WriteValue(v *Value) error {
 		}
 		return w.WriteError(v.Err)
 	case TypeInteger:
+		if v.Str != "" {
+			_, err := w.wr.WriteString(":" + v.Str + "\r\n")
+			return err
+		}
 		return w.WriteInteger(v.Int)
 	case TypeBulkString:
 		if v.IsNull {

@@ -50,6 +50,8 @@ type configParam struct {
 	// strict reads an integer as Redis' string2ll does, as module
 	// parameters are read: no sign but '-' and no leading zeros.
 	strict bool
+	// checkInt validates a cfgInt value beyond its range.
+	checkInt func(v int64) string
 }
 
 const defaultOutputBufferLimit = "normal 0 0 0 slave 268435456 67108864 60 pubsub 33554432 8388608 60"
@@ -102,6 +104,9 @@ var configParams = map[string]*configParam{
 	"cluster-allow-reads-when-down":        boolParam("no"),
 	"cluster-slot-stats-enabled":           {kind: cfgBool, def: "no", applyText: func(v string) { slotStatsEnabled.Store(v == "yes") }},
 	"cluster-compatibility-sample-ratio":   {kind: cfgInt, def: "0", lo: 0, hi: 100, apply: clusterCompatRatio.Store},
+	"array-slice-size":                     {kind: cfgInt, def: "4096", lo: 256, hi: 65536, apply: store.SetArraySliceSize, checkInt: checkArraySliceSize},
+	"array-sparse-kmax":                    {kind: cfgInt, def: "10", lo: 0, hi: 256, apply: store.SetArraySparseKMax, checkInt: checkArraySparseKMax},
+	"array-sparse-kmin":                    {kind: cfgInt, def: "5", lo: 0, hi: 256, apply: store.SetArraySparseKMin, checkInt: checkArraySparseKMin},
 	"stream-idmp-duration":                 {kind: cfgInt, def: "100", lo: 1, hi: 86400, apply: store.SetIDMPDefaultDuration},
 	"stream-idmp-maxsize":                  {kind: cfgInt, def: "100", lo: 1, hi: 10000, apply: store.SetIDMPDefaultMaxSize},
 	"cluster-bus-port-protected-mode":      boolParam("no"),
@@ -301,6 +306,11 @@ func (c *Config) setParamLocked(name, value string, p *configParam) error {
 		v, err := ParseConfigInt(name, value, p.lo, p.hi)
 		if err != nil {
 			return err
+		}
+		if p.checkInt != nil {
+			if msg := p.checkInt(v); msg != "" {
+				return ConfigSetError(name, msg)
+			}
 		}
 		n, shown = v, strconv.FormatInt(v, 10)
 	case cfgMemory:
@@ -610,4 +620,27 @@ func checkOutputBufferLimit(name, value string) (string, error) {
 		out = append(out, class, l[0], l[1], l[2])
 	}
 	return strings.Join(out, " "), nil
+}
+
+// The array-* configs' checks, Redis' isValidArraySliceSize,
+// isValidArraySparseKmax and isValidArraySparseKmin.
+func checkArraySliceSize(v int64) string {
+	if v&(v-1) != 0 {
+		return "array-slice-size must be a power of two"
+	}
+	return ""
+}
+
+func checkArraySparseKMax(v int64) string {
+	if _, _, kmin := store.ArrayConfig(); v != 0 && v <= kmin {
+		return "array-sparse-kmax must be greater than array-sparse-kmin when non-zero"
+	}
+	return ""
+}
+
+func checkArraySparseKMin(v int64) string {
+	if _, kmax, _ := store.ArrayConfig(); kmax != 0 && v >= kmax {
+		return "array-sparse-kmin must be less than array-sparse-kmax"
+	}
+	return ""
 }

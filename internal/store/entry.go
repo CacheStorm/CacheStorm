@@ -26,6 +26,7 @@ const (
 	DataTypeTDigest
 	DataTypeSuggest
 	DataTypeVectorSet
+	DataTypeArray
 )
 
 func (dt DataType) String() string {
@@ -62,6 +63,8 @@ func (dt DataType) String() string {
 		return "trietype0"
 	case DataTypeVectorSet:
 		return "vectorset"
+	case DataTypeArray:
+		return "array"
 	default:
 		return "unknown"
 	}

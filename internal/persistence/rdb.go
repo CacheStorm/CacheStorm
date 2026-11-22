@@ -1145,8 +1145,6 @@ func (r *RDBReader) readRedisEntry(f io.Reader, valueType byte, expiresAtMS, idl
 		return fmt.Errorf("RDB module values are not supported (key %q)", key)
 	case 22, 23:
 		return fmt.Errorf("pre-GA hash field expiration format not supported (key %q)", key)
-	case 28:
-		return fmt.Errorf("array values (Redis 8.8) are not supported (key %q)", key)
 	case 29, 30, 31, 32:
 		return fmt.Errorf("template hashes of Redis 8.10 (HIMPORT) are not supported (key %q)", key)
 	default:
