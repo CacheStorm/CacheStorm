@@ -232,7 +232,7 @@ func appendDumpStream(out []byte, v *store.StreamValue) []byte {
 			ms(c.ActiveTime)
 			owned := 0
 			for _, p := range pel {
-				if p.Consumer == cname {
+				if p.Consumer == cname && !p.IsNacked() {
 					owned++
 				}
 			}

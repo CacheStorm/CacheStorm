@@ -944,6 +944,9 @@ func (rw *AOFRewriter) writeStreamConsumers(w *bufio.Writer, key, name string, g
 	}
 	rows := make([]pendingRow, 0, len(group.Pending))
 	for _, p := range group.Pending {
+		if p.IsNacked() {
+			continue
+		}
 		id, err := store.ParseStreamID(p.ID, 0)
 		if err != nil {
 			continue
@@ -958,6 +961,28 @@ func (rw *AOFRewriter) writeStreamConsumers(w *bufio.Writer, key, name string, g
 			"JUSTID", "FORCE"); err != nil {
 			return err
 		}
+	}
+	return rw.writeStreamNacked(w, key, name, group.NackedEntriesLocked())
+}
+
+// writeStreamNacked re-creates the entries XNACK released, in the order it
+// released them, as Redis does: one XNACK FORCE per run of up to 64
+// entries with the same delivery count.
+func (rw *AOFRewriter) writeStreamNacked(w *bufio.Writer, key, name string, nacked []*store.PendingEntry) error {
+	for start := 0; start < len(nacked); {
+		end := start + 1
+		for end < len(nacked) && end-start < rewriteItemsPerCommand && nacked[end].Deliveries == nacked[start].Deliveries {
+			end++
+		}
+		args := []string{key, name, "FAIL", "IDS", strconv.Itoa(end - start)}
+		for _, p := range nacked[start:end] {
+			args = append(args, p.ID)
+		}
+		args = append(args, "RETRYCOUNT", strconv.FormatInt(nacked[start].Deliveries, 10), "FORCE")
+		if err := rw.writeCommand(w, "XNACK", args...); err != nil {
+			return err
+		}
+		start = end
 	}
 	return nil
 }

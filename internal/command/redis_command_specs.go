@@ -232,6 +232,7 @@ var redisCommandSpecs = map[string]commandSpec{
 	"XGROUP":               {Arity: -2, Flags: []string{}, FirstKey: 0, LastKey: 0, KeyStep: 0, Categories: []string{"slow"}},
 	"XINFO":                {Arity: -2, Flags: []string{}, FirstKey: 0, LastKey: 0, KeyStep: 0, Categories: []string{"slow"}},
 	"XLEN":                 {Arity: 2, Flags: []string{"readonly", "fast"}, FirstKey: 1, LastKey: 1, KeyStep: 1, Categories: []string{"read", "stream", "fast"}},
+	"XNACK":                {Arity: -7, Flags: []string{"write", "fast"}, FirstKey: 1, LastKey: 1, KeyStep: 1, Categories: []string{"write", "stream", "fast"}},
 	"XPENDING":             {Arity: -3, Flags: []string{"readonly"}, FirstKey: 1, LastKey: 1, KeyStep: 1, Categories: []string{"read", "stream", "slow"}},
 	"XRANGE":               {Arity: -4, Flags: []string{"readonly"}, FirstKey: 1, LastKey: 1, KeyStep: 1, Categories: []string{"read", "stream", "slow"}},
 	"XREAD":                {Arity: -4, Flags: []string{"readonly", "blocking", "movablekeys"}, FirstKey: 0, LastKey: 0, KeyStep: 0, Categories: []string{"read", "stream", "slow", "blocking"}},

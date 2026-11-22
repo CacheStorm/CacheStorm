@@ -34,6 +34,7 @@ func RegisterStreamCommands(router *Router) {
 	router.Register(&CommandDef{Name: "XGROUP", Handler: cmdXGROUP})
 	router.Register(&CommandDef{Name: "XREADGROUP", Handler: cmdXREADGROUP})
 	router.Register(&CommandDef{Name: "XACK", Handler: cmdXACK})
+	router.Register(&CommandDef{Name: "XNACK", Handler: cmdXNACK})
 	router.Register(&CommandDef{Name: "XPENDING", Handler: cmdXPENDING})
 	router.Register(&CommandDef{Name: "XCLAIM", Handler: cmdXCLAIM})
 	router.Register(&CommandDef{Name: "XAUTOCLAIM", Handler: cmdXAUTOCLAIM})
@@ -485,6 +486,32 @@ func readGroupEffects(ctx *Context, key, group, consumer string, now int64, noac
 		}})
 	}
 	return cmds
+}
+
+// claimEffectCommands is how XCLAIM and XAUTOCLAIM reach replicas and the
+// AOF, as Redis sends them: one XCLAIM per entry with its delivery time and
+// count spelled out, so a replica or a later AOF load does not judge idle
+// times again, and an XACK for a released entry deleted from the stream.
+func claimEffectCommands(ctx *Context, key, group, lastID string, effects []store.StreamClaimEffect) []ExecutedCommand {
+	cmds := make([]ExecutedCommand, 0, len(effects))
+	for _, e := range effects {
+		if e.Released {
+			if e.Deleted {
+				cmds = append(cmds, ExecutedCommand{Name: "XACK", DB: ctx.DB, Args: cmdArgs(key, group, e.ID.String())})
+			}
+			continue
+		}
+		cmds = append(cmds, ExecutedCommand{Name: "XCLAIM", DB: ctx.DB, Args: cmdArgs(
+			key, group, e.Consumer, "0", e.ID.String(),
+			"TIME", strconv.FormatInt(e.DeliveryTS, 10),
+			"RETRYCOUNT", strconv.FormatInt(e.Deliveries, 10),
+			"FORCE", "JUSTID", "LASTID", lastID)})
+	}
+	return cmds
+}
+
+func createConsumerCommand(ctx *Context, key, group, consumer string) ExecutedCommand {
+	return ExecutedCommand{Name: "XGROUP", DB: ctx.DB, Args: cmdArgs("CREATECONSUMER", key, group, consumer)}
 }
 
 func cmdXREAD(ctx *Context) error      { return xreadGeneric(ctx, false) }
@@ -1142,7 +1169,8 @@ func cmdXINFO(ctx *Context) error {
 	case "GROUPS":
 		groups := stream.GroupsInfo()
 		out := make([]*resp.Value, 0, len(groups))
-		for _, g := range groups {
+		for i := range groups {
+			g := &groups[i]
 			out = append(out, resp.PairsValue([]*resp.Value{
 				resp.BulkString("name"), resp.BulkString(g.Name),
 				resp.BulkString("consumers"), resp.IntegerValue(g.Consumers),
@@ -1203,7 +1231,8 @@ func cmdXINFO(ctx *Context) error {
 		return ctx.WriteValue(resp.PairsValue(out))
 	}
 	groups := make([]*resp.Value, 0, len(info.GroupInfos))
-	for _, g := range info.GroupInfos {
+	for i := range info.GroupInfos {
+		g := &info.GroupInfos[i]
 		pel := make([]*resp.Value, 0, len(g.PEL))
 		for _, p := range g.PEL {
 			pel = append(pel, resp.ArrayValue([]*resp.Value{
@@ -1233,6 +1262,7 @@ func cmdXINFO(ctx *Context) error {
 			resp.BulkString("entries-read"), entriesReadValue(g.EntriesRead),
 			resp.BulkString("lag"), lagValue(g),
 			resp.BulkString("pel-count"), resp.IntegerValue(g.Pending),
+			resp.BulkString("nacked-count"), resp.IntegerValue(g.Nacked),
 			resp.BulkString("pending"), resp.ArrayValue(pel),
 			resp.BulkString("consumers"), resp.ArrayValue(consumers),
 		}))
@@ -1251,7 +1281,7 @@ func entriesReadValue(n int64) *resp.Value {
 	return resp.IntegerValue(n)
 }
 
-func lagValue(g store.StreamGroupInfo) *resp.Value {
+func lagValue(g *store.StreamGroupInfo) *resp.Value {
 	if !g.LagValid {
 		return resp.NullBulkString()
 	}
@@ -1514,6 +1544,9 @@ func cmdXPENDING(ctx *Context) error {
 		if idle < 0 {
 			idle = 0
 		}
+		if r.IsNacked() {
+			idle = -1
+		}
 		out = append(out, resp.ArrayValue([]*resp.Value{
 			resp.BulkString(r.ID), resp.BulkString(r.Consumer),
 			resp.IntegerValue(idle), resp.IntegerValue(r.Deliveries),
@@ -1599,14 +1632,23 @@ func cmdXCLAIM(ctx *Context) error {
 	}
 
 	knownConsumer := !ctx.Store.Notifying(store.NotifyStream) || stream.HasConsumer(groupName, consumerName)
-	items, ok := stream.ClaimIDs(groupName, consumerName, ids, args, now)
+	r, ok := stream.ClaimIDs(groupName, consumerName, ids, args, now)
 	if !ok {
 		return ctx.WriteError(errNoGroupFor(key, groupName))
 	}
 	if !knownConsumer && stream.HasConsumer(groupName, consumerName) {
 		ctx.notify(store.NotifyStream, "xgroup-createconsumer", key)
 	}
-	return ctx.WriteValue(streamItemsValue(items, args.JustID))
+	cmds := claimEffectCommands(ctx, key, groupName, r.LastID, r.Effects)
+	if r.LastIDMoved && len(cmds) == 0 {
+		cmds = append(cmds, ExecutedCommand{Name: "XGROUP", DB: ctx.DB, Args: cmdArgs(
+			"SETID", key, groupName, r.LastID, "ENTRIESREAD", strconv.FormatInt(r.EntriesRead, 10))})
+	}
+	if r.ConsumerCreated && len(r.Items) == 0 {
+		cmds = append([]ExecutedCommand{createConsumerCommand(ctx, key, groupName, consumerName)}, cmds...)
+	}
+	ctx.PropagateAs(cmds...)
+	return ctx.WriteValue(streamItemsValue(r.Items, args.JustID))
 }
 
 func cmdXAUTOCLAIM(ctx *Context) error {
@@ -1653,20 +1695,25 @@ func cmdXAUTOCLAIM(ctx *Context) error {
 		return ctx.WriteError(errNoGroupFor(key, groupName))
 	}
 	knownConsumer := !ctx.Store.Notifying(store.NotifyStream) || stream.HasConsumer(groupName, consumerName)
-	next, items, deleted, ok := stream.AutoClaim(groupName, consumerName, start, minIdle, count, justID, time.Now().UnixMilli())
+	r, ok := stream.AutoClaim(groupName, consumerName, start, minIdle, count, justID, time.Now().UnixMilli())
 	if !ok {
 		return ctx.WriteError(errNoGroupFor(key, groupName))
 	}
 	if !knownConsumer && stream.HasConsumer(groupName, consumerName) {
 		ctx.notify(store.NotifyStream, "xgroup-createconsumer", key)
 	}
-	deletedVals := make([]*resp.Value, 0, len(deleted))
-	for _, id := range deleted {
+	cmds := claimEffectCommands(ctx, key, groupName, r.LastID, r.Effects)
+	if r.ConsumerCreated && len(r.Items) == 0 {
+		cmds = append([]ExecutedCommand{createConsumerCommand(ctx, key, groupName, consumerName)}, cmds...)
+	}
+	ctx.PropagateAs(cmds...)
+	deletedVals := make([]*resp.Value, 0, len(r.Deleted))
+	for _, id := range r.Deleted {
 		deletedVals = append(deletedVals, resp.BulkString(id.String()))
 	}
 	return ctx.WriteArray([]*resp.Value{
-		resp.BulkString(next.String()),
-		streamItemsValue(items, justID),
+		resp.BulkString(r.Next.String()),
+		streamItemsValue(r.Items, justID),
 		resp.ArrayValue(deletedVals),
 	})
 }

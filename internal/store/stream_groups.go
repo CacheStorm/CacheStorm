@@ -207,7 +207,7 @@ func (v *StreamValue) ReadGroupWith(groupName, consumerName string, o ReadGroupO
 
 	if o.History {
 		for _, p := range g.sortedPendingLocked() {
-			if p.Consumer != consumerName {
+			if !p.ownedBy(consumerName) {
 				continue
 			}
 			id := streamIDOf(p.ID)
@@ -244,16 +244,8 @@ func (v *StreamValue) ReadGroupWith(groupName, consumerName string, o ReadGroupO
 				continue
 			}
 			item := StreamGroupItem{ID: id, Entry: e, Idle: idle, Deliveries: p.Deliveries, Claimed: true, Pending: true}
-			if p.Consumer != consumerName {
-				if old, ok := g.Consumers[p.Consumer]; ok {
-					old.Pending--
-				}
-				p.Consumer = consumerName
-				c.Pending++
-			}
-			if p.Deliveries != math.MaxInt64 {
-				p.Deliveries++
-			}
+			g.handOverLocked(p, consumerName, c)
+			p.bumpDeliveries()
 			g.stampLocked(p, now)
 			c.ActiveTime = now
 			item.DeliveredCount = p.Deliveries
@@ -341,7 +333,9 @@ func (v *StreamValue) PendingSummary(groupName string) (StreamPendingSummary, bo
 	out.Min, out.Max = pel[0].ID, pel[len(pel)-1].ID
 	counts := make(map[string]int64)
 	for _, p := range pel {
-		counts[p.Consumer]++
+		if !p.nacked {
+			counts[p.Consumer]++
+		}
 	}
 	for name, n := range counts {
 		out.Consumers = append(out.Consumers, StreamConsumerCount{Name: name, Count: n})
@@ -378,10 +372,10 @@ func (v *StreamValue) PendingRange(groupName string, start, end StreamID, count,
 		if end.Less(id) {
 			break
 		}
-		if byConsumer && p.Consumer != consumer {
+		if byConsumer && !p.ownedBy(consumer) {
 			continue
 		}
-		if minIdle > 0 && now-p.DeliveryTS < minIdle {
+		if !p.nacked && minIdle > 0 && now-p.DeliveryTS < minIdle {
 			continue
 		}
 		rows = append(rows, *p)
@@ -403,20 +397,51 @@ type StreamClaimArgs struct {
 	LastID     StreamID
 }
 
+// StreamClaimEffect is one change XCLAIM or XAUTOCLAIM made to the PEL, as
+// replicas and the AOF are told of it: the entry's holder, delivery time
+// and count afterwards, or, for an entry deleted from the stream, before
+// it left the PEL. Released marks an entry XNACK had released.
+type StreamClaimEffect struct {
+	ID         StreamID
+	Consumer   string
+	DeliveryTS int64
+	Deliveries int64
+	Released   bool
+	Deleted    bool
+}
+
+func claimEffect(id StreamID, p *PendingEntry, deleted bool) StreamClaimEffect {
+	return StreamClaimEffect{ID: id, Consumer: p.Consumer, DeliveryTS: p.DeliveryTS, Deliveries: p.Deliveries, Released: p.nacked, Deleted: deleted}
+}
+
+// StreamClaimResult is what XCLAIM did: the entries to reply with, the PEL
+// changes, the group's last delivered ID and read counter afterwards and
+// whether LASTID moved them, and whether the consumer was created.
+type StreamClaimResult struct {
+	Items           []StreamGroupItem
+	Effects         []StreamClaimEffect
+	LastID          string
+	EntriesRead     int64
+	LastIDMoved     bool
+	ConsumerCreated bool
+}
+
 // ClaimIDs is XCLAIM: it moves pending entries to consumer. Pending entries
 // whose stream entry was deleted are dropped from the PEL.
-func (v *StreamValue) ClaimIDs(groupName, consumerName string, ids []StreamID, a StreamClaimArgs, now int64) ([]StreamGroupItem, bool) {
+func (v *StreamValue) ClaimIDs(groupName, consumerName string, ids []StreamID, a StreamClaimArgs, now int64) (StreamClaimResult, bool) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	g, ok := v.Groups[groupName]
 	if !ok {
-		return nil, false
+		return StreamClaimResult{}, false
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
+	var r StreamClaimResult
 	if streamIDOf(g.LastID).Less(a.LastID) {
 		g.LastID = a.LastID.String()
+		r.LastIDMoved = true
 	}
 	deliveryTS := a.DeliveryTS
 	if deliveryTS < 0 || deliveryTS > now {
@@ -424,6 +449,8 @@ func (v *StreamValue) ClaimIDs(groupName, consumerName string, ids []StreamID, a
 	}
 
 	// Redis 7.4 creates the consumer even when nothing is claimed.
+	_, known := g.Consumers[consumerName]
+	r.ConsumerCreated = !known
 	c := g.consumerLocked(consumerName, now)
 	items := make([]StreamGroupItem, 0, len(ids))
 	for _, id := range ids {
@@ -432,6 +459,7 @@ func (v *StreamValue) ClaimIDs(groupName, consumerName string, ids []StreamID, a
 		e := v.entryLocked(id)
 		if e == nil {
 			if p != nil {
+				r.Effects = append(r.Effects, claimEffect(id, p, true))
 				g.ackLocked(key)
 			}
 			continue
@@ -445,39 +473,39 @@ func (v *StreamValue) ClaimIDs(groupName, consumerName string, ids []StreamID, a
 			g.Pending[key] = p
 			created = true
 		}
-		if !created && a.MinIdle > 0 && now-p.DeliveryTS < a.MinIdle {
+		if !created && !p.nacked && a.MinIdle > 0 && now-p.DeliveryTS < a.MinIdle {
 			continue
 		}
-		if created || p.Consumer != consumerName {
-			if !created {
-				if old, exists := g.Consumers[p.Consumer]; exists {
-					old.Pending--
-				}
-			}
+		if created {
 			p.Consumer = consumerName
 			c.Pending++
+		} else {
+			g.handOverLocked(p, consumerName, c)
 		}
 		g.stampLocked(p, deliveryTS)
 		if a.RetryCount >= 0 {
 			p.Deliveries = a.RetryCount
 		} else if !a.JustID {
-			p.Deliveries++
+			p.bumpDeliveries()
 		}
 		c.ActiveTime = now
 		items = append(items, StreamGroupItem{ID: id, Entry: e})
+		r.Effects = append(r.Effects, claimEffect(id, p, false))
 	}
-	return items, true
+	r.Items = items
+	r.LastID, r.EntriesRead = g.LastID, g.EntriesRead
+	return r, true
 }
 
 // AutoClaim is XAUTOCLAIM. It scans the PEL from start, claims entries idle
 // for at least minIdle, drops entries deleted from the stream and returns the
 // cursor for the next call (0-0 when the scan reached the end).
-func (v *StreamValue) AutoClaim(groupName, consumerName string, start StreamID, minIdle, count int64, justID bool, now int64) (StreamID, []StreamGroupItem, []StreamID, bool) {
+func (v *StreamValue) AutoClaim(groupName, consumerName string, start StreamID, minIdle, count int64, justID bool, now int64) (StreamAutoClaimResult, bool) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	g, ok := v.Groups[groupName]
 	if !ok {
-		return StreamID{}, nil, nil, false
+		return StreamAutoClaimResult{}, false
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -485,6 +513,8 @@ func (v *StreamValue) AutoClaim(groupName, consumerName string, start StreamID, 
 	pel := g.sortedPendingLocked()
 	i := sort.Search(len(pel), func(i int) bool { return streamIDOf(pel[i].ID).Compare(start) >= 0 })
 	attempts := count * 10
+	_, known := g.Consumers[consumerName]
+	r := StreamAutoClaimResult{ConsumerCreated: !known, LastID: g.LastID}
 	c := g.consumerLocked(consumerName, now)
 	items := []StreamGroupItem{}
 	deleted := []StreamID{}
@@ -495,34 +525,43 @@ func (v *StreamValue) AutoClaim(groupName, consumerName string, start StreamID, 
 		id := streamIDOf(p.ID)
 		e := v.entryLocked(id)
 		if e == nil {
+			r.Effects = append(r.Effects, claimEffect(id, p, true))
 			g.ackLocked(p.ID)
 			deleted = append(deleted, id)
 			count--
 			continue
 		}
-		if minIdle > 0 && now-p.DeliveryTS < minIdle {
+		if !p.nacked && minIdle > 0 && now-p.DeliveryTS < minIdle {
 			continue
 		}
-		if p.Consumer != consumerName {
-			if old, exists := g.Consumers[p.Consumer]; exists {
-				old.Pending--
-			}
-			p.Consumer = consumerName
-			c.Pending++
-		}
+		g.handOverLocked(p, consumerName, c)
 		g.stampLocked(p, now)
 		if !justID {
-			p.Deliveries++
+			p.bumpDeliveries()
 		}
 		c.ActiveTime = now
 		items = append(items, StreamGroupItem{ID: id, Entry: e})
+		r.Effects = append(r.Effects, claimEffect(id, p, false))
 		count--
 	}
-	next := StreamID{}
 	if i < len(pel) {
-		next = streamIDOf(pel[i].ID)
+		r.Next = streamIDOf(pel[i].ID)
 	}
-	return next, items, deleted, true
+	r.Items, r.Deleted = items, deleted
+	return r, true
+}
+
+// StreamAutoClaimResult is what XAUTOCLAIM did: the cursor for the next
+// call, the claimed entries, the IDs dropped as deleted from the stream,
+// the PEL changes, the group's last delivered ID and whether the consumer
+// was created.
+type StreamAutoClaimResult struct {
+	Next            StreamID
+	Items           []StreamGroupItem
+	Deleted         []StreamID
+	Effects         []StreamClaimEffect
+	LastID          string
+	ConsumerCreated bool
 }
 
 // CreateGroupAt is XGROUP CREATE; useLast starts the group at the stream's
@@ -597,7 +636,7 @@ func (v *StreamValue) DeleteConsumer(groupName, name string) (int64, bool) {
 	}
 	pending := int64(0)
 	for id, p := range g.Pending {
-		if p.Consumer == name {
+		if p.ownedBy(name) {
 			delete(g.Pending, id)
 			pending++
 		}
@@ -650,6 +689,7 @@ type StreamGroupInfo struct {
 	Name        string
 	Consumers   int64
 	Pending     int64
+	Nacked      int64
 	LastID      string
 	EntriesRead int64
 	Lag         int64
@@ -675,7 +715,7 @@ type StreamInfo struct {
 func limitPending(pel []*PendingEntry, count int64, consumer string, byConsumer bool) []PendingEntry {
 	out := []PendingEntry{}
 	for _, p := range pel {
-		if byConsumer && p.Consumer != consumer {
+		if byConsumer && !p.ownedBy(consumer) {
 			continue
 		}
 		if count > 0 && int64(len(out)) >= count {
@@ -693,6 +733,7 @@ func (v *StreamValue) groupInfoLocked(g *ConsumerGroup, full bool, count int64) 
 		Name:        g.Name,
 		Consumers:   int64(len(g.Consumers)),
 		Pending:     int64(len(g.Pending)),
+		Nacked:      g.nackedCountLocked(),
 		LastID:      streamIDOf(g.LastID).String(),
 		EntriesRead: g.EntriesRead,
 	}
@@ -787,7 +828,9 @@ func (v *StreamValue) ConsumersInfo(groupName string) ([]StreamConsumerInfo, boo
 	defer g.mu.RUnlock()
 	counts := make(map[string]int64)
 	for _, p := range g.Pending {
-		counts[p.Consumer]++
+		if !p.nacked {
+			counts[p.Consumer]++
+		}
 	}
 	out := []StreamConsumerInfo{}
 	for name, c := range g.Consumers {
@@ -795,4 +838,57 @@ func (v *StreamValue) ConsumersInfo(groupName string) ([]StreamConsumerInfo, boo
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, true
+}
+
+// XNACK modes: how releasing an entry changes its delivery count.
+const (
+	NackSilent = iota
+	NackFail
+	NackFatal
+)
+
+// Nack is XNACK: each pending entry among ids loses its consumer and moves
+// to the end of the NACK zone, the head of the PEL's time order, so the next
+// XREADGROUP CLAIM takes it first. SILENT takes the delivery back, FAIL
+// keeps the count and FATAL raises it to the maximum; a retryCount of 0 or
+// more sets it instead. force creates the entry for an ID in the stream
+// that no consumer was delivered. It returns how many entries it released,
+// and false when the group does not exist.
+func (v *StreamValue) Nack(groupName string, ids []StreamID, mode int, retryCount int64, force bool) (int64, bool) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	g, ok := v.Groups[groupName]
+	if !ok {
+		return 0, false
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	released := int64(0)
+	for _, id := range ids {
+		key := id.String()
+		p := g.Pending[key]
+		if p == nil {
+			if !force || v.entryLocked(id) == nil {
+				continue
+			}
+			p = &PendingEntry{ID: key}
+			g.Pending[key] = p
+		} else {
+			g.releaseLocked(p)
+		}
+		switch {
+		case retryCount >= 0:
+			p.Deliveries = retryCount
+		case mode == NackSilent:
+			if p.Deliveries > 0 {
+				p.Deliveries--
+			}
+		case mode == NackFatal:
+			p.Deliveries = math.MaxInt64
+		}
+		g.pelSeq++
+		p.Consumer, p.DeliveryTS, p.seq, p.nacked = "", 0, g.pelSeq, true
+		released++
+	}
+	return released, true
 }

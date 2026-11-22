@@ -2,6 +2,7 @@ package store
 
 import (
 	"encoding/binary"
+	"math"
 	"sort"
 	"sync"
 	"time"
@@ -108,17 +109,71 @@ func (g *ConsumerGroup) MarkLoadedNacked(id string) bool {
 // it released them. The caller holds the group's lock.
 func (g *ConsumerGroup) NackedLocked() []string {
 	var out []string
+	for _, p := range g.NackedEntriesLocked() {
+		out = append(out, p.ID)
+	}
+	return out
+}
+
+// NackedEntriesLocked returns the entries XNACK released, in the order it
+// released them. The caller holds the group's lock.
+func (g *ConsumerGroup) NackedEntriesLocked() []*PendingEntry {
+	var out []*PendingEntry
 	for _, p := range g.timeOrderLocked() {
 		if !p.nacked {
 			break
 		}
-		out = append(out, p.ID)
+		out = append(out, p)
 	}
 	return out
 }
 
 // IsNacked reports whether the PEL entry was released by XNACK.
 func (p *PendingEntry) IsNacked() bool { return p.nacked }
+
+// ownedBy reports whether consumer name holds p; an entry XNACK released
+// has no holder.
+func (p *PendingEntry) ownedBy(name string) bool { return !p.nacked && p.Consumer == name }
+
+// releaseLocked takes p away from the consumer holding it, if any.
+func (g *ConsumerGroup) releaseLocked(p *PendingEntry) {
+	if p.nacked {
+		return
+	}
+	if c, ok := g.Consumers[p.Consumer]; ok {
+		c.Pending--
+	}
+}
+
+// handOverLocked gives p to consumer c, named name, taking it from its
+// holder. It leaves the delivery time to the caller.
+func (g *ConsumerGroup) handOverLocked(p *PendingEntry, name string, c *Consumer) {
+	if p.ownedBy(name) {
+		return
+	}
+	g.releaseLocked(p)
+	p.Consumer, p.nacked = name, false
+	c.Pending++
+}
+
+// bumpDeliveries counts one more delivery, stopping at the largest count as
+// XNACK FATAL leaves it.
+func (p *PendingEntry) bumpDeliveries() {
+	if p.Deliveries != math.MaxInt64 {
+		p.Deliveries++
+	}
+}
+
+// nackedCountLocked is the number of entries XNACK released.
+func (g *ConsumerGroup) nackedCountLocked() int64 {
+	n := int64(0)
+	for _, p := range g.Pending {
+		if p.nacked {
+			n++
+		}
+	}
+	return n
+}
 
 // timeOrderLocked is the PEL oldest delivery first, as Redis 8.4's PEL time
 // list holds it for XREADGROUP CLAIM.
@@ -186,9 +241,7 @@ func (g *ConsumerGroup) AddPending(entryID, consumer string) {
 // the entry away from any consumer that held it.
 func (g *ConsumerGroup) addPendingLocked(entryID, consumer string, now int64) {
 	if previous, exists := g.Pending[entryID]; exists {
-		if c, exists := g.Consumers[previous.Consumer]; exists {
-			c.Pending--
-		}
+		g.releaseLocked(previous)
 	}
 	p := &PendingEntry{ID: entryID, Consumer: consumer, Deliveries: 1}
 	g.stampLocked(p, now)
@@ -206,9 +259,7 @@ func (g *ConsumerGroup) Ack(entryID string) bool {
 
 func (g *ConsumerGroup) ackLocked(entryID string) bool {
 	if p, exists := g.Pending[entryID]; exists {
-		if c, exists := g.Consumers[p.Consumer]; exists {
-			c.Pending--
-		}
+		g.releaseLocked(p)
 		delete(g.Pending, entryID)
 		return true
 	}
@@ -266,26 +317,23 @@ func (g *ConsumerGroup) claimLocked(entryIDs []string, newConsumer string, opts 
 			g.Pending[id] = p
 			forced = true
 		}
-		if !forced && opts.MinIdleTime > 0 && now-p.DeliveryTS < opts.MinIdleTime {
+		if !forced && !p.nacked && opts.MinIdleTime > 0 && now-p.DeliveryTS < opts.MinIdleTime {
 			continue
 		}
 		if c == nil {
 			c = g.consumerLocked(newConsumer, now)
 		}
-		if !forced && p.Consumer != newConsumer {
-			if old, ok := g.Consumers[p.Consumer]; ok {
-				old.Pending--
-			}
+		if forced {
+			p.Consumer = newConsumer
+			c.Pending++
+		} else {
+			g.handOverLocked(p, newConsumer, c)
 		}
 		g.stampLocked(p, deliveryTS)
 		if opts.SetRetry {
 			p.Deliveries = opts.RetryCount
 		} else if !opts.JustID {
-			p.Deliveries++
-		}
-		if forced || p.Consumer != newConsumer {
-			p.Consumer = newConsumer
-			c.Pending++
+			p.bumpDeliveries()
 		}
 		c.ActiveTime = now
 		claimed = append(claimed, id)

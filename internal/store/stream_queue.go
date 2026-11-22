@@ -29,15 +29,9 @@ func (v *StreamValue) TakeForGroup(groupName, consumer string, redeliver func(Pe
 			continue
 		}
 		c := g.consumerLocked(consumer, now)
-		if pe.Consumer != consumer {
-			if old, exists := g.Consumers[pe.Consumer]; exists {
-				old.Pending--
-			}
-			pe.Consumer = consumer
-			c.Pending++
-		}
+		g.handOverLocked(pe, consumer, c)
 		g.stampLocked(pe, now)
-		pe.Deliveries++
+		pe.bumpDeliveries()
 		c.ActiveTime, c.SeenTime = now, now
 		return StreamGroupItem{ID: id, Entry: e}, *pe, 0, true, true, true
 	}
@@ -82,13 +76,7 @@ func (v *StreamValue) MovePendingIf(groupName string, id StreamID, now int64, de
 		return "", 0, false
 	}
 	c := g.consumerLocked(consumer, now)
-	if pe.Consumer != consumer {
-		if old, exists := g.Consumers[pe.Consumer]; exists {
-			old.Pending--
-		}
-		pe.Consumer = consumer
-		c.Pending++
-	}
+	g.handOverLocked(pe, consumer, c)
 	g.stampLocked(pe, now)
 	pe.Deliveries = deliveries
 	c.ActiveTime = now

@@ -441,7 +441,7 @@ func slicesContainsAny(flags []string, want ...string) bool {
 // streamGroupWrites change a stream's consumer groups or ID counters, not its
 // entries; Redis does not count them as modifying the key for WATCH.
 var streamGroupWrites = map[string]bool{
-	"XREADGROUP": true, "XCLAIM": true, "XAUTOCLAIM": true, "XACK": true, "XSETID": true,
+	"XREADGROUP": true, "XCLAIM": true, "XAUTOCLAIM": true, "XACK": true, "XSETID": true, "XNACK": true,
 }
 
 // watchedKeysBefore records, while a key is watched, which keys a write
