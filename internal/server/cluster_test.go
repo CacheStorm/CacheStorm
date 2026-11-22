@@ -109,7 +109,11 @@ func TestClusterSingleNode(t *testing.T) {
 	}
 	want := "cluster_state:ok\r\ncluster_slots_assigned:16384\r\ncluster_slots_ok:16384\r\ncluster_slots_pfail:0\r\ncluster_slots_fail:0\r\n" +
 		"cluster_known_nodes:1\r\ncluster_size:1\r\ncluster_current_epoch:0\r\ncluster_my_epoch:0\r\n" +
-		"cluster_stats_messages_sent:0\r\ncluster_stats_messages_received:0\r\ntotal_cluster_links_buffer_limit_exceeded:0\r\n"
+		"cluster_stats_messages_sent:0\r\ncluster_stats_messages_received:0\r\ntotal_cluster_links_buffer_limit_exceeded:0\r\n" +
+		"cluster_slot_migration_active_tasks:0\r\ncluster_slot_migration_active_trim_running:0\r\n" +
+		"cluster_slot_migration_active_trim_current_job_keys:0\r\ncluster_slot_migration_active_trim_current_job_trimmed:0\r\n" +
+		"cluster_slot_migration_stats_active_trim_started:0\r\ncluster_slot_migration_stats_active_trim_completed:0\r\n" +
+		"cluster_slot_migration_stats_active_trim_cancelled:0\r\n"
 	if got := c.str("CLUSTER", "INFO"); got != want {
 		t.Fatalf("CLUSTER INFO:\n%q\nwant\n%q", got, want)
 	}

@@ -47,7 +47,7 @@ var writeCommands = map[string]bool{
 	"DEL": true, "UNLINK": true, "RENAME": true, "RENAMENX": true, "EXPIRE": true, "EXPIREAT": true,
 	"PEXPIRE": true, "PEXPIREAT": true, "PERSIST": true,
 	"COPY": true, "MOVE": true, "MIGRATE": true, "RESTORE": true, "RESTORE-ASKING": true, "SORT": true,
-	"FLUSHALL": true, "FLUSHDB": true, "SWAPDB": true,
+	"FLUSHALL": true, "FLUSHDB": true, "SWAPDB": true, "TRIMSLOTS": true,
 	"HSET": true, "HSETNX": true, "HMSET": true, "HDEL": true, "HINCRBY": true, "HINCRBYFLOAT": true,
 	"HGETDEL": true, "HGETEX": true, "HSETEX": true, "HEXPIRE": true, "HPEXPIRE": true,
 	"HEXPIREAT": true, "HPEXPIREAT": true, "HPERSIST": true,
@@ -296,6 +296,7 @@ type Server struct {
 	gate              writeGate
 	snapshotMu        sync.Mutex
 	backup            *backupManager
+	asm               *asmManager
 	snapshotWG        sync.WaitGroup
 	snapshotRunning   bool
 	snapshotClosing   bool
@@ -375,6 +376,7 @@ func New(cfg *config.Config) (result *Server, retErr error) {
 		aofRewriteTook: -1,
 	}
 	s.backup = newBackupManager(s)
+	s.asm = newASMManager(s)
 
 	s.dataLease = lease
 	if lease != nil {
@@ -706,6 +708,7 @@ func (s *Server) installCommitHooks() {
 		if b := s.backup.recorder(); b != nil {
 			b.Append(db, upperCmd, args)
 		}
+		s.cancelSlotMigrationOnFlush(db, upperCmd)
 		ctx.AddSlotBytesOut(s.repl.Feed(db, upperCmd, args))
 		return nil
 	},
@@ -824,6 +827,9 @@ func (s *Server) Start(_ context.Context) (retErr error) {
 	if err := s.announceCluster(); err != nil {
 		listener.Close()
 		return fmt.Errorf("cluster: %w", err)
+	}
+	if s.router.Cluster() != nil {
+		go s.asm.run(s.stopCh)
 	}
 	defer func() {
 		if !startupComplete {
@@ -1055,6 +1061,7 @@ func (s *Server) Stop(ctx context.Context) error {
 	s.stopping.Store(true)
 	close(s.stopCh)
 	s.backup.stop()
+	s.asm.stop()
 
 	// 1. Stop accepting new connections
 	if s.listener != nil {

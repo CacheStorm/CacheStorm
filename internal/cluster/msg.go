@@ -81,6 +81,10 @@ type message struct {
 	updateSlots [Slots / 8]byte
 	channel     []byte
 	payload     []byte
+	// secret is the sender's internal secret, carried after the gossip
+	// section of a PING, PONG or MEET; a node that predates it sends none
+	// and one that does not know it ignores the bytes.
+	secret string
 }
 
 type encoder struct{ b []byte }
@@ -144,6 +148,9 @@ func (m *message) encode() []byte {
 			e.u16(int(g.flags))
 			e.u64(uint64(g.pingSent))
 			e.u64(uint64(g.pongRecv))
+		}
+		if len(m.secret) == IDLen {
+			e.b = append(e.b, m.secret...)
 		}
 	case msgFail:
 		e.id(m.about)
@@ -230,6 +237,9 @@ func decodeMessage(frame []byte) (*message, error) {
 			g.flags = Flags(d.u16())
 			g.pingSent, g.pongRecv = int64(d.u64()), int64(d.u64())
 			m.gossip = append(m.gossip, g)
+		}
+		if d.err == nil && len(d.b) >= IDLen {
+			m.secret = string(d.take(IDLen))
 		}
 	case msgFail:
 		m.about = d.id()

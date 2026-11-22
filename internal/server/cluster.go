@@ -49,6 +49,7 @@ func (s *Server) openCluster() error {
 	}
 	s.store.EnableSlotIndex()
 	s.router.SetCluster(c)
+	s.router.SetSlotMigrationController(s.asm)
 	if !cc.TLS {
 		logger.Warn().Msg("WARNING: the cluster bus port is not authenticated: 'tls-cluster' is disabled and " +
 			"protected mode was waived with 'cluster-bus-port-protected-mode no'. Any host able " +
@@ -153,6 +154,7 @@ func (s *Server) announceCluster() error {
 		Publish:       func(channel string, msg []byte) { ps.Publish(channel, msg) },
 		KeysInSlot:    s.store.CountKeysInSlot,
 		DelKeysInSlot: s.dropSlotKeys,
+		SlotsLost:     s.asm.slotsLost,
 		SetMaster:     s.clusterSetMaster,
 		ReplOffset: func() int64 {
 			_, off := s.repl.ReplID()

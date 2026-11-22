@@ -50,6 +50,9 @@ type BusOptions struct {
 	// them, when the slot is found to belong to another node.
 	KeysInSlot    func(slot int) int
 	DelKeysInSlot func(slot int)
+	// SlotsLost is told the slots of this master another node took over
+	// with one configuration update, before their keys are deleted.
+	SlotsLost func(slots []int)
 
 	// SetMaster points replication at the master at ip:port, or, with port
 	// 0, stops replicating and keeps the data, as REPLICAOF NO ONE does.
@@ -78,6 +81,7 @@ type bus struct {
 	inbound   map[*link]struct{}
 	iteration int
 	delSlots  []int
+	lostSlots [][]int
 	published []*message
 	roleWake  chan struct{}
 }

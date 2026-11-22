@@ -32,6 +32,7 @@ func RegisterClusterCommands(router *Router) {
 	router.Register(&CommandDef{Name: "ASKING", Handler: cmdASKING})
 	router.Register(&CommandDef{Name: "READONLY", Handler: cmdREADONLY})
 	router.Register(&CommandDef{Name: "READWRITE", Handler: cmdREADWRITE})
+	router.Register(&CommandDef{Name: "TRIMSLOTS", Handler: cmdTRIMSLOTS})
 }
 
 // ClusterEnabled reports whether the server runs in cluster mode.
@@ -96,7 +97,7 @@ var clusterSubcommandArity = map[string]int{
 	"KEYSLOT": 3, "LINKS": 2, "MEET": -4, "MYID": 2, "MYSHARDID": 2, "NODES": 2,
 	"REPLICAS": 3, "REPLICATE": 3, "RESET": -2, "SAVECONFIG": 2,
 	"SET-CONFIG-EPOCH": 3, "SETSLOT": -4, "SHARDS": 2, "SLAVES": 3, "SLOT-STATS": -4,
-	"SLOTS": 2,
+	"SLOTS": 2, "MIGRATION": -4, "SYNCSLOTS": -3,
 }
 
 var clusterHelp = []string{
@@ -195,7 +196,15 @@ func cmdCLUSTER(ctx *Context) error {
 		}
 		return ctx.WriteArray(out)
 	case "INFO":
-		return ctx.Writer.WriteVerbatim("txt", c.Info())
+		info := c.Info()
+		if ctl := ctx.slotMigration(); ctl != nil {
+			info += ctl.Info()
+		}
+		return ctx.Writer.WriteVerbatim("txt", info)
+	case "MIGRATION":
+		return clusterMigration(ctx, args)
+	case "SYNCSLOTS":
+		return clusterSyncSlots(ctx, c, args)
 	case "MYID":
 		return ctx.WriteBulkString(c.MyID())
 	case "MYSHARDID":
@@ -243,6 +252,9 @@ func cmdCLUSTER(ctx *Context) error {
 	case "FORGET":
 		if err := c.Forget(string(args[0])); err != nil {
 			return ctx.WriteError(err)
+		}
+		if ctl := ctx.slotMigration(); ctl != nil {
+			ctl.CancelNode(strings.ToLower(string(args[0])), "node deleted")
 		}
 		return ctx.WriteOK()
 	case "KEYSLOT":
@@ -318,6 +330,9 @@ func cmdCLUSTER(ctx *Context) error {
 		if !replica && clusterDB(ctx).KeyCount() != 0 {
 			return ctx.WriteError(errors.New("ERR CLUSTER RESET can't be called with master nodes containing keys"))
 		}
+		if ctl := ctx.slotMigration(); ctl != nil {
+			ctl.Cancel("", "CLUSTER RESET")
+		}
 		c.Reset(hard)
 		if replica {
 			// A replica that leaves its master drops the data it had from it.
@@ -366,6 +381,9 @@ func cmdCLUSTER(ctx *Context) error {
 		if err := c.Replicate(string(args[0]), clusterDB(ctx).KeyCount() == 0); err != nil {
 			return ctx.WriteError(err)
 		}
+		if ctl := ctx.slotMigration(); ctl != nil {
+			ctl.Cancel("", "switching to replica")
+		}
 		return ctx.WriteOK()
 	case "FAILOVER":
 		if len(args) > 1 {
@@ -384,6 +402,9 @@ func cmdCLUSTER(ctx *Context) error {
 		}
 		if err := c.Failover(force, takeover); err != nil {
 			return ctx.WriteError(err)
+		}
+		if ctl := ctx.slotMigration(); ctl != nil {
+			ctl.Cancel("", "manual failover")
 		}
 		return ctx.WriteOK()
 	}
@@ -430,6 +451,9 @@ func clusterAssign(ctx *Context, c *cluster.Cluster, ranges []cluster.SlotRange,
 				return ctx.WriteError(err)
 			}
 		}
+	}
+	if ctl := ctx.slotMigration(); ctl != nil {
+		ctl.CancelSlots(ranges, "slots configuration updated")
 	}
 	var err error
 	if del {

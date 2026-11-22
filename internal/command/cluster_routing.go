@@ -15,6 +15,11 @@ import (
 type ClusterConn struct {
 	ReadOnly bool
 	Asking   bool
+	// Internal is set by "AUTH internal connection <secret>": the other
+	// nodes' connections, allowed CLUSTER SYNCSLOTS. NodeID is the node the
+	// connection said it is with CLUSTER SYNCSLOTS CONF NODE-ID.
+	Internal bool
+	NodeID   string
 	slot     int
 	asking   bool
 	// extraOut is what the running command sent beyond its reply, which
@@ -44,6 +49,10 @@ func (r *Router) SetMigrateTLS(cfg *tls.Config) {
 	defer r.mu.Unlock()
 	r.migrateTLS = cfg
 }
+
+// MigrateTLSConfig is the TLS configuration of connections to the other
+// nodes' client ports, nil when they speak plain TCP.
+func (r *Router) MigrateTLSConfig() *tls.Config { return r.migrateTLSConfig() }
 
 func (r *Router) migrateTLSConfig() *tls.Config {
 	r.mu.RLock()

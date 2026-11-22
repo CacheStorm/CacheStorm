@@ -179,6 +179,11 @@ type Cluster struct {
 	// milliseconds since it last heard from its master, sampled by the cron.
 	myOffset atomic.Int64
 	dataAge  atomic.Int64
+	// secret is the internal secret: random at start, then the smallest
+	// one the nodes gossip, so every node of the cluster ends up with the
+	// same. "AUTH internal connection <secret>" opens an internal
+	// connection, as atomic slot migration uses between nodes.
+	secret string
 }
 
 // NewID returns a random 40-character hex node ID.
@@ -207,7 +212,7 @@ func ValidID(id string) bool {
 // New returns the state of a fresh node: a new identity, no slots, no
 // other nodes. path is where Save writes nodes.conf; empty disables saving.
 func New(path string, opts Options) *Cluster {
-	c := &Cluster{path: path, opts: opts, nodes: make(map[string]*Node)}
+	c := &Cluster{path: path, opts: opts, nodes: make(map[string]*Node), secret: NewID()}
 	c.myself = &Node{ID: NewID(), ShardID: NewID(), Flags: FlagMyself | FlagMaster}
 	c.nodes[c.myself.ID] = c.myself
 	c.updateMyselfFlagsLocked()
@@ -232,6 +237,7 @@ func Open(path string, opts Options) (c *Cluster, created bool, err error) {
 		return nil, false, fmt.Errorf("cluster config %s: %w", path, err)
 	}
 	c.path, c.opts = path, opts
+	c.secret = NewID()
 	c.writableAt = nowMs() + writableDelay
 	c.mu.Lock()
 	c.updateMyselfFlagsLocked()

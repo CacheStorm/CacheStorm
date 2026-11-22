@@ -234,6 +234,7 @@ var redisCommandSpecs = map[string]commandSpec{
 	"SYNC":                 {Arity: 1, Flags: []string{"admin", "noscript", "no_async_loading", "no_multi"}, FirstKey: 0, LastKey: 0, KeyStep: 0, Categories: []string{"admin", "slow", "dangerous"}},
 	"TIME":                 {Arity: 1, Flags: []string{"loading", "stale", "fast"}, FirstKey: 0, LastKey: 0, KeyStep: 0, Categories: []string{"fast"}},
 	"TOUCH":                {Arity: -2, Flags: []string{"readonly", "fast"}, FirstKey: 1, LastKey: -1, KeyStep: 1, Categories: []string{"keyspace", "read", "fast"}},
+	"TRIMSLOTS":            {Arity: -5, Flags: []string{"write"}, FirstKey: 0, LastKey: 0, KeyStep: 0, Categories: []string{"keyspace", "write", "slow", "dangerous"}},
 	"TTL":                  {Arity: 2, Flags: []string{"readonly", "fast"}, FirstKey: 1, LastKey: 1, KeyStep: 1, Categories: []string{"keyspace", "read", "fast"}},
 	"TYPE":                 {Arity: 2, Flags: []string{"readonly", "fast"}, FirstKey: 1, LastKey: 1, KeyStep: 1, Categories: []string{"keyspace", "read", "fast"}},
 	"UNLINK":               {Arity: -2, Flags: []string{"write", "fast"}, FirstKey: 1, LastKey: -1, KeyStep: 1, Categories: []string{"keyspace", "write", "fast"}},

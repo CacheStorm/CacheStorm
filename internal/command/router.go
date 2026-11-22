@@ -72,6 +72,7 @@ type Router struct {
 	snapshotInfo     func() string
 	aofRewrite       func() error
 	backup           BackupController
+	slotMigration    SlotMigrationController
 	configHooks      *ConfigHooks
 	serverStatus     func() ServerStatus
 	trackingHooks    *TrackingHooks

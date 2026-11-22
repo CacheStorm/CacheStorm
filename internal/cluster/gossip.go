@@ -22,11 +22,12 @@ func (c *Cluster) unlockAndSave() {
 	acks := c.pendingAcks
 	c.pendingAcks = nil
 	var del []int
+	var lost [][]int
 	var pubs []*message
 	var opts BusOptions
 	if b := c.bus; b != nil {
-		del, pubs, opts = b.delSlots, b.published, b.opts
-		b.delSlots, b.published = nil, nil
+		del, lost, pubs, opts = b.delSlots, b.lostSlots, b.published, b.opts
+		b.delSlots, b.lostSlots, b.published = nil, nil, nil
 		if role {
 			select {
 			case b.roleWake <- struct{}{}:
@@ -53,6 +54,11 @@ func (c *Cluster) unlockAndSave() {
 	}
 	if pause {
 		c.startManualFailoverPause(opts)
+	}
+	if opts.SlotsLost != nil {
+		for _, slots := range lost {
+			opts.SlotsLost(slots)
+		}
 	}
 	if opts.DelKeysInSlot != nil {
 		for _, slot := range del {
@@ -102,6 +108,7 @@ func (c *Cluster) sendPingLocked(l *link, typ msgType) {
 		return
 	}
 	m := c.headerLocked(typ)
+	m.secret = c.secret
 	wanted := len(c.nodes) / 10
 	if wanted < 3 {
 		wanted = 3
@@ -338,7 +345,7 @@ func (c *Cluster) updateSlotsConfigWithLocked(sender *Node, epoch uint64, slots 
 	if me.replica() {
 		cur = c.nodes[me.MasterID]
 	}
-	var dirty []int
+	var dirty, lost []int
 	var newMaster *Node
 	migrated := 0
 	for j := 0; j < Slots; j++ {
@@ -356,6 +363,9 @@ func (c *Cluster) updateSlotsConfigWithLocked(sender *Node, epoch uint64, slots 
 			continue
 		}
 		if c.unclaimedLocked(j) || c.owner[j].ConfigEpoch < epoch {
+			if c.owner[j] == me && !me.replica() {
+				lost = append(lost, j)
+			}
 			if c.owner[j] == me && c.bus != nil && c.bus.opts.KeysInSlot != nil && c.bus.opts.KeysInSlot(j) > 0 {
 				dirty = append(dirty, j)
 			}
@@ -380,6 +390,9 @@ func (c *Cluster) updateSlotsConfigWithLocked(sender *Node, epoch uint64, slots 
 		c.setMyMasterLocked(grand)
 	case len(dirty) > 0 && c.bus != nil:
 		c.bus.delSlots = append(c.bus.delSlots, dirty...)
+	}
+	if len(lost) > 0 && c.bus != nil {
+		c.bus.lostSlots = append(c.bus.lostSlots, lost)
 	}
 	c.updateStateLocked()
 }
@@ -444,6 +457,10 @@ func (c *Cluster) processPacket(b *bus, l *link, m *message) {
 	}
 	switch m.typ {
 	case msgPing, msgPong, msgMeet:
+		// The nodes agree on the smallest internal secret any of them has.
+		if sender != nil && len(m.secret) == IDLen && m.secret < c.secret {
+			c.secret = m.secret
+		}
 		c.processPingLocked(l, m, sender, now)
 	case msgFail:
 		if sender == nil {

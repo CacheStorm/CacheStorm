@@ -2,6 +2,7 @@ package command
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"errors"
 	"math"
@@ -624,6 +625,9 @@ func cmdAUTH(ctx *Context) error {
 	if ctx.ArgCount() >= 2 {
 		username := ctx.ArgString(0)
 		password := ctx.ArgString(1)
+		if username == "internal connection" {
+			return internalAuth(ctx, password)
+		}
 
 		user, err := globalACL.Authenticate(username, password)
 		if err != nil {
@@ -656,6 +660,27 @@ func cmdAUTH(ctx *Context) error {
 	}
 
 	ctx.SetAuthenticated(true)
+	return ctx.WriteOK()
+}
+
+// internalAuth is "AUTH internal connection <secret>": with the cluster's
+// internal secret the connection becomes internal, authenticated as the
+// unrestricted user.
+func internalAuth(ctx *Context, password string) error {
+	c := ctx.clusterState()
+	if c == nil {
+		return ctx.Writer.WriteError("ERR Cannot authenticate as an internal connection on non-cluster instances")
+	}
+	secret := c.InternalSecret()
+	if len(password) != len(secret) || subtle.ConstantTimeCompare([]byte(password), []byte(secret)) != 1 {
+		return ctx.Writer.WriteError("WRONGPASS invalid internal password")
+	}
+	ctx.SetAuthenticated(true)
+	ctx.ACLUser = nil
+	ctx.Username = ""
+	if ctx.ClusterConn != nil {
+		ctx.ClusterConn.Internal = true
+	}
 	return ctx.WriteOK()
 }
 

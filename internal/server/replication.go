@@ -83,7 +83,7 @@ var exclusiveWrites = map[string]bool{
 	"EXEC": true, "EVAL": true, "EVALSHA": true, "FCALL": true,
 	"FLUSHALL": true, "FLUSHDB": true, "SWAPDB": true, "MOVE": true,
 	"RENAME": true, "RENAMENX": true, "COPY": true, "SMOVE": true,
-	"SCRIPT": true, "FUNCTION": true, "MIGRATE": true,
+	"SCRIPT": true, "FUNCTION": true, "MIGRATE": true, "TRIMSLOTS": true,
 	// Read-only scripts take the gate exclusively too: a script is atomic in
 	// Redis, so it must not see a write land between two of its reads.
 	"EVAL_RO": true, "EVALSHA_RO": true, "FCALL_RO": true,

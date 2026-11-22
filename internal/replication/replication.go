@@ -138,6 +138,9 @@ type Manager struct {
 	// state in which writes enter the stream. It lets the write path skip
 	// the Manager's lock on a server that never had a replica.
 	feeding atomic.Bool
+	// tap, when set, sees every write the stream is fed, whether or not
+	// a replica is attached (atomic slot migration copies a slot's).
+	tap atomic.Pointer[func([]command.ExecutedCommand)]
 
 	// Replica side: the master to follow and the state of the link. linkDB
 	// and linkTx are the master client's selected database and transaction,
@@ -333,7 +336,7 @@ func (m *Manager) FeedTransaction(cmds []command.ExecutedCommand) int64 {
 // eviction. It is called with the key's shard lock held, so it only touches
 // the Manager's own state.
 func (m *Manager) FeedDelete(s *store.Store, key string) {
-	if !m.feeding.Load() {
+	if !m.feeding.Load() && m.tap.Load() == nil {
 		return
 	}
 	db := m.dbIndex(s)
@@ -347,7 +350,7 @@ func (m *Manager) FeedDelete(s *store.Store, key string) {
 // as one HDEL per field, as Redis propagates field expiry. It is called with
 // the key's shard lock held.
 func (m *Manager) FeedHashFieldDeletes(s *store.Store, key string, fields []string) {
-	if !m.feeding.Load() {
+	if !m.feeding.Load() && m.tap.Load() == nil {
 		return
 	}
 	db := m.dbIndex(s)
@@ -370,7 +373,21 @@ func (m *Manager) dbIndex(s *store.Store) int {
 	return -1
 }
 
+// SetTap makes fn see every write fed to the stream from now on; nil
+// stops it. fn may run with a shard lock held, so it must not touch the
+// store.
+func (m *Manager) SetTap(fn func([]command.ExecutedCommand)) {
+	if fn == nil {
+		m.tap.Store(nil)
+		return
+	}
+	m.tap.Store(&fn)
+}
+
 func (m *Manager) feed(cmds []command.ExecutedCommand, tx bool) int64 {
+	if tap := m.tap.Load(); tap != nil {
+		(*tap)(cmds)
+	}
 	if !m.feeding.Load() {
 		return 0
 	}
