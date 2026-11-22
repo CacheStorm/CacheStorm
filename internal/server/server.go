@@ -295,6 +295,7 @@ type Server struct {
 	// replicas, and lets a full resync snapshot the data between writes.
 	gate              writeGate
 	snapshotMu        sync.Mutex
+	backup            *backupManager
 	snapshotWG        sync.WaitGroup
 	snapshotRunning   bool
 	snapshotClosing   bool
@@ -373,6 +374,7 @@ func New(cfg *config.Config) (result *Server, retErr error) {
 		snapshotTook:   -1,
 		aofRewriteTook: -1,
 	}
+	s.backup = newBackupManager(s)
 
 	s.dataLease = lease
 	if lease != nil {
@@ -479,6 +481,7 @@ func New(cfg *config.Config) (result *Server, retErr error) {
 	command.RegisterVectorSetCommands(s.router)
 	command.RegisterArrayCommands(s.router)
 	command.RegisterHImportCommands(s.router)
+	command.RegisterBackupCommands(s.router)
 	command.RegisterGraphCommands(s.router)
 	command.RegisterDigestCommands(s.router)
 	command.RegisterUtilityCommands(s.router)
@@ -666,6 +669,7 @@ func New(cfg *config.Config) (result *Server, retErr error) {
 	s.shutdownCh = make(chan struct{})
 	s.router.SetShutdownHook(s.requestShutdown)
 	s.router.SetWaitAOFHook(s.waitAOF)
+	s.router.SetBackupController(s.backup)
 
 	s.installCommitHooks()
 
@@ -698,6 +702,9 @@ func (s *Server) installCommitHooks() {
 			if err := s.commitAOF(aof, ctx.DeferSync); err != nil {
 				return err
 			}
+		}
+		if b := s.backup.recorder(); b != nil {
+			b.Append(db, upperCmd, args)
 		}
 		ctx.AddSlotBytesOut(s.repl.Feed(db, upperCmd, args))
 		return nil
@@ -732,6 +739,13 @@ func (s *Server) installCommitHooks() {
 				if err := s.commitAOF(aof, ctx.DeferSync); err != nil {
 					return err
 				}
+			}
+			if b := s.backup.recorder(); b != nil {
+				cmds := make([]persistence.Command, len(writes))
+				for i, c := range writes {
+					cmds[i] = persistence.Command{Name: c.Name, Args: c.Args, DB: c.DB}
+				}
+				b.AppendTransaction(cmds)
 			}
 			ctx.AddSlotBytesOut(s.repl.FeedTransaction(writes))
 			return nil
@@ -1040,6 +1054,7 @@ func (s *Server) Stop(ctx context.Context) error {
 	defer func() { s.stopped = true }()
 	s.stopping.Store(true)
 	close(s.stopCh)
+	s.backup.stop()
 
 	// 1. Stop accepting new connections
 	if s.listener != nil {

@@ -71,6 +71,7 @@ type Router struct {
 	snapshotLastSave func() int64
 	snapshotInfo     func() string
 	aofRewrite       func() error
+	backup           BackupController
 	configHooks      *ConfigHooks
 	serverStatus     func() ServerStatus
 	trackingHooks    *TrackingHooks
@@ -310,6 +311,19 @@ func (r *Router) snapshotHooks() (func(bool) error, func() int64, func() string)
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.snapshotSave, r.snapshotLastSave, r.snapshotInfo
+}
+
+// SetBackupController installs what BACKUP drives.
+func (r *Router) SetBackupController(b BackupController) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.backup = b
+}
+
+func (r *Router) backupController() BackupController {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.backup
 }
 
 // SetAOFRewriteHook installs the function BGREWRITEAOF starts a rewrite with.

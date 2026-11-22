@@ -29,6 +29,7 @@ var redisCommandSpecs = map[string]commandSpec{
 	"ARSET":                {Arity: -4, Flags: []string{"write", "denyoom", "fast"}, FirstKey: 1, LastKey: 1, KeyStep: 1, Categories: []string{"write", "array", "fast"}},
 	"ASKING":               {Arity: 1, Flags: []string{"fast"}, FirstKey: 0, LastKey: 0, KeyStep: 0, Categories: []string{"fast", "connection"}},
 	"AUTH":                 {Arity: -2, Flags: []string{"noscript", "loading", "stale", "fast", "no_auth", "allow_busy"}, FirstKey: 0, LastKey: 0, KeyStep: 0, Categories: []string{"fast", "connection"}},
+	"BACKUP":               {Arity: 2, Flags: []string{}, FirstKey: 0, LastKey: 0, KeyStep: 0, Categories: []string{"slow"}},
 	"BGREWRITEAOF":         {Arity: 1, Flags: []string{"admin", "noscript", "no_async_loading"}, FirstKey: 0, LastKey: 0, KeyStep: 0, Categories: []string{"admin", "slow", "dangerous"}},
 	"BGSAVE":               {Arity: -1, Flags: []string{"admin", "noscript", "no_async_loading"}, FirstKey: 0, LastKey: 0, KeyStep: 0, Categories: []string{"admin", "slow", "dangerous"}},
 	"BITCOUNT":             {Arity: -2, Flags: []string{"readonly"}, FirstKey: 1, LastKey: 1, KeyStep: 1, Categories: []string{"read", "bitmap", "slow"}},

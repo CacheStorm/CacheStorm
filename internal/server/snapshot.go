@@ -212,6 +212,7 @@ func (s *Server) snapshotInfo() string {
 	field("aof_rewrites_consecutive_failures", s.aofRewriteFailures)
 	field("aof_last_write_status", aofStatus)
 	field("aof_last_cow_size", 0)
+	field("backup_in_progress", boolInt(s.backup.InProgress()))
 	field("module_fork_in_progress", 0)
 	field("module_fork_last_cow_size", 0)
 	if aof := s.aof(); aof != nil {

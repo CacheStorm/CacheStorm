@@ -170,6 +170,9 @@ type PersistenceConfig struct {
 	// RedisAOFDir is redis.conf's appenddirname: the directory under DataDir
 	// a Redis 7 AOF to load at startup is in ("appendonlydir" when empty).
 	RedisAOFDir string `yaml:"-"`
+	// BackupDir is redis.conf's backupdirname: the directory under DataDir
+	// BACKUP writes to ("backupdir" when empty).
+	BackupDir string `yaml:"-"`
 }
 
 type ReplicationConfig struct {

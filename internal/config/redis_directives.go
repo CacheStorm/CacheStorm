@@ -240,6 +240,19 @@ func (c *Config) applyDirective(d Directive) (bool, error) {
 		}
 		c.Persistence.RedisAOFDir = v
 		return true, nil
+	case "backupdirname":
+		v, err := one()
+		if err != nil {
+			return true, err
+		}
+		if v == "" {
+			return true, fmt.Errorf("backupdirname can't be empty")
+		}
+		if v == "." || v == ".." || strings.ContainsAny(v, `/\`) {
+			return true, fmt.Errorf("backupdirname can't be a path, just a dirname")
+		}
+		c.Persistence.BackupDir = v
+		return true, nil
 	case "dir":
 		return str(&c.Persistence.DataDir)
 	case "loglevel":

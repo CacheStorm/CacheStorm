@@ -94,6 +94,8 @@ var configParams = map[string]*configParam{
 	"aof-timestamp-enabled":                boolParam("no"),
 	"aof-use-rdb-preamble":                 boolParam("yes"),
 	"appenddirname":                        immutableParam("appendonlydir"),
+	"backupdirname":                        immutableParam("backupdir"),
+	"backup-sealed-ttl":                    {kind: cfgInt, def: "0", lo: 0, hi: configLongMax, apply: backupSealedTTL.Store},
 	"bgsave-cpulist":                       immutableParam(""),
 	"bind-source-addr":                     stringParam(""),
 	"bio-cpulist":                          immutableParam(""),
