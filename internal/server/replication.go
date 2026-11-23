@@ -90,7 +90,8 @@ var exclusiveWrites = map[string]bool{
 	"EVAL_RO": true, "EVALSHA_RO": true, "FCALL_RO": true,
 	// INVALIDATE deletes the keys of a tag, and the hierarchy TAGLINK and
 	// TAGUNLINK change decides which tags INVALIDATE ... CASCADE reaches.
-	// A small tag's INVALIDATE takes its keys' stripes (see planInvalidate).
+	// A small INVALIDATE takes its keys' stripes (see planInvalidate); TAGLINK
+	// and TAGUNLINK holding the whole gate keeps the hierarchy still for it.
 	// SETTAG, ADDTAG and REMTAG change one key's tags; the tag index has
 	// locks of its own, so the key's stripe orders them.
 	"INVALIDATE": true, "TAGLINK": true, "TAGUNLINK": true,
@@ -148,23 +149,39 @@ func (g *writeGate) planWrite(h *gateHold, ctx *command.Context) *gateHold {
 	return h
 }
 
-// maxInvalidateStripes bounds the stripes INVALIDATE locks one by one; a tag
-// with more keys than this takes the whole gate.
+// maxInvalidateStripes bounds the keys (and the tags) INVALIDATE locks the
+// stripes of one by one; a larger invalidation takes the whole gate.
 const maxInvalidateStripes = 32
 
-// planInvalidate plans INVALIDATE tag (without CASCADE) on the stripes of the
-// keys the tag has now, so invalidating a small tag does not stop every other
-// write. A key that joins the tag before the hold is taken is not covered:
-// the command then escalates to the whole gate (see Context.Escalate).
+// planInvalidate plans INVALIDATE tag [CASCADE] on the stripes of the keys
+// the tag (and with CASCADE the tags below it) has now, so invalidating a
+// small tag does not stop every other write. A key that joins one of the
+// tags before the hold is taken is not covered: the command then escalates
+// to the whole gate (see Context.Escalate).
 func (g *writeGate) planInvalidate(h *gateHold, ctx *command.Context) bool {
-	if len(ctx.Args) != 1 || ctx.Store == nil {
+	args := ctx.Args
+	if ctx.Store == nil || len(args) == 0 || len(args) > 2 || (len(args) == 2 && string(args[1]) != "CASCADE") {
 		return false
 	}
-	tag := ctx.Args[0]
+	ti := ctx.Store.GetTagIndex()
+	tags := []string{string(args[0])}
+	if len(args) == 2 {
+		tags = append(tags, ti.GetAllDescendants(tags[0])...)
+		if len(tags) > maxInvalidateStripes {
+			return false
+		}
+	}
 	var held stripeSet
-	held.add(stripeOf(tag))
-	if !ctx.Store.GetTagIndex().KeysUpTo(string(tag), maxInvalidateStripes, func(k string) { held.add(stripeOf(k)) }) {
-		return false
+	budget := maxInvalidateStripes
+	for _, tag := range tags {
+		held.add(stripeOf(tag))
+		ok := ti.KeysUpTo(tag, budget, func(k string) {
+			held.add(stripeOf(k))
+			budget--
+		})
+		if !ok {
+			return false
+		}
 	}
 	h.stripes = h.inline[:0]
 	if held.count() > len(h.inline) {

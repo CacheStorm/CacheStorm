@@ -97,33 +97,31 @@ func cmdINVALIDATE(ctx *Context) error {
 		}
 	}
 
+	ti := ctx.Store.GetTagIndex()
+	tags := []string{tag}
+	if cascade {
+		tags = append(tags, ti.GetAllDescendants(tag)...)
+	}
+	// With KeyHeld the command holds only the stripes of the keys its tags
+	// had when it was planned; a tag that has gained a key since makes it
+	// take the whole gate for the rest.
+	striped := ctx.KeyHeld != nil && ctx.Escalate != nil
+	ranBeside := false
 	var keysToDelete []string
-
-	if cascade {
-		allKeys := ctx.Store.GetTagIndex().InvalidateCascade(tag)
-		for _, keys := range allKeys {
-			keysToDelete = append(keysToDelete, keys...)
-		}
-	} else if ctx.KeyHeld != nil && ctx.Escalate != nil {
-		keys, held := ctx.Store.GetTagIndex().InvalidateIf(tag, ctx.KeyHeld)
-		if !held {
+	for _, t := range tags {
+		if striped {
+			if keys, held := ti.InvalidateIf(t, ctx.KeyHeld); held {
+				keysToDelete = append(keysToDelete, keys...)
+				ranBeside = true
+				continue
+			}
 			ctx.Escalate()
-			keys = ctx.Store.GetTagIndex().Invalidate(tag)
-		} else {
-			// Writes to other keys run beside this one, so a replica must
-			// delete the keys deleted here rather than look the tag up.
-			propagateDeletes(ctx, keys)
+			striped = false
 		}
-		keysToDelete = keys
-	} else {
-		keysToDelete = ctx.Store.GetTagIndex().Invalidate(tag)
+		keysToDelete = append(keysToDelete, ti.Invalidate(t)...)
 	}
 
-	if len(keysToDelete) == 0 {
-		return ctx.WriteInteger(0)
-	}
-
-	if cascade {
+	if cascade && len(tags) > 1 {
 		// A key with several of the tags is listed once per tag.
 		uniqueKeys := make([]string, 0, len(keysToDelete))
 		seen := make(map[string]struct{}, len(keysToDelete))
@@ -134,6 +132,15 @@ func cmdINVALIDATE(ctx *Context) error {
 			}
 		}
 		keysToDelete = uniqueKeys
+	}
+	if ranBeside {
+		// Writes to other keys ran beside this one, so a replica must delete
+		// the keys deleted here rather than look the tags up.
+		propagateDeletes(ctx, keysToDelete)
+	}
+
+	if len(keysToDelete) == 0 {
+		return ctx.WriteInteger(0)
 	}
 
 	deleted := ctx.Store.DeleteBatch(keysToDelete)

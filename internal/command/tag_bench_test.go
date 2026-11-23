@@ -69,3 +69,24 @@ func BenchmarkInvalidateSmall(b *testing.B) {
 		}
 	}
 }
+
+// BenchmarkInvalidateLarge invalidates a tag of 50,000 keys, each with a
+// second tag of its own group, as dropping a whole catalogue does.
+func BenchmarkInvalidateLarge(b *testing.B) {
+	r := newMemAcctRouter()
+	RegisterTagCommands(r)
+	s := store.NewStore()
+	w := resp.NewWriter(io.Discard)
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		for k := 0; k < 50000; k++ {
+			if err := s.Set("key:"+strconv.Itoa(k), &store.StringValue{Data: []byte("v")}, store.SetOptions{Tags: []string{"all", "g" + strconv.Itoa(k/100)}}); err != nil {
+				b.Fatal(err)
+			}
+		}
+		b.StartTimer()
+		if err := r.Execute(NewContext("INVALIDATE", [][]byte{[]byte("all")}, s, w)); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
