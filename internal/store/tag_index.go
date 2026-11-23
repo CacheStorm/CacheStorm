@@ -165,6 +165,51 @@ func (ti *TagIndex) Invalidate(tag string) []string {
 	return keys
 }
 
+// KeysUpTo calls fn with each key of tag, unless the tag has more than max
+// keys, which it reports by returning false without calling fn.
+func (ti *TagIndex) KeysUpTo(tag string, max int, fn func(key string)) bool {
+	shard := ti.shards[ti.shardIndex(tag)]
+	shard.mu.RLock()
+	defer shard.mu.RUnlock()
+	set := shard.index[tag]
+	if len(set) > max {
+		return false
+	}
+	for k := range set {
+		fn(k)
+	}
+	return true
+}
+
+// InvalidateIf invalidates tag only when held reports every key the tag has
+// now. It reports false, and changes nothing, when one of them is not: the
+// caller locked the keys the tag had earlier, and a key joined it since.
+func (ti *TagIndex) InvalidateIf(tag string, held func(key string) bool) ([]string, bool) {
+	shard := ti.shards[ti.shardIndex(tag)]
+	shard.mu.Lock()
+	set, ok := shard.index[tag]
+	keys := make([]string, 0, len(set))
+	for k := range set {
+		if !held(k) {
+			shard.mu.Unlock()
+			return nil, false
+		}
+		keys = append(keys, k)
+	}
+	if ok {
+		delete(shard.index, tag)
+		ti.tags.Add(-1)
+	}
+	shard.mu.Unlock()
+	ti.hookMu.RLock()
+	onInvalidate := ti.onInvalidate
+	ti.hookMu.RUnlock()
+	if onInvalidate != nil {
+		onInvalidate(tag, keys)
+	}
+	return keys, true
+}
+
 func (ti *TagIndex) invalidate(tag string) []string {
 	idx := ti.shardIndex(tag)
 	shard := ti.shards[idx]

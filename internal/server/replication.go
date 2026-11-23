@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"math/bits"
 	"net"
 	"runtime"
 	"sort"
@@ -89,6 +90,7 @@ var exclusiveWrites = map[string]bool{
 	"EVAL_RO": true, "EVALSHA_RO": true, "FCALL_RO": true,
 	// INVALIDATE deletes the keys of a tag, and the hierarchy TAGLINK and
 	// TAGUNLINK change decides which tags INVALIDATE ... CASCADE reaches.
+	// A small tag's INVALIDATE takes its keys' stripes (see planInvalidate).
 	// SETTAG, ADDTAG and REMTAG change one key's tags; the tag index has
 	// locks of its own, so the key's stripe orders them.
 	"INVALIDATE": true, "TAGLINK": true, "TAGUNLINK": true,
@@ -126,6 +128,9 @@ func stripeOf[K string | []byte](key K) int {
 func (g *writeGate) planWrite(h *gateHold, ctx *command.Context) *gateHold {
 	cmd, args := ctx.Command, ctx.Args
 	h.reset(g, false, false)
+	if cmd == "INVALIDATE" && g.planInvalidate(h, ctx) {
+		return h
+	}
 	if exclusiveWrites[cmd] || globalRead(cmd, args) {
 		h.exclusive = true
 	} else if key, ok := command.SoleFirstKey(cmd, args); ok {
@@ -141,6 +146,65 @@ func (g *writeGate) planWrite(h *gateHold, ctx *command.Context) *gateHold {
 		}
 	}
 	return h
+}
+
+// maxInvalidateStripes bounds the stripes INVALIDATE locks one by one; a tag
+// with more keys than this takes the whole gate.
+const maxInvalidateStripes = 32
+
+// planInvalidate plans INVALIDATE tag (without CASCADE) on the stripes of the
+// keys the tag has now, so invalidating a small tag does not stop every other
+// write. A key that joins the tag before the hold is taken is not covered:
+// the command then escalates to the whole gate (see Context.Escalate).
+func (g *writeGate) planInvalidate(h *gateHold, ctx *command.Context) bool {
+	if len(ctx.Args) != 1 || ctx.Store == nil {
+		return false
+	}
+	tag := ctx.Args[0]
+	var held stripeSet
+	held.add(stripeOf(tag))
+	if !ctx.Store.GetTagIndex().KeysUpTo(string(tag), maxInvalidateStripes, func(k string) { held.add(stripeOf(k)) }) {
+		return false
+	}
+	h.stripes = h.inline[:0]
+	if held.count() > len(h.inline) {
+		h.stripes = h.spill[:0]
+	}
+	h.stripes = held.appendTo(h.stripes)
+	if cap(h.stripes) > len(h.inline) {
+		h.spill = h.stripes[:0]
+	}
+	ctx.KeyHeld = held.hasKey
+	return true
+}
+
+// stripeSet is a set of gate stripes.
+type stripeSet [gateStripes / 64]uint64
+
+func (s *stripeSet) add(stripe int) { s[stripe/64] |= 1 << (stripe % 64) }
+
+func (s stripeSet) hasKey(key string) bool {
+	stripe := stripeOf(key)
+	return s[stripe/64]&(1<<(stripe%64)) != 0
+}
+
+func (s *stripeSet) count() int {
+	n := 0
+	for _, w := range s {
+		n += bits.OnesCount64(w)
+	}
+	return n
+}
+
+// appendTo appends the stripes in ascending order, the order they are locked in.
+func (s *stripeSet) appendTo(stripes []int) []int {
+	for i, w := range s {
+		for w != 0 {
+			stripes = append(stripes, i*64+bits.TrailingZeros64(w))
+			w &= w - 1
+		}
+	}
+	return stripes
 }
 
 func globalRead(cmd string, args [][]byte) bool {
@@ -455,6 +519,11 @@ func (s *Server) holdGate(ctx *command.Context) func() {
 	h.lock()
 	ctx.BeforeWait = h.unlock
 	ctx.AfterWait = h.lock
+	ctx.Escalate = func() {
+		h.unlock()
+		h.exclusive, h.stripes = true, nil
+		h.lock()
+	}
 	return h.unlock
 }
 

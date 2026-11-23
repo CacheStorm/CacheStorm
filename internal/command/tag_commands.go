@@ -104,6 +104,17 @@ func cmdINVALIDATE(ctx *Context) error {
 		for _, keys := range allKeys {
 			keysToDelete = append(keysToDelete, keys...)
 		}
+	} else if ctx.KeyHeld != nil && ctx.Escalate != nil {
+		keys, held := ctx.Store.GetTagIndex().InvalidateIf(tag, ctx.KeyHeld)
+		if !held {
+			ctx.Escalate()
+			keys = ctx.Store.GetTagIndex().Invalidate(tag)
+		} else {
+			// Writes to other keys run beside this one, so a replica must
+			// delete the keys deleted here rather than look the tag up.
+			propagateDeletes(ctx, keys)
+		}
+		keysToDelete = keys
 	} else {
 		keysToDelete = ctx.Store.GetTagIndex().Invalidate(tag)
 	}
@@ -112,16 +123,20 @@ func cmdINVALIDATE(ctx *Context) error {
 		return ctx.WriteInteger(0)
 	}
 
-	uniqueKeys := make([]string, 0, len(keysToDelete))
-	seen := make(map[string]struct{})
-	for _, key := range keysToDelete {
-		if _, exists := seen[key]; !exists {
-			seen[key] = struct{}{}
-			uniqueKeys = append(uniqueKeys, key)
+	if cascade {
+		// A key with several of the tags is listed once per tag.
+		uniqueKeys := make([]string, 0, len(keysToDelete))
+		seen := make(map[string]struct{}, len(keysToDelete))
+		for _, key := range keysToDelete {
+			if _, exists := seen[key]; !exists {
+				seen[key] = struct{}{}
+				uniqueKeys = append(uniqueKeys, key)
+			}
 		}
+		keysToDelete = uniqueKeys
 	}
 
-	deleted := ctx.Store.DeleteBatch(uniqueKeys)
+	deleted := ctx.Store.DeleteBatch(keysToDelete)
 	return ctx.WriteInteger(int64(deleted))
 }
 
@@ -192,4 +207,23 @@ func cmdTAGCHILDREN(ctx *Context) error {
 	}
 
 	return ctx.WriteArray(results)
+}
+
+func propagateDeletes(ctx *Context, keys []string) {
+	if len(keys) == 0 {
+		ctx.PropagateAs()
+		return
+	}
+	n := 0
+	for _, k := range keys {
+		n += len(k)
+	}
+	buf := make([]byte, 0, n)
+	args := make([][]byte, len(keys))
+	for i, k := range keys {
+		start := len(buf)
+		buf = append(buf, k...)
+		args[i] = buf[start:len(buf):len(buf)]
+	}
+	ctx.PropagateAs(ExecutedCommand{Name: "DEL", Args: args, DB: ctx.DB})
 }

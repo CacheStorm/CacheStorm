@@ -47,3 +47,25 @@ func BenchmarkTagWrites(b *testing.B) {
 		})
 	}
 }
+
+// BenchmarkInvalidateSmall tags ten keys and invalidates the tag, as a cache
+// dropping one entity's entries does.
+func BenchmarkInvalidateSmall(b *testing.B) {
+	r := newMemAcctRouter()
+	RegisterTagCommands(r)
+	s := store.NewStore()
+	w := resp.NewWriter(io.Discard)
+	tag := []byte("g")
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		for k := 0; k < 10; k++ {
+			if err := s.Set("key:"+strconv.Itoa(k), &store.StringValue{Data: []byte("v")}, store.SetOptions{Tags: []string{"g"}}); err != nil {
+				b.Fatal(err)
+			}
+		}
+		b.StartTimer()
+		if err := r.Execute(NewContext("INVALIDATE", [][]byte{tag}, s, w)); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

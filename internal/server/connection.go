@@ -57,6 +57,7 @@ type Connection struct {
 	// waits; beforeWait and afterWait, made once, release and retake it.
 	waitHold              *gateHold
 	beforeWait, afterWait func()
+	escalate              func()
 	// sink holds replies while a command runs; see replySink.
 	sink *replySink
 	// draining is set when the server shuts down: the connection finishes the
@@ -289,6 +290,21 @@ func (c *Connection) releaseGate() {
 		c.heldCount = 0
 		c.gateWaiting = false
 	}
+}
+
+// escalateGate trades the stripes the running command holds for the whole
+// gate, waiting out a pause that began meanwhile as taking it afresh would.
+func (c *Connection) escalateGate(cmd string) {
+	c.releaseGate()
+	h := &gateHold{g: &c.srv.gate, exclusive: true}
+	h.lock()
+	if c.srv.pauseActive() && c.srv.pausedNow(cmd) {
+		h.unlock()
+		c.srv.waitWhilePaused(cmd)
+		h.lock()
+	}
+	c.heldGate = h
+	c.waitHold = h
 }
 
 // keepGate reports whether the hold of the command that just ran may be kept
@@ -947,6 +963,12 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 					c.afterWait = func() { c.waitHold.lock(); c.gateWaiting = false }
 				}
 				ctx.BeforeWait, ctx.AfterWait = c.beforeWait, c.afterWait
+				if ctx.KeyHeld != nil {
+					if c.escalate == nil {
+						c.escalate = func() { c.escalateGate(c.ctx.Command) }
+					}
+					ctx.Escalate = c.escalate
+				}
 			} else {
 				c.releaseGate()
 			}

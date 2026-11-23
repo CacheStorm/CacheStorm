@@ -1,8 +1,10 @@
 package store
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -713,45 +715,65 @@ func (s *Store) evictObserved(key string, expected *Entry) bool {
 	return true
 }
 
+// shardKey is a key with its shard and whether it was deleted, or with the
+// tags it had once deleted.
+type shardKey struct {
+	idx  uint32
+	gone bool
+	key  string
+	tags []string
+}
+
 func (s *Store) DeleteBatch(keys []string) int {
 	if len(keys) == 0 {
 		return 0
 	}
 
-	shardOps := make(map[*Shard][]string)
-	for _, key := range keys {
-		idx := s.shardIndex(key)
-		shard := s.shards[idx]
-		shardOps[shard] = append(shardOps[shard], key)
+	// Group the keys by shard with one sorted slice rather than a map of
+	// slices: INVALIDATE deletes a tag's few keys this way on every call.
+	var small, smallUntag [16]shardKey
+	ops := small[:0]
+	if len(keys) > len(small) {
+		ops = make([]shardKey, 0, len(keys))
 	}
+	for _, key := range keys {
+		ops = append(ops, shardKey{idx: s.shardIndex(key), key: key})
+	}
+	slices.SortFunc(ops, func(a, b shardKey) int { return cmp.Compare(a.idx, b.idx) })
 
 	deleted := 0
 	freed := int64(0)
-	var untag []struct {
-		key  string
-		tags []string
-	}
-	s.versionMu.Lock()
-	for shard, shardKeys := range shardOps {
+	untag := smallUntag[:0]
+	for i := 0; i < len(ops); {
+		idx := ops[i].idx
+		shard := s.shards[idx]
 		shard.mu.Lock()
-		for _, key := range shardKeys {
+		for ; i < len(ops) && ops[i].idx == idx; i++ {
+			key := ops[i].key
 			entry, exists := shard.data[key]
 			if !exists {
 				continue
 			}
 			freed += shard.deleteLocked(key, entry)
-			s.touchLocked(key)
-			if len(entry.TagList()) > 0 {
-				untag = append(untag, struct {
-					key  string
-					tags []string
-				}{key, entry.TagList()})
+			ops[i].gone = true
+			if tags := entry.TagList(); len(tags) > 0 {
+				untag = append(untag, shardKey{key: key, tags: tags})
 			}
 			deleted++
 		}
 		shard.mu.Unlock()
 	}
-	s.versionMu.Unlock()
+	// Like Store.Delete, bump the watched keys after deleting them, and take
+	// the version lock only when some key is watched: it is global.
+	if s.watching.Load() != 0 {
+		s.versionMu.Lock()
+		for i := range ops {
+			if ops[i].gone {
+				s.touchLocked(ops[i].key)
+			}
+		}
+		s.versionMu.Unlock()
+	}
 
 	// Mirror Store.Delete's index bookkeeping, outside the shard/version
 	// locks to preserve their ordering with the tag-index locks.

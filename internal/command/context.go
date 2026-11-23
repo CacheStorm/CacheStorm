@@ -114,6 +114,13 @@ type Context struct {
 	BeforeWait func()
 	AfterWait  func()
 
+	// KeyHeld, when set, reports whether the write ordering locks the
+	// command holds cover key, and Escalate trades them for the whole gate.
+	// INVALIDATE locks the keys its tag had when the hold was planned and
+	// escalates when the tag has gained a key since.
+	KeyHeld  func(key string) bool
+	Escalate func()
+
 	// waited is how long the running command blocked waiting for data,
 	// which its command statistics leave out as Redis does.
 	waited time.Duration
