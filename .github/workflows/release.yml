@@ -89,7 +89,9 @@ jobs:
           if [ "$GOOS" = "windows" ]; then
             OUTPUT="${OUTPUT}.exe"
           fi
-          go build -ldflags="-s -w -X github.com/cachestorm/cachestorm/internal/version.Version=$VERSION" -o $OUTPUT ./cmd/cachestorm
+          # The commit's time, so a rebuild of the tag reports the same one.
+          BUILD_TIME="$(git log -1 --format=%cI)"
+          go build -ldflags="-s -w -X github.com/cachestorm/cachestorm/internal/version.Version=$VERSION -X github.com/cachestorm/cachestorm/internal/version.BuildTime=$BUILD_TIME" -o $OUTPUT ./cmd/cachestorm
 
       - name: Create archive
         run: |
