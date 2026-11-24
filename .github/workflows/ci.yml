@@ -36,6 +36,13 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      # The release builds 32-bit ARM; an int constant past 2^31 or an
+      # unaligned 64-bit atomic only shows there.
+      - name: Vet and unit-test as 32-bit
+        run: |
+          GOARCH=386 go vet ./...
+          GOARCH=386 go test ./internal/store/... ./plugins/... -count=1
+
       - name: gofmt
         run: |
           unformatted="$(gofmt -l .)"

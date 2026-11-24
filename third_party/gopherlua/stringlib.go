@@ -550,13 +550,15 @@ func strMatch(L *LState) int {
 
 func strRep(L *LState) int {
 	str := L.CheckString(1)
-	n := L.CheckInt(2)
-	if n <= 0 || len(str) == 0 {
+	// The count is compared as a number: as an int it wraps on 32-bit
+	// platforms, and a huge count then repeated nothing instead of failing.
+	count := float64(L.CheckNumber(2))
+	if count < 1 || len(str) == 0 {
 		L.Push(emptyLString)
-	} else if n > MaxStringLen/len(str) {
+	} else if count > float64(MaxStringLen/len(str)) {
 		L.RaiseError("resulting string too large")
 	} else {
-		L.Push(LString(strings.Repeat(str, n)))
+		L.Push(LString(strings.Repeat(str, int(count))))
 	}
 	return 1
 }

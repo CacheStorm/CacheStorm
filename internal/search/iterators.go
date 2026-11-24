@@ -513,7 +513,7 @@ type intersectIter struct {
 	broken      bool
 }
 
-const invalidEstimate = math.MaxUint32
+const invalidEstimate = min(math.MaxUint32, math.MaxInt)
 
 func newIntersectIter(its []rsIter, inOrder bool, fieldMask uint64, weight float64, relevant func(int64) bool) *intersectIter {
 	ii := &intersectIter{its: its, docIDs: make([]int64, len(its)), fieldMask: fieldMask, relevant: relevant, expected: invalidEstimate}

@@ -388,6 +388,6 @@ func TestParseMemorySizeTib(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if result != 1024*1024*1024*1024 {
-		t.Errorf("expected %d, got %d", 1024*1024*1024*1024, result)
+		t.Errorf("expected %d, got %d", int64(1024*1024*1024*1024), result)
 	}
 }

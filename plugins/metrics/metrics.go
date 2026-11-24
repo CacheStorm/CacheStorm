@@ -15,14 +15,14 @@ type Metrics struct {
 	// sync.Map keeps the per-command path lock-free: the set of names is
 	// fixed once each command has run, which is the case sync.Map is for.
 	commandsTotal    sync.Map
-	hitCount         int64
-	missCount        int64
-	evictedCount     int64
-	expiredCount     int64
-	connectedClients int64
-	tagInvalidations int64
-	keysTotal        int64
-	memoryBytes      int64
+	hitCount         atomic.Int64
+	missCount        atomic.Int64
+	evictedCount     atomic.Int64
+	expiredCount     atomic.Int64
+	connectedClients atomic.Int64
+	tagInvalidations atomic.Int64
+	keysTotal        atomic.Int64
+	memoryBytes      atomic.Int64
 }
 
 type MetricsPlugin struct {
@@ -69,51 +69,51 @@ func (m *MetricsPlugin) AfterCommand(ctx *command.Context) {
 }
 
 func (m *MetricsPlugin) RecordHit() {
-	atomic.AddInt64(&m.metrics.hitCount, 1)
+	m.metrics.hitCount.Add(1)
 }
 
 func (m *MetricsPlugin) RecordMiss() {
-	atomic.AddInt64(&m.metrics.missCount, 1)
+	m.metrics.missCount.Add(1)
 }
 
 func (m *MetricsPlugin) RecordEviction() {
-	atomic.AddInt64(&m.metrics.evictedCount, 1)
+	m.metrics.evictedCount.Add(1)
 }
 
 func (m *MetricsPlugin) RecordExpiration() {
-	atomic.AddInt64(&m.metrics.expiredCount, 1)
+	m.metrics.expiredCount.Add(1)
 }
 
 func (m *MetricsPlugin) RecordTagInvalidation() {
-	atomic.AddInt64(&m.metrics.tagInvalidations, 1)
+	m.metrics.tagInvalidations.Add(1)
 }
 
 func (m *MetricsPlugin) SetConnectedClients(n int64) {
-	atomic.StoreInt64(&m.metrics.connectedClients, n)
+	m.metrics.connectedClients.Store(n)
 }
 
 func (m *MetricsPlugin) SetKeysTotal(n int64) {
-	atomic.StoreInt64(&m.metrics.keysTotal, n)
+	m.metrics.keysTotal.Store(n)
 }
 
 func (m *MetricsPlugin) SetMemoryBytes(n int64) {
-	atomic.StoreInt64(&m.metrics.memoryBytes, n)
+	m.metrics.memoryBytes.Store(n)
 }
 
 func (m *MetricsPlugin) SetHitCount(n int64) {
-	atomic.StoreInt64(&m.metrics.hitCount, n)
+	m.metrics.hitCount.Store(n)
 }
 
 func (m *MetricsPlugin) SetMissCount(n int64) {
-	atomic.StoreInt64(&m.metrics.missCount, n)
+	m.metrics.missCount.Store(n)
 }
 
 func (m *MetricsPlugin) SetEvictedCount(n int64) {
-	atomic.StoreInt64(&m.metrics.evictedCount, n)
+	m.metrics.evictedCount.Store(n)
 }
 
 func (m *MetricsPlugin) SetExpiredCount(n int64) {
-	atomic.StoreInt64(&m.metrics.expiredCount, n)
+	m.metrics.expiredCount.Store(n)
 }
 
 func (m *MetricsPlugin) ExportPrometheus() string {
@@ -130,35 +130,35 @@ func (m *MetricsPlugin) ExportPrometheus() string {
 
 	result += "\n# HELP cachestorm_hit_total Total cache hits\n"
 	result += "# TYPE cachestorm_hit_total counter\n"
-	result += "cachestorm_hit_total " + strconv.FormatInt(atomic.LoadInt64(&m.metrics.hitCount), 10) + "\n"
+	result += "cachestorm_hit_total " + strconv.FormatInt(m.metrics.hitCount.Load(), 10) + "\n"
 
 	result += "\n# HELP cachestorm_miss_total Total cache misses\n"
 	result += "# TYPE cachestorm_miss_total counter\n"
-	result += "cachestorm_miss_total " + strconv.FormatInt(atomic.LoadInt64(&m.metrics.missCount), 10) + "\n"
+	result += "cachestorm_miss_total " + strconv.FormatInt(m.metrics.missCount.Load(), 10) + "\n"
 
 	result += "\n# HELP cachestorm_evicted_total Total keys evicted\n"
 	result += "# TYPE cachestorm_evicted_total counter\n"
-	result += "cachestorm_evicted_total " + strconv.FormatInt(atomic.LoadInt64(&m.metrics.evictedCount), 10) + "\n"
+	result += "cachestorm_evicted_total " + strconv.FormatInt(m.metrics.evictedCount.Load(), 10) + "\n"
 
 	result += "\n# HELP cachestorm_expired_total Total keys expired\n"
 	result += "# TYPE cachestorm_expired_total counter\n"
-	result += "cachestorm_expired_total " + strconv.FormatInt(atomic.LoadInt64(&m.metrics.expiredCount), 10) + "\n"
+	result += "cachestorm_expired_total " + strconv.FormatInt(m.metrics.expiredCount.Load(), 10) + "\n"
 
 	result += "\n# HELP cachestorm_connected_clients Number of connected clients\n"
 	result += "# TYPE cachestorm_connected_clients gauge\n"
-	result += "cachestorm_connected_clients " + strconv.FormatInt(atomic.LoadInt64(&m.metrics.connectedClients), 10) + "\n"
+	result += "cachestorm_connected_clients " + strconv.FormatInt(m.metrics.connectedClients.Load(), 10) + "\n"
 
 	result += "\n# HELP cachestorm_keys_total Total number of keys\n"
 	result += "# TYPE cachestorm_keys_total gauge\n"
-	result += "cachestorm_keys_total " + strconv.FormatInt(atomic.LoadInt64(&m.metrics.keysTotal), 10) + "\n"
+	result += "cachestorm_keys_total " + strconv.FormatInt(m.metrics.keysTotal.Load(), 10) + "\n"
 
 	result += "\n# HELP cachestorm_memory_bytes Memory usage in bytes\n"
 	result += "# TYPE cachestorm_memory_bytes gauge\n"
-	result += "cachestorm_memory_bytes " + strconv.FormatInt(atomic.LoadInt64(&m.metrics.memoryBytes), 10) + "\n"
+	result += "cachestorm_memory_bytes " + strconv.FormatInt(m.metrics.memoryBytes.Load(), 10) + "\n"
 
 	result += "\n# HELP cachestorm_tag_invalidations_total Total tag invalidations\n"
 	result += "# TYPE cachestorm_tag_invalidations_total counter\n"
-	result += "cachestorm_tag_invalidations_total " + strconv.FormatInt(atomic.LoadInt64(&m.metrics.tagInvalidations), 10) + "\n"
+	result += "cachestorm_tag_invalidations_total " + strconv.FormatInt(m.metrics.tagInvalidations.Load(), 10) + "\n"
 
 	return result
 }
@@ -172,14 +172,14 @@ func (m *MetricsPlugin) GetMetrics() map[string]interface{} {
 
 	return map[string]interface{}{
 		"commands_total":    commands,
-		"hit_count":         atomic.LoadInt64(&m.metrics.hitCount),
-		"miss_count":        atomic.LoadInt64(&m.metrics.missCount),
-		"evicted_count":     atomic.LoadInt64(&m.metrics.evictedCount),
-		"expired_count":     atomic.LoadInt64(&m.metrics.expiredCount),
-		"connected_clients": atomic.LoadInt64(&m.metrics.connectedClients),
-		"tag_invalidations": atomic.LoadInt64(&m.metrics.tagInvalidations),
-		"keys_total":        atomic.LoadInt64(&m.metrics.keysTotal),
-		"memory_bytes":      atomic.LoadInt64(&m.metrics.memoryBytes),
+		"hit_count":         m.metrics.hitCount.Load(),
+		"miss_count":        m.metrics.missCount.Load(),
+		"evicted_count":     m.metrics.evictedCount.Load(),
+		"expired_count":     m.metrics.expiredCount.Load(),
+		"connected_clients": m.metrics.connectedClients.Load(),
+		"tag_invalidations": m.metrics.tagInvalidations.Load(),
+		"keys_total":        m.metrics.keysTotal.Load(),
+		"memory_bytes":      m.metrics.memoryBytes.Load(),
 	}
 }
 

@@ -557,7 +557,7 @@ var listShapePool = sync.Pool{New: func() any { return new(listShape) }}
 // and frees it; a quicklist keeps its shape.
 func (v *ListValue) settleShapeLocked() {
 	s := v.shape
-	if s == nil || !packListShapes || s.quick || s.count != v.l.count || s.count > math.MaxUint16 || s.lpBytes <= 0 || s.lpBytes > math.MaxUint32 {
+	if s == nil || !packListShapes || s.quick || s.count != v.l.count || s.count > math.MaxUint16 || s.lpBytes <= 0 || int64(s.lpBytes) > math.MaxUint32 {
 		return
 	}
 	v.lpBytes, v.lpCount = uint32(s.lpBytes), uint16(s.count)

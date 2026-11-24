@@ -30,7 +30,7 @@ type BenchmarkResult struct {
 
 type progressBar struct {
 	total     int64
-	current   int64
+	current   atomic.Int64
 	width     int
 	startTime time.Time
 }
@@ -44,11 +44,11 @@ func newProgressBar(total int64) *progressBar {
 }
 
 func (p *progressBar) increment() {
-	atomic.AddInt64(&p.current, 1)
+	p.current.Add(1)
 }
 
 func (p *progressBar) print() {
-	current := atomic.LoadInt64(&p.current)
+	current := p.current.Load()
 	percent := float64(current) / float64(p.total)
 	filled := int(percent * float64(p.width))
 

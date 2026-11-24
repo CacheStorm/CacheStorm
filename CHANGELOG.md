@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-11-24
+
+The binaries of 0.4.0 were never published: its release build failed on 32-bit ARM, which cancelled the other platforms (the 0.4.0 Docker image was published and is unaffected). 0.4.1 is 0.4.0 with the fixes below.
+
+### Changed
+- **32-bit builds**: three integer constants above 2^31 (in the list encoding, the time series size estimate and the search iterators) no longer stop the build on 32-bit platforms, and the metrics plugin's counters are `atomic.Int64`, which 32-bit platforms keep aligned: as plain `int64` fields after a `sync.Map` they were misaligned there, and the first recorded hit crashed the server with "unaligned 64-bit atomic operation".
+- **Lua `string.rep`**: the count is compared as a number, so a huge count fails with `resulting string too large` on 32-bit platforms too, where it wrapped around and returned an empty string.
+- CI vets the code and runs the store and plugin tests as 32-bit (`GOARCH=386`).
+
 ## [0.4.0] - 2026-11-22
 
 Highlights: the commands and data types Redis 8.0 to 8.10 added (vector sets, the array type, Redis 8.4's conditional string commands, `MSETEX`, `INCREX`, `DIGEST`, the stream additions — `XREADGROUP ... CLAIM`, `XNACK`, idempotent `XADD` —, `LMOVEM`, `HOTKEYS`, `HIMPORT`, `BACKUP`, the new keyspace notification classes and atomic slot migration), loading Redis 8.10's RDB files and `DUMP` payloads, Redis 8's `INFO` fields and modules, and the production-readiness work on persistence, replication and cluster mode listed below.

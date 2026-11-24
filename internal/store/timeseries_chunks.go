@@ -385,7 +385,7 @@ func redisStringSize(n int) int64 {
 	}
 	hdr := 3
 	switch {
-	case n >= 1<<32:
+	case int64(n) >= 1<<32:
 		hdr = 17
 	case n >= 1<<16:
 		hdr = 9
@@ -414,7 +414,7 @@ func RedisLoadedStringSize(n int, enc RedisStringEnc) int64 {
 	}
 	hdr := 3
 	switch {
-	case n >= 1<<32:
+	case int64(n) >= 1<<32:
 		hdr = 17
 	case n >= 1<<16:
 		hdr = 9
