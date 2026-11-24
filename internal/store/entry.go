@@ -1,10 +1,14 @@
 package store
 
 import (
+	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+	"unsafe"
+	"weak"
 )
 
 type DataType uint8
@@ -653,7 +657,77 @@ func (e *Entry) SetTags(tags []string) {
 			return
 		}
 	}
-	e.meta.Store(&entryMeta{loading: loading, tags: tags})
+	e.meta.Store(sharedMeta(loading, tags))
+}
+
+// metaKey names an entryMeta by its loading flag and its tags.
+type metaKey struct {
+	loading *atomic.Bool
+	tags    string
+}
+
+// metas holds, weakly, the entryMeta of each loading flag and tag list in
+// use, so the entries with the same tags share one: a cache tags thousands
+// of keys with the same few tags, and a meta of its own (with the slice and
+// the tag names) cost each of them 50 to 100 bytes.
+var metas [64]struct {
+	mu sync.RWMutex
+	m  map[metaKey]weak.Pointer[entryMeta]
+}
+
+// sharedMeta returns the entryMeta for loading and tags, which must not be
+// empty. The caller must not modify its tags.
+func sharedMeta(loading *atomic.Bool, tags []string) *entryMeta {
+	var buf [256]byte
+	enc := buf[:0]
+	for _, tag := range tags {
+		enc = strconv.AppendInt(enc, int64(len(tag)), 10)
+		enc = append(enc, ':')
+		enc = append(enc, tag...)
+	}
+	shard := &metas[fnv32a(enc)%uint32(len(metas))]
+	shard.mu.RLock()
+	wp, ok := shard.m[metaKey{loading: loading, tags: unsafe.String(unsafe.SliceData(enc), len(enc))}]
+	shard.mu.RUnlock()
+	if ok {
+		if m := wp.Value(); m != nil {
+			return m
+		}
+	}
+
+	// One allocation holds the names of all the tags, and keys the cache.
+	names := string(enc)
+	own := make([]string, len(tags))
+	at := 0
+	for i, tag := range tags {
+		for at < len(names) && names[at] != ':' {
+			at++
+		}
+		at++
+		own[i] = names[at : at+len(tag)]
+		at += len(tag)
+	}
+	key := metaKey{loading: loading, tags: names}
+	shard.mu.Lock()
+	if live := shard.m[key].Value(); live != nil {
+		shard.mu.Unlock()
+		return live
+	}
+	m := &entryMeta{loading: loading, tags: own}
+	wp = weak.Make(m)
+	if shard.m == nil {
+		shard.m = make(map[metaKey]weak.Pointer[entryMeta])
+	}
+	shard.m[key] = wp
+	shard.mu.Unlock()
+	runtime.AddCleanup(m, func(k metaKey) {
+		shard.mu.Lock()
+		if shard.m[k] == wp {
+			delete(shard.m, k)
+		}
+		shard.mu.Unlock()
+	}, key)
+	return m
 }
 
 // bind ties the entry to the store whose untagged entries share plain.
@@ -671,7 +745,7 @@ func (e *Entry) bind(plain *entryMeta) {
 		loading = plain.loading
 	}
 	if m.loading != loading {
-		e.meta.Store(&entryMeta{loading: loading, tags: m.tags})
+		e.meta.Store(sharedMeta(loading, m.tags))
 	}
 }
 
@@ -680,7 +754,7 @@ func (e *Entry) bind(plain *entryMeta) {
 func (e *Entry) rehome() *Entry {
 	n := &Entry{Value: e.Value}
 	if tags := e.TagList(); len(tags) > 0 {
-		n.meta.Store(&entryMeta{tags: tags})
+		n.meta.Store(sharedMeta(nil, tags))
 	}
 	n.access.Store(e.access.Load())
 	n.ExpiresAt.Store(e.ExpiresAt.Load())
