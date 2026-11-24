@@ -749,7 +749,7 @@ func cmdMIGRATE(ctx *Context) error {
 				args = append(args, []byte("REPLACE"))
 			}
 			if len(it.tags) > 0 && mc.restoreTags > 0 {
-				args = append(args, []byte("TAGS"), []byte(strconv.Itoa(len(it.tags))))
+				args = append(args, []byte("TAGS"))
 				for _, tag := range it.tags {
 					args = append(args, []byte(tag))
 				}
@@ -848,7 +848,7 @@ func migrateProbeRestoreTags(mc *migrateConn, auth [][]byte, restore []byte, key
 	}
 	// REPLACE skips the existing-key check, and the payload is refused
 	// before anything is stored.
-	_ = w.WriteArray([]*resp.Value{resp.BulkBytes(restore), resp.BulkString(key), resp.BulkString("0"), resp.BulkString("-"), resp.BulkString("REPLACE"), resp.BulkString("TAGS"), resp.BulkString("0")})
+	_ = w.WriteArray([]*resp.Value{resp.BulkBytes(restore), resp.BulkString(key), resp.BulkString("0"), resp.BulkString("-"), resp.BulkString("REPLACE"), resp.BulkString("TAGS"), resp.BulkString("probe")})
 	replies, err := migrateExchange(&deadlineConn{Conn: mc.conn, timeout: timeout}, out.Bytes(), n)
 	if err != nil || len(replies) < n {
 		return 0

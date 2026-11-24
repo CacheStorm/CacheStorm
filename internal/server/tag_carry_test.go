@@ -47,13 +47,13 @@ func TestRestoreTagsX(t *testing.T) {
 	c := dialRepl(t, master)
 	c.do("SET", "src", "v")
 	payload := c.do("DUMP", "src")
-	if got := c.str("RESTORE", "k", "0", string(payload.Bulk), "TAGS", "2", "a", "b c"); got != "OK" {
+	if got := c.str("RESTORE", "k", "0", string(payload.Bulk), "REPLACE", "TAGS", "a", "b c"); got != "OK" {
 		t.Fatalf("RESTORE TAGS = %s", got)
 	}
 	if got := c.str("TAGS", "k"); got != "[a b c]" {
 		t.Fatalf("TAGS k = %s", got)
 	}
-	for _, bad := range [][]string{{"TAGS"}, {"TAGS", "3", "a"}, {"TAGS", "-1"}, {"TAGS", "1", "a", "TAGS", "1", "b"}} {
+	for _, bad := range [][]string{{"TAGS"}, {"REPLACE", "TAGS"}} {
 		args := append([]string{"RESTORE", "x", "0", string(payload.Bulk)}, bad...)
 		if got := c.do(args...); got.Type != resp.TypeError {
 			t.Fatalf("RESTORE %v = %s, want an error", bad, str(got))
@@ -124,7 +124,7 @@ func TestSetTagsOptionX(t *testing.T) {
 	replica := startReplServer(t, nil)
 	rc := replicate(t, replica, master)
 	c := dialRepl(t, master)
-	if got := c.str("SET", "k", "v", "EX", "100", "TAGS", "2", "a", "b"); got != "OK" {
+	if got := c.str("SET", "k", "v", "EX", "100", "TAGS", "a", "b"); got != "OK" {
 		t.Fatalf("SET EX TAGS = %s", got)
 	}
 	if got := c.str("TAGS", "k"); got != "[a b]" {
@@ -133,13 +133,13 @@ func TestSetTagsOptionX(t *testing.T) {
 	if ttl := c.do("TTL", "k"); ttl.Int <= 0 || ttl.Int > 100 {
 		t.Fatalf("TTL k = %s", str(ttl))
 	}
-	// The option may come anywhere, and an option's value spelled TAGS is
-	// that value.
-	if got := c.str("SET", "k", "TAGS", "TAGS", "1", "c", "IFEQ", "v", "GET"); got != "v" {
-		t.Fatalf("SET TAGS IFEQ GET = %s", got)
+	// TAGS is the last option: what follows it are tags, even spelled like
+	// options. A value spelled TAGS is that value.
+	if got := c.str("SET", "k", "TAGS", "IFEQ", "v", "GET", "TAGS", "c", "EX"); got != "v" {
+		t.Fatalf("SET IFEQ GET TAGS = %s", got)
 	}
-	if got := c.str("TAGS", "k"); got != "[c]" {
-		t.Fatalf("TAGS k = %s, want [c]", got)
+	if got := c.str("TAGS", "k"); got != "[c EX]" {
+		t.Fatalf("TAGS k = %s, want [c EX]", got)
 	}
 	if got := c.str("SET", "k", "x", "IFEQ", "TAGS"); got != "OK" {
 		t.Fatalf("SET IFEQ TAGS = %s", got)
@@ -147,16 +147,16 @@ func TestSetTagsOptionX(t *testing.T) {
 	if got := c.str("TAGS", "k"); got != "[]" {
 		t.Fatalf("a SET without TAGS kept the tags: %s", got)
 	}
-	if got := c.do("SET", "n", "v", "NX", "TAGS", "1", "t"); str(got) != "OK" {
+	if got := c.do("SET", "n", "v", "NX", "TAGS", "t"); str(got) != "OK" {
 		t.Fatalf("SET NX TAGS = %s", str(got))
 	}
-	if got := c.do("SET", "n", "w", "NX", "TAGS", "1", "u"); !got.IsNull {
+	if got := c.do("SET", "n", "w", "NX", "TAGS", "u"); !got.IsNull {
 		t.Fatalf("SET NX on an existing key = %s", str(got))
 	}
 	if got := c.str("TAGKEYS", "u"); got != "[]" {
 		t.Fatalf("an aborted SET tagged the key: %s", got)
 	}
-	for _, bad := range [][]string{{"TAGS"}, {"TAGS", "2", "a"}, {"TAGS", "x"}, {"TAGS", "1", "a", "TAGS", "1", "b"}} {
+	for _, bad := range [][]string{{"TAGS"}, {"EX", "10", "TAGS"}} {
 		args := append([]string{"SET", "bad", "v"}, bad...)
 		if got := c.do(args...); got.Type != resp.TypeError {
 			t.Fatalf("%v = %s, want an error", args, str(got))

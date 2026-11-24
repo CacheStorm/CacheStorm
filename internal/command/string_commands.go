@@ -124,38 +124,31 @@ var (
 	setValueOptions = [][]byte{[]byte("EX"), []byte("PX"), []byte("EXAT"), []byte("PXAT"), []byte("IFEQ"), []byte("IFNE"), []byte("IFDEQ"), []byte("IFDNE")}
 )
 
-// splitSetTags takes SET's CacheStorm-only TAGS numtags tag ... option out
-// of its options, so a key gets its value, expiry and tags in one write. It
-// steps over the options that take a value, so a value spelled TAGS is not
-// taken for the option. tags is nil without the option.
+// splitSetTags takes SET's CacheStorm-only TAGS tag [tag ...] option, the
+// last one, off its options, so a key gets its value, expiry and tags in one
+// write. It steps over the options that take a value, so a value spelled
+// TAGS is not taken for the option. tags is nil without the option.
 func splitSetTags(args [][]byte) (rest [][]byte, tags []string, err error) {
 	for j := 0; j < len(args); j++ {
-		switch a := args[j]; {
-		case !bytes.EqualFold(a, tagsOption):
+		if !bytes.EqualFold(args[j], tagsOption) {
 			for _, opt := range setValueOptions {
-				if bytes.EqualFold(a, opt) {
+				if bytes.EqualFold(args[j], opt) {
 					j++
 					break
 				}
 			}
-		default:
-			if tags != nil || j+1 >= len(args) {
-				return nil, nil, ErrSyntaxError
-			}
-			n, ok := parseRedisInt(args[j+1])
-			if !ok || n < 0 || n > int64(len(args)-j-2) {
-				return nil, nil, ErrSyntaxError
-			}
-			tags = make([]string, n)
-			for i := range tags {
-				tags[i] = string(args[j+2+i])
-			}
-			rest = append(append(rest, args[:j]...), args[j+2+int(n):]...)
-			args, j = rest, j-1
-			rest = nil
+			continue
 		}
+		if j+1 >= len(args) {
+			return nil, nil, ErrSyntaxError
+		}
+		tags = make([]string, len(args)-j-1)
+		for i := range tags {
+			tags[i] = string(args[j+1+i])
+		}
+		return args[:j], tags, nil
 	}
-	return args, tags, nil
+	return args, nil, nil
 }
 
 // setGeneric is Redis' setGenericCommand: with GET the old value (which must
@@ -268,7 +261,7 @@ func setGenericIf(ctx *Context, key string, value []byte, flags int, hasExpire b
 		if whenMs != 0 {
 			args = append(args, []byte("PXAT"), strconv.AppendInt(nil, whenMs, 10))
 		}
-		args = append(args, []byte("TAGS"), strconv.AppendInt(nil, int64(len(ctx.setTags)), 10))
+		args = append(args, []byte("TAGS"))
 		for _, tag := range ctx.setTags {
 			args = append(args, []byte(tag))
 		}

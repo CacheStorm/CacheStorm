@@ -40,20 +40,14 @@ func cmdRESTORE(ctx *Context) error {
 	for i := 3; i < ctx.ArgCount(); i++ {
 		switch strings.ToUpper(ctx.ArgString(i)) {
 		case "TAGS":
-			// CacheStorm's own option: the key's tags, which a DUMP payload
-			// (Redis' format) has no room for. MIGRATE and slot migration
-			// send it to a CacheStorm target.
-			if tags != nil || i+1 >= ctx.ArgCount() {
+			// CacheStorm's own option, the last one: the key's tags, which
+			// a DUMP payload (Redis' format) has no room for. MIGRATE and
+			// slot migration send it to a CacheStorm target.
+			if i+1 >= ctx.ArgCount() {
 				return ctx.WriteError(ErrSyntaxError)
 			}
-			i++
-			n, ok := parseRedisInt(ctx.Arg(i))
-			if !ok || n < 0 || n > int64(ctx.ArgCount()-i-1) {
-				return ctx.WriteError(ErrSyntaxError)
-			}
-			tags = make([]string, 0, n)
-			for ; n > 0; n-- {
-				i++
+			tags = make([]string, 0, ctx.ArgCount()-i-1)
+			for i++; i < ctx.ArgCount(); i++ {
 				tags = append(tags, ctx.ArgString(i))
 			}
 		case "REPLACE":
@@ -144,7 +138,7 @@ func cmdRESTORE(ctx *Context) error {
 		args = append(args, []byte("FREQ"), strconv.AppendInt(nil, freq, 10))
 	}
 	if len(tags) > 0 {
-		args = append(args, []byte("TAGS"), strconv.AppendInt(nil, int64(len(tags)), 10))
+		args = append(args, []byte("TAGS"))
 		for _, tag := range tags {
 			args = append(args, []byte(tag))
 		}

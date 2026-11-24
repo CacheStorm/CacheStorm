@@ -1236,7 +1236,7 @@ func (m *asmManager) slotSnapshot(ranges []cluster.SlotRange, withTags bool) []b
 				}
 				args := [][]byte{[]byte(k), []byte(strconv.FormatInt(exp, 10)), payload, []byte("ABSTTL")}
 				if tags := e.TagList(); withTags && len(tags) > 0 {
-					args = append(args, []byte("TAGS"), []byte(strconv.Itoa(len(tags))))
+					args = append(args, []byte("TAGS"))
 					for _, tag := range tags {
 						args = append(args, []byte(tag))
 					}
