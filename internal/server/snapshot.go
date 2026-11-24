@@ -99,6 +99,36 @@ func (s *Server) restoreRDBAux(reader *persistence.RDBReader) error {
 	if err := s.restoreSearch([]byte(reader.AuxFields[snapshotSearchAux])); err != nil {
 		return fmt.Errorf("restore snapshot search indexes: %w", err)
 	}
+	if err := s.restoreTagLinks([]byte(reader.AuxFields[snapshotTagLinksAux])); err != nil {
+		return fmt.Errorf("restore snapshot tag hierarchy: %w", err)
+	}
+	return nil
+}
+
+// snapshotTagLinksAux is the snapshot aux field that holds the tag
+// hierarchy, as the SELECT and TAGLINK commands of tagLinkCommands.
+const snapshotTagLinksAux = "cachestorm-taglinks"
+
+func (s *Server) restoreTagLinks(payload []byte) error {
+	cmds, err := persistence.DecodeCommands(payload)
+	if err != nil {
+		return err
+	}
+	db := 0
+	for _, cmd := range cmds {
+		switch name := command.CanonicalName(cmd.Name); {
+		case name == "SELECT" && len(cmd.Args) == 1:
+			n, err := strconv.Atoi(string(cmd.Args[0]))
+			if err != nil || !s.dbs.Valid(n) {
+				return fmt.Errorf("bad database %q", cmd.Args[0])
+			}
+			db = n
+		case name == "TAGLINK" && len(cmd.Args) == 2:
+			s.dbs.DB(db).GetTagIndex().Link(string(cmd.Args[0]), string(cmd.Args[1]))
+		default:
+			return fmt.Errorf("unexpected command %s", name)
+		}
+	}
 	return nil
 }
 
@@ -272,9 +302,12 @@ func (s *Server) saveSnapshot(background bool) error {
 		finish(err)
 		return fmt.Errorf("ERR snapshot functions: %w", err)
 	}
-	var aux map[string]string
-	if searchCmds := s.SearchCommands(); len(searchCmds) > 0 {
-		aux = map[string]string{snapshotSearchAux: string(persistence.EncodeCommands(searchCmds))}
+	aux := map[string]string{}
+	if searchCmds := s.router.SearchIndexes().Commands(); len(searchCmds) > 0 {
+		aux[snapshotSearchAux] = string(persistence.EncodeCommands(searchCmds))
+	}
+	if linkCmds := tagLinkCommands(s.dbs); len(linkCmds) > 0 {
+		aux[snapshotTagLinksAux] = string(persistence.EncodeCommands(linkCmds))
 	}
 	// The snapshot is in Redis' RDB format, so Redis and its tools load it.
 	// The pieces are written and the checksum computed after the encoder

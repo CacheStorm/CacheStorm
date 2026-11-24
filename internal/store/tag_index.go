@@ -1,6 +1,8 @@
 package store
 
 import (
+	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 )
@@ -271,6 +273,25 @@ func (ti *TagIndex) Unlink(parent, child string) {
 		}
 	}
 	delete(ti.parents, child)
+}
+
+// Links returns every parent and child pair of the hierarchy, sorted.
+func (ti *TagIndex) Links() [][2]string {
+	ti.hierarchy.RLock()
+	links := make([][2]string, 0, len(ti.parents))
+	for parent, children := range ti.children {
+		for child := range children {
+			links = append(links, [2]string{parent, child})
+		}
+	}
+	ti.hierarchy.RUnlock()
+	slices.SortFunc(links, func(a, b [2]string) int {
+		if c := strings.Compare(a[0], b[0]); c != 0 {
+			return c
+		}
+		return strings.Compare(a[1], b[1])
+	})
+	return links
 }
 
 func (ti *TagIndex) GetChildren(tag string) []string {

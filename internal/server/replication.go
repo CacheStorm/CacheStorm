@@ -7,7 +7,9 @@ import (
 	"math/bits"
 	"net"
 	"runtime"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -380,7 +382,7 @@ func (s *Server) CommitFullSync(dbs *store.Databases, replay *command.Router) er
 	functions := replay.FunctionRegistry().CloneForStore(s.Store())
 	searchIndexes := replay.SearchIndexes()
 	if aof := s.aof(); aof != nil {
-		if err := aof.Rewrite(replication.DBSource{DBs: dbs, Functions: functions.DumpPayload(), Search: searchIndexes.Commands()}); err != nil {
+		if err := aof.Rewrite(replication.DBSource{DBs: dbs, Functions: functions.DumpPayload(), Search: slices.Concat(searchIndexes.Commands(), tagLinkCommands(dbs))}); err != nil {
 			return err
 		}
 	}
@@ -396,9 +398,36 @@ func (s *Server) FunctionPayload() ([]byte, error) {
 	return s.snapshotFunctionCommand([][]byte{[]byte("DUMP")})
 }
 
-// SearchCommands implements replication.Host.
+// SearchCommands implements replication.Host: the commands a snapshot
+// starts with to rebuild what lives outside the keys, the search indexes and
+// the tag hierarchy.
 func (s *Server) SearchCommands() [][]string {
-	return s.router.SearchIndexes().Commands()
+	return slices.Concat(s.router.SearchIndexes().Commands(), tagLinkCommands(s.dbs))
+}
+
+// tagLinkCommands returns the TAGLINK commands that rebuild the tag
+// hierarchy of every database of dbs, each database's after a SELECT, ending
+// in database 0 as the keys that follow them in a snapshot expect.
+func tagLinkCommands(dbs *store.Databases) [][]string {
+	var cmds [][]string
+	selected := 0
+	dbs.ForEach(func(db int, st *store.Store) {
+		links := st.GetTagIndex().Links()
+		if len(links) == 0 {
+			return
+		}
+		if db != selected {
+			cmds = append(cmds, []string{"SELECT", strconv.Itoa(db)})
+			selected = db
+		}
+		for _, link := range links {
+			cmds = append(cmds, []string{"TAGLINK", link[0], link[1]})
+		}
+	})
+	if selected != 0 {
+		cmds = append(cmds, []string{"SELECT", "0"})
+	}
+	return cmds
 }
 
 // persistenceSource is dbs with the state an AOF rewrite or a snapshot
