@@ -20,8 +20,11 @@ type ClusterConn struct {
 	// connection said it is with CLUSTER SYNCSLOTS CONF NODE-ID.
 	Internal bool
 	NodeID   string
-	slot     int
-	asking   bool
+	// RestoreTags is set by CLUSTER SYNCSLOTS CONF CAPA cachestorm-tags: the
+	// destination of a slot migration takes RESTORE ... TAGS.
+	RestoreTags bool
+	slot        int
+	asking      bool
 	// extraOut is what the running command sent beyond its reply, which
 	// CLUSTER SLOT-STATS counts as its slot's: the replication stream it fed,
 	// once per replica, and the messages SPUBLISH delivered.

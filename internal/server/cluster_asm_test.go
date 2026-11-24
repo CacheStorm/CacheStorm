@@ -103,6 +103,11 @@ func TestClusterAtomicSlotMigration(t *testing.T) {
 	}
 	stay := keyInSlot(t, "stay", 300)
 	src.c.str("SET", stay, "here")
+	// A tagged key: the snapshot's RESTORE carries its tags.
+	tagged := keyInSlot(t, "tagged", 133)
+	if got := src.c.str("SETTAG", tagged, "v", "asm-a", "asm-b"); got != "OK" {
+		t.Fatalf("SETTAG: %s", got)
+	}
 	if got := src.c.str("FUNCTION", "LOAD", "#!lua name=asmlib\nredis.register_function('asmf', function() return 1 end)"); got != "asmlib" {
 		t.Fatalf("FUNCTION LOAD: %s", got)
 	}
@@ -192,6 +197,8 @@ func TestClusterAtomicSlotMigration(t *testing.T) {
 	}
 	expect(dst, "[[library_name asmlib engine LUA functions [[name asmf description <null> flags []]]]]", "FUNCTION", "LIST")
 	expect(src, "here", "GET", stay)
+	expect(dst, "[asm-a asm-b]", "TAGS", tagged)
+	expect(dst, "1", "INVALIDATE", "asm-b")
 
 	// The source and its replica dropped the slots' keys; the destination's
 	// replica has them.

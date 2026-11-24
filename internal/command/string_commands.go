@@ -366,7 +366,7 @@ func incrBy(ctx *Context, incr int64) error {
 			return ctx.WriteError(ErrOverflow)
 		}
 		newVal := cur + incr
-		if err := ctx.Store.Set(key, &store.StringValue{Data: []byte(strconv.FormatInt(newVal, 10))}, store.SetOptions{KeepTTL: true}); err != nil {
+		if err := ctx.Store.Set(key, &store.StringValue{Data: []byte(strconv.FormatInt(newVal, 10))}, store.SetOptions{KeepTTL: true, KeepTags: true}); err != nil {
 			return ctx.WriteError(err)
 		}
 		ctx.notify(store.NotifyString, "incrby", key)
@@ -405,7 +405,7 @@ func cmdAPPEND(ctx *Context) error {
 		newData = append(growString(entry.Value, cur, len(cur)+len(suffix)), suffix...)
 	}
 
-	if err := ctx.Store.Set(key, &store.StringValue{Data: newData, Enc: enc}, store.SetOptions{KeepTTL: true}); err != nil {
+	if err := ctx.Store.Set(key, &store.StringValue{Data: newData, Enc: enc}, store.SetOptions{KeepTTL: true, KeepTags: true}); err != nil {
 		return ctx.WriteError(err)
 	}
 	ctx.notify(store.NotifyString, "append", key)
@@ -537,7 +537,7 @@ func cmdSETRANGE(ctx *Context) error {
 		copy(data, cur)
 		copy(data[offset:], value)
 	}
-	if err := ctx.Store.Set(key, &store.StringValue{Data: data, Enc: store.StringEncRaw}, store.SetOptions{KeepTTL: true}); err != nil {
+	if err := ctx.Store.Set(key, &store.StringValue{Data: data, Enc: store.StringEncRaw}, store.SetOptions{KeepTTL: true, KeepTags: true}); err != nil {
 		return ctx.WriteError(err)
 	}
 	ctx.notify(store.NotifyString, "setrange", key)
@@ -749,7 +749,7 @@ func cmdINCRBYFLOAT(ctx *Context) error {
 	if !ok {
 		return ctx.WriteError(ErrFloatOverflow)
 	}
-	opts := store.SetOptions{KeepTTL: true}
+	opts := store.SetOptions{KeepTTL: true, KeepTags: true}
 	if err := ctx.Store.Set(key, &store.StringValue{Data: []byte(formatted), Enc: store.StringEncNoInt}, opts); err != nil {
 		return ctx.WriteError(err)
 	}

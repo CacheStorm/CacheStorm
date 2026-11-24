@@ -1,6 +1,7 @@
 package command
 
 import (
+	"github.com/cachestorm/cachestorm/internal/hashslot"
 	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
 )
@@ -106,13 +107,11 @@ func cmdINVALIDATE(ctx *Context) error {
 	// had when it was planned; a tag that has gained a key since makes it
 	// take the whole gate for the rest.
 	striped := ctx.KeyHeld != nil && ctx.Escalate != nil
-	ranBeside := false
 	var keysToDelete []string
 	for _, t := range tags {
 		if striped {
 			if keys, held := ti.InvalidateIf(t, ctx.KeyHeld); held {
 				keysToDelete = append(keysToDelete, keys...)
-				ranBeside = true
 				continue
 			}
 			ctx.Escalate()
@@ -133,11 +132,10 @@ func cmdINVALIDATE(ctx *Context) error {
 		}
 		keysToDelete = uniqueKeys
 	}
-	if ranBeside {
-		// Writes to other keys ran beside this one, so a replica must delete
-		// the keys deleted here rather than look the tags up.
-		propagateDeletes(ctx, keysToDelete)
-	}
+	// Replicas, the AOF and a slot migration get the keys deleted, not the
+	// tags: writes to other keys may have run beside a striped run, and a
+	// slot migration copies only the writes naming keys of its slots.
+	propagateDeletes(ctx, keysToDelete)
 
 	if len(keysToDelete) == 0 {
 		return ctx.WriteInteger(0)
@@ -216,21 +214,44 @@ func cmdTAGCHILDREN(ctx *Context) error {
 	return ctx.WriteArray(results)
 }
 
+// deleteChunk bounds the keys of one propagated DEL.
+const deleteChunk = 1024
+
+// propagateDeletes records the deletion of keys, in place of the command,
+// as DELs: of at most deleteChunk keys, and in a cluster one per slot, as a
+// slot migration copies only single-slot writes to the slots it moves.
 func propagateDeletes(ctx *Context, keys []string) {
 	if len(keys) == 0 {
 		ctx.PropagateAs()
 		return
 	}
-	n := 0
-	for _, k := range keys {
-		n += len(k)
+	groups := [][]string{keys}
+	if ctx.ClusterEnabled() {
+		bySlot := map[int][]string{}
+		var order []int
+		for _, k := range keys {
+			slot := hashslot.Key(k)
+			if _, seen := bySlot[slot]; !seen {
+				order = append(order, slot)
+			}
+			bySlot[slot] = append(bySlot[slot], k)
+		}
+		groups = groups[:0]
+		for _, slot := range order {
+			groups = append(groups, bySlot[slot])
+		}
 	}
-	buf := make([]byte, 0, n)
-	args := make([][]byte, len(keys))
-	for i, k := range keys {
-		start := len(buf)
-		buf = append(buf, k...)
-		args[i] = buf[start:len(buf):len(buf)]
+	var cmds []ExecutedCommand
+	for _, group := range groups {
+		for len(group) > 0 {
+			n := min(len(group), deleteChunk)
+			args := make([][]byte, n)
+			for i, k := range group[:n] {
+				args[i] = []byte(k)
+			}
+			cmds = append(cmds, ExecutedCommand{Name: "DEL", Args: args, DB: ctx.DB})
+			group = group[n:]
+		}
 	}
-	ctx.PropagateAs(ExecutedCommand{Name: "DEL", Args: args, DB: ctx.DB})
+	ctx.PropagateAs(cmds...)
 }

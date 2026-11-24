@@ -670,7 +670,9 @@ func cmdMIGRATE(ctx *Context) error {
 		key     string
 		ttl     int64
 		payload []byte
+		tags    []string
 	}
+	tagged := false
 	var items []item
 	now := time.Now().UnixMilli()
 	for _, key := range keys {
@@ -691,7 +693,9 @@ func cmdMIGRATE(ctx *Context) error {
 		if err != nil {
 			return ctx.WriteError(err)
 		}
-		items = append(items, item{key, ttl, payload})
+		tags := entry.TagList()
+		tagged = tagged || len(tags) > 0
+		items = append(items, item{key, ttl, payload, tags})
 	}
 	if len(items) == 0 {
 		return ctx.WriteSimpleString("NOKEY")
@@ -727,6 +731,9 @@ func cmdMIGRATE(ctx *Context) error {
 			}
 			_ = w.WriteArray(vals)
 		}
+		if tagged && mc.restoreTags == 0 {
+			mc.restoreTags = migrateProbeRestoreTags(mc, auth, restore, items[0].key, timeout)
+		}
 		prefix = 0
 		if auth != nil {
 			send(append([][]byte{[]byte("AUTH")}, auth...)...)
@@ -740,6 +747,12 @@ func cmdMIGRATE(ctx *Context) error {
 			args := [][]byte{restore, []byte(it.key), []byte(strconv.FormatInt(it.ttl, 10)), it.payload}
 			if replace {
 				args = append(args, []byte("REPLACE"))
+			}
+			if len(it.tags) > 0 && mc.restoreTags > 0 {
+				args = append(args, []byte("TAGS"), []byte(strconv.Itoa(len(it.tags))))
+				for _, tag := range it.tags {
+					args = append(args, []byte(tag))
+				}
 			}
 			send(args...)
 		}
@@ -814,6 +827,41 @@ var errMigrateWrite = errors.New("migrate write failed")
 // migrateExchange writes data to conn while a reader collects up to
 // expected replies, so a target that answers before it has read everything
 // never stalls the pipe. It returns the replies read before any error.
+// migrateProbeRestoreTags asks the target whether its RESTORE takes the TAGS
+// option, which only CacheStorm has: a RESTORE of an invalid payload with
+// it fails on the payload where it is known and with a syntax error where
+// it is not, either way without touching a key. It names a key being
+// migrated with the RESTORE variant MIGRATE uses, so a cluster node
+// importing the slot answers it rather than redirecting it. It returns 1 or -1, and 0
+// when the target could not be asked (the next MIGRATE asks again).
+func migrateProbeRestoreTags(mc *migrateConn, auth [][]byte, restore []byte, key string, timeout time.Duration) int8 {
+	var out bytes.Buffer
+	w := resp.NewWriter(&out)
+	n := 1
+	if auth != nil {
+		vals := []*resp.Value{resp.BulkString("AUTH")}
+		for _, a := range auth {
+			vals = append(vals, resp.BulkBytes(a))
+		}
+		_ = w.WriteArray(vals)
+		n++
+	}
+	// REPLACE skips the existing-key check, and the payload is refused
+	// before anything is stored.
+	_ = w.WriteArray([]*resp.Value{resp.BulkBytes(restore), resp.BulkString(key), resp.BulkString("0"), resp.BulkString("-"), resp.BulkString("REPLACE"), resp.BulkString("TAGS"), resp.BulkString("0")})
+	replies, err := migrateExchange(&deadlineConn{Conn: mc.conn, timeout: timeout}, out.Bytes(), n)
+	if err != nil || len(replies) < n {
+		return 0
+	}
+	// Only the payload error shows the option was taken: a syntax error, or
+	// a MOVED for the probe key in a cluster, means the key would not be
+	// restored with it.
+	if probe := replies[n-1]; probe.Type == resp.TypeError && strings.Contains(probe.Err, "DUMP payload") {
+		return 1
+	}
+	return -1
+}
+
 func migrateExchange(conn net.Conn, data []byte, expected int) ([]*resp.Value, error) {
 	type reply struct {
 		v   *resp.Value

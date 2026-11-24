@@ -74,7 +74,9 @@ func (s *Store) applyValuePlan(key string, options *SetOptions, snapshot *Entry,
 				shard.mu.Unlock()
 				return ErrKeyNotFound
 			}
-			tags = options.Tags
+			if !options.KeepTags {
+				tags = options.Tags
+			}
 		}
 		if snapshot != nil {
 			tags = snapshot.TagList()

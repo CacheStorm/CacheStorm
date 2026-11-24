@@ -41,7 +41,11 @@ type SetOptions struct {
 	NX         bool
 	XX         bool
 	KeepTTL    bool
-	Tags       []string
+	// KeepTags keeps the key's tags, for a write that changes its value in
+	// place (APPEND, SETRANGE, INCR...) rather than replacing it; Tags is
+	// then ignored.
+	KeepTags bool
+	Tags     []string
 	// Replaced, when set, receives the type of the live value the write
 	// replaced; it is left alone when the key was absent.
 	Replaced *DataType

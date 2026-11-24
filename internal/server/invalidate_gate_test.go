@@ -94,8 +94,8 @@ func TestInvalidateEscalatesWhenTagGainsKeyX(t *testing.T) {
 	if s.store.Exists("k1") || s.store.Exists(late) {
 		t.Fatal("tagged keys survived INVALIDATE")
 	}
-	if _, set := ctx.Propagation(); set {
-		t.Fatal("an INVALIDATE holding the whole gate should replicate as itself")
+	if got := delArgs(t, ctx); got != "k1,"+late {
+		t.Fatalf("DEL args=%s", got)
 	}
 }
 

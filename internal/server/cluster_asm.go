@@ -76,8 +76,11 @@ type asmTask struct {
 	// destState is the destination's state as its ACKs report it.
 	destState    string
 	source, dest string
-	lastErr      string
-	retries      int64
+	// restoreTags is set when the destination takes RESTORE ... TAGS, so the
+	// snapshot carries the keys' tags.
+	restoreTags bool
+	lastErr     string
+	retries     int64
 	// Times in milliseconds; start and end are -1 until set.
 	create, start, end, paused int64
 	destSnapshotTime           int64
@@ -679,7 +682,7 @@ func (m *asmManager) runImport(t *asmTask, gen int) {
 	if !m.setState(t, gen, asmSendHandshake, false) {
 		return
 	}
-	if err := main.send("CLUSTER", "SYNCSLOTS", "CONF", "NODE-ID", m.cluster().MyID()); err != nil {
+	if err := main.send("CLUSTER", "SYNCSLOTS", "CONF", "NODE-ID", m.cluster().MyID(), "CAPA", "cachestorm-tags"); err != nil {
 		mainFail(err.Error())
 		return
 	}
@@ -1013,6 +1016,11 @@ func (m *asmManager) confCommand(ctx *command.Context, args [][]byte) error {
 				return ctx.WriteError(errors.New("ERR CLUSTER SYNCSLOTS CONF ASM-TASK only allowed on replica"))
 			}
 		case "capa":
+			// Redis ignores the capabilities it does not know; a CacheStorm
+			// destination announces that its RESTORE takes key tags.
+			if strings.EqualFold(value, "cachestorm-tags") && ctx.ClusterConn != nil {
+				ctx.ClusterConn.RestoreTags = true
+			}
 		default:
 			return ctx.WriteError(fmt.Errorf("ERR Unknown option %s", args[j]))
 		}
@@ -1069,6 +1077,7 @@ func (m *asmManager) syncCommand(ctx *command.Context, id string, rangeArgs [][]
 	}
 	t.ranges, t.op = ranges, asmMigrate
 	t.source, t.dest = c.MyID(), dest
+	t.restoreTags = ctx.ClusterConn != nil && ctx.ClusterConn.RestoreTags
 	t.state = asmWaitRDBChannel
 	t.wake = make(chan struct{}, 1)
 	gen := t.gen
@@ -1144,9 +1153,9 @@ func (m *asmManager) sendSnapshot(t *asmTask, gen int, conn net.Conn) {
 		s.UnlockWrites()
 		return
 	}
-	ranges := t.ranges
+	ranges, restoreTags := t.ranges, t.restoreTags
 	m.mu.Unlock()
-	snapshot := m.slotSnapshot(ranges)
+	snapshot := m.slotSnapshot(ranges, restoreTags)
 	m.mu.Lock()
 	if t.gen != gen {
 		m.mu.Unlock()
@@ -1187,7 +1196,7 @@ func (m *asmManager) sendSnapshot(t *asmTask, gen int, conn net.Conn) {
 
 // slotSnapshot is slotSnapshotSaveRio: the function libraries, then every
 // key of the slots as a RESTORE with its absolute expiry.
-func (m *asmManager) slotSnapshot(ranges []cluster.SlotRange) []byte {
+func (m *asmManager) slotSnapshot(ranges []cluster.SlotRange, withTags bool) []byte {
 	var out []byte
 	if reg := m.s.router.FunctionRegistry(); reg != nil {
 		out = asmAppendCommand(out, []byte("FUNCTION"), [][]byte{[]byte("RESTORE"), reg.DumpPayload(), []byte("REPLACE")})
@@ -1225,7 +1234,14 @@ func (m *asmManager) slotSnapshot(ranges []cluster.SlotRange) []byte {
 				if exp != 0 {
 					expires++
 				}
-				body = asmAppendCommand(body, []byte("RESTORE"), [][]byte{[]byte(k), []byte(strconv.FormatInt(exp, 10)), payload, []byte("ABSTTL")})
+				args := [][]byte{[]byte(k), []byte(strconv.FormatInt(exp, 10)), payload, []byte("ABSTTL")}
+				if tags := e.TagList(); withTags && len(tags) > 0 {
+					args = append(args, []byte("TAGS"), []byte(strconv.Itoa(len(tags))))
+					for _, tag := range tags {
+						args = append(args, []byte(tag))
+					}
+				}
+				body = asmAppendCommand(body, []byte("RESTORE"), args)
 				count++
 			}
 			if count == 0 {

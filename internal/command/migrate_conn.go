@@ -20,6 +20,9 @@ type migrateConn struct {
 	conn    net.Conn
 	db      int64
 	lastUse time.Time
+	// restoreTags is 1 when the target's RESTORE takes the TAGS option, -1
+	// when it does not, and 0 until it is asked.
+	restoreTags int8
 }
 
 var migrateConns = struct {

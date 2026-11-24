@@ -33,6 +33,10 @@ var aclNoKeyCommands = map[string]bool{
 	"SUBSCRIBE": true, "SWAPDB": true, "TIME": true, "UNSUBSCRIBE": true,
 	"UNWATCH": true, "WAIT": true, "RANDOMKEY": true, "TS.QUERYINDEX": true,
 	"TS.MGET": true, "TS.MRANGE": true, "TS.MREVRANGE": true,
+	// The tag commands that name tags, not keys. Like FLUSHDB and KEYS they
+	// reach whatever keys have the tag, on the node they run on.
+	"INVALIDATE": true, "TAGKEYS": true, "TAGCOUNT": true, "TAGLINK": true,
+	"TAGUNLINK": true, "TAGCHILDREN": true,
 }
 
 // aclSingleKeyCommands take the key as their first argument.
