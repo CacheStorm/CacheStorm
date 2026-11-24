@@ -132,17 +132,16 @@ func cmdINVALIDATE(ctx *Context) error {
 		}
 		keysToDelete = uniqueKeys
 	}
+	deleted := ctx.Store.DeleteBatchKeys(keysToDelete)
 	// Replicas, the AOF and a slot migration get the keys deleted, not the
 	// tags: writes to other keys may have run beside a striped run, and a
 	// slot migration copies only the writes naming keys of its slots.
-	propagateDeletes(ctx, keysToDelete)
-
-	if len(keysToDelete) == 0 {
-		return ctx.WriteInteger(0)
+	propagateDeletes(ctx, deleted)
+	// Each key deleted is announced as DEL announces it.
+	for _, key := range deleted {
+		ctx.notify(store.NotifyGeneric, "del", key)
 	}
-
-	deleted := ctx.Store.DeleteBatch(keysToDelete)
-	return ctx.WriteInteger(int64(deleted))
+	return ctx.WriteInteger(int64(len(deleted)))
 }
 
 func cmdTAGKEYS(ctx *Context) error {
@@ -245,9 +244,17 @@ func propagateDeletes(ctx *Context, keys []string) {
 	for _, group := range groups {
 		for len(group) > 0 {
 			n := min(len(group), deleteChunk)
+			// One buffer holds the chunk's key names.
+			size := 0
+			for _, k := range group[:n] {
+				size += len(k)
+			}
+			buf := make([]byte, 0, size)
 			args := make([][]byte, n)
 			for i, k := range group[:n] {
-				args[i] = []byte(k)
+				start := len(buf)
+				buf = append(buf, k...)
+				args[i] = buf[start:len(buf):len(buf)]
 			}
 			cmds = append(cmds, ExecutedCommand{Name: "DEL", Args: args, DB: ctx.DB})
 			group = group[n:]

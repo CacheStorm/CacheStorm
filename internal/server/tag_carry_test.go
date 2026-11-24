@@ -1,8 +1,11 @@
 package server
 
 import (
+	"sort"
 	"strconv"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
 )
@@ -89,5 +92,29 @@ func TestMigrateCarriesTagsX(t *testing.T) {
 	// The probe left nothing behind.
 	if got := d.str("DBSIZE"); got != "3" {
 		t.Fatalf("destination DBSIZE = %s, want 3", got)
+	}
+}
+
+func TestInvalidateAnnouncesDeletesX(t *testing.T) {
+	s := startReplServer(t, nil)
+	b, sub := dialRepl(t, s), dialRepl(t, s)
+	b.do("SETTAG", "k1", "v", "t")
+	b.do("SETTAG", "k2", "v", "t")
+	b.do("CONFIG", "SET", "notify-keyspace-events", "Eg")
+	sub.do("SUBSCRIBE", "__keyevent@0__:del")
+	if got := b.do("INVALIDATE", "t"); got.Int != 2 {
+		t.Fatalf("INVALIDATE = %s", str(got))
+	}
+	var keys []string
+	for len(keys) < 2 {
+		v, ok := sub.next(3 * time.Second)
+		if !ok {
+			t.Fatalf("got del events for %v only", keys)
+		}
+		keys = append(keys, str(v.Array[2]))
+	}
+	sort.Strings(keys)
+	if strings.Join(keys, ",") != "k1,k2" {
+		t.Fatalf("del events for %v", keys)
 	}
 }
