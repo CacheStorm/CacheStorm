@@ -118,3 +118,55 @@ func TestInvalidateAnnouncesDeletesX(t *testing.T) {
 		t.Fatalf("del events for %v", keys)
 	}
 }
+
+func TestSetTagsOptionX(t *testing.T) {
+	master := startReplServer(t, nil)
+	replica := startReplServer(t, nil)
+	rc := replicate(t, replica, master)
+	c := dialRepl(t, master)
+	if got := c.str("SET", "k", "v", "EX", "100", "TAGS", "2", "a", "b"); got != "OK" {
+		t.Fatalf("SET EX TAGS = %s", got)
+	}
+	if got := c.str("TAGS", "k"); got != "[a b]" {
+		t.Fatalf("TAGS k = %s", got)
+	}
+	if ttl := c.do("TTL", "k"); ttl.Int <= 0 || ttl.Int > 100 {
+		t.Fatalf("TTL k = %s", str(ttl))
+	}
+	// The option may come anywhere, and an option's value spelled TAGS is
+	// that value.
+	if got := c.str("SET", "k", "TAGS", "TAGS", "1", "c", "IFEQ", "v", "GET"); got != "v" {
+		t.Fatalf("SET TAGS IFEQ GET = %s", got)
+	}
+	if got := c.str("TAGS", "k"); got != "[c]" {
+		t.Fatalf("TAGS k = %s, want [c]", got)
+	}
+	if got := c.str("SET", "k", "x", "IFEQ", "TAGS"); got != "OK" {
+		t.Fatalf("SET IFEQ TAGS = %s", got)
+	}
+	if got := c.str("TAGS", "k"); got != "[]" {
+		t.Fatalf("a SET without TAGS kept the tags: %s", got)
+	}
+	if got := c.do("SET", "n", "v", "NX", "TAGS", "1", "t"); str(got) != "OK" {
+		t.Fatalf("SET NX TAGS = %s", str(got))
+	}
+	if got := c.do("SET", "n", "w", "NX", "TAGS", "1", "u"); !got.IsNull {
+		t.Fatalf("SET NX on an existing key = %s", str(got))
+	}
+	if got := c.str("TAGKEYS", "u"); got != "[]" {
+		t.Fatalf("an aborted SET tagged the key: %s", got)
+	}
+	for _, bad := range [][]string{{"TAGS"}, {"TAGS", "2", "a"}, {"TAGS", "x"}, {"TAGS", "1", "a", "TAGS", "1", "b"}} {
+		args := append([]string{"SET", "bad", "v"}, bad...)
+		if got := c.do(args...); got.Type != resp.TypeError {
+			t.Fatalf("%v = %s, want an error", args, str(got))
+		}
+	}
+	waitSynced(t, replica, master)
+	if got := rc.str("TAGKEYS", "t"); got != "[n]" {
+		t.Fatalf("replica TAGKEYS t = %s", got)
+	}
+	if ttl := rc.do("TTL", "k"); ttl.Int != -1 {
+		t.Fatalf("replica TTL k = %s", str(ttl))
+	}
+}

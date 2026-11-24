@@ -1,6 +1,7 @@
 package command
 
 import (
+	"bytes"
 	"errors"
 	"math"
 	"math/big"
@@ -99,7 +100,11 @@ func cmdSET(ctx *Context) error {
 	key := ctx.ArgString(0)
 	value := ctx.Arg(1)
 
-	flags, expireArg, match, err := parseStringArgs(ctx.Args[2:], strModeSet)
+	opts, tags, err := splitSetTags(ctx.Args[2:])
+	if err != nil {
+		return ctx.WriteError(err)
+	}
+	flags, expireArg, match, err := parseStringArgs(opts, strModeSet)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
@@ -109,7 +114,48 @@ func cmdSET(ctx *Context) error {
 			return ctx.WriteError(err)
 		}
 	}
+	ctx.setTags = tags
 	return setGenericIf(ctx, key, value, flags, expireArg != nil, whenMs, match)
+}
+
+var (
+	tagsOption = []byte("TAGS")
+	// setValueOptions are SET's options followed by a value.
+	setValueOptions = [][]byte{[]byte("EX"), []byte("PX"), []byte("EXAT"), []byte("PXAT"), []byte("IFEQ"), []byte("IFNE"), []byte("IFDEQ"), []byte("IFDNE")}
+)
+
+// splitSetTags takes SET's CacheStorm-only TAGS numtags tag ... option out
+// of its options, so a key gets its value, expiry and tags in one write. It
+// steps over the options that take a value, so a value spelled TAGS is not
+// taken for the option. tags is nil without the option.
+func splitSetTags(args [][]byte) (rest [][]byte, tags []string, err error) {
+	for j := 0; j < len(args); j++ {
+		switch a := args[j]; {
+		case !bytes.EqualFold(a, tagsOption):
+			for _, opt := range setValueOptions {
+				if bytes.EqualFold(a, opt) {
+					j++
+					break
+				}
+			}
+		default:
+			if tags != nil || j+1 >= len(args) {
+				return nil, nil, ErrSyntaxError
+			}
+			n, ok := parseRedisInt(args[j+1])
+			if !ok || n < 0 || n > int64(len(args)-j-2) {
+				return nil, nil, ErrSyntaxError
+			}
+			tags = make([]string, n)
+			for i := range tags {
+				tags[i] = string(args[j+2+i])
+			}
+			rest = append(append(rest, args[:j]...), args[j+2+int(n):]...)
+			args, j = rest, j-1
+			rest = nil
+		}
+	}
+	return args, tags, nil
 }
 
 // setGeneric is Redis' setGenericCommand: with GET the old value (which must
@@ -192,6 +238,7 @@ func setGenericIf(ctx *Context, key string, value []byte, flags int, hasExpire b
 		NX:      flags&strOptNX != 0,
 		XX:      flags&strOptXX != 0,
 		KeepTTL: flags&strOptKEEPTTL != 0,
+		Tags:    ctx.setTags,
 	}
 	if hasExpire {
 		opts.ExpireAtMS = whenMs
@@ -215,6 +262,18 @@ func setGenericIf(ctx *Context, key string, value []byte, flags int, hasExpire b
 		}
 	}
 	ctx.propagateSetX(key, value, whenMs)
+	if len(ctx.setTags) > 0 {
+		// The replicas and the AOF get the tags with the value.
+		args := [][]byte{[]byte(key), value}
+		if whenMs != 0 {
+			args = append(args, []byte("PXAT"), strconv.AppendInt(nil, whenMs, 10))
+		}
+		args = append(args, []byte("TAGS"), strconv.AppendInt(nil, int64(len(ctx.setTags)), 10))
+		for _, tag := range ctx.setTags {
+			args = append(args, []byte(tag))
+		}
+		ctx.PropagateAs(ExecutedCommand{Name: "SET", Args: args, DB: ctx.DB})
+	}
 	return reply()
 }
 

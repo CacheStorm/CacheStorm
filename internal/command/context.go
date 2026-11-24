@@ -121,6 +121,9 @@ type Context struct {
 	KeyHeld  func(key string) bool
 	Escalate func()
 
+	// setTags are the tags SET's TAGS option gives the key.
+	setTags []string
+
 	// waited is how long the running command blocked waiting for data,
 	// which its command statistics leave out as Redis does.
 	waited time.Duration

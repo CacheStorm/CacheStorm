@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`SET ... TAGS numtags tag ...`**: `SET` takes the tags with the value, so a cache entry gets its value, its expiry and its tags in one atomic write, with every option of `SET` (`EX`/`PX`/`EXAT`/`PXAT`/`KEEPTTL`, `NX`/`XX`, `IFEQ` and the other conditions, `GET`): `SET page:1 html EX 300 TAGS 2 user:7 pages`. `SETTAG` takes no expiry (every argument after the value is a tag), so this took `SETTAG` and `EXPIRE` before. The tags replace the key's, as `SETTAG`'s do; a `SET` without the option still drops them. The option is CacheStorm's own; replicas and the AOF get it with the value.
+
 ### Changed
 - **Tags survive in-place writes**: `APPEND`, `SETRANGE`, `INCR`, `INCRBY`, `DECR`, `DECRBY` and `INCRBYFLOAT` dropped the key's tags (a tagged counter fell out of its tags on its first increment, and `INVALIDATE` then left it behind). They now keep them, as they keep the TTL; `SET` and `GETSET`, which replace the value, still drop them, like the TTL.
 - **Tags move with their keys**: `RESTORE` takes `TAGS numtags tag ...`, CacheStorm's own option, as a `DUMP` payload (Redis' format) has no room for tags. `MIGRATE` sends it when the target's `RESTORE` takes it (it asks once per connection, with a `RESTORE` of an invalid payload, so a Redis target gets plain `RESTORE`s as before), and a slot migration (`CLUSTER MIGRATION IMPORT`) does when the destination announces `CAPA cachestorm-tags` in `CLUSTER SYNCSLOTS CONF`, which Redis ignores. Tagged keys moved by `MIGRATE` or a slot migration kept their values but lost their tags.
