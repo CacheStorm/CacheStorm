@@ -170,3 +170,37 @@ func TestSetTagsOptionX(t *testing.T) {
 		t.Fatalf("replica TTL k = %s", str(ttl))
 	}
 }
+
+func TestInvalidateSeveralTagsX(t *testing.T) {
+	master := startReplServer(t, nil)
+	replica := startReplServer(t, nil)
+	rc := replicate(t, replica, master)
+	c := dialRepl(t, master)
+	c.do("SETTAG", "a1", "v", "a")
+	c.do("SETTAG", "ab", "v", "a", "b")
+	c.do("SETTAG", "b1", "v", "b")
+	c.do("SETTAG", "c1", "v", "c")
+	c.do("SETTAG", "d1", "v", "d")
+	c.do("TAGLINK", "c", "d")
+	c.do("SETTAG", "keep", "v", "z")
+	// Every tag named goes, a key with two of them counts once, and a
+	// final CASCADE reaches below each.
+	if got := c.do("INVALIDATE", "a", "b", "a"); got.Int != 3 {
+		t.Fatalf("INVALIDATE a b a = %s, want 3", str(got))
+	}
+	if got := c.do("INVALIDATE", "nothing", "c", "CASCADE"); got.Int != 2 {
+		t.Fatalf("INVALIDATE nothing c CASCADE = %s, want 2", str(got))
+	}
+	if got := c.str("KEYS", "*"); got != "[keep]" {
+		t.Fatalf("KEYS = %s, want [keep]", got)
+	}
+	// A single argument spelled CASCADE is a tag.
+	c.do("SETTAG", "cas", "v", "CASCADE")
+	if got := c.do("INVALIDATE", "CASCADE"); got.Int != 1 {
+		t.Fatalf("INVALIDATE CASCADE = %s, want 1", str(got))
+	}
+	waitSynced(t, replica, master)
+	if got := rc.str("KEYS", "*"); got != "[keep]" {
+		t.Fatalf("replica KEYS = %s", got)
+	}
+}

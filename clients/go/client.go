@@ -457,9 +457,17 @@ func (c *Client) SCard(ctx context.Context, key string) (int64, error) {
 	return toInt64(val), nil
 }
 
-// Invalidate invalidates keys by tag
-func (c *Client) Invalidate(ctx context.Context, tag string) error {
-	_, err := c.Do(ctx, "INVALIDATE", tag)
+// Invalidate deletes every key that has any of tags, in one atomic command.
+func (c *Client) Invalidate(ctx context.Context, tags ...string) error {
+	if len(tags) == 0 {
+		return nil
+	}
+	args := make([]interface{}, 0, len(tags)+1)
+	args = append(args, "INVALIDATE")
+	for _, tag := range tags {
+		args = append(args, tag)
+	}
+	_, err := c.Do(ctx, args...)
 	return err
 }
 

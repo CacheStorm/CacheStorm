@@ -321,8 +321,10 @@ export class CacheStormClient extends EventEmitter {
   }
 
   // CacheStorm-specific commands
-  async invalidate(tag: string): Promise<number> {
-    return this.sendCommand(['INVALIDATE', tag]) as Promise<number>;
+  /** Deletes every key that has any of the tags, in one atomic command. */
+  async invalidate(...tags: string[]): Promise<number> {
+    if (tags.length === 0) return 0;
+    return this.sendCommand(['INVALIDATE', ...tags]) as Promise<number>;
   }
 
   async tagKeys(tag: string): Promise<string[]> {

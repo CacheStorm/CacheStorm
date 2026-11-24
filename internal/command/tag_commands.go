@@ -85,24 +85,42 @@ func tagArgs(ctx *Context) []string {
 	return tags
 }
 
+// InvalidateTags returns the tags INVALIDATE tag [tag ...] [CASCADE] with
+// args reaches: the tags named, and with a final CASCADE every tag below
+// them, each once. The write gate plans its hold from the same list.
+func InvalidateTags(ti *store.TagIndex, args [][]byte) []string {
+	cascade := len(args) > 1 && string(args[len(args)-1]) == "CASCADE"
+	if cascade {
+		args = args[:len(args)-1]
+	}
+	tags := make([]string, 0, len(args))
+	seen := make(map[string]struct{}, len(args))
+	add := func(tag string) {
+		if _, dup := seen[tag]; !dup {
+			seen[tag] = struct{}{}
+			tags = append(tags, tag)
+		}
+	}
+	for _, a := range args {
+		add(string(a))
+	}
+	if cascade {
+		for _, root := range tags[:len(tags):len(tags)] {
+			for _, d := range ti.GetAllDescendants(root) {
+				add(d)
+			}
+		}
+	}
+	return tags
+}
+
 func cmdINVALIDATE(ctx *Context) error {
 	if ctx.ArgCount() < 1 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
-	tag := ctx.ArgString(0)
-	cascade := false
-	if ctx.ArgCount() >= 2 {
-		if ctx.ArgString(1) == "CASCADE" {
-			cascade = true
-		}
-	}
-
 	ti := ctx.Store.GetTagIndex()
-	tags := []string{tag}
-	if cascade {
-		tags = append(tags, ti.GetAllDescendants(tag)...)
-	}
+	tags := InvalidateTags(ti, ctx.Args)
 	// With KeyHeld the command holds only the stripes of the keys its tags
 	// had when it was planned; a tag that has gained a key since makes it
 	// take the whole gate for the rest.
@@ -120,7 +138,7 @@ func cmdINVALIDATE(ctx *Context) error {
 		keysToDelete = append(keysToDelete, ti.Invalidate(t)...)
 	}
 
-	if cascade && len(tags) > 1 {
+	if len(tags) > 1 {
 		// A key with several of the tags is listed once per tag.
 		uniqueKeys := make([]string, 0, len(keysToDelete))
 		seen := make(map[string]struct{}, len(keysToDelete))

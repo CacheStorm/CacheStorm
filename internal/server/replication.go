@@ -155,23 +155,19 @@ func (g *writeGate) planWrite(h *gateHold, ctx *command.Context) *gateHold {
 // stripes of one by one; a larger invalidation takes the whole gate.
 const maxInvalidateStripes = 32
 
-// planInvalidate plans INVALIDATE tag [CASCADE] on the stripes of the keys
-// the tag (and with CASCADE the tags below it) has now, so invalidating a
-// small tag does not stop every other write. A key that joins one of the
-// tags before the hold is taken is not covered: the command then escalates
-// to the whole gate (see Context.Escalate).
+// planInvalidate plans INVALIDATE tag [tag ...] [CASCADE] on the stripes of
+// the keys its tags (and with CASCADE the tags below them) have now, so
+// invalidating small tags does not stop every other write. A key that joins
+// one of the tags before the hold is taken is not covered: the command then
+// escalates to the whole gate (see Context.Escalate).
 func (g *writeGate) planInvalidate(h *gateHold, ctx *command.Context) bool {
-	args := ctx.Args
-	if ctx.Store == nil || len(args) == 0 || len(args) > 2 || (len(args) == 2 && string(args[1]) != "CASCADE") {
+	if ctx.Store == nil || len(ctx.Args) == 0 || len(ctx.Args) > maxInvalidateStripes+1 {
 		return false
 	}
 	ti := ctx.Store.GetTagIndex()
-	tags := []string{string(args[0])}
-	if len(args) == 2 {
-		tags = append(tags, ti.GetAllDescendants(tags[0])...)
-		if len(tags) > maxInvalidateStripes {
-			return false
-		}
+	tags := command.InvalidateTags(ti, ctx.Args)
+	if len(tags) > maxInvalidateStripes {
+		return false
 	}
 	var held stripeSet
 	budget := maxInvalidateStripes

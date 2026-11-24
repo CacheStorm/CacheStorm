@@ -278,9 +278,16 @@ class CacheStormClient:
         return self.execute_command("ZREM", name, *values)
 
     # CacheStorm-specific commands
-    def invalidate(self, tag: str) -> int:
-        """Invalidate keys by tag."""
-        return self.execute_command("INVALIDATE", tag)
+    def invalidate(self, *tags: str, cascade: bool = False) -> int:
+        """Delete every key with any of tags, in one atomic command; with
+        cascade, also the keys of the tags linked below them. Returns the
+        number of keys deleted."""
+        if not tags:
+            return 0
+        args = ["INVALIDATE", *tags]
+        if cascade:
+            args.append("CASCADE")
+        return self.execute_command(*args)
 
     def tag_keys(self, tag: str) -> List[str]:
         """Get keys by tag."""

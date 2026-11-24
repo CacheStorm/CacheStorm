@@ -757,12 +757,32 @@ TENSOR.DELETE name                   # 1 if deleted, 0 if absent
 
 ## Tag-Based Invalidation Commands
 
+Tags group keys so they can be deleted together. A key's tags live with the
+key: they follow it through `RENAME`, `COPY`, `MOVE`, `MIGRATE`, slot
+migration, snapshots, the AOF and replication, survive in-place writes
+(`APPEND`, `SETRANGE`, `INCR`...), and go when a write replaces the value
+(`SET` without `TAGS`, `GETSET`), as the TTL does. Commands naming tags run on
+the node they are sent to; in a cluster, send them to every master.
+
 ```
-SET key value [EX seconds] [PX milliseconds] [NX|XX] [TAGS tag [tag ...]]
-TAGS key [tag [tag ...]]
-TAGKEYS tag
-INVALIDATE tag [tag ...]
+SET key value [EX s|PX ms|EXAT ts|PXAT ms-ts|KEEPTTL] [NX|XX] [GET] [TAGS tag [tag ...]]
+                                     # TAGS comes last; the tags replace the key's
+SETTAG key value tag [tag ...]       # SET with tags, no expiry
+ADDTAG key tag [tag ...]             # add tags to an existing key; how many were new
+REMTAG key tag [tag ...]             # remove tags; how many it had
+TAGS key                             # the key's tags
+TAGKEYS tag                          # the keys with the tag
+TAGCOUNT tag                         # how many keys have the tag
+INVALIDATE tag [tag ...] [CASCADE]   # delete every key with any of the tags; the
+                                     # number deleted. CASCADE (last) also reaches
+                                     # the tags linked below them
+TAGLINK parent child                 # make child a tag below parent
+TAGUNLINK parent child
+TAGCHILDREN tag                      # the tags directly below tag
 ```
+
+`INVALIDATE` publishes a `del` keyspace notification for each key it deletes
+and reaches replicas and the AOF as `DEL`s of those keys.
 
 ---
 
