@@ -1,6 +1,6 @@
 # CacheStorm Documentation
 
-Start with the installation and configuration guides. The [project review](./PROJECT_REVIEW.md) records verified limitations, the [roadmap](../ROADMAP.md) defines the next milestones, [benchmarks](./BENCHMARKS.md) records measured throughput, and the [compatibility report](../tests/compat/REPORT.md) lists the measured differences from Redis 7.4.
+Start with the installation and configuration guides. The [roadmap](../ROADMAP.md) defines the next milestones, [benchmarks](./BENCHMARKS.md) records measured throughput, and the [compatibility report](../tests/compat/REPORT.md) lists the measured differences from Redis 7.4.
 
 ## Guides
 
@@ -8,12 +8,12 @@ Start with the installation and configuration guides. The [project review](./PRO
 - [Configuration](./02-configuration.md)
 - [Command reference](./commands.md)
 - [Command examples](./commands-detailed.md)
-- [Tag-based invalidation](./commands.md#tag-based-invalidation-commands)
+- [Tag-based invalidation](./commands.md#tag-based-invalidation-commands) ([overview](../README.md#tag-based-invalidation))
 - [Running a cluster](./09-cluster.md)
 - [HTTP API](./07-http-api.md)
 - [Admin UI](./08-admin-ui.md)
 
-The command reference and examples serve different purposes; neither is a Redis conformance certificate. The production router registers about 1,200 unique command names. Some commands have incomplete behavior; see the project review before relying on transactions, persistence, SDKs or distributed operation.
+The command reference and examples serve different purposes; neither is a Redis conformance certificate. The server registers 1,238 command names; [the compatibility report](../tests/compat/REPORT.md) lists the measured differences from Redis 7.4. The [project review](./PROJECT_REVIEW.md) is the October 2026 audit that the roadmap's milestones M0–M5 resolved.
 
 ## Development and operations
 
@@ -33,7 +33,7 @@ The command reference and examples serve different purposes; neither is a Redis 
 - [Python](../clients/python/README.md)
 - [TypeScript](../clients/typescript/README.md)
 
-Client capabilities differ. Consult the project review for the confirmed pipeline, protocol, async and lifecycle defects.
+Client capabilities differ; each client's README lists its limitations.
 
 ## Historical material
 

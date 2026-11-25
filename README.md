@@ -6,95 +6,102 @@
 
   <img src="assets/cachestorm_.jpeg" alt="CacheStorm" width="100%">
 
-  [![Go Version](https://img.shields.io/badge/Go-1.22%2B-00ADD8?style=flat&logo=go)](https://golang.org)
+  [![Go Version](https://img.shields.io/badge/Go-1.26%2B-00ADD8?style=flat&logo=go)](https://golang.org)
   [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-  [![Commands](https://img.shields.io/badge/Commands-1606+-green)](./docs/commands.md)
-  [![Coverage](https://img.shields.io/badge/Coverage-93%25-brightgreen)](COVERAGE_REPORT.md)
-  [![RESP Compatible](https://img.shields.io/badge/RESP-Compatible-blue)](https://cachestorm.com/docs/commands)
+  [![Commands](https://img.shields.io/badge/Commands-1238-green)](./docs/commands.md)
+  [![Coverage](https://img.shields.io/badge/Coverage-86%25-brightgreen)](COVERAGE_REPORT.md)
+  [![RESP Compatible](https://img.shields.io/badge/RESP2%20%2F%20RESP3-Compatible-blue)](./docs/commands.md)
 
   [![CI](https://github.com/CacheStorm/CacheStorm/actions/workflows/ci.yml/badge.svg)](https://github.com/CacheStorm/CacheStorm/actions/workflows/ci.yml)
   [![Release](https://github.com/CacheStorm/CacheStorm/actions/workflows/release.yml/badge.svg)](https://github.com/CacheStorm/CacheStorm/actions/workflows/release.yml)
-  [![Nightly](https://github.com/CacheStorm/CacheStorm/actions/workflows/nightly.yml/badge.svg)](https://github.com/CacheStorm/CacheStorm/actions/workflows/nightly.yml)
   [![Go Report Card](https://goreportcard.com/badge/github.com/cachestorm/cachestorm)](https://goreportcard.com/report/github.com/cachestorm/cachestorm)
   [![Website](https://img.shields.io/badge/Website-cachestorm.com-blue)](https://cachestorm.com)
 </div>
 
 ---
 
-A high-performance in-memory data store written in Go. **about 1,200 commands**, 256-shard lock-free architecture, built-in HTTP API, enterprise security, and full observability — in a single binary.
+A Redis-compatible in-memory data store written in Go, with **tag-based cache invalidation built in**. Point any Redis client at it: strings, hashes, lists, sets, sorted sets, streams, Lua, transactions, pub/sub, replication, cluster mode and persistence behave as they do in Redis. On top of that, every key can carry tags, and one `INVALIDATE` deletes every key of a tag atomically, replicated and persisted like any other write.
 
-**Test Coverage: 90-99%** across 18 internal packages (core store: 99.2%). 100% test success rate. Works with any RESP-compatible client.
+About 1,240 commands (the Redis 7.4 set, most of what Redis 8 added, and CacheStorm's own), one static binary, multi-core.
 
-🌐 **[Website](https://cachestorm.com)** | 📚 **[Documentation](https://cachestorm.com/docs)** | 📖 **[Commands](https://cachestorm.com/docs/commands)** | 📊 **[Coverage Report](./COVERAGE_REPORT.md)** | 💬 **[Discussions](https://github.com/CacheStorm/CacheStorm/discussions)**
+🌐 **[Website](https://cachestorm.com)** | 📖 **[Commands](./docs/commands.md)** | 🚀 **[Getting started](./docs/01-getting-started.md)** | 📊 **[Benchmarks](./docs/BENCHMARKS.md)** | 📝 **[Changelog](./CHANGELOG.md)** | 💬 **[Discussions](https://github.com/CacheStorm/CacheStorm/discussions)**
 
 ## Table of Contents
 
+- [Tag-Based Invalidation](#tag-based-invalidation)
 - [Features](#features)
 - [Quick Start](#quick-start)
-- [Installation](#installation)
-- [Examples](#examples)
-- [Command Modules](#command-modules)
-- [Data Types](#data-types)
+- [Installation](#installation-methods)
 - [Performance](#performance)
-- [Testing](#testing)
+- [Official SDKs](#official-sdks)
 - [Docker](#docker)
 - [Security](#security)
 - [Production Deployment](#production-deployment)
 - [Monitoring & Observability](#monitoring--observability)
-- [CI/CD & Releases](#cicd--releases)
+- [Testing and CI](#testing-and-ci)
+- [Configuration](#configuration)
 - [Contributing](#contributing)
 - [License](#license)
 
+## Tag-Based Invalidation
+
+Caching the result of a query is easy; knowing which cached entries to drop when the data behind them changes is the hard part. On Redis that usually means keeping a set of keys per tag, adding to it on every write, and deleting through a Lua script that reads the set — with sets that outlive their keys and a script that must run on the right node. CacheStorm keeps the tag index itself:
+
+```redis
+# Value, expiry and tags in one atomic write (TAGS is the last option)
+SET page:/users/7 "<html>..." EX 300 TAGS user:7 pages
+SET api:/users/7/orders "[...]" EX 60 TAGS user:7 orders
+
+# Tag an existing key, or set a value with tags (no expiry)
+SET session:ab12 "..." EX 1800
+ADDTAG session:ab12 user:7
+SETTAG report:q3 "..." reports
+
+# Which keys carry a tag, how many, and which tags a key has
+TAGKEYS user:7
+TAGCOUNT user:7
+TAGS page:/users/7
+
+# User 7 changed: drop everything cached for them, in one atomic command
+INVALIDATE user:7                  # (integer) 3
+INVALIDATE orders pages            # several tags at once; a key counts once
+
+# Tag hierarchies: CASCADE also reaches the child tags
+TAGLINK catalog category:shoes
+INVALIDATE catalog CASCADE
+```
+
+What you can rely on:
+
+- **Atomic**: `INVALIDATE` deletes every key the tags have when it runs; a key tagged concurrently is either deleted or written after it, never left half-invalidated.
+- **No stale index**: a key leaves its tags when it is deleted, expires, is evicted, or is overwritten by a plain `SET`. `RENAME`, `COPY`, `MOVE` and `SWAPDB` take its tags along; in-place writes (`APPEND`, `INCR`, `SETRANGE`, `EXPIRE`, ...) keep them.
+- **Replicated and persisted**: replicas, the AOF and RDB snapshots carry the tags and the tag hierarchy; `INVALIDATE` reaches replicas as the `DEL`s it caused, so they never depend on their own copy of the index.
+- **Observable**: each deleted key publishes the usual `del` keyspace notification, and clients using `CLIENT TRACKING` are told.
+- **Cluster-aware**: tag commands run on the node they are sent to (send `INVALIDATE` to every master to reach a whole cluster); `MIGRATE` and slot migration move a key's tags with it.
+- **Fast**: invalidating a tag of 10 keys runs at ~270k ops/s with 8 pipelining clients without stopping other clients' writes, and a tag of 50,000 keys is gone in ~9 ms — about 4x faster than the `SMEMBERS` + `DEL` Lua script the same job takes on Redis. A tag costs a key about 55 bytes.
+
+The [Go, Python and TypeScript SDKs](#official-sdks) wrap these commands (`SetWithTags` / `set(..., tags=[...])` / `setWithTags`, and `Invalidate(tags...)`); with any other client, send them as raw commands. See [the tag commands](./docs/commands.md#tag-based-invalidation-commands) for every option.
+
 ## Features
 
-### Core Redis Compatibility
-- **Redis protocol**: RESP2 and RESP3 (HELLO 3, push messages, client-side caching with CLIENT TRACKING); works with standard Redis clients
-- **289 Core Commands**: Complete Redis command set for strings, hashes, lists, sets, sorted sets, etc.
-- **9 Core Data Types**: String, Hash, List, Set, SortedSet, Stream, Geo, Bitmap, HyperLogLog
+### Redis Compatibility
+- **Protocol**: RESP2 and RESP3 (`HELLO 3`, push messages, client-side caching with `CLIENT TRACKING`); go-redis, redis-py, ioredis, Jedis and `redis-cli` work unmodified
+- **Data types**: strings, hashes (with field expiration), lists, sets, sorted sets, streams with consumer groups, bitmaps, bitfields, HyperLogLog, geo, plus the Redis Stack/Redis 8 types: JSON, time series, search (`FT.*`), Bloom/Cuckoo filters, Count-Min Sketch, Top-K, t-digest and vector sets
+- **Redis 8 additions**: the array type, the conditional string commands (`SET ... IFEQ`, `DELEX`, `DIGEST`), `MSETEX`, `HSETEX`/`HGETEX`, the stream additions and atomic slot migration
+- **Measured, not estimated**: CI runs `tests/compat`, which sends the same command sequences to Redis 7.4 and CacheStorm and compares every reply; [its report](tests/compat/REPORT.md) lists the known differences
+- **Drop-in data**: loads Redis' `dump.rdb` (up to Redis 8.10's format), its `DUMP` payloads, and a Redis 7 `appendonlydir`; reads `redis.conf`
 
-### Extended Command Set (1,458+ Commands)
+### Server
+- **Persistence**: AOF (`always`/`everysec`/`no`) with rewrite, RDB snapshots with `SAVE`/`BGSAVE` and Redis `save` rules
+- **Replication**: `REPLICAOF`, PSYNC full and partial resync, read-only replicas, `WAIT`
+- **Cluster mode**: a Redis Cluster node that cluster clients and `redis-cli --cluster` work with: slot table, `nodes.conf`, `MOVED`/`ASK` redirections, gossip and failure detection, automatic and manual failover, online resharding. See [Running a cluster](docs/09-cluster.md)
+- **Scripting and transactions**: Lua (`EVAL`, `FUNCTION`), `MULTI`/`EXEC`/`WATCH`
+- **Memory management**: `maxmemory` with LRU/LFU/random/TTL eviction policies
+- **Security**: TLS, `requirepass`, ACLs with per-user command, key and channel rules, protected mode
+- **Observability**: Prometheus metrics, slow log, latency monitor, `INFO`, hot-key tracking, an HTTP API and admin UI
 
-| Module | Commands | Description |
-|--------|----------|-------------|
-| **Core Redis** | 289 | Full Redis compatibility |
-| **JSON** | 14 | JSON document operations |
-| **Time Series** | 12 | Time-series data |
-| **Search** | 12 | Full-text search |
-| **Graph** | 13 | Property graphs as keys, with read-only Cypher queries (`GRAPH.QUERY`) |
-| **Probabilistic** | 20+ | Bloom/Cuckoo filters, Count-Min Sketch |
-| **Distributed** | 100+ | Master-replica replication; Redis Cluster mode with replicas, failover and resharding |
-| **Caching** | 50+ | Cache warming, invalidation |
-| **Scheduling** | 40+ | Jobs, cron, timers |
-| **Messaging** | 60+ | Pub/Sub, queues, streams |
-| **Resilience** | 128 | Circuit breakers, rate limiters, retries |
-| **Data Processing** | 100+ | Aggregation, windowing, joins |
-| **Monitoring** | 80+ | Metrics, alerts, dashboards |
-| **Security** | 40+ | ACL, secrets, encryption |
-| **Workflows** | 50+ | DAGs, state machines |
-| **ML data helpers** | 25 | Feature store, datasets, embeddings and tensor storage (no training or prediction) |
-| **And more...** | 400+ | See [Commands Reference](./docs/commands.md) |
-
-### Performance
-- **Throughput over TCP**: about 790k SET/s and 880k GET/s pipelined across one million keys, ahead of Redis 7.4 on the same machine with half its median latency (see [Benchmarks](./docs/BENCHMARKS.md) for the method and the single-hot-key case, where Redis is faster)
-- **256-Shard Architecture**: Concurrent access with minimal lock contention
-- **Channel-Based Blocking**: BLPOP/BRPOP/BZPOPMIN/XREADGROUP use event-driven waiting, not polling
-- **Zero Core Dependencies**: Core functionality implemented from scratch
-
-### Enterprise Features
-- **TLS Support**: TLS 1.2+ with configurable certificate/key files
-- **Authentication**: `requirepass` with constant-time password validation
-- **Lua Scripting**: Full EVAL/EVALSHA/SCRIPT support
-- **Transactions**: MULTI/EXEC/DISCARD/WATCH support
-- **Pub/Sub**: Subscribe, Publish, Pattern Subscribe, Sharded Pub/Sub (Redis 7)
-- **Persistence**: AOF with everysec/always sync policies, auto-replay on startup
-- **Replication**: Redis-style master-replica replication (`REPLICAOF`, PSYNC full and partial resync, read-only replicas, `WAIT`)
-- **Cluster mode**: `cluster.enabled: true` runs a Redis Cluster node that unmodified cluster clients and `redis-cli --cluster` work with. It covers the slot table, `nodes.conf`, the `CLUSTER` commands and the `MOVED`/`ASK`/`CROSSSLOT`/`TRYAGAIN`/`CLUSTERDOWN` redirections. A cluster bus provides gossip and failure detection. Replicas get automatic and manual failover, and `reshard`, `rebalance`, `add-node`, `del-node` and `fix` work while clients stay online. See [Running a cluster](docs/09-cluster.md)
-- **Memory Management**: Configurable maxmemory with LRU/LFU/Random eviction + OOM rejection
-- **Access Control**: ACL support with per-command authentication enforcement
-- **Graceful Shutdown**: Connection draining with configurable timeout
-- **Panic Recovery**: Per-connection panic recovery with stack trace logging
-- **Monitoring**: Prometheus `/metrics` endpoint, Slow Log, Latency monitoring, Hot key detection
-- **HTTP API**: RESTful API with Read/Write/Idle timeouts on port 8080
+### Extension Commands
+CacheStorm's own command modules, whose state lives in ordinary keys (persisted, replicated and expired like any other): circuit breakers, rate limiters and bulkheads, distributed locks and semaphores, promises and futures, windows, aggregators and joins over streams of values, event sourcing, telemetry and alerts, a property graph with read-only Cypher (`GRAPH.QUERY`), and ML feature/embedding storage. See the [Commands Reference](./docs/commands.md); `extension-commands` in the configuration turns them off.
 
 ## Quick Start
 
@@ -180,7 +187,7 @@ go build -o cachestorm ./cmd/cachestorm
 
 #### Using Go Install
 ```bash
-go install github.com/cachestorm/cachestorm@latest
+go install github.com/cachestorm/cachestorm/cmd/cachestorm@latest
 ```
 
 #### Using Docker
@@ -239,131 +246,35 @@ python demo.py
 cd examples/typescript
 npm install
 npm run demo
+
+# Tag-based invalidation with redis-cli
+bash examples/tag_examples.sh
 ```
 
 See [examples/](./examples/) directory for complete working examples.
 
-## Command Modules
-
-### Core Redis Commands
-- **Strings**: SET, GET, INCR, DECR, APPEND, MSET, MGET, etc.
-- **Hashes**: HSET, HGET, HINCRBY, HMSET, HGETALL, etc.
-- **Lists**: LPUSH, RPUSH, LPOP, RPOP, LRANGE, etc.
-- **Sets**: SADD, SREM, SINTER, SUNION, etc.
-- **Sorted Sets**: ZADD, ZRANGE, ZINCRBY, etc.
-- **Bitmaps**: SETBIT, GETBIT, BITCOUNT, BITOP, etc.
-- **HyperLogLog**: PFADD, PFCOUNT, PFMERGE
-- **Geo**: GEOADD, GEODIST, GEORADIUS, etc.
-- **Streams**: XADD, XREAD, XGROUP, etc.
-
-### Extended Commands
-
-#### Resilience Patterns
-```
-CIRCUITX.CREATE/ALLOW/RECORD/STATUS/METRICS  - Circuit breaker pattern
-RATELIMITER.CREATE/TRY/WAIT/RESET/STATUS     - Rate limiting
-BULKHEAD.CREATE/ACQUIRE/RELEASE/STATUS       - Bulkhead isolation
-```
-
-#### Async Processing
-```
-PROMISE.CREATE/RESOLVE/REJECT/AWAIT          - Promise pattern
-FUTURE.CREATE/COMPLETE/GET/CANCEL            - Future pattern
-```
-
-#### Data Processing
-```
-AGGREGATOR.CREATE/ADD/GET/RESET              - Real-time aggregation
-WINDOWX.CREATE/ADD/GET/AGGREGATE             - Sliding/tumbling windows
-JOINX.CREATE/ADD/GET/DELETE                  - Stream joins
-PARTITIONX.CREATE/ADD/GET                    - Data partitioning
-```
-
-#### Event Sourcing
-```
-EVENTSOURCING.APPEND/REPLAY/GET              - Event store
-STREAMPROC.CREATE/PUSH/POP/PEEK              - Stream processing
-```
-
-#### Coordination
-```
-LOCKX.ACQUIRE/RELEASE/EXTEND/STATUS          - Distributed locks
-SEMAPHOREX.CREATE/ACQUIRE/RELEASE/STATUS     - Semaphores
-```
-
-#### Monitoring
-```
-TELEMETRY.RECORD/QUERY                       - Telemetry data
-ALERT.CREATE/TRIGGER/RESOLVE/LIST            - Alerting
-METRICS.GET/RESET                            - Metrics
-```
-
-## Data Types
-
-| Type | Description | Commands |
-|------|-------------|----------|
-| String | Binary-safe strings | SET, GET, INCR, etc. |
-| Hash | Field-value maps | HSET, HGET, HINCRBY, etc. |
-| List | Ordered collections | LPUSH, RPUSH, LRANGE, etc. |
-| Set | Unordered unique sets | SADD, SREM, SINTER, etc. |
-| Sorted Set | Scored ordered sets | ZADD, ZRANGE, ZINCRBY, etc. |
-| Bitmap | Bit-level operations | SETBIT, GETBIT, BITCOUNT, etc. |
-| HyperLogLog | Cardinality estimation | PFADD, PFCOUNT, PFMERGE |
-| Geo | Geographic data | GEOADD, GEODIST, GEORADIUS, etc. |
-| Stream | Log data structure | XADD, XREAD, XGROUP, etc. |
-| JSON | JSON documents | JSON.GET, JSON.SET, etc. |
-| Time Series | Time-stamped data | TS.CREATE, TS.ADD, etc. |
-
 ## Performance
 
-Benchmarks on AMD Ryzen 9 9950X3D, 64GB RAM, Windows 11 (in-memory, no network):
+CacheStorm runs commands on every core; Redis runs them on one. Measured with `redis-benchmark` over loopback on an 8-core Ryzen 7 PRO 6850H, one million distinct keys, 50 clients, pipelines of 16 ([method and history](./docs/BENCHMARKS.md)):
 
-| Operation | ops/sec | ns/op | Allocs/op |
-|-----------|---------|-------|-----------|
-| GET (sequential) | 20M | 50 ns | 0 |
-| GET (parallel, 32 cores) | 106M | 9.4 ns | 0 |
-| SET (sequential) | 1.3M | 796 ns | 3 |
-| SET (parallel, 32 cores) | 2.2M | 449 ns | 3 |
-| RESP ReadCommand | 672K | 1,488 ns | - |
-| RESP WriteBulkString (1KB) | 1.2M | 833 ns | - |
-| Store Delete (100 keys) | 968K | 1,034 ns | - |
-| Store Delete Batch (100 keys) | 82K | 12,162 ns | - |
-| Store Delete (10K keys) | 9.1K | 109,133 ns | - |
-| Store Delete Batch (10K keys) | 1.4K | 717,362 ns | - |
-| Tag Invalidate (10K keys) | 510 | 1.96 ms | - |
-| Tag Count | 73M | 13.7 ns | 0 |
+| Command | CacheStorm | Redis 7.4 | CacheStorm p50 | Redis p50 |
+|---|---|---|---|---|
+| SET | 869,565/s | 627,353/s | 0.50 ms | 1.10 ms |
+| GET | 1,016,260/s | 753,580/s | 0.38 ms | 0.91 ms |
+| INCR | 933,707/s | 634,518/s | 0.45 ms | 1.08 ms |
 
-E2E benchmarks (full TCP round-trip):
+Writes to one key run one at a time on any server, and there Redis' compact encodings still win (`HSET` on a single hash of 600k fields: 352k/s against 558k/s).
 
-| Operation | ops/sec | ns/op |
-|-----------|---------|-------|
-| SET | 32K | 37 us |
-| GET | 33K | 37 us |
-| HSET | 33K | 38 us |
-| ZADD | 31K | 36 us |
-| XADD | 31K | 39 us |
+Tag operations, 8 pipelining clients (depth 32), same machine:
 
-## Testing
-
-CacheStorm has comprehensive test coverage:
-
-- **100% Test Success Rate**: All 18 internal packages pass
-- **90-99% Coverage**: Core packages 95-99%, range 86-100%
-- **Integration Tests**: Full integration test suite
-- **Benchmarks**: Performance benchmarks included
-
-```bash
-# Run all tests
-go test ./internal/... -v
-
-# Run with coverage
-go test ./internal/... -cover
-
-# Run benchmarks
-go test ./internal/store/... -bench=.
-```
-
-See [COVERAGE_REPORT.md](./COVERAGE_REPORT.md) for detailed coverage information.
+| Operation | Throughput / latency |
+|---|---|
+| `SETTAG key value t u` | ~800k ops/s |
+| `ADDTAG key t` | ~950k ops/s |
+| `INVALIDATE` of a 10-key tag | ~270k ops/s, other clients keep writing |
+| Cache mix: 8 `GET` + `SETTAG` + `INVALIDATE` | ~1.45M commands/s |
+| `INVALIDATE` of a 50,000-key tag | ~9 ms (the Redis-style `SMEMBERS` + `DEL` Lua script: ~36 ms) |
+| Memory per tag on a key | ~55 bytes |
 
 ## Docker
 
@@ -613,71 +524,18 @@ plugins:
 
 Query the slow log via the `SLOWLOG GET` command from any Redis client.
 
-## CI/CD & Releases
+## Testing and CI
 
-### Continuous Integration
-- **Build**: Multi-platform builds (Linux, macOS, Windows)
-- **Test**: Unit tests, integration tests, benchmarks
-- **Lint**: golangci-lint with comprehensive rules
-- **Security**: Gosec vulnerability scanning
-- **Coverage**: Code coverage tracking
-
-### Release Process
-- **Automated Releases**: Triggered by version tags (`v*`) or manual dispatch
-- **Multi-Architecture**: linux/amd64, linux/arm64, linux/386, linux/arm/v7, darwin/amd64, darwin/arm64, windows/amd64
-- **Package Formats**: Binary archives (tar.gz, zip), DEB, RPM, APK
-- **Docker Images**: Multi-arch images pushed to Docker Hub & GHCR with digest attestation
-- **Package Managers**: Homebrew, Scoop, Snap
-- **Nightly Builds**: Automated daily builds with `nightly` tag
-- **Signed Releases**: GPG-signed binaries and checksums
-
-### Creating a Release
 ```bash
-# Method 1: Tag and push (automatic)
-git tag v0.1.28
-git push origin v0.1.28
-
-# Method 2: Manual dispatch from GitHub Actions
-# Go to Actions → Release → Run workflow
+go test ./internal/...              # unit and end-to-end server tests
+go test ./internal/... -race        # what CI runs
+go test ./benchmarks/ -bench . -benchmem
+golangci-lint run
 ```
 
-### CI/CD Workflows
+Every push runs, in [CI](.github/workflows/ci.yml): build, `go vet` (also as 32-bit), gofmt, golangci-lint, the race-enabled test suite (and again with `-count=3` to catch order dependence), govulncheck, the three SDKs' tests, the Redis compatibility comparison against `redis:7.4-alpine`, and smoke tests with real Redis tooling — go-redis, redis-py and ioredis, master/replica replication, Redis Sentinel failover, `redis-cli --cluster`, persistence recovery and the Docker image. Statement coverage of the internal packages is about 86% (see [COVERAGE_REPORT.md](./COVERAGE_REPORT.md)).
 
-| Workflow | Trigger | Description |
-|----------|---------|-------------|
-| [CI](.github/workflows/ci.yml) | Push, PR | Build, test, lint, security scan on all platforms |
-| [Release](.github/workflows/release.yml) | Tag `v*` | Full release with binaries, Docker, package managers |
-| [Nightly](.github/workflows/nightly.yml) | Daily 2AM | Nightly builds with latest changes |
-| [Changelog](.github/workflows/changelog.yml) | Push | Auto-update CHANGELOG.md |
-| [Dependencies](.github/workflows/dependency-update.yml) | Weekly | Automated dependency updates |
-| [Docs](.github/workflows/docs.yml) | Push to docs | Documentation deployment |
-
-### What CI/CD Does Automatically
-
-1. **On Every Push/PR**:
-   - Build on Linux, macOS, Windows
-   - Run tests with race detection
-   - Code coverage reporting (Codecov)
-   - Linting (golangci-lint, go vet)
-   - Security scanning (Gosec, Nancy, Trivy)
-   - Benchmark tests
-   - Docker build test
-
-2. **On Release Tag**:
-   - Run full test suite
-   - Build binaries for all platforms
-   - Create signed GitHub release
-   - Build and push multi-arch Docker images
-   - Update Homebrew formula
-   - Update Scoop manifest
-   - Publish Snap package
-   - Create release discussion
-   - Notify Slack/Discord
-
-3. **Scheduled Tasks**:
-   - Daily: Nightly builds
-   - Weekly: Dependency updates
-   - Daily: Changelog updates
+A version tag (`v*`) runs the [release workflow](.github/workflows/release.yml): binaries for linux (amd64, arm64, armv7), macOS (amd64, arm64), Windows (amd64) and FreeBSD (amd64) with a `checksums.txt`, and multi-arch (amd64, arm64) Docker images on `ghcr.io/cachestorm/cachestorm`.
 
 ## Configuration
 
@@ -787,7 +645,7 @@ Each SDK's README lists its limitations.
 
 ### Using Any Redis Client
 
-CacheStorm speaks RESP2, so existing Redis clients work. Compatibility is measured, not estimated: `tests/compat` runs the same command sequences against Redis 7.4 and CacheStorm and compares every reply; [its report](tests/compat/REPORT.md) lists the known differences.
+CacheStorm speaks RESP2 and RESP3, so existing Redis clients work. Compatibility is measured, not estimated: `tests/compat` runs the same command sequences against Redis 7.4 and CacheStorm and compares every reply; [its report](tests/compat/REPORT.md) lists the known differences.
 
 ```python
 # Python with redis-py
@@ -813,38 +671,31 @@ var redis = ConnectionMultiplexer.Connect("localhost:6380");
 
 ```
 cachestorm/
-├── cmd/cachestorm/        # Main application entry point
+├── cmd/cachestorm/        # Server entry point
 ├── internal/
-│   ├── acl/               # Access control lists
-│   ├── batch/             # Batch processing
-│   ├── buffer/            # Buffer management
-│   ├── cluster/           # Cluster state, nodes.conf and the cluster bus
-│   ├── command/           # Command handlers (about 1,200 commands)
-│   ├── config/            # Configuration management
-│   ├── graph/             # Graph operations
-│   ├── logger/            # Logging (100% coverage)
-│   ├── module/            # Module system
-│   ├── persistence/       # AOF/RDB persistence
-│   ├── plugin/            # Plugin system
-│   ├── pool/              # Connection pooling
+│   ├── command/           # Command handlers (1,238 commands), tag commands in tag_commands.go
+│   ├── store/             # Sharded keyspace, value encodings, tag index, eviction
+│   ├── server/            # Connections, write gate, persistence wiring, cluster slot migration
+│   ├── resp/              # RESP2/RESP3 protocol
+│   ├── persistence/       # AOF and RDB
 │   ├── replication/       # Master-replica replication (PSYNC, backlog, master link)
-│   ├── resp/              # RESP protocol
-│   ├── search/            # Search functionality
-│   ├── sentinel/          # Redis Sentinel
-│   ├── server/            # Server implementation
-│   └── store/             # Data store (256-shard)
-├── clients/               # Official SDKs
-│   ├── go/                # Go client
-│   ├── typescript/        # TypeScript/JavaScript client
-│   └── python/            # Python client
-├── plugins/               # Plugin implementations
-├── scripts/               # Installation scripts
-├── tests/                 # Integration tests
-├── benchmarks/            # Performance benchmarks
+│   ├── cluster/           # Cluster state, nodes.conf and the cluster bus
+│   ├── sentinel/          # Built-in Sentinel role
+│   ├── search/            # FT.* search engine
+│   ├── vectorset/         # Vector sets (HNSW)
+│   ├── graph/             # Property graph and Cypher
+│   ├── acl/               # Access control lists
+│   ├── config/            # YAML and redis.conf configuration
+│   └── ...                # logger, plugin, module, hashslot and helpers
+├── clients/               # Official SDKs: go/, python/, typescript/
+├── plugins/               # Metrics and other plugins
+├── tests/                 # Integration tests and the Redis compatibility harness (tests/compat)
+├── benchmarks/            # Go benchmarks for RESP, the store and tags
+├── examples/              # SDK and redis-cli examples (tag_examples.sh)
+├── scripts/               # Installers and CI smoke tests
 ├── docs/                  # Documentation
 ├── config/                # Configuration examples
-├── docker/                # Docker files
-└── web/                   # Web interface
+└── docker/                # Docker files
 ```
 
 ## License

@@ -91,10 +91,10 @@ OK
 ### 3. Use Tag-Based Invalidation
 
 ```redis
-127.0.0.1:6380> SET user:1 '{"name":"John"}' TAGS "user" "session"
+127.0.0.1:6380> SET user:1 '{"name":"John"}' EX 300 TAGS user session
 OK
 
-127.0.0.1:6380> SET user:2 '{"name":"Jane"}' TAGS "user"
+127.0.0.1:6380> SET user:2 '{"name":"Jane"}' TAGS user
 OK
 
 127.0.0.1:6380> TAGKEYS user
@@ -102,9 +102,13 @@ OK
 2) "user:2"
 
 127.0.0.1:6380> INVALIDATE user
-1) "user:1"
-2) "user:2"
+(integer) 2
+
+127.0.0.1:6380> EXISTS user:1 user:2
+(integer) 0
 ```
+
+`TAGS` is the last option of `SET`: every argument after it is a tag. `INVALIDATE` takes several tags (`INVALIDATE user session`) and answers how many keys it deleted.
 
 ### 4. Access Admin UI
 

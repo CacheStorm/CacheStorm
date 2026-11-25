@@ -77,6 +77,28 @@ The table is the median of three runs.
 
 Unpipelined, both servers are bound by round trips and perform alike.
 
+## Tags, 2026-11-23
+
+Tag writes and invalidation (0.4.0 and 0.5.0), from a Go load generator with 8 connections each pipelining 32 commands against a server on the same host; operations per second unless noted.
+
+| Operation | Before | After |
+|---|---|---|
+| `SETTAG key value t u` | 290k | ~800k |
+| `ADDTAG key t` | 340k | ~950k |
+| `INVALIDATE` of a 10-key tag | 88k | ~270k |
+| 8 `GET` + `SETTAG` + `INVALIDATE` per 10 commands | 635k commands/s | 1.45M commands/s |
+| `INVALIDATE` of a 50,000-key tag | 37 ms | ~9 ms |
+| `DEL` of untagged keys with 1,050 tags in the database | 61k | 1.24M |
+| Memory a tag costs a key | ~110 B | ~55 B |
+
+For comparison, the usual Redis pattern — a set per tag, and a Lua script running `SMEMBERS` then `DEL` — took about 36 ms for the 50,000-key tag when run on CacheStorm itself (no Redis server was available for this round; the script's work is the same on both).
+
+An `INVALIDATE` reaching at most 32 keys locks only those keys' stripes of the write gate, so other clients keep writing while it runs; a larger one holds the whole gate, and a batch of 2,048 keys or more is deleted by up to 8 goroutines over separate shards. In-process equivalents:
+
+```bash
+go test ./internal/command/ -run '^$' -bench 'Invalidate|TagWrites' -benchmem
+```
+
 ## Snapshot pauses, 2026-10-27
 
 One million 100-byte strings (138 MB of AOF). Writes wait for the encode

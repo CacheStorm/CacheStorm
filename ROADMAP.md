@@ -4,6 +4,20 @@
 
 Bu planın başlangıç noktası `fe598ff` ve çalışma ağacındaki mevcut değişikliklerdir. Süreler tek geliştirici için yaklaşık iş günü tahminidir; yayın tarihi taahhüdü değildir. Yeni komut, GraphQL veya bulut entegrasyonu ekleme işi ilk dört kilometre taşının çıkış ölçütlerinden sonra ele alınmalı.
 
+## Güncel durum (25 Kasım 2026)
+
+Aşağıdaki M0–M5 kilometre taşları tamamlandı; bu bölümden sonrası Ekim 2026 incelemesinin kaydıdır ve tarihsel olarak korunuyor.
+
+- **v0.4.0 / v0.4.1 (22–24 Kasım):** Redis 8.0–8.10'un eklediği komutlar ve veri tipleri (vector set, array tipi, `SET ... IFEQ`, `DELEX`, `DIGEST`, `MSETEX`, `INCREX`, stream eklemeleri, `LMOVEM`, `HOTKEYS`, `HIMPORT`, `BACKUP`, atomik slot taşıma), Redis 8.10 RDB ve `DUMP` yükleme, keyspace bildirim sınıfları; 32-bit derleme düzeltmeleri.
+- **v0.5.0 (25 Kasım):** etiket tabanlı geçersiz kılma uçtan uca: `SET ... TAGS`, çok etiketli `INVALIDATE`, etiketlerin yerinde yazmalarda, `MIGRATE` ve slot taşımada korunması, cluster ve ACL'de doğru yönlendirme, `del` bildirimleri, `DEL` olarak replikasyon; etiket hiyerarşisinin snapshot/AOF/full sync'te korunması. Performans: 10 anahtarlı `INVALIDATE` 88k → ~270k op/s, 50.000 anahtarlı `INVALIDATE` 37 → ~9 ms, etiket başına bellek ~110 → ~55 bayt ([ölçümler](docs/BENCHMARKS.md)).
+
+Sürümler bundan sonra yama sürümleri olarak (0.5.x) çıkacak. Sıradaki işler:
+
+1. Etiket iş yüklerinin gerçek bir Redis sunucusuna karşı aynı makinede ölçülmesi (şimdiki karşılaştırma Lua betiğinin CacheStorm üzerinde çalıştırılmasıyla yapıldı).
+2. Anahtar başına bellek farkı: 16 baytlık değerli 1M string'de ~1,6 kat, küçük koleksiyonlarda 1,4–2,1 kat Redis.
+3. Tek anahtara yoğun pipeline yazmaları (büyük tek hash'te `HSET` Redis'in ~%63'ü).
+4. Python ve TypeScript SDK'larının PyPI/npm'e yayımlanması.
+
 ## Öncelik sırası
 
 | Öncelik | İş | Tamamlanma ölçütü | Bağımlılık |
