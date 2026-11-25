@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-25
+
+Highlights: tagged caching end to end. `SET ... TAGS` writes a value, its expiry and its tags at once, `INVALIDATE` takes several tags, and tags now survive in-place writes, `MIGRATE` and slot migration, work per node in a cluster, publish keyspace notifications and replicate as the deletes they cause.
+
 ### Added
 - **`SET ... TAGS tag [tag ...]`**: `SET` takes the tags with the value, as `docs/commands.md` and the Python, TypeScript and Go clients (`set(..., tags=...)`, `setWithTags`, `SetWithTags`) already had it, though the server refused it until now: a cache entry gets its value, its expiry and its tags in one atomic write, with every option of `SET` (`EX`/`PX`/`EXAT`/`PXAT`/`KEEPTTL`, `NX`/`XX`, `IFEQ` and the other conditions, `GET`): `SET page:1 html EX 300 TAGS user:7 pages`. `TAGS` comes last, and every argument after it is a tag. `SETTAG` takes no expiry (every argument after the value is a tag), so this took `SETTAG` and `EXPIRE` before. The tags replace the key's, as `SETTAG`'s do; a `SET` without the option still drops them. Replicas and the AOF get the tags with the value.
 
