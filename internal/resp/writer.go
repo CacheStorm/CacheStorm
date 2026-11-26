@@ -224,8 +224,8 @@ func (w *Writer) WriteInteger(n int64) error {
 	if err := w.wr.WriteByte(byte(TypeInteger)); err != nil {
 		return err
 	}
-	var num [24]byte
-	if _, err := w.wr.Write(append(strconv.AppendInt(num[:0], n, 10), '\r', '\n')); err != nil {
+	w.wr.Write(strconv.AppendInt(w.num[:0], n, 10))
+	if _, err := w.wr.WriteString("\r\n"); err != nil {
 		return err
 	}
 	return w.wr.Flush()

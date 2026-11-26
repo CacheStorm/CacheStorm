@@ -672,7 +672,7 @@ func (r *Router) executeHandler(ctx *Context, cmd *CommandDef, capture bool) (er
 	before := watchedKeysBefore(ctx)
 	ctx.waited = 0
 	err = cmd.Handler(ctx)
-	ctx.EndTime = time.Now()
+	ctx.EndTime = clockAfter(ctx.StartTime)
 	t := cmd.traitsFor(ctx.Command)
 	t.recordCall(ctx.Args, ctx.EndTime.Sub(ctx.StartTime)-ctx.waited, err != nil || ctx.Writer.Errors() > errsBefore)
 	if auditEnabled() {
@@ -814,8 +814,18 @@ func (r *Router) Execute(ctx *Context) error {
 		return ctx.Writer.WriteSimpleString("QUEUED")
 	}
 
-	ctx.StartTime = time.Now()
+	ctx.StartTime = clockAfter(ctx.StartTime)
 	return r.executeHandler(ctx, cmd, capture)
+}
+
+// clockAfter reads the clock as t plus the monotonic time since t. That is
+// one read of the monotonic clock where time.Now reads the wall clock too,
+// and it runs twice per command on the holder of a busy key's stripe.
+func clockAfter(t time.Time) time.Time {
+	if t.IsZero() {
+		return time.Now()
+	}
+	return t.Add(time.Since(t))
 }
 
 // RejectedReply is the error a command refused before it runs gets: EXEC
