@@ -77,7 +77,11 @@ func cmdFTCREATE(ctx *Context) error {
 	if err := searchIndexesFor(ctx).Create(idx); err != nil {
 		return ctx.WriteError(err)
 	}
-	idx.Open(ctx.Store)
+	if idx.SkipInitialScan {
+		idx.OpenEmpty(ctx.Store)
+	} else {
+		idx.Open(ctx.Store)
+	}
 	return ctx.WriteOK()
 }
 
@@ -298,9 +302,6 @@ func cmdFTINFO(ctx *Context) error {
 		switch f.Type {
 		case search.FieldText:
 			a = append(a, resp.SimpleString("WEIGHT"), resp.BulkString(search.FormatNumber(f.Weight)))
-			if f.NoStem {
-				a = append(a, resp.SimpleString("NOSTEM"))
-			}
 		case search.FieldVector:
 			v := f.Vector
 			a = append(a, resp.SimpleString("algorithm"), resp.SimpleString(v.Algorithm), resp.SimpleString("data_type"), resp.SimpleString(v.Type),
@@ -325,11 +326,28 @@ func cmdFTINFO(ctx *Context) error {
 				a = append(a, resp.SimpleString("CASESENSITIVE"))
 			}
 		}
+		// The flags in RediSearch's order; a sortable NUMERIC, or TAG
+		// kept as written, is unnormalised.
 		if f.Sortable {
 			a = append(a, resp.SimpleString("SORTABLE"))
+			if f.UNF || f.Type == search.FieldNumeric || f.Type == search.FieldTag && f.CaseSensitive {
+				a = append(a, resp.SimpleString("UNF"))
+			}
+		}
+		if f.NoStem {
+			a = append(a, resp.SimpleString("NOSTEM"))
 		}
 		if f.NoIndex {
 			a = append(a, resp.SimpleString("NOINDEX"))
+		}
+		if f.WithSuffixTrie {
+			a = append(a, resp.SimpleString("WITHSUFFIXTRIE"))
+		}
+		if f.IndexEmpty {
+			a = append(a, resp.SimpleString("INDEXEMPTY"))
+		}
+		if f.IndexMissing {
+			a = append(a, resp.SimpleString("INDEXMISSING"))
 		}
 		attrs = append(attrs, resp.ArrayValue(a))
 	}
@@ -571,7 +589,16 @@ func parseSearchRequest(ctx *Context) (*searchRequest, error) {
 				return nil, err
 			}
 			i = last
-		case "SLOP", "TIMEOUT", "LANGUAGE", "EXPANDER", "SCORER", "PAYLOAD":
+		case "SCORER":
+			if i+1 < n {
+				scorer, err := search.ParseScorer(ctx.ArgString(i + 1))
+				if err != nil {
+					return nil, err
+				}
+				r.opts.Scorer = scorer
+			}
+			i++
+		case "SLOP", "TIMEOUT", "LANGUAGE", "EXPANDER", "PAYLOAD":
 			i++
 		}
 	}
@@ -661,8 +688,10 @@ func cmdFTSEARCH(ctx *Context) error {
 		})
 	} else {
 		sort.SliceStable(hits, func(i, j int) bool {
-			if hits[i].score != hits[j].score {
-				return hits[i].score > hits[j].score
+			// As RediSearch compares: scores neither below nor above
+			// each other, NaNs among them, tie and go by document id.
+			if si, sj := hits[i].score, hits[j].score; si > sj || si < sj {
+				return si > sj
 			}
 			return hits[i].doc.Before(hits[j].doc)
 		})
@@ -687,7 +716,12 @@ func cmdFTSEARCH(ctx *Context) error {
 		}
 		add("id", resp.BulkString(key))
 		if req.withScores {
-			add("score", resp.DoubleValue(fpconvDtoa(h.score)))
+			score := h.score
+			if math.IsNaN(score) {
+				// RediSearch's NaN scores print as "nan".
+				score = math.NaN()
+			}
+			add("score", resp.DoubleValue(fpconvDtoa(score)))
 		}
 		if req.withPayloads {
 			add("payload", resp.NullBulkString())
@@ -902,6 +936,15 @@ func cmdFTAGGREGATE(ctx *Context) error {
 			return ctx.WriteError(errors.New("FT.AGGREGATE + WITHCOUNT is not available when `ENABLE_UNSTABLE_FEATURES` is off")) //nolint:staticcheck // RediSearch's reply text
 		case "VERBATIM":
 			opts.Verbatim = true
+		case "SCORER":
+			if i+1 < n {
+				scorer, err := search.ParseScorer(ctx.ArgString(i + 1))
+				if err != nil {
+					return ctx.WriteError(err)
+				}
+				opts.Scorer = scorer
+				i++
+			}
 		case "DIALECT":
 			if i+1 < n {
 				opts.Dialect = parseDialect(ctx.ArgString(i + 1))
@@ -1573,6 +1616,12 @@ func cmdFTSYNUPDATE(ctx *Context) error {
 	terms := make([]string, 0, ctx.ArgCount()-from)
 	for i := from; i < ctx.ArgCount(); i++ {
 		terms = append(terms, ctx.ArgString(i))
+	}
+	if skip {
+		// RediSearch indexes a document when it is written; this index
+		// does at its next query. The documents written so far take the
+		// synonyms as they were.
+		idx.Open(ctx.Store)
 	}
 	if err := idx.UpdateSynonyms(ctx.ArgString(1), terms, skip); err != nil {
 		return ctx.WriteError(err)

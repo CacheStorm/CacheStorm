@@ -67,7 +67,7 @@ func TestBundledModulesReported(t *testing.T) {
 		"search_fields_numeric":            "Numeric=1,IndexErrors=0",
 		"search_fields_tag":                "Tag=1,CaseSensitive=1,IndexErrors=0",
 		"search_fields_vector":             "Vector=1,HNSW=1,IndexErrors=0",
-		"search_dialect_1":                 "1",
+		"search_dialect_2":                 "1", // the default dialect, Redis 8's
 		"search_dialect_3":                 "1",
 	} {
 		if after[name] != want {

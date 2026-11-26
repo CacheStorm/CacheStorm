@@ -46,9 +46,13 @@ type Field struct {
 	CaseSensitive bool
 	IndexMissing  bool
 	UNF           bool
-	Vector        *VectorSpec
-	path          *store.JSONPath
-	pos           int
+	// WithSuffixTrie and IndexEmpty are kept for FT.INFO: the index
+	// answers suffix queries and empty values without them.
+	WithSuffixTrie bool
+	IndexEmpty     bool
+	Vector         *VectorSpec
+	path           *store.JSONPath
+	pos            int
 }
 
 // Index is an index definition. Args are the FT.CREATE arguments after the
@@ -61,9 +65,12 @@ type Index struct {
 	Stopwords map[string]bool
 	Language  string
 	Score     float64
-	Args      []string
-	cacheSet  *cacheSet
-	syn       *synonyms
+	// SkipInitialScan leaves the keys that exist at FT.CREATE out until
+	// they are written again.
+	SkipInitialScan bool
+	Args            []string
+	cacheSet        *cacheSet
+	syn             *synonyms
 }
 
 //nolint:staticcheck // RediSearch's reply texts
@@ -141,7 +148,9 @@ func ParseIndex(name string, args []string) (*Index, error) {
 			}
 		case "FILTER", "LANGUAGE_FIELD", "SCORE_FIELD", "PAYLOAD_FIELD", "TEMPORARY":
 			i++
-		case "MAXTEXTFIELDS", "NOOFFSETS", "NOHL", "NOFIELDS", "NOFREQS", "SKIPINITIALSCAN":
+		case "SKIPINITIALSCAN":
+			idx.SkipInitialScan = true
+		case "MAXTEXTFIELDS", "NOOFFSETS", "NOHL", "NOFIELDS", "NOFREQS":
 		case "SCHEMA":
 			fields, err := parseSchema(args[i+1:], idx.JSON)
 			if err != nil {
@@ -221,10 +230,12 @@ func parseSchema(args []string, json bool) ([]Field, error) {
 				f.IndexMissing = true
 			case "UNF":
 				f.UNF = true
-			case "WITHSUFFIXTRIE", "INDEXEMPTY", "PHONETIC":
-				if strings.EqualFold(args[i], "PHONETIC") {
-					i++
-				}
+			case "WITHSUFFIXTRIE":
+				f.WithSuffixTrie = true
+			case "INDEXEMPTY":
+				f.IndexEmpty = true
+			case "PHONETIC":
+				i++
 			default:
 				goto done
 			}

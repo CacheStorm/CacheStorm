@@ -192,6 +192,23 @@ func (idx *Index) Touch(st *store.Store, key string) {
 // Open makes the index keep track of st from now on, indexing what it
 // holds: FT.CREATE calls it, so documents written later are numbered in
 // the order they are written.
+// OpenEmpty is Open for FT.CREATE ... SKIPINITIALSCAN: the index starts
+// with no documents, and only keys written from now on enter it. A rebuild
+// (after a restart, a load or FLUSHALL) reads every key, as RediSearch
+// indexes every key it loads.
+func (idx *Index) OpenEmpty(st *store.Store) {
+	c := idx.cache(st)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.dirtyMu.Lock()
+	c.built = true
+	c.dirty = make(map[string]int64)
+	c.dirtyMu.Unlock()
+	c.reset()
+	c.stats.score = idx.Score
+	c.generation = st.Generation()
+}
+
 func (idx *Index) Open(st *store.Store) {
 	c := idx.cache(st)
 	c.mu.Lock()
@@ -373,14 +390,16 @@ func (idx *Index) Search(st *store.Store, n Node, opts QueryOptions) ([]Hit, err
 			hits[i].Terms = terms[hits[i].Doc]
 		}
 	}
-	if needsEngine(root) && len(hits) > 0 {
-		scores := newScoreEngine(idx, c, c.stats).scores(root)
+	scorer := scorerOf(opts)
+	if (needsEngine(root) || !bm25stdFamily(scorer)) && len(hits) > 0 {
+		scores := newScoreEngine(idx, c, c.stats).scores(root, scorer)
 		for i := range hits {
 			if s, ok := scores[hits[i].Doc]; ok {
 				hits[i].Score = s
 			}
 		}
 	}
+	normalizeScores(scorer, hits)
 	if knn != nil {
 		if knn.byScore {
 			for i := range hits {

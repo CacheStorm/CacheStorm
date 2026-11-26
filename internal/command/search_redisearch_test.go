@@ -14,6 +14,7 @@ import (
 // RediSearch's. Results Redis orders by its internal document ids (ties,
 // wildcard queries) and the exact scores are left out.
 func TestSearchRepliesMatchRediSearch(t *testing.T) {
+	searchDialect1(t)
 	router := NewRouter()
 	router.SetSearchIndexes(search.NewIndexManager())
 	RegisterSearchCommands(router)

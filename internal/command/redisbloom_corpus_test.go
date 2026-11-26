@@ -162,8 +162,16 @@ func TestSuggestReplaysCorpus(t *testing.T) {
 	replayRedisCorpus(t, router, "testdata/redisearch_suggest_r8.jsonl")
 }
 
+// searchDialect1 runs a test whose replies were recorded from a Redis 8.2
+// set to search-default-dialect 1; Redis 8's default is 2.
+func searchDialect1(t *testing.T) {
+	search.SetConfigValue("DEFAULT_DIALECT", "1")
+	t.Cleanup(func() { search.SetConfigValue("DEFAULT_DIALECT", "2") })
+}
+
 func replayRedisCorpus(t *testing.T, router *Router, file string) {
 	t.Helper()
+	searchDialect1(t)
 	f, err := os.Open(file)
 	if err != nil {
 		t.Fatal(err)

@@ -329,6 +329,8 @@ type QueryOptions struct {
 	Params      map[string]string
 	// MatchedTerms has Search list each hit's matched terms.
 	MatchedTerms bool
+	// Scorer is the SCORER, "" for the default (see scorers.go).
+	Scorer string
 }
 
 // ErrSyntax is a query syntax error, in RediSearch's words.

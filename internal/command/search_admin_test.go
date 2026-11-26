@@ -12,7 +12,7 @@ func TestFTConfig(t *testing.T) {
 	t.Cleanup(func() {
 		h.do("FT.CONFIG", "SET", "MINPREFIX", "2")
 		h.do("FT.CONFIG", "SET", "MAXSEARCHRESULTS", "1000000")
-		h.do("FT.CONFIG", "SET", "DEFAULT_DIALECT", "1")
+		h.do("FT.CONFIG", "SET", "DEFAULT_DIALECT", "2")
 	})
 	for _, c := range []struct {
 		want string
@@ -42,7 +42,9 @@ func TestFTConfig(t *testing.T) {
 	h.expect("-LIMIT exceeds maximum of 1000000\r\n", "FT.SEARCH", "i", "*", "LIMIT", "0", "2000000")
 	h.expect("-OFFSET exceeds maximum of 1000000\r\n", "FT.SEARCH", "i", "*", "LIMIT", "1000001", "1")
 
-	// The default dialect decides how a query parses.
+	// The default dialect decides how a query parses; Redis 8's is 2.
+	h.expect("*1\r\n*2\r\n+DEFAULT_DIALECT\r\n$1\r\n2\r\n", "FT.CONFIG", "GET", "DEFAULT_DIALECT")
+	h.expect("+OK\r\n", "FT.CONFIG", "SET", "DEFAULT_DIALECT", "1")
 	h.expect("$66\r\nINTERSECT {\n  UNION {\n    w\n    +w(expanded)\n  }\n  PREFIX{hel*}\n}\n\r\n", "FT.EXPLAIN", "i", "w'hel*'")
 	h.expect("+OK\r\n", "FT.CONFIG", "SET", "DEFAULT_DIALECT", "2")
 	h.expect("$15\r\nWILDCARD{hel*}\n\r\n", "FT.EXPLAIN", "i", "w'hel*'")

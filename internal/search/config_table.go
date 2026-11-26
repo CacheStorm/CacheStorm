@@ -43,7 +43,7 @@ var configOptions = []configOption{
 	{name: "_PRINT_PROFILE_CLOCK", help: "Disable print of time for ft.profile. For testing only.", value: ptr("true"), kind: configBool},
 	{name: "RAW_DOCID_ENCODING", help: "Disable compression for DocID inverted index. Boost CPU performance.", value: ptr("false"), kind: configImmutable},
 	{name: "_NUMERIC_RANGES_PARENTS", help: "Keep numeric ranges in numeric tree parent nodes of leafs for `x` generations.", value: ptr("0"), kind: configRangeparents},
-	{name: "DEFAULT_DIALECT", help: "Set RediSearch default dialect version through the lifetime of the server.", value: ptr("1"), kind: configDialect},
+	{name: "DEFAULT_DIALECT", help: "Set RediSearch default dialect version through the lifetime of the server.", value: ptr("2"), kind: configDialect},
 	{name: "VSS_MAX_RESIZE", help: "Set RediSearch vector indexes max resize (in bytes).", value: ptr("0"), kind: configGe0},
 	{name: "MULTI_TEXT_SLOP", help: "Set RediSearch delta used to increase positional offsets between array slots for multi text values.Can control the level of separation between phrases in different array slots (related to the SLOP parameter of ft.search command)", value: ptr("100"), kind: configImmutable},
 	{name: "BG_INDEX_SLEEP_GAP", help: "The number of iterations to run while performing background indexing before we call usleep(1) (sleep for 1 micro-second) and make sure that we allow redis process other commands.", value: ptr("100"), kind: configImmutable},

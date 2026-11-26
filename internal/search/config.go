@@ -219,7 +219,7 @@ func (o *configOption) parse(arg string) (string, error) {
 }
 
 // DefaultDialect is the dialect of queries that name none.
-func DefaultDialect() int { return int(configInt("DEFAULT_DIALECT", 1)) }
+func DefaultDialect() int { return int(configInt("DEFAULT_DIALECT", 2)) }
 
 func minPrefixLength() int     { return int(configInt("MINPREFIX", 2)) }
 func maxPrefixExpansions() int { return int(configInt("MAXPREFIXEXPANSIONS", 200)) }

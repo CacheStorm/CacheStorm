@@ -10,6 +10,7 @@ var profileTimes = regexp.MustCompile(`(\+[A-Za-z ]*[Tt]ime\r\n)\$\d+\r\n[^\r]*\
 
 // The replies are Redis 8.2's, with times replaced by T.
 func TestFTProfile(t *testing.T) {
+	searchDialect1(t)
 	h := newCursorHarness(t)
 	for _, c := range []struct {
 		want string

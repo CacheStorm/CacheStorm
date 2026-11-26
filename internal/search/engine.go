@@ -361,7 +361,7 @@ func (e *scoreEngine) matchedTerms(root *qnode) map[*Document][]string {
 }
 
 // scores reads the root to its end and scores each document it returns.
-func (e *scoreEngine) scores(root *qnode) map[*Document]float64 {
+func (e *scoreEngine) scores(root *qnode, scorer string) map[*Document]float64 {
 	it := e.build(root, allFields)
 	out := make(map[*Document]float64)
 	if it == nil {
@@ -380,7 +380,7 @@ func (e *scoreEngine) scores(root *qnode) map[*Document]float64 {
 			continue
 		}
 		if _, seen := out[d]; !seen {
-			out[d] = e.stats.score * e.bm25(r, d)
+			out[d] = e.score(scorer, r, d)
 		}
 	}
 }

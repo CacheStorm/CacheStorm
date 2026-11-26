@@ -48,7 +48,7 @@ var searchConfigs = []searchConfig{
 	{"search-bg-index-sleep-gap", cfgInt, "100", 0, 0, true, "BG_INDEX_SLEEP_GAP"},
 	{"search-bm25std-tanh-factor", cfgInt, "4", 1, 10000, false, "BM25STD_TANH_FACTOR"},
 	{"search-cursor-max-idle", cfgInt, "300000", 1, configLongMaxStr, false, "CURSOR_MAX_IDLE"},
-	{"search-default-dialect", cfgInt, "1", 1, 4, false, "DEFAULT_DIALECT"},
+	{"search-default-dialect", cfgInt, "2", 1, 4, false, "DEFAULT_DIALECT"},
 	{"search-default-scorer", cfgSpecial, "BM25STD", 0, 0, false, "DEFAULT_SCORER"},
 	{"search-enable-unstable-features", cfgBool, "no", 0, 0, false, "ENABLE_UNSTABLE_FEATURES"},
 	{"search-ext-load", cfgString, "", 0, 0, true, "EXTLOAD"},

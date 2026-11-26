@@ -55,10 +55,14 @@ var wholeValueWriters = map[string]bool{
 }
 
 func reaccountWrittenKeys(ctx *Context) {
-	traitsOf(ctx.Command).reaccountWrittenKeys(ctx)
+	traitsOf(ctx.Command).reaccountWrittenKeys(ctx, false)
 }
 
-func (t *commandTraits) reaccountWrittenKeys(ctx *Context) {
+// reaccountWrittenKeys charges the keys a write named for their new size
+// and has the search indexes read them again, unless the write failed: a
+// command answered with an error left its keys as they were, and an index
+// created with SKIPINITIALSCAN must not take in a key it only touched.
+func (t *commandTraits) reaccountWrittenKeys(ctx *Context, failed bool) {
 	if ctx.Store == nil || t.readonly {
 		return
 	}
@@ -74,6 +78,9 @@ func (t *commandTraits) reaccountWrittenKeys(ctx *Context) {
 	}
 	keys := ctx.CommandKeys()
 	ctx.Store.Reaccount(keys...)
+	if failed {
+		return
+	}
 	for _, idx := range indexes {
 		for _, k := range keys {
 			idx.Touch(ctx.Store, k)

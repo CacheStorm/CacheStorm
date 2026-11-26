@@ -681,7 +681,7 @@ func (r *Router) executeHandler(ctx *Context, cmd *CommandDef, capture bool) (er
 		recordAudit(ctx, err == nil && ctx.Writer.Errors() == errsBefore)
 	}
 	ctx.passWakeup()
-	t.reaccountWrittenKeys(ctx)
+	t.reaccountWrittenKeys(ctx, err != nil || ctx.Writer.Errors() > errsBefore)
 	touchWrittenKeys(ctx, before, err != nil || ctx.Writer.Errors() > errsBefore)
 	signalWrittenKeys(ctx)
 	if err == nil {
