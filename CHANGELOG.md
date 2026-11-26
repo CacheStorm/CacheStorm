@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-26
+
+Highlights: tag commands act on the whole cluster from any node and the tag hierarchy is one per cluster; tag commands are first-class commands (`COMMAND INFO`, ACL categories, read-only scripts, save rules, `maxmemory`); `INFO tags`; and, measured against Redis 7.4, tagged writes 68% faster, invalidations 4-7 times faster and a tag costing a key 25 bytes instead of 56.
+
 ### Added
 - **Cluster-wide tag commands**: in a cluster, `INVALIDATE`, `TAGKEYS` and `TAGCOUNT` sent to any node run there and on every other master, and answer for all of them (the total deleted, all the keys, the total count), so a client sends them once, as to a single server; until now they covered the receiving node only. A node asks the others after releasing its own locks, over pooled connections authenticated with the cluster's internal secret. A master that does not answer within `cluster-tag-fanout-timeout` milliseconds (default 1000) makes the command fail with `-TAGFANOUT`, saying what was done and which masters were not reached; the commands are idempotent, so the client sends it again. `LOCAL` keeps a command on its node, as do `MULTI`/`EXEC` and scripts.
 - **One tag hierarchy per cluster**: `TAGLINK` and `TAGUNLINK` sent to any node go through the master of slot 0, which checks for cycles, numbers the change and hands it to every master; each link keeps the version of its last change, and the nodes exchange a digest of their hierarchy in every cluster bus `PING`, fetching (`TAGSYNC`) and merging the hierarchy of a node whose digest differs. A master that missed changes while down catches up within seconds of returning. Before, each node had its own hierarchy, so `INVALIDATE ... CASCADE` reached different tags on different nodes.
