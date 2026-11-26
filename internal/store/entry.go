@@ -2,6 +2,7 @@ package store
 
 import (
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -643,9 +644,10 @@ func (e *Entry) TagList() []string {
 	return nil
 }
 
-// SetTags replaces the entry's tags. Callers hold the shard lock or own an
-// entry not yet installed.
+// SetTags replaces the entry's tags; a tag named twice is kept once. Callers
+// hold the shard lock or own an entry not yet installed.
 func (e *Entry) SetTags(tags []string) {
+	tags = distinctTags(tags)
 	var loading *atomic.Bool
 	if m := e.meta.Load(); m != nil {
 		loading = m.loading
@@ -824,4 +826,24 @@ func (e *Entry) TTL() time.Duration {
 		return time.Duration(ms)
 	}
 	return expiryDuration(ms)
+}
+
+// distinctTags returns tags without repeats, in first-seen order: tags itself
+// when it has none, which is the usual case.
+func distinctTags(tags []string) []string {
+	for i := 1; i < len(tags); i++ {
+		if !slices.Contains(tags[:i], tags[i]) {
+			continue
+		}
+		out := make([]string, 0, len(tags))
+		seen := make(map[string]struct{}, len(tags))
+		for _, t := range tags {
+			if _, dup := seen[t]; !dup {
+				seen[t] = struct{}{}
+				out = append(out, t)
+			}
+		}
+		return out
+	}
+	return tags
 }
