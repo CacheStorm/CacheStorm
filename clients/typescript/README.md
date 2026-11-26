@@ -69,7 +69,17 @@ pipeline.set('key2', 'value2');
 pipeline.get('key1');
 
 const results = await pipeline.exec();
+
+// Warm a cache in one round trip: tagged writes and invalidations pipeline too
+const warm = client.pipeline();
+for (const user of users) {
+  warm.set(`user:${user.id}`, JSON.stringify(user), { EX: 3600, TAGS: ['users', `user:${user.id}`] });
+}
+warm.invalidate('stale').command('TAGCOUNT', 'users');
+await warm.exec();
 ```
+
+`command(...args)`, on the client and on a pipeline, sends any command the client has no method for.
 
 If any reply is a server error, `exec()` rejects with `PipelineError`; its `results` array holds every reply, with errors as `ReplyError`.
 

@@ -75,6 +75,38 @@ test('pipeline writes all commands in one write and returns real replies', async
   assert.deepEqual(await pending, ['OK', 'v', 1, null]);
 });
 
+test('pipeline sends tagged writes, invalidations and any command', async () => {
+  const { client, socket } = fakeClient();
+  const pending = client.pipeline()
+    .set('k', 'v', { EX: 60, TAGS: ['user:1', 'users'] })
+    .setWithTags('k2', 'v', ['users'])
+    .addTags('k', 'vip')
+    .removeTags('k', 'vip')
+    .invalidate('user:1')
+    .invalidateCascade('users')
+    .command('TAGCOUNT', 'users')
+    .exec();
+  assert.deepEqual(socket.sentCommands(), [
+    ['SET', 'k', 'v', 'EX', '60', 'TAGS', 'user:1', 'users'],
+    ['SET', 'k2', 'v', 'TAGS', 'users'],
+    ['ADDTAG', 'k', 'vip'],
+    ['REMTAG', 'k', 'vip'],
+    ['INVALIDATE', 'user:1'],
+    ['INVALIDATE', 'users', 'CASCADE'],
+    ['TAGCOUNT', 'users'],
+  ]);
+  socket.reply('+OK\r\n+OK\r\n:1\r\n:1\r\n:1\r\n:1\r\n:0\r\n');
+  assert.deepEqual(await pending, ['OK', 'OK', 1, 1, 1, 1, 0]);
+});
+
+test('command sends a command the client has no method for', async () => {
+  const { client, socket } = fakeClient();
+  const pending = client.command('TAGCHILDREN', 'users');
+  assert.deepEqual(socket.sentCommands(), [['TAGCHILDREN', 'users']]);
+  socket.reply('*1\r\n$6\r\nuser:1\r\n');
+  assert.deepEqual(await pending, ['user:1']);
+});
+
 test('pipeline is cleared after exec and an empty pipeline resolves to []', async () => {
   const { client, socket } = fakeClient();
   const pipeline = client.pipeline().get('a');

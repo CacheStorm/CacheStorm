@@ -289,12 +289,12 @@ class CacheStormClient:
             args.append("CASCADE")
         return self.execute_command(*args)
 
-    def tag_keys(self, tag: str) -> List[str]:
-        """Get keys by tag."""
+    def tag_keys(self, tag: str) -> List[bytes]:
+        """Return the keys with tag, as bytes like every reply."""
         return self.execute_command("TAGKEYS", tag)
 
-    def tags(self, key: str) -> List[str]:
-        """Get tags of key."""
+    def tags(self, key: str) -> List[bytes]:
+        """Return the tags of key, as bytes like every reply."""
         return self.execute_command("TAGS", key)
 
     def tag_count(self, tag: str) -> int:
@@ -323,8 +323,8 @@ class CacheStormClient:
         """Remove the link between parent and child."""
         return self.execute_command("TAGUNLINK", parent, child) == "OK"
 
-    def tag_children(self, tag: str) -> List[str]:
-        """Return the tags linked directly below tag, sorted."""
+    def tag_children(self, tag: str) -> List[bytes]:
+        """Return the tags linked directly below tag, sorted, as bytes."""
         return self.execute_command("TAGCHILDREN", tag)
 
     # Pub/Sub
@@ -502,12 +502,12 @@ class AsyncCacheStormClient:
             args.append("CASCADE")
         return await self.execute_command(*args)
 
-    async def tag_keys(self, tag: str) -> List[str]:
-        """Get keys by tag."""
+    async def tag_keys(self, tag: str) -> List[bytes]:
+        """Return the keys with tag, as bytes like every reply."""
         return await self.execute_command("TAGKEYS", tag)
 
-    async def tags(self, key: str) -> List[str]:
-        """Get tags of key."""
+    async def tags(self, key: str) -> List[bytes]:
+        """Return the tags of key, as bytes like every reply."""
         return await self.execute_command("TAGS", key)
 
     async def tag_count(self, tag: str) -> int:
@@ -534,6 +534,6 @@ class AsyncCacheStormClient:
         """Remove the link between parent and child."""
         return await self.execute_command("TAGUNLINK", parent, child) == "OK"
 
-    async def tag_children(self, tag: str) -> List[str]:
-        """Return the tags linked directly below tag, sorted."""
+    async def tag_children(self, tag: str) -> List[bytes]:
+        """Return the tags linked directly below tag, sorted, as bytes."""
         return await self.execute_command("TAGCHILDREN", tag)

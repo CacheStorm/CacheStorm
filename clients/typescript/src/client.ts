@@ -12,6 +12,24 @@ import { RespDecoder, RespValue, ReplyError, ProtocolError, encodeCommand, buffe
 
 export type PushHandler = (reply: RespValue) => void;
 
+/** The SET command for key, value and options; the client and Pipeline send the same. */
+export function setCommand(key: string, value: string | number | Buffer, options?: SetOptions): Command {
+  const args: Command = ['SET', key, value];
+
+  if (options?.EX) args.push('EX', options.EX);
+  if (options?.PX) args.push('PX', options.PX);
+  if (options?.NX) args.push('NX');
+  if (options?.XX) args.push('XX');
+  if ((options as Record<string, unknown> | undefined)?.namespace !== undefined) {
+    throw new Error('SET option "namespace" is not implemented');
+  }
+  if (options?.TAGS && options.TAGS.length > 0) {
+    args.push('TAGS');
+    args.push(...options.TAGS);
+  }
+  return args;
+}
+
 const PUSH_KINDS = new Set(['message', 'pmessage', 'subscribe', 'psubscribe', 'unsubscribe', 'punsubscribe']);
 
 interface PendingRequest {
@@ -164,21 +182,13 @@ export class CacheStormClient extends EventEmitter {
   }
 
   async set(key: string, value: string | number | Buffer, options?: SetOptions): Promise<string> {
-    const args: Command = ['SET', key, value];
+    return this.sendCommand(setCommand(key, value, options)) as Promise<string>;
+  }
 
-    if (options?.EX) args.push('EX', options.EX);
-    if (options?.PX) args.push('PX', options.PX);
-    if (options?.NX) args.push('NX');
-    if (options?.XX) args.push('XX');
-    if ((options as Record<string, unknown> | undefined)?.namespace !== undefined) {
-      throw new Error('SET option "namespace" is not implemented');
-    }
-    if (options?.TAGS && options.TAGS.length > 0) {
-      args.push('TAGS');
-      args.push(...options.TAGS);
-    }
-
-    return this.sendCommand(args) as Promise<string>;
+  /** Sends any command, for those the client has no method for, and returns its reply. */
+  async command(...args: Command): Promise<unknown> {
+    if (args.length === 0) throw new Error('command needs a command name');
+    return this.sendCommand(args);
   }
 
   async setWithTags(key: string, value: string | number | Buffer, tags: string[]): Promise<string> {

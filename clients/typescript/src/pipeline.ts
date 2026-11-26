@@ -1,5 +1,5 @@
-import { CacheStormClient } from './client';
-import { Command } from './types';
+import { CacheStormClient, setCommand } from './client';
+import { Command, SetOptions } from './types';
 
 export class Pipeline {
   private client: CacheStormClient;
@@ -9,8 +9,50 @@ export class Pipeline {
     this.client = client;
   }
 
-  set(key: string, value: string | number | Buffer): this {
-    this.commands.push(['SET', key, value]);
+  set(key: string, value: string | number | Buffer, options?: SetOptions): this {
+    this.commands.push(setCommand(key, value, options));
+    return this;
+  }
+
+  setWithTags(key: string, value: string | number | Buffer, tags: string[]): this {
+    return this.set(key, value, { TAGS: tags });
+  }
+
+  /** Queues an INVALIDATE of the tags; its result is how many keys it deleted. */
+  invalidate(...tags: string[]): this {
+    this.commands.push(['INVALIDATE', ...tags]);
+    return this;
+  }
+
+  invalidateCascade(...tags: string[]): this {
+    this.commands.push(['INVALIDATE', ...tags, 'CASCADE']);
+    return this;
+  }
+
+  addTags(key: string, ...tags: string[]): this {
+    this.commands.push(['ADDTAG', key, ...tags]);
+    return this;
+  }
+
+  removeTags(key: string, ...tags: string[]): this {
+    this.commands.push(['REMTAG', key, ...tags]);
+    return this;
+  }
+
+  expire(key: string, seconds: number): this {
+    this.commands.push(['EXPIRE', key, seconds]);
+    return this;
+  }
+
+  incr(key: string): this {
+    this.commands.push(['INCR', key]);
+    return this;
+  }
+
+  /** Queues any command, for those Pipeline has no method for. */
+  command(...args: Command): this {
+    if (args.length === 0) throw new Error('command needs a command name');
+    this.commands.push(args);
     return this;
   }
 
