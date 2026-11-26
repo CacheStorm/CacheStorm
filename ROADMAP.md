@@ -145,7 +145,7 @@ M1–M5 tamamlandı. Redis 7.4'ün komut tablosundaki her komut kayıtlı; hash 
 1. Keyspace bildirimleri (`notify-keyspace-events`) — devam ediyor.
 2. Native snapshot yakalama ile tam senkronizasyonun yazma duraklamasını ve ek bellek maliyetini ölçüp azaltmak.
 3. Süreç geneli uzantı kayıtlarının (kuyruklar, kilitler, sayaçlar) kalıcılığı ve replikasyonu, ya da bunların açıkça geçici olarak belgelenmesi.
-4. Tek anahtara yoğun pipeline yazmalarında komut başına maliyeti düşürmek (HSET Redis'in ~%63'ü).
+4. Tek anahtara yoğun pipeline yazmaları: meşgul şeritteki yazmaları kilidi tutan bağlantı çalıştırıyor (flat combining, 26 Kasım 2026; 0.5.1'e göre %20–30 hızlı). Varsayılan `redis-benchmark`'ta yazmalar hâlâ Redis'in ~%70–95'i; kalan maliyet tutan çekirdeğin bekleyen bağlantıların bağlamını başka çekirdeğin önbelleğinden okuması.
 
 AOF snapshot değişimi (25 Ekim 2026): yazarı durdurup yeniden açma kaldırıldı; eşzamanlı append kilit altında sıralanıyor. Hazırlama, yazma, fsync, rename ve directory-sync hataları kalıcı regresyonlarla sınanıyor. Geri alma sonrası append, hard-link bulunmayan dosya sisteminde de doğru dosyaya gidiyor. Geri alma da başarısızsa önceki veri korunuyor, kurtarma yolu bildiriliyor ve writer hata döndürüyor. AOF hataları artık MISCONF/HTTP 503 olarak istemciye taşınıyor; sonraki AOF kapsamındaki yazmalar uygulama öncesi reddediliyor. INFO ve readiness hatayı gösteriyor. Açık: ilk hatalı işlemin bellek/disk belirsizliği, güç kesintisi kurtarması ve Windows çalışma zamanı doğrulaması.
 

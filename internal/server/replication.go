@@ -41,6 +41,8 @@ const gateStripes = 256
 type writeGate struct {
 	global  sync.RWMutex
 	stripes [gateStripes]sync.RWMutex
+	// queues hold the writes waiting on each stripe (see combine).
+	queues [gateStripes]combineQueue
 }
 
 // gateHold is one acquisition of the gate.
@@ -347,10 +349,14 @@ func (h *gateHold) unlock() {
 		return
 	}
 	for i := len(h.stripes) - 1; i >= 0; i-- {
+		s := h.stripes[i]
 		if h.read {
-			h.g.stripes[h.stripes[i]].RUnlock()
+			h.g.stripes[s].RUnlock()
 		} else {
-			h.g.stripes[h.stripes[i]].Unlock()
+			h.g.stripes[s].Unlock()
+		}
+		if h.g.queues[s].waiting.Load() != 0 {
+			h.g.passTurn(s)
 		}
 	}
 	h.g.global.RUnlock()

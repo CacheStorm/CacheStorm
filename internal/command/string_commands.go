@@ -397,6 +397,12 @@ func cmdDECRBY(ctx *Context) error {
 
 var errDecrementOverflow = errors.New("ERR decrement would overflow")
 
+// integerString is the stored form of the integer n, built in one allocation.
+func integerString(n int64) store.CompactString {
+	var num [20]byte
+	return store.NewCompactString(strconv.AppendInt(num[:0], n, 10), store.StringEncAuto)
+}
+
 func incrBy(ctx *Context, incr int64) error {
 	if ctx.ArgCount() < 1 {
 		return ctx.WriteError(ErrWrongArgCount)
@@ -418,14 +424,14 @@ func incrBy(ctx *Context, incr int64) error {
 			return ctx.WriteError(ErrOverflow)
 		}
 		newVal := cur + incr
-		if err := ctx.Store.Set(key, &store.StringValue{Data: []byte(strconv.FormatInt(newVal, 10))}, store.SetOptions{KeepTTL: true, KeepTags: true}); err != nil {
+		if err := ctx.Store.Set(key, integerString(newVal), store.SetOptions{KeepTTL: true, KeepTags: true}); err != nil {
 			return ctx.WriteError(err)
 		}
 		ctx.notify(store.NotifyString, "incrby", key)
 		return ctx.WriteInteger(newVal)
 	}
 
-	if err := ctx.Store.Set(key, &store.StringValue{Data: []byte(strconv.FormatInt(incr, 10))}, store.SetOptions{}); err != nil {
+	if err := ctx.Store.Set(key, integerString(incr), store.SetOptions{}); err != nil {
 		return ctx.WriteError(err)
 	}
 	ctx.notify(store.NotifyString, "incrby", key)

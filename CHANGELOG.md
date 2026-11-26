@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Performance
+- **Writes to one hot key**: a write that finds its key's stripe of the write gate busy no longer waits to take it in turn; it queues the part of the command that needs the stripe and the connection holding the stripe runs it (flat combining), so the key stays on one core's cache and the stripe is never idle while writes wait. With `redis-benchmark`'s defaults (every test on one key, 50 clients, pipelines of 16) writes are 20-30% faster than in 0.5.1 (`INCR` 551k to 696k/s, `SET` 591k to 748k/s, `LPOP` 660k to 863k/s). See docs/BENCHMARKS.md.
+- Outside cluster mode a command's existence, arity, authentication and ACL are checked before it takes the write gate, so the holder of a busy stripe does not spend its time on them. `INCR`/`INCRBY`/`DECR` store their result in one allocation instead of four, and integer replies no longer allocate.
+
 ## [0.5.1] - 2026-11-26
 
 Highlights: tag commands act on the whole cluster from any node and the tag hierarchy is one per cluster; tag commands are first-class commands (`COMMAND INFO`, ACL categories, read-only scripts, save rules, `maxmemory`); `INFO tags`; and, measured against Redis 7.4, tagged writes 68% faster, invalidations 4-7 times faster and a tag costing a key 25 bytes instead of 56.

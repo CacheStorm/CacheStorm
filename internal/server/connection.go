@@ -155,6 +155,14 @@ type Connection struct {
 	// gateWaiting is set while a blocking command has handed heldGate back
 	// to wait, so releaseGate does not unlock it a second time.
 	gateWaiting bool
+	// gated is what the part of the command run under the gate left, and
+	// combineReq queues that part on a busy stripe (see writeGate.combine).
+	gated struct {
+		err          error
+		deferredMark int64
+		replyStart   int
+	}
+	combineReq *combineReq
 
 	// src feeds bufReader. While the connection waits for its next command
 	// it holds no read buffer: bufReader goes back to its pool and the wait
@@ -274,6 +282,74 @@ func (c *Connection) readWhenReadable() *bufio.Reader {
 		br = nil
 	}
 	return br
+}
+
+// execGated runs the part of the command that needs the write gate. For a
+// write queued on a busy stripe it runs on the goroutine holding the stripe
+// while this connection's goroutine waits (see writeGate.combine).
+func (c *Connection) execGated() {
+	ctx := &c.ctx
+	errsBefore := c.writer.Errors()
+	aof := c.srv.aof()
+	var appended int64
+	c.gated.deferredMark, c.gated.replyStart = 0, 0
+	if aof != nil {
+		appended = aof.Appended()
+		ctx.DeferSync = c.hasPending()
+		c.gated.replyStart = c.sink.pending() + c.writer.Buffered()
+	}
+	c.gated.err = c.router.Execute(ctx)
+	if aof != nil {
+		if now := aof.Appended(); now != appended && ctx.DeferSync {
+			c.gated.deferredMark = now
+		}
+	}
+	c.srv.trackCommand(ctx, c.gated.err != nil || c.writer.Errors() != errsBefore)
+}
+
+// combinable reports whether the command planned into want may be queued on
+// its stripe for the holder to run: a plain write of one stripe, which
+// neither blocks nor may need more of the gate than it planned.
+func (c *Connection) combinable(want *gateHold, ctx *command.Context, blocking bool) bool {
+	return c.srv != nil && !want.exclusive && !want.read && len(want.stripes) == 1 &&
+		!blocking && ctx.KeyHeld == nil && ctx.AfterGate == nil
+}
+
+// takeOrQueue takes want, a single-stripe write hold, or has the stripe's
+// holder run the command. It returns the hold now kept in heldGate, nil if
+// the command ran without this connection holding the stripe, and sets ran
+// when the command has run.
+func (c *Connection) takeOrQueue(want *gateHold, ran *bool) *gateHold {
+	g := want.g
+	g.global.RLock()
+	if c.srv.pauseActive() {
+		// A pause has to see this write wait like any other.
+		g.global.RUnlock()
+		want.lock()
+		c.heldGate = want
+		return want
+	}
+	if c.combineReq == nil {
+		c.combineReq = newCombineReq(c.execGated)
+	}
+	r := c.combineReq
+	held, done := g.combine(want.stripes[0], r)
+	*ran = done
+	if p := r.panicked; p != nil {
+		r.panicked = nil
+		if held {
+			c.heldGate = want
+		} else {
+			g.global.RUnlock()
+		}
+		panic(p)
+	}
+	if held {
+		c.heldGate = want
+		return want
+	}
+	g.global.RUnlock()
+	return want
 }
 
 // maxGateBatch bounds how many pipelined commands run under one gate hold
@@ -932,7 +1008,11 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 		// is where its reply begins, for CLUSTER SLOT-STATS.
 		executed := false
 		outStart := c.sink.pending() + c.writer.Buffered()
-		if c.srv != nil && c.srv.refuseOnReplica(ctx) {
+		if refused, aerr := c.router.Admit(ctx); refused {
+			c.releaseGate()
+			err = aerr
+			executed = true
+		} else if c.srv != nil && c.srv.refuseOnReplica(ctx) {
 			c.releaseGate()
 			err = nil
 		} else {
@@ -943,12 +1023,21 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 				buf = &c.holds[1]
 			}
 			want := c.srv.planGate(ctx, buf)
+			ran := false
 			if want != nil {
 				if !c.heldGate.covers(want) {
 					c.releaseGate()
-					want.lock()
-					c.heldGate = want
+					if c.combinable(want, ctx, blocking) {
+						want = c.takeOrQueue(want, &ran)
+					} else {
+						want.lock()
+						c.heldGate = want
+					}
 				}
+			}
+			if ran {
+				// The command ran while queued on its stripe.
+			} else if want != nil {
 				if c.srv.pauseActive() && c.srv.pausedNow(cmd) {
 					// A pause that began after the check before this
 					// command waits for the writes holding the gate, so a
@@ -973,22 +1062,15 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 			} else {
 				c.releaseGate()
 			}
-			errsBefore := c.writer.Errors()
-			aof := c.srv.aof()
-			var appended int64
-			if aof != nil {
-				appended = aof.Appended()
-				ctx.DeferSync = c.hasPending()
-				replyStart = c.sink.pending() + c.writer.Buffered()
+			if !ran {
+				c.execGated()
 			}
-			err = c.router.Execute(ctx)
+			if h := c.heldGate; h != nil && !h.read && !h.exclusive && len(h.stripes) == 1 && h.g.queues[h.stripes[0]].waiting.Load() != 0 {
+				// Run the writes that queued on the stripe meanwhile.
+				h.g.drain(h.stripes[0], maxCombine)
+			}
+			err, deferredMark, replyStart = c.gated.err, c.gated.deferredMark, c.gated.replyStart
 			executed = true
-			if aof != nil {
-				if now := aof.Appended(); now != appended && ctx.DeferSync {
-					deferredMark = now
-				}
-			}
-			c.srv.trackCommand(ctx, err != nil || c.writer.Errors() != errsBefore)
 			if after := ctx.AfterGate; after != nil && err == nil {
 				// The command's effects are recorded; the rest (asking the
 				// other masters of a cluster) runs without the locks.

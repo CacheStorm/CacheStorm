@@ -332,6 +332,9 @@ func (m *Manager) MarkLocalWrite() {
 // bytes the write added to the stream, SELECT aside, times the replicas
 // attached, which CLUSTER SLOT-STATS counts as the command's slot's.
 func (m *Manager) Feed(db int, name string, args [][]byte) int64 {
+	if !m.feeding.Load() && m.tap.Load() == nil {
+		return 0
+	}
 	return m.feed([]command.ExecutedCommand{{Name: name, Args: args, DB: db}}, false)
 }
 

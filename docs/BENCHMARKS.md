@@ -96,6 +96,25 @@ While Redis runs the script every other client waits, as it waits while CacheSto
 
 `redis-benchmark` (from the same image, one million random keys, 50 clients, pipelines of 16) on the same run: SET 830k vs 436k/s, GET 878k vs 626k/s, INCR 876k vs 650k/s, LPUSH 552k vs 443k/s; `HSET`, which `redis-benchmark` sends to one hash, 450k vs 580k/s. On one hot key the 50 connections queue on one stripe of the write gate and most of the time goes to handing it from goroutine to goroutine, which single-threaded Redis never does.
 
+### One hot key, 2026-11-26
+
+`redis-benchmark` without `-r` sends every test to one key (`key:__rand_int__` is a literal there), so it is the first thing a Redis user sees. All writes to that key queue on one stripe of the write gate. Each connection used to take the stripe in turn: the woken goroutine had to be scheduled while the stripe sat idle, and the key's data then moved to another core, which nearly doubled the cost of the command (0.72 µs per `INCR` on one connection, 1.33 µs with 50 taking turns). Now a write that finds its stripe busy queues the part of the command that needs the stripe, and the connection holding it runs the queued writes before it lets go (flat combining), so the key stays on one core and the stripe stays busy. The checks before a command (that it exists, its arity, authentication, the ACL) also moved out of the gate outside cluster mode, and `INCR` and integer replies stopped allocating.
+
+50 clients, pipelines of 16, no `-r`, Redis 7.4.12 in Docker on the host network; median of three interleaved runs, thousands of requests per second:
+
+| Command | Redis 7.4 | CacheStorm 0.5.1 | Now |
+|---|---|---|---|
+| SET | 873 | 591 | 748 |
+| GET | 1,067 | 937 | 1,030 |
+| INCR | 975 | 551 | 696 |
+| RPUSH | 863 | 595 | 727 |
+| LPOP | 1,088 | 660 | 863 |
+| SADD | 845 | 628 | 656 |
+| HSET | 708 | 450 | 571 |
+| ZADD | 807 | 613 | 764 |
+
+The machine was not idle (load average around 7), and Redis's own figures moved by up to 40% between runs, so the ratios are rough; the gain over 0.5.1, measured alternately in the same runs, is 20-30%. The remaining gap is the cost of a command on the holding core: it reads each queued connection's context, arguments and reply buffer from another core's cache. With random keys (`-r 1000000`) nothing got slower: SET 825k (Redis 589k), INCR 750k (604k), LPUSH 741k (448k).
+
 The tag set of each tag was a Go `map[string]struct{}`, about 55 bytes per member at the sizes tags have; it is now a slice of the key strings, open-addressed and grown by half (a plain slice up to 8 members), about 25 bytes per member. That also made `SET ... TAGS` 36% faster and invalidating 50,000 keys a third faster, as the members are read from one array.
 
 ## Large invalidations, 2026-11-26

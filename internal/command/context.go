@@ -121,6 +121,10 @@ type Context struct {
 	KeyHeld  func(key string) bool
 	Escalate func()
 
+	// admitted is the command Router.Admit found and let through; Execute
+	// then skips the checks Admit made.
+	admitted *CommandDef
+
 	// CanDefer is set by a connection that runs AfterGate: once the
 	// command's effects are recorded and its write ordering locks released,
 	// it calls AfterGate, which writes the reply. A cluster-wide tag

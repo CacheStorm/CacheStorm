@@ -692,6 +692,62 @@ func (r *Router) postExecHook() func(ctx *Context, cmds []ExecutedCommand) error
 	return r.hotState().postExec
 }
 
+// Admit makes the checks a command passes before it runs that do not need
+// the write gate: that it exists, its arity, authentication and the ACL. A
+// connection calls it before taking the gate, so the holder of a busy stripe
+// does not spend its time on them, and Execute then skips them. It reports
+// whether the command was refused; the reply is then written, or err is to
+// be reported. In cluster mode it does nothing: Redis checks the slot
+// before some of these, and the slot is only settled under the gate.
+func (r *Router) Admit(ctx *Context) (refused bool, err error) {
+	if r.cluster != nil {
+		return false, nil
+	}
+	ctx.router = r
+	ctx.Command = CanonicalName(ctx.Command)
+	cmd, refused, err := r.admit(ctx)
+	if !refused {
+		ctx.admitted = cmd
+	}
+	return refused, err
+}
+
+func (r *Router) admit(ctx *Context) (*CommandDef, bool, error) {
+	cmd, ok := r.Get(ctx.Command)
+	if !ok {
+		// Redis refuses to run a transaction once a command failed to queue.
+		if ctx.Transaction != nil && ctx.Transaction.IsActive() {
+			ctx.Transaction.Abort()
+		}
+		return nil, true, ErrUnknownCommand
+	}
+
+	// Redis rejects a call with the wrong number of arguments before running
+	// or queueing it, and a transaction that queued one is discarded at EXEC.
+	if err := cmd.traitsFor(ctx.Command).argumentError(ctx.Args); err != nil {
+		recordRejected(ctx.Command, ctx.Args)
+		return nil, true, reject(ctx, err.Error())
+	}
+
+	// Enforce authentication if requirepass is set
+	upperCmd := strings.ToUpper(ctx.Command)
+	if r.RequirePass() != "" && !ctx.IsAuthenticated() && !noAuthCommands[upperCmd] {
+		recordRejected(ctx.Command, ctx.Args)
+		return nil, true, reject(ctx, "NOAUTH Authentication required.")
+	}
+
+	// Enforce the per-connection ACL user's command and key permissions. A
+	// connection that never ran ACL AUTH has no ACLUser and keeps the
+	// permissive default-user behaviour. enforceACL writes its own NOPERM
+	// reply, so the router must stop on the bool and return nil — returning
+	// the error would make the caller write a second reply.
+	if enforceACL(ctx, upperCmd) {
+		recordRejected(ctx.Command, ctx.Args)
+		return nil, true, nil
+	}
+	return cmd, false, nil
+}
+
 func (r *Router) Execute(ctx *Context) error {
 	ctx.router = r
 	ctx.Command = CanonicalName(ctx.Command)
@@ -703,39 +759,16 @@ func (r *Router) Execute(ctx *Context) error {
 			ctx.ClusterConn.slot, ctx.ClusterConn.extraOut = 0, 0
 		}
 	}
-	cmd, ok := r.Get(ctx.Command)
-	if !ok {
-		// Redis refuses to run a transaction once a command failed to queue.
-		if ctx.Transaction != nil && ctx.Transaction.IsActive() {
-			ctx.Transaction.Abort()
+	cmd := ctx.admitted
+	ctx.admitted = nil
+	if cmd == nil {
+		var refused bool
+		var err error
+		if cmd, refused, err = r.admit(ctx); refused {
+			return err
 		}
-		return ErrUnknownCommand
 	}
-
-	// Redis rejects a call with the wrong number of arguments before running
-	// or queueing it, and a transaction that queued one is discarded at EXEC.
 	t := cmd.traitsFor(ctx.Command)
-	if err := t.argumentError(ctx.Args); err != nil {
-		recordRejected(ctx.Command, ctx.Args)
-		return reject(ctx, err.Error())
-	}
-
-	// Enforce authentication if requirepass is set
-	upperCmd := strings.ToUpper(ctx.Command)
-	if r.RequirePass() != "" && !ctx.IsAuthenticated() && !noAuthCommands[upperCmd] {
-		recordRejected(ctx.Command, ctx.Args)
-		return reject(ctx, "NOAUTH Authentication required.")
-	}
-
-	// Enforce the per-connection ACL user's command and key permissions. A
-	// connection that never ran ACL AUTH has no ACLUser and keeps the
-	// permissive default-user behaviour. enforceACL writes its own NOPERM
-	// reply, so the router must stop on the bool and return nil — returning
-	// the error would make the caller write a second reply.
-	if enforceACL(ctx, upperCmd) {
-		recordRejected(ctx.Command, ctx.Args)
-		return nil
-	}
 
 	// Cluster mode: a command whose keys this node does not serve is
 	// answered with a redirection instead of running or being queued.
