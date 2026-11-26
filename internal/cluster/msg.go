@@ -85,6 +85,10 @@ type message struct {
 	// section of a PING, PONG or MEET; a node that predates it sends none
 	// and one that does not know it ignores the bytes.
 	secret string
+	// tagDigest is the sender's tag hierarchy digest, carried after the
+	// secret; nodes that predate it ignore the bytes.
+	tagDigest    uint64
+	hasTagDigest bool
 }
 
 type encoder struct{ b []byte }
@@ -151,6 +155,9 @@ func (m *message) encode() []byte {
 		}
 		if len(m.secret) == IDLen {
 			e.b = append(e.b, m.secret...)
+			if m.hasTagDigest {
+				e.u64(m.tagDigest)
+			}
 		}
 	case msgFail:
 		e.id(m.about)
@@ -240,6 +247,9 @@ func decodeMessage(frame []byte) (*message, error) {
 		}
 		if d.err == nil && len(d.b) >= IDLen {
 			m.secret = string(d.take(IDLen))
+			if d.err == nil && len(d.b) >= 8 {
+				m.tagDigest, m.hasTagDigest = d.u64(), true
+			}
 		}
 	case msgFail:
 		m.about = d.id()

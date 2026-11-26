@@ -84,6 +84,9 @@ func (s *Server) configValues() map[string]string {
 		cc, opts := s.cfg.Cluster, c.Options()
 		values["cluster-config-file"] = cc.ConfigFile
 		values["cluster-node-timeout"] = strconv.Itoa(cc.NodeTimeout)
+		if s.fanout != nil {
+			values["cluster-tag-fanout-timeout"] = strconv.FormatInt(s.fanout.timeoutMS.Load(), 10)
+		}
 		values["cluster-port"] = strconv.Itoa(cc.BusPort)
 		values["cluster-announce-ip"] = cc.AnnounceIP
 		values["cluster-announce-port"] = strconv.Itoa(cc.AnnouncePort)
@@ -240,6 +243,16 @@ func (s *Server) configSet(name, value string) (bool, error) {
 			return true, command.ConfigSetError(name, "can't set immutable config")
 		}
 		c.UpdateOptions(update)
+		return true, nil
+	case "cluster-tag-fanout-timeout":
+		if s.fanout == nil {
+			return false, nil
+		}
+		n, err := command.ParseConfigInt(name, value, 1, 1<<31-1)
+		if err != nil {
+			return true, err
+		}
+		s.fanout.setTimeout(int(n))
 		return true, nil
 	case "cluster-bus-port-protected-mode":
 		// Redis 8.2 refuses to leave a cluster bus without TLS open to any

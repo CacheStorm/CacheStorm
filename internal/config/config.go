@@ -130,6 +130,9 @@ type ClusterConfig struct {
 	ConfigFile string `yaml:"config_file" default:"nodes.conf"`
 	// NodeTimeout is cluster-node-timeout, in milliseconds.
 	NodeTimeout int `yaml:"node_timeout" default:"15000"`
+	// TagFanoutTimeout is cluster-tag-fanout-timeout: how long, in
+	// milliseconds, a cluster-wide tag command waits for each other master.
+	TagFanoutTimeout int `yaml:"tag_fanout_timeout" default:"1000"`
 	// BusPort is the cluster bus port; 0 means the client port + 10000.
 	BusPort             int    `yaml:"bus_port" default:"0"`
 	AnnounceIP          string `yaml:"announce_ip"`

@@ -30,6 +30,7 @@ func Default() *Config {
 		Cluster: ClusterConfig{
 			ConfigFile:            "nodes.conf",
 			NodeTimeout:           15000,
+			TagFanoutTimeout:      1000,
 			RequireFullCoverage:   true,
 			ReplicaValidityFactor: 10,
 			AllowReplicaMigration: true,

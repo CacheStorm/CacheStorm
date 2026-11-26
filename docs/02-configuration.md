@@ -77,6 +77,7 @@ cluster:
   enabled: false
   config_file: nodes.conf       # relative to persistence.data_dir
   node_timeout: 15000           # ms, as cluster-node-timeout
+  tag_fanout_timeout: 1000      # ms each master gets to answer a cluster-wide tag command
   bus_port: 0                   # cluster bus port; 0 = port + 10000
   announce_ip: ""               # as cluster-announce-ip
   announce_port: 0              # 0 = the listening port

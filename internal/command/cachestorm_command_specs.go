@@ -11,12 +11,13 @@ var cachestormCommandSpecs = map[string]commandSpec{
 	"ADDTAG":      {Arity: -3, Flags: []string{"write", "denyoom", "fast"}, FirstKey: 1, LastKey: 1, KeyStep: 1, Categories: []string{"write", "keyspace", "fast"}},
 	"REMTAG":      {Arity: -3, Flags: []string{"write", "fast"}, FirstKey: 1, LastKey: 1, KeyStep: 1, Categories: []string{"write", "keyspace", "fast"}},
 	"TAGS":        {Arity: 2, Flags: []string{"readonly", "fast"}, FirstKey: 1, LastKey: 1, KeyStep: 1, Categories: []string{"read", "keyspace", "fast"}},
-	"TAGKEYS":     {Arity: 2, Flags: []string{"readonly"}, Categories: []string{"read", "keyspace", "slow"}},
-	"TAGCOUNT":    {Arity: 2, Flags: []string{"readonly", "fast"}, Categories: []string{"read", "keyspace", "fast"}},
+	"TAGKEYS":     {Arity: -2, Flags: []string{"readonly"}, Categories: []string{"read", "keyspace", "slow"}},
+	"TAGCOUNT":    {Arity: -2, Flags: []string{"readonly", "fast"}, Categories: []string{"read", "keyspace", "fast"}},
 	"TAGCHILDREN": {Arity: 2, Flags: []string{"readonly"}, Categories: []string{"read", "keyspace", "slow"}},
 	"INVALIDATE":  {Arity: -2, Flags: []string{"write"}, Categories: []string{"write", "keyspace", "slow"}},
-	"TAGLINK":     {Arity: 3, Flags: []string{"write", "denyoom"}, Categories: []string{"write", "keyspace", "slow"}},
-	"TAGUNLINK":   {Arity: 3, Flags: []string{"write"}, Categories: []string{"write", "keyspace", "slow"}},
+	"TAGLINK":     {Arity: -3, Flags: []string{"write", "denyoom"}, Categories: []string{"write", "keyspace", "slow"}},
+	"TAGSYNC":     {Arity: 1, Flags: []string{"admin", "noscript"}, Categories: []string{"admin", "slow", "dangerous"}},
+	"TAGUNLINK":   {Arity: -3, Flags: []string{"write"}, Categories: []string{"write", "keyspace", "slow"}},
 }
 
 // cachestormCommandSummaries are the COMMAND DOCS summaries of the commands
@@ -32,6 +33,7 @@ var cachestormCommandSummaries = map[string]string{
 	"INVALIDATE":  "Deletes every key that carries one of the tags, and with CASCADE the tags linked below them, atomically.",
 	"TAGLINK":     "Links a child tag below a parent tag, for INVALIDATE ... CASCADE.",
 	"TAGUNLINK":   "Removes the link between a parent and a child tag.",
+	"TAGSYNC":     "Returns the tag hierarchy with its versions, for the other nodes of a cluster.",
 }
 
 // redisCommandSpecs is the command table everything reads: Redis' own

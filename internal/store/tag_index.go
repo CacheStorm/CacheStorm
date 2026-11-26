@@ -35,7 +35,15 @@ type TagIndex struct {
 	// children holds the hierarchy: each parent tag's child tags. A tag
 	// may have several parents; TAGLINK refuses a link that would close a
 	// cycle.
-	children     map[string]map[string]struct{}
+	children map[string]map[string]struct{}
+	// edges holds the version of every link, and in a cluster of every
+	// removed one, so that nodes applying the same changes in any order
+	// keep the one with the highest version (see ApplyEdge). clock is the
+	// highest version seen, and digest the XOR of the edges' hashes, which
+	// the nodes of a cluster compare to find out they differ.
+	edges        map[[2]string]edgeVersion
+	clock        uint64
+	digest       atomic.Uint64
 	onInvalidate func(tag string, keys []string)
 	// tags counts the tags indexed, so removing a key that may have tags
 	// skips the walk of every shard when no key has any.
@@ -94,6 +102,7 @@ func (ti *TagIndex) ResetStats() {
 func NewTagIndex() *TagIndex {
 	ti := &TagIndex{
 		children: make(map[string]map[string]struct{}),
+		edges:    make(map[[2]string]edgeVersion),
 	}
 	for i := 0; i < TagShards; i++ {
 		ti.shards[i] = newTagShard()
@@ -316,20 +325,102 @@ func (ti *TagIndex) Tags() []string {
 // own descendant.
 var ErrTagLinkCycle = errors.New("ERR the link would make the tag its own descendant")
 
+// TagEdge is one link of the hierarchy as set or removed by a version:
+// Version orders the changes, Node (the cluster node that made the change,
+// empty outside a cluster) breaks ties, and Live is false for a removed
+// link a cluster keeps so that an older addition cannot bring it back.
+type TagEdge struct {
+	Parent, Child string
+	Live          bool
+	Version       uint64
+	Node          string
+}
+
+type edgeVersion struct {
+	live bool
+	ver  uint64
+	node string
+}
+
+func (v edgeVersion) newer(than edgeVersion) bool {
+	if v.ver != than.ver {
+		return v.ver > than.ver
+	}
+	return v.node > than.node
+}
+
+func edgeHash(link [2]string, v edgeVersion) uint64 {
+	h := uint64(14695981039346656037)
+	mix := func(s string) {
+		for i := 0; i < len(s); i++ {
+			h ^= uint64(s[i])
+			h *= 1099511628211
+		}
+		h ^= 0xff
+		h *= 1099511628211
+	}
+	mix(link[0])
+	mix(link[1])
+	mix(v.node)
+	for i := 0; i < 8; i++ {
+		h ^= (v.ver >> (8 * i)) & 0xff
+		h *= 1099511628211
+	}
+	if v.live {
+		h ^= 1
+		h *= 1099511628211
+	}
+	return h
+}
+
+// setEdgeLocked records link at v, or forgets it when v is nil, keeping
+// children and the digest in step. The caller holds ti.hierarchy.
+func (ti *TagIndex) setEdgeLocked(link [2]string, v *edgeVersion) {
+	if old, ok := ti.edges[link]; ok {
+		ti.digest.Store(ti.digest.Load() ^ edgeHash(link, old))
+	}
+	parent, child := link[0], link[1]
+	if v == nil || !v.live {
+		if children, ok := ti.children[parent]; ok {
+			delete(children, child)
+			if len(children) == 0 {
+				delete(ti.children, parent)
+			}
+		}
+	} else {
+		if ti.children[parent] == nil {
+			ti.children[parent] = make(map[string]struct{})
+		}
+		ti.children[parent][child] = struct{}{}
+	}
+	if v == nil {
+		delete(ti.edges, link)
+		return
+	}
+	ti.edges[link] = *v
+	ti.digest.Store(ti.digest.Load() ^ edgeHash(link, *v))
+	ti.clock = max(ti.clock, v.ver)
+}
+
 // Link adds child below parent. It refuses a link of a tag to itself or to
 // one of its ancestors: CASCADE follows the links down, and a cycle made
 // every tag on it a descendant of itself.
 func (ti *TagIndex) Link(parent, child string) error {
+	_, err := ti.LinkAt(parent, child, "")
+	return err
+}
+
+// LinkAt is Link made by node: it returns the link with the version it
+// got, for the other nodes to apply.
+func (ti *TagIndex) LinkAt(parent, child, node string) (TagEdge, error) {
 	ti.hierarchy.Lock()
 	defer ti.hierarchy.Unlock()
 	if parent == child || ti.reachesLocked(child, parent) {
-		return ErrTagLinkCycle
+		return TagEdge{}, ErrTagLinkCycle
 	}
-	if ti.children[parent] == nil {
-		ti.children[parent] = make(map[string]struct{})
-	}
-	ti.children[parent][child] = struct{}{}
-	return nil
+	v := edgeVersion{live: true, ver: ti.clock + 1, node: node}
+	ti.setEdgeLocked([2]string{parent, child}, &v)
+	return TagEdge{Parent: parent, Child: child, Live: true, Version: v.ver, Node: node}, nil
 }
 
 // reachesLocked reports whether to lies below from. The caller holds
@@ -373,15 +464,68 @@ func (ti *TagIndex) walkLocked(root string, fn func(tag string) bool) {
 // Unlink removes the link between parent and child, and only that one: a
 // child linked below other parents stays below them.
 func (ti *TagIndex) Unlink(parent, child string) {
+	ti.UnlinkAt(parent, child, "")
+}
+
+// UnlinkAt is Unlink made by node. Outside a cluster (node empty) the link
+// is forgotten; a cluster node keeps it as removed, with a version, so the
+// removal reaches the other nodes and an older link cannot return.
+func (ti *TagIndex) UnlinkAt(parent, child, node string) TagEdge {
 	ti.hierarchy.Lock()
 	defer ti.hierarchy.Unlock()
-
-	if children, exists := ti.children[parent]; exists {
-		delete(children, child)
-		if len(children) == 0 {
-			delete(ti.children, parent)
-		}
+	link := [2]string{parent, child}
+	v := edgeVersion{ver: ti.clock + 1, node: node}
+	if node == "" {
+		ti.setEdgeLocked(link, nil)
+	} else {
+		ti.setEdgeLocked(link, &v)
 	}
+	return TagEdge{Parent: parent, Child: child, Version: v.ver, Node: node}
+}
+
+// ApplyEdge applies a link change another node made, unless the index has
+// a newer one for the link, and reports whether it did. Nodes applying the
+// same changes in any order end with the same hierarchy. It does not check
+// for cycles: the node that made the change did.
+func (ti *TagIndex) ApplyEdge(e TagEdge) bool {
+	ti.hierarchy.Lock()
+	defer ti.hierarchy.Unlock()
+	link := [2]string{e.Parent, e.Child}
+	v := edgeVersion{live: e.Live, ver: e.Version, node: e.Node}
+	if old, ok := ti.edges[link]; ok && !v.newer(old) {
+		ti.clock = max(ti.clock, e.Version)
+		return false
+	}
+	if !e.Live && e.Node == "" {
+		ti.setEdgeLocked(link, nil)
+		ti.clock = max(ti.clock, e.Version)
+		return true
+	}
+	ti.setEdgeLocked(link, &v)
+	return true
+}
+
+// Edges returns every link with its version, removed ones included, sorted.
+func (ti *TagIndex) Edges() []TagEdge {
+	ti.hierarchy.RLock()
+	out := make([]TagEdge, 0, len(ti.edges))
+	for link, v := range ti.edges {
+		out = append(out, TagEdge{Parent: link[0], Child: link[1], Live: v.live, Version: v.ver, Node: v.node})
+	}
+	ti.hierarchy.RUnlock()
+	slices.SortFunc(out, func(a, b TagEdge) int {
+		if c := strings.Compare(a.Parent, b.Parent); c != 0 {
+			return c
+		}
+		return strings.Compare(a.Child, b.Child)
+	})
+	return out
+}
+
+// Digest is a hash of the hierarchy and its versions: two nodes with the
+// same digest have the same links.
+func (ti *TagIndex) Digest() uint64 {
+	return ti.digest.Load()
 }
 
 // Links returns every parent and child pair of the hierarchy, sorted.

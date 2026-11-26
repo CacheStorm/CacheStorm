@@ -178,6 +178,16 @@ for i in $(seq 1 "$nkeys"); do echo "v$i"; done | diff - "$work/get.out"
 echo "--- go-redis ClusterClient after the failover"
 (cd tests/clients/goredis && CACHESTORM_CLUSTER_ADDR="127.0.0.1:${ports[0]}" go run .)
 
+echo "--- tags: one INVALIDATE reaches every master (one of them failed over)"
+ntag=30
+for i in $(seq 1 "$ntag"); do echo "SET tagged:$i v TAGS smoke-tag"; done | rcli -c -p "${ports[0]}" > /dev/null
+got=$(rcli -p "${ports[0]}" TAGCOUNT smoke-tag)
+[ "$got" = "$ntag" ] || { echo "TAGCOUNT smoke-tag = $got, want $ntag" >&2; exit 1; }
+got=$(rcli -p "${ports[0]}" INVALIDATE smoke-tag)
+[ "$got" = "$ntag" ] || { echo "INVALIDATE smoke-tag = $got, want $ntag" >&2; exit 1; }
+for i in $(seq 1 "$ntag"); do echo "EXISTS tagged:$i"; done | rcli -c -p "${ports[0]}" | grep -v '^-> Redirected' | sort -u > "$work/tagged.out"
+[ "$(cat "$work/tagged.out")" = "0" ] || { echo "tagged keys survived INVALIDATE" >&2; exit 1; }
+
 echo "--- restart the killed master: it rejoins as a replica"
 start_node "$victim"
 wait_port "$victim"

@@ -184,6 +184,9 @@ type Cluster struct {
 	// same. "AUTH internal connection <secret>" opens an internal
 	// connection, as atomic slot migration uses between nodes.
 	secret string
+	// tagDigest and tagDigestDiffers are set by SetTagDigest.
+	tagDigest        func() uint64
+	tagDigestDiffers func(node string)
 }
 
 // NewID returns a random 40-character hex node ID.
@@ -952,6 +955,17 @@ func (c *Cluster) Shards() []Shard {
 		out = append(out, *byID[sid])
 	}
 	return out
+}
+
+// SetTagDigest installs the tag hierarchy hooks: digest is this node's
+// hierarchy digest, sent with every PING and PONG, and differs is told when
+// another node sent one that differs, so this node can fetch that node's
+// hierarchy and merge it. Both are called with the cluster's lock held and
+// must not block. Call it before StartBus.
+func (c *Cluster) SetTagDigest(digest func() uint64, differs func(node string)) {
+	c.mu.Lock()
+	c.tagDigest, c.tagDigestDiffers = digest, differs
+	c.mu.Unlock()
 }
 
 // Config returns the nodes.conf text.

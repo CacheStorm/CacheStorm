@@ -1081,9 +1081,15 @@ func (h *HTTPServer) handleExecute(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	ctx.CanDefer = true
 	release := h.srv.holdGate(ctx)
 	result, err := h.router.ExecuteHTTP(ctx)
 	release()
+	if after := ctx.AfterGate; after != nil && err == nil {
+		if aerr := after(); aerr != nil {
+			err = aerr
+		}
+	}
 	if err != nil {
 		status := http.StatusBadRequest
 		if errors.Is(err, errAOFUnavailable) {

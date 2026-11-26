@@ -326,6 +326,8 @@ func (c *Config) applyDirective(d Directive) (bool, error) {
 		return str(&c.Cluster.ConfigFile)
 	case "cluster-node-timeout":
 		return integer(&c.Cluster.NodeTimeout)
+	case "cluster-tag-fanout-timeout":
+		return integer(&c.Cluster.TagFanoutTimeout)
 	case "cluster-port":
 		return integer(&c.Cluster.BusPort)
 	case "cluster-announce-ip":

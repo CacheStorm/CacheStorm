@@ -206,3 +206,18 @@ func TestBusMeetMyself(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 }
+
+// The tag hierarchy digest rides after the secret; a PING without one (from
+// an older node) decodes with none.
+func TestMessageTagDigest(t *testing.T) {
+	m := &message{typ: msgPong, sender: otherID, secret: strings.Repeat("s", IDLen), tagDigest: 0xfeedface12345678, hasTagDigest: true}
+	got, err := decodeMessage(m.encode())
+	if err != nil || got.secret != m.secret || !got.hasTagDigest || got.tagDigest != m.tagDigest {
+		t.Fatalf("with digest: %v %+v", err, got)
+	}
+	m.hasTagDigest = false
+	got, err = decodeMessage(m.encode())
+	if err != nil || got.secret != m.secret || got.hasTagDigest {
+		t.Fatalf("without digest: %v %+v", err, got)
+	}
+}

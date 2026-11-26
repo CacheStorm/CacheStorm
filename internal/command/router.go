@@ -45,6 +45,7 @@ type Router struct {
 	commands         map[string]*CommandDef
 	functionRegistry *FunctionRegistry
 	searchIndexes    *search.IndexManager
+	tagFanout        TagFanout
 	migrateTLS       *tls.Config
 	// duplicates records command names registered more than once. Register is
 	// last-write-wins, so a second registration silently replaced the first;
@@ -290,6 +291,37 @@ func (r *Router) SetFunctionRegistry(registry *FunctionRegistry) {
 
 // SearchIndexes returns the router's search indexes; nil means the
 // process-wide manager.
+// TagFanout sends a tag command to the other masters of a cluster: the
+// cluster-wide INVALIDATE, TAGKEYS, TAGCOUNT, TAGLINK and TAGUNLINK run
+// their part on this node and the rest through it.
+type TagFanout interface {
+	// Send sends cmd with args to every master but this node, at once, and
+	// returns their replies; a master that could not be asked has Err set.
+	Send(cmd string, args [][]byte) []FanoutReply
+	// Ask sends cmd with args to the node id and returns its reply.
+	Ask(node, cmd string, args [][]byte) FanoutReply
+}
+
+// FanoutReply is one master's answer to a fanned-out command.
+type FanoutReply struct {
+	Node  string
+	Reply *resp.Value
+	Err   error
+}
+
+// SetTagFanout installs the cluster's tag fan-out.
+func (r *Router) SetTagFanout(f TagFanout) {
+	r.mu.Lock()
+	r.tagFanout = f
+	r.mu.Unlock()
+}
+
+func (r *Router) fanout() TagFanout {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.tagFanout
+}
+
 func (r *Router) SearchIndexes() *search.IndexManager {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

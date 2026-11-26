@@ -761,8 +761,7 @@ Tags group keys so they can be deleted together. A key's tags live with the
 key: they follow it through `RENAME`, `COPY`, `MOVE`, `MIGRATE`, slot
 migration, snapshots, the AOF and replication, survive in-place writes
 (`APPEND`, `SETRANGE`, `INCR`...), and go when a write replaces the value
-(`SET` without `TAGS`, `GETSET`), as the TTL does. Commands naming tags run on
-the node they are sent to; in a cluster, send them to every master.
+(`SET` without `TAGS`, `GETSET`), as the TTL does.
 
 ```
 SET key value [EX s|PX ms|EXAT ts|PXAT ms-ts|KEEPTTL] [NX|XX] [GET] [TAGS tag [tag ...]]
@@ -771,13 +770,14 @@ SETTAG key value tag [tag ...]       # SET with tags, no expiry
 ADDTAG key tag [tag ...]             # add tags to an existing key; how many were new
 REMTAG key tag [tag ...]             # remove tags; how many it had
 TAGS key                             # the key's tags
-TAGKEYS tag                          # the keys with the tag
-TAGCOUNT tag                         # how many keys have the tag
-INVALIDATE tag [tag ...] [CASCADE]   # delete every key with any of the tags; the
-                                     # number deleted. CASCADE (last, any case) also
+TAGKEYS tag [LOCAL]                  # the keys with the tag
+TAGCOUNT tag [LOCAL]                 # how many keys have the tag
+INVALIDATE tag [tag ...] [CASCADE] [LOCAL]
+                                     # delete every key with any of the tags; the
+                                     # number deleted. CASCADE (any case) also
                                      # reaches the tags linked below them
-TAGLINK parent child                 # make child a tag below parent
-TAGUNLINK parent child               # remove that one link
+TAGLINK parent child [LOCAL]         # make child a tag below parent
+TAGUNLINK parent child [LOCAL]       # remove that one link
 TAGCHILDREN tag                      # the tags directly below tag, sorted
 ```
 
@@ -786,6 +786,41 @@ is gone, and a key tagged meanwhile is either deleted or written after it. It
 publishes a `del` keyspace notification for each key it deletes, drops their
 documents from search indexes, and reaches replicas and the AOF as `DEL`s of
 those keys.
+
+### In a cluster
+
+The tag commands act on the whole cluster from whichever node receives them,
+so a client sends `INVALIDATE` once, as it would to a single server:
+
+- `INVALIDATE` runs on the node, then on every other master, and answers the
+  total number of keys deleted. Each master's part is atomic on that master;
+  the masters are not invalidated at one instant (Redis Cluster has no
+  cross-node atomicity either). Replicas get the deletes from their masters.
+- `TAGKEYS` and `TAGCOUNT` answer for every master's keys. On a replica they
+  ask the masters, its own included.
+- `LOCAL` keeps a command on the node it is sent to. So does running it
+  inside `MULTI`/`EXEC` or a script, whose commands run on one node.
+- A master that does not answer within `cluster-tag-fanout-timeout`
+  milliseconds (default 1000; `CONFIG SET` changes it) makes the command
+  fail with `TAGFANOUT`, naming what was done and the masters not reached,
+  for example `-TAGFANOUT 812 keys deleted; not reached: <node-id> (i/o
+  timeout)`. The commands are idempotent: send it again. A master the cluster
+  has marked failed is not asked; its replica takes its keys over.
+- The hierarchy is one for the cluster. The master of slot 0 orders its
+  changes: another node forwards `TAGLINK`/`TAGUNLINK` to it, and it checks
+  for cycles, numbers the change and hands it to every master, which pass it
+  to their replicas. The nodes also send a digest of their hierarchy with
+  every cluster bus `PING`; a node whose digest differs from another's
+  fetches that node's hierarchy and keeps, link by link, the newer change.
+  So a master that was down or partitioned while links changed, or a change
+  made with `LOCAL`, catches up within a few seconds. `TAGSYNC` is the
+  command the nodes fetch it with, refused to clients.
+
+The node waits for the other masters after releasing its own locks, so it
+keeps serving other clients meanwhile, and two nodes invalidating at once do
+not wait on each other.
+
+### Hierarchy
 
 The hierarchy is a graph without cycles: a tag may sit below several parents,
 and `TAGLINK` refuses a link of a tag to itself or to one of its own

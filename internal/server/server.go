@@ -293,10 +293,12 @@ type Server struct {
 	repl *replication.Manager
 	// gate orders every write with its propagation to the AOF and the
 	// replicas, and lets a full resync snapshot the data between writes.
-	gate              writeGate
-	snapshotMu        sync.Mutex
-	backup            *backupManager
-	asm               *asmManager
+	gate       writeGate
+	snapshotMu sync.Mutex
+	backup     *backupManager
+	asm        *asmManager
+	// fanout sends the cluster-wide tag commands to the other masters.
+	fanout            *tagFanout
 	snapshotWG        sync.WaitGroup
 	snapshotRunning   bool
 	snapshotClosing   bool
@@ -1064,6 +1066,9 @@ func (s *Server) Stop(ctx context.Context) error {
 	close(s.stopCh)
 	s.backup.stop()
 	s.asm.stop()
+	if s.fanout != nil {
+		s.fanout.close()
+	}
 
 	// 1. Stop accepting new connections
 	if s.listener != nil {

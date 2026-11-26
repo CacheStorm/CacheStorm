@@ -224,6 +224,9 @@ func validateCluster(cfg *Config) error {
 	if c.NodeTimeout <= 0 {
 		return fmt.Errorf("invalid cluster node_timeout: %d", c.NodeTimeout)
 	}
+	if c.TagFanoutTimeout < 0 {
+		return fmt.Errorf("invalid cluster tag_fanout_timeout: %d", c.TagFanoutTimeout)
+	}
 	if c.ReplicaValidityFactor < 0 {
 		return fmt.Errorf("invalid cluster replica_validity_factor: %d", c.ReplicaValidityFactor)
 	}

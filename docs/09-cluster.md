@@ -39,6 +39,8 @@ Use your client library's cluster client: go-redis `ClusterClient`, redis-py `Re
 
 Keys that one command uses together must hash to the same slot. Use a hash tag, `{user:42}:profile` and `{user:42}:sessions`, or the command is refused with `CROSSSLOT`. Only database 0 exists. With `READONLY`, a client may read from replicas.
 
+Tag commands are cluster-wide: `INVALIDATE`, `TAGKEYS` and `TAGCOUNT` sent to any node cover every master, and `TAGLINK`/`TAGUNLINK` change one hierarchy shared by all nodes. `cluster-tag-fanout-timeout` (milliseconds, default 1000) bounds the wait for each master. See [the tag commands](./commands.md#in-a-cluster).
+
 ## Scaling and rebalancing
 
 The standard `redis-cli --cluster` workflows work while clients keep reading and writing:

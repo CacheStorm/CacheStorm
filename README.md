@@ -77,7 +77,7 @@ What you can rely on:
 - **No stale index**: a key leaves its tags when it is deleted, expires, is evicted, or is overwritten by a plain `SET`. `RENAME`, `COPY`, `MOVE` and `SWAPDB` take its tags along; in-place writes (`APPEND`, `INCR`, `SETRANGE`, `EXPIRE`, ...) keep them.
 - **Replicated and persisted**: replicas, the AOF and RDB snapshots carry the tags and the tag hierarchy; `INVALIDATE` reaches replicas as the `DEL`s it caused, so they never depend on their own copy of the index.
 - **Observable**: each deleted key publishes the usual `del` keyspace notification, and clients using `CLIENT TRACKING` are told.
-- **Cluster-aware**: tag commands run on the node they are sent to (send `INVALIDATE` to every master to reach a whole cluster); `MIGRATE` and slot migration move a key's tags with it.
+- **Cluster-wide**: in a cluster, `INVALIDATE`, `TAGKEYS` and `TAGCOUNT` sent to any node cover every master, and the tag hierarchy is the same on every node, kept in step even across a node's restart; `MIGRATE` and slot migration move a key's tags with it.
 - **Fast**: invalidating a tag of 10 keys runs at ~270k ops/s with 8 pipelining clients without stopping other clients' writes, and a tag of 50,000 keys is gone in ~9 ms — about 4x faster than the `SMEMBERS` + `DEL` Lua script the same job takes on Redis. A tag costs a key about 55 bytes.
 
 The [Go, Python and TypeScript SDKs](#official-sdks) wrap these commands (`SetWithTags` / `set(..., tags=[...])` / `setWithTags`, and `Invalidate(tags...)`); with any other client, send them as raw commands. See [the tag commands](./docs/commands.md#tag-based-invalidation-commands) for every option.

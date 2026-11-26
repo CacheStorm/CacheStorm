@@ -121,6 +121,16 @@ type Context struct {
 	KeyHeld  func(key string) bool
 	Escalate func()
 
+	// CanDefer is set by a connection that runs AfterGate: once the
+	// command's effects are recorded and its write ordering locks released,
+	// it calls AfterGate, which writes the reply. A cluster-wide tag
+	// command does its local part under the locks and asks the other
+	// masters in AfterGate, as waiting on the network while holding them
+	// would stall every writer (and two nodes asking each other at once
+	// would wait on each other).
+	CanDefer  bool
+	AfterGate func() error
+
 	// setTags are the tags SET's TAGS option gives the key.
 	setTags []string
 

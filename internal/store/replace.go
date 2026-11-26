@@ -109,12 +109,18 @@ func (d *Databases) ReplaceFrom(src *Databases) error {
 		// the staging databases.
 		dst.tagIndex.hierarchy.Lock()
 		dst.tagIndex.children = make(map[string]map[string]struct{})
+		dst.tagIndex.edges = make(map[[2]string]edgeVersion)
+		dst.tagIndex.clock = 0
+		dst.tagIndex.digest.Store(0)
 		dst.tagIndex.tags.Store(0)
 		dst.tagIndex.members.Store(0)
 		if incoming != nil {
 			from := incoming.tagIndex
 			from.hierarchy.Lock()
 			dst.tagIndex.children, from.children = from.children, dst.tagIndex.children
+			dst.tagIndex.edges, from.edges = from.edges, dst.tagIndex.edges
+			dst.tagIndex.clock, from.clock = from.clock, 0
+			dst.tagIndex.digest.Store(from.digest.Swap(0))
 			dst.tagIndex.tags.Store(from.tags.Swap(0))
 			dst.tagIndex.members.Store(from.members.Swap(0))
 			from.hierarchy.Unlock()

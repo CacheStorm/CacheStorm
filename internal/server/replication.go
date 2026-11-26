@@ -408,16 +408,16 @@ func tagLinkCommands(dbs *store.Databases) [][]string {
 	var cmds [][]string
 	selected := 0
 	dbs.ForEach(func(db int, st *store.Store) {
-		links := st.GetTagIndex().Links()
-		if len(links) == 0 {
+		edges := st.GetTagIndex().Edges()
+		if len(edges) == 0 {
 			return
 		}
 		if db != selected {
 			cmds = append(cmds, []string{"SELECT", strconv.Itoa(db)})
 			selected = db
 		}
-		for _, link := range links {
-			cmds = append(cmds, []string{"TAGLINK", link[0], link[1]})
+		for _, e := range edges {
+			cmds = append(cmds, command.TagEdgeCommand(e))
 		}
 	})
 	if selected != 0 {

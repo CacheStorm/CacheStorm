@@ -50,6 +50,10 @@ func (s *Server) openCluster() error {
 	s.store.EnableSlotIndex()
 	s.router.SetCluster(c)
 	s.router.SetSlotMigrationController(s.asm)
+	s.fanout = newTagFanout(s, cc.TagFanoutTimeout)
+	s.router.SetTagFanout(s.fanout)
+	c.SetTagDigest(func() uint64 { return s.dbs.DB(0).GetTagIndex().Digest() }, s.fanout.digestDiffers)
+	go s.fanout.runSync(s.stopCh)
 	if !cc.TLS {
 		logger.Warn().Msg("WARNING: the cluster bus port is not authenticated: 'tls-cluster' is disabled and " +
 			"protected mode was waived with 'cluster-bus-port-protected-mode no'. Any host able " +

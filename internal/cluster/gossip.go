@@ -109,6 +109,9 @@ func (c *Cluster) sendPingLocked(l *link, typ msgType) {
 	}
 	m := c.headerLocked(typ)
 	m.secret = c.secret
+	if c.tagDigest != nil {
+		m.tagDigest, m.hasTagDigest = c.tagDigest(), true
+	}
 	wanted := len(c.nodes) / 10
 	if wanted < 3 {
 		wanted = 3
@@ -460,6 +463,9 @@ func (c *Cluster) processPacket(b *bus, l *link, m *message) {
 		// The nodes agree on the smallest internal secret any of them has.
 		if sender != nil && len(m.secret) == IDLen && m.secret < c.secret {
 			c.secret = m.secret
+		}
+		if sender != nil && m.hasTagDigest && c.tagDigest != nil && c.tagDigestDiffers != nil && m.tagDigest != c.tagDigest() {
+			c.tagDigestDiffers(sender.ID)
 		}
 		c.processPingLocked(l, m, sender, now)
 	case msgFail:

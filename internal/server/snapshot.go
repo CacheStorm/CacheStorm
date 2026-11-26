@@ -16,6 +16,7 @@ import (
 	"github.com/cachestorm/cachestorm/internal/persistence"
 	"github.com/cachestorm/cachestorm/internal/replication"
 	"github.com/cachestorm/cachestorm/internal/resp"
+	"github.com/cachestorm/cachestorm/internal/store"
 )
 
 func (s *Server) snapshotPath() string {
@@ -129,6 +130,15 @@ func (s *Server) restoreTagLinks(payload []byte) error {
 				// is left out.
 				continue
 			}
+		case (name == "TAGLINK" || name == "TAGUNLINK") && len(cmd.Args) == 5 && strings.EqualFold(string(cmd.Args[2]), "VERSION"):
+			ver, err := strconv.ParseUint(string(cmd.Args[3]), 10, 64)
+			if err != nil {
+				return fmt.Errorf("bad tag link version %q", cmd.Args[3])
+			}
+			s.dbs.DB(db).GetTagIndex().ApplyEdge(store.TagEdge{
+				Parent: string(cmd.Args[0]), Child: string(cmd.Args[1]),
+				Live: name == "TAGLINK", Version: ver, Node: string(cmd.Args[4]),
+			})
 		default:
 			return fmt.Errorf("unexpected command %s", name)
 		}

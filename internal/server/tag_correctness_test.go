@@ -85,7 +85,7 @@ func TestTagCommandsIntrospectionX(t *testing.T) {
 		"SETTAG":     "[settag -4 [write denyoom] 1 1 1 [@write @string @slow] [] [] []]",
 		"TAGS":       "[tags 2 [readonly fast] 1 1 1 [@read @keyspace @fast] [] [] []]",
 		"INVALIDATE": "[invalidate -2 [write] 0 0 0 [@write @keyspace @slow] [] [] []]",
-		"TAGLINK":    "[taglink 3 [write denyoom] 0 0 0 [@write @keyspace @slow] [] [] []]",
+		"TAGLINK":    "[taglink -3 [write denyoom] 0 0 0 [@write @keyspace @slow] [] [] []]",
 	} {
 		if got := c.str("COMMAND", "INFO", cmd); got != "["+want+"]" {
 			t.Fatalf("COMMAND INFO %s = %s", cmd, got)

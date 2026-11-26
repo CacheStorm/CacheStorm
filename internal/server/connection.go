@@ -898,6 +898,7 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 		ctx.ClientName = c.clientName
 		ctx.ReplConf = &c.replConf
 		ctx.ClusterConn = &c.clusterConn
+		ctx.CanDefer = true
 
 		if cmd == "QUIT" {
 			c.conn.SetWriteDeadline(time.Now().Add(c.writeTimeout))
@@ -988,7 +989,15 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 				}
 			}
 			c.srv.trackCommand(ctx, err != nil || c.writer.Errors() != errsBefore)
-			if c.heldGate != nil {
+			if after := ctx.AfterGate; after != nil && err == nil {
+				// The command's effects are recorded; the rest (asking the
+				// other masters of a cluster) runs without the locks.
+				ctx.AfterGate = nil
+				c.releaseGate()
+				if aerr := after(); aerr != nil {
+					logger.Debug().Err(aerr).Int64("conn_id", c.ID).Msg("reply after the gate not written")
+				}
+			} else if c.heldGate != nil {
 				if c.keepGate(c.heldGate, ctx, stopMerge != nil) {
 					c.heldCount++
 				} else {

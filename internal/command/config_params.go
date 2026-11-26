@@ -130,6 +130,7 @@ var configParams = map[string]*configParam{
 	"cluster-link-sendbuf-limit":                       {kind: cfgMemory, def: "0", lo: 0, hi: configLongMax, unsigned: true},
 	"cluster-migration-barrier":                        intParam("1", 0, configIntMax),
 	"cluster-node-timeout":                             intParam("15000", 0, configLongMax),
+	"cluster-tag-fanout-timeout":                       intParam("1000", 1, configIntMax),
 	"cluster-port":                                     immutableParam("0"),
 	"cluster-preferred-endpoint-type":                  enumParam("ip", "ip", "hostname", "unknown-endpoint"),
 	"cluster-replica-no-failover":                      boolParam("no"),

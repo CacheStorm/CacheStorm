@@ -121,6 +121,7 @@ cluster:
   enabled: false
   # config_file: nodes.conf
   # node_timeout: 15000          # ms
+  # tag_fanout_timeout: 1000     # ms, as cluster-tag-fanout-timeout
   # bus_port: 0                  # cluster bus; 0 = port + 10000
   # announce_ip: ""
   # require_full_coverage: true
