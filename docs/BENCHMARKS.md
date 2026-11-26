@@ -77,6 +77,35 @@ The table is the median of three runs.
 
 Unpipelined, both servers are bound by round trips and perform alike.
 
+## Tags against Redis 7.4, 2026-11-26
+
+The tag workload on Redis 7.4.12 (`redis:7.4-alpine`, `--network host`, no persistence) the way it is usually done there — a set of keys per tag, `SET` plus `SADD` for a tagged write, and a Lua script running `SMEMBERS` then `DEL` in chunks of 5,000 for an invalidation — against `SET ... TAGS` and `INVALIDATE` on CacheStorm, from the same Go load generator on the same host (8-core Ryzen 7 PRO 6850H, loaded by other work, so single runs vary by ±15%).
+
+| Workload | Redis 7.4.12 | CacheStorm |
+|---|---|---|
+| Tagged writes, 8 connections × 32 pipelined, one of 1,000 tags | 425k/s | 523k/s |
+| Cache mix per 10 operations: 8 `GET`, 1 tagged write, 1 invalidation of a 10-key entity tag (8 connections) | 686k ops/s | 1,048k ops/s |
+| Invalidate a 10-key tag, median of 301 / p90 | 122 µs / 182 µs | 88 µs / 122 µs |
+| Invalidate a 1,000-key tag, median | 625 µs | 323 µs |
+| Invalidate a 50,000-key tag, median | 31.8 ms | 7.0 ms |
+| Invalidate a 200,000-key tag, median | 149 ms | 21 ms |
+| Memory of 200,000 keys (16-byte values), one of 200 tags each, RSS | 58 MB | 83 MB |
+
+While Redis runs the script every other client waits, as it waits while CacheStorm's whole-gate invalidation runs; the waits follow the invalidation times above. Memory is where Redis is still ahead: its `used_memory` was 121 bytes per tagged key.
+
+## Large invalidations, 2026-11-26
+
+An `INVALIDATE` of more than 256 keys holds the whole write gate, so its length is how long every other client waits. Measured as the longest `GET` of four clients running beside it, which matched the invalidation's own time:
+
+| Tag size | 0.5.0 | Now |
+|---|---|---|
+| 1,000 keys | 0.9 ms | 0.25 ms (alone) |
+| 10,000 keys | 3.1 ms | 1.5 ms |
+| 50,000 keys | 10.5–13 ms | 5.3–6.5 ms |
+| 200,000 keys | 44–49 ms | 21–24 ms |
+
+What changed: bucketing the keys by shard runs on the worker goroutines too (it was a sequential pass hashing every key while everything else waited); the workers' result slices are sized up front; the keys are not looked for again in the tag that was just invalidated (the index dropped it already, and a key with that one tag now costs no tag-index work at all); batches from 512 keys (was 2,048) use the workers, as below that the sequential path was slower; and the `DEL`s recorded for replicas and the AOF use the key strings' bytes instead of copying them. An `INVALIDATE` reaching up to 256 keys (was 32) and at most three quarters of the 256 gate stripes holds only those stripes, so other clients keep running beside it: with two clients invalidating 50-key tags in a loop, six other pipelining clients wrote 12% more.
+
 ## Tags, 2026-11-23
 
 Tag writes and invalidation (0.4.0 and 0.5.0), from a Go load generator with 8 connections each pipelining 32 commands against a server on the same host; operations per second unless noted.

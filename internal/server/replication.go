@@ -153,7 +153,15 @@ func (g *writeGate) planWrite(h *gateHold, ctx *command.Context) *gateHold {
 
 // maxInvalidateStripes bounds the keys (and the tags) INVALIDATE locks the
 // stripes of one by one; a larger invalidation takes the whole gate.
-const maxInvalidateStripes = 32
+// maxInvalidateStripes bounds the tags a striped INVALIDATE may name,
+// maxInvalidateKeys the keys they may have, and maxInvalidateHeld the
+// stripes it may hold: covering most of the gate stripe by stripe costs
+// more than taking the whole gate.
+const (
+	maxInvalidateStripes = 32
+	maxInvalidateKeys    = 256
+	maxInvalidateHeld    = gateStripes * 3 / 4
+)
 
 // planInvalidate plans INVALIDATE tag [tag ...] [CASCADE] on the stripes of
 // the keys its tags (and with CASCADE the tags below them) have now, so
@@ -170,7 +178,7 @@ func (g *writeGate) planInvalidate(h *gateHold, ctx *command.Context) bool {
 		return false
 	}
 	var held stripeSet
-	budget := maxInvalidateStripes
+	budget := maxInvalidateKeys
 	for _, tag := range tags {
 		held.add(stripeOf(tag))
 		ok := ti.KeysUpTo(tag, budget, func(k string) {
@@ -180,6 +188,9 @@ func (g *writeGate) planInvalidate(h *gateHold, ctx *command.Context) bool {
 		if !ok {
 			return false
 		}
+	}
+	if held.count() > maxInvalidateHeld {
+		return false
 	}
 	h.stripes = h.inline[:0]
 	if held.count() > len(h.inline) {

@@ -78,7 +78,7 @@ What you can rely on:
 - **Replicated and persisted**: replicas, the AOF and RDB snapshots carry the tags and the tag hierarchy; `INVALIDATE` reaches replicas as the `DEL`s it caused, so they never depend on their own copy of the index.
 - **Observable**: each deleted key publishes the usual `del` keyspace notification, and clients using `CLIENT TRACKING` are told.
 - **Cluster-wide**: in a cluster, `INVALIDATE`, `TAGKEYS` and `TAGCOUNT` sent to any node cover every master, and the tag hierarchy is the same on every node, kept in step even across a node's restart; `MIGRATE` and slot migration move a key's tags with it.
-- **Fast**: invalidating a tag of 10 keys runs at ~270k ops/s with 8 pipelining clients without stopping other clients' writes, and a tag of 50,000 keys is gone in ~9 ms — about 4x faster than the `SMEMBERS` + `DEL` Lua script the same job takes on Redis. A tag costs a key about 55 bytes.
+- **Fast**: against Redis 7.4 doing the same job its usual way (a set per tag, `SMEMBERS` + `DEL` in a Lua script), invalidating 50,000 keys takes 7 ms instead of 32 ms and 200,000 keys 21 ms instead of 149 ms, tagged writes run 23% faster and a cache workload mixing reads, tagged writes and invalidations 50% faster. Invalidating up to 256 keys does not stop other clients' writes. A tag costs a key about 55 bytes.
 
 The [Go, Python and TypeScript SDKs](#official-sdks) wrap these commands (`SetWithTags` / `set(..., tags=[...])` / `setWithTags`, and `Invalidate(tags...)`); with any other client, send them as raw commands. See [the tag commands](./docs/commands.md#tag-based-invalidation-commands) for every option.
 
@@ -273,7 +273,8 @@ Tag operations, 8 pipelining clients (depth 32), same machine:
 | `ADDTAG key t` | ~950k ops/s |
 | `INVALIDATE` of a 10-key tag | ~270k ops/s, other clients keep writing |
 | Cache mix: 8 `GET` + `SETTAG` + `INVALIDATE` | ~1.45M commands/s |
-| `INVALIDATE` of a 50,000-key tag | ~9 ms (the Redis-style `SMEMBERS` + `DEL` Lua script: ~36 ms) |
+| `INVALIDATE` of a 50,000-key tag | ~7 ms (Redis 7.4 running `SMEMBERS` + `DEL` in Lua: ~32 ms) |
+| `INVALIDATE` of a 200,000-key tag | ~21 ms (Redis 7.4: ~149 ms) |
 | Memory per tag on a key | ~55 bytes |
 
 ## Docker

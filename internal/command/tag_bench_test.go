@@ -90,3 +90,24 @@ func BenchmarkInvalidateLarge(b *testing.B) {
 		}
 	}
 }
+
+// BenchmarkInvalidateMedium invalidates a tag of 1,000 keys, below the size
+// at which the store deletes in parallel.
+func BenchmarkInvalidateMedium(b *testing.B) {
+	r := newMemAcctRouter()
+	RegisterTagCommands(r)
+	s := store.NewStore()
+	w := resp.NewWriter(io.Discard)
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		for k := 0; k < 1000; k++ {
+			if err := s.Set("key:"+strconv.Itoa(k), &store.StringValue{Data: []byte("v")}, store.SetOptions{Tags: []string{"m"}}); err != nil {
+				b.Fatal(err)
+			}
+		}
+		b.StartTimer()
+		if err := r.Execute(NewContext("INVALIDATE", [][]byte{[]byte("m")}, s, w)); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

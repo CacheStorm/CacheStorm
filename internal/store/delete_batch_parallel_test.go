@@ -54,3 +54,34 @@ func TestDeleteBatchParallelX(t *testing.T) {
 		t.Fatal("a key left alone had its version bumped")
 	}
 }
+
+// DeleteInvalidated leaves the tags the keys were invalidated through
+// alone (the index dropped them already) and removes the keys from their
+// other tags, on the sequential and the parallel path alike.
+func TestDeleteInvalidatedX(t *testing.T) {
+	for _, n := range []int{parallelDeleteMin / 4, parallelDeleteMin * 3} {
+		s := NewStore()
+		if err := s.Set("keep", &StringValue{Data: []byte("v")}, SetOptions{Tags: []string{"other"}}); err != nil {
+			t.Fatal(err)
+		}
+		for i := 0; i < n; i++ {
+			tags := []string{"inv"}
+			if i%2 == 0 {
+				tags = append(tags, "other", "g"+strconv.Itoa(i%5))
+			}
+			if err := s.Set("k:"+strconv.Itoa(i), &StringValue{Data: []byte("v")}, SetOptions{Tags: tags}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		keys := s.tagIndex.Invalidate("inv")
+		if got := len(s.DeleteInvalidated(keys, []string{"inv"})); got != n {
+			t.Fatalf("n=%d: deleted %d", n, got)
+		}
+		if got := s.tagIndex.GetKeys("other"); len(got) != 1 || got[0] != "keep" {
+			t.Fatalf("n=%d: tag other lists %d keys, want [keep]", n, len(got))
+		}
+		if st := s.tagIndex.Stats(); st.Tags != 1 || st.Members != 1 {
+			t.Fatalf("n=%d: index stats %+v, want one tag with one key", n, st)
+		}
+	}
+}

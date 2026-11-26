@@ -223,3 +223,79 @@ func TestInvalidateCascadeEscalatesMidwayX(t *testing.T) {
 		t.Fatalf("DEL args=%s", got)
 	}
 }
+
+// A tag of up to maxInvalidateKeys keys is invalidated on its keys' stripes;
+// a larger one, or one whose keys cover most stripes, takes the whole gate.
+func TestInvalidateMediumTagTakesStripesX(t *testing.T) {
+	keys := func(n int) []string {
+		out := make([]string, n)
+		for i := range out {
+			out[i] = fmt.Sprintf("m%d", i)
+		}
+		return out
+	}
+	medium := keys(120)
+	s, r := tagServer(t, medium...)
+	ctx := command.NewContext("INVALIDATE", [][]byte{[]byte("t")}, s.store, resp.NewWriter(&bytes.Buffer{}))
+	unlock := s.holdGate(ctx)
+	if !s.gate.global.TryRLock() {
+		t.Fatal("INVALIDATE of a 120-key tag took the whole gate")
+	}
+	s.gate.global.RUnlock()
+	other := keyOffStripes("o", append(medium, "t")...)
+	if !s.gate.stripes[stripeOf(other)].TryLock() {
+		t.Fatal("INVALIDATE of a 120-key tag holds the stripe of an unrelated key")
+	}
+	s.gate.stripes[stripeOf(other)].Unlock()
+	if err := r.Execute(ctx); err != nil {
+		t.Fatal(err)
+	}
+	unlock()
+	if got := delArgs(t, ctx); got != strings.Join(sortedCopy(medium), ",") {
+		t.Fatalf("DEL args=%s", got)
+	}
+
+	s, _ = tagServer(t, keys(maxInvalidateKeys+1)...)
+	ctx = command.NewContext("INVALIDATE", [][]byte{[]byte("t")}, s.store, resp.NewWriter(&bytes.Buffer{}))
+	unlock = s.holdGate(ctx)
+	if s.gate.global.TryRLock() {
+		s.gate.global.RUnlock()
+		t.Fatal("INVALIDATE of a tag over the key budget did not take the whole gate")
+	}
+	unlock()
+}
+
+func sortedCopy(in []string) []string {
+	out := append([]string(nil), in...)
+	sort.Strings(out)
+	return out
+}
+
+// Large tags, deleted in parallel while other clients tag keys, still leave
+// the replica equal to the master.
+func TestInvalidateLargeTagsReplicaFollowsX(t *testing.T) {
+	master := startReplServer(t, nil)
+	replica := startReplServer(t, nil)
+	rc := replicate(t, replica, master)
+	var wg sync.WaitGroup
+	for w := 0; w < 3; w++ {
+		wg.Add(1)
+		go func(w int) {
+			defer wg.Done()
+			c := dialRepl(t, master)
+			for round := 0; round < 6; round++ {
+				for i := 0; i < 700; i++ {
+					c.do("SET", fmt.Sprintf("w%d:%d", w, i), "v", "TAGS", "big", fmt.Sprintf("g%d", i%4))
+				}
+				c.do("INVALIDATE", "big")
+				c.do("INVALIDATE", fmt.Sprintf("g%d", round%4))
+			}
+		}(w)
+	}
+	wg.Wait()
+	waitSynced(t, replica, master)
+	want, got := dumpAll(t, dialRepl(t, master)), dumpAll(t, rc)
+	if fmt.Sprint(want) != fmt.Sprint(got) {
+		t.Fatalf("replica diverged: master has %d keys, replica %d", len(want), len(got))
+	}
+}

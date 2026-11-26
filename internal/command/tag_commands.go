@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unsafe"
 
 	"github.com/cachestorm/cachestorm/internal/hashslot"
 	"github.com/cachestorm/cachestorm/internal/resp"
@@ -276,7 +277,7 @@ func cmdINVALIDATE(ctx *Context) error {
 		}
 		keysToDelete = uniqueKeys
 	}
-	deleted := ctx.Store.DeleteBatchKeys(keysToDelete)
+	deleted := ctx.Store.DeleteInvalidated(keysToDelete, tags)
 	// Replicas, the AOF and a slot migration get the keys deleted, not the
 	// tags: writes to other keys may have run beside a striped run, and a
 	// slot migration copies only the writes naming keys of its slots.
@@ -601,17 +602,12 @@ func propagateDeletes(ctx *Context, keys []string) {
 	for _, group := range groups {
 		for len(group) > 0 {
 			n := min(len(group), deleteChunk)
-			// One buffer holds the chunk's key names.
-			size := 0
-			for _, k := range group[:n] {
-				size += len(k)
-			}
-			buf := make([]byte, 0, size)
+			// The arguments are the key strings' own bytes: the deleted
+			// keys are not used again, and what records the DEL (the AOF,
+			// replicas, tracking) only reads them.
 			args := make([][]byte, n)
 			for i, k := range group[:n] {
-				start := len(buf)
-				buf = append(buf, k...)
-				args[i] = buf[start:len(buf):len(buf)]
+				args[i] = unsafe.Slice(unsafe.StringData(k), len(k))
 			}
 			cmds = append(cmds, ExecutedCommand{Name: "DEL", Args: args, DB: ctx.DB})
 			group = group[n:]

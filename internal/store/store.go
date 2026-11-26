@@ -724,55 +724,82 @@ func (s *Store) evictObserved(key string, expected *Entry) bool {
 // shards over several goroutines. Invalidating a large tag deletes tens of
 // thousands of keys while every other command waits; the shards are
 // independent, so the work divides across cores.
-const parallelDeleteMin = 2048
+const parallelDeleteMin = 512
 
 // deleteBatchParallel is DeleteBatch for a large batch: the keys are bucketed
 // by shard, and each worker deletes the keys of a range of shards and drops
-// them from the tag index.
-func (s *Store) deleteBatchParallel(keys []string) []string {
-	var start [NumShards + 1]int
-	idx := make([]uint16, len(keys))
-	for i, key := range keys {
-		sh := s.shardIndex(key)
-		idx[i] = uint16(sh)
-		start[sh+1]++
-	}
-	for i := 1; i <= NumShards; i++ {
-		start[i] += start[i-1]
-	}
-	next := start
-	byShard := make([]string, len(keys))
-	for i, key := range keys {
-		byShard[next[idx[i]]] = key
-		next[idx[i]]++
-	}
-
-	workers := runtime.GOMAXPROCS(0)
-	if workers > 8 {
-		workers = 8
-	}
+// them from the tag index. Everything here runs while every other command
+// waits, so the bucketing is parallel too: each worker hashes a slice of
+// the keys and counts them per shard, and after a prefix sum places its
+// keys at its own offsets.
+func (s *Store) deleteBatchParallel(keys []string, dropped *droppedTags) []string {
+	workers := min(runtime.GOMAXPROCS(0), 8)
 	if per := len(keys) / (parallelDeleteMin / 2); workers > per {
 		workers = per
 	}
-	if workers < 1 {
-		workers = 1
+	workers = max(workers, 1)
+
+	n := len(keys)
+	idx := make([]uint8, n)
+	counts := make([][NumShards]int, workers)
+	chunk := (n + workers - 1) / workers
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		lo, hi := min(w*chunk, n), min((w+1)*chunk, n)
+		wg.Add(1)
+		go func(c *[NumShards]int) {
+			defer wg.Done()
+			for i := lo; i < hi; i++ {
+				sh := s.shardIndex(keys[i])
+				idx[i] = uint8(sh)
+				c[sh]++
+			}
+		}(&counts[w])
 	}
+	wg.Wait()
+	var start [NumShards + 1]int
+	offsets := make([][NumShards]int, workers)
+	pos := 0
+	for sh := 0; sh < NumShards; sh++ {
+		start[sh] = pos
+		for w := 0; w < workers; w++ {
+			offsets[w][sh] = pos
+			pos += counts[w][sh]
+		}
+	}
+	start[NumShards] = pos
+	byShard := make([]string, n)
+	for w := 0; w < workers; w++ {
+		lo, hi := min(w*chunk, n), min((w+1)*chunk, n)
+		wg.Add(1)
+		go func(off *[NumShards]int) {
+			defer wg.Done()
+			for i := lo; i < hi; i++ {
+				sh := idx[i]
+				byShard[off[sh]] = keys[i]
+				off[sh]++
+			}
+		}(&offsets[w])
+	}
+	wg.Wait()
+
 	type result struct {
 		gone  []string
 		freed int64
 		_     [48]byte // keep workers' results on separate cache lines
 	}
 	results := make([]result, workers)
-	var wg sync.WaitGroup
 	for w := 0; w < workers; w++ {
 		lo, hi := w*NumShards/workers, (w+1)*NumShards/workers
 		wg.Add(1)
 		go func(r *result) {
 			defer wg.Done()
+			r.gone = make([]string, 0, start[hi]-start[lo])
 			// The keys to drop from each tag, so a tag's lock is taken once
 			// per worker rather than once per key: the keys of a large tag
-			// all share it.
-			untag := map[string][]string{}
+			// all share it. The tags the keys were invalidated through are
+			// gone from the index already.
+			var untag map[string][]string
 			for sh := lo; sh < hi; sh++ {
 				shardKeys := byShard[start[sh]:start[sh+1]]
 				if len(shardKeys) == 0 {
@@ -788,6 +815,12 @@ func (s *Store) deleteBatchParallel(keys []string) []string {
 					r.freed += shard.deleteLocked(key, entry)
 					r.gone = append(r.gone, key)
 					for _, tag := range entry.TagList() {
+						if dropped.has(tag) {
+							continue
+						}
+						if untag == nil {
+							untag = map[string][]string{}
+						}
 						untag[tag] = append(untag[tag], key)
 					}
 				}
@@ -801,17 +834,81 @@ func (s *Store) deleteBatchParallel(keys []string) []string {
 	}
 	wg.Wait()
 
-	n, freed := 0, int64(0)
+	total, freed := 0, int64(0)
 	for i := range results {
-		n += len(results[i].gone)
+		total += len(results[i].gone)
 		freed += results[i].freed
 	}
-	gone := make([]string, 0, n)
+	gone := make([]string, 0, total)
 	for i := range results {
 		gone = append(gone, results[i].gone...)
 	}
 	s.trackMemory(-freed)
 	return gone
+}
+
+// droppedTags are the tags an INVALIDATE removed from the index before
+// deleting their keys: removing the keys from them again finds nothing.
+type droppedTags struct {
+	list []string
+	set  map[string]struct{}
+}
+
+func newDroppedTags(tags []string) *droppedTags {
+	if len(tags) == 0 {
+		return nil
+	}
+	d := &droppedTags{list: tags}
+	if len(tags) > 8 {
+		d.set = make(map[string]struct{}, len(tags))
+		for _, t := range tags {
+			d.set[t] = struct{}{}
+		}
+	}
+	return d
+}
+
+func (d *droppedTags) has(tag string) bool {
+	if d == nil {
+		return false
+	}
+	if d.set != nil {
+		_, ok := d.set[tag]
+		return ok
+	}
+	for _, t := range d.list {
+		if t == tag {
+			return true
+		}
+	}
+	return false
+}
+
+// remaining is tags without the dropped ones; it allocates only when some
+// tags remain besides dropped ones.
+func (d *droppedTags) remaining(tags []string) []string {
+	if d == nil {
+		return tags
+	}
+	keep := 0
+	for _, t := range tags {
+		if !d.has(t) {
+			keep++
+		}
+	}
+	if keep == len(tags) {
+		return tags
+	}
+	if keep == 0 {
+		return nil
+	}
+	out := make([]string, 0, keep)
+	for _, t := range tags {
+		if !d.has(t) {
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 // shardKey is a key with its shard and whether it was deleted, or with the
@@ -829,11 +926,22 @@ func (s *Store) DeleteBatch(keys []string) int {
 
 // DeleteBatchKeys deletes keys and returns those that existed.
 func (s *Store) DeleteBatchKeys(keys []string) []string {
+	return s.deleteBatchKeys(keys, nil)
+}
+
+// DeleteInvalidated is DeleteBatchKeys for INVALIDATE: dropped are the tags
+// the keys were invalidated through, which the index no longer has, so the
+// keys are not looked for in them again.
+func (s *Store) DeleteInvalidated(keys, dropped []string) []string {
+	return s.deleteBatchKeys(keys, newDroppedTags(dropped))
+}
+
+func (s *Store) deleteBatchKeys(keys []string, dropped *droppedTags) []string {
 	if len(keys) == 0 {
 		return nil
 	}
 	if len(keys) >= parallelDeleteMin {
-		return s.deleteBatchParallel(keys)
+		return s.deleteBatchParallel(keys, dropped)
 	}
 
 	// Group the keys by shard with one sorted slice rather than a map of
@@ -863,7 +971,7 @@ func (s *Store) DeleteBatchKeys(keys []string) []string {
 			}
 			freed += shard.deleteLocked(key, entry)
 			ops[i].gone = true
-			if tags := entry.TagList(); len(tags) > 0 {
+			if tags := dropped.remaining(entry.TagList()); len(tags) > 0 {
 				untag = append(untag, shardKey{key: key, tags: tags})
 			}
 			gone = append(gone, key)
