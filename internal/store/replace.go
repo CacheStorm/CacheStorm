@@ -129,12 +129,12 @@ func (d *Databases) ReplaceFrom(src *Databases) error {
 		for j, shard := range &dst.tagIndex.shards {
 			shard.mu.Lock()
 			if incoming == nil {
-				shard.index = make(map[string]map[string]struct{})
+				shard.index = make(map[string]*strSet)
 			} else {
 				from := incoming.tagIndex.shards[j]
 				from.mu.Lock()
 				shard.index = from.index
-				from.index = make(map[string]map[string]struct{})
+				from.index = make(map[string]*strSet)
 				from.mu.Unlock()
 			}
 			shard.mu.Unlock()

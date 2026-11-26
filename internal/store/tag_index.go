@@ -15,12 +15,12 @@ const (
 
 type tagShard struct {
 	mu    sync.RWMutex
-	index map[string]map[string]struct{}
+	index map[string]*strSet
 }
 
 func newTagShard() *tagShard {
 	return &tagShard{
-		index: make(map[string]map[string]struct{}),
+		index: make(map[string]*strSet),
 	}
 }
 
@@ -129,15 +129,17 @@ func (ti *TagIndex) AddTagsBatch(keys []string, tags []string) {
 		shard.mu.Lock()
 		set := shard.index[tag]
 		if set == nil {
-			set = make(map[string]struct{})
+			set = newStrSet()
 			shard.index[tag] = set
 			ti.tags.Add(1)
 		}
-		before := len(set)
+		added := 0
 		for _, key := range keys {
-			set[key] = struct{}{}
+			if set.Add(key) {
+				added++
+			}
 		}
-		ti.members.Add(int64(len(set) - before))
+		ti.members.Add(int64(added))
 		shard.mu.Unlock()
 	}
 }
@@ -155,12 +157,14 @@ func (ti *TagIndex) RemoveTagsBatch(keys []string, tags []string) {
 		shard := ti.shards[idx]
 		shard.mu.Lock()
 		if keySet, exists := shard.index[tag]; exists {
-			before := len(keySet)
+			removed := 0
 			for _, k := range keys {
-				delete(keySet, k)
+				if keySet.Remove(k) {
+					removed++
+				}
 			}
-			ti.members.Add(int64(len(keySet) - before))
-			if len(keySet) == 0 {
+			ti.members.Add(-int64(removed))
+			if keySet.Len() == 0 {
 				delete(shard.index, tag)
 				ti.tags.Add(-1)
 			}
@@ -186,12 +190,14 @@ func (ti *TagIndex) RemoveTagsBatchAllShards(keys []string) {
 		shard := ti.shards[i]
 		shard.mu.Lock()
 		for tag, keySet := range shard.index {
-			before := len(keySet)
+			removed := 0
 			for _, key := range keys {
-				delete(keySet, key)
+				if keySet.Remove(key) {
+					removed++
+				}
 			}
-			ti.members.Add(int64(len(keySet) - before))
-			if len(keySet) == 0 {
+			ti.members.Add(-int64(removed))
+			if keySet.Len() == 0 {
 				delete(shard.index, tag)
 				ti.tags.Add(-1)
 			}
@@ -206,11 +212,11 @@ func (ti *TagIndex) GetKeys(tag string) []string {
 	shard.mu.RLock()
 	defer shard.mu.RUnlock()
 
-	keys := make([]string, 0, len(shard.index[tag]))
-	for k := range shard.index[tag] {
-		keys = append(keys, k)
+	set := shard.index[tag]
+	if set == nil {
+		return []string{}
 	}
-	return keys
+	return set.AppendTo(make([]string, 0, set.Len()))
 }
 
 // SetOnInvalidate installs a callback fired after a tag's keys are removed
@@ -242,12 +248,16 @@ func (ti *TagIndex) KeysUpTo(tag string, max int, fn func(key string)) bool {
 	shard.mu.RLock()
 	defer shard.mu.RUnlock()
 	set := shard.index[tag]
-	if len(set) > max {
+	if set == nil {
+		return true
+	}
+	if set.Len() > max {
 		return false
 	}
-	for k := range set {
+	set.Range(func(k string) bool {
 		fn(k)
-	}
+		return true
+	})
 	return true
 }
 
@@ -258,18 +268,25 @@ func (ti *TagIndex) InvalidateIf(tag string, held func(key string) bool) ([]stri
 	shard := ti.shards[ti.shardIndex(tag)]
 	shard.mu.Lock()
 	set, ok := shard.index[tag]
-	keys := make([]string, 0, len(set))
-	for k := range set {
-		if !held(k) {
+	var keys []string
+	if ok {
+		keys = make([]string, 0, set.Len())
+		covered := true
+		set.Range(func(k string) bool {
+			if !held(k) {
+				covered = false
+				return false
+			}
+			keys = append(keys, k)
+			return true
+		})
+		if !covered {
 			shard.mu.Unlock()
 			return nil, false
 		}
-		keys = append(keys, k)
-	}
-	if ok {
 		delete(shard.index, tag)
 		ti.tags.Add(-1)
-		ti.members.Add(-int64(len(set)))
+		ti.members.Add(-int64(set.Len()))
 	}
 	shard.mu.Unlock()
 	ti.hookMu.RLock()
@@ -287,16 +304,14 @@ func (ti *TagIndex) invalidate(tag string) []string {
 	shard.mu.Lock()
 	defer shard.mu.Unlock()
 
-	keys := make([]string, 0, len(shard.index[tag]))
 	set, ok := shard.index[tag]
-	for k := range set {
-		keys = append(keys, k)
+	if !ok {
+		return []string{}
 	}
-	if ok {
-		delete(shard.index, tag)
-		ti.tags.Add(-1)
-		ti.members.Add(-int64(len(set)))
-	}
+	keys := set.AppendTo(make([]string, 0, set.Len()))
+	delete(shard.index, tag)
+	ti.tags.Add(-1)
+	ti.members.Add(-int64(set.Len()))
 	return keys
 }
 
@@ -305,7 +320,10 @@ func (ti *TagIndex) Count(tag string) int {
 	shard := ti.shards[idx]
 	shard.mu.RLock()
 	defer shard.mu.RUnlock()
-	return len(shard.index[tag])
+	if set := shard.index[tag]; set != nil {
+		return set.Len()
+	}
+	return 0
 }
 
 func (ti *TagIndex) Tags() []string {

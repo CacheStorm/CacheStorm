@@ -83,15 +83,20 @@ The tag workload on Redis 7.4.12 (`redis:7.4-alpine`, `--network host`, no persi
 
 | Workload | Redis 7.4.12 | CacheStorm |
 |---|---|---|
-| Tagged writes, 8 connections × 32 pipelined, one of 1,000 tags | 425k/s | 523k/s |
-| Cache mix per 10 operations: 8 `GET`, 1 tagged write, 1 invalidation of a 10-key entity tag (8 connections) | 686k ops/s | 1,048k ops/s |
-| Invalidate a 10-key tag, median of 301 / p90 | 122 µs / 182 µs | 88 µs / 122 µs |
-| Invalidate a 1,000-key tag, median | 625 µs | 323 µs |
-| Invalidate a 50,000-key tag, median | 31.8 ms | 7.0 ms |
-| Invalidate a 200,000-key tag, median | 149 ms | 21 ms |
-| Memory of 200,000 keys (16-byte values), one of 200 tags each, RSS | 58 MB | 83 MB |
+| Tagged writes, 8 connections × 32 pipelined, one of 1,000 tags | 425k/s | 713k/s |
+| Cache mix per 10 operations: 8 `GET`, 1 tagged write, 1 invalidation of a 10-key entity tag (8 connections) | 686k ops/s | 1,180k ops/s |
+| Invalidate a 10-key tag, median of 301 / p90 | 122 µs / 182 µs | 92 µs / 126 µs |
+| Invalidate a 1,000-key tag, median | 625 µs | 332 µs |
+| Invalidate a 50,000-key tag, median | 31.8 ms | 4.7 ms |
+| Invalidate a 200,000-key tag, median | 149 ms | 23 ms |
+| Memory per key, 16-byte value, untagged: allocated / RSS | 87 B / 86 B | 124 B / 136 B |
+| Memory per key, 16-byte value, one of 200 tags: allocated / RSS | 120 B / 117 B | 151 B / 186 B |
 
-While Redis runs the script every other client waits, as it waits while CacheStorm's whole-gate invalidation runs; the waits follow the invalidation times above. Memory is where Redis is still ahead: its `used_memory` was 121 bytes per tagged key.
+While Redis runs the script every other client waits, as it waits while CacheStorm's whole-gate invalidation runs; the waits follow the invalidation times above. Memory is where Redis is still ahead, on the key itself: a tag costs a key 25 bytes on CacheStorm and 33 on Redis, but an untagged string key 124 bytes against 87 (Go's map slot, the 48-byte entry and the separately allocated key and value), and the Go heap keeps more free memory around the live data than jemalloc does. Memory is measured after `MEMORY PURGE`, as the change in the allocator's figure (`used_memory_heap` on CacheStorm, `allocator_allocated` on Redis) and in RSS while 200,000 keys are added.
+
+`redis-benchmark` (from the same image, one million random keys, 50 clients, pipelines of 16) on the same run: SET 830k vs 436k/s, GET 878k vs 626k/s, INCR 876k vs 650k/s, LPUSH 552k vs 443k/s; `HSET`, which `redis-benchmark` sends to one hash, 450k vs 580k/s. On one hot key the 50 connections queue on one stripe of the write gate and most of the time goes to handing it from goroutine to goroutine, which single-threaded Redis never does.
+
+The tag set of each tag was a Go `map[string]struct{}`, about 55 bytes per member at the sizes tags have; it is now a slice of the key strings, open-addressed and grown by half (a plain slice up to 8 members), about 25 bytes per member. That also made `SET ... TAGS` 36% faster and invalidating 50,000 keys a third faster, as the members are read from one array.
 
 ## Large invalidations, 2026-11-26
 
