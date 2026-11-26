@@ -219,7 +219,7 @@ func TestFeedIsIgnoredWithoutBacklogOrOnReplica(t *testing.T) {
 	}
 	m.mu.Lock()
 	m.createBacklogLocked()
-	m.role = RoleReplica
+	m.setRoleLocked(RoleReplica)
 	m.mu.Unlock()
 	m.Feed(0, "SET", [][]byte{[]byte("a"), []byte("1")})
 	if _, off := m.ReplID(); off != 0 {
@@ -295,7 +295,7 @@ func TestInfoAndSavedState(t *testing.T) {
 		t.Fatal("a master saved a replica state")
 	}
 	m.mu.Lock()
-	m.role = RoleReplica
+	m.setRoleLocked(RoleReplica)
 	m.masterHost, m.masterPort = "h", 7
 	m.offset, m.linkDB = 99, 3
 	m.mu.Unlock()
@@ -310,7 +310,7 @@ func TestInfoAndSavedState(t *testing.T) {
 		}
 	}
 	m.mu.Lock()
-	m.role = RoleMaster
+	m.setRoleLocked(RoleMaster)
 	m.mu.Unlock()
 }
 

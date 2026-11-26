@@ -5,7 +5,7 @@ import "testing"
 func TestPromotionOfDivergedReplicaDiscardsPartialHistory(t *testing.T) {
 	m, _ := newTestManager(t, Config{BacklogSize: 100})
 	m.mu.Lock()
-	m.role = RoleReplica
+	m.setRoleLocked(RoleReplica)
 	m.createBacklogLocked()
 	m.appendLocked([]byte("old-history"))
 	oldID := m.replid

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cachestorm/cachestorm/internal/command"
@@ -42,6 +43,8 @@ type backupManager struct {
 	base      bool
 	manifest  bool
 	recording *persistence.Backup
+	// recordingNow mirrors recording for recorder, which every write calls.
+	recordingNow atomic.Pointer[persistence.Backup]
 }
 
 func newBackupManager(s *Server) *backupManager {
@@ -76,9 +79,7 @@ func (b *backupManager) recorder() *persistence.Backup {
 	if b == nil {
 		return nil
 	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.recording
+	return b.recordingNow.Load()
 }
 
 func (b *backupManager) Start() error {
@@ -126,6 +127,7 @@ func (b *backupManager) snapshot(dir string) {
 		return
 	}
 	b.files, b.recording = files, files
+	b.recordingNow.Store(files)
 	b.state = backupSnapshotting
 	b.start = time.Now().Unix()
 	b.mu.Unlock()
@@ -154,6 +156,7 @@ func (b *backupManager) Seal() error {
 	files := b.files
 	// Writes stop going to the INCR file from here.
 	b.recording = nil
+	b.recordingNow.Store(nil)
 	if err := files.Seal(); err != nil {
 		b.failLocked(err.Error())
 		return errors.New("ERR Can't write the backup manifest")
@@ -254,6 +257,7 @@ func (b *backupManager) failLocked(reason string) {
 	b.state = backupFailed
 	b.err = reason
 	b.recording = nil
+	b.recordingNow.Store(nil)
 	if b.files != nil {
 		b.files.Close()
 	}
@@ -269,6 +273,7 @@ func (b *backupManager) resetLocked() {
 	b.state, b.err = backupIdle, ""
 	b.start, b.end = 0, 0
 	b.files, b.recording = nil, nil
+	b.recordingNow.Store(nil)
 	b.base, b.manifest = false, false
 }
 

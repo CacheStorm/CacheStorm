@@ -103,7 +103,12 @@ func (s *Shard) installLocked(key string, entry *Entry, held bool) (int64, *Entr
 	entry.accounted.Store(word)
 	s.moveKeysize(oldTag, sizeTagOf(word))
 	s.memUsage += newMem
-	s.data[key] = entry
+	if old != entry {
+		// An entry changed in place is in the map already; assigning it
+		// again would cost a map write and swap the stored key string for
+		// the caller's copy.
+		s.data[key] = entry
+	}
 	if h, ok := entry.Value.(*HashValue); ok {
 		s.hfe.schedule(key, h.NextFieldExpiry())
 	}

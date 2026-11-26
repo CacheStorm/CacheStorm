@@ -88,11 +88,13 @@ func (kn *KeyNotifier) WaitForKey(key string, timeout time.Duration) bool {
 
 	kn.mu.Lock()
 	kn.waiters[key] = append(kn.waiters[key], ch)
+	kn.registered.Add(1)
 	kn.mu.Unlock()
 
 	defer func() {
 		kn.mu.Lock()
 		kn.removeWaiter(key, ch)
+		kn.registered.Add(-1)
 		kn.mu.Unlock()
 	}()
 
@@ -280,6 +282,12 @@ func (kn *KeyNotifier) consumerAhead(key string, ch chan struct{}) bool {
 // ...). Every observer is woken, and the oldest consumer: a consumer that
 // leaves the data for others passes the wakeup on (see Pass).
 func (kn *KeyNotifier) NotifyKey(key string) {
+	// A waiter registers before it looks at the key, and a writer publishes
+	// the key before it gets here, so one of them sees the other: with no
+	// waiter registered there is nothing to wake.
+	if kn.registered.Load() == 0 {
+		return
+	}
 	kn.mu.Lock()
 	waiters := kn.waiters[key]
 	if len(waiters) > 0 {

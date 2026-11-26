@@ -119,7 +119,7 @@ func (m *Manager) replicaOf(host string, port int, failover bool) error {
 		m.linkTx = command.NewTransaction()
 		m.cached = true
 	}
-	m.role = RoleReplica
+	m.setRoleLocked(RoleReplica)
 	m.dbs.SetPassiveExpiry(true)
 	m.feeding.Store(false)
 	m.masterHost, m.masterPort = host, port
@@ -177,7 +177,7 @@ func (m *Manager) Promote() {
 		}
 	}
 	m.replid = NewReplID()
-	m.role = RoleMaster
+	m.setRoleLocked(RoleMaster)
 	m.feeding.Store(m.backlog != nil)
 	m.streamDB = m.linkDB
 	m.masterHost, m.masterPort = "", 0

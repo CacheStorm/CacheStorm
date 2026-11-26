@@ -118,6 +118,9 @@ type Manager struct {
 	mu sync.Mutex
 	// role is RoleMaster or RoleReplica.
 	role Role
+	// replica mirrors role == RoleReplica for MarkLocalWrite, which every
+	// write calls: on a master it returns without taking mu.
+	replica atomic.Bool
 	// replid is the id of the stream this server holds; replid2 the id it
 	// held before its last promotion, valid up to secondOffset.
 	replid       string
@@ -302,7 +305,16 @@ func (m *Manager) ReplID() (string, int64) {
 	return m.replid, m.offset
 }
 
+// setRoleLocked sets the role and its mirror. The caller holds m.mu.
+func (m *Manager) setRoleLocked(r Role) {
+	m.role = r
+	m.replica.Store(r == RoleReplica)
+}
+
 func (m *Manager) MarkLocalWrite() {
+	if !m.replica.Load() {
+		return
+	}
 	m.mu.Lock()
 	if m.role != RoleReplica {
 		m.mu.Unlock()
