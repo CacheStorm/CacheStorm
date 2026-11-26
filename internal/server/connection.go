@@ -368,6 +368,15 @@ func (c *Connection) releaseGate() {
 	}
 }
 
+// internalAuth reports whether the command is the AUTH another node of the
+// cluster opens its connections with ("internal connection" is one
+// argument, the user name). CLIENT PAUSE does not hold it: it is
+// how CacheStorm's nodes reach each other, where Redis' nodes need none, so
+// a pause holds their first real command as Redis would.
+func internalAuth(cmd string, args [][]byte) bool {
+	return cmd == "AUTH" && len(args) == 2 && string(args[0]) == "internal connection"
+}
+
 // escalateGate trades the stripes the running command holds for the whole
 // gate, waiting out a pause that began meanwhile as taking it afresh would.
 func (c *Connection) escalateGate(cmd string) {
@@ -864,7 +873,7 @@ func (c *Connection) Handle() {
 			continue
 		}
 
-		if c.srv != nil && c.srv.pauseActive() {
+		if c.srv != nil && c.srv.pauseActive() && !internalAuth(cmd, args) {
 			c.releaseGate()
 			c.srv.waitWhilePaused(cmd)
 		}
@@ -1008,7 +1017,16 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 		// is where its reply begins, for CLUSTER SLOT-STATS.
 		executed := false
 		outStart := c.sink.pending() + c.writer.Buffered()
-		if refused, aerr := c.router.Admit(ctx); refused {
+		if busy := c.router.ScriptBusy(cmd, args); busy != "" {
+			// A script has run for busy-reply-threshold: Redis refuses
+			// the other clients' commands, and a transaction they queue
+			// into fails at EXEC.
+			c.releaseGate()
+			if c.transaction.IsActive() {
+				c.transaction.Abort()
+			}
+			err = errors.New(busy)
+		} else if refused, aerr := c.router.Admit(ctx); refused {
 			c.releaseGate()
 			err = aerr
 			executed = true
@@ -1038,7 +1056,7 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 			if ran {
 				// The command ran while queued on its stripe.
 			} else if want != nil {
-				if c.srv.pauseActive() && c.srv.pausedNow(cmd) {
+				if c.srv.pauseActive() && !internalAuth(cmd, args) && c.srv.pausedNow(cmd) {
 					// A pause that began after the check before this
 					// command waits for the writes holding the gate, so a
 					// write that took the gate after it must wait too.

@@ -732,9 +732,12 @@ func runFunction(ctx *Context, lib *Library, fn *Function, keys, args []string, 
 		return resp.ErrorValue("ERR Error compiling function: " + luaCompileError(err))
 	}
 
-	tctx, cancel := context.WithTimeout(context.Background(), luaScriptTimeout)
+	// No time limit, as in Redis: FUNCTION KILL stops the function.
+	tctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	L.SetContext(tctx)
+	run.begin(cancel, false)
+	defer run.end()
 
 	L.Push(chunk)
 	if err := L.PCall(0, 0, run.errHandler(L)); err != nil {
@@ -777,7 +780,7 @@ func cmdFUNCTION(ctx *Context) error {
 	case "FLUSH":
 		return handleFunctionFlush(ctx, registry)
 	case "KILL":
-		return ctx.WriteError(replyError("NOTBUSY No scripts in execution right now."))
+		return killScript(ctx, false)
 	default:
 		return ctx.WriteError(replyError("ERR unknown subcommand '" + ctx.ArgString(0) + "'. Try FUNCTION HELP."))
 	}
@@ -1071,6 +1074,10 @@ func copyFunctions(m map[string]*Function) map[string]*Function {
 }
 
 func handleFunctionStats(ctx *Context, registry *FunctionRegistry) error {
+	run := ctx.dispatcher().oldestScript()
+	if run != nil && run.eval {
+		return ctx.WriteError(replyError(errBusyEval))
+	}
 	registry.mu.RLock()
 	libCount, fnCount := len(registry.libraries), 0
 	for _, lib := range registry.libraries {
@@ -1080,7 +1087,7 @@ func handleFunctionStats(ctx *Context, registry *FunctionRegistry) error {
 
 	return ctx.WriteValue(resp.PairsValue([]*resp.Value{
 		resp.BulkString("running_script"),
-		resp.NullBulkString(),
+		runningScriptValue(run),
 		resp.BulkString("engines"),
 		resp.PairsValue([]*resp.Value{
 			resp.BulkString("LUA"),

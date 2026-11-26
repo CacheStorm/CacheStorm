@@ -323,11 +323,12 @@ func (s *Server) unpauseClients() {
 }
 
 // pausedCommand reports whether CLIENT PAUSE holds cmd: every client command
-// under ALL, and commands that may write under WRITE. CLIENT itself always
-// runs, so a paused server can be unpaused.
+// under ALL (PING, AUTH and HELLO too, as in Redis, so a client's health
+// check waits like its other commands), and commands that may write under
+// WRITE. CLIENT itself always runs, so CLIENT UNPAUSE can end an ALL pause,
+// which in Redis waits for the pause to end.
 func pausedCommand(cmd string, writesOnly bool) bool {
-	switch cmd {
-	case "CLIENT", "QUIT", "RESET", "PING", "AUTH", "HELLO":
+	if cmd == "CLIENT" {
 		return false
 	}
 	if !writesOnly {

@@ -21,6 +21,7 @@ import (
 var (
 	errTSKeyExists        = errors.New("ERR TSDB: key already exists")
 	errTSKeyMissing       = errors.New("ERR TSDB: the key does not exist")
+	errTSGetLatest        = errors.New("ERR TSDB: wrong 3rd argument")
 	errTSNotTSDB          = errors.New("ERR TSDB: the key is not a TSDB key")
 	errTSWrongType        = errors.New("ERR WRONGTYPE Operation against a key holding the wrong kind of value")
 	errTSMatcher          = errors.New("ERR TSDB: please provide at least one matcher")
@@ -744,6 +745,13 @@ func cmdTSGET(ctx *Context) error {
 	if ctx.ArgCount() < 1 || ctx.ArgCount() > 2 {
 		return ctx.WriteError(arityError(ctx.Command))
 	}
+	latest := false
+	if ctx.ArgCount() == 2 {
+		if !strings.EqualFold(ctx.ArgString(1), "LATEST") {
+			return ctx.WriteError(errTSGetLatest)
+		}
+		latest = true
+	}
 	ts, err := getTimeSeries(ctx, ctx.ArgString(0), errTSWrongType)
 	if err != nil {
 		return ctx.WriteError(err)
@@ -751,7 +759,49 @@ func cmdTSGET(ctx *Context) error {
 	if ts == nil {
 		return ctx.WriteError(errTSKeyMissing)
 	}
-	return ctx.WriteValue(tsLastReply(ctx.Writer.IsRESP3(), ts))
+	return ctx.WriteValue(tsGetReply(ctx, ctx.ArgString(0), ts, latest))
+}
+
+// tsGetReply is TS.GET's reply: the newest sample, or with latest the
+// compaction's open bucket when it has one.
+func tsGetReply(ctx *Context, key string, ts *store.TimeSeriesValue, latest bool) *resp.Value {
+	if latest {
+		if open, ok := latestSample(ctx, key, ts); ok {
+			return tsSampleReply(ctx.Writer.IsRESP3(), open)
+		}
+	}
+	return tsLastReply(ctx.Writer.IsRESP3(), ts)
+}
+
+// latestSample is what LATEST adds for a compaction (a series a rule
+// fills): the source's bucket the rule has not closed yet, aggregated as
+// far as it goes. ok is false for a series that is not a compaction or
+// whose open bucket is empty.
+func latestSample(ctx *Context, key string, ts *store.TimeSeriesValue) (store.TimeSeriesSample, bool) {
+	ts.RLock()
+	source := ts.SourceKey
+	ts.RUnlock()
+	if source == "" {
+		return store.TimeSeriesSample{}, false
+	}
+	src, err := getTimeSeries(ctx, source, errTSWrongType)
+	if err != nil || src == nil {
+		return store.TimeSeriesSample{}, false
+	}
+	src.RLock()
+	defer src.RUnlock()
+	for i := range src.Rules {
+		r := &src.Rules[i]
+		if r.Dest != key || !r.Started {
+			continue
+		}
+		v, ok := ruleBucketValue(src, r, int64(r.Start))
+		if !ok {
+			return store.TimeSeriesSample{}, false
+		}
+		return store.TimeSeriesSample{Timestamp: int64(r.Start), Value: v}, true
+	}
+	return store.TimeSeriesSample{}, false
 }
 
 // tsRangeQuery is a TS.RANGE or TS.MRANGE query.
@@ -771,6 +821,9 @@ type tsRangeQuery struct {
 	filters        []tsFilter
 	groupBy        string
 	reducer        string
+	// latest adds the compaction's open bucket (LATEST); latestOf is
+	// the series' key, to find the rule that fills it.
+	latest bool
 }
 
 // parseTSRange reads a range query whose bounds are args[at] and
@@ -867,6 +920,8 @@ func parseTSRange(ctx *Context, at int, multi bool) (*tsRangeQuery, error) {
 			i++
 		case "EMPTY":
 			q.empty = true
+		case "LATEST":
+			q.latest = true
 		case "WITHLABELS":
 			q.withLabels = multi
 		case "SELECTED_LABELS":
@@ -987,10 +1042,21 @@ func tsMultiKeyword(s string) bool {
 }
 
 // run answers the query for one series, newest first when rev.
-func (q *tsRangeQuery) run(ts *store.TimeSeriesValue, rev bool) []store.TimeSeriesSample {
+func (q *tsRangeQuery) run(ctx *Context, key string, ts *store.TimeSeriesValue, rev bool) []store.TimeSeriesSample {
+	var open store.TimeSeriesSample
+	hasOpen := false
+	if q.latest {
+		open, hasOpen = latestSample(ctx, key, ts)
+	}
 	ts.RLock()
 	defer ts.RUnlock()
 	samples := ts.Range(q.from, q.to)
+	if hasOpen && open.Timestamp >= q.from && open.Timestamp <= q.to {
+		if n := len(samples); n == 0 || samples[n-1].Timestamp < open.Timestamp {
+			// A copy: Range may share the series' own array.
+			samples = append(samples[:n:n], open)
+		}
+	}
 	if len(q.filterTS) > 0 || q.filterMin != nil {
 		kept := samples[:0]
 		for _, s := range samples {
@@ -1229,7 +1295,7 @@ func tsRange(ctx *Context, rev bool) error {
 	if ts == nil {
 		return ctx.WriteError(errTSKeyMissing)
 	}
-	return ctx.WriteValue(tsSamplesReply(ctx.Writer.IsRESP3(), q.run(ts, rev)))
+	return ctx.WriteValue(tsSamplesReply(ctx.Writer.IsRESP3(), q.run(ctx, ctx.ArgString(0), ts, rev)))
 }
 
 func cmdTSRANGE(ctx *Context) error    { return tsRange(ctx, false) }
@@ -1301,11 +1367,13 @@ func selectLabels(resp3 bool, labels [][2]string, all bool, selected []string) *
 }
 
 func cmdTSMGET(ctx *Context) error {
-	var withLabels bool
+	var withLabels, latest bool
 	var selected []string
 	filterAt := -1
 	for i := 0; i < ctx.ArgCount() && filterAt < 0; i++ {
 		switch strings.ToUpper(ctx.ArgString(i)) {
+		case "LATEST":
+			latest = true
 		case "WITHLABELS":
 			withLabels = true
 		case "SELECTED_LABELS":
@@ -1339,7 +1407,7 @@ func cmdTSMGET(ctx *Context) error {
 	entries := make([][]*resp.Value, len(keys))
 	for i, k := range keys {
 		ts := series[k]
-		entries[i] = []*resp.Value{labelsReply(resp3, ts, withLabels, selected), tsLastReply(resp3, ts)}
+		entries[i] = []*resp.Value{labelsReply(resp3, ts, withLabels, selected), tsGetReply(ctx, k, ts, latest)}
 	}
 	return tsMultiReply(ctx, keys, entries)
 }
@@ -1378,7 +1446,7 @@ func tsMRange(ctx *Context, rev bool) error {
 			if resp3 {
 				entries[i] = append(entries[i], resp.PairsValue([]*resp.Value{resp.BulkString("aggregators"), resp.ArrayValue(aggregators)}))
 			}
-			entries[i] = append(entries[i], tsSamplesReply(resp3, q.run(ts, rev)))
+			entries[i] = append(entries[i], tsSamplesReply(resp3, q.run(ctx, k, ts, rev)))
 		}
 		return tsMultiReply(ctx, keys, entries)
 	}
@@ -1404,7 +1472,7 @@ func tsMRange(ctx *Context, rev bool) error {
 		byTS := make(map[int64][]store.TimeSeriesSample)
 		var stamps []int64
 		for _, k := range groups[v] {
-			for _, s := range q.run(series[k], false) {
+			for _, s := range q.run(ctx, k, series[k], false) {
 				if _, seen := byTS[s.Timestamp]; !seen {
 					stamps = append(stamps, s.Timestamp)
 				}

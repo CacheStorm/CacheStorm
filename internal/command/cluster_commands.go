@@ -720,6 +720,13 @@ func cmdMIGRATE(ctx *Context) error {
 		var cached bool
 		mc, cached, err = migrateGetConn(addr, timeout, migrateTLS)
 		if err != nil {
+			// Redis connects without blocking and learns that the target
+			// refused only when it writes; it reports a connection error
+			// only for a timeout or an address it cannot resolve.
+			var dnsErr *net.DNSError
+			if !isTimeout(err) && !errors.As(err, &dnsErr) {
+				return ctx.WriteError(fmt.Errorf("IOERR error or timeout writing to target instance"))
+			}
 			return ctx.WriteError(fmt.Errorf("IOERR error or timeout connecting to the client"))
 		}
 		var out bytes.Buffer

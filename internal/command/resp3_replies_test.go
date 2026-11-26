@@ -56,7 +56,8 @@ func TestRESP3ReplyTypes(t *testing.T) {
 			t.Errorf("%v\n got: %q\nwant: %q", c.args, got, c.want)
 		}
 	}
-	if got := do3("XINFO", "STREAM", "x"); !strings.HasPrefix(got, "%16\r\n$6\r\nlength\r\n:1\r\n") {
+	// Ten fields, as Redis 7.4: the stream never used IDMP (Redis 8.6).
+	if got := do3("XINFO", "STREAM", "x"); !strings.HasPrefix(got, "%10\r\n$6\r\nlength\r\n:1\r\n") {
 		t.Errorf("XINFO STREAM in RESP3: %q", got)
 	}
 	for _, args := range [][]string{{"INFO", "server"}, {"LOLWUT"}} {

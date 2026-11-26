@@ -172,9 +172,15 @@ func cmdXIDMPRECORD(ctx *Context) error {
 }
 
 // idmpInfoFields is what XINFO STREAM shows of IDMP, after
-// recorded-first-entry-id.
+// recorded-first-entry-id: nothing for a stream that never used it. Redis
+// 8.6 lists the fields for every stream, but clients written before it
+// (go-redis up to 9.7 among them) fail on a field they do not know, and
+// CacheStorm answers as Redis 7.4 to all who do not use the 8.6 features.
 func idmpInfoFields(stream *store.StreamValue) []*resp.Value {
 	i := stream.IDMPInfoAt(time.Now().UnixMilli())
+	if !i.InUse {
+		return nil
+	}
 	return []*resp.Value{
 		resp.BulkString("idmp-duration"), resp.IntegerValue(i.Duration),
 		resp.BulkString("idmp-maxsize"), resp.IntegerValue(i.MaxSize),

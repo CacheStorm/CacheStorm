@@ -35,9 +35,6 @@ var verdicts = map[string]Verdict{
 	"acl/dryrun-cat-whoami":          {SevEdge, intent, "ACL CAT also lists the module categories (@bloom ... @json) of Redis 8.2, whose bundled modules CacheStorm implements; Redis 7.4 has no modules"},
 	"command/count-and-list-filters": {SevEdge, intent, "COMMAND LIST also lists XACKDEL (and COMMAND COUNT counts it, with XDELEX, DELEX, DIGEST, MSETEX, INCREX, LMOVEM, BLMOVEM, SUNIONCARD, SDIFFCARD, XNACK, XCFGSET, XIDMPRECORD, HIMPORT, BACKUP, TRIMSLOTS and the 18 AR* array commands), commands of Redis 8.2 to 8.10 CacheStorm implements; Redis 7.4 does not have them"},
 	"keyspace-events/config-flags":   {SevEdge, intent, "notify-keyspace-events has Redis 8.8's array class 'a', so \"g$lshzxetd\" no longer covers every class and CONFIG GET lists the letters instead of A, as Redis 8.8 does"},
-	"streams/xinfo-shapes":           {SevEdge, intent, "XINFO STREAM lists Redis 8.6's IDMP fields (idmp-duration ... iids-duplicates) and FULL each group's nacked-count, the field Redis 8.8 added with XNACK, which CacheStorm implements; Redis 7.4 does not have them"},
-	"streams/xinfo-after-deletes":    {SevEdge, intent, "XINFO STREAM lists Redis 8.6's IDMP fields (idmp-duration, idmp-maxsize, pids-tracked, iids-tracked, iids-added, iids-duplicates), which CacheStorm implements; Redis 7.4 does not have them"},
-	"streams/xsetid-forms":           {SevEdge, intent, "XINFO STREAM lists Redis 8.6's IDMP fields (idmp-duration, idmp-maxsize, pids-tracked, iids-tracked, iids-added, iids-duplicates), which CacheStorm implements; Redis 7.4 does not have them"},
 	"command/getkeys-forms":          {SevEdge, intent, "COMMAND DOCS SET lists the IFEQ, IFNE, IFDEQ and IFDNE conditions and the 8.4.0 history entry Redis 8.4 added, which CacheStorm implements; Redis 7.4 does not have them"},
 }
 

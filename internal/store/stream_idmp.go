@@ -244,8 +244,10 @@ func (v *StreamValue) SetIDMPConfig(duration, maxSize int64) bool {
 	return changed
 }
 
-// IDMPInfo is what XINFO STREAM shows of IDMP.
+// IDMPInfo is what XINFO STREAM shows of IDMP. InUse reports that the
+// stream has used it (XADD IDMP or IDMPAUTO, XCFGSET, XIDMPRECORD).
 type IDMPInfo struct {
+	InUse             bool
 	Duration, MaxSize int64
 	Producers, IIDs   int64
 	Added, Duplicates int64
@@ -260,7 +262,7 @@ func (v *StreamValue) IDMPInfoAt(nowMS int64) IDMPInfo {
 	if m == nil {
 		return IDMPInfo{Duration: DefaultIDMPDuration, MaxSize: DefaultIDMPMaxSize}
 	}
-	info := IDMPInfo{Duration: m.Duration, MaxSize: m.MaxSize, Producers: int64(len(m.Producers)), Added: m.Added, Duplicates: m.Duplicates}
+	info := IDMPInfo{InUse: true, Duration: m.Duration, MaxSize: m.MaxSize, Producers: int64(len(m.Producers)), Added: m.Added, Duplicates: m.Duplicates}
 	for _, es := range m.Producers {
 		info.IIDs += int64(len(es))
 	}

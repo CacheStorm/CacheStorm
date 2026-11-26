@@ -1359,16 +1359,22 @@ func cmdXINFO(ctx *Context) error {
 				resp.BulkString("pending"), resp.ArrayValue(cpel),
 			}))
 		}
-		groups = append(groups, resp.PairsValue([]*resp.Value{
+		group := []*resp.Value{
 			resp.BulkString("name"), resp.BulkString(g.Name),
 			resp.BulkString("last-delivered-id"), resp.BulkString(g.LastID),
 			resp.BulkString("entries-read"), entriesReadValue(g.EntriesRead),
 			resp.BulkString("lag"), lagValue(g),
 			resp.BulkString("pel-count"), resp.IntegerValue(g.Pending),
-			resp.BulkString("nacked-count"), resp.IntegerValue(g.Nacked),
+		}
+		if g.Nacked > 0 {
+			// Redis 8.8's field, shown only while XNACK has released
+			// entries, for the same reason as the IDMP fields.
+			group = append(group, resp.BulkString("nacked-count"), resp.IntegerValue(g.Nacked))
+		}
+		groups = append(groups, resp.PairsValue(append(group,
 			resp.BulkString("pending"), resp.ArrayValue(pel),
 			resp.BulkString("consumers"), resp.ArrayValue(consumers),
-		}))
+		)))
 	}
 	out = append(out,
 		resp.BulkString("entries"), streamEntriesValue(info.Entries),

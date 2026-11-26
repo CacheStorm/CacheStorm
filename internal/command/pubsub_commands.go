@@ -2,6 +2,7 @@ package command
 
 import (
 	"errors"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -189,14 +190,20 @@ func cmdPUBSUB(ctx *Context) error {
 		if len(rest) > 1 {
 			return ctx.WriteError(wrongArgs)
 		}
-		pattern := ""
+		pattern := "*"
 		if len(rest) == 1 {
 			pattern = rest[0]
 		}
-		if subCmd == "CHANNELS" {
-			return writeNameList(ctx, ps.Channels(pattern))
+		list := ps.Channels
+		if subCmd == "SHARDCHANNELS" {
+			list = ps.ShardChannels
 		}
-		return writeNameList(ctx, ps.ShardChannels(pattern))
+		if pattern == "" {
+			// An empty pattern matches only a channel with an empty name,
+			// as in Redis (the store's empty pattern means every channel).
+			return writeNameList(ctx, slices.DeleteFunc(list("*"), func(name string) bool { return name != "" }))
+		}
+		return writeNameList(ctx, list(pattern))
 
 	case "NUMSUB":
 		return writeNumSub(ctx, rest, ps.NumSub(rest...))

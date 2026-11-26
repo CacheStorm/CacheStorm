@@ -238,7 +238,7 @@ func cmdSCRIPT(ctx *Context) error {
 		if ctx.ArgCount() != 1 {
 			return wrongArgs()
 		}
-		return ctx.WriteError(replyError("NOTBUSY No scripts in execution right now."))
+		return killScript(ctx, true)
 
 	default:
 		return ctx.WriteError(replyError("ERR unknown subcommand '" + ctx.ArgString(0) + "'. Try SCRIPT HELP."))

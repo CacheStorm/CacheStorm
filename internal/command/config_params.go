@@ -99,7 +99,7 @@ var configParams = map[string]*configParam{
 	"bgsave-cpulist":                                   immutableParam(""),
 	"bind-source-addr":                                 stringParam(""),
 	"bio-cpulist":                                      immutableParam(""),
-	"busy-reply-threshold":                             intParam("5000", 0, configLongMax),
+	"busy-reply-threshold":                             {kind: cfgInt, def: "5000", lo: 0, hi: configLongMax, apply: busyReplyThresholdMS.Store},
 	"client-output-buffer-limit":                       {kind: cfgSpecial, def: defaultOutputBufferLimit, check: checkOutputBufferLimit, applyText: applyOutputBufferLimit},
 	"client-query-buffer-limit":                        {kind: cfgMemory, def: "1073741824", lo: 1 << 20, hi: configLongMax, apply: resp.SetQueryBufferLimit},
 	"cluster-allow-pubsubshard-when-down":              boolParam("yes"),

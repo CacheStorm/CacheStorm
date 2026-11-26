@@ -656,7 +656,7 @@ func cmdAUTH(ctx *Context) error {
 	// servers can share a process, each with its own router.
 	r := ctx.dispatcher()
 	if r == nil || r.RequirePass() == "" {
-		return ctx.Writer.WriteError("ERR Client sent AUTH, but no password is set. Did you mean ACL SETUSER with >password?")
+		return ctx.Writer.WriteError("ERR AUTH <password> called without any password configured for the default user. Are you sure your configuration is correct?")
 	}
 
 	if !r.ValidatePassword(password) {
@@ -1558,6 +1558,11 @@ func cmdSHUTDOWN(ctx *Context) error {
 	}
 	if hook == nil {
 		return ctx.WriteError(errors.New("ERR SHUTDOWN is not available in this context"))
+	}
+	if o.NoSave {
+		// A script SCRIPT KILL cannot stop (it has written) ends here,
+		// as in Redis.
+		ctx.dispatcher().stopScripts()
 	}
 	if err := hook(o); err != nil {
 		return ctx.WriteError(err)

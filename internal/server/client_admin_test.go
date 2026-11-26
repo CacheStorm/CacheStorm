@@ -423,3 +423,36 @@ func TestACLCategoriesAndCommandIntrospection(t *testing.T) {
 		t.Fatalf("ACL CAT dangerous = %+v", got)
 	}
 }
+
+// An ALL pause holds every command but CLIENT, as Redis holds every one:
+// PING too, so a client's health check waits like its other commands. A
+// WRITE pause leaves PING alone.
+func TestClientPauseAllHoldsPingX(t *testing.T) {
+	s := startReplServer(t, nil)
+	admin, c := dialRepl(t, s), dialRepl(t, s)
+	held := func(args ...string) time.Duration {
+		t.Helper()
+		start := time.Now()
+		if got := c.do(args...); got.Type == resp.TypeError {
+			t.Fatalf("%v = %s", args, got.Err)
+		}
+		return time.Since(start)
+	}
+	for _, cmd := range [][]string{{"PING"}, {"ECHO", "x"}} {
+		admin.str("CLIENT", "PAUSE", "300")
+		if d := held(cmd...); d < 200*time.Millisecond {
+			t.Fatalf("%v ran %v into a 300ms ALL pause", cmd, d)
+		}
+	}
+	admin.str("CLIENT", "PAUSE", "300")
+	if d := held("CLIENT", "ID"); d > 150*time.Millisecond {
+		t.Fatalf("CLIENT ID waited %v for an ALL pause", d)
+	}
+	if got := c.str("CLIENT", "UNPAUSE"); got != "OK" {
+		t.Fatalf("CLIENT UNPAUSE = %s", got)
+	}
+	admin.str("CLIENT", "PAUSE", "300", "WRITE")
+	if d := held("PING"); d > 150*time.Millisecond {
+		t.Fatalf("PING waited %v for a WRITE pause", d)
+	}
+}

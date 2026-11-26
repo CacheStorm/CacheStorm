@@ -241,7 +241,8 @@ func (red Reducer) Name() string {
 	if red.As != "" {
 		return red.As
 	}
-	return "__generated_alias" + strings.ToLower(red.Fn) + strings.ToLower(strings.Join(trimAt(red.Args), ""))
+	// RediSearch joins the arguments with commas: quantilen,0.5.
+	return "__generated_alias" + strings.ToLower(red.Fn) + strings.ToLower(strings.Join(trimAt(red.Args), ","))
 }
 
 // Group groups rows by the props and runs the reducers on each group.

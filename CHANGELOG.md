@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Long scripts behave as in Redis**: an `EVAL` or `FCALL` was stopped with `ERR script timeout exceeded 5 seconds`, even after it had written, and `SCRIPT KILL`/`FUNCTION KILL` always answered `NOTBUSY`. A script now runs until it ends; once it has run `busy-reply-threshold` milliseconds (`lua-time-limit`, default 5000) other clients' commands get Redis' `BUSY` error, except `AUTH`, `HELLO`, `MULTI`, `DISCARD`, `WATCH`, `UNWATCH`, `QUIT`, `RESET`, `SCRIPT KILL`, `FUNCTION KILL`, `FUNCTION STATS` and `SHUTDOWN NOSAVE`. `SCRIPT KILL` and `FUNCTION KILL` stop a script that has not written (`UNKILLABLE` once it has, as in Redis; `SHUTDOWN NOSAVE` then ends it), and `FUNCTION STATS` shows the running function, its `FCALL` and how long it has run. The replies are Redis 7.4's, byte for byte.
+- **`CLIENT PAUSE` (ALL) holds every command but `CLIENT`**, as Redis holds every one: `PING`, `ECHO`, `AUTH`, `HELLO`, `QUIT` and `RESET` ran through it. `CLIENT` still runs, so `CLIENT UNPAUSE` can end the pause early (in Redis it waits for the pause to end).
+- **`XINFO STREAM` answers as Redis 7.4 for streams that do not use Redis 8.6/8.8 features**: the IDMP fields (`idmp-duration` ... `iids-duplicates`) are listed only for a stream that used IDMP, and a group's `nacked-count` only while `XNACK` has released entries. Clients written before Redis 8.6, go-redis up to 9.7 among them, failed on `XInfoStream` and `XInfoStreamFull` with `unexpected key "idmp-duration"`.
+
+### Added
+- **TypeScript SDK**: a pipeline takes tagged writes (`set(key, value, { EX, TAGS })`, `setWithTags`), `invalidate`, `invalidateCascade`, `addTags`, `removeTags`, `expire` and `incr`, so a cache can be warmed or invalidated in one round trip; `command(...args)` on the client and the pipeline sends any command the SDK has no method for (until now there was no public way to).
+
+### Fixed
+- Python SDK: `tags`, `tag_keys` and `tag_children` were typed as returning `List[str]` but return `List[bytes]`, like every other reply of the client; the type hints now say so.
+- `PUBSUB CHANNELS ""` and `PUBSUB SHARDCHANNELS ""` listed every channel; an empty pattern matches only a channel with an empty name, as in Redis (no pattern still lists all).
+- `AUTH <password>` with no password set answered Redis 5's `ERR Client sent AUTH, but no password is set`; it now gives Redis 6+'s `ERR AUTH <password> called without any password configured for the default user. Are you sure your configuration is correct?`.
+- `MIGRATE` to a port nothing listens on answered `IOERR error or timeout connecting to the client`; Redis, which connects without blocking, answers `IOERR error or timeout writing to target instance`, and so does CacheStorm now (a timeout or an unresolvable host keeps the connecting error).
+- A tag named twice in one write (`SET k v TAGS a a`, `SETTAG k v a a`) was stored twice on the key, so `TAGS k` answered `a a`; the key now has it once, also when such a write is replayed from an AOF. The tag's own key list was right.
+
+### Tests
+- go-redis v9.7.3's own test suite, run against CacheStorm and Redis 7.4 alike, now fails on CacheStorm only where CacheStorm differs on purpose (`COMMAND COUNT` includes the extension commands). It found the `XINFO`, `CLIENT PAUSE`, `PUBSUB CHANNELS`, `AUTH`, `MIGRATE` and script differences above.
+- The tag commands are checked against a model of what they should do: random sequences of tagged writes, `ADDTAG`/`REMTAG`, deletes, expiry, `RENAME`/`RENAMENX`, `COPY`, `MOVE`, `SWAPDB`, `FLUSHDB`, in-place writes, `INVALIDATE` with and without `CASCADE`, hierarchy changes and `MULTI`/`EXEC`, comparing every key's tags, every tag's keys and count and the hierarchy after each command, then on a replica, after an AOF restart, a rewritten AOF and a snapshot restart. Keys evicted under `maxmemory` (LRU, random, TTL policies) are checked to leave their tags on the master and its replica.
+
 ### Performance
 - **Writes to one hot key**: a write that finds its key's stripe of the write gate busy no longer waits to take it in turn; it queues the part of the command that needs the stripe and the connection holding the stripe runs it (flat combining), so the key stays on one core's cache and the stripe is never idle while writes wait. With `redis-benchmark`'s defaults (every test on one key, 50 clients, pipelines of 16) writes are 20-30% faster than in 0.5.1 (`INCR` 551k to 696k/s, `SET` 591k to 748k/s, `LPOP` 660k to 863k/s). See docs/BENCHMARKS.md.
 - Outside cluster mode a command's existence, arity, authentication and ACL are checked before it takes the write gate, so the holder of a busy stripe does not spend its time on them. `INCR`/`INCRBY`/`DECR` store their result in one allocation instead of four, and integer replies no longer allocate. A command's start and end times are read from the monotonic clock alone (one clock read instead of two each), which with the above gives another 3–7% on one hot key (`INCR` 684k → 735k/s, `SET` 715k → 764k/s).

@@ -36,6 +36,8 @@ type CommandDef struct { //nolint:revive // Command prefix is intentional for cl
 
 type Router struct {
 	mu sync.RWMutex
+	// scripts are the EVALs and FCALLs running (see script_busy.go).
+	scripts runningScripts
 	// hot is what dispatch reads on every command, published as one value
 	// so a command takes no lock on the router: an RLock is an atomic add
 	// on a cache line every core shares, and several per command made

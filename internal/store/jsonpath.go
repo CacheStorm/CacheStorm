@@ -127,6 +127,11 @@ func (p *jpParser) step() (jpStep, error) {
 		}
 	case p.s[p.pos] == '.':
 		p.pos++
+		if p.pos < len(p.s) && p.s[p.pos] == '[' {
+			// "$.[0]" and "$.['a']": RedisJSON reads a bracket after a
+			// dot as the bracket alone.
+			return p.bracket(step)
+		}
 	case p.s[p.pos] == '[':
 		return p.bracket(step)
 	default:

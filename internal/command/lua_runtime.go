@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	lua "github.com/cachestorm/cachestorm/third_party/gopherlua"
 
@@ -54,6 +56,18 @@ type scriptRun struct {
 	// compatSlot carries the cluster compatibility check of the EVAL or
 	// FCALL into the commands the script runs.
 	compatSlot int
+
+	// The script as running (see script_busy.go): when it started, how to
+	// stop it, whether it is an EVAL, sent by a master, the command that
+	// runs it, killed by SCRIPT/FUNCTION KILL, and whether it has called
+	// a write, after which it cannot be killed.
+	started    time.Time
+	cancel     context.CancelFunc
+	eval       bool
+	fromMaster bool
+	command    []string
+	killed     atomic.Bool
+	dirty      atomic.Bool
 }
 
 func newScriptRun(ctx *Context, e *ScriptEngine, name, chunk string, readOnly bool) *scriptRun {
@@ -242,6 +256,9 @@ func (r *scriptRun) call(L *lua.LState) (lua.LValue, bool) {
 	r.compatCheck(name, args)
 	if r.ctx.ReplicaReadOnly && name != "PFCOUNT" && (commandHasFlag(name, "write") || r.router.Persisted(name, args)) {
 		return r.rejectCall(L, name, argv[1:], "READONLY You can't write against a read only replica."), true
+	}
+	if commandHasFlag(name, "write") {
+		r.dirty.Store(true)
 	}
 	reply, recorded := runQueuedCommand(r.ctx, queuedCommand{cmd: name, args: args})
 	if len(recorded) > 0 {
@@ -568,6 +585,9 @@ func (r *scriptRun) finish(L *lua.LState, tctx context.Context, err error) *resp
 		return v
 	}
 	if err != nil {
+		if r.killed.Load() {
+			return r.killedReply(err)
+		}
 		if tctx.Err() != nil {
 			return resp.ErrorValue(fmt.Sprintf("ERR script timeout exceeded %.0f seconds", luaScriptTimeout.Seconds()))
 		}
@@ -711,9 +731,12 @@ func (e *ScriptEngine) runScript(ctx *Context, script string, keys, args []strin
 	e.cacheEvalScript(script)
 	protectGlobals(L)
 
-	tctx, cancel := context.WithTimeout(context.Background(), luaScriptTimeout)
+	// No time limit, as in Redis: SCRIPT KILL stops the script.
+	tctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	L.SetContext(tctx)
+	run.begin(cancel, true)
+	defer run.end()
 
 	L.Push(fn)
 	err = L.PCall(0, 1, run.errHandler(L))

@@ -118,6 +118,10 @@ var ungatedCommands = map[string]bool{
 	"PSYNC": true, "SYNC": true, "REPLCONF": true, "REPLICAOF": true,
 	"SLAVEOF": true, "WAIT": true, "WAITAOF": true, "ROLE": true,
 	"QUIT": true, "RESET": true, "AUTH": true, "HELLO": true,
+	// MULTI, DISCARD and UNWATCH change only the connection's transaction
+	// (the watch lists have their own locks); like Redis, they run while a
+	// busy script holds the gate.
+	"MULTI": true, "DISCARD": true, "UNWATCH": true,
 }
 
 func stripeOf[K string | []byte](key K) int {
@@ -600,7 +604,7 @@ func (s *Server) planGate(ctx *command.Context, h *gateHold) *gateHold {
 	// replication stream, by EXEC, which runs them, and by the exclusive
 	// writes.
 	t := traitsOfName(ctx.Command)
-	if t.has(ntUngated) {
+	if t.has(ntUngated) || command.ScriptControl(ctx.Command, ctx.Args) || s.router.ShutdownBesideScript(ctx.Command, ctx.Args) {
 		return nil
 	}
 	if t.has(ntWrite|ntExclusive) || ctx.Command == "EXEC" || scriptPersisted(ctx.Command, ctx.Args) {
