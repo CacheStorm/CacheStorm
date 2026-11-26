@@ -260,6 +260,7 @@ func (r *scriptRun) call(L *lua.LState) (lua.LValue, bool) {
 	if commandHasFlag(name, "write") {
 		r.dirty.Store(true)
 	}
+	r.monitorScriptCall(argv[0], name, args)
 	reply, recorded := runQueuedCommand(r.ctx, queuedCommand{cmd: name, args: args})
 	if len(recorded) > 0 {
 		r.parent.propagate = append(r.parent.propagate, recorded...)

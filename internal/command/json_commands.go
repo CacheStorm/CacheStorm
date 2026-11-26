@@ -1122,13 +1122,14 @@ func cmdJSONARRPOP(ctx *Context) error {
 		return ctx.WriteError(err)
 	}
 	var replies []*resp.Value
-	var notArray bool
+	// last is the reply of the last array matched, which a legacy path
+	// answers with, as RedisJSON does.
+	var last *resp.Value
 	var opErr error
 	jsonWrite(ctx, key, jv, func() bool {
 		changed := false
 		for _, m := range path.EvalPaths(jv.Root) {
 			if m.Node.Kind != store.JArray {
-				notArray = true
 				replies = append(replies, resp.NullBulkString())
 				continue
 			}
@@ -1143,7 +1144,8 @@ func cmdJSONARRPOP(ctx *Context) error {
 			}
 			arr := m.Node.Arr
 			if len(arr) == 0 {
-				replies = append(replies, resp.NullBulkString())
+				last = resp.NullBulkString()
+				replies = append(replies, last)
 				continue
 			}
 			at := index
@@ -1151,7 +1153,8 @@ func cmdJSONARRPOP(ctx *Context) error {
 				at += len(arr)
 			}
 			at = min(max(at, 0), len(arr)-1)
-			replies = append(replies, jsonBulk(arr[at]))
+			last = jsonBulk(arr[at])
+			replies = append(replies, last)
 			copy(arr[at:], arr[at+1:])
 			m.Node.Arr = arr[:len(arr)-1]
 			changed = true
@@ -1164,10 +1167,10 @@ func cmdJSONARRPOP(ctx *Context) error {
 	if !path.Legacy {
 		return ctx.WriteArray(replies)
 	}
-	if len(replies) == 0 || notArray && replies[0].IsNull {
+	if last == nil {
 		return ctx.WriteError(errJSONNotArray)
 	}
-	return ctx.WriteValue(replies[0])
+	return ctx.WriteValue(last)
 }
 
 func cmdJSONARRTRIM(ctx *Context) error {

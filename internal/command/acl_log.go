@@ -65,8 +65,15 @@ func recordACLDenial(ctx *Context, reason, object, username string) {
 		username = "default"
 	}
 	context := aclLogContext(ctx)
-	clientInfo := "id=" + strconv.FormatInt(ctx.ClientID, 10) + " addr=" + ctx.RemoteAddr + " name=" + ctx.ClientName +
-		" db=" + strconv.Itoa(ctx.DB) + " user=" + username + " cmd=" + strings.ToLower(ctx.Command)
+	// The client's CLIENT INFO line, as Redis records it.
+	var clientInfo string
+	if h := clientHooksFor(ctx); h != nil {
+		clientInfo = strings.TrimSuffix(h.List(ctx.ClientID, ClientFilter{IDs: []int64{ctx.ClientID}}), "\n")
+	}
+	if clientInfo == "" {
+		clientInfo = "id=" + strconv.FormatInt(ctx.ClientID, 10) + " addr=" + ctx.RemoteAddr + " name=" + ctx.ClientName +
+			" db=" + strconv.Itoa(ctx.DB) + " user=" + username + " cmd=" + strings.ToLower(ctx.Command)
+	}
 	now := time.Now()
 	aclLog.mu.Lock()
 	defer aclLog.mu.Unlock()

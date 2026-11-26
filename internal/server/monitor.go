@@ -68,6 +68,21 @@ func (s *Server) feedMonitors(c *Connection, db int, raw string, cmd string, arg
 	if s == nil || s.monitor.count.Load() == 0 || !command.MonitorVisible(cmd) {
 		return
 	}
+	s.feedMonitorLine(c.ID, db, c.conn.RemoteAddr().String(), raw, args)
+}
+
+// feedScriptCall shows MONITOR a command a script ran, as Redis does with
+// "lua" for the client's address.
+func (s *Server) feedScriptCall(db int, raw, cmd string, args [][]byte) {
+	if s == nil || s.monitor.count.Load() == 0 || !command.MonitorVisible(cmd) {
+		return
+	}
+	s.feedMonitorLine(-1, db, "lua", raw, args)
+}
+
+// feedMonitorLine sends a MONITOR line to every monitor but the client
+// skip.
+func (s *Server) feedMonitorLine(skip int64, db int, addr, raw string, args [][]byte) {
 	now := time.Now()
 	line := make([]byte, 0, 64)
 	line = append(line, '+')
@@ -79,7 +94,7 @@ func (s *Server) feedMonitors(c *Connection, db int, raw string, cmd string, arg
 	line = append(line, " ["...)
 	line = strconv.AppendInt(line, int64(db), 10)
 	line = append(line, ' ')
-	line = append(line, c.conn.RemoteAddr().String()...)
+	line = append(line, addr...)
 	line = append(line, ']', ' ')
 	line = appendRepr(line, []byte(raw))
 	for _, a := range args {
@@ -90,7 +105,7 @@ func (s *Server) feedMonitors(c *Connection, db int, raw string, cmd string, arg
 	s.monitor.mu.Lock()
 	defer s.monitor.mu.Unlock()
 	for id, m := range s.monitor.conns {
-		if id == c.ID || m.subscriber == nil {
+		if id == skip || m.subscriber == nil {
 			continue
 		}
 		m.subscriber.Send(line)

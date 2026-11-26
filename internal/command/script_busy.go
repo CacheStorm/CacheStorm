@@ -217,6 +217,22 @@ func runningScriptValue(run *scriptRun) *resp.Value {
 	})
 }
 
+// SetScriptMonitor installs the function that shows MONITOR the commands
+// scripts run.
+func (rt *Router) SetScriptMonitor(fn func(db int, raw, cmd string, args [][]byte)) {
+	rt.scriptMonitor.Store(&fn)
+}
+
+// monitorScriptCall shows MONITOR a command the script is about to run.
+func (r *scriptRun) monitorScriptCall(raw, cmd string, args [][]byte) {
+	if r.router == nil {
+		return
+	}
+	if fn := r.router.scriptMonitor.Load(); fn != nil {
+		(*fn)(r.ctx.DB, raw, cmd, args)
+	}
+}
+
 // killedReply is the error a killed script ends with, at the line it was
 // running, as Redis words it.
 func (r *scriptRun) killedReply(err error) *resp.Value {

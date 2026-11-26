@@ -672,6 +672,7 @@ func New(cfg *config.Config) (result *Server, retErr error) {
 	s.router.SetClientHooks(s.clientHooks())
 	s.shutdownCh = make(chan struct{})
 	s.router.SetShutdownHook(s.requestShutdown)
+	s.router.SetScriptMonitor(s.feedScriptCall)
 	s.router.SetWaitAOFHook(s.waitAOF)
 	s.router.SetBackupController(s.backup)
 

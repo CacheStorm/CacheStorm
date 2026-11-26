@@ -16,7 +16,6 @@ import (
 	"github.com/cachestorm/cachestorm/internal/acl"
 	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
-	buildversion "github.com/cachestorm/cachestorm/internal/version"
 )
 
 var globalACL = acl.NewACL()
@@ -1476,35 +1475,31 @@ func cmdLASTSAVE(ctx *Context) error {
 }
 
 func cmdLOLWUT(ctx *Context) error {
-	version := 6
-	if ctx.ArgCount() > 0 {
-		arg := strings.ToUpper(ctx.ArgString(0))
-		if arg == "VERSION" && ctx.ArgCount() > 1 {
-			v, err := redisAtoi(ctx.ArgString(1))
-			if err == nil {
-				version = v
-			}
+	// Redis 7's own LOLWUT has no art; VERSION 5 and 6 draw one, each
+	// signed with its credit and the version, which clients look for.
+	version := 7
+	if ctx.ArgCount() > 1 && strings.EqualFold(ctx.ArgString(0), "VERSION") {
+		if v, err := redisAtoi(ctx.ArgString(1)); err == nil {
+			version = v
 		}
 	}
-
 	var output strings.Builder
-	output.WriteString("\n")
-
 	switch version {
 	case 5:
-		for i := 0; i < 6; i++ {
-			output.WriteString("._ \n")
-			for j := 0; j < 15; j++ {
-				output.WriteString(" ")
-			}
-			output.WriteString(".\n")
-		}
-	default:
-		output.WriteString("CacheStorm ver. " + buildversion.Version + "\n")
 		output.WriteString("\n")
-		output.WriteString("High-performance Redis-compatible cache with tag-based invalidation.\n")
+		for i := 0; i < 6; i++ {
+			output.WriteString("._ \n               .\n")
+		}
+		output.WriteString("\nGeorg Nees - schotter, plotter on paper, 1968. Redis ver. " + infoRedisVersion + "\n")
+	case 6:
+		output.WriteString("\n")
+		for i := 0; i < 4; i++ {
+			output.WriteString(strings.Repeat("\u2588\u2591", 20) + "\n")
+		}
+		output.WriteString("\nDedicated to the 8 bit game developers of past and present.\nOriginal 8 bit image from Plaguemon by hikikomori. Redis ver. " + infoRedisVersion + "\n")
+	default:
+		output.WriteString("Redis ver. " + infoRedisVersion + "\n")
 	}
-
 	return ctx.WriteVerbatim(output.String())
 }
 
