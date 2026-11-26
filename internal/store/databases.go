@@ -116,6 +116,20 @@ func (d *Databases) ForEach(fn func(index int, s *Store)) {
 }
 
 // KeyCount returns the number of keys over all databases.
+// TagStats sums the tag indexes of every database.
+func (d *Databases) TagStats() TagStats {
+	var t TagStats
+	d.ForEach(func(_ int, s *Store) {
+		st := s.tagIndex.Stats()
+		t.Tags += st.Tags
+		t.Members += st.Members
+		t.Invalidations += st.Invalidations
+		t.InvalidatedKeys += st.InvalidatedKeys
+		t.MaxInvalidateUsec = max(t.MaxInvalidateUsec, st.MaxInvalidateUsec)
+	})
+	return t
+}
+
 func (d *Databases) KeyCount() int64 {
 	var n int64
 	d.ForEach(func(_ int, s *Store) { n += s.KeyCount() })

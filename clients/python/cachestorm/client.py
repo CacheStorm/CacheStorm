@@ -297,6 +297,36 @@ class CacheStormClient:
         """Get tags of key."""
         return self.execute_command("TAGS", key)
 
+    def tag_count(self, tag: str) -> int:
+        """Return how many keys have tag."""
+        return self.execute_command("TAGCOUNT", tag)
+
+    def add_tags(self, name: str, *tags: str) -> int:
+        """Add tags to an existing key. Returns how many it did not have."""
+        if not tags:
+            return 0
+        return self.execute_command("ADDTAG", name, *tags)
+
+    def remove_tags(self, name: str, *tags: str) -> int:
+        """Remove tags from a key. Returns how many it had."""
+        if not tags:
+            return 0
+        return self.execute_command("REMTAG", name, *tags)
+
+    def tag_link(self, parent: str, child: str) -> bool:
+        """Link child below parent, so invalidate(parent, cascade=True)
+        reaches child's keys. A link that would make a tag its own
+        descendant is refused with a ResponseError."""
+        return self.execute_command("TAGLINK", parent, child) == "OK"
+
+    def tag_unlink(self, parent: str, child: str) -> bool:
+        """Remove the link between parent and child."""
+        return self.execute_command("TAGUNLINK", parent, child) == "OK"
+
+    def tag_children(self, tag: str) -> List[str]:
+        """Return the tags linked directly below tag, sorted."""
+        return self.execute_command("TAGCHILDREN", tag)
+
     # Pub/Sub
     def pubsub(self) -> PubSub:
         """Create pub/sub instance."""
@@ -447,7 +477,7 @@ class AsyncCacheStormClient:
             args.append("NX")
         if kwargs.get("xx"):
             args.append("XX")
-        if "tags" in kwargs:
+        if kwargs.get("tags"):
             args.append("TAGS")
             args.extend(kwargs["tags"])
 
@@ -460,3 +490,50 @@ class AsyncCacheStormClient:
     async def delete(self, *names: str) -> int:
         """Delete keys."""
         return await self.execute_command("DEL", *names)
+
+    async def invalidate(self, *tags: str, cascade: bool = False) -> int:
+        """Delete every key with any of tags, in one atomic command; with
+        cascade, also the keys of the tags linked below them. Returns the
+        number of keys deleted."""
+        if not tags:
+            return 0
+        args = ["INVALIDATE", *tags]
+        if cascade:
+            args.append("CASCADE")
+        return await self.execute_command(*args)
+
+    async def tag_keys(self, tag: str) -> List[str]:
+        """Get keys by tag."""
+        return await self.execute_command("TAGKEYS", tag)
+
+    async def tags(self, key: str) -> List[str]:
+        """Get tags of key."""
+        return await self.execute_command("TAGS", key)
+
+    async def tag_count(self, tag: str) -> int:
+        """Return how many keys have tag."""
+        return await self.execute_command("TAGCOUNT", tag)
+
+    async def add_tags(self, name: str, *tags: str) -> int:
+        """Add tags to an existing key. Returns how many it did not have."""
+        if not tags:
+            return 0
+        return await self.execute_command("ADDTAG", name, *tags)
+
+    async def remove_tags(self, name: str, *tags: str) -> int:
+        """Remove tags from a key. Returns how many it had."""
+        if not tags:
+            return 0
+        return await self.execute_command("REMTAG", name, *tags)
+
+    async def tag_link(self, parent: str, child: str) -> bool:
+        """Link child below parent for invalidate(..., cascade=True)."""
+        return await self.execute_command("TAGLINK", parent, child) == "OK"
+
+    async def tag_unlink(self, parent: str, child: str) -> bool:
+        """Remove the link between parent and child."""
+        return await self.execute_command("TAGUNLINK", parent, child) == "OK"
+
+    async def tag_children(self, tag: str) -> List[str]:
+        """Return the tags linked directly below tag, sorted."""
+        return await self.execute_command("TAGCHILDREN", tag)

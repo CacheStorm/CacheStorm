@@ -578,6 +578,7 @@ func cmdConfigResetStat(ctx *Context) error {
 		c.ResetSlotUsage()
 	}
 	clusterIncompatibleOps.Store(0)
+	ctx.databases().ForEach(func(_ int, s *store.Store) { s.GetTagIndex().ResetStats() })
 	return ctx.WriteOK()
 }
 

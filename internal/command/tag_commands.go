@@ -1,6 +1,10 @@
 package command
 
 import (
+	"strconv"
+	"strings"
+	"time"
+
 	"github.com/cachestorm/cachestorm/internal/hashslot"
 	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
@@ -87,9 +91,11 @@ func tagArgs(ctx *Context) []string {
 
 // InvalidateTags returns the tags INVALIDATE tag [tag ...] [CASCADE] with
 // args reaches: the tags named, and with a final CASCADE every tag below
-// them, each once. The write gate plans its hold from the same list.
+// them, each once. CASCADE is matched in any case, like Redis' options; a
+// single argument is always a tag. The write gate plans its hold from the
+// same list.
 func InvalidateTags(ti *store.TagIndex, args [][]byte) []string {
-	cascade := len(args) > 1 && string(args[len(args)-1]) == "CASCADE"
+	cascade := len(args) > 1 && strings.EqualFold(string(args[len(args)-1]), "CASCADE")
 	if cascade {
 		args = args[:len(args)-1]
 	}
@@ -119,6 +125,7 @@ func cmdINVALIDATE(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 
+	start := time.Now()
 	ti := ctx.Store.GetTagIndex()
 	tags := InvalidateTags(ti, ctx.Args)
 	// With KeyHeld the command holds only the stripes of the keys its tags
@@ -155,11 +162,27 @@ func cmdINVALIDATE(ctx *Context) error {
 	// tags: writes to other keys may have run beside a striped run, and a
 	// slot migration copies only the writes naming keys of its slots.
 	propagateDeletes(ctx, deleted)
-	// Each key deleted is announced as DEL announces it.
-	for _, key := range deleted {
+	announceDeletes(ctx, deleted)
+	elapsed := time.Since(start)
+	ti.RecordInvalidation(len(deleted), elapsed.Microseconds())
+	RecordLatency("invalidate", elapsed)
+	return ctx.WriteInteger(int64(len(deleted)))
+}
+
+// announceDeletes tells what follows the keyspace that keys were deleted by
+// a command that names none of them: each key publishes the del keyspace
+// notification DEL publishes, and search indexes drop the documents, which
+// they otherwise learn of only through the keys a command names.
+func announceDeletes(ctx *Context, keys []string) {
+	for _, key := range keys {
 		ctx.notify(store.NotifyGeneric, "del", key)
 	}
-	return ctx.WriteInteger(int64(len(deleted)))
+	indexes := searchIndexesFor(ctx).All()
+	for _, idx := range indexes {
+		for _, key := range keys {
+			idx.Touch(ctx.Store, key)
+		}
+	}
 }
 
 func cmdTAGKEYS(ctx *Context) error {
@@ -197,8 +220,16 @@ func cmdTAGLINK(ctx *Context) error {
 	parent := ctx.ArgString(0)
 	child := ctx.ArgString(1)
 
-	ctx.Store.GetTagIndex().Link(parent, child)
-
+	if err := ctx.Store.GetTagIndex().Link(parent, child); err != nil {
+		if ctx.Replaying || ctx.LegacyReplay || ctx.FromMaster {
+			// An AOF or a master of an older version accepted a link that
+			// closes a cycle; it is left out rather than stopping the
+			// replay.
+			ctx.PropagateAs()
+			return ctx.WriteOK()
+		}
+		return ctx.WriteError(err)
+	}
 	return ctx.WriteOK()
 }
 
@@ -279,4 +310,43 @@ func propagateDeletes(ctx *Context, keys []string) {
 		}
 	}
 	ctx.PropagateAs(cmds...)
+}
+
+// tagsInfo is CacheStorm's Tags section of INFO, summed over the databases:
+// how many tags and (tag, key) pairs the indexes hold, how many links the
+// hierarchies have, and what INVALIDATE has done since the last CONFIG
+// RESETSTAT.
+func tagsInfo(ctx *Context) string {
+	var t store.TagStats
+	links := 0
+	ctx.databases().ForEach(func(_ int, s *store.Store) {
+		ti := s.GetTagIndex()
+		st := ti.Stats()
+		t.Tags += st.Tags
+		t.Members += st.Members
+		t.Invalidations += st.Invalidations
+		t.InvalidatedKeys += st.InvalidatedKeys
+		t.MaxInvalidateUsec = max(t.MaxInvalidateUsec, st.MaxInvalidateUsec)
+		links += len(ti.Links())
+	})
+	var sb strings.Builder
+	sb.WriteString("# Tags\r\n")
+	for _, f := range []struct {
+		name string
+		v    int64
+	}{
+		{"tags", t.Tags},
+		{"tag_memberships", t.Members},
+		{"tag_links", int64(links)},
+		{"invalidations", t.Invalidations},
+		{"invalidated_keys", t.InvalidatedKeys},
+		{"invalidate_max_usec", t.MaxInvalidateUsec},
+	} {
+		sb.WriteString(f.name)
+		sb.WriteByte(':')
+		sb.WriteString(strconv.FormatInt(f.v, 10))
+		sb.WriteString("\r\n")
+	}
+	sb.WriteString("\r\n")
+	return sb.String()
 }

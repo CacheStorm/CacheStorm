@@ -67,11 +67,11 @@ func main() {
 	sort.Slice(rows, func(i, j int) bool { return rows[i].name < rows[j].name })
 	fmt.Print("package command\n\n")
 	fmt.Print("// Code generated from the COMMAND reply of Redis 7.4; DO NOT EDIT.\n\n")
-	fmt.Println("// redisCommandSpecs holds the arity, flags, key positions and ACL categories")
+	fmt.Println("// redisNativeCommandSpecs holds the arity, flags, key positions and ACL categories")
 	fmt.Println("// Redis 7.4 reports for its own commands. Arity follows Redis: a positive")
 	fmt.Println("// value is an exact argument count including the command name, a negative")
 	fmt.Println("// value a minimum.")
-	fmt.Println("var redisCommandSpecs = map[string]commandSpec{")
+	fmt.Println("var redisNativeCommandSpecs = map[string]commandSpec{")
 	for _, r := range rows {
 		fl := make([]string, len(r.flags))
 		for i, f := range r.flags {

@@ -92,14 +92,27 @@ msg, err := pubsub.ReceiveMessage(ctx)
 ### CacheStorm-Specific Features
 
 ```go
-// Tag-based invalidation
-err := client.SetWithTags(ctx, "user:1", data, []string{"user", "session"})
+// Value, expiry and tags in one atomic write
+err := client.SetWithTagsTTL(ctx, "user:1", data, 5*time.Minute, []string{"user:1", "users"})
+err = client.SetWithTags(ctx, "report", data, []string{"reports"}) // no expiry
 
-// Invalidate by tag
-err := client.Invalidate(ctx, "user")
+// Tag an existing key, or untag it; each returns how many tags changed
+added, err := client.AddTags(ctx, "session:9", "user:1")
+removed, err := client.RemoveTags(ctx, "session:9", "user:1")
 
-// Get keys by tag
-taggedKeys, err := client.TagKeys(ctx, "user")
+// Delete every key of the tags, atomically; how many were deleted
+n, err := client.InvalidateCount(ctx, "user:1", "users")
+
+// Tag hierarchy: InvalidateCascade also reaches the tags linked below
+err = client.TagLink(ctx, "catalog", "category:shoes")
+n, err = client.InvalidateCascade(ctx, "catalog")
+children, err := client.TagChildren(ctx, "catalog")
+err = client.TagUnlink(ctx, "catalog", "category:shoes")
+
+// Inspect
+keys, err := client.TagKeys(ctx, "users")
+count, err := client.TagCount(ctx, "users")
+tags, err := client.Tags(ctx, "user:1")
 ```
 
 ## API Reference

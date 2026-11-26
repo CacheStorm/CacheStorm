@@ -21,6 +21,9 @@ type Metrics struct {
 	expiredCount     atomic.Int64
 	connectedClients atomic.Int64
 	tagInvalidations atomic.Int64
+	tagKeys          atomic.Int64
+	tags             atomic.Int64
+	tagMembers       atomic.Int64
 	keysTotal        atomic.Int64
 	memoryBytes      atomic.Int64
 }
@@ -86,6 +89,15 @@ func (m *MetricsPlugin) RecordExpiration() {
 
 func (m *MetricsPlugin) RecordTagInvalidation() {
 	m.metrics.tagInvalidations.Add(1)
+}
+
+// SetTagStats sets the tag gauges and the INVALIDATE counters, summed over
+// the databases.
+func (m *MetricsPlugin) SetTagStats(tags, members, invalidations, invalidatedKeys int64) {
+	m.metrics.tags.Store(tags)
+	m.metrics.tagMembers.Store(members)
+	m.metrics.tagInvalidations.Store(invalidations)
+	m.metrics.tagKeys.Store(invalidatedKeys)
 }
 
 func (m *MetricsPlugin) SetConnectedClients(n int64) {
@@ -156,9 +168,21 @@ func (m *MetricsPlugin) ExportPrometheus() string {
 	result += "# TYPE cachestorm_memory_bytes gauge\n"
 	result += "cachestorm_memory_bytes " + strconv.FormatInt(m.metrics.memoryBytes.Load(), 10) + "\n"
 
-	result += "\n# HELP cachestorm_tag_invalidations_total Total tag invalidations\n"
+	result += "\n# HELP cachestorm_tag_invalidations_total INVALIDATE commands run\n"
 	result += "# TYPE cachestorm_tag_invalidations_total counter\n"
 	result += "cachestorm_tag_invalidations_total " + strconv.FormatInt(m.metrics.tagInvalidations.Load(), 10) + "\n"
+
+	result += "\n# HELP cachestorm_tag_invalidated_keys_total Keys INVALIDATE deleted\n"
+	result += "# TYPE cachestorm_tag_invalidated_keys_total counter\n"
+	result += "cachestorm_tag_invalidated_keys_total " + strconv.FormatInt(m.metrics.tagKeys.Load(), 10) + "\n"
+
+	result += "\n# HELP cachestorm_tags Tags that have at least one key\n"
+	result += "# TYPE cachestorm_tags gauge\n"
+	result += "cachestorm_tags " + strconv.FormatInt(m.metrics.tags.Load(), 10) + "\n"
+
+	result += "\n# HELP cachestorm_tag_memberships Tag and key pairs in the tag index\n"
+	result += "# TYPE cachestorm_tag_memberships gauge\n"
+	result += "cachestorm_tag_memberships " + strconv.FormatInt(m.metrics.tagMembers.Load(), 10) + "\n"
 
 	return result
 }

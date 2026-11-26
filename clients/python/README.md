@@ -106,14 +106,26 @@ for message in pubsub.listen():
 ### CacheStorm-Specific Features
 
 ```python
-# Tag-based invalidation
-client.set('user:1', user_data, tags=['user', 'session'])
+# Value, expiry and tags in one atomic write
+client.set('user:1', user_data, ex=300, tags=['user:1', 'users'])
 
-# Invalidate by tag
-client.invalidate('user')
+# Tag an existing key, or untag it; each returns how many tags changed
+client.add_tags('session:9', 'user:1')
+client.remove_tags('session:9', 'user:1')
 
-# Get keys by tag
-keys = client.tag_keys('user')
+# Delete every key of the tags, atomically; returns how many were deleted
+client.invalidate('user:1', 'users')
+
+# Tag hierarchy: cascade=True also reaches the tags linked below
+client.tag_link('catalog', 'category:shoes')
+client.invalidate('catalog', cascade=True)
+client.tag_children('catalog')
+client.tag_unlink('catalog', 'category:shoes')
+
+# Inspect
+client.tag_keys('users'); client.tag_count('users'); client.tags('user:1')
+
+# AsyncCacheStormClient has the same tag methods, awaited.
 ```
 
 ## Known Limitations

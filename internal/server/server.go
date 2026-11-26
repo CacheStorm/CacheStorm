@@ -941,6 +941,8 @@ func (s *Server) updateMetricsGauges() {
 	s.metricsPlugin.SetMissCount(store.GlobalMetrics.TotalMisses.Load())
 	s.metricsPlugin.SetEvictedCount(store.GlobalMetrics.TotalEvictions.Load())
 	s.metricsPlugin.SetExpiredCount(store.GlobalMetrics.TotalExpirations.Load())
+	t := s.dbs.TagStats()
+	s.metricsPlugin.SetTagStats(t.Tags, t.Members, t.Invalidations, t.InvalidatedKeys)
 }
 
 func (s *Server) acceptLoop() {

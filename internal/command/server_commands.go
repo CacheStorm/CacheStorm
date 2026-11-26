@@ -291,6 +291,12 @@ func cmdINFO(ctx *Context) error {
 		sb.WriteString(keysizesInfo(ctx))
 	}
 
+	// CacheStorm's tag section comes with INFO tags or everything, so the
+	// default and all keep Redis' sections.
+	if sections["tags"] || everything {
+		sb.WriteString(tagsInfo(ctx))
+	}
+
 	// RediSearch's sections come with INFO search, modules or everything,
 	// as Redis 8 gives a module's sections; all and default leave them out.
 	if sections["search"] || sections["modules"] || everything {

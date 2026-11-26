@@ -1,122 +1,116 @@
 package store
 
 import (
+	"errors"
+	"slices"
 	"testing"
 )
 
-// TAGLINK accepts any (parent, child) pair and never checks whether the edge
-// closes a cycle, so a client can make the tag hierarchy cyclic with two
-// ordinary commands: TAGLINK a b followed by TAGLINK b a. INVALIDATE <tag>
-// CASCADE then walks that cycle in TagIndex.collectDescendants, which recursed
-// once per revisit with no visited set. Go cannot recover a stack overflow, so
-// the recursion did not return an error or hang -- it aborted the whole server
-// process. collectDescendants must bound its walk to one visit per tag.
-func TestGetAllDescendantsTerminatesOnSelfLinkCycle(t *testing.T) {
+// TAGLINK used to accept any (parent, child) pair, so TAGLINK a b followed by
+// TAGLINK b a made the hierarchy cyclic, and a recursive walk of it aborted
+// the process with a stack overflow. Link now refuses a link that closes a
+// cycle, and the walk keeps a visited set and its own queue regardless.
+func TestLinkRefusesCyclesX(t *testing.T) {
 	ti := NewTagIndex()
-
-	// The shortest cycle: a tag linked to itself.
-	ti.Link("a", "a")
-
-	// A tag is not a descendant of itself, so the walk finds nothing below it.
-	descendants := ti.GetAllDescendants("a")
-
-	if len(descendants) != 0 {
-		t.Fatalf("self-linked tag: expected no descendants, got %v", descendants)
+	if err := ti.Link("a", "a"); !errors.Is(err, ErrTagLinkCycle) {
+		t.Fatalf("Link(a, a) = %v, want ErrTagLinkCycle", err)
 	}
-}
-
-func TestGetAllDescendantsTerminatesOnTwoNodeCycle(t *testing.T) {
-	ti := NewTagIndex()
-
-	ti.Link("a", "b")
-	ti.Link("b", "a")
-
-	descendants := ti.GetAllDescendants("a")
-
-	seen := make(map[string]int, len(descendants))
-	for _, d := range descendants {
-		seen[d]++
-	}
-	if len(descendants) != 1 || seen["b"] != 1 {
-		t.Fatalf("two-node cycle from a: expected only b as a descendant, got %v", descendants)
-	}
-	if seen["a"] != 0 {
-		t.Fatalf("two-node cycle: the root must not be its own descendant, got %v", descendants)
-	}
-}
-
-func TestGetAllDescendantsTerminatesOnLongCycle(t *testing.T) {
-	ti := NewTagIndex()
-
-	// A longer cycle plus a tail hanging off it: the walk must visit every
-	// reachable tag once and must not be cut short by the cycle.
-	ti.Link("a", "b")
-	ti.Link("b", "c")
-	ti.Link("c", "a")
-	ti.Link("c", "d")
-
-	descendants := ti.GetAllDescendants("a")
-
-	got := make(map[string]bool, len(descendants))
-	for _, d := range descendants {
-		if got[d] {
-			t.Fatalf("tag %q reported twice: %v", d, descendants)
-		}
-		got[d] = true
-	}
-	// The root is seeded as visited, so the cycle back to it terminates the
-	// walk; the tail below the cycle must still be reached.
-	for _, want := range []string{"b", "c", "d"} {
-		if !got[want] {
-			t.Errorf("expected descendant %q in %v", want, descendants)
+	for _, l := range [][2]string{{"a", "b"}, {"b", "c"}, {"c", "d"}} {
+		if err := ti.Link(l[0], l[1]); err != nil {
+			t.Fatalf("Link%v: %v", l, err)
 		}
 	}
-	if got["a"] {
-		t.Errorf("the root must not be its own descendant: %v", descendants)
+	for _, l := range [][2]string{{"b", "a"}, {"d", "a"}, {"c", "b"}} {
+		if err := ti.Link(l[0], l[1]); !errors.Is(err, ErrTagLinkCycle) {
+			t.Fatalf("Link%v = %v, want ErrTagLinkCycle", l, err)
+		}
+	}
+	// A second path to a descendant is no cycle.
+	if err := ti.Link("a", "d"); err != nil {
+		t.Fatalf("Link(a, d): %v", err)
+	}
+	if got := ti.Links(); len(got) != 4 {
+		t.Fatalf("Links = %v", got)
 	}
 }
 
-// Control: the acyclic hierarchy this fix must leave untouched. Diamond shapes
-// share descendants, so the visited set must not drop a tag that is reachable
-// by more than one path.
+// A hierarchy loaded with a cycle (or built by hand here) is still walked
+// once per tag, without the root.
+func TestGetAllDescendantsTerminatesOnCycleX(t *testing.T) {
+	ti := NewTagIndex()
+	ti.children = map[string]map[string]struct{}{
+		"a": {"a": {}, "b": {}},
+		"b": {"c": {}},
+		"c": {"a": {}, "d": {}},
+	}
+	got := ti.GetAllDescendants("a")
+	slices.Sort(got)
+	if !slices.Equal(got, []string{"b", "c", "d"}) {
+		t.Fatalf("descendants of a = %v", got)
+	}
+}
+
+// A deep chain is walked without recursion.
+func TestGetAllDescendantsDeepChainX(t *testing.T) {
+	ti := NewTagIndex()
+	const depth = 100000
+	ti.children = make(map[string]map[string]struct{}, depth)
+	for i := range depth {
+		ti.children[tagName(i)] = map[string]struct{}{tagName(i + 1): {}}
+	}
+	if got := len(ti.GetAllDescendants(tagName(0))); got != depth {
+		t.Fatalf("descendants = %d, want %d", got, depth)
+	}
+}
+
+func tagName(i int) string {
+	b := []byte{'t'}
+	for {
+		b = append(b, byte('0'+i%10))
+		i /= 10
+		if i == 0 {
+			return string(b)
+		}
+	}
+}
+
+// Diamond shapes share descendants: the visited set must not drop a tag
+// reachable by more than one path.
 func TestGetAllDescendantsAcyclicDiamondUnaffected(t *testing.T) {
 	ti := NewTagIndex()
 
-	ti.Link("root", "left")
-	ti.Link("root", "right")
-	ti.Link("left", "shared")
-	ti.Link("right", "shared")
-
-	descendants := ti.GetAllDescendants("root")
-
-	got := make(map[string]bool, len(descendants))
-	for _, d := range descendants {
-		got[d] = true
-	}
-	if len(descendants) != 3 {
-		t.Fatalf("expected 3 distinct descendants, got %d (%v)", len(descendants), descendants)
-	}
-	for _, want := range []string{"left", "right", "shared"} {
-		if !got[want] {
-			t.Errorf("expected descendant %q in %v", want, descendants)
+	for _, l := range [][2]string{{"root", "left"}, {"root", "right"}, {"left", "shared"}, {"right", "shared"}} {
+		if err := ti.Link(l[0], l[1]); err != nil {
+			t.Fatal(err)
 		}
 	}
-	if got["root"] {
-		t.Errorf("root must not be its own descendant: %v", descendants)
+	got := ti.GetAllDescendants("root")
+	slices.Sort(got)
+	if !slices.Equal(got, []string{"left", "right", "shared"}) {
+		t.Fatalf("descendants = %v", got)
 	}
 }
 
-// InvalidateCascade is the production entry point behind the INVALIDATE ... CASCADE
-// command. On a cyclic hierarchy it must return the invalidated key set rather
-// than aborting the process, and it must still invalidate every linked tag.
-func TestInvalidateCascadeTerminatesOnCycleAndCollectsKeys(t *testing.T) {
+// A tag may have several parents; unlinking one leaves the others.
+func TestUnlinkKeepsOtherParentsX(t *testing.T) {
+	ti := NewTagIndex()
+	_ = ti.Link("a", "c")
+	_ = ti.Link("b", "c")
+	ti.Unlink("b", "c")
+	if got := ti.GetAllDescendants("a"); !slices.Equal(got, []string{"c"}) {
+		t.Fatalf("descendants of a = %v", got)
+	}
+	if got := ti.GetAllDescendants("b"); len(got) != 0 {
+		t.Fatalf("descendants of b = %v", got)
+	}
+}
+
+func TestInvalidateCascadeCollectsKeys(t *testing.T) {
 	ti := NewTagIndex()
 
 	ti.AddTags("key1", []string{"a"})
 	ti.AddTags("key2", []string{"b"})
-
-	ti.Link("a", "b")
-	ti.Link("b", "a")
+	_ = ti.Link("a", "b")
 
 	result := ti.InvalidateCascade("a")
 

@@ -159,3 +159,35 @@ test('round trip over a real TCP socket with fragmented, coalesced replies', asy
     server.close();
   }
 });
+
+test('tag commands send their arguments and return the replies', async () => {
+  const { client, socket } = fakeClient();
+  const calls = [
+    client.set('k', 'v', { EX: 10, TAGS: ['a', 'b'] }),
+    client.set('k2', 'v', { TAGS: [] }),
+    client.invalidate('a', 'b'),
+    client.invalidateCascade('a'),
+    client.tagCount('a'),
+    client.addTags('k', 'c'),
+    client.removeTags('k', 'c'),
+    client.tagLink('p', 'q'),
+    client.tagUnlink('p', 'q'),
+    client.tagChildren('p'),
+  ];
+  socket.reply('+OK\r\n+OK\r\n:2\r\n:3\r\n:4\r\n:1\r\n:1\r\n+OK\r\n+OK\r\n*1\r\n$1\r\nq\r\n');
+  assert.deepEqual(await Promise.all(calls), ['OK', 'OK', 2, 3, 4, 1, 1, 'OK', 'OK', ['q']]);
+  assert.equal(await client.addTags('k'), 0);
+  assert.equal(await client.invalidateCascade(), 0);
+  assert.deepEqual(socket.sentCommands(), [
+    ['SET', 'k', 'v', 'EX', '10', 'TAGS', 'a', 'b'],
+    ['SET', 'k2', 'v'],
+    ['INVALIDATE', 'a', 'b'],
+    ['INVALIDATE', 'a', 'CASCADE'],
+    ['TAGCOUNT', 'a'],
+    ['ADDTAG', 'k', 'c'],
+    ['REMTAG', 'k', 'c'],
+    ['TAGLINK', 'p', 'q'],
+    ['TAGUNLINK', 'p', 'q'],
+    ['TAGCHILDREN', 'p'],
+  ]);
+});

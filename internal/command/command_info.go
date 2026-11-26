@@ -39,6 +39,9 @@ func commandInfoValue(name string, def *CommandDef) *resp.Value {
 	if m := moduleCommand(name); m != nil {
 		return m.info
 	}
+	if spec, ok := cachestormCommandSpecs[strings.ToUpper(name)]; ok {
+		return specInfoValue(name, spec)
+	}
 	arity := -1
 	var flags []string
 	if def != nil {
@@ -86,6 +89,31 @@ func commandInfoValue(name string, def *CommandDef) *resp.Value {
 	})
 }
 
+// specInfoValue is the COMMAND INFO entry of a CacheStorm command described
+// in cachestormCommandSpecs.
+func specInfoValue(name string, spec commandSpec) *resp.Value {
+	flags := make([]*resp.Value, 0, len(spec.Flags))
+	for _, f := range spec.Flags {
+		flags = append(flags, resp.SimpleString(f))
+	}
+	cats := make([]*resp.Value, 0, len(spec.Categories))
+	for _, c := range spec.Categories {
+		cats = append(cats, resp.SimpleString("@"+c))
+	}
+	return resp.ArrayValue([]*resp.Value{
+		resp.BulkString(strings.ToLower(name)),
+		resp.IntegerValue(int64(spec.Arity)),
+		resp.SetValue(flags),
+		resp.IntegerValue(int64(spec.FirstKey)),
+		resp.IntegerValue(int64(spec.LastKey)),
+		resp.IntegerValue(int64(spec.KeyStep)),
+		resp.SetValue(cats),
+		resp.SetValue([]*resp.Value{}),
+		resp.SetValue([]*resp.Value{}),
+		resp.SetValue([]*resp.Value{}),
+	})
+}
+
 func commandDefHasFlag(def *CommandDef, flag string) bool {
 	if def == nil {
 		return false
@@ -100,9 +128,13 @@ func commandDefHasFlag(def *CommandDef, flag string) bool {
 
 // extensionDocsValue is the COMMAND DOCS entry of a CacheStorm extension
 // command, shaped like the one Redis gives a module command.
-func extensionDocsValue() *resp.Value {
+func extensionDocsValue(name string) *resp.Value {
+	summary, ok := cachestormCommandSummaries[strings.ToUpper(name)]
+	if !ok {
+		summary = "CacheStorm extension command."
+	}
 	return resp.PairsValue([]*resp.Value{
-		resp.BulkString("summary"), resp.BulkString("CacheStorm extension command."),
+		resp.BulkString("summary"), resp.BulkString(summary),
 		resp.BulkString("since"), resp.BulkString("0.1.0"),
 		resp.BulkString("group"), resp.BulkString("module"),
 		resp.BulkString("module"), resp.BulkString("cachestorm"),
@@ -238,7 +270,7 @@ func cmdCommandDocs(ctx *Context) error {
 				pairs = append(pairs, resp.BulkString(m.name), m.docs)
 				continue
 			}
-			pairs = append(pairs, resp.BulkString(strings.ToLower(def.Name)), extensionDocsValue())
+			pairs = append(pairs, resp.BulkString(strings.ToLower(def.Name)), extensionDocsValue(def.Name))
 		}
 	}
 	return ctx.WriteValue(resp.PairsValue(pairs))

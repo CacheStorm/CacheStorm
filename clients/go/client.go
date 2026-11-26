@@ -457,23 +457,129 @@ func (c *Client) SCard(ctx context.Context, key string) (int64, error) {
 	return toInt64(val), nil
 }
 
-// Invalidate deletes every key that has any of tags, in one atomic command.
-func (c *Client) Invalidate(ctx context.Context, tags ...string) error {
-	if len(tags) == 0 {
-		return nil
-	}
-	args := make([]interface{}, 0, len(tags)+1)
-	args = append(args, "INVALIDATE")
-	for _, tag := range tags {
-		args = append(args, tag)
+// SetWithTagsTTL sets a key's value, expiry and tags in one atomic write
+// (SET key value PX ms TAGS tag ...). An expiration of 0 keeps no expiry.
+func (c *Client) SetWithTagsTTL(ctx context.Context, key string, value interface{}, expiration time.Duration, tags []string) error {
+	args := appendExpiration([]interface{}{"SET", key, value}, expiration)
+	if len(tags) > 0 {
+		args = append(args, "TAGS")
+		for _, tag := range tags {
+			args = append(args, tag)
+		}
 	}
 	_, err := c.Do(ctx, args...)
 	return err
 }
 
+// Invalidate deletes every key that has any of tags, in one atomic command.
+// InvalidateCount also returns how many keys it deleted.
+func (c *Client) Invalidate(ctx context.Context, tags ...string) error {
+	_, err := c.InvalidateCount(ctx, tags...)
+	return err
+}
+
+// InvalidateCount deletes every key that has any of tags, in one atomic
+// command, and returns how many keys it deleted.
+func (c *Client) InvalidateCount(ctx context.Context, tags ...string) (int64, error) {
+	return c.invalidate(ctx, tags, false)
+}
+
+// InvalidateCascade deletes every key that has any of tags or of the tags
+// linked below them (TAGLINK), in one atomic command, and returns how many
+// keys it deleted.
+func (c *Client) InvalidateCascade(ctx context.Context, tags ...string) (int64, error) {
+	return c.invalidate(ctx, tags, true)
+}
+
+func (c *Client) invalidate(ctx context.Context, tags []string, cascade bool) (int64, error) {
+	if len(tags) == 0 {
+		return 0, nil
+	}
+	args := make([]interface{}, 0, len(tags)+2)
+	args = append(args, "INVALIDATE")
+	for _, tag := range tags {
+		args = append(args, tag)
+	}
+	if cascade {
+		args = append(args, "CASCADE")
+	}
+	val, err := c.Do(ctx, args...)
+	if err != nil {
+		return 0, err
+	}
+	return toInt64(val), nil
+}
+
 // TagKeys gets all keys with a tag
 func (c *Client) TagKeys(ctx context.Context, tag string) ([]string, error) {
 	val, err := c.Do(ctx, "TAGKEYS", tag)
+	if err != nil {
+		return nil, err
+	}
+	return toStringSlice(val), nil
+}
+
+// TagCount returns how many keys have a tag.
+func (c *Client) TagCount(ctx context.Context, tag string) (int64, error) {
+	val, err := c.Do(ctx, "TAGCOUNT", tag)
+	if err != nil {
+		return 0, err
+	}
+	return toInt64(val), nil
+}
+
+// Tags returns the tags of a key.
+func (c *Client) Tags(ctx context.Context, key string) ([]string, error) {
+	val, err := c.Do(ctx, "TAGS", key)
+	if err != nil {
+		return nil, err
+	}
+	return toStringSlice(val), nil
+}
+
+// AddTags adds tags to an existing key and returns how many it did not
+// have.
+func (c *Client) AddTags(ctx context.Context, key string, tags ...string) (int64, error) {
+	return c.keyTags(ctx, "ADDTAG", key, tags)
+}
+
+// RemoveTags removes tags from a key and returns how many it had.
+func (c *Client) RemoveTags(ctx context.Context, key string, tags ...string) (int64, error) {
+	return c.keyTags(ctx, "REMTAG", key, tags)
+}
+
+func (c *Client) keyTags(ctx context.Context, cmd, key string, tags []string) (int64, error) {
+	if len(tags) == 0 {
+		return 0, nil
+	}
+	args := make([]interface{}, 0, len(tags)+2)
+	args = append(args, cmd, key)
+	for _, tag := range tags {
+		args = append(args, tag)
+	}
+	val, err := c.Do(ctx, args...)
+	if err != nil {
+		return 0, err
+	}
+	return toInt64(val), nil
+}
+
+// TagLink links child below parent, so InvalidateCascade of parent reaches
+// child's keys. A link that would make a tag its own descendant is refused.
+func (c *Client) TagLink(ctx context.Context, parent, child string) error {
+	_, err := c.Do(ctx, "TAGLINK", parent, child)
+	return err
+}
+
+// TagUnlink removes the link between parent and child.
+func (c *Client) TagUnlink(ctx context.Context, parent, child string) error {
+	_, err := c.Do(ctx, "TAGUNLINK", parent, child)
+	return err
+}
+
+// TagChildren returns the tags linked directly below tag, sorted.
+func (c *Client) TagChildren(ctx context.Context, tag string) ([]string, error) {
+	val, err := c.Do(ctx, "TAGCHILDREN", tag)
 	if err != nil {
 		return nil, err
 	}

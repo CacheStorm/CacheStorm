@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`INFO tags`** (also in `INFO everything`): the number of tags, (tag, key) pairs and hierarchy links, and the `INVALIDATE` commands run, the keys they deleted and the longest one since `CONFIG RESETSTAT`. An `INVALIDATE` over `latency-monitor-threshold` is the `invalidate` event of `LATENCY`, and the metrics endpoint exports `cachestorm_tags`, `cachestorm_tag_memberships` and `cachestorm_tag_invalidated_keys_total`; `cachestorm_tag_invalidations_total` was always 0 and now counts.
+- **SDKs**: the Go, Python (sync and async) and TypeScript clients cover every tag command: tag counts, adding and removing tags on a key (with how many changed), the hierarchy (`TAGLINK`, `TAGUNLINK`, `TAGCHILDREN`), `INVALIDATE ... CASCADE` (Go `InvalidateCascade`, TypeScript `invalidateCascade`) and the number of keys deleted (Go `InvalidateCount`). Go's `SetWithTagsTTL` writes the value, expiry and tags at once. A `SET` with an empty tag list no longer sends a bare `TAGS`, which the server refuses.
+
+### Changed
+- **Tag commands are described like Redis' commands**: `COMMAND INFO` and `COMMAND DOCS` give their arity, flags, key positions and ACL categories, and the server acts on them. `SETTAG`, `ADDTAG`, `REMTAG`, `INVALIDATE`, `TAGLINK` and `TAGUNLINK` were run inside read-only scripts (`EVAL_RO`, `FCALL_RO`), which now refuse them; they did not count towards the save rules (`rdb_changes_since_last_save`), so a workload of tag writes alone never triggered a snapshot; those that may grow memory were not refused over `maxmemory` under `noeviction`; and an ACL user limited to `@read` could run them. Wrong argument counts get Redis' `wrong number of arguments for '<command>'` error.
+- **`INVALIDATE` and `CACHE.CLEAR` update search indexes**: the documents of the keys they delete left the keys but stayed in `FT.*` indexes, which kept counting them. `CACHE.CLEAR` and `CACHE.BULKDEL` also propagate their deletes in chunks, one per slot in a cluster, like `INVALIDATE`.
+- **The tag hierarchy has no cycles**: `TAGLINK` refuses linking a tag to itself or to one of its ancestors (`TAGLINK a b` then `TAGLINK b a` made every tag of the cycle its own descendant). A tag may have several parents, and `TAGUNLINK` removes only the link named. An AOF, snapshot or master of an older version holding such a link still loads; the link closing the cycle is left out. The walk below a tag no longer recurses, so a hierarchy many levels deep cannot exhaust the stack. `TAGCHILDREN` answers in sorted order.
+- **`CASCADE` in any case**: `INVALIDATE t cascade` treated `cascade` as a second tag; the final `CASCADE` is now matched like Redis' options. A single argument is still a tag.
+
 ## [0.5.0] - 2026-11-25
 
 Highlights: tagged caching end to end. `SET ... TAGS` writes a value, its expiry and its tags at once, `INVALIDATE` takes several tags, and tags now survive in-place writes, `MIGRATE` and slot migration, work per node in a cluster, publish keyspace notifications and replicate as the deletes they cause.

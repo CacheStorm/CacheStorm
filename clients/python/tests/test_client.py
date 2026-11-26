@@ -91,6 +91,28 @@ class SyncClientTest(unittest.TestCase):
         self.assertTrue(client.set("k", "ş"))
         self.assertEqual(sock.sent, b"*3\r\n$3\r\nSET\r\n$1\r\nk\r\n$2\r\n\xc5\x9f\r\n")
 
+    def test_tag_commands_send_expected_arguments(self):
+        client, sock = self.make_client([b":2\r\n", b":1\r\n", b":1\r\n", b":3\r\n", b"+OK\r\n", b"+OK\r\n", b"*1\r\n$1\r\nc\r\n"])
+        self.assertEqual(client.add_tags("k", "a", "b"), 2)
+        self.assertEqual(client.remove_tags("k", "a"), 1)
+        self.assertEqual(client.invalidate("a", "b", cascade=True), 1)
+        self.assertEqual(client.tag_count("b"), 3)
+        self.assertTrue(client.tag_link("p", "c"))
+        self.assertTrue(client.tag_unlink("p", "c"))
+        self.assertEqual(client.tag_children("p"), [b"c"])
+        self.assertEqual(client.add_tags("k"), 0)
+        sent = sock.sent
+        for cmd in (
+            b"*4\r\n$6\r\nADDTAG\r\n$1\r\nk\r\n$1\r\na\r\n$1\r\nb\r\n",
+            b"*3\r\n$6\r\nREMTAG\r\n$1\r\nk\r\n$1\r\na\r\n",
+            b"*4\r\n$10\r\nINVALIDATE\r\n$1\r\na\r\n$1\r\nb\r\n$7\r\nCASCADE\r\n",
+            b"*2\r\n$8\r\nTAGCOUNT\r\n$1\r\nb\r\n",
+            b"*3\r\n$7\r\nTAGLINK\r\n$1\r\np\r\n$1\r\nc\r\n",
+            b"*3\r\n$9\r\nTAGUNLINK\r\n$1\r\np\r\n$1\r\nc\r\n",
+            b"*2\r\n$11\r\nTAGCHILDREN\r\n$1\r\np\r\n",
+        ):
+            self.assertIn(cmd, sent)
+
     def test_get_binary_fragmented_reply(self):
         client, sock = self.make_client([b"$", b"2\r", b"\n\xff", b"\x00\r", b"\n"])
         self.assertEqual(client.get("k"), b"\xff\x00")

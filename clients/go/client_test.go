@@ -170,6 +170,13 @@ func (s *fakeServer) reply(c net.Conn, args []string) (string, bool) {
 		return "", false
 	case "BADCMD":
 		return "-ERR unknown command 'BADCMD'\r\n", true
+	case "INVALIDATE", "ADDTAG", "REMTAG", "TAGCOUNT":
+		// Answers the number of arguments, so a test sees what was sent.
+		return ":" + strconv.Itoa(len(args)-1) + "\r\n", true
+	case "TAGLINK", "TAGUNLINK":
+		return "+OK\r\n", true
+	case "TAGS", "TAGKEYS", "TAGCHILDREN":
+		return "*2\r\n" + bulk("x") + bulk("y"), true
 	case "MIXED":
 		return "*3\r\n" + bulk("a") + "-ERR inner\r\n$-1\r\n", true
 	case "BINARY":
@@ -576,4 +583,55 @@ func TestPubSubEndsOnClientClose(t *testing.T) {
 		}
 	}
 	s.pubsub <- ""
+}
+
+func TestTagCommands(t *testing.T) {
+	s := newFakeServer(t)
+	c := newClient(t, s.addr())
+	ctx := context.Background()
+	if err := c.SetWithTagsTTL(ctx, "k", "v", 1500*time.Millisecond, []string{"a", "b"}); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := c.InvalidateCount(ctx, "a", "b"); err != nil || n != 2 {
+		t.Fatalf("InvalidateCount = %d, %v", n, err)
+	}
+	if n, err := c.InvalidateCascade(ctx, "a"); err != nil || n != 2 {
+		t.Fatalf("InvalidateCascade = %d, %v", n, err)
+	}
+	if n, err := c.AddTags(ctx, "k", "c", "d"); err != nil || n != 3 {
+		t.Fatalf("AddTags = %d, %v", n, err)
+	}
+	if n, err := c.RemoveTags(ctx, "k", "c"); err != nil || n != 2 {
+		t.Fatalf("RemoveTags = %d, %v", n, err)
+	}
+	if n, err := c.TagCount(ctx, "a"); err != nil || n != 1 {
+		t.Fatalf("TagCount = %d, %v", n, err)
+	}
+	if err := c.TagLink(ctx, "p", "q"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.TagUnlink(ctx, "p", "q"); err != nil {
+		t.Fatal(err)
+	}
+	for name, f := range map[string]func(context.Context, string) ([]string, error){"Tags": c.Tags, "TagKeys": c.TagKeys, "TagChildren": c.TagChildren} {
+		if got, err := f(ctx, "z"); err != nil || strings.Join(got, ",") != "x,y" {
+			t.Fatalf("%s = %v, %v", name, got, err)
+		}
+	}
+	if n, err := c.InvalidateCount(ctx); err != nil || n != 0 {
+		t.Fatalf("InvalidateCount() = %d, %v", n, err)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var sent []string
+	for _, cmd := range s.commands {
+		sent = append(sent, strings.Join(cmd, " "))
+	}
+	want := []string{
+		"SET k v PX 1500 TAGS a b", "INVALIDATE a b", "INVALIDATE a CASCADE",
+		"ADDTAG k c d", "REMTAG k c", "TAGCOUNT a", "TAGLINK p q", "TAGUNLINK p q",
+	}
+	if got := strings.Join(sent, "|"); !strings.Contains(got, strings.Join(want, "|")) {
+		t.Fatalf("sent %v", sent)
+	}
 }

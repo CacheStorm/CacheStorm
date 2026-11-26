@@ -774,15 +774,48 @@ TAGS key                             # the key's tags
 TAGKEYS tag                          # the keys with the tag
 TAGCOUNT tag                         # how many keys have the tag
 INVALIDATE tag [tag ...] [CASCADE]   # delete every key with any of the tags; the
-                                     # number deleted. CASCADE (last) also reaches
-                                     # the tags linked below them
+                                     # number deleted. CASCADE (last, any case) also
+                                     # reaches the tags linked below them
 TAGLINK parent child                 # make child a tag below parent
-TAGUNLINK parent child
-TAGCHILDREN tag                      # the tags directly below tag
+TAGUNLINK parent child               # remove that one link
+TAGCHILDREN tag                      # the tags directly below tag, sorted
 ```
 
-`INVALIDATE` publishes a `del` keyspace notification for each key it deletes
-and reaches replicas and the AOF as `DEL`s of those keys.
+`INVALIDATE` is atomic: when it returns, every key the tags had when it ran
+is gone, and a key tagged meanwhile is either deleted or written after it. It
+publishes a `del` keyspace notification for each key it deletes, drops their
+documents from search indexes, and reaches replicas and the AOF as `DEL`s of
+those keys.
+
+The hierarchy is a graph without cycles: a tag may sit below several parents,
+and `TAGLINK` refuses a link of a tag to itself or to one of its own
+ancestors (`ERR the link would make the tag its own descendant`). It is saved
+with snapshots and the AOF and sent to replicas.
+
+The tag commands have entries in `COMMAND INFO` and `COMMAND DOCS` and belong
+to ACL categories like Redis' commands: `SETTAG`, `ADDTAG`, `REMTAG`,
+`INVALIDATE`, `TAGLINK` and `TAGUNLINK` are `@write`, the others `@read`, and
+`SETTAG`, `ADDTAG`, `REMTAG` and `TAGS` take their key's ACL key permission.
+The writes are refused in read-only scripts (`EVAL_RO`, `FCALL_RO`), count
+towards the save rules, and those that may grow memory are refused with
+`OOM` over `maxmemory` under `noeviction`.
+
+`INFO tags` (or `INFO everything`) reports:
+
+| Field | Meaning |
+|---|---|
+| `tags` | tags that have at least one key |
+| `tag_memberships` | (tag, key) pairs |
+| `tag_links` | links of the hierarchy |
+| `invalidations` | `INVALIDATE` commands run since the last `CONFIG RESETSTAT` |
+| `invalidated_keys` | keys they deleted |
+| `invalidate_max_usec` | the longest one, in microseconds |
+
+An `INVALIDATE` that takes `latency-monitor-threshold` or longer is recorded
+as the `invalidate` event of `LATENCY`. The metrics endpoint exports
+`cachestorm_tags`, `cachestorm_tag_memberships`,
+`cachestorm_tag_invalidations_total` and
+`cachestorm_tag_invalidated_keys_total`.
 
 ---
 

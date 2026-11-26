@@ -92,14 +92,27 @@ The subscription opens its own connection; the original client stays usable for 
 ### CacheStorm-Specific Features
 
 ```typescript
-// Tag-based invalidation
-await client.setWithTags('user:1', userData, ['user', 'session']);
+// Value, expiry and tags in one atomic write
+await client.set('user:1', userData, { EX: 300, TAGS: ['user:1', 'users'] });
+await client.setWithTags('report', data, ['reports']); // no expiry
 
-// Invalidate by tag
-await client.invalidate('user');
+// Tag an existing key, or untag it; each resolves to how many tags changed
+await client.addTags('session:9', 'user:1');
+await client.removeTags('session:9', 'user:1');
 
-// Get keys by tag
-const keys = await client.tagKeys('user');
+// Delete every key of the tags, atomically; resolves to how many were deleted
+await client.invalidate('user:1', 'users');
+
+// Tag hierarchy: invalidateCascade also reaches the tags linked below
+await client.tagLink('catalog', 'category:shoes');
+await client.invalidateCascade('catalog');
+await client.tagChildren('catalog');
+await client.tagUnlink('catalog', 'category:shoes');
+
+// Inspect
+await client.tagKeys('users');
+await client.tagCount('users');
+await client.tags('user:1');
 ```
 
 ## API Reference

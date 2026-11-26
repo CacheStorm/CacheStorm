@@ -70,13 +70,13 @@ func TestCommandIntrospectionReplies(t *testing.T) {
 }
 
 func TestCommandMetaCoversRedisTable(t *testing.T) {
-	for name := range redisCommandSpecs {
+	for name := range redisNativeCommandSpecs {
 		m := redisCommandMeta(name)
 		if m == nil || m.docs == nil {
 			t.Fatalf("%s has no generated COMMAND INFO/DOCS entry", name)
 		}
-		if m.arity != redisCommandSpecs[name].Arity {
-			t.Fatalf("%s arity %d, spec %d", name, m.arity, redisCommandSpecs[name].Arity)
+		if m.arity != redisNativeCommandSpecs[name].Arity {
+			t.Fatalf("%s arity %d, spec %d", name, m.arity, redisNativeCommandSpecs[name].Arity)
 		}
 	}
 	for sub := range redisSubcommandCategories {

@@ -173,7 +173,7 @@ export class CacheStormClient extends EventEmitter {
     if ((options as Record<string, unknown> | undefined)?.namespace !== undefined) {
       throw new Error('SET option "namespace" is not implemented');
     }
-    if (options?.TAGS) {
+    if (options?.TAGS && options.TAGS.length > 0) {
       args.push('TAGS');
       args.push(...options.TAGS);
     }
@@ -321,10 +321,48 @@ export class CacheStormClient extends EventEmitter {
   }
 
   // CacheStorm-specific commands
-  /** Deletes every key that has any of the tags, in one atomic command. */
+  /** Deletes every key that has any of the tags, in one atomic command, and returns how many it deleted. */
   async invalidate(...tags: string[]): Promise<number> {
     if (tags.length === 0) return 0;
     return this.sendCommand(['INVALIDATE', ...tags]) as Promise<number>;
+  }
+
+  /** Like invalidate, and also reaches the tags linked below them with tagLink. */
+  async invalidateCascade(...tags: string[]): Promise<number> {
+    if (tags.length === 0) return 0;
+    return this.sendCommand(['INVALIDATE', ...tags, 'CASCADE']) as Promise<number>;
+  }
+
+  /** Returns how many keys have the tag. */
+  async tagCount(tag: string): Promise<number> {
+    return this.sendCommand(['TAGCOUNT', tag]) as Promise<number>;
+  }
+
+  /** Adds tags to an existing key and returns how many it did not have. */
+  async addTags(key: string, ...tags: string[]): Promise<number> {
+    if (tags.length === 0) return 0;
+    return this.sendCommand(['ADDTAG', key, ...tags]) as Promise<number>;
+  }
+
+  /** Removes tags from a key and returns how many it had. */
+  async removeTags(key: string, ...tags: string[]): Promise<number> {
+    if (tags.length === 0) return 0;
+    return this.sendCommand(['REMTAG', key, ...tags]) as Promise<number>;
+  }
+
+  /** Links child below parent, so invalidateCascade(parent) reaches child's keys. A link that would make a tag its own descendant is refused. */
+  async tagLink(parent: string, child: string): Promise<string> {
+    return this.sendCommand(['TAGLINK', parent, child]) as Promise<string>;
+  }
+
+  /** Removes the link between parent and child. */
+  async tagUnlink(parent: string, child: string): Promise<string> {
+    return this.sendCommand(['TAGUNLINK', parent, child]) as Promise<string>;
+  }
+
+  /** Returns the tags linked directly below the tag, sorted. */
+  async tagChildren(tag: string): Promise<string[]> {
+    return this.sendCommand(['TAGCHILDREN', tag]) as Promise<string[]>;
   }
 
   async tagKeys(tag: string): Promise<string[]> {

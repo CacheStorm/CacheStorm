@@ -77,22 +77,18 @@ func cmdCacheBulkDel(ctx *Context) error {
 }
 
 func deleteMatching(ctx *Context, pattern string, limit int64) int64 {
-	args := [][]byte{}
+	var deleted []string
 	for _, key := range ctx.Store.Keys() {
-		if limit > 0 && int64(len(args)) >= limit {
+		if limit > 0 && int64(len(deleted)) >= limit {
 			break
 		}
 		if matchPattern(key, pattern) && ctx.Store.Delete(key) {
-			ctx.notify(store.NotifyGeneric, "del", key)
-			args = append(args, []byte(key))
+			deleted = append(deleted, key)
 		}
 	}
-	if len(args) == 0 {
-		ctx.PropagateAs()
-	} else {
-		ctx.PropagateAs(ExecutedCommand{Name: "DEL", Args: args, DB: ctx.DB})
-	}
-	return int64(len(args))
+	propagateDeletes(ctx, deleted)
+	announceDeletes(ctx, deleted)
+	return int64(len(deleted))
 }
 
 func cmdCacheStats(ctx *Context) error {

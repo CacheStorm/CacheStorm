@@ -124,7 +124,11 @@ func (s *Server) restoreTagLinks(payload []byte) error {
 			}
 			db = n
 		case name == "TAGLINK" && len(cmd.Args) == 2:
-			s.dbs.DB(db).GetTagIndex().Link(string(cmd.Args[0]), string(cmd.Args[1]))
+			if err := s.dbs.DB(db).GetTagIndex().Link(string(cmd.Args[0]), string(cmd.Args[1])); err != nil {
+				// A link closing a cycle, which an older version accepted,
+				// is left out.
+				continue
+			}
 		default:
 			return fmt.Errorf("unexpected command %s", name)
 		}

@@ -55,7 +55,7 @@ for n in names:
     flags = [cmdblob.FLAG_NAME.get(f, f.lower()) for f in cmdblob.CMD_FLAGS if f in fl]
     cats = cmdblob.acl_of(s, fl)
     q = lambda xs: '[]string{' + ', '.join('"%s"' % x for x in xs) + '}'
-    st = upsert(st, 'redisCommandSpecs', n.upper(),
+    st = upsert(st, 'redisNativeCommandSpecs', n.upper(),
                 '{Arity: %d, Flags: %s, FirstKey: %d, LastKey: %d, KeyStep: %d, Categories: %s}' % (s['arity'], q(flags), first, last, step, q(cats)))
 open(data, 'w').write(dt)
 open(specs, 'w').write(st)
