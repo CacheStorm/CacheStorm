@@ -1,6 +1,7 @@
 package search
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -25,6 +26,9 @@ const (
 	qVector
 	qWildcardQuery
 	qMissing
+	// qGeoShape is @field:[PREDICATE $shape]: str is the WKT, dist the
+	// predicate (see geoshape.go), shape it parsed.
+	qGeoShape
 )
 
 // allFields is the field mask of a node no modifier restricts.
@@ -45,6 +49,14 @@ type qnode struct {
 	// str is a token's term, an affix's or a fuzzy term's text.
 	str      string
 	expanded bool
+	// phonetic is the node's $phonetic attribute: 0 unset, 1 true, 2
+	// false.
+	phonetic int8
+	shape    *geoShape
+	// slop (with hasSlop) and inOrder constrain where an intersection's
+	// terms lie: SLOP and INORDER, or $slop and $inorder.
+	slop             int
+	hasSlop, inOrder bool
 	// prefix and suffix tell an affix's kind: both for an infix.
 	prefix, suffix bool
 	dist           int
@@ -135,6 +147,16 @@ func (idx *Index) expand(pn **qnode) {
 		syn := tokenNode(g)
 		syn.expanded, syn.mask = true, n.mask
 		u.add(syn)
+	}
+	// RediSearch's default expander: synonyms, then the sound of the
+	// word where a field of the query matches by sound, then stems.
+	if n.phonetic == 1 || n.phonetic == 0 && idx.phoneticIn(n.mask) {
+		if code := phoneticCode(n.str); code != "" {
+			union()
+			ph := tokenNode(code)
+			ph.expanded, ph.mask = true, n.mask
+			u.add(ph)
+		}
 	}
 	if idx.Language != "english" {
 		return
@@ -277,6 +299,8 @@ func (idx *Index) dump(b *strings.Builder, n *qnode, depth int) {
 		b.WriteString("WILDCARD{" + n.str + "}")
 	case qMissing:
 		b.WriteString("ISMISSING{" + n.field + "}")
+	case qGeoShape:
+		fmt.Fprintf(b, "GEOSHAPE{%d %s}", n.dist, n.str)
 	case qVector:
 		b.WriteString("VECTOR {")
 		if len(n.children) > 0 {
@@ -577,4 +601,184 @@ func withinRangeInOrder(offsets [][]int, maxSlop int) bool {
 			return true
 		}
 	}
+}
+
+// applySlop gives the intersections of a query SLOP and INORDER, where
+// their own attributes do not say otherwise.
+func applySlop(n *qnode, opts QueryOptions) {
+	if n == nil {
+		return
+	}
+	if n.typ == qPhrase && !n.exact {
+		if opts.HasSlop && !n.hasSlop {
+			n.slop, n.hasSlop = opts.Slop, true
+		}
+		if opts.InOrder {
+			n.inOrder = true
+		}
+	}
+	for _, c := range n.children {
+		applySlop(c, opts)
+	}
+}
+
+// phraseWithin reports whether doc holds the intersection's terms within
+// its slop, in order with inOrder, as RediSearch's IndexResult_IsWithinRange
+// checks their positions: children without positions (negations, numeric
+// or tag filters) are left out.
+func (idx *Index) phraseWithin(n *qnode, doc *Document) bool {
+	stream := idx.wordStream(doc)
+	var offsets [][]int
+	for _, c := range n.children {
+		if pos := idx.nodeOffsets(c, stream); len(pos) > 0 {
+			offsets = append(offsets, pos)
+		}
+	}
+	if len(offsets) == 0 {
+		return true
+	}
+	slop := math.MaxInt32
+	if n.hasSlop {
+		slop = n.slop
+	}
+	if n.inOrder {
+		return withinRangeInOrder(offsets, slop)
+	}
+	return withinRangeUnordered(offsets, slop)
+}
+
+// streamWord is a word of a document's text and the field it is in.
+type streamWord struct {
+	w string
+	f *Field
+}
+
+// wordStream is the document's indexed words in position order, as
+// textStream, with their fields.
+func (idx *Index) wordStream(doc *Document) []streamWord {
+	var out []streamWord
+	for i := range idx.Fields {
+		if f := &idx.Fields[i]; f.Type == FieldText {
+			for _, w := range doc.field(i).strs {
+				out = append(out, streamWord{w, f})
+			}
+		}
+	}
+	return out
+}
+
+// nodeOffsets are the positions, from 1, of the words a query node matches
+// in the document's text: its terms, their stems, sounds and synonyms.
+func (idx *Index) nodeOffsets(n *qnode, stream []streamWord) []int {
+	var terms []string
+	var collect func(*qnode)
+	collect = func(n *qnode) {
+		if n.typ == qToken {
+			terms = append(terms, n.str)
+		}
+		if n.typ == qNot {
+			return
+		}
+		for _, c := range n.children {
+			collect(c)
+		}
+	}
+	collect(n)
+	var out []int
+	for i, sw := range stream {
+		for _, t := range terms {
+			if idx.termAt(t, sw) {
+				out = append(out, i+1)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// termAt reports whether index term t was recorded at a word: the word
+// itself, "+stem" in a field that stems, "<sound" in a PHONETIC field,
+// "~group" for a word of a synonym group.
+func (idx *Index) termAt(t string, sw streamWord) bool {
+	switch {
+	case sw.w == t:
+		return true
+	case strings.HasPrefix(t, "+"):
+		return !sw.f.NoStem && len(sw.w) >= minStemLength() && sw.w != t[1:] && snowballEnglish(sw.w) == t[1:]
+	case strings.HasPrefix(t, "<"):
+		return sw.f.Phonetic && len(sw.w) >= minPhoneticLength() && phoneticCode(sw.w) == t
+	case strings.HasPrefix(t, "~"):
+		return hasString(idx.synonymGroups(sw.w), t)
+	}
+	return false
+}
+
+// withinRangeUnordered is RediSearch's unordered slop test: some position
+// of each term such that the span between the first and the last, less the
+// terms themselves, is at most maxSlop.
+func withinRangeUnordered(offsets [][]int, maxSlop int) bool {
+	num := len(offsets)
+	next := make([]int, num)
+	positions := make([]int, num)
+	const eof = math.MaxInt32
+	read := func(i int) int {
+		if next[i] >= len(offsets[i]) {
+			return eof
+		}
+		next[i]++
+		return offsets[i][next[i]-1]
+	}
+	for i := range offsets {
+		positions[i] = read(i)
+	}
+	maxIdx := 0
+	for i := range positions {
+		if positions[i] > positions[maxIdx] {
+			maxIdx = i
+		}
+	}
+	for {
+		minIdx := 0
+		for i := range positions {
+			if positions[i] < positions[minIdx] {
+				minIdx = i
+			}
+		}
+		if minIdx != maxIdx {
+			if positions[maxIdx]-positions[minIdx]-(num-1) <= maxSlop {
+				return true
+			}
+		}
+		positions[minIdx] = read(minIdx)
+		if positions[minIdx] != eof && positions[minIdx] > positions[maxIdx] {
+			maxIdx = minIdx
+		}
+		if positions[minIdx] == eof {
+			return false
+		}
+	}
+}
+
+// applySlopAttribute applies $slop (a number, negative for none) or
+// $inorder (true/1 or false/0) to a node.
+func applySlopAttribute(n *qnode, name, v string) error {
+	if name == "slop" {
+		s, err := strconv.Atoi(v)
+		if err != nil {
+			return errors.New("Invalid value (" + v + ") for `slop`") //nolint:staticcheck // RediSearch's reply text
+		}
+		if s >= 0 {
+			n.slop, n.hasSlop = s, true
+		}
+		return nil
+	}
+	switch strings.ToLower(v) {
+	case "true", "1":
+		n.inOrder = true
+	case "false", "0":
+		n.inOrder = false
+	default:
+		return errors.New("Invalid value (" + v + ") for `inorder`") //nolint:staticcheck // RediSearch's reply text
+	}
+	return nil
 }

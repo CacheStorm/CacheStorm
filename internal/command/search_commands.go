@@ -287,6 +287,7 @@ func cmdFTINFO(ctx *Context) error {
 	if !ok {
 		return ctx.WriteError(search.ErrUnknownIndex)
 	}
+	resp3 := ctx.Writer.IsRESP3()
 	keyType := "HASH"
 	if idx.JSON {
 		keyType = "JSON"
@@ -295,17 +296,18 @@ func cmdFTINFO(ctx *Context) error {
 	for i, p := range idx.Prefixes {
 		prefixes[i] = resp.SimpleString(p)
 	}
+	ss := resp.SimpleString
+	num := func(f float64) *resp.Value { return resp.DoubleValue(search.FormatNumber(f)) }
 	attrs := make([]*resp.Value, 0, len(idx.Fields))
 	for _, f := range idx.Fields {
-		a := []*resp.Value{resp.SimpleString("identifier"), resp.SimpleString(f.Identifier),
-			resp.SimpleString("attribute"), resp.SimpleString(f.Name), resp.SimpleString("type"), resp.SimpleString(f.Type.String())}
+		a := []*resp.Value{ss("identifier"), ss(f.Identifier), ss("attribute"), ss(f.Name), ss("type"), ss(f.Type.String())}
 		switch f.Type {
 		case search.FieldText:
-			a = append(a, resp.SimpleString("WEIGHT"), resp.BulkString(search.FormatNumber(f.Weight)))
+			a = append(a, ss("WEIGHT"), num(f.Weight))
 		case search.FieldVector:
 			v := f.Vector
-			a = append(a, resp.SimpleString("algorithm"), resp.SimpleString(v.Algorithm), resp.SimpleString("data_type"), resp.SimpleString(v.Type),
-				resp.SimpleString("dim"), resp.IntegerValue(int64(v.Dim)), resp.SimpleString("distance_metric"), resp.SimpleString(v.Metric))
+			a = append(a, ss("algorithm"), ss(v.Algorithm), ss("data_type"), ss(v.Type),
+				ss("dim"), resp.IntegerValue(int64(v.Dim)), ss("distance_metric"), ss(v.Metric))
 			if v.Algorithm == "HNSW" {
 				m, ef := int64(16), int64(200)
 				for _, p := range v.Params {
@@ -318,64 +320,147 @@ func cmdFTINFO(ctx *Context) error {
 						}
 					}
 				}
-				a = append(a, resp.SimpleString("M"), resp.IntegerValue(m), resp.SimpleString("ef_construction"), resp.IntegerValue(ef))
+				a = append(a, ss("M"), resp.IntegerValue(m), ss("ef_construction"), resp.IntegerValue(ef))
 			}
 		case search.FieldTag:
-			a = append(a, resp.SimpleString("SEPARATOR"), resp.BulkString(string(f.Separator)))
-			if f.CaseSensitive {
-				a = append(a, resp.SimpleString("CASESENSITIVE"))
-			}
+			a = append(a, ss("SEPARATOR"), ss(string(f.Separator)))
+		case search.FieldGeoShape:
+			a = append(a, ss("coord_system"), ss(f.CoordSystem))
 		}
 		// The flags in RediSearch's order; a sortable NUMERIC, or TAG
-		// kept as written, is unnormalised.
+		// kept as written, is unnormalised. RESP3 lists them under
+		// "flags".
+		var flags []*resp.Value
+		if f.Type == search.FieldTag && f.CaseSensitive {
+			flags = append(flags, ss("CASESENSITIVE"))
+		}
 		if f.Sortable {
-			a = append(a, resp.SimpleString("SORTABLE"))
+			flags = append(flags, ss("SORTABLE"))
 			if f.UNF || f.Type == search.FieldNumeric || f.Type == search.FieldTag && f.CaseSensitive {
-				a = append(a, resp.SimpleString("UNF"))
+				flags = append(flags, ss("UNF"))
 			}
 		}
 		if f.NoStem {
-			a = append(a, resp.SimpleString("NOSTEM"))
+			flags = append(flags, ss("NOSTEM"))
 		}
 		if f.NoIndex {
-			a = append(a, resp.SimpleString("NOINDEX"))
+			flags = append(flags, ss("NOINDEX"))
 		}
 		if f.WithSuffixTrie {
-			a = append(a, resp.SimpleString("WITHSUFFIXTRIE"))
+			flags = append(flags, ss("WITHSUFFIXTRIE"))
 		}
 		if f.IndexEmpty {
-			a = append(a, resp.SimpleString("INDEXEMPTY"))
+			flags = append(flags, ss("INDEXEMPTY"))
 		}
 		if f.IndexMissing {
-			a = append(a, resp.SimpleString("INDEXMISSING"))
+			flags = append(flags, ss("INDEXMISSING"))
 		}
-		attrs = append(attrs, resp.ArrayValue(a))
+		if resp3 {
+			if flags == nil {
+				flags = []*resp.Value{}
+			}
+			attrs = append(attrs, resp.PairsValue(append(a, ss("flags"), resp.ArrayValue(flags))))
+		} else {
+			attrs = append(attrs, resp.ArrayValue(append(a, flags...)))
+		}
 	}
-	docs, terms, records := idx.Summary(ctx.Store)
+	in := idx.Info(ctx.Store)
 	idle, total, own := searchIndexesFor(ctx).CursorStats(idx)
-	return ctx.WriteArray([]*resp.Value{
-		resp.SimpleString("index_name"), resp.SimpleString(idx.Name),
-		resp.SimpleString("index_options"), resp.ArrayValue([]*resp.Value{}),
-		resp.SimpleString("index_definition"), resp.ArrayValue([]*resp.Value{
-			resp.SimpleString("key_type"), resp.SimpleString(keyType),
-			resp.SimpleString("prefixes"), resp.ArrayValue(prefixes),
-			resp.SimpleString("default_score"), resp.BulkString(search.FormatNumber(idx.Score)),
+	records := in.TextRecords + in.TagRecords
+	// RediSearch's memory figures, estimated from what this index keeps:
+	// its inverted lists (about a varint per record and a block header
+	// per term or tag value), positions, the document and key tables and
+	// the sortable values.
+	const mb = 1 << 20
+	blocks := in.Terms + in.TagValues
+	inverted := float64(records*8 + blocks*48)
+	offsets := float64(in.TextRecords)
+	docTable := float64(in.Docs*96 + 16*1024)
+	keyTable := float64(in.Docs * 48)
+	sortable := 0.0
+	for _, f := range idx.Fields {
+		if f.Sortable {
+			sortable += float64(in.Docs * 32)
+		}
+	}
+	tagOverhead, textOverhead := float64(in.TagValues*64), float64(in.Terms*32)
+	ratio := func(a, b float64) *resp.Value {
+		if b == 0 {
+			return resp.DoubleValue("nan")
+		}
+		return num(a / b)
+	}
+	dialects := make([]*resp.Value, 0, 8)
+	for d := 1; d <= 4; d++ {
+		dialects = append(dialects, ss("dialect_"+strconv.Itoa(d)), resp.IntegerValue(int64(in.Dialects>>(d-1)&1)))
+	}
+	indexErrors := func(withStatus bool) *resp.Value {
+		e := []*resp.Value{ss("indexing failures"), resp.IntegerValue(0), ss("last indexing error"), ss("N/A"),
+			ss("last indexing error key"), resp.BulkString("N/A")}
+		if withStatus {
+			e = append(e, ss("background indexing status"), ss("OK"))
+		}
+		return resp.PairsValue(e)
+	}
+	fieldStats := make([]*resp.Value, 0, len(idx.Fields))
+	for _, f := range idx.Fields {
+		st := []*resp.Value{ss("identifier"), ss(f.Identifier), ss("attribute"), ss(f.Name), ss("Index Errors"), indexErrors(false)}
+		if f.Type == search.FieldVector {
+			// A vector field's memory: its vectors and their graph.
+			st = append(st, ss("memory"), resp.IntegerValue(int64(in.Docs*f.Vector.Dim*8)), ss("marked_deleted"), resp.IntegerValue(0))
+		}
+		fieldStats = append(fieldStats, resp.PairsValue(st))
+	}
+	return ctx.WriteValue(resp.PairsValue([]*resp.Value{
+		ss("index_name"), ss(idx.Name),
+		ss("index_options"), resp.ArrayValue([]*resp.Value{}),
+		ss("index_definition"), resp.PairsValue([]*resp.Value{
+			ss("key_type"), ss(keyType),
+			ss("prefixes"), resp.ArrayValue(prefixes),
+			ss("default_score"), num(idx.Score),
+			ss("indexes_all"), ss("false"),
 		}),
-		resp.SimpleString("attributes"), resp.ArrayValue(attrs),
-		resp.SimpleString("num_docs"), resp.IntegerValue(int64(docs)),
-		resp.SimpleString("max_doc_id"), resp.IntegerValue(int64(docs)),
-		resp.SimpleString("num_terms"), resp.IntegerValue(int64(terms)),
-		resp.SimpleString("num_records"), resp.IntegerValue(int64(records)),
-		resp.SimpleString("indexing"), resp.IntegerValue(0),
-		resp.SimpleString("percent_indexed"), resp.BulkString("1"),
-		resp.SimpleString("hash_indexing_failures"), resp.IntegerValue(0),
-		resp.SimpleString("cursor_stats"), resp.ArrayValue([]*resp.Value{
-			resp.SimpleString("global_idle"), resp.IntegerValue(int64(idle)),
-			resp.SimpleString("global_total"), resp.IntegerValue(int64(total)),
-			resp.SimpleString("index_capacity"), resp.IntegerValue(int64(search.IndexCursorLimit())),
-			resp.SimpleString("index_total"), resp.IntegerValue(int64(own)),
+		ss("attributes"), resp.ArrayValue(attrs),
+		ss("num_docs"), resp.IntegerValue(int64(in.Docs)),
+		ss("max_doc_id"), resp.IntegerValue(int64(in.Docs)),
+		ss("num_terms"), resp.IntegerValue(int64(in.Terms)),
+		ss("num_records"), resp.IntegerValue(int64(records)),
+		ss("inverted_sz_mb"), num(inverted / mb),
+		ss("vector_index_sz_mb"), num(0),
+		ss("total_inverted_index_blocks"), resp.IntegerValue(int64(blocks)),
+		ss("offset_vectors_sz_mb"), num(offsets / mb),
+		ss("doc_table_size_mb"), num(docTable / mb),
+		ss("sortable_values_size_mb"), num(sortable / mb),
+		ss("key_table_size_mb"), num(keyTable / mb),
+		ss("tag_overhead_sz_mb"), num(tagOverhead / mb),
+		ss("text_overhead_sz_mb"), num(textOverhead / mb),
+		ss("total_index_memory_sz_mb"), num((inverted + offsets + docTable + sortable + keyTable + tagOverhead + textOverhead) / mb),
+		ss("geoshapes_sz_mb"), num(0),
+		ss("records_per_doc_avg"), ratio(float64(records), float64(in.Docs)),
+		ss("bytes_per_record_avg"), ratio(inverted, float64(records)),
+		ss("offsets_per_term_avg"), ratio(offsets, float64(records)),
+		ss("offset_bits_per_record_avg"), ratio(offsets*8, float64(in.TextRecords)),
+		ss("hash_indexing_failures"), resp.IntegerValue(0),
+		ss("total_indexing_time"), num(0),
+		ss("indexing"), resp.IntegerValue(0),
+		ss("percent_indexed"), num(1),
+		ss("number_of_uses"), resp.IntegerValue(in.Uses),
+		ss("cleaning"), resp.IntegerValue(0),
+		ss("gc_stats"), resp.PairsValue([]*resp.Value{
+			ss("bytes_collected"), num(0), ss("total_ms_run"), num(0), ss("total_cycles"), num(0),
+			ss("average_cycle_time_ms"), resp.DoubleValue("nan"), ss("last_run_time_ms"), num(0),
+			ss("gc_numeric_trees_missed"), num(0), ss("gc_blocks_denied"), num(0),
 		}),
-	})
+		ss("cursor_stats"), resp.PairsValue([]*resp.Value{
+			ss("global_idle"), resp.IntegerValue(int64(idle)),
+			ss("global_total"), resp.IntegerValue(int64(total)),
+			ss("index_capacity"), resp.IntegerValue(int64(search.IndexCursorLimit())),
+			ss("index_total"), resp.IntegerValue(int64(own)),
+		}),
+		ss("dialect_stats"), resp.PairsValue(dialects),
+		ss("Index Errors"), indexErrors(true),
+		ss("field statistics"), resp.ArrayValue(fieldStats),
+	}))
 }
 
 // countedArgs reads the n arguments after a count at args[i]; it returns
@@ -438,6 +523,8 @@ func parseLimit(ctx *Context, i int) (offset, num int, err error) {
 }
 
 type searchRequest struct {
+	// highlight is set by HIGHLIGHT or SUMMARIZE.
+	highlight                           bool
 	noContent, withScores, withSortKeys bool
 	withPayloads                        bool
 	opts                                search.QueryOptions
@@ -468,7 +555,9 @@ func parseSearchRequest(ctx *Context) (*searchRequest, error) {
 			r.withSortKeys = true
 		case "WITHPAYLOADS":
 			r.withPayloads = true
-		case "INORDER", "EXPLAINSCORE":
+		case "INORDER":
+			r.opts.InOrder = true
+		case "EXPLAINSCORE":
 		case "FILTER":
 			if i+3 >= n {
 				return nil, errors.New("Bad arguments for FILTER: Expected an argument, but none provided") //nolint:staticcheck // RediSearch's reply text
@@ -562,6 +651,7 @@ func parseSearchRequest(ctx *Context) (*searchRequest, error) {
 			}
 			i = last
 		case "SUMMARIZE", "HIGHLIGHT":
+			r.highlight = true
 			for more := true; more && i+1 < n; {
 				switch strings.ToUpper(ctx.ArgString(i + 1)) {
 				case "FIELDS":
@@ -598,7 +688,14 @@ func parseSearchRequest(ctx *Context) (*searchRequest, error) {
 				r.opts.Scorer = scorer
 			}
 			i++
-		case "SLOP", "TIMEOUT", "LANGUAGE", "EXPANDER", "PAYLOAD":
+		case "SLOP":
+			if i+1 < n {
+				if v, err := strconv.Atoi(ctx.ArgString(i + 1)); err == nil && v >= 0 {
+					r.opts.Slop, r.opts.HasSlop = v, true
+				}
+			}
+			i++
+		case "TIMEOUT", "LANGUAGE", "EXPANDER", "PAYLOAD":
 			i++
 		}
 	}
@@ -617,8 +714,14 @@ func cmdFTSEARCH(ctx *Context) error {
 	if err != nil {
 		return ctx.WriteError(err)
 	}
+	if req.highlight && (idx.NoOffsets || idx.NoHighlight) {
+		return ctx.WriteError(errors.New("Cannot use HIGHLIGHT/SUMMARIZE because NOOFSETS was specified at index level")) //nolint:staticcheck // RediSearch's reply text, typo included
+	}
 	query, err := search.ParseQuery(idx, ctx.ArgString(1), req.opts)
 	if err != nil {
+		return ctx.WriteError(err)
+	}
+	if err := idx.CheckEmptyTags(query); err != nil {
 		return ctx.WriteError(err)
 	}
 	if len(req.filters) > 0 {

@@ -224,6 +224,7 @@ func DefaultDialect() int { return int(configInt("DEFAULT_DIALECT", 2)) }
 func minPrefixLength() int     { return int(configInt("MINPREFIX", 2)) }
 func maxPrefixExpansions() int { return int(configInt("MAXPREFIXEXPANSIONS", 200)) }
 func minStemLength() int       { return int(configInt("MINSTEMLEN", 4)) }
+func minPhoneticLength() int   { return int(configInt("MIN_PHONETIC_TERM_LEN", 3)) }
 func unionHeapMin() int        { return int(configInt("UNION_ITERATOR_HEAP", 20)) }
 
 // CursorMaxIdle is the longest MAXIDLE a cursor may have.

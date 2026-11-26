@@ -50,6 +50,8 @@ type docField struct {
 	nums []float64
 	vec  []float64 // a VECTOR field's vector
 	raw  []string  // full documents and SORTABLE fields
+	// shape is a GEOSHAPE field's point or polygon.
+	shape *geoShape
 }
 
 func fieldBit(pos int) uint64 { return 1 << (uint(pos) & 63) }
@@ -160,6 +162,16 @@ func (idx *Index) Load(key string, entry *store.Entry, full bool) (*Document, bo
 				}
 				df.vec = vec
 			}
+		case FieldGeoShape:
+			if len(values[i]) > 0 {
+				// An invalid shape is an indexing failure: the document
+				// has none, as in RediSearch.
+				if s, err := parseWKT(values[i][0]); err == nil {
+					if s.sph = f.CoordSystem == "SPHERICAL"; s.valid() {
+						df.shape = s
+					}
+				}
+			}
 		case FieldGeo:
 			for _, raw := range values[i] {
 				lonText, latText, ok := strings.Cut(raw, ",")
@@ -173,6 +185,10 @@ func (idx *Index) Load(key string, entry *store.Entry, full bool) (*Document, bo
 			for _, raw := range values[i] {
 				for _, tag := range strings.Split(raw, string(f.Separator)) {
 					tag = strings.TrimSpace(tag)
+					if tag == "" && !f.IndexEmpty {
+						// An empty tag is indexed only with INDEXEMPTY.
+						continue
+					}
 					if !f.CaseSensitive {
 						tag = strings.ToLower(tag)
 					}
@@ -185,6 +201,11 @@ func (idx *Index) Load(key string, entry *store.Entry, full bool) (*Document, bo
 			}
 			bit, w, sw := fieldBit(i), termWeight(f.Weight), stemWeight(f.Weight)
 			for _, raw := range values[i] {
+				if raw == "" && f.IndexEmpty {
+					// INDEXEMPTY: the empty value is the empty term,
+					// which '' and an empty parameter look for.
+					doc.addTerm("", w, bit)
+				}
 				for _, t := range Tokenize(raw) {
 					if idx.Stopwords[t] {
 						continue
@@ -199,6 +220,11 @@ func (idx *Index) Load(key string, entry *store.Entry, full bool) (*Document, bo
 					}
 					for _, g := range idx.synonymGroups(t) {
 						doc.addTerm(g, w, bit)
+					}
+					if f.Phonetic && len(t) >= minPhoneticLength() {
+						if code := phoneticCode(t); code != "" {
+							doc.addTerm(code, w, bit)
+						}
 					}
 				}
 			}
@@ -331,6 +357,11 @@ type QueryOptions struct {
 	MatchedTerms bool
 	// Scorer is the SCORER, "" for the default (see scorers.go).
 	Scorer string
+	// Slop (with HasSlop) and InOrder are SLOP and INORDER: the terms of
+	// every intersection lie within Slop other terms, in the query's order.
+	Slop    int
+	HasSlop bool
+	InOrder bool
 }
 
 // ErrSyntax is a query syntax error, in RediSearch's words.
@@ -351,6 +382,9 @@ func ParseQuery(idx *Index, q string, opts QueryOptions) (Node, error) {
 	if opts.Dialect == 0 {
 		opts.Dialect = DefaultDialect()
 	}
+	if idx.usage != nil && opts.Dialect >= 1 && opts.Dialect <= 4 {
+		idx.usage.dialects.Or(1 << (opts.Dialect - 1))
+	}
 	if opts.Dialect <= 1 {
 		n, err = parseDialect1(idx, q, opts)
 	} else {
@@ -369,16 +403,74 @@ func ParseQuery(idx *Index, q string, opts QueryOptions) (Node, error) {
 	if err := idx.validate(n); err != nil {
 		return nil, err
 	}
+	if opts.HasSlop || opts.InOrder {
+		applySlop(n, opts)
+	}
 	if !opts.Verbatim {
 		idx.expand(&n)
 	}
 	return n, nil
 }
 
+var errIndexEmpty = errors.New("Use `INDEXEMPTY` in field creation in order to index and query for empty strings") //nolint:staticcheck // RediSearch's reply text
+
+// indexEmptyIn reports whether mask holds a TEXT field with INDEXEMPTY.
+func (idx *Index) indexEmptyIn(mask uint64) bool {
+	for i := range idx.Fields {
+		f := &idx.Fields[i]
+		if f.Type == FieldText && f.IndexEmpty && mask&fieldBit(i) != 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// CheckEmptyTags refuses FT.SEARCH's search for the empty tag of a TAG
+// field without INDEXEMPTY; FT.EXPLAIN shows it and FT.AGGREGATE finds
+// nothing, as in RediSearch.
+func (idx *Index) CheckEmptyTags(n *qnode) error {
+	if n == nil {
+		return nil
+	}
+	if n.typ == qTag {
+		if f := idx.Field(n.field); f != nil && !f.IndexEmpty && hasEmptyToken(n) {
+			return errIndexEmpty
+		}
+		return nil
+	}
+	for _, c := range n.children {
+		if err := idx.CheckEmptyTags(c); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// hasEmptyToken reports whether a tag query looks for the empty tag.
+func hasEmptyToken(n *qnode) bool {
+	if n.typ == qToken && n.str == "" {
+		return true
+	}
+	for _, c := range n.children {
+		if hasEmptyToken(c) {
+			return true
+		}
+	}
+	return false
+}
+
 // validate checks what RediSearch checks of a parsed query.
 func (idx *Index) validate(n Node) error {
 	if n == nil {
 		return nil
+	}
+	// An empty term of a field without INDEXEMPTY is refused when the
+	// query is parsed; '' over every field is not (it matches nothing).
+	if n.typ == qToken && n.str == "" && n.mask != allFields && !idx.indexEmptyIn(n.mask) {
+		return errIndexEmpty
+	}
+	if n.phonetic != 0 && !idx.phoneticIn(n.mask) {
+		return errors.New("field does not support phonetics") //nolint:staticcheck // RediSearch's reply text
 	}
 	if n.typ == qNumeric && n.lo > n.hi {
 		return fmt.Errorf("Invalid numeric range (min > max): @%s:[%s %s]", n.field, cfmtF(n.lo), cfmtF(n.hi)) //nolint:staticcheck // RediSearch's reply text
@@ -499,6 +591,9 @@ func (idx *Index) Match(n Node, doc *Document, opts QueryOptions, stats *Stats) 
 		if n.exact && !idx.exactPhrase(n, doc) {
 			return false, 0
 		}
+		if !n.exact && (n.hasSlop || n.inOrder) && !idx.phraseWithin(n, doc) {
+			return false, 0
+		}
 		return true, total * n.weight
 	case qUnion:
 		matched, total := false, 0.0
@@ -521,6 +616,13 @@ func (idx *Index) Match(n Node, doc *Document, opts QueryOptions, stats *Stats) 
 		}
 		vec := doc.field(f.pos).vec
 		return vec != nil && f.Vector.distance(vec, stats.vectors[n]) <= n.radius, 0
+	case qGeoShape:
+		f := idx.Field(n.field)
+		if f == nil || f.Type != FieldGeoShape || n.shape == nil {
+			return false, 0
+		}
+		s := doc.field(f.pos).shape
+		return s != nil && geoshapeMatch(n.dist, s, n.shape), 0
 	case qMissing:
 		f := idx.Field(n.field)
 		if f == nil {

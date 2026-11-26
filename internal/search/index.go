@@ -50,9 +50,13 @@ type Field struct {
 	// answers suffix queries and empty values without them.
 	WithSuffixTrie bool
 	IndexEmpty     bool
-	Vector         *VectorSpec
-	path           *store.JSONPath
-	pos            int
+	// Phonetic indexes each word's Double Metaphone code (PHONETIC dm:xx).
+	Phonetic bool
+	// CoordSystem is a GEOSHAPE field's FLAT or SPHERICAL.
+	CoordSystem string
+	Vector      *VectorSpec
+	path        *store.JSONPath
+	pos         int
 }
 
 // Index is an index definition. Args are the FT.CREATE arguments after the
@@ -68,9 +72,15 @@ type Index struct {
 	// SkipInitialScan leaves the keys that exist at FT.CREATE out until
 	// they are written again.
 	SkipInitialScan bool
-	Args            []string
-	cacheSet        *cacheSet
-	syn             *synonyms
+	// NoOffsets and NoHighlight (NOOFFSETS, NOHL) refuse HIGHLIGHT and
+	// SUMMARIZE.
+	NoOffsets, NoHighlight bool
+	Args                   []string
+	cacheSet               *cacheSet
+	syn                    *synonyms
+	// usage counts the commands that named the index and the dialects
+	// its queries used, for FT.INFO; an altered index keeps them.
+	usage *indexUsage
 }
 
 //nolint:staticcheck // RediSearch's reply texts
@@ -98,7 +108,7 @@ func stopwordSet(words []string) map[string]bool {
 // ParseIndex reads an FT.CREATE definition: the arguments after the index
 // name.
 func ParseIndex(name string, args []string) (*Index, error) {
-	idx := &Index{Name: name, Score: 1, Language: "english", Stopwords: stopwordSet(DefaultStopwords), Args: append([]string(nil), args...), cacheSet: &cacheSet{}, syn: &synonyms{}}
+	idx := &Index{Name: name, Score: 1, Language: "english", Stopwords: stopwordSet(DefaultStopwords), Args: append([]string(nil), args...), cacheSet: &cacheSet{}, syn: &synonyms{}, usage: &indexUsage{}}
 	i := 0
 	for ; i < len(args); i++ {
 		switch strings.ToUpper(args[i]) {
@@ -150,7 +160,11 @@ func ParseIndex(name string, args []string) (*Index, error) {
 			i++
 		case "SKIPINITIALSCAN":
 			idx.SkipInitialScan = true
-		case "MAXTEXTFIELDS", "NOOFFSETS", "NOHL", "NOFIELDS", "NOFREQS":
+		case "NOOFFSETS":
+			idx.NoOffsets = true
+		case "NOHL":
+			idx.NoHighlight = true
+		case "MAXTEXTFIELDS", "NOFIELDS", "NOFREQS":
 		case "SCHEMA":
 			fields, err := parseSchema(args[i+1:], idx.JSON)
 			if err != nil {
@@ -190,6 +204,16 @@ func parseSchema(args []string, json bool) ([]Field, error) {
 			f.Type = FieldTag
 		case "GEO":
 			f.Type = FieldGeo
+		case "GEOSHAPE":
+			f.Type = FieldGeoShape
+			f.CoordSystem = "SPHERICAL"
+			if i+1 < len(args) {
+				switch strings.ToUpper(args[i+1]) {
+				case "FLAT", "SPHERICAL":
+					f.CoordSystem = strings.ToUpper(args[i+1])
+					i++
+				}
+			}
 		case "VECTOR":
 			f.Type = FieldVector
 			spec, next, err := parseVectorSpec(args, i+1)
@@ -235,6 +259,20 @@ func parseSchema(args []string, json bool) ([]Field, error) {
 			case "INDEXEMPTY":
 				f.IndexEmpty = true
 			case "PHONETIC":
+				if f.Type != FieldText {
+					// Only TEXT takes it: RediSearch reads it as the
+					// next field's name.
+					goto done
+				}
+				if i+1 >= len(args) {
+					return nil, errors.New("PHONETIC requires an argument") //nolint:staticcheck // RediSearch's reply text
+				}
+				switch args[i+1] {
+				case "dm:en", "dm:fr", "dm:pt", "dm:es":
+				default:
+					return nil, errors.New("Matcher Format: <2 chars algorithm>:<2 chars language>. Support algorithms: double metaphone (dm). Supported languages: English (en), French (fr), Portuguese (pt) and Spanish (es)") //nolint:staticcheck // RediSearch's reply text
+				}
+				f.Phonetic = true
 				i++
 			default:
 				goto done
@@ -421,6 +459,10 @@ func (m *IndexManager) Get(name string) (*Index, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	idx, ok := m.indexes[m.resolve(name)]
+	if ok && idx.usage != nil {
+		// RediSearch counts each command that opens the index.
+		idx.usage.uses.Add(1)
+	}
 	return idx, ok
 }
 

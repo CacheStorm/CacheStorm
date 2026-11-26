@@ -1,0 +1,548 @@
+{"cmd": ["hello", "2"]}
+{"cmd": ["flushall"]}
+{"cmd": ["ft.create", "ph", "SCHEMA", "name", "TEXT", "PHONETIC", "dm:en", "other", "TEXT", "m", "TEXT", "NOSTEM", "PHONETIC", "dm:fr"], "want": "+OK\r\n"}
+{"cmd": ["hset", "d1", "name", "Jon", "other", "Jon"], "want": ":2\r\n"}
+{"cmd": ["hset", "d2", "name", "John", "other", "John"], "want": ":2\r\n"}
+{"cmd": ["hset", "d3", "name", "Smith and Schmidt", "other", "Schmidt", "m", "jean john"], "want": ":3\r\n"}
+{"cmd": ["hset", "d4", "name", "al bo xyz", "m", "jon smyth"], "want": ":2\r\n"}
+{"cmd": ["hset", "d5", "name", "Catherine Kathryn", "other", "philip filip"], "want": ":2\r\n"}
+{"cmd": ["ft.search", "ph", "Jon", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD"], "want": "*9\r\n:4\r\n$2\r\nd1\r\n$18\r\n1.7273481236344206\r\n$2\r\nd4\r\n$18\r\n1.0035027169466282\r\n$2\r\nd3\r\n$19\r\n0.35656373391331614\r\n$2\r\nd2\r\n$18\r\n0.3516114597218614\r\n"}
+{"cmd": ["ft.search", "ph", "Jon", "WITHSCORES", "NOCONTENT", "SCORER", "TFIDF"], "want": "*9\r\n:4\r\n$2\r\nd4\r\n$1\r\n3\r\n$2\r\nd1\r\n$3\r\n2.5\r\n$2\r\nd3\r\n$1\r\n1\r\n$2\r\nd2\r\n$3\r\n0.5\r\n"}
+{"cmd": ["ft.search", "ph", "Jon", "WITHSCORES", "NOCONTENT", "SCORER", "BM25"], "want": "*9\r\n:4\r\n$2\r\nd1\r\n$18\r\n1.1062935541430612\r\n$2\r\nd4\r\n$18\r\n0.7978723171530083\r\n$2\r\nd3\r\n$19\r\n0.42016805754602926\r\n$2\r\nd2\r\n$18\r\n0.2659574390510028\r\n"}
+{"cmd": ["ft.explain", "ph", "Jon"], "want": "$49\r\nUNION {\n  jon\n  <JN(expanded)\n  +jon(expanded)\n}\n\r\n"}
+{"cmd": ["ft.explain", "ph", "Jon", "DIALECT", "2"], "want": "$49\r\nUNION {\n  jon\n  <JN(expanded)\n  +jon(expanded)\n}\n\r\n"}
+{"cmd": ["ft.search", "ph", "@name:Jon", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD"], "want": "*5\r\n:2\r\n$2\r\nd1\r\n$18\r\n1.7273481236344206\r\n$2\r\nd2\r\n$18\r\n0.3516114597218614\r\n"}
+{"cmd": ["ft.search", "ph", "@name:Jon", "WITHSCORES", "NOCONTENT", "SCORER", "TFIDF"], "want": "*5\r\n:2\r\n$2\r\nd1\r\n$3\r\n2.5\r\n$2\r\nd2\r\n$3\r\n0.5\r\n"}
+{"cmd": ["ft.search", "ph", "@name:Jon", "WITHSCORES", "NOCONTENT", "SCORER", "BM25"], "want": "*5\r\n:2\r\n$2\r\nd1\r\n$18\r\n1.1062935541430612\r\n$2\r\nd2\r\n$18\r\n0.2659574390510028\r\n"}
+{"cmd": ["ft.explain", "ph", "@name:Jon"], "want": "$73\r\n@name:UNION {\n  @name:jon\n  @name:<JN(expanded)\n  @name:+jon(expanded)\n}\n\r\n"}
+{"cmd": ["ft.explain", "ph", "@name:Jon", "DIALECT", "2"], "want": "$73\r\n@name:UNION {\n  @name:jon\n  @name:<JN(expanded)\n  @name:+jon(expanded)\n}\n\r\n"}
+{"cmd": ["ft.search", "ph", "@other:Jon", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD"], "want": "*3\r\n:1\r\n$2\r\nd1\r\n$18\r\n1.3757366639125592\r\n"}
+{"cmd": ["ft.search", "ph", "@other:Jon", "WITHSCORES", "NOCONTENT", "SCORER", "TFIDF"], "want": "*3\r\n:1\r\n$2\r\nd1\r\n$1\r\n2\r\n"}
+{"cmd": ["ft.search", "ph", "@other:Jon", "WITHSCORES", "NOCONTENT", "SCORER", "BM25"], "want": "*3\r\n:1\r\n$2\r\nd1\r\n$18\r\n0.8403361150920585\r\n"}
+{"cmd": ["ft.explain", "ph", "@other:Jon"], "want": "$54\r\n@other:UNION {\n  @other:jon\n  @other:+jon(expanded)\n}\n\r\n"}
+{"cmd": ["ft.explain", "ph", "@other:Jon", "DIALECT", "2"], "want": "$54\r\n@other:UNION {\n  @other:jon\n  @other:+jon(expanded)\n}\n\r\n"}
+{"cmd": ["ft.search", "ph", "@m:john", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD"], "want": "*3\r\n:1\r\n$2\r\nd3\r\n$18\r\n0.7553063940485881\r\n"}
+{"cmd": ["ft.search", "ph", "@m:john", "WITHSCORES", "NOCONTENT", "SCORER", "TFIDF"], "want": "*3\r\n:1\r\n$2\r\nd3\r\n$1\r\n1\r\n"}
+{"cmd": ["ft.search", "ph", "@m:john", "WITHSCORES", "NOCONTENT", "SCORER", "BM25"], "want": "*3\r\n:1\r\n$2\r\nd3\r\n$18\r\n0.5319148781020056\r\n"}
+{"cmd": ["ft.explain", "ph", "@m:john"], "want": "$8\r\n@m:john\n\r\n"}
+{"cmd": ["ft.explain", "ph", "@m:john", "DIALECT", "2"], "want": "$8\r\n@m:john\n\r\n"}
+{"cmd": ["ft.search", "ph", "@m|other:jon", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD"], "want": "*7\r\n:3\r\n$2\r\nd1\r\n$18\r\n1.3757366639125592\r\n$2\r\nd4\r\n$18\r\n1.0035027169466282\r\n$2\r\nd3\r\n$19\r\n0.35656373391331614\r\n"}
+{"cmd": ["ft.search", "ph", "@m|other:jon", "WITHSCORES", "NOCONTENT", "SCORER", "TFIDF"], "want": "*7\r\n:3\r\n$2\r\nd4\r\n$1\r\n3\r\n$2\r\nd1\r\n$1\r\n2\r\n$2\r\nd3\r\n$1\r\n1\r\n"}
+{"cmd": ["ft.search", "ph", "@m|other:jon", "WITHSCORES", "NOCONTENT", "SCORER", "BM25"], "want": "*7\r\n:3\r\n$2\r\nd1\r\n$18\r\n0.8403361150920585\r\n$2\r\nd4\r\n$18\r\n0.7978723171530083\r\n$2\r\nd3\r\n$19\r\n0.42016805754602926\r\n"}
+{"cmd": ["ft.explain", "ph", "@m|other:jon"], "want": "$83\r\n@other|m:UNION {\n  @other|m:jon\n  @other|m:<JN(expanded)\n  @other:+jon(expanded)\n}\n\r\n"}
+{"cmd": ["ft.explain", "ph", "@m|other:jon", "DIALECT", "2"], "want": "$83\r\n@other|m:UNION {\n  @other|m:jon\n  @other|m:<JN(expanded)\n  @other:+jon(expanded)\n}\n\r\n"}
+{"cmd": ["ft.search", "ph", "smith", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD"], "want": "*5\r\n:2\r\n$2\r\nd3\r\n$16\r\n1.95132505557913\r\n$2\r\nd4\r\n$18\r\n0.7553063940485881\r\n"}
+{"cmd": ["ft.search", "ph", "smith", "WITHSCORES", "NOCONTENT", "SCORER", "TFIDF"], "want": "*5\r\n:2\r\n$2\r\nd3\r\n$1\r\n2\r\n$2\r\nd4\r\n$1\r\n2\r\n"}
+{"cmd": ["ft.search", "ph", "smith", "WITHSCORES", "NOCONTENT", "SCORER", "BM25"], "want": "*5\r\n:2\r\n$2\r\nd3\r\n$17\r\n1.063829756204011\r\n$2\r\nd4\r\n$18\r\n0.5319148781020056\r\n"}
+{"cmd": ["ft.explain", "ph", "smith"], "want": "$54\r\nUNION {\n  smith\n  <SM0(expanded)\n  +smith(expanded)\n}\n\r\n"}
+{"cmd": ["ft.explain", "ph", "smith", "DIALECT", "2"], "want": "$54\r\nUNION {\n  smith\n  <SM0(expanded)\n  +smith(expanded)\n}\n\r\n"}
+{"cmd": ["ft.search", "ph", "@name:schmidt", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD"], "want": "*3\r\n:1\r\n$2\r\nd3\r\n$17\r\n2.914242665842349\r\n"}
+{"cmd": ["ft.search", "ph", "@name:schmidt", "WITHSCORES", "NOCONTENT", "SCORER", "TFIDF"], "want": "*3\r\n:1\r\n$2\r\nd3\r\n$1\r\n3\r\n"}
+{"cmd": ["ft.search", "ph", "@name:schmidt", "WITHSCORES", "NOCONTENT", "SCORER", "BM25"], "want": "*3\r\n:1\r\n$2\r\nd3\r\n$17\r\n1.372250993194064\r\n"}
+{"cmd": ["ft.explain", "ph", "@name:schmidt"], "want": "$82\r\n@name:UNION {\n  @name:schmidt\n  @name:<XMT(expanded)\n  @name:+schmidt(expanded)\n}\n\r\n"}
+{"cmd": ["ft.explain", "ph", "@name:schmidt", "DIALECT", "2"], "want": "$82\r\n@name:UNION {\n  @name:schmidt\n  @name:<XMT(expanded)\n  @name:+schmidt(expanded)\n}\n\r\n"}
+{"cmd": ["ft.search", "ph", "kathryn", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD"], "want": "*3\r\n:1\r\n$2\r\nd5\r\n$18\r\n3.1744131848255326\r\n"}
+{"cmd": ["ft.search", "ph", "kathryn", "WITHSCORES", "NOCONTENT", "SCORER", "TFIDF"], "want": "*3\r\n:1\r\n$2\r\nd5\r\n$1\r\n3\r\n"}
+{"cmd": ["ft.search", "ph", "kathryn", "WITHSCORES", "NOCONTENT", "SCORER", "BM25"], "want": "*3\r\n:1\r\n$2\r\nd5\r\n$17\r\n1.372250993194064\r\n"}
+{"cmd": ["ft.explain", "ph", "kathryn"], "want": "$59\r\nUNION {\n  kathryn\n  <K0RN(expanded)\n  +kathryn(expanded)\n}\n\r\n"}
+{"cmd": ["ft.explain", "ph", "kathryn", "DIALECT", "2"], "want": "$59\r\nUNION {\n  kathryn\n  <K0RN(expanded)\n  +kathryn(expanded)\n}\n\r\n"}
+{"cmd": ["ft.search", "ph", "katherine", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD"], "want": "*3\r\n:1\r\n$2\r\nd5\r\n$18\r\n1.8483924926217505\r\n"}
+{"cmd": ["ft.search", "ph", "katherine", "WITHSCORES", "NOCONTENT", "SCORER", "TFIDF"], "want": "*3\r\n:1\r\n$2\r\nd5\r\n$1\r\n2\r\n"}
+{"cmd": ["ft.search", "ph", "katherine", "WITHSCORES", "NOCONTENT", "SCORER", "BM25"], "want": "*3\r\n:1\r\n$2\r\nd5\r\n$18\r\n0.8403361150920585\r\n"}
+{"cmd": ["ft.explain", "ph", "katherine"], "want": "$83\r\nUNION {\n  katherine\n  <K0RN(expanded)\n  +katherin(expanded)\n  katherin(expanded)\n}\n\r\n"}
+{"cmd": ["ft.explain", "ph", "katherine", "DIALECT", "2"], "want": "$83\r\nUNION {\n  katherine\n  <K0RN(expanded)\n  +katherin(expanded)\n  katherin(expanded)\n}\n\r\n"}
+{"cmd": ["ft.search", "ph", "filip", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD"], "want": "*3\r\n:1\r\n$2\r\nd5\r\n$17\r\n1.326020692203782\r\n"}
+{"cmd": ["ft.search", "ph", "filip", "WITHSCORES", "NOCONTENT", "SCORER", "TFIDF"], "want": "*3\r\n:1\r\n$2\r\nd5\r\n$1\r\n1\r\n"}
+{"cmd": ["ft.search", "ph", "filip", "WITHSCORES", "NOCONTENT", "SCORER", "BM25"], "want": "*3\r\n:1\r\n$2\r\nd5\r\n$18\r\n0.5319148781020056\r\n"}
+{"cmd": ["ft.explain", "ph", "filip"], "want": "$54\r\nUNION {\n  filip\n  <FLP(expanded)\n  +filip(expanded)\n}\n\r\n"}
+{"cmd": ["ft.explain", "ph", "filip", "DIALECT", "2"], "want": "$54\r\nUNION {\n  filip\n  <FLP(expanded)\n  +filip(expanded)\n}\n\r\n"}
+{"cmd": ["ft.search", "ph", "xyz", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD"], "want": "*3\r\n:1\r\n$2\r\nd4\r\n$17\r\n2.392037323061084\r\n"}
+{"cmd": ["ft.search", "ph", "xyz", "WITHSCORES", "NOCONTENT", "SCORER", "TFIDF"], "want": "*3\r\n:1\r\n$2\r\nd4\r\n$1\r\n4\r\n"}
+{"cmd": ["ft.search", "ph", "xyz", "WITHSCORES", "NOCONTENT", "SCORER", "BM25"], "want": "*3\r\n:1\r\n$2\r\nd4\r\n$17\r\n1.063829756204011\r\n"}
+{"cmd": ["ft.explain", "ph", "xyz"], "want": "$49\r\nUNION {\n  xyz\n  <SS(expanded)\n  +xyz(expanded)\n}\n\r\n"}
+{"cmd": ["ft.explain", "ph", "xyz", "DIALECT", "2"], "want": "$49\r\nUNION {\n  xyz\n  <SS(expanded)\n  +xyz(expanded)\n}\n\r\n"}
+{"cmd": ["ft.search", "ph", "al", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD"], "want": "*3\r\n:1\r\n$2\r\nd4\r\n$17\r\n1.196018661530542\r\n"}
+{"cmd": ["ft.search", "ph", "al", "WITHSCORES", "NOCONTENT", "SCORER", "TFIDF"], "want": "*3\r\n:1\r\n$2\r\nd4\r\n$1\r\n2\r\n"}
+{"cmd": ["ft.search", "ph", "al", "WITHSCORES", "NOCONTENT", "SCORER", "BM25"], "want": "*3\r\n:1\r\n$2\r\nd4\r\n$18\r\n0.5319148781020056\r\n"}
+{"cmd": ["ft.explain", "ph", "al"], "want": "$47\r\nUNION {\n  al\n  <AL(expanded)\n  +al(expanded)\n}\n\r\n"}
+{"cmd": ["ft.explain", "ph", "al", "DIALECT", "2"], "want": "$47\r\nUNION {\n  al\n  <AL(expanded)\n  +al(expanded)\n}\n\r\n"}
+{"cmd": ["ft.search", "ph", "jon smith", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD"], "want": "*5\r\n:2\r\n$2\r\nd3\r\n$18\r\n2.3078887894924462\r\n$2\r\nd4\r\n$18\r\n1.7588091109952164\r\n"}
+{"cmd": ["ft.search", "ph", "jon smith", "WITHSCORES", "NOCONTENT", "SCORER", "TFIDF"], "want": "*5\r\n:2\r\n$2\r\nd4\r\n$1\r\n5\r\n$2\r\nd3\r\n$1\r\n1\r\n"}
+{"cmd": ["ft.search", "ph", "jon smith", "WITHSCORES", "NOCONTENT", "SCORER", "BM25"], "want": "*5\r\n:2\r\n$2\r\nd4\r\n$17\r\n1.329787195255014\r\n$2\r\nd3\r\n$19\r\n0.49466593791668007\r\n"}
+{"cmd": ["ft.explain", "ph", "jon smith"], "want": "$137\r\nINTERSECT {\n  UNION {\n    jon\n    <JN(expanded)\n    +jon(expanded)\n  }\n  UNION {\n    smith\n    <SM0(expanded)\n    +smith(expanded)\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "ph", "jon smith", "DIALECT", "2"], "want": "$137\r\nINTERSECT {\n  UNION {\n    jon\n    <JN(expanded)\n    +jon(expanded)\n  }\n  UNION {\n    smith\n    <SM0(expanded)\n    +smith(expanded)\n  }\n}\n\r\n"}
+{"cmd": ["ft.search", "ph", "jon|kathryn", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD"], "want": "*11\r\n:5\r\n$2\r\nd5\r\n$18\r\n3.1744131848255326\r\n$2\r\nd1\r\n$18\r\n1.7273481236344206\r\n$2\r\nd4\r\n$18\r\n1.0035027169466282\r\n$2\r\nd3\r\n$19\r\n0.35656373391331614\r\n$2\r\nd2\r\n$18\r\n0.3516114597218614\r\n"}
+{"cmd": ["ft.search", "ph", "jon|kathryn", "WITHSCORES", "NOCONTENT", "SCORER", "TFIDF"], "want": "*11\r\n:5\r\n$2\r\nd4\r\n$1\r\n3\r\n$2\r\nd5\r\n$1\r\n3\r\n$2\r\nd1\r\n$3\r\n2.5\r\n$2\r\nd3\r\n$1\r\n1\r\n$2\r\nd2\r\n$3\r\n0.5\r\n"}
+{"cmd": ["ft.search", "ph", "jon|kathryn", "WITHSCORES", "NOCONTENT", "SCORER", "BM25"], "want": "*11\r\n:5\r\n$2\r\nd5\r\n$17\r\n1.372250993194064\r\n$2\r\nd1\r\n$18\r\n1.1062935541430612\r\n$2\r\nd4\r\n$18\r\n0.7978723171530083\r\n$2\r\nd3\r\n$19\r\n0.42016805754602926\r\n$2\r\nd2\r\n$18\r\n0.2659574390510028\r\n"}
+{"cmd": ["ft.explain", "ph", "jon|kathryn"], "want": "$138\r\nUNION {\n  UNION {\n    jon\n    <JN(expanded)\n    +jon(expanded)\n  }\n  UNION {\n    kathryn\n    <K0RN(expanded)\n    +kathryn(expanded)\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "ph", "jon|kathryn", "DIALECT", "2"], "want": "$138\r\nUNION {\n  UNION {\n    jon\n    <JN(expanded)\n    +jon(expanded)\n  }\n  UNION {\n    kathryn\n    <K0RN(expanded)\n    +kathryn(expanded)\n  }\n}\n\r\n"}
+{"cmd": ["ft.search", "ph", "@name:Jon=>{$phonetic:false}", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD"], "want": "*3\r\n:1\r\n$2\r\nd1\r\n$18\r\n1.3757366639125592\r\n"}
+{"cmd": ["ft.search", "ph", "@name:Jon=>{$phonetic:false}", "WITHSCORES", "NOCONTENT", "SCORER", "TFIDF"], "want": "*3\r\n:1\r\n$2\r\nd1\r\n$1\r\n2\r\n"}
+{"cmd": ["ft.search", "ph", "@name:Jon=>{$phonetic:false}", "WITHSCORES", "NOCONTENT", "SCORER", "BM25"], "want": "*3\r\n:1\r\n$2\r\nd1\r\n$18\r\n0.8403361150920585\r\n"}
+{"cmd": ["ft.explain", "ph", "@name:Jon=>{$phonetic:false}"], "want": "$51\r\n@name:UNION {\n  @name:jon\n  @name:+jon(expanded)\n}\n\r\n"}
+{"cmd": ["ft.explain", "ph", "@name:Jon=>{$phonetic:false}", "DIALECT", "2"], "want": "$51\r\n@name:UNION {\n  @name:jon\n  @name:+jon(expanded)\n}\n\r\n"}
+{"cmd": ["ft.search", "ph", "@other:Jon=>{$phonetic:true}", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD"], "want": "-field does not support phonetics\r\n"}
+{"cmd": ["ft.search", "ph", "@other:Jon=>{$phonetic:true}", "WITHSCORES", "NOCONTENT", "SCORER", "TFIDF"], "want": "-field does not support phonetics\r\n"}
+{"cmd": ["ft.search", "ph", "@other:Jon=>{$phonetic:true}", "WITHSCORES", "NOCONTENT", "SCORER", "BM25"], "want": "-field does not support phonetics\r\n"}
+{"cmd": ["ft.explain", "ph", "@other:Jon=>{$phonetic:true}"], "want": "-field does not support phonetics\r\n"}
+{"cmd": ["ft.explain", "ph", "@other:Jon=>{$phonetic:true}", "DIALECT", "2"], "want": "-field does not support phonetics\r\n"}
+{"cmd": ["ft.search", "ph", "@name:Jon=>{$phonetic:maybe}", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD"], "want": "-Invalid value (maybe) for `phonetic`\r\n"}
+{"cmd": ["ft.search", "ph", "@name:Jon=>{$phonetic:maybe}", "WITHSCORES", "NOCONTENT", "SCORER", "TFIDF"], "want": "-Invalid value (maybe) for `phonetic`\r\n"}
+{"cmd": ["ft.search", "ph", "@name:Jon=>{$phonetic:maybe}", "WITHSCORES", "NOCONTENT", "SCORER", "BM25"], "want": "-Invalid value (maybe) for `phonetic`\r\n"}
+{"cmd": ["ft.explain", "ph", "@name:Jon=>{$phonetic:maybe}"], "want": "-Invalid value (maybe) for `phonetic`\r\n"}
+{"cmd": ["ft.explain", "ph", "@name:Jon=>{$phonetic:maybe}", "DIALECT", "2"], "want": "-Invalid value (maybe) for `phonetic`\r\n"}
+{"cmd": ["ft.search", "ph", "(john smith)=>{$phonetic:false}", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD"], "want": "*5\r\n:2\r\n$2\r\nd3\r\n$18\r\n3.0631951835410343\r\n$2\r\nd4\r\n$18\r\n1.0035027169466282\r\n"}
+{"cmd": ["ft.search", "ph", "(john smith)=>{$phonetic:false}", "WITHSCORES", "NOCONTENT", "SCORER", "TFIDF"], "want": "*5\r\n:2\r\n$2\r\nd4\r\n$1\r\n3\r\n$2\r\nd3\r\n$18\r\n1.3333333333333333\r\n"}
+{"cmd": ["ft.search", "ph", "(john smith)=>{$phonetic:false}", "WITHSCORES", "NOCONTENT", "SCORER", "BM25"], "want": "*5\r\n:2\r\n$2\r\nd4\r\n$18\r\n0.7978723171530083\r\n$2\r\nd3\r\n$18\r\n0.6719708972840154\r\n"}
+{"cmd": ["ft.explain", "ph", "(john smith)=>{$phonetic:false}"], "want": "$139\r\nINTERSECT {\n  UNION {\n    john\n    <JN(expanded)\n    +john(expanded)\n  }\n  UNION {\n    smith\n    <SM0(expanded)\n    +smith(expanded)\n  }\n}\n\r\n"}
+{"cmd": ["ft.explain", "ph", "(john smith)=>{$phonetic:false}", "DIALECT", "2"], "want": "$139\r\nINTERSECT {\n  UNION {\n    john\n    <JN(expanded)\n    +john(expanded)\n  }\n  UNION {\n    smith\n    <SM0(expanded)\n    +smith(expanded)\n  }\n}\n\r\n"}
+{"cmd": ["ft.search", "ph", "h", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "ph", "h", "WITHSCORES", "NOCONTENT", "SCORER", "TFIDF"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "ph", "h", "WITHSCORES", "NOCONTENT", "SCORER", "BM25"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.explain", "ph", "h"], "want": "$29\r\nUNION {\n  h\n  +h(expanded)\n}\n\r\n"}
+{"cmd": ["ft.explain", "ph", "h", "DIALECT", "2"], "want": "$29\r\nUNION {\n  h\n  +h(expanded)\n}\n\r\n"}
+{"cmd": ["ft.create", "px", "SCHEMA", "n", "TAG", "PHONETIC", "dm:en"], "want": "-Invalid field type for field `PHONETIC`\r\n"}
+{"cmd": ["ft.create", "px", "SCHEMA", "n", "TEXT", "PHONETIC"], "want": "-PHONETIC requires an argument\r\n"}
+{"cmd": ["ft.create", "px", "SCHEMA", "n", "TEXT", "PHONETIC", "dm:EN"], "want": "-Matcher Format: <2 chars algorithm>:<2 chars language>. Support algorithms: double metaphone (dm). Supported languages: English (en), French (fr), Portuguese (pt) and Spanish (es)\r\n"}
+{"cmd": ["ft.create", "px", "SCHEMA", "n", "TEXT", "PHONETIC", "dm:es"], "want": "+OK\r\n"}
+{"cmd": ["flushall"]}
+{"cmd": ["ft.create", "h", "SCHEMA", "t", "TEXT", "NOSTEM"], "want": "+OK\r\n"}
+{"cmd": ["hset", "z1", "t", "aa bb cc"], "want": ":1\r\n"}
+{"cmd": ["hset", "z2", "t", "aa xx bb xx xx cc"], "want": ":1\r\n"}
+{"cmd": ["hset", "z3", "t", "qq"], "want": ":1\r\n"}
+{"cmd": ["hset", "z4", "t", "aa bb xx xx xx xx xx cc"], "want": ":1\r\n"}
+{"cmd": ["hset", "z5", "t", "cc yy yy aa yy bb dd"], "want": ":1\r\n"}
+{"cmd": ["hset", "z6", "t", "dd aa yy yy yy cc bb"], "want": ":1\r\n"}
+{"cmd": ["hset", "z7", "t", "bb bb aa cc dd dd"], "want": ":1\r\n"}
+{"cmd": ["ft.search", "h", "aa bb cc", "WITHSCORES", "NOCONTENT", "SCORER", "TFIDF"], "want": "*13\r\n:6\r\n$2\r\nz1\r\n$1\r\n3\r\n$2\r\nz7\r\n$1\r\n1\r\n$2\r\nz2\r\n$18\r\n0.3333333333333333\r\n$2\r\nz5\r\n$3\r\n0.2\r\n$2\r\nz6\r\n$3\r\n0.2\r\n$2\r\nz4\r\n$19\r\n0.09999999999999999\r\n"}
+{"cmd": ["ft.search", "h", "aa bb cc", "WITHSCORES", "NOCONTENT", "SCORER", "BM25"], "want": "*13\r\n:6\r\n$2\r\nz1\r\n$18\r\n0.6176470393334299\r\n$2\r\nz7\r\n$18\r\n0.3766140492938609\r\n$2\r\nz2\r\n$19\r\n0.20588234644447664\r\n$2\r\nz5\r\n$19\r\n0.12352940786668598\r\n$2\r\nz6\r\n$19\r\n0.12352940786668598\r\n$2\r\nz4\r\n$19\r\n0.10294117322223832\r\n"}
+{"cmd": ["ft.search", "h", "aa bb cc", "WITHSCORES", "NOCONTENT", "SCORER", "TFIDF.DOCNORM"], "want": "*13\r\n:6\r\n$2\r\nz1\r\n$1\r\n1\r\n$2\r\nz7\r\n$18\r\n0.3333333333333333\r\n$2\r\nz2\r\n$19\r\n0.16666666666666666\r\n$2\r\nz5\r\n$19\r\n0.08571428571428572\r\n$2\r\nz6\r\n$19\r\n0.08571428571428572\r\n$2\r\nz4\r\n$6\r\n0.0625\r\n"}
+{"cmd": ["ft.search", "h", "aa bb cc", "WITHSCORES", "NOCONTENT", "SCORER", "DISMAX"], "want": "*13\r\n:6\r\n$2\r\nz7\r\n$1\r\n4\r\n$2\r\nz1\r\n$1\r\n3\r\n$2\r\nz2\r\n$1\r\n3\r\n$2\r\nz4\r\n$1\r\n3\r\n$2\r\nz5\r\n$1\r\n3\r\n$2\r\nz6\r\n$1\r\n3\r\n"}
+{"cmd": ["ft.search", "h", "aa bb cc", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD"], "want": "*13\r\n:6\r\n$2\r\nz1\r\n$18\r\n0.7624591836034595\r\n$2\r\nz7\r\n$18\r\n0.6754290601520729\r\n$2\r\nz2\r\n$18\r\n0.5972013989745371\r\n$2\r\nz5\r\n$18\r\n0.5569621596772087\r\n$2\r\nz6\r\n$18\r\n0.5569621596772087\r\n$2\r\nz4\r\n$18\r\n0.5218032252177313\r\n"}
+{"cmd": ["ft.search", "h", "aa bb cc", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD.NORM"], "want": "*13\r\n:6\r\n$2\r\nz1\r\n$1\r\n1\r\n$2\r\nz7\r\n$18\r\n0.8858560230856248\r\n$2\r\nz2\r\n$18\r\n0.7832568769807488\r\n$2\r\nz5\r\n$16\r\n0.73048127906985\r\n$2\r\nz6\r\n$16\r\n0.73048127906985\r\n$2\r\nz4\r\n$18\r\n0.6843687326994164\r\n"}
+{"cmd": ["ft.search", "h", "aa bb cc", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD.TANH"], "want": "*13\r\n:6\r\n$2\r\nz1\r\n$19\r\n0.18833926252246996\r\n$2\r\nz7\r\n$19\r\n0.16727049672948188\r\n$2\r\nz2\r\n$19\r\n0.14820082118051361\r\n$2\r\nz5\r\n$19\r\n0.13834760231230384\r\n$2\r\nz6\r\n$19\r\n0.13834760231230384\r\n$2\r\nz4\r\n$19\r\n0.12971583044454582\r\n"}
+{"cmd": ["ft.search", "h", "aa bb", "WITHSCORES", "NOCONTENT", "SCORER", "TFIDF"], "want": "*13\r\n:6\r\n$2\r\nz1\r\n$1\r\n2\r\n$2\r\nz7\r\n$3\r\n1.5\r\n$2\r\nz4\r\n$3\r\n0.4\r\n$2\r\nz2\r\n$18\r\n0.3333333333333333\r\n$2\r\nz5\r\n$18\r\n0.3333333333333333\r\n$2\r\nz6\r\n$19\r\n0.13333333333333333\r\n"}
+{"cmd": ["ft.search", "h", "aa bb", "WITHSCORES", "NOCONTENT", "SCORER", "BM25"], "want": "*13\r\n:6\r\n$2\r\nz7\r\n$18\r\n0.5473457521432452\r\n$2\r\nz1\r\n$19\r\n0.41176469288895323\r\n$2\r\nz4\r\n$19\r\n0.41176469288895323\r\n$2\r\nz2\r\n$19\r\n0.20588234644447662\r\n$2\r\nz5\r\n$19\r\n0.20588234644447662\r\n$2\r\nz6\r\n$19\r\n0.08235293857779065\r\n"}
+{"cmd": ["ft.search", "h", "aa bb", "WITHSCORES", "NOCONTENT", "SCORER", "TFIDF.DOCNORM"], "want": "*13\r\n:6\r\n$2\r\nz1\r\n$18\r\n0.6666666666666666\r\n$2\r\nz7\r\n$3\r\n0.5\r\n$2\r\nz4\r\n$4\r\n0.25\r\n$2\r\nz2\r\n$19\r\n0.16666666666666666\r\n$2\r\nz5\r\n$19\r\n0.14285714285714285\r\n$2\r\nz6\r\n$19\r\n0.05714285714285714\r\n"}
+{"cmd": ["ft.search", "h", "aa bb", "WITHSCORES", "NOCONTENT", "SCORER", "DISMAX"], "want": "*13\r\n:6\r\n$2\r\nz7\r\n$1\r\n3\r\n$2\r\nz1\r\n$1\r\n2\r\n$2\r\nz2\r\n$1\r\n2\r\n$2\r\nz4\r\n$1\r\n2\r\n$2\r\nz5\r\n$1\r\n2\r\n$2\r\nz6\r\n$1\r\n2\r\n"}
+{"cmd": ["ft.search", "h", "aa bb", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD"], "want": "*13\r\n:6\r\n$2\r\nz1\r\n$18\r\n0.5083061224023063\r\n$2\r\nz7\r\n$18\r\n0.4763619271605605\r\n$2\r\nz2\r\n$18\r\n0.3981342659830247\r\n$2\r\nz5\r\n$18\r\n0.3713081064514725\r\n$2\r\nz6\r\n$18\r\n0.3713081064514725\r\n$2\r\nz4\r\n$19\r\n0.34786881681182086\r\n"}
+{"cmd": ["ft.search", "h", "aa bb", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD.NORM"], "want": "*13\r\n:6\r\n$2\r\nz1\r\n$1\r\n1\r\n$2\r\nz7\r\n$18\r\n0.9371555961380629\r\n$2\r\nz2\r\n$18\r\n0.7832568769807489\r\n$2\r\nz5\r\n$16\r\n0.73048127906985\r\n$2\r\nz6\r\n$16\r\n0.73048127906985\r\n$2\r\nz4\r\n$18\r\n0.6843687326994164\r\n"}
+{"cmd": ["ft.search", "h", "aa bb", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD.TANH"], "want": "*13\r\n:6\r\n$2\r\nz1\r\n$19\r\n0.12639689087366476\r\n$2\r\nz7\r\n$19\r\n0.11853065552598895\r\n$2\r\nz2\r\n$19\r\n0.09920617309958721\r\n$2\r\nz5\r\n$19\r\n0.09256131667511411\r\n$2\r\nz6\r\n$19\r\n0.09256131667511411\r\n$2\r\nz4\r\n$19\r\n0.08674861262596935\r\n"}
+{"cmd": ["ft.search", "h", "bb cc", "WITHSCORES", "NOCONTENT", "SCORER", "TFIDF"], "want": "*13\r\n:6\r\n$2\r\nz1\r\n$1\r\n2\r\n$2\r\nz7\r\n$4\r\n0.75\r\n$2\r\nz6\r\n$18\r\n0.6666666666666666\r\n$2\r\nz2\r\n$18\r\n0.2222222222222222\r\n$2\r\nz5\r\n$19\r\n0.13333333333333333\r\n$2\r\nz4\r\n$19\r\n0.06666666666666667\r\n"}
+{"cmd": ["ft.search", "h", "bb cc", "WITHSCORES", "NOCONTENT", "SCORER", "BM25"], "want": "*13\r\n:6\r\n$2\r\nz1\r\n$19\r\n0.41176469288895323\r\n$2\r\nz6\r\n$19\r\n0.41176469288895323\r\n$2\r\nz7\r\n$18\r\n0.2736728760716226\r\n$2\r\nz2\r\n$19\r\n0.13725489762965107\r\n$2\r\nz5\r\n$19\r\n0.08235293857779065\r\n$2\r\nz4\r\n$19\r\n0.06862744881482553\r\n"}
+{"cmd": ["ft.search", "h", "bb cc", "WITHSCORES", "NOCONTENT", "SCORER", "TFIDF.DOCNORM"], "want": "*13\r\n:6\r\n$2\r\nz1\r\n$18\r\n0.6666666666666666\r\n$2\r\nz6\r\n$18\r\n0.2857142857142857\r\n$2\r\nz7\r\n$4\r\n0.25\r\n$2\r\nz2\r\n$18\r\n0.1111111111111111\r\n$2\r\nz5\r\n$19\r\n0.05714285714285714\r\n$2\r\nz4\r\n$20\r\n0.041666666666666664\r\n"}
+{"cmd": ["ft.search", "h", "bb cc", "WITHSCORES", "NOCONTENT", "SCORER", "DISMAX"], "want": "*13\r\n:6\r\n$2\r\nz7\r\n$1\r\n3\r\n$2\r\nz1\r\n$1\r\n2\r\n$2\r\nz2\r\n$1\r\n2\r\n$2\r\nz4\r\n$1\r\n2\r\n$2\r\nz5\r\n$1\r\n2\r\n$2\r\nz6\r\n$1\r\n2\r\n"}
+{"cmd": ["ft.search", "h", "bb cc", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD"], "want": "*13\r\n:6\r\n$2\r\nz1\r\n$18\r\n0.5083061224023063\r\n$2\r\nz7\r\n$18\r\n0.4763619271605605\r\n$2\r\nz2\r\n$18\r\n0.3981342659830247\r\n$2\r\nz5\r\n$18\r\n0.3713081064514725\r\n$2\r\nz6\r\n$18\r\n0.3713081064514725\r\n$2\r\nz4\r\n$19\r\n0.34786881681182086\r\n"}
+{"cmd": ["ft.search", "h", "bb cc", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD.NORM"], "want": "*13\r\n:6\r\n$2\r\nz1\r\n$1\r\n1\r\n$2\r\nz7\r\n$18\r\n0.9371555961380629\r\n$2\r\nz2\r\n$18\r\n0.7832568769807489\r\n$2\r\nz5\r\n$16\r\n0.73048127906985\r\n$2\r\nz6\r\n$16\r\n0.73048127906985\r\n$2\r\nz4\r\n$18\r\n0.6843687326994164\r\n"}
+{"cmd": ["ft.search", "h", "bb cc", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD.TANH"], "want": "*13\r\n:6\r\n$2\r\nz1\r\n$19\r\n0.12639689087366476\r\n$2\r\nz7\r\n$19\r\n0.11853065552598895\r\n$2\r\nz2\r\n$19\r\n0.09920617309958721\r\n$2\r\nz5\r\n$19\r\n0.09256131667511411\r\n$2\r\nz6\r\n$19\r\n0.09256131667511411\r\n$2\r\nz4\r\n$19\r\n0.08674861262596935\r\n"}
+{"cmd": ["ft.search", "h", "aa cc", "WITHSCORES", "NOCONTENT", "SCORER", "TFIDF"], "want": "*13\r\n:6\r\n$2\r\nz1\r\n$1\r\n1\r\n$2\r\nz7\r\n$1\r\n1\r\n$2\r\nz5\r\n$18\r\n0.2222222222222222\r\n$2\r\nz6\r\n$19\r\n0.16666666666666666\r\n$2\r\nz2\r\n$19\r\n0.13333333333333333\r\n$2\r\nz4\r\n$19\r\n0.05714285714285715\r\n"}
+{"cmd": ["ft.search", "h", "aa cc", "WITHSCORES", "NOCONTENT", "SCORER", "BM25"], "want": "*13\r\n:6\r\n$2\r\nz7\r\n$19\r\n0.41176469288895323\r\n$2\r\nz1\r\n$19\r\n0.20588234644447662\r\n$2\r\nz5\r\n$19\r\n0.13725489762965107\r\n$2\r\nz6\r\n$19\r\n0.10294117322223831\r\n$2\r\nz2\r\n$19\r\n0.08235293857779065\r\n$2\r\nz4\r\n$19\r\n0.05882352755556475\r\n"}
+{"cmd": ["ft.search", "h", "aa cc", "WITHSCORES", "NOCONTENT", "SCORER", "TFIDF.DOCNORM"], "want": "*13\r\n:6\r\n$2\r\nz1\r\n$18\r\n0.3333333333333333\r\n$2\r\nz7\r\n$18\r\n0.3333333333333333\r\n$2\r\nz5\r\n$19\r\n0.09523809523809523\r\n$2\r\nz6\r\n$19\r\n0.07142857142857142\r\n$2\r\nz2\r\n$19\r\n0.06666666666666667\r\n$2\r\nz4\r\n$19\r\n0.03571428571428571\r\n"}
+{"cmd": ["ft.search", "h", "aa cc", "WITHSCORES", "NOCONTENT", "SCORER", "DISMAX"], "want": "*13\r\n:6\r\n$2\r\nz1\r\n$1\r\n2\r\n$2\r\nz2\r\n$1\r\n2\r\n$2\r\nz4\r\n$1\r\n2\r\n$2\r\nz5\r\n$1\r\n2\r\n$2\r\nz6\r\n$1\r\n2\r\n$2\r\nz7\r\n$1\r\n2\r\n"}
+{"cmd": ["ft.search", "h", "aa cc", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD"], "want": "*13\r\n:6\r\n$2\r\nz1\r\n$18\r\n0.5083061224023063\r\n$2\r\nz2\r\n$18\r\n0.3981342659830247\r\n$2\r\nz7\r\n$18\r\n0.3981342659830247\r\n$2\r\nz5\r\n$18\r\n0.3713081064514725\r\n$2\r\nz6\r\n$18\r\n0.3713081064514725\r\n$2\r\nz4\r\n$19\r\n0.34786881681182086\r\n"}
+{"cmd": ["ft.search", "h", "aa cc", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD.NORM"], "want": "*13\r\n:6\r\n$2\r\nz1\r\n$1\r\n1\r\n$2\r\nz2\r\n$18\r\n0.7832568769807489\r\n$2\r\nz7\r\n$18\r\n0.7832568769807489\r\n$2\r\nz5\r\n$16\r\n0.73048127906985\r\n$2\r\nz6\r\n$16\r\n0.73048127906985\r\n$2\r\nz4\r\n$18\r\n0.6843687326994164\r\n"}
+{"cmd": ["ft.search", "h", "aa cc", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD.TANH"], "want": "*13\r\n:6\r\n$2\r\nz1\r\n$19\r\n0.12639689087366476\r\n$2\r\nz2\r\n$19\r\n0.09920617309958721\r\n$2\r\nz7\r\n$19\r\n0.09920617309958721\r\n$2\r\nz5\r\n$19\r\n0.09256131667511411\r\n$2\r\nz6\r\n$19\r\n0.09256131667511411\r\n$2\r\nz4\r\n$19\r\n0.08674861262596935\r\n"}
+{"cmd": ["ft.search", "h", "cc aa bb", "WITHSCORES", "NOCONTENT", "SCORER", "TFIDF"], "want": "*13\r\n:6\r\n$2\r\nz7\r\n$1\r\n2\r\n$2\r\nz1\r\n$3\r\n1.5\r\n$2\r\nz5\r\n$18\r\n0.3333333333333333\r\n$2\r\nz2\r\n$3\r\n0.2\r\n$2\r\nz6\r\n$19\r\n0.16666666666666666\r\n$2\r\nz4\r\n$19\r\n0.08571428571428572\r\n"}
+{"cmd": ["ft.search", "h", "cc aa bb", "WITHSCORES", "NOCONTENT", "SCORER", "BM25"], "want": "*13\r\n:6\r\n$2\r\nz7\r\n$18\r\n0.7532280985877218\r\n$2\r\nz1\r\n$19\r\n0.30882351966671495\r\n$2\r\nz5\r\n$19\r\n0.20588234644447664\r\n$2\r\nz2\r\n$19\r\n0.12352940786668598\r\n$2\r\nz6\r\n$19\r\n0.10294117322223832\r\n$2\r\nz4\r\n$19\r\n0.08823529133334714\r\n"}
+{"cmd": ["ft.search", "h", "cc aa bb", "WITHSCORES", "NOCONTENT", "SCORER", "TFIDF.DOCNORM"], "want": "*13\r\n:6\r\n$2\r\nz7\r\n$18\r\n0.6666666666666666\r\n$2\r\nz1\r\n$3\r\n0.5\r\n$2\r\nz5\r\n$19\r\n0.14285714285714285\r\n$2\r\nz2\r\n$3\r\n0.1\r\n$2\r\nz6\r\n$19\r\n0.07142857142857142\r\n$2\r\nz4\r\n$19\r\n0.05357142857142857\r\n"}
+{"cmd": ["ft.search", "h", "cc aa bb", "WITHSCORES", "NOCONTENT", "SCORER", "DISMAX"], "want": "*13\r\n:6\r\n$2\r\nz7\r\n$1\r\n4\r\n$2\r\nz1\r\n$1\r\n3\r\n$2\r\nz2\r\n$1\r\n3\r\n$2\r\nz4\r\n$1\r\n3\r\n$2\r\nz5\r\n$1\r\n3\r\n$2\r\nz6\r\n$1\r\n3\r\n"}
+{"cmd": ["ft.search", "h", "cc aa bb", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD"], "want": "*13\r\n:6\r\n$2\r\nz1\r\n$18\r\n0.7624591836034595\r\n$2\r\nz7\r\n$18\r\n0.6754290601520729\r\n$2\r\nz2\r\n$18\r\n0.5972013989745371\r\n$2\r\nz5\r\n$18\r\n0.5569621596772087\r\n$2\r\nz6\r\n$18\r\n0.5569621596772087\r\n$2\r\nz4\r\n$18\r\n0.5218032252177313\r\n"}
+{"cmd": ["ft.search", "h", "cc aa bb", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD.NORM"], "want": "*13\r\n:6\r\n$2\r\nz1\r\n$1\r\n1\r\n$2\r\nz7\r\n$18\r\n0.8858560230856248\r\n$2\r\nz2\r\n$18\r\n0.7832568769807488\r\n$2\r\nz5\r\n$16\r\n0.73048127906985\r\n$2\r\nz6\r\n$16\r\n0.73048127906985\r\n$2\r\nz4\r\n$18\r\n0.6843687326994164\r\n"}
+{"cmd": ["ft.search", "h", "cc aa bb", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD.TANH"], "want": "*13\r\n:6\r\n$2\r\nz1\r\n$19\r\n0.18833926252246996\r\n$2\r\nz7\r\n$19\r\n0.16727049672948188\r\n$2\r\nz2\r\n$19\r\n0.14820082118051361\r\n$2\r\nz5\r\n$19\r\n0.13834760231230384\r\n$2\r\nz6\r\n$19\r\n0.13834760231230384\r\n$2\r\nz4\r\n$19\r\n0.12971583044454582\r\n"}
+{"cmd": ["ft.search", "h", "aa bb cc dd", "WITHSCORES", "NOCONTENT", "SCORER", "TFIDF"], "want": "*7\r\n:3\r\n$2\r\nz7\r\n$1\r\n1\r\n$2\r\nz6\r\n$19\r\n0.26666666666666666\r\n$2\r\nz5\r\n$18\r\n0.2222222222222222\r\n"}
+{"cmd": ["ft.search", "h", "aa bb cc dd", "WITHSCORES", "NOCONTENT", "SCORER", "BM25"], "want": "*7\r\n:3\r\n$2\r\nz7\r\n$18\r\n0.3648971680954968\r\n$2\r\nz6\r\n$18\r\n0.1647058771555813\r\n$2\r\nz5\r\n$19\r\n0.13725489762965107\r\n"}
+{"cmd": ["ft.search", "h", "aa bb cc dd", "WITHSCORES", "NOCONTENT", "SCORER", "TFIDF.DOCNORM"], "want": "*7\r\n:3\r\n$2\r\nz7\r\n$18\r\n0.3333333333333333\r\n$2\r\nz6\r\n$19\r\n0.11428571428571428\r\n$2\r\nz5\r\n$19\r\n0.09523809523809523\r\n"}
+{"cmd": ["ft.search", "h", "aa bb cc dd", "WITHSCORES", "NOCONTENT", "SCORER", "DISMAX"], "want": "*7\r\n:3\r\n$2\r\nz7\r\n$1\r\n6\r\n$2\r\nz5\r\n$1\r\n4\r\n$2\r\nz6\r\n$1\r\n4\r\n"}
+{"cmd": ["ft.search", "h", "aa bb cc dd", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD"], "want": "*7\r\n:3\r\n$2\r\nz7\r\n$18\r\n1.7794278485549853\r\n$2\r\nz5\r\n$18\r\n1.2961100056997021\r\n$2\r\nz6\r\n$18\r\n1.2961100056997021\r\n"}
+{"cmd": ["ft.search", "h", "aa bb cc dd", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD.NORM"], "want": "*7\r\n:3\r\n$2\r\nz7\r\n$1\r\n1\r\n$2\r\nz5\r\n$18\r\n0.7283858161218677\r\n$2\r\nz6\r\n$18\r\n0.7283858161218677\r\n"}
+{"cmd": ["ft.search", "h", "aa bb cc dd", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD.TANH"], "want": "*7\r\n:3\r\n$2\r\nz7\r\n$18\r\n0.4176622661034951\r\n$2\r\nz5\r\n$19\r\n0.31314405651550675\r\n$2\r\nz6\r\n$19\r\n0.31314405651550675\r\n"}
+{"cmd": ["ft.search", "h", "dd cc", "WITHSCORES", "NOCONTENT", "SCORER", "TFIDF"], "want": "*7\r\n:3\r\n$2\r\nz7\r\n$3\r\n1.5\r\n$2\r\nz6\r\n$19\r\n0.13333333333333333\r\n$2\r\nz5\r\n$18\r\n0.1111111111111111\r\n"}
+{"cmd": ["ft.search", "h", "dd cc", "WITHSCORES", "NOCONTENT", "SCORER", "BM25"], "want": "*7\r\n:3\r\n$2\r\nz7\r\n$18\r\n0.5473457521432452\r\n$2\r\nz6\r\n$19\r\n0.08235293857779065\r\n$2\r\nz5\r\n$19\r\n0.06862744881482553\r\n"}
+{"cmd": ["ft.search", "h", "dd cc", "WITHSCORES", "NOCONTENT", "SCORER", "TFIDF.DOCNORM"], "want": "*7\r\n:3\r\n$2\r\nz7\r\n$3\r\n0.5\r\n$2\r\nz6\r\n$19\r\n0.05714285714285714\r\n$2\r\nz5\r\n$20\r\n0.047619047619047616\r\n"}
+{"cmd": ["ft.search", "h", "dd cc", "WITHSCORES", "NOCONTENT", "SCORER", "DISMAX"], "want": "*7\r\n:3\r\n$2\r\nz7\r\n$1\r\n3\r\n$2\r\nz5\r\n$1\r\n2\r\n$2\r\nz6\r\n$1\r\n2\r\n"}
+{"cmd": ["ft.search", "h", "dd cc", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD"], "want": "*7\r\n:3\r\n$2\r\nz7\r\n$18\r\n1.3030659213944247\r\n$2\r\nz5\r\n$18\r\n0.9248018992482296\r\n$2\r\nz6\r\n$18\r\n0.9248018992482296\r\n"}
+{"cmd": ["ft.search", "h", "dd cc", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD.NORM"], "want": "*7\r\n:3\r\n$2\r\nz7\r\n$1\r\n1\r\n$2\r\nz5\r\n$18\r\n0.7097122901185148\r\n$2\r\nz6\r\n$18\r\n0.7097122901185148\r\n"}
+{"cmd": ["ft.search", "h", "dd cc", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD.TANH"], "want": "*7\r\n:3\r\n$2\r\nz7\r\n$17\r\n0.314711657338259\r\n$2\r\nz5\r\n$19\r\n0.22716718669396826\r\n$2\r\nz6\r\n$19\r\n0.22716718669396826\r\n"}
+{"cmd": ["ft.search", "h", "aa|bb", "WITHSCORES", "NOCONTENT", "SCORER", "TFIDF"], "want": "*13\r\n:6\r\n$2\r\nz1\r\n$1\r\n2\r\n$2\r\nz7\r\n$3\r\n1.5\r\n$2\r\nz4\r\n$3\r\n0.4\r\n$2\r\nz2\r\n$18\r\n0.3333333333333333\r\n$2\r\nz5\r\n$18\r\n0.3333333333333333\r\n$2\r\nz6\r\n$19\r\n0.13333333333333333\r\n"}
+{"cmd": ["ft.search", "h", "aa|bb", "WITHSCORES", "NOCONTENT", "SCORER", "BM25"], "want": "*13\r\n:6\r\n$2\r\nz7\r\n$18\r\n0.5473457521432452\r\n$2\r\nz1\r\n$19\r\n0.41176469288895323\r\n$2\r\nz4\r\n$19\r\n0.41176469288895323\r\n$2\r\nz2\r\n$19\r\n0.20588234644447662\r\n$2\r\nz5\r\n$19\r\n0.20588234644447662\r\n$2\r\nz6\r\n$19\r\n0.08235293857779065\r\n"}
+{"cmd": ["ft.search", "h", "aa|bb", "WITHSCORES", "NOCONTENT", "SCORER", "TFIDF.DOCNORM"], "want": "*13\r\n:6\r\n$2\r\nz1\r\n$18\r\n0.6666666666666666\r\n$2\r\nz7\r\n$3\r\n0.5\r\n$2\r\nz4\r\n$4\r\n0.25\r\n$2\r\nz2\r\n$19\r\n0.16666666666666666\r\n$2\r\nz5\r\n$19\r\n0.14285714285714285\r\n$2\r\nz6\r\n$19\r\n0.05714285714285714\r\n"}
+{"cmd": ["ft.search", "h", "aa|bb", "WITHSCORES", "NOCONTENT", "SCORER", "DISMAX"], "want": "*13\r\n:6\r\n$2\r\nz7\r\n$1\r\n2\r\n$2\r\nz1\r\n$1\r\n1\r\n$2\r\nz2\r\n$1\r\n1\r\n$2\r\nz4\r\n$1\r\n1\r\n$2\r\nz5\r\n$1\r\n1\r\n$2\r\nz6\r\n$1\r\n1\r\n"}
+{"cmd": ["ft.search", "h", "aa|bb", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD"], "want": "*13\r\n:6\r\n$2\r\nz1\r\n$18\r\n0.5083061224023063\r\n$2\r\nz7\r\n$18\r\n0.4763619271605605\r\n$2\r\nz2\r\n$18\r\n0.3981342659830247\r\n$2\r\nz5\r\n$18\r\n0.3713081064514725\r\n$2\r\nz6\r\n$18\r\n0.3713081064514725\r\n$2\r\nz4\r\n$19\r\n0.34786881681182086\r\n"}
+{"cmd": ["ft.search", "h", "aa|bb", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD.NORM"], "want": "*13\r\n:6\r\n$2\r\nz1\r\n$1\r\n1\r\n$2\r\nz7\r\n$18\r\n0.9371555961380629\r\n$2\r\nz2\r\n$18\r\n0.7832568769807489\r\n$2\r\nz5\r\n$16\r\n0.73048127906985\r\n$2\r\nz6\r\n$16\r\n0.73048127906985\r\n$2\r\nz4\r\n$18\r\n0.6843687326994164\r\n"}
+{"cmd": ["ft.search", "h", "aa|bb", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD.TANH"], "want": "*13\r\n:6\r\n$2\r\nz1\r\n$19\r\n0.12639689087366476\r\n$2\r\nz7\r\n$19\r\n0.11853065552598895\r\n$2\r\nz2\r\n$19\r\n0.09920617309958721\r\n$2\r\nz5\r\n$19\r\n0.09256131667511411\r\n$2\r\nz6\r\n$19\r\n0.09256131667511411\r\n$2\r\nz4\r\n$19\r\n0.08674861262596935\r\n"}
+{"cmd": ["ft.search", "h", "aa|bb|cc", "WITHSCORES", "NOCONTENT", "SCORER", "TFIDF"], "want": "*13\r\n:6\r\n$2\r\nz1\r\n$1\r\n3\r\n$2\r\nz7\r\n$1\r\n1\r\n$2\r\nz2\r\n$18\r\n0.3333333333333333\r\n$2\r\nz5\r\n$3\r\n0.2\r\n$2\r\nz6\r\n$3\r\n0.2\r\n$2\r\nz4\r\n$19\r\n0.09999999999999999\r\n"}
+{"cmd": ["ft.search", "h", "aa|bb|cc", "WITHSCORES", "NOCONTENT", "SCORER", "BM25"], "want": "*13\r\n:6\r\n$2\r\nz1\r\n$18\r\n0.6176470393334299\r\n$2\r\nz7\r\n$18\r\n0.3766140492938609\r\n$2\r\nz2\r\n$19\r\n0.20588234644447664\r\n$2\r\nz5\r\n$19\r\n0.12352940786668598\r\n$2\r\nz6\r\n$19\r\n0.12352940786668598\r\n$2\r\nz4\r\n$19\r\n0.10294117322223832\r\n"}
+{"cmd": ["ft.search", "h", "aa|bb|cc", "WITHSCORES", "NOCONTENT", "SCORER", "TFIDF.DOCNORM"], "want": "*13\r\n:6\r\n$2\r\nz1\r\n$1\r\n1\r\n$2\r\nz7\r\n$18\r\n0.3333333333333333\r\n$2\r\nz2\r\n$19\r\n0.16666666666666666\r\n$2\r\nz5\r\n$19\r\n0.08571428571428572\r\n$2\r\nz6\r\n$19\r\n0.08571428571428572\r\n$2\r\nz4\r\n$6\r\n0.0625\r\n"}
+{"cmd": ["ft.search", "h", "aa|bb|cc", "WITHSCORES", "NOCONTENT", "SCORER", "DISMAX"], "want": "*13\r\n:6\r\n$2\r\nz7\r\n$1\r\n2\r\n$2\r\nz1\r\n$1\r\n1\r\n$2\r\nz2\r\n$1\r\n1\r\n$2\r\nz4\r\n$1\r\n1\r\n$2\r\nz5\r\n$1\r\n1\r\n$2\r\nz6\r\n$1\r\n1\r\n"}
+{"cmd": ["ft.search", "h", "aa|bb|cc", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD"], "want": "*13\r\n:6\r\n$2\r\nz1\r\n$18\r\n0.7624591836034595\r\n$2\r\nz7\r\n$18\r\n0.6754290601520729\r\n$2\r\nz2\r\n$18\r\n0.5972013989745371\r\n$2\r\nz5\r\n$18\r\n0.5569621596772087\r\n$2\r\nz6\r\n$18\r\n0.5569621596772087\r\n$2\r\nz4\r\n$18\r\n0.5218032252177313\r\n"}
+{"cmd": ["ft.search", "h", "aa|bb|cc", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD.NORM"], "want": "*13\r\n:6\r\n$2\r\nz1\r\n$1\r\n1\r\n$2\r\nz7\r\n$18\r\n0.8858560230856248\r\n$2\r\nz2\r\n$18\r\n0.7832568769807488\r\n$2\r\nz5\r\n$16\r\n0.73048127906985\r\n$2\r\nz6\r\n$16\r\n0.73048127906985\r\n$2\r\nz4\r\n$18\r\n0.6843687326994164\r\n"}
+{"cmd": ["ft.search", "h", "aa|bb|cc", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD.TANH"], "want": "*13\r\n:6\r\n$2\r\nz1\r\n$19\r\n0.18833926252246996\r\n$2\r\nz7\r\n$19\r\n0.16727049672948188\r\n$2\r\nz2\r\n$19\r\n0.14820082118051361\r\n$2\r\nz5\r\n$19\r\n0.13834760231230384\r\n$2\r\nz6\r\n$19\r\n0.13834760231230384\r\n$2\r\nz4\r\n$19\r\n0.12971583044454582\r\n"}
+{"cmd": ["ft.search", "h", "(aa bb)|cc", "WITHSCORES", "NOCONTENT", "SCORER", "TFIDF"], "want": "*13\r\n:6\r\n$2\r\nz1\r\n$1\r\n3\r\n$2\r\nz7\r\n$1\r\n2\r\n$2\r\nz6\r\n$1\r\n1\r\n$2\r\nz2\r\n$18\r\n0.3333333333333333\r\n$2\r\nz5\r\n$18\r\n0.3333333333333333\r\n$2\r\nz4\r\n$19\r\n0.09999999999999999\r\n"}
+{"cmd": ["ft.search", "h", "(aa bb)|cc", "WITHSCORES", "NOCONTENT", "SCORER", "BM25"], "want": "*13\r\n:6\r\n$2\r\nz7\r\n$18\r\n0.7532280985877218\r\n$2\r\nz1\r\n$18\r\n0.6176470393334299\r\n$2\r\nz6\r\n$18\r\n0.6176470393334299\r\n$2\r\nz2\r\n$19\r\n0.20588234644447664\r\n$2\r\nz5\r\n$19\r\n0.20588234644447664\r\n$2\r\nz4\r\n$19\r\n0.10294117322223832\r\n"}
+{"cmd": ["ft.search", "h", "(aa bb)|cc", "WITHSCORES", "NOCONTENT", "SCORER", "TFIDF.DOCNORM"], "want": "*13\r\n:6\r\n$2\r\nz1\r\n$1\r\n1\r\n$2\r\nz7\r\n$18\r\n0.6666666666666666\r\n$2\r\nz6\r\n$19\r\n0.42857142857142855\r\n$2\r\nz2\r\n$19\r\n0.16666666666666666\r\n$2\r\nz5\r\n$19\r\n0.14285714285714285\r\n$2\r\nz4\r\n$6\r\n0.0625\r\n"}
+{"cmd": ["ft.search", "h", "(aa bb)|cc", "WITHSCORES", "NOCONTENT", "SCORER", "DISMAX"], "want": "*13\r\n:6\r\n$2\r\nz7\r\n$1\r\n3\r\n$2\r\nz1\r\n$1\r\n2\r\n$2\r\nz2\r\n$1\r\n2\r\n$2\r\nz4\r\n$1\r\n2\r\n$2\r\nz5\r\n$1\r\n2\r\n$2\r\nz6\r\n$1\r\n2\r\n"}
+{"cmd": ["ft.search", "h", "(aa bb)|cc", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD"], "want": "*13\r\n:6\r\n$2\r\nz1\r\n$18\r\n0.7624591836034595\r\n$2\r\nz7\r\n$18\r\n0.6754290601520729\r\n$2\r\nz2\r\n$18\r\n0.5972013989745371\r\n$2\r\nz5\r\n$18\r\n0.5569621596772087\r\n$2\r\nz6\r\n$18\r\n0.5569621596772087\r\n$2\r\nz4\r\n$18\r\n0.5218032252177313\r\n"}
+{"cmd": ["ft.search", "h", "(aa bb)|cc", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD.NORM"], "want": "*13\r\n:6\r\n$2\r\nz1\r\n$1\r\n1\r\n$2\r\nz7\r\n$18\r\n0.8858560230856248\r\n$2\r\nz2\r\n$18\r\n0.7832568769807488\r\n$2\r\nz5\r\n$16\r\n0.73048127906985\r\n$2\r\nz6\r\n$16\r\n0.73048127906985\r\n$2\r\nz4\r\n$18\r\n0.6843687326994164\r\n"}
+{"cmd": ["ft.search", "h", "(aa bb)|cc", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD.TANH"], "want": "*13\r\n:6\r\n$2\r\nz1\r\n$19\r\n0.18833926252246996\r\n$2\r\nz7\r\n$19\r\n0.16727049672948188\r\n$2\r\nz2\r\n$19\r\n0.14820082118051361\r\n$2\r\nz5\r\n$19\r\n0.13834760231230384\r\n$2\r\nz6\r\n$19\r\n0.13834760231230384\r\n$2\r\nz4\r\n$19\r\n0.12971583044454582\r\n"}
+{"cmd": ["ft.search", "h", "aa (bb|cc)", "WITHSCORES", "NOCONTENT", "SCORER", "TFIDF"], "want": "*13\r\n:6\r\n$2\r\nz1\r\n$1\r\n3\r\n$2\r\nz7\r\n$1\r\n2\r\n$2\r\nz4\r\n$3\r\n0.6\r\n$2\r\nz2\r\n$3\r\n0.5\r\n$2\r\nz5\r\n$3\r\n0.5\r\n$2\r\nz6\r\n$4\r\n0.25\r\n"}
+{"cmd": ["ft.search", "h", "aa (bb|cc)", "WITHSCORES", "NOCONTENT", "SCORER", "BM25"], "want": "*13\r\n:6\r\n$2\r\nz7\r\n$18\r\n0.7532280985877218\r\n$2\r\nz1\r\n$18\r\n0.6176470393334299\r\n$2\r\nz4\r\n$18\r\n0.6176470393334299\r\n$2\r\nz2\r\n$19\r\n0.30882351966671495\r\n$2\r\nz5\r\n$19\r\n0.30882351966671495\r\n$2\r\nz6\r\n$19\r\n0.15441175983335748\r\n"}
+{"cmd": ["ft.search", "h", "aa (bb|cc)", "WITHSCORES", "NOCONTENT", "SCORER", "TFIDF.DOCNORM"], "want": "*13\r\n:6\r\n$2\r\nz1\r\n$1\r\n1\r\n$2\r\nz7\r\n$18\r\n0.6666666666666666\r\n$2\r\nz4\r\n$5\r\n0.375\r\n$2\r\nz2\r\n$4\r\n0.25\r\n$2\r\nz5\r\n$19\r\n0.21428571428571427\r\n$2\r\nz6\r\n$19\r\n0.10714285714285714\r\n"}
+{"cmd": ["ft.search", "h", "aa (bb|cc)", "WITHSCORES", "NOCONTENT", "SCORER", "DISMAX"], "want": "*13\r\n:6\r\n$2\r\nz7\r\n$1\r\n3\r\n$2\r\nz1\r\n$1\r\n2\r\n$2\r\nz2\r\n$1\r\n2\r\n$2\r\nz4\r\n$1\r\n2\r\n$2\r\nz5\r\n$1\r\n2\r\n$2\r\nz6\r\n$1\r\n2\r\n"}
+{"cmd": ["ft.search", "h", "aa (bb|cc)", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD"], "want": "*13\r\n:6\r\n$2\r\nz1\r\n$18\r\n0.7624591836034595\r\n$2\r\nz7\r\n$18\r\n0.6754290601520729\r\n$2\r\nz2\r\n$18\r\n0.5972013989745371\r\n$2\r\nz5\r\n$18\r\n0.5569621596772087\r\n$2\r\nz6\r\n$18\r\n0.5569621596772087\r\n$2\r\nz4\r\n$18\r\n0.5218032252177313\r\n"}
+{"cmd": ["ft.search", "h", "aa (bb|cc)", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD.NORM"], "want": "*13\r\n:6\r\n$2\r\nz1\r\n$1\r\n1\r\n$2\r\nz7\r\n$18\r\n0.8858560230856248\r\n$2\r\nz2\r\n$18\r\n0.7832568769807488\r\n$2\r\nz5\r\n$16\r\n0.73048127906985\r\n$2\r\nz6\r\n$16\r\n0.73048127906985\r\n$2\r\nz4\r\n$18\r\n0.6843687326994164\r\n"}
+{"cmd": ["ft.search", "h", "aa (bb|cc)", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD.TANH"], "want": "*13\r\n:6\r\n$2\r\nz1\r\n$19\r\n0.18833926252246996\r\n$2\r\nz7\r\n$19\r\n0.16727049672948188\r\n$2\r\nz2\r\n$19\r\n0.14820082118051361\r\n$2\r\nz5\r\n$19\r\n0.13834760231230384\r\n$2\r\nz6\r\n$19\r\n0.13834760231230384\r\n$2\r\nz4\r\n$19\r\n0.12971583044454582\r\n"}
+{"cmd": ["ft.search", "h", "aa bb dd", "WITHSCORES", "NOCONTENT", "SCORER", "TFIDF"], "want": "*7\r\n:3\r\n$2\r\nz7\r\n$4\r\n1.25\r\n$2\r\nz5\r\n$18\r\n0.3333333333333333\r\n$2\r\nz6\r\n$3\r\n0.2\r\n"}
+{"cmd": ["ft.search", "h", "aa bb dd", "WITHSCORES", "NOCONTENT", "SCORER", "BM25"], "want": "*7\r\n:3\r\n$2\r\nz7\r\n$18\r\n0.4444045789210069\r\n$2\r\nz5\r\n$19\r\n0.20588234644447664\r\n$2\r\nz6\r\n$19\r\n0.12352940786668598\r\n"}
+{"cmd": ["ft.search", "h", "aa bb dd", "WITHSCORES", "NOCONTENT", "SCORER", "TFIDF.DOCNORM"], "want": "*7\r\n:3\r\n$2\r\nz7\r\n$18\r\n0.4166666666666667\r\n$2\r\nz5\r\n$19\r\n0.14285714285714285\r\n$2\r\nz6\r\n$19\r\n0.08571428571428572\r\n"}
+{"cmd": ["ft.search", "h", "aa bb dd", "WITHSCORES", "NOCONTENT", "SCORER", "DISMAX"], "want": "*7\r\n:3\r\n$2\r\nz7\r\n$1\r\n5\r\n$2\r\nz5\r\n$1\r\n3\r\n$2\r\nz6\r\n$1\r\n3\r\n"}
+{"cmd": ["ft.search", "h", "aa bb dd", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD"], "want": "*7\r\n:3\r\n$2\r\nz7\r\n$17\r\n1.580360715563473\r\n$2\r\nz5\r\n$17\r\n1.110455952473966\r\n$2\r\nz6\r\n$17\r\n1.110455952473966\r\n"}
+{"cmd": ["ft.search", "h", "aa bb dd", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD.NORM"], "want": "*7\r\n:3\r\n$2\r\nz7\r\n$1\r\n1\r\n$2\r\nz5\r\n$18\r\n0.7026598051559616\r\n$2\r\nz6\r\n$18\r\n0.7026598051559616\r\n"}
+{"cmd": ["ft.search", "h", "aa bb dd", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD.TANH"], "want": "*7\r\n:3\r\n$2\r\nz7\r\n$18\r\n0.3757401111679132\r\n$2\r\nz5\r\n$19\r\n0.27069533743378227\r\n$2\r\nz6\r\n$19\r\n0.27069533743378227\r\n"}
+{"cmd": ["ft.search", "h", "yy aa", "WITHSCORES", "NOCONTENT", "SCORER", "TFIDF"], "want": "*5\r\n:2\r\n$2\r\nz5\r\n$18\r\n2.3333333333333335\r\n$2\r\nz6\r\n$18\r\n2.3333333333333335\r\n"}
+{"cmd": ["ft.search", "h", "yy aa", "WITHSCORES", "NOCONTENT", "SCORER", "BM25"], "want": "*5\r\n:2\r\n$2\r\nz5\r\n$17\r\n1.080882326886703\r\n$2\r\nz6\r\n$17\r\n1.080882326886703\r\n"}
+{"cmd": ["ft.search", "h", "yy aa", "WITHSCORES", "NOCONTENT", "SCORER", "TFIDF.DOCNORM"], "want": "*5\r\n:2\r\n$2\r\nz5\r\n$1\r\n1\r\n$2\r\nz6\r\n$1\r\n1\r\n"}
+{"cmd": ["ft.search", "h", "yy aa", "WITHSCORES", "NOCONTENT", "SCORER", "DISMAX"], "want": "*5\r\n:2\r\n$2\r\nz5\r\n$1\r\n4\r\n$2\r\nz6\r\n$1\r\n4\r\n"}
+{"cmd": ["ft.search", "h", "yy aa", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD"], "want": "*5\r\n:2\r\n$2\r\nz5\r\n$17\r\n1.906705553896767\r\n$2\r\nz6\r\n$17\r\n1.906705553896767\r\n"}
+{"cmd": ["ft.search", "h", "yy aa", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD.NORM"], "want": "*5\r\n:2\r\n$2\r\nz5\r\n$1\r\n1\r\n$2\r\nz6\r\n$1\r\n1\r\n"}
+{"cmd": ["ft.search", "h", "yy aa", "WITHSCORES", "NOCONTENT", "SCORER", "BM25STD.TANH"], "want": "*5\r\n:2\r\n$2\r\nz5\r\n$19\r\n0.44357789684063487\r\n$2\r\nz6\r\n$19\r\n0.44357789684063487\r\n"}
+{"cmd": ["flushall"]}
+{"cmd": ["ft.create", "g", "SCHEMA", "t", "TEXT"], "want": "+OK\r\n"}
+{"cmd": ["hset", "y1", "t", "gaming laptop"], "want": ":1\r\n"}
+{"cmd": ["hset", "y2", "t", "games are fun"], "want": ":1\r\n"}
+{"cmd": ["hset", "y3", "t", "office chair"], "want": ":1\r\n"}
+{"cmd": ["ft.search", "g", "gaming", "WITHSCORES", "NOCONTENT", "SCORER", "TFIDF"], "want": "*5\r\n:2\r\n$2\r\ny1\r\n$1\r\n3\r\n$2\r\ny2\r\n$1\r\n1\r\n"}
+{"cmd": ["ft.search", "g", "gaming", "WITHSCORES", "NOCONTENT", "SCORER", "BM25"], "want": "*5\r\n:2\r\n$2\r\ny1\r\n$18\r\n1.0714285440590925\r\n$2\r\ny2\r\n$18\r\n0.3571428480196975\r\n"}
+{"cmd": ["ft.search", "g", "gaming", "WITHSCORES", "NOCONTENT", "SCORER", "DISMAX"], "want": "*5\r\n:2\r\n$2\r\ny1\r\n$1\r\n1\r\n$2\r\ny2\r\n$1\r\n1\r\n"}
+{"cmd": ["ft.search", "g", "games", "WITHSCORES", "NOCONTENT", "SCORER", "TFIDF"], "want": "*5\r\n:2\r\n$2\r\ny2\r\n$1\r\n3\r\n$2\r\ny1\r\n$1\r\n1\r\n"}
+{"cmd": ["ft.search", "g", "games", "WITHSCORES", "NOCONTENT", "SCORER", "BM25"], "want": "*5\r\n:2\r\n$2\r\ny2\r\n$18\r\n1.0714285440590925\r\n$2\r\ny1\r\n$18\r\n0.3571428480196975\r\n"}
+{"cmd": ["ft.search", "g", "games", "WITHSCORES", "NOCONTENT", "SCORER", "DISMAX"], "want": "*5\r\n:2\r\n$2\r\ny1\r\n$1\r\n1\r\n$2\r\ny2\r\n$1\r\n1\r\n"}
+{"cmd": ["ft.search", "g", "gaming laptop", "WITHSCORES", "NOCONTENT", "SCORER", "TFIDF"], "want": "*3\r\n:1\r\n$2\r\ny1\r\n$1\r\n5\r\n"}
+{"cmd": ["ft.search", "g", "gaming laptop", "WITHSCORES", "NOCONTENT", "SCORER", "BM25"], "want": "*3\r\n:1\r\n$2\r\ny1\r\n$18\r\n1.7857142400984873\r\n"}
+{"cmd": ["ft.search", "g", "gaming laptop", "WITHSCORES", "NOCONTENT", "SCORER", "DISMAX"], "want": "*3\r\n:1\r\n$2\r\ny1\r\n$1\r\n2\r\n"}
+{"cmd": ["ft.search", "g", "laptop gaming", "WITHSCORES", "NOCONTENT", "SCORER", "TFIDF"], "want": "*3\r\n:1\r\n$2\r\ny1\r\n$1\r\n5\r\n"}
+{"cmd": ["ft.search", "g", "laptop gaming", "WITHSCORES", "NOCONTENT", "SCORER", "BM25"], "want": "*3\r\n:1\r\n$2\r\ny1\r\n$18\r\n1.7857142400984873\r\n"}
+{"cmd": ["ft.search", "g", "laptop gaming", "WITHSCORES", "NOCONTENT", "SCORER", "DISMAX"], "want": "*3\r\n:1\r\n$2\r\ny1\r\n$1\r\n2\r\n"}
+{"cmd": ["ft.search", "g", "games|chair", "WITHSCORES", "NOCONTENT", "SCORER", "TFIDF"], "want": "*7\r\n:3\r\n$2\r\ny2\r\n$1\r\n3\r\n$2\r\ny3\r\n$1\r\n2\r\n$2\r\ny1\r\n$1\r\n1\r\n"}
+{"cmd": ["ft.search", "g", "games|chair", "WITHSCORES", "NOCONTENT", "SCORER", "BM25"], "want": "*7\r\n:3\r\n$2\r\ny2\r\n$18\r\n1.0714285440590925\r\n$2\r\ny3\r\n$17\r\n0.714285696039395\r\n$2\r\ny1\r\n$18\r\n0.3571428480196975\r\n"}
+{"cmd": ["ft.search", "g", "games|chair", "WITHSCORES", "NOCONTENT", "SCORER", "DISMAX"], "want": "*7\r\n:3\r\n$2\r\ny1\r\n$1\r\n1\r\n$2\r\ny2\r\n$1\r\n1\r\n$2\r\ny3\r\n$1\r\n1\r\n"}
+{"cmd": ["flushall"]}
+{"cmd": ["ft.create", "e", "ON", "HASH", "PREFIX", "1", "property:", "SCHEMA", "title", "TEXT", "SORTABLE", "features", "TAG", "INDEXEMPTY", "description", "TEXT", "INDEXEMPTY", "t2", "TAG"], "want": "+OK\r\n"}
+{"cmd": ["ft.create", "noe", "SCHEMA", "a", "TEXT", "b", "TAG"], "want": "+OK\r\n"}
+{"cmd": ["hset", "property:1", "title", "Luxury Villa", "features", "pool,sea view", "description", "A villa", "t2", "x"], "want": ":4\r\n"}
+{"cmd": ["hset", "property:2", "title", "Flat", "features", "", "description", "Modern flat", "t2", ""], "want": ":4\r\n"}
+{"cmd": ["hset", "property:3", "title", "Bungalow", "features", "beachfront", "description", ""], "want": ":3\r\n"}
+{"cmd": ["hset", "q1", "a", "", "b", ""], "want": ":2\r\n"}
+{"cmd": ["ft.search", "e", "@title:''", "NOCONTENT", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "-Use `INDEXEMPTY` in field creation in order to index and query for empty strings\r\n"}
+{"cmd": ["ft.explain", "e", "@title:''", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "-Use `INDEXEMPTY` in field creation in order to index and query for empty strings\r\n"}
+{"cmd": ["ft.aggregate", "e", "@title:''", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "-Use `INDEXEMPTY` in field creation in order to index and query for empty strings\r\n"}
+{"cmd": ["ft.search", "e", "@features:{$empty}", "NOCONTENT", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "*2\r\n:1\r\n$10\r\nproperty:2\r\n"}
+{"cmd": ["ft.explain", "e", "@features:{$empty}", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "$23\r\nTAG:@features {\n  \"\"\n}\n\r\n"}
+{"cmd": ["ft.aggregate", "e", "@features:{$empty}", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "*2\r\n:1\r\n*0\r\n"}
+{"cmd": ["ft.search", "e", "-@features:{$empty}", "NOCONTENT", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "*3\r\n:2\r\n$10\r\nproperty:1\r\n$10\r\nproperty:3\r\n"}
+{"cmd": ["ft.explain", "e", "-@features:{$empty}", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "$36\r\nNOT{\n  TAG:@features {\n    \"\"\n  }\n}\n\r\n"}
+{"cmd": ["ft.aggregate", "e", "-@features:{$empty}", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "*3\r\n:1\r\n*0\r\n*0\r\n"}
+{"cmd": ["ft.search", "e", "@description:''", "NOCONTENT", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "*2\r\n:1\r\n$10\r\nproperty:3\r\n"}
+{"cmd": ["ft.explain", "e", "@description:''", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "$16\r\n@description:\"\"\n\r\n"}
+{"cmd": ["ft.aggregate", "e", "@description:''", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "*2\r\n:1\r\n*0\r\n"}
+{"cmd": ["ft.search", "e", "-@description:''", "NOCONTENT", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "*3\r\n:2\r\n$10\r\nproperty:1\r\n$10\r\nproperty:2\r\n"}
+{"cmd": ["ft.explain", "e", "-@description:''", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "$25\r\nNOT{\n  @description:\"\"\n}\n\r\n"}
+{"cmd": ["ft.aggregate", "e", "-@description:''", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "*3\r\n:1\r\n*0\r\n*0\r\n"}
+{"cmd": ["ft.search", "e", "@t2:{$empty}", "NOCONTENT", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "-Use `INDEXEMPTY` in field creation in order to index and query for empty strings\r\n"}
+{"cmd": ["ft.explain", "e", "@t2:{$empty}", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "$17\r\nTAG:@t2 {\n  \"\"\n}\n\r\n"}
+{"cmd": ["ft.aggregate", "e", "@t2:{$empty}", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "e", "@features:{''}", "NOCONTENT", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "*2\r\n:1\r\n$10\r\nproperty:2\r\n"}
+{"cmd": ["ft.explain", "e", "@features:{''}", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "$23\r\nTAG:@features {\n  \"\"\n}\n\r\n"}
+{"cmd": ["ft.aggregate", "e", "@features:{''}", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "*2\r\n:1\r\n*0\r\n"}
+{"cmd": ["ft.search", "e", "@description:$empty", "NOCONTENT", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "*2\r\n:1\r\n$10\r\nproperty:3\r\n"}
+{"cmd": ["ft.explain", "e", "@description:$empty", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "$16\r\n@description:\"\"\n\r\n"}
+{"cmd": ["ft.aggregate", "e", "@description:$empty", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "*2\r\n:1\r\n*0\r\n"}
+{"cmd": ["ft.search", "e", "''", "NOCONTENT", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "*2\r\n:1\r\n$10\r\nproperty:3\r\n"}
+{"cmd": ["ft.explain", "e", "''", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "$3\r\n\"\"\n\r\n"}
+{"cmd": ["ft.aggregate", "e", "''", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "*2\r\n:1\r\n*0\r\n"}
+{"cmd": ["ft.search", "e", "@a:$empty", "NOCONTENT", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "-Unknown field at offset 0 near a\r\n"}
+{"cmd": ["ft.explain", "e", "@a:$empty", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "-Unknown field at offset 0 near a\r\n"}
+{"cmd": ["ft.aggregate", "e", "@a:$empty", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "-Unknown field at offset 0 near a\r\n"}
+{"cmd": ["ft.search", "e", "@b:{$empty}", "NOCONTENT", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "-Unknown field at offset 0 near b\r\n"}
+{"cmd": ["ft.explain", "e", "@b:{$empty}", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "-Unknown field at offset 0 near b\r\n"}
+{"cmd": ["ft.aggregate", "e", "@b:{$empty}", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "-Unknown field at offset 0 near b\r\n"}
+{"cmd": ["ft.search", "e", "@a:''", "NOCONTENT", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "-Unknown field at offset 0 near a\r\n"}
+{"cmd": ["ft.explain", "e", "@a:''", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "-Unknown field at offset 0 near a\r\n"}
+{"cmd": ["ft.aggregate", "e", "@a:''", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "-Unknown field at offset 0 near a\r\n"}
+{"cmd": ["ft.search", "noe", "@title:''", "NOCONTENT", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "-Unknown field at offset 0 near title\r\n"}
+{"cmd": ["ft.explain", "noe", "@title:''", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "-Unknown field at offset 0 near title\r\n"}
+{"cmd": ["ft.aggregate", "noe", "@title:''", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "-Unknown field at offset 0 near title\r\n"}
+{"cmd": ["ft.search", "noe", "@features:{$empty}", "NOCONTENT", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "-Unknown field at offset 0 near features\r\n"}
+{"cmd": ["ft.explain", "noe", "@features:{$empty}", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "-Unknown field at offset 0 near features\r\n"}
+{"cmd": ["ft.aggregate", "noe", "@features:{$empty}", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "-Unknown field at offset 0 near features\r\n"}
+{"cmd": ["ft.search", "noe", "-@features:{$empty}", "NOCONTENT", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "-Unknown field at offset 1 near features\r\n"}
+{"cmd": ["ft.explain", "noe", "-@features:{$empty}", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "-Unknown field at offset 1 near features\r\n"}
+{"cmd": ["ft.aggregate", "noe", "-@features:{$empty}", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "-Unknown field at offset 1 near features\r\n"}
+{"cmd": ["ft.search", "noe", "@description:''", "NOCONTENT", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "-Unknown field at offset 0 near description\r\n"}
+{"cmd": ["ft.explain", "noe", "@description:''", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "-Unknown field at offset 0 near description\r\n"}
+{"cmd": ["ft.aggregate", "noe", "@description:''", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "-Unknown field at offset 0 near description\r\n"}
+{"cmd": ["ft.search", "noe", "-@description:''", "NOCONTENT", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "-Unknown field at offset 1 near description\r\n"}
+{"cmd": ["ft.explain", "noe", "-@description:''", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "-Unknown field at offset 1 near description\r\n"}
+{"cmd": ["ft.aggregate", "noe", "-@description:''", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "-Unknown field at offset 1 near description\r\n"}
+{"cmd": ["ft.search", "noe", "@t2:{$empty}", "NOCONTENT", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "-Unknown field at offset 0 near t2\r\n"}
+{"cmd": ["ft.explain", "noe", "@t2:{$empty}", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "-Unknown field at offset 0 near t2\r\n"}
+{"cmd": ["ft.aggregate", "noe", "@t2:{$empty}", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "-Unknown field at offset 0 near t2\r\n"}
+{"cmd": ["ft.search", "noe", "@features:{''}", "NOCONTENT", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "-Unknown field at offset 0 near features\r\n"}
+{"cmd": ["ft.explain", "noe", "@features:{''}", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "-Unknown field at offset 0 near features\r\n"}
+{"cmd": ["ft.aggregate", "noe", "@features:{''}", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "-Unknown field at offset 0 near features\r\n"}
+{"cmd": ["ft.search", "noe", "@description:$empty", "NOCONTENT", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "-Unknown field at offset 0 near description\r\n"}
+{"cmd": ["ft.explain", "noe", "@description:$empty", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "-Unknown field at offset 0 near description\r\n"}
+{"cmd": ["ft.aggregate", "noe", "@description:$empty", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "-Unknown field at offset 0 near description\r\n"}
+{"cmd": ["ft.search", "noe", "''", "NOCONTENT", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.explain", "noe", "''", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "$3\r\n\"\"\n\r\n"}
+{"cmd": ["ft.aggregate", "noe", "''", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "noe", "@a:$empty", "NOCONTENT", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "-Use `INDEXEMPTY` in field creation in order to index and query for empty strings\r\n"}
+{"cmd": ["ft.explain", "noe", "@a:$empty", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "-Use `INDEXEMPTY` in field creation in order to index and query for empty strings\r\n"}
+{"cmd": ["ft.aggregate", "noe", "@a:$empty", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "-Use `INDEXEMPTY` in field creation in order to index and query for empty strings\r\n"}
+{"cmd": ["ft.search", "noe", "@b:{$empty}", "NOCONTENT", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "-Use `INDEXEMPTY` in field creation in order to index and query for empty strings\r\n"}
+{"cmd": ["ft.explain", "noe", "@b:{$empty}", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "$16\r\nTAG:@b {\n  \"\"\n}\n\r\n"}
+{"cmd": ["ft.aggregate", "noe", "@b:{$empty}", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "noe", "@a:''", "NOCONTENT", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "-Use `INDEXEMPTY` in field creation in order to index and query for empty strings\r\n"}
+{"cmd": ["ft.explain", "noe", "@a:''", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "-Use `INDEXEMPTY` in field creation in order to index and query for empty strings\r\n"}
+{"cmd": ["ft.aggregate", "noe", "@a:''", "DIALECT", "2", "PARAMS", "2", "empty", ""], "want": "-Use `INDEXEMPTY` in field creation in order to index and query for empty strings\r\n"}
+{"cmd": ["ft.create", "n1", "NOOFFSETS", "SCHEMA", "txt", "TEXT"], "want": "+OK\r\n"}
+{"cmd": ["ft.create", "n2", "NOHL", "SCHEMA", "txt", "TEXT"], "want": "+OK\r\n"}
+{"cmd": ["hset", "doc1", "txt", "foo bar"], "want": ":1\r\n"}
+{"cmd": ["ft.search", "n1", "foo", "SUMMARIZE", "FIELDS", "1", "txt"], "want": "-Cannot use HIGHLIGHT/SUMMARIZE because NOOFSETS was specified at index level\r\n"}
+{"cmd": ["ft.search", "n1", "foo", "HIGHLIGHT"], "want": "-Cannot use HIGHLIGHT/SUMMARIZE because NOOFSETS was specified at index level\r\n"}
+{"cmd": ["ft.search", "n2", "foo", "SUMMARIZE", "FIELDS", "1", "txt"], "want": "-Cannot use HIGHLIGHT/SUMMARIZE because NOOFSETS was specified at index level\r\n"}
+{"cmd": ["ft.search", "n2", "foo", "HIGHLIGHT"], "want": "-Cannot use HIGHLIGHT/SUMMARIZE because NOOFSETS was specified at index level\r\n"}
+{"cmd": ["flushall"]}
+{"cmd": ["ft.create", "gs", "SCHEMA", "g", "GEOSHAPE", "FLAT"], "want": "+OK\r\n"}
+{"cmd": ["hset", "sq", "g", "POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))"], "want": ":1\r\n"}
+{"cmd": ["hset", "ccw", "g", "POLYGON((0 0, 0 10, 10 10, 10 0, 0 0))"], "want": ":1\r\n"}
+{"cmd": ["hset", "open", "g", "POLYGON((0 0, 0 10, 10 10, 10 0))"], "want": ":1\r\n"}
+{"cmd": ["hset", "hole", "g", "POLYGON((0 0, 0 10, 10 10, 10 0, 0 0), (4 4, 6 4, 6 6, 4 6, 4 4))"], "want": ":1\r\n"}
+{"cmd": ["hset", "pe", "g", "POINT(10 5)"], "want": ":1\r\n"}
+{"cmd": ["hset", "pc", "g", "POINT(5 5)"], "want": ":1\r\n"}
+{"cmd": ["hset", "pv", "g", "POINT(0 0)"], "want": ":1\r\n"}
+{"cmd": ["hset", "concave", "g", "POLYGON((0 20, 10 20, 10 30, 5 25, 0 30, 0 20))"], "want": ":1\r\n"}
+{"cmd": ["hset", "tri", "g", "POLYGON((20 20, 25 35, 35 25, 20 20))"], "want": ":1\r\n"}
+{"cmd": ["hset", "bad", "g", "POLYGON((1 1, 2 2))"], "want": ":1\r\n"}
+{"cmd": ["hset", "bad2", "g", "LINESTRING (1 1, 2 2)"], "want": ":1\r\n"}
+{"cmd": ["hset", "bowtie", "g", "POLYGON((0 0, 2 2, 2 0, 0 2, 0 0))"], "want": ":1\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[within $sh]", "PARAMS", "2", "sh", "POINT(5 5)", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[within $sh]", "PARAMS", "2", "sh", "POINT(10 5)", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[within $sh]", "PARAMS", "2", "sh", "POINT(0 0)", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[within $sh]", "PARAMS", "2", "sh", "POINT(2 2)", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[within $sh]", "PARAMS", "2", "sh", "POINT(5 28)", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[within $sh]", "PARAMS", "2", "sh", "POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*6\r\n:5\r\n$2\r\nsq\r\n$3\r\nccw\r\n$4\r\nopen\r\n$4\r\nhole\r\n$2\r\npc\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[within $sh]", "PARAMS", "2", "sh", "POLYGON((-1 -1, 11 -1, 11 11, -1 11, -1 -1))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*8\r\n:7\r\n$2\r\nsq\r\n$3\r\nccw\r\n$4\r\nopen\r\n$4\r\nhole\r\n$2\r\npe\r\n$2\r\npc\r\n$2\r\npv\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[within $sh]", "PARAMS", "2", "sh", "POLYGON((4.5 4.5, 5.5 4.5, 5.5 5.5, 4.5 5.5, 4.5 4.5))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*2\r\n:1\r\n$2\r\npc\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[within $sh]", "PARAMS", "2", "sh", "POLYGON((10 0, 20 0, 20 10, 10 10, 10 0))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[within $sh]", "PARAMS", "2", "sh", "POLYGON((1 1, 3 1, 3 3, 1 3, 1 1))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[within $sh]", "PARAMS", "2", "sh", "POLYGON((1 21, 9 21, 9 29, 1 29, 1 21))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[within $sh]", "PARAMS", "2", "sh", "POLYGON((15 15, 75 15, 50 70, 20 40, 15 15))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*2\r\n:1\r\n$3\r\ntri\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[within $sh]", "PARAMS", "2", "sh", "POLYGON((-5 15, 40 15, 40 40, -5 40, -5 15), (2 22, 8 22, 8 24, 2 24, 2 22))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*2\r\n:1\r\n$3\r\ntri\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[within $sh]", "PARAMS", "2", "sh", "POLYGON((24 24, 24 26, 25 25, 24 24))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[contains $sh]", "PARAMS", "2", "sh", "POINT(5 5)", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*4\r\n:3\r\n$2\r\nsq\r\n$3\r\nccw\r\n$4\r\nopen\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[contains $sh]", "PARAMS", "2", "sh", "POINT(10 5)", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[contains $sh]", "PARAMS", "2", "sh", "POINT(0 0)", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[contains $sh]", "PARAMS", "2", "sh", "POINT(2 2)", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*5\r\n:4\r\n$2\r\nsq\r\n$3\r\nccw\r\n$4\r\nopen\r\n$4\r\nhole\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[contains $sh]", "PARAMS", "2", "sh", "POINT(5 28)", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[contains $sh]", "PARAMS", "2", "sh", "POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*4\r\n:3\r\n$2\r\nsq\r\n$3\r\nccw\r\n$4\r\nopen\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[contains $sh]", "PARAMS", "2", "sh", "POLYGON((-1 -1, 11 -1, 11 11, -1 11, -1 -1))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[contains $sh]", "PARAMS", "2", "sh", "POLYGON((4.5 4.5, 5.5 4.5, 5.5 5.5, 4.5 5.5, 4.5 4.5))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*4\r\n:3\r\n$2\r\nsq\r\n$3\r\nccw\r\n$4\r\nopen\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[contains $sh]", "PARAMS", "2", "sh", "POLYGON((10 0, 20 0, 20 10, 10 10, 10 0))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[contains $sh]", "PARAMS", "2", "sh", "POLYGON((1 1, 3 1, 3 3, 1 3, 1 1))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*5\r\n:4\r\n$2\r\nsq\r\n$3\r\nccw\r\n$4\r\nopen\r\n$4\r\nhole\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[contains $sh]", "PARAMS", "2", "sh", "POLYGON((1 21, 9 21, 9 29, 1 29, 1 21))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[contains $sh]", "PARAMS", "2", "sh", "POLYGON((15 15, 75 15, 50 70, 20 40, 15 15))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[contains $sh]", "PARAMS", "2", "sh", "POLYGON((-5 15, 40 15, 40 40, -5 40, -5 15), (2 22, 8 22, 8 24, 2 24, 2 22))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[contains $sh]", "PARAMS", "2", "sh", "POLYGON((24 24, 24 26, 25 25, 24 24))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*2\r\n:1\r\n$3\r\ntri\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[intersects $sh]", "PARAMS", "2", "sh", "POINT(5 5)", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*5\r\n:4\r\n$2\r\nsq\r\n$3\r\nccw\r\n$4\r\nopen\r\n$2\r\npc\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[intersects $sh]", "PARAMS", "2", "sh", "POINT(10 5)", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*6\r\n:5\r\n$2\r\nsq\r\n$3\r\nccw\r\n$4\r\nopen\r\n$4\r\nhole\r\n$2\r\npe\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[intersects $sh]", "PARAMS", "2", "sh", "POINT(0 0)", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*6\r\n:5\r\n$2\r\nsq\r\n$3\r\nccw\r\n$4\r\nopen\r\n$4\r\nhole\r\n$2\r\npv\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[intersects $sh]", "PARAMS", "2", "sh", "POINT(2 2)", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*5\r\n:4\r\n$2\r\nsq\r\n$3\r\nccw\r\n$4\r\nopen\r\n$4\r\nhole\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[intersects $sh]", "PARAMS", "2", "sh", "POINT(5 28)", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[intersects $sh]", "PARAMS", "2", "sh", "POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*8\r\n:7\r\n$2\r\nsq\r\n$3\r\nccw\r\n$4\r\nopen\r\n$4\r\nhole\r\n$2\r\npe\r\n$2\r\npc\r\n$2\r\npv\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[intersects $sh]", "PARAMS", "2", "sh", "POLYGON((-1 -1, 11 -1, 11 11, -1 11, -1 -1))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*8\r\n:7\r\n$2\r\nsq\r\n$3\r\nccw\r\n$4\r\nopen\r\n$4\r\nhole\r\n$2\r\npe\r\n$2\r\npc\r\n$2\r\npv\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[intersects $sh]", "PARAMS", "2", "sh", "POLYGON((4.5 4.5, 5.5 4.5, 5.5 5.5, 4.5 5.5, 4.5 4.5))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*5\r\n:4\r\n$2\r\nsq\r\n$3\r\nccw\r\n$4\r\nopen\r\n$2\r\npc\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[intersects $sh]", "PARAMS", "2", "sh", "POLYGON((10 0, 20 0, 20 10, 10 10, 10 0))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*6\r\n:5\r\n$2\r\nsq\r\n$3\r\nccw\r\n$4\r\nopen\r\n$4\r\nhole\r\n$2\r\npe\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[intersects $sh]", "PARAMS", "2", "sh", "POLYGON((1 1, 3 1, 3 3, 1 3, 1 1))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*5\r\n:4\r\n$2\r\nsq\r\n$3\r\nccw\r\n$4\r\nopen\r\n$4\r\nhole\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[intersects $sh]", "PARAMS", "2", "sh", "POLYGON((1 21, 9 21, 9 29, 1 29, 1 21))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*2\r\n:1\r\n$7\r\nconcave\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[intersects $sh]", "PARAMS", "2", "sh", "POLYGON((15 15, 75 15, 50 70, 20 40, 15 15))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*2\r\n:1\r\n$3\r\ntri\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[intersects $sh]", "PARAMS", "2", "sh", "POLYGON((-5 15, 40 15, 40 40, -5 40, -5 15), (2 22, 8 22, 8 24, 2 24, 2 22))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*3\r\n:2\r\n$7\r\nconcave\r\n$3\r\ntri\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[intersects $sh]", "PARAMS", "2", "sh", "POLYGON((24 24, 24 26, 25 25, 24 24))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*2\r\n:1\r\n$3\r\ntri\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[disjoint $sh]", "PARAMS", "2", "sh", "POINT(5 5)", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*6\r\n:5\r\n$4\r\nhole\r\n$2\r\npe\r\n$2\r\npv\r\n$7\r\nconcave\r\n$3\r\ntri\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[disjoint $sh]", "PARAMS", "2", "sh", "POINT(10 5)", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*5\r\n:4\r\n$2\r\npc\r\n$2\r\npv\r\n$7\r\nconcave\r\n$3\r\ntri\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[disjoint $sh]", "PARAMS", "2", "sh", "POINT(0 0)", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*5\r\n:4\r\n$2\r\npe\r\n$2\r\npc\r\n$7\r\nconcave\r\n$3\r\ntri\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[disjoint $sh]", "PARAMS", "2", "sh", "POINT(2 2)", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*6\r\n:5\r\n$2\r\npe\r\n$2\r\npc\r\n$2\r\npv\r\n$7\r\nconcave\r\n$3\r\ntri\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[disjoint $sh]", "PARAMS", "2", "sh", "POINT(5 28)", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*10\r\n:9\r\n$2\r\nsq\r\n$3\r\nccw\r\n$4\r\nopen\r\n$4\r\nhole\r\n$2\r\npe\r\n$2\r\npc\r\n$2\r\npv\r\n$7\r\nconcave\r\n$3\r\ntri\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[disjoint $sh]", "PARAMS", "2", "sh", "POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*3\r\n:2\r\n$7\r\nconcave\r\n$3\r\ntri\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[disjoint $sh]", "PARAMS", "2", "sh", "POLYGON((-1 -1, 11 -1, 11 11, -1 11, -1 -1))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*3\r\n:2\r\n$7\r\nconcave\r\n$3\r\ntri\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[disjoint $sh]", "PARAMS", "2", "sh", "POLYGON((4.5 4.5, 5.5 4.5, 5.5 5.5, 4.5 5.5, 4.5 4.5))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*6\r\n:5\r\n$4\r\nhole\r\n$2\r\npe\r\n$2\r\npv\r\n$7\r\nconcave\r\n$3\r\ntri\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[disjoint $sh]", "PARAMS", "2", "sh", "POLYGON((10 0, 20 0, 20 10, 10 10, 10 0))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*5\r\n:4\r\n$2\r\npc\r\n$2\r\npv\r\n$7\r\nconcave\r\n$3\r\ntri\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[disjoint $sh]", "PARAMS", "2", "sh", "POLYGON((1 1, 3 1, 3 3, 1 3, 1 1))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*6\r\n:5\r\n$2\r\npe\r\n$2\r\npc\r\n$2\r\npv\r\n$7\r\nconcave\r\n$3\r\ntri\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[disjoint $sh]", "PARAMS", "2", "sh", "POLYGON((1 21, 9 21, 9 29, 1 29, 1 21))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*9\r\n:8\r\n$2\r\nsq\r\n$3\r\nccw\r\n$4\r\nopen\r\n$4\r\nhole\r\n$2\r\npe\r\n$2\r\npc\r\n$2\r\npv\r\n$3\r\ntri\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[disjoint $sh]", "PARAMS", "2", "sh", "POLYGON((15 15, 75 15, 50 70, 20 40, 15 15))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*9\r\n:8\r\n$2\r\nsq\r\n$3\r\nccw\r\n$4\r\nopen\r\n$4\r\nhole\r\n$2\r\npe\r\n$2\r\npc\r\n$2\r\npv\r\n$7\r\nconcave\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[disjoint $sh]", "PARAMS", "2", "sh", "POLYGON((-5 15, 40 15, 40 40, -5 40, -5 15), (2 22, 8 22, 8 24, 2 24, 2 22))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*8\r\n:7\r\n$2\r\nsq\r\n$3\r\nccw\r\n$4\r\nopen\r\n$4\r\nhole\r\n$2\r\npe\r\n$2\r\npc\r\n$2\r\npv\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[disjoint $sh]", "PARAMS", "2", "sh", "POLYGON((24 24, 24 26, 25 25, 24 24))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*9\r\n:8\r\n$2\r\nsq\r\n$3\r\nccw\r\n$4\r\nopen\r\n$4\r\nhole\r\n$2\r\npe\r\n$2\r\npc\r\n$2\r\npv\r\n$7\r\nconcave\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[within $sh]", "PARAMS", "2", "sh", "garbage", "DIALECT", "3", "NOCONTENT"], "want": "-Error querying geoshape index: unknown geometry type\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[within $sh]", "PARAMS", "2", "sh", "POLYGON((0 0, 2 2, 2 0, 0 2, 0 0))", "DIALECT", "3", "NOCONTENT"], "want": "-Error querying geoshape index: invalid geometry: Geometry has wrong orientation\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[within $sh]", "PARAMS", "2", "sh", "POLYGON((5 12, 5 7, 5 8, 5 8, 5 9, 5 12))", "DIALECT", "3", "NOCONTENT"], "want": "-Error querying geoshape index: invalid geometry: Geometry has spikes. A spike point was found with apex at (5, 7)\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[within $sh]", "PARAMS", "2", "sh", "POLYGON((7 6, 7 6, 5 0, 7 6))", "DIALECT", "3", "NOCONTENT"], "want": "-Error querying geoshape index: invalid geometry: Geometry has wrong topological dimension\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[touches $sh]", "PARAMS", "2", "sh", "POINT(1 1)", "DIALECT", "3"], "want": "-Syntax error: Expecting a geoshape predicate at offset 12\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[within $sh]", "PARAMS", "2", "sh", "POINT(1 1)", "DIALECT", "1"], "want": "-Syntax error at offset 4 near within\r\n"}
+{"cmd": ["ft.explain", "gs", "@g:[intersects $sh]", "PARAMS", "2", "sh", "POINT(1 1)", "DIALECT", "3"], "want": "$23\r\nGEOSHAPE{4 POINT(1 1)}\n\r\n"}
+{"cmd": ["ft.explain", "gs", "@g:[disjoint $sh]", "PARAMS", "2", "sh", "POINT(1 1)", "DIALECT", "3"], "want": "$23\r\nGEOSHAPE{3 POINT(1 1)}\n\r\n"}
+{"cmd": ["ft.explain", "gs", "@g:[within $sh]", "PARAMS", "2", "sh", "POINT(1 1)", "DIALECT", "3"], "want": "$23\r\nGEOSHAPE{2 POINT(1 1)}\n\r\n"}
+{"cmd": ["ft.explain", "gs", "@g:[contains $sh]", "PARAMS", "2", "sh", "POINT(1 1)", "DIALECT", "3"], "want": "$23\r\nGEOSHAPE{1 POINT(1 1)}\n\r\n"}
+{"cmd": ["flushall"]}
+{"cmd": ["ft.create", "gs", "SCHEMA", "g", "GEOSHAPE", "SPHERICAL"], "want": "+OK\r\n"}
+{"cmd": ["hset", "sq", "g", "POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))"], "want": ":1\r\n"}
+{"cmd": ["hset", "ccw", "g", "POLYGON((0 0, 0 10, 10 10, 10 0, 0 0))"], "want": ":1\r\n"}
+{"cmd": ["hset", "open", "g", "POLYGON((0 0, 0 10, 10 10, 10 0))"], "want": ":1\r\n"}
+{"cmd": ["hset", "hole", "g", "POLYGON((0 0, 0 10, 10 10, 10 0, 0 0), (4 4, 6 4, 6 6, 4 6, 4 4))"], "want": ":1\r\n"}
+{"cmd": ["hset", "pe", "g", "POINT(10 5)"], "want": ":1\r\n"}
+{"cmd": ["hset", "pc", "g", "POINT(5 5)"], "want": ":1\r\n"}
+{"cmd": ["hset", "pv", "g", "POINT(0 0)"], "want": ":1\r\n"}
+{"cmd": ["hset", "concave", "g", "POLYGON((0 20, 10 20, 10 30, 5 25, 0 30, 0 20))"], "want": ":1\r\n"}
+{"cmd": ["hset", "tri", "g", "POLYGON((20 20, 25 35, 35 25, 20 20))"], "want": ":1\r\n"}
+{"cmd": ["hset", "bad", "g", "POLYGON((1 1, 2 2))"], "want": ":1\r\n"}
+{"cmd": ["hset", "bad2", "g", "LINESTRING (1 1, 2 2)"], "want": ":1\r\n"}
+{"cmd": ["hset", "bowtie", "g", "POLYGON((0 0, 2 2, 2 0, 0 2, 0 0))"], "want": ":1\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[within $sh]", "PARAMS", "2", "sh", "POINT(5 5)", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[within $sh]", "PARAMS", "2", "sh", "POINT(10 5)", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[within $sh]", "PARAMS", "2", "sh", "POINT(0 0)", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[within $sh]", "PARAMS", "2", "sh", "POINT(2 2)", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[within $sh]", "PARAMS", "2", "sh", "POINT(5 28)", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[within $sh]", "PARAMS", "2", "sh", "POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*6\r\n:5\r\n$2\r\nsq\r\n$3\r\nccw\r\n$4\r\nopen\r\n$4\r\nhole\r\n$2\r\npc\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[within $sh]", "PARAMS", "2", "sh", "POLYGON((-1 -1, 11 -1, 11 11, -1 11, -1 -1))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*8\r\n:7\r\n$2\r\nsq\r\n$3\r\nccw\r\n$4\r\nopen\r\n$4\r\nhole\r\n$2\r\npe\r\n$2\r\npc\r\n$2\r\npv\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[within $sh]", "PARAMS", "2", "sh", "POLYGON((4.5 4.5, 5.5 4.5, 5.5 5.5, 4.5 5.5, 4.5 4.5))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*2\r\n:1\r\n$2\r\npc\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[within $sh]", "PARAMS", "2", "sh", "POLYGON((10 0, 20 0, 20 10, 10 10, 10 0))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[within $sh]", "PARAMS", "2", "sh", "POLYGON((1 1, 3 1, 3 3, 1 3, 1 1))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[within $sh]", "PARAMS", "2", "sh", "POLYGON((1 21, 9 21, 9 29, 1 29, 1 21))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[within $sh]", "PARAMS", "2", "sh", "POLYGON((15 15, 75 15, 50 70, 20 40, 15 15))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*2\r\n:1\r\n$3\r\ntri\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[within $sh]", "PARAMS", "2", "sh", "POLYGON((-5 15, 40 15, 40 40, -5 40, -5 15), (2 22, 8 22, 8 24, 2 24, 2 22))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*2\r\n:1\r\n$3\r\ntri\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[within $sh]", "PARAMS", "2", "sh", "POLYGON((24 24, 24 26, 25 25, 24 24))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[contains $sh]", "PARAMS", "2", "sh", "POINT(5 5)", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*4\r\n:3\r\n$2\r\nsq\r\n$3\r\nccw\r\n$4\r\nopen\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[contains $sh]", "PARAMS", "2", "sh", "POINT(10 5)", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[contains $sh]", "PARAMS", "2", "sh", "POINT(0 0)", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[contains $sh]", "PARAMS", "2", "sh", "POINT(2 2)", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*5\r\n:4\r\n$2\r\nsq\r\n$3\r\nccw\r\n$4\r\nopen\r\n$4\r\nhole\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[contains $sh]", "PARAMS", "2", "sh", "POINT(5 28)", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[contains $sh]", "PARAMS", "2", "sh", "POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*4\r\n:3\r\n$2\r\nsq\r\n$3\r\nccw\r\n$4\r\nopen\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[contains $sh]", "PARAMS", "2", "sh", "POLYGON((-1 -1, 11 -1, 11 11, -1 11, -1 -1))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[contains $sh]", "PARAMS", "2", "sh", "POLYGON((4.5 4.5, 5.5 4.5, 5.5 5.5, 4.5 5.5, 4.5 4.5))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*4\r\n:3\r\n$2\r\nsq\r\n$3\r\nccw\r\n$4\r\nopen\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[contains $sh]", "PARAMS", "2", "sh", "POLYGON((10 0, 20 0, 20 10, 10 10, 10 0))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[contains $sh]", "PARAMS", "2", "sh", "POLYGON((1 1, 3 1, 3 3, 1 3, 1 1))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*5\r\n:4\r\n$2\r\nsq\r\n$3\r\nccw\r\n$4\r\nopen\r\n$4\r\nhole\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[contains $sh]", "PARAMS", "2", "sh", "POLYGON((1 21, 9 21, 9 29, 1 29, 1 21))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[contains $sh]", "PARAMS", "2", "sh", "POLYGON((15 15, 75 15, 50 70, 20 40, 15 15))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[contains $sh]", "PARAMS", "2", "sh", "POLYGON((-5 15, 40 15, 40 40, -5 40, -5 15), (2 22, 8 22, 8 24, 2 24, 2 22))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[contains $sh]", "PARAMS", "2", "sh", "POLYGON((24 24, 24 26, 25 25, 24 24))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*2\r\n:1\r\n$3\r\ntri\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[intersects $sh]", "PARAMS", "2", "sh", "POINT(5 5)", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*5\r\n:4\r\n$2\r\nsq\r\n$3\r\nccw\r\n$4\r\nopen\r\n$2\r\npc\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[intersects $sh]", "PARAMS", "2", "sh", "POINT(10 5)", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*6\r\n:5\r\n$2\r\nsq\r\n$3\r\nccw\r\n$4\r\nopen\r\n$4\r\nhole\r\n$2\r\npe\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[intersects $sh]", "PARAMS", "2", "sh", "POINT(0 0)", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*6\r\n:5\r\n$2\r\nsq\r\n$3\r\nccw\r\n$4\r\nopen\r\n$4\r\nhole\r\n$2\r\npv\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[intersects $sh]", "PARAMS", "2", "sh", "POINT(2 2)", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*5\r\n:4\r\n$2\r\nsq\r\n$3\r\nccw\r\n$4\r\nopen\r\n$4\r\nhole\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[intersects $sh]", "PARAMS", "2", "sh", "POINT(5 28)", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[intersects $sh]", "PARAMS", "2", "sh", "POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*8\r\n:7\r\n$2\r\nsq\r\n$3\r\nccw\r\n$4\r\nopen\r\n$4\r\nhole\r\n$2\r\npe\r\n$2\r\npc\r\n$2\r\npv\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[intersects $sh]", "PARAMS", "2", "sh", "POLYGON((-1 -1, 11 -1, 11 11, -1 11, -1 -1))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*8\r\n:7\r\n$2\r\nsq\r\n$3\r\nccw\r\n$4\r\nopen\r\n$4\r\nhole\r\n$2\r\npe\r\n$2\r\npc\r\n$2\r\npv\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[intersects $sh]", "PARAMS", "2", "sh", "POLYGON((4.5 4.5, 5.5 4.5, 5.5 5.5, 4.5 5.5, 4.5 4.5))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*5\r\n:4\r\n$2\r\nsq\r\n$3\r\nccw\r\n$4\r\nopen\r\n$2\r\npc\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[intersects $sh]", "PARAMS", "2", "sh", "POLYGON((10 0, 20 0, 20 10, 10 10, 10 0))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*6\r\n:5\r\n$2\r\nsq\r\n$3\r\nccw\r\n$4\r\nopen\r\n$4\r\nhole\r\n$2\r\npe\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[intersects $sh]", "PARAMS", "2", "sh", "POLYGON((1 1, 3 1, 3 3, 1 3, 1 1))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*5\r\n:4\r\n$2\r\nsq\r\n$3\r\nccw\r\n$4\r\nopen\r\n$4\r\nhole\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[intersects $sh]", "PARAMS", "2", "sh", "POLYGON((1 21, 9 21, 9 29, 1 29, 1 21))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*2\r\n:1\r\n$7\r\nconcave\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[intersects $sh]", "PARAMS", "2", "sh", "POLYGON((15 15, 75 15, 50 70, 20 40, 15 15))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*2\r\n:1\r\n$3\r\ntri\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[intersects $sh]", "PARAMS", "2", "sh", "POLYGON((-5 15, 40 15, 40 40, -5 40, -5 15), (2 22, 8 22, 8 24, 2 24, 2 22))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*3\r\n:2\r\n$7\r\nconcave\r\n$3\r\ntri\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[intersects $sh]", "PARAMS", "2", "sh", "POLYGON((24 24, 24 26, 25 25, 24 24))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*2\r\n:1\r\n$3\r\ntri\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[disjoint $sh]", "PARAMS", "2", "sh", "POINT(5 5)", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*6\r\n:5\r\n$4\r\nhole\r\n$2\r\npe\r\n$2\r\npv\r\n$7\r\nconcave\r\n$3\r\ntri\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[disjoint $sh]", "PARAMS", "2", "sh", "POINT(10 5)", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*5\r\n:4\r\n$2\r\npc\r\n$2\r\npv\r\n$7\r\nconcave\r\n$3\r\ntri\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[disjoint $sh]", "PARAMS", "2", "sh", "POINT(0 0)", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*5\r\n:4\r\n$2\r\npe\r\n$2\r\npc\r\n$7\r\nconcave\r\n$3\r\ntri\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[disjoint $sh]", "PARAMS", "2", "sh", "POINT(2 2)", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*6\r\n:5\r\n$2\r\npe\r\n$2\r\npc\r\n$2\r\npv\r\n$7\r\nconcave\r\n$3\r\ntri\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[disjoint $sh]", "PARAMS", "2", "sh", "POINT(5 28)", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*10\r\n:9\r\n$2\r\nsq\r\n$3\r\nccw\r\n$4\r\nopen\r\n$4\r\nhole\r\n$2\r\npe\r\n$2\r\npc\r\n$2\r\npv\r\n$7\r\nconcave\r\n$3\r\ntri\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[disjoint $sh]", "PARAMS", "2", "sh", "POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*3\r\n:2\r\n$7\r\nconcave\r\n$3\r\ntri\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[disjoint $sh]", "PARAMS", "2", "sh", "POLYGON((-1 -1, 11 -1, 11 11, -1 11, -1 -1))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*3\r\n:2\r\n$7\r\nconcave\r\n$3\r\ntri\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[disjoint $sh]", "PARAMS", "2", "sh", "POLYGON((4.5 4.5, 5.5 4.5, 5.5 5.5, 4.5 5.5, 4.5 4.5))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*6\r\n:5\r\n$4\r\nhole\r\n$2\r\npe\r\n$2\r\npv\r\n$7\r\nconcave\r\n$3\r\ntri\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[disjoint $sh]", "PARAMS", "2", "sh", "POLYGON((10 0, 20 0, 20 10, 10 10, 10 0))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*5\r\n:4\r\n$2\r\npc\r\n$2\r\npv\r\n$7\r\nconcave\r\n$3\r\ntri\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[disjoint $sh]", "PARAMS", "2", "sh", "POLYGON((1 1, 3 1, 3 3, 1 3, 1 1))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*6\r\n:5\r\n$2\r\npe\r\n$2\r\npc\r\n$2\r\npv\r\n$7\r\nconcave\r\n$3\r\ntri\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[disjoint $sh]", "PARAMS", "2", "sh", "POLYGON((1 21, 9 21, 9 29, 1 29, 1 21))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*9\r\n:8\r\n$2\r\nsq\r\n$3\r\nccw\r\n$4\r\nopen\r\n$4\r\nhole\r\n$2\r\npe\r\n$2\r\npc\r\n$2\r\npv\r\n$3\r\ntri\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[disjoint $sh]", "PARAMS", "2", "sh", "POLYGON((15 15, 75 15, 50 70, 20 40, 15 15))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*9\r\n:8\r\n$2\r\nsq\r\n$3\r\nccw\r\n$4\r\nopen\r\n$4\r\nhole\r\n$2\r\npe\r\n$2\r\npc\r\n$2\r\npv\r\n$7\r\nconcave\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[disjoint $sh]", "PARAMS", "2", "sh", "POLYGON((-5 15, 40 15, 40 40, -5 40, -5 15), (2 22, 8 22, 8 24, 2 24, 2 22))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*8\r\n:7\r\n$2\r\nsq\r\n$3\r\nccw\r\n$4\r\nopen\r\n$4\r\nhole\r\n$2\r\npe\r\n$2\r\npc\r\n$2\r\npv\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[disjoint $sh]", "PARAMS", "2", "sh", "POLYGON((24 24, 24 26, 25 25, 24 24))", "DIALECT", "3", "NOCONTENT", "LIMIT", "0", "100"], "want": "*9\r\n:8\r\n$2\r\nsq\r\n$3\r\nccw\r\n$4\r\nopen\r\n$4\r\nhole\r\n$2\r\npe\r\n$2\r\npc\r\n$2\r\npv\r\n$7\r\nconcave\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[within $sh]", "PARAMS", "2", "sh", "garbage", "DIALECT", "3", "NOCONTENT"], "want": "-Error querying geoshape index: unknown geometry type\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[within $sh]", "PARAMS", "2", "sh", "POLYGON((0 0, 2 2, 2 0, 0 2, 0 0))", "DIALECT", "3", "NOCONTENT"], "want": "-Error querying geoshape index: invalid geometry: Geometry has wrong orientation\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[within $sh]", "PARAMS", "2", "sh", "POLYGON((5 12, 5 7, 5 8, 5 8, 5 9, 5 12))", "DIALECT", "3", "NOCONTENT"], "want": "-Error querying geoshape index: invalid geometry: Geometry has spikes. A spike point was found with apex at (5, 7)\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[within $sh]", "PARAMS", "2", "sh", "POLYGON((7 6, 7 6, 5 0, 7 6))", "DIALECT", "3", "NOCONTENT"], "want": "-Error querying geoshape index: invalid geometry: Geometry has wrong topological dimension\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[touches $sh]", "PARAMS", "2", "sh", "POINT(1 1)", "DIALECT", "3"], "want": "-Syntax error: Expecting a geoshape predicate at offset 12\r\n"}
+{"cmd": ["ft.search", "gs", "@g:[within $sh]", "PARAMS", "2", "sh", "POINT(1 1)", "DIALECT", "1"], "want": "-Syntax error at offset 4 near within\r\n"}
+{"cmd": ["ft.explain", "gs", "@g:[intersects $sh]", "PARAMS", "2", "sh", "POINT(1 1)", "DIALECT", "3"], "want": "$23\r\nGEOSHAPE{4 POINT(1 1)}\n\r\n"}
+{"cmd": ["ft.explain", "gs", "@g:[disjoint $sh]", "PARAMS", "2", "sh", "POINT(1 1)", "DIALECT", "3"], "want": "$23\r\nGEOSHAPE{3 POINT(1 1)}\n\r\n"}
+{"cmd": ["ft.explain", "gs", "@g:[within $sh]", "PARAMS", "2", "sh", "POINT(1 1)", "DIALECT", "3"], "want": "$23\r\nGEOSHAPE{2 POINT(1 1)}\n\r\n"}
+{"cmd": ["ft.explain", "gs", "@g:[contains $sh]", "PARAMS", "2", "sh", "POINT(1 1)", "DIALECT", "3"], "want": "$23\r\nGEOSHAPE{1 POINT(1 1)}\n\r\n"}
+{"cmd": ["flushall"]}
+{"cmd": ["ft.create", "s", "SCHEMA", "t", "TEXT", "NOSTEM", "u", "TEXT"], "want": "+OK\r\n"}
+{"cmd": ["hset", "d1", "t", "henry king", "u", "henry king"], "want": ":2\r\n"}
+{"cmd": ["hset", "d2", "t", "king henry", "u", "king henry"], "want": ":2\r\n"}
+{"cmd": ["hset", "d3", "t", "henry the king", "u", "henry the king"], "want": ":2\r\n"}
+{"cmd": ["hset", "d4", "t", "henry the old king", "u", "henry the old king"], "want": ":2\r\n"}
+{"cmd": ["hset", "d5", "t", "henry a b c d king", "u", "henry a b c d king"], "want": ":2\r\n"}
+{"cmd": ["hset", "d6", "t", "king x henry", "u", "king x henry"], "want": ":2\r\n"}
+{"cmd": ["hset", "d7", "t", "henry", "u", "henry"], "want": ":2\r\n"}
+{"cmd": ["hset", "d8", "t", "kings henry", "u", "kings henry"], "want": ":2\r\n"}
+{"cmd": ["hset", "d9", "t", "henry walks kingly", "u", "henry walks kingly"], "want": ":2\r\n"}
+{"cmd": ["ft.search", "s", "henry king", "NOCONTENT"], "want": "*9\r\n:8\r\n$2\r\nd8\r\n$2\r\nd9\r\n$2\r\nd1\r\n$2\r\nd2\r\n$2\r\nd3\r\n$2\r\nd4\r\n$2\r\nd6\r\n$2\r\nd5\r\n"}
+{"cmd": ["ft.search", "s", "henry king", "NOCONTENT", "SLOP", "0"], "want": "*8\r\n:7\r\n$2\r\nd8\r\n$2\r\nd1\r\n$2\r\nd2\r\n$2\r\nd3\r\n$2\r\nd4\r\n$2\r\nd6\r\n$2\r\nd5\r\n"}
+{"cmd": ["ft.search", "s", "henry king", "NOCONTENT", "SLOP", "1"], "want": "*9\r\n:8\r\n$2\r\nd8\r\n$2\r\nd9\r\n$2\r\nd1\r\n$2\r\nd2\r\n$2\r\nd3\r\n$2\r\nd4\r\n$2\r\nd6\r\n$2\r\nd5\r\n"}
+{"cmd": ["ft.search", "s", "henry king", "NOCONTENT", "SLOP", "2"], "want": "*9\r\n:8\r\n$2\r\nd8\r\n$2\r\nd9\r\n$2\r\nd1\r\n$2\r\nd2\r\n$2\r\nd3\r\n$2\r\nd4\r\n$2\r\nd6\r\n$2\r\nd5\r\n"}
+{"cmd": ["ft.search", "s", "henry king", "NOCONTENT", "INORDER"], "want": "*9\r\n:8\r\n$2\r\nd8\r\n$2\r\nd9\r\n$2\r\nd1\r\n$2\r\nd2\r\n$2\r\nd3\r\n$2\r\nd4\r\n$2\r\nd6\r\n$2\r\nd5\r\n"}
+{"cmd": ["ft.search", "s", "henry king", "NOCONTENT", "SLOP", "0", "INORDER"], "want": "*6\r\n:5\r\n$2\r\nd8\r\n$2\r\nd1\r\n$2\r\nd2\r\n$2\r\nd3\r\n$2\r\nd6\r\n"}
+{"cmd": ["ft.search", "s", "henry king", "NOCONTENT", "SLOP", "1", "INORDER"], "want": "*8\r\n:7\r\n$2\r\nd8\r\n$2\r\nd9\r\n$2\r\nd1\r\n$2\r\nd2\r\n$2\r\nd3\r\n$2\r\nd4\r\n$2\r\nd6\r\n"}
+{"cmd": ["ft.search", "s", "henry king", "NOCONTENT", "SLOP", "-1"], "want": "*9\r\n:8\r\n$2\r\nd8\r\n$2\r\nd9\r\n$2\r\nd1\r\n$2\r\nd2\r\n$2\r\nd3\r\n$2\r\nd4\r\n$2\r\nd6\r\n$2\r\nd5\r\n"}
+{"cmd": ["ft.search", "s", "@u:henry @u:king", "NOCONTENT"], "want": "*9\r\n:8\r\n$2\r\nd8\r\n$2\r\nd9\r\n$2\r\nd1\r\n$2\r\nd2\r\n$2\r\nd3\r\n$2\r\nd4\r\n$2\r\nd6\r\n$2\r\nd5\r\n"}
+{"cmd": ["ft.search", "s", "@u:henry @u:king", "NOCONTENT", "SLOP", "0"], "want": "*8\r\n:7\r\n$2\r\nd8\r\n$2\r\nd1\r\n$2\r\nd2\r\n$2\r\nd3\r\n$2\r\nd4\r\n$2\r\nd6\r\n$2\r\nd5\r\n"}
+{"cmd": ["ft.search", "s", "@u:henry @u:king", "NOCONTENT", "SLOP", "1"], "want": "*9\r\n:8\r\n$2\r\nd8\r\n$2\r\nd9\r\n$2\r\nd1\r\n$2\r\nd2\r\n$2\r\nd3\r\n$2\r\nd4\r\n$2\r\nd6\r\n$2\r\nd5\r\n"}
+{"cmd": ["ft.search", "s", "@u:henry @u:king", "NOCONTENT", "SLOP", "2"], "want": "*9\r\n:8\r\n$2\r\nd8\r\n$2\r\nd9\r\n$2\r\nd1\r\n$2\r\nd2\r\n$2\r\nd3\r\n$2\r\nd4\r\n$2\r\nd6\r\n$2\r\nd5\r\n"}
+{"cmd": ["ft.search", "s", "@u:henry @u:king", "NOCONTENT", "INORDER"], "want": "*9\r\n:8\r\n$2\r\nd8\r\n$2\r\nd9\r\n$2\r\nd1\r\n$2\r\nd2\r\n$2\r\nd3\r\n$2\r\nd4\r\n$2\r\nd6\r\n$2\r\nd5\r\n"}
+{"cmd": ["ft.search", "s", "@u:henry @u:king", "NOCONTENT", "SLOP", "0", "INORDER"], "want": "*6\r\n:5\r\n$2\r\nd8\r\n$2\r\nd1\r\n$2\r\nd2\r\n$2\r\nd3\r\n$2\r\nd6\r\n"}
+{"cmd": ["ft.search", "s", "@u:henry @u:king", "NOCONTENT", "SLOP", "1", "INORDER"], "want": "*8\r\n:7\r\n$2\r\nd8\r\n$2\r\nd9\r\n$2\r\nd1\r\n$2\r\nd2\r\n$2\r\nd3\r\n$2\r\nd4\r\n$2\r\nd6\r\n"}
+{"cmd": ["ft.search", "s", "@u:henry @u:king", "NOCONTENT", "SLOP", "-1"], "want": "*9\r\n:8\r\n$2\r\nd8\r\n$2\r\nd9\r\n$2\r\nd1\r\n$2\r\nd2\r\n$2\r\nd3\r\n$2\r\nd4\r\n$2\r\nd6\r\n$2\r\nd5\r\n"}
+{"cmd": ["ft.search", "s", "henry king queen", "NOCONTENT"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "s", "henry king queen", "NOCONTENT", "SLOP", "0"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "s", "henry king queen", "NOCONTENT", "SLOP", "1"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "s", "henry king queen", "NOCONTENT", "SLOP", "2"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "s", "henry king queen", "NOCONTENT", "INORDER"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "s", "henry king queen", "NOCONTENT", "SLOP", "0", "INORDER"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "s", "henry king queen", "NOCONTENT", "SLOP", "1", "INORDER"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "s", "henry king queen", "NOCONTENT", "SLOP", "-1"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "s", "henry (king|x)", "NOCONTENT"], "want": "*9\r\n:8\r\n$2\r\nd6\r\n$2\r\nd8\r\n$2\r\nd9\r\n$2\r\nd1\r\n$2\r\nd2\r\n$2\r\nd3\r\n$2\r\nd4\r\n$2\r\nd5\r\n"}
+{"cmd": ["ft.search", "s", "henry (king|x)", "NOCONTENT", "SLOP", "0"], "want": "*8\r\n:7\r\n$2\r\nd6\r\n$2\r\nd8\r\n$2\r\nd1\r\n$2\r\nd2\r\n$2\r\nd3\r\n$2\r\nd4\r\n$2\r\nd5\r\n"}
+{"cmd": ["ft.search", "s", "henry (king|x)", "NOCONTENT", "SLOP", "1"], "want": "*9\r\n:8\r\n$2\r\nd6\r\n$2\r\nd8\r\n$2\r\nd9\r\n$2\r\nd1\r\n$2\r\nd2\r\n$2\r\nd3\r\n$2\r\nd4\r\n$2\r\nd5\r\n"}
+{"cmd": ["ft.search", "s", "henry (king|x)", "NOCONTENT", "SLOP", "2"], "want": "*9\r\n:8\r\n$2\r\nd6\r\n$2\r\nd8\r\n$2\r\nd9\r\n$2\r\nd1\r\n$2\r\nd2\r\n$2\r\nd3\r\n$2\r\nd4\r\n$2\r\nd5\r\n"}
+{"cmd": ["ft.search", "s", "henry (king|x)", "NOCONTENT", "INORDER"], "want": "*9\r\n:8\r\n$2\r\nd6\r\n$2\r\nd8\r\n$2\r\nd9\r\n$2\r\nd1\r\n$2\r\nd2\r\n$2\r\nd3\r\n$2\r\nd4\r\n$2\r\nd5\r\n"}
+{"cmd": ["ft.search", "s", "henry (king|x)", "NOCONTENT", "SLOP", "0", "INORDER"], "want": "*6\r\n:5\r\n$2\r\nd6\r\n$2\r\nd8\r\n$2\r\nd1\r\n$2\r\nd2\r\n$2\r\nd3\r\n"}
+{"cmd": ["ft.search", "s", "henry (king|x)", "NOCONTENT", "SLOP", "1", "INORDER"], "want": "*8\r\n:7\r\n$2\r\nd6\r\n$2\r\nd8\r\n$2\r\nd9\r\n$2\r\nd1\r\n$2\r\nd2\r\n$2\r\nd3\r\n$2\r\nd4\r\n"}
+{"cmd": ["ft.search", "s", "henry (king|x)", "NOCONTENT", "SLOP", "-1"], "want": "*9\r\n:8\r\n$2\r\nd6\r\n$2\r\nd8\r\n$2\r\nd9\r\n$2\r\nd1\r\n$2\r\nd2\r\n$2\r\nd3\r\n$2\r\nd4\r\n$2\r\nd5\r\n"}
+{"cmd": ["ft.search", "s", "henry -king", "NOCONTENT"], "want": "*2\r\n:1\r\n$2\r\nd7\r\n"}
+{"cmd": ["ft.search", "s", "henry -king", "NOCONTENT", "SLOP", "0"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "s", "henry -king", "NOCONTENT", "SLOP", "1"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "s", "henry -king", "NOCONTENT", "SLOP", "2"], "want": "*1\r\n:0\r\n"}
+{"cmd": ["ft.search", "s", "henry -king", "NOCONTENT", "INORDER"], "want": "*2\r\n:1\r\n$2\r\nd7\r\n"}
+{"cmd": ["ft.search", "s", "henry -king", "NOCONTENT", "SLOP", "0", "INORDER"], "want": "*2\r\n:1\r\n$2\r\nd7\r\n"}
+{"cmd": ["ft.search", "s", "henry -king", "NOCONTENT", "SLOP", "1", "INORDER"], "want": "*2\r\n:1\r\n$2\r\nd7\r\n"}
+{"cmd": ["ft.search", "s", "henry -king", "NOCONTENT", "SLOP", "-1"], "want": "*2\r\n:1\r\n$2\r\nd7\r\n"}
+{"cmd": ["ft.search", "s", "@u:(henry king)", "NOCONTENT"], "want": "*9\r\n:8\r\n$2\r\nd8\r\n$2\r\nd9\r\n$2\r\nd1\r\n$2\r\nd2\r\n$2\r\nd3\r\n$2\r\nd4\r\n$2\r\nd6\r\n$2\r\nd5\r\n"}
+{"cmd": ["ft.search", "s", "@u:(henry king)", "NOCONTENT", "SLOP", "0"], "want": "*8\r\n:7\r\n$2\r\nd8\r\n$2\r\nd1\r\n$2\r\nd2\r\n$2\r\nd3\r\n$2\r\nd4\r\n$2\r\nd6\r\n$2\r\nd5\r\n"}
+{"cmd": ["ft.search", "s", "@u:(henry king)", "NOCONTENT", "SLOP", "1"], "want": "*9\r\n:8\r\n$2\r\nd8\r\n$2\r\nd9\r\n$2\r\nd1\r\n$2\r\nd2\r\n$2\r\nd3\r\n$2\r\nd4\r\n$2\r\nd6\r\n$2\r\nd5\r\n"}
+{"cmd": ["ft.search", "s", "@u:(henry king)", "NOCONTENT", "SLOP", "2"], "want": "*9\r\n:8\r\n$2\r\nd8\r\n$2\r\nd9\r\n$2\r\nd1\r\n$2\r\nd2\r\n$2\r\nd3\r\n$2\r\nd4\r\n$2\r\nd6\r\n$2\r\nd5\r\n"}
+{"cmd": ["ft.search", "s", "@u:(henry king)", "NOCONTENT", "INORDER"], "want": "*9\r\n:8\r\n$2\r\nd8\r\n$2\r\nd9\r\n$2\r\nd1\r\n$2\r\nd2\r\n$2\r\nd3\r\n$2\r\nd4\r\n$2\r\nd6\r\n$2\r\nd5\r\n"}
+{"cmd": ["ft.search", "s", "@u:(henry king)", "NOCONTENT", "SLOP", "0", "INORDER"], "want": "*6\r\n:5\r\n$2\r\nd8\r\n$2\r\nd1\r\n$2\r\nd2\r\n$2\r\nd3\r\n$2\r\nd6\r\n"}
+{"cmd": ["ft.search", "s", "@u:(henry king)", "NOCONTENT", "SLOP", "1", "INORDER"], "want": "*8\r\n:7\r\n$2\r\nd8\r\n$2\r\nd9\r\n$2\r\nd1\r\n$2\r\nd2\r\n$2\r\nd3\r\n$2\r\nd4\r\n$2\r\nd6\r\n"}
+{"cmd": ["ft.search", "s", "@u:(henry king)", "NOCONTENT", "SLOP", "-1"], "want": "*9\r\n:8\r\n$2\r\nd8\r\n$2\r\nd9\r\n$2\r\nd1\r\n$2\r\nd2\r\n$2\r\nd3\r\n$2\r\nd4\r\n$2\r\nd6\r\n$2\r\nd5\r\n"}
+{"cmd": ["ft.search", "s", "henry king=>{$slop:0}", "NOCONTENT"], "want": "*8\r\n:7\r\n$2\r\nd8\r\n$2\r\nd1\r\n$2\r\nd2\r\n$2\r\nd3\r\n$2\r\nd4\r\n$2\r\nd6\r\n$2\r\nd5\r\n"}
+{"cmd": ["ft.search", "s", "henry king=>{$slop:0}", "NOCONTENT", "DIALECT", "2"], "want": "*9\r\n:8\r\n$2\r\nd8\r\n$2\r\nd9\r\n$2\r\nd1\r\n$2\r\nd2\r\n$2\r\nd3\r\n$2\r\nd4\r\n$2\r\nd6\r\n$2\r\nd5\r\n"}
+{"cmd": ["ft.search", "s", "(henry king)=>{$slop:0;$inorder:true}", "NOCONTENT"], "want": "*6\r\n:5\r\n$2\r\nd8\r\n$2\r\nd1\r\n$2\r\nd2\r\n$2\r\nd3\r\n$2\r\nd6\r\n"}
+{"cmd": ["ft.search", "s", "(henry king)=>{$slop:0;$inorder:true}", "NOCONTENT", "DIALECT", "2"], "want": "*6\r\n:5\r\n$2\r\nd8\r\n$2\r\nd1\r\n$2\r\nd2\r\n$2\r\nd3\r\n$2\r\nd6\r\n"}
+{"cmd": ["ft.search", "s", "(henry king)=>{$inorder:true}", "NOCONTENT"], "want": "*9\r\n:8\r\n$2\r\nd8\r\n$2\r\nd9\r\n$2\r\nd1\r\n$2\r\nd2\r\n$2\r\nd3\r\n$2\r\nd4\r\n$2\r\nd6\r\n$2\r\nd5\r\n"}
+{"cmd": ["ft.search", "s", "(henry king)=>{$inorder:true}", "NOCONTENT", "DIALECT", "2"], "want": "*9\r\n:8\r\n$2\r\nd8\r\n$2\r\nd9\r\n$2\r\nd1\r\n$2\r\nd2\r\n$2\r\nd3\r\n$2\r\nd4\r\n$2\r\nd6\r\n$2\r\nd5\r\n"}
+{"cmd": ["ft.search", "s", "\"henry king\"", "NOCONTENT"], "want": "*5\r\n:4\r\n$2\r\nd1\r\n$2\r\nd2\r\n$2\r\nd3\r\n$2\r\nd6\r\n"}
+{"cmd": ["ft.search", "s", "\"henry king\"", "NOCONTENT", "DIALECT", "2"], "want": "*5\r\n:4\r\n$2\r\nd1\r\n$2\r\nd2\r\n$2\r\nd3\r\n$2\r\nd6\r\n"}
+{"cmd": ["ft.search", "s", "(henry king)=>{$slop:x}", "NOCONTENT"], "want": "-Invalid value (x) for `slop`\r\n"}
+{"cmd": ["ft.search", "s", "(henry king)=>{$slop:x}", "NOCONTENT", "DIALECT", "2"], "want": "-Invalid value (x) for `slop`\r\n"}
+{"cmd": ["ft.search", "s", "(henry king)=>{$inorder:maybe}", "NOCONTENT"], "want": "-Invalid value (maybe) for `inorder`\r\n"}
+{"cmd": ["ft.search", "s", "(henry king)=>{$inorder:maybe}", "NOCONTENT", "DIALECT", "2"], "want": "-Invalid value (maybe) for `inorder`\r\n"}
+{"cmd": ["ft.search", "s", "(henry king)=>{$slop:1}", "NOCONTENT"], "want": "*9\r\n:8\r\n$2\r\nd8\r\n$2\r\nd9\r\n$2\r\nd1\r\n$2\r\nd2\r\n$2\r\nd3\r\n$2\r\nd4\r\n$2\r\nd6\r\n$2\r\nd5\r\n"}
+{"cmd": ["ft.search", "s", "(henry king)=>{$slop:1}", "NOCONTENT", "DIALECT", "2"], "want": "*9\r\n:8\r\n$2\r\nd8\r\n$2\r\nd9\r\n$2\r\nd1\r\n$2\r\nd2\r\n$2\r\nd3\r\n$2\r\nd4\r\n$2\r\nd6\r\n$2\r\nd5\r\n"}
+{"cmd": ["ft.search", "s", "(a (henry king)=>{$slop:0})", "NOCONTENT"], "want": "*8\r\n:7\r\n$2\r\nd8\r\n$2\r\nd1\r\n$2\r\nd2\r\n$2\r\nd3\r\n$2\r\nd4\r\n$2\r\nd6\r\n$2\r\nd5\r\n"}
+{"cmd": ["ft.search", "s", "(a (henry king)=>{$slop:0})", "NOCONTENT", "DIALECT", "2"], "want": "*8\r\n:7\r\n$2\r\nd8\r\n$2\r\nd1\r\n$2\r\nd2\r\n$2\r\nd3\r\n$2\r\nd4\r\n$2\r\nd6\r\n$2\r\nd5\r\n"}

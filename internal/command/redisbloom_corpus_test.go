@@ -56,6 +56,21 @@ func TestSearchReplaysRediSearchCorpus(t *testing.T) {
 	replayRedisCorpus(t, router, "testdata/redisearch_r8.jsonl")
 }
 
+// testdata/redisearch_phonetic_geoshape_r8.jsonl holds Redis 8.2's
+// replies to PHONETIC fields and $phonetic, every scorer over terms at
+// various distances (the slop TFIDF and BM25 divide by), INDEXEMPTY and
+// NOHL/NOOFFSETS, and GEOSHAPE fields, FLAT and SPHERICAL, with their
+// predicates, boundaries, holes and invalid shapes.
+func TestSearchReplaysPhoneticGeoshapeCorpus(t *testing.T) {
+	router := NewRouter()
+	RegisterSearchCommands(router)
+	RegisterHashCommands(router)
+	RegisterKeyCommands(router)
+	search.GetIndexManager().Reset()
+	t.Cleanup(search.GetIndexManager().Reset)
+	replayRedisCorpus(t, router, "testdata/redisearch_phonetic_geoshape_r8.jsonl")
+}
+
 // testdata/redisearch_vectors_r8.jsonl holds random vector indexes (FLAT
 // and HNSW, single and double precision, L2, IP and cosine, 2 to 40
 // dimensions) and KNN, hybrid and range queries with Redis 8.2's replies;

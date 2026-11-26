@@ -787,7 +787,20 @@ func (p *parser2) reduce(r int, v []pval2) pval2 {
 		}
 		out.node = n
 	case v2RuleGeometryExpr:
-		p.wantField(&v[0], FieldGeoShape)
+		if p.wantField(&v[0], FieldGeoShape) && v[2].node != nil {
+			out.node = v[2].node
+			out.node.field = v[0].field.Name
+		}
+	case v2RuleGeometryQuery:
+		pred, ok := geoPredicates[strings.ToUpper(v[1].tok.s)]
+		if !ok {
+			p.fail(fmt.Errorf("Syntax error: Expecting a geoshape predicate at offset %d", v[2].tok.pos)) //nolint:staticcheck // RediSearch's reply text
+			break
+		}
+		wkt, _ := p.param(v[2].tok.s)
+		n := newNode(qGeoShape)
+		n.dist, n.str = pred, wkt
+		out.node = n
 	case v2RuleQueryKnnExpr, v2RuleQueryKnnText, v2RuleQueryKnnStar, v2RuleQueryKnnExprAttrs, v2RuleQueryKnnTextAttrs, v2RuleQueryKnnStarAttrs:
 		vn := v[3].node
 		if vn == nil {
@@ -974,7 +987,17 @@ func (p *parser2) applyAttributes(n *qnode, attrs [][2]string) {
 			n.yield = a[1]
 		case n.typ == qVector:
 			n.vecAttrs = append(n.vecAttrs, [2]string{a[0], a[1]})
-		case name == "slop" || name == "inorder" || name == "phonetic":
+		case name == "phonetic":
+			v, err := phoneticAttribute(a[1])
+			if err != nil {
+				p.fail(err)
+				continue
+			}
+			n.phonetic = v
+		case name == "slop" || name == "inorder":
+			if err := applySlopAttribute(n, name, a[1]); err != nil {
+				p.fail(err)
+			}
 		default:
 			p.fail(errAttribute)
 		}

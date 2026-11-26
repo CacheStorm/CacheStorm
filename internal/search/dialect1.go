@@ -432,7 +432,16 @@ func (p *parser1) applyAttributes(n *qnode, attrs [][2]string) {
 			} else if p.err == nil {
 				p.err = errAttribute
 			}
-		case "slop", "inorder", "phonetic":
+		case "phonetic":
+			if v, err := phoneticAttribute(a[1]); err == nil {
+				n.phonetic = v
+			} else if p.err == nil {
+				p.err = err
+			}
+		case "slop", "inorder":
+			if err := applySlopAttribute(n, strings.ToLower(a[0]), a[1]); err != nil && p.err == nil {
+				p.err = err
+			}
 		default:
 			if p.err == nil {
 				p.err = errAttribute

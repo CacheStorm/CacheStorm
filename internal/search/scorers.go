@@ -66,13 +66,14 @@ func (e *scoreEngine) score(scorer string, r *rsResult, d *Document) float64 {
 	return e.stats.score * e.bm25(r, d)
 }
 
-// tfidfIDF is the IDF TFIDF and BM25 use: logb(1 + N/n).
+// tfidfIDF is the IDF TFIDF and BM25 use: logb(1 + N/n), N being the
+// size of RediSearch's document table, one more than the documents.
 func (e *scoreEngine) tfidfIDF(term string) float64 {
 	n := e.stats.termDocs(term)
 	if n == 0 {
 		n = 1
 	}
-	return math.Logb(float64(float32(1)) + float64(e.stats.Docs)/float64(n))
+	return math.Logb(float64(float32(1)) + float64(e.stats.Docs+1)/float64(n))
 }
 
 func (e *scoreEngine) tfidf(r *rsResult) float64 {
@@ -137,14 +138,15 @@ func (d *Document) maxFreq() uint32 {
 	return m
 }
 
-// slop is RediSearch's IndexResult_MinOffsetDelta: for an aggregate, the
-// sum over consecutive children of their nearest positions'
-// distance; 1 for a single term.
+// slop is RediSearch's IndexResult_MinOffsetDelta: for an aggregate, over
+// each child and the next that have positions, the nearest distance
+// between their positions; the square root of the sum of their squares,
+// truncated, or the number of children less one when it is 0.
 func (e *scoreEngine) slop(r *rsResult, d *Document) int {
 	if r.typ&(resUnion|resIntersect) == 0 || len(r.children) <= 1 {
 		return 1
 	}
-	stream := e.idx.textStream(d)
+	stream := e.idx.wordStream(d)
 	dist, num := 0, len(r.children)
 	for i := 0; i < num; {
 		for i < num && !hasOffsets(r.children[i]) {
@@ -159,9 +161,6 @@ func (e *scoreEngine) slop(r *rsResult, d *Document) int {
 			i++
 		}
 		if i == num {
-			if dist == 0 {
-				dist = 100
-			}
 			break
 		}
 		v2 := e.offsets(r.children[i], stream)
@@ -178,12 +177,12 @@ func (e *scoreEngine) slop(r *rsResult, d *Document) int {
 				b++
 			}
 		}
-		dist += cd
+		dist += cd * cd
 	}
 	if dist == 0 {
 		return num - 1
 	}
-	return dist
+	return int(math.Sqrt(float64(dist)))
 }
 
 func absDelta(a, b int) int {
@@ -205,10 +204,9 @@ func hasOffsets(r *rsResult) bool {
 	return false
 }
 
-// offsets are the positions, from 1, of a result's terms in the document's
-// text: a stem term ("+stem") is at the words that stem to it; an
-// aggregate's are its children's, merged.
-func (e *scoreEngine) offsets(r *rsResult, stream []string) []int {
+// offsets are the positions, from 1, where a result's terms were recorded
+// in the document's text; an aggregate's are its children's, merged.
+func (e *scoreEngine) offsets(r *rsResult, stream []streamWord) []int {
 	if r.typ != resTerm {
 		var out []int
 		for _, c := range r.children {
@@ -218,9 +216,8 @@ func (e *scoreEngine) offsets(r *rsResult, stream []string) []int {
 		return out
 	}
 	var out []int
-	stem, isStem := strings.CutPrefix(r.term, "+")
-	for i, w := range stream {
-		if w == r.term || isStem && w != stem && snowballEnglish(w) == stem {
+	for i, sw := range stream {
+		if e.idx.termAt(r.term, sw) {
 			out = append(out, i+1)
 		}
 	}

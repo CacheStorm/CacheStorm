@@ -341,6 +341,9 @@ type Hit struct {
 // the candidates, which are then matched and scored. A KNN query keeps the
 // k documents nearest its vector among those its filter matches.
 func (idx *Index) Search(st *store.Store, n Node, opts QueryOptions) ([]Hit, error) {
+	if err := idx.prepareShapes(n); err != nil {
+		return nil, err
+	}
 	if n == nil {
 		return nil, nil
 	}
@@ -526,6 +529,45 @@ func (idx *Index) Summary(st *store.Store) (docs, terms, records int) {
 		records += len(list)
 	}
 	return len(c.docs), len(c.terms), records
+}
+
+// indexUsage is what FT.INFO reports of an index's use.
+type indexUsage struct {
+	uses     atomic.Int64
+	dialects atomic.Uint32
+}
+
+// IndexInfo is what FT.INFO reports of an index's contents and use.
+type IndexInfo struct {
+	Docs, Terms             int
+	TextRecords, TagRecords int
+	TagValues               int
+	Bytes                   int64
+	Uses                    int64
+	// Dialects has bit d-1 set when a query used dialect d.
+	Dialects uint32
+}
+
+// Info returns idx's figures in st.
+func (idx *Index) Info(st *store.Store) IndexInfo {
+	c := idx.cache(st)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.syncLocked(idx, st)
+	in := IndexInfo{Docs: len(c.docs), Terms: len(c.terms), Bytes: c.bytes.Load()}
+	for _, list := range c.terms {
+		in.TextRecords += len(list)
+	}
+	for _, vals := range c.tags {
+		in.TagValues += len(vals)
+		for _, list := range vals {
+			in.TagRecords += len(list)
+		}
+	}
+	if idx.usage != nil {
+		in.Uses, in.Dialects = idx.usage.uses.Load(), idx.usage.dialects.Load()
+	}
+	return in
 }
 
 // TagValues returns the distinct values of a TAG field in st, sorted.
