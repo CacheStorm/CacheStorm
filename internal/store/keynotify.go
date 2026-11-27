@@ -332,6 +332,38 @@ func (kn *KeyNotifier) NotifyKey(key string) {
 	kn.mu.Unlock()
 }
 
+// WakeAll wakes every waiter, consumers included, as if one of its keys was
+// written. SWAPDB calls it: the data a blocked client waits for may now be
+// in its database, and each one looks again in the database its client
+// selected, waiting there again if there is nothing to take.
+func (kn *KeyNotifier) WakeAll() {
+	if kn.registered.Load() == 0 {
+		return
+	}
+	kn.mu.Lock()
+	for key, waiters := range kn.waiters {
+		for _, ch := range waiters {
+			if kn.woken[ch] {
+				continue
+			}
+			if fn := kn.wakeHooks[ch]; fn != nil {
+				fn(key)
+			}
+			if kn.woken == nil {
+				kn.woken = make(map[chan struct{}]bool)
+			}
+			kn.woken[ch] = true
+			select {
+			case ch <- struct{}{}:
+			default:
+			}
+		}
+		delete(kn.waiters, key)
+	}
+	kn.inflight = nil
+	kn.mu.Unlock()
+}
+
 // WaitedKeys reports how many keys clients are blocked on.
 func (kn *KeyNotifier) WaitedKeys() int {
 	kn.mu.Lock()

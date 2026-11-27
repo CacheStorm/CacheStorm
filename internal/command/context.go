@@ -375,7 +375,10 @@ func (ctx *Context) waitForKeysReady(keys []string, timeout time.Duration, ready
 	defer func(start time.Time) { ctx.waited += time.Since(start) }(time.Now())
 	if ctx.BeforeWait != nil {
 		ctx.BeforeWait()
-		defer ctx.AfterWait()
+		defer func() {
+			ctx.AfterWait()
+			ctx.followSwap()
+		}()
 	}
 	key, ok := ctx.Store.KeyNotifier().WaitForKeysOpts(keys, timeout, store.WaitOptions{
 		Token:   &ctx.passToken,
@@ -405,7 +408,10 @@ func (ctx *Context) waitForStreamKeys(keys []string, timeout time.Duration, read
 	defer func(start time.Time) { ctx.waited += time.Since(start) }(time.Now())
 	if ctx.BeforeWait != nil {
 		ctx.BeforeWait()
-		defer ctx.AfterWait()
+		defer func() {
+			ctx.AfterWait()
+			ctx.followSwap()
+		}()
 	}
 	return ctx.Store.KeyNotifier().WaitForKeysOpts(keys, timeout, store.WaitOptions{
 		Cancel: ctx.Done,

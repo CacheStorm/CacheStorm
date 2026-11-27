@@ -249,20 +249,26 @@ func cmdINVALIDATE(ctx *Context) error {
 	ti := ctx.Store.GetTagIndex()
 	tags := InvalidateTags(ti, ctx.Args)
 	// With KeyHeld the command holds only the stripes of the keys its tags
-	// had when it was planned; a tag that has gained a key since makes it
-	// take the whole gate for the rest.
-	striped := ctx.KeyHeld != nil && ctx.Escalate != nil
+	// had when it was planned. A tag that has gained a key since makes it
+	// take the whole gate before it changes anything: taking it lets other
+	// writes (a SWAPDB, a TAGLINK, writes to the keys) run, so the command
+	// then starts over from what they left.
 	var keysToDelete []string
-	for _, t := range tags {
-		if striped {
-			if keys, held := ti.InvalidateIf(t, ctx.KeyHeld); held {
-				keysToDelete = append(keysToDelete, keys...)
-				continue
-			}
+	striped := ctx.KeyHeld != nil && ctx.Escalate != nil
+	if striped {
+		var held bool
+		if keysToDelete, held = ti.InvalidateAllIf(tags, ctx.KeyHeld); !held {
 			ctx.Escalate()
+			ctx.followSwap()
+			ti = ctx.Store.GetTagIndex()
+			tags = InvalidateTags(ti, ctx.Args)
 			striped = false
 		}
-		keysToDelete = append(keysToDelete, ti.Invalidate(t)...)
+	}
+	if !striped {
+		for _, t := range tags {
+			keysToDelete = append(keysToDelete, ti.Invalidate(t)...)
+		}
 	}
 
 	if len(tags) > 1 {

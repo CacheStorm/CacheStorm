@@ -754,6 +754,7 @@ func (r *Router) admit(ctx *Context) (*CommandDef, bool, error) {
 
 func (r *Router) Execute(ctx *Context) error {
 	ctx.router = r
+	ctx.followSwap()
 	ctx.Command = CanonicalName(ctx.Command)
 	asking := false
 	if r.cluster != nil {

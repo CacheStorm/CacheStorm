@@ -103,6 +103,9 @@ func (d *Databases) Swap(a, b int) error {
 	d.mu.Unlock()
 	sa.TouchWatchedPresent(sb)
 	sb.TouchWatchedPresent(sa)
+	// Clients blocked in either database wait for the other one's data now.
+	sa.keyNotifier.WakeAll()
+	sb.keyNotifier.WakeAll()
 	return nil
 }
 

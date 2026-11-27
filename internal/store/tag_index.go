@@ -261,39 +261,69 @@ func (ti *TagIndex) KeysUpTo(tag string, max int, fn func(key string)) bool {
 	return true
 }
 
-// InvalidateIf invalidates tag only when held reports every key the tag has
-// now. It reports false, and changes nothing, when one of them is not: the
-// caller locked the keys the tag had earlier, and a key joined it since.
-func (ti *TagIndex) InvalidateIf(tag string, held func(key string) bool) ([]string, bool) {
-	shard := ti.shards[ti.shardIndex(tag)]
-	shard.mu.Lock()
-	set, ok := shard.index[tag]
-	var keys []string
-	if ok {
-		keys = make([]string, 0, set.Len())
+// InvalidateAllIf invalidates every one of tags, and returns their keys,
+// only when held reports every key the tags have now. It reports false, and
+// changes nothing, when one of them is not: the caller locked the keys the
+// tags had earlier, and a key joined one of them since. The tags' shards are
+// locked together, in index order, so the check and the invalidation are
+// one step for all of them.
+func (ti *TagIndex) InvalidateAllIf(tags []string, held func(key string) bool) ([]string, bool) {
+	var shardSet [TagShards / 64]uint64
+	for _, tag := range tags {
+		i := ti.shardIndex(tag)
+		shardSet[i/64] |= 1 << (i % 64)
+	}
+	each := func(fn func(*tagShard)) {
+		for w, bits := range shardSet {
+			for b := 0; b < 64; b++ {
+				if bits&(1<<b) != 0 {
+					fn(ti.shards[w*64+b])
+				}
+			}
+		}
+	}
+	each(func(sh *tagShard) { sh.mu.Lock() })
+	unlock := func() { each(func(sh *tagShard) { sh.mu.Unlock() }) }
+	n := 0
+	for _, tag := range tags {
+		set := ti.shards[ti.shardIndex(tag)].index[tag]
+		if set == nil {
+			continue
+		}
 		covered := true
 		set.Range(func(k string) bool {
-			if !held(k) {
-				covered = false
-				return false
-			}
-			keys = append(keys, k)
-			return true
+			covered = held(k)
+			return covered
 		})
 		if !covered {
-			shard.mu.Unlock()
+			unlock()
 			return nil, false
 		}
+		n += set.Len()
+	}
+	keys := make([]string, 0, n)
+	perTag := make([][]string, len(tags))
+	for i, tag := range tags {
+		shard := ti.shards[ti.shardIndex(tag)]
+		set := shard.index[tag]
+		if set == nil {
+			continue
+		}
+		start := len(keys)
+		keys = set.AppendTo(keys)
+		perTag[i] = keys[start:len(keys):len(keys)]
 		delete(shard.index, tag)
 		ti.tags.Add(-1)
 		ti.members.Add(-int64(set.Len()))
 	}
-	shard.mu.Unlock()
+	unlock()
 	ti.hookMu.RLock()
 	onInvalidate := ti.onInvalidate
 	ti.hookMu.RUnlock()
 	if onInvalidate != nil {
-		onInvalidate(tag, keys)
+		for i, tag := range tags {
+			onInvalidate(tag, perTag[i])
+		}
 	}
 	return keys, true
 }

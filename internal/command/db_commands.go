@@ -25,6 +25,19 @@ func (ctx *Context) databases() *store.Databases {
 	return ctx.DBs
 }
 
+// followSwap points ctx at the store its database index has now. SWAPDB
+// exchanges two databases' stores, and a connection that picked its store
+// before the swap (before it got the write gate, or before it blocked) must
+// run in the data its database holds now, as in Redis.
+func (ctx *Context) followSwap() {
+	if ctx.DBs == nil {
+		return
+	}
+	if s := ctx.DBs.Existing(ctx.DB); s != nil && s != ctx.Store {
+		ctx.Store = s
+	}
+}
+
 // selectDB makes database index the one the following commands run in.
 func (ctx *Context) selectDB(index int) error {
 	dbs := ctx.databases()
