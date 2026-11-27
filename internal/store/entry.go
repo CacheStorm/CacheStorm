@@ -632,8 +632,28 @@ func NewEntry(value Value) *Entry {
 }
 
 type entryMeta struct {
-	loading *atomic.Bool
-	tags    []string
+	clock *expiryClock
+	tags  []string
+}
+
+// expiryClock decides for a store's entries whether they have expired.
+// While the store loads (an AOF, a snapshot, a master's stream) nothing has,
+// as in Redis. While a transaction or a script runs, time stands at its
+// start (Redis' command time snapshot), so a key it found alive does not
+// expire under it halfway: what it did then replays the same from the AOF.
+type expiryClock struct {
+	loading atomic.Bool
+	// frozen is the time in unix milliseconds the store's keys expire by,
+	// or 0 to use the clock.
+	frozen atomic.Int64
+}
+
+// now is the time keys expire by: the frozen time, or the clock.
+func (c *expiryClock) now() int64 {
+	if t := c.frozen.Load(); t != 0 {
+		return t
+	}
+	return time.Now().UnixMilli()
 }
 
 // TagList returns the entry's tags; the caller must not modify the slice.
@@ -648,24 +668,24 @@ func (e *Entry) TagList() []string {
 // hold the shard lock or own an entry not yet installed.
 func (e *Entry) SetTags(tags []string) {
 	tags = distinctTags(tags)
-	var loading *atomic.Bool
+	var clock *expiryClock
 	if m := e.meta.Load(); m != nil {
-		loading = m.loading
+		clock = m.clock
 	}
 	if len(tags) == 0 {
 		tags = nil
-		if loading == nil {
+		if clock == nil {
 			e.meta.Store(nil)
 			return
 		}
 	}
-	e.meta.Store(sharedMeta(loading, tags))
+	e.meta.Store(sharedMeta(clock, tags))
 }
 
-// metaKey names an entryMeta by its loading flag and its tags.
+// metaKey names an entryMeta by its store's clock and its tags.
 type metaKey struct {
-	loading *atomic.Bool
-	tags    string
+	clock *expiryClock
+	tags  string
 }
 
 // metas holds, weakly, the entryMeta of each loading flag and tag list in
@@ -679,7 +699,7 @@ var metas [64]struct {
 
 // sharedMeta returns the entryMeta for loading and tags, which must not be
 // empty. The caller must not modify its tags.
-func sharedMeta(loading *atomic.Bool, tags []string) *entryMeta {
+func sharedMeta(clock *expiryClock, tags []string) *entryMeta {
 	var buf [256]byte
 	enc := buf[:0]
 	for _, tag := range tags {
@@ -689,7 +709,7 @@ func sharedMeta(loading *atomic.Bool, tags []string) *entryMeta {
 	}
 	shard := &metas[fnv32a(enc)%uint32(len(metas))]
 	shard.mu.RLock()
-	wp, ok := shard.m[metaKey{loading: loading, tags: unsafe.String(unsafe.SliceData(enc), len(enc))}]
+	wp, ok := shard.m[metaKey{clock: clock, tags: unsafe.String(unsafe.SliceData(enc), len(enc))}]
 	shard.mu.RUnlock()
 	if ok {
 		if m := wp.Value(); m != nil {
@@ -709,13 +729,13 @@ func sharedMeta(loading *atomic.Bool, tags []string) *entryMeta {
 		own[i] = names[at : at+len(tag)]
 		at += len(tag)
 	}
-	key := metaKey{loading: loading, tags: names}
+	key := metaKey{clock: clock, tags: names}
 	shard.mu.Lock()
 	if live := shard.m[key].Value(); live != nil {
 		shard.mu.Unlock()
 		return live
 	}
-	m := &entryMeta{loading: loading, tags: own}
+	m := &entryMeta{clock: clock, tags: own}
 	wp = weak.Make(m)
 	if shard.m == nil {
 		shard.m = make(map[metaKey]weak.Pointer[entryMeta])
@@ -742,12 +762,12 @@ func (e *Entry) bind(plain *entryMeta) {
 		e.meta.Store(plain)
 		return
 	}
-	var loading *atomic.Bool
+	var clock *expiryClock
 	if plain != nil {
-		loading = plain.loading
+		clock = plain.clock
 	}
-	if m.loading != loading {
-		e.meta.Store(sharedMeta(loading, m.tags))
+	if m.clock != clock {
+		e.meta.Store(sharedMeta(clock, m.tags))
 	}
 }
 
@@ -764,13 +784,21 @@ func (e *Entry) rehome() *Entry {
 }
 
 func (e *Entry) IsExpired() bool {
-	if m := e.meta.Load(); m != nil && m.loading != nil && m.loading.Load() {
+	expiresAt := e.ExpiresAt.Load()
+	if expiresAt == 0 {
 		return false
 	}
-	if expiresAt := e.ExpiresAt.Load(); expiresAt != 0 {
-		return time.Now().UnixMilli() >= expiresAt
+	var now int64
+	if m := e.meta.Load(); m != nil && m.clock != nil {
+		if m.clock.loading.Load() {
+			return false
+		}
+		now = m.clock.frozen.Load()
 	}
-	return false
+	if now == 0 {
+		now = time.Now().UnixMilli()
+	}
+	return now >= expiresAt
 }
 
 // EntryOverhead is what a key costs besides its name, value and tags: the

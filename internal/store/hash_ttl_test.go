@@ -280,12 +280,12 @@ func TestHashFieldPassiveStoreHidesWithoutDeleting(t *testing.T) {
 	if len(rec.get("h")) != 0 {
 		t.Fatal("a replica must not expire fields itself")
 	}
-	s.loading.Store(true)
+	s.clock.loading.Store(true)
 	entry, _ = s.Get("h")
 	if entry.Value.(*HashValue).Len() != 2 {
 		t.Fatal("the master's stream sees the field until its HDEL arrives")
 	}
-	s.loading.Store(false)
+	s.clock.loading.Store(false)
 
 	setFieldTTL(t, s, "h", time.Now().UnixMilli()-1, "b")
 	if _, ok := s.Get("h"); ok {

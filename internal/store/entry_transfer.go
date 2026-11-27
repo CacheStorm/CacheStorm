@@ -88,7 +88,7 @@ func (s *Store) Transfer(srcKey string, dst *Store, dstKey string, options Trans
 		if shared && !options.Copy {
 			delta -= source.charged()
 		}
-		reserved := dst.memTracker != nil && !dst.loading.Load()
+		reserved := dst.memTracker != nil && !dst.clock.loading.Load()
 		if reserved && !dst.memTracker.TryReserve(delta) {
 			minimum := newMem
 			tooLarge := false

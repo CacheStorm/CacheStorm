@@ -185,7 +185,7 @@ func (s *Store) moveSetMember(srcKey, dstKey, member string) (bool, error) {
 			oldMem += previous.charged()
 		}
 		delta := newMem - oldMem
-		reserved := s.memTracker != nil && !s.loading.Load()
+		reserved := s.memTracker != nil && !s.clock.loading.Load()
 		if reserved && !s.memTracker.TryReserve(delta) {
 			tooLarge := !s.memTracker.withinLimit(newMem)
 			unlock()

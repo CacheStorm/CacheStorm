@@ -1,8 +1,11 @@
 package server
 
 import (
+	"bufio"
 	"fmt"
 	"math/rand"
+	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -11,6 +14,7 @@ import (
 	"time"
 
 	"github.com/cachestorm/cachestorm/internal/config"
+	"github.com/cachestorm/cachestorm/internal/resp"
 )
 
 var (
@@ -187,6 +191,7 @@ func TestConcurrentTagCommandsKeepTheIndexConsistentX(t *testing.T) {
 	}
 	stopReplServer(master)
 	if s, err := newOwnedTestServer(t, cfg); err != nil {
+		logAOFTail(t, filepath.Join(cfg.Persistence.DataDir, "appendonly.aof"), err)
 		t.Fatal(err)
 	} else {
 		stopReplServer(s)
@@ -195,4 +200,52 @@ func TestConcurrentTagCommandsKeepTheIndexConsistentX(t *testing.T) {
 	if got := tagIndexState(t, dialRepl(t, restarted), "restarted"); got != want {
 		t.Fatalf("after an AOF restart\nbefore: %s\nafter:  %s", want, got)
 	}
+}
+
+// logAOFTail logs, for a replay that failed at AOF command n, the commands
+// before it with the database each ran in, so a failure seen once (in CI)
+// can be followed.
+func logAOFTail(t *testing.T, path string, replayErr error) {
+	t.Helper()
+	var n int
+	msg := replayErr.Error()
+	if i := strings.Index(msg, "AOF command "); i < 0 {
+		return
+	} else if _, err := fmt.Sscanf(msg[i:], "AOF command %d", &n); err != nil {
+		return
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	br := bufio.NewReader(f)
+	rd := resp.NewReader(br)
+	db := "0"
+	var lines []string
+	for i := 1; i <= n; i++ {
+		for {
+			if b, _ := br.Peek(1); len(b) == 1 && b[0] == '#' {
+				_, _ = br.ReadString('\n')
+				continue
+			}
+			break
+		}
+		v, err := rd.ReadValue()
+		if err != nil {
+			break
+		}
+		args := make([]string, 0, len(v.Array))
+		for _, a := range v.Array {
+			args = append(args, string(a.Bulk))
+		}
+		if len(args) > 1 && strings.EqualFold(args[0], "SELECT") {
+			db = args[1]
+		}
+		lines = append(lines, fmt.Sprintf("%5d db%s %s", i, db, strings.Join(args, " ")))
+	}
+	if len(lines) > 60 {
+		lines = lines[len(lines)-60:]
+	}
+	t.Logf("AOF before the failing command:\n%s", strings.Join(lines, "\n"))
 }

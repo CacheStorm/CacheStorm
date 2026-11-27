@@ -37,7 +37,12 @@ func accountWord[K string | []byte](key K, entry *Entry, held bool) int64 {
 	if !ok {
 		tag = sizeTagOf(entry.accounted.Load())
 	}
-	return footprint(key, entry) | tag<<chargeBits
+	// A collection's size is read without its lock from counters a writer
+	// updates one after the other, so a read beside a write can be off for
+	// a moment, even below zero; the writer reaccounts the key once it is
+	// done. Kept within the charge bits, it cannot spill into the tag.
+	fp := min(max(footprint(key, entry), 0), chargeMask)
+	return fp | tag<<chargeBits
 }
 
 func lengthUnder(mu *sync.RWMutex, held bool, n func() int) (int, bool) {

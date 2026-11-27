@@ -46,6 +46,12 @@ func (r *scriptRun) begin(cancel context.CancelFunc, eval bool) {
 	r.eval = eval
 	r.fromMaster = r.parent.FromMaster || r.parent.Replaying
 	r.command = append([]string{r.parent.Command}, argStrings(r.parent)...)
+	// The script runs at one time, its start or that of the transaction
+	// running it: keys do not expire under it, as in Redis.
+	if r.ctx.timeSnapshot == 0 {
+		r.ctx.timeSnapshot = r.started.UnixMilli()
+	}
+	r.thaw = r.ctx.databases().FreezeExpiry(r.ctx.timeSnapshot)
 	if r.router == nil {
 		return
 	}
@@ -57,6 +63,10 @@ func (r *scriptRun) begin(cancel context.CancelFunc, eval bool) {
 
 // end removes r from the running scripts.
 func (r *scriptRun) end() {
+	if r.thaw != nil {
+		r.thaw()
+		r.thaw = nil
+	}
 	if r.router == nil {
 		return
 	}

@@ -270,7 +270,7 @@ func (s *Store) NotifyOverwrite(key string, old, now DataType) {
 // notifyNew announces that key was added to the keyspace (the "new" event
 // of Redis' dbAdd). Loading a dataset announces nothing.
 func (s *Store) notifyNew(key string) {
-	if s.Notifying(NotifyNew) && !s.loading.Load() {
+	if s.Notifying(NotifyNew) && !s.clock.loading.Load() {
 		s.Notify(NotifyNew, "new", key)
 	}
 }

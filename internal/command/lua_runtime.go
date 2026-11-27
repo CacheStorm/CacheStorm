@@ -68,6 +68,8 @@ type scriptRun struct {
 	command    []string
 	killed     atomic.Bool
 	dirty      atomic.Bool
+	// thaw ends the expiry freeze the script runs under.
+	thaw func()
 }
 
 func newScriptRun(ctx *Context, e *ScriptEngine, name, chunk string, readOnly bool) *scriptRun {

@@ -24,6 +24,28 @@ type Databases struct {
 	mu       sync.Mutex
 	slots    []atomic.Pointer[Store]
 	expiring bool
+	frozen   atomic.Bool
+}
+
+// FreezeExpiry makes the keys of every database expire by ms (unix
+// milliseconds) rather than by the clock until the returned function is
+// called, as Redis runs a transaction or a script at one command time: no
+// key expires under it halfway, so it replays from the AOF as it ran. A
+// freeze already in place (a script a transaction runs) is kept. The caller
+// holds the whole write gate, so nothing else is running.
+func (d *Databases) FreezeExpiry(ms int64) (thaw func()) {
+	if !d.frozen.CompareAndSwap(false, true) {
+		return func() {}
+	}
+	d.mu.Lock()
+	d.ForEach(func(_ int, s *Store) { s.clock.frozen.Store(ms) })
+	d.mu.Unlock()
+	return func() {
+		d.mu.Lock()
+		d.ForEach(func(_ int, s *Store) { s.clock.frozen.Store(0) })
+		d.mu.Unlock()
+		d.frozen.Store(false)
+	}
 }
 
 // NewDatabases builds a container of n databases with base as database 0.
@@ -184,7 +206,8 @@ func (s *Store) newSibling() *Store {
 		n.EnableSlotIndex()
 	}
 	n.passiveExpiry.Store(s.passiveExpiry.Load())
-	n.loading.Store(s.loading.Load())
+	n.clock.loading.Store(s.clock.loading.Load())
+	n.clock.frozen.Store(s.clock.frozen.Load())
 	n.pubsub = s.pubsub
 	if s.memTracker != nil {
 		n.memTracker = s.memTracker

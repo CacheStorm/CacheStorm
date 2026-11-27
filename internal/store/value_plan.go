@@ -41,7 +41,7 @@ func (s *Store) applyValuePlan(key string, options *SetOptions, snapshot *Entry,
 			}
 			continue
 		}
-		if live && !s.loading.Load() && !s.passiveExpiry.Load() {
+		if live && !s.clock.loading.Load() && !s.passiveExpiry.Load() {
 			if h, ok := previous.Value.(*HashValue); ok && h.minExpire.Load() != 0 {
 				if now := time.Now().UnixMilli(); h.fieldsDue(now) {
 					fields, deleted, delta := s.reapHashFieldsLocked(shard, key, previous, h, now, 0)
@@ -117,7 +117,7 @@ func (s *Store) applyValuePlan(key string, options *SetOptions, snapshot *Entry,
 			oldMem = previous.charged()
 		}
 		delta := newMem - oldMem
-		reserved := s.memTracker != nil && !s.loading.Load()
+		reserved := s.memTracker != nil && !s.clock.loading.Load()
 		if reserved && !s.memTracker.TryReserve(delta) {
 			tooLarge := !s.memTracker.withinLimit(newMem)
 			unlock()

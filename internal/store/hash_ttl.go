@@ -3,7 +3,6 @@ package store
 import (
 	"container/heap"
 	"sync"
-	"time"
 )
 
 // hashFieldTTLOverhead is what a field's expiry adds to the hash's size: its
@@ -148,10 +147,10 @@ func (v *HashValue) FieldExpiries() map[string]int64 {
 // judges whether a hash field has expired: 0, meaning never, while the store
 // is loading or applying its master's stream, which deletes fields itself.
 func (s *Store) HashFieldClock() int64 {
-	if s.loading.Load() {
+	if s.clock.loading.Load() {
 		return 0
 	}
-	return time.Now().UnixMilli()
+	return s.clock.now()
 }
 
 // FieldLive reports whether field is set and, when now > 0, not past its
@@ -379,7 +378,7 @@ func (s *Store) ScheduleHashFieldExpiry(key string, v *HashValue) {
 // the field, as on a master. While loading and on a replica the field keeps
 // the expiry instead: the master's HDEL removes it.
 func (s *Store) HashFieldExpiryDeletes() bool {
-	return !s.loading.Load() && !s.passiveExpiry.Load()
+	return !s.clock.loading.Load() && !s.passiveExpiry.Load()
 }
 
 // reapHashFieldsLocked deletes the due fields of h, the value of entry under
@@ -433,8 +432,8 @@ func (s *Store) finishHashReap(key string, entry *Entry, fields []string, delete
 // key still exists; retry is set when the key changed under it. A writer on
 // a replica gets the stored hash, expired fields included.
 func (s *Store) settleHashFields(shard *Shard, key string, entry *Entry, h *HashValue, write bool) (*Entry, bool, bool) {
-	now := time.Now().UnixMilli()
-	if !h.fieldsDue(now) || s.loading.Load() {
+	now := s.clock.now()
+	if !h.fieldsDue(now) || s.clock.loading.Load() {
 		return entry, true, false
 	}
 	if s.passiveExpiry.Load() {
@@ -470,7 +469,7 @@ const hashFieldActiveBudget = 2000
 // the hashes the expiry index lists as due, at most hashFieldActiveBudget
 // fields per call.
 func (s *Store) activeExpireHashFields(now int64) {
-	if s.passiveExpiry.Load() || s.loading.Load() {
+	if s.passiveExpiry.Load() || s.clock.loading.Load() {
 		return
 	}
 	budget := hashFieldActiveBudget

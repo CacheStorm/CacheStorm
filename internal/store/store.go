@@ -57,7 +57,7 @@ type Store struct {
 	generation    atomic.Uint64
 	order         uint64
 	passiveExpiry atomic.Bool
-	loading       atomic.Bool
+	clock         expiryClock
 	plain         *entryMeta
 	dbIndex       atomic.Int32
 	shards        [NumShards]*Shard
@@ -88,7 +88,7 @@ func NewStore() *Store {
 		versions:    make(map[string]int64),
 		watchRefs:   make(map[string]int),
 	}
-	s.plain = &entryMeta{loading: &s.loading}
+	s.plain = &entryMeta{clock: &s.clock}
 	s.expiry = newActiveExpiry(s)
 	s.hfe = newHashExpiryIndex()
 	for i := 0; i < NumShards; i++ {
@@ -692,6 +692,14 @@ func (s *Store) Delete(key string) bool {
 	entry, exists := shard.Get(key)
 	if !exists {
 		return false
+	}
+	if entry.IsExpired() && !s.passiveExpiry.Load() {
+		// As in Redis, an expired key is expired first: DEL and UNLINK do
+		// not count it, and its expiry is what is announced and recorded. A
+		// replica (passive expiry) deletes what its master tells it to.
+		if entry, exists = s.get(key, true, false); !exists {
+			return false
+		}
 	}
 
 	s.tagIndex.RemoveKey(key, entry.TagList())

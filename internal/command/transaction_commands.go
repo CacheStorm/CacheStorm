@@ -249,6 +249,18 @@ func cmdEXEC(ctx *Context) error {
 	results := make([]*resp.Value, 0, len(queued))
 	executed := make([]ExecutedCommand, 0, len(queued))
 
+	// The transaction runs at one time: no key expires under it halfway, as
+	// in Redis, so what it did replays the same from the AOF and a replica.
+	if ctx.timeSnapshot == 0 {
+		ctx.timeSnapshot = time.Now().UnixMilli()
+	}
+	thaw := ctx.databases().FreezeExpiry(ctx.timeSnapshot)
+	defer func() {
+		// A command that panicked must not leave the clock stopped.
+		if thaw != nil {
+			thaw()
+		}
+	}()
 	var wakes []func()
 	ctx.wakeAfter = &wakes
 	for _, qc := range queued {
@@ -257,6 +269,8 @@ func cmdEXEC(ctx *Context) error {
 		executed = append(executed, recorded...)
 	}
 	ctx.wakeAfter = nil
+	thaw()
+	thaw = nil
 	for _, wake := range wakes {
 		wake()
 	}
