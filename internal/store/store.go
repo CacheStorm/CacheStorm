@@ -740,7 +740,7 @@ const parallelDeleteMin = 512
 // waits, so the bucketing is parallel too: each worker hashes a slice of
 // the keys and counts them per shard, and after a prefix sum places its
 // keys at its own offsets.
-func (s *Store) deleteBatchParallel(keys []string, dropped *droppedTags) []string {
+func (s *Store) deleteBatchParallel(keys []string, dropped *droppedTags) ([]string, int) {
 	workers := min(runtime.GOMAXPROCS(0), 8)
 	if per := len(keys) / (parallelDeleteMin / 2); workers > per {
 		workers = per
@@ -792,9 +792,10 @@ func (s *Store) deleteBatchParallel(keys []string, dropped *droppedTags) []strin
 	wg.Wait()
 
 	type result struct {
-		gone  []string
-		freed int64
-		_     [48]byte // keep workers' results on separate cache lines
+		gone    []string
+		expired []string
+		freed   int64
+		_       [24]byte // keep workers' results on separate cache lines
 	}
 	results := make([]result, workers)
 	for w := 0; w < workers; w++ {
@@ -821,7 +822,11 @@ func (s *Store) deleteBatchParallel(keys []string, dropped *droppedTags) []strin
 						continue
 					}
 					r.freed += shard.deleteLocked(key, entry)
-					r.gone = append(r.gone, key)
+					if s.expiredNow(entry) {
+						r.expired = append(r.expired, key)
+					} else {
+						r.gone = append(r.gone, key)
+					}
 					for _, tag := range entry.TagList() {
 						if dropped.has(tag) {
 							continue
@@ -838,21 +843,26 @@ func (s *Store) deleteBatchParallel(keys []string, dropped *droppedTags) []strin
 				s.tagIndex.RemoveTagsBatch(tagKeys, []string{tag})
 			}
 			s.TouchKeys(r.gone)
+			s.TouchKeys(r.expired)
 		}(&results[w])
 	}
 	wg.Wait()
 
-	total, freed := 0, int64(0)
+	total, live, freed := 0, 0, int64(0)
 	for i := range results {
-		total += len(results[i].gone)
+		total += len(results[i].gone) + len(results[i].expired)
+		live += len(results[i].gone)
 		freed += results[i].freed
 	}
 	gone := make([]string, 0, total)
 	for i := range results {
 		gone = append(gone, results[i].gone...)
 	}
+	for i := range results {
+		gone = append(gone, results[i].expired...)
+	}
 	s.trackMemory(-freed)
-	return gone
+	return gone, live
 }
 
 // droppedTags are the tags an INVALIDATE removed from the index before
@@ -929,24 +939,35 @@ type shardKey struct {
 }
 
 func (s *Store) DeleteBatch(keys []string) int {
-	return len(s.DeleteBatchKeys(keys))
+	_, live := s.deleteBatchKeys(keys, nil)
+	return live
 }
 
-// DeleteBatchKeys deletes keys and returns those that existed.
+// DeleteBatchKeys deletes keys and returns those that were stored, expired
+// ones included.
 func (s *Store) DeleteBatchKeys(keys []string) []string {
-	return s.deleteBatchKeys(keys, nil)
+	gone, _ := s.deleteBatchKeys(keys, nil)
+	return gone
 }
 
 // DeleteInvalidated is DeleteBatchKeys for INVALIDATE: dropped are the tags
 // the keys were invalidated through, which the index no longer has, so the
-// keys are not looked for in them again.
-func (s *Store) DeleteInvalidated(keys, dropped []string) []string {
+// keys are not looked for in them again. The first live of the keys it
+// returns were alive; the rest had expired without being removed yet, which
+// INVALIDATE does not count, as DEL does not.
+func (s *Store) DeleteInvalidated(keys, dropped []string) (gone []string, live int) {
 	return s.deleteBatchKeys(keys, newDroppedTags(dropped))
 }
 
-func (s *Store) deleteBatchKeys(keys []string, dropped *droppedTags) []string {
+// expiredNow reports whether entry has expired and the store removes such
+// keys itself (a replica waits for its master).
+func (s *Store) expiredNow(entry *Entry) bool {
+	return entry.ExpiresAt.Load() != 0 && !s.passiveExpiry.Load() && entry.IsExpired()
+}
+
+func (s *Store) deleteBatchKeys(keys []string, dropped *droppedTags) ([]string, int) {
 	if len(keys) == 0 {
-		return nil
+		return nil, 0
 	}
 	if len(keys) >= parallelDeleteMin {
 		return s.deleteBatchParallel(keys, dropped)
@@ -964,7 +985,7 @@ func (s *Store) deleteBatchKeys(keys []string, dropped *droppedTags) []string {
 	}
 	slices.SortFunc(ops, func(a, b shardKey) int { return cmp.Compare(a.idx, b.idx) })
 
-	var gone []string
+	var gone, expired []string
 	freed := int64(0)
 	untag := smallUntag[:0]
 	for i := 0; i < len(ops); {
@@ -982,7 +1003,11 @@ func (s *Store) deleteBatchKeys(keys []string, dropped *droppedTags) []string {
 			if tags := dropped.remaining(entry.TagList()); len(tags) > 0 {
 				untag = append(untag, shardKey{key: key, tags: tags})
 			}
-			gone = append(gone, key)
+			if s.expiredNow(entry) {
+				expired = append(expired, key)
+			} else {
+				gone = append(gone, key)
+			}
 		}
 		shard.mu.Unlock()
 	}
@@ -1006,7 +1031,8 @@ func (s *Store) deleteBatchKeys(keys []string, dropped *droppedTags) []string {
 
 	s.trackMemory(-freed)
 
-	return gone
+	live := len(gone)
+	return append(gone, expired...), live
 }
 
 func (s *Store) Exists(key string) bool {

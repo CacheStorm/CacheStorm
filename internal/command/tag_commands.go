@@ -283,19 +283,19 @@ func cmdINVALIDATE(ctx *Context) error {
 		}
 		keysToDelete = uniqueKeys
 	}
-	deleted := ctx.Store.DeleteInvalidated(keysToDelete, tags)
+	deleted, live := ctx.Store.DeleteInvalidated(keysToDelete, tags)
 	// Replicas, the AOF and a slot migration get the keys deleted, not the
 	// tags: writes to other keys may have run beside a striped run, and a
 	// slot migration copies only the writes naming keys of its slots.
 	propagateDeletes(ctx, deleted)
-	announceDeletes(ctx, deleted)
+	announceDeletes(ctx, deleted, live)
 	elapsed := time.Since(start)
-	ti.RecordInvalidation(len(deleted), elapsed.Microseconds())
+	ti.RecordInvalidation(live, elapsed.Microseconds())
 	RecordLatency("invalidate", elapsed)
 	_, _, local := tagOptions(ctx.Args, 1, true)
 	if f := ctx.tagFanout(local); f != nil {
 		args := withLocal(ctx.Args)
-		n := int64(len(deleted))
+		n := int64(live)
 		ctx.AfterGate = func() error {
 			replies := f.Send("INVALIDATE", args)
 			total, failed := n, false
@@ -313,16 +313,21 @@ func cmdINVALIDATE(ctx *Context) error {
 		}
 		return nil
 	}
-	return ctx.WriteInteger(int64(len(deleted)))
+	return ctx.WriteInteger(int64(live))
 }
 
 // announceDeletes tells what follows the keyspace that keys were deleted by
 // a command that names none of them: each key publishes the del keyspace
 // notification DEL publishes, and search indexes drop the documents, which
 // they otherwise learn of only through the keys a command names.
-func announceDeletes(ctx *Context, keys []string) {
-	for _, key := range keys {
+func announceDeletes(ctx *Context, keys []string, live int) {
+	for _, key := range keys[:live] {
 		ctx.notify(store.NotifyGeneric, "del", key)
+	}
+	// The rest had expired: like a lookup of an expired key, removing them
+	// announces their expiry.
+	for _, key := range keys[live:] {
+		ctx.notify(store.NotifyExpired, "expired", key)
 	}
 	indexes := searchIndexesFor(ctx).All()
 	for _, idx := range indexes {

@@ -74,8 +74,8 @@ func TestDeleteInvalidatedX(t *testing.T) {
 			}
 		}
 		keys := s.tagIndex.Invalidate("inv")
-		if got := len(s.DeleteInvalidated(keys, []string{"inv"})); got != n {
-			t.Fatalf("n=%d: deleted %d", n, got)
+		if gone, live := s.DeleteInvalidated(keys, []string{"inv"}); len(gone) != n || live != n {
+			t.Fatalf("n=%d: deleted %d, %d alive", n, len(gone), live)
 		}
 		if got := s.tagIndex.GetKeys("other"); len(got) != 1 || got[0] != "keep" {
 			t.Fatalf("n=%d: tag other lists %d keys, want [keep]", n, len(got))

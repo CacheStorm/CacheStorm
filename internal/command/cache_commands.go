@@ -87,7 +87,7 @@ func deleteMatching(ctx *Context, pattern string, limit int64) int64 {
 		}
 	}
 	propagateDeletes(ctx, deleted)
-	announceDeletes(ctx, deleted)
+	announceDeletes(ctx, deleted, len(deleted))
 	return int64(len(deleted))
 }
 

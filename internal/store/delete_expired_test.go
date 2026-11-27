@@ -1,6 +1,7 @@
 package store
 
 import (
+	"strconv"
 	"testing"
 	"time"
 )
@@ -61,5 +62,35 @@ func TestFrozenExpiryClock(t *testing.T) {
 	thaw()
 	if _, ok := s.Get("k"); ok {
 		t.Fatal("the key outlived the freeze")
+	}
+}
+
+// INVALIDATE deletes a tag's expired keys too, but counts only the live
+// ones (listing the expired ones last), in the sequential and the parallel
+// batch alike.
+func TestDeleteInvalidatedCountsLiveKeys(t *testing.T) {
+	for _, n := range []int{10, 2 * parallelDeleteMin} {
+		s := NewStore()
+		past := time.Now().UnixMilli() - 1
+		for i := 0; i < n; i++ {
+			opts := SetOptions{Tags: []string{"t"}}
+			if i%2 == 1 {
+				opts.ExpireAtMS = past
+			}
+			if err := s.Set("k"+strconv.Itoa(i), &StringValue{Data: []byte("v")}, opts); err != nil {
+				t.Fatal(err)
+			}
+		}
+		keys := s.tagIndex.Invalidate("t")
+		gone, live := s.DeleteInvalidated(keys, []string{"t"})
+		if len(gone) != n || live != n/2 {
+			t.Fatalf("n=%d: %d deleted, %d alive; want %d and %d", n, len(gone), live, n, n/2)
+		}
+		for i, k := range gone {
+			idx, _ := strconv.Atoi(k[1:])
+			if expired := idx%2 == 1; expired != (i >= live) {
+				t.Fatalf("n=%d: %s listed at %d with %d alive", n, k, i, live)
+			}
+		}
 	}
 }
