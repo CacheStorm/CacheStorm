@@ -4,7 +4,6 @@ import (
 	"errors"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
@@ -44,7 +43,7 @@ func errHFEExpireTime(cmd string) error {
 // hfeExpireAt converts a field expiry argument to unix milliseconds the way
 // Redis 7.4 does: unitMS is 1000 for seconds, absolute is false for a time
 // relative to now.
-func hfeExpireAt(ctx *Context, arg string, unitMS int64, absolute bool) (int64, error) {
+func hfeExpireAt(ctx *Context, now int64, arg string, unitMS int64, absolute bool) (int64, error) {
 	t, err := strconv.ParseInt(arg, 10, 64)
 	if err != nil {
 		return 0, ErrNotInteger
@@ -60,7 +59,7 @@ func hfeExpireAt(ctx *Context, arg string, unitMS int64, absolute bool) (int64, 
 	}
 	var base int64
 	if !absolute {
-		base = time.Now().UnixMilli()
+		base = now
 	}
 	if t > store.MaxHashFieldExpireMS-base {
 		return 0, errHFEExpireTime(ctx.Command)
@@ -153,7 +152,10 @@ func hexpireGeneric(ctx *Context, unitMS int64, absolute bool) error {
 	if err != nil {
 		return ctx.WriteError(err)
 	}
-	at, err := hfeExpireAt(ctx, ctx.ArgString(1), unitMS, absolute)
+	// One clock for the command: a relative time and the check whether it
+	// is already past read the same instant, as Redis' command time does.
+	now := ctx.nowMS()
+	at, err := hfeExpireAt(ctx, now, ctx.ArgString(1), unitMS, absolute)
 	if err != nil {
 		return ctx.WriteError(err)
 	}
@@ -196,7 +198,7 @@ func hexpireGeneric(ctx *Context, unitMS int64, absolute bool) error {
 	}
 	hash.UseFieldTTLs()
 	deletes := ctx.Store.HashFieldExpiryDeletes()
-	now, clock := time.Now().UnixMilli(), ctx.Store.HashFieldClock()
+	clock := ctx.Store.HashFieldClock()
 	results := make([]*resp.Value, len(fields))
 	var deleted, updated []string
 	for i, fb := range fields {
@@ -267,7 +269,7 @@ func httlGeneric(ctx *Context, unitMS int64, absolute bool) error {
 	if hash == nil {
 		return ctx.WriteArray(hfeIntegers(len(fields), -2))
 	}
-	now := time.Now().UnixMilli()
+	now := ctx.nowMS()
 	var base int64
 	if !absolute {
 		base = now
@@ -363,6 +365,7 @@ func cmdHGETEX(ctx *Context) error {
 	if err != nil {
 		return ctx.WriteError(err)
 	}
+	now := ctx.nowMS()
 	mode, at, fieldsAt := hgetexNone, int64(0), 1
 	switch opt := strings.ToUpper(ctx.ArgString(1)); opt {
 	case "EX", "PX", "EXAT", "PXAT":
@@ -370,7 +373,7 @@ func cmdHGETEX(ctx *Context) error {
 		if opt == "EX" || opt == "EXAT" {
 			unitMS = 1000
 		}
-		at, err = hfeExpireAt(ctx, ctx.ArgString(2), unitMS, opt == "EXAT" || opt == "PXAT")
+		at, err = hfeExpireAt(ctx, now, ctx.ArgString(2), unitMS, opt == "EXAT" || opt == "PXAT")
 		if err != nil {
 			return ctx.WriteError(err)
 		}
@@ -401,7 +404,7 @@ func cmdHGETEX(ctx *Context) error {
 		return ctx.WriteArray(results)
 	}
 	deletes := ctx.Store.HashFieldExpiryDeletes()
-	now, clock := time.Now().UnixMilli(), ctx.Store.HashFieldClock()
+	clock := ctx.Store.HashFieldClock()
 	var deleted, updated, persisted []string
 	for i, f := range fields {
 		val, ok := hash.Get(f)
@@ -458,6 +461,7 @@ func cmdHSETEX(ctx *Context) error {
 		return ctx.WriteError(arityError(ctx.Command))
 	}
 	key := ctx.ArgString(0)
+	now := ctx.nowMS()
 	var opts store.HashSetExOptions
 	condSet, expirySet := false, false
 	expiryArg := ""
@@ -498,7 +502,7 @@ parse:
 			if opt == "EX" || opt == "EXAT" {
 				unitMS = 1000
 			}
-			at, err := hfeExpireAt(ctx, ctx.ArgString(i+1), unitMS, opt == "EXAT" || opt == "PXAT")
+			at, err := hfeExpireAt(ctx, now, ctx.ArgString(i+1), unitMS, opt == "EXAT" || opt == "PXAT")
 			if err != nil {
 				return ctx.WriteError(err)
 			}
@@ -518,7 +522,7 @@ parse:
 	ctx.writeEffectsHandled = true
 	var applied bool
 	var err error
-	if expiryArg != "" && ctx.Store.HashFieldExpiryDeletes() && opts.ExpireAt <= time.Now().UnixMilli() {
+	if expiryArg != "" && ctx.Store.HashFieldExpiryDeletes() && opts.ExpireAt <= now {
 		applied, err = hsetexDelete(ctx, key, pairs, opts)
 		if err != nil {
 			return ctx.WriteError(err)
