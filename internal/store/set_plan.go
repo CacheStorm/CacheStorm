@@ -195,7 +195,7 @@ func (s *Store) moveSetMember(srcKey, dstKey, member string) (bool, error) {
 			if !s.mayEvictAgain(&remaining) {
 				return false, ErrMemoryLimit
 			}
-			if !s.evictor.evictOne() {
+			if !s.evictor.evictOne(dstKey, false) {
 				return false, ErrMemoryLimit
 			}
 			continue

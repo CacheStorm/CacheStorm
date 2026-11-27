@@ -112,7 +112,7 @@ func (s *Store) Transfer(srcKey string, dst *Store, dstKey string, options Trans
 				return false, ErrMemoryLimit
 			}
 			remaining--
-			if !dst.evictor.evictOne() {
+			if !dst.evictor.evictOne(dstKey, false) {
 				return false, ErrMemoryLimit
 			}
 			continue

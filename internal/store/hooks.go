@@ -27,6 +27,15 @@ type StoreHooks struct {
 	// when fields of the hash at key expired and were removed. Replication
 	// and the AOF record them as HDEL, as Redis propagates field expiry.
 	OnHashFieldsExpiredLocked func(s *Store, key string, fields []string)
+	// EvictGuard, when set, is asked before a key is evicted for a write of
+	// writing (empty when the write names no key), before the command ran
+	// (before) or halfway through it. It returns what to call once the key
+	// is gone, or false when the key may not be evicted now, and another one
+	// is picked: another command is in the middle of a write of it, or the
+	// command evicting it already used it, and the eviction's DEL would be
+	// recorded before a write the master made first, so a replica and the
+	// AOF would keep the key the master evicted.
+	EvictGuard func(s *Store, victim, writing string, before bool) (release func(), ok bool)
 }
 
 func (s *Store) fireEvictLocked(key string) {
@@ -101,6 +110,16 @@ func (s *Store) expiryGuard(key string) func() {
 		return func() {}
 	}
 	return h(s, key)
+}
+
+func (s *Store) evictGuard(victim, writing string, before bool) (func(), bool) {
+	s.hooksMu.RLock()
+	h := s.hooks.EvictGuard
+	s.hooksMu.RUnlock()
+	if h == nil {
+		return func() {}, true
+	}
+	return h(s, victim, writing, before)
 }
 
 func (s *Store) fireHashFieldsExpiredLocked(key string, fields []string) {

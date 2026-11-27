@@ -129,7 +129,7 @@ func (s *Store) SetStringBatchOpts(pairs []StringPair, opts BatchSetOptions) (bo
 			if !s.mayEvictAgain(&remaining) {
 				return false, ErrMemoryLimit
 			}
-			if !s.evictor.evictOne() {
+			if !s.evictor.evictOne(pairs[0].Key, false) {
 				return false, ErrMemoryLimit
 			}
 			continue

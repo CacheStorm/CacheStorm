@@ -42,7 +42,7 @@ func TestVolatilePoliciesOnlyEvictKeysWithTTL(t *testing.T) {
 			s.ConfigureMemory(0, policy, 70, 85, 10)
 			fillForEviction(t, s)
 			for i := 0; i < 20; i++ {
-				if !s.evictor.evictOne() {
+				if !s.evictor.evictOne("", true) {
 					t.Fatalf("eviction %d found no victim", i)
 				}
 			}

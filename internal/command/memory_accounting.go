@@ -105,7 +105,7 @@ func (t *commandTraits) overMemory(ctx *Context) bool {
 		return false
 	}
 	if t.denyOOM {
-		return ctx.Store.CheckWriteMemory() != nil
+		return ctx.Store.CheckWriteMemoryFor(firstKeyOf(ctx)) != nil
 	}
 	if !t.mayGrow {
 		return false
@@ -114,7 +114,20 @@ func (t *commandTraits) overMemory(ctx *Context) bool {
 	if mt == nil || mt.Max() <= 0 {
 		return false
 	}
-	return ctx.Store.CheckWriteMemory() != nil || heapOverLimit(mt.Max())
+	return ctx.Store.CheckWriteMemoryFor(firstKeyOf(ctx)) != nil || heapOverLimit(mt.Max())
+}
+
+// firstKeyOf is the first key ctx's command names, which an eviction it
+// makes room with may take without asking for the key's lock: the command
+// holds it. It is looked up only when memory is over the limit.
+func firstKeyOf(ctx *Context) string {
+	if ctx.Store.MemoryTracker() == nil || ctx.Store.MemoryTracker().Usage() <= ctx.Store.MemoryTracker().Limit() {
+		return ""
+	}
+	if keys := ctx.CommandKeys(); len(keys) > 0 {
+		return keys[0]
+	}
+	return ""
 }
 
 // execDeniedForMemory reports whether an EXEC must be refused for memory: a

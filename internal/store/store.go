@@ -189,12 +189,18 @@ func (s *Store) ReaccountKey(key []byte) {
 // not bring usage back under the limit. Store.Set only sees new values, so
 // without this a collection could grow in place without bound.
 func (s *Store) CheckWriteMemory() error {
+	return s.CheckWriteMemoryFor("")
+}
+
+// CheckWriteMemoryFor is CheckWriteMemory before a write of the key
+// writing, which an eviction to make room may take as its victim.
+func (s *Store) CheckWriteMemoryFor(writing string) error {
 	mt := s.memTracker
 	if mt == nil || mt.Max() <= 0 || mt.Usage() <= mt.Limit() {
 		return nil
 	}
 	if s.evictor.evicts() {
-		if err := s.evictor.CheckAndEvict(); err != nil {
+		if err := s.evictor.CheckAndEvictFor(writing); err != nil {
 			logger.Warn().Err(err).Msg("eviction attempt failed")
 		}
 	}

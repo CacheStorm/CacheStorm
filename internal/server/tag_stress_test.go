@@ -377,3 +377,59 @@ func logAOFTail(t *testing.T, path string, replayErr error) {
 	}
 	t.Logf("AOF commands naming %q:\n%s", failKey, strings.Join(keyLines, "\n"))
 }
+
+// stressEvictCommand writes large tagged values half the time, so that the
+// keys outgrow maxmemory and are evicted while the other commands run.
+func stressEvictCommand(rng *rand.Rand) []string {
+	if rng.Intn(2) == 0 {
+		key := stressKeys[rng.Intn(len(stressKeys))]
+		return []string{"SET", key, strings.Repeat("x", 10_000+rng.Intn(30_000)), "TAGS",
+			stressTags[rng.Intn(len(stressTags))], stressTags[rng.Intn(len(stressTags))]}
+	}
+	return stressCommand(rng)
+}
+
+// Keys evicted under maxmemory while clients write, retag and invalidate
+// them leave a tag index that agrees with the keys, and their eviction
+// reaches the replica and the AOF as a DEL in its place.
+func TestConcurrentTagCommandsUnderEvictionX(t *testing.T) {
+	for _, policy := range []string{"allkeys-lru", "allkeys-random", "volatile-ttl"} {
+		t.Run(policy, func(t *testing.T) {
+			cfg := aofRewriteConfig(t, t.TempDir(), func(c *config.Config) { c.Persistence.AOFRewritePercentage = 0 })
+			master := startReplServerCfg(t, cfg)
+			replica := startReplServer(t, nil)
+			replicate(t, replica, master)
+			admin := dialRepl(t, master)
+			used, _ := strconv.ParseInt(admin.info("memory")["used_memory"], 10, 64)
+			admin.do("CONFIG", "SET", "maxmemory-policy", policy)
+			admin.do("CONFIG", "SET", "maxmemory", strconv.FormatInt(used+300_000, 10))
+
+			runTagLoad(t, master, 8, 60, stressEvictCommand, nil)
+
+			if n := admin.info("stats")["evicted_keys"]; n == "0" || n == "" {
+				t.Fatalf("nothing was evicted (evicted_keys %q)", n)
+			}
+			mc := dialRepl(t, master)
+			want := tagIndexState(t, mc, "master")
+			wantKeys := dumpAll(t, mc)
+			waitSynced(t, replica, master)
+			rc := dialRepl(t, replica)
+			if got := tagIndexState(t, rc, "replica"); got != want {
+				t.Fatalf("replica differs\nmaster:  %s\nreplica: %s", want, got)
+			}
+			if got := dumpAll(t, rc); !reflect.DeepEqual(got, wantKeys) {
+				t.Fatalf("replica keys differ\n%s", mapDiff(wantKeys, got))
+			}
+			restarted := checkAOFRestart(t, master, cfg)
+			ac := dialRepl(t, restarted)
+			if got := tagIndexState(t, ac, "restarted"); got != want {
+				aof, _ := os.ReadFile(filepath.Join(cfg.Persistence.DataDir, "appendonly.aof"))
+				t.Fatalf("after an AOF restart (the AOF has %d bytes, %d commands)\nbefore: %s\nafter:  %s",
+					len(aof), strings.Count(string(aof), "\r\n*"), want, got)
+			}
+			if got := dumpAll(t, ac); !reflect.DeepEqual(got, wantKeys) {
+				t.Fatalf("keys after an AOF restart differ\n%s", mapDiff(wantKeys, got))
+			}
+		})
+	}
+}

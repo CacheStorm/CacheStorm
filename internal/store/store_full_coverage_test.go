@@ -1239,7 +1239,7 @@ func TestEvictionController_EvictOne_WithCallback(t *testing.T) {
 		evictedKey = key
 	})
 
-	ec.evictOne()
+	ec.evictOne("", true)
 	_ = evictedKey // may remain empty: random sampling may not evict
 }
 
@@ -2240,7 +2240,7 @@ func TestEvictionController_EvictOne_WithOnEvict(t *testing.T) {
 
 	// Try multiple times since it's random
 	for i := 0; i < 20; i++ {
-		if ec.evictOne() {
+		if ec.evictOne("", true) {
 			break
 		}
 	}

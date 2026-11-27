@@ -1844,7 +1844,7 @@ func TestEvictionController(t *testing.T) {
 		mt7 := NewMemoryTracker(1000000, 80, 90)
 		ec7 := NewEvictionController(EvictionAllKeysLRU, 1000000, s7, mt7, 5)
 
-		ec7.evictKeys(5)
+		ec7.evictKeys(5, "", true)
 	})
 }
 

@@ -151,6 +151,11 @@ func (ec *EvictionController) SetOnEvict(fn func(key string, entry *Entry)) {
 }
 
 func (ec *EvictionController) CheckAndEvict() error {
+	return ec.CheckAndEvictFor("")
+}
+
+// CheckAndEvictFor is CheckAndEvict for a write of the key writing.
+func (ec *EvictionController) CheckAndEvictFor(writing string) error {
 	maxMemory := ec.memTracker.Max()
 	if maxMemory <= 0 {
 		return nil
@@ -164,19 +169,19 @@ func (ec *EvictionController) CheckAndEvict() error {
 			Int64("usage", ec.memTracker.Usage()).
 			Int64("max", maxMemory).
 			Msg("memory pressure emergency, aggressive eviction")
-		ec.evictUntil(0.85)
+		ec.evictUntil(0.85, writing, true)
 	case PressureCritical:
 		logger.Warn().
 			Int64("usage", ec.memTracker.Usage()).
 			Int64("max", maxMemory).
 			Msg("memory pressure critical, evicting keys")
-		ec.evictKeys(100)
+		ec.evictKeys(100, writing, true)
 	case PressureWarning:
 		logger.Debug().
 			Int64("usage", ec.memTracker.Usage()).
 			Int64("max", maxMemory).
 			Msg("memory pressure warning, evicting keys")
-		ec.evictKeys(10)
+		ec.evictKeys(10, writing, true)
 	}
 
 	return nil
@@ -203,27 +208,43 @@ func (s *Store) mayEvictAgain(remaining *int) bool {
 	return true
 }
 
-func (ec *EvictionController) evictUntil(targetPct float64) {
+func (ec *EvictionController) evictUntil(targetPct float64, writing string, before bool) {
 	target := int64(float64(ec.memTracker.Limit()) * targetPct)
 	for ec.memTracker.Usage() > target {
-		if !ec.evictOne() {
+		if !ec.evictOne(writing, before) {
 			break
 		}
 	}
 }
 
-func (ec *EvictionController) evictKeys(count int) {
+func (ec *EvictionController) evictKeys(count int, writing string, before bool) {
 	for i := 0; i < count; i++ {
-		if !ec.evictOne() {
+		if !ec.evictOne(writing, before) {
 			break
 		}
 	}
 }
 
-func (ec *EvictionController) evictOne() bool {
-	key, ok := ec.selectVictim()
-	if !ok {
-		return false
+// evictGuardTries bounds how many victims a write passes over because
+// another command is writing them before it gives up on evicting.
+const evictGuardTries = 8
+
+// evictOne evicts one key for a write of the key writing ("" for none),
+// before the command ran or halfway through it.
+func (ec *EvictionController) evictOne(writing string, before bool) bool {
+	var key string
+	var release func()
+	for try := 0; ; try++ {
+		var ok bool
+		if key, ok = ec.selectVictim(); !ok {
+			return false
+		}
+		if release, ok = ec.store.evictGuard(key, writing, before); ok {
+			break
+		}
+		if try == evictGuardTries {
+			return false
+		}
 	}
 
 	// Read the victim through the shard directly: Store.Get would count this
@@ -231,7 +252,9 @@ func (ec *EvictionController) evictOne() bool {
 	// is about to be deleted.
 	entry, _ := ec.store.GetShard(key).Get(key)
 
-	if entry == nil || !ec.store.evictObserved(key, entry) {
+	evicted := entry != nil && ec.store.evictObserved(key, entry)
+	release()
+	if !evicted {
 		return false
 	}
 	GlobalMetrics.RecordEviction()
@@ -384,7 +407,7 @@ func (ec *EvictionController) sample(volatile bool) []candidate {
 func (ec *EvictionController) ForceEvict(n int) int {
 	evicted := 0
 	for i := 0; i < n; i++ {
-		if ec.evictOne() {
+		if ec.evictOne("", true) {
 			evicted++
 		} else {
 			break

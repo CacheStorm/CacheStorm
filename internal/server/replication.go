@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cachestorm/cachestorm/internal/command"
@@ -43,6 +44,9 @@ type writeGate struct {
 	stripes [gateStripes]sync.RWMutex
 	// queues hold the writes waiting on each stripe (see combine).
 	queues [gateStripes]combineQueue
+	// whole is set while a command holds the whole gate: nothing else runs
+	// then, so a write that sees it is that command's (see evictGuard).
+	whole atomic.Bool
 }
 
 // gateHold is one acquisition of the gate.
@@ -301,6 +305,41 @@ func appendStripe(stripes []int, stripe int) []int {
 }
 
 // acquireKey takes the gate for a write of key alone.
+// evictGuard lets a write evict victim only when the eviction's DEL is
+// recorded where it happened, as Redis evicts before a command runs. A
+// write records its effects after the store applied them, so evicting a key
+// another command had just written recorded the DEL before that write, and
+// evicting a key the evicting command itself had used recorded it before
+// the command; either way the replicas and the AOF kept a key the master
+// had evicted. So a victim is the key being written, or, before the command
+// ran, any key of the stripes the command holds (a command holding the
+// whole gate evicts only then, and halfway through is refused the write as
+// when there is nothing to evict), or a key of a free stripe, taken until
+// the eviction is recorded. Taking it never waits: the evicting command holds
+// stripes of its own, and the store picks another victim.
+func (g *writeGate) evictGuard(victim, writing string, before bool) (func(), bool) {
+	if g.whole.Load() {
+		return func() {}, before
+	}
+	if victim == writing && writing != "" {
+		return func() {}, true
+	}
+	s := stripeOf(victim)
+	if before && writing != "" && stripeOf(writing) == s {
+		return func() {}, true
+	}
+	mu := &g.stripes[s]
+	if !mu.TryLock() {
+		return nil, false
+	}
+	return func() {
+		mu.Unlock()
+		if g.queues[s].waiting.Load() != 0 {
+			g.passTurn(s)
+		}
+	}, true
+}
+
 func (g *writeGate) acquireKey(key string) *gateHold {
 	h := &gateHold{g: g}
 	h.stripes = append(h.inline[:0], stripeOf(key))
@@ -311,6 +350,7 @@ func (g *writeGate) acquireKey(key string) *gateHold {
 func (h *gateHold) lock() {
 	if h.exclusive {
 		h.g.global.Lock()
+		h.g.whole.Store(true)
 		return
 	}
 	h.g.global.RLock()
@@ -349,6 +389,7 @@ func lockStripe(mu *sync.RWMutex) {
 
 func (h *gateHold) unlock() {
 	if h.exclusive {
+		h.g.whole.Store(false)
 		h.g.global.Unlock()
 		return
 	}
@@ -387,10 +428,16 @@ func (s *Server) PauseWrites(until time.Time) { s.pauseWritesForFailover(until) 
 func (s *Server) UnpauseWrites() { s.unpauseClients() }
 
 // LockWrites implements replication.Host.
-func (s *Server) LockWrites() { s.gate.global.Lock() }
+func (s *Server) LockWrites() {
+	s.gate.global.Lock()
+	s.gate.whole.Store(true)
+}
 
 // UnlockWrites implements replication.Host.
-func (s *Server) UnlockWrites() { s.gate.global.Unlock() }
+func (s *Server) UnlockWrites() {
+	s.gate.whole.Store(false)
+	s.gate.global.Unlock()
+}
 
 func (s *Server) CommitFullSync(dbs *store.Databases, replay *command.Router) error {
 	if dbs.Count() != s.dbs.Count() {
@@ -543,6 +590,9 @@ func (s *Server) storeHooks() store.StoreHooks {
 		},
 		ExpiryGuard: func(_ *store.Store, key string) func() {
 			return s.gate.acquireKey(key).unlock
+		},
+		EvictGuard: func(_ *store.Store, victim, writing string, before bool) (func(), bool) {
+			return s.gate.evictGuard(victim, writing, before)
 		},
 	}
 }
