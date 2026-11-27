@@ -311,18 +311,17 @@ func appendStripe(stripes []int, stripe int) []int {
 // another command had just written recorded the DEL before that write, and
 // evicting a key the evicting command itself had used recorded it before
 // the command; either way the replicas and the AOF kept a key the master
-// had evicted. So a victim is the key being written, or, before the command
-// ran, any key of the stripes the command holds (a command holding the
-// whole gate evicts only then, and halfway through is refused the write as
-// when there is nothing to evict), or a key of a free stripe, taken until
-// the eviction is recorded. Taking it never waits: the evicting command holds
+// had evicted. So a victim is, before the command ran, any key of the
+// stripes the command holds (a command holding the
+// whole gate evicts only then), or a key of a free stripe, taken until the
+// eviction is recorded. Halfway through a command its own keys are never
+// victims, not even the one it writes: it may have read that key already
+// (PFMERGE reads its destination as a source), and the write is refused as
+// when there is nothing to evict. Taking it never waits: the evicting command holds
 // stripes of its own, and the store picks another victim.
 func (g *writeGate) evictGuard(victim, writing string, before bool) (func(), bool) {
 	if g.whole.Load() {
 		return func() {}, before
-	}
-	if victim == writing && writing != "" {
-		return func() {}, true
 	}
 	s := stripeOf(victim)
 	if before && writing != "" && stripeOf(writing) == s {

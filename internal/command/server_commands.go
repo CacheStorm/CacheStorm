@@ -1242,7 +1242,7 @@ func doSort(ctx *Context, readOnly bool) error {
 				}
 				list.AppendLoaded(p.Bulk)
 			}
-			if err := ctx.replaceKey(storeKey, list, store.SetOptions{}); err != nil {
+			if err := ctx.replaceKey(storeKey, list, store.SetOptions{Overwrite: true}); err != nil {
 				return ctx.WriteError(err)
 			}
 			ctx.notify(store.NotifyList, "sortstore", storeKey)
@@ -1262,7 +1262,7 @@ func doSort(ctx *Context, readOnly bool) error {
 		for _, elem := range elements {
 			list.AppendLoaded([]byte(elem))
 		}
-		if err := ctx.replaceKey(storeKey, list, store.SetOptions{}); err != nil {
+		if err := ctx.replaceKey(storeKey, list, store.SetOptions{Overwrite: true}); err != nil {
 			return ctx.WriteError(err)
 		}
 		ctx.notify(store.NotifyList, "sortstore", storeKey)

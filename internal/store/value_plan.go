@@ -33,7 +33,7 @@ func (s *Store) applyValuePlan(key string, options *SetOptions, snapshot *Entry,
 		shard.mu.Lock()
 		previous := shard.data[key]
 		live := previous != nil && !previous.IsExpired()
-		if previous != nil && !live && !s.passiveExpiry.Load() {
+		if previous != nil && !live && !s.passiveExpiry.Load() && (options == nil || !options.Overwrite) {
 			shard.mu.Unlock()
 			if s.DeleteIfExpired(key) {
 				s.DeleteVersion(key)

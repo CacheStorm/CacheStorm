@@ -253,7 +253,7 @@ func setOpStoreCommand(ctx *Context, op int, event string) error {
 		}
 		return ctx.WriteInteger(0)
 	}
-	if err := ctx.replaceKey(dstKey, dst, store.SetOptions{}); err != nil {
+	if err := ctx.replaceKey(dstKey, dst, store.SetOptions{Overwrite: true}); err != nil {
 		return ctx.WriteError(err)
 	}
 	ctx.notify(store.NotifySet, event, dstKey)

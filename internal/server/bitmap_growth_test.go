@@ -148,9 +148,13 @@ func TestHistoricalBitfieldFramesRemainRecoverable(t *testing.T) {
 func TestRejectedBitmapGrowthEvictionInvalidatesReplicaCheckpoint(t *testing.T) {
 	master := startReplServer(t, nil)
 	mc := dialRepl(t, master)
+	// spare, written first, is the least recently used: the growing write
+	// evicts it, which does not free enough, and is then refused. It does
+	// not evict target, the key it writes, halfway through.
+	mc.do("SET", "spare", strings.Repeat("z", 100))
 	mc.do("SET", "target", strings.Repeat("x", 200))
 	mc.do("SELECT", "3")
-	mc.do("SET", "other", strings.Repeat("y", 400))
+	mc.do("SET", "other", strings.Repeat("y", 300))
 	cfg := replTestConfig(t, func(c *config.Config) {
 		c.Persistence.Enabled, c.Persistence.AOF = true, true
 		c.Persistence.DataDir = t.TempDir()
@@ -172,8 +176,11 @@ func TestRejectedBitmapGrowthEvictionInvalidatesReplicaCheckpoint(t *testing.T) 
 	if result.Type != resp.TypeError {
 		t.Fatalf("growth unexpectedly succeeded: %#v", result)
 	}
-	if replica.store.Exists("target") || !master.store.Exists("target") {
+	if replica.store.Exists("spare") || !master.store.Exists("spare") {
 		t.Fatal("test did not cause a local eviction")
+	}
+	if entry, ok := replica.store.Get("target"); !ok || len(entry.Value.String()) != 200 {
+		t.Fatal("the refused write changed or evicted the key it writes")
 	}
 	if _, ok := replica.repl.SavedState(); ok {
 		t.Fatal("failed command left locally evicted data eligible for upstream checkpoint")

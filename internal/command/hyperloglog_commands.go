@@ -327,9 +327,13 @@ func cmdPFMERGE(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	// Redis checks the keys in order, the destination first, so the first
-	// invalid one names the error.
+	// invalid one names the error. The destination's own registers are
+	// merged below from its value when it is written, not from this look:
+	// it can expire in between, and its expiry is then recorded before the
+	// PFMERGE, which the replicas and the AOF run without it.
+	dest := ctx.ArgString(0)
 	sources := &store.HLLState{}
-	for _, key := range ctx.Args {
+	for i, key := range ctx.Args {
 		entry, ok := ctx.Store.Get(string(key))
 		if !ok {
 			continue
@@ -338,7 +342,9 @@ func cmdPFMERGE(ctx *Context) error {
 		if err != nil {
 			return ctx.WriteError(err)
 		}
-		sources.Merge(state)
+		if i > 0 && string(key) != dest {
+			sources.Merge(state)
+		}
 	}
 	err := ctx.Store.ApplyValuePlan(ctx.ArgString(0), func(value store.Value) (store.ValuePlan, error) {
 		state, err := decodeHLLValue(value)

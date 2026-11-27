@@ -49,6 +49,14 @@ type SetOptions struct {
 	// Replaced, when set, receives the type of the live value the write
 	// replaced; it is left alone when the key was absent.
 	Replaced *DataType
+	// Overwrite marks a write that replaces the key whatever it held, as a
+	// *STORE command does with its destination. An expired value it finds
+	// is replaced as it is rather than expired first: such a command may
+	// have read the destination as one of its sources a moment before, when
+	// it was alive, and an expiry recorded ahead of the command made the
+	// replicas and the AOF run it without that source. (Redis looks every
+	// key up at the command's one time.)
+	Overwrite bool
 }
 
 type Store struct {
