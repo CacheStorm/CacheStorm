@@ -1081,7 +1081,13 @@ func (c *Connection) runCommand(cmd string, args [][]byte) (quit bool) {
 				c.releaseGate()
 			}
 			if !ran {
-				c.execGated()
+				if h := c.heldGate; h != nil && h.exclusive && !blocking {
+					thaw := c.srv.freezeCommandTime(ctx)
+					c.execGated()
+					thaw()
+				} else {
+					c.execGated()
+				}
 			}
 			if h := c.heldGate; h != nil && !h.read && !h.exclusive && len(h.stripes) == 1 && h.g.queues[h.stripes[0]].waiting.Load() != 0 {
 				// Run the writes that queued on the stripe meanwhile.

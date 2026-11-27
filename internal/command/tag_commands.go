@@ -117,6 +117,11 @@ func cmdADDTAG(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	added, _ := ctx.Store.AddKeyTags(ctx.ArgString(0), tagArgs(ctx))
+	if added == 0 {
+		// Nothing changed: nothing is recorded, as Redis records no SADD
+		// that added nothing.
+		ctx.PropagateAs()
+	}
 	return ctx.WriteInteger(int64(added))
 }
 
@@ -125,6 +130,9 @@ func cmdREMTAG(ctx *Context) error {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
 	removed, _ := ctx.Store.RemoveKeyTags(ctx.ArgString(0), tagArgs(ctx))
+	if removed == 0 {
+		ctx.PropagateAs()
+	}
 	return ctx.WriteInteger(int64(removed))
 }
 

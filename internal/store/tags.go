@@ -79,8 +79,15 @@ func (s *Store) changeKeyTags(key string, tags []string, add bool) (int, bool) {
 	shard := s.shards[s.shardIndex(key)]
 	shard.mu.Lock()
 	entry, ok := shard.data[key]
-	if !ok || entry.IsExpired() {
+	if !ok {
 		shard.mu.Unlock()
+		return 0, false
+	}
+	if entry.IsExpired() && !s.passiveExpiry.Load() {
+		// The key is expired first, its DEL recorded, as any write to it
+		// does. A replica (passive expiry) applies what its master changed.
+		shard.mu.Unlock()
+		s.get(key, true, false)
 		return 0, false
 	}
 	old := entry.TagList()

@@ -293,6 +293,11 @@ func ResetConnectionContext(ctx *Context, cmd string, args [][]byte, s *store.St
 	}
 }
 
+// SetCommandTime fixes the command's time at ms (unix milliseconds), as
+// for the commands of a transaction: the server does it for a command that
+// holds the whole write gate, while it stands every key's expiry still.
+func (ctx *Context) SetCommandTime(ms int64) { ctx.timeSnapshot = ms }
+
 // nowMS is the command's time in unix milliseconds: the snapshot of the
 // transaction or script it runs in, or the clock.
 func (ctx *Context) nowMS() int64 {

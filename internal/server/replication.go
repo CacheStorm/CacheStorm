@@ -580,6 +580,10 @@ func (s *Server) holdGate(ctx *command.Context) func() {
 		return func() {}
 	}
 	h.lock()
+	if h.exclusive && !traitsOfName(ctx.Command).has(ntBlocking) {
+		thaw := s.freezeCommandTime(ctx)
+		return func() { thaw(); h.unlock() }
+	}
 	ctx.BeforeWait = h.unlock
 	ctx.AfterWait = h.lock
 	ctx.Escalate = func() {
@@ -588,6 +592,22 @@ func (s *Server) holdGate(ctx *command.Context) func() {
 		h.lock()
 	}
 	return h.unlock
+}
+
+// freezeCommandTime stands every key's expiry still at the present
+// millisecond for a command holding the whole write gate, as Redis runs a
+// command at one time (its commandTimeSnapshot), and returns what lets the
+// clock go on. Without it a key could expire between two lookups of the
+// same command: RENAME a b of a key about to expire, looking at b after
+// moving it there, found b expired and recorded its DEL before the RENAME,
+// so the AOF and the replicas kept b where the master had none.
+func (s *Server) freezeCommandTime(ctx *command.Context) func() {
+	if s.dbs == nil {
+		return func() {}
+	}
+	ms := time.Now().UnixMilli()
+	ctx.SetCommandTime(ms)
+	return s.dbs.FreezeExpiry(ms)
 }
 
 // planGate fills h with the hold ctx's command needs and returns it,
