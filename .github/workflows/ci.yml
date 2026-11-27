@@ -19,7 +19,9 @@ jobs:
   quality-gate:
     name: Quality gate
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # The race suite and the three order-sensitivity passes take 16-20
+    # minutes on a hosted runner; 20 cut a passing run off.
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v6
