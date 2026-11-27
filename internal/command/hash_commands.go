@@ -179,6 +179,7 @@ func cmdHDEL(ctx *Context) error {
 		return ctx.WriteError(err)
 	}
 	if hash == nil {
+		ctx.PropagateAs()
 		return ctx.WriteInteger(0)
 	}
 

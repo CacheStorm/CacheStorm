@@ -971,6 +971,7 @@ func cmdXDEL(ctx *Context) error {
 		return ctx.WriteError(err)
 	}
 	if stream == nil {
+		ctx.PropagateAs()
 		return ctx.WriteInteger(0)
 	}
 	ids := make([]store.StreamID, 0, ctx.ArgCount()-1)
@@ -1154,6 +1155,7 @@ func cmdXTRIM(ctx *Context) error {
 		return ctx.WriteError(err)
 	}
 	if stream == nil {
+		ctx.PropagateAs()
 		return ctx.WriteInteger(0)
 	}
 	trimmed := stream.TrimStream(a.trim)
@@ -1507,6 +1509,7 @@ func cmdXGROUP(ctx *Context) error {
 			ctx.Store.KeyNotifier().NotifyKey(key)
 			return ctx.WriteInteger(1)
 		}
+		ctx.PropagateAs()
 		return ctx.WriteInteger(0)
 
 	case "CREATECONSUMER":
@@ -1518,6 +1521,7 @@ func cmdXGROUP(ctx *Context) error {
 			ctx.notify(store.NotifyStream, "xgroup-createconsumer", key)
 			return ctx.WriteInteger(1)
 		}
+		ctx.PropagateAs()
 		return ctx.WriteInteger(0)
 
 	default:
@@ -1528,6 +1532,8 @@ func cmdXGROUP(ctx *Context) error {
 		}
 		if existed {
 			ctx.notify(store.NotifyStream, "xgroup-delconsumer", key)
+		} else {
+			ctx.PropagateAs()
 		}
 		return ctx.WriteInteger(pending)
 	}

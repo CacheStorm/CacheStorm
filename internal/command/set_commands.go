@@ -84,6 +84,7 @@ func cmdSREM(ctx *Context) error {
 		return ctx.WriteError(err)
 	}
 	if set == nil {
+		ctx.PropagateAs()
 		return ctx.WriteInteger(0)
 	}
 

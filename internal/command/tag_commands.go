@@ -532,6 +532,14 @@ func tagLinkCommand(ctx *Context, link bool) error {
 			return nil
 		}
 	}
+	if node == "" && ti.HasLink(parent, child) == link {
+		// Outside a cluster a link made twice, or removed when it is not
+		// there, changes nothing and is not recorded. A cluster node records
+		// it anyway: its new version is what settles it against a change
+		// another node made concurrently.
+		ctx.PropagateAs()
+		return ctx.WriteOK()
+	}
 	var e store.TagEdge
 	if link {
 		if e, err = ti.LinkAt(parent, child, node); err != nil {

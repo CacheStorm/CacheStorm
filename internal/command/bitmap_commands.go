@@ -395,6 +395,8 @@ func cmdBITOP(ctx *Context) error {
 	if maxLen == 0 {
 		if ctx.Store.Delete(destKey) {
 			ctx.notify(store.NotifyGeneric, "del", destKey)
+		} else {
+			ctx.PropagateAs()
 		}
 		return ctx.WriteInteger(0)
 	}

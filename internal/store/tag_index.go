@@ -450,6 +450,14 @@ func (ti *TagIndex) setEdgeLocked(link [2]string, v *edgeVersion) {
 	ti.clock = max(ti.clock, v.ver)
 }
 
+// HasLink reports whether child is linked below parent.
+func (ti *TagIndex) HasLink(parent, child string) bool {
+	ti.hierarchy.RLock()
+	defer ti.hierarchy.RUnlock()
+	_, ok := ti.children[parent][child]
+	return ok
+}
+
 // Link adds child below parent. It refuses a link of a tag to itself or to
 // one of its ancestors: CASCADE follows the links down, and a cycle made
 // every tag on it a descendant of itself.

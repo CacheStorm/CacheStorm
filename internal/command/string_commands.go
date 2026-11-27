@@ -300,7 +300,11 @@ func cmdDEL(ctx *Context) error {
 			ctx.notify(store.NotifyGeneric, "del", key)
 		}
 	}
-
+	if deleted == 0 {
+		// Deleting nothing is not recorded; an expired key it met was, as
+		// the DEL of its expiry.
+		ctx.PropagateAs()
+	}
 	return ctx.WriteInteger(deleted)
 }
 

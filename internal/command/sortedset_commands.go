@@ -342,6 +342,9 @@ func storeSortedSet(ctx *Context, dst string, entries []store.SortedEntry, event
 	if len(entries) == 0 {
 		if ctx.Store.Delete(dst) {
 			ctx.notify(store.NotifyGeneric, "del", dst)
+		} else {
+			// An empty result over a missing destination changed nothing.
+			ctx.PropagateAs()
 		}
 		return nil
 	}
@@ -818,6 +821,7 @@ func cmdZREM(ctx *Context) error {
 		return ctx.WriteError(err)
 	}
 	if zset == nil {
+		ctx.PropagateAs()
 		return ctx.WriteInteger(0)
 	}
 
@@ -851,6 +855,7 @@ func zremRange(ctx *Context, key, event string, pick func(z *store.SortedSetValu
 		return ctx.WriteError(err)
 	}
 	if zset == nil {
+		ctx.PropagateAs()
 		return ctx.WriteInteger(0)
 	}
 
@@ -1139,6 +1144,7 @@ func zpopMinMax(ctx *Context, max bool) error {
 		return ctx.WriteError(err)
 	}
 	if zset == nil || count == 0 {
+		ctx.PropagateAs()
 		return ctx.WriteArray([]*resp.Value{})
 	}
 	popped := zpopFrom(ctx, key, count, max)
@@ -1536,9 +1542,18 @@ func cmdZMPOP(ctx *Context) error {
 		return ctx.WriteError(err)
 	}
 	if popped == nil {
+		ctx.PropagateAs()
 		return ctx.WriteNullArray()
 	}
 	return ctx.WriteArray([]*resp.Value{resp.BulkString(key), resp.ArrayValue(zPairsReply(popped))})
+}
+
+// zpopName is the plain pop a blocking sorted-set pop is recorded as.
+func zpopName(max bool) string {
+	if max {
+		return "ZPOPMAX"
+	}
+	return "ZPOPMIN"
 }
 
 func cmdBZPOPMIN(ctx *Context) error {
@@ -1579,6 +1594,7 @@ func cmdBZPOPGeneric(ctx *Context, max bool) error {
 		if err != nil || popped == nil {
 			return false
 		}
+		propagatePop(ctx, zpopName(max), key, 0)
 		reply = []*resp.Value{
 			resp.BulkString(key),
 			resp.BulkString(popped[0].Member),
@@ -1592,6 +1608,7 @@ func cmdBZPOPGeneric(ctx *Context, max bool) error {
 		return ctx.WriteError(err)
 	}
 	if popped != nil {
+		propagatePop(ctx, zpopName(max), key, 0)
 		return ctx.WriteArray([]*resp.Value{
 			resp.BulkString(key),
 			resp.BulkString(popped[0].Member),
@@ -1599,6 +1616,7 @@ func cmdBZPOPGeneric(ctx *Context, max bool) error {
 		})
 	}
 	if !bzpopWait(ctx, keys, timeout, pop) {
+		ctx.PropagateAs()
 		return ctx.WriteNullArray()
 	}
 	return ctx.WriteArray(reply)
@@ -1624,6 +1642,7 @@ func cmdBZMPOP(ctx *Context) error {
 		if err != nil || popped == nil {
 			return false
 		}
+		propagatePop(ctx, zpopName(max), key, len(popped))
 		reply = []*resp.Value{resp.BulkString(key), resp.ArrayValue(zPairsReply(popped))}
 		return true
 	}
@@ -1633,9 +1652,11 @@ func cmdBZMPOP(ctx *Context) error {
 		return ctx.WriteError(err)
 	}
 	if popped != nil {
+		propagatePop(ctx, zpopName(max), key, len(popped))
 		return ctx.WriteArray([]*resp.Value{resp.BulkString(key), resp.ArrayValue(zPairsReply(popped))})
 	}
 	if !bzpopWait(ctx, keys, timeout, pop) {
+		ctx.PropagateAs()
 		return ctx.WriteNullArray()
 	}
 	return ctx.WriteArray(reply)

@@ -135,6 +135,7 @@ func cmdLPUSHX(ctx *Context) error {
 		return ctx.WriteError(err)
 	}
 	if list == nil {
+		ctx.PropagateAs()
 		return ctx.WriteInteger(0)
 	}
 
@@ -163,6 +164,7 @@ func cmdRPUSHX(ctx *Context) error {
 		return ctx.WriteError(err)
 	}
 	if list == nil {
+		ctx.PropagateAs()
 		return ctx.WriteInteger(0)
 	}
 
@@ -201,6 +203,7 @@ func listPopGeneric(ctx *Context, left bool) error {
 		return ctx.WriteError(err)
 	}
 	if list == nil {
+		ctx.PropagateAs()
 		if hasCount {
 			return ctx.WriteNullArray()
 		}
@@ -208,11 +211,13 @@ func listPopGeneric(ctx *Context, left bool) error {
 	}
 	if hasCount && count == 0 {
 		list.Unlock()
+		ctx.PropagateAs()
 		return ctx.WriteArray([]*resp.Value{})
 	}
 
 	if list.Len() == 0 {
 		list.Unlock()
+		ctx.PropagateAs()
 		if hasCount {
 			return ctx.WriteNullArray()
 		}
@@ -430,6 +435,7 @@ func cmdLREM(ctx *Context) error {
 		return ctx.WriteError(err)
 	}
 	if list == nil {
+		ctx.PropagateAs()
 		return ctx.WriteInteger(0)
 	}
 
@@ -489,6 +495,7 @@ func cmdLINSERT(ctx *Context) error {
 		return ctx.WriteError(err)
 	}
 	if list == nil {
+		ctx.PropagateAs()
 		return ctx.WriteInteger(0)
 	}
 
@@ -505,6 +512,7 @@ func cmdLINSERT(ctx *Context) error {
 	})
 
 	if pivotIdx == -1 {
+		ctx.PropagateAs()
 		return ctx.WriteInteger(-1)
 	}
 
@@ -533,6 +541,7 @@ func cmdLTRIM(ctx *Context) error {
 		return ctx.WriteError(err)
 	}
 	if list == nil {
+		ctx.PropagateAs()
 		return ctx.WriteOK()
 	}
 
@@ -540,6 +549,7 @@ func cmdLTRIM(ctx *Context) error {
 	if length == 0 {
 		list.Unlock()
 		ctx.notify(store.NotifyList, "ltrim", key)
+		ctx.PropagateAs()
 		return ctx.WriteOK()
 	}
 
@@ -564,9 +574,14 @@ func cmdLTRIM(ctx *Context) error {
 		return ctx.WriteOK()
 	}
 
+	// Trimming nothing is not recorded, as Redis counts what LTRIM removed.
+	trimmed := start > 0 || stop < length-1
 	list.Trim(start, stop)
 	list.Unlock()
 	ctx.notify(store.NotifyList, "ltrim", key)
+	if !trimmed {
+		ctx.PropagateAs()
+	}
 	return ctx.WriteOK()
 }
 
@@ -643,6 +658,7 @@ func blockingListMove(ctx *Context, srcKey, dstKey, whereFrom, whereTo string, t
 		return ctx.WriteError(err)
 	}
 	if ok {
+		propagateListMove(ctx, srcKey, dstKey, whereFrom, whereTo)
 		return ctx.WriteBulkBytes(value)
 	}
 	var moveErr error
@@ -655,9 +671,32 @@ func blockingListMove(ctx *Context, srcKey, dstKey, whereFrom, whereTo string, t
 		return ctx.WriteError(moveErr)
 	}
 	if !moved {
+		ctx.PropagateAs()
 		return ctx.WriteNullArray()
 	}
+	propagateListMove(ctx, srcKey, dstKey, whereFrom, whereTo)
 	return ctx.WriteBulkBytes(value)
+}
+
+// propagatePop records a blocking or multi-key pop as Redis does: as the
+// plain pop on the key it took from, which replays the same on a replica or
+// from the AOF whichever of the keys it waited on were filled since.
+func propagatePop(ctx *Context, name, key string, count int) {
+	args := [][]byte{[]byte(key)}
+	if count > 0 {
+		args = append(args, []byte(strconv.Itoa(count)))
+	}
+	ctx.PropagateAs(ExecutedCommand{Name: name, Args: args, DB: ctx.DB})
+}
+
+// propagateListMove records BLMOVE and BRPOPLPUSH as the LMOVE and RPOPLPUSH
+// they ran as, so a replica or an AOF load does not wait on the source.
+func propagateListMove(ctx *Context, src, dst, whereFrom, whereTo string) {
+	if ctx.Command == "BRPOPLPUSH" {
+		ctx.PropagateAs(ExecutedCommand{Name: "RPOPLPUSH", Args: [][]byte{[]byte(src), []byte(dst)}, DB: ctx.DB})
+		return
+	}
+	ctx.PropagateAs(ExecutedCommand{Name: "LMOVE", Args: [][]byte{[]byte(src), []byte(dst), []byte(whereFrom), []byte(whereTo)}, DB: ctx.DB})
 }
 
 var (
@@ -855,9 +894,15 @@ func blockingListPop(ctx *Context, left bool) error {
 			return popErr == nil && value != nil
 		})
 		if !popped {
+			ctx.PropagateAs()
 			return ctx.WriteNullArray()
 		}
 	}
+	name := "RPOP"
+	if left {
+		name = "LPOP"
+	}
+	propagatePop(ctx, name, key, 0)
 	return ctx.WriteArray([]*resp.Value{
 		resp.BulkString(key),
 		resp.BulkBytes(value),
@@ -1006,6 +1051,7 @@ func cmdLMPOP(ctx *Context) error {
 		return ctx.WriteError(err)
 	}
 	if reply == nil {
+		ctx.PropagateAs()
 		return ctx.WriteNullArray()
 	}
 	return ctx.WriteValue(reply)
@@ -1150,9 +1196,15 @@ func cmdBLMPOP(ctx *Context) error {
 			return popErr == nil && reply != nil
 		})
 		if !popped {
+			ctx.PropagateAs()
 			return ctx.WriteNullArray()
 		}
 	}
+	name := "RPOP"
+	if dir == "LEFT" {
+		name = "LPOP"
+	}
+	propagatePop(ctx, name, string(reply.Array[0].Bulk), len(reply.Array[1].Array))
 	return ctx.WriteValue(reply)
 }
 
