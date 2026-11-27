@@ -119,3 +119,44 @@ func TestAOFWritesThatChangeNothingAreNotRecorded(t *testing.T) {
 		t.Fatalf("writes that changed nothing were recorded:\n%q", after[len(before):])
 	}
 }
+
+// XREADGROUP creates its consumer before it blocks. That was recorded only
+// when the read ended, after a SWAPDB made while it waited, so the AOF and
+// the replicas created the consumer in the other database (and an AOF load
+// failed on it). It is recorded before the read lets the gate go, as Redis
+// propagates it when the command blocks.
+func TestBlockedXREADGROUPRecordsItsConsumerBeforeASwap(t *testing.T) {
+	cfg := aofRewriteConfig(t, t.TempDir(), nil)
+	master := startReplServerCfg(t, cfg)
+	replica := startReplServer(t, nil)
+	replicate(t, replica, master)
+	c := dialRepl(t, master)
+	b := dialRepl(t, master)
+	c.do("XGROUP", "CREATE", "s", "g", "$", "MKSTREAM")
+	served := make(chan string, 1)
+	go func() {
+		served <- str(b.do("XREADGROUP", "GROUP", "g", "reader", "BLOCK", "3000", "STREAMS", "s", ">"))
+	}()
+	eventually(t, 5*time.Second, "client blocked", func() bool {
+		return strings.Contains(str(c.do("INFO", "clients")), "blocked_clients:1")
+	})
+	c.do("SWAPDB", "0", "1")
+	<-served
+	consumers := func(rc *replClient) string {
+		rc.do("SELECT", "1")
+		defer rc.do("SELECT", "0")
+		return str(rc.do("XINFO", "CONSUMERS", "s", "g"))
+	}
+	want := consumers(c)
+	if !strings.Contains(want, "reader") {
+		t.Fatalf("the master's db 1 has no consumer reader: %s", want)
+	}
+	waitSynced(t, replica, master)
+	if got := consumers(dialRepl(t, replica)); !strings.Contains(got, "reader") {
+		t.Fatalf("the replica's db 1 has no consumer reader: %s", got)
+	}
+	restarted := checkAOFRestart(t, master, cfg)
+	if got := consumers(dialRepl(t, restarted)); !strings.Contains(got, "reader") {
+		t.Fatalf("after an AOF load db 1 has no consumer reader: %s", got)
+	}
+}

@@ -914,6 +914,14 @@ parse:
 				wait, claimDue = max(d, 0), true
 			}
 		}
+		if len(propagated) > 0 {
+			// The consumer this read created, as Redis propagates it
+			// when the command blocks.
+			if err := ctx.recordNow(propagated); err != nil {
+				return ctx.WriteError(err)
+			}
+			propagated = nil
+		}
 		if _, notified := ctx.waitForStreamKeys(keys, wait, ready); !notified && claimDue {
 			results, err := serve()
 			if err != nil {
@@ -1745,6 +1753,7 @@ func cmdXCLAIM(ctx *Context) error {
 	if args.DeliveryTS == -1 {
 		args.DeliveryTS = now
 	}
+	args.Restore = ctx.Replaying || ctx.LegacyReplay || ctx.FromMaster
 
 	knownConsumer := !ctx.Store.Notifying(store.NotifyStream) || stream.HasConsumer(groupName, consumerName)
 	r, ok := stream.ClaimIDs(groupName, consumerName, ids, args, now)

@@ -328,11 +328,18 @@ func executeQueuedCommand(ctx *Context, qc queuedCommand) *resp.Value {
 func runQueuedCommand(ctx *Context, qc queuedCommand) (*resp.Value, []ExecutedCommand) {
 	db := ctx.DB
 	v, sub := execQueued(ctx, qc)
-	if v.Type == resp.TypeError || sub == nil {
+	if sub == nil {
 		return v, nil
 	}
+	// What a command said it recorded holds even when it answered with an
+	// error, as Router.record has it: a script that wrote and then failed
+	// keeps its writes, which a transaction lost from the AOF and the
+	// replication stream.
 	if cmds, ok := sub.Propagation(); ok {
 		return v, cmds
+	}
+	if v.Type == resp.TypeError {
+		return v, nil
 	}
 	if r := ctx.dispatcher(); r != nil && !r.Persisted(qc.cmd, qc.args) {
 		return v, nil

@@ -412,6 +412,12 @@ type StreamClaimArgs struct {
 	Force      bool
 	JustID     bool
 	LastID     StreamID
+	// Restore makes FORCE recreate a pending entry whose stream entry was
+	// deleted, which a client's XCLAIM ignores. A rewritten AOF and a full
+	// sync carry the PEL as XCLAIM ... FORCE, and the master kept such
+	// entries pending (XTRIM and XDEL leave them in the PEL), as Redis'
+	// RDB does.
+	Restore bool
 }
 
 // StreamClaimEffect is one change XCLAIM or XAUTOCLAIM made to the PEL, as
@@ -478,6 +484,14 @@ func (v *StreamValue) ClaimIDs(groupName, consumerName string, ids []StreamID, a
 			if p != nil {
 				r.Effects = append(r.Effects, claimEffect(id, p, true))
 				g.ackLocked(key)
+			} else if a.Force && a.Restore {
+				p = &PendingEntry{ID: key, Consumer: consumerName, Deliveries: 1}
+				if a.RetryCount >= 0 {
+					p.Deliveries = a.RetryCount
+				}
+				g.Pending[key] = p
+				c.Pending++
+				g.stampLocked(p, deliveryTS)
 			}
 			continue
 		}

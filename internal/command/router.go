@@ -601,6 +601,23 @@ func (r *Router) record(ctx *Context, db int, errsBefore int64) error {
 	return nil
 }
 
+// recordNow hands cmds to the persistence hooks at once instead of when the
+// command ends. A blocking command records what it changed before it lets
+// the write gate go to wait, so that writes other clients make meanwhile
+// (a SWAPDB among them) follow it in the AOF and the replication stream as
+// they followed it on the master.
+func (ctx *Context) recordNow(cmds []ExecutedCommand) error {
+	r := ctx.dispatcher()
+	if r == nil || len(cmds) == 0 {
+		return nil
+	}
+	saved, set := ctx.propagate, ctx.propagateSet
+	ctx.propagate, ctx.propagateSet = cmds, true
+	err := r.record(ctx, ctx.DB, 0)
+	ctx.propagate, ctx.propagateSet = saved, set
+	return err
+}
+
 func (r *Router) SetCommitHooks(check func(string, [][]byte) error, single func(*Context, int, string, [][]byte) error, batch func(*Context, []ExecutedCommand) error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
