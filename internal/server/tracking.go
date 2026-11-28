@@ -29,6 +29,12 @@ type trackedClient struct {
 	noLoop   bool
 	// caching is CLIENT CACHING for the next command: 1 yes, -1 no, 0 unset.
 	caching int8
+	// reading holds the keys of the read the client is running (see
+	// beginRead); raced, the ones of them invalidated meanwhile, and
+	// racedAll whether the whole keyspace was.
+	reading  []string
+	raced    []string
+	racedAll bool
 }
 
 // tracker implements Redis client-side caching: it remembers which clients
@@ -41,6 +47,8 @@ type tracker struct {
 	keys    map[string]map[int64]struct{}
 	// bcast maps each registered prefix ("" for every key) to its clients.
 	bcast map[string]map[int64]struct{}
+	// reading maps the keys of reads in flight to the clients running them.
+	reading map[string]map[int64]struct{}
 	// endpoints are the connections that can receive out-of-band messages,
 	// by client id: their own tracking messages and REDIRECT targets.
 	endpoints map[int64]*Connection
@@ -54,6 +62,7 @@ func newTracker() *tracker {
 		clients:   make(map[int64]*trackedClient),
 		keys:      make(map[string]map[int64]struct{}),
 		bcast:     make(map[string]map[int64]struct{}),
+		reading:   make(map[string]map[int64]struct{}),
 		endpoints: make(map[int64]*Connection),
 	}
 }
@@ -176,6 +185,7 @@ func (t *tracker) disableLocked(id int64) {
 	if !ok {
 		return
 	}
+	t.endReadLocked(tc)
 	delete(t.clients, id)
 	t.tracking.Store(int64(len(t.clients)))
 	if len(t.clients) == 0 {
@@ -269,9 +279,64 @@ func (t *tracker) active() bool {
 	return t.tracking.Load() > 0
 }
 
+// beginRead notes the keys a read-only command of client id is about to
+// read. The command holds its keys' stripes of the write gate, so no write
+// changes them before trackRead registers them; but a key can still be
+// removed without the gate (it expires, actively or when another reader
+// sharing the stripe finds it expired), and its invalidation would reach
+// nobody if it came between the read and the registration, leaving the
+// client caching a key that is gone. A key invalidated while the read runs
+// is reported to the client after the reply instead, as if it had been
+// registered first, which is what Redis, running one command at a time,
+// does.
+func (t *tracker) beginRead(id int64, keys []string) {
+	if len(keys) == 0 {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	tc, ok := t.clients[id]
+	if !ok || tc.bcast || (tc.optIn && tc.caching != 1) || (tc.optOut && tc.caching == -1) {
+		return
+	}
+	t.endReadLocked(tc)
+	tc.reading = append(tc.reading, keys...)
+	for _, k := range keys {
+		set := t.reading[k]
+		if set == nil {
+			set = make(map[int64]struct{})
+			t.reading[k] = set
+		}
+		set[id] = struct{}{}
+	}
+}
+
+// endReadLocked ends tc's read in flight and returns the keys invalidated
+// while it ran (all of them when the keyspace was).
+func (t *tracker) endReadLocked(tc *trackedClient) (raced []string) {
+	if len(tc.reading) == 0 {
+		return nil
+	}
+	for _, k := range tc.reading {
+		if set := t.reading[k]; set != nil {
+			delete(set, tc.id)
+			if len(set) == 0 {
+				delete(t.reading, k)
+			}
+		}
+	}
+	raced = tc.raced
+	if tc.racedAll {
+		raced = slices.Clone(tc.reading)
+	}
+	tc.reading, tc.raced, tc.racedAll = tc.reading[:0], nil, false
+	return raced
+}
+
 // trackRead records the keys a read-only command of client id read. It runs
 // while the command still holds the write gate, so no write to those keys
-// can slip in between the read and the registration.
+// can slip in between the read and the registration; keys removed in
+// between otherwise are reported now (see beginRead).
 func (t *tracker) trackRead(id int64, keys []string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -279,6 +344,7 @@ func (t *tracker) trackRead(id int64, keys []string) {
 	if !ok {
 		return
 	}
+	raced := t.endReadLocked(tc)
 	caching := tc.caching
 	tc.caching = 0
 	if tc.bcast || len(keys) == 0 {
@@ -288,12 +354,18 @@ func (t *tracker) trackRead(id int64, keys []string) {
 		return
 	}
 	for _, k := range keys {
+		if slices.Contains(raced, k) {
+			continue
+		}
 		set := t.keys[k]
 		if set == nil {
 			set = make(map[int64]struct{})
 			t.keys[k] = set
 		}
 		set[id] = struct{}{}
+	}
+	if len(raced) > 0 {
+		t.sendLocked(tc, raced)
 	}
 }
 
@@ -302,6 +374,7 @@ func (t *tracker) trackRead(id int64, keys []string) {
 func (t *tracker) clearCaching(id int64) {
 	t.mu.Lock()
 	if tc, ok := t.clients[id]; ok {
+		t.endReadLocked(tc)
 		tc.caching = 0
 	}
 	t.mu.Unlock()
@@ -315,11 +388,16 @@ func (t *tracker) invalidate(writer int64, keys []string) {
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if len(t.keys) == 0 && len(t.bcast) == 0 {
+	if len(t.keys) == 0 && len(t.bcast) == 0 && len(t.reading) == 0 {
 		return
 	}
 	pending := make(map[int64][]string)
 	for _, k := range keys {
+		for id := range t.reading[k] {
+			if tc := t.clients[id]; tc != nil && !slices.Contains(tc.raced, k) {
+				tc.raced = append(tc.raced, k)
+			}
+		}
 		if set, ok := t.keys[k]; ok {
 			for id := range set {
 				pending[id] = append(pending[id], k)
@@ -354,6 +432,9 @@ func (t *tracker) invalidateAll(writer int64) {
 	defer t.mu.Unlock()
 	t.keys = make(map[string]map[int64]struct{})
 	for id, tc := range t.clients {
+		if len(tc.reading) > 0 {
+			tc.racedAll = true
+		}
 		if tc.noLoop && id == writer {
 			continue
 		}
@@ -423,6 +504,28 @@ func invalidationMessage(keys []string) []byte {
 	return appendKeyList(b, keys, false)
 }
 
+// trackedRead reports whether cmd is a read whose keys a tracking client
+// registers.
+func trackedRead(cmd string) bool {
+	switch cmd {
+	case "CLIENT", "MULTI", "EXEC", "DISCARD", "WATCH", "UNWATCH":
+		return false
+	}
+	return !command.IsWriteCommand(cmd)
+}
+
+// beginTrackedRead notes, before a tracking client's read-only command runs,
+// the keys it reads (see tracker.beginRead). The caller holds the write
+// gate for the command.
+func (s *Server) beginTrackedRead(ctx *command.Context) {
+	if s == nil || s.tracker == nil || !s.tracker.active() || ctx.Transaction != nil && ctx.Transaction.IsActive() {
+		return
+	}
+	if cmd := command.CanonicalName(ctx.Command); trackedRead(cmd) {
+		s.tracker.beginRead(ctx.ClientID, command.CommandKeys(cmd, ctx.Args))
+	}
+}
+
 // trackCommand records the keys a tracking client's read-only command read.
 // The caller still holds the write gate for the command.
 func (s *Server) trackCommand(ctx *command.Context, failed bool) {
@@ -433,8 +536,7 @@ func (s *Server) trackCommand(ctx *command.Context, failed bool) {
 		s.tracker.clearCaching(ctx.ClientID)
 		return
 	}
-	switch ctx.Command {
-	case "CLIENT", "MULTI", "EXEC", "DISCARD", "WATCH", "UNWATCH":
+	if !trackedRead(ctx.Command) {
 		return
 	}
 	s.tracker.trackRead(ctx.ClientID, ctx.CommandKeys())

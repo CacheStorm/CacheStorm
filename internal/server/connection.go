@@ -298,6 +298,7 @@ func (c *Connection) execGated() {
 		ctx.DeferSync = c.hasPending()
 		c.gated.replyStart = c.sink.pending() + c.writer.Buffered()
 	}
+	c.srv.beginTrackedRead(ctx)
 	c.gated.err = c.router.Execute(ctx)
 	if aof != nil {
 		if now := aof.Appended(); now != appended && ctx.DeferSync {
