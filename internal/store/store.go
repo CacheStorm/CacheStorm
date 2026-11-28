@@ -72,19 +72,19 @@ type Store struct {
 	tagIndex      *TagIndex
 	pubsub        *PubSub
 	keyNotifier   *KeyNotifier
-	versions      map[string]int64
-	watchRefs     map[string]int
-	watching      atomic.Int64
-	versionMu     sync.RWMutex
-	memTracker    *MemoryTracker
-	evictor       *EvictionController
-	expiry        *activeExpiry
-	hfe           *hashExpiryIndex
-	setOpsMu      sync.RWMutex
-	expiryMu      sync.Mutex
-	expiryActive  bool
-	hooksMu       sync.RWMutex
-	hooks         StoreHooks
+	// watch holds the WATCH registrations of the database index this
+	// store serves; SWAPDB exchanges it with the other store's, so a watch
+	// stays with its database index, as in Redis.
+	watch        atomic.Pointer[WatchTable]
+	memTracker   *MemoryTracker
+	evictor      *EvictionController
+	expiry       *activeExpiry
+	hfe          *hashExpiryIndex
+	setOpsMu     sync.RWMutex
+	expiryMu     sync.Mutex
+	expiryActive bool
+	hooksMu      sync.RWMutex
+	hooks        StoreHooks
 }
 
 func NewStore() *Store {
@@ -93,9 +93,8 @@ func NewStore() *Store {
 		tagIndex:    NewTagIndex(),
 		pubsub:      NewPubSub(),
 		keyNotifier: NewKeyNotifier(),
-		versions:    make(map[string]int64),
-		watchRefs:   make(map[string]int),
 	}
+	s.watch.Store(newWatchTable())
 	s.plain = &entryMeta{clock: &s.clock}
 	s.expiry = newActiveExpiry(s)
 	s.hfe = newHashExpiryIndex()
@@ -305,116 +304,166 @@ func (s *Store) KeyNotifier() *KeyNotifier {
 // can never return to the version a WATCH recorded.
 var versionStamp atomic.Int64
 
-// GetVersion returns the modification stamp of a watched key: 0 until the key
+// WatchTable holds the keys clients WATCH in one database and a version
+// for each, bumped whenever the key is modified. Only watched keys carry a
+// version, so the maps are bounded by the open watches.
+type WatchTable struct {
+	mu       sync.RWMutex
+	versions map[string]int64
+	refs     map[string]int
+	watching atomic.Int64
+}
+
+func newWatchTable() *WatchTable {
+	return &WatchTable{versions: make(map[string]int64), refs: make(map[string]int)}
+}
+
+// Version returns the modification stamp of a watched key: 0 until the key
 // is modified while watched.
-func (s *Store) GetVersion(key string) int64 {
-	s.versionMu.RLock()
-	defer s.versionMu.RUnlock()
-	return s.versions[key]
+func (w *WatchTable) Version(key string) int64 {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.versions[key]
 }
 
-// WatchKey registers a WATCH on key and returns its current version. Only
-// watched keys carry a version, so the map is bounded by the open watches.
-func (s *Store) WatchKey(key string) int64 {
-	s.versionMu.Lock()
-	defer s.versionMu.Unlock()
-	if s.watchRefs[key] == 0 {
-		s.watching.Add(1)
+func (w *WatchTable) watch(key string) int64 {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.refs[key] == 0 {
+		w.watching.Add(1)
 	}
-	s.watchRefs[key]++
-	return s.versions[key]
+	w.refs[key]++
+	return w.versions[key]
 }
 
-// WatchedKeys reports how many distinct keys are watched in this database.
-func (s *Store) WatchedKeys() int64 {
-	return s.watching.Load()
-}
-
-// UnwatchKey drops one WATCH registration taken by WatchKey.
-func (s *Store) UnwatchKey(key string) {
-	s.versionMu.Lock()
-	defer s.versionMu.Unlock()
-	n, ok := s.watchRefs[key]
+// Unwatch drops one registration taken by Store.Watch or Databases.Watch.
+func (w *WatchTable) Unwatch(key string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	n, ok := w.refs[key]
 	if !ok {
 		return
 	}
 	if n <= 1 {
-		delete(s.watchRefs, key)
-		delete(s.versions, key)
-		s.watching.Add(-1)
+		delete(w.refs, key)
+		delete(w.versions, key)
+		w.watching.Add(-1)
 		return
 	}
-	s.watchRefs[key] = n - 1
+	w.refs[key] = n - 1
+}
+
+// touchLocked bumps key's version if it is watched. Caller holds mu.
+func (w *WatchTable) touchLocked(key string) {
+	if w.refs[key] > 0 {
+		w.versions[key] = versionStamp.Add(1)
+	}
+}
+
+func (w *WatchTable) touch(keys ...string) {
+	if w.watching.Load() == 0 || len(keys) == 0 {
+		return
+	}
+	w.mu.Lock()
+	for _, k := range keys {
+		w.touchLocked(k)
+	}
+	w.mu.Unlock()
+}
+
+// touchIf bumps every watched key for which present reports true, or every
+// watched key when present is nil. present runs without the table's lock.
+func (w *WatchTable) touchIf(present func(string) bool) {
+	if w.watching.Load() == 0 {
+		return
+	}
+	if present == nil {
+		w.mu.Lock()
+		for k := range w.refs {
+			w.touchLocked(k)
+		}
+		w.mu.Unlock()
+		return
+	}
+	w.mu.RLock()
+	keys := make([]string, 0, len(w.refs))
+	for k := range w.refs {
+		keys = append(keys, k)
+	}
+	w.mu.RUnlock()
+	hit := keys[:0]
+	for _, k := range keys {
+		if present(k) {
+			hit = append(hit, k)
+		}
+	}
+	w.touch(hit...)
+}
+
+// GetVersion returns the modification stamp of a watched key: 0 until the key
+// is modified while watched.
+func (s *Store) GetVersion(key string) int64 {
+	return s.watch.Load().Version(key)
+}
+
+// WatchKey registers a WATCH on key and returns its current version.
+func (s *Store) WatchKey(key string) int64 {
+	_, v := s.Watch(key)
+	return v
+}
+
+// Watch registers a WATCH on key in the table of this store's database and
+// returns the table, to check the version in and release the watch from
+// later, and the key's current version. A connection that resolves its
+// database by index while SWAPDB may run uses Databases.Watch.
+func (s *Store) Watch(key string) (*WatchTable, int64) {
+	for {
+		w := s.watch.Load()
+		v := w.watch(key)
+		if s.watch.Load() == w {
+			return w, v
+		}
+		w.Unwatch(key)
+	}
+}
+
+// WatchedKeys reports how many distinct keys are watched in this database.
+func (s *Store) WatchedKeys() int64 {
+	return s.watch.Load().watching.Load()
+}
+
+// UnwatchKey drops one WATCH registration taken by WatchKey.
+func (s *Store) UnwatchKey(key string) {
+	s.watch.Load().Unwatch(key)
 }
 
 // HasWatchedKeys reports whether any client watches a key of this store.
 func (s *Store) HasWatchedKeys() bool {
-	return s.watching.Load() > 0
-}
-
-// touchLocked bumps key's version if it is watched. Caller holds versionMu.
-func (s *Store) touchLocked(key string) {
-	if s.watchRefs[key] > 0 {
-		s.versions[key] = versionStamp.Add(1)
-	}
+	return s.watch.Load().watching.Load() > 0
 }
 
 // TouchKey records a modification of key, aborting every transaction that
 // watches it.
 func (s *Store) TouchKey(key string) {
-	if s.watching.Load() == 0 {
-		return
-	}
-	s.versionMu.Lock()
-	s.touchLocked(key)
-	s.versionMu.Unlock()
+	s.watch.Load().touch(key)
 }
 
 // TouchKeys is TouchKey for several keys.
 func (s *Store) TouchKeys(keys []string) {
-	if s.watching.Load() == 0 || len(keys) == 0 {
-		return
-	}
-	s.versionMu.Lock()
-	for _, k := range keys {
-		s.touchLocked(k)
-	}
-	s.versionMu.Unlock()
+	s.watch.Load().touch(keys...)
 }
 
 // TouchAllWatched bumps every watched key of this store, the effect a
-// database swap has on watchers.
+// replacement of its contents has on watchers.
 func (s *Store) TouchAllWatched() {
-	if s.watching.Load() == 0 {
-		return
-	}
-	s.versionMu.Lock()
-	for k := range s.watchRefs {
-		s.versions[k] = versionStamp.Add(1)
-	}
-	s.versionMu.Unlock()
+	s.watch.Load().touchIf(nil)
 }
 
 // TouchWatchedPresent bumps the watched keys of this store that exist in it
 // or in other, as Redis' touchAllWatchedKeysInDb does on SWAPDB: a watched
 // key missing from both databases is not changed by the swap.
 func (s *Store) TouchWatchedPresent(other *Store) {
-	if s.watching.Load() == 0 {
-		return
-	}
-	s.versionMu.RLock()
-	keys := make([]string, 0, len(s.watchRefs))
-	for k := range s.watchRefs {
-		keys = append(keys, k)
-	}
-	s.versionMu.RUnlock()
-	present := keys[:0]
-	for _, k := range keys {
-		if s.Exists(k) || other.Exists(k) {
-			present = append(present, k)
-		}
-	}
-	s.TouchKeys(present)
+	s.watch.Load().touchIf(func(k string) bool { return s.Exists(k) || other.Exists(k) })
 }
 
 // IncrementVersion records a modification of key (see TouchKey).
@@ -1027,14 +1076,14 @@ func (s *Store) deleteBatchKeys(keys []string, dropped *droppedTags) ([]string, 
 	}
 	// Like Store.Delete, bump the watched keys after deleting them, and take
 	// the version lock only when some key is watched: it is global.
-	if s.watching.Load() != 0 {
-		s.versionMu.Lock()
+	if w := s.watch.Load(); w.watching.Load() != 0 {
+		w.mu.Lock()
 		for i := range ops {
 			if ops[i].gone {
-				s.touchLocked(ops[i].key)
+				w.touchLocked(ops[i].key)
 			}
 		}
-		s.versionMu.Unlock()
+		w.mu.Unlock()
 	}
 
 	// Mirror Store.Delete's index bookkeeping, outside the shard/version
@@ -1206,15 +1255,7 @@ func (s *Store) Generation() uint64 { return s.generation.Load() }
 func (s *Store) Flush() {
 	defer s.generation.Add(1)
 	keyCount := s.KeyCount()
-	if s.watching.Load() > 0 {
-		s.versionMu.Lock()
-		for k := range s.watchRefs {
-			if s.shards[s.shardIndex(k)].Exists(k) {
-				s.touchLocked(k)
-			}
-		}
-		s.versionMu.Unlock()
-	}
+	s.watch.Load().touchIf(func(k string) bool { return s.shards[s.shardIndex(k)].Exists(k) })
 	freed := int64(0)
 	for i := 0; i < NumShards; i++ {
 		freed += s.shards[i].Flush()

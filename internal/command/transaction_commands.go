@@ -32,11 +32,11 @@ type Transaction struct {
 	himport map[string]*himportFieldset
 }
 
-// watchedKey is a key in one database. A nil store is a key recorded through
-// the legacy Watch, checked against the getVersion passed to
-// CheckWatchedVersions.
+// watchedKey is a key in one database's watch table. A nil table is a key
+// recorded through the legacy Watch, checked against the getVersion passed
+// to CheckWatchedVersions.
 type watchedKey struct {
-	db  *store.Store
+	db  *store.WatchTable
 	key string
 }
 
@@ -105,7 +105,7 @@ func (t *Transaction) ClearWatch() {
 	}
 	for wk := range watched {
 		if wk.db != nil {
-			wk.db.UnwatchKey(wk.key)
+			wk.db.Unwatch(wk.key)
 		}
 	}
 }
@@ -147,14 +147,31 @@ func (t *Transaction) noteWatchLocked() {
 // database, by any client, makes the following EXEC fail. Watching the same
 // key twice keeps the first baseline.
 func (t *Transaction) WatchIn(db *store.Store, key string) {
-	wk := watchedKey{db: db, key: key}
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if _, ok := t.watchedKeys[wk]; ok {
-		return
+	t.watchTaken(key)(db.Watch(key))
+}
+
+// WatchDB watches key in database index of dbs, as WatchIn does. The watch
+// stays with the index when SWAPDB moves the database's data, as in Redis.
+func (t *Transaction) WatchDB(dbs *store.Databases, index int, key string) {
+	t.watchTaken(key)(dbs.Watch(index, key))
+}
+
+// watchTaken returns the function that records a registration taken on key,
+// or releases it when the transaction already watches key in that table.
+func (t *Transaction) watchTaken(key string) func(*store.WatchTable, int64) {
+	return func(w *store.WatchTable, version int64) {
+		wk := watchedKey{db: w, key: key}
+		t.mu.Lock()
+		_, dup := t.watchedKeys[wk]
+		if !dup {
+			t.noteWatchLocked()
+			t.watchedKeys[wk] = version
+		}
+		t.mu.Unlock()
+		if dup {
+			w.Unwatch(key)
+		}
 	}
-	t.noteWatchLocked()
-	t.watchedKeys[wk] = db.WatchKey(key)
 }
 
 // CheckWatchedVersions reports whether no watched key changed since it was
@@ -166,7 +183,7 @@ func (t *Transaction) CheckWatchedVersions(getVersion func(key string) int64) bo
 	for wk, version := range t.watchedKeys {
 		var current int64
 		if wk.db != nil {
-			current = wk.db.GetVersion(wk.key)
+			current = wk.db.Version(wk.key)
 		} else if getVersion != nil {
 			current = getVersion(wk.key)
 		}
@@ -302,7 +319,11 @@ func cmdWATCH(ctx *Context) error {
 	}
 
 	for i := 0; i < ctx.ArgCount(); i++ {
-		ctx.Transaction.WatchIn(ctx.Store, ctx.ArgString(i))
+		if ctx.DBs != nil {
+			ctx.Transaction.WatchDB(ctx.DBs, ctx.DB, ctx.ArgString(i))
+		} else {
+			ctx.Transaction.WatchIn(ctx.Store, ctx.ArgString(i))
+		}
 	}
 
 	return ctx.WriteOK()

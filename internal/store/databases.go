@@ -107,8 +107,10 @@ func (d *Databases) Existing(index int) *Store {
 }
 
 // Swap exchanges the contents of databases a and b: a connection that has
-// selected a sees b's keys from its next command on. Watchers of either
-// database are touched, as Redis does on SWAPDB.
+// selected a sees b's keys from its next command on. The WATCH registrations
+// stay with their database index, as in Redis, and a watched key that
+// exists in either database is touched, as Redis' touchAllWatchedKeysInDb
+// does on SWAPDB.
 func (d *Databases) Swap(a, b int) error {
 	if !d.Valid(a) || !d.Valid(b) {
 		return ErrDBIndexOutOfRange
@@ -122,13 +124,28 @@ func (d *Databases) Swap(a, b int) error {
 	d.slots[b].Store(sa)
 	sb.dbIndex.Store(int32(a))
 	sa.dbIndex.Store(int32(b))
+	wa, wb := sa.watch.Load(), sb.watch.Load()
+	sa.watch.Store(wb)
+	sb.watch.Store(wa)
+	// Touched under d.mu, which Watch takes: a WATCH that comes after the
+	// swap watches the data it sees and is not touched by it.
+	present := func(k string) bool { return sa.Exists(k) || sb.Exists(k) }
+	wa.touchIf(present)
+	wb.touchIf(present)
 	d.mu.Unlock()
-	sa.TouchWatchedPresent(sb)
-	sb.TouchWatchedPresent(sa)
 	// Clients blocked in either database wait for the other one's data now.
 	sa.keyNotifier.WakeAll()
 	sb.keyNotifier.WakeAll()
 	return nil
+}
+
+// Watch registers a WATCH on key in database index, as Store.Watch does,
+// resolving the index under the lock SWAPDB takes: the watch is in the table
+// of the database the index names when it is taken.
+func (d *Databases) Watch(index int, key string) (*WatchTable, int64) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.dbLocked(index).Watch(key)
 }
 
 // ForEach calls fn for every database created so far, in index order.

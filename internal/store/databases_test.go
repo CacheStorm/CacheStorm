@@ -119,7 +119,7 @@ func TestWatchVersionChangesOnEveryModification(t *testing.T) {
 	}
 	s.UnwatchKey("other")
 
-	if s.HasWatchedKeys() || len(s.versions) != 0 || len(s.watchRefs) != 0 {
+	if s.HasWatchedKeys() || len(s.watch.Load().versions) != 0 || len(s.watch.Load().refs) != 0 {
 		t.Fatal("unwatching every key must release all watch state")
 	}
 }
@@ -148,10 +148,11 @@ func TestSwapTouchesWatchersOfBothDatabases(t *testing.T) {
 	if err := dbs.Swap(0, 1); err != nil {
 		t.Fatal(err)
 	}
-	if db0.GetVersion("a") == v0 || db1.GetVersion("b") == v1 {
+	// A watch stays with its database index: read the versions by index.
+	if dbs.DB(0).GetVersion("a") == v0 || dbs.DB(1).GetVersion("b") == v1 {
 		t.Fatal("SWAPDB must abort transactions watching keys of either database")
 	}
-	if db0.GetVersion("c") != vc {
+	if dbs.DB(0).GetVersion("c") != vc {
 		t.Fatal("SWAPDB must not touch a watched key missing from both databases")
 	}
 }

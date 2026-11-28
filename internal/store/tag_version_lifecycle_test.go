@@ -61,9 +61,10 @@ func TestDeleteCleansVersionEntry(t *testing.T) {
 	}
 	s.Delete("vk")
 
-	s.versionMu.Lock()
-	_, leaked := s.versions["vk"]
-	s.versionMu.Unlock()
+	w := s.watch.Load()
+	w.mu.Lock()
+	_, leaked := w.versions["vk"]
+	w.mu.Unlock()
 	if leaked {
 		t.Fatal("version entry for a deleted key leaked (unbounded map growth under SET/DEL churn)")
 	}
@@ -82,9 +83,10 @@ func TestLazyExpiryCleansVersionEntry(t *testing.T) {
 		t.Fatal("expired key must not be returned")
 	}
 
-	s.versionMu.Lock()
-	_, leaked := s.versions["ek"]
-	s.versionMu.Unlock()
+	w := s.watch.Load()
+	w.mu.Lock()
+	_, leaked := w.versions["ek"]
+	w.mu.Unlock()
 	if leaked {
 		t.Fatal("version entry for a lazily-expired key leaked")
 	}

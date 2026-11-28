@@ -47,6 +47,6 @@ func TestAudit50R31X(t *testing.T) {
 	checkAudit50R31X(t, "hook still installed", 1, calls)
 	s.Flush()
 	checkAudit50R31X(t, "repeat empty flush memory", int64(0), s.MemUsage())
-	checkAudit50R31X(t, "flush versions", 0, len(s.versions))
+	checkAudit50R31X(t, "flush versions", 0, len(s.watch.Load().versions))
 
 }
