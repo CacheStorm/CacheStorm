@@ -7,7 +7,6 @@ import (
 	"math/big"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
@@ -110,7 +109,7 @@ func cmdSET(ctx *Context) error {
 	}
 	var whenMs int64
 	if expireArg != nil {
-		if whenMs, err = stringOptionsExpireMs(flags, expireArg, "set"); err != nil {
+		if whenMs, err = stringOptionsExpireMs(flags, expireArg, "set", ctx.nowMS()); err != nil {
 			return ctx.WriteError(err)
 		}
 	}
@@ -152,9 +151,11 @@ func splitSetTags(args [][]byte) (rest [][]byte, tags []string, err error) {
 }
 
 // setGeneric is Redis' setGenericCommand: with GET the old value (which must
-// be a string) is the reply whether or not the write happens, an NX/XX abort
-// otherwise replies nil, and an expire instant that already passed deletes the
-// key instead of storing it.
+// be a string) is the reply whether or not the write happens, and an NX/XX
+// abort otherwise replies nil. An expire instant that already passed stores
+// the key as expired, as Redis does: it counts in DBSIZE until a read or the
+// active expiry cycle removes it, which then announces "expired" and
+// propagates the DEL.
 func setGeneric(ctx *Context, key string, value []byte, flags int, hasExpire bool, whenMs int64) error {
 	return setGenericIf(ctx, key, value, flags, hasExpire, whenMs, nil)
 }
@@ -212,19 +213,6 @@ func setGenericIf(ctx *Context, key string, value []byte, flags int, hasExpire b
 				return abort()
 			}
 		}
-	}
-
-	if hasExpire && whenMs <= time.Now().UnixMilli() && !ctx.Replaying {
-		found := ctx.Store.Exists(key)
-		if (flags&strOptNX != 0 && found) || (flags&strOptXX != 0 && !found) {
-			return abort()
-		}
-		ctx.Store.Delete(key)
-		ctx.propagateDelete(key)
-		ctx.notify(store.NotifyString, "set", key)
-		ctx.notify(store.NotifyGeneric, "expire", key)
-		ctx.notify(store.NotifyExpired, "expired", key)
-		return reply()
 	}
 
 	opts := store.SetOptions{
@@ -639,7 +627,7 @@ func setExpireGeneric(ctx *Context, seconds bool, cmd string) error {
 	if ctx.ArgCount() != 3 {
 		return ctx.WriteError(ErrWrongArgCount)
 	}
-	whenMs, err := stringExpireMs(ctx.Arg(1), seconds, true, cmd)
+	whenMs, err := stringExpireMs(ctx.Arg(1), seconds, true, cmd, ctx.nowMS())
 	if err != nil {
 		return ctx.WriteError(err)
 	}
@@ -751,7 +739,7 @@ func cmdGETEX(ctx *Context) error {
 	}
 	var whenMs int64
 	if expireArg != nil {
-		if whenMs, err = stringOptionsExpireMs(flags, expireArg, "getex"); err != nil {
+		if whenMs, err = stringOptionsExpireMs(flags, expireArg, "getex", ctx.nowMS()); err != nil {
 			return ctx.WriteError(err)
 		}
 	}
@@ -760,7 +748,7 @@ func cmdGETEX(ctx *Context) error {
 	copy(result, data)
 
 	switch {
-	case expireArg != nil && whenMs <= time.Now().UnixMilli() && !ctx.Replaying:
+	case expireArg != nil && whenMs <= ctx.nowMS() && !ctx.Replaying:
 		ctx.Store.Delete(key)
 		ctx.propagateDelete(key)
 		ctx.notify(store.NotifyGeneric, "del", key)

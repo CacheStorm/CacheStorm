@@ -6,7 +6,6 @@ import (
 	"math/big"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
@@ -140,7 +139,7 @@ func parseIncrexArgs(ctx *Context) (*increxArgs, error) {
 		return nil, errors.New("ERR ENX flag requires an expiration")
 	}
 	if expire != nil {
-		ms, err := stringExpireMs(expire, a.flags&(increxEX|increxEXAT) != 0, a.flags&(increxEX|increxPX) != 0, "increx")
+		ms, err := stringExpireMs(expire, a.flags&(increxEX|increxEXAT) != 0, a.flags&(increxEX|increxPX) != 0, "increx", ctx.nowMS())
 		if err != nil {
 			return nil, err
 		}
@@ -241,7 +240,7 @@ func cmdINCREX(ctx *Context) error {
 		_, hadTTL = ctx.Store.ExpiryDeadline(key)
 	}
 	setExpire := a.expireMs != 0 && (a.flags&increxENX == 0 || !hadTTL)
-	if setExpire && a.expireMs <= time.Now().UnixMilli() && !ctx.Replaying {
+	if setExpire && a.expireMs <= ctx.nowMS() && !ctx.Replaying {
 		if exists && ctx.Store.Delete(key) {
 			ctx.notify(store.NotifyGeneric, "del", key)
 			ctx.propagateDelete(key)

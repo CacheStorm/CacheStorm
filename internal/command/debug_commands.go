@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cachestorm/cachestorm/internal/logger"
 	"github.com/cachestorm/cachestorm/internal/resp"
 	"github.com/cachestorm/cachestorm/internal/store"
 )
@@ -28,25 +29,160 @@ func cmdDEBUG(ctx *Context) error {
 	}
 
 	subCmd := strings.ToUpper(ctx.ArgString(0))
-
-	switch subCmd {
-	case "SLEEP":
+	// n counts the arguments after DEBUG, the subcommand included, so it
+	// is Redis' argc minus one.
+	n := ctx.ArgCount()
+	switch {
+	case subCmd == "HELP" && n == 1:
+		return ctx.WriteArray(helpReply(debugHelp))
+	case subCmd == "SLEEP" && n == 2:
 		return cmdDebugSleep(ctx)
-	case "OBJECT":
+	case subCmd == "OBJECT" && n == 2:
 		return cmdDebugObject(ctx)
-	case "RELOAD", "LOADAOF":
+	case subCmd == "RELOAD", subCmd == "LOADAOF":
 		return ctx.WriteError(fmt.Errorf("ERR DEBUG %s is not supported by this server", subCmd))
-	case "DIGEST":
-		return ctx.WriteBulkString(datasetDigest(ctx))
-	case "SEGFAULT":
+	case subCmd == "DIGEST" && n == 1:
+		return ctx.WriteSimpleString(datasetDigest(ctx))
+	case subCmd == "DIGEST-VALUE":
+		out := make([]*resp.Value, 0, n-1)
+		for _, key := range ctx.Args[1:] {
+			out = append(out, resp.SimpleString(keyDigest(ctx, string(key))))
+		}
+		return ctx.WriteArray(out)
+	case subCmd == "PROTOCOL" && n == 2:
+		return cmdDebugProtocol(ctx)
+	case subCmd == "SET-ACTIVE-EXPIRE" && n == 2:
+		on := cAtoi(ctx.Arg(1)) != 0
+		ctx.databases().ForEach(func(_ int, s *store.Store) { s.SetActiveExpire(on) })
+		ctx.Store.SetActiveExpire(on)
+		return ctx.WriteOK()
+	case subCmd == "LOG" && n == 2:
+		logger.Warn().Msg("DEBUG LOG: " + ctx.ArgString(1))
+		return ctx.WriteOK()
+	case subCmd == "ERROR" && n == 2:
+		return ctx.Writer.WriteError(strings.NewReplacer("\r", " ", "\n", " ").Replace(ctx.ArgString(1)))
+	case subCmd == "SEGFAULT":
 		return ctx.WriteError(ErrSegfault)
-	case "STRUCTSIZE":
-		return ctx.WriteInteger(104)
-	case "POPULATE":
+	case subCmd == "STRUCTSIZE" && n == 1:
+		return ctx.WriteBulkString("bits:" + strconv.Itoa(strconv.IntSize) + " robj:16 dictentry:24 sdshdr5:1 sdshdr8:3 sdshdr16:5 sdshdr32:9 sdshdr64:17 ")
+	case subCmd == "POPULATE":
 		return cmdDebugPopulate(ctx)
 	default:
-		return ctx.WriteError(fmt.Errorf("ERR unknown DEBUG subcommand '%s'", subCmd))
+		return ctx.WriteError(fmt.Errorf("ERR unknown subcommand or wrong number of arguments for '%s'. Try DEBUG HELP.", ctx.ArgString(0))) //nolint:staticcheck // Redis reply text
 	}
+}
+
+// debugHelp is Redis' DEBUG HELP text for the subcommands this server has.
+const debugHelp = `DEBUG <subcommand> [<arg> [value] [opt] ...]. Subcommands are:
+DIGEST
+    Output a hex signature representing the current DB content.
+DIGEST-VALUE <key> [<key> ...]
+    Output a hex signature of the values of all the specified keys.
+ERROR <string>
+    Return a Redis protocol error with <string> as message. Useful for clients
+    unit tests to simulate Redis errors.
+LOG <message>
+    Write <message> to the server log.
+OBJECT <key>
+    Show low level info about ` + "`key`" + ` and associated value.
+POPULATE <count> [<prefix>] [<size>]
+    Create <count> string keys named key:<num>. If <prefix> is specified then
+    it is used instead of the 'key' prefix. These are not propagated to
+    replicas. Cluster slots are not respected so keys not belonging to the
+    current node can be created in cluster mode.
+PROTOCOL <type>
+    Reply with a test value of the specified type. <type> can be: string,
+    integer, double, bignum, null, array, set, map, attrib, push, verbatim,
+    true, false.
+SET-ACTIVE-EXPIRE <0|1>
+    Setting it to 0 disables expiring keys (and hash-fields) in background 
+    when they are not accessed (otherwise the Redis behavior). Setting it
+    to 1 reenables back the default.
+SLEEP <seconds>
+    Stop the server for <seconds>. Decimals allowed.
+STRUCTSIZE
+    Return the size of different Redis core C structures.
+HELP
+    Print this help.`
+
+// cAtoi is C's atoi: optional blanks and sign, then digits up to the
+// first other byte; no digits is 0.
+func cAtoi(b []byte) int64 {
+	i := 0
+	for i < len(b) && (b[i] == ' ' || b[i] >= '\t' && b[i] <= '\r') {
+		i++
+	}
+	neg := false
+	if i < len(b) && (b[i] == '+' || b[i] == '-') {
+		neg = b[i] == '-'
+		i++
+	}
+	var n int64
+	for ; i < len(b) && b[i] >= '0' && b[i] <= '9'; i++ {
+		n = n*10 + int64(b[i]-'0')
+	}
+	if neg {
+		return -n
+	}
+	return n
+}
+
+// cmdDebugProtocol is DEBUG PROTOCOL type: a fixed reply of each RESP type,
+// for client tests.
+func cmdDebugProtocol(ctx *Context) error {
+	ints := func(n int) []*resp.Value {
+		out := make([]*resp.Value, n)
+		for j := range out {
+			out[j] = resp.IntegerValue(int64(j))
+		}
+		return out
+	}
+	switch strings.ToLower(ctx.ArgString(1)) {
+	case "string":
+		return ctx.WriteBulkString("Hello World")
+	case "integer":
+		return ctx.WriteInteger(12345)
+	case "double":
+		return ctx.WriteValue(resp.DoubleValue("3.141"))
+	case "bignum":
+		return ctx.WriteValue(resp.BigNumberValue("1234567999999999999999999999999999999"))
+	case "null":
+		return ctx.WriteNull()
+	case "array":
+		return ctx.WriteArray(ints(3))
+	case "set":
+		return ctx.WriteSet(ints(3))
+	case "map":
+		pairs := make([]*resp.Value, 0, 6)
+		for j := 0; j < 3; j++ {
+			pairs = append(pairs, resp.IntegerValue(int64(j)), resp.BooleanValue(j == 1))
+		}
+		return ctx.WriteValue(&resp.Value{Type: resp.TypeMap, Array: pairs})
+	case "attrib":
+		if ctx.Writer.IsRESP3() {
+			// Attributes are not real replies: the reply follows them.
+			if err := ctx.Writer.WriteCaptured([]byte("|1\r\n$14\r\nkey-popularity\r\n*2\r\n$7\r\nkey:123\r\n:90\r\n"), 0); err != nil {
+				return err
+			}
+		}
+		return ctx.WriteBulkString("Some real reply following the attribute")
+	case "push":
+		if !ctx.Writer.IsRESP3() {
+			return ctx.WriteError(errors.New("ERR RESP2 is not supported by this command"))
+		}
+		// A push a command makes goes out after its reply, as in Redis.
+		if err := ctx.WriteBulkString("Some real reply following the push reply"); err != nil {
+			return err
+		}
+		return ctx.WriteValue(&resp.Value{Type: resp.TypePush, Array: []*resp.Value{resp.BulkString("server-cpu-usage"), resp.IntegerValue(42)}})
+	case "true":
+		return ctx.WriteValue(resp.BooleanValue(true))
+	case "false":
+		return ctx.WriteValue(resp.BooleanValue(false))
+	case "verbatim":
+		return ctx.WriteVerbatim("This is a verbatim\nstring")
+	}
+	return ctx.WriteError(errors.New("ERR Wrong protocol type name. Please use one of the following: string|integer|double|bignum|null|array|set|map|attrib|push|verbatim|true|false"))
 }
 
 // cmdDebugPopulate is DEBUG POPULATE count [prefix [size]]: it creates the
@@ -95,13 +231,10 @@ func debugPositive(arg string) (int64, error) {
 }
 
 func cmdDebugSleep(ctx *Context) error {
-	if ctx.ArgCount() != 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
+	// Redis reads the seconds with strtod and ignores what does not parse.
 	seconds, err := strconv.ParseFloat(ctx.ArgString(1), 64)
 	if err != nil {
-		return ctx.WriteError(ErrNotInteger)
+		seconds = 0
 	}
 
 	// Cap at 300 seconds to prevent indefinite blocking
@@ -118,10 +251,6 @@ func cmdDebugSleep(ctx *Context) error {
 }
 
 func cmdDebugObject(ctx *Context) error {
-	if ctx.ArgCount() != 2 {
-		return ctx.WriteError(ErrWrongArgCount)
-	}
-
 	key := ctx.ArgString(1)
 	entry, exists := ctx.Store.Get(key)
 	if !exists {

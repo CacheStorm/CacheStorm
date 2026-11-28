@@ -137,7 +137,7 @@ func cmdMSETEX(ctx *Context) error {
 	}
 	var whenMs int64
 	if expireArg != nil {
-		if whenMs, err = stringOptionsExpireMs(flags, expireArg, "msetex"); err != nil {
+		if whenMs, err = stringOptionsExpireMs(flags, expireArg, "msetex", ctx.nowMS()); err != nil {
 			return ctx.WriteError(err)
 		}
 	}

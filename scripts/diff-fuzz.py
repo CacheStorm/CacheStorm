@@ -3,6 +3,16 @@ CacheStorm and Redis and stops at the first reply or key-type difference.
 
     CACHESTORM_PORT=6390 REDIS_PORT=6391 python3 scripts/diff-fuzz.py SEED COUNT
 
+Start Redis with enable-debug-command yes (the fuzzer sends DEBUG DIGEST).
+FUZZ_REDIS8=1 tolerates the Redis 8 differences CacheStorm keeps on purpose
+(it follows 7.4 there): OBJECT REFCOUNT and GEO coordinate digits.
+
+A known difference left on purpose: a BITFIELD whose writes all fail but that
+grows the string aborts a WATCH in CacheStorm, which propagates the growth;
+Redis neither touches the key nor propagates it, so its replicas miss it.
+And an MSET over a key past its expiry announces "expired" before the "set"
+of the keys ahead of it: CacheStorm writes the keys of an MSET in one step.
+
 Both servers are flushed first. Replies that are unordered or random by
 definition are normalized; OBJECT ENCODING is not compared.
 """
@@ -294,6 +304,47 @@ GENS = [
     lambda: ["EVAL_RO", random.choice(LUA), "1", k()],
     lambda: ["LCS", k(), k(), "IDX"] + random.choice([[], ["MINMATCHLEN", "2"], ["WITHMATCHLEN"]]),
     lambda: ["SET", k(), random.choice(["12345", "-7", "1e5", " 1", "abcdefghij"])],
+    # Redis 8.0-8.2 additions.
+    lambda: ["HGETEX", k()] + random.choice([[], ["PERSIST"], ["EX", "100"], ["PX", "0"], ["EXAT", "1"], ["PXAT", "99999999999999"]]) + ["FIELDS", "2", random.choice(FIELDS), random.choice(FIELDS)],
+    lambda: ["HSETEX", k()] + random.choice([[], ["FNX"], ["FXX"], ["KEEPTTL"], ["EX", "100"], ["PX", "0"], ["FNX", "EX", "100"]]) + ["FIELDS", random.choice(["1", "2", "0"]), random.choice(FIELDS), v(), random.choice(FIELDS), v()],
+    lambda: ["HGETDEL", k(), "FIELDS", random.choice(["1", "2"]), random.choice(FIELDS), random.choice(FIELDS)],
+    lambda: ["XDELEX", k()] + random.choice([[], ["KEEPREF"], ["DELREF"], ["ACKED"]]) + ["IDS", random.choice(["1", "2"]), random.choice(["1-1", "2-0"]), random.choice(["5-0", "1-0"])],
+    lambda: ["XACKDEL", k(), "g"] + random.choice([[], ["KEEPREF"], ["DELREF"], ["ACKED"]]) + ["IDS", "1", random.choice(["1-1", "2-0", "5-0"])],
+    lambda: ["XADD", k(), "KEEPREF", random.choice(["*", "9-0"]), "f", v()],
+    lambda: ["XTRIM", k(), "MAXLEN", "1", random.choice(["KEEPREF", "DELREF", "ACKED"])],
+    lambda: ["BITOP", random.choice(["DIFF", "DIFF1", "ANDOR", "ONE"]), k(), k(), k()] + random.choice([[], [k()]]),
+    lambda: ["BITOP", random.choice(["DIFF", "ANDOR"]), k(), k()],
+    lambda: ["SET", k(), v(), random.choice(["EXAT", "PXAT"]), random.choice(["1", "99999999999", "0", "x"])],
+    lambda: ["GETEX", k(), random.choice(["EXAT", "PXAT"]), random.choice(["1", "99999999999999"])],
+    lambda: ["SET", k(), v(), "KEEPTTL", "GET"],
+    lambda: ["SCAN", "0", "COUNT", "100"] + random.choice([[], ["MATCH", "k[12]"], ["TYPE", random.choice(["string", "hash", "list", "zset", "stream"])]]),
+    lambda: ["HSCAN", k(), "0"] + random.choice([[], ["NOVALUES"], ["MATCH", "f1"]]),
+    lambda: ["SSCAN", k(), "0"] + random.choice([[], ["MATCH", "a*"]]),
+    lambda: ["ZSCAN", k(), "0"] + random.choice([[], ["NOSCORES"]]),
+    lambda: ["OBJECT", random.choice(["REFCOUNT", "IDLETIME"]), k()],
+    lambda: ["HINCRBYFLOAT", k(), random.choice(FIELDS), random.choice(["1e308", "nan", "inf", "0.1"])],
+    lambda: ["ZADD", k(), random.choice(["GT", "LT", "NX"]), "CH", random.choice(SCORES), v(), random.choice(SCORES), v()],
+    lambda: ["SMOVE", k(), k(), v()],
+    lambda: ["LSET", k(), random.choice(["0", "-1", "5"]), v()],
+    lambda: ["XINFO", "STREAM", k()],
+    lambda: ["XINFO", random.choice(["GROUPS", "CONSUMERS"]), k()] + random.choice([[], ["g"]]),
+    lambda: ["XCLAIM", k(), "g", "c1", "0", random.choice(["1-1", "2-0"])] + random.choice([["IDLE", "5"], ["RETRYCOUNT", "3"], ["LASTID", "9-0"], ["TIME", "1"]]),
+    lambda: ["XGROUP", "CREATE", k(), random.choice(["g", "g2"]), "0", "MKSTREAM"],
+    lambda: ["ZRANGE", k(), "(1", "+inf", "BYSCORE", "LIMIT", random.choice(["0", "1", "-1"]), random.choice(["-1", "1", "0"])],
+    lambda: ["LRANGE", k(), random.choice(["-100", "0", "5"]), random.choice(["-100", "100", "-1"])],
+    lambda: ["GETRANGE", k(), random.choice(["9223372036854775807", "-9223372036854775808"]), "-1"],
+    lambda: ["INCRBY", k(), random.choice(["9223372036854775807", "-9223372036854775808", "9223372036854775808"])],
+    lambda: ["SETRANGE", k(), random.choice(["536870911", "536870912"]), ""],
+    lambda: ["EXPIRE", k(), random.choice(["9223372036854775807", "-9223372036854775808", "4611686018427387904"])],
+    lambda: ["PEXPIREAT", k(), random.choice(["9223372036854775807", "-1", "1"])],
+    lambda: ["COPY", k(), k(), "DB", random.choice(["0", "1", "16", "x"])] + random.choice([[], ["REPLACE"]]),
+    lambda: ["SINTERSTORE", k(), k()],
+    lambda: ["ZUNIONSTORE", k(), random.choice(["0", "1", "3", "-1"]), k(), k()],
+    lambda: ["LPOS", k(), v(), "RANK", random.choice(["-9223372036854775808", "9223372036854775807"])],
+    # DEBUG DIGEST compares the whole dataset; Redis needs
+    # enable-debug-command (or "local").
+    lambda: ["DEBUG", "DIGEST"],
+    lambda: ["DEBUG", "DIGEST-VALUE", k(), k()],
 ]
 
 LUA = [
@@ -326,6 +377,7 @@ LUA = [
 
 UNORDERED = {"SMEMBERS", "SINTER", "SUNION", "SDIFF", "HGETALL", "HKEYS", "HVALS", "KEYS"}
 SKIP_RESULT = {"HRANDFIELD", "ZRANDMEMBER", "SRANDMEMBER"}
+UNORDERED_SCAN = {"SCAN", "HSCAN", "SSCAN", "ZSCAN"}
 
 
 def auto_ids(r):
@@ -372,6 +424,16 @@ def norm(cmd, r):
             return r if r < 0 else "pos"
         if isinstance(r, list):
             return [x if x < 0 else "pos" for x in r]
+    if name == "OBJECT" and cmd[1] == "REFCOUNT" and os.environ.get("FUZZ_REDIS8"):
+        # Redis 8 embeds the key in the value object, so nothing in the
+        # keyspace is shared; CacheStorm reports Redis 7.4's shared integers.
+        return isinstance(r, int)
+    if name.startswith("GEO") and os.environ.get("FUZZ_REDIS8"):
+        # Redis 8 prints coordinates as the shortest round-trip double, 7.4
+        # (and CacheStorm) with 17 decimals of a long double.
+        r = long_decimals(r)
+    if name == "OBJECT" and cmd[1] == "IDLETIME":
+        return isinstance(r, int)
     if name == "OBJECT":
         return r
     if name in ("EVAL", "EVAL_RO") and isinstance(r, list):
@@ -389,9 +451,51 @@ def norm(cmd, r):
         return sorted(r)
     if name == "SINTERCARD":
         return r
+    if name in UNORDERED_SCAN and isinstance(r, list) and len(r) == 2 and isinstance(r[1], list) and not KEEP_ORDER:
+        if name in ("HSCAN", "ZSCAN") and "NOVALUES" not in cmd and "NOSCORES" not in cmd:
+            return [r[0], sorted(zip(r[1][0::2], r[1][1::2]))]
+        return [r[0], sorted(r[1])]
+    if name == "XINFO" and isinstance(r, tuple) and r[0] == "map":
+        r = [x for kv in r[1] for x in kv]
+    if name == "XINFO" and isinstance(r, list):
+        r = [[x for kv in m[1] for x in kv] if isinstance(m, tuple) and m[0] == "map" else m for m in r]
+    if name == "XINFO" and cmd[1] == "STREAM" and isinstance(r, list):
+        # Auto IDs and timestamps differ; compare the field names and counts.
+        return [x if not isinstance(x, (bytes, list)) else ("v" if isinstance(x, bytes) and x[:1].isdigit() else x) for x in r[0::2]] + [r[1::2][:1]]
+    if name == "XINFO" and cmd[1] in ("CONSUMERS",) and isinstance(r, list):
+        return [[e for j, e in enumerate(c) if j % 2 == 0 or not c[j - 1] in (b"seen-time", b"idle", b"inactive", b"active-time")] for c in r]
     if isinstance(r, tuple) and r[0] == "-":
         return ("-", r[1].split(" ")[0])
     return r
+
+
+def long_decimals(r):
+    if isinstance(r, tuple) and len(r) == 2 and r[0] == "double":
+        r = r[1].encode()
+    if isinstance(r, bytes) and b"." in r:
+        try:
+            return "%.12g" % float(r)
+        except ValueError:
+            return r
+    if isinstance(r, list):
+        return [long_decimals(x) for x in r]
+    return r
+
+
+def has_debug(c, queued):
+    return c[0] == "DEBUG" or (c[0] == "EXEC" and any(q[0] == "DEBUG" for q in queued))
+
+
+def contents(conn, key):
+    t = conn.cmd("TYPE", key)[1]
+    return {
+        "string": lambda: conn.cmd("GET", key),
+        "list": lambda: conn.cmd("LRANGE", key, "0", "-1"),
+        "set": lambda: sorted(conn.cmd("SMEMBERS", key)),
+        "zset": lambda: conn.cmd("ZRANGE", key, "0", "-1", "WITHSCORES"),
+        "hash": lambda: sorted(zip(*[iter(conn.cmd("HGETALL", key))] * 2)),
+        "stream": lambda: conn.cmd("XRANGE", key, "-", "+"),
+    }.get(t, lambda: t)()
 
 
 def drain(sc):
@@ -415,6 +519,11 @@ def main():
         b.cmd("HELLO", "3")
     a.cmd("FLUSHALL")
     b.cmd("FLUSHALL")
+    if os.environ.get("FUZZ_NOTIFY"):
+        # The active expiry cycles of the two servers run at different
+        # moments, so an "expired" event would race the drain.
+        a.cmd("DEBUG", "SET-ACTIVE-EXPIRE", "0")
+        b.cmd("DEBUG", "SET-ACTIVE-EXPIRE", "0")
     subs = None
     if os.environ.get("FUZZ_NOTIFY"):
         # Keyspace notifications are compared too: each subscriber is
@@ -426,16 +535,28 @@ def main():
             sc.cmd("PSUBSCRIBE", "__key*__:*")
             subs.append(sc)
     history = []
+    # auto_stream is set once XADD took an ID from the clock: the stream
+    # may have moved to another database, where DEBUG DIGEST still sees it.
+    auto_stream = False
     in_multi = False
     queued = []
+    stop = int(os.environ.get("FUZZ_STOP", "-1"))
     for i in range(count):
         c = gen()
+        if i == stop:
+            # Leave both servers in the state the step would run against.
+            print("stopped before step", i, ":", " ".join(c))
+            return 0
         ra, rb = a.cmd(*c), b.cmd(*c)
         history.append(c)
         if subs:
             events = [drain(sc) for sc in subs]
             if events[0] != events[1]:
                 print("seed", seed, "step", i, "NOTIFY DIVERGE:", " ".join(c))
+                j = next((j for j, (x, y) in enumerate(zip(events[0], events[1])) if x != y), min(len(events[0]), len(events[1])))
+                print("  first difference at event", j, ": cachestorm", events[0][max(0, j - 8):j + 4], "\n  redis", events[1][max(0, j - 8):j + 4])
+                if c[0] == "EXEC":
+                    print("  queued:", [" ".join(q) for q in queued])
                 print("  cachestorm:", events[0])
                 print("  redis     :", events[1])
                 for h in history[-int(os.environ.get("FUZZ_HISTORY", "8")):-1]:
@@ -459,10 +580,27 @@ def main():
             tb = [b.cmd("TYPE", x) for x in KEYS]
             if ta != tb:
                 na, nb = ("state", ta), ("state", tb)
+        if c[0] == "XADD" and isinstance(ra, bytes) and "*" in c[-3]:
+            auto_stream = True
+        if na != nb and has_debug(c, queued) and (auto_stream or any(a.cmd("TYPE", x) == ("+", "stream") for x in KEYS)):
+            # Stream IDs XADD * took from each server's clock differ, so
+            # their digests do.
+            na = nb
         if na != nb:
             print("seed", seed, "step", i, "DIVERGE:", " ".join(c))
             print("  cachestorm:", ra)
             print("  redis     :", rb)
+            keys_shown = [x for x in c[1:] if x in KEYS][:1]
+            if c[0] in ("DEBUG", "EXEC"):
+                # Show every key whose digest differs.
+                keys_shown = [x for x in KEYS if a.cmd("DEBUG", "DIGEST-VALUE", x) != b.cmd("DEBUG", "DIGEST-VALUE", x)]
+            for key in keys_shown:
+                for name, conn in (("cachestorm", a), ("redis", b)):
+                    print("  %s %s:" % (name, key), conn.cmd("TYPE", key), conn.cmd("OBJECT", "ENCODING", key), conn.cmd("PTTL", key), contents(conn, key))
+            if c[0] == "EXEC" and isinstance(ra, list) and isinstance(rb, list):
+                for q, x, y in zip(queued, ra, rb):
+                    if norm(q, x) != norm(q, y):
+                        print("  queued:", " ".join(q), "->", x, "vs", y)
             for h in history[-int(os.environ.get("FUZZ_HISTORY", "8")):-1]:
                 print("    prev:", " ".join(h))
             return 1

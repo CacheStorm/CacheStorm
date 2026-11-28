@@ -403,7 +403,11 @@ func touchWrittenKeys(ctx *Context, before []bool, failed bool) {
 	if len(before) == len(keys) {
 		touched := keys[:0:0]
 		for i, k := range keys {
-			if before[i] || ctx.Store.Exists(k) {
+			// A key the command stored already past its expiry (SET with
+			// an EXAT in the past) was written: look at what is stored
+			// rather than with Exists, which would expire it on the spot
+			// and announce "expired" that Redis leaves to a later read.
+			if before[i] || ctx.Store.Stored(k) {
 				touched = append(touched, k)
 			}
 		}
@@ -468,7 +472,10 @@ func watchedKeysBefore(ctx *Context) []bool {
 	keys := writtenKeys(ctx.Command, ctx.Args)
 	existed := make([]bool, len(keys))
 	for i, k := range keys {
-		existed[i] = ctx.Store.Exists(k)
+		// Without expiring the key: the command expires it itself when it
+		// looks it up, and its "expired" event belongs there, after the
+		// events of the keys the command handles before it.
+		existed[i] = ctx.Store.Live(k)
 	}
 	return existed
 }

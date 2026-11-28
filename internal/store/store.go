@@ -85,6 +85,11 @@ type Store struct {
 	expiryActive bool
 	hooksMu      sync.RWMutex
 	hooks        StoreHooks
+
+	// activeExpireOff is DEBUG SET-ACTIVE-EXPIRE 0, shared by every
+	// database of a server: the active expiry cycle skips its runs while
+	// it is set, and keys and hash fields expire only when read.
+	activeExpireOff *atomic.Bool
 }
 
 func NewStore() *Store {
@@ -97,6 +102,7 @@ func NewStore() *Store {
 	s.watch.Store(newWatchTable())
 	s.plain = &entryMeta{clock: &s.clock}
 	s.expiry = newActiveExpiry(s)
+	s.activeExpireOff = new(atomic.Bool)
 	s.hfe = newHashExpiryIndex()
 	for i := 0; i < NumShards; i++ {
 		s.shards[i] = NewShard()
@@ -525,6 +531,27 @@ func (s *Store) GetBytes(key []byte) (*Entry, bool) {
 // up for with LOOKUP_NOTOUCH (TYPE, TTL and its kin, OBJECT).
 func (s *Store) Peek(key string) (*Entry, bool) {
 	return s.get(key, false, false)
+}
+
+// PeekStored returns the stored entry of key even when it is past its
+// expiry, without removing it or recording an access, for DEBUG
+// DIGEST-VALUE, which Redis lets look at logically expired keys.
+func (s *Store) PeekStored(key string) (*Entry, bool) {
+	return s.shards[s.shardIndex(key)].Get(key)
+}
+
+// Stored reports whether key is stored, past its expiry or not, without
+// removing it.
+func (s *Store) Stored(key string) bool {
+	_, ok := s.PeekStored(key)
+	return ok
+}
+
+// Live reports whether key is stored and not past its expiry, without
+// removing it when it is.
+func (s *Store) Live(key string) bool {
+	e, ok := s.PeekStored(key)
+	return ok && !e.IsExpired()
 }
 
 // GetForWrite is Get for a caller that modifies the value in place. On a

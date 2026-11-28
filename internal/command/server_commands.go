@@ -318,11 +318,11 @@ func cmdTIME(ctx *Context) error {
 }
 
 func cmdEXPIRE(ctx *Context) error {
-	return expireGeneric(ctx, time.Now().UnixMilli(), true, "expire")
+	return expireGeneric(ctx, ctx.nowMS(), true, "expire")
 }
 
 func cmdPEXPIRE(ctx *Context) error {
-	return expireGeneric(ctx, time.Now().UnixMilli(), false, "pexpire")
+	return expireGeneric(ctx, ctx.nowMS(), false, "pexpire")
 }
 
 func cmdEXPIREAT(ctx *Context) error {
@@ -425,7 +425,7 @@ func expireGeneric(ctx *Context, basetimeMs int64, seconds bool, cmd string) err
 		}
 	}
 
-	if when <= time.Now().UnixMilli() && !ctx.Replaying {
+	if when <= ctx.nowMS() && !ctx.Replaying {
 		ctx.Store.Delete(key)
 		ctx.propagateDelete(key)
 		ctx.notify(store.NotifyGeneric, "del", key)

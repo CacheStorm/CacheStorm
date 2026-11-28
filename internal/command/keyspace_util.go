@@ -5,7 +5,6 @@ import (
 	"math"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/cachestorm/cachestorm/internal/store"
 )
@@ -105,8 +104,10 @@ func errInvalidExpireIn(cmd string) error {
 
 // stringExpireMs validates and converts the expire argument of SET, SETEX,
 // PSETEX and GETEX into an absolute Unix time in milliseconds, following
-// Redis' getExpireMillisecondsOrReply.
-func stringExpireMs(arg []byte, seconds, relative bool, cmd string) (int64, error) {
+// Redis' getExpireMillisecondsOrReply. A relative argument counts from now,
+// the command's time (Context.nowMS), which stands still in a transaction
+// or a script as Redis' command time snapshot does.
+func stringExpireMs(arg []byte, seconds, relative bool, cmd string, now int64) (int64, error) {
 	v, ok := parseRedisInt(arg)
 	if !ok {
 		return 0, ErrNotInteger
@@ -118,7 +119,6 @@ func stringExpireMs(arg []byte, seconds, relative bool, cmd string) (int64, erro
 		v *= 1000
 	}
 	if relative {
-		now := time.Now().UnixMilli()
 		if v > math.MaxInt64-now {
 			return 0, errInvalidExpireIn(cmd)
 		}
@@ -241,8 +241,8 @@ func parseStringArgs(args [][]byte, mode int) (int, []byte, []byte, error) {
 
 // stringOptionsExpireMs converts the parsed expire argument into an absolute
 // millisecond instant.
-func stringOptionsExpireMs(flags int, expire []byte, cmd string) (int64, error) {
-	return stringExpireMs(expire, flags&(strOptEX|strOptEXAT) != 0, flags&(strOptEX|strOptPX) != 0, cmd)
+func stringOptionsExpireMs(flags int, expire []byte, cmd string, now int64) (int64, error) {
+	return stringExpireMs(expire, flags&(strOptEX|strOptEXAT) != 0, flags&(strOptEX|strOptPX) != 0, cmd, now)
 }
 
 // parseInt64 parses a decimal integer, 0 when s is not one.

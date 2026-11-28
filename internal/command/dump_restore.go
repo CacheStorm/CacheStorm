@@ -5,7 +5,6 @@ import (
 	"math"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/cachestorm/cachestorm/internal/persistence"
 	"github.com/cachestorm/cachestorm/internal/store"
@@ -33,7 +32,7 @@ func cmdRESTORE(ctx *Context) error {
 	if (ctx.LegacyReplay || ctx.Replaying) && strings.HasPrefix(ctx.ArgString(2), "CACHSTORM001") {
 		return cmdRESTORELegacy(ctx)
 	}
-	commandNow := time.Now().UnixMilli()
+	commandNow := ctx.nowMS()
 	replace, absolute := false, false
 	idle, freq := int64(-1), int64(-1)
 	var tags []string

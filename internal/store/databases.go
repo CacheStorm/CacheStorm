@@ -223,6 +223,7 @@ func (s *Store) newSibling() *Store {
 		n.EnableSlotIndex()
 	}
 	n.passiveExpiry.Store(s.passiveExpiry.Load())
+	n.activeExpireOff = s.activeExpireOff
 	n.clock.loading.Store(s.clock.loading.Load())
 	n.clock.frozen.Store(s.clock.frozen.Load())
 	n.pubsub = s.pubsub

@@ -47,12 +47,25 @@ func (a *activeExpiry) Start() {
 			case <-a.stopCh:
 				return
 			case <-ticker.C:
+				if a.store.activeExpireOff.Load() {
+					continue
+				}
 				a.cycle()
 				a.store.activeExpireHashFields(time.Now().UnixMilli())
 			}
 		}
 	}()
 }
+
+// SetActiveExpire is DEBUG SET-ACTIVE-EXPIRE: false pauses the active expiry
+// cycle of the store and of every database sharing it, as Redis'
+// active_expire_enabled does, so keys and hash fields past their expiry stay
+// until a read removes them. Replicas do not expire actively either way.
+func (s *Store) SetActiveExpire(on bool) { s.activeExpireOff.Store(!on) }
+
+// ActiveExpireEnabled reports whether SetActiveExpire left the active expiry
+// cycle on.
+func (s *Store) ActiveExpireEnabled() bool { return !s.activeExpireOff.Load() }
 
 func (a *activeExpiry) Stop() {
 	close(a.stopCh)
