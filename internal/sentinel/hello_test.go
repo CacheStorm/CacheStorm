@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"sync"
 	"testing"
 	"time"
 )
@@ -146,32 +147,39 @@ func reservePort(t *testing.T) int {
 		t.Fatalf("failed to reserve a port: %v", err)
 	}
 	port := ln.Addr().(*net.TCPAddr).Port
-	ln.Close()
+	// The listener stays open for serveOn: closing it and listening again
+	// let another process (packages are tested in parallel) take the port
+	// in between, and the sentinel's peer then dialed that process instead.
+	reservedMu.Lock()
+	reserved[port] = ln
+	reservedMu.Unlock()
+	t.Cleanup(func() { ln.Close() })
 	return port
 }
 
-// serveOn starts s.Serve on the given port and returns a shutdown func.
+var (
+	reservedMu sync.Mutex
+	reserved   = map[int]net.Listener{}
+)
+
+// serveOn starts s.Serve on the given port, reserved with reservePort, and
+// returns a shutdown func.
 //
 // The port is passed in rather than chosen here because announceTo reports
 // s.port from config, so the configured port and the listening port must be the
 // same number or peers would be told to dial the wrong address.
 func serveOn(t *testing.T, s *Sentinel, port int) func() {
 	t.Helper()
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() { _ = s.Serve(ctx, port) }()
-
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		c, err := net.DialTimeout("tcp", net.JoinHostPort(s.addr, fmt.Sprint(port)), 200*time.Millisecond)
-		if err == nil {
-			c.Close()
-			return cancel
-		}
-		time.Sleep(20 * time.Millisecond)
+	reservedMu.Lock()
+	ln := reserved[port]
+	delete(reserved, port)
+	reservedMu.Unlock()
+	if ln == nil {
+		t.Fatalf("port %d was not reserved with reservePort", port)
 	}
-	cancel()
-	t.Fatalf("sentinel %s never began listening on port %d", s.id, port)
-	return func() {}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() { _ = s.ServeListener(ctx, ln) }()
+	return cancel
 }
 
 // TestHelloRecordsPeerOnEveryMonitoredMaster proves HELLO registers the sender

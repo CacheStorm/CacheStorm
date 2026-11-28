@@ -761,8 +761,12 @@ func (s *Sentinel) Serve(ctx context.Context, port int) error {
 	if err != nil {
 		return err
 	}
+	return s.ServeListener(ctx, ln)
+}
 
-	logger.Info().Str("addr", addr).Msg("Sentinel listening")
+// ServeListener is Serve on a listener the caller opened.
+func (s *Sentinel) ServeListener(ctx context.Context, ln net.Listener) error {
+	logger.Info().Str("addr", ln.Addr().String()).Msg("Sentinel listening")
 
 	go func() {
 		<-ctx.Done()
