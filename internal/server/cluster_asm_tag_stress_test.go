@@ -176,7 +176,7 @@ func TestClusterTagsDuringSlotMigrationX(t *testing.T) {
 	}
 
 	for i, k := range counters {
-		if got := owner.c.str("GET", k); got != strconv.Itoa(acked[i]) && !(got == "<null>" && acked[i] == 0) {
+		if got := owner.c.str("GET", k); got != strconv.Itoa(acked[i]) && (got != "<null>" || acked[i] != 0) {
 			t.Fatalf("counter %s = %s, %d increments were acknowledged", k, got, acked[i])
 		}
 	}
